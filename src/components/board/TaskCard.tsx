@@ -20,13 +20,6 @@ interface Props {
   onDelete: () => void;
 }
 
-function getCategoryPillStyles(color: string) {
-  return {
-    backgroundColor: `${color}1a`,
-    color: color,
-  };
-}
-
 export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -60,7 +53,7 @@ export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
       role="button"
       tabIndex={0}
     >
-      {/* Card border via box-shadow to avoid layout shift */}
+      {/* Card border */}
       <div className="absolute inset-0 rounded-lg border border-[hsl(var(--card-border))] group-hover:border-[hsl(var(--card-border-hover))] pointer-events-none" />
 
       {/* Priority dot */}
@@ -93,14 +86,18 @@ export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
         {task.title}
       </p>
 
-      {/* Category pill */}
-      {task.category_name && task.category_color && (
-        <span
-          className="inline-block mt-1.5 px-1.5 py-0.5 rounded text-[10px] font-medium"
-          style={getCategoryPillStyles(task.category_color)}
-        >
-          {task.category_name}
-        </span>
+      {/* Tags */}
+      {task.tags && task.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {task.tags.map((tag) => (
+            <span
+              key={tag.id}
+              className="text-[10px] font-normal px-1.5 py-0.5 rounded border border-border text-muted-foreground bg-secondary"
+            >
+              #{tag.name}
+            </span>
+          ))}
+        </div>
       )}
 
       {/* Footer */}

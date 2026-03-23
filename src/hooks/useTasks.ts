@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import type { TaskWithDetail, TaskCategory, TeamMember } from '@/lib/types';
+import type { TaskWithDetail, Tag, TeamMember } from '@/lib/types';
 import type { Database } from '@/integrations/supabase/types';
 
 type TaskColumn = Database['public']['Enums']['task_column'];
@@ -9,7 +9,25 @@ type TaskColumn = Database['public']['Enums']['task_column'];
 export function useTasks() {
   const qc = useQueryClient();
 
-  const { data: tasks = [], isLoading } = useQuery({
+  const { data: tags = [] } = useQuery({
+    queryKey: ['tags'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('tags').select('*');
+      if (error) throw error;
+      return (data ?? []) as Tag[];
+    },
+  });
+
+  const { data: taskTags = [] } = useQuery({
+    queryKey: ['task_tags'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('task_tags').select('task_id, tag_id');
+      if (error) throw error;
+      return (data ?? []) as { task_id: string; tag_id: string }[];
+    },
+  });
+
+  const { data: rawTasks = [], isLoading } = useQuery({
     queryKey: ['tasks'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -21,24 +39,17 @@ export function useTasks() {
     },
   });
 
-  const { data: categories = [] } = useQuery({
-    queryKey: ['categories'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('task_categories')
-        .select('*')
-        .order('position');
-      if (error) throw error;
-      return (data ?? []) as TaskCategory[];
-    },
+  // Merge tags into tasks
+  const tasks: TaskWithDetail[] = rawTasks.map((t) => {
+    const tagIds = taskTags.filter((tt) => tt.task_id === t.id).map((tt) => tt.tag_id);
+    const taskTagList = tags.filter((tag) => tagIds.includes(tag.id));
+    return { ...t, tags: taskTagList };
   });
 
   const { data: members = [] } = useQuery({
     queryKey: ['members'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('team_members')
-        .select('*');
+      const { data, error } = await supabase.from('team_members').select('*');
       if (error) throw error;
       return (data ?? []) as TeamMember[];
     },
@@ -53,16 +64,19 @@ export function useTasks() {
       })
       .subscribe();
 
-    const catsSub = supabase
-      .channel('categories-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_categories' }, () => {
-        qc.invalidateQueries({ queryKey: ['categories'] });
+    const tagsSub = supabase
+      .channel('tags-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tags' }, () => {
+        qc.invalidateQueries({ queryKey: ['tags'] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_tags' }, () => {
+        qc.invalidateQueries({ queryKey: ['task_tags'] });
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(tasksSub);
-      supabase.removeChannel(catsSub);
+      supabase.removeChannel(tagsSub);
     };
   }, [qc]);
 
@@ -71,13 +85,12 @@ export function useTasks() {
       title: string;
       column?: TaskColumn;
       priority?: Database['public']['Enums']['task_priority'];
-      category_id?: string | null;
       assignee_id?: string | null;
       due_date?: string | null;
       description?: string | null;
       created_by?: string | null;
+      tag_ids?: string[];
     }) => {
-      // Get max position in column
       const col = task.column || 'todo';
       const { data: maxPos } = await supabase
         .from('tasks')
@@ -89,35 +102,60 @@ export function useTasks() {
 
       const position = (maxPos?.position ?? -1) + 1;
 
-      const { error } = await supabase.from('tasks').insert({
+      const { data: newTask, error } = await supabase.from('tasks').insert({
         title: task.title,
         column: col,
         priority: task.priority || 'med',
         position,
-        category_id: task.category_id || null,
         assignee_id: task.assignee_id || null,
         due_date: task.due_date || null,
         description: task.description || null,
         created_by: task.created_by || null,
-      });
+      }).select('id').single();
       if (error) throw error;
+
+      // Insert tags
+      if (task.tag_ids && task.tag_ids.length > 0 && newTask) {
+        const { error: tagError } = await supabase.from('task_tags').insert(
+          task.tag_ids.map((tag_id) => ({ task_id: newTask.id, tag_id }))
+        );
+        if (tagError) throw tagError;
+      }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['task_tags'] });
+    },
   });
 
   const updateTask = useMutation({
-    mutationFn: async ({ id, ...updates }: { id: string } & Partial<{
+    mutationFn: async ({ id, tag_ids, ...updates }: { id: string; tag_ids?: string[] } & Partial<{
       title: string;
       priority: Database['public']['Enums']['task_priority'];
-      category_id: string | null;
       assignee_id: string | null;
       due_date: string | null;
       description: string | null;
     }>) => {
-      const { error } = await supabase.from('tasks').update(updates).eq('id', id);
-      if (error) throw error;
+      if (Object.keys(updates).length > 0) {
+        const { error } = await supabase.from('tasks').update(updates).eq('id', id);
+        if (error) throw error;
+      }
+
+      if (tag_ids !== undefined) {
+        // Replace all tags
+        await supabase.from('task_tags').delete().eq('task_id', id);
+        if (tag_ids.length > 0) {
+          const { error: tagError } = await supabase.from('task_tags').insert(
+            tag_ids.map((tag_id) => ({ task_id: id, tag_id }))
+          );
+          if (tagError) throw tagError;
+        }
+      }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['task_tags'] });
+    },
   });
 
   const deleteTask = useMutation({
@@ -140,42 +178,24 @@ export function useTasks() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
   });
 
-  // Category mutations
-  const createCategory = useMutation({
-    mutationFn: async ({ name, color, position }: { name: string; color: string; position: number }) => {
-      const { error } = await supabase.from('task_categories').insert({ name, color, position });
+  const createTag = useMutation({
+    mutationFn: async (name: string) => {
+      const { data, error } = await supabase.from('tags').insert({ name }).select('id').single();
       if (error) throw error;
+      return data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
-  });
-
-  const updateCategory = useMutation({
-    mutationFn: async ({ id, name }: { id: string; name: string }) => {
-      const { error } = await supabase.from('task_categories').update({ name }).eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
-  });
-
-  const deleteCategory = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('task_categories').delete().eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
   });
 
   return {
     tasks,
-    categories,
+    tags,
     members,
     isLoading,
     createTask,
     updateTask,
     deleteTask,
     moveTask,
-    createCategory,
-    updateCategory,
-    deleteCategory,
+    createTag,
   };
 }
