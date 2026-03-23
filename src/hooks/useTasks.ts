@@ -236,7 +236,10 @@ export function useTasks() {
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['tasks'] });
+        qc.invalidateQueries({ queryKey: ['task_tags'] });
+      }, 300);
     },
   });
 

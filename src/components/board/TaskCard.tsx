@@ -21,9 +21,11 @@ export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
     isDragging,
   } = useSortable({ id: task.id, data: { task } });
 
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition: transition || 'transform 200ms ease',
+  const style: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition: transition || 'transform 200ms cubic-bezier(0.25, 1, 0.5, 1)',
+    willChange: isDragging ? 'transform' : undefined,
+    zIndex: isDragging ? 1 : undefined,
   };
 
   return (

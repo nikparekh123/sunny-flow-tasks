@@ -10,7 +10,7 @@ interface TopBarProps {
   members: TeamMember[];
   activeAssignee: string | null;
   onAssigneeFilter: (id: string | null) => void;
-  onCreateTask: (data: any) => void;
+  onCreateTask: (data: any) => Promise<void>;
   onCreateTag: (name: string) => void;
   currentMemberId: string | null;
 }

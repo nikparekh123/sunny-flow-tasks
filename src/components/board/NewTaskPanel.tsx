@@ -183,7 +183,9 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
           </div>
 
           <div className="flex gap-2 pt-2">
-            <Button size="sm" className="text-xs h-7 flex-1" onClick={handleSave}>Save</Button>
+            <Button size="sm" className="text-xs h-7 flex-1" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
             <Button size="sm" variant="outline" className="text-xs h-7 flex-1" onClick={handleClose}>Cancel</Button>
           </div>
         </div>
