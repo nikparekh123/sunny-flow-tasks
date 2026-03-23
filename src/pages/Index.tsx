@@ -1,19 +1,11 @@
-import { useAuth } from '@/hooks/useAuth';
+import { useState } from 'react';
 import Auth from './Auth';
 import { KanbanBoard } from '@/components/board/KanbanBoard';
 
 export default function Index() {
-  const { user, loading } = useAuth();
+  const [entered, setEntered] = useState(false);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <p className="text-sm text-muted-foreground">Loading...</p>
-      </div>
-    );
-  }
-
-  if (!user) return <Auth />;
+  if (!entered) return <Auth onBypass={() => setEntered(true)} />;
 
   return <KanbanBoard />;
 }
