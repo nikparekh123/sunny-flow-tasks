@@ -34,7 +34,7 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
             transform: isOver ? 'scale(1.25)' : 'scale(1)',
           }}
         />
-        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <span className="text-xs font-semibold text-foreground">{label}</span>
         <span className="ml-auto px-1.5 py-0.5 rounded-full bg-secondary text-[10px] text-muted-foreground font-medium">
           {tasks.length}
         </span>

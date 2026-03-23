@@ -23,15 +23,23 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
     <div
       className="group/card relative"
       style={{
-        backgroundColor: isOverlay ? '#fff' : '#f7f7f7',
+        backgroundColor: isOverlay
+          ? '#fff'
+          : task.priority === 'high'
+            ? 'rgba(226,75,74,0.04)'
+            : task.priority === 'med'
+              ? 'rgba(239,159,39,0.04)'
+              : 'rgba(99,153,34,0.04)',
         border: isOverlay ? '1px solid #d4d4d4' : '0.5px solid #ebebeb',
+        borderLeft: isOverlay
+          ? undefined
+          : `3px solid ${PRIORITY_COLORS[task.priority]}`,
         borderRadius: '8px',
         padding: '10px',
-        opacity: isDragging ? 0.4 : isDone ? 0.5 : 1,
+        opacity: isDone ? 0.5 : 1,
         cursor: isOverlay ? 'grabbing' : 'grab',
         boxShadow: isOverlay ? '0 8px 24px rgba(0,0,0,0.12)' : 'none',
         transform: isOverlay ? 'rotate(2deg) scale(1.02)' : undefined,
-        transition: isDragging ? 'opacity 0.2s' : undefined,
       }}
       onMouseEnter={(e) => {
         if (!isOverlay) {

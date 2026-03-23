@@ -26,6 +26,8 @@ export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
     transition: transition || 'transform 200ms cubic-bezier(0.25, 1, 0.5, 1)',
     willChange: isDragging ? 'transform' : undefined,
     zIndex: isDragging ? 1 : undefined,
+    opacity: isDragging ? 0 : undefined,
+    pointerEvents: isDragging ? 'none' : undefined,
   };
 
   return (
