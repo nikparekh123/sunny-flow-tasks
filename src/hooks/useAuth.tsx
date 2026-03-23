@@ -24,36 +24,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      if (u) {
-        // Fetch or create team member
-        const { data: existing } = await supabase
-          .from('team_members')
-          .select('*')
-          .eq('user_id', u.id)
-          .maybeSingle();
-
-        if (existing) {
-          setMember(existing as TeamMember);
-        } else {
-          const name = u.user_metadata?.full_name || u.email?.split('@')[0] || 'User';
-          const initials = name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2);
-          const colors = ['blue', 'green', 'purple', 'orange', 'pink', 'teal'];
-          const color = colors[Math.floor(Math.random() * colors.length)];
-
-          const { data: created } = await supabase
+      try {
+        const u = session?.user ?? null;
+        setUser(u);
+        if (u) {
+          const { data: existing } = await supabase
             .from('team_members')
-            .insert({ user_id: u.id, name, initials, color })
-            .select()
-            .single();
+            .select('*')
+            .eq('user_id', u.id)
+            .maybeSingle();
 
-          if (created) setMember(created as TeamMember);
+          if (existing) {
+            setMember(existing as TeamMember);
+          } else {
+            const name = u.user_metadata?.full_name || u.email?.split('@')[0] || 'User';
+            const initials = name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2);
+            const colors = ['blue', 'green', 'purple', 'orange', 'pink', 'teal'];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+
+            const { data: created } = await supabase
+              .from('team_members')
+              .insert({ user_id: u.id, name, initials, color })
+              .select()
+              .single();
+
+            if (created) setMember(created as TeamMember);
+          }
+        } else {
+          setMember(null);
         }
-      } else {
+      } catch (err) {
+        console.error('Auth state error:', err);
         setMember(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     supabase.auth.getSession();
