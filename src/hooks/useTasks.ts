@@ -221,6 +221,7 @@ export function useTasks() {
     },
     onMutate: async ({ taskId, column, position }) => {
       await qc.cancelQueries({ queryKey: ['tasks'] });
+      await qc.cancelQueries({ queryKey: ['task_tags'] });
       const previousTasks = qc.getQueryData<TaskWithDetail[]>(['tasks']) ?? [];
 
       qc.setQueryData<TaskWithDetail[]>(['tasks'], (oldTasks = []) =>
@@ -235,7 +236,10 @@ export function useTasks() {
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['tasks'] });
+        qc.invalidateQueries({ queryKey: ['task_tags'] });
+      }, 300);
     },
   });
 

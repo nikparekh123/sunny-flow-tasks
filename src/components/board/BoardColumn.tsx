@@ -42,7 +42,7 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
 
       <div
         ref={setNodeRef}
-        className="space-y-2 min-h-[60px] flex-1 overflow-y-auto pr-1"
+        className="space-y-2 min-h-[60px] flex-1 overflow-y-auto pr-1 transition-all duration-200"
       >
         <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((task) => (

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 import type { Tag, TeamMember, TaskPriority } from '@/lib/types';
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
   members: TeamMember[];
   currentMemberId: string | null;
   onClose: () => void;
-  onSave: (data: any) => void;
+  onSave: (data: any) => Promise<void>;
   onCreateTag: (name: string) => void;
 }
 
@@ -28,6 +29,7 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [isClosing, setIsClosing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const toggleTag = (id: string) => {
     setSelectedTagIds((prev) =>
@@ -40,18 +42,26 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
     setTimeout(onClose, 250);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title.trim()) return;
-    onSave({
-      title: title.trim(),
-      priority,
-      assignee_id: assigneeId === 'none' ? null : assigneeId,
-      due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
-      description: description.trim() || null,
-      created_by: currentMemberId,
-      tag_ids: selectedTagIds,
-    });
-    handleClose();
+    setSaving(true);
+    try {
+      await onSave({
+        title: title.trim(),
+        priority,
+        assignee_id: assigneeId === 'none' ? null : assigneeId,
+        due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
+        description: description.trim() || null,
+        created_by: currentMemberId,
+        tag_ids: selectedTagIds,
+      });
+      toast.success('Task created');
+      handleClose();
+    } catch {
+      toast.error('Failed to create task');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -173,7 +183,9 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
           </div>
 
           <div className="flex gap-2 pt-2">
-            <Button size="sm" className="text-xs h-7 flex-1" onClick={handleSave}>Save</Button>
+            <Button size="sm" className="text-xs h-7 flex-1" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
             <Button size="sm" variant="outline" className="text-xs h-7 flex-1" onClick={handleClose}>Cancel</Button>
           </div>
         </div>

@@ -159,7 +159,7 @@ export function KanbanBoard() {
         members={members}
         activeAssignee={activeAssignee}
         onAssigneeFilter={setActiveAssignee}
-        onCreateTask={(data) => createTask.mutate(data)}
+        onCreateTask={(data) => createTask.mutateAsync(data)}
         onCreateTag={(name) => createTag.mutate(name)}
         currentMemberId={member?.id ?? null}
       />
