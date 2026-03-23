@@ -8,9 +8,7 @@ import {
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
-  type DragOverEvent,
 } from '@dnd-kit/core';
-import { arrayMove } from '@dnd-kit/sortable';
 import { COLUMNS } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
@@ -23,12 +21,11 @@ import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 export function KanbanBoard() {
   const { member } = useAuth();
   const {
-    tasks, categories, members, isLoading,
-    createTask, updateTask, deleteTask, moveTask,
-    createCategory, updateCategory, deleteCategory,
+    tasks, tags, members, isLoading,
+    createTask, updateTask, deleteTask, moveTask, createTag,
   } = useTasks();
 
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskWithDetail | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
 
@@ -37,9 +34,9 @@ export function KanbanBoard() {
   );
 
   const filteredTasks = useMemo(() => {
-    if (!activeCategory) return tasks;
-    return tasks.filter((t) => t.category_id === activeCategory);
-  }, [tasks, activeCategory]);
+    if (!activeAssignee) return tasks;
+    return tasks.filter((t) => t.assignee_id === activeAssignee);
+  }, [tasks, activeAssignee]);
 
   const tasksByColumn = useMemo(() => {
     const map: Record<TaskColumn, TaskWithDetail[]> = {
@@ -48,7 +45,6 @@ export function KanbanBoard() {
     filteredTasks.forEach((t) => {
       if (map[t.column]) map[t.column].push(t);
     });
-    // Sort by position within each column
     Object.values(map).forEach((arr) => arr.sort((a, b) => a.position - b.position));
     return map;
   }, [filteredTasks]);
@@ -66,17 +62,14 @@ export function KanbanBoard() {
     const activeTask = active.data.current?.task as TaskWithDetail;
     if (!activeTask) return;
 
-    // Determine target column
     let targetColumn: TaskColumn;
     let targetPosition: number;
 
-    // Check if dropped over a column (droppable) or a task
     const overTask = over.data.current?.task as TaskWithDetail | undefined;
     if (overTask) {
       targetColumn = overTask.column;
       targetPosition = overTask.position;
     } else {
-      // Dropped on column itself
       targetColumn = over.id as TaskColumn;
       targetPosition = tasksByColumn[targetColumn]?.length ?? 0;
     }
@@ -101,14 +94,12 @@ export function KanbanBoard() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <TopBar
-        categories={categories}
+        tags={tags}
         members={members}
-        activeCategory={activeCategory}
-        onCategoryFilter={setActiveCategory}
-        onCreateCategory={(d) => createCategory.mutate(d)}
-        onUpdateCategory={(d) => updateCategory.mutate(d)}
-        onDeleteCategory={(id) => deleteCategory.mutate(id)}
+        activeAssignee={activeAssignee}
+        onAssigneeFilter={setActiveAssignee}
         onCreateTask={(d) => createTask.mutate(d)}
+        onCreateTag={(name) => createTag.mutate(name)}
         currentMemberId={member?.id ?? null}
       />
 
@@ -130,10 +121,6 @@ export function KanbanBoard() {
                 onCardClick={(t) => setSelectedTask(t)}
                 onCardEdit={(t) => setSelectedTask(t)}
                 onCardDelete={(id) => deleteTask.mutate(id)}
-                onQuickAdd={col.id === 'todo' ? (title) => createTask.mutate({
-                  title,
-                  created_by: member?.id ?? null,
-                }) : undefined}
               />
             ))}
           </div>
@@ -157,11 +144,10 @@ export function KanbanBoard() {
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
-          categories={categories}
+          tags={tags}
           members={members}
           onClose={() => setSelectedTask(null)}
           onUpdate={(data) => {
-            // If column changed via detail panel, use moveTask
             if ('column' in data && data.column !== selectedTask.column) {
               moveTask.mutate({
                 taskId: data.id,
@@ -171,10 +157,10 @@ export function KanbanBoard() {
             } else {
               updateTask.mutate(data);
             }
-            // Update local selected task reference
             const updated = { ...selectedTask, ...data };
             setSelectedTask(updated as TaskWithDetail);
           }}
+          onCreateTag={(name) => createTag.mutate(name)}
         />
       )}
     </div>

@@ -4,6 +4,11 @@ export type TaskColumn = Database['public']['Enums']['task_column'];
 export type TaskPriority = Database['public']['Enums']['task_priority'];
 export type MemberRole = Database['public']['Enums']['member_role'];
 
+export interface Tag {
+  id: string;
+  name: string;
+}
+
 export interface TaskWithDetail {
   id: string;
   title: string;
@@ -22,6 +27,7 @@ export interface TaskWithDetail {
   assignee_name: string | null;
   assignee_initials: string | null;
   assignee_color: string | null;
+  tags?: Tag[];
 }
 
 export interface TeamMember {

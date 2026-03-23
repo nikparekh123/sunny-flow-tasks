@@ -9,19 +9,21 @@ import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 import { COLUMNS, PRIORITY_COLORS } from '@/lib/constants';
-import type { TaskWithDetail, TaskCategory, TeamMember, TaskColumn, TaskPriority } from '@/lib/types';
+import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority } from '@/lib/types';
 
 interface Props {
   task: TaskWithDetail;
-  categories: TaskCategory[];
+  tags: Tag[];
   members: TeamMember[];
   onClose: () => void;
   onUpdate: (data: { id: string } & Record<string, any>) => void;
+  onCreateTag: (name: string) => void;
 }
 
-export function TaskDetailPanel({ task, categories, members, onClose, onUpdate }: Props) {
+export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onCreateTag }: Props) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description || '');
+  const [newTag, setNewTag] = useState('');
 
   useEffect(() => {
     setTitle(task.title);
@@ -40,6 +42,15 @@ export function TaskDetailPanel({ task, categories, members, onClose, onUpdate }
     }
   };
 
+  const currentTagIds = (task.tags || []).map((t) => t.id);
+
+  const toggleTag = (tagId: string) => {
+    const newIds = currentTagIds.includes(tagId)
+      ? currentTagIds.filter((id) => id !== tagId)
+      : [...currentTagIds, tagId];
+    onUpdate({ id: task.id, tag_ids: newIds });
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} />
@@ -51,7 +62,6 @@ export function TaskDetailPanel({ task, categories, members, onClose, onUpdate }
           </button>
         </div>
         <div className="p-4 space-y-4">
-          {/* Title */}
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -59,7 +69,6 @@ export function TaskDetailPanel({ task, categories, members, onClose, onUpdate }
             className="text-sm font-medium border-none shadow-none px-0 focus-visible:ring-0"
           />
 
-          {/* Fields grid */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">Status</Label>
@@ -106,24 +115,6 @@ export function TaskDetailPanel({ task, categories, members, onClose, onUpdate }
             </div>
 
             <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Category</Label>
-              <Select
-                value={task.category_id || 'none'}
-                onValueChange={(v) => onUpdate({ id: task.id, category_id: v === 'none' ? null : v })}
-              >
-                <SelectTrigger className="text-xs h-7">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">Assignee</Label>
               <Select
                 value={task.assignee_id || 'none'}
@@ -141,7 +132,7 @@ export function TaskDetailPanel({ task, categories, members, onClose, onUpdate }
               </Select>
             </div>
 
-            <div className="col-span-2 space-y-1">
+            <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">Due date</Label>
               <Popover>
                 <PopoverTrigger asChild>
@@ -160,7 +151,40 @@ export function TaskDetailPanel({ task, categories, members, onClose, onUpdate }
             </div>
           </div>
 
-          {/* Description */}
+          {/* Tags */}
+          <div className="space-y-2">
+            <Label className="text-[10px] text-muted-foreground">Tags</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {tags.map((tag) => (
+                <button
+                  key={tag.id}
+                  onClick={() => toggleTag(tag.id)}
+                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                    currentTagIds.includes(tag.id)
+                      ? 'bg-foreground text-primary-foreground border-foreground'
+                      : 'bg-secondary text-muted-foreground border-border hover:border-foreground/30'
+                  }`}
+                >
+                  #{tag.name}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1.5">
+              <Input
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newTag.trim()) {
+                    onCreateTag(newTag.trim().toLowerCase());
+                    setNewTag('');
+                  }
+                }}
+                placeholder="Add new tag..."
+                className="text-xs h-7 flex-1"
+              />
+            </div>
+          </div>
+
           <div className="space-y-1">
             <Label className="text-[10px] text-muted-foreground">Description</Label>
             <Textarea
