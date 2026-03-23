@@ -95,7 +95,9 @@ export function TopBar({
         <div className="flex-1" />
 
         {/* User menu */}
-        <span className="text-[11px] text-muted-foreground mr-2">{member?.name}</span>
+        {member && (
+          <span className="text-[11px] text-muted-foreground mr-2">{member.name}</span>
+        )}
         <button onClick={signOut} className="text-[11px] text-muted-foreground hover:text-foreground underline mr-3">
           Sign out
         </button>
