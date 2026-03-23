@@ -37,7 +37,6 @@ export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
   return (
     <div
       ref={setNodeRef}
-      style={style}
       {...attributes}
       {...listeners}
       className="group/card relative cursor-grab active:cursor-grabbing"
