@@ -23,7 +23,7 @@ interface Props {
 export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, onCreateTag }: Props) {
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('med');
-  const [assigneeId, setAssigneeId] = useState('none');
+  const [assigneeId, setAssigneeId] = useState(currentMemberId || 'none');
   const [dueDate, setDueDate] = useState<Date | undefined>();
   const [description, setDescription] = useState('');
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
