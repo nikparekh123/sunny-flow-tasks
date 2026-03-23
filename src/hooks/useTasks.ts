@@ -6,6 +6,48 @@ import type { Database } from '@/integrations/supabase/types';
 
 type TaskColumn = Database['public']['Enums']['task_column'];
 
+const BOARD_COLUMNS: TaskColumn[] = ['todo', 'inprogress', 'review', 'done'];
+
+const moveTaskOptimistically = (
+  tasks: TaskWithDetail[],
+  taskId: string,
+  targetColumn: TaskColumn,
+  targetPosition: number
+): TaskWithDetail[] => {
+  const sourceTask = tasks.find((task) => task.id === taskId);
+  if (!sourceTask) return tasks;
+
+  const byColumn: Record<TaskColumn, TaskWithDetail[]> = {
+    todo: [],
+    inprogress: [],
+    review: [],
+    done: [],
+  };
+
+  tasks.forEach((task) => {
+    if (task.id !== taskId) {
+      byColumn[task.column].push({ ...task });
+    }
+  });
+
+  BOARD_COLUMNS.forEach((column) => {
+    byColumn[column].sort((a, b) => a.position - b.position);
+  });
+
+  const movedTask: TaskWithDetail = { ...sourceTask, column: targetColumn };
+  const safePosition = Math.max(0, Math.min(targetPosition, byColumn[targetColumn].length));
+  byColumn[targetColumn].splice(safePosition, 0, movedTask);
+
+  BOARD_COLUMNS.forEach((column) => {
+    byColumn[column] = byColumn[column].map((task, index) => ({
+      ...task,
+      position: index,
+    }));
+  });
+
+  return BOARD_COLUMNS.flatMap((column) => byColumn[column]);
+};
+
 export function useTasks() {
   const qc = useQueryClient();
 
@@ -40,10 +82,10 @@ export function useTasks() {
   });
 
   // Merge tags into tasks
-  const tasks: TaskWithDetail[] = rawTasks.map((t) => {
-    const tagIds = taskTags.filter((tt) => tt.task_id === t.id).map((tt) => tt.tag_id);
+  const tasks: TaskWithDetail[] = rawTasks.map((task) => {
+    const tagIds = taskTags.filter((tt) => tt.task_id === task.id).map((tt) => tt.tag_id);
     const taskTagList = tags.filter((tag) => tagIds.includes(tag.id));
-    return { ...t, tags: taskTagList };
+    return { ...task, tags: taskTagList };
   });
 
   const { data: members = [] } = useQuery({
@@ -91,30 +133,33 @@ export function useTasks() {
       created_by?: string | null;
       tag_ids?: string[];
     }) => {
-      const col = task.column || 'todo';
+      const column = task.column || 'todo';
       const { data: maxPos } = await supabase
         .from('tasks')
         .select('position')
-        .eq('column', col)
+        .eq('column', column)
         .order('position', { ascending: false })
         .limit(1)
         .single();
 
       const position = (maxPos?.position ?? -1) + 1;
 
-      const { data: newTask, error } = await supabase.from('tasks').insert({
-        title: task.title,
-        column: col,
-        priority: task.priority || 'med',
-        position,
-        assignee_id: task.assignee_id || null,
-        due_date: task.due_date || null,
-        description: task.description || null,
-        created_by: task.created_by || null,
-      }).select('id').single();
+      const { data: newTask, error } = await supabase
+        .from('tasks')
+        .insert({
+          title: task.title,
+          column,
+          priority: task.priority || 'med',
+          position,
+          assignee_id: task.assignee_id || null,
+          due_date: task.due_date || null,
+          description: task.description || null,
+          created_by: task.created_by || null,
+        })
+        .select('id')
+        .single();
       if (error) throw error;
 
-      // Insert tags
       if (task.tag_ids && task.tag_ids.length > 0 && newTask) {
         const { error: tagError } = await supabase.from('task_tags').insert(
           task.tag_ids.map((tag_id) => ({ task_id: newTask.id, tag_id }))
@@ -142,7 +187,6 @@ export function useTasks() {
       }
 
       if (tag_ids !== undefined) {
-        // Replace all tags
         await supabase.from('task_tags').delete().eq('task_id', id);
         if (tag_ids.length > 0) {
           const { error: tagError } = await supabase.from('task_tags').insert(
@@ -175,7 +219,24 @@ export function useTasks() {
       });
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+    onMutate: async ({ taskId, column, position }) => {
+      await qc.cancelQueries({ queryKey: ['tasks'] });
+      const previousTasks = qc.getQueryData<TaskWithDetail[]>(['tasks']) ?? [];
+
+      qc.setQueryData<TaskWithDetail[]>(['tasks'], (oldTasks = []) =>
+        moveTaskOptimistically(oldTasks, taskId, column, position)
+      );
+
+      return { previousTasks };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousTasks) {
+        qc.setQueryData(['tasks'], context.previousTasks);
+      }
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+    },
   });
 
   const createTag = useMutation({

@@ -20,19 +20,18 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
 
   return (
     <div
-      className={`w-72 flex-shrink-0 rounded-xl p-3 bg-card border transition-all duration-200 ${
+      className={`min-w-[240px] lg:min-w-0 rounded-xl p-3 bg-card border transition-all duration-200 h-[calc(100vh-132px)] flex flex-col ${
         isOver
-          ? 'border-ring/40 bg-accent/50 scale-[1.01]'
+          ? 'border-ring/40 bg-accent/40 scale-[1.01]'
           : 'border-border'
       }`}
     >
-      {/* Column header */}
       <div className="flex items-center gap-2 px-1 mb-3">
         <div
           className="w-2.5 h-2.5 rounded-full transition-transform duration-200"
           style={{
             backgroundColor: color,
-            transform: isOver ? 'scale(1.3)' : 'scale(1)',
+            transform: isOver ? 'scale(1.25)' : 'scale(1)',
           }}
         />
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
@@ -41,34 +40,25 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
         </span>
       </div>
 
-      {/* Droppable area */}
       <div
         ref={setNodeRef}
-        className="space-y-2 min-h-[60px] transition-all duration-200"
+        className="space-y-2 min-h-[60px] flex-1 overflow-y-auto pr-1"
       >
-        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-          {tasks.map((task, index) => (
-            <div
+        <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+          {tasks.map((task) => (
+            <TaskCard
               key={task.id}
-              className="animate-fade-in"
-              style={{ animationDelay: `${index * 30}ms`, animationFillMode: 'both' }}
-            >
-              <TaskCard
-                task={task}
-                isDone={isDone}
-                onClick={() => onCardClick(task)}
-                onEdit={() => onCardEdit(task)}
-                onDelete={() => onCardDelete(task.id)}
-              />
-            </div>
+              task={task}
+              isDone={isDone}
+              onClick={() => onCardClick(task)}
+              onEdit={() => onCardEdit(task)}
+              onDelete={() => onCardDelete(task.id)}
+            />
           ))}
         </SortableContext>
 
-        {/* Drop placeholder when column is empty and being hovered */}
         {tasks.length === 0 && isOver && (
-          <div
-            className="border-2 border-dashed border-ring/30 rounded-lg h-16 flex items-center justify-center animate-scale-in"
-          >
+          <div className="border-2 border-dashed border-ring/30 rounded-lg h-16 flex items-center justify-center animate-scale-in">
             <span className="text-[10px] text-muted-foreground">Drop here</span>
           </div>
         )}

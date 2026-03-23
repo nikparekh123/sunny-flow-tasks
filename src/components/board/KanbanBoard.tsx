@@ -13,7 +13,6 @@ import {
   type DragOverEvent,
   type CollisionDetection,
 } from '@dnd-kit/core';
-import { arrayMove } from '@dnd-kit/sortable';
 import { COLUMNS } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
@@ -23,17 +22,21 @@ import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
 import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 
-// Custom collision detection: prefer droppable columns, fall back to closest center
 const customCollision: CollisionDetection = (args) => {
-  // First check if pointer is within a droppable
   const pointerCollisions = pointerWithin(args);
   if (pointerCollisions.length > 0) return pointerCollisions;
 
-  // Fall back to rect intersection
   const rectCollisions = rectIntersection(args);
   if (rectCollisions.length > 0) return rectCollisions;
 
   return closestCenter(args);
+};
+
+const EMPTY_COLUMNS: Record<TaskColumn, TaskWithDetail[]> = {
+  todo: [],
+  inprogress: [],
+  review: [],
+  done: [],
 };
 
 export function KanbanBoard() {
@@ -54,17 +57,40 @@ export function KanbanBoard() {
 
   const filteredTasks = useMemo(() => {
     if (!activeAssignee) return tasks;
-    return tasks.filter((t) => t.assignee_id === activeAssignee);
+    return tasks.filter((task) => task.assignee_id === activeAssignee);
   }, [tasks, activeAssignee]);
 
-  const tasksByColumn = useMemo(() => {
+  const allTasksByColumn = useMemo(() => {
     const map: Record<TaskColumn, TaskWithDetail[]> = {
-      todo: [], inprogress: [], review: [], done: [],
+      ...EMPTY_COLUMNS,
+      todo: [],
+      inprogress: [],
+      review: [],
+      done: [],
     };
-    filteredTasks.forEach((t) => {
-      if (map[t.column]) map[t.column].push(t);
+
+    tasks.forEach((task) => {
+      map[task.column].push(task);
     });
-    Object.values(map).forEach((arr) => arr.sort((a, b) => a.position - b.position));
+
+    Object.values(map).forEach((list) => list.sort((a, b) => a.position - b.position));
+    return map;
+  }, [tasks]);
+
+  const visibleTasksByColumn = useMemo(() => {
+    const map: Record<TaskColumn, TaskWithDetail[]> = {
+      ...EMPTY_COLUMNS,
+      todo: [],
+      inprogress: [],
+      review: [],
+      done: [],
+    };
+
+    filteredTasks.forEach((task) => {
+      map[task.column].push(task);
+    });
+
+    Object.values(map).forEach((list) => list.sort((a, b) => a.position - b.position));
     return map;
   }, [filteredTasks]);
 
@@ -74,48 +100,41 @@ export function KanbanBoard() {
   }, []);
 
   const handleDragOver = useCallback((event: DragOverEvent) => {
-    const { over } = event;
-    if (!over) {
-      setOverColumn(null);
-      return;
-    }
-    // Determine which column is being hovered
-    const overTask = over.data.current?.task as TaskWithDetail | undefined;
-    const col = overTask ? overTask.column : (over.id as TaskColumn);
-    setOverColumn(col);
+    const overTask = event.over?.data.current?.task as TaskWithDetail | undefined;
+    const hoveredColumn = overTask ? overTask.column : (event.over?.id as TaskColumn | undefined);
+    setOverColumn(hoveredColumn ?? null);
   }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setDraggedTask(null);
     setOverColumn(null);
-    const { active, over } = event;
-    if (!over) return;
 
-    const activeTask = active.data.current?.task as TaskWithDetail;
-    if (!activeTask) return;
+    const activeTask = event.active.data.current?.task as TaskWithDetail;
+    if (!activeTask || !event.over) return;
 
-    let targetColumn: TaskColumn;
-    let targetPosition: number;
+    const overTask = event.over.data.current?.task as TaskWithDetail | undefined;
+    const targetColumn = overTask ? overTask.column : (event.over.id as TaskColumn);
 
-    const overTask = over.data.current?.task as TaskWithDetail | undefined;
+    const targetColumnTasks = allTasksByColumn[targetColumn] ?? [];
+    const sourceColumnTasks = allTasksByColumn[activeTask.column] ?? [];
+
+    let targetPosition = targetColumnTasks.length;
+
     if (overTask) {
-      targetColumn = overTask.column;
-      // Place before the hovered task
-      targetPosition = overTask.position;
-    } else {
-      // Dropped on column itself — append to end
-      targetColumn = over.id as TaskColumn;
-      targetPosition = tasksByColumn[targetColumn]?.length ?? 0;
+      const overIndex = targetColumnTasks.findIndex((task) => task.id === overTask.id);
+      targetPosition = overIndex < 0 ? targetColumnTasks.length : overIndex;
     }
 
-    if (activeTask.column === targetColumn && activeTask.position === targetPosition) return;
+    const currentIndex = sourceColumnTasks.findIndex((task) => task.id === activeTask.id);
+    if (currentIndex < 0) return;
+    if (activeTask.column === targetColumn && currentIndex === targetPosition) return;
 
     moveTask.mutate({
       taskId: activeTask.id,
       column: targetColumn,
       position: targetPosition,
     });
-  }, [tasksByColumn, moveTask]);
+  }, [allTasksByColumn, moveTask]);
 
   const handleDragCancel = useCallback(() => {
     setDraggedTask(null);
@@ -126,7 +145,7 @@ export function KanbanBoard() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-6 h-6 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+          <div className="h-6 w-6 rounded-full border-2 border-ring/20 border-t-ring animate-spin" />
           <p className="text-sm text-muted-foreground">Loading board…</p>
         </div>
       </div>
@@ -140,12 +159,12 @@ export function KanbanBoard() {
         members={members}
         activeAssignee={activeAssignee}
         onAssigneeFilter={setActiveAssignee}
-        onCreateTask={(d) => createTask.mutate(d)}
+        onCreateTask={(data) => createTask.mutate(data)}
         onCreateTag={(name) => createTag.mutate(name)}
         currentMemberId={member?.id ?? null}
       />
 
-      <div className="flex-1 p-5 overflow-x-auto">
+      <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto">
         <DndContext
           sensors={sensors}
           collisionDetection={customCollision}
@@ -154,26 +173,28 @@ export function KanbanBoard() {
           onDragEnd={handleDragEnd}
           onDragCancel={handleDragCancel}
         >
-          <div className="flex gap-4 min-w-max">
-            {COLUMNS.map((col) => (
+          <div className="grid grid-cols-4 gap-4 min-w-[980px] w-full pt-4 items-start">
+            {COLUMNS.map((column) => (
               <BoardColumn
-                key={col.id}
-                id={col.id}
-                label={col.label}
-                color={col.color}
-                tasks={tasksByColumn[col.id]}
-                isOver={overColumn === col.id}
-                onCardClick={(t) => setSelectedTask(t)}
-                onCardEdit={(t) => setSelectedTask(t)}
-                onCardDelete={(id) => deleteTask.mutate(id)}
+                key={column.id}
+                id={column.id}
+                label={column.label}
+                color={column.color}
+                tasks={visibleTasksByColumn[column.id]}
+                isOver={overColumn === column.id}
+                onCardClick={(task) => setSelectedTask(task)}
+                onCardEdit={(task) => setSelectedTask(task)}
+                onCardDelete={(taskId) => deleteTask.mutate(taskId)}
               />
             ))}
           </div>
 
-          <DragOverlay dropAnimation={{
-            duration: 200,
-            easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
-          }}>
+          <DragOverlay
+            dropAnimation={{
+              duration: 180,
+              easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+          >
             {draggedTask && (
               <TaskCardContent
                 task={draggedTask}
@@ -199,11 +220,12 @@ export function KanbanBoard() {
               moveTask.mutate({
                 taskId: data.id,
                 column: data.column as TaskColumn,
-                position: tasksByColumn[data.column as TaskColumn]?.length ?? 0,
+                position: allTasksByColumn[data.column as TaskColumn]?.length ?? 0,
               });
             } else {
               updateTask.mutate(data);
             }
+
             const updated = { ...selectedTask, ...data };
             setSelectedTask(updated as TaskWithDetail);
           }}
