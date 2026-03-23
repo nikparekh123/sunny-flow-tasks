@@ -189,12 +189,7 @@ export function KanbanBoard() {
             ))}
           </div>
 
-          <DragOverlay
-            dropAnimation={{
-              duration: 180,
-              easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
-          >
+          <DragOverlay dropAnimation={null}>
             {draggedTask && (
               <TaskCardContent
                 task={draggedTask}
