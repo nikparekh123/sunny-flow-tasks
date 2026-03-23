@@ -14,28 +14,7 @@ export default function Auth() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    try {
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { full_name: name },
-            emailRedirectTo: window.location.origin,
-          },
-        });
-        if (error) throw error;
-        toast.success('Check your email for a confirmation link');
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      }
-    } catch (err: any) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
-    }
+    toast.success('Sign in clicked (dummy)');
   };
 
   return (
