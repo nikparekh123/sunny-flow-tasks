@@ -27,11 +27,17 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
   const [description, setDescription] = useState('');
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
+  const [isClosing, setIsClosing] = useState(false);
 
   const toggleTag = (id: string) => {
     setSelectedTagIds((prev) =>
       prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
     );
+  };
+
+  const handleClose = () => {
+    setIsClosing(true);
+    setTimeout(onClose, 250);
   };
 
   const handleSave = () => {
@@ -45,16 +51,24 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
       created_by: currentMemberId,
       tag_ids: selectedTagIds,
     });
-    onClose();
+    handleClose();
   };
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-card shadow-xl border-l border-border overflow-y-auto">
+      <div
+        className={`absolute inset-0 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`}
+        style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}
+        onClick={handleClose}
+      />
+      <div
+        className={`relative w-full max-w-md bg-card shadow-xl border-l border-border overflow-y-auto transition-transform duration-250 ease-out ${
+          isClosing ? 'translate-x-full' : 'animate-slide-in-right'
+        }`}
+      >
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-sm font-medium text-foreground">New task</h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button onClick={handleClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -72,9 +86,9 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
                   <button
                     key={p}
                     onClick={() => setPriority(p)}
-                    className={`flex-1 text-[10px] py-1 rounded transition-colors ${
+                    className={`flex-1 text-[10px] py-1 rounded transition-all duration-150 ${
                       priority === p
-                        ? 'bg-foreground text-primary-foreground'
+                        ? 'bg-foreground text-primary-foreground scale-105'
                         : 'bg-secondary text-muted-foreground hover:bg-accent'
                     }`}
                   >
@@ -122,9 +136,9 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
                 <button
                   key={tag.id}
                   onClick={() => toggleTag(tag.id)}
-                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  className={`text-[10px] px-2 py-0.5 rounded border transition-all duration-150 ${
                     selectedTagIds.includes(tag.id)
-                      ? 'bg-foreground text-primary-foreground border-foreground'
+                      ? 'bg-foreground text-primary-foreground border-foreground scale-105'
                       : 'bg-secondary text-muted-foreground border-border hover:border-foreground/30'
                   }`}
                 >
@@ -160,7 +174,7 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
 
           <div className="flex gap-2 pt-2">
             <Button size="sm" className="text-xs h-7 flex-1" onClick={handleSave}>Save</Button>
-            <Button size="sm" variant="outline" className="text-xs h-7 flex-1" onClick={onClose}>Cancel</Button>
+            <Button size="sm" variant="outline" className="text-xs h-7 flex-1" onClick={handleClose}>Cancel</Button>
           </div>
         </div>
       </div>
