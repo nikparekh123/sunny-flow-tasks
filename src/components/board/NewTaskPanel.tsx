@@ -110,17 +110,31 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
 
             <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">Assignee</Label>
-              <Select value={assigneeId} onValueChange={setAssigneeId}>
-                <SelectTrigger className="text-xs h-7">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Unassigned</SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex flex-wrap gap-1">
+                <button
+                  onClick={() => setAssigneeId('none')}
+                  className={`text-[10px] px-2 py-1 rounded transition-all duration-150 ${
+                    assigneeId === 'none'
+                      ? 'bg-foreground text-primary-foreground scale-105'
+                      : 'bg-secondary text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  None
+                </button>
+                {members.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setAssigneeId(m.id)}
+                    className={`text-[10px] px-2 py-1 rounded transition-all duration-150 ${
+                      assigneeId === m.id
+                        ? 'bg-foreground text-primary-foreground scale-105'
+                        : 'bg-secondary text-muted-foreground hover:bg-accent'
+                    }`}
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="col-span-2 space-y-1">
