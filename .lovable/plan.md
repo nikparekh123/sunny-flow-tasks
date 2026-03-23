@@ -1,69 +1,43 @@
 
 
-## Plan: Fix Task Creation Bugs, Improve DnD Smoothness, and Optimize Load Time
+## Plan: Six Fixes for the Kanban Board
 
-### Problems Identified
+### 1. Bolder column headers
+**`src/components/board/BoardColumn.tsx`** — Change column label from `font-medium text-muted-foreground` to `font-semibold text-foreground`.
 
-1. **Slow initial load**: The app fires 4 parallel queries (tasks, tags, task_tags, members) with no `staleTime`, so React Query refetches on every mount. The Google Fonts `@import` in CSS also blocks rendering.
-2. **New task creation bugs**: The `NewTaskPanel` calls `handleClose()` immediately after `onSave()`, closing the panel before the mutation completes. There's no loading state, no error handling, and no toast feedback. If the save fails silently, the user sees nothing.
-3. **DnD jerkiness**: The `SortableContext` uses `verticalListSortingStrategy` but the optimistic update operates on `rawTasks` (the query cache before tag merging), while the UI renders `tasks` (with tags merged). This mismatch causes a brief flicker when `onSettled` refetches. Also, `CSS.Transform.toString` produces transforms that can cause layout shifts without `will-change`.
-
-### Changes
-
-#### 1. Optimize initial load time (2 files)
-
-**`src/App.tsx`** — Add `staleTime` and `refetchOnWindowFocus: false` to the QueryClient defaults so data isn't refetched unnecessarily:
-```ts
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { staleTime: 30_000, refetchOnWindowFocus: false },
-  },
-});
-```
-
-**`index.html`** — Preload the Inter font with a `<link rel="preconnect">` + `<link rel="preload">` so it doesn't block first paint via the CSS `@import`.
-
-#### 2. Fix task creation flow (2 files)
-
+### 2. Replace assignee dropdown with pill buttons in New Task panel
 **`src/components/board/NewTaskPanel.tsx`**:
-- Add a `saving` state that disables the Save button and shows "Saving..." text
-- Don't call `handleClose()` from `handleSave()` — instead, pass an `onSuccess` callback
-- Show a toast on success/error via sonner
+- Remove the `Select` dropdown for assignee
+- Replace with clickable pill buttons (same style as priority buttons) showing each member's name
+- Default `assigneeId` to `currentMemberId` instead of `'none'`
+- Add an "Unassigned" pill as the first option
 
-**`src/components/board/TopBar.tsx`** / **`KanbanBoard.tsx`**:
-- Change `onCreateTask` to return a Promise so the panel can `await` it
-- Wire `createTask.mutateAsync` instead of `createTask.mutate` so the panel knows when it's done
+### 3. Fix ghost/transparent card during drag
+**`src/components/board/TaskCard.tsx`** — When `isDragging` is true, set `opacity: 0` and `pointerEvents: 'none'` so the placeholder is invisible. Only the `DragOverlay` copy is visible.
 
-#### 3. Smooth out drag-and-drop (3 files)
+**`src/components/board/TaskCardContent.tsx`** — Remove the `isDragging` opacity logic (line 30: `opacity: isDragging ? 0.4 : ...`). The `isDragging` prop is no longer needed for opacity since the parent wrapper handles hiding.
 
-**`src/components/board/TaskCard.tsx`**:
-- Use `CSS.Translate.toString` instead of `CSS.Transform.toString` to avoid scale transforms that cause layout shifts
-- Add `will-change: transform` and `transition: transform 200ms cubic-bezier(0.25, 1, 0.5, 1)` for GPU-accelerated movement
-- Set `z-index: 1` when dragging so the card stays above siblings
+### 4. Remove user name next to "Sign out"
+**`src/components/board/TopBar.tsx`** — Remove line 78 (`<span>` showing `member?.name`).
 
-**`src/hooks/useTasks.ts`**:
-- In the `moveTask.onMutate`, also cancel and snapshot `task_tags` queries to prevent mid-drag refetch from causing flicker
-- Debounce the `onSettled` invalidation by 300ms so rapid successive drags don't trigger cascading refetches
+### 5. Color-code cards by priority
+**`src/components/board/TaskCardContent.tsx`** — Add a subtle left border or soft background tint based on priority:
+- High: `border-left: 3px solid #E24B4A` with very faint red bg (`rgba(226,75,74,0.04)`)
+- Med: `border-left: 3px solid #EF9F27` with faint amber bg (`rgba(239,159,39,0.04)`)
+- Low: `border-left: 3px solid #639922` with faint green bg (`rgba(99,153,34,0.04)`)
 
-**`src/components/board/BoardColumn.tsx`**:
-- Add `transition-all duration-200` to the card list container for smoother reflows when cards enter/leave
+This replaces the current flat `#f7f7f7` background. The priority dot remains. The colors are deliberately very muted.
 
-#### 4. Add toast notifications (1 file)
+### 6. Making the app live with real user names
+The app is already published at `https://sunny-flow-tasks.lovable.app`. Each user who signs up gets a `team_members` row auto-created from their email/name (see `useAuth.tsx` line 40). Their name appears in the filter pills and avatar stack. To get real names, users need to sign up — the system already handles this. No code changes needed here, just sharing the published URL with your team.
 
-**`src/components/board/KanbanBoard.tsx`**:
-- Import `toast` from sonner
-- Add `onSuccess`/`onError` toasts for create, delete, and move operations
-
-### File Change Summary
+### Files Changed
 
 | File | Change |
 |------|--------|
-| `src/App.tsx` | Add QueryClient `staleTime` defaults |
-| `index.html` | Add font preconnect/preload |
-| `src/components/board/NewTaskPanel.tsx` | Add saving state, async save, toast |
-| `src/components/board/TopBar.tsx` | Pass `mutateAsync` for create |
-| `src/components/board/KanbanBoard.tsx` | Wire async create, add toasts |
-| `src/components/board/TaskCard.tsx` | Use `CSS.Translate`, add `will-change` |
-| `src/hooks/useTasks.ts` | Cancel tag queries on drag, debounce settle |
-| `src/components/board/BoardColumn.tsx` | Smooth container transitions |
+| `BoardColumn.tsx` | Bolder header text |
+| `NewTaskPanel.tsx` | Pill buttons for assignee, default to current user |
+| `TaskCard.tsx` | Hide placeholder during drag (`opacity: 0`) |
+| `TaskCardContent.tsx` | Remove `isDragging` opacity, add priority color border/tint |
+| `TopBar.tsx` | Remove user name span next to sign out |
 
