@@ -16,7 +16,7 @@ interface Props {
   members: TeamMember[];
   currentMemberId: string | null;
   onClose: () => void;
-  onSave: (data: any) => void;
+  onSave: (data: any) => Promise<void>;
   onCreateTag: (name: string) => void;
 }
 
