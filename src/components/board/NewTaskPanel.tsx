@@ -29,6 +29,7 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [isClosing, setIsClosing] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const toggleTag = (id: string) => {
     setSelectedTagIds((prev) =>
