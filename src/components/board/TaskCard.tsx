@@ -40,7 +40,7 @@ export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
       style={style}
       {...attributes}
       {...listeners}
-      className="group/card relative rounded-lg p-2.5 cursor-grab active:cursor-grabbing"
+      className="group/card relative cursor-grab active:cursor-grabbing"
       style={{
         ...style,
         backgroundColor: '#f7f7f7',
