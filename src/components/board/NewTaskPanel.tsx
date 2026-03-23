@@ -42,18 +42,26 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
     setTimeout(onClose, 250);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title.trim()) return;
-    onSave({
-      title: title.trim(),
-      priority,
-      assignee_id: assigneeId === 'none' ? null : assigneeId,
-      due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
-      description: description.trim() || null,
-      created_by: currentMemberId,
-      tag_ids: selectedTagIds,
-    });
-    handleClose();
+    setSaving(true);
+    try {
+      await onSave({
+        title: title.trim(),
+        priority,
+        assignee_id: assigneeId === 'none' ? null : assigneeId,
+        due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
+        description: description.trim() || null,
+        created_by: currentMemberId,
+        tag_ids: selectedTagIds,
+      });
+      toast.success('Task created');
+      handleClose();
+    } catch {
+      toast.error('Failed to create task');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
