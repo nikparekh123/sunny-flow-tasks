@@ -1,22 +1,40 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   DndContext,
   DragOverlay,
-  closestCorners,
+  closestCenter,
+  pointerWithin,
+  rectIntersection,
   PointerSensor,
   useSensor,
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
+  type DragOverEvent,
+  type CollisionDetection,
 } from '@dnd-kit/core';
+import { arrayMove } from '@dnd-kit/sortable';
 import { COLUMNS } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
 import { TopBar } from './TopBar';
 import { BoardColumn } from './BoardColumn';
 import { TaskDetailPanel } from './TaskDetailPanel';
-import { TaskCard } from './TaskCard';
+import { TaskCardContent } from './TaskCardContent';
 import type { TaskWithDetail, TaskColumn } from '@/lib/types';
+
+// Custom collision detection: prefer droppable columns, fall back to closest center
+const customCollision: CollisionDetection = (args) => {
+  // First check if pointer is within a droppable
+  const pointerCollisions = pointerWithin(args);
+  if (pointerCollisions.length > 0) return pointerCollisions;
+
+  // Fall back to rect intersection
+  const rectCollisions = rectIntersection(args);
+  if (rectCollisions.length > 0) return rectCollisions;
+
+  return closestCenter(args);
+};
 
 export function KanbanBoard() {
   const { member } = useAuth();
@@ -28,9 +46,10 @@ export function KanbanBoard() {
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskWithDetail | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
+  const [overColumn, setOverColumn] = useState<TaskColumn | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
 
   const filteredTasks = useMemo(() => {
@@ -49,13 +68,26 @@ export function KanbanBoard() {
     return map;
   }, [filteredTasks]);
 
-  const handleDragStart = (event: DragStartEvent) => {
+  const handleDragStart = useCallback((event: DragStartEvent) => {
     const task = event.active.data.current?.task as TaskWithDetail;
     setDraggedTask(task || null);
-  };
+  }, []);
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { over } = event;
+    if (!over) {
+      setOverColumn(null);
+      return;
+    }
+    // Determine which column is being hovered
+    const overTask = over.data.current?.task as TaskWithDetail | undefined;
+    const col = overTask ? overTask.column : (over.id as TaskColumn);
+    setOverColumn(col);
+  }, []);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
     setDraggedTask(null);
+    setOverColumn(null);
     const { active, over } = event;
     if (!over) return;
 
@@ -68,8 +100,10 @@ export function KanbanBoard() {
     const overTask = over.data.current?.task as TaskWithDetail | undefined;
     if (overTask) {
       targetColumn = overTask.column;
+      // Place before the hovered task
       targetPosition = overTask.position;
     } else {
+      // Dropped on column itself — append to end
       targetColumn = over.id as TaskColumn;
       targetPosition = tasksByColumn[targetColumn]?.length ?? 0;
     }
@@ -81,12 +115,20 @@ export function KanbanBoard() {
       column: targetColumn,
       position: targetPosition,
     });
-  };
+  }, [tasksByColumn, moveTask]);
+
+  const handleDragCancel = useCallback(() => {
+    setDraggedTask(null);
+    setOverColumn(null);
+  }, []);
 
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <p className="text-sm text-muted-foreground">Loading board...</p>
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-6 h-6 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+          <p className="text-sm text-muted-foreground">Loading board…</p>
+        </div>
       </div>
     );
   }
@@ -106,9 +148,11 @@ export function KanbanBoard() {
       <div className="flex-1 p-5 overflow-x-auto">
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCorners}
+          collisionDetection={customCollision}
           onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
         >
           <div className="flex gap-4 min-w-max">
             {COLUMNS.map((col) => (
@@ -118,6 +162,7 @@ export function KanbanBoard() {
                 label={col.label}
                 color={col.color}
                 tasks={tasksByColumn[col.id]}
+                isOver={overColumn === col.id}
                 onCardClick={(t) => setSelectedTask(t)}
                 onCardEdit={(t) => setSelectedTask(t)}
                 onCardDelete={(id) => deleteTask.mutate(id)}
@@ -125,17 +170,19 @@ export function KanbanBoard() {
             ))}
           </div>
 
-          <DragOverlay>
+          <DragOverlay dropAnimation={{
+            duration: 200,
+            easing: 'cubic-bezier(0.18, 0.67, 0.6, 1.22)',
+          }}>
             {draggedTask && (
-              <div className="opacity-80">
-                <TaskCard
-                  task={draggedTask}
-                  isDone={draggedTask.column === 'done'}
-                  onClick={() => {}}
-                  onEdit={() => {}}
-                  onDelete={() => {}}
-                />
-              </div>
+              <TaskCardContent
+                task={draggedTask}
+                isDone={draggedTask.column === 'done'}
+                isOverlay
+                onClick={() => {}}
+                onEdit={() => {}}
+                onDelete={() => {}}
+              />
             )}
           </DragOverlay>
         </DndContext>

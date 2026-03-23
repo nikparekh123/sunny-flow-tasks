@@ -24,11 +24,17 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onCrea
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description || '');
   const [newTag, setNewTag] = useState('');
+  const [isClosing, setIsClosing] = useState(false);
 
   useEffect(() => {
     setTitle(task.title);
     setDescription(task.description || '');
   }, [task]);
+
+  const handleClose = () => {
+    setIsClosing(true);
+    setTimeout(onClose, 250);
+  };
 
   const handleTitleBlur = () => {
     if (title.trim() && title !== task.title) {
@@ -53,11 +59,19 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onCrea
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-card shadow-xl border-l border-border overflow-y-auto">
+      <div
+        className={`absolute inset-0 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`}
+        style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}
+        onClick={handleClose}
+      />
+      <div
+        className={`relative w-full max-w-md bg-card shadow-xl border-l border-border overflow-y-auto transition-transform duration-250 ease-out ${
+          isClosing ? 'translate-x-full' : 'animate-slide-in-right'
+        }`}
+      >
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-sm font-medium text-muted-foreground">Task details</h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+          <button onClick={handleClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -159,9 +173,9 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onCrea
                 <button
                   key={tag.id}
                   onClick={() => toggleTag(tag.id)}
-                  className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  className={`text-[10px] px-2 py-0.5 rounded border transition-all duration-150 ${
                     currentTagIds.includes(tag.id)
-                      ? 'bg-foreground text-primary-foreground border-foreground'
+                      ? 'bg-foreground text-primary-foreground border-foreground scale-105'
                       : 'bg-secondary text-muted-foreground border-border hover:border-foreground/30'
                   }`}
                 >
