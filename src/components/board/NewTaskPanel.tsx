@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import type { Tag, TeamMember, TaskPriority } from '@/lib/types';
+import { PROJECTS } from '@/lib/constants';
+import type { Tag, TeamMember, TaskPriority, TaskProject } from '@/lib/types';
 
 interface Props {
   tags: Tag[];
@@ -24,6 +24,7 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('med');
   const [assigneeId, setAssigneeId] = useState(currentMemberId || 'none');
+  const [project, setProject] = useState<TaskProject | null>(null);
   const [dueDate, setDueDate] = useState<Date | undefined>();
   const [description, setDescription] = useState('');
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
@@ -50,6 +51,7 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
         title: title.trim(),
         priority,
         assignee_id: assigneeId === 'none' ? null : assigneeId,
+        project,
         due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
         description: description.trim() || null,
         created_by: currentMemberId,
@@ -86,6 +88,36 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
           <div className="space-y-1">
             <Label className="text-[10px] text-muted-foreground">Title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} className="text-xs" autoFocus />
+          </div>
+
+          {/* Project */}
+          <div className="space-y-1">
+            <Label className="text-[10px] text-muted-foreground">Project</Label>
+            <div className="flex flex-wrap gap-1">
+              <button
+                onClick={() => setProject(null)}
+                className={`text-[10px] px-2 py-1 rounded transition-all duration-150 ${
+                  project === null
+                    ? 'bg-foreground text-primary-foreground scale-105'
+                    : 'bg-secondary text-muted-foreground hover:bg-accent'
+                }`}
+              >
+                None
+              </button>
+              {PROJECTS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setProject(p.id)}
+                  className={`text-[10px] px-2 py-1 rounded transition-all duration-150 ${
+                    project === p.id
+                      ? 'bg-foreground text-primary-foreground scale-105'
+                      : 'bg-secondary text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

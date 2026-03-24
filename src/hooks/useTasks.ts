@@ -132,6 +132,7 @@ export function useTasks() {
       description?: string | null;
       created_by?: string | null;
       tag_ids?: string[];
+      project?: string | null;
     }) => {
       const column = task.column || 'todo';
       const { data: maxPos } = await supabase
@@ -155,7 +156,8 @@ export function useTasks() {
           due_date: task.due_date || null,
           description: task.description || null,
           created_by: task.created_by || null,
-        })
+          project: task.project || null,
+        } as any)
         .select('id')
         .single();
       if (error) throw error;
@@ -180,9 +182,10 @@ export function useTasks() {
       assignee_id: string | null;
       due_date: string | null;
       description: string | null;
+      project: string | null;
     }>) => {
       if (Object.keys(updates).length > 0) {
-        const { error } = await supabase.from('tasks').update(updates).eq('id', id);
+        const { error } = await supabase.from('tasks').update(updates as any).eq('id', id);
         if (error) throw error;
       }
 

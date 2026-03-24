@@ -105,6 +105,7 @@ export type Database = {
           id: string
           position: number
           priority: Database["public"]["Enums"]["task_priority"]
+          project: Database["public"]["Enums"]["task_project"] | null
           title: string
           updated_at: string | null
         }
@@ -119,6 +120,7 @@ export type Database = {
           id?: string
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
+          project?: Database["public"]["Enums"]["task_project"] | null
           title: string
           updated_at?: string | null
         }
@@ -133,6 +135,7 @@ export type Database = {
           id?: string
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
+          project?: Database["public"]["Enums"]["task_project"] | null
           title?: string
           updated_at?: string | null
         }
@@ -223,6 +226,7 @@ export type Database = {
           id: string | null
           position: number | null
           priority: Database["public"]["Enums"]["task_priority"] | null
+          project: Database["public"]["Enums"]["task_project"] | null
           title: string | null
           updated_at: string | null
         }
@@ -265,6 +269,13 @@ export type Database = {
       member_role: "admin" | "member"
       task_column: "todo" | "inprogress" | "review" | "done"
       task_priority: "high" | "med" | "low"
+      task_project:
+        | "admin_ops"
+        | "sector_research"
+        | "macro_research"
+        | "company_research"
+        | "technical_setup"
+        | "live_positions"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -395,6 +406,14 @@ export const Constants = {
       member_role: ["admin", "member"],
       task_column: ["todo", "inprogress", "review", "done"],
       task_priority: ["high", "med", "low"],
+      task_project: [
+        "admin_ops",
+        "sector_research",
+        "macro_research",
+        "company_research",
+        "technical_setup",
+        "live_positions",
+      ],
     },
   },
 } as const
