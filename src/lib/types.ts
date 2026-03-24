@@ -1,8 +1,10 @@
 import type { Database } from '@/integrations/supabase/types';
+import type { TaskProject } from '@/lib/constants';
 
 export type TaskColumn = Database['public']['Enums']['task_column'];
 export type TaskPriority = Database['public']['Enums']['task_priority'];
 export type MemberRole = Database['public']['Enums']['member_role'];
+export type { TaskProject } from '@/lib/constants';
 
 export interface Tag {
   id: string;
