@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Plus, Settings, Users, Palette, User, Shield, LogOut, Eye } from 'lucide-react';
+import { Plus, Settings, Users, Palette, User, Shield, LogOut, Eye, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,8 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/useAuth';
-import { PROJECTS } from '@/lib/constants';
-import type { Tag, TeamMember, TaskProject } from '@/lib/types';
+import type { Tag, TeamMember } from '@/lib/types';
 import { NewTaskPanel } from './NewTaskPanel';
 import { UserSettingsModal } from '@/components/settings/UserSettingsModal';
 import { AdminSettingsModal } from '@/components/settings/AdminSettingsModal';
@@ -20,29 +20,30 @@ interface TopBarProps {
   tags: Tag[];
   members: TeamMember[];
   activeAssignee: string | null;
-  activeProject: TaskProject | null;
   onAssigneeFilter: (id: string | null) => void;
-  onProjectFilter: (project: TaskProject | null) => void;
   onCreateTask: (data: any) => Promise<void>;
   onCreateTag: (name: string) => void;
   currentMemberId: string | null;
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
 }
 
 export function TopBar({
   tags,
   members,
   activeAssignee,
-  activeProject,
   onAssigneeFilter,
-  onProjectFilter,
   onCreateTask,
   onCreateTag,
   currentMemberId,
+  searchQuery,
+  onSearchChange,
 }: TopBarProps) {
   const { signOut, member } = useAuth();
   const [showNewTask, setShowNewTask] = useState(false);
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [showAdminSettings, setShowAdminSettings] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   const isAdmin = member?.role === 'admin';
 
@@ -51,34 +52,31 @@ export function TopBar({
       <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-card">
         <h1 className="text-sm font-semibold text-foreground whitespace-nowrap">SunnyFi Board</h1>
 
-        {/* Project filter tabs */}
-        <div className="flex items-center gap-1 ml-4 overflow-x-auto">
-          <button
-            onClick={() => onProjectFilter(null)}
-            className={`px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors ${
-              activeProject === null
-                ? 'bg-foreground text-primary-foreground'
-                : 'bg-secondary text-muted-foreground hover:bg-accent'
-            }`}
-          >
-            All
-          </button>
-          {PROJECTS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => onProjectFilter(p.id)}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors ${
-                activeProject === p.id
-                  ? 'bg-foreground text-primary-foreground'
-                  : 'bg-secondary text-muted-foreground hover:bg-accent'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
         <div className="flex-1" />
+
+        {/* Search */}
+        {showSearch ? (
+          <div className="flex items-center gap-1.5 max-w-xs w-full">
+            <Search className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search tasks…"
+              className="h-7 text-xs"
+              autoFocus
+            />
+            <button
+              onClick={() => { setShowSearch(false); onSearchChange(''); }}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : (
+          <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowSearch(true)}>
+            <Search className="w-3.5 h-3.5" />
+          </Button>
+        )}
 
         {/* User avatar circles */}
         <div className="flex items-center -space-x-1.5">
