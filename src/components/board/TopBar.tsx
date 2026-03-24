@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Settings, Users, Palette, User, Shield, LogOut } from 'lucide-react';
+import { Plus, Settings, Users, Palette, User, Shield, LogOut, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -8,10 +8,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/useAuth';
 import { PROJECTS } from '@/lib/constants';
 import type { Tag, TeamMember, TaskProject } from '@/lib/types';
 import { NewTaskPanel } from './NewTaskPanel';
+import { UserSettingsModal } from '@/components/settings/UserSettingsModal';
+import { AdminSettingsModal } from '@/components/settings/AdminSettingsModal';
 
 interface TopBarProps {
   tags: Tag[];
@@ -36,8 +39,12 @@ export function TopBar({
   onCreateTag,
   currentMemberId,
 }: TopBarProps) {
-  const { signOut } = useAuth();
+  const { signOut, member } = useAuth();
   const [showNewTask, setShowNewTask] = useState(false);
+  const [showUserSettings, setShowUserSettings] = useState(false);
+  const [showAdminSettings, setShowAdminSettings] = useState(false);
+
+  const isAdmin = member?.role === 'admin';
 
   return (
     <>
@@ -73,14 +80,35 @@ export function TopBar({
 
         <div className="flex-1" />
 
-        {/* User filter dropdown */}
+        {/* User avatar circles */}
+        <div className="flex items-center -space-x-1.5">
+          {members.map((m) => (
+            <Avatar
+              key={m.id}
+              className={`h-7 w-7 border-2 cursor-pointer transition-all ${
+                activeAssignee === m.id
+                  ? 'border-primary ring-2 ring-primary/30'
+                  : 'border-card hover:border-primary/50'
+              }`}
+              onClick={() => onAssigneeFilter(activeAssignee === m.id ? null : m.id)}
+              title={m.name}
+            >
+              <AvatarImage src={(m as any).avatar_url || ''} />
+              <AvatarFallback
+                style={{ backgroundColor: m.color || undefined }}
+                className="text-primary-foreground text-[8px] font-medium"
+              >
+                {m.initials}
+              </AvatarFallback>
+            </Avatar>
+          ))}
+        </div>
+
+        {/* Eye icon filter dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1">
-              <User className="w-3 h-3" />
-              {activeAssignee
-                ? members.find((m) => m.id === activeAssignee)?.name || 'User'
-                : 'All Users'}
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+              <Eye className="w-3.5 h-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -121,12 +149,14 @@ export function TopBar({
             <DropdownMenuItem disabled>
               <Palette className="w-3.5 h-3.5 mr-2" /> Personalization
             </DropdownMenuItem>
-            <DropdownMenuItem disabled>
+            <DropdownMenuItem onClick={() => setShowUserSettings(true)}>
               <User className="w-3.5 h-3.5 mr-2" /> User Settings
             </DropdownMenuItem>
-            <DropdownMenuItem disabled>
-              <Shield className="w-3.5 h-3.5 mr-2" /> Admin Settings
-            </DropdownMenuItem>
+            {isAdmin && (
+              <DropdownMenuItem onClick={() => setShowAdminSettings(true)}>
+                <Shield className="w-3.5 h-3.5 mr-2" /> Admin Settings
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={signOut}>
               <LogOut className="w-3.5 h-3.5 mr-2" /> Sign Out
@@ -144,6 +174,11 @@ export function TopBar({
           onSave={onCreateTask}
           onCreateTag={onCreateTag}
         />
+      )}
+
+      <UserSettingsModal open={showUserSettings} onOpenChange={setShowUserSettings} />
+      {isAdmin && (
+        <AdminSettingsModal open={showAdminSettings} onOpenChange={setShowAdminSettings} />
       )}
     </>
   );
