@@ -29,6 +29,7 @@ export interface TaskWithDetail {
   assignee_name: string | null;
   assignee_initials: string | null;
   assignee_color: string | null;
+  project: TaskProject | null;
   tags?: Tag[];
 }
 

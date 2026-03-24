@@ -19,3 +19,14 @@ export const CATEGORY_COLOR_SEQUENCE = [
   '#D85A30', '#7F77DD', '#1D9E75', '#EF9F27',
   '#E24B4A', '#888780', '#378ADD', '#5DCAA5',
 ];
+
+export type TaskProject = 'admin_ops' | 'sector_research' | 'macro_research' | 'company_research' | 'technical_setup' | 'live_positions';
+
+export const PROJECTS: { id: TaskProject; label: string }[] = [
+  { id: 'admin_ops', label: 'Admin & Operations' },
+  { id: 'sector_research', label: 'Sector Research' },
+  { id: 'macro_research', label: 'Macro Research' },
+  { id: 'company_research', label: 'Company Research' },
+  { id: 'technical_setup', label: 'Technical Setup' },
+  { id: 'live_positions', label: 'Live Positions' },
+];
