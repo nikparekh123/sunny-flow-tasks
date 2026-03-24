@@ -20,7 +20,7 @@ import { TopBar } from './TopBar';
 import { BoardColumn } from './BoardColumn';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
-import type { TaskWithDetail, TaskColumn, TaskProject } from '@/lib/types';
+import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 
 const customCollision: CollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args);
@@ -28,10 +28,6 @@ const customCollision: CollisionDetection = (args) => {
   const rectCollisions = rectIntersection(args);
   if (rectCollisions.length > 0) return rectCollisions;
   return closestCenter(args);
-};
-
-const EMPTY_COLUMNS: Record<TaskColumn, TaskWithDetail[]> = {
-  todo: [], inprogress: [], review: [], done: [],
 };
 
 export function KanbanBoard() {
@@ -42,7 +38,7 @@ export function KanbanBoard() {
   } = useTasks();
 
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
-  const [activeProject, setActiveProject] = useState<TaskProject | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedTask, setSelectedTask] = useState<TaskWithDetail | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
   const [overColumn, setOverColumn] = useState<TaskColumn | null>(null);
@@ -53,10 +49,19 @@ export function KanbanBoard() {
 
   const filteredTasks = useMemo(() => {
     let result = tasks;
-    if (activeProject) result = result.filter((t) => t.project === activeProject);
     if (activeAssignee) result = result.filter((t) => t.assignee_id === activeAssignee);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter((t) =>
+        t.title.toLowerCase().includes(q) ||
+        (t.description && t.description.toLowerCase().includes(q)) ||
+        (t.tags && t.tags.some((tag) => tag.name.toLowerCase().includes(q))) ||
+        (t.assignee_name && t.assignee_name.toLowerCase().includes(q)) ||
+        (t.category_name && t.category_name.toLowerCase().includes(q))
+      );
+    }
     return result;
-  }, [tasks, activeAssignee, activeProject]);
+  }, [tasks, activeAssignee, searchQuery]);
 
   const allTasksByColumn = useMemo(() => {
     const map: Record<TaskColumn, TaskWithDetail[]> = { todo: [], inprogress: [], review: [], done: [] };
@@ -118,17 +123,17 @@ export function KanbanBoard() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="flex-1 bg-background flex flex-col">
       <TopBar
         tags={tags}
         members={members}
         activeAssignee={activeAssignee}
-        activeProject={activeProject}
         onAssigneeFilter={setActiveAssignee}
-        onProjectFilter={setActiveProject}
         onCreateTask={(data) => createTask.mutateAsync(data)}
         onCreateTag={(name) => createTag.mutate(name)}
         currentMemberId={member?.id ?? null}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
       />
 
       <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto">
