@@ -185,7 +185,7 @@ export function useTasks() {
       project: string | null;
     }>) => {
       if (Object.keys(updates).length > 0) {
-        const { error } = await supabase.from('tasks').update(updates).eq('id', id);
+        const { error } = await supabase.from('tasks').update(updates as any).eq('id', id);
         if (error) throw error;
       }
 
