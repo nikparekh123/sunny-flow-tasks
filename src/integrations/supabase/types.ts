@@ -179,30 +179,60 @@ export type Database = {
       }
       team_members: {
         Row: {
+          avatar_url: string | null
           color: string | null
           created_at: string | null
           id: string
           initials: string
           name: string
+          preferences: Json
           role: Database["public"]["Enums"]["member_role"]
+          status: string
           user_id: string
         }
         Insert: {
+          avatar_url?: string | null
           color?: string | null
           created_at?: string | null
           id?: string
           initials: string
           name: string
+          preferences?: Json
           role?: Database["public"]["Enums"]["member_role"]
+          status?: string
           user_id: string
         }
         Update: {
+          avatar_url?: string | null
           color?: string | null
           created_at?: string | null
           id?: string
           initials?: string
           name?: string
+          preferences?: Json
           role?: Database["public"]["Enums"]["member_role"]
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_notes: {
+        Row: {
+          content: string
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content?: string
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          id?: string
+          updated_at?: string
           user_id?: string
         }
         Relationships: []
