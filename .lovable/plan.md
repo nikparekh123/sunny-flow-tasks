@@ -1,82 +1,99 @@
 
 
-## Plan: Phased Board Overhaul — Phase 1
+## Plan: Major Feature Expansion — Phased Approach
 
-This is a large request spanning 6 feature areas. I recommend implementing it in two phases to keep things stable. **Phase 1** (this plan) covers the navbar refactor, project field, settings menu, and auth improvements. **Phase 2** (follow-up) covers real-time presence, file attachments, and invite email flow.
+This request contains 7+ major features. To keep the app stable, I recommend splitting into **3 phases**. Here is **Phase 2A** — the highest-impact items that build on what exists.
 
 ---
 
-### Phase 1 Scope
+### Phase 2A Scope (This Plan)
 
-#### 1. Add "project" column to tasks table
+#### 1. Seed the 4 users via edge function
+
+Since we cannot create auth users via client-side code or migrations, create an edge function `seed-users` that uses the Supabase Admin API (`supabase.auth.admin.createUser`) to create:
+
+| Name | Email | Password | Role |
+|------|-------|----------|------|
+| Nik Parekh | nik@sunnyfi.co | niknik | admin |
+| Ary LaRocca | ary@sunnyfi.co | aryary | admin |
+| Rad Rahmouni | rad@sunnyfi.co | radrad | member |
+| Kushal Jain | kushal@sunnyfi.co | kushalkushal | member |
+
+The function creates auth users with `email_confirm: true`, then upserts `team_members` rows with the correct `role` (admin/member). It's idempotent — skips users that already exist.
+
+**Enable auto-confirm** for email signups so these users can sign in immediately.
+
+**File:** `supabase/functions/seed-users/index.ts`
+
+#### 2. Role-based settings menu
+
+**`src/components/board/TopBar.tsx`** — Read `member.role` from `useAuth()`. Conditionally show/hide menu items:
+- **Admin**: sees all items (Invite Users, Personalization, User Settings, Admin Settings, Sign Out)
+- **Member**: sees Invite Users, Personalization, User Settings, Sign Out — no Admin Settings
+
+#### 3. Left sidebar with project navigation + Dashboard
 
 **Database migration:**
-- Create an enum `task_project` with values: `admin_ops`, `sector_research`, `macro_research`, `company_research`, `technical_setup`, `live_positions`
-- Add `project` column (nullable, type `task_project`) to `tasks` table
-- Update `tasks_with_detail` view to include the `project` column
+- Create `user_notes` table: `id uuid PK, user_id uuid NOT NULL, content text, updated_at timestamptz`
+- RLS: users can only CRUD their own notes (`user_id = auth.uid()`)
 
-#### 2. Refactor TopBar into project filter tabs + user dropdown
+**New files:**
+- `src/components/layout/AppSidebar.tsx` — Left sidebar using the existing Sidebar component with:
+  - "Dashboard" link at top
+  - Project sections (Admin & Operations, Sector Research, etc.) — clicking navigates/filters to that project
+  - Collapsible with icon mode
+- `src/pages/Dashboard.tsx` — User-centric view with:
+  - Task widget: shows tasks assigned to current user, grouped by status
+  - Notes widget: private textarea that auto-saves to `user_notes` table
 
-**`src/lib/constants.ts`** — Add a `PROJECTS` array with id/label pairs matching the enum values.
+**Modified files:**
+- `src/App.tsx` — Add routes: `/` (Dashboard), `/board` (KanbanBoard), wrap in `SidebarProvider`
+- `src/pages/Index.tsx` — Update routing logic
 
-**`src/components/board/TopBar.tsx`** — Complete rewrite:
-- Replace the avatar stack and person filter pills with:
-  - Project filter tabs: `All | Admin & Operations | Sector Research | Macro Research | Company Research | Technical Setup | Live Positions`
-  - A "User" dropdown (using `DropdownMenu`) listing: Ary LaRocca, Nik Parekh, Kushal Jain, Rad Rahmouni (mapped to team members from DB). Selecting filters by assignee.
-- Move "Sign out" into a Settings gear icon dropdown (top-right) with: Sign Out
-- Keep the `+ New task` button
+#### 4. Refactor top-right user filter with avatars + eye icon
 
-**`src/components/board/KanbanBoard.tsx`** — Update state/props:
-- Add `activeProject` state (string | null)
-- Pass to TopBar, filter tasks by `task.project === activeProject` (or show all if null)
-- Update `filteredTasks` memo to combine project + assignee filters
+**`src/components/board/TopBar.tsx`**:
+- Replace "All Users" button with a row of small avatar circles (from `members` data)
+- Add an `Eye` icon button next to avatars that opens a dropdown with "All Users" + individual user filter options
+- Avatars are dynamically driven from `team_members` table
 
-#### 3. Add Project field to task panels
+#### 5. User Settings modal
 
-**`src/components/board/NewTaskPanel.tsx`** — Add a "Project" pill selector (same style as priority) using the `PROJECTS` constant. Default to null.
+**New file:** `src/components/settings/UserSettingsModal.tsx`
+- Dialog with fields: Name (editable), Email (read-only), Status toggle (active/inactive stored in `team_members`), Avatar upload (to storage bucket), notification preferences (stored in new `user_preferences` JSON column on `team_members`)
+- Save updates to `team_members` table
 
-**`src/components/board/TaskDetailPanel.tsx`** — Add a Project `Select` dropdown in the details grid. On change, call `onUpdate({ id, project })`.
+**Database migration:**
+- Add `status text DEFAULT 'active'` and `avatar_url text` and `preferences jsonb DEFAULT '{}'` columns to `team_members`
+- Create `avatars` storage bucket
 
-**`src/hooks/useTasks.ts`** — Update `createTask` and `updateTask` mutation types to include `project`.
+#### 6. Admin Settings panel (admin-only)
 
-#### 4. Replace dummy auth with email/password sign-up and sign-in
+**New file:** `src/components/settings/AdminSettingsModal.tsx`
+- Shows all users with their roles
+- Admins can toggle role between admin/member (updates `team_members.role`)
+- Shows user status, can deactivate users
 
-**`src/pages/Auth.tsx`** — Rewrite with two tabs (Sign In / Sign Up):
-- Sign Up: first name, last name, email, password fields. Calls `supabase.auth.signUp` with `full_name` in metadata.
-- Sign In: email, password. Calls `supabase.auth.signInWithPassword`.
-- Remove anonymous sign-in entirely.
-
-**`src/hooks/useAuth.tsx`** — `getOrCreateMember` already extracts `full_name` from metadata — no changes needed.
-
-#### 5. Settings gear menu (top-right)
-
-**`src/components/board/TopBar.tsx`** — Add a `Settings` (gear icon) button that opens a `DropdownMenu` with:
-- Invite Users (placeholder for Phase 2)
-- Personalization (placeholder)
-- User Settings (placeholder)
-- Admin Settings (placeholder)
-- Sign Out (moved from current location)
+### Deferred to Phase 2B
+- Email notifications on task assignment (requires edge function + email infrastructure)
+- Admin Reports/Analytics dashboard
+- Invite Users flow (email sending)
 
 ---
 
-### Files Changed
+### Files Changed / Created
 
-| File | Change |
+| File | Action |
 |------|--------|
-| **Migration SQL** | Add `task_project` enum, `project` column on `tasks`, update `tasks_with_detail` view |
-| `src/lib/constants.ts` | Add `PROJECTS` array |
-| `src/lib/types.ts` | Add `TaskProject` type, add `project` to `TaskWithDetail` |
-| `src/components/board/TopBar.tsx` | Full rewrite: project tabs, user dropdown, settings gear |
-| `src/components/board/KanbanBoard.tsx` | Add `activeProject` state, dual filtering |
-| `src/components/board/NewTaskPanel.tsx` | Add project pill selector |
-| `src/components/board/TaskDetailPanel.tsx` | Add project select dropdown |
-| `src/hooks/useTasks.ts` | Add `project` to create/update mutations |
-| `src/pages/Auth.tsx` | Email/password sign-up and sign-in (replace anonymous) |
-
-### What's deferred to Phase 2
-- Real-time user presence (green dots)
-- Task attachments (file uploads, URLs, Google Drive)
-- Invite Users flow (email sending)
-- Permissions / private projects
-- Personalization and admin settings panels
+| `supabase/functions/seed-users/index.ts` | Create — seed 4 users |
+| Migration SQL | Create `user_notes` table, add columns to `team_members`, create storage bucket |
+| `src/components/layout/AppSidebar.tsx` | Create — left sidebar navigation |
+| `src/pages/Dashboard.tsx` | Create — user dashboard with tasks + notes |
+| `src/components/settings/UserSettingsModal.tsx` | Create — user settings dialog |
+| `src/components/settings/AdminSettingsModal.tsx` | Create — admin user management |
+| `src/components/board/TopBar.tsx` | Modify — role-based menu, avatar filter UI |
+| `src/App.tsx` | Modify — add sidebar layout, new routes |
+| `src/pages/Index.tsx` | Modify — routing updates |
+| `src/hooks/useAuth.tsx` | Minor — expose `member.role` check |
+| `src/lib/types.ts` | Update — add new fields |
 
