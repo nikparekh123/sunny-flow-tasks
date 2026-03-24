@@ -182,6 +182,7 @@ export function useTasks() {
       assignee_id: string | null;
       due_date: string | null;
       description: string | null;
+      project: string | null;
     }>) => {
       if (Object.keys(updates).length > 0) {
         const { error } = await supabase.from('tasks').update(updates).eq('id', id);

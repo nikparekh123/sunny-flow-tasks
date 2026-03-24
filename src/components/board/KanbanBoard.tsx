@@ -2,9 +2,9 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   DndContext,
   DragOverlay,
-  closestCenter,
   pointerWithin,
   rectIntersection,
+  closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
@@ -20,23 +20,18 @@ import { TopBar } from './TopBar';
 import { BoardColumn } from './BoardColumn';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
-import type { TaskWithDetail, TaskColumn } from '@/lib/types';
+import type { TaskWithDetail, TaskColumn, TaskProject } from '@/lib/types';
 
 const customCollision: CollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args);
   if (pointerCollisions.length > 0) return pointerCollisions;
-
   const rectCollisions = rectIntersection(args);
   if (rectCollisions.length > 0) return rectCollisions;
-
   return closestCenter(args);
 };
 
 const EMPTY_COLUMNS: Record<TaskColumn, TaskWithDetail[]> = {
-  todo: [],
-  inprogress: [],
-  review: [],
-  done: [],
+  todo: [], inprogress: [], review: [], done: [],
 };
 
 export function KanbanBoard() {
@@ -47,6 +42,7 @@ export function KanbanBoard() {
   } = useTasks();
 
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
+  const [activeProject, setActiveProject] = useState<TaskProject | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskWithDetail | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
   const [overColumn, setOverColumn] = useState<TaskColumn | null>(null);
@@ -56,84 +52,53 @@ export function KanbanBoard() {
   );
 
   const filteredTasks = useMemo(() => {
-    if (!activeAssignee) return tasks;
-    return tasks.filter((task) => task.assignee_id === activeAssignee);
-  }, [tasks, activeAssignee]);
+    let result = tasks;
+    if (activeProject) result = result.filter((t) => t.project === activeProject);
+    if (activeAssignee) result = result.filter((t) => t.assignee_id === activeAssignee);
+    return result;
+  }, [tasks, activeAssignee, activeProject]);
 
   const allTasksByColumn = useMemo(() => {
-    const map: Record<TaskColumn, TaskWithDetail[]> = {
-      ...EMPTY_COLUMNS,
-      todo: [],
-      inprogress: [],
-      review: [],
-      done: [],
-    };
-
-    tasks.forEach((task) => {
-      map[task.column].push(task);
-    });
-
+    const map: Record<TaskColumn, TaskWithDetail[]> = { todo: [], inprogress: [], review: [], done: [] };
+    tasks.forEach((task) => map[task.column].push(task));
     Object.values(map).forEach((list) => list.sort((a, b) => a.position - b.position));
     return map;
   }, [tasks]);
 
   const visibleTasksByColumn = useMemo(() => {
-    const map: Record<TaskColumn, TaskWithDetail[]> = {
-      ...EMPTY_COLUMNS,
-      todo: [],
-      inprogress: [],
-      review: [],
-      done: [],
-    };
-
-    filteredTasks.forEach((task) => {
-      map[task.column].push(task);
-    });
-
+    const map: Record<TaskColumn, TaskWithDetail[]> = { todo: [], inprogress: [], review: [], done: [] };
+    filteredTasks.forEach((task) => map[task.column].push(task));
     Object.values(map).forEach((list) => list.sort((a, b) => a.position - b.position));
     return map;
   }, [filteredTasks]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
-    const task = event.active.data.current?.task as TaskWithDetail;
-    setDraggedTask(task || null);
+    setDraggedTask((event.active.data.current?.task as TaskWithDetail) || null);
   }, []);
 
   const handleDragOver = useCallback((event: DragOverEvent) => {
     const overTask = event.over?.data.current?.task as TaskWithDetail | undefined;
-    const hoveredColumn = overTask ? overTask.column : (event.over?.id as TaskColumn | undefined);
-    setOverColumn(hoveredColumn ?? null);
+    setOverColumn(overTask ? overTask.column : (event.over?.id as TaskColumn | undefined) ?? null);
   }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setDraggedTask(null);
     setOverColumn(null);
-
     const activeTask = event.active.data.current?.task as TaskWithDetail;
     if (!activeTask || !event.over) return;
-
     const overTask = event.over.data.current?.task as TaskWithDetail | undefined;
     const targetColumn = overTask ? overTask.column : (event.over.id as TaskColumn);
-
     const targetColumnTasks = allTasksByColumn[targetColumn] ?? [];
     const sourceColumnTasks = allTasksByColumn[activeTask.column] ?? [];
-
     let targetPosition = targetColumnTasks.length;
-
     if (overTask) {
-      const overIndex = targetColumnTasks.findIndex((task) => task.id === overTask.id);
+      const overIndex = targetColumnTasks.findIndex((t) => t.id === overTask.id);
       targetPosition = overIndex < 0 ? targetColumnTasks.length : overIndex;
     }
-
-    const currentIndex = sourceColumnTasks.findIndex((task) => task.id === activeTask.id);
+    const currentIndex = sourceColumnTasks.findIndex((t) => t.id === activeTask.id);
     if (currentIndex < 0) return;
     if (activeTask.column === targetColumn && currentIndex === targetPosition) return;
-
-    moveTask.mutate({
-      taskId: activeTask.id,
-      column: targetColumn,
-      position: targetPosition,
-    });
+    moveTask.mutate({ taskId: activeTask.id, column: targetColumn, position: targetPosition });
   }, [allTasksByColumn, moveTask]);
 
   const handleDragCancel = useCallback(() => {
@@ -158,7 +123,9 @@ export function KanbanBoard() {
         tags={tags}
         members={members}
         activeAssignee={activeAssignee}
+        activeProject={activeProject}
         onAssigneeFilter={setActiveAssignee}
+        onProjectFilter={setActiveProject}
         onCreateTask={(data) => createTask.mutateAsync(data)}
         onCreateTag={(name) => createTag.mutate(name)}
         currentMemberId={member?.id ?? null}
@@ -220,9 +187,7 @@ export function KanbanBoard() {
             } else {
               updateTask.mutate(data);
             }
-
-            const updated = { ...selectedTask, ...data };
-            setSelectedTask(updated as TaskWithDetail);
+            setSelectedTask({ ...selectedTask, ...data } as TaskWithDetail);
           }}
           onCreateTag={(name) => createTag.mutate(name)}
         />

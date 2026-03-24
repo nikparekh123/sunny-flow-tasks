@@ -8,8 +8,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
-import { COLUMNS, PRIORITY_COLORS } from '@/lib/constants';
-import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority } from '@/lib/types';
+import { COLUMNS, PRIORITY_COLORS, PROJECTS } from '@/lib/constants';
+import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority, TaskProject } from '@/lib/types';
 
 interface Props {
   task: TaskWithDetail;
@@ -162,6 +162,25 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onCrea
                   />
                 </PopoverContent>
               </Popover>
+            </div>
+
+            {/* Project */}
+            <div className="col-span-2 space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Project</Label>
+              <Select
+                value={task.project || 'none'}
+                onValueChange={(v) => onUpdate({ id: task.id, project: v === 'none' ? null : v })}
+              >
+                <SelectTrigger className="text-xs h-7">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No project</SelectItem>
+                  {PROJECTS.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
