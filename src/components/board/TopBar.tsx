@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Settings, Users, Palette, User, Shield, LogOut, Eye, Search, X } from 'lucide-react';
+import { Plus, Settings, Users, User, Shield, LogOut, Eye, Search, X, Archive, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -8,16 +8,18 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/useAuth';
-import type { Tag, TeamMember } from '@/lib/types';
+import type { Tag as TagType, TeamMember } from '@/lib/types';
 import { NewTaskPanel } from './NewTaskPanel';
 import { UserSettingsModal } from '@/components/settings/UserSettingsModal';
 import { AdminSettingsModal } from '@/components/settings/AdminSettingsModal';
+import { InviteUserModal } from '@/components/settings/InviteUserModal';
 
 interface TopBarProps {
-  tags: Tag[];
+  tags: TagType[];
   members: TeamMember[];
   activeAssignee: string | null;
   onAssigneeFilter: (id: string | null) => void;
@@ -26,6 +28,9 @@ interface TopBarProps {
   currentMemberId: string | null;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  activeTagIds: string[];
+  onTagFilter: (ids: string[]) => void;
+  onOpenArchive: () => void;
 }
 
 export function TopBar({
@@ -38,14 +43,26 @@ export function TopBar({
   currentMemberId,
   searchQuery,
   onSearchChange,
+  activeTagIds,
+  onTagFilter,
+  onOpenArchive,
 }: TopBarProps) {
   const { signOut, member } = useAuth();
   const [showNewTask, setShowNewTask] = useState(false);
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [showAdminSettings, setShowAdminSettings] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
 
   const isAdmin = member?.role === 'admin';
+
+  const toggleTag = (tagId: string) => {
+    onTagFilter(
+      activeTagIds.includes(tagId)
+        ? activeTagIds.filter((id) => id !== tagId)
+        : [...activeTagIds, tagId]
+    );
+  };
 
   return (
     <>
@@ -77,6 +94,44 @@ export function TopBar({
             <Search className="w-3.5 h-3.5" />
           </Button>
         )}
+
+        {/* Tag filter */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`h-7 w-7 p-0 ${activeTagIds.length > 0 ? 'text-primary' : ''}`}
+            >
+              <Tag className="w-3.5 h-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-64 overflow-y-auto">
+            {activeTagIds.length > 0 && (
+              <>
+                <DropdownMenuItem onClick={() => onTagFilter([])}>Clear all</DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
+            {tags.map((tag) => (
+              <DropdownMenuCheckboxItem
+                key={tag.id}
+                checked={activeTagIds.includes(tag.id)}
+                onCheckedChange={() => toggleTag(tag.id)}
+              >
+                #{tag.name}
+              </DropdownMenuCheckboxItem>
+            ))}
+            {tags.length === 0 && (
+              <DropdownMenuItem disabled>No tags yet</DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Archive */}
+        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenArchive}>
+          <Archive className="w-3.5 h-3.5" />
+        </Button>
 
         {/* User avatar circles */}
         <div className="flex items-center -space-x-1.5">
@@ -141,11 +196,8 @@ export function TopBar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem disabled>
+            <DropdownMenuItem onClick={() => setShowInvite(true)}>
               <Users className="w-3.5 h-3.5 mr-2" /> Invite Users
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled>
-              <Palette className="w-3.5 h-3.5 mr-2" /> Personalization
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShowUserSettings(true)}>
               <User className="w-3.5 h-3.5 mr-2" /> User Settings
@@ -175,6 +227,7 @@ export function TopBar({
       )}
 
       <UserSettingsModal open={showUserSettings} onOpenChange={setShowUserSettings} />
+      <InviteUserModal open={showInvite} onOpenChange={setShowInvite} />
       {isAdmin && (
         <AdminSettingsModal open={showAdminSettings} onOpenChange={setShowAdminSettings} />
       )}

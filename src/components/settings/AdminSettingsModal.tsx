@@ -8,6 +8,8 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
@@ -27,6 +29,11 @@ interface Props {
 export function AdminSettingsModal({ open, onOpenChange }: Props) {
   const [members, setMembers] = useState<(TeamMember & { status?: string; avatar_url?: string })[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Create user form
+  const [newName, setNewName] = useState('');
+  const [newPincode, setNewPincode] = useState('');
+  const [creating, setCreating] = useState(false);
 
   const fetchMembers = async () => {
     setLoading(true);
@@ -72,12 +79,65 @@ export function AdminSettingsModal({ open, onOpenChange }: Props) {
     }
   };
 
+  const handleCreateUser = async () => {
+    if (!newName.trim() || !/^\d{4}$/.test(newPincode)) {
+      toast.error('Enter a name and a valid 4-digit pincode.');
+      return;
+    }
+    setCreating(true);
+
+    const { data, error } = await supabase.functions.invoke('create-user', {
+      body: { name: newName.trim(), pincode: newPincode },
+    });
+
+    setCreating(false);
+
+    if (error || data?.error) {
+      toast.error(data?.error || 'Failed to create user.');
+      return;
+    }
+
+    toast.success(`${newName.trim()} added`);
+    setNewName('');
+    setNewPincode('');
+    fetchMembers();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Admin Settings — User Management</DialogTitle>
         </DialogHeader>
+
+        {/* Create user section */}
+        <div className="space-y-3 p-3 rounded-lg border border-border bg-secondary/30">
+          <p className="text-xs font-medium">Add New User</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[10px]">Name</Label>
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="text-xs h-8"
+                placeholder="Full name"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px]">4-digit code</Label>
+              <Input
+                value={newPincode}
+                onChange={(e) => setNewPincode(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                className="text-xs h-8"
+                placeholder="e.g. 1234"
+                maxLength={4}
+              />
+            </div>
+          </div>
+          <Button size="sm" className="text-xs" onClick={handleCreateUser} disabled={creating}>
+            {creating ? 'Creating…' : 'Add User'}
+          </Button>
+        </div>
 
         {loading ? (
           <p className="text-sm text-muted-foreground py-4">Loading…</p>

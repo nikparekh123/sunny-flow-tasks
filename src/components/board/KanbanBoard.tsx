@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -20,6 +20,8 @@ import { TopBar } from './TopBar';
 import { BoardColumn } from './BoardColumn';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
+import { ArchivePanel } from './ArchivePanel';
+import { toast } from 'sonner';
 import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 
 const customCollision: CollisionDetection = (args) => {
@@ -34,14 +36,18 @@ export function KanbanBoard() {
   const { member } = useAuth();
   const {
     tasks, tags, members, isLoading,
-    createTask, updateTask, deleteTask, moveTask, createTag,
+    createTask, updateTask, archiveTask, restoreTask, permanentlyDeleteTask, moveTask, createTag,
   } = useTasks();
 
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
   const [selectedTask, setSelectedTask] = useState<TaskWithDetail | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
   const [overColumn, setOverColumn] = useState<TaskColumn | null>(null);
+  const [showArchive, setShowArchive] = useState(false);
+
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -60,8 +66,13 @@ export function KanbanBoard() {
         (t.category_name && t.category_name.toLowerCase().includes(q))
       );
     }
+    if (activeTagIds.length > 0) {
+      result = result.filter((t) =>
+        activeTagIds.every((tagId) => t.tags?.some((tag) => tag.id === tagId))
+      );
+    }
     return result;
-  }, [tasks, activeAssignee, searchQuery]);
+  }, [tasks, activeAssignee, searchQuery, activeTagIds]);
 
   const allTasksByColumn = useMemo(() => {
     const map: Record<TaskColumn, TaskWithDetail[]> = { todo: [], inprogress: [], review: [], done: [] };
@@ -76,6 +87,23 @@ export function KanbanBoard() {
     Object.values(map).forEach((list) => list.sort((a, b) => a.position - b.position));
     return map;
   }, [filteredTasks]);
+
+  const handleDelete = useCallback((taskId: string) => {
+    archiveTask.mutate(taskId);
+
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+
+    toast('Task deleted', {
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          restoreTask.mutate(taskId);
+        },
+      },
+      duration: 30000,
+      position: 'bottom-left',
+    });
+  }, [archiveTask, restoreTask]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setDraggedTask((event.active.data.current?.task as TaskWithDetail) || null);
@@ -134,6 +162,9 @@ export function KanbanBoard() {
         currentMemberId={member?.id ?? null}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        activeTagIds={activeTagIds}
+        onTagFilter={setActiveTagIds}
+        onOpenArchive={() => setShowArchive(true)}
       />
 
       <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto">
@@ -156,7 +187,7 @@ export function KanbanBoard() {
                 isOver={overColumn === column.id}
                 onCardClick={(task) => setSelectedTask(task)}
                 onCardEdit={(task) => setSelectedTask(task)}
-                onCardDelete={(taskId) => deleteTask.mutate(taskId)}
+                onCardDelete={handleDelete}
               />
             ))}
           </div>
@@ -194,9 +225,17 @@ export function KanbanBoard() {
             }
             setSelectedTask({ ...selectedTask, ...data } as TaskWithDetail);
           }}
+          onDelete={handleDelete}
           onCreateTag={(name) => createTag.mutate(name)}
         />
       )}
+
+      <ArchivePanel
+        open={showArchive}
+        onClose={() => setShowArchive(false)}
+        onRestore={(id) => restoreTask.mutate(id)}
+        onPermanentDelete={(id) => permanentlyDeleteTask.mutate(id)}
+      />
     </div>
   );
 }

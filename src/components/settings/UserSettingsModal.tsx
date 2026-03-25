@@ -29,6 +29,11 @@ export function UserSettingsModal({ open, onOpenChange }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [avatarUrl, setAvatarUrl] = useState((member as any)?.avatar_url || '');
 
+  // Pincode change
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [savingPin, setSavingPin] = useState(false);
+
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !member) return;
@@ -85,6 +90,34 @@ export function UserSettingsModal({ open, onOpenChange }: Props) {
     } else {
       toast.success('Settings saved');
       onOpenChange(false);
+    }
+  };
+
+  const handlePincodeChange = async () => {
+    if (!/^\d{4}$/.test(newPin)) {
+      toast.error('Enter a valid 4-digit code.');
+      return;
+    }
+    if (newPin !== confirmPin) {
+      toast.error('Codes do not match.');
+      return;
+    }
+    if (!member) return;
+    setSavingPin(true);
+
+    const { error } = await supabase
+      .from('team_members')
+      .update({ pincode: newPin } as any)
+      .eq('id', member.id);
+
+    setSavingPin(false);
+
+    if (error) {
+      toast.error('Failed to update code.');
+    } else {
+      toast.success('Login code updated.');
+      setNewPin('');
+      setConfirmPin('');
     }
   };
 
@@ -150,6 +183,36 @@ export function UserSettingsModal({ open, onOpenChange }: Props) {
           <Button onClick={handleSave} disabled={saving} className="w-full">
             {saving ? 'Saving…' : 'Save Changes'}
           </Button>
+
+          {/* Change pincode */}
+          <div className="space-y-3 pt-3 border-t border-border">
+            <p className="text-xs font-medium text-foreground">Change Login Code</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[10px]">New code</Label>
+                <Input
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  placeholder="4 digits"
+                  maxLength={4}
+                  className="text-xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[10px]">Confirm</Label>
+                <Input
+                  value={confirmPin}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  placeholder="4 digits"
+                  maxLength={4}
+                  className="text-xs"
+                />
+              </div>
+            </div>
+            <Button size="sm" variant="outline" onClick={handlePincodeChange} disabled={savingPin} className="text-xs">
+              {savingPin ? 'Updating…' : 'Update Code'}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
