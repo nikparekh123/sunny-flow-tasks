@@ -61,7 +61,7 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
   };
 
   const handleSave = () => {
-    const updates: Record<string, any> = { id: task.id };
+    const updates: { id: string } & Record<string, any> = { id: task.id };
     if (title.trim() !== task.title) updates.title = title.trim();
     if (description !== (task.description || '')) updates.description = description || null;
     if (column !== task.column) updates.column = column;
