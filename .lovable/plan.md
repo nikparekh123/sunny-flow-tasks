@@ -1,83 +1,111 @@
 
 
-## Plan: Major Feature Expansion — Phased Approach
+## Plan: Pincode Auth, Task Improvements, Archive, and Admin Updates
 
-This request contains 7+ major features. To keep the app stable, I recommend splitting into **3 phases**. Here is **Phase 2A** — the highest-impact items that build on what exists.
-
----
-
-### Phase 2A Scope (This Plan)
-
-#### 1. Seed the 4 users via edge function
-
-Since we cannot create auth users via client-side code or migrations, create an edge function `seed-users` that uses the Supabase Admin API (`supabase.auth.admin.createUser`) to create:
-
-| Name | Email | Password | Role |
-|------|-------|----------|------|
-| Nik Parekh | nik@sunnyfi.co | niknik | admin |
-| Ary LaRocca | ary@sunnyfi.co | aryary | admin |
-| Rad Rahmouni | rad@sunnyfi.co | radrad | member |
-| Kushal Jain | kushal@sunnyfi.co | kushalkushal | member |
-
-The function creates auth users with `email_confirm: true`, then upserts `team_members` rows with the correct `role` (admin/member). It's idempotent — skips users that already exist.
-
-**Enable auto-confirm** for email signups so these users can sign in immediately.
-
-**File:** `supabase/functions/seed-users/index.ts`
-
-#### 2. Role-based settings menu
-
-**`src/components/board/TopBar.tsx`** — Read `member.role` from `useAuth()`. Conditionally show/hide menu items:
-- **Admin**: sees all items (Invite Users, Personalization, User Settings, Admin Settings, Sign Out)
-- **Member**: sees Invite Users, Personalization, User Settings, Sign Out — no Admin Settings
-
-#### 3. Left sidebar with project navigation + Dashboard
+### 1. Pincode Authentication System
 
 **Database migration:**
-- Create `user_notes` table: `id uuid PK, user_id uuid NOT NULL, content text, updated_at timestamptz`
-- RLS: users can only CRUD their own notes (`user_id = auth.uid()`)
+- Add `pincode text` column to `team_members` table
 
-**New files:**
-- `src/components/layout/AppSidebar.tsx` — Left sidebar using the existing Sidebar component with:
-  - "Dashboard" link at top
-  - Project sections (Admin & Operations, Sector Research, etc.) — clicking navigates/filters to that project
-  - Collapsible with icon mode
-- `src/pages/Dashboard.tsx` — User-centric view with:
-  - Task widget: shows tasks assigned to current user, grouped by status
-  - Notes widget: private textarea that auto-saves to `user_notes` table
+**Update seed-users edge function** to include pincode mappings:
+- 5499 → Ary LaRocca, 6617 → Nik Parekh, 2026 → Radhouen Rahmouni, 0987 → Kushal Jain
 
-**Modified files:**
-- `src/App.tsx` — Add routes: `/` (Dashboard), `/board` (KanbanBoard), wrap in `SidebarProvider`
-- `src/pages/Index.tsx` — Update routing logic
+**New `src/pages/Auth.tsx`** — Complete rewrite:
+- Single input field labeled "Enter your 4-digit code"
+- Numeric-only, exactly 4 digits (use `InputOTP` component already in project)
+- On submit: call a new edge function `pincode-login` that looks up the pincode in `team_members`, finds the corresponding `user_id`, gets email from auth admin API, and signs in with `signInWithPassword` using a stored password hash approach
 
-#### 4. Refactor top-right user filter with avatars + eye icon
+**Better approach — edge function `pincode-login`:**
+- Receives 4-digit code
+- Queries `team_members` where `pincode = code`
+- Uses service role to look up the user's email from `auth.users`
+- Calls `auth.admin.generateLink({ type: 'magiclink' })` or returns a custom JWT
+- Actually simplest: store email+password mapping in edge function, look up by pincode, call `signInWithPassword` server-side and return the session tokens
 
-**`src/components/board/TopBar.tsx`**:
-- Replace "All Users" button with a row of small avatar circles (from `members` data)
-- Add an `Eye` icon button next to avatars that opens a dropdown with "All Users" + individual user filter options
-- Avatars are dynamically driven from `team_members` table
+**Simplest secure approach:** The edge function receives the pincode, looks up the `team_members` row, gets `user_id`, uses admin API to generate a sign-in link/token, returns it. The client sets the session.
 
-#### 5. User Settings modal
+**Files:**
+- `supabase/functions/pincode-login/index.ts` — New edge function
+- `src/pages/Auth.tsx` — Rewrite to pincode UI
+- Migration SQL — Add `pincode` column
 
-**New file:** `src/components/settings/UserSettingsModal.tsx`
-- Dialog with fields: Name (editable), Email (read-only), Status toggle (active/inactive stored in `team_members`), Avatar upload (to storage bucket), notification preferences (stored in new `user_preferences` JSON column on `team_members`)
-- Save updates to `team_members` table
+### 2. Task Deletion Fix & Archive System
 
 **Database migration:**
-- Add `status text DEFAULT 'active'` and `avatar_url text` and `preferences jsonb DEFAULT '{}'` columns to `team_members`
-- Create `avatars` storage bucket
+- Add `archived boolean DEFAULT false` and `archived_at timestamptz` columns to `tasks` table
+- Update `tasks_with_detail` view to include `archived` and exclude archived tasks by default
 
-#### 6. Admin Settings panel (admin-only)
+**`src/hooks/useTasks.ts`:**
+- Change `deleteTask` to set `archived = true, archived_at = now()` instead of hard delete
+- Add `restoreTask` mutation (sets `archived = false`)
+- Add `permanentlyDeleteTask` mutation
+- Add `archivedTasks` query (fetches where `archived = true`)
 
-**New file:** `src/components/settings/AdminSettingsModal.tsx`
-- Shows all users with their roles
-- Admins can toggle role between admin/member (updates `team_members.role`)
-- Shows user status, can deactivate users
+**`src/components/board/KanbanBoard.tsx`:**
+- Add `deletedTask` state for undo functionality
+- On delete: show toast with "Undo" button, 30-second timer
+- If undo clicked: call `restoreTask`
 
-### Deferred to Phase 2B
-- Email notifications on task assignment (requires edge function + email infrastructure)
-- Admin Reports/Analytics dashboard
-- Invite Users flow (email sending)
+**New `src/components/board/ArchivePanel.tsx`:**
+- Slide-out panel showing archived tasks
+- Each task has "Restore" and "Delete permanently" buttons
+- Triggered by Archive button in TopBar
+
+**`src/components/board/TopBar.tsx`:**
+- Add Archive icon button next to search icon
+
+### 3. Task Editing with Save/Cancel
+
+**`src/components/board/TaskDetailPanel.tsx`** — Refactor:
+- Add `editing` boolean state (default false)
+- In view mode: show read-only fields with an "Edit Task" button
+- In edit mode: all fields become editable, show "Save Changes" and "Cancel" buttons
+- Cancel reverts all local state to original task values
+- Save calls `onUpdate` with all changed fields, then exits edit mode
+
+### 4. Multi-Tag Search Filter
+
+**`src/components/board/TopBar.tsx`:**
+- Add a tag filter dropdown (multi-select) next to the search icon
+- Selected tags filter tasks using AND logic
+
+**`src/components/board/KanbanBoard.tsx`:**
+- Add `activeTagIds` state
+- In `filteredTasks` memo: if `activeTagIds.length > 0`, filter tasks that have ALL selected tags
+
+### 5. Admin: Create Users with Pincode
+
+**`src/components/settings/AdminSettingsModal.tsx`** — Expand:
+- Add "Create User" section at top with fields: Name, 4-digit pincode
+- On submit: call a new edge function `create-user` that creates auth user (with generated email like `pin_{code}@sunnyfi.local` and the pincode as password), creates team_member row with pincode
+- Keep existing role/status management
+
+**New `supabase/functions/create-user/index.ts`:**
+- Receives name, pincode
+- Creates auth user with service role
+- Creates team_member with pincode, name, role=member
+
+### 6. Invite Users Modal
+
+**`src/components/board/TopBar.tsx`:**
+- Wire up "Invite Users" menu item to open a modal
+
+**New `src/components/settings/InviteUserModal.tsx`:**
+- Fields: Name, 4-digit pincode
+- Calls the same `create-user` edge function
+- Shows success/error feedback
+
+### 7. User Settings: Pincode Change
+
+**`src/components/settings/UserSettingsModal.tsx`:**
+- Add "Change Pincode" section
+- Two inputs: new 4-digit code + confirm code
+- On save: update `team_members.pincode` and update the auth user's password via edge function
+
+### 8. UI Cleanup
+
+**`src/components/board/TopBar.tsx`:**
+- Remove "Personalization" from gear dropdown
 
 ---
 
@@ -85,15 +113,17 @@ The function creates auth users with `email_confirm: true`, then upserts `team_m
 
 | File | Action |
 |------|--------|
-| `supabase/functions/seed-users/index.ts` | Create — seed 4 users |
-| Migration SQL | Create `user_notes` table, add columns to `team_members`, create storage bucket |
-| `src/components/layout/AppSidebar.tsx` | Create — left sidebar navigation |
-| `src/pages/Dashboard.tsx` | Create — user dashboard with tasks + notes |
-| `src/components/settings/UserSettingsModal.tsx` | Create — user settings dialog |
-| `src/components/settings/AdminSettingsModal.tsx` | Create — admin user management |
-| `src/components/board/TopBar.tsx` | Modify — role-based menu, avatar filter UI |
-| `src/App.tsx` | Modify — add sidebar layout, new routes |
-| `src/pages/Index.tsx` | Modify — routing updates |
-| `src/hooks/useAuth.tsx` | Minor — expose `member.role` check |
-| `src/lib/types.ts` | Update — add new fields |
+| Migration SQL | Add `pincode` to `team_members`, add `archived`/`archived_at` to `tasks`, update view |
+| `supabase/functions/pincode-login/index.ts` | Create — pincode auth |
+| `supabase/functions/create-user/index.ts` | Create — admin user creation |
+| `supabase/functions/seed-users/index.ts` | Update — add pincode values |
+| `src/pages/Auth.tsx` | Rewrite — 4-digit pincode input |
+| `src/hooks/useTasks.ts` | Add archive/restore mutations, undo logic |
+| `src/components/board/KanbanBoard.tsx` | Archive button, undo toast, multi-tag filter state |
+| `src/components/board/TopBar.tsx` | Archive icon, tag filter, remove Personalization |
+| `src/components/board/TaskDetailPanel.tsx` | Edit mode with Save/Cancel |
+| `src/components/board/ArchivePanel.tsx` | Create — archived tasks view |
+| `src/components/settings/AdminSettingsModal.tsx` | Add create user form |
+| `src/components/settings/InviteUserModal.tsx` | Create — invite user modal |
+| `src/components/settings/UserSettingsModal.tsx` | Add pincode change |
 
