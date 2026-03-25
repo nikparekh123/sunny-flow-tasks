@@ -18,16 +18,11 @@ const moveTaskOptimistically = (
   if (!sourceTask) return tasks;
 
   const byColumn: Record<TaskColumn, TaskWithDetail[]> = {
-    todo: [],
-    inprogress: [],
-    review: [],
-    done: [],
+    todo: [], inprogress: [], review: [], done: [],
   };
 
   tasks.forEach((task) => {
-    if (task.id !== taskId) {
-      byColumn[task.column].push({ ...task });
-    }
+    if (task.id !== taskId) byColumn[task.column].push({ ...task });
   });
 
   BOARD_COLUMNS.forEach((column) => {
@@ -39,10 +34,7 @@ const moveTaskOptimistically = (
   byColumn[targetColumn].splice(safePosition, 0, movedTask);
 
   BOARD_COLUMNS.forEach((column) => {
-    byColumn[column] = byColumn[column].map((task, index) => ({
-      ...task,
-      position: index,
-    }));
+    byColumn[column] = byColumn[column].map((task, index) => ({ ...task, position: index }));
   });
 
   return BOARD_COLUMNS.flatMap((column) => byColumn[column]);
@@ -81,7 +73,6 @@ export function useTasks() {
     },
   });
 
-  // Merge tags into tasks
   const tasks: TaskWithDetail[] = rawTasks.map((task) => {
     const tagIds = taskTags.filter((tt) => tt.task_id === task.id).map((tt) => tt.tag_id);
     const taskTagList = tags.filter((tag) => tagIds.includes(tag.id));
@@ -97,7 +88,6 @@ export function useTasks() {
     },
   });
 
-  // Realtime subscriptions
   useEffect(() => {
     const tasksSub = supabase
       .channel('tasks-realtime')
@@ -132,13 +122,13 @@ export function useTasks() {
       description?: string | null;
       created_by?: string | null;
       tag_ids?: string[];
-      project?: string | null;
     }) => {
       const column = task.column || 'todo';
       const { data: maxPos } = await supabase
         .from('tasks')
         .select('position')
         .eq('column', column)
+        .eq('archived', false)
         .order('position', { ascending: false })
         .limit(1)
         .single();
@@ -156,7 +146,6 @@ export function useTasks() {
           due_date: task.due_date || null,
           description: task.description || null,
           created_by: task.created_by || null,
-          project: task.project || null,
         } as any)
         .select('id')
         .single();
@@ -182,7 +171,6 @@ export function useTasks() {
       assignee_id: string | null;
       due_date: string | null;
       description: string | null;
-      project: string | null;
     }>) => {
       if (Object.keys(updates).length > 0) {
         const { error } = await supabase.from('tasks').update(updates as any).eq('id', id);
@@ -205,7 +193,30 @@ export function useTasks() {
     },
   });
 
-  const deleteTask = useMutation({
+  // Soft delete: archive the task
+  const archiveTask = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ archived: true, archived_at: new Date().toISOString() } as any)
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+  });
+
+  const restoreTask = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ archived: false, archived_at: null } as any)
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+  });
+
+  const permanentlyDeleteTask = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from('tasks').delete().eq('id', id);
       if (error) throw error;
@@ -262,7 +273,9 @@ export function useTasks() {
     isLoading,
     createTask,
     updateTask,
-    deleteTask,
+    archiveTask,
+    restoreTask,
+    permanentlyDeleteTask,
     moveTask,
     createTag,
   };

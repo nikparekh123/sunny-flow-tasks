@@ -95,6 +95,8 @@ export type Database = {
       }
       tasks: {
         Row: {
+          archived: boolean
+          archived_at: string | null
           assignee_id: string | null
           category_id: string | null
           column: Database["public"]["Enums"]["task_column"]
@@ -110,6 +112,8 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          archived?: boolean
+          archived_at?: string | null
           assignee_id?: string | null
           category_id?: string | null
           column?: Database["public"]["Enums"]["task_column"]
@@ -125,6 +129,8 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          archived?: boolean
+          archived_at?: string | null
           assignee_id?: string | null
           category_id?: string | null
           column?: Database["public"]["Enums"]["task_column"]
@@ -185,6 +191,7 @@ export type Database = {
           id: string
           initials: string
           name: string
+          pincode: string | null
           preferences: Json
           role: Database["public"]["Enums"]["member_role"]
           status: string
@@ -197,6 +204,7 @@ export type Database = {
           id?: string
           initials: string
           name: string
+          pincode?: string | null
           preferences?: Json
           role?: Database["public"]["Enums"]["member_role"]
           status?: string
@@ -209,6 +217,7 @@ export type Database = {
           id?: string
           initials?: string
           name?: string
+          pincode?: string | null
           preferences?: Json
           role?: Database["public"]["Enums"]["member_role"]
           status?: string
@@ -241,6 +250,8 @@ export type Database = {
     Views: {
       tasks_with_detail: {
         Row: {
+          archived: boolean | null
+          archived_at: string | null
           assignee_color: string | null
           assignee_id: string | null
           assignee_initials: string | null
