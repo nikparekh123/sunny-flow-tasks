@@ -6,9 +6,12 @@ export type TaskPriority = Database['public']['Enums']['task_priority'];
 export type MemberRole = Database['public']['Enums']['member_role'];
 export type { TaskProject } from '@/lib/constants';
 
+export type RecurrenceFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
+
 export interface Tag {
   id: string;
   name: string;
+  color?: string;
 }
 
 export interface TaskWithDetail {
@@ -29,8 +32,11 @@ export interface TaskWithDetail {
   assignee_name: string | null;
   assignee_initials: string | null;
   assignee_color: string | null;
+  assignee_avatar_url: string | null;
   project: TaskProject | null;
   tags?: Tag[];
+  recurrence: RecurrenceFrequency | null;
+  brief: string | null;
 }
 
 export interface TeamMember {
@@ -40,6 +46,7 @@ export interface TeamMember {
   initials: string;
   color: string | null;
   role: MemberRole;
+  avatar_url?: string | null;
 }
 
 export interface TaskCategory {
@@ -47,4 +54,25 @@ export interface TaskCategory {
   name: string;
   color: string;
   position: number | null;
+}
+
+export interface AutomationRule {
+  id: string;
+  name: string;
+  trigger_type: string;
+  trigger_config: Record<string, any>;
+  action_type: string;
+  action_config: Record<string, any>;
+  active: boolean;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  message: string;
+  task_id: string | null;
+  read: boolean;
+  created_at: string;
 }
