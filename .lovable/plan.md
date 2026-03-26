@@ -1,111 +1,196 @@
 
 
-## Plan: Pincode Auth, Task Improvements, Archive, and Admin Updates
+## Plan: Full Feature & UI Enhancement Pass
 
-### 1. Pincode Authentication System
+This is a large update spanning 9 feature areas. Here's the implementation plan.
 
-**Database migration:**
-- Add `pincode text` column to `team_members` table
+---
 
-**Update seed-users edge function** to include pincode mappings:
-- 5499 → Ary LaRocca, 6617 → Nik Parekh, 2026 → Radhouen Rahmouni, 0987 → Kushal Jain
+### Database Migration
 
-**New `src/pages/Auth.tsx`** — Complete rewrite:
-- Single input field labeled "Enter your 4-digit code"
-- Numeric-only, exactly 4 digits (use `InputOTP` component already in project)
-- On submit: call a new edge function `pincode-login` that looks up the pincode in `team_members`, finds the corresponding `user_id`, gets email from auth admin API, and signs in with `signInWithPassword` using a stored password hash approach
+Add the following schema changes in a single migration:
 
-**Better approach — edge function `pincode-login`:**
-- Receives 4-digit code
-- Queries `team_members` where `pincode = code`
-- Uses service role to look up the user's email from `auth.users`
-- Calls `auth.admin.generateLink({ type: 'magiclink' })` or returns a custom JWT
-- Actually simplest: store email+password mapping in edge function, look up by pincode, call `signInWithPassword` server-side and return the session tokens
+```sql
+-- Recurring tasks
+ALTER TABLE tasks ADD COLUMN recurrence text; -- 'daily','weekly','biweekly','monthly' or null
+ALTER TABLE tasks ADD COLUMN brief text; -- short preview text, max 150 chars
 
-**Simplest secure approach:** The edge function receives the pincode, looks up the `team_members` row, gets `user_id`, uses admin API to generate a sign-in link/token, returns it. The client sets the session.
+-- Notifications table
+CREATE TABLE public.notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  message text NOT NULL,
+  task_id uuid,
+  read boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "own notifications" ON public.notifications FOR ALL TO authenticated
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 
-**Files:**
-- `supabase/functions/pincode-login/index.ts` — New edge function
-- `src/pages/Auth.tsx` — Rewrite to pincode UI
-- Migration SQL — Add `pincode` column
+-- Rules/automation table
+CREATE TABLE public.automation_rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL,
+  trigger_type text NOT NULL,
+  trigger_config jsonb NOT NULL DEFAULT '{}',
+  action_type text NOT NULL,
+  action_config jsonb NOT NULL DEFAULT '{}',
+  active boolean NOT NULL DEFAULT true,
+  created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.automation_rules ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "auth crud" ON public.automation_rules FOR ALL TO authenticated
+  USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
 
-### 2. Task Deletion Fix & Archive System
+-- Tag colors
+ALTER TABLE tags ADD COLUMN color text DEFAULT '#888888';
 
-**Database migration:**
-- Add `archived boolean DEFAULT false` and `archived_at timestamptz` columns to `tasks` table
-- Update `tasks_with_detail` view to include `archived` and exclude archived tasks by default
+-- Update tasks_with_detail view to include recurrence and brief
+```
 
-**`src/hooks/useTasks.ts`:**
-- Change `deleteTask` to set `archived = true, archived_at = now()` instead of hard delete
-- Add `restoreTask` mutation (sets `archived = false`)
-- Add `permanentlyDeleteTask` mutation
-- Add `archivedTasks` query (fetches where `archived = true`)
+Recreate the `tasks_with_detail` view to include `recurrence` and `brief` columns.
 
-**`src/components/board/KanbanBoard.tsx`:**
-- Add `deletedTask` state for undo functionality
-- On delete: show toast with "Undo" button, 30-second timer
-- If undo clicked: call `restoreTask`
+Enable realtime on `notifications` table.
 
-**New `src/components/board/ArchivePanel.tsx`:**
-- Slide-out panel showing archived tasks
-- Each task has "Restore" and "Delete permanently" buttons
-- Triggered by Archive button in TopBar
+---
 
-**`src/components/board/TopBar.tsx`:**
-- Add Archive icon button next to search icon
+### Task 1 — Recurring Tasks
 
-### 3. Task Editing with Save/Cancel
+**`NewTaskPanel.tsx`** and **`TaskDetailPanel.tsx`**: Add a "Recurring" toggle. When enabled, show a select for frequency (Daily, Weekly, Bi-weekly, Monthly). Store in `recurrence` column.
 
-**`src/components/board/TaskDetailPanel.tsx`** — Refactor:
-- Add `editing` boolean state (default false)
-- In view mode: show read-only fields with an "Edit Task" button
-- In edit mode: all fields become editable, show "Save Changes" and "Cancel" buttons
-- Cancel reverts all local state to original task values
-- Save calls `onUpdate` with all changed fields, then exits edit mode
+**`TaskCardContent.tsx`**: Show a small `Repeat` icon (from lucide) next to the title when `task.recurrence` is set.
 
-### 4. Multi-Tag Search Filter
+**`useTasks.ts`**: When moving a task to "done" column AND `recurrence` is set, auto-create a new task with the same fields but next due date calculated from frequency. Use a helper function:
+- Daily: +1 day
+- Weekly: +7 days
+- Bi-weekly: +14 days
+- Monthly: +1 month
 
-**`src/components/board/TopBar.tsx`:**
-- Add a tag filter dropdown (multi-select) next to the search icon
-- Selected tags filter tasks using AND logic
+**`types.ts`**: Add `recurrence` and `brief` to `TaskWithDetail`.
 
-**`src/components/board/KanbanBoard.tsx`:**
-- Add `activeTagIds` state
-- In `filteredTasks` memo: if `activeTagIds.length > 0`, filter tasks that have ALL selected tags
+---
 
-### 5. Admin: Create Users with Pincode
+### Task 2 — Fix Today/Tomorrow/Overdue Display
 
-**`src/components/settings/AdminSettingsModal.tsx`** — Expand:
-- Add "Create User" section at top with fields: Name, 4-digit pincode
-- On submit: call a new edge function `create-user` that creates auth user (with generated email like `pin_{code}@sunnyfi.local` and the pincode as password), creates team_member row with pincode
-- Keep existing role/status management
+**`TaskCardContent.tsx`**: Replace the current `isPast` check with:
+```ts
+const today = startOfDay(new Date());
+const dueDay = startOfDay(parseISO(task.due_date));
+const isToday = isSameDay(dueDay, today);
+const isTomorrow = isSameDay(dueDay, addDays(today, 1));
+const isOverdue = isBefore(dueDay, today);
+```
+Display: "Today" in green, "Tomorrow" in neutral, past dates in red with "overdue".
 
-**New `supabase/functions/create-user/index.ts`:**
-- Receives name, pincode
-- Creates auth user with service role
-- Creates team_member with pincode, name, role=member
+Apply same logic in `TaskDetailPanel.tsx` due date display.
 
-### 6. Invite Users Modal
+---
 
-**`src/components/board/TopBar.tsx`:**
-- Wire up "Invite Users" menu item to open a modal
+### Task 3 — Rules & Automation
 
-**New `src/components/settings/InviteUserModal.tsx`:**
-- Fields: Name, 4-digit pincode
-- Calls the same `create-user` edge function
-- Shows success/error feedback
+**New file `src/pages/RulesPage.tsx`**: Full-page rules manager with:
+- List of rules in card layout (name, trigger summary, action summary, active toggle)
+- "Create Rule" button opens a builder modal
+- Builder has: Rule name, Trigger type dropdown, dynamic config fields, Action type dropdown, dynamic config fields
+- Edit and delete per rule
 
-### 7. User Settings: Pincode Change
+**Trigger types**: `task_assigned`, `task_moved`, `task_overdue`, `task_created`, `task_completed`, `tag_added`
 
-**`src/components/settings/UserSettingsModal.tsx`:**
-- Add "Change Pincode" section
-- Two inputs: new 4-digit code + confirm code
-- On save: update `team_members.pincode` and update the auth user's password via edge function
+**Action types**: `assign_user`, `move_to_column`, `add_tag`, `send_notification`, `set_due_date`, `remove_assignee`
 
-### 8. UI Cleanup
+**New file `src/hooks/useRules.ts`**: CRUD operations on `automation_rules` table.
 
-**`src/components/board/TopBar.tsx`:**
-- Remove "Personalization" from gear dropdown
+**`useTasks.ts`**: After `createTask`, `updateTask`, and `moveTask` succeed, fetch active rules and evaluate triggers. Execute matching actions. Include a guard to prevent infinite loops (max 1 rule execution depth per action).
+
+**`TopBar.tsx`**: Add "Rules" option in the gear dropdown. Opens `/rules` route or a modal.
+
+**`App.tsx`**: Add `/rules` route.
+
+---
+
+### Task 4 (numbered 5 in request) — Notifications System
+
+**New file `src/components/board/NotificationBell.tsx`**: Bell icon with red badge for unread count. Click opens dropdown panel showing notifications list with relative timestamps, message text, and click-to-navigate.
+
+**New file `src/hooks/useNotifications.ts`**: 
+- Query `notifications` table filtered to current user
+- Subscribe to realtime changes
+- `markAllRead` mutation
+- `markRead` mutation
+
+**`TopBar.tsx`**: Add `NotificationBell` component next to search icon.
+
+**Notification triggers** (in `useTasks.ts`):
+- On task assignment/reassignment: insert notification for assignee
+- On task overdue: handled by rules system or a periodic check
+
+---
+
+### Task 5 (numbered 6) — Brief Field & Preview on Banners
+
+**`TaskCardContent.tsx`**: Below the title, show `task.brief` in a muted, truncated 1-2 line preview. If no brief, show nothing (not a placeholder).
+
+**`NewTaskPanel.tsx`** and **`TaskDetailPanel.tsx`**: Add "Brief" text input (max 150 chars) between title and description.
+
+**`useTasks.ts`**: Include `brief` in create/update mutations.
+
+---
+
+### Task 6 (numbered 7) — Tag Management
+
+**A. Tag Settings Modal** — New file `src/components/settings/TagManagementModal.tsx`:
+- List all tags with editable name, color picker (preset swatches), and delete button
+- Delete shows confirmation, removes from `task_tags` junction table too
+- Accessible from tag dropdown in task panels ("Manage Tags" option at bottom)
+
+**B. Tag Search**: In `TaskDetailPanel.tsx` and `NewTaskPanel.tsx`, add a searchable input that filters the tag list by name.
+
+**`useTasks.ts`**: Add `updateTag` and `deleteTag` mutations.
+
+**Migration**: Add RLS policies for tag UPDATE and DELETE for authenticated users.
+
+---
+
+### Task 7 (numbered 8) — Gantt Chart & Calendar Views
+
+**New file `src/components/board/GanttView.tsx`**: 
+- Horizontal timeline with task bars spanning creation date to due date
+- Grouped by column/status or assignee (toggle)
+- Click bar opens task detail
+- Tasks without due date shown in "Unscheduled" section below
+
+**New file `src/components/board/CalendarView.tsx`**:
+- Monthly calendar grid
+- Tasks appear as colored pills on due dates
+- Previous/Next month navigation
+- Click task opens detail modal
+
+**`TopBar.tsx`** or **`KanbanBoard.tsx`**: Add view toggle buttons (Board icon, Gantt icon, Calendar icon) next to "SunnyFi Board" title. Use icons from lucide: `LayoutGrid`, `GanttChart`, `CalendarDays`.
+
+**State management**: Add `activeView` state in parent component. Conditionally render `KanbanBoard` grid, `GanttView`, or `CalendarView`.
+
+---
+
+### Task 8 (numbered 9) — Sync User Icons with Profile Photos
+
+**`TaskCardContent.tsx`**: The assignee avatar already uses `assignee_color` and `assignee_initials`. The `tasks_with_detail` view doesn't include `avatar_url`. 
+
+**Fix**: Update the `tasks_with_detail` view to include `tm.avatar_url as assignee_avatar_url`. Add to `TaskWithDetail` type. Use `Avatar` component with `AvatarImage` fallback to initials everywhere assignees are shown.
+
+---
+
+### Task 9 — Error Detection & Fix Pass
+
+After all features are implemented:
+- Verify recurring task regeneration doesn't create duplicates (guard with a `regenerated_from` column or check)
+- Verify date logic consistency across all views
+- Add rule execution depth guard (prevent infinite loops)
+- Handle null/missing dates gracefully in Gantt and Calendar views
+- Test tag deletion cascade
+- Verify notification badge clears correctly
+- Check responsive layouts
 
 ---
 
@@ -113,17 +198,21 @@
 
 | File | Action |
 |------|--------|
-| Migration SQL | Add `pincode` to `team_members`, add `archived`/`archived_at` to `tasks`, update view |
-| `supabase/functions/pincode-login/index.ts` | Create — pincode auth |
-| `supabase/functions/create-user/index.ts` | Create — admin user creation |
-| `supabase/functions/seed-users/index.ts` | Update — add pincode values |
-| `src/pages/Auth.tsx` | Rewrite — 4-digit pincode input |
-| `src/hooks/useTasks.ts` | Add archive/restore mutations, undo logic |
-| `src/components/board/KanbanBoard.tsx` | Archive button, undo toast, multi-tag filter state |
-| `src/components/board/TopBar.tsx` | Archive icon, tag filter, remove Personalization |
-| `src/components/board/TaskDetailPanel.tsx` | Edit mode with Save/Cancel |
-| `src/components/board/ArchivePanel.tsx` | Create — archived tasks view |
-| `src/components/settings/AdminSettingsModal.tsx` | Add create user form |
-| `src/components/settings/InviteUserModal.tsx` | Create — invite user modal |
-| `src/components/settings/UserSettingsModal.tsx` | Add pincode change |
+| Migration SQL | Add columns, create tables, update view |
+| `src/lib/types.ts` | Add `recurrence`, `brief`, `assignee_avatar_url` |
+| `src/hooks/useTasks.ts` | Add recurring regeneration, brief, notification triggers, tag CRUD |
+| `src/hooks/useNotifications.ts` | Create — notification queries |
+| `src/hooks/useRules.ts` | Create — rules CRUD |
+| `src/components/board/TaskCardContent.tsx` | Brief preview, recurring icon, fix date logic, avatar photo |
+| `src/components/board/TopBar.tsx` | Notification bell, Rules menu item, view toggles |
+| `src/components/board/KanbanBoard.tsx` | View state, pass data to Gantt/Calendar |
+| `src/components/board/NewTaskPanel.tsx` | Recurring toggle, brief field, tag search |
+| `src/components/board/TaskDetailPanel.tsx` | Recurring toggle, brief field, tag search, date display fix |
+| `src/components/board/NotificationBell.tsx` | Create — bell icon + dropdown |
+| `src/components/board/GanttView.tsx` | Create — Gantt chart |
+| `src/components/board/CalendarView.tsx` | Create — Calendar view |
+| `src/components/settings/TagManagementModal.tsx` | Create — tag CRUD modal |
+| `src/pages/RulesPage.tsx` | Create — rules management |
+| `src/App.tsx` | Add /rules route |
+| Tags migration | Add UPDATE/DELETE RLS policies |
 
