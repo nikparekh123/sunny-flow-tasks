@@ -1,14 +1,16 @@
 import { useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import type { Tag, TeamMember, TaskPriority } from '@/lib/types';
+import type { Tag, TeamMember, TaskPriority, RecurrenceFrequency } from '@/lib/types';
 
 interface Props {
   tags: Tag[];
@@ -25,10 +27,14 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
   const [assigneeId, setAssigneeId] = useState(currentMemberId || 'none');
   const [dueDate, setDueDate] = useState<Date | undefined>();
   const [description, setDescription] = useState('');
+  const [brief, setBrief] = useState('');
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
+  const [tagSearch, setTagSearch] = useState('');
   const [isClosing, setIsClosing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrence, setRecurrence] = useState<RecurrenceFrequency>('weekly');
 
   const toggleTag = (id: string) => {
     setSelectedTagIds((prev) =>
@@ -41,6 +47,10 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
     setTimeout(onClose, 250);
   };
 
+  const filteredTags = tags.filter((t) =>
+    !tagSearch || t.name.toLowerCase().includes(tagSearch.toLowerCase())
+  );
+
   const handleSave = async () => {
     if (!title.trim()) return;
     setSaving(true);
@@ -51,8 +61,10 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
         assignee_id: assigneeId === 'none' ? null : assigneeId,
         due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
         description: description.trim() || null,
+        brief: brief.trim() || null,
         created_by: currentMemberId,
         tag_ids: selectedTagIds,
+        recurrence: isRecurring ? recurrence : null,
       });
       toast.success('Task created');
       handleClose();
@@ -85,6 +97,18 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
           <div className="space-y-1">
             <Label className="text-[10px] text-muted-foreground">Title</Label>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} className="text-xs" autoFocus />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-[10px] text-muted-foreground">Brief (preview on card)</Label>
+            <Input
+              value={brief}
+              onChange={(e) => setBrief(e.target.value.slice(0, 150))}
+              className="text-xs"
+              placeholder="Short summary (max 150 chars)"
+              maxLength={150}
+            />
+            <span className="text-[9px] text-muted-foreground">{brief.length}/150</span>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -151,11 +175,37 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
             </div>
           </div>
 
-          {/* Tags */}
+          {/* Recurring toggle */}
+          <div className="flex items-center justify-between">
+            <Label className="text-[10px] text-muted-foreground">Recurring task</Label>
+            <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
+          </div>
+          {isRecurring && (
+            <Select value={recurrence} onValueChange={(v) => setRecurrence(v as RecurrenceFrequency)}>
+              <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="daily">Daily</SelectItem>
+                <SelectItem value="weekly">Weekly</SelectItem>
+                <SelectItem value="biweekly">Bi-weekly</SelectItem>
+                <SelectItem value="monthly">Monthly</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+
+          {/* Tags with search */}
           <div className="space-y-2">
             <Label className="text-[10px] text-muted-foreground">Tags</Label>
+            <div className="flex items-center gap-1.5">
+              <Search className="w-3 h-3 text-muted-foreground" />
+              <Input
+                value={tagSearch}
+                onChange={(e) => setTagSearch(e.target.value)}
+                placeholder="Search tags…"
+                className="text-xs h-6 flex-1"
+              />
+            </div>
             <div className="flex flex-wrap gap-1.5">
-              {tags.map((tag) => (
+              {filteredTags.map((tag) => (
                 <button
                   key={tag.id}
                   onClick={() => toggleTag(tag.id)}

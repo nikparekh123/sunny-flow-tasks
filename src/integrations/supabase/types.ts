@@ -14,18 +14,99 @@ export type Database = {
   }
   public: {
     Tables: {
+      automation_rules: {
+        Row: {
+          action_config: Json
+          action_type: string
+          active: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          trigger_config: Json
+          trigger_type: string
+        }
+        Insert: {
+          action_config?: Json
+          action_type: string
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          trigger_config?: Json
+          trigger_type: string
+        }
+        Update: {
+          action_config?: Json
+          action_type?: string
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          trigger_config?: Json
+          trigger_type?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          created_at: string
+          id: string
+          message: string
+          read: boolean
+          task_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message: string
+          read?: boolean
+          task_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string
+          read?: boolean
+          task_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_detail"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tags: {
         Row: {
+          color: string | null
           created_at: string | null
           id: string
           name: string
         }
         Insert: {
+          color?: string | null
           created_at?: string | null
           id?: string
           name: string
         }
         Update: {
+          color?: string | null
           created_at?: string | null
           id?: string
           name?: string
@@ -98,6 +179,7 @@ export type Database = {
           archived: boolean
           archived_at: string | null
           assignee_id: string | null
+          brief: string | null
           category_id: string | null
           column: Database["public"]["Enums"]["task_column"]
           created_at: string | null
@@ -108,6 +190,7 @@ export type Database = {
           position: number
           priority: Database["public"]["Enums"]["task_priority"]
           project: Database["public"]["Enums"]["task_project"] | null
+          recurrence: string | null
           title: string
           updated_at: string | null
         }
@@ -115,6 +198,7 @@ export type Database = {
           archived?: boolean
           archived_at?: string | null
           assignee_id?: string | null
+          brief?: string | null
           category_id?: string | null
           column?: Database["public"]["Enums"]["task_column"]
           created_at?: string | null
@@ -125,6 +209,7 @@ export type Database = {
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
           project?: Database["public"]["Enums"]["task_project"] | null
+          recurrence?: string | null
           title: string
           updated_at?: string | null
         }
@@ -132,6 +217,7 @@ export type Database = {
           archived?: boolean
           archived_at?: string | null
           assignee_id?: string | null
+          brief?: string | null
           category_id?: string | null
           column?: Database["public"]["Enums"]["task_column"]
           created_at?: string | null
@@ -142,17 +228,11 @@ export type Database = {
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
           project?: Database["public"]["Enums"]["task_project"] | null
+          recurrence?: string | null
           title?: string
           updated_at?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "tasks_assignee_id_fkey"
-            columns: ["assignee_id"]
-            isOneToOne: false
-            referencedRelation: "tasks_with_detail"
-            referencedColumns: ["assignee_id"]
-          },
           {
             foreignKeyName: "tasks_assignee_id_fkey"
             columns: ["assignee_id"]
@@ -166,13 +246,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "task_categories"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "tasks_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "tasks_with_detail"
-            referencedColumns: ["assignee_id"]
           },
           {
             foreignKeyName: "tasks_created_by_fkey"
@@ -252,10 +325,12 @@ export type Database = {
         Row: {
           archived: boolean | null
           archived_at: string | null
+          assignee_avatar_url: string | null
           assignee_color: string | null
           assignee_id: string | null
           assignee_initials: string | null
           assignee_name: string | null
+          brief: string | null
           category_color: string | null
           category_id: string | null
           category_name: string | null
@@ -268,23 +343,24 @@ export type Database = {
           position: number | null
           priority: Database["public"]["Enums"]["task_priority"] | null
           project: Database["public"]["Enums"]["task_project"] | null
+          recurrence: string | null
           title: string | null
           updated_at: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "tasks_assignee_id_fkey"
+            columns: ["assignee_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tasks_category_id_fkey"
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "task_categories"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "tasks_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "tasks_with_detail"
-            referencedColumns: ["assignee_id"]
           },
           {
             foreignKeyName: "tasks_created_by_fkey"
