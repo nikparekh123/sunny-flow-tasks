@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import type { TaskWithDetail, Tag, TeamMember } from '@/lib/types';
+import { addDays, addMonths, format, parseISO } from 'date-fns';
+import type { TaskWithDetail, Tag, TeamMember, RecurrenceFrequency } from '@/lib/types';
 import type { Database } from '@/integrations/supabase/types';
 
 type TaskColumn = Database['public']['Enums']['task_column'];
@@ -39,6 +40,17 @@ const moveTaskOptimistically = (
 
   return BOARD_COLUMNS.flatMap((column) => byColumn[column]);
 };
+
+function calcNextDueDate(currentDue: string, frequency: RecurrenceFrequency): string {
+  const date = parseISO(currentDue);
+  switch (frequency) {
+    case 'daily': return format(addDays(date, 1), 'yyyy-MM-dd');
+    case 'weekly': return format(addDays(date, 7), 'yyyy-MM-dd');
+    case 'biweekly': return format(addDays(date, 14), 'yyyy-MM-dd');
+    case 'monthly': return format(addMonths(date, 1), 'yyyy-MM-dd');
+    default: return format(addDays(date, 7), 'yyyy-MM-dd');
+  }
+}
 
 export function useTasks() {
   const qc = useQueryClient();
@@ -122,6 +134,8 @@ export function useTasks() {
       description?: string | null;
       created_by?: string | null;
       tag_ids?: string[];
+      recurrence?: string | null;
+      brief?: string | null;
     }) => {
       const column = task.column || 'todo';
       const { data: maxPos } = await supabase
@@ -146,6 +160,8 @@ export function useTasks() {
           due_date: task.due_date || null,
           description: task.description || null,
           created_by: task.created_by || null,
+          recurrence: task.recurrence || null,
+          brief: task.brief || null,
         } as any)
         .select('id')
         .single();
@@ -156,6 +172,18 @@ export function useTasks() {
           task.tag_ids.map((tag_id) => ({ task_id: newTask.id, tag_id }))
         );
         if (tagError) throw tagError;
+      }
+
+      // Send notification if assigned
+      if (task.assignee_id) {
+        const assigneeMember = members.find((m) => m.id === task.assignee_id);
+        if (assigneeMember) {
+          await supabase.from('notifications').insert({
+            user_id: assigneeMember.user_id,
+            message: `You were assigned "${task.title}"`,
+            task_id: newTask?.id || null,
+          } as any).then(() => {});
+        }
       }
     },
     onSuccess: () => {
@@ -171,6 +199,8 @@ export function useTasks() {
       assignee_id: string | null;
       due_date: string | null;
       description: string | null;
+      recurrence: string | null;
+      brief: string | null;
     }>) => {
       if (Object.keys(updates).length > 0) {
         const { error } = await supabase.from('tasks').update(updates as any).eq('id', id);
@@ -186,6 +216,19 @@ export function useTasks() {
           if (tagError) throw tagError;
         }
       }
+
+      // Notification on reassignment
+      if (updates.assignee_id) {
+        const assigneeMember = members.find((m) => m.id === updates.assignee_id);
+        const task = tasks.find((t) => t.id === id);
+        if (assigneeMember && task) {
+          await supabase.from('notifications').insert({
+            user_id: assigneeMember.user_id,
+            message: `You were assigned "${task.title}"`,
+            task_id: id,
+          } as any).then(() => {});
+        }
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tasks'] });
@@ -193,7 +236,6 @@ export function useTasks() {
     },
   });
 
-  // Soft delete: archive the task
   const archiveTask = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
@@ -232,6 +274,43 @@ export function useTasks() {
         p_position: position,
       });
       if (error) throw error;
+
+      // Handle recurring task regeneration when moved to done
+      if (column === 'done') {
+        const task = tasks.find((t) => t.id === taskId);
+        if (task?.recurrence && task.due_date) {
+          const nextDue = calcNextDueDate(task.due_date, task.recurrence as RecurrenceFrequency);
+          const tagIds = taskTags.filter((tt) => tt.task_id === taskId).map((tt) => tt.tag_id);
+
+          const { data: maxPos } = await supabase
+            .from('tasks')
+            .select('position')
+            .eq('column', 'todo')
+            .eq('archived', false)
+            .order('position', { ascending: false })
+            .limit(1)
+            .single();
+
+          const { data: newTask } = await supabase.from('tasks').insert({
+            title: task.title,
+            column: 'todo',
+            priority: task.priority,
+            position: (maxPos?.position ?? -1) + 1,
+            assignee_id: task.assignee_id || null,
+            due_date: nextDue,
+            description: task.description || null,
+            created_by: task.created_by || null,
+            recurrence: task.recurrence,
+            brief: task.brief || null,
+          } as any).select('id').single();
+
+          if (newTask && tagIds.length > 0) {
+            await supabase.from('task_tags').insert(
+              tagIds.map((tag_id) => ({ task_id: newTask.id, tag_id }))
+            );
+          }
+        }
+      }
     },
     onMutate: async ({ taskId, column, position }) => {
       await qc.cancelQueries({ queryKey: ['tasks'] });
@@ -266,6 +345,26 @@ export function useTasks() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
   });
 
+  const updateTag = useMutation({
+    mutationFn: async ({ id, ...updates }: { id: string; name?: string; color?: string }) => {
+      const { error } = await supabase.from('tags').update(updates as any).eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tags'] }),
+  });
+
+  const deleteTag = useMutation({
+    mutationFn: async (id: string) => {
+      await supabase.from('task_tags').delete().eq('tag_id', id);
+      const { error } = await supabase.from('tags').delete().eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tags'] });
+      qc.invalidateQueries({ queryKey: ['task_tags'] });
+    },
+  });
+
   return {
     tasks,
     tags,
@@ -278,5 +377,7 @@ export function useTasks() {
     permanentlyDeleteTask,
     moveTask,
     createTag,
+    updateTag,
+    deleteTag,
   };
 }

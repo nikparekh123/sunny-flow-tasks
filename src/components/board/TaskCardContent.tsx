@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { MoreHorizontal } from 'lucide-react';
-import { format, isPast, parseISO } from 'date-fns';
+import { MoreHorizontal, Repeat } from 'lucide-react';
+import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { PRIORITY_COLORS } from '@/lib/constants';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import type { TaskWithDetail } from '@/lib/types';
 
 interface Props {
@@ -17,7 +18,28 @@ interface Props {
 export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDragging, isOverlay }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const isOverdue = task.due_date && isPast(parseISO(task.due_date)) && !isDone;
+  const today = startOfDay(new Date());
+  const dueDay = task.due_date ? startOfDay(parseISO(task.due_date)) : null;
+  const isToday = dueDay ? isSameDay(dueDay, today) : false;
+  const isTomorrow = dueDay ? isSameDay(dueDay, addDays(today, 1)) : false;
+  const isOverdue = dueDay ? isBefore(dueDay, today) && !isDone : false;
+
+  const getDueDateDisplay = () => {
+    if (!task.due_date || !dueDay) return null;
+    if (isDone) return format(parseISO(task.due_date), 'MMM d');
+    if (isToday) return 'Today';
+    if (isTomorrow) return 'Tomorrow';
+    if (isOverdue) return `${format(parseISO(task.due_date), 'MMM d')} — overdue`;
+    return format(parseISO(task.due_date), 'MMM d');
+  };
+
+  const getDueDateColor = () => {
+    if (isDone) return undefined;
+    if (isToday) return '#639922';
+    if (isTomorrow) return 'hsl(var(--muted-foreground))';
+    if (isOverdue) return '#A32D2D';
+    return undefined;
+  };
 
   return (
     <div
@@ -59,18 +81,20 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       role="button"
       tabIndex={0}
     >
-      {/* Priority dot */}
-      <div
-        className="absolute transition-[right] duration-150 group-hover/card:right-[30px]"
-        style={{
-          top: '12px',
-          right: '10px',
-          width: '7px',
-          height: '7px',
-          borderRadius: '50%',
-          backgroundColor: PRIORITY_COLORS[task.priority],
-        }}
-      />
+      {/* Priority dot + recurring icon */}
+      <div className="absolute flex items-center gap-1 transition-[right] duration-150 group-hover/card:right-[30px]" style={{ top: '12px', right: '10px' }}>
+        {task.recurrence && (
+          <Repeat className="w-2.5 h-2.5 text-muted-foreground" />
+        )}
+        <div
+          style={{
+            width: '7px',
+            height: '7px',
+            borderRadius: '50%',
+            backgroundColor: PRIORITY_COLORS[task.priority],
+          }}
+        />
+      </div>
 
       {/* ⋯ menu button */}
       {!isOverlay && (
@@ -147,17 +171,36 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         {task.title}
       </p>
 
+      {/* Brief preview */}
+      {task.brief && (
+        <p
+          className="text-muted-foreground"
+          style={{
+            fontSize: '10px',
+            lineHeight: 1.3,
+            marginTop: '3px',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
+        >
+          {task.brief}
+        </p>
+      )}
+
       {/* Tags */}
       {task.tags && task.tags.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
           {task.tags.map((tag) => (
             <span
               key={tag.id}
-              className="bg-secondary text-muted-foreground"
               style={{
                 fontSize: '10px',
                 padding: '1px 6px',
                 borderRadius: '10px',
+                backgroundColor: (tag.color || '#888') + '20',
+                color: tag.color || '#888',
               }}
             >
               #{tag.name}
@@ -171,33 +214,30 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
           {task.due_date ? (
             <span
-              className="text-muted-foreground"
               style={{
                 fontSize: '10px',
-                color: isOverdue ? '#A32D2D' : undefined,
+                color: getDueDateColor(),
+                fontWeight: isToday ? 500 : undefined,
               }}
+              className={getDueDateColor() ? '' : 'text-muted-foreground'}
             >
-              {format(parseISO(task.due_date), 'MMM d')}
-              {isOverdue && ' — overdue'}
+              {getDueDateDisplay()}
             </span>
           ) : <span />}
           {task.assignee_initials && (
-            <div
-              style={{
-                width: '20px',
-                height: '20px',
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '9px',
-                fontWeight: 500,
-                color: '#fff',
-                backgroundColor: task.assignee_color || '#378ADD',
-              }}
-            >
-              {task.assignee_initials}
-            </div>
+            <Avatar className="h-5 w-5">
+              <AvatarImage src={task.assignee_avatar_url || ''} />
+              <AvatarFallback
+                style={{
+                  backgroundColor: task.assignee_color || '#378ADD',
+                  fontSize: '9px',
+                  fontWeight: 500,
+                  color: '#fff',
+                }}
+              >
+                {task.assignee_initials}
+              </AvatarFallback>
+            </Avatar>
           )}
         </div>
       )}

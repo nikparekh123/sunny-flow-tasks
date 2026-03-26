@@ -16,11 +16,14 @@ import {
 import { COLUMNS } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
-import { TopBar } from './TopBar';
+import { TopBar, type ViewMode } from './TopBar';
 import { BoardColumn } from './BoardColumn';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
 import { ArchivePanel } from './ArchivePanel';
+import { CalendarView } from './CalendarView';
+import { GanttView } from './GanttView';
+import { TagManagementModal } from '@/components/settings/TagManagementModal';
 import { toast } from 'sonner';
 import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 
@@ -37,6 +40,7 @@ export function KanbanBoard() {
   const {
     tasks, tags, members, isLoading,
     createTask, updateTask, archiveTask, restoreTask, permanentlyDeleteTask, moveTask, createTag,
+    updateTag, deleteTag,
   } = useTasks();
 
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
@@ -46,6 +50,8 @@ export function KanbanBoard() {
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
   const [overColumn, setOverColumn] = useState<TaskColumn | null>(null);
   const [showArchive, setShowArchive] = useState(false);
+  const [activeView, setActiveView] = useState<ViewMode>('board');
+  const [showTagManagement, setShowTagManagement] = useState(false);
 
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -61,6 +67,7 @@ export function KanbanBoard() {
       result = result.filter((t) =>
         t.title.toLowerCase().includes(q) ||
         (t.description && t.description.toLowerCase().includes(q)) ||
+        (t.brief && t.brief.toLowerCase().includes(q)) ||
         (t.tags && t.tags.some((tag) => tag.name.toLowerCase().includes(q))) ||
         (t.assignee_name && t.assignee_name.toLowerCase().includes(q)) ||
         (t.category_name && t.category_name.toLowerCase().includes(q))
@@ -90,20 +97,21 @@ export function KanbanBoard() {
 
   const handleDelete = useCallback((taskId: string) => {
     archiveTask.mutate(taskId);
-
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-
     toast('Task deleted', {
       action: {
         label: 'Undo',
-        onClick: () => {
-          restoreTask.mutate(taskId);
-        },
+        onClick: () => { restoreTask.mutate(taskId); },
       },
       duration: 30000,
       position: 'bottom-left',
     });
   }, [archiveTask, restoreTask]);
+
+  const handleNavigateToTask = useCallback((taskId: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (task) setSelectedTask(task);
+  }, [tasks]);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     setDraggedTask((event.active.data.current?.task as TaskWithDetail) || null);
@@ -165,47 +173,67 @@ export function KanbanBoard() {
         activeTagIds={activeTagIds}
         onTagFilter={setActiveTagIds}
         onOpenArchive={() => setShowArchive(true)}
+        activeView={activeView}
+        onViewChange={setActiveView}
+        onNavigateToTask={handleNavigateToTask}
       />
 
-      <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto">
-        <DndContext
-          sensors={sensors}
-          collisionDetection={customCollision}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-          onDragCancel={handleDragCancel}
-        >
-          <div className="grid grid-cols-4 gap-4 min-w-[980px] w-full pt-4 items-start">
-            {COLUMNS.map((column) => (
-              <BoardColumn
-                key={column.id}
-                id={column.id}
-                label={column.label}
-                color={column.color}
-                tasks={visibleTasksByColumn[column.id]}
-                isOver={overColumn === column.id}
-                onCardClick={(task) => setSelectedTask(task)}
-                onCardEdit={(task) => setSelectedTask(task)}
-                onCardDelete={handleDelete}
-              />
-            ))}
-          </div>
+      {activeView === 'board' && (
+        <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto">
+          <DndContext
+            sensors={sensors}
+            collisionDetection={customCollision}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
+          >
+            <div className="grid grid-cols-4 gap-4 min-w-[980px] w-full pt-4 items-start">
+              {COLUMNS.map((column) => (
+                <BoardColumn
+                  key={column.id}
+                  id={column.id}
+                  label={column.label}
+                  color={column.color}
+                  tasks={visibleTasksByColumn[column.id]}
+                  isOver={overColumn === column.id}
+                  onCardClick={(task) => setSelectedTask(task)}
+                  onCardEdit={(task) => setSelectedTask(task)}
+                  onCardDelete={handleDelete}
+                />
+              ))}
+            </div>
 
-          <DragOverlay dropAnimation={null}>
-            {draggedTask && (
-              <TaskCardContent
-                task={draggedTask}
-                isDone={draggedTask.column === 'done'}
-                isOverlay
-                onClick={() => {}}
-                onEdit={() => {}}
-                onDelete={() => {}}
-              />
-            )}
-          </DragOverlay>
-        </DndContext>
-      </div>
+            <DragOverlay dropAnimation={null}>
+              {draggedTask && (
+                <TaskCardContent
+                  task={draggedTask}
+                  isDone={draggedTask.column === 'done'}
+                  isOverlay
+                  onClick={() => {}}
+                  onEdit={() => {}}
+                  onDelete={() => {}}
+                />
+              )}
+            </DragOverlay>
+          </DndContext>
+        </div>
+      )}
+
+      {activeView === 'gantt' && (
+        <GanttView
+          tasks={filteredTasks}
+          members={members}
+          onTaskClick={(task) => setSelectedTask(task)}
+        />
+      )}
+
+      {activeView === 'calendar' && (
+        <CalendarView
+          tasks={filteredTasks}
+          onTaskClick={(task) => setSelectedTask(task)}
+        />
+      )}
 
       {selectedTask && (
         <TaskDetailPanel
@@ -235,6 +263,14 @@ export function KanbanBoard() {
         onClose={() => setShowArchive(false)}
         onRestore={(id) => restoreTask.mutate(id)}
         onPermanentDelete={(id) => permanentlyDeleteTask.mutate(id)}
+      />
+
+      <TagManagementModal
+        open={showTagManagement}
+        onOpenChange={setShowTagManagement}
+        tags={tags}
+        onUpdateTag={(id, updates) => updateTag.mutate({ id, ...updates })}
+        onDeleteTag={(id) => deleteTag.mutate(id)}
       />
     </div>
   );

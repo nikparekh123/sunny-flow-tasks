@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Settings, Users, User, Shield, LogOut, Eye, Search, X, Archive, Tag } from 'lucide-react';
+import { Plus, Settings, Users, User, Shield, LogOut, Eye, Search, X, Archive, Tag, Zap, LayoutGrid, GanttChart, CalendarDays } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -12,11 +12,15 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/hooks/useAuth';
+import { useNavigate } from 'react-router-dom';
 import type { Tag as TagType, TeamMember } from '@/lib/types';
 import { NewTaskPanel } from './NewTaskPanel';
 import { UserSettingsModal } from '@/components/settings/UserSettingsModal';
 import { AdminSettingsModal } from '@/components/settings/AdminSettingsModal';
 import { InviteUserModal } from '@/components/settings/InviteUserModal';
+import { NotificationBell } from './NotificationBell';
+
+export type ViewMode = 'board' | 'gantt' | 'calendar';
 
 interface TopBarProps {
   tags: TagType[];
@@ -31,6 +35,9 @@ interface TopBarProps {
   activeTagIds: string[];
   onTagFilter: (ids: string[]) => void;
   onOpenArchive: () => void;
+  activeView: ViewMode;
+  onViewChange: (view: ViewMode) => void;
+  onNavigateToTask?: (taskId: string) => void;
 }
 
 export function TopBar({
@@ -46,8 +53,12 @@ export function TopBar({
   activeTagIds,
   onTagFilter,
   onOpenArchive,
+  activeView,
+  onViewChange,
+  onNavigateToTask,
 }: TopBarProps) {
   const { signOut, member } = useAuth();
+  const navigate = useNavigate();
   const [showNewTask, setShowNewTask] = useState(false);
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [showAdminSettings, setShowAdminSettings] = useState(false);
@@ -64,10 +75,32 @@ export function TopBar({
     );
   };
 
+  const viewButtons: { mode: ViewMode; icon: typeof LayoutGrid; label: string }[] = [
+    { mode: 'board', icon: LayoutGrid, label: 'Board' },
+    { mode: 'gantt', icon: GanttChart, label: 'Gantt' },
+    { mode: 'calendar', icon: CalendarDays, label: 'Calendar' },
+  ];
+
   return (
     <>
       <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-card">
         <h1 className="text-sm font-semibold text-foreground whitespace-nowrap">SunnyFi Board</h1>
+
+        {/* View toggle */}
+        <div className="flex items-center gap-0.5 bg-secondary rounded-md p-0.5">
+          {viewButtons.map(({ mode, icon: Icon, label }) => (
+            <Button
+              key={mode}
+              variant="ghost"
+              size="sm"
+              className={`h-6 px-2 text-[10px] gap-1 ${activeView === mode ? 'bg-card shadow-sm' : 'hover:bg-card/50'}`}
+              onClick={() => onViewChange(mode)}
+              title={label}
+            >
+              <Icon className="w-3 h-3" />
+            </Button>
+          ))}
+        </div>
 
         <div className="flex-1" />
 
@@ -132,6 +165,9 @@ export function TopBar({
         <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onOpenArchive}>
           <Archive className="w-3.5 h-3.5" />
         </Button>
+
+        {/* Notifications */}
+        <NotificationBell onNavigateToTask={onNavigateToTask} />
 
         {/* User avatar circles */}
         <div className="flex items-center -space-x-1.5">
@@ -201,6 +237,9 @@ export function TopBar({
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setShowUserSettings(true)}>
               <User className="w-3.5 h-3.5 mr-2" /> User Settings
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate('/rules')}>
+              <Zap className="w-3.5 h-3.5 mr-2" /> Rules
             </DropdownMenuItem>
             {isAdmin && (
               <DropdownMenuItem onClick={() => setShowAdminSettings(true)}>

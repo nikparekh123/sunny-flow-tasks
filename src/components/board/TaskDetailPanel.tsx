@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { X, Pencil } from 'lucide-react';
+import { X, Pencil, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
-import { format } from 'date-fns';
+import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { COLUMNS, PRIORITY_COLORS } from '@/lib/constants';
-import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority } from '@/lib/types';
+import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority, RecurrenceFrequency } from '@/lib/types';
 
 interface Props {
   task: TaskWithDetail;
@@ -25,22 +26,29 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description || '');
+  const [brief, setBrief] = useState(task.brief || '');
   const [column, setColumn] = useState<TaskColumn>(task.column);
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
   const [assigneeId, setAssigneeId] = useState(task.assignee_id || 'none');
   const [dueDate, setDueDate] = useState<Date | undefined>(task.due_date ? new Date(task.due_date) : undefined);
   const [editTagIds, setEditTagIds] = useState<string[]>((task.tags || []).map((t) => t.id));
   const [newTag, setNewTag] = useState('');
+  const [tagSearch, setTagSearch] = useState('');
   const [isClosing, setIsClosing] = useState(false);
+  const [isRecurring, setIsRecurring] = useState(!!task.recurrence);
+  const [recurrence, setRecurrence] = useState<RecurrenceFrequency>((task.recurrence as RecurrenceFrequency) || 'weekly');
 
   useEffect(() => {
     setTitle(task.title);
     setDescription(task.description || '');
+    setBrief(task.brief || '');
     setColumn(task.column);
     setPriority(task.priority);
     setAssigneeId(task.assignee_id || 'none');
     setDueDate(task.due_date ? new Date(task.due_date) : undefined);
     setEditTagIds((task.tags || []).map((t) => t.id));
+    setIsRecurring(!!task.recurrence);
+    setRecurrence((task.recurrence as RecurrenceFrequency) || 'weekly');
     setEditing(false);
   }, [task]);
 
@@ -52,11 +60,14 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
   const handleCancel = () => {
     setTitle(task.title);
     setDescription(task.description || '');
+    setBrief(task.brief || '');
     setColumn(task.column);
     setPriority(task.priority);
     setAssigneeId(task.assignee_id || 'none');
     setDueDate(task.due_date ? new Date(task.due_date) : undefined);
     setEditTagIds((task.tags || []).map((t) => t.id));
+    setIsRecurring(!!task.recurrence);
+    setRecurrence((task.recurrence as RecurrenceFrequency) || 'weekly');
     setEditing(false);
   };
 
@@ -64,12 +75,15 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
     const updates: { id: string } & Record<string, any> = { id: task.id };
     if (title.trim() !== task.title) updates.title = title.trim();
     if (description !== (task.description || '')) updates.description = description || null;
+    if (brief !== (task.brief || '')) updates.brief = brief || null;
     if (column !== task.column) updates.column = column;
     if (priority !== task.priority) updates.priority = priority;
     const newAssignee = assigneeId === 'none' ? null : assigneeId;
     if (newAssignee !== task.assignee_id) updates.assignee_id = newAssignee;
     const newDue = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
     if (newDue !== task.due_date) updates.due_date = newDue;
+    const newRecurrence = isRecurring ? recurrence : null;
+    if (newRecurrence !== task.recurrence) updates.recurrence = newRecurrence;
     const origTagIds = (task.tags || []).map((t) => t.id).sort().join(',');
     const newTagIds = [...editTagIds].sort().join(',');
     if (origTagIds !== newTagIds) updates.tag_ids = editTagIds;
@@ -81,6 +95,9 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
   };
 
   const currentTagIds = editing ? editTagIds : (task.tags || []).map((t) => t.id);
+  const filteredTags = tags.filter((t) =>
+    !tagSearch || t.name.toLowerCase().includes(tagSearch.toLowerCase())
+  );
 
   const toggleTag = (tagId: string) => {
     if (editing) {
@@ -93,6 +110,22 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
         : [...currentTagIds, tagId];
       onUpdate({ id: task.id, tag_ids: newIds });
     }
+  };
+
+  // Due date display logic
+  const today = startOfDay(new Date());
+  const dueDay = task.due_date ? startOfDay(parseISO(task.due_date)) : null;
+  const isToday = dueDay ? isSameDay(dueDay, today) : false;
+  const isTomorrow = dueDay ? isSameDay(dueDay, addDays(today, 1)) : false;
+  const isOverdue = dueDay ? isBefore(dueDay, today) && task.column !== 'done' : false;
+
+  const dueDateDisplayText = () => {
+    if (!task.due_date) return 'No due date';
+    if (task.column === 'done') return format(new Date(task.due_date), 'MMM d, yyyy');
+    if (isToday) return 'Today';
+    if (isTomorrow) return 'Tomorrow';
+    if (isOverdue) return `${format(new Date(task.due_date), 'MMM d, yyyy')} — overdue`;
+    return format(new Date(task.due_date), 'MMM d, yyyy');
   };
 
   return (
@@ -122,14 +155,29 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
         </div>
         <div className="p-4 space-y-4">
           {editing ? (
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="text-sm font-medium"
-            />
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} className="text-sm font-medium" />
           ) : (
             <p className="text-sm font-medium">{task.title}</p>
           )}
+
+          {/* Brief */}
+          <div className="space-y-1">
+            <Label className="text-[10px] text-muted-foreground">Brief</Label>
+            {editing ? (
+              <>
+                <Input
+                  value={brief}
+                  onChange={(e) => setBrief(e.target.value.slice(0, 150))}
+                  className="text-xs"
+                  placeholder="Short summary (max 150 chars)"
+                  maxLength={150}
+                />
+                <span className="text-[9px] text-muted-foreground">{brief.length}/150</span>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">{task.brief || 'No brief'}</p>
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
@@ -205,18 +253,56 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
                   </PopoverContent>
                 </Popover>
               ) : (
-                <p className="text-xs text-foreground">
-                  {task.due_date ? format(new Date(task.due_date), 'MMM d, yyyy') : 'No due date'}
+                <p className={`text-xs ${isOverdue ? 'text-destructive font-medium' : isToday ? 'text-[#639922] font-medium' : 'text-foreground'}`}>
+                  {dueDateDisplayText()}
                 </p>
               )}
             </div>
           </div>
 
+          {/* Recurring */}
+          {editing && (
+            <>
+              <div className="flex items-center justify-between">
+                <Label className="text-[10px] text-muted-foreground">Recurring task</Label>
+                <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
+              </div>
+              {isRecurring && (
+                <Select value={recurrence} onValueChange={(v) => setRecurrence(v as RecurrenceFrequency)}>
+                  <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="biweekly">Bi-weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </>
+          )}
+          {!editing && task.recurrence && (
+            <div className="space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Recurrence</Label>
+              <p className="text-xs text-foreground capitalize">{task.recurrence === 'biweekly' ? 'Bi-weekly' : task.recurrence}</p>
+            </div>
+          )}
+
           {/* Tags */}
           <div className="space-y-2">
             <Label className="text-[10px] text-muted-foreground">Tags</Label>
+            {editing && (
+              <div className="flex items-center gap-1.5">
+                <Search className="w-3 h-3 text-muted-foreground" />
+                <Input
+                  value={tagSearch}
+                  onChange={(e) => setTagSearch(e.target.value)}
+                  placeholder="Search tags…"
+                  className="text-xs h-6 flex-1"
+                />
+              </div>
+            )}
             <div className="flex flex-wrap gap-1.5">
-              {tags.map((tag) => (
+              {filteredTags.map((tag) => (
                 <button
                   key={tag.id}
                   onClick={() => toggleTag(tag.id)}
