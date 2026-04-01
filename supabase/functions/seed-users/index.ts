@@ -38,7 +38,6 @@ Deno.serve(async (req) => {
     const results = [];
 
     for (const u of USERS) {
-      // Check if user already exists
       const { data: existing } = await admin.auth.admin.listUsers();
       const found = existing?.users?.find((x: any) => x.email === u.email);
 
@@ -74,7 +73,6 @@ Deno.serve(async (req) => {
         );
 
       if (memberError) {
-        // If upsert fails due to no unique constraint on user_id, try select + insert/update
         const { data: existingMember } = await admin
           .from("team_members")
           .select("id")

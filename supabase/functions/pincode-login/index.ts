@@ -27,15 +27,15 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Look up team member by pincode
-    const { data: member, error: memberError } = await admin
-      .from("team_members")
-      .select("user_id, name")
+    // Look up pincode in member_pincodes table
+    const { data: pinRow, error: pinError } = await admin
+      .from("member_pincodes")
+      .select("user_id")
       .eq("pincode", pincode)
       .maybeSingle();
 
-    if (memberError) throw memberError;
-    if (!member) {
+    if (pinError) throw pinError;
+    if (!pinRow) {
       return new Response(
         JSON.stringify({ error: "Invalid code." }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     }
 
     // Get user email from auth
-    const { data: userData, error: userError } = await admin.auth.admin.getUserById(member.user_id);
+    const { data: userData, error: userError } = await admin.auth.admin.getUserById(pinRow.user_id);
     if (userError || !userData?.user?.email) {
       return new Response(
         JSON.stringify({ error: "User not found." }),
@@ -61,13 +61,11 @@ Deno.serve(async (req) => {
       throw linkError || new Error("Failed to generate login link");
     }
 
-    // Extract the token hash and use it to verify OTP
     const tokenHash = linkData.properties?.hashed_token;
     if (!tokenHash) {
       throw new Error("No token hash returned");
     }
 
-    // Use verifyOtp with the token hash to get a valid session
     const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
