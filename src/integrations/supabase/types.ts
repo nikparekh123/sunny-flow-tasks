@@ -50,6 +50,27 @@ export type Database = {
         }
         Relationships: []
       }
+      member_pincodes: {
+        Row: {
+          created_at: string
+          id: string
+          pincode: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          pincode: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          pincode?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           created_at: string
@@ -264,7 +285,6 @@ export type Database = {
           id: string
           initials: string
           name: string
-          pincode: string | null
           preferences: Json
           role: Database["public"]["Enums"]["member_role"]
           status: string
@@ -277,7 +297,6 @@ export type Database = {
           id?: string
           initials: string
           name: string
-          pincode?: string | null
           preferences?: Json
           role?: Database["public"]["Enums"]["member_role"]
           status?: string
@@ -290,7 +309,6 @@ export type Database = {
           id?: string
           initials?: string
           name?: string
-          pincode?: string | null
           preferences?: Json
           role?: Database["public"]["Enums"]["member_role"]
           status?: string
