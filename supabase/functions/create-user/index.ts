@@ -44,9 +44,9 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Check if pincode already exists
+    // Check if pincode already exists in member_pincodes
     const { data: existing } = await admin
-      .from("team_members")
+      .from("member_pincodes")
       .select("id")
       .eq("pincode", pincode)
       .maybeSingle();
@@ -80,10 +80,17 @@ Deno.serve(async (req) => {
       initials: getInitials(name.trim()),
       color: pickColor(userId),
       role: "member",
-      pincode,
     });
 
     if (memberError) throw memberError;
+
+    // Store pincode in member_pincodes
+    const { error: pinError } = await admin.from("member_pincodes").insert({
+      user_id: userId,
+      pincode,
+    });
+
+    if (pinError) throw pinError;
 
     return new Response(
       JSON.stringify({ success: true, name: name.trim(), pincode }),

@@ -105,15 +105,14 @@ export function UserSettingsModal({ open, onOpenChange }: Props) {
     if (!member) return;
     setSavingPin(true);
 
-    const { error } = await supabase
-      .from('team_members')
-      .update({ pincode: newPin } as any)
-      .eq('id', member.id);
+    const { data, error } = await supabase.functions.invoke('update-pincode', {
+      body: { pincode: newPin },
+    });
 
     setSavingPin(false);
 
-    if (error) {
-      toast.error('Failed to update code.');
+    if (error || data?.error) {
+      toast.error(data?.error || 'Failed to update code.');
     } else {
       toast.success('Login code updated.');
       setNewPin('');
