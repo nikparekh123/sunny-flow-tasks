@@ -39,7 +39,7 @@ export function UserSettingsModal({ open, onOpenChange }: Props) {
     if (!file || !member) return;
 
     const ext = file.name.split('.').pop();
-    const path = `${member.id}.${ext}`;
+    const path = `${user?.id}/${member.id}.${ext}`;
 
     const { error } = await supabase.storage
       .from('avatars')
