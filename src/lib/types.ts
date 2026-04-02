@@ -84,6 +84,16 @@ export interface AutomationRule {
   created_at: string;
 }
 
+export interface Subtask {
+  id: string;
+  task_id: string;
+  title: string;
+  done: boolean;
+  assignee_id: string | null;
+  position: number;
+  created_at: string;
+}
+
 export interface Notification {
   id: string;
   user_id: string;
