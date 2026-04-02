@@ -44,6 +44,7 @@ export function KanbanBoard() {
     createTask, updateTask, archiveTask, restoreTask, permanentlyDeleteTask, moveTask, createTag,
     updateTag, deleteTag,
   } = useTasks();
+  const { completeAllSubtasks } = useSubtasks();
 
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,6 +55,7 @@ export function KanbanBoard() {
   const [showArchive, setShowArchive] = useState(false);
   const [activeView, setActiveView] = useState<ViewMode>('board');
   const [showTagManagement, setShowTagManagement] = useState(false);
+  const [pendingDragMove, setPendingDragMove] = useState<{ taskId: string; column: TaskColumn; position: number; task: TaskWithDetail } | null>(null);
 
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
