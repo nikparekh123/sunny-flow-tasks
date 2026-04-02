@@ -220,6 +220,15 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         </div>
       )}
 
+      {/* Subtask progress */}
+      {subtaskTotal > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+          <ListChecks className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+          <Progress value={subtaskPercent} className="h-1.5 flex-1" />
+          <span className="text-[10px] text-muted-foreground whitespace-nowrap">{subtaskDone}/{subtaskTotal}</span>
+        </div>
+      )}
+
       {/* Footer */}
       {(task.due_date || assignees.length > 0 || task.assignee_initials) && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
