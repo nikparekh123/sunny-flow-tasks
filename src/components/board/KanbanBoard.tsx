@@ -16,6 +16,7 @@ import {
 import { COLUMNS } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
+import { useSubtasks } from '@/hooks/useSubtasks';
 import { TopBar, type ViewMode } from './TopBar';
 import { BoardColumn } from './BoardColumn';
 import { TaskDetailPanel } from './TaskDetailPanel';
@@ -24,6 +25,7 @@ import { ArchivePanel } from './ArchivePanel';
 import { CalendarView } from './CalendarView';
 import { GanttView } from './GanttView';
 import { TagManagementModal } from '@/components/settings/TagManagementModal';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 
