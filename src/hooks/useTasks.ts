@@ -135,6 +135,15 @@ export function useTasks() {
     },
   });
 
+  const { data: allSubtasks = [] } = useQuery({
+    queryKey: ['subtasks'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('subtasks').select('*').order('position');
+      if (error) throw error;
+      return (data ?? []) as Subtask[];
+    },
+  });
+
   const tasks: TaskWithDetail[] = rawTasks.map((task) => {
     const tagIds = taskTags.filter((tt) => tt.task_id === task.id).map((tt) => tt.tag_id);
     const taskTagList = tags.filter((tag) => tagIds.includes(tag.id));
@@ -143,7 +152,8 @@ export function useTasks() {
       .map((aId) => members.find((m) => m.id === aId))
       .filter(Boolean)
       .map((m) => ({ id: m!.id, name: m!.name, initials: m!.initials, color: m!.color, avatar_url: m!.avatar_url || null }));
-    return { ...task, tags: taskTagList, assignee_ids: aIds, assignees: assigneeList };
+    const taskSubtasks = allSubtasks.filter((s) => s.task_id === task.id);
+    return { ...task, tags: taskTagList, assignee_ids: aIds, assignees: assigneeList, subtasks: taskSubtasks };
   });
 
   const { evaluateRules } = useRuleEngine(members);
