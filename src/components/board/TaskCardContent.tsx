@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { MoreHorizontal, Repeat } from 'lucide-react';
+import { MoreHorizontal, Repeat, ListChecks } from 'lucide-react';
 import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { PRIORITY_COLORS } from '@/lib/constants';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Progress } from '@/components/ui/progress';
 import type { TaskWithDetail } from '@/lib/types';
 
 interface Props {
