@@ -1,196 +1,130 @@
 
 
-## Plan: Full Feature & UI Enhancement Pass
-
-This is a large update spanning 9 feature areas. Here's the implementation plan.
+## Plan: 6-Feature Update — Paginated Done, Multi-Assignee, Gantt Improvements, Custom Recurrence, and Rule Execution
 
 ---
 
-### Database Migration
+### Feature 1 — Paginated Done Column with Sort by Completion Date
 
-Add the following schema changes in a single migration:
+**Database migration:**
+- Add `completed_at timestamptz` column to `tasks` table
+- Update `tasks_with_detail` view to include `completed_at`
 
-```sql
--- Recurring tasks
-ALTER TABLE tasks ADD COLUMN recurrence text; -- 'daily','weekly','biweekly','monthly' or null
-ALTER TABLE tasks ADD COLUMN brief text; -- short preview text, max 150 chars
+**`src/hooks/useTasks.ts`:**
+- In `moveTask` mutation: when moving to `done`, set `completed_at = now()`. When moving out of `done`, set `completed_at = null`.
 
--- Notifications table
-CREATE TABLE public.notifications (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  message text NOT NULL,
-  task_id uuid,
-  read boolean NOT NULL DEFAULT false,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "own notifications" ON public.notifications FOR ALL TO authenticated
-  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+**`src/components/board/BoardColumn.tsx`:**
+- Accept a `pageSize` prop (default 20 for done column)
+- Add `visibleCount` state, initially 20
+- Slice tasks to `visibleCount` for done column
+- Show "See more" button at bottom when there are more tasks; clicking appends 20 more
+- Sort done column tasks by `completed_at` descending
 
--- Rules/automation table
-CREATE TABLE public.automation_rules (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name text NOT NULL,
-  trigger_type text NOT NULL,
-  trigger_config jsonb NOT NULL DEFAULT '{}',
-  action_type text NOT NULL,
-  action_config jsonb NOT NULL DEFAULT '{}',
-  active boolean NOT NULL DEFAULT true,
-  created_by uuid,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE public.automation_rules ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "auth crud" ON public.automation_rules FOR ALL TO authenticated
-  USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
-
--- Tag colors
-ALTER TABLE tags ADD COLUMN color text DEFAULT '#888888';
-
--- Update tasks_with_detail view to include recurrence and brief
-```
-
-Recreate the `tasks_with_detail` view to include `recurrence` and `brief` columns.
-
-Enable realtime on `notifications` table.
+**`src/lib/types.ts`:** Add `completed_at: string | null` to `TaskWithDetail`.
 
 ---
 
-### Task 1 — Recurring Tasks
+### Feature 2 — Multiple Assignees per Task
 
-**`NewTaskPanel.tsx`** and **`TaskDetailPanel.tsx`**: Add a "Recurring" toggle. When enabled, show a select for frequency (Daily, Weekly, Bi-weekly, Monthly). Store in `recurrence` column.
+**Database migration:**
+- Create `task_assignees` table: `task_id uuid NOT NULL, assignee_id uuid NOT NULL, PRIMARY KEY (task_id, assignee_id)`
+- Add RLS policies for authenticated users (select, insert, delete)
+- Migrate existing `assignee_id` data into `task_assignees`
+- Keep `assignee_id` on `tasks` for backward compat (will be ignored in favor of junction table)
 
-**`TaskCardContent.tsx`**: Show a small `Repeat` icon (from lucide) next to the title when `task.recurrence` is set.
+**`src/hooks/useTasks.ts`:**
+- Add `useQuery` for `task_assignees` (like `task_tags`)
+- Map each task's assignees from the junction table + `members` list
+- Update `createTask` and `updateTask` to accept `assignee_ids: string[]` and sync the junction table
+- Update notification logic to notify all assignees
 
-**`useTasks.ts`**: When moving a task to "done" column AND `recurrence` is set, auto-create a new task with the same fields but next due date calculated from frequency. Use a helper function:
-- Daily: +1 day
-- Weekly: +7 days
-- Bi-weekly: +14 days
-- Monthly: +1 month
+**`src/lib/types.ts`:**
+- Add to `TaskWithDetail`: `assignee_ids: string[]`, `assignees: { id: string; name: string; initials: string; color: string | null; avatar_url: string | null }[]`
 
-**`types.ts`**: Add `recurrence` and `brief` to `TaskWithDetail`.
+**`src/components/board/NewTaskPanel.tsx`:**
+- Convert assignee picker from single-select buttons to multi-select checkboxes/tokens
 
----
+**`src/components/board/TaskDetailPanel.tsx`:**
+- Convert assignee field to multi-select in edit mode
+- Display all assignees in read mode
 
-### Task 2 — Fix Today/Tomorrow/Overdue Display
+**`src/components/board/TaskCardContent.tsx`:**
+- Show stacked avatars for all assignees (up to 3 visible + "+N" overflow)
 
-**`TaskCardContent.tsx`**: Replace the current `isPast` check with:
-```ts
-const today = startOfDay(new Date());
-const dueDay = startOfDay(parseISO(task.due_date));
-const isToday = isSameDay(dueDay, today);
-const isTomorrow = isSameDay(dueDay, addDays(today, 1));
-const isOverdue = isBefore(dueDay, today);
-```
-Display: "Today" in green, "Tomorrow" in neutral, past dates in red with "overdue".
+**`src/components/board/KanbanBoard.tsx`:**
+- Update assignee filter to match if current user is ANY of the task's assignees
 
-Apply same logic in `TaskDetailPanel.tsx` due date display.
+**`src/components/board/GanttView.tsx` and `CalendarView.tsx`:**
+- Update to show multiple assignee avatars
 
----
-
-### Task 3 — Rules & Automation
-
-**New file `src/pages/RulesPage.tsx`**: Full-page rules manager with:
-- List of rules in card layout (name, trigger summary, action summary, active toggle)
-- "Create Rule" button opens a builder modal
-- Builder has: Rule name, Trigger type dropdown, dynamic config fields, Action type dropdown, dynamic config fields
-- Edit and delete per rule
-
-**Trigger types**: `task_assigned`, `task_moved`, `task_overdue`, `task_created`, `task_completed`, `tag_added`
-
-**Action types**: `assign_user`, `move_to_column`, `add_tag`, `send_notification`, `set_due_date`, `remove_assignee`
-
-**New file `src/hooks/useRules.ts`**: CRUD operations on `automation_rules` table.
-
-**`useTasks.ts`**: After `createTask`, `updateTask`, and `moveTask` succeed, fetch active rules and evaluate triggers. Execute matching actions. Include a guard to prevent infinite loops (max 1 rule execution depth per action).
-
-**`TopBar.tsx`**: Add "Rules" option in the gear dropdown. Opens `/rules` route or a modal.
-
-**`App.tsx`**: Add `/rules` route.
+**`tasks_with_detail` view:** Keep as-is for primary assignee display; the multiple assignees come from the client-side join with `task_assignees`.
 
 ---
 
-### Task 4 (numbered 5 in request) — Notifications System
+### Feature 3 — Gantt Chart: Larger Fonts + Full-Screen Mode
 
-**New file `src/components/board/NotificationBell.tsx`**: Bell icon with red badge for unread count. Click opens dropdown panel showing notifications list with relative timestamps, message text, and click-to-navigate.
-
-**New file `src/hooks/useNotifications.ts`**: 
-- Query `notifications` table filtered to current user
-- Subscribe to realtime changes
-- `markAllRead` mutation
-- `markRead` mutation
-
-**`TopBar.tsx`**: Add `NotificationBell` component next to search icon.
-
-**Notification triggers** (in `useTasks.ts`):
-- On task assignment/reassignment: insert notification for assignee
-- On task overdue: handled by rules system or a periodic check
+**`src/components/board/GanttView.tsx`:**
+- Increase all font sizes by ~25%: task labels from `10px` to `12px`, date headers from `8px` to `10px`, group labels accordingly
+- Add a fullscreen toggle button in the toolbar area
+- When fullscreen: render the Gantt in a fixed full-viewport overlay (`position: fixed; inset: 0; z-index: 50`) with a close/escape button
+- Listen for `Escape` key to exit fullscreen via `useEffect`
 
 ---
 
-### Task 5 (numbered 6) — Brief Field & Preview on Banners
+### Feature 4 — Recurring Tasks: Add Custom Option
 
-**`TaskCardContent.tsx`**: Below the title, show `task.brief` in a muted, truncated 1-2 line preview. If no brief, show nothing (not a placeholder).
+Recurring tasks already exist (Daily, Weekly, Bi-weekly, Monthly). Add:
 
-**`NewTaskPanel.tsx`** and **`TaskDetailPanel.tsx`**: Add "Brief" text input (max 150 chars) between title and description.
+**`src/lib/types.ts`:** Expand `RecurrenceFrequency` to include `'custom'`.
 
-**`useTasks.ts`**: Include `brief` in create/update mutations.
+**`src/components/board/NewTaskPanel.tsx` and `TaskDetailPanel.tsx`:**
+- Add "Custom" option in the recurrence select
+- When "Custom" is selected, show day-of-week checkboxes (Mon–Sun) and/or day-of-month input
+- Store custom config as JSON string in `recurrence` field (e.g. `custom:{"days":["mon","wed"]}`)
 
----
-
-### Task 6 (numbered 7) — Tag Management
-
-**A. Tag Settings Modal** — New file `src/components/settings/TagManagementModal.tsx`:
-- List all tags with editable name, color picker (preset swatches), and delete button
-- Delete shows confirmation, removes from `task_tags` junction table too
-- Accessible from tag dropdown in task panels ("Manage Tags" option at bottom)
-
-**B. Tag Search**: In `TaskDetailPanel.tsx` and `NewTaskPanel.tsx`, add a searchable input that filters the tag list by name.
-
-**`useTasks.ts`**: Add `updateTag` and `deleteTag` mutations.
-
-**Migration**: Add RLS policies for tag UPDATE and DELETE for authenticated users.
+**`src/hooks/useTasks.ts`:**
+- Update `calcNextDueDate` to handle custom recurrence by finding the next matching day
 
 ---
 
-### Task 7 (numbered 8) — Gantt Chart & Calendar Views
+### Feature 5 — Weekly View in Gantt Chart
 
-**New file `src/components/board/GanttView.tsx`**: 
-- Horizontal timeline with task bars spanning creation date to due date
-- Grouped by column/status or assignee (toggle)
-- Click bar opens task detail
-- Tasks without due date shown in "Unscheduled" section below
-
-**New file `src/components/board/CalendarView.tsx`**:
-- Monthly calendar grid
-- Tasks appear as colored pills on due dates
-- Previous/Next month navigation
-- Click task opens detail modal
-
-**`TopBar.tsx`** or **`KanbanBoard.tsx`**: Add view toggle buttons (Board icon, Gantt icon, Calendar icon) next to "SunnyFi Board" title. Use icons from lucide: `LayoutGrid`, `GanttChart`, `CalendarDays`.
-
-**State management**: Add `activeView` state in parent component. Conditionally render `KanbanBoard` grid, `GanttView`, or `CalendarView`.
+**`src/components/board/GanttView.tsx`:**
+- Add a view-switcher in the Gantt toolbar: "Week" (alongside existing default)
+- In week mode:
+  - Show exactly 7 columns (Mon–Sun) for the selected week
+  - Add "← Prev" and "Next →" buttons to shift by 7 days
+  - Add "Today" button to snap to current week
+  - Highlight today's column with a distinct background
+  - Each column = 1 day with wider width for readability
 
 ---
 
-### Task 8 (numbered 9) — Sync User Icons with Profile Photos
+### Feature 6 — Bug Fix: Automation Rules Not Executing
 
-**`TaskCardContent.tsx`**: The assignee avatar already uses `assignee_color` and `assignee_initials`. The `tasks_with_detail` view doesn't include `avatar_url`. 
+**Root cause:** Rules are saved to the database but there is NO rule evaluation engine anywhere in the code. `useTasks.ts` mutations never check rules after task changes.
 
-**Fix**: Update the `tasks_with_detail` view to include `tm.avatar_url as assignee_avatar_url`. Add to `TaskWithDetail` type. Use `Avatar` component with `AvatarImage` fallback to initials everywhere assignees are shown.
+**Fix — add rule evaluation in `src/hooks/useTasks.ts`:**
+- Create a `useRuleEngine` helper or inline function that:
+  1. Fetches active rules from the `automation_rules` table
+  2. After `createTask`, `updateTask`, and `moveTask` succeed, evaluates trigger conditions
+  3. For matching rules, executes the action (assign user, move column, add tag, send notification, remove assignee)
+  4. Includes a depth guard (max 1 level) to prevent infinite loops
+  5. Logs rule execution to console for debugging
 
----
+**Trigger mapping:**
+- `task_created` → fires after `createTask` succeeds
+- `task_assigned` → fires after `updateTask`/`createTask` when `assignee_id` changes to match config
+- `task_moved` → fires after `moveTask` when target column matches config
+- `task_completed` → fires after `moveTask` when column = `done`
+- `tag_added` → fires after tag changes when new tag matches config
 
-### Task 9 — Error Detection & Fix Pass
-
-After all features are implemented:
-- Verify recurring task regeneration doesn't create duplicates (guard with a `regenerated_from` column or check)
-- Verify date logic consistency across all views
-- Add rule execution depth guard (prevent infinite loops)
-- Handle null/missing dates gracefully in Gantt and Calendar views
-- Test tag deletion cascade
-- Verify notification badge clears correctly
-- Check responsive layouts
+**Action execution:**
+- `assign_user` → update task's assignee(s)
+- `move_to_column` → call `reorder_task` RPC
+- `add_tag` → insert into `task_tags`
+- `send_notification` → insert into `notifications`
+- `remove_assignee` → clear assignee(s)
 
 ---
 
@@ -198,21 +132,14 @@ After all features are implemented:
 
 | File | Action |
 |------|--------|
-| Migration SQL | Add columns, create tables, update view |
-| `src/lib/types.ts` | Add `recurrence`, `brief`, `assignee_avatar_url` |
-| `src/hooks/useTasks.ts` | Add recurring regeneration, brief, notification triggers, tag CRUD |
-| `src/hooks/useNotifications.ts` | Create — notification queries |
-| `src/hooks/useRules.ts` | Create — rules CRUD |
-| `src/components/board/TaskCardContent.tsx` | Brief preview, recurring icon, fix date logic, avatar photo |
-| `src/components/board/TopBar.tsx` | Notification bell, Rules menu item, view toggles |
-| `src/components/board/KanbanBoard.tsx` | View state, pass data to Gantt/Calendar |
-| `src/components/board/NewTaskPanel.tsx` | Recurring toggle, brief field, tag search |
-| `src/components/board/TaskDetailPanel.tsx` | Recurring toggle, brief field, tag search, date display fix |
-| `src/components/board/NotificationBell.tsx` | Create — bell icon + dropdown |
-| `src/components/board/GanttView.tsx` | Create — Gantt chart |
-| `src/components/board/CalendarView.tsx` | Create — Calendar view |
-| `src/components/settings/TagManagementModal.tsx` | Create — tag CRUD modal |
-| `src/pages/RulesPage.tsx` | Create — rules management |
-| `src/App.tsx` | Add /rules route |
-| Tags migration | Add UPDATE/DELETE RLS policies |
+| Migration SQL | Add `completed_at`, create `task_assignees`, update view |
+| `src/lib/types.ts` | Add `completed_at`, `assignee_ids`, `assignees`, expand `RecurrenceFrequency` |
+| `src/hooks/useTasks.ts` | Paginated done sort, multi-assignee CRUD, rule engine, custom recurrence |
+| `src/components/board/BoardColumn.tsx` | Paginated "See more" for done column |
+| `src/components/board/TaskCardContent.tsx` | Stacked multi-assignee avatars |
+| `src/components/board/NewTaskPanel.tsx` | Multi-select assignee, custom recurrence UI |
+| `src/components/board/TaskDetailPanel.tsx` | Multi-select assignee, custom recurrence UI |
+| `src/components/board/GanttView.tsx` | Larger fonts, fullscreen mode, weekly view |
+| `src/components/board/KanbanBoard.tsx` | Multi-assignee filter, done sort logic |
+| `src/components/board/CalendarView.tsx` | Multi-assignee display |
 
