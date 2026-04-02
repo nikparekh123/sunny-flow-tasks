@@ -148,10 +148,49 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
     const newTagIds = [...editTagIds].sort().join(',');
     if (origTagIds !== newTagIds) updates.tag_ids = editTagIds;
 
+    // Check if moving to done with incomplete subtasks
+    const subtasks = task.subtasks || [];
+    const incompleteCount = subtasks.filter(s => !s.done).length;
+    if (column === 'done' && task.column !== 'done' && incompleteCount > 0) {
+      setPendingColumnChange(column);
+      setShowSubtaskConfirm(true);
+      return;
+    }
+
     if (Object.keys(updates).length > 1) {
       onUpdate(updates);
     }
     setEditing(false);
+  };
+
+  const executeSaveWithSubtaskChoice = (completeSubtasks: boolean) => {
+    const updates: { id: string } & Record<string, any> = { id: task.id };
+    if (title.trim() !== task.title) updates.title = title.trim();
+    if (description !== (task.description || '')) updates.description = description || null;
+    if (brief !== (task.brief || '')) updates.brief = brief || null;
+    if (pendingColumnChange) updates.column = pendingColumnChange;
+    if (priority !== task.priority) updates.priority = priority;
+    const origAssignees = (task.assignee_ids || []).sort().join(',');
+    const newAssignees = [...assigneeIds].sort().join(',');
+    if (origAssignees !== newAssignees) updates.assignee_ids = assigneeIds;
+    const newDue = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
+    if (newDue !== task.due_date) updates.due_date = newDue;
+    const newRecurrence = getRecurrenceValue();
+    if (newRecurrence !== task.recurrence) updates.recurrence = newRecurrence;
+    const origTagIds = (task.tags || []).map((t) => t.id).sort().join(',');
+    const newTagIds = [...editTagIds].sort().join(',');
+    if (origTagIds !== newTagIds) updates.tag_ids = editTagIds;
+
+    if (completeSubtasks) {
+      completeAllSubtasks.mutate(task.id);
+    }
+
+    if (Object.keys(updates).length > 1) {
+      onUpdate(updates);
+    }
+    setEditing(false);
+    setPendingColumnChange(null);
+    setShowSubtaskConfirm(false);
   };
 
   const toggleAssignee = (id: string) => {
