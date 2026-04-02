@@ -47,6 +47,11 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
   const visibleAssignees = assignees.slice(0, maxVisible);
   const overflowCount = assignees.length - maxVisible;
 
+  const subtasks = task.subtasks || [];
+  const subtaskTotal = subtasks.length;
+  const subtaskDone = subtasks.filter(s => s.done).length;
+  const subtaskPercent = subtaskTotal > 0 ? (subtaskDone / subtaskTotal) * 100 : 0;
+
   return (
     <div
       className="group/card relative"
