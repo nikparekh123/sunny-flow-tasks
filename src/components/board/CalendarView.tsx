@@ -5,6 +5,7 @@ import {
 } from 'date-fns';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { PRIORITY_COLORS } from '@/lib/constants';
 import type { TaskWithDetail } from '@/lib/types';
 
@@ -72,14 +73,26 @@ export function CalendarView({ tasks, onTaskClick }: Props) {
                   <button
                     key={t.id}
                     onClick={() => onTaskClick(t)}
-                    className="w-full text-left px-1 py-0.5 rounded text-[9px] truncate hover:opacity-80 transition-opacity"
+                    className="w-full text-left px-1 py-0.5 rounded text-[9px] truncate hover:opacity-80 transition-opacity flex items-center gap-0.5"
                     style={{
                       backgroundColor: PRIORITY_COLORS[t.priority] + '20',
                       color: PRIORITY_COLORS[t.priority],
                       borderLeft: `2px solid ${PRIORITY_COLORS[t.priority]}`,
                     }}
                   >
-                    {t.title}
+                    {(t.assignees || []).length > 0 && (
+                      <div className="flex -space-x-1 shrink-0">
+                        {t.assignees.slice(0, 2).map((a) => (
+                          <Avatar key={a.id} className="h-3 w-3">
+                            <AvatarImage src={a.avatar_url || ''} />
+                            <AvatarFallback style={{ backgroundColor: a.color || '#888', fontSize: '5px', color: '#fff' }}>
+                              {a.initials}
+                            </AvatarFallback>
+                          </Avatar>
+                        ))}
+                      </div>
+                    )}
+                    <span className="truncate">{t.title}</span>
                   </button>
                 ))}
                 {dayTasks.length > 3 && (

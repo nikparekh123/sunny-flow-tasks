@@ -6,12 +6,25 @@ export type TaskPriority = Database['public']['Enums']['task_priority'];
 export type MemberRole = Database['public']['Enums']['member_role'];
 export type { TaskProject } from '@/lib/constants';
 
-export type RecurrenceFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly';
+export type RecurrenceFrequency = 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'custom';
+
+export interface CustomRecurrenceConfig {
+  days?: string[]; // 'mon','tue','wed','thu','fri','sat','sun'
+  dayOfMonth?: number;
+}
 
 export interface Tag {
   id: string;
   name: string;
   color?: string;
+}
+
+export interface TaskAssignee {
+  id: string;
+  name: string;
+  initials: string;
+  color: string | null;
+  avatar_url: string | null;
 }
 
 export interface TaskWithDetail {
@@ -35,8 +48,11 @@ export interface TaskWithDetail {
   assignee_avatar_url: string | null;
   project: TaskProject | null;
   tags?: Tag[];
-  recurrence: RecurrenceFrequency | null;
+  recurrence: string | null;
   brief: string | null;
+  completed_at: string | null;
+  assignee_ids: string[];
+  assignees: TaskAssignee[];
 }
 
 export interface TeamMember {

@@ -4,13 +4,42 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { COLUMNS, PRIORITY_COLORS } from '@/lib/constants';
 import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority, RecurrenceFrequency } from '@/lib/types';
+
+const DAYS_OF_WEEK = [
+  { id: 'mon', label: 'Mon' },
+  { id: 'tue', label: 'Tue' },
+  { id: 'wed', label: 'Wed' },
+  { id: 'thu', label: 'Thu' },
+  { id: 'fri', label: 'Fri' },
+  { id: 'sat', label: 'Sat' },
+  { id: 'sun', label: 'Sun' },
+];
+
+function parseRecurrence(rec: string | null): { frequency: RecurrenceFrequency; customDays: string[]; customDayOfMonth: string } {
+  if (!rec) return { frequency: 'weekly', customDays: [], customDayOfMonth: '' };
+  if (rec.startsWith('custom:')) {
+    try {
+      const config = JSON.parse(rec.slice(7));
+      return {
+        frequency: 'custom',
+        customDays: config.days || [],
+        customDayOfMonth: config.dayOfMonth?.toString() || '',
+      };
+    } catch {
+      return { frequency: 'weekly', customDays: [], customDayOfMonth: '' };
+    }
+  }
+  return { frequency: rec as RecurrenceFrequency, customDays: [], customDayOfMonth: '' };
+}
 
 interface Props {
   task: TaskWithDetail;
@@ -29,14 +58,18 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
   const [brief, setBrief] = useState(task.brief || '');
   const [column, setColumn] = useState<TaskColumn>(task.column);
   const [priority, setPriority] = useState<TaskPriority>(task.priority);
-  const [assigneeId, setAssigneeId] = useState(task.assignee_id || 'none');
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(task.assignee_ids || []);
   const [dueDate, setDueDate] = useState<Date | undefined>(task.due_date ? new Date(task.due_date) : undefined);
   const [editTagIds, setEditTagIds] = useState<string[]>((task.tags || []).map((t) => t.id));
   const [newTag, setNewTag] = useState('');
   const [tagSearch, setTagSearch] = useState('');
   const [isClosing, setIsClosing] = useState(false);
   const [isRecurring, setIsRecurring] = useState(!!task.recurrence);
-  const [recurrence, setRecurrence] = useState<RecurrenceFrequency>((task.recurrence as RecurrenceFrequency) || 'weekly');
+
+  const parsed = parseRecurrence(task.recurrence);
+  const [recurrence, setRecurrence] = useState<RecurrenceFrequency>(parsed.frequency);
+  const [customDays, setCustomDays] = useState<string[]>(parsed.customDays);
+  const [customDayOfMonth, setCustomDayOfMonth] = useState(parsed.customDayOfMonth);
 
   useEffect(() => {
     setTitle(task.title);
@@ -44,11 +77,14 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
     setBrief(task.brief || '');
     setColumn(task.column);
     setPriority(task.priority);
-    setAssigneeId(task.assignee_id || 'none');
+    setAssigneeIds(task.assignee_ids || []);
     setDueDate(task.due_date ? new Date(task.due_date) : undefined);
     setEditTagIds((task.tags || []).map((t) => t.id));
     setIsRecurring(!!task.recurrence);
-    setRecurrence((task.recurrence as RecurrenceFrequency) || 'weekly');
+    const p = parseRecurrence(task.recurrence);
+    setRecurrence(p.frequency);
+    setCustomDays(p.customDays);
+    setCustomDayOfMonth(p.customDayOfMonth);
     setEditing(false);
   }, [task]);
 
@@ -63,12 +99,26 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
     setBrief(task.brief || '');
     setColumn(task.column);
     setPriority(task.priority);
-    setAssigneeId(task.assignee_id || 'none');
+    setAssigneeIds(task.assignee_ids || []);
     setDueDate(task.due_date ? new Date(task.due_date) : undefined);
     setEditTagIds((task.tags || []).map((t) => t.id));
     setIsRecurring(!!task.recurrence);
-    setRecurrence((task.recurrence as RecurrenceFrequency) || 'weekly');
+    const p = parseRecurrence(task.recurrence);
+    setRecurrence(p.frequency);
+    setCustomDays(p.customDays);
+    setCustomDayOfMonth(p.customDayOfMonth);
     setEditing(false);
+  };
+
+  const getRecurrenceValue = () => {
+    if (!isRecurring) return null;
+    if (recurrence === 'custom') {
+      const config: Record<string, any> = {};
+      if (customDays.length > 0) config.days = customDays;
+      if (customDayOfMonth) config.dayOfMonth = parseInt(customDayOfMonth);
+      return `custom:${JSON.stringify(config)}`;
+    }
+    return recurrence;
   };
 
   const handleSave = () => {
@@ -78,11 +128,14 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
     if (brief !== (task.brief || '')) updates.brief = brief || null;
     if (column !== task.column) updates.column = column;
     if (priority !== task.priority) updates.priority = priority;
-    const newAssignee = assigneeId === 'none' ? null : assigneeId;
-    if (newAssignee !== task.assignee_id) updates.assignee_id = newAssignee;
+
+    const origAssignees = (task.assignee_ids || []).sort().join(',');
+    const newAssignees = [...assigneeIds].sort().join(',');
+    if (origAssignees !== newAssignees) updates.assignee_ids = assigneeIds;
+
     const newDue = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
     if (newDue !== task.due_date) updates.due_date = newDue;
-    const newRecurrence = isRecurring ? recurrence : null;
+    const newRecurrence = getRecurrenceValue();
     if (newRecurrence !== task.recurrence) updates.recurrence = newRecurrence;
     const origTagIds = (task.tags || []).map((t) => t.id).sort().join(',');
     const newTagIds = [...editTagIds].sort().join(',');
@@ -92,6 +145,12 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
       onUpdate(updates);
     }
     setEditing(false);
+  };
+
+  const toggleAssignee = (id: string) => {
+    setAssigneeIds((prev) =>
+      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
+    );
   };
 
   const currentTagIds = editing ? editTagIds : (task.tags || []).map((t) => t.id);
@@ -112,7 +171,6 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
     }
   };
 
-  // Due date display logic
   const today = startOfDay(new Date());
   const dueDay = task.due_date ? startOfDay(parseISO(task.due_date)) : null;
   const isToday = dueDay ? isSameDay(dueDay, today) : false;
@@ -126,6 +184,22 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
     if (isTomorrow) return 'Tomorrow';
     if (isOverdue) return `${format(new Date(task.due_date), 'MMM d, yyyy')} — overdue`;
     return format(new Date(task.due_date), 'MMM d, yyyy');
+  };
+
+  const recurrenceDisplayText = () => {
+    if (!task.recurrence) return null;
+    if (task.recurrence.startsWith('custom:')) {
+      try {
+        const config = JSON.parse(task.recurrence.slice(7));
+        const parts: string[] = [];
+        if (config.days?.length) parts.push(`on ${config.days.join(', ')}`);
+        if (config.dayOfMonth) parts.push(`day ${config.dayOfMonth} of month`);
+        return `Custom: ${parts.join(', ')}`;
+      } catch {
+        return 'Custom';
+      }
+    }
+    return task.recurrence === 'biweekly' ? 'Bi-weekly' : task.recurrence;
   };
 
   return (
@@ -222,24 +296,46 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
               )}
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Assignee</Label>
+            <div className="col-span-2 space-y-1">
+              <Label className="text-[10px] text-muted-foreground">Assignees</Label>
               {editing ? (
-                <Select value={assigneeId} onValueChange={setAssigneeId}>
-                  <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Unassigned</SelectItem>
-                    {members.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex flex-wrap gap-1">
+                  {members.map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => toggleAssignee(m.id)}
+                      className={`text-[10px] px-2 py-1 rounded transition-all duration-150 ${
+                        assigneeIds.includes(m.id)
+                          ? 'bg-foreground text-primary-foreground scale-105'
+                          : 'bg-secondary text-muted-foreground hover:bg-accent'
+                      }`}
+                    >
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
               ) : (
-                <p className="text-xs text-foreground">{task.assignee_name || 'Unassigned'}</p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {(task.assignees || []).length > 0 ? (
+                    task.assignees.map((a) => (
+                      <div key={a.id} className="flex items-center gap-1">
+                        <Avatar className="h-4 w-4">
+                          <AvatarImage src={a.avatar_url || ''} />
+                          <AvatarFallback style={{ backgroundColor: a.color || '#378ADD', fontSize: '7px', color: '#fff' }}>
+                            {a.initials}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="text-xs text-foreground">{a.name}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-foreground">Unassigned</p>
+                  )}
+                </div>
               )}
             </div>
 
-            <div className="space-y-1">
+            <div className="col-span-2 space-y-1">
               <Label className="text-[10px] text-muted-foreground">Due date</Label>
               {editing ? (
                 <Popover>
@@ -268,22 +364,56 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
                 <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
               </div>
               {isRecurring && (
-                <Select value={recurrence} onValueChange={(v) => setRecurrence(v as RecurrenceFrequency)}>
-                  <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="daily">Daily</SelectItem>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="biweekly">Bi-weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="space-y-2">
+                  <Select value={recurrence} onValueChange={(v) => setRecurrence(v as RecurrenceFrequency)}>
+                    <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="daily">Daily</SelectItem>
+                      <SelectItem value="weekly">Weekly</SelectItem>
+                      <SelectItem value="biweekly">Bi-weekly</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {recurrence === 'custom' && (
+                    <div className="space-y-2 p-2 border border-border rounded bg-secondary/50">
+                      <Label className="text-[10px] text-muted-foreground">Repeat on days</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {DAYS_OF_WEEK.map((day) => (
+                          <label key={day.id} className="flex items-center gap-1 text-[10px]">
+                            <Checkbox
+                              checked={customDays.includes(day.id)}
+                              onCheckedChange={(checked) => {
+                                setCustomDays((prev) =>
+                                  checked ? [...prev, day.id] : prev.filter((d) => d !== day.id)
+                                );
+                              }}
+                              className="h-3 w-3"
+                            />
+                            {day.label}
+                          </label>
+                        ))}
+                      </div>
+                      <Label className="text-[10px] text-muted-foreground">Or day of month</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={customDayOfMonth}
+                        onChange={(e) => setCustomDayOfMonth(e.target.value)}
+                        className="text-xs h-7 w-20"
+                        placeholder="1-31"
+                      />
+                    </div>
+                  )}
+                </div>
               )}
             </>
           )}
           {!editing && task.recurrence && (
             <div className="space-y-1">
               <Label className="text-[10px] text-muted-foreground">Recurrence</Label>
-              <p className="text-xs text-foreground capitalize">{task.recurrence === 'biweekly' ? 'Bi-weekly' : task.recurrence}</p>
+              <p className="text-xs text-foreground capitalize">{recurrenceDisplayText()}</p>
             </div>
           )}
 
