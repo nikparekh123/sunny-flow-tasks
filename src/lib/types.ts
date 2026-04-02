@@ -53,6 +53,7 @@ export interface TaskWithDetail {
   completed_at: string | null;
   assignee_ids: string[];
   assignees: TaskAssignee[];
+  subtasks?: Subtask[];
 }
 
 export interface TeamMember {
