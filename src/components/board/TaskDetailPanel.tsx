@@ -55,6 +55,10 @@ interface Props {
 }
 
 export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDelete, onCreateTag }: Props) {
+  const { createSubtask, toggleSubtask, deleteSubtask, completeAllSubtasks } = useSubtasks();
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [showSubtaskConfirm, setShowSubtaskConfirm] = useState(false);
+  const [pendingColumnChange, setPendingColumnChange] = useState<TaskColumn | null>(null);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description || '');
