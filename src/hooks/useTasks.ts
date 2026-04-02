@@ -183,10 +183,18 @@ export function useTasks() {
       })
       .subscribe();
 
+    const subtasksSub = supabase
+      .channel('subtasks-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => {
+        qc.invalidateQueries({ queryKey: ['subtasks'] });
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(tasksSub);
       supabase.removeChannel(tagsSub);
       supabase.removeChannel(assigneeSub);
+      supabase.removeChannel(subtasksSub);
     };
   }, [qc]);
 
