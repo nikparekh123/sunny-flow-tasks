@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Pencil, Search } from 'lucide-react';
+import { X, Pencil, Search, Trash2, Plus } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -10,9 +10,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Progress } from '@/components/ui/progress';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { COLUMNS, PRIORITY_COLORS } from '@/lib/constants';
-import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority, RecurrenceFrequency } from '@/lib/types';
+import { useSubtasks } from '@/hooks/useSubtasks';
+import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority, RecurrenceFrequency, Subtask } from '@/lib/types';
 
 const DAYS_OF_WEEK = [
   { id: 'mon', label: 'Mon' },
@@ -52,6 +55,10 @@ interface Props {
 }
 
 export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDelete, onCreateTag }: Props) {
+  const { createSubtask, toggleSubtask, deleteSubtask, completeAllSubtasks } = useSubtasks();
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [showSubtaskConfirm, setShowSubtaskConfirm] = useState(false);
+  const [pendingColumnChange, setPendingColumnChange] = useState<TaskColumn | null>(null);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description || '');
@@ -141,10 +148,49 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
     const newTagIds = [...editTagIds].sort().join(',');
     if (origTagIds !== newTagIds) updates.tag_ids = editTagIds;
 
+    // Check if moving to done with incomplete subtasks
+    const subtasks = task.subtasks || [];
+    const incompleteCount = subtasks.filter(s => !s.done).length;
+    if (column === 'done' && task.column !== 'done' && incompleteCount > 0) {
+      setPendingColumnChange(column);
+      setShowSubtaskConfirm(true);
+      return;
+    }
+
     if (Object.keys(updates).length > 1) {
       onUpdate(updates);
     }
     setEditing(false);
+  };
+
+  const executeSaveWithSubtaskChoice = (completeSubtasks: boolean) => {
+    const updates: { id: string } & Record<string, any> = { id: task.id };
+    if (title.trim() !== task.title) updates.title = title.trim();
+    if (description !== (task.description || '')) updates.description = description || null;
+    if (brief !== (task.brief || '')) updates.brief = brief || null;
+    if (pendingColumnChange) updates.column = pendingColumnChange;
+    if (priority !== task.priority) updates.priority = priority;
+    const origAssignees = (task.assignee_ids || []).sort().join(',');
+    const newAssignees = [...assigneeIds].sort().join(',');
+    if (origAssignees !== newAssignees) updates.assignee_ids = assigneeIds;
+    const newDue = dueDate ? format(dueDate, 'yyyy-MM-dd') : null;
+    if (newDue !== task.due_date) updates.due_date = newDue;
+    const newRecurrence = getRecurrenceValue();
+    if (newRecurrence !== task.recurrence) updates.recurrence = newRecurrence;
+    const origTagIds = (task.tags || []).map((t) => t.id).sort().join(',');
+    const newTagIds = [...editTagIds].sort().join(',');
+    if (origTagIds !== newTagIds) updates.tag_ids = editTagIds;
+
+    if (completeSubtasks) {
+      completeAllSubtasks.mutate(task.id);
+    }
+
+    if (Object.keys(updates).length > 1) {
+      onUpdate(updates);
+    }
+    setEditing(false);
+    setPendingColumnChange(null);
+    setShowSubtaskConfirm(false);
   };
 
   const toggleAssignee = (id: string) => {
@@ -481,6 +527,67 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
             )}
           </div>
 
+          {/* Subtasks */}
+          <div className="space-y-2">
+            <Label className="text-[10px] text-muted-foreground">
+              Subtasks {(task.subtasks || []).length > 0 && (
+                <span className="ml-1">({(task.subtasks || []).filter(s => s.done).length}/{(task.subtasks || []).length})</span>
+              )}
+            </Label>
+            {(task.subtasks || []).length > 0 && (
+              <Progress
+                value={(task.subtasks || []).length > 0 ? ((task.subtasks || []).filter(s => s.done).length / (task.subtasks || []).length) * 100 : 0}
+                className="h-1.5"
+              />
+            )}
+            <div className="space-y-1">
+              {(task.subtasks || []).map((subtask) => {
+                const assignee = subtask.assignee_id ? members.find(m => m.id === subtask.assignee_id) : null;
+                return (
+                  <div key={subtask.id} className="group/subtask flex items-center gap-2 py-1 px-1 rounded hover:bg-secondary/50">
+                    <Checkbox
+                      checked={subtask.done}
+                      onCheckedChange={(checked) => toggleSubtask.mutate({ id: subtask.id, done: !!checked })}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span className={`text-xs flex-1 ${subtask.done ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+                      {subtask.title}
+                    </span>
+                    {assignee && (
+                      <Avatar className="h-4 w-4">
+                        <AvatarImage src={assignee.avatar_url || ''} />
+                        <AvatarFallback style={{ backgroundColor: assignee.color || '#378ADD', fontSize: '7px', color: '#fff' }}>
+                          {assignee.initials}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
+                    <button
+                      className="opacity-0 group-hover/subtask:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                      onClick={() => deleteSubtask.mutate(subtask.id)}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Plus className="w-3 h-3 text-muted-foreground" />
+              <Input
+                value={newSubtaskTitle}
+                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newSubtaskTitle.trim()) {
+                    createSubtask.mutate({ task_id: task.id, title: newSubtaskTitle.trim() });
+                    setNewSubtaskTitle('');
+                  }
+                }}
+                placeholder="Add subtask…"
+                className="text-xs h-7 flex-1"
+              />
+            </div>
+          </div>
+
           {editing && (
             <div className="flex gap-2 pt-2">
               <Button size="sm" className="flex-1 text-xs" onClick={handleSave}>Save Changes</Button>
@@ -500,6 +607,22 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
           </div>
         </div>
       </div>
+
+      {/* Subtask completion confirmation */}
+      <AlertDialog open={showSubtaskConfirm} onOpenChange={setShowSubtaskConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Incomplete subtasks</AlertDialogTitle>
+            <AlertDialogDescription>
+              This task has {(task.subtasks || []).filter(s => !s.done).length} incomplete subtask(s). Mark them all as complete too?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => executeSaveWithSubtaskChoice(false)}>No</AlertDialogCancel>
+            <AlertDialogAction onClick={() => executeSaveWithSubtaskChoice(true)}>Yes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

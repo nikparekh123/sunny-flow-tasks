@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { MoreHorizontal, Repeat } from 'lucide-react';
+import { MoreHorizontal, Repeat, ListChecks } from 'lucide-react';
 import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { PRIORITY_COLORS } from '@/lib/constants';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Progress } from '@/components/ui/progress';
 import type { TaskWithDetail } from '@/lib/types';
 
 interface Props {
@@ -45,6 +46,11 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
   const maxVisible = 3;
   const visibleAssignees = assignees.slice(0, maxVisible);
   const overflowCount = assignees.length - maxVisible;
+
+  const subtasks = task.subtasks || [];
+  const subtaskTotal = subtasks.length;
+  const subtaskDone = subtasks.filter(s => s.done).length;
+  const subtaskPercent = subtaskTotal > 0 ? (subtaskDone / subtaskTotal) * 100 : 0;
 
   return (
     <div
@@ -211,6 +217,15 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
               #{tag.name}
             </span>
           ))}
+        </div>
+      )}
+
+      {/* Subtask progress */}
+      {subtaskTotal > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
+          <ListChecks className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+          <Progress value={subtaskPercent} className="h-1.5 flex-1" />
+          <span className="text-[10px] text-muted-foreground whitespace-nowrap">{subtaskDone}/{subtaskTotal}</span>
         </div>
       )}
 

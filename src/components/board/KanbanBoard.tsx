@@ -16,6 +16,7 @@ import {
 import { COLUMNS } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
+import { useSubtasks } from '@/hooks/useSubtasks';
 import { TopBar, type ViewMode } from './TopBar';
 import { BoardColumn } from './BoardColumn';
 import { TaskDetailPanel } from './TaskDetailPanel';
@@ -24,6 +25,7 @@ import { ArchivePanel } from './ArchivePanel';
 import { CalendarView } from './CalendarView';
 import { GanttView } from './GanttView';
 import { TagManagementModal } from '@/components/settings/TagManagementModal';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 
@@ -42,6 +44,7 @@ export function KanbanBoard() {
     createTask, updateTask, archiveTask, restoreTask, permanentlyDeleteTask, moveTask, createTag,
     updateTag, deleteTag,
   } = useTasks();
+  const { completeAllSubtasks } = useSubtasks();
 
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -52,6 +55,7 @@ export function KanbanBoard() {
   const [showArchive, setShowArchive] = useState(false);
   const [activeView, setActiveView] = useState<ViewMode>('board');
   const [showTagManagement, setShowTagManagement] = useState(false);
+  const [pendingDragMove, setPendingDragMove] = useState<{ taskId: string; column: TaskColumn; position: number; task: TaskWithDetail } | null>(null);
 
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -154,6 +158,14 @@ export function KanbanBoard() {
     const currentIndex = sourceColumnTasks.findIndex((t) => t.id === activeTask.id);
     if (currentIndex < 0) return;
     if (activeTask.column === targetColumn && currentIndex === targetPosition) return;
+
+    // Check for incomplete subtasks when moving to done
+    const incompleteSubtasks = (activeTask.subtasks || []).filter(s => !s.done).length;
+    if (targetColumn === 'done' && activeTask.column !== 'done' && incompleteSubtasks > 0) {
+      setPendingDragMove({ taskId: activeTask.id, column: targetColumn, position: targetPosition, task: activeTask });
+      return;
+    }
+
     moveTask.mutate({ taskId: activeTask.id, column: targetColumn, position: targetPosition });
   }, [allTasksByColumn, moveTask]);
 
@@ -287,6 +299,33 @@ export function KanbanBoard() {
         onUpdateTag={(id, updates) => updateTag.mutate({ id, ...updates })}
         onDeleteTag={(id) => deleteTag.mutate(id)}
       />
+
+      {/* Subtask completion confirmation on drag-to-done */}
+      <AlertDialog open={!!pendingDragMove} onOpenChange={(open) => { if (!open) setPendingDragMove(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Incomplete subtasks</AlertDialogTitle>
+            <AlertDialogDescription>
+              This task has {pendingDragMove ? (pendingDragMove.task.subtasks || []).filter(s => !s.done).length : 0} incomplete subtask(s). Mark them all as complete too?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              if (pendingDragMove) {
+                moveTask.mutate({ taskId: pendingDragMove.taskId, column: pendingDragMove.column, position: pendingDragMove.position });
+              }
+              setPendingDragMove(null);
+            }}>No</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (pendingDragMove) {
+                completeAllSubtasks.mutate(pendingDragMove.taskId);
+                moveTask.mutate({ taskId: pendingDragMove.taskId, column: pendingDragMove.column, position: pendingDragMove.position });
+              }
+              setPendingDragMove(null);
+            }}>Yes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

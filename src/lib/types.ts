@@ -53,6 +53,7 @@ export interface TaskWithDetail {
   completed_at: string | null;
   assignee_ids: string[];
   assignees: TaskAssignee[];
+  subtasks?: Subtask[];
 }
 
 export interface TeamMember {
@@ -81,6 +82,16 @@ export interface AutomationRule {
   action_config: Record<string, any>;
   active: boolean;
   created_by: string | null;
+  created_at: string;
+}
+
+export interface Subtask {
+  id: string;
+  task_id: string;
+  title: string;
+  done: boolean;
+  assignee_id: string | null;
+  position: number;
   created_at: string;
 }
 
