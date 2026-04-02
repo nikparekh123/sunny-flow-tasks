@@ -134,6 +134,43 @@ export type Database = {
         }
         Relationships: []
       }
+      task_assignees: {
+        Row: {
+          assignee_id: string
+          task_id: string
+        }
+        Insert: {
+          assignee_id: string
+          task_id: string
+        }
+        Update: {
+          assignee_id?: string
+          task_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_assignees_assignee_id_fkey"
+            columns: ["assignee_id"]
+            isOneToOne: false
+            referencedRelation: "team_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_assignees_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_assignees_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks_with_detail"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_categories: {
         Row: {
           color: string
@@ -203,6 +240,7 @@ export type Database = {
           brief: string | null
           category_id: string | null
           column: Database["public"]["Enums"]["task_column"]
+          completed_at: string | null
           created_at: string | null
           created_by: string | null
           description: string | null
@@ -222,6 +260,7 @@ export type Database = {
           brief?: string | null
           category_id?: string | null
           column?: Database["public"]["Enums"]["task_column"]
+          completed_at?: string | null
           created_at?: string | null
           created_by?: string | null
           description?: string | null
@@ -241,6 +280,7 @@ export type Database = {
           brief?: string | null
           category_id?: string | null
           column?: Database["public"]["Enums"]["task_column"]
+          completed_at?: string | null
           created_at?: string | null
           created_by?: string | null
           description?: string | null
@@ -353,6 +393,7 @@ export type Database = {
           category_id: string | null
           category_name: string | null
           column: Database["public"]["Enums"]["task_column"] | null
+          completed_at: string | null
           created_at: string | null
           created_by: string | null
           description: string | null
