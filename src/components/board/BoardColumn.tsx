@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { TaskCard } from './TaskCard';
+import { Button } from '@/components/ui/button';
 import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 
 interface Props {
@@ -17,6 +19,20 @@ interface Props {
 export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCardEdit, onCardDelete }: Props) {
   const { setNodeRef } = useDroppable({ id });
   const isDone = id === 'done';
+  const PAGE_SIZE = 20;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Sort done tasks by completed_at descending
+  const sortedTasks = isDone
+    ? [...tasks].sort((a, b) => {
+        const aDate = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+        const bDate = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+        return bDate - aDate;
+      })
+    : tasks;
+
+  const displayedTasks = isDone ? sortedTasks.slice(0, visibleCount) : sortedTasks;
+  const hasMore = isDone && visibleCount < sortedTasks.length;
 
   return (
     <div
@@ -44,8 +60,8 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
         ref={setNodeRef}
         className="space-y-2 min-h-[60px] flex-1 overflow-y-auto pr-1 transition-all duration-200"
       >
-        <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
-          {tasks.map((task) => (
+        <SortableContext items={displayedTasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+          {displayedTasks.map((task) => (
             <TaskCard
               key={task.id}
               task={task}
@@ -56,6 +72,17 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
             />
           ))}
         </SortableContext>
+
+        {hasMore && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full text-[10px] text-muted-foreground hover:text-foreground h-7"
+            onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+          >
+            See more ({sortedTasks.length - visibleCount} remaining)
+          </Button>
+        )}
 
         {tasks.length === 0 && isOver && (
           <div className="border-2 border-dashed border-ring/30 rounded-lg h-16 flex items-center justify-center animate-scale-in">

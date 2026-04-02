@@ -61,7 +61,11 @@ export function KanbanBoard() {
 
   const filteredTasks = useMemo(() => {
     let result = tasks;
-    if (activeAssignee) result = result.filter((t) => t.assignee_id === activeAssignee);
+    if (activeAssignee) {
+      result = result.filter((t) =>
+        t.assignee_ids?.includes(activeAssignee) || t.assignee_id === activeAssignee
+      );
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter((t) =>
@@ -70,6 +74,7 @@ export function KanbanBoard() {
         (t.brief && t.brief.toLowerCase().includes(q)) ||
         (t.tags && t.tags.some((tag) => tag.name.toLowerCase().includes(q))) ||
         (t.assignee_name && t.assignee_name.toLowerCase().includes(q)) ||
+        (t.assignees && t.assignees.some((a) => a.name.toLowerCase().includes(q))) ||
         (t.category_name && t.category_name.toLowerCase().includes(q))
       );
     }
@@ -91,7 +96,17 @@ export function KanbanBoard() {
   const visibleTasksByColumn = useMemo(() => {
     const map: Record<TaskColumn, TaskWithDetail[]> = { todo: [], inprogress: [], review: [], done: [] };
     filteredTasks.forEach((task) => map[task.column].push(task));
-    Object.values(map).forEach((list) => list.sort((a, b) => a.position - b.position));
+    Object.keys(map).forEach((col) => {
+      if (col === 'done') {
+        map[col as TaskColumn].sort((a, b) => {
+          const aDate = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+          const bDate = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+          return bDate - aDate;
+        });
+      } else {
+        map[col as TaskColumn].sort((a, b) => a.position - b.position);
+      }
+    });
     return map;
   }, [filteredTasks]);
 

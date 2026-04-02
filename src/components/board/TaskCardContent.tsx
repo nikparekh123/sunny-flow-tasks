@@ -41,6 +41,11 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
     return undefined;
   };
 
+  const assignees = task.assignees || [];
+  const maxVisible = 3;
+  const visibleAssignees = assignees.slice(0, maxVisible);
+  const overflowCount = assignees.length - maxVisible;
+
   return (
     <div
       className="group/card relative"
@@ -210,7 +215,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       )}
 
       {/* Footer */}
-      {(task.due_date || task.assignee_initials) && (
+      {(task.due_date || assignees.length > 0 || task.assignee_initials) && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
           {task.due_date ? (
             <span
@@ -224,7 +229,34 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
               {getDueDateDisplay()}
             </span>
           ) : <span />}
-          {task.assignee_initials && (
+
+          {/* Multi-assignee avatars */}
+          {assignees.length > 0 ? (
+            <div className="flex items-center" style={{ marginLeft: 'auto' }}>
+              {visibleAssignees.map((a, i) => (
+                <Avatar
+                  key={a.id}
+                  className="h-5 w-5 border border-card"
+                  style={{ marginLeft: i > 0 ? '-6px' : 0, zIndex: maxVisible - i }}
+                >
+                  <AvatarImage src={a.avatar_url || ''} />
+                  <AvatarFallback
+                    style={{
+                      backgroundColor: a.color || '#378ADD',
+                      fontSize: '8px',
+                      fontWeight: 500,
+                      color: '#fff',
+                    }}
+                  >
+                    {a.initials}
+                  </AvatarFallback>
+                </Avatar>
+              ))}
+              {overflowCount > 0 && (
+                <span className="text-[8px] text-muted-foreground ml-0.5">+{overflowCount}</span>
+              )}
+            </div>
+          ) : task.assignee_initials ? (
             <Avatar className="h-5 w-5">
               <AvatarImage src={task.assignee_avatar_url || ''} />
               <AvatarFallback
@@ -238,7 +270,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
                 {task.assignee_initials}
               </AvatarFallback>
             </Avatar>
-          )}
+          ) : null}
         </div>
       )}
     </div>

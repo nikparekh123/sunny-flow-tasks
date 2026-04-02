@@ -7,10 +7,21 @@ import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import type { Tag, TeamMember, TaskPriority, RecurrenceFrequency } from '@/lib/types';
+
+const DAYS_OF_WEEK = [
+  { id: 'mon', label: 'Mon' },
+  { id: 'tue', label: 'Tue' },
+  { id: 'wed', label: 'Wed' },
+  { id: 'thu', label: 'Thu' },
+  { id: 'fri', label: 'Fri' },
+  { id: 'sat', label: 'Sat' },
+  { id: 'sun', label: 'Sun' },
+];
 
 interface Props {
   tags: Tag[];
@@ -24,7 +35,7 @@ interface Props {
 export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, onCreateTag }: Props) {
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('med');
-  const [assigneeId, setAssigneeId] = useState(currentMemberId || 'none');
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(currentMemberId ? [currentMemberId] : []);
   const [dueDate, setDueDate] = useState<Date | undefined>();
   const [description, setDescription] = useState('');
   const [brief, setBrief] = useState('');
@@ -35,6 +46,14 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
   const [saving, setSaving] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrence, setRecurrence] = useState<RecurrenceFrequency>('weekly');
+  const [customDays, setCustomDays] = useState<string[]>([]);
+  const [customDayOfMonth, setCustomDayOfMonth] = useState('');
+
+  const toggleAssignee = (id: string) => {
+    setAssigneeIds((prev) =>
+      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
+    );
+  };
 
   const toggleTag = (id: string) => {
     setSelectedTagIds((prev) =>
@@ -51,6 +70,17 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
     !tagSearch || t.name.toLowerCase().includes(tagSearch.toLowerCase())
   );
 
+  const getRecurrenceValue = () => {
+    if (!isRecurring) return null;
+    if (recurrence === 'custom') {
+      const config: Record<string, any> = {};
+      if (customDays.length > 0) config.days = customDays;
+      if (customDayOfMonth) config.dayOfMonth = parseInt(customDayOfMonth);
+      return `custom:${JSON.stringify(config)}`;
+    }
+    return recurrence;
+  };
+
   const handleSave = async () => {
     if (!title.trim()) return;
     setSaving(true);
@@ -58,13 +88,13 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
       await onSave({
         title: title.trim(),
         priority,
-        assignee_id: assigneeId === 'none' ? null : assigneeId,
+        assignee_ids: assigneeIds,
         due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
         description: description.trim() || null,
         brief: brief.trim() || null,
         created_by: currentMemberId,
         tag_ids: selectedTagIds,
-        recurrence: isRecurring ? recurrence : null,
+        recurrence: getRecurrenceValue(),
       });
       toast.success('Task created');
       handleClose();
@@ -132,24 +162,14 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
             </div>
 
             <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Assignee</Label>
+              <Label className="text-[10px] text-muted-foreground">Assignees</Label>
               <div className="flex flex-wrap gap-1">
-                <button
-                  onClick={() => setAssigneeId('none')}
-                  className={`text-[10px] px-2 py-1 rounded transition-all duration-150 ${
-                    assigneeId === 'none'
-                      ? 'bg-foreground text-primary-foreground scale-105'
-                      : 'bg-secondary text-muted-foreground hover:bg-accent'
-                  }`}
-                >
-                  None
-                </button>
                 {members.map((m) => (
                   <button
                     key={m.id}
-                    onClick={() => setAssigneeId(m.id)}
+                    onClick={() => toggleAssignee(m.id)}
                     className={`text-[10px] px-2 py-1 rounded transition-all duration-150 ${
-                      assigneeId === m.id
+                      assigneeIds.includes(m.id)
                         ? 'bg-foreground text-primary-foreground scale-105'
                         : 'bg-secondary text-muted-foreground hover:bg-accent'
                     }`}
@@ -181,15 +201,49 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
             <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
           </div>
           {isRecurring && (
-            <Select value={recurrence} onValueChange={(v) => setRecurrence(v as RecurrenceFrequency)}>
-              <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="daily">Daily</SelectItem>
-                <SelectItem value="weekly">Weekly</SelectItem>
-                <SelectItem value="biweekly">Bi-weekly</SelectItem>
-                <SelectItem value="monthly">Monthly</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="space-y-2">
+              <Select value={recurrence} onValueChange={(v) => setRecurrence(v as RecurrenceFrequency)}>
+                <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="biweekly">Bi-weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="custom">Custom</SelectItem>
+                </SelectContent>
+              </Select>
+              {recurrence === 'custom' && (
+                <div className="space-y-2 p-2 border border-border rounded bg-secondary/50">
+                  <Label className="text-[10px] text-muted-foreground">Repeat on days</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {DAYS_OF_WEEK.map((day) => (
+                      <label key={day.id} className="flex items-center gap-1 text-[10px]">
+                        <Checkbox
+                          checked={customDays.includes(day.id)}
+                          onCheckedChange={(checked) => {
+                            setCustomDays((prev) =>
+                              checked ? [...prev, day.id] : prev.filter((d) => d !== day.id)
+                            );
+                          }}
+                          className="h-3 w-3"
+                        />
+                        {day.label}
+                      </label>
+                    ))}
+                  </div>
+                  <Label className="text-[10px] text-muted-foreground">Or day of month</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={customDayOfMonth}
+                    onChange={(e) => setCustomDayOfMonth(e.target.value)}
+                    className="text-xs h-7 w-20"
+                    placeholder="1-31"
+                  />
+                </div>
+              )}
+            </div>
           )}
 
           {/* Tags with search */}
