@@ -527,6 +527,67 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
             )}
           </div>
 
+          {/* Subtasks */}
+          <div className="space-y-2">
+            <Label className="text-[10px] text-muted-foreground">
+              Subtasks {(task.subtasks || []).length > 0 && (
+                <span className="ml-1">({(task.subtasks || []).filter(s => s.done).length}/{(task.subtasks || []).length})</span>
+              )}
+            </Label>
+            {(task.subtasks || []).length > 0 && (
+              <Progress
+                value={(task.subtasks || []).length > 0 ? ((task.subtasks || []).filter(s => s.done).length / (task.subtasks || []).length) * 100 : 0}
+                className="h-1.5"
+              />
+            )}
+            <div className="space-y-1">
+              {(task.subtasks || []).map((subtask) => {
+                const assignee = subtask.assignee_id ? members.find(m => m.id === subtask.assignee_id) : null;
+                return (
+                  <div key={subtask.id} className="group/subtask flex items-center gap-2 py-1 px-1 rounded hover:bg-secondary/50">
+                    <Checkbox
+                      checked={subtask.done}
+                      onCheckedChange={(checked) => toggleSubtask.mutate({ id: subtask.id, done: !!checked })}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span className={`text-xs flex-1 ${subtask.done ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+                      {subtask.title}
+                    </span>
+                    {assignee && (
+                      <Avatar className="h-4 w-4">
+                        <AvatarImage src={assignee.avatar_url || ''} />
+                        <AvatarFallback style={{ backgroundColor: assignee.color || '#378ADD', fontSize: '7px', color: '#fff' }}>
+                          {assignee.initials}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
+                    <button
+                      className="opacity-0 group-hover/subtask:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                      onClick={() => deleteSubtask.mutate(subtask.id)}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Plus className="w-3 h-3 text-muted-foreground" />
+              <Input
+                value={newSubtaskTitle}
+                onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newSubtaskTitle.trim()) {
+                    createSubtask.mutate({ task_id: task.id, title: newSubtaskTitle.trim() });
+                    setNewSubtaskTitle('');
+                  }
+                }}
+                placeholder="Add subtask…"
+                className="text-xs h-7 flex-1"
+              />
+            </div>
+          </div>
+
           {editing && (
             <div className="flex gap-2 pt-2">
               <Button size="sm" className="flex-1 text-xs" onClick={handleSave}>Save Changes</Button>
@@ -546,6 +607,22 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
           </div>
         </div>
       </div>
+
+      {/* Subtask completion confirmation */}
+      <AlertDialog open={showSubtaskConfirm} onOpenChange={setShowSubtaskConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Incomplete subtasks</AlertDialogTitle>
+            <AlertDialogDescription>
+              This task has {(task.subtasks || []).filter(s => !s.done).length} incomplete subtask(s). Mark them all as complete too?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => executeSaveWithSubtaskChoice(false)}>No</AlertDialogCancel>
+            <AlertDialogAction onClick={() => executeSaveWithSubtaskChoice(true)}>Yes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
