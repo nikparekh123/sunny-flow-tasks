@@ -299,6 +299,33 @@ export function KanbanBoard() {
         onUpdateTag={(id, updates) => updateTag.mutate({ id, ...updates })}
         onDeleteTag={(id) => deleteTag.mutate(id)}
       />
+
+      {/* Subtask completion confirmation on drag-to-done */}
+      <AlertDialog open={!!pendingDragMove} onOpenChange={(open) => { if (!open) setPendingDragMove(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Incomplete subtasks</AlertDialogTitle>
+            <AlertDialogDescription>
+              This task has {pendingDragMove ? (pendingDragMove.task.subtasks || []).filter(s => !s.done).length : 0} incomplete subtask(s). Mark them all as complete too?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              if (pendingDragMove) {
+                moveTask.mutate({ taskId: pendingDragMove.taskId, column: pendingDragMove.column, position: pendingDragMove.position });
+              }
+              setPendingDragMove(null);
+            }}>No</AlertDialogCancel>
+            <AlertDialogAction onClick={() => {
+              if (pendingDragMove) {
+                completeAllSubtasks.mutate(pendingDragMove.taskId);
+                moveTask.mutate({ taskId: pendingDragMove.taskId, column: pendingDragMove.column, position: pendingDragMove.position });
+              }
+              setPendingDragMove(null);
+            }}>Yes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
