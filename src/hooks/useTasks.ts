@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { addDays, addMonths, format, parseISO, getDay, nextDay } from 'date-fns';
-import type { TaskWithDetail, Tag, TeamMember, RecurrenceFrequency, TaskAssignee, CustomRecurrenceConfig } from '@/lib/types';
+import type { TaskWithDetail, Tag, TeamMember, RecurrenceFrequency, TaskAssignee, CustomRecurrenceConfig, Subtask } from '@/lib/types';
 import type { Database } from '@/integrations/supabase/types';
 import { useRuleEngine } from './useRuleEngine';
 
