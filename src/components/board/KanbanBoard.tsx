@@ -158,6 +158,14 @@ export function KanbanBoard() {
     const currentIndex = sourceColumnTasks.findIndex((t) => t.id === activeTask.id);
     if (currentIndex < 0) return;
     if (activeTask.column === targetColumn && currentIndex === targetPosition) return;
+
+    // Check for incomplete subtasks when moving to done
+    const incompleteSubtasks = (activeTask.subtasks || []).filter(s => !s.done).length;
+    if (targetColumn === 'done' && activeTask.column !== 'done' && incompleteSubtasks > 0) {
+      setPendingDragMove({ taskId: activeTask.id, column: targetColumn, position: targetPosition, task: activeTask });
+      return;
+    }
+
     moveTask.mutate({ taskId: activeTask.id, column: targetColumn, position: targetPosition });
   }, [allTasksByColumn, moveTask]);
 
