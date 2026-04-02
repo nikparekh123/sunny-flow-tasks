@@ -1,145 +1,75 @@
 
 
-## Plan: 6-Feature Update — Paginated Done, Multi-Assignee, Gantt Improvements, Custom Recurrence, and Rule Execution
+## Plan: Subtask Support
 
----
+### Database Migration
 
-### Feature 1 — Paginated Done Column with Sort by Completion Date
+```sql
+CREATE TABLE public.subtasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id uuid NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  done boolean NOT NULL DEFAULT false,
+  assignee_id uuid,
+  position integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
-**Database migration:**
-- Add `completed_at timestamptz` column to `tasks` table
-- Update `tasks_with_detail` view to include `completed_at`
+ALTER TABLE public.subtasks ENABLE ROW LEVEL SECURITY;
 
-**`src/hooks/useTasks.ts`:**
-- In `moveTask` mutation: when moving to `done`, set `completed_at = now()`. When moving out of `done`, set `completed_at = null`.
+CREATE POLICY "subtasks: authenticated select" ON public.subtasks FOR SELECT TO authenticated
+  USING (auth.role() = 'authenticated'::text);
+CREATE POLICY "subtasks: authenticated insert" ON public.subtasks FOR INSERT TO authenticated
+  WITH CHECK (auth.role() = 'authenticated'::text);
+CREATE POLICY "subtasks: authenticated update" ON public.subtasks FOR UPDATE TO authenticated
+  USING (auth.role() = 'authenticated'::text);
+CREATE POLICY "subtasks: authenticated delete" ON public.subtasks FOR DELETE TO authenticated
+  USING (auth.role() = 'authenticated'::text);
+```
 
-**`src/components/board/BoardColumn.tsx`:**
-- Accept a `pageSize` prop (default 20 for done column)
-- Add `visibleCount` state, initially 20
-- Slice tasks to `visibleCount` for done column
-- Show "See more" button at bottom when there are more tasks; clicking appends 20 more
-- Sort done column tasks by `completed_at` descending
+### Types
 
-**`src/lib/types.ts`:** Add `completed_at: string | null` to `TaskWithDetail`.
+Add to `src/lib/types.ts`:
+- `Subtask` interface: `{ id, task_id, title, done, assignee_id, position, created_at }`
+- Add `subtasks?: Subtask[]` to `TaskWithDetail`
 
----
+### Data Hook — `src/hooks/useSubtasks.ts` (new)
 
-### Feature 2 — Multiple Assignees per Task
+- `useQuery` fetching all subtasks (or by task_id)
+- `createSubtask` mutation (title, task_id, optional assignee_id)
+- `toggleSubtask` mutation (update `done` field)
+- `deleteSubtask` mutation
+- Invalidate on success
 
-**Database migration:**
-- Create `task_assignees` table: `task_id uuid NOT NULL, assignee_id uuid NOT NULL, PRIMARY KEY (task_id, assignee_id)`
-- Add RLS policies for authenticated users (select, insert, delete)
-- Migrate existing `assignee_id` data into `task_assignees`
-- Keep `assignee_id` on `tasks` for backward compat (will be ignored in favor of junction table)
+### Task Hook — `src/hooks/useTasks.ts`
 
-**`src/hooks/useTasks.ts`:**
-- Add `useQuery` for `task_assignees` (like `task_tags`)
-- Map each task's assignees from the junction table + `members` list
-- Update `createTask` and `updateTask` to accept `assignee_ids: string[]` and sync the junction table
-- Update notification logic to notify all assignees
+- Query subtasks alongside tasks; merge `subtasks[]` onto each `TaskWithDetail`
+- In `moveTask`: when moving to `done`, check for incomplete subtasks. Add a `confirmCompleteSubtasks` option — if true, batch-update all subtasks to `done = true`
 
-**`src/lib/types.ts`:**
-- Add to `TaskWithDetail`: `assignee_ids: string[]`, `assignees: { id: string; name: string; initials: string; color: string | null; avatar_url: string | null }[]`
+### UI — Task Detail Panel (`TaskDetailPanel.tsx`)
 
-**`src/components/board/NewTaskPanel.tsx`:**
-- Convert assignee picker from single-select buttons to multi-select checkboxes/tokens
+Add a "Subtasks" section below description:
+- Checklist of existing subtasks: checkbox + title (strikethrough when done) + assignee avatar + delete icon (hover)
+- "Add subtask" inline input at bottom with Enter-to-save
+- When parent task is moved to done via the panel's column selector and has incomplete subtasks, show an `AlertDialog` confirmation: "This task has X incomplete subtasks. Mark them all as complete too?" with Yes/No
 
-**`src/components/board/TaskDetailPanel.tsx`:**
-- Convert assignee field to multi-select in edit mode
-- Display all assignees in read mode
+### UI — Task Card (`TaskCardContent.tsx`)
 
-**`src/components/board/TaskCardContent.tsx`:**
-- Show stacked avatars for all assignees (up to 3 visible + "+N" overflow)
+- If `task.subtasks?.length > 0`, show a small progress indicator in the footer area: "2/5" with a tiny progress bar (using the existing `Progress` component scaled down)
 
-**`src/components/board/KanbanBoard.tsx`:**
-- Update assignee filter to match if current user is ANY of the task's assignees
+### UI — KanbanBoard / moveTask flow
 
-**`src/components/board/GanttView.tsx` and `CalendarView.tsx`:**
-- Update to show multiple assignee avatars
-
-**`tasks_with_detail` view:** Keep as-is for primary assignee display; the multiple assignees come from the client-side join with `task_assignees`.
-
----
-
-### Feature 3 — Gantt Chart: Larger Fonts + Full-Screen Mode
-
-**`src/components/board/GanttView.tsx`:**
-- Increase all font sizes by ~25%: task labels from `10px` to `12px`, date headers from `8px` to `10px`, group labels accordingly
-- Add a fullscreen toggle button in the toolbar area
-- When fullscreen: render the Gantt in a fixed full-viewport overlay (`position: fixed; inset: 0; z-index: 50`) with a close/escape button
-- Listen for `Escape` key to exit fullscreen via `useEffect`
-
----
-
-### Feature 4 — Recurring Tasks: Add Custom Option
-
-Recurring tasks already exist (Daily, Weekly, Bi-weekly, Monthly). Add:
-
-**`src/lib/types.ts`:** Expand `RecurrenceFrequency` to include `'custom'`.
-
-**`src/components/board/NewTaskPanel.tsx` and `TaskDetailPanel.tsx`:**
-- Add "Custom" option in the recurrence select
-- When "Custom" is selected, show day-of-week checkboxes (Mon–Sun) and/or day-of-month input
-- Store custom config as JSON string in `recurrence` field (e.g. `custom:{"days":["mon","wed"]}`)
-
-**`src/hooks/useTasks.ts`:**
-- Update `calcNextDueDate` to handle custom recurrence by finding the next matching day
-
----
-
-### Feature 5 — Weekly View in Gantt Chart
-
-**`src/components/board/GanttView.tsx`:**
-- Add a view-switcher in the Gantt toolbar: "Week" (alongside existing default)
-- In week mode:
-  - Show exactly 7 columns (Mon–Sun) for the selected week
-  - Add "← Prev" and "Next →" buttons to shift by 7 days
-  - Add "Today" button to snap to current week
-  - Highlight today's column with a distinct background
-  - Each column = 1 day with wider width for readability
-
----
-
-### Feature 6 — Bug Fix: Automation Rules Not Executing
-
-**Root cause:** Rules are saved to the database but there is NO rule evaluation engine anywhere in the code. `useTasks.ts` mutations never check rules after task changes.
-
-**Fix — add rule evaluation in `src/hooks/useTasks.ts`:**
-- Create a `useRuleEngine` helper or inline function that:
-  1. Fetches active rules from the `automation_rules` table
-  2. After `createTask`, `updateTask`, and `moveTask` succeed, evaluates trigger conditions
-  3. For matching rules, executes the action (assign user, move column, add tag, send notification, remove assignee)
-  4. Includes a depth guard (max 1 level) to prevent infinite loops
-  5. Logs rule execution to console for debugging
-
-**Trigger mapping:**
-- `task_created` → fires after `createTask` succeeds
-- `task_assigned` → fires after `updateTask`/`createTask` when `assignee_id` changes to match config
-- `task_moved` → fires after `moveTask` when target column matches config
-- `task_completed` → fires after `moveTask` when column = `done`
-- `tag_added` → fires after tag changes when new tag matches config
-
-**Action execution:**
-- `assign_user` → update task's assignee(s)
-- `move_to_column` → call `reorder_task` RPC
-- `add_tag` → insert into `task_tags`
-- `send_notification` → insert into `notifications`
-- `remove_assignee` → clear assignee(s)
-
----
+- When dragging a task to "Done" column and it has incomplete subtasks, show the same confirmation dialog before completing the move
 
 ### Files Changed / Created
 
 | File | Action |
 |------|--------|
-| Migration SQL | Add `completed_at`, create `task_assignees`, update view |
-| `src/lib/types.ts` | Add `completed_at`, `assignee_ids`, `assignees`, expand `RecurrenceFrequency` |
-| `src/hooks/useTasks.ts` | Paginated done sort, multi-assignee CRUD, rule engine, custom recurrence |
-| `src/components/board/BoardColumn.tsx` | Paginated "See more" for done column |
-| `src/components/board/TaskCardContent.tsx` | Stacked multi-assignee avatars |
-| `src/components/board/NewTaskPanel.tsx` | Multi-select assignee, custom recurrence UI |
-| `src/components/board/TaskDetailPanel.tsx` | Multi-select assignee, custom recurrence UI |
-| `src/components/board/GanttView.tsx` | Larger fonts, fullscreen mode, weekly view |
-| `src/components/board/KanbanBoard.tsx` | Multi-assignee filter, done sort logic |
-| `src/components/board/CalendarView.tsx` | Multi-assignee display |
+| Migration SQL | Create `subtasks` table with RLS |
+| `src/lib/types.ts` | Add `Subtask` type, update `TaskWithDetail` |
+| `src/hooks/useSubtasks.ts` | Create — CRUD for subtasks |
+| `src/hooks/useTasks.ts` | Merge subtasks into tasks, confirmation logic |
+| `src/components/board/TaskDetailPanel.tsx` | Subtask checklist UI + add/delete + completion prompt |
+| `src/components/board/TaskCardContent.tsx` | Subtask progress indicator |
+| `src/components/board/KanbanBoard.tsx` | Completion confirmation on drag-to-done |
 
