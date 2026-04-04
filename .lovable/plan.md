@@ -1,75 +1,65 @@
 
 
-## Plan: Subtask Support
+## Plan: Card Visual Redesign — Bigger, Bolder, Shadow, No Left Border
 
-### Database Migration
+Based on both Dribbble references, the cards need a complete visual overhaul.
 
-```sql
-CREATE TABLE public.subtasks (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  task_id uuid NOT NULL REFERENCES public.tasks(id) ON DELETE CASCADE,
-  title text NOT NULL,
-  done boolean NOT NULL DEFAULT false,
-  assignee_id uuid,
-  position integer NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
+---
 
-ALTER TABLE public.subtasks ENABLE ROW LEVEL SECURITY;
+### Changes to `src/components/board/TaskCardContent.tsx`
 
-CREATE POLICY "subtasks: authenticated select" ON public.subtasks FOR SELECT TO authenticated
-  USING (auth.role() = 'authenticated'::text);
-CREATE POLICY "subtasks: authenticated insert" ON public.subtasks FOR INSERT TO authenticated
-  WITH CHECK (auth.role() = 'authenticated'::text);
-CREATE POLICY "subtasks: authenticated update" ON public.subtasks FOR UPDATE TO authenticated
-  USING (auth.role() = 'authenticated'::text);
-CREATE POLICY "subtasks: authenticated delete" ON public.subtasks FOR DELETE TO authenticated
-  USING (auth.role() = 'authenticated'::text);
-```
+**Card container styling:**
+- Remove the colored left border entirely (`borderLeft: 3px solid ...` gone)
+- Background: solid white `#ffffff` for all cards (no priority-tinted backgrounds)
+- Add box shadow: `0 1px 4px rgba(0,0,0,0.08)` resting, `0 4px 12px rgba(0,0,0,0.12)` on hover
+- Border: `1px solid #f0f0f0` (very subtle)
+- Border-radius: `10px`
+- Padding: `14px 16px`
 
-### Types
+**Card layout (top to bottom), matching the Keitoto reference:**
 
-Add to `src/lib/types.ts`:
-- `Subtask` interface: `{ id, task_id, title, done, assignee_id, position, created_at }`
-- Add `subtasks?: Subtask[]` to `TaskWithDetail`
+1. **Top row**: Status pill (colored dot + column name like "Not Started" / "In Research") on the left, recurrence icon + three-dot menu on the right
+2. **Title**: `16px`, font-weight 600, line-height 1.4
+3. **Brief**: `12px`, 2-line clamp, muted color
+4. **Assignees row**: "Assignees:" label + stacked avatars (size `h-6 w-6`)
+5. **Separator**: thin `1px` line (`#f0f0f0`)
+6. **Footer row**: Due date with calendar icon (`12px`) on left, Priority pill on right (colored text like "High" in red, "Medium" in orange, "Low" in green)
+7. **Bottom meta row** (if applicable): Subtask progress + count
 
-### Data Hook — `src/hooks/useSubtasks.ts` (new)
+**Remove:** Priority dot, priority-tinted backgrounds, colored left border
 
-- `useQuery` fetching all subtasks (or by task_id)
-- `createSubtask` mutation (title, task_id, optional assignee_id)
-- `toggleSubtask` mutation (update `done` field)
-- `deleteSubtask` mutation
-- Invalidate on success
+**Hover:** Background stays white, shadow increases. No background color change.
 
-### Task Hook — `src/hooks/useTasks.ts`
+---
 
-- Query subtasks alongside tasks; merge `subtasks[]` onto each `TaskWithDetail`
-- In `moveTask`: when moving to `done`, check for incomplete subtasks. Add a `confirmCompleteSubtasks` option — if true, batch-update all subtasks to `done = true`
+### Changes to `src/components/board/BoardColumn.tsx`
 
-### UI — Task Detail Panel (`TaskDetailPanel.tsx`)
+- Remove `bg-card`, `border`, `border-border` — columns become transparent containers on the board background
+- Keep `rounded-xl p-3` for spacing
+- Increase header text from `text-xs` to `text-sm`
+- Increase card gap from `space-y-2` to `space-y-3`
+- When `isOver`: use a subtle background tint instead of border highlight
 
-Add a "Subtasks" section below description:
-- Checklist of existing subtasks: checkbox + title (strikethrough when done) + assignee avatar + delete icon (hover)
-- "Add subtask" inline input at bottom with Enter-to-save
-- When parent task is moved to done via the panel's column selector and has incomplete subtasks, show an `AlertDialog` confirmation: "This task has X incomplete subtasks. Mark them all as complete too?" with Yes/No
+---
 
-### UI — Task Card (`TaskCardContent.tsx`)
+### Changes to `src/components/board/KanbanBoard.tsx` (if needed)
 
-- If `task.subtasks?.length > 0`, show a small progress indicator in the footer area: "2/5" with a tiny progress bar (using the existing `Progress` component scaled down)
+- Ensure board background is the light gray (`#f5f5f4` or similar) so borderless columns sit naturally on it
 
-### UI — KanbanBoard / moveTask flow
+---
 
-- When dragging a task to "Done" column and it has incomplete subtasks, show the same confirmation dialog before completing the move
+### Props/Data needed
 
-### Files Changed / Created
+The status pill on the card needs the column label. `TaskCardContent` doesn't currently receive column info, so pass `columnLabel` as a new prop from `BoardColumn` → `TaskCard` → `TaskCardContent`, along with `columnColor`.
 
-| File | Action |
+---
+
+### Files Changed
+
+| File | Change |
 |------|--------|
-| Migration SQL | Create `subtasks` table with RLS |
-| `src/lib/types.ts` | Add `Subtask` type, update `TaskWithDetail` |
-| `src/hooks/useSubtasks.ts` | Create — CRUD for subtasks |
-| `src/hooks/useTasks.ts` | Merge subtasks into tasks, confirmation logic |
-| `src/components/board/TaskDetailPanel.tsx` | Subtask checklist UI + add/delete + completion prompt |
-| `src/components/board/TaskCardContent.tsx` | Subtask progress indicator |
-| `src/components/board/KanbanBoard.tsx` | Completion confirmation on drag-to-done |
+| `src/components/board/TaskCardContent.tsx` | Full visual redesign: white bg, shadow, 16px title, status pill, priority pill, separator, no left border |
+| `src/components/board/TaskCard.tsx` | Pass `columnLabel` and `columnColor` props through |
+| `src/components/board/BoardColumn.tsx` | Remove white card/border, transparent columns, pass column info to cards |
+| `src/components/board/KanbanBoard.tsx` | Ensure board has light gray background |
 
