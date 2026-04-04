@@ -79,16 +79,6 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         transform: isOverlay ? 'rotate(2deg) scale(1.02)' : undefined,
         transition: 'box-shadow 200ms ease, background-color 200ms ease',
       }}
-      onMouseEnter={(e) => {
-        if (!isOverlay) {
-          e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.10)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isOverlay) {
-          e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)';
-        }
-      }}
       onClick={(e) => {
         if (!menuOpen && !isOverlay) onClick();
       }}
