@@ -9,9 +9,11 @@ interface Props {
   onClick: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  columnLabel?: string;
+  columnColor?: string;
 }
 
-export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
+export function TaskCard({ task, isDone, onClick, onEdit, onDelete, columnLabel, columnColor }: Props) {
   const {
     attributes,
     listeners,
@@ -44,6 +46,8 @@ export function TaskCard({ task, isDone, onClick, onEdit, onDelete }: Props) {
         onClick={onClick}
         onEdit={onEdit}
         onDelete={onDelete}
+        columnLabel={columnLabel}
+        columnColor={columnColor}
       />
     </div>
   );

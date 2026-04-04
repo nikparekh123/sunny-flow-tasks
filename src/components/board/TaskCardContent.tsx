@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MoreHorizontal, Repeat, ListChecks } from 'lucide-react';
+import { MoreHorizontal, Repeat, ListChecks, Calendar } from 'lucide-react';
 import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { PRIORITY_COLORS } from '@/lib/constants';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -14,9 +14,17 @@ interface Props {
   onDelete: () => void;
   isDragging?: boolean;
   isOverlay?: boolean;
+  columnLabel?: string;
+  columnColor?: string;
 }
 
-export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDragging, isOverlay }: Props) {
+const PRIORITY_LABELS: Record<string, string> = {
+  high: 'High',
+  med: 'Medium',
+  low: 'Low',
+};
+
+export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDragging, isOverlay, columnLabel, columnColor }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   const today = startOfDay(new Date());
@@ -35,11 +43,11 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
   };
 
   const getDueDateColor = () => {
-    if (isDone) return undefined;
+    if (isDone) return 'hsl(var(--muted-foreground))';
     if (isToday) return '#639922';
     if (isTomorrow) return 'hsl(var(--muted-foreground))';
     if (isOverdue) return '#A32D2D';
-    return undefined;
+    return 'hsl(var(--muted-foreground))';
   };
 
   const assignees = task.assignees || [];
@@ -52,38 +60,33 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
   const subtaskDone = subtasks.filter(s => s.done).length;
   const subtaskPercent = subtaskTotal > 0 ? (subtaskDone / subtaskTotal) * 100 : 0;
 
+  const hasFooter = task.due_date || task.priority;
+  const hasBottomMeta = subtaskTotal > 0;
+
   return (
     <div
       className="group/card relative"
       style={{
-        backgroundColor: isOverlay
-          ? '#fff'
-          : task.priority === 'high'
-            ? 'rgba(226,75,74,0.04)'
-            : task.priority === 'med'
-              ? 'rgba(239,159,39,0.04)'
-              : 'rgba(99,153,34,0.04)',
-        border: isOverlay ? '1px solid #d4d4d4' : '0.5px solid #ebebeb',
-        borderLeft: isOverlay
-          ? undefined
-          : `3px solid ${PRIORITY_COLORS[task.priority]}`,
-        borderRadius: '8px',
-        padding: '10px',
-        opacity: isDone ? 0.5 : 1,
+        backgroundColor: '#ffffff',
+        border: '1px solid hsl(var(--border))',
+        borderRadius: '10px',
+        padding: '14px 16px',
+        opacity: isDone ? 0.55 : 1,
         cursor: isOverlay ? 'grabbing' : 'grab',
-        boxShadow: isOverlay ? '0 8px 24px rgba(0,0,0,0.12)' : 'none',
+        boxShadow: isOverlay
+          ? '0 8px 24px rgba(0,0,0,0.15)'
+          : '0 1px 4px rgba(0,0,0,0.06)',
         transform: isOverlay ? 'rotate(2deg) scale(1.02)' : undefined,
+        transition: 'box-shadow 200ms ease, background-color 200ms ease',
       }}
       onMouseEnter={(e) => {
         if (!isOverlay) {
-          e.currentTarget.style.backgroundColor = '#f3f3f3';
-          e.currentTarget.style.borderColor = '#d4d4d4';
+          e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.10)';
         }
       }}
       onMouseLeave={(e) => {
         if (!isOverlay) {
-          e.currentTarget.style.backgroundColor = '#f7f7f7';
-          e.currentTarget.style.borderColor = '#ebebeb';
+          e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)';
         }
       }}
       onClick={(e) => {
@@ -92,43 +95,48 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       role="button"
       tabIndex={0}
     >
-      {/* Priority dot + recurring icon */}
-      <div className="absolute flex items-center gap-1 transition-[right] duration-150 group-hover/card:right-[30px]" style={{ top: '12px', right: '10px' }}>
-        {task.recurrence && (
-          <Repeat className="w-2.5 h-2.5 text-muted-foreground" />
-        )}
-        <div
-          style={{
-            width: '7px',
-            height: '7px',
-            borderRadius: '50%',
-            backgroundColor: PRIORITY_COLORS[task.priority],
-          }}
-        />
-      </div>
-
-      {/* ⋯ menu button */}
-      {!isOverlay && (
-        <div
-          className="absolute hidden group-hover/card:flex items-center justify-center"
-          style={{
-            top: '8px',
-            right: '8px',
-            width: '20px',
-            height: '20px',
-            borderRadius: '4px',
-            backgroundColor: '#ebebeb',
-            border: '0.5px solid #ddd',
-            cursor: 'pointer',
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen(!menuOpen);
-          }}
-        >
-          <MoreHorizontal style={{ width: '11px', height: '11px', color: '#999' }} />
+      {/* Row 1: Status pill + recurrence + menu */}
+      <div className="flex items-center justify-between mb-2.5">
+        <div className="flex items-center gap-2">
+          {columnLabel && (
+            <span
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: (columnColor || '#888') + '18',
+                color: columnColor || 'hsl(var(--muted-foreground))',
+              }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: columnColor || '#888' }}
+              />
+              {columnLabel}
+            </span>
+          )}
+          {task.recurrence && (
+            <Repeat className="w-3.5 h-3.5 text-muted-foreground" />
+          )}
         </div>
-      )}
+
+        {/* ⋯ menu button */}
+        {!isOverlay && (
+          <div
+            className="hidden group-hover/card:flex items-center justify-center rounded cursor-pointer"
+            style={{
+              width: '24px',
+              height: '24px',
+              backgroundColor: 'hsl(var(--muted))',
+              border: '1px solid hsl(var(--border))',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(!menuOpen);
+            }}
+          >
+            <MoreHorizontal style={{ width: '13px', height: '13px', color: 'hsl(var(--muted-foreground))' }} />
+          </div>
+        )}
+      </div>
 
       {/* Dropdown menu */}
       {menuOpen && (
@@ -137,14 +145,14 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           <div
             className="absolute z-50 animate-scale-in"
             style={{
-              top: '30px',
-              right: '8px',
+              top: '42px',
+              right: '12px',
               backgroundColor: '#fff',
-              border: '0.5px solid #ebebeb',
+              border: '1px solid hsl(var(--border))',
               borderRadius: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
               overflow: 'hidden',
-              minWidth: '100px',
+              minWidth: '110px',
             }}
           >
             <button
@@ -167,14 +175,13 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         </>
       )}
 
-      {/* Title */}
+      {/* Row 2: Title */}
       <p
         style={{
-          fontSize: '12px',
-          fontWeight: 500,
+          fontSize: '16px',
+          fontWeight: 600,
           color: 'hsl(var(--foreground))',
           lineHeight: 1.4,
-          paddingRight: '16px',
           textDecoration: isDone ? 'line-through' : 'none',
           margin: 0,
         }}
@@ -182,14 +189,14 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         {task.title}
       </p>
 
-      {/* Brief preview */}
+      {/* Row 3: Brief */}
       {task.brief && (
         <p
           className="text-muted-foreground"
           style={{
-            fontSize: '10px',
-            lineHeight: 1.3,
-            marginTop: '3px',
+            fontSize: '12px',
+            lineHeight: 1.4,
+            marginTop: '6px',
             display: '-webkit-box',
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
@@ -202,16 +209,17 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
 
       {/* Tags */}
       {task.tags && task.tags.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '8px' }}>
           {task.tags.map((tag) => (
             <span
               key={tag.id}
               style={{
-                fontSize: '10px',
-                padding: '1px 6px',
+                fontSize: '11px',
+                padding: '2px 8px',
                 borderRadius: '10px',
                 backgroundColor: (tag.color || '#888') + '20',
                 color: tag.color || '#888',
+                fontWeight: 500,
               }}
             >
               #{tag.name}
@@ -220,46 +228,24 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         </div>
       )}
 
-      {/* Subtask progress */}
-      {subtaskTotal > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
-          <ListChecks className="w-3 h-3 text-muted-foreground flex-shrink-0" />
-          <Progress value={subtaskPercent} className="h-1.5 flex-1" />
-          <span className="text-[10px] text-muted-foreground whitespace-nowrap">{subtaskDone}/{subtaskTotal}</span>
-        </div>
-      )}
-
-      {/* Footer */}
-      {(task.due_date || assignees.length > 0 || task.assignee_initials) && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px' }}>
-          {task.due_date ? (
-            <span
-              style={{
-                fontSize: '10px',
-                color: getDueDateColor(),
-                fontWeight: isToday ? 500 : undefined,
-              }}
-              className={getDueDateColor() ? '' : 'text-muted-foreground'}
-            >
-              {getDueDateDisplay()}
-            </span>
-          ) : <span />}
-
-          {/* Multi-assignee avatars */}
+      {/* Row 4: Assignees */}
+      {(assignees.length > 0 || task.assignee_initials) && (
+        <div className="flex items-center gap-2 mt-2.5">
+          <span className="text-[11px] text-muted-foreground">Assignees:</span>
           {assignees.length > 0 ? (
-            <div className="flex items-center" style={{ marginLeft: 'auto' }}>
+            <div className="flex items-center">
               {visibleAssignees.map((a, i) => (
                 <Avatar
                   key={a.id}
-                  className="h-5 w-5 border border-card"
+                  className="h-6 w-6 border-2 border-white"
                   style={{ marginLeft: i > 0 ? '-6px' : 0, zIndex: maxVisible - i }}
                 >
                   <AvatarImage src={a.avatar_url || ''} />
                   <AvatarFallback
                     style={{
                       backgroundColor: a.color || '#378ADD',
-                      fontSize: '8px',
-                      fontWeight: 500,
+                      fontSize: '9px',
+                      fontWeight: 600,
                       color: '#fff',
                     }}
                   >
@@ -268,17 +254,17 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
                 </Avatar>
               ))}
               {overflowCount > 0 && (
-                <span className="text-[8px] text-muted-foreground ml-0.5">+{overflowCount}</span>
+                <span className="text-[9px] text-muted-foreground ml-1">+{overflowCount}</span>
               )}
             </div>
           ) : task.assignee_initials ? (
-            <Avatar className="h-5 w-5">
+            <Avatar className="h-6 w-6">
               <AvatarImage src={task.assignee_avatar_url || ''} />
               <AvatarFallback
                 style={{
                   backgroundColor: task.assignee_color || '#378ADD',
                   fontSize: '9px',
-                  fontWeight: 500,
+                  fontWeight: 600,
                   color: '#fff',
                 }}
               >
@@ -286,6 +272,56 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
               </AvatarFallback>
             </Avatar>
           ) : null}
+        </div>
+      )}
+
+      {/* Separator */}
+      {(hasFooter || hasBottomMeta) && (
+        <div
+          style={{
+            height: '1px',
+            backgroundColor: 'hsl(var(--border))',
+            marginTop: '10px',
+            marginBottom: '10px',
+          }}
+        />
+      )}
+
+      {/* Row 5: Footer — due date + priority pill */}
+      {hasFooter && (
+        <div className="flex items-center justify-between">
+          {task.due_date ? (
+            <span
+              className="inline-flex items-center gap-1"
+              style={{
+                fontSize: '12px',
+                color: getDueDateColor(),
+                fontWeight: isToday || isOverdue ? 500 : 400,
+              }}
+            >
+              <Calendar className="w-3 h-3" />
+              {getDueDateDisplay()}
+            </span>
+          ) : <span />}
+
+          <span
+            className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+            style={{
+              color: PRIORITY_COLORS[task.priority],
+              backgroundColor: PRIORITY_COLORS[task.priority] + '15',
+            }}
+          >
+            {PRIORITY_LABELS[task.priority]}
+          </span>
+        </div>
+      )}
+
+      {/* Row 6: Subtask progress */}
+      {hasBottomMeta && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: hasFooter ? '8px' : '0' }}>
+          <ListChecks className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <Progress value={subtaskPercent} className="h-1.5 flex-1" />
+          <span className="text-[11px] text-muted-foreground whitespace-nowrap font-medium">{subtaskDone}/{subtaskTotal}</span>
         </div>
       )}
     </div>

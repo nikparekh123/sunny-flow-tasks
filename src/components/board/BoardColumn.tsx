@@ -22,7 +22,6 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
   const PAGE_SIZE = 20;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  // Sort done tasks by completed_at descending
   const sortedTasks = isDone
     ? [...tasks].sort((a, b) => {
         const aDate = a.completed_at ? new Date(a.completed_at).getTime() : 0;
@@ -36,10 +35,8 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
 
   return (
     <div
-      className={`min-w-[240px] lg:min-w-0 rounded-xl p-3 bg-card border transition-all duration-200 h-[calc(100vh-132px)] flex flex-col ${
-        isOver
-          ? 'border-ring/40 bg-accent/40 scale-[1.01]'
-          : 'border-border'
+      className={`min-w-[240px] lg:min-w-0 rounded-xl p-3 transition-all duration-200 h-[calc(100vh-132px)] flex flex-col ${
+        isOver ? 'bg-accent/30' : ''
       }`}
     >
       <div className="flex items-center gap-2 px-1 mb-3">
@@ -50,15 +47,15 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
             transform: isOver ? 'scale(1.25)' : 'scale(1)',
           }}
         />
-        <span className="text-xs font-semibold text-foreground">{label}</span>
-        <span className="ml-auto px-1.5 py-0.5 rounded-full bg-secondary text-[10px] text-muted-foreground font-medium">
+        <span className="text-sm font-semibold text-foreground">{label}</span>
+        <span className="ml-auto px-1.5 py-0.5 rounded-full bg-secondary text-[11px] text-muted-foreground font-medium">
           {tasks.length}
         </span>
       </div>
 
       <div
         ref={setNodeRef}
-        className="space-y-2 min-h-[60px] flex-1 overflow-y-auto pr-1 transition-all duration-200"
+        className="space-y-3 min-h-[60px] flex-1 overflow-y-auto pr-1 transition-all duration-200"
       >
         <SortableContext items={displayedTasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
           {displayedTasks.map((task) => (
@@ -69,6 +66,8 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
               onClick={() => onCardClick(task)}
               onEdit={() => onCardEdit(task)}
               onDelete={() => onCardDelete(task.id)}
+              columnLabel={label}
+              columnColor={color}
             />
           ))}
         </SortableContext>
@@ -77,7 +76,7 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
           <Button
             variant="ghost"
             size="sm"
-            className="w-full text-[10px] text-muted-foreground hover:text-foreground h-7"
+            className="w-full text-[11px] text-muted-foreground hover:text-foreground h-7"
             onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
           >
             See more ({sortedTasks.length - visibleCount} remaining)
@@ -86,7 +85,7 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
 
         {tasks.length === 0 && isOver && (
           <div className="border-2 border-dashed border-ring/30 rounded-lg h-16 flex items-center justify-center animate-scale-in">
-            <span className="text-[10px] text-muted-foreground">Drop here</span>
+            <span className="text-[11px] text-muted-foreground">Drop here</span>
           </div>
         )}
       </div>
