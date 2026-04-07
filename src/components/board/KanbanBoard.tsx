@@ -206,7 +206,7 @@ export function KanbanBoard() {
       />
 
       {activeView === 'board' && (
-        <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto bg-muted/40">
+        <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto" style={{ backgroundColor: 'var(--owl-page)' }}>
           <DndContext
             sensors={sensors}
             collisionDetection={customCollision}
