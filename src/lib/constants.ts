@@ -10,7 +10,7 @@ export const COLUMNS: { id: TaskColumn; label: string; color: string }[] = [
 ];
 
 export const PRIORITY_COLORS: Record<string, string> = {
-  high: '#E24B4A',
+  high: '#d2e632',
   med: '#EF9F27',
   low: '#639922',
 };
