@@ -63,19 +63,23 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
   const hasFooter = task.due_date || task.priority;
   const hasBottomMeta = subtaskTotal > 0;
 
+  const isHighPriority = task.priority === 'high' && !isDone;
+
   return (
     <div
       className="group/card relative"
       style={{
-        backgroundColor: 'var(--owl-card)',
-        border: '1px solid var(--owl-border)',
+        backgroundColor: isHighPriority ? 'rgba(210, 230, 50, 0.08)' : 'var(--owl-card)',
+        border: isHighPriority ? '1px solid rgba(210, 230, 50, 0.35)' : '1px solid var(--owl-border)',
         borderRadius: 'var(--owl-radius-lg)',
         padding: '14px 16px',
         opacity: isDone ? 0.55 : 1,
         cursor: isOverlay ? 'grabbing' : 'grab',
         boxShadow: isOverlay
           ? '0 8px 24px rgba(0,0,0,0.3)'
-          : '0 1px 4px rgba(0,0,0,0.2)',
+          : isHighPriority
+            ? '0 1px 8px rgba(210, 230, 50, 0.12)'
+            : '0 1px 4px rgba(0,0,0,0.2)',
         transform: isOverlay ? 'rotate(2deg) scale(1.02)' : undefined,
       }}
       onClick={(e) => {
