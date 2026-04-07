@@ -186,7 +186,7 @@ export function KanbanBoard() {
   }
 
   return (
-    <div className="flex-1 bg-background flex flex-col">
+    <div className="flex-1 flex flex-col" style={{ backgroundColor: 'var(--owl-page)' }}>
       <TopBar
         tags={tags}
         members={members}
