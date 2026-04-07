@@ -87,13 +87,17 @@ export function TopBar({
         <h1 className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--owl-text-primary)' }}>SunnyFi Board</h1>
 
         {/* View toggle */}
-        <div className="flex items-center gap-0.5 bg-secondary rounded-md p-0.5">
+        <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: 'var(--owl-card)' }}>
           {viewButtons.map(({ mode, icon: Icon, label }) => (
             <Button
               key={mode}
               variant="ghost"
               size="sm"
-              className={`h-6 px-2 text-[10px] gap-1 ${activeView === mode ? 'bg-card shadow-sm' : 'hover:bg-card/50'}`}
+              className={`h-6 px-2 text-[10px] gap-1 ${activeView === mode ? 'shadow-sm' : ''}`}
+              style={{
+                backgroundColor: activeView === mode ? 'var(--owl-surface)' : 'transparent',
+                color: activeView === mode ? 'var(--owl-neon)' : 'var(--owl-text-muted)',
+              }}
               onClick={() => onViewChange(mode)}
               title={label}
             >
