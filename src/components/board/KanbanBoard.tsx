@@ -176,10 +176,10 @@ export function KanbanBoard() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: 'var(--owl-page)' }}>
         <div className="flex flex-col items-center gap-3">
-          <div className="h-6 w-6 rounded-full border-2 border-ring/20 border-t-ring animate-spin" />
-          <p className="text-sm text-muted-foreground">Loading board…</p>
+          <div className="h-6 w-6 rounded-full border-2 animate-spin" style={{ borderColor: 'var(--owl-dusk)', borderTopColor: 'var(--owl-neon)' }} />
+          <p className="text-sm" style={{ color: 'var(--owl-text-secondary)' }}>Loading board…</p>
         </div>
       </div>
     );

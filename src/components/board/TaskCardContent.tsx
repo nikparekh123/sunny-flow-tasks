@@ -43,11 +43,11 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
   };
 
   const getDueDateColor = () => {
-    if (isDone) return 'hsl(var(--muted-foreground))';
-    if (isToday) return '#639922';
-    if (isTomorrow) return 'hsl(var(--muted-foreground))';
-    if (isOverdue) return '#A32D2D';
-    return 'hsl(var(--muted-foreground))';
+    if (isDone) return 'var(--owl-text-muted)';
+    if (isToday) return 'var(--owl-positive)';
+    if (isTomorrow) return 'var(--owl-text-secondary)';
+    if (isOverdue) return 'var(--owl-negative)';
+    return 'var(--owl-text-secondary)';
   };
 
   const assignees = task.assignees || [];
@@ -67,17 +67,16 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
     <div
       className="group/card relative"
       style={{
-        backgroundColor: '#ffffff',
-        border: '1px solid hsl(var(--border))',
-        borderRadius: '10px',
+        backgroundColor: 'var(--owl-card)',
+        border: '1px solid var(--owl-border)',
+        borderRadius: 'var(--owl-radius-lg)',
         padding: '14px 16px',
         opacity: isDone ? 0.55 : 1,
         cursor: isOverlay ? 'grabbing' : 'grab',
         boxShadow: isOverlay
-          ? '0 8px 24px rgba(0,0,0,0.15)'
-          : '0 1px 4px rgba(0,0,0,0.06)',
+          ? '0 8px 24px rgba(0,0,0,0.3)'
+          : '0 1px 4px rgba(0,0,0,0.2)',
         transform: isOverlay ? 'rotate(2deg) scale(1.02)' : undefined,
-        transition: 'box-shadow 200ms ease, background-color 200ms ease',
       }}
       onClick={(e) => {
         if (!menuOpen && !isOverlay) onClick();
@@ -93,7 +92,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
               className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full"
               style={{
                 backgroundColor: (columnColor || '#888') + '18',
-                color: columnColor || 'hsl(var(--muted-foreground))',
+                color: columnColor || 'var(--owl-text-secondary)',
               }}
             >
               <span
@@ -104,7 +103,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
             </span>
           )}
           {task.recurrence && (
-            <Repeat className="w-3.5 h-3.5 text-muted-foreground" />
+            <Repeat className="w-3.5 h-3.5" style={{ color: 'var(--owl-text-muted)' }} />
           )}
         </div>
 
@@ -115,15 +114,15 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
             style={{
               width: '24px',
               height: '24px',
-              backgroundColor: 'hsl(var(--muted))',
-              border: '1px solid hsl(var(--border))',
+              backgroundColor: 'var(--owl-surface)',
+              border: '1px solid var(--owl-border)',
             }}
             onClick={(e) => {
               e.stopPropagation();
               setMenuOpen(!menuOpen);
             }}
           >
-            <MoreHorizontal style={{ width: '13px', height: '13px', color: 'hsl(var(--muted-foreground))' }} />
+            <MoreHorizontal style={{ width: '13px', height: '13px', color: 'var(--owl-text-secondary)' }} />
           </div>
         )}
       </div>
@@ -137,26 +136,28 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
             style={{
               top: '42px',
               right: '12px',
-              backgroundColor: '#fff',
-              border: '1px solid hsl(var(--border))',
-              borderRadius: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              backgroundColor: 'var(--owl-surface)',
+              border: '1px solid var(--owl-border)',
+              borderRadius: 'var(--owl-radius-md)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
               overflow: 'hidden',
               minWidth: '110px',
             }}
           >
             <button
-              className="w-full text-left block hover:bg-secondary"
-              style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))', padding: '8px 14px' }}
+              className="w-full text-left block"
+              style={{ fontSize: '12px', color: 'var(--owl-text-secondary)', padding: '8px 14px' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(30,90,80,0.15)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
               onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(); }}
             >
               Edit
             </button>
             <button
               className="w-full text-left block"
-              style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))', padding: '8px 14px' }}
-              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#FCEBEB'; e.currentTarget.style.color = '#A32D2D'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'hsl(var(--muted-foreground))'; }}
+              style={{ fontSize: '12px', color: 'var(--owl-text-secondary)', padding: '8px 14px' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(232,112,96,0.15)'; e.currentTarget.style.color = 'var(--owl-negative)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; e.currentTarget.style.color = 'var(--owl-text-secondary)'; }}
               onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete(); }}
             >
               Delete
@@ -170,7 +171,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         style={{
           fontSize: '16px',
           fontWeight: 600,
-          color: 'hsl(var(--foreground))',
+          color: 'var(--owl-text-primary)',
           lineHeight: 1.4,
           textDecoration: isDone ? 'line-through' : 'none',
           margin: 0,
@@ -182,11 +183,11 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       {/* Row 3: Brief */}
       {task.brief && (
         <p
-          className="text-muted-foreground"
           style={{
             fontSize: '12px',
             lineHeight: 1.4,
             marginTop: '6px',
+            color: 'var(--owl-text-secondary)',
             display: '-webkit-box',
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
@@ -208,7 +209,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
                 padding: '2px 8px',
                 borderRadius: '10px',
                 backgroundColor: (tag.color || '#888') + '20',
-                color: tag.color || '#888',
+                color: tag.color || 'var(--owl-text-secondary)',
                 fontWeight: 500,
               }}
             >
@@ -221,14 +222,18 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       {/* Row 4: Assignees */}
       {(assignees.length > 0 || task.assignee_initials) && (
         <div className="flex items-center gap-2 mt-2.5">
-          <span className="text-[11px] text-muted-foreground">Assignees:</span>
+          <span style={{ fontSize: '11px', color: 'var(--owl-text-muted)' }}>Assignees:</span>
           {assignees.length > 0 ? (
             <div className="flex items-center">
               {visibleAssignees.map((a, i) => (
                 <Avatar
                   key={a.id}
-                  className="h-6 w-6 border-2 border-white"
-                  style={{ marginLeft: i > 0 ? '-6px' : 0, zIndex: maxVisible - i }}
+                  className="h-6 w-6"
+                  style={{
+                    marginLeft: i > 0 ? '-6px' : 0,
+                    zIndex: maxVisible - i,
+                    border: '2px solid var(--owl-surface)',
+                  }}
                 >
                   <AvatarImage src={a.avatar_url || ''} />
                   <AvatarFallback
@@ -244,7 +249,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
                 </Avatar>
               ))}
               {overflowCount > 0 && (
-                <span className="text-[9px] text-muted-foreground ml-1">+{overflowCount}</span>
+                <span style={{ fontSize: '9px', color: 'var(--owl-text-muted)', marginLeft: '4px' }}>+{overflowCount}</span>
               )}
             </div>
           ) : task.assignee_initials ? (
@@ -270,7 +275,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         <div
           style={{
             height: '1px',
-            backgroundColor: 'hsl(var(--border))',
+            backgroundColor: 'var(--owl-border)',
             marginTop: '10px',
             marginBottom: '10px',
           }}
@@ -309,9 +314,9 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       {/* Row 6: Subtask progress */}
       {hasBottomMeta && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: hasFooter ? '8px' : '0' }}>
-          <ListChecks className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+          <ListChecks className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--owl-text-muted)' }} />
           <Progress value={subtaskPercent} className="h-1.5 flex-1" />
-          <span className="text-[11px] text-muted-foreground whitespace-nowrap font-medium">{subtaskDone}/{subtaskTotal}</span>
+          <span style={{ fontSize: '11px', color: 'var(--owl-text-muted)', whiteSpace: 'nowrap', fontWeight: 500 }}>{subtaskDone}/{subtaskTotal}</span>
         </div>
       )}
     </div>

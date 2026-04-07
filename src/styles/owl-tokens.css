@@ -1,0 +1,40 @@
+:root {
+  /* Canvas & surfaces */
+  --owl-page:       #0a2828;
+  --owl-surface:    #0f3333;
+  --owl-card:       rgba(15, 51, 51, 0.55);
+  --owl-elevated:   #1e5a50;
+  --owl-dusk:       #325050;
+
+  /* Text */
+  --owl-text-primary:   #faf5f0;
+  --owl-text-secondary: #a8c4c0;
+  --owl-text-muted:     #468278;
+  --owl-text-disabled:  #325050;
+
+  /* Semantic */
+  --owl-positive:   #a8d4a0;
+  --owl-negative:   #e87060;
+  --owl-neon:       #d2e632;
+  --owl-neon-dark:  #c8d820;
+  --owl-warning:    #e0c060;
+
+  /* Borders */
+  --owl-border:     rgba(30, 90, 80, 0.35);
+  --owl-border-mid: rgba(30, 90, 80, 0.5);
+
+  /* Animations */
+  --owl-transition: 0.15s ease;
+  --owl-transition-md: 0.25s ease;
+
+  /* Radius */
+  --owl-radius-sm: 6px;
+  --owl-radius-md: 8px;
+  --owl-radius-lg: 10px;
+  --owl-radius-xl: 12px;
+}
+
+/* Animations */
+@keyframes owl-pulse    { 0%,100%{opacity:1} 50%{opacity:.35} }
+@keyframes owl-fade-up  { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes owl-slide-in { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }

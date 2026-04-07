@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600&display=swap');
+@import './styles/owl-tokens.css';
 
 @tailwind base;
 @tailwind components;
@@ -6,59 +7,61 @@
 
 @layer base {
   :root {
-    --background: 40 7% 97%;
-    --foreground: 0 0% 10%;
+    --background: 170 60% 6%;
+    --foreground: 30 50% 96%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 10%;
+    --card: 170 54% 13%;
+    --card-foreground: 30 50% 96%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 10%;
+    --popover: 170 54% 13%;
+    --popover-foreground: 30 50% 96%;
 
-    --primary: 0 0% 10%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 66 75% 52%;
+    --primary-foreground: 170 60% 6%;
 
-    --secondary: 40 5% 93%;
-    --secondary-foreground: 0 0% 10%;
+    --secondary: 170 25% 25%;
+    --secondary-foreground: 30 50% 96%;
 
-    --muted: 40 5% 93%;
-    --muted-foreground: 0 0% 42%;
+    --muted: 170 25% 25%;
+    --muted-foreground: 165 25% 38%;
 
-    --accent: 40 5% 93%;
-    --accent-foreground: 0 0% 10%;
+    --accent: 170 25% 25%;
+    --accent-foreground: 30 50% 96%;
 
-    --destructive: 4 84% 60%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 8 72% 58%;
+    --destructive-foreground: 30 50% 96%;
 
-    --border: 40 5% 91%;
-    --input: 40 5% 91%;
-    --ring: 0 0% 10%;
+    --border: 170 50% 22%;
+    --input: 170 50% 22%;
+    --ring: 66 75% 52%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 170 60% 6%;
+    --sidebar-foreground: 30 50% 96%;
+    --sidebar-primary: 66 75% 52%;
+    --sidebar-primary-foreground: 170 60% 6%;
+    --sidebar-accent: 170 25% 25%;
+    --sidebar-accent-foreground: 30 50% 96%;
+    --sidebar-border: 170 50% 22%;
+    --sidebar-ring: 66 75% 52%;
 
-    --board-bg: 40 7% 97%;
-    --card-border: 0 0% 91%;
-    --card-border-hover: 0 0% 82%;
-    --text-tertiary: 0 0% 60%;
+    --board-bg: 170 60% 6%;
+    --card-border: 170 50% 22%;
+    --card-border-hover: 170 40% 30%;
+    --text-tertiary: 165 25% 38%;
   }
 }
 
 @layer base {
   * {
     @apply border-border;
+    box-sizing: border-box;
   }
 
   body {
-    @apply bg-background text-foreground;
-    font-family: 'Inter', sans-serif;
+    background: var(--owl-page);
+    color: var(--owl-text-primary);
+    font-family: 'Work Sans', system-ui, sans-serif;
   }
 }

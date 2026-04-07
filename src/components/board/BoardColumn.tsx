@@ -36,7 +36,7 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
   return (
     <div
       className={`min-w-[240px] lg:min-w-0 rounded-xl p-3 transition-all duration-200 h-[calc(100vh-132px)] flex flex-col ${
-        isOver ? 'bg-accent/30' : ''
+        isOver ? 'bg-accent/20' : ''
       }`}
     >
       <div className="flex items-center gap-2 px-1 mb-3">
@@ -47,8 +47,11 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
             transform: isOver ? 'scale(1.25)' : 'scale(1)',
           }}
         />
-        <span className="text-sm font-semibold text-foreground">{label}</span>
-        <span className="ml-auto px-1.5 py-0.5 rounded-full bg-secondary text-[11px] text-muted-foreground font-medium">
+        <span className="text-sm font-semibold" style={{ color: 'var(--owl-text-primary)' }}>{label}</span>
+        <span
+          className="ml-auto px-1.5 py-0.5 rounded-full text-[11px] font-medium"
+          style={{ backgroundColor: 'var(--owl-card)', color: 'var(--owl-text-muted)' }}
+        >
           {tasks.length}
         </span>
       </div>
@@ -76,7 +79,8 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
           <Button
             variant="ghost"
             size="sm"
-            className="w-full text-[11px] text-muted-foreground hover:text-foreground h-7"
+            className="w-full text-[11px] h-7"
+            style={{ color: 'var(--owl-text-muted)' }}
             onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
           >
             See more ({sortedTasks.length - visibleCount} remaining)
@@ -84,8 +88,11 @@ export function BoardColumn({ id, label, color, tasks, isOver, onCardClick, onCa
         )}
 
         {tasks.length === 0 && isOver && (
-          <div className="border-2 border-dashed border-ring/30 rounded-lg h-16 flex items-center justify-center animate-scale-in">
-            <span className="text-[11px] text-muted-foreground">Drop here</span>
+          <div
+            className="rounded-lg h-16 flex items-center justify-center animate-scale-in"
+            style={{ border: '2px dashed var(--owl-border-mid)' }}
+          >
+            <span style={{ fontSize: '11px', color: 'var(--owl-text-muted)' }}>Drop here</span>
           </div>
         )}
       </div>
