@@ -114,7 +114,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         {/* ⋯ menu button */}
         {!isOverlay && (
           <div
-            className="hidden group-hover/card:flex items-center justify-center rounded cursor-pointer"
+            className="flex items-center justify-center rounded cursor-pointer opacity-0 group-hover/card:opacity-100 transition-opacity duration-150"
             style={{
               width: '24px',
               height: '24px',
