@@ -223,7 +223,7 @@ export function TopBar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button size="sm" className="h-7 text-[11px] gap-1" onClick={() => setShowNewTask(true)}>
+        <Button size="sm" className="h-7 text-[11px] gap-1" style={{ backgroundColor: 'var(--owl-neon)', color: 'var(--owl-page)' }} onClick={() => setShowNewTask(true)}>
           <Plus className="w-3 h-3" />
           New task
         </Button>
