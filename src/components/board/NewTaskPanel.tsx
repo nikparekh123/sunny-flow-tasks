@@ -109,13 +109,14 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
     <div className="fixed inset-0 z-50 flex justify-end">
       <div
         className={`absolute inset-0 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`}
-        style={{ backgroundColor: 'rgba(0,0,0,0.2)' }}
+        style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
         onClick={handleClose}
       />
       <div
-        className={`relative w-full max-w-md bg-card shadow-xl border-l border-border overflow-y-auto transition-transform duration-250 ease-out ${
+        className={`relative w-full max-w-md shadow-xl overflow-y-auto transition-transform duration-250 ease-out ${
           isClosing ? 'translate-x-full' : 'animate-slide-in-right'
         }`}
+        style={{ backgroundColor: 'var(--owl-surface)', borderLeft: '1px solid var(--owl-border)' }}
       >
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-sm font-medium text-foreground">New task</h2>

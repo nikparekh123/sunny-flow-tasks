@@ -176,17 +176,17 @@ export function KanbanBoard() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: 'var(--owl-page)' }}>
         <div className="flex flex-col items-center gap-3">
-          <div className="h-6 w-6 rounded-full border-2 border-ring/20 border-t-ring animate-spin" />
-          <p className="text-sm text-muted-foreground">Loading board…</p>
+          <div className="h-6 w-6 rounded-full border-2 animate-spin" style={{ borderColor: 'var(--owl-dusk)', borderTopColor: 'var(--owl-neon)' }} />
+          <p className="text-sm" style={{ color: 'var(--owl-text-secondary)' }}>Loading board…</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 bg-background flex flex-col">
+    <div className="flex-1 flex flex-col" style={{ backgroundColor: 'var(--owl-page)' }}>
       <TopBar
         tags={tags}
         members={members}
@@ -206,7 +206,7 @@ export function KanbanBoard() {
       />
 
       {activeView === 'board' && (
-        <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto bg-muted/40">
+        <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto" style={{ backgroundColor: 'var(--owl-page)' }}>
           <DndContext
             sensors={sensors}
             collisionDetection={customCollision}

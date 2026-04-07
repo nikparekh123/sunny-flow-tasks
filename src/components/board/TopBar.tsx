@@ -83,17 +83,21 @@ export function TopBar({
 
   return (
     <>
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-card">
-        <h1 className="text-sm font-semibold text-foreground whitespace-nowrap">SunnyFi Board</h1>
+      <div className="flex items-center gap-3 px-5 py-3 border-b" style={{ backgroundColor: 'rgba(15,51,51,0.7)', borderColor: 'var(--owl-border)' }}>
+        <h1 className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--owl-text-primary)' }}>SunnyFi Board</h1>
 
         {/* View toggle */}
-        <div className="flex items-center gap-0.5 bg-secondary rounded-md p-0.5">
+        <div className="flex items-center gap-0.5 rounded-md p-0.5" style={{ backgroundColor: 'var(--owl-card)' }}>
           {viewButtons.map(({ mode, icon: Icon, label }) => (
             <Button
               key={mode}
               variant="ghost"
               size="sm"
-              className={`h-6 px-2 text-[10px] gap-1 ${activeView === mode ? 'bg-card shadow-sm' : 'hover:bg-card/50'}`}
+              className={`h-6 px-2 text-[10px] gap-1 ${activeView === mode ? 'shadow-sm' : ''}`}
+              style={{
+                backgroundColor: activeView === mode ? 'var(--owl-surface)' : 'transparent',
+                color: activeView === mode ? 'var(--owl-neon)' : 'var(--owl-text-muted)',
+              }}
               onClick={() => onViewChange(mode)}
               title={label}
             >
@@ -219,7 +223,7 @@ export function TopBar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button size="sm" className="h-7 text-[11px] gap-1" onClick={() => setShowNewTask(true)}>
+        <Button size="sm" className="h-7 text-[11px] gap-1" style={{ backgroundColor: 'var(--owl-neon)', color: 'var(--owl-page)' }} onClick={() => setShowNewTask(true)}>
           <Plus className="w-3 h-3" />
           New task
         </Button>

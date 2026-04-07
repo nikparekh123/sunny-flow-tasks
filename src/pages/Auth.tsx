@@ -39,11 +39,11 @@ export default function Auth() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
+    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: 'var(--owl-page)' }}>
       <div className="w-full max-w-xs space-y-6 px-4 text-center">
         <div className="space-y-1">
-          <h1 className="text-xl font-medium tracking-tight text-foreground">SunnyFi</h1>
-          <p className="text-sm text-muted-foreground">Enter your 4-digit code</p>
+          <h1 className="text-xl font-medium tracking-tight" style={{ color: 'var(--owl-text-primary)' }}>SunnyFi</h1>
+          <p className="text-sm" style={{ color: 'var(--owl-text-secondary)' }}>Enter your 4-digit code</p>
         </div>
 
         <div className="flex justify-center">
@@ -66,8 +66,8 @@ export default function Auth() {
           </InputOTP>
         </div>
 
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        {loading && <p className="text-xs text-muted-foreground">Signing in…</p>}
+        {error && <p className="text-xs" style={{ color: 'var(--owl-negative)' }}>{error}</p>}
+        {loading && <p className="text-xs" style={{ color: 'var(--owl-text-muted)' }}>Signing in…</p>}
       </div>
     </div>
   );
