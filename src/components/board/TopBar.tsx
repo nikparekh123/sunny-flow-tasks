@@ -83,8 +83,8 @@ export function TopBar({
 
   return (
     <>
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-border bg-card">
-        <h1 className="text-sm font-semibold text-foreground whitespace-nowrap">SunnyFi Board</h1>
+      <div className="flex items-center gap-3 px-5 py-3 border-b" style={{ backgroundColor: 'rgba(15,51,51,0.7)', borderColor: 'var(--owl-border)' }}>
+        <h1 className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--owl-text-primary)' }}>SunnyFi Board</h1>
 
         {/* View toggle */}
         <div className="flex items-center gap-0.5 bg-secondary rounded-md p-0.5">
