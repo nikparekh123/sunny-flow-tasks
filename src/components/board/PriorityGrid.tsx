@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { COLUMNS, PRIORITIES } from '@/lib/constants';
@@ -169,17 +169,21 @@ interface CellProps {
   onCardDelete: (taskId: string) => void;
 }
 
+const CELL_LIMIT = 6;
+
 function Cell({
   id, priority, column, isOver, isDone, isHigh, tasks,
   onCardClick, onCardEdit, onCardDelete,
 }: CellProps) {
   const { setNodeRef } = useDroppable({ id, data: { column, priority } });
   const isEmpty = tasks.length === 0;
+  const [expanded, setExpanded] = useState(false);
+  const visibleTasks =
+    expanded || tasks.length <= CELL_LIMIT ? tasks : tasks.slice(0, CELL_LIMIT);
+  const hiddenCount = tasks.length - visibleTasks.length;
 
   const baseStyle: React.CSSProperties = {
     minHeight: isEmpty ? 56 : 80,
-    maxHeight: 360,
-    overflowY: 'auto',
     borderRadius: 10,
     padding: 6,
     display: 'flex',
@@ -200,8 +204,8 @@ function Cell({
 
   return (
     <div ref={setNodeRef} style={baseStyle}>
-      <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-        {tasks.map((task) => (
+      <SortableContext items={visibleTasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+        {visibleTasks.map((task) => (
           <TaskCard
             key={task.id}
             task={task}
@@ -212,6 +216,43 @@ function Cell({
           />
         ))}
       </SortableContext>
+      {hiddenCount > 0 && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="w-full rounded-md transition-colors"
+          style={{
+            fontFamily: 'var(--owl-font-mono)',
+            fontSize: 10,
+            color: 'var(--owl-text-muted)',
+            background: 'transparent',
+            border: '1px dashed var(--owl-line-bright)',
+            padding: '5px 8px',
+            cursor: 'pointer',
+            letterSpacing: '0.3px',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--owl-neon)')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--owl-text-muted)')}
+        >
+          +{hiddenCount} more
+        </button>
+      )}
+      {expanded && tasks.length > CELL_LIMIT && (
+        <button
+          onClick={() => setExpanded(false)}
+          className="w-full rounded-md transition-colors"
+          style={{
+            fontFamily: 'var(--owl-font-mono)',
+            fontSize: 10,
+            color: 'var(--owl-text-disabled)',
+            background: 'transparent',
+            border: 'none',
+            padding: '3px 8px',
+            cursor: 'pointer',
+          }}
+        >
+          show less
+        </button>
+      )}
       {isEmpty && (
         <div
           className="text-center w-full px-2 py-4"
