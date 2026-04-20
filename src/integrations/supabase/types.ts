@@ -298,12 +298,14 @@ export type Database = {
           description: string | null
           due_date: string | null
           id: string
+          participant_ids: string[]
           position: number
           priority: Database["public"]["Enums"]["task_priority"]
           project: Database["public"]["Enums"]["task_project"] | null
           recurrence: string | null
           title: string
           updated_at: string | null
+          visibility: Database["public"]["Enums"]["task_visibility"]
         }
         Insert: {
           archived?: boolean
@@ -318,12 +320,14 @@ export type Database = {
           description?: string | null
           due_date?: string | null
           id?: string
+          participant_ids?: string[]
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
           project?: Database["public"]["Enums"]["task_project"] | null
           recurrence?: string | null
           title: string
           updated_at?: string | null
+          visibility?: Database["public"]["Enums"]["task_visibility"]
         }
         Update: {
           archived?: boolean
@@ -338,12 +342,14 @@ export type Database = {
           description?: string | null
           due_date?: string | null
           id?: string
+          participant_ids?: string[]
           position?: number
           priority?: Database["public"]["Enums"]["task_priority"]
           project?: Database["public"]["Enums"]["task_project"] | null
           recurrence?: string | null
           title?: string
           updated_at?: string | null
+          visibility?: Database["public"]["Enums"]["task_visibility"]
         }
         Relationships: [
           {
@@ -451,12 +457,14 @@ export type Database = {
           description: string | null
           due_date: string | null
           id: string | null
+          participant_ids: string[] | null
           position: number | null
           priority: Database["public"]["Enums"]["task_priority"] | null
           project: Database["public"]["Enums"]["task_project"] | null
           recurrence: string | null
           title: string | null
           updated_at: string | null
+          visibility: Database["public"]["Enums"]["task_visibility"] | null
         }
         Relationships: [
           {
@@ -497,6 +505,7 @@ export type Database = {
       member_role: "admin" | "member"
       task_column: "backlog" | "todo" | "inprogress" | "review" | "done"
       task_priority: "high" | "med" | "low"
+      task_visibility: "team" | "private"
       task_project:
         | "admin_ops"
         | "sector_research"
@@ -634,6 +643,7 @@ export const Constants = {
       member_role: ["admin", "member"],
       task_column: ["backlog", "todo", "inprogress", "review", "done"],
       task_priority: ["high", "med", "low"],
+      task_visibility: ["team", "private"],
       task_project: [
         "admin_ops",
         "sector_research",

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MoreHorizontal, Repeat, ListChecks, Calendar } from 'lucide-react';
+import { MoreHorizontal, Repeat, ListChecks, Calendar, Lock } from 'lucide-react';
 import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { PRIORITY_COLORS } from '@/lib/constants';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -179,9 +179,19 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           lineHeight: 1.4,
           textDecoration: isDone ? 'line-through' : 'none',
           margin: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
         }}
       >
-        {task.title}
+        {task.visibility === 'private' && (
+          <Lock
+            className="shrink-0"
+            style={{ width: 13, height: 13, color: 'var(--owl-neon)' }}
+            aria-label="Private task"
+          />
+        )}
+        <span style={{ flex: 1 }}>{task.title}</span>
       </p>
 
       {/* Row 3: Brief */}

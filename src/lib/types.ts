@@ -3,6 +3,7 @@ import type { TaskProject } from '@/lib/constants';
 
 export type TaskColumn = Database['public']['Enums']['task_column'];
 export type TaskPriority = Database['public']['Enums']['task_priority'];
+export type TaskVisibility = Database['public']['Enums']['task_visibility'];
 export type MemberRole = Database['public']['Enums']['member_role'];
 export type { TaskProject } from '@/lib/constants';
 
@@ -54,6 +55,8 @@ export interface TaskWithDetail {
   assignee_ids: string[];
   assignees: TaskAssignee[];
   subtasks?: Subtask[];
+  visibility: TaskVisibility;
+  participant_ids: string[];
 }
 
 export interface TeamMember {

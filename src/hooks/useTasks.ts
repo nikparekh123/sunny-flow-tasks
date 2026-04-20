@@ -211,6 +211,8 @@ export function useTasks() {
       tag_ids?: string[];
       recurrence?: string | null;
       brief?: string | null;
+      visibility?: Database['public']['Enums']['task_visibility'];
+      participant_ids?: string[];
     }) => {
       const column = task.column || 'todo';
       const { data: maxPos } = await supabase
@@ -238,6 +240,8 @@ export function useTasks() {
           created_by: task.created_by || null,
           recurrence: task.recurrence || null,
           brief: task.brief || null,
+          visibility: task.visibility || 'team',
+          participant_ids: task.participant_ids || [],
         } as any)
         .select('id')
         .single();

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Lock } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
@@ -34,8 +34,16 @@ export function NewTaskPanel({
   );
   const [dueDate, setDueDate] = useState<Date | undefined>();
   const [description, setDescription] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [participantIds, setParticipantIds] = useState<string[]>([]);
   const [isClosing, setIsClosing] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const toggleParticipant = (id: string) => {
+    setParticipantIds((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
+    );
+  };
 
   const toggleAssignee = (id: string) => {
     setAssigneeIds((prev) =>
@@ -52,6 +60,11 @@ export function NewTaskPanel({
     if (!title.trim()) return;
     setSaving(true);
     try {
+      // Auto-include creator in participants for private cards so they can still see it.
+      const finalParticipants =
+        isPrivate && currentMemberId
+          ? Array.from(new Set([currentMemberId, ...participantIds]))
+          : [];
       await onSave({
         title: title.trim(),
         column,
@@ -60,6 +73,8 @@ export function NewTaskPanel({
         due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
         description: description.trim() || null,
         created_by: currentMemberId,
+        visibility: isPrivate ? 'private' : 'team',
+        participant_ids: finalParticipants,
       });
       toast.success('Task created');
       handleClose();
@@ -231,6 +246,77 @@ export function NewTaskPanel({
               ))}
             </ChipGroup>
           </Field>
+        </div>
+
+        {/* Privacy */}
+        <div className="mt-[14px]">
+          <label
+            className="flex items-center justify-between cursor-pointer"
+            style={{
+              fontSize: 12,
+              color: 'var(--owl-text-secondary)',
+              padding: '8px 12px',
+              borderRadius: 8,
+              background: isPrivate ? 'rgba(210,230,50,0.06)' : 'rgba(15,51,51,0.4)',
+              border: `1px solid ${isPrivate ? 'rgba(210,230,50,0.3)' : 'var(--owl-line)'}`,
+            }}
+          >
+            <span className="inline-flex items-center gap-2">
+              <Lock
+                className="w-3.5 h-3.5"
+                style={{ color: isPrivate ? 'var(--owl-neon)' : 'var(--owl-text-muted)' }}
+              />
+              Private — only you and selected people can see this
+            </span>
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => setIsPrivate(e.target.checked)}
+              style={{ accentColor: 'var(--owl-neon)' }}
+            />
+          </label>
+          {isPrivate && (
+            <div className="mt-[10px]">
+              <div
+                className="mb-[6px]"
+                style={{
+                  fontSize: 8,
+                  fontWeight: 600,
+                  letterSpacing: '2.5px',
+                  textTransform: 'uppercase',
+                  color: 'var(--owl-text-disabled)',
+                }}
+              >
+                Shared with
+              </div>
+              <ChipGroup>
+                {members
+                  .filter((m) => m.id !== currentMemberId)
+                  .map((m) => (
+                    <Chip
+                      key={m.id}
+                      on={participantIds.includes(m.id)}
+                      onClick={() => toggleParticipant(m.id)}
+                    >
+                      <Avatar>{m.initials}</Avatar>
+                      {m.name}
+                    </Chip>
+                  ))}
+              </ChipGroup>
+              {participantIds.length === 0 && (
+                <div
+                  className="mt-[6px]"
+                  style={{
+                    fontFamily: 'var(--owl-font-mono)',
+                    fontSize: 10,
+                    color: 'var(--owl-warning)',
+                  }}
+                >
+                  Pick at least one person to share with
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Footer */}
