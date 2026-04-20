@@ -82,12 +82,6 @@ export function BoardHeader({ tasks }: Props) {
           >
             Product <b style={{ fontWeight: 700 }}>board</b>
           </h1>
-          <div
-            className="max-w-[580px]"
-            style={{ fontSize: 12, color: 'var(--owl-text-muted)', marginTop: 6 }}
-          >
-            Priority × status grid. Rows = how urgent, columns = where it is. Drop on a cell to set both at once.
-          </div>
         </div>
         <div className="flex gap-6 items-center flex-wrap">
           <Stat label="Active" value={stats.active} />
