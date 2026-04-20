@@ -1,0 +1,1 @@
+alter type public.task_column add value if not exists 'backlog' before 'todo';
