@@ -19,6 +19,10 @@ import { useSubtasks } from '@/hooks/useSubtasks';
 import { TopBar, type ViewMode } from './TopBar';
 import { Sidebar } from './Sidebar';
 import { PriorityGrid } from './PriorityGrid';
+import { BoardHeader } from './BoardHeader';
+import { FooterStatus } from './FooterStatus';
+import { PeopleView } from './PeopleView';
+import { TweaksPanel } from './TweaksPanel';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
 import { ArchivePanel } from './ArchivePanel';
@@ -237,39 +241,56 @@ export function KanbanBoard() {
       />
 
       {activeView === 'board' && (
-        <div className="flex-1 px-3 pb-4 md:px-5 overflow-x-auto" style={{ backgroundColor: 'var(--owl-page)' }}>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={customCollision}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
-            onDragCancel={handleDragCancel}
-          >
-            <div className="pt-4 w-full">
-              <PriorityGrid
-                tasks={filteredTasks}
-                overCellId={overCellId}
-                onCardClick={(task) => setSelectedTask(task)}
-                onCardEdit={(task) => setSelectedTask(task)}
-                onCardDelete={handleDelete}
-              />
-            </div>
-
-            <DragOverlay dropAnimation={null}>
-              {draggedTask && (
-                <TaskCardContent
-                  task={draggedTask}
-                  isDone={draggedTask.column === 'done'}
-                  isOverlay
-                  onClick={() => {}}
-                  onEdit={() => {}}
-                  onDelete={() => {}}
+        <>
+          <BoardHeader tasks={tasks} />
+          <div className="flex-1 px-5 md:px-7 pb-4 overflow-x-auto" style={{ backgroundColor: 'var(--owl-page)' }}>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={customCollision}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+            >
+              <div className="pt-4 w-full">
+                <PriorityGrid
+                  tasks={filteredTasks}
+                  overCellId={overCellId}
+                  onCardClick={(task) => setSelectedTask(task)}
+                  onCardEdit={(task) => setSelectedTask(task)}
+                  onCardDelete={handleDelete}
                 />
-              )}
-            </DragOverlay>
-          </DndContext>
-        </div>
+              </div>
+
+              <DragOverlay dropAnimation={null}>
+                {draggedTask && (
+                  <TaskCardContent
+                    task={draggedTask}
+                    isDone={draggedTask.column === 'done'}
+                    isOverlay
+                    onClick={() => {}}
+                    onEdit={() => {}}
+                    onDelete={() => {}}
+                  />
+                )}
+              </DragOverlay>
+            </DndContext>
+          </div>
+          <FooterStatus tasks={tasks} />
+        </>
+      )}
+
+      {activeView === 'people' && (
+        <>
+          <BoardHeader tasks={tasks} />
+          <PeopleView
+            tasks={filteredTasks}
+            members={members}
+            onTaskClick={(task) => setSelectedTask(task)}
+            currentMemberId={member?.id ?? null}
+          />
+          <FooterStatus tasks={tasks} />
+        </>
       )}
 
       {activeView === 'gantt' && (
@@ -351,6 +372,8 @@ export function KanbanBoard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <TweaksPanel />
       </div>
     </div>
   );

@@ -256,21 +256,64 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
         onClick={handleClose}
       />
       <div
-        className={`relative w-full max-w-md shadow-xl overflow-y-auto transition-transform duration-250 ease-out ${
+        className={`relative w-full shadow-xl overflow-y-auto transition-transform duration-250 ease-out ${
           isClosing ? 'translate-x-full' : 'animate-slide-in-right'
         }`}
-        style={{ backgroundColor: 'var(--owl-surface)', borderLeft: '1px solid var(--owl-border)' }}
+        style={{
+          backgroundColor: 'var(--owl-page)',
+          borderLeft: '1px solid var(--owl-line-bright)',
+          maxWidth: 680,
+          boxShadow: '-20px 0 60px rgba(0,0,0,0.4)',
+        }}
       >
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-sm font-medium text-muted-foreground">Task details</h2>
+        <div
+          className="flex items-center justify-between px-[22px] pt-4 pb-[14px] sticky top-0 z-10"
+          style={{ background: 'var(--owl-page)', borderBottom: '1px solid var(--owl-line)' }}
+        >
+          <div
+            style={{
+              fontFamily: 'var(--owl-font-mono)',
+              fontSize: 10,
+              color: 'var(--owl-text-disabled)',
+              letterSpacing: '0.5px',
+            }}
+          >
+            s to dos <span style={{ color: 'var(--owl-text-disabled)' }}>/</span>{' '}
+            <b style={{ color: 'var(--owl-text-secondary)', fontWeight: 500 }}>
+              {COLUMNS.find((c) => c.id === task.column)?.label ?? task.column}
+            </b>{' '}
+            <span style={{ color: 'var(--owl-text-disabled)' }}>/</span>{' '}
+            <span style={{ color: 'var(--owl-text-muted)' }}>card-{task.id.slice(0, 6)}</span>
+          </div>
           <div className="flex items-center gap-2">
             {!editing && (
               <Button variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={() => setEditing(true)}>
                 <Pencil className="w-3 h-3" /> Edit Task
               </Button>
             )}
-            <button onClick={handleClose} className="text-muted-foreground hover:text-foreground transition-colors">
-              <X className="w-4 h-4" />
+            <button
+              onClick={handleClose}
+              className="inline-flex items-center gap-1.5 text-xs rounded-md transition-colors"
+              style={{
+                border: '1px solid var(--owl-line-bright)',
+                color: 'var(--owl-text-secondary)',
+                padding: '5px 10px',
+                background: 'transparent',
+              }}
+            >
+              Close
+              <span
+                style={{
+                  fontFamily: 'var(--owl-font-mono)',
+                  fontSize: 10,
+                  color: 'var(--owl-text-disabled)',
+                  border: '1px solid var(--owl-text-disabled)',
+                  padding: '0 4px',
+                  borderRadius: 3,
+                }}
+              >
+                esc
+              </span>
             </button>
           </div>
         </div>

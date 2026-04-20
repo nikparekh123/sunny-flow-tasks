@@ -113,13 +113,45 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
         onClick={handleClose}
       />
       <div
-        className={`relative w-full max-w-md shadow-xl overflow-y-auto transition-transform duration-250 ease-out ${
+        className={`relative w-full shadow-xl overflow-y-auto transition-transform duration-250 ease-out ${
           isClosing ? 'translate-x-full' : 'animate-slide-in-right'
         }`}
-        style={{ backgroundColor: 'var(--owl-surface)', borderLeft: '1px solid var(--owl-border)' }}
+        style={{
+          backgroundColor: 'var(--owl-surface)',
+          borderLeft: '1px solid var(--owl-line-bright)',
+          maxWidth: 540,
+          boxShadow: '-20px 0 60px rgba(0,0,0,0.4)',
+        }}
       >
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-sm font-medium text-foreground">New task</h2>
+        <div
+          className="flex items-center justify-between px-[22px] pt-4 pb-[14px] sticky top-0 z-10"
+          style={{ background: 'var(--owl-surface)', borderBottom: '1px solid var(--owl-line)' }}
+        >
+          <h2
+            className="flex items-center gap-[10px]"
+            style={{
+              fontSize: 18,
+              fontWeight: 500,
+              letterSpacing: '-0.3px',
+              color: 'var(--owl-text-primary)',
+            }}
+          >
+            New card
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 500,
+                letterSpacing: '0.6px',
+                textTransform: 'uppercase',
+                padding: '3px 8px',
+                borderRadius: 4,
+                background: 'rgba(70,130,120,0.18)',
+                color: 'var(--owl-text-secondary)',
+              }}
+            >
+              adds to Todo · Med
+            </span>
+          </h2>
           <button onClick={handleClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-4 h-4" />
           </button>

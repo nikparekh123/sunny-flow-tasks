@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Settings, Users, User, Shield, LogOut, Eye, Search, X, Archive, Tag, Zap, LayoutGrid, GanttChart, CalendarDays } from 'lucide-react';
+import { Plus, Settings, Users, User, Shield, LogOut, Eye, Search, X, Archive, Tag, Zap, LayoutGrid, GanttChart, CalendarDays, UsersRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -20,7 +20,7 @@ import { AdminSettingsModal } from '@/components/settings/AdminSettingsModal';
 import { InviteUserModal } from '@/components/settings/InviteUserModal';
 import { NotificationBell } from './NotificationBell';
 
-export type ViewMode = 'board' | 'gantt' | 'calendar';
+export type ViewMode = 'board' | 'people' | 'gantt' | 'calendar';
 
 interface TopBarProps {
   tags: TagType[];
@@ -77,6 +77,7 @@ export function TopBar({
 
   const viewButtons: { mode: ViewMode; icon: typeof LayoutGrid; label: string }[] = [
     { mode: 'board', icon: LayoutGrid, label: 'Board' },
+    { mode: 'people', icon: UsersRound, label: 'People' },
     { mode: 'gantt', icon: GanttChart, label: 'Gantt' },
     { mode: 'calendar', icon: CalendarDays, label: 'Calendar' },
   ];
