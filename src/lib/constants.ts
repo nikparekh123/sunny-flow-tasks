@@ -2,11 +2,18 @@ import type { Database } from '@/integrations/supabase/types';
 
 type TaskColumn = Database['public']['Enums']['task_column'];
 
-export const COLUMNS: { id: TaskColumn; label: string; color: string }[] = [
-  { id: 'todo', label: 'To Do', color: '#378ADD' },
-  { id: 'inprogress', label: 'In Progress', color: '#EF9F27' },
-  { id: 'review', label: 'Review', color: '#7F77DD' },
-  { id: 'done', label: 'Done', color: '#639922' },
+export const COLUMNS: { id: TaskColumn; label: string; color: string; sub?: string }[] = [
+  { id: 'backlog', label: 'Backlog', color: '#468278', sub: 'unscheduled' },
+  { id: 'todo', label: 'Todo', color: '#378ADD', sub: 'ready' },
+  { id: 'inprogress', label: 'In progress', color: '#EF9F27', sub: 'in-flight' },
+  { id: 'review', label: 'Review', color: '#7F77DD', sub: 'needs eyes' },
+  { id: 'done', label: 'Done', color: '#639922', sub: 'this week' },
+];
+
+export const PRIORITIES: { id: 'high' | 'med' | 'low'; label: string; glyph: string; sub: string }[] = [
+  { id: 'high', label: 'High', glyph: '!!', sub: 'ship first' },
+  { id: 'med',  label: 'Med',  glyph: '=',  sub: 'this sprint' },
+  { id: 'low',  label: 'Low',  glyph: '·',  sub: 'nice to have' },
 ];
 
 export const PRIORITY_COLORS: Record<string, string> = {

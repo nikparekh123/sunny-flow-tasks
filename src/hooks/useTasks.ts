@@ -8,7 +8,7 @@ import { useRuleEngine } from './useRuleEngine';
 
 type TaskColumn = Database['public']['Enums']['task_column'];
 
-const BOARD_COLUMNS: TaskColumn[] = ['todo', 'inprogress', 'review', 'done'];
+const BOARD_COLUMNS: TaskColumn[] = ['backlog', 'todo', 'inprogress', 'review', 'done'];
 
 const DAY_MAP: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 
@@ -22,7 +22,7 @@ const moveTaskOptimistically = (
   if (!sourceTask) return tasks;
 
   const byColumn: Record<TaskColumn, TaskWithDetail[]> = {
-    todo: [], inprogress: [], review: [], done: [],
+    backlog: [], todo: [], inprogress: [], review: [], done: [],
   };
 
   tasks.forEach((task) => {
@@ -401,7 +401,7 @@ export function useTasks() {
   });
 
   const moveTask = useMutation({
-    mutationFn: async ({ taskId, column, position }: { taskId: string; column: TaskColumn; position: number }) => {
+    mutationFn: async ({ taskId, column, position, priority }: { taskId: string; column: TaskColumn; position: number; priority?: Database['public']['Enums']['task_priority'] }) => {
       // Set completed_at when moving to done, clear when moving out
       if (column === 'done') {
         await supabase.from('tasks').update({ completed_at: new Date().toISOString() } as any).eq('id', taskId);
@@ -418,6 +418,11 @@ export function useTasks() {
         p_position: position,
       });
       if (error) throw error;
+
+      // Apply priority change in the same move (e.g. drop on a priority-row cell)
+      if (priority) {
+        await supabase.from('tasks').update({ priority } as any).eq('id', taskId);
+      }
 
       const task = tasks.find((t) => t.id === taskId);
 
@@ -473,14 +478,17 @@ export function useTasks() {
         evaluateRules({ type: 'task_moved', task, newColumn: column });
       }
     },
-    onMutate: async ({ taskId, column, position }) => {
+    onMutate: async ({ taskId, column, position, priority }) => {
       await qc.cancelQueries({ queryKey: ['tasks'] });
       await qc.cancelQueries({ queryKey: ['task_tags'] });
       const previousTasks = qc.getQueryData<TaskWithDetail[]>(['tasks']) ?? [];
 
-      qc.setQueryData<TaskWithDetail[]>(['tasks'], (oldTasks = []) =>
-        moveTaskOptimistically(oldTasks, taskId, column, position)
-      );
+      qc.setQueryData<TaskWithDetail[]>(['tasks'], (oldTasks = []) => {
+        const moved = moveTaskOptimistically(oldTasks, taskId, column, position);
+        return priority
+          ? moved.map((t) => (t.id === taskId ? { ...t, priority } : t))
+          : moved;
+      });
 
       return { previousTasks };
     },

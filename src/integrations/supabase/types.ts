@@ -495,7 +495,7 @@ export type Database = {
     }
     Enums: {
       member_role: "admin" | "member"
-      task_column: "todo" | "inprogress" | "review" | "done"
+      task_column: "backlog" | "todo" | "inprogress" | "review" | "done"
       task_priority: "high" | "med" | "low"
       task_project:
         | "admin_ops"
@@ -632,7 +632,7 @@ export const Constants = {
   public: {
     Enums: {
       member_role: ["admin", "member"],
-      task_column: ["todo", "inprogress", "review", "done"],
+      task_column: ["backlog", "todo", "inprogress", "review", "done"],
       task_priority: ["high", "med", "low"],
       task_project: [
         "admin_ops",

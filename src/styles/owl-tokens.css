@@ -1,8 +1,10 @@
 :root {
   /* Canvas & surfaces */
   --owl-page:       #0a2828;
+  --owl-dash:       #061a10;
   --owl-surface:    #0f3333;
   --owl-card:       rgba(15, 51, 51, 0.55);
+  --owl-card-elevated: rgba(15, 51, 51, 0.85);
   --owl-elevated:   #1e5a50;
   --owl-dusk:       #325050;
 
@@ -22,6 +24,11 @@
   /* Borders */
   --owl-border:     rgba(30, 90, 80, 0.35);
   --owl-border-mid: rgba(30, 90, 80, 0.5);
+  --owl-line:       rgba(30, 90, 80, 0.25);
+  --owl-line-bright:#326e64;
+
+  /* Fonts */
+  --owl-font-mono:  'DM Mono', ui-monospace, monospace;
 
   /* Animations */
   --owl-transition: 0.15s ease;
@@ -36,5 +43,6 @@
 
 /* Animations */
 @keyframes owl-pulse    { 0%,100%{opacity:1} 50%{opacity:.35} }
+@keyframes owl-blink    { 0%,49%{opacity:1} 50%,100%{opacity:0} }
 @keyframes owl-fade-up  { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
 @keyframes owl-slide-in { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }

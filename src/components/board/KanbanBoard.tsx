@@ -13,12 +13,12 @@ import {
   type DragOverEvent,
   type CollisionDetection,
 } from '@dnd-kit/core';
-import { COLUMNS } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
 import { useSubtasks } from '@/hooks/useSubtasks';
 import { TopBar, type ViewMode } from './TopBar';
-import { BoardColumn } from './BoardColumn';
+import { Sidebar } from './Sidebar';
+import { PriorityGrid } from './PriorityGrid';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
 import { ArchivePanel } from './ArchivePanel';
@@ -27,7 +27,7 @@ import { GanttView } from './GanttView';
 import { TagManagementModal } from '@/components/settings/TagManagementModal';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
-import type { TaskWithDetail, TaskColumn } from '@/lib/types';
+import type { TaskWithDetail, TaskColumn, TaskPriority } from '@/lib/types';
 
 const customCollision: CollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args);
@@ -49,9 +49,10 @@ export function KanbanBoard() {
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
+  const [priorityFilter, setPriorityFilter] = useState<'high' | null>(null);
   const [selectedTask, setSelectedTask] = useState<TaskWithDetail | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
-  const [overColumn, setOverColumn] = useState<TaskColumn | null>(null);
+  const [overCellId, setOverCellId] = useState<string | null>(null);
   const [showArchive, setShowArchive] = useState(false);
   const [activeView, setActiveView] = useState<ViewMode>('board');
   const [showTagManagement, setShowTagManagement] = useState(false);
@@ -87,32 +88,18 @@ export function KanbanBoard() {
         activeTagIds.every((tagId) => t.tags?.some((tag) => tag.id === tagId))
       );
     }
+    if (priorityFilter) {
+      result = result.filter((t) => t.priority === priorityFilter);
+    }
     return result;
-  }, [tasks, activeAssignee, searchQuery, activeTagIds]);
+  }, [tasks, activeAssignee, searchQuery, activeTagIds, priorityFilter]);
 
   const allTasksByColumn = useMemo(() => {
-    const map: Record<TaskColumn, TaskWithDetail[]> = { todo: [], inprogress: [], review: [], done: [] };
+    const map: Record<TaskColumn, TaskWithDetail[]> = { backlog: [], todo: [], inprogress: [], review: [], done: [] };
     tasks.forEach((task) => map[task.column].push(task));
     Object.values(map).forEach((list) => list.sort((a, b) => a.position - b.position));
     return map;
   }, [tasks]);
-
-  const visibleTasksByColumn = useMemo(() => {
-    const map: Record<TaskColumn, TaskWithDetail[]> = { todo: [], inprogress: [], review: [], done: [] };
-    filteredTasks.forEach((task) => map[task.column].push(task));
-    Object.keys(map).forEach((col) => {
-      if (col === 'done') {
-        map[col as TaskColumn].sort((a, b) => {
-          const aDate = a.completed_at ? new Date(a.completed_at).getTime() : 0;
-          const bDate = b.completed_at ? new Date(b.completed_at).getTime() : 0;
-          return bDate - aDate;
-        });
-      } else {
-        map[col as TaskColumn].sort((a, b) => a.position - b.position);
-      }
-    });
-    return map;
-  }, [filteredTasks]);
 
   const handleDelete = useCallback((taskId: string) => {
     archiveTask.mutate(taskId);
@@ -137,17 +124,38 @@ export function KanbanBoard() {
   }, []);
 
   const handleDragOver = useCallback((event: DragOverEvent) => {
-    const overTask = event.over?.data.current?.task as TaskWithDetail | undefined;
-    setOverColumn(overTask ? overTask.column : (event.over?.id as TaskColumn | undefined) ?? null);
+    const overData = event.over?.data.current as { task?: TaskWithDetail; column?: TaskColumn; priority?: TaskPriority } | undefined;
+    const overTask = overData?.task;
+    const overId = event.over?.id as string | undefined;
+    if (overTask) {
+      setOverCellId(`${overTask.priority}:${overTask.column}`);
+    } else if (overData?.column) {
+      setOverCellId(overId ?? null);
+    } else {
+      setOverCellId(null);
+    }
   }, []);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     setDraggedTask(null);
-    setOverColumn(null);
+    setOverCellId(null);
     const activeTask = event.active.data.current?.task as TaskWithDetail;
     if (!activeTask || !event.over) return;
-    const overTask = event.over.data.current?.task as TaskWithDetail | undefined;
-    const targetColumn = overTask ? overTask.column : (event.over.id as TaskColumn);
+    const overData = event.over.data.current as { task?: TaskWithDetail; column?: TaskColumn; priority?: TaskPriority } | undefined;
+    const overTask = overData?.task;
+
+    let targetColumn: TaskColumn;
+    let targetPriority: TaskPriority | undefined;
+    if (overTask) {
+      targetColumn = overTask.column;
+      targetPriority = overTask.priority;
+    } else if (overData?.column) {
+      targetColumn = overData.column;
+      targetPriority = overData.priority;
+    } else {
+      targetColumn = event.over.id as TaskColumn;
+    }
+
     const targetColumnTasks = allTasksByColumn[targetColumn] ?? [];
     const sourceColumnTasks = allTasksByColumn[activeTask.column] ?? [];
     let targetPosition = targetColumnTasks.length;
@@ -157,7 +165,13 @@ export function KanbanBoard() {
     }
     const currentIndex = sourceColumnTasks.findIndex((t) => t.id === activeTask.id);
     if (currentIndex < 0) return;
-    if (activeTask.column === targetColumn && currentIndex === targetPosition) return;
+    const priorityChanged = targetPriority && targetPriority !== activeTask.priority;
+    if (
+      !priorityChanged &&
+      activeTask.column === targetColumn &&
+      currentIndex === targetPosition
+    )
+      return;
 
     // Check for incomplete subtasks when moving to done
     const incompleteSubtasks = (activeTask.subtasks || []).filter(s => !s.done).length;
@@ -166,12 +180,17 @@ export function KanbanBoard() {
       return;
     }
 
-    moveTask.mutate({ taskId: activeTask.id, column: targetColumn, position: targetPosition });
+    moveTask.mutate({
+      taskId: activeTask.id,
+      column: targetColumn,
+      position: targetPosition,
+      priority: priorityChanged ? targetPriority : undefined,
+    });
   }, [allTasksByColumn, moveTask]);
 
   const handleDragCancel = useCallback(() => {
     setDraggedTask(null);
-    setOverColumn(null);
+    setOverCellId(null);
   }, []);
 
   if (isLoading) {
@@ -186,7 +205,19 @@ export function KanbanBoard() {
   }
 
   return (
-    <div className="flex-1 flex flex-col" style={{ backgroundColor: 'var(--owl-page)' }}>
+    <div className="flex-1 flex" style={{ backgroundColor: 'var(--owl-page)' }}>
+      <Sidebar
+        tasks={tasks}
+        members={members}
+        currentMemberId={member?.id ?? null}
+        activeAssignee={activeAssignee}
+        onAssigneeFilter={setActiveAssignee}
+        onFilterPriority={setPriorityFilter}
+        activePriorityFilter={priorityFilter}
+        onOpenArchive={() => setShowArchive(true)}
+        showingArchive={showArchive}
+      />
+      <div className="flex-1 flex flex-col min-w-0">
       <TopBar
         tags={tags}
         members={members}
@@ -215,20 +246,14 @@ export function KanbanBoard() {
             onDragEnd={handleDragEnd}
             onDragCancel={handleDragCancel}
           >
-            <div className="grid grid-cols-4 gap-4 min-w-[980px] w-full pt-4 items-start">
-              {COLUMNS.map((column) => (
-                <BoardColumn
-                  key={column.id}
-                  id={column.id}
-                  label={column.label}
-                  color={column.color}
-                  tasks={visibleTasksByColumn[column.id]}
-                  isOver={overColumn === column.id}
-                  onCardClick={(task) => setSelectedTask(task)}
-                  onCardEdit={(task) => setSelectedTask(task)}
-                  onCardDelete={handleDelete}
-                />
-              ))}
+            <div className="pt-4 w-full">
+              <PriorityGrid
+                tasks={filteredTasks}
+                overCellId={overCellId}
+                onCardClick={(task) => setSelectedTask(task)}
+                onCardEdit={(task) => setSelectedTask(task)}
+                onCardDelete={handleDelete}
+              />
             </div>
 
             <DragOverlay dropAnimation={null}>
@@ -326,6 +351,7 @@ export function KanbanBoard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </div>
     </div>
   );
 }

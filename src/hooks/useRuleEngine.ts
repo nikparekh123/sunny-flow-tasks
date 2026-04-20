@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { AutomationRule, TaskWithDetail, TeamMember } from '@/lib/types';
 
-type TaskColumn = 'todo' | 'inprogress' | 'review' | 'done';
+type TaskColumn = 'backlog' | 'todo' | 'inprogress' | 'review' | 'done';
 
 interface TriggerContext {
   type: 'task_created' | 'task_moved' | 'task_completed' | 'task_assigned' | 'tag_added';
