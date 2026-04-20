@@ -1,27 +1,11 @@
-import { useState } from 'react';
-import { X, Search } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { useState, useEffect } from 'react';
+import { X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Switch } from '@/components/ui/switch';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import type { Tag, TeamMember, TaskPriority, RecurrenceFrequency } from '@/lib/types';
-
-const DAYS_OF_WEEK = [
-  { id: 'mon', label: 'Mon' },
-  { id: 'tue', label: 'Tue' },
-  { id: 'wed', label: 'Wed' },
-  { id: 'thu', label: 'Thu' },
-  { id: 'fri', label: 'Fri' },
-  { id: 'sat', label: 'Sat' },
-  { id: 'sun', label: 'Sun' },
-];
+import { COLUMNS } from '@/lib/constants';
+import type { Tag, TeamMember, TaskPriority, TaskColumn } from '@/lib/types';
 
 interface Props {
   tags: Tag[];
@@ -30,55 +14,38 @@ interface Props {
   onClose: () => void;
   onSave: (data: any) => Promise<void>;
   onCreateTag: (name: string) => void;
+  defaultColumn?: TaskColumn;
+  defaultPriority?: TaskPriority;
 }
 
-export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, onCreateTag }: Props) {
+export function NewTaskPanel({
+  members,
+  currentMemberId,
+  onClose,
+  onSave,
+  defaultColumn = 'todo',
+  defaultPriority = 'med',
+}: Props) {
   const [title, setTitle] = useState('');
-  const [priority, setPriority] = useState<TaskPriority>('med');
-  const [assigneeIds, setAssigneeIds] = useState<string[]>(currentMemberId ? [currentMemberId] : []);
+  const [priority, setPriority] = useState<TaskPriority>(defaultPriority);
+  const [column, setColumn] = useState<TaskColumn>(defaultColumn);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(
+    currentMemberId ? [currentMemberId] : [],
+  );
   const [dueDate, setDueDate] = useState<Date | undefined>();
   const [description, setDescription] = useState('');
-  const [brief, setBrief] = useState('');
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
-  const [newTag, setNewTag] = useState('');
-  const [tagSearch, setTagSearch] = useState('');
   const [isClosing, setIsClosing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [isRecurring, setIsRecurring] = useState(false);
-  const [recurrence, setRecurrence] = useState<RecurrenceFrequency>('weekly');
-  const [customDays, setCustomDays] = useState<string[]>([]);
-  const [customDayOfMonth, setCustomDayOfMonth] = useState('');
 
   const toggleAssignee = (id: string) => {
     setAssigneeIds((prev) =>
-      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
-    );
-  };
-
-  const toggleTag = (id: string) => {
-    setSelectedTagIds((prev) =>
-      prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id],
     );
   };
 
   const handleClose = () => {
     setIsClosing(true);
-    setTimeout(onClose, 250);
-  };
-
-  const filteredTags = tags.filter((t) =>
-    !tagSearch || t.name.toLowerCase().includes(tagSearch.toLowerCase())
-  );
-
-  const getRecurrenceValue = () => {
-    if (!isRecurring) return null;
-    if (recurrence === 'custom') {
-      const config: Record<string, any> = {};
-      if (customDays.length > 0) config.days = customDays;
-      if (customDayOfMonth) config.dayOfMonth = parseInt(customDayOfMonth);
-      return `custom:${JSON.stringify(config)}`;
-    }
-    return recurrence;
+    setTimeout(onClose, 200);
   };
 
   const handleSave = async () => {
@@ -87,14 +54,12 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
     try {
       await onSave({
         title: title.trim(),
+        column,
         priority,
         assignee_ids: assigneeIds,
         due_date: dueDate ? format(dueDate, 'yyyy-MM-dd') : null,
         description: description.trim() || null,
-        brief: brief.trim() || null,
         created_by: currentMemberId,
-        tag_ids: selectedTagIds,
-        recurrence: getRecurrenceValue(),
       });
       toast.success('Task created');
       handleClose();
@@ -105,34 +70,58 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
     }
   };
 
+  // Keyboard shortcuts: Esc to close, ⌘/Ctrl+Enter to create
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && title.trim()) {
+        e.preventDefault();
+        handleSave();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, column, priority, assigneeIds, dueDate, description]);
+
+  const priorityLabel = priority === 'high' ? 'High' : priority === 'med' ? 'Med' : 'Low';
+  const columnLabel = COLUMNS.find((c) => c.id === column)?.label ?? column;
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center"
+      style={{
+        padding: '6vh 20px 20px',
+        background: 'rgba(6,26,16,0.6)',
+        backdropFilter: 'blur(2px)',
+        animation: 'owl-fade-up 0.2s ease',
+        opacity: isClosing ? 0 : 1,
+        transition: 'opacity 0.2s ease',
+      }}
+      onClick={handleClose}
+    >
       <div
-        className={`absolute inset-0 transition-opacity duration-250 ${isClosing ? 'opacity-0' : 'opacity-100'}`}
-        style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
-        onClick={handleClose}
-      />
-      <div
-        className={`relative w-full shadow-xl overflow-y-auto transition-transform duration-250 ease-out ${
-          isClosing ? 'translate-x-full' : 'animate-slide-in-right'
-        }`}
+        role="dialog"
+        aria-label="New card"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full rounded-xl"
         style={{
-          backgroundColor: 'var(--owl-surface)',
-          borderLeft: '1px solid var(--owl-line-bright)',
           maxWidth: 540,
-          boxShadow: '-20px 0 60px rgba(0,0,0,0.4)',
+          background: 'var(--owl-surface)',
+          border: '1px solid var(--owl-line-bright)',
+          padding: '22px 24px 20px',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+          animation: 'owl-fade-up 0.2s ease',
         }}
       >
-        <div
-          className="flex items-center justify-between px-[22px] pt-4 pb-[14px] sticky top-0 z-10"
-          style={{ background: 'var(--owl-surface)', borderBottom: '1px solid var(--owl-line)' }}
-        >
+        {/* Header */}
+        <div className="flex items-center justify-between">
           <h2
             className="flex items-center gap-[10px]"
             style={{
-              fontSize: 18,
+              fontSize: 22,
               fontWeight: 500,
-              letterSpacing: '-0.3px',
+              letterSpacing: '-0.5px',
               color: 'var(--owl-text-primary)',
             }}
           >
@@ -149,197 +138,258 @@ export function NewTaskPanel({ tags, members, currentMemberId, onClose, onSave, 
                 color: 'var(--owl-text-secondary)',
               }}
             >
-              adds to Todo · Med
+              adds to {columnLabel} · {priorityLabel}
             </span>
           </h2>
-          <button onClick={handleClose} className="text-muted-foreground hover:text-foreground transition-colors">
+          <button
+            onClick={handleClose}
+            aria-label="Close"
+            style={{ color: 'var(--owl-text-muted)' }}
+          >
             <X className="w-4 h-4" />
           </button>
         </div>
-        <div className="p-4 space-y-4">
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">Title</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} className="text-xs" autoFocus />
-          </div>
 
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">Brief (preview on card)</Label>
-            <Input
-              value={brief}
-              onChange={(e) => setBrief(e.target.value.slice(0, 150))}
-              className="text-xs"
-              placeholder="Short summary (max 150 chars)"
-              maxLength={150}
-            />
-            <span className="text-[9px] text-muted-foreground">{brief.length}/150</span>
-          </div>
+        {/* Title */}
+        <Field label="Title">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="What needs to happen?"
+            autoFocus
+            className="w-full outline-none"
+            style={inputStyle}
+          />
+        </Field>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Priority</Label>
-              <div className="flex gap-1">
-                {(['high', 'med', 'low'] as TaskPriority[]).map((p) => (
-                  <button
-                    key={p}
-                    onClick={() => setPriority(p)}
-                    className={`flex-1 text-[10px] py-1 rounded transition-all duration-150 ${
-                      priority === p
-                        ? 'bg-foreground text-primary-foreground scale-105'
-                        : 'bg-secondary text-muted-foreground hover:bg-accent'
-                    }`}
-                  >
-                    {p.charAt(0).toUpperCase() + p.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
+        {/* Description */}
+        <Field label="Description" hint="optional">
+          <textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Repro steps, links, context…"
+            rows={3}
+            className="w-full outline-none resize-y"
+            style={{ ...inputStyle, minHeight: 80, lineHeight: 1.55, fontSize: 13 }}
+          />
+        </Field>
 
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Assignees</Label>
-              <div className="flex flex-wrap gap-1">
-                {members.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => toggleAssignee(m.id)}
-                    className={`text-[10px] px-2 py-1 rounded transition-all duration-150 ${
-                      assigneeIds.includes(m.id)
-                        ? 'bg-foreground text-primary-foreground scale-105'
-                        : 'bg-secondary text-muted-foreground hover:bg-accent'
-                    }`}
-                  >
-                    {m.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="col-span-2 space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Due date</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-start text-xs h-7 font-normal">
-                    {dueDate ? format(dueDate, 'MMM d, yyyy') : 'No due date'}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar mode="single" selected={dueDate} onSelect={setDueDate} />
-                </PopoverContent>
-              </Popover>
-            </div>
-          </div>
-
-          {/* Recurring toggle */}
-          <div className="flex items-center justify-between">
-            <Label className="text-[10px] text-muted-foreground">Recurring task</Label>
-            <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
-          </div>
-          {isRecurring && (
-            <div className="space-y-2">
-              <Select value={recurrence} onValueChange={(v) => setRecurrence(v as RecurrenceFrequency)}>
-                <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="biweekly">Bi-weekly</SelectItem>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="custom">Custom</SelectItem>
-                </SelectContent>
-              </Select>
-              {recurrence === 'custom' && (
-                <div className="space-y-2 p-2 border border-border rounded bg-secondary/50">
-                  <Label className="text-[10px] text-muted-foreground">Repeat on days</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {DAYS_OF_WEEK.map((day) => (
-                      <label key={day.id} className="flex items-center gap-1 text-[10px]">
-                        <Checkbox
-                          checked={customDays.includes(day.id)}
-                          onCheckedChange={(checked) => {
-                            setCustomDays((prev) =>
-                              checked ? [...prev, day.id] : prev.filter((d) => d !== day.id)
-                            );
-                          }}
-                          className="h-3 w-3"
-                        />
-                        {day.label}
-                      </label>
-                    ))}
-                  </div>
-                  <Label className="text-[10px] text-muted-foreground">Or day of month</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={customDayOfMonth}
-                    onChange={(e) => setCustomDayOfMonth(e.target.value)}
-                    className="text-xs h-7 w-20"
-                    placeholder="1-31"
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Tags with search */}
-          <div className="space-y-2">
-            <Label className="text-[10px] text-muted-foreground">Tags</Label>
-            <div className="flex items-center gap-1.5">
-              <Search className="w-3 h-3 text-muted-foreground" />
-              <Input
-                value={tagSearch}
-                onChange={(e) => setTagSearch(e.target.value)}
-                placeholder="Search tags…"
-                className="text-xs h-6 flex-1"
-              />
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {filteredTags.map((tag) => (
-                <button
-                  key={tag.id}
-                  onClick={() => toggleTag(tag.id)}
-                  className={`text-[10px] px-2 py-0.5 rounded border transition-all duration-150 ${
-                    selectedTagIds.includes(tag.id)
-                      ? 'bg-foreground text-primary-foreground border-foreground scale-105'
-                      : 'bg-secondary text-muted-foreground border-border hover:border-foreground/30'
-                  }`}
-                >
-                  #{tag.name}
-                </button>
+        {/* Priority + Due date */}
+        <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <Field label="Priority">
+            <ChipGroup>
+              {(['low', 'med', 'high'] as TaskPriority[]).map((p) => (
+                <Chip key={p} on={priority === p} onClick={() => setPriority(p)}>
+                  <Glyph>{p === 'low' ? '·' : p === 'med' ? '=' : '!!'}</Glyph>
+                  {p === 'low' ? 'Low' : p === 'med' ? 'Med' : 'High'}
+                </Chip>
               ))}
-            </div>
-            <div className="flex gap-1.5">
-              <Input
-                value={newTag}
-                onChange={(e) => setNewTag(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && newTag.trim()) {
-                    onCreateTag(newTag.trim().toLowerCase());
-                    setNewTag('');
-                  }
-                }}
-                placeholder="Add new tag..."
-                className="text-xs h-7 flex-1"
-              />
-            </div>
-          </div>
+            </ChipGroup>
+          </Field>
 
-          <div className="space-y-1">
-            <Label className="text-[10px] text-muted-foreground">Description</Label>
-            <Textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Add a description..."
-              className="text-xs min-h-[80px]"
-            />
-          </div>
+          <Field label="Due date">
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="w-full text-left" style={inputStyle}>
+                  {dueDate ? format(dueDate, 'MMM d, yyyy') : (
+                    <span style={{ color: 'var(--owl-text-disabled)' }}>
+                      e.g. Apr 25 · next fri
+                    </span>
+                  )}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar mode="single" selected={dueDate} onSelect={setDueDate} />
+              </PopoverContent>
+            </Popover>
+          </Field>
+        </div>
 
-          <div className="flex gap-2 pt-2">
-            <Button size="sm" className="text-xs h-7 flex-1" onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </Button>
-            <Button size="sm" variant="outline" className="text-xs h-7 flex-1" onClick={handleClose}>Cancel</Button>
+        {/* Column + Assignees */}
+        <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <Field label="Column">
+            <ChipGroup>
+              {COLUMNS.filter((c) => c.id !== 'done').map((c) => (
+                <Chip key={c.id} on={column === c.id} onClick={() => setColumn(c.id)}>
+                  {c.label}
+                </Chip>
+              ))}
+            </ChipGroup>
+          </Field>
+
+          <Field label="Assignee">
+            <ChipGroup>
+              {members.slice(0, 5).map((m) => (
+                <Chip
+                  key={m.id}
+                  on={assigneeIds.includes(m.id)}
+                  onClick={() => toggleAssignee(m.id)}
+                >
+                  <Avatar me={m.id === currentMemberId}>{m.initials}</Avatar>
+                  {m.id === currentMemberId ? 'Me' : m.initials}
+                </Chip>
+              ))}
+            </ChipGroup>
+          </Field>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-2 mt-[18px] flex-wrap">
+          <span
+            style={{
+              fontFamily: 'var(--owl-font-mono)',
+              fontSize: 10,
+              color: 'var(--owl-text-disabled)',
+            }}
+          >
+            ⏎ to create · ⌘⏎ to create & close
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={handleClose}
+              style={{
+                fontSize: 13,
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--owl-text-muted)',
+                padding: '9px 14px',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !title.trim()}
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                padding: '9px 16px',
+                background: 'var(--owl-neon)',
+                color: '#0a2828',
+                border: 'none',
+                borderRadius: 8,
+                cursor: title.trim() ? 'pointer' : 'not-allowed',
+                opacity: title.trim() ? 1 : 0.5,
+              }}
+            >
+              {saving ? 'Creating…' : 'Create card'}
+            </button>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  background: 'rgba(15,51,51,0.6)',
+  border: 'none',
+  color: 'var(--owl-text-primary)',
+  font: 'inherit',
+  fontSize: 14,
+  padding: '10px 12px',
+  borderRadius: 8,
+};
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-[14px]">
+      <label
+        className="block mb-[6px]"
+        style={{
+          fontSize: 8,
+          fontWeight: 600,
+          letterSpacing: '2.5px',
+          textTransform: 'uppercase',
+          color: 'var(--owl-text-disabled)',
+        }}
+      >
+        {label}
+        {hint && (
+          <span
+            style={{
+              color: 'var(--owl-text-muted)',
+              fontWeight: 400,
+              letterSpacing: 'normal',
+              textTransform: 'none',
+              marginLeft: 6,
+            }}
+          >
+            · {hint}
+          </span>
+        )}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function ChipGroup({ children }: { children: React.ReactNode }) {
+  return <div className="flex gap-[5px] flex-wrap">{children}</div>;
+}
+
+function Chip({
+  on,
+  onClick,
+  children,
+}: {
+  on?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      type="button"
+      className="inline-flex items-center gap-[5px] rounded-full transition-colors"
+      style={{
+        fontSize: 12,
+        padding: '6px 12px',
+        background: on ? 'rgba(210,230,50,0.1)' : 'rgba(15,51,51,0.6)',
+        color: on ? 'var(--owl-neon)' : 'var(--owl-text-muted)',
+        border: 'none',
+        cursor: 'pointer',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Glyph({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ fontFamily: 'var(--owl-font-mono)', fontSize: 11, opacity: 0.7 }}>
+      {children}
+    </span>
+  );
+}
+
+function Avatar({ me, children }: { me?: boolean; children: React.ReactNode }) {
+  return (
+    <span
+      className="inline-flex items-center justify-center rounded-full"
+      style={{
+        width: 16,
+        height: 16,
+        margin: '-3px 0 -3px -2px',
+        fontFamily: 'var(--owl-font-mono)',
+        fontSize: 8,
+        fontWeight: 500,
+        background: me ? 'var(--owl-neon)' : 'var(--owl-elevated)',
+        color: me ? '#0a2828' : 'var(--owl-text-primary)',
+        border: '1px solid var(--owl-dash)',
+      }}
+    >
+      {children}
+    </span>
   );
 }

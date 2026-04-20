@@ -61,7 +61,7 @@ export function FooterStatus({ tasks }: Props) {
 
   return (
     <div
-      className="flex items-center gap-[14px] flex-wrap px-[14px] py-[10px] rounded-lg mx-5 md:mx-7 mb-4 mt-[18px]"
+      className="flex items-center gap-[14px] flex-wrap px-[14px] py-[8px] rounded-lg mx-5 md:mx-7 mb-3 mt-2"
       style={{
         background: 'var(--owl-dash)',
         fontFamily: 'var(--owl-font-mono)',

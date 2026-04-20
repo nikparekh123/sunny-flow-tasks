@@ -45,8 +45,8 @@ export function PriorityGrid({ tasks, onCardClick, onCardEdit, onCardDelete, ove
   return (
     <div className="overflow-x-auto pb-1">
       <div
-        className="grid gap-[10px] min-w-[1200px]"
-        style={{ gridTemplateColumns: '112px repeat(5, minmax(220px, 1fr))' }}
+        className="grid gap-[8px] min-w-[1120px]"
+        style={{ gridTemplateColumns: '96px repeat(5, minmax(200px, 1fr))' }}
       >
         {/* Row 0: column headers */}
         <div style={{ borderBottom: 'none' }} />
@@ -177,12 +177,12 @@ function Cell({
   const isEmpty = tasks.length === 0;
 
   const baseStyle: React.CSSProperties = {
-    minHeight: 120,
+    minHeight: isEmpty ? 56 : 80,
     borderRadius: 10,
-    padding: 8,
+    padding: 6,
     display: 'flex',
     flexDirection: 'column',
-    gap: 8,
+    gap: 6,
     transition: 'background 0.15s, border-color 0.15s',
     border: isOver
       ? '1px solid var(--owl-neon)'

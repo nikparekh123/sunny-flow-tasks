@@ -26,8 +26,6 @@ import { TweaksPanel } from './TweaksPanel';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
 import { ArchivePanel } from './ArchivePanel';
-import { CalendarView } from './CalendarView';
-import { GanttView } from './GanttView';
 import { TagManagementModal } from '@/components/settings/TagManagementModal';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
@@ -252,7 +250,7 @@ export function KanbanBoard() {
               onDragEnd={handleDragEnd}
               onDragCancel={handleDragCancel}
             >
-              <div className="pt-4 w-full">
+              <div className="pt-3 w-full">
                 <PriorityGrid
                   tasks={filteredTasks}
                   overCellId={overCellId}
@@ -291,21 +289,6 @@ export function KanbanBoard() {
           />
           <FooterStatus tasks={tasks} />
         </>
-      )}
-
-      {activeView === 'gantt' && (
-        <GanttView
-          tasks={filteredTasks}
-          members={members}
-          onTaskClick={(task) => setSelectedTask(task)}
-        />
-      )}
-
-      {activeView === 'calendar' && (
-        <CalendarView
-          tasks={filteredTasks}
-          onTaskClick={(task) => setSelectedTask(task)}
-        />
       )}
 
       {selectedTask && (

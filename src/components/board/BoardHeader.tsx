@@ -35,7 +35,7 @@ export function BoardHeader({ tasks }: Props) {
   }, [tasks]);
 
   return (
-    <div className="px-5 md:px-7 pt-5 pb-[18px]" style={{ borderBottom: '1px solid var(--owl-line)' }}>
+    <div className="px-5 md:px-7 pt-4 pb-[14px]" style={{ borderBottom: '1px solid var(--owl-line)' }}>
       {/* Breadcrumb + live */}
       <div className="flex items-center justify-between gap-4">
         <div
