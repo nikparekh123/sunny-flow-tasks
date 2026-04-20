@@ -106,6 +106,20 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
               {columnLabel}
             </span>
           )}
+          {task.visibility === 'private' && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[1px] px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: 'rgba(168,196,192,0.12)',
+                color: 'var(--owl-text-secondary)',
+                border: '1px solid rgba(168,196,192,0.25)',
+              }}
+              aria-label="Private task"
+            >
+              <Lock className="w-2.5 h-2.5" />
+              Private
+            </span>
+          )}
           {task.recurrence && (
             <Repeat className="w-3.5 h-3.5" style={{ color: 'var(--owl-text-muted)' }} />
           )}
@@ -179,19 +193,9 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           lineHeight: 1.4,
           textDecoration: isDone ? 'line-through' : 'none',
           margin: 0,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
         }}
       >
-        {task.visibility === 'private' && (
-          <Lock
-            className="shrink-0"
-            style={{ width: 13, height: 13, color: 'var(--owl-neon)' }}
-            aria-label="Private task"
-          />
-        )}
-        <span style={{ flex: 1 }}>{task.title}</span>
+        {task.title}
       </p>
 
       {/* Row 3: Brief */}
