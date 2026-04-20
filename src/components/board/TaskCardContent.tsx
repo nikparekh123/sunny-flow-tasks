@@ -72,7 +72,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         backgroundColor: isHighPriority ? 'rgba(210, 230, 50, 0.08)' : 'var(--owl-card)',
         border: isHighPriority ? '1px solid rgba(210, 230, 50, 0.35)' : '1px solid var(--owl-border)',
         borderRadius: 'var(--owl-radius-lg)',
-        padding: '14px 16px',
+        padding: '10px 14px 12px',
         opacity: isDone ? 0.55 : 1,
         cursor: isOverlay ? 'grabbing' : 'grab',
         boxShadow: isOverlay
@@ -88,63 +88,6 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       role="button"
       tabIndex={0}
     >
-      {/* Row 1: Status pill + recurrence + menu */}
-      <div className="flex items-center justify-between mb-2.5">
-        <div className="flex items-center gap-2">
-          {columnLabel && (
-            <span
-              className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full"
-              style={{
-                backgroundColor: (columnColor || '#888') + '18',
-                color: columnColor || 'var(--owl-text-secondary)',
-              }}
-            >
-              <span
-                className="w-1.5 h-1.5 rounded-full"
-                style={{ backgroundColor: columnColor || '#888' }}
-              />
-              {columnLabel}
-            </span>
-          )}
-          {task.visibility === 'private' && (
-            <span
-              className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[1px] px-2 py-0.5 rounded-full"
-              style={{
-                backgroundColor: 'rgba(168,196,192,0.12)',
-                color: 'var(--owl-text-secondary)',
-                border: '1px solid rgba(168,196,192,0.25)',
-              }}
-              aria-label="Private task"
-            >
-              <Lock className="w-2.5 h-2.5" />
-              Private
-            </span>
-          )}
-          {task.recurrence && (
-            <Repeat className="w-3.5 h-3.5" style={{ color: 'var(--owl-text-muted)' }} />
-          )}
-        </div>
-
-        {/* ⋯ menu button */}
-        {!isOverlay && (
-          <div
-            className="flex items-center justify-center rounded cursor-pointer opacity-0 group-hover/card:opacity-100 transition-opacity duration-150"
-            style={{
-              width: '24px',
-              height: '24px',
-              backgroundColor: 'var(--owl-surface)',
-              border: '1px solid var(--owl-border)',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen(!menuOpen);
-            }}
-          >
-            <MoreHorizontal style={{ width: '13px', height: '13px', color: 'var(--owl-text-secondary)' }} />
-          </div>
-        )}
-      </div>
-
       {/* Dropdown menu */}
       {menuOpen && (
         <>
@@ -152,7 +95,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           <div
             className="absolute z-50 animate-scale-in"
             style={{
-              top: '42px',
+              bottom: '42px',
               right: '12px',
               backgroundColor: 'var(--owl-surface)',
               border: '1px solid var(--owl-border)',
@@ -337,6 +280,62 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           <span style={{ fontSize: '11px', color: 'var(--owl-text-muted)', whiteSpace: 'nowrap', fontWeight: 500 }}>{subtaskDone}/{subtaskTotal}</span>
         </div>
       )}
+
+      {/* Row 7: Meta footer — column pill + flags + menu */}
+      <div className="flex items-center justify-between gap-2 mt-2.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          {columnLabel && (
+            <span
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: (columnColor || '#888') + '18',
+                color: columnColor || 'var(--owl-text-secondary)',
+              }}
+            >
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: columnColor || '#888' }}
+              />
+              {columnLabel}
+            </span>
+          )}
+          {task.visibility === 'private' && (
+            <span
+              className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[1px] px-2 py-0.5 rounded-full"
+              style={{
+                backgroundColor: 'rgba(168,196,192,0.12)',
+                color: 'var(--owl-text-secondary)',
+                border: '1px solid rgba(168,196,192,0.25)',
+              }}
+              aria-label="Private task"
+            >
+              <Lock className="w-2.5 h-2.5" />
+              Private
+            </span>
+          )}
+          {task.recurrence && (
+            <Repeat className="w-3.5 h-3.5" style={{ color: 'var(--owl-text-muted)' }} />
+          )}
+        </div>
+
+        {!isOverlay && (
+          <div
+            className="flex items-center justify-center rounded cursor-pointer opacity-0 group-hover/card:opacity-100 transition-opacity duration-150 shrink-0"
+            style={{
+              width: '24px',
+              height: '24px',
+              backgroundColor: 'var(--owl-surface)',
+              border: '1px solid var(--owl-border)',
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen(!menuOpen);
+            }}
+          >
+            <MoreHorizontal style={{ width: '13px', height: '13px', color: 'var(--owl-text-secondary)' }} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
