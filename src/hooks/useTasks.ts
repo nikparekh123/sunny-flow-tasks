@@ -227,6 +227,20 @@ export function useTasks() {
       const position = (maxPos?.position ?? -1) + 1;
       const primaryAssignee = task.assignee_ids?.[0] || task.assignee_id || null;
 
+      // Private tasks: auto-include creator and all assignees in participants
+      // so they can still see and interact with the task.
+      const assigneesForParticipants = task.assignee_ids || (task.assignee_id ? [task.assignee_id] : []);
+      const participantIds =
+        task.visibility === 'private'
+          ? Array.from(
+              new Set([
+                ...(task.participant_ids || []),
+                ...(task.created_by ? [task.created_by] : []),
+                ...assigneesForParticipants,
+              ]),
+            )
+          : [];
+
       const { data: newTask, error } = await supabase
         .from('tasks')
         .insert({
@@ -241,7 +255,7 @@ export function useTasks() {
           recurrence: task.recurrence || null,
           brief: task.brief || null,
           visibility: task.visibility || 'team',
-          participant_ids: task.participant_ids || [],
+          participant_ids: participantIds,
         } as any)
         .select('id')
         .single();
@@ -261,8 +275,13 @@ export function useTasks() {
         );
       }
 
-      // Send notification to all assignees
+      // Send notification to all assignees. For private tasks, only notify
+      // assignees who are participants (otherwise they can't see the task
+      // the notification references, and the title would leak).
+      const isPrivate = task.visibility === 'private';
+      const allowedForNotify = new Set(participantIds);
       for (const aId of assigneeIds) {
+        if (isPrivate && !allowedForNotify.has(aId)) continue;
         const assigneeMember = members.find((m) => m.id === aId);
         if (assigneeMember) {
           await supabase.from('notifications').insert({
@@ -343,8 +362,26 @@ export function useTasks() {
       // Notifications for new assignees
       const task = tasks.find((t) => t.id === id);
       if (assignee_ids && task) {
+        // For private tasks, auto-add new assignees to participants so the
+        // notification target can actually see the task, and don't notify
+        // anyone who isn't a participant.
+        if (task.visibility === 'private') {
+          const nextParticipants = Array.from(
+            new Set([...(task.participant_ids || []), ...assignee_ids]),
+          );
+          await supabase
+            .from('tasks')
+            .update({ participant_ids: nextParticipants } as any)
+            .eq('id', id);
+        }
+        const allowedSet = new Set(
+          task.visibility === 'private'
+            ? [...(task.participant_ids || []), ...assignee_ids]
+            : assignee_ids,
+        );
         const newAssignees = assignee_ids.filter((aId) => !task.assignee_ids.includes(aId));
         for (const aId of newAssignees) {
+          if (!allowedSet.has(aId)) continue;
           const m = members.find((m) => m.id === aId);
           if (m) {
             await supabase.from('notifications').insert({
