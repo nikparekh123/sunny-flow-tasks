@@ -178,6 +178,8 @@ function Cell({
 
   const baseStyle: React.CSSProperties = {
     minHeight: isEmpty ? 56 : 80,
+    maxHeight: 360,
+    overflowY: 'auto',
     borderRadius: 10,
     padding: 6,
     display: 'flex',
