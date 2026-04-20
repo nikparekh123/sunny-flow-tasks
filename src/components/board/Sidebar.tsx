@@ -108,7 +108,7 @@ export function Sidebar({
             dotColor="var(--owl-neon)"
             count={counts.active}
           >
-            Product board
+            Team to do's
           </NavItem>
           <NavItem
             active={isMineActive}

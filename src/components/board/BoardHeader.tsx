@@ -48,7 +48,7 @@ export function BoardHeader({ tasks }: Props) {
           }}
         >
           workspace <span style={{ color: 'var(--owl-text-disabled)' }}>/</span>{' '}
-          <b style={{ color: 'var(--owl-text-secondary)', fontWeight: 500 }}>product board</b>{' '}
+          <b style={{ color: 'var(--owl-text-secondary)', fontWeight: 500 }}>team to do's</b>{' '}
           <span style={{ color: 'var(--owl-text-disabled)' }}>/</span> priority × status
         </div>
         <div
@@ -80,7 +80,7 @@ export function BoardHeader({ tasks }: Props) {
               color: 'var(--owl-text-primary)',
             }}
           >
-            Product <b style={{ fontWeight: 700 }}>board</b>
+            Team <b style={{ fontWeight: 700 }}>to do's</b>
           </h1>
         </div>
         <div className="flex gap-6 items-center flex-wrap">
