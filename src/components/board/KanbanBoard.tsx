@@ -50,6 +50,7 @@ export function KanbanBoard() {
   const { completeAllSubtasks } = useSubtasks();
 
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
+  const [assigneeScope, setAssigneeScope] = useState<'all' | 'mine' | 'unassigned'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
   const [priorityFilter, setPriorityFilter] = useState<'high' | null>(null);
@@ -69,6 +70,15 @@ export function KanbanBoard() {
 
   const filteredTasks = useMemo(() => {
     let result = tasks;
+    if (assigneeScope === 'mine' && member?.id) {
+      result = result.filter(
+        (t) => t.assignee_ids?.includes(member.id) || t.assignee_id === member.id,
+      );
+    } else if (assigneeScope === 'unassigned') {
+      result = result.filter(
+        (t) => (!t.assignee_ids || t.assignee_ids.length === 0) && !t.assignee_id,
+      );
+    }
     if (activeAssignee) {
       result = result.filter((t) =>
         t.assignee_ids?.includes(activeAssignee) || t.assignee_id === activeAssignee
@@ -95,7 +105,7 @@ export function KanbanBoard() {
       result = result.filter((t) => t.priority === priorityFilter);
     }
     return result;
-  }, [tasks, activeAssignee, searchQuery, activeTagIds, priorityFilter]);
+  }, [tasks, activeAssignee, assigneeScope, member?.id, searchQuery, activeTagIds, priorityFilter]);
 
   const allTasksByColumn = useMemo(() => {
     const map: Record<TaskColumn, TaskWithDetail[]> = { backlog: [], todo: [], inprogress: [], review: [], done: [] };
@@ -246,6 +256,8 @@ export function KanbanBoard() {
         activeView={activeView}
         onViewChange={setActiveView}
         onNavigateToTask={handleNavigateToTask}
+        assigneeScope={assigneeScope}
+        onAssigneeScopeChange={setAssigneeScope}
       />
 
       {activeView === 'board' && (
