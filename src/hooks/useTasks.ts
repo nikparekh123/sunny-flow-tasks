@@ -308,6 +308,7 @@ export function useTasks() {
           assignee_color: null, assignee_avatar_url: null, project: null,
           tags: [], recurrence: task.recurrence || null, brief: task.brief || null,
           completed_at: null, assignee_ids: assigneeIds, assignees: [],
+          visibility: task.visibility || 'team', participant_ids: participantIds,
         };
         evaluateRules({ type: 'task_created', task: createdTask });
         if (primaryAssignee) {
