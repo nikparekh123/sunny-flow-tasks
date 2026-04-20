@@ -241,22 +241,27 @@ export function useTasks() {
             )
           : [];
 
+      const insertPayload: Record<string, any> = {
+        title: task.title,
+        column,
+        priority: task.priority || 'med',
+        position,
+        assignee_id: primaryAssignee,
+        due_date: task.due_date || null,
+        description: task.description || null,
+        created_by: task.created_by || null,
+        recurrence: task.recurrence || null,
+        brief: task.brief || null,
+      };
+      // Only send privacy fields when actually needed — lets public task
+      // creation work even before the privacy migration has been applied.
+      if (task.visibility === 'private') {
+        insertPayload.visibility = 'private';
+        insertPayload.participant_ids = participantIds;
+      }
       const { data: newTask, error } = await supabase
         .from('tasks')
-        .insert({
-          title: task.title,
-          column,
-          priority: task.priority || 'med',
-          position,
-          assignee_id: primaryAssignee,
-          due_date: task.due_date || null,
-          description: task.description || null,
-          created_by: task.created_by || null,
-          recurrence: task.recurrence || null,
-          brief: task.brief || null,
-          visibility: task.visibility || 'team',
-          participant_ids: participantIds,
-        } as any)
+        .insert(insertPayload as any)
         .select('id')
         .single();
       if (error) throw error;
