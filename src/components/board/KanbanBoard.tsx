@@ -13,6 +13,7 @@ import {
   type DragOverEvent,
   type CollisionDetection,
 } from '@dnd-kit/core';
+import { canMoveColumn } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
 import { useSubtasks } from '@/hooks/useSubtasks';
@@ -174,6 +175,15 @@ export function KanbanBoard() {
       currentIndex === targetPosition
     )
       return;
+
+    // Workflow rule: can only move to the next step, no skipping, no going back.
+    if (
+      activeTask.column !== targetColumn &&
+      !canMoveColumn(activeTask.column, targetColumn)
+    ) {
+      toast.error('Can only move to the next step');
+      return;
+    }
 
     // Check for incomplete subtasks when moving to done
     const incompleteSubtasks = (activeTask.subtasks || []).filter(s => !s.done).length;

@@ -16,6 +16,17 @@ export const PRIORITIES: { id: 'high' | 'med' | 'low'; label: string; glyph: str
   { id: 'low',  label: 'Low',  glyph: '·',  sub: 'nice to have' },
 ];
 
+export const COLUMN_ORDER: TaskColumn[] = ['backlog', 'todo', 'inprogress', 'review', 'done'];
+
+// A card may move only to the next step in the workflow (no skipping, no going back).
+export function canMoveColumn(from: TaskColumn, to: TaskColumn): boolean {
+  if (from === to) return true;
+  const fromIdx = COLUMN_ORDER.indexOf(from);
+  const toIdx = COLUMN_ORDER.indexOf(to);
+  if (fromIdx < 0 || toIdx < 0) return false;
+  return toIdx === fromIdx + 1;
+}
+
 export const PRIORITY_COLORS: Record<string, string> = {
   high: '#d2e632',
   med: '#EF9F27',

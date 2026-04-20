@@ -13,7 +13,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
-import { COLUMNS, PRIORITY_COLORS } from '@/lib/constants';
+import { COLUMNS, PRIORITY_COLORS, canMoveColumn } from '@/lib/constants';
+import { toast } from 'sonner';
 import { useSubtasks } from '@/hooks/useSubtasks';
 import type { TaskWithDetail, Tag, TeamMember, TaskColumn, TaskPriority, RecurrenceFrequency, Subtask } from '@/lib/types';
 
@@ -129,6 +130,11 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
   };
 
   const handleSave = () => {
+    if (column !== task.column && !canMoveColumn(task.column, column)) {
+      toast.error('Can only move to the next step');
+      setColumn(task.column);
+      return;
+    }
     const updates: { id: string } & Record<string, any> = { id: task.id };
     if (title.trim() !== task.title) updates.title = title.trim();
     if (description !== (task.description || '')) updates.description = description || null;
@@ -350,14 +356,17 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
                 <Select value={column} onValueChange={(v) => setColumn(v as TaskColumn)}>
                   <SelectTrigger className="text-xs h-7"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {COLUMNS.map((col) => (
-                      <SelectItem key={col.id} value={col.id}>
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: col.color }} />
-                          {col.label}
-                        </span>
-                      </SelectItem>
-                    ))}
+                    {COLUMNS.map((col) => {
+                      const allowed = canMoveColumn(task.column, col.id);
+                      return (
+                        <SelectItem key={col.id} value={col.id} disabled={!allowed}>
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: col.color }} />
+                            {col.label}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               ) : (
