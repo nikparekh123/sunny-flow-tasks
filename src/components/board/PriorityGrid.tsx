@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { COLUMNS, PRIORITIES } from '@/lib/constants';
+import { COLUMNS } from '@/lib/constants';
 import { TaskCard } from './TaskCard';
-import type { TaskWithDetail, TaskColumn, TaskPriority } from '@/lib/types';
+import type { TaskWithDetail, TaskColumn } from '@/lib/types';
 
 interface Props {
   tasks: TaskWithDetail[];
@@ -13,31 +13,32 @@ interface Props {
   overCellId: string | null;
 }
 
+const PRIORITY_ORDER: Record<string, number> = { high: 0, med: 1, low: 2 };
+
 export function PriorityGrid({ tasks, onCardClick, onCardEdit, onCardDelete, overCellId }: Props) {
-  const grouped = useMemo(() => {
+  const byColumn = useMemo(() => {
     const map: Record<string, TaskWithDetail[]> = {};
+    COLUMNS.forEach((c) => (map[c.id] = []));
     tasks.forEach((t) => {
-      const key = `${t.priority}:${t.column}`;
-      (map[key] ||= []).push(t);
+      (map[t.column] ||= []).push(t);
     });
-    Object.keys(map).forEach((k) => {
-      if (k.endsWith(':done')) {
-        map[k].sort((a, b) => {
+    Object.entries(map).forEach(([col, list]) => {
+      if (col === 'done') {
+        list.sort((a, b) => {
           const aD = a.completed_at ? new Date(a.completed_at).getTime() : 0;
           const bD = b.completed_at ? new Date(b.completed_at).getTime() : 0;
           return bD - aD;
         });
       } else {
-        map[k].sort((a, b) => a.position - b.position);
+        list.sort((a, b) => {
+          const pa = PRIORITY_ORDER[a.priority] ?? 3;
+          const pb = PRIORITY_ORDER[b.priority] ?? 3;
+          if (pa !== pb) return pa - pb;
+          return a.position - b.position;
+        });
       }
     });
     return map;
-  }, [tasks]);
-
-  const columnCounts = useMemo(() => {
-    const m: Record<string, number> = {};
-    COLUMNS.forEach((c) => (m[c.id] = tasks.filter((t) => t.column === c.id).length));
-    return m;
   }, [tasks]);
 
   const totalActive = tasks.filter((t) => t.column !== 'done').length || 1;
@@ -45,109 +46,64 @@ export function PriorityGrid({ tasks, onCardClick, onCardEdit, onCardDelete, ove
   return (
     <div className="overflow-x-auto pb-1">
       <div
-        className="grid gap-[8px] min-w-[1120px]"
-        style={{ gridTemplateColumns: '96px repeat(5, minmax(200px, 1fr))' }}
+        className="grid gap-[10px] min-w-[1040px]"
+        style={{ gridTemplateColumns: 'repeat(5, minmax(200px, 1fr))' }}
       >
-        {/* Row 0: column headers */}
-        <div style={{ borderBottom: 'none' }} />
         {COLUMNS.map((col) => {
-          const pct = Math.round((columnCounts[col.id] / totalActive) * 100);
+          const colTasks = byColumn[col.id] ?? [];
           const isDone = col.id === 'done';
+          const pct = Math.round((colTasks.length / totalActive) * 100);
           return (
-            <div
-              key={col.id}
-              className="flex flex-col gap-[3px] px-[14px] pt-3 pb-[10px]"
-              style={{ borderBottom: '1px solid var(--owl-line)' }}
-            >
-              <div
-                className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[2px]"
-                style={{ color: isDone ? 'var(--owl-positive)' : 'var(--owl-text-muted)' }}
-              >
-                {col.label}
-                <span className="flex-1 h-px" style={{ background: 'var(--owl-line)' }} />
-              </div>
-              <div className="flex items-baseline justify-between gap-2">
+            <div key={col.id} className="flex flex-col gap-2">
+              {/* Column header */}
+              <div className="flex flex-col gap-[3px] px-[4px] pt-2 pb-[8px]">
                 <div
-                  className="text-base font-medium tracking-tight"
-                  style={{
-                    fontFamily: 'var(--owl-font-mono)',
-                    color: isDone ? 'var(--owl-positive)' : 'var(--owl-text-secondary)',
-                  }}
+                  className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[2px]"
+                  style={{ color: isDone ? 'var(--owl-positive)' : 'var(--owl-text-muted)' }}
                 >
-                  {columnCounts[col.id]}
+                  {col.label}
+                  <span className="flex-1 h-px" style={{ background: 'var(--owl-line)' }} />
                 </div>
-                <div
-                  className="text-[10px]"
-                  style={{ fontFamily: 'var(--owl-font-mono)', color: 'var(--owl-text-disabled)' }}
-                >
-                  {col.sub ?? ''}
-                </div>
-              </div>
-              <div
-                className="h-[3px] rounded-sm mt-[6px] overflow-hidden"
-                style={{ background: 'rgba(15,51,51,0.8)' }}
-              >
-                <span
-                  className="block h-full rounded-sm"
-                  style={{
-                    width: `${pct}%`,
-                    background: isDone ? 'var(--owl-positive)' : 'var(--owl-elevated)',
-                  }}
-                />
-              </div>
-            </div>
-          );
-        })}
-
-        {/* Priority rows */}
-        {PRIORITIES.map((p) => {
-          const color =
-            p.id === 'high'
-              ? 'var(--owl-negative)'
-              : p.id === 'med'
-              ? 'var(--owl-warning)'
-              : 'var(--owl-text-muted)';
-          return (
-            <div key={p.id} className="contents">
-              <div
-                className="flex flex-col items-end text-right gap-[3px] py-3 pr-[10px] pl-[10px]"
-                style={{ borderRight: '1px solid var(--owl-line)' }}
-              >
-                <div className="font-bold tracking-tight leading-none" style={{ fontSize: 22, color }}>
-                  {p.glyph}
+                <div className="flex items-baseline justify-between gap-2">
+                  <div
+                    className="text-base font-medium tracking-tight"
+                    style={{
+                      fontFamily: 'var(--owl-font-mono)',
+                      color: isDone ? 'var(--owl-positive)' : 'var(--owl-text-secondary)',
+                    }}
+                  >
+                    {colTasks.length}
+                  </div>
+                  <div
+                    className="text-[10px]"
+                    style={{ fontFamily: 'var(--owl-font-mono)', color: 'var(--owl-text-disabled)' }}
+                  >
+                    {col.sub ?? ''}
+                  </div>
                 </div>
                 <div
-                  className="text-[9px] font-semibold uppercase tracking-[2px]"
-                  style={{ color }}
+                  className="h-[3px] rounded-sm mt-[6px] overflow-hidden"
+                  style={{ background: 'rgba(15,51,51,0.8)' }}
                 >
-                  {p.label}
-                </div>
-                <div
-                  className="text-[10px] mt-px"
-                  style={{ fontFamily: 'var(--owl-font-mono)', color: 'var(--owl-text-disabled)' }}
-                >
-                  {p.sub}
-                </div>
-              </div>
-              {COLUMNS.map((col) => {
-                const key = `${p.id}:${col.id}`;
-                const cellTasks = grouped[key] ?? [];
-                return (
-                  <Cell
-                    key={key}
-                    id={key}
-                    priority={p.id}
-                    column={col.id}
-                    isOver={overCellId === key}
-                    isDone={col.id === 'done'}
-                    isHigh={p.id === 'high'}
-                    tasks={cellTasks}
-                    onCardClick={onCardClick}
-                    onCardEdit={onCardEdit}
-                    onCardDelete={onCardDelete}
+                  <span
+                    className="block h-full rounded-sm"
+                    style={{
+                      width: `${Math.min(100, pct)}%`,
+                      background: isDone ? 'var(--owl-positive)' : 'var(--owl-elevated)',
+                    }}
                   />
-                );
-              })}
+                </div>
+              </div>
+
+              <Column
+                id={col.id}
+                tasks={colTasks}
+                isOver={overCellId === col.id}
+                isDone={isDone}
+                onCardClick={onCardClick}
+                onCardEdit={onCardEdit}
+                onCardDelete={onCardDelete}
+              />
             </div>
           );
         })}
@@ -156,48 +112,36 @@ export function PriorityGrid({ tasks, onCardClick, onCardEdit, onCardDelete, ove
   );
 }
 
-interface CellProps {
-  id: string;
-  priority: TaskPriority;
-  column: TaskColumn;
+interface ColumnProps {
+  id: TaskColumn;
+  tasks: TaskWithDetail[];
   isOver: boolean;
   isDone: boolean;
-  isHigh: boolean;
-  tasks: TaskWithDetail[];
   onCardClick: (task: TaskWithDetail) => void;
   onCardEdit: (task: TaskWithDetail) => void;
   onCardDelete: (taskId: string) => void;
 }
 
-const CELL_LIMIT = 6;
+const COLUMN_LIMIT = 10;
 
-function Cell({
-  id, priority, column, isOver, isDone, isHigh, tasks,
-  onCardClick, onCardEdit, onCardDelete,
-}: CellProps) {
-  const { setNodeRef } = useDroppable({ id, data: { column, priority } });
+function Column({ id, tasks, isOver, isDone, onCardClick, onCardEdit, onCardDelete }: ColumnProps) {
+  const { setNodeRef } = useDroppable({ id, data: { column: id } });
   const isEmpty = tasks.length === 0;
   const [expanded, setExpanded] = useState(false);
   const visibleTasks =
-    expanded || tasks.length <= CELL_LIMIT ? tasks : tasks.slice(0, CELL_LIMIT);
+    expanded || tasks.length <= COLUMN_LIMIT ? tasks : tasks.slice(0, COLUMN_LIMIT);
   const hiddenCount = tasks.length - visibleTasks.length;
 
   const baseStyle: React.CSSProperties = {
-    minHeight: isEmpty ? 56 : 80,
+    minHeight: isEmpty ? 80 : 100,
     borderRadius: 10,
     padding: 6,
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
     transition: 'background 0.15s, border-color 0.15s',
-    border: isOver
-      ? '1px solid var(--owl-neon)'
-      : `1px dashed ${isHigh ? 'rgba(232,112,96,0.3)' : 'rgba(30,90,80,0.35)'}`,
-    background: isOver
-      ? 'rgba(210,230,50,0.05)'
-      : isHigh
-      ? 'rgba(232,112,96,0.05)'
-      : 'rgba(15,51,51,0.22)',
+    border: isOver ? '1px solid var(--owl-neon)' : '1px dashed rgba(30,90,80,0.35)',
+    background: isOver ? 'rgba(210,230,50,0.05)' : 'rgba(15,51,51,0.22)',
     alignItems: isEmpty ? 'center' : undefined,
     justifyContent: isEmpty ? 'center' : undefined,
   };
@@ -209,7 +153,7 @@ function Cell({
           <TaskCard
             key={task.id}
             task={task}
-            isDone={column === 'done'}
+            isDone={task.column === 'done'}
             onClick={() => onCardClick(task)}
             onEdit={() => onCardEdit(task)}
             onDelete={() => onCardDelete(task.id)}
@@ -236,7 +180,7 @@ function Cell({
           +{hiddenCount} more
         </button>
       )}
-      {expanded && tasks.length > CELL_LIMIT && (
+      {expanded && tasks.length > COLUMN_LIMIT && (
         <button
           onClick={() => setExpanded(false)}
           className="w-full rounded-md transition-colors"
