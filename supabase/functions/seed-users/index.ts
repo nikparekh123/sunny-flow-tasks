@@ -7,10 +7,10 @@ const corsHeaders = {
 };
 
 const USERS = [
-  { email: "nik@sunnyfi.co", password: "niknik", name: "Nik Parekh", role: "admin" },
-  { email: "ary@sunnyfi.co", password: "aryary", name: "Ary LaRocca", role: "admin" },
-  { email: "rad@sunnyfi.co", password: "radrad", name: "Rad Rahmouni", role: "member" },
-  { email: "kushal@sunnyfi.co", password: "kushalkushal", name: "Kushal Jain", role: "member" },
+  { email: "nik@sunnyfi.co",    password: "niknik",       name: "Nik Parekh",    role: "admin",  pincode: "1111" },
+  { email: "ary@sunnyfi.co",    password: "aryary",       name: "Ary LaRocca",   role: "admin",  pincode: "2222" },
+  { email: "rad@sunnyfi.co",    password: "radrad",       name: "Rad Rahmouni",  role: "member", pincode: "3333" },
+  { email: "kushal@sunnyfi.co", password: "kushalkushal", name: "Kushal Jain",   role: "member", pincode: "4444" },
 ];
 
 const MEMBER_COLORS = ["blue", "green", "purple", "orange", "pink", "teal"];
@@ -94,6 +94,12 @@ Deno.serve(async (req) => {
           });
         }
       }
+
+      // Upsert the pincode for this user so they can log in by PIN
+      await admin.from("member_pincodes").upsert(
+        { user_id: userId, pincode: u.pincode },
+        { onConflict: "user_id" },
+      );
     }
 
     return new Response(JSON.stringify({ success: true, results }), {
