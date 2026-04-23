@@ -76,7 +76,7 @@ export function PriorityGrid({ tasks, onCardClick, onCardEdit, onCardDelete, ove
                   </div>
                   <div
                     className="text-[10px]"
-                    style={{ fontFamily: 'var(--owl-font-mono)', color: 'var(--owl-text-disabled)' }}
+                    style={{ fontFamily: 'var(--owl-font-mono)', color: 'var(--owl-text-label)' }}
                   >
                     {col.sub ?? ''}
                   </div>
@@ -187,7 +187,7 @@ function Column({ id, tasks, isOver, isDone, onCardClick, onCardEdit, onCardDele
           style={{
             fontFamily: 'var(--owl-font-mono)',
             fontSize: 10,
-            color: 'var(--owl-text-disabled)',
+            color: 'var(--owl-text-label)',
             background: 'transparent',
             border: 'none',
             padding: '3px 8px',
@@ -203,7 +203,7 @@ function Column({ id, tasks, isOver, isDone, onCardClick, onCardEdit, onCardDele
           style={{
             fontFamily: 'var(--owl-font-mono)',
             fontSize: 10,
-            color: isDone ? 'var(--owl-positive)' : 'var(--owl-text-disabled)',
+            color: isDone ? 'var(--owl-positive)' : 'var(--owl-text-label)',
             opacity: isDone ? 0.6 : 1,
             letterSpacing: '0.5px',
           }}

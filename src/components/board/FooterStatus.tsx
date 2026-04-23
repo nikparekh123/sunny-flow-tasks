@@ -116,5 +116,5 @@ function Item({ children }: { children: React.ReactNode }) {
   return <span className="inline-flex items-center gap-[6px]">{children}</span>;
 }
 function Sep() {
-  return <span style={{ color: 'var(--owl-text-disabled)' }}>·</span>;
+  return <span style={{ color: 'var(--owl-text-label)' }}>·</span>;
 }

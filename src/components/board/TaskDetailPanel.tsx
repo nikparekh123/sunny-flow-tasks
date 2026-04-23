@@ -280,15 +280,15 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
             style={{
               fontFamily: 'var(--owl-font-mono)',
               fontSize: 10,
-              color: 'var(--owl-text-disabled)',
+              color: 'var(--owl-text-label)',
               letterSpacing: '0.5px',
             }}
           >
-            s to dos <span style={{ color: 'var(--owl-text-disabled)' }}>/</span>{' '}
+            s to dos <span style={{ color: 'var(--owl-text-label)' }}>/</span>{' '}
             <b style={{ color: 'var(--owl-text-secondary)', fontWeight: 500 }}>
               {COLUMNS.find((c) => c.id === task.column)?.label ?? task.column}
             </b>{' '}
-            <span style={{ color: 'var(--owl-text-disabled)' }}>/</span>{' '}
+            <span style={{ color: 'var(--owl-text-label)' }}>/</span>{' '}
             <span style={{ color: 'var(--owl-text-muted)' }}>card-{task.id.slice(0, 6)}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -312,7 +312,7 @@ export function TaskDetailPanel({ task, tags, members, onClose, onUpdate, onDele
                 style={{
                   fontFamily: 'var(--owl-font-mono)',
                   fontSize: 10,
-                  color: 'var(--owl-text-disabled)',
+                  color: 'var(--owl-text-label)',
                   border: '1px solid var(--owl-text-disabled)',
                   padding: '0 4px',
                   borderRadius: 3,

@@ -98,7 +98,7 @@ export function PeopleView({ tasks, members, onTaskClick, currentMemberId }: Pro
                       fontWeight: 500,
                       letterSpacing: '1.2px',
                       textTransform: 'uppercase',
-                      color: 'var(--owl-text-disabled)',
+                      color: 'var(--owl-text-label)',
                       marginTop: 2,
                     }}
                   >
@@ -147,7 +147,7 @@ export function PeopleView({ tasks, members, onTaskClick, currentMemberId }: Pro
                 {sorted.length === 0 ? (
                   <div
                     className="text-[11px] italic p-2"
-                    style={{ color: 'var(--owl-text-disabled)' }}
+                    style={{ color: 'var(--owl-text-label)' }}
                   >
                     No cards assigned.
                   </div>
@@ -201,7 +201,7 @@ function PStat({
           fontWeight: 600,
           letterSpacing: '1.5px',
           textTransform: 'uppercase',
-          color: 'var(--owl-text-disabled)',
+          color: 'var(--owl-text-label)',
         }}
       >
         {k}
@@ -240,7 +240,7 @@ function PersonCard({ task, onClick }: { task: TaskWithDetail; onClick: () => vo
     task.column === 'done'
       ? 'var(--owl-text-muted)'
       : !task.due_date
-      ? 'var(--owl-text-disabled)'
+      ? 'var(--owl-text-label)'
       : differenceInCalendarDays(new Date(task.due_date), today) < 0
       ? 'var(--owl-negative)'
       : differenceInCalendarDays(new Date(task.due_date), today) <= 3
@@ -279,7 +279,7 @@ function PersonCard({ task, onClick }: { task: TaskWithDetail; onClick: () => vo
           style={{
             fontFamily: 'var(--owl-font-mono)',
             fontSize: 9.5,
-            color: 'var(--owl-text-disabled)',
+            color: 'var(--owl-text-label)',
             letterSpacing: '0.3px',
             marginTop: 2,
             textTransform: 'uppercase',

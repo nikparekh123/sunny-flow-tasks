@@ -1,56 +1,76 @@
+/*
+ * Canonical design tokens for Sunny Ops.
+ * Single source of truth: DESIGN_SYSTEM.md at repo root.
+ * When in doubt, match that file — not this one.
+ */
+
 :root {
-  /* Canvas & surfaces */
-  --owl-page:       #0a2828;
-  --owl-dash:       #061a10;
-  --owl-surface:    #0f3333;
-  --owl-card:       rgba(15, 51, 51, 0.55);
+  /* ---------- Canvas & surfaces ---------- */
+  --owl-page:          #0a2828;  /* main app background */
+  --owl-dash:          #061a10;  /* dashboard deep background, banners */
+  --owl-surface:       #0f3333;  /* card header bars, nav bars */
+  --owl-card:          transparent; /* card fill — outline only */
   --owl-card-elevated: rgba(15, 51, 51, 0.85);
-  --owl-elevated:   #1e5a50;
-  --owl-dusk:       #325050;
+  --owl-elevated:      #1e5a50;  /* surface only — never as text */
+  --owl-dusk:          #325050;  /* structural dividers only */
 
-  /* Text */
-  --owl-text-primary:   #faf5f0;
-  --owl-text-secondary: #a8c4c0;
-  --owl-text-muted:     #468278;
-  --owl-text-disabled:  #325050;
+  /* ---------- Text hierarchy ---------- */
+  --owl-text-primary:   #faf5f0; /* main values, symbols, headings */
+  --owl-text-secondary: #a8c4c0; /* supporting text, descriptions */
+  --owl-text-muted:     #8abdb6; /* sub-labels, secondary data (updated) */
+  --owl-text-label:     #6a9e96; /* card labels, section headers (new) */
+  --owl-text-disabled:  #325050; /* structural dividers only — NOT for readable text */
+  --owl-text-invisible: #1e5a50; /* surface use only — NEVER as text */
 
-  /* Semantic */
-  --owl-positive:   #a8d4a0;
-  --owl-negative:   #e87060;
-  --owl-neon:       #d2e632;
-  --owl-neon-dark:  #c8d820;
-  --owl-warning:    #e0c060;
+  /* ---------- Semantic ---------- */
+  --owl-positive:       #a8d4a0;
+  --owl-negative:       #e87060;
+  --owl-neon:           #d2e632;
+  --owl-neon-dark:      #c8d820;
+  --owl-warning:        #e0c060;
 
-  /* Borders */
-  --owl-border:     rgba(30, 90, 80, 0.35);
-  --owl-border-mid: rgba(30, 90, 80, 0.5);
-  --owl-line:       rgba(30, 90, 80, 0.25);
-  --owl-line-bright:#326e64;
+  /* ---------- Semantic tints (for chips / alerts / card variants) ---------- */
+  --owl-tint-positive:  rgba(168, 212, 160, 0.10);
+  --owl-tint-negative:  rgba(220,  80,  60, 0.10);
+  --owl-tint-warning:   rgba(224, 192,  96, 0.08);
+  --owl-tint-neon:      rgba(210, 230,  50, 0.08);
+  --owl-tint-neutral:   rgba( 15,  51,  51, 0.50);
 
-  /* Fonts */
-  --owl-font-mono:  'DM Mono', ui-monospace, monospace;
+  /* ---------- Borders ---------- */
+  --owl-border:         rgba( 30,  90,  80, 0.20); /* default card border */
+  --owl-border-bright:  rgba( 50, 110, 100, 0.35); /* emphasized borders */
+  --owl-border-mid:     rgba( 30,  90,  80, 0.50);
+  --owl-line:           rgba( 30,  90,  80, 0.25);
+  --owl-line-bright:    #326e64;
 
-  /* Animations */
-  --owl-transition: 0.15s ease;
-  --owl-transition-md: 0.25s ease;
+  /* ---------- Fonts ---------- */
+  --owl-font-sans:      'Work Sans', system-ui, sans-serif;
+  --owl-font-mono:      'DM Mono', ui-monospace, monospace;
 
-  /* Radius */
-  --owl-radius-sm: 6px;
-  --owl-radius-md: 8px;
-  --owl-radius-lg: 10px;
-  --owl-radius-xl: 12px;
+  /* ---------- Motion ---------- */
+  --owl-transition:     0.15s ease;
+  --owl-transition-md:  0.25s ease;
+
+  /* ---------- Radius ---------- */
+  --owl-radius-sm:      4px;  /* badge */
+  --owl-radius-md:      6px;  /* metric chip */
+  --owl-radius-lg:      8px;  /* button / rounded input */
+  --owl-radius-xl:      10px; /* card */
+  --owl-radius-pill:    100px;
 }
 
-/* Animations */
-@keyframes owl-pulse    { 0%,100%{opacity:1} 50%{opacity:.35} }
+/* ---------- Animations (DESIGN_SYSTEM §15) ---------- */
+@keyframes owl-pulse    { 0%,100%{opacity:1} 50%{opacity:.3} }
 @keyframes owl-blink    { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes owl-fade-up  { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes owl-slide-in { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+@keyframes owl-shimmer  { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+@keyframes owl-scroll   { from{transform:translateX(0)} to{transform:translateX(-50%)} }
 
-/* Accent swaps */
+/* ---------- Accent swaps (tweaks panel) ---------- */
 body.owl-accent-ember  { --owl-neon: #e0a070; --owl-neon-dark: #d89060; }
 body.owl-accent-violet { --owl-neon: #b8a0e8; --owl-neon-dark: #a890d8; }
 
-/* Density (scales card padding/gap in the priority grid cells) */
+/* ---------- Density (tweaks panel) ---------- */
 body.owl-density-compact  { --owl-density-scale: 0.85; }
 body.owl-density-spacious { --owl-density-scale: 1.15; }
-@keyframes owl-fade-up  { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
-@keyframes owl-slide-in { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }

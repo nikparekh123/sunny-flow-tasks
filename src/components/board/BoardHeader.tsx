@@ -44,12 +44,12 @@ export function BoardHeader({ tasks }: Props) {
             fontFamily: 'var(--owl-font-mono)',
             fontSize: 10,
             letterSpacing: '0.5px',
-            color: 'var(--owl-text-disabled)',
+            color: 'var(--owl-text-label)',
           }}
         >
-          workspace <span style={{ color: 'var(--owl-text-disabled)' }}>/</span>{' '}
+          workspace <span style={{ color: 'var(--owl-text-label)' }}>/</span>{' '}
           <b style={{ color: 'var(--owl-text-secondary)', fontWeight: 500 }}>team to do's</b>{' '}
-          <span style={{ color: 'var(--owl-text-disabled)' }}>/</span> priority × status
+          <span style={{ color: 'var(--owl-text-label)' }}>/</span> priority × status
         </div>
         <div
           className="inline-flex items-center gap-[6px]"
@@ -133,7 +133,7 @@ function Stat({
           fontWeight: 500,
           letterSpacing: '1.4px',
           textTransform: 'uppercase',
-          color: 'var(--owl-text-disabled)',
+          color: 'var(--owl-text-label)',
         }}
       >
         {label}

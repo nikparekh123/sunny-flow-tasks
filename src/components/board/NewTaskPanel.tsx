@@ -207,7 +207,7 @@ export function NewTaskPanel({
               <PopoverTrigger asChild>
                 <button className="w-full text-left" style={inputStyle}>
                   {dueDate ? format(dueDate, 'MMM d, yyyy') : (
-                    <span style={{ color: 'var(--owl-text-disabled)' }}>
+                    <span style={{ color: 'var(--owl-text-label)' }}>
                       e.g. Apr 25 · next fri
                     </span>
                   )}
@@ -284,7 +284,7 @@ export function NewTaskPanel({
                   fontWeight: 600,
                   letterSpacing: '2.5px',
                   textTransform: 'uppercase',
-                  color: 'var(--owl-text-disabled)',
+                  color: 'var(--owl-text-label)',
                 }}
               >
                 Shared with
@@ -325,7 +325,7 @@ export function NewTaskPanel({
             style={{
               fontFamily: 'var(--owl-font-mono)',
               fontSize: 10,
-              color: 'var(--owl-text-disabled)',
+              color: 'var(--owl-text-label)',
             }}
           >
             ⏎ to create · ⌘⏎ to create & close
@@ -396,7 +396,7 @@ function Field({
           fontWeight: 600,
           letterSpacing: '2.5px',
           textTransform: 'uppercase',
-          color: 'var(--owl-text-disabled)',
+          color: 'var(--owl-text-label)',
         }}
       >
         {label}

@@ -94,7 +94,7 @@ export function Sidebar({
       <div>
         <div
           className="text-[8px] font-semibold uppercase tracking-[3px] mx-[4px] mt-2 mb-1"
-          style={{ color: 'var(--owl-elevated)' }}
+          style={{ color: 'var(--owl-text-label)' }}
         >
           Workspace
         </div>
@@ -127,7 +127,7 @@ export function Sidebar({
       <div>
         <div
           className="text-[8px] font-semibold uppercase tracking-[3px] mx-[4px] mt-2 mb-1"
-          style={{ color: 'var(--owl-elevated)' }}
+          style={{ color: 'var(--owl-text-label)' }}
         >
           Filters
         </div>
@@ -161,7 +161,7 @@ export function Sidebar({
       >
         <div
           className="text-[8px] font-semibold uppercase tracking-[2px] mb-[6px]"
-          style={{ color: 'var(--owl-elevated)' }}
+          style={{ color: 'var(--owl-text-label)' }}
         >
           Team · {members.length} online
         </div>
@@ -260,7 +260,7 @@ function NavItem({ children, active, onClick, dotColor, count }: NavItemProps) {
           style={{
             fontFamily: 'var(--owl-font-mono)',
             fontSize: 10,
-            color: 'var(--owl-text-disabled)',
+            color: 'var(--owl-text-label)',
           }}
         >
           {count}

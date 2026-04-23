@@ -291,7 +291,7 @@ function Kbd({ children }: { children: React.ReactNode }) {
       style={{
         fontFamily: 'var(--owl-font-mono)',
         fontSize: 10,
-        color: 'var(--owl-text-disabled)',
+        color: 'var(--owl-text-label)',
         border: '1px solid var(--owl-text-disabled)',
         padding: '1px 5px',
         borderRadius: 3,
