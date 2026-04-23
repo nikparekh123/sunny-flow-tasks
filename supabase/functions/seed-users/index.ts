@@ -7,10 +7,10 @@ const corsHeaders = {
 };
 
 const USERS = [
-  { email: "nik@sunnyfi.co",    password: "niknik",       name: "Nik Parekh",    role: "admin",  pincode: "1111" },
-  { email: "ary@sunnyfi.co",    password: "aryary",       name: "Ary LaRocca",   role: "admin",  pincode: "2222" },
-  { email: "rad@sunnyfi.co",    password: "radrad",       name: "Rad Rahmouni",  role: "member", pincode: "3333" },
-  { email: "kushal@sunnyfi.co", password: "kushalkushal", name: "Kushal Jain",   role: "member", pincode: "4444" },
+  { email: "nik@sunnyfi.co",    password: "niknik",       name: "Nik Parekh",    role: "admin",  pincode: "111111" },
+  { email: "ary@sunnyfi.co",    password: "aryary",       name: "Ary LaRocca",   role: "admin",  pincode: "222222" },
+  { email: "rad@sunnyfi.co",    password: "radrad",       name: "Rad Rahmouni",  role: "member", pincode: "333333" },
+  { email: "kushal@sunnyfi.co", password: "kushalkushal", name: "Kushal Jain",   role: "member", pincode: "444444" },
 ];
 
 const MEMBER_COLORS = ["blue", "green", "purple", "orange", "pink", "teal"];

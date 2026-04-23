@@ -31,7 +31,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (!pincode || typeof pincode !== "string" || !/^\d{4}$/.test(pincode)) {
+    if (!pincode || typeof pincode !== "string" || !/^\d{6}$/.test(pincode)) {
       return new Response(
         JSON.stringify({ error: "A valid 4-digit pincode is required." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }

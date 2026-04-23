@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
   try {
     const { pincode } = await req.json();
 
-    if (!pincode || typeof pincode !== "string" || pincode.length !== 4) {
+    if (!pincode || typeof pincode !== "string" || pincode.length !== 6) {
       return new Response(
         JSON.stringify({ error: "Invalid code." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }

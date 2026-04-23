@@ -80,8 +80,8 @@ export function AdminSettingsModal({ open, onOpenChange }: Props) {
   };
 
   const handleCreateUser = async () => {
-    if (!newName.trim() || !/^\d{4}$/.test(newPincode)) {
-      toast.error('Enter a name and a valid 4-digit pincode.');
+    if (!newName.trim() || !/^\d{6}$/.test(newPincode)) {
+      toast.error('Enter a name and a valid 6-digit pincode.');
       return;
     }
     setCreating(true);
@@ -124,13 +124,13 @@ export function AdminSettingsModal({ open, onOpenChange }: Props) {
               />
             </div>
             <div className="space-y-1">
-              <Label className="text-[10px]">4-digit code</Label>
+              <Label className="text-[10px]">6-digit code</Label>
               <Input
                 value={newPincode}
                 onChange={(e) => setNewPincode(e.target.value.replace(/\D/g, '').slice(0, 4))}
                 className="text-xs h-8"
                 placeholder="e.g. 1234"
-                maxLength={4}
+                maxLength={6}
               />
             </div>
           </div>

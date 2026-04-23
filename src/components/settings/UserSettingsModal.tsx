@@ -94,8 +94,8 @@ export function UserSettingsModal({ open, onOpenChange }: Props) {
   };
 
   const handlePincodeChange = async () => {
-    if (!/^\d{4}$/.test(newPin)) {
-      toast.error('Enter a valid 4-digit code.');
+    if (!/^\d{6}$/.test(newPin)) {
+      toast.error('Enter a valid 6-digit code.');
       return;
     }
     if (newPin !== confirmPin) {
@@ -192,8 +192,8 @@ export function UserSettingsModal({ open, onOpenChange }: Props) {
                 <Input
                   value={newPin}
                   onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="4 digits"
-                  maxLength={4}
+                  placeholder="6 digits"
+                  maxLength={6}
                   className="text-xs"
                 />
               </div>
@@ -202,8 +202,8 @@ export function UserSettingsModal({ open, onOpenChange }: Props) {
                 <Input
                   value={confirmPin}
                   onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="4 digits"
-                  maxLength={4}
+                  placeholder="6 digits"
+                  maxLength={6}
                   className="text-xs"
                 />
               </div>

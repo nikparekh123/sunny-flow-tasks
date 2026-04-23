@@ -22,8 +22,8 @@ export function InviteUserModal({ open, onOpenChange }: Props) {
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async () => {
-    if (!name.trim() || !/^\d{4}$/.test(pincode)) {
-      toast.error('Enter a name and a valid 4-digit pincode.');
+    if (!name.trim() || !/^\d{6}$/.test(pincode)) {
+      toast.error('Enter a name and a valid 6-digit pincode.');
       return;
     }
     setSaving(true);
@@ -63,14 +63,14 @@ export function InviteUserModal({ open, onOpenChange }: Props) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="invite-pin" className="text-xs">4-digit login code</Label>
+            <Label htmlFor="invite-pin" className="text-xs">6-digit login code</Label>
             <Input
               id="invite-pin"
               value={pincode}
               onChange={(e) => setPincode(e.target.value.replace(/\D/g, '').slice(0, 4))}
               className="text-xs"
               placeholder="e.g. 1234"
-              maxLength={4}
+              maxLength={6}
             />
           </div>
           <Button onClick={handleSubmit} disabled={saving} className="w-full text-xs">

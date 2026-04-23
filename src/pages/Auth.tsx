@@ -9,7 +9,7 @@ export default function Auth() {
   const [error, setError] = useState('');
 
   const handleSubmit = async (code: string) => {
-    if (code.length !== 4) return;
+    if (code.length !== 6) return;
     setLoading(true);
     setError('');
 
@@ -43,12 +43,12 @@ export default function Auth() {
       <div className="w-full max-w-xs space-y-6 px-4 text-center">
         <div className="space-y-1">
           <h1 className="text-xl font-medium tracking-tight" style={{ color: 'var(--owl-text-primary)' }}>SunnyFi</h1>
-          <p className="text-sm" style={{ color: 'var(--owl-text-secondary)' }}>Enter your 4-digit code</p>
+          <p className="text-sm" style={{ color: 'var(--owl-text-secondary)' }}>Enter your 6-digit code</p>
         </div>
 
         <div className="flex justify-center">
           <InputOTP
-            maxLength={4}
+            maxLength={6}
             value={value}
             onChange={(v) => {
               setValue(v.replace(/\D/g, ''));
