@@ -47,10 +47,19 @@ export function PeopleView({ tasks, members, onTaskClick, currentMemberId }: Pro
           const hiPct = (high / total) * 100;
           const mdPct = (med / total) * 100;
           const loPct = (low / total) * 100;
+          // Order: recently completed tasks first (newest completion), then
+          // active tasks by priority (high → med → low).
           const sorted = [...assigned].sort((a, b) => {
+            const aDone = a.column === 'done';
+            const bDone = b.column === 'done';
+            if (aDone && bDone) {
+              const at = a.completed_at ? new Date(a.completed_at).getTime() : 0;
+              const bt = b.completed_at ? new Date(b.completed_at).getTime() : 0;
+              return bt - at;
+            }
+            if (aDone) return -1;
+            if (bDone) return 1;
             const order = { high: 0, med: 1, low: 2 } as const;
-            if (a.column === 'done' && b.column !== 'done') return 1;
-            if (b.column === 'done' && a.column !== 'done') return -1;
             return (order[a.priority] ?? 3) - (order[b.priority] ?? 3);
           });
           return (
@@ -197,7 +206,7 @@ function PStat({
       </div>
       <div
         style={{
-          fontSize: 8,
+          fontSize: 10,
           fontWeight: 600,
           letterSpacing: '1.5px',
           textTransform: 'uppercase',
@@ -278,7 +287,7 @@ function PersonCard({ task, onClick }: { task: TaskWithDetail; onClick: () => vo
         <div
           style={{
             fontFamily: 'var(--owl-font-mono)',
-            fontSize: 9.5,
+            fontSize: 10,
             color: 'var(--owl-text-label)',
             letterSpacing: '0.3px',
             marginTop: 2,

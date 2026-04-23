@@ -280,7 +280,7 @@ export function NewTaskPanel({
               <div
                 className="mb-[6px]"
                 style={{
-                  fontSize: 8,
+                  fontSize: 10,
                   fontWeight: 600,
                   letterSpacing: '2.5px',
                   textTransform: 'uppercase',
@@ -392,7 +392,7 @@ function Field({
       <label
         className="block mb-[6px]"
         style={{
-          fontSize: 8,
+          fontSize: 10,
           fontWeight: 600,
           letterSpacing: '2.5px',
           textTransform: 'uppercase',
@@ -468,7 +468,7 @@ function Avatar({ me, children }: { me?: boolean; children: React.ReactNode }) {
         height: 16,
         margin: '-3px 0 -3px -2px',
         fontFamily: 'var(--owl-font-mono)',
-        fontSize: 8,
+        fontSize: 10,
         fontWeight: 500,
         background: me ? 'var(--owl-neon)' : 'var(--owl-elevated)',
         color: me ? '#0a2828' : 'var(--owl-text-primary)',

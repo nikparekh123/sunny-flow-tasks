@@ -93,7 +93,7 @@ export function Sidebar({
       {/* Workspace */}
       <div>
         <div
-          className="text-[8px] font-semibold uppercase tracking-[3px] mx-[4px] mt-2 mb-1"
+          className="text-[10px] font-semibold uppercase tracking-[3px] mx-[4px] mt-2 mb-1"
           style={{ color: 'var(--owl-text-label)' }}
         >
           Workspace
@@ -126,7 +126,7 @@ export function Sidebar({
       {/* Filters */}
       <div>
         <div
-          className="text-[8px] font-semibold uppercase tracking-[3px] mx-[4px] mt-2 mb-1"
+          className="text-[10px] font-semibold uppercase tracking-[3px] mx-[4px] mt-2 mb-1"
           style={{ color: 'var(--owl-text-label)' }}
         >
           Filters
@@ -160,32 +160,47 @@ export function Sidebar({
         }}
       >
         <div
-          className="text-[8px] font-semibold uppercase tracking-[2px] mb-[6px]"
+          className="text-[10px] font-semibold uppercase tracking-[2px] mb-[6px]"
           style={{ color: 'var(--owl-text-label)' }}
         >
           Team · {members.length} online
         </div>
         <div className="flex items-center mb-[8px]">
-          {teamSlice.map((m, i) => (
-            <span
-              key={m.id}
-              title={m.name}
-              className="inline-flex items-center justify-center rounded-full"
-              style={{
-                width: 24,
-                height: 24,
-                fontFamily: 'var(--owl-font-mono)',
-                fontSize: 10,
-                fontWeight: 500,
-                background: m.id === currentMemberId ? 'var(--owl-neon)' : 'var(--owl-elevated)',
-                color: m.id === currentMemberId ? '#0a2828' : 'var(--owl-text-primary)',
-                border: '1.5px solid var(--owl-dash)',
-                marginLeft: i === 0 ? 0 : -6,
-              }}
-            >
-              {m.initials}
-            </span>
-          ))}
+          {teamSlice.map((m, i) => {
+            const isFiltered = activeAssignee === m.id;
+            return (
+              <button
+                key={m.id}
+                onClick={() =>
+                  onAssigneeFilter(isFiltered ? null : m.id)
+                }
+                title={isFiltered ? `Clear filter (${m.name})` : `Show only ${m.name}'s tasks`}
+                className="inline-flex items-center justify-center rounded-full transition-transform"
+                style={{
+                  width: 24,
+                  height: 24,
+                  fontFamily: 'var(--owl-font-mono)',
+                  fontSize: 10,
+                  fontWeight: 500,
+                  background:
+                    m.id === currentMemberId
+                      ? 'var(--owl-neon)'
+                      : 'var(--owl-elevated)',
+                  color:
+                    m.id === currentMemberId ? '#0a2828' : 'var(--owl-text-primary)',
+                  border: isFiltered
+                    ? '1.5px solid var(--owl-neon)'
+                    : '1.5px solid var(--owl-dash)',
+                  marginLeft: i === 0 ? 0 : -6,
+                  cursor: 'pointer',
+                  transform: isFiltered ? 'scale(1.15)' : 'scale(1)',
+                  zIndex: isFiltered ? 2 : 1,
+                }}
+              >
+                {m.initials}
+              </button>
+            );
+          })}
         </div>
         <div
           style={{
