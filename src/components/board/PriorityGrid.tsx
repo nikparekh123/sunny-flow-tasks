@@ -46,8 +46,8 @@ export function PriorityGrid({ tasks, onCardClick, onCardEdit, onCardDelete, ove
   return (
     <div className="overflow-x-auto pb-1">
       <div
-        className="grid gap-[10px] min-w-[1040px]"
-        style={{ gridTemplateColumns: 'repeat(5, minmax(200px, 1fr))' }}
+        className="grid gap-[10px] w-full"
+        style={{ gridTemplateColumns: `repeat(${COLUMNS.length}, minmax(220px, 1fr))` }}
       >
         {COLUMNS.map((col) => {
           const colTasks = byColumn[col.id] ?? [];
