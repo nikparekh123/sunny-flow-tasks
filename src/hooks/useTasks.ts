@@ -158,6 +158,34 @@ export function useTasks() {
 
   const { evaluateRules } = useRuleEngine(members);
 
+  // Auto-cleanup: delete Done tasks older than 30 days. Runs once per
+  // browser session the first time tasks are fetched. Idempotent —
+  // harmless if another session already ran it recently.
+  useEffect(() => {
+    if (!rawTasks.length) return;
+    const flag = 'owl-done-cleanup-ran';
+    if (sessionStorage.getItem(flag) === '1') return;
+    sessionStorage.setItem(flag, '1');
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    supabase
+      .from('tasks')
+      .delete()
+      .eq('column', 'done')
+      .lt('completed_at', cutoff.toISOString())
+      .then(({ error, count }) => {
+        if (error) {
+          // Clear the flag so a later session can retry.
+          sessionStorage.removeItem(flag);
+          return;
+        }
+        if (count && count > 0) {
+          qc.invalidateQueries({ queryKey: ['tasks'] });
+        }
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawTasks.length > 0]);
+
   useEffect(() => {
     const tasksSub = supabase
       .channel('tasks-realtime')
