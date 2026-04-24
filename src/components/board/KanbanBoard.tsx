@@ -309,8 +309,22 @@ export function KanbanBoard() {
           <PeopleView
             tasks={filteredTasks}
             members={members}
-            onTaskClick={(task) => setSelectedTask(task)}
             currentMemberId={member?.id ?? null}
+            onUpdate={(data) => {
+              if ('column' in data && data.column !== undefined) {
+                moveTask.mutate({
+                  taskId: data.id,
+                  column: data.column as TaskColumn,
+                  position: allTasksByColumn[data.column as TaskColumn]?.length ?? 0,
+                });
+                const rest = { ...data };
+                delete (rest as any).column;
+                if (Object.keys(rest).length > 1) updateTask.mutate(rest);
+              } else {
+                updateTask.mutate(data);
+              }
+            }}
+            onDelete={handleDelete}
           />
           <FooterStatus tasks={tasks} />
         </>
