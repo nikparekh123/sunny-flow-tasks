@@ -11,11 +11,12 @@ import {
   type DragStartEvent,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { Calendar as CalendarIcon, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { COLUMNS, canMoveColumn } from '@/lib/constants';
 import { toast } from 'sonner';
-import type { TaskWithDetail, TeamMember, TaskColumn, TaskPriority } from '@/lib/types';
+import { CardForm, type CardDraft } from './CardForm';
+import type { TaskWithDetail, TeamMember, TaskColumn } from '@/lib/types';
 
 interface Props {
   tasks: TaskWithDetail[];
@@ -670,27 +671,28 @@ function ExpandedCard({
   onUpdate: (data: { id: string } & Record<string, any>) => void;
   onDelete: (id: string) => void;
 }) {
-  const type = typeOf(task);
   const isDone = task.column === 'done';
 
-  const typeTagBg =
-    type === 'recurring'
-      ? 'rgba(160,144,224,0.15)'
-      : 'rgba(210,230,50,0.1)';
-  const typeTagColor = type === 'recurring' ? '#a090e0' : 'var(--owl-neon)';
-
-  const cyclePri = (): TaskPriority => {
-    const order: TaskPriority[] = ['high', 'med', 'low'];
-    const next = (order.indexOf(task.priority) + 1) % order.length;
-    return order[next];
+  // Local draft mirrors the task so CardForm can drive updates via a uniform
+  // onChange; each patch is immediately forwarded to onUpdate so changes land
+  // on the server without an extra Save button.
+  const draft: CardDraft = {
+    title: task.title,
+    description: task.description,
+    priority: task.priority,
+    assignee_id: task.assignee_id,
+    due_date: task.due_date,
+    recurrence: task.recurrence,
+    column: task.column,
   };
 
-  const dueDisplay = task.due_date
-    ? format(parseISO(task.due_date), 'MMM d, yyyy')
-    : '—';
+  const pushPatch = (patch: Partial<CardDraft>) => {
+    onUpdate({ id: task.id, ...patch });
+  };
+
   const startDisplay = task.created_at
     ? format(parseISO(task.created_at), 'MMM d')
-    : '—';
+    : null;
 
   return (
     <div
@@ -706,8 +708,8 @@ function ExpandedCard({
         boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
       }}
     >
-      {/* Header */}
-      <div className="flex items-start gap-[10px]">
+      {/* Header with Collapse */}
+      <div className="flex items-center">
         <span
           style={{
             fontFamily: 'var(--owl-font-mono)',
@@ -715,13 +717,10 @@ function ExpandedCard({
             fontWeight: 500,
             letterSpacing: '1.4px',
             textTransform: 'uppercase',
-            padding: '3px 7px',
-            borderRadius: 3,
-            background: typeTagBg,
-            color: typeTagColor,
+            color: 'var(--owl-text-label)',
           }}
         >
-          {type}
+          Edit card
         </span>
         <span className="flex-1" />
         <button
@@ -744,160 +743,13 @@ function ExpandedCard({
         </button>
       </div>
 
-      {/* Title */}
-      <h3
-        contentEditable
-        suppressContentEditableWarning
-        onBlur={(e) => {
-          const next = e.currentTarget.innerText.trim();
-          if (next && next !== task.title) {
-            onUpdate({ id: task.id, title: next });
-          }
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            (e.currentTarget as HTMLElement).blur();
-          }
-        }}
-        style={{
-          fontSize: 15,
-          fontWeight: 500,
-          color: 'var(--owl-text-primary)',
-          lineHeight: 1.35,
-          letterSpacing: '-0.1px',
-          outline: 'none',
-          padding: '2px 4px',
-          margin: '-2px -4px',
-          borderRadius: 3,
-          textDecoration: isDone ? 'line-through' : 'none',
-        }}
-      >
-        {task.title}
-      </h3>
-
-      {/* Description */}
-      <div
-        contentEditable
-        suppressContentEditableWarning
-        onBlur={(e) => {
-          const next = e.currentTarget.innerText.trim();
-          if (next !== (task.description || '')) {
-            onUpdate({ id: task.id, description: next || null });
-          }
-        }}
-        style={{
-          fontSize: 12,
-          color: task.description ? 'var(--owl-text-secondary)' : 'var(--owl-text-invisible)',
-          fontStyle: task.description ? 'normal' : 'italic',
-          lineHeight: 1.55,
-          outline: 'none',
-          padding: '6px 8px',
-          margin: '0 -8px',
-          borderRadius: 4,
-        }}
-      >
-        {task.description || 'Add a description…'}
-      </div>
-
-      {/* Metadata grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: '8px 14px',
-          padding: '10px 0',
-          borderTop: '1px solid var(--owl-line)',
-          borderBottom: '1px solid var(--owl-line)',
-        }}
-      >
-        <MetaField label="Priority">
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              onUpdate({ id: task.id, priority: cyclePri() });
-            }}
-            style={{
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              fontFamily: 'var(--owl-font-mono)',
-              fontSize: 11,
-              color:
-                task.priority === 'high'
-                  ? 'var(--owl-negative)'
-                  : task.priority === 'med'
-                  ? 'var(--owl-warning)'
-                  : 'var(--owl-text-muted)',
-            }}
-          >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: 'currentColor',
-              }}
-            />
-            {PRI_LABEL[task.priority]}
-          </span>
-        </MetaField>
-        <MetaField label="Owner">
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-            }}
-          >
-            <span
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: '50%',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontFamily: 'var(--owl-font-mono)',
-                fontSize: 8.5,
-                fontWeight: 500,
-                color: '#faf5f0',
-                background: avatarColor(member.id),
-              }}
-            >
-              {member.initials}
-            </span>
-            <span style={{ color: 'var(--owl-text-primary)' }}>{member.name}</span>
-          </span>
-        </MetaField>
-        <MetaField label="Start">
-          <span
-            style={{
-              fontFamily: 'var(--owl-font-mono)',
-              fontSize: 11,
-              color: 'var(--owl-text-primary)',
-            }}
-          >
-            {startDisplay}
-          </span>
-        </MetaField>
-        <MetaField label="Due">
-          <span
-            style={{
-              fontFamily: 'var(--owl-font-mono)',
-              fontSize: 11,
-              color: 'var(--owl-text-primary)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <CalendarIcon className="w-3 h-3" />
-            {dueDisplay}
-          </span>
-        </MetaField>
-      </div>
+      <CardForm
+        draft={draft}
+        onChange={pushPatch}
+        members={allMembers}
+        mode="edit"
+        startDisplay={startDisplay}
+      />
 
       {/* Actions */}
       <div className="flex gap-2 flex-wrap">
@@ -943,27 +795,6 @@ function ExpandedCard({
           Delete
         </ActionButton>
       </div>
-    </div>
-  );
-}
-
-function MetaField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-baseline gap-2" style={{ fontSize: 11, minWidth: 0 }}>
-      <span
-        style={{
-          fontSize: 8.5,
-          fontWeight: 600,
-          letterSpacing: '1.5px',
-          textTransform: 'uppercase',
-          color: 'var(--owl-text-label)',
-          width: 58,
-          flexShrink: 0,
-        }}
-      >
-        {label}
-      </span>
-      {children}
     </div>
   );
 }
