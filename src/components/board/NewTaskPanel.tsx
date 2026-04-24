@@ -1,11 +1,21 @@
 import { useState, useEffect } from 'react';
-import { X, Lock } from 'lucide-react';
+import { X, Lock, Repeat } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { COLUMNS } from '@/lib/constants';
-import type { Tag, TeamMember, TaskPriority, TaskColumn } from '@/lib/types';
+import type { Tag, TeamMember, TaskPriority, TaskColumn, RecurrenceFrequency } from '@/lib/types';
+
+const WEEKDAYS: { id: string; label: string }[] = [
+  { id: 'mon', label: 'M' },
+  { id: 'tue', label: 'T' },
+  { id: 'wed', label: 'W' },
+  { id: 'thu', label: 'T' },
+  { id: 'fri', label: 'F' },
+  { id: 'sat', label: 'S' },
+  { id: 'sun', label: 'S' },
+];
 
 interface Props {
   tags: Tag[];
@@ -38,6 +48,29 @@ export function NewTaskPanel({
   const [participantIds, setParticipantIds] = useState<string[]>([]);
   const [isClosing, setIsClosing] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Recurring state
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [frequency, setFrequency] = useState<RecurrenceFrequency>('weekly');
+  const [customDays, setCustomDays] = useState<string[]>([]);
+  const [customDayOfMonth, setCustomDayOfMonth] = useState<string>('');
+
+  const toggleWeekday = (id: string) =>
+    setCustomDays((prev) =>
+      prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id],
+    );
+
+  const getRecurrenceValue = (): string | null => {
+    if (!isRecurring) return null;
+    if (frequency === 'custom') {
+      const cfg: Record<string, unknown> = {};
+      if (customDays.length) cfg.days = customDays;
+      const dom = parseInt(customDayOfMonth, 10);
+      if (!isNaN(dom) && dom >= 1 && dom <= 31) cfg.dayOfMonth = dom;
+      return `custom:${JSON.stringify(cfg)}`;
+    }
+    return frequency;
+  };
 
   const toggleParticipant = (id: string) => {
     setParticipantIds((prev) =>
@@ -75,6 +108,7 @@ export function NewTaskPanel({
         created_by: currentMemberId,
         visibility: isPrivate ? 'private' : 'team',
         participant_ids: finalParticipants,
+        recurrence: getRecurrenceValue(),
       });
       toast.success('Task created');
       handleClose();
@@ -163,6 +197,166 @@ export function NewTaskPanel({
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+
+        {/* Recurring mini-card — sits above everything, smaller + distinct */}
+        <div
+          className="mt-[14px] rounded-md"
+          style={{
+            border: `1px solid ${isRecurring ? 'rgba(210,230,50,0.25)' : 'var(--owl-border)'}`,
+            background: isRecurring ? 'rgba(210,230,50,0.04)' : 'rgba(15,51,51,0.3)',
+            padding: isRecurring ? '10px 12px' : '8px 12px',
+            transition: 'border-color 0.15s, background 0.15s, padding 0.15s',
+          }}
+        >
+          <label
+            className="flex items-center justify-between cursor-pointer"
+            style={{ fontSize: 11, color: 'var(--owl-text-secondary)' }}
+          >
+            <span className="inline-flex items-center gap-[6px]">
+              <Repeat
+                className="w-3 h-3"
+                style={{
+                  color: isRecurring ? 'var(--owl-neon)' : 'var(--owl-text-muted)',
+                }}
+              />
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: '1.5px',
+                  textTransform: 'uppercase',
+                  color: isRecurring ? 'var(--owl-neon)' : 'var(--owl-text-label)',
+                }}
+              >
+                Recurring card
+              </span>
+              {!isRecurring && (
+                <span style={{ fontSize: 10, color: 'var(--owl-text-muted)', marginLeft: 2 }}>
+                  — repeat this task on a schedule
+                </span>
+              )}
+            </span>
+            <input
+              type="checkbox"
+              checked={isRecurring}
+              onChange={(e) => setIsRecurring(e.target.checked)}
+              style={{ accentColor: 'var(--owl-neon)' }}
+            />
+          </label>
+
+          {isRecurring && (
+            <div className="mt-[10px] flex flex-col gap-[8px]">
+              <div className="flex gap-[5px] flex-wrap">
+                {(['daily', 'weekly', 'biweekly', 'monthly', 'custom'] as RecurrenceFrequency[]).map(
+                  (f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      onClick={() => setFrequency(f)}
+                      className="rounded-full transition-colors"
+                      style={{
+                        fontSize: 11,
+                        padding: '4px 10px',
+                        background:
+                          frequency === f
+                            ? 'rgba(210,230,50,0.12)'
+                            : 'rgba(15,51,51,0.6)',
+                        color:
+                          frequency === f ? 'var(--owl-neon)' : 'var(--owl-text-muted)',
+                        border: 'none',
+                        cursor: 'pointer',
+                        textTransform: 'capitalize',
+                      }}
+                    >
+                      {f === 'biweekly' ? 'Bi-weekly' : f}
+                    </button>
+                  ),
+                )}
+              </div>
+
+              {frequency === 'custom' && (
+                <div className="flex flex-col gap-[8px]">
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        letterSpacing: '1.5px',
+                        textTransform: 'uppercase',
+                        color: 'var(--owl-text-label)',
+                        marginBottom: 4,
+                      }}
+                    >
+                      Repeat on
+                    </div>
+                    <div className="flex gap-[4px]">
+                      {WEEKDAYS.map((d) => {
+                        const on = customDays.includes(d.id);
+                        return (
+                          <button
+                            key={d.id}
+                            type="button"
+                            onClick={() => toggleWeekday(d.id)}
+                            className="inline-flex items-center justify-center rounded-full transition-colors"
+                            style={{
+                              width: 26,
+                              height: 26,
+                              fontSize: 11,
+                              fontWeight: 500,
+                              background: on
+                                ? 'rgba(210,230,50,0.15)'
+                                : 'rgba(15,51,51,0.6)',
+                              color: on ? 'var(--owl-neon)' : 'var(--owl-text-muted)',
+                              border: 'none',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {d.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        letterSpacing: '1.5px',
+                        textTransform: 'uppercase',
+                        color: 'var(--owl-text-label)',
+                      }}
+                    >
+                      Day of month
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      max={31}
+                      value={customDayOfMonth}
+                      onChange={(e) => setCustomDayOfMonth(e.target.value)}
+                      placeholder="—"
+                      style={{
+                        width: 60,
+                        fontFamily: 'var(--owl-font-mono)',
+                        fontSize: 12,
+                        padding: '4px 8px',
+                        background: 'rgba(15,51,51,0.6)',
+                        color: 'var(--owl-text-primary)',
+                        border: 'none',
+                        borderRadius: 6,
+                        outline: 'none',
+                      }}
+                    />
+                    <span style={{ fontSize: 10, color: 'var(--owl-text-label)' }}>
+                      1–31, optional
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Title */}

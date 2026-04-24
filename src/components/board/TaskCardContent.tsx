@@ -72,7 +72,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         backgroundColor: isHighPriority ? 'rgba(210, 230, 50, 0.08)' : 'var(--owl-card)',
         border: isHighPriority ? '1px solid rgba(210, 230, 50, 0.35)' : '1px solid var(--owl-border)',
         borderRadius: 'var(--owl-radius-lg)',
-        padding: '10px 14px 12px',
+        padding: '8px 12px 10px',
         opacity: isDone ? 0.55 : 1,
         cursor: isOverlay ? 'grabbing' : 'grab',
         boxShadow: isOverlay
@@ -130,7 +130,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       {/* Row 2: Title */}
       <p
         style={{
-          fontSize: '16px',
+          fontSize: '14px',
           fontWeight: 600,
           color: 'var(--owl-text-primary)',
           lineHeight: 1.4,
@@ -147,7 +147,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           style={{
             fontSize: '12px',
             lineHeight: 1.4,
-            marginTop: '6px',
+            marginTop: '4px',
             color: 'var(--owl-text-secondary)',
             display: '-webkit-box',
             WebkitLineClamp: 2,
@@ -161,7 +161,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
 
       {/* Tags */}
       {task.tags && task.tags.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '6px' }}>
           {task.tags.map((tag) => (
             <span
               key={tag.id}
@@ -182,7 +182,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
 
       {/* Row 4: Assignees */}
       {(assignees.length > 0 || task.assignee_initials) && (
-        <div className="flex items-center gap-2 mt-2.5">
+        <div className="flex items-center gap-2 mt-2">
           <span style={{ fontSize: '11px', color: 'var(--owl-text-muted)' }}>Assignees:</span>
           {assignees.length > 0 ? (
             <div className="flex items-center">
@@ -237,7 +237,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           style={{
             height: '1px',
             backgroundColor: 'var(--owl-border)',
-            marginTop: '10px',
+            marginTop: '8px',
             marginBottom: '10px',
           }}
         />
@@ -282,7 +282,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       )}
 
       {/* Row 7: Meta footer — column pill + flags + menu */}
-      <div className="flex items-center justify-between gap-2 mt-2.5">
+      <div className="flex items-center justify-between gap-2 mt-2">
         <div className="flex items-center gap-2 flex-wrap">
           {columnLabel && (
             <span
