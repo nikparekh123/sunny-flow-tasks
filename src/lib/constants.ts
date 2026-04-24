@@ -5,7 +5,6 @@ type TaskColumn = Database['public']['Enums']['task_column'];
 export const COLUMNS: { id: TaskColumn; label: string; color: string; sub?: string }[] = [
   { id: 'todo', label: 'Todo', color: '#378ADD', sub: 'ready' },
   { id: 'inprogress', label: 'In progress', color: '#EF9F27', sub: 'in-flight' },
-  { id: 'review', label: 'Review', color: '#7F77DD', sub: 'needs eyes' },
   { id: 'done', label: 'Done', color: '#639922', sub: 'this week' },
 ];
 
@@ -15,7 +14,7 @@ export const PRIORITIES: { id: 'high' | 'med' | 'low'; label: string; glyph: str
   { id: 'low',  label: 'Low',  glyph: '·',  sub: 'nice to have' },
 ];
 
-export const COLUMN_ORDER: TaskColumn[] = ['todo', 'inprogress', 'review', 'done'];
+export const COLUMN_ORDER: TaskColumn[] = ['todo', 'inprogress', 'done'];
 
 // A card can move to the next step in the workflow, or jump straight to Done
 // from any stage (handy when a task is finished without needing review).
