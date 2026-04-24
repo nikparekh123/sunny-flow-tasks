@@ -156,7 +156,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       <p
         style={{
           fontSize: '14px',
-          fontWeight: 400,
+          fontWeight: 300,
           color: 'var(--owl-text-primary)',
           lineHeight: 1.35,
           textDecoration: isDone ? 'line-through' : 'none',
@@ -257,22 +257,17 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           ) : <span />}
 
           {(() => {
-            // Medium uses a neutral white-on-transparent outline so it's less
-            // shouty than the old yellow fill. High/Low keep their tinted fill.
+            // Medium uses the design-system positive (light green) — muted
+            // and calm compared to the old yellow. High/Low keep their own.
             const isMed = task.priority === 'med';
-            const color = isMed ? 'var(--owl-text-primary)' : PRIORITY_COLORS[task.priority];
+            const fg = isMed ? 'var(--owl-positive)' : PRIORITY_COLORS[task.priority];
+            const bg = isMed
+              ? 'var(--owl-tint-positive)'
+              : PRIORITY_COLORS[task.priority] + '15';
             return (
               <span
                 className="text-[11px] font-medium px-2 py-0.5 rounded-full"
-                style={{
-                  color,
-                  backgroundColor: isMed
-                    ? 'transparent'
-                    : PRIORITY_COLORS[task.priority] + '15',
-                  border: isMed
-                    ? '1px solid var(--owl-border-bright)'
-                    : '1px solid transparent',
-                }}
+                style={{ color: fg, backgroundColor: bg }}
               >
                 {PRIORITY_LABELS[task.priority]}
               </span>
