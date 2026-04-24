@@ -17,7 +17,7 @@ import { canMoveColumn } from '@/lib/constants';
 import { useTasks } from '@/hooks/useTasks';
 import { useAuth } from '@/hooks/useAuth';
 import { useSubtasks } from '@/hooks/useSubtasks';
-import { TopBar, type ViewMode } from './TopBar';
+import { TopBar, type ViewMode, type FilterState } from './TopBar';
 import { Sidebar } from './Sidebar';
 import { PriorityGrid } from './PriorityGrid';
 import { BoardHeader } from './BoardHeader';
@@ -26,8 +26,7 @@ import { PeopleView } from './PeopleView';
 import { TweaksPanel } from './TweaksPanel';
 import { TaskDetailPanel } from './TaskDetailPanel';
 import { TaskCardContent } from './TaskCardContent';
-import { ArchivePanel } from './ArchivePanel';
-import { TagManagementModal } from '@/components/settings/TagManagementModal';
+import { differenceInCalendarDays, startOfDay } from 'date-fns';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { toast } from 'sonner';
 import type { TaskWithDetail, TaskColumn, TaskPriority } from '@/lib/types';
@@ -44,22 +43,23 @@ export function KanbanBoard() {
   const { member } = useAuth();
   const {
     tasks, tags, members, isLoading,
-    createTask, updateTask, archiveTask, restoreTask, permanentlyDeleteTask, moveTask, createTag,
-    updateTag, deleteTag,
+    createTask, updateTask, archiveTask, restoreTask, moveTask, createTag,
   } = useTasks();
   const { completeAllSubtasks } = useSubtasks();
 
   const [activeAssignee, setActiveAssignee] = useState<string | null>(null);
-  const [assigneeScope, setAssigneeScope] = useState<'all' | 'mine' | 'unassigned'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTagIds, setActiveTagIds] = useState<string[]>([]);
-  const [priorityFilter, setPriorityFilter] = useState<'high' | null>(null);
+  const [filters, setFilters] = useState<FilterState>({
+    scope: 'all',
+    priorityHigh: false,
+    dueWeek: false,
+    stale: false,
+    tagIds: [],
+  });
   const [selectedTask, setSelectedTask] = useState<TaskWithDetail | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
   const [overCellId, setOverCellId] = useState<string | null>(null);
-  const [showArchive, setShowArchive] = useState(false);
   const [activeView, setActiveView] = useState<ViewMode>('board');
-  const [showTagManagement, setShowTagManagement] = useState(false);
   const [pendingDragMove, setPendingDragMove] = useState<{ taskId: string; column: TaskColumn; position: number; task: TaskWithDetail } | null>(null);
 
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -70,11 +70,12 @@ export function KanbanBoard() {
 
   const filteredTasks = useMemo(() => {
     let result = tasks;
-    if (assigneeScope === 'mine' && member?.id) {
+    const today = startOfDay(new Date());
+    if (filters.scope === 'mine' && member?.id) {
       result = result.filter(
         (t) => t.assignee_ids?.includes(member.id) || t.assignee_id === member.id,
       );
-    } else if (assigneeScope === 'unassigned') {
+    } else if (filters.scope === 'unassigned') {
       result = result.filter(
         (t) => (!t.assignee_ids || t.assignee_ids.length === 0) && !t.assignee_id,
       );
@@ -96,16 +97,29 @@ export function KanbanBoard() {
         (t.category_name && t.category_name.toLowerCase().includes(q))
       );
     }
-    if (activeTagIds.length > 0) {
+    if (filters.tagIds.length > 0) {
       result = result.filter((t) =>
-        activeTagIds.every((tagId) => t.tags?.some((tag) => tag.id === tagId))
+        filters.tagIds.every((tagId) => t.tags?.some((tag) => tag.id === tagId))
       );
     }
-    if (priorityFilter) {
-      result = result.filter((t) => t.priority === priorityFilter);
+    if (filters.priorityHigh) {
+      result = result.filter((t) => t.priority === 'high');
+    }
+    if (filters.dueWeek) {
+      result = result.filter((t) => {
+        if (!t.due_date || t.column === 'done') return false;
+        const d = differenceInCalendarDays(new Date(t.due_date), today);
+        return d >= 0 && d <= 7;
+      });
+    }
+    if (filters.stale) {
+      result = result.filter((t) => {
+        if (t.column === 'done' || !t.updated_at) return false;
+        return differenceInCalendarDays(today, new Date(t.updated_at)) >= 3;
+      });
     }
     return result;
-  }, [tasks, activeAssignee, assigneeScope, member?.id, searchQuery, activeTagIds, priorityFilter]);
+  }, [tasks, activeAssignee, filters, member?.id, searchQuery]);
 
   const allTasksByColumn = useMemo(() => {
     const map: Record<TaskColumn, TaskWithDetail[]> = { backlog: [], todo: [], inprogress: [], review: [], done: [] };
@@ -230,14 +244,8 @@ export function KanbanBoard() {
     <div className="flex-1 flex" style={{ backgroundColor: 'var(--owl-page)' }}>
       <Sidebar
         tasks={tasks}
-        members={members}
-        currentMemberId={member?.id ?? null}
-        activeAssignee={activeAssignee}
-        onAssigneeFilter={setActiveAssignee}
-        onFilterPriority={setPriorityFilter}
-        activePriorityFilter={priorityFilter}
-        onOpenArchive={() => setShowArchive(true)}
-        showingArchive={showArchive}
+        activeView={activeView}
+        onViewChange={setActiveView}
       />
       <div className="flex-1 flex flex-col min-w-0">
       <TopBar
@@ -250,19 +258,14 @@ export function KanbanBoard() {
         currentMemberId={member?.id ?? null}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        activeTagIds={activeTagIds}
-        onTagFilter={setActiveTagIds}
-        onOpenArchive={() => setShowArchive(true)}
-        activeView={activeView}
-        onViewChange={setActiveView}
         onNavigateToTask={handleNavigateToTask}
-        assigneeScope={assigneeScope}
-        onAssigneeScopeChange={setAssigneeScope}
+        filters={filters}
+        onFiltersChange={setFilters}
       />
 
       {activeView === 'board' && (
         <>
-          <BoardHeader tasks={tasks} />
+          <BoardHeader />
           <div className="flex-1 px-5 md:px-7 pb-4 overflow-x-auto" style={{ backgroundColor: 'var(--owl-page)' }}>
             <DndContext
               sensors={sensors}
@@ -302,7 +305,7 @@ export function KanbanBoard() {
 
       {activeView === 'people' && (
         <>
-          <BoardHeader tasks={tasks} />
+          <BoardHeader />
           <PeopleView
             tasks={filteredTasks}
             members={members}
@@ -335,21 +338,6 @@ export function KanbanBoard() {
           onCreateTag={(name) => createTag.mutate(name)}
         />
       )}
-
-      <ArchivePanel
-        open={showArchive}
-        onClose={() => setShowArchive(false)}
-        onRestore={(id) => restoreTask.mutate(id)}
-        onPermanentDelete={(id) => permanentlyDeleteTask.mutate(id)}
-      />
-
-      <TagManagementModal
-        open={showTagManagement}
-        onOpenChange={setShowTagManagement}
-        tags={tags}
-        onUpdateTag={(id, updates) => updateTag.mutate({ id, ...updates })}
-        onDeleteTag={(id) => deleteTag.mutate(id)}
-      />
 
       {/* Subtask completion confirmation on drag-to-done */}
       <AlertDialog open={!!pendingDragMove} onOpenChange={(open) => { if (!open) setPendingDragMove(null); }}>

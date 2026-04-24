@@ -1,67 +1,50 @@
 import { useMemo } from 'react';
-import { differenceInCalendarDays } from 'date-fns';
-import type { TaskWithDetail, TeamMember } from '@/lib/types';
+import { LayoutGrid, UsersRound } from 'lucide-react';
+import { differenceInCalendarDays, startOfDay, subDays } from 'date-fns';
+import type { TaskWithDetail } from '@/lib/types';
+import type { ViewMode } from './TopBar';
 
 interface SidebarProps {
   tasks: TaskWithDetail[];
-  members: TeamMember[];
-  currentMemberId: string | null;
-  activeAssignee: string | null;
-  onAssigneeFilter: (id: string | null) => void;
-  onFilterPriority?: (priority: 'high' | null) => void;
-  onOpenArchive: () => void;
-  activePriorityFilter?: 'high' | null;
-  showingArchive?: boolean;
+  activeView: ViewMode;
+  onViewChange: (view: ViewMode) => void;
 }
 
-export function Sidebar({
-  tasks,
-  members,
-  currentMemberId,
-  activeAssignee,
-  onAssigneeFilter,
-  onFilterPriority,
-  onOpenArchive,
-  activePriorityFilter,
-  showingArchive,
-}: SidebarProps) {
-  const counts = useMemo(() => {
+export function Sidebar({ tasks, activeView, onViewChange }: SidebarProps) {
+  const stats = useMemo(() => {
+    const today = startOfDay(new Date());
     const active = tasks.filter((t) => t.column !== 'done').length;
-    const mine = currentMemberId
-      ? tasks.filter(
-          (t) =>
-            t.column !== 'done' &&
-            (t.assignee_ids?.includes(currentMemberId) || t.assignee_id === currentMemberId),
-        ).length
-      : 0;
-    const high = tasks.filter((t) => t.priority === 'high' && t.column !== 'done').length;
-    const now = new Date();
     const dueWeek = tasks.filter((t) => {
       if (!t.due_date || t.column === 'done') return false;
-      const d = differenceInCalendarDays(new Date(t.due_date), now);
+      const d = differenceInCalendarDays(new Date(t.due_date), today);
       return d >= 0 && d <= 7;
     }).length;
-    const stale = tasks.filter((t) => {
-      if (t.column === 'done' || !t.updated_at) return false;
-      return differenceInCalendarDays(now, new Date(t.updated_at)) >= 3;
+    const overdue = tasks.filter((t) => {
+      if (!t.due_date || t.column === 'done') return false;
+      return differenceInCalendarDays(new Date(t.due_date), today) < 0;
     }).length;
-    return { active, mine, high, dueWeek, stale };
-  }, [tasks, currentMemberId]);
-
-  const teamLimit = 5;
-  const teamSlice = members.slice(0, teamLimit);
-
-  const isMineActive = activeAssignee === currentMemberId && currentMemberId !== null;
-  const noFilter = !activePriorityFilter && !isMineActive && !showingArchive;
+    const thirtyDaysAgo = subDays(today, 30);
+    const recentDone = tasks.filter(
+      (t) => t.column === 'done' && t.completed_at && new Date(t.completed_at) >= thirtyDaysAgo,
+    );
+    const onTime = recentDone.filter((t) => {
+      if (!t.due_date || !t.completed_at) return true;
+      return new Date(t.completed_at) <= new Date(t.due_date);
+    }).length;
+    const onTimePct = recentDone.length
+      ? Math.round((onTime / recentDone.length) * 100)
+      : null;
+    return { active, dueWeek, overdue, onTimePct };
+  }, [tasks]);
 
   return (
     <aside
-      className="hidden md:flex flex-col gap-[18px] sticky top-0 h-screen px-[14px] py-5 border-r"
+      className="hidden md:flex flex-col gap-5 sticky top-0 h-screen px-[14px] py-5 border-r"
       style={{
         background: 'var(--owl-dash)',
         borderRightColor: 'rgba(255,255,255,0.03)',
-        width: 220,
-        minWidth: 220,
+        width: 240,
+        minWidth: 240,
       }}
     >
       {/* Brand */}
@@ -76,7 +59,10 @@ export function Sidebar({
             boxShadow: '0 0 0 2px rgba(210,230,50,0.15)',
           }}
         />
-        <div className="text-[13px] font-bold tracking-[0.5px]" style={{ color: 'var(--owl-text-primary)' }}>
+        <div
+          className="text-[13px] font-bold tracking-[0.5px]"
+          style={{ color: 'var(--owl-text-primary)' }}
+        >
           S To dos
           <span
             className="inline-block align-[-2px] ml-[1px]"
@@ -90,149 +76,118 @@ export function Sidebar({
         </div>
       </div>
 
-      {/* Workspace */}
-      <div>
-        <div
-          className="text-[10px] font-semibold uppercase tracking-[3px] mx-[4px] mt-2 mb-1"
-          style={{ color: 'var(--owl-text-label)' }}
-        >
-          Workspace
-        </div>
-        <nav className="flex flex-col gap-[2px]">
-          <NavItem
-            active={noFilter}
-            onClick={() => {
-              onAssigneeFilter(null);
-              onFilterPriority?.(null);
-            }}
-            dotColor="var(--owl-neon)"
-            count={counts.active}
-          >
-            Team to do's
-          </NavItem>
-          <NavItem
-            active={isMineActive}
-            onClick={() => onAssigneeFilter(isMineActive ? null : currentMemberId)}
-            count={counts.mine}
-          >
-            My tasks
-          </NavItem>
-          <NavItem active={!!showingArchive} onClick={onOpenArchive}>
-            Archived
-          </NavItem>
-        </nav>
+      {/* Activity stats */}
+      <div className="flex flex-col gap-[14px] px-[6px]">
+        <SectionLabel>Activity</SectionLabel>
+        <Stat label="Active" value={stats.active} />
+        <Stat
+          label="Due this week"
+          value={stats.dueWeek}
+          tone={stats.dueWeek > 0 ? 'warn' : undefined}
+        />
+        <Stat
+          label="Overdue"
+          value={stats.overdue}
+          tone={stats.overdue > 0 ? 'neg' : undefined}
+        />
+        <Stat
+          label="On-time · 30d"
+          value={stats.onTimePct === null ? '—' : `${stats.onTimePct}%`}
+        />
       </div>
 
-      {/* Filters */}
-      <div>
-        <div
-          className="text-[10px] font-semibold uppercase tracking-[3px] mx-[4px] mt-2 mb-1"
-          style={{ color: 'var(--owl-text-label)' }}
+      {/* Views */}
+      <div className="flex flex-col gap-[2px] px-[2px] mt-2">
+        <SectionLabel>Views</SectionLabel>
+        <ViewLink
+          active={activeView === 'board'}
+          onClick={() => onViewChange('board')}
+          icon={<LayoutGrid className="w-3.5 h-3.5" />}
         >
-          Filters
-        </div>
-        <nav className="flex flex-col gap-[2px]">
-          <NavItem
-            active={activePriorityFilter === 'high'}
-            onClick={() =>
-              onFilterPriority?.(activePriorityFilter === 'high' ? null : 'high')
-            }
-            dotColor="var(--owl-negative)"
-            count={counts.high}
-          >
-            High priority
-          </NavItem>
-          <NavItem dotColor="var(--owl-warning)" count={counts.dueWeek}>
-            Due this week
-          </NavItem>
-          <NavItem dotColor="var(--owl-text-muted)" count={counts.stale}>
-            Stale ≥ 3d
-          </NavItem>
-        </nav>
-      </div>
-
-      {/* Team card */}
-      <div
-        className="mt-auto rounded-lg p-[10px_12px]"
-        style={{
-          border: '1px solid var(--owl-line)',
-          background: 'rgba(15,51,51,0.4)',
-        }}
-      >
-        <div
-          className="text-[10px] font-semibold uppercase tracking-[2px] mb-[6px]"
-          style={{ color: 'var(--owl-text-label)' }}
+          Board
+        </ViewLink>
+        <ViewLink
+          active={activeView === 'people'}
+          onClick={() => onViewChange('people')}
+          icon={<UsersRound className="w-3.5 h-3.5" />}
         >
-          Team · {members.length} online
-        </div>
-        <div className="flex items-center mb-[8px]">
-          {teamSlice.map((m, i) => {
-            const isFiltered = activeAssignee === m.id;
-            return (
-              <button
-                key={m.id}
-                onClick={() =>
-                  onAssigneeFilter(isFiltered ? null : m.id)
-                }
-                title={isFiltered ? `Clear filter (${m.name})` : `Show only ${m.name}'s tasks`}
-                className="inline-flex items-center justify-center rounded-full transition-transform"
-                style={{
-                  width: 24,
-                  height: 24,
-                  fontFamily: 'var(--owl-font-mono)',
-                  fontSize: 10,
-                  fontWeight: 500,
-                  background:
-                    m.id === currentMemberId
-                      ? 'var(--owl-neon)'
-                      : 'var(--owl-elevated)',
-                  color:
-                    m.id === currentMemberId ? '#0a2828' : 'var(--owl-text-primary)',
-                  border: isFiltered
-                    ? '1.5px solid var(--owl-neon)'
-                    : '1.5px solid var(--owl-dash)',
-                  marginLeft: i === 0 ? 0 : -6,
-                  cursor: 'pointer',
-                  transform: isFiltered ? 'scale(1.15)' : 'scale(1)',
-                  zIndex: isFiltered ? 2 : 1,
-                }}
-              >
-                {m.initials}
-              </button>
-            );
-          })}
-        </div>
-        <div
-          style={{
-            fontFamily: 'var(--owl-font-mono)',
-            fontSize: 10,
-            color: 'var(--owl-text-muted)',
-            lineHeight: 1.5,
-          }}
-        >
-          <div>
-            ● <span style={{ color: 'var(--owl-neon)' }}>{counts.active}</span> active cards
-          </div>
-          {counts.high > 0 && (
-            <div>
-              !! <span style={{ color: 'var(--owl-negative)' }}>{counts.high}</span> high priority
-            </div>
-          )}
-        </div>
+          People
+        </ViewLink>
       </div>
     </aside>
   );
 }
 
-interface NavItemProps {
-  children: React.ReactNode;
-  active?: boolean;
-  onClick?: () => void;
-  dotColor?: string;
-  count?: number;
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="mb-1"
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '2.5px',
+        textTransform: 'uppercase',
+        color: 'var(--owl-text-label)',
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
-function NavItem({ children, active, onClick, dotColor, count }: NavItemProps) {
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  tone?: 'warn' | 'neg' | 'neon';
+}) {
+  const color =
+    tone === 'warn'
+      ? 'var(--owl-warning)'
+      : tone === 'neg'
+      ? 'var(--owl-negative)'
+      : tone === 'neon'
+      ? 'var(--owl-neon)'
+      : 'var(--owl-text-primary)';
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span
+        style={{
+          fontSize: 11,
+          color: 'var(--owl-text-muted)',
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontFamily: 'var(--owl-font-mono)',
+          fontSize: 16,
+          fontWeight: 500,
+          letterSpacing: '-0.3px',
+          color,
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function ViewLink({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active?: boolean;
+  onClick?: () => void;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <button
       onClick={onClick}
@@ -260,27 +215,8 @@ function NavItem({ children, active, onClick, dotColor, count }: NavItemProps) {
           style={{ background: 'var(--owl-neon)' }}
         />
       )}
-      <span
-        className="rounded-full"
-        style={{
-          width: 6,
-          height: 6,
-          background: dotColor ?? 'currentColor',
-          opacity: dotColor ? 1 : 0.65,
-        }}
-      />
+      {icon}
       <span className="flex-1">{children}</span>
-      {count !== undefined && count > 0 && (
-        <span
-          style={{
-            fontFamily: 'var(--owl-font-mono)',
-            fontSize: 10,
-            color: 'var(--owl-text-label)',
-          }}
-        >
-          {count}
-        </span>
-      )}
     </button>
   );
 }
