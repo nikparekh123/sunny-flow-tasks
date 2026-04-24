@@ -59,7 +59,7 @@ export function KanbanBoard() {
   const [selectedTask, setSelectedTask] = useState<TaskWithDetail | null>(null);
   const [draggedTask, setDraggedTask] = useState<TaskWithDetail | null>(null);
   const [overCellId, setOverCellId] = useState<string | null>(null);
-  const [activeView, setActiveView] = useState<ViewMode>('board');
+  const [activeView, setActiveView] = useState<ViewMode>('people');
   const [pendingDragMove, setPendingDragMove] = useState<{ taskId: string; column: TaskColumn; position: number; task: TaskWithDetail } | null>(null);
 
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -242,11 +242,7 @@ export function KanbanBoard() {
 
   return (
     <div className="flex-1 flex" style={{ backgroundColor: 'var(--owl-page)' }}>
-      <Sidebar
-        tasks={tasks}
-        activeView={activeView}
-        onViewChange={setActiveView}
-      />
+      <Sidebar tasks={tasks} />
       <div className="flex-1 flex flex-col min-w-0">
       <TopBar
         tags={tags}

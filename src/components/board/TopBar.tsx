@@ -21,7 +21,6 @@ import { NewTaskPanel } from './NewTaskPanel';
 import { UserSettingsModal } from '@/components/settings/UserSettingsModal';
 import { AdminSettingsModal } from '@/components/settings/AdminSettingsModal';
 import { NotificationBell } from './NotificationBell';
-import { FiltersDropdown } from './FiltersDropdown';
 
 export type ViewMode = 'board' | 'people';
 
@@ -119,46 +118,6 @@ export function TopBar({
         </div>
 
         <div className="flex-1" />
-
-        {/* Filters dropdown (replaces the old Live indicator) */}
-        <FiltersDropdown
-          filters={filters}
-          onFiltersChange={onFiltersChange}
-          tags={tags}
-          members={members}
-        />
-
-        {/* Team avatars — side by side, no overlap. Click to filter to that person. */}
-        <div className="flex items-center gap-[4px]">
-          {members.map((m) => {
-            const isActive = activeAssignee === m.id;
-            const isMe = m.id === currentMemberId;
-            return (
-              <button
-                key={m.id}
-                onClick={() => onAssigneeFilter(isActive ? null : m.id)}
-                title={isActive ? `Clear filter (${m.name})` : `Show only ${m.name}'s tasks`}
-                className="inline-flex items-center justify-center rounded-full transition-transform"
-                style={{
-                  width: 26,
-                  height: 26,
-                  fontFamily: 'var(--owl-font-mono)',
-                  fontSize: 10,
-                  fontWeight: 500,
-                  background: isMe ? 'var(--owl-neon)' : 'var(--owl-elevated)',
-                  color: isMe ? '#0a2828' : 'var(--owl-text-primary)',
-                  border: isActive
-                    ? '1.5px solid var(--owl-neon)'
-                    : '1.5px solid transparent',
-                  cursor: 'pointer',
-                  transform: isActive ? 'scale(1.1)' : 'scale(1)',
-                }}
-              >
-                {m.initials}
-              </button>
-            );
-          })}
-        </div>
 
         <NotificationBell onNavigateToTask={onNavigateToTask} />
 

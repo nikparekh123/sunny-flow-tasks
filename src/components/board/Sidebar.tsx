@@ -1,16 +1,12 @@
 import { useMemo } from 'react';
-import { LayoutGrid, UsersRound } from 'lucide-react';
 import { differenceInCalendarDays, startOfDay, subDays } from 'date-fns';
 import type { TaskWithDetail } from '@/lib/types';
-import type { ViewMode } from './TopBar';
 
 interface SidebarProps {
   tasks: TaskWithDetail[];
-  activeView: ViewMode;
-  onViewChange: (view: ViewMode) => void;
 }
 
-export function Sidebar({ tasks, activeView, onViewChange }: SidebarProps) {
+export function Sidebar({ tasks }: SidebarProps) {
   const stats = useMemo(() => {
     const today = startOfDay(new Date());
     const active = tasks.filter((t) => t.column !== 'done').length;
@@ -96,24 +92,6 @@ export function Sidebar({ tasks, activeView, onViewChange }: SidebarProps) {
         />
       </div>
 
-      {/* Views */}
-      <div className="flex flex-col gap-[2px] px-[2px] mt-2">
-        <SectionLabel>Views</SectionLabel>
-        <ViewLink
-          active={activeView === 'board'}
-          onClick={() => onViewChange('board')}
-          icon={<LayoutGrid className="w-3.5 h-3.5" />}
-        >
-          Board
-        </ViewLink>
-        <ViewLink
-          active={activeView === 'people'}
-          onClick={() => onViewChange('people')}
-          icon={<UsersRound className="w-3.5 h-3.5" />}
-        >
-          People
-        </ViewLink>
-      </div>
     </aside>
   );
 }
@@ -177,46 +155,3 @@ function Stat({
   );
 }
 
-function ViewLink({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active?: boolean;
-  onClick?: () => void;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="relative flex items-center gap-[10px] px-[8px] py-[7px] rounded-md text-[13px] text-left transition-colors"
-      style={{
-        color: active ? 'var(--owl-text-primary)' : 'var(--owl-text-muted)',
-        background: active ? 'rgba(210,230,50,0.07)' : 'transparent',
-      }}
-      onMouseEnter={(e) => {
-        if (!active) {
-          e.currentTarget.style.color = 'var(--owl-text-secondary)';
-          e.currentTarget.style.background = 'rgba(30,90,80,0.14)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!active) {
-          e.currentTarget.style.color = 'var(--owl-text-muted)';
-          e.currentTarget.style.background = 'transparent';
-        }
-      }}
-    >
-      {active && (
-        <span
-          className="absolute top-[7px] bottom-[7px] left-[-14px] w-[2px]"
-          style={{ background: 'var(--owl-neon)' }}
-        />
-      )}
-      {icon}
-      <span className="flex-1">{children}</span>
-    </button>
-  );
-}
