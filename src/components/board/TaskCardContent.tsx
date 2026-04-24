@@ -72,7 +72,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         backgroundColor: isHighPriority ? 'rgba(210, 230, 50, 0.08)' : 'var(--owl-card)',
         border: isHighPriority ? '1px solid rgba(210, 230, 50, 0.35)' : '1px solid var(--owl-border)',
         borderRadius: 'var(--owl-radius-lg)',
-        padding: '8px 12px 10px',
+        padding: '6px 10px 8px',
         opacity: isDone ? 0.55 : 1,
         cursor: isOverlay ? 'grabbing' : 'grab',
         boxShadow: isOverlay
@@ -95,8 +95,8 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           <div
             className="absolute z-50 animate-scale-in"
             style={{
-              bottom: '42px',
-              right: '12px',
+              top: '28px',
+              right: '6px',
               backgroundColor: 'var(--owl-surface)',
               border: '1px solid var(--owl-border)',
               borderRadius: 'var(--owl-radius-md)',
@@ -127,15 +127,45 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         </>
       )}
 
+      {/* Overflow menu — absolute top-right, hover-reveal, no chrome */}
+      {!isOverlay && (
+        <button
+          className="absolute opacity-0 group-hover/card:opacity-100 transition-opacity duration-150"
+          style={{
+            top: 4,
+            right: 4,
+            width: 20,
+            height: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'transparent',
+            border: 'none',
+            color: 'var(--owl-text-muted)',
+            cursor: 'pointer',
+            padding: 0,
+            zIndex: 2,
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen(!menuOpen);
+          }}
+          aria-label="Task actions"
+        >
+          <MoreHorizontal style={{ width: 14, height: 14 }} />
+        </button>
+      )}
+
       {/* Row 2: Title */}
       <p
         style={{
           fontSize: '14px',
-          fontWeight: 600,
+          fontWeight: 500,
           color: 'var(--owl-text-primary)',
-          lineHeight: 1.4,
+          lineHeight: 1.35,
           textDecoration: isDone ? 'line-through' : 'none',
           margin: 0,
+          paddingRight: 20, /* leave space for the hover menu dots */
         }}
       >
         {task.title}
@@ -318,23 +348,6 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
           )}
         </div>
 
-        {!isOverlay && (
-          <div
-            className="flex items-center justify-center rounded cursor-pointer opacity-0 group-hover/card:opacity-100 transition-opacity duration-150 shrink-0"
-            style={{
-              width: '24px',
-              height: '24px',
-              backgroundColor: 'var(--owl-surface)',
-              border: '1px solid var(--owl-border)',
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setMenuOpen(!menuOpen);
-            }}
-          >
-            <MoreHorizontal style={{ width: '13px', height: '13px', color: 'var(--owl-text-secondary)' }} />
-          </div>
-        )}
       </div>
     </div>
   );
