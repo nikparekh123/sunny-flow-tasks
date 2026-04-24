@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { MoreHorizontal, Repeat, ListChecks, Calendar, Lock } from 'lucide-react';
 import { format, parseISO, startOfDay, isSameDay, addDays, isBefore } from 'date-fns';
 import { PRIORITY_COLORS } from '@/lib/constants';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Progress } from '@/components/ui/progress';
 import type { TaskWithDetail } from '@/lib/types';
 
@@ -51,9 +50,6 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
   };
 
   const assignees = task.assignees || [];
-  const maxVisible = 3;
-  const visibleAssignees = assignees.slice(0, maxVisible);
-  const overflowCount = assignees.length - maxVisible;
 
   const subtasks = task.subtasks || [];
   const subtaskTotal = subtasks.length;
@@ -160,7 +156,7 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
       <p
         style={{
           fontSize: '14px',
-          fontWeight: 500,
+          fontWeight: 400,
           color: 'var(--owl-text-primary)',
           lineHeight: 1.35,
           textDecoration: isDone ? 'line-through' : 'none',
@@ -210,54 +206,24 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
         </div>
       )}
 
-      {/* Row 4: Assignees */}
-      {(assignees.length > 0 || task.assignee_initials) && (
-        <div className="flex items-center gap-2 mt-2">
-          <span style={{ fontSize: '11px', color: 'var(--owl-text-muted)' }}>Assignees:</span>
-          {assignees.length > 0 ? (
-            <div className="flex items-center">
-              {visibleAssignees.map((a, i) => (
-                <Avatar
-                  key={a.id}
-                  className="h-6 w-6"
-                  style={{
-                    marginLeft: i > 0 ? '-6px' : 0,
-                    zIndex: maxVisible - i,
-                    border: '2px solid var(--owl-surface)',
-                  }}
-                >
-                  <AvatarImage src={a.avatar_url || ''} />
-                  <AvatarFallback
-                    style={{
-                      backgroundColor: a.color || '#378ADD',
-                      fontSize: '9px',
-                      fontWeight: 600,
-                      color: '#fff',
-                    }}
-                  >
-                    {a.initials}
-                  </AvatarFallback>
-                </Avatar>
-              ))}
-              {overflowCount > 0 && (
-                <span style={{ fontSize: '9px', color: 'var(--owl-text-muted)', marginLeft: '4px' }}>+{overflowCount}</span>
-              )}
-            </div>
-          ) : task.assignee_initials ? (
-            <Avatar className="h-6 w-6">
-              <AvatarImage src={task.assignee_avatar_url || ''} />
-              <AvatarFallback
-                style={{
-                  backgroundColor: task.assignee_color || '#378ADD',
-                  fontSize: '9px',
-                  fontWeight: 600,
-                  color: '#fff',
-                }}
-              >
-                {task.assignee_initials}
-              </AvatarFallback>
-            </Avatar>
-          ) : null}
+      {/* Row 4: Assignees — comma-separated names, max 2 shown + overflow count */}
+      {(assignees.length > 0 || task.assignee_name) && (
+        <div
+          className="mt-[6px]"
+          style={{
+            fontSize: '11px',
+            color: 'var(--owl-text-muted)',
+            lineHeight: 1.3,
+          }}
+        >
+          {assignees.length > 0
+            ? (() => {
+                const max = 2;
+                const shown = assignees.slice(0, max).map((a) => a.name).join(', ');
+                const extra = assignees.length - max;
+                return extra > 0 ? `${shown}, +${extra}` : shown;
+              })()
+            : task.assignee_name}
         </div>
       )}
 
@@ -290,15 +256,28 @@ export function TaskCardContent({ task, isDone, onClick, onEdit, onDelete, isDra
             </span>
           ) : <span />}
 
-          <span
-            className="text-[11px] font-medium px-2 py-0.5 rounded-full"
-            style={{
-              color: PRIORITY_COLORS[task.priority],
-              backgroundColor: PRIORITY_COLORS[task.priority] + '15',
-            }}
-          >
-            {PRIORITY_LABELS[task.priority]}
-          </span>
+          {(() => {
+            // Medium uses a neutral white-on-transparent outline so it's less
+            // shouty than the old yellow fill. High/Low keep their tinted fill.
+            const isMed = task.priority === 'med';
+            const color = isMed ? 'var(--owl-text-primary)' : PRIORITY_COLORS[task.priority];
+            return (
+              <span
+                className="text-[11px] font-medium px-2 py-0.5 rounded-full"
+                style={{
+                  color,
+                  backgroundColor: isMed
+                    ? 'transparent'
+                    : PRIORITY_COLORS[task.priority] + '15',
+                  border: isMed
+                    ? '1px solid var(--owl-border-bright)'
+                    : '1px solid transparent',
+                }}
+              >
+                {PRIORITY_LABELS[task.priority]}
+              </span>
+            );
+          })()}
         </div>
       )}
 
