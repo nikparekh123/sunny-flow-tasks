@@ -4,7 +4,7 @@
  * we send them back to sunnyfi.co's login.
  */
 
-const SUNNYFI_LOGIN_URL = 'https://sunnyfi.co/login';
+const SUNNYFI_LOGIN_URL = 'https://sunnyfi.co';
 
 export default function Auth() {
   const here = typeof window !== 'undefined' ? window.location.href : 'https://todos.sunnyfi.co';

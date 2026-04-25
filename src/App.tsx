@@ -9,19 +9,30 @@ import Index from './pages/Index.tsx';
 import RulesPage from './pages/RulesPage.tsx';
 import NotFound from './pages/NotFound.tsx';
 
-// One repo serves two apps via different subdomains:
-//   todos.sunnyfi.co     → tasks (default)
-//   positions.sunnyfi.co → positions
-// Detected by hostname so users see clean URLs and never the other app.
+// One repo serves three apps via different hostnames:
+//   sunnyfi.co / www.sunnyfi.co → Sunnyfi (Landing, Dashboard, Research, …)
+//   todos.sunnyfi.co            → Tasks (default)
+//   positions.sunnyfi.co        → Positions
+// Hostname is detected at first paint; each app is lazy-loaded so users
+// only download the bundle for the host they're on.
 const PositionsPage = lazy(() => import('./positions/PositionsPage'));
+const Sunnyfi = lazy(() => import('./sunnyfi/Sunnyfi'));
 
-function isPositionsHost(): boolean {
-  if (typeof window === 'undefined') return false;
+type App = 'tasks' | 'positions' | 'sunnyfi';
+
+function detectApp(): App {
+  if (typeof window === 'undefined') return 'tasks';
+  // Local dev: ?app=positions / ?app=sunnyfi overrides hostname detection.
+  const override = new URLSearchParams(window.location.search).get('app');
+  if (override === 'positions' || override === 'sunnyfi' || override === 'tasks') {
+    return override;
+  }
   const h = window.location.hostname;
-  if (h.startsWith('positions.')) return true;
-  // Local dev: ?app=positions overrides so we can test without DNS.
-  const params = new URLSearchParams(window.location.search);
-  return params.get('app') === 'positions';
+  if (h.startsWith('positions.')) return 'positions';
+  if (h.startsWith('todos.')) return 'tasks';
+  if (h === 'sunnyfi.co' || h === 'www.sunnyfi.co') return 'sunnyfi';
+  // Anything else (localhost, preview deploys) defaults to the tasks app.
+  return 'tasks';
 }
 
 const queryClient = new QueryClient({
@@ -39,8 +50,37 @@ const SuspenseFallback = () => (
   </div>
 );
 
+function TasksApp() {
+  return (
+    <Routes>
+      <Route path="/" element={<Index />} />
+      <Route path="/rules" element={<RulesPage />} />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  );
+}
+
 const App = () => {
-  const positions = isPositionsHost();
+  const which = detectApp();
+
+  let content: React.ReactNode;
+  if (which === 'positions') {
+    content = (
+      <Suspense fallback={<SuspenseFallback />}>
+        <Routes>
+          <Route path="*" element={<PositionsPage />} />
+        </Routes>
+      </Suspense>
+    );
+  } else if (which === 'sunnyfi') {
+    content = (
+      <Suspense fallback={<SuspenseFallback />}>
+        <Sunnyfi />
+      </Suspense>
+    );
+  } else {
+    content = <TasksApp />;
+  }
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -48,21 +88,7 @@ const App = () => {
         <TooltipProvider>
           <Toaster />
           <Sonner />
-          <BrowserRouter>
-            {positions ? (
-              <Suspense fallback={<SuspenseFallback />}>
-                <Routes>
-                  <Route path="*" element={<PositionsPage />} />
-                </Routes>
-              </Suspense>
-            ) : (
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/rules" element={<RulesPage />} />
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            )}
-          </BrowserRouter>
+          <BrowserRouter>{content}</BrowserRouter>
         </TooltipProvider>
       </AuthProvider>
     </QueryClientProvider>
