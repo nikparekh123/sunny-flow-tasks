@@ -1,73 +1,85 @@
-import { useState } from 'react';
-import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
-import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
+/**
+ * No more pincode entry. Auth is handled by sunnyfi.co (same Supabase
+ * project + magic links). When the user lands here without a session,
+ * we send them back to sunnyfi.co's login.
+ */
+
+const SUNNYFI_LOGIN_URL = 'https://sunnyfi.co/login';
 
 export default function Auth() {
-  const [loading, setLoading] = useState(false);
-  const [value, setValue] = useState('');
-  const [error, setError] = useState('');
-
-  const handleSubmit = async (code: string) => {
-    if (code.length !== 6) return;
-    setLoading(true);
-    setError('');
-
-    try {
-      const { data, error: fnError } = await supabase.functions.invoke('pincode-login', {
-        body: { pincode: code },
-      });
-
-      if (fnError || data?.error) {
-        setError(data?.error || 'Invalid code.');
-        setValue('');
-        setLoading(false);
-        return;
-      }
-
-      if (data?.session) {
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
-        });
-      }
-    } catch {
-      setError('Something went wrong.');
-      setValue('');
-    }
-    setLoading(false);
-  };
+  const here = typeof window !== 'undefined' ? window.location.href : 'https://todos.sunnyfi.co';
+  const loginHref = `${SUNNYFI_LOGIN_URL}?next=${encodeURIComponent(here)}`;
 
   return (
-    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: 'var(--owl-page)' }}>
-      <div className="w-full max-w-xs space-y-6 px-4 text-center">
-        <div className="space-y-1">
-          <h1 className="text-xl font-medium tracking-tight" style={{ color: 'var(--owl-text-primary)' }}>SunnyFi</h1>
-          <p className="text-sm" style={{ color: 'var(--owl-text-secondary)' }}>Enter your 6-digit code</p>
-        </div>
-
-        <div className="flex justify-center">
-          <InputOTP
-            maxLength={6}
-            value={value}
-            onChange={(v) => {
-              setValue(v.replace(/\D/g, ''));
-              setError('');
+    <div
+      className="flex min-h-screen items-center justify-center"
+      style={{ backgroundColor: 'var(--owl-page)' }}
+    >
+      <div className="w-full max-w-sm px-6 text-center">
+        <div className="flex items-center justify-center gap-[9px] mb-6">
+          <div
+            style={{
+              width: 18,
+              height: 18,
+              background: 'var(--owl-neon)',
+              borderRadius: 2,
+              transform: 'rotate(10deg)',
+              boxShadow: '0 0 0 2px rgba(210,230,50,0.15)',
             }}
-            onComplete={handleSubmit}
-            disabled={loading}
+          />
+          <div
+            className="text-[14px] font-bold tracking-[0.5px]"
+            style={{ color: 'var(--owl-text-primary)' }}
           >
-            <InputOTPGroup>
-              <InputOTPSlot index={0} />
-              <InputOTPSlot index={1} />
-              <InputOTPSlot index={2} />
-              <InputOTPSlot index={3} />
-            </InputOTPGroup>
-          </InputOTP>
+            S To dos
+          </div>
         </div>
 
-        {error && <p className="text-xs" style={{ color: 'var(--owl-negative)' }}>{error}</p>}
-        {loading && <p className="text-xs" style={{ color: 'var(--owl-text-muted)' }}>Signing in…</p>}
+        <h1
+          style={{
+            fontSize: 22,
+            fontWeight: 300,
+            letterSpacing: '-0.5px',
+            color: 'var(--owl-text-primary)',
+          }}
+        >
+          Sign in at <b style={{ fontWeight: 600 }}>sunnyfi.co</b>
+        </h1>
+        <p
+          className="mt-3"
+          style={{ fontSize: 13, color: 'var(--owl-text-muted)', lineHeight: 1.55 }}
+        >
+          Use your Sunnyfi login. Once you're in, your task app session
+          carries over automatically.
+        </p>
+
+        <a
+          href={loginHref}
+          className="inline-flex items-center justify-center gap-2 mt-8 rounded-lg transition-colors"
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            padding: '10px 18px',
+            background: 'var(--owl-neon)',
+            color: '#0a2828',
+            textDecoration: 'none',
+            border: 'none',
+          }}
+        >
+          Continue to sunnyfi.co →
+        </a>
+
+        <p
+          className="mt-6"
+          style={{
+            fontFamily: 'var(--owl-font-mono)',
+            fontSize: 10,
+            color: 'var(--owl-text-label)',
+            letterSpacing: '0.5px',
+          }}
+        >
+          Already signed in? Refresh this page.
+        </p>
       </div>
     </div>
   );
