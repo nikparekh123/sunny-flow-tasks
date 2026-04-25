@@ -2,20 +2,23 @@
 -- authenticated user reads + writes the same rows). CSV upload replaces all
 -- rows; refresh-prices function updates last_price / prev_close.
 
-create type if not exists public.sector_kind as enum (
-  'Technology',
-  'Healthcare',
-  'Financials',
-  'Consumer Discretionary',
-  'Consumer Staples',
-  'Energy',
-  'Industrials',
-  'Materials',
-  'Utilities',
-  'Real Estate',
-  'Communication Services',
-  'Other'
-);
+do $$ begin
+  create type public.sector_kind as enum (
+    'Technology',
+    'Healthcare',
+    'Financials',
+    'Consumer Discretionary',
+    'Consumer Staples',
+    'Energy',
+    'Industrials',
+    'Materials',
+    'Utilities',
+    'Real Estate',
+    'Communication Services',
+    'Other'
+  );
+exception when duplicate_object then null;
+end $$;
 
 create table if not exists public.positions (
   id           uuid primary key default gen_random_uuid(),
