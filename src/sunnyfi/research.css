@@ -939,6 +939,80 @@
   letter-spacing: 0.5px;
 }
 
+/* ============== READER PAGE TRANSITIONS ============== */
+/* Fade the whole reader in on mount so navigation from a card feels
+   continuous instead of "blank-then-pop". */
+.reader-fade {
+  animation: reader-fade-in .22s var(--ease, cubic-bezier(.4,0,.2,1)) both;
+}
+@keyframes reader-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* The iframe paints whenever its srcDoc changes — fade it in instead. */
+.reader-iframe-fade {
+  animation: reader-iframe-fade .35s var(--ease, cubic-bezier(.4,0,.2,1)) both;
+}
+@keyframes reader-iframe-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Skeleton blocks shown while title/iframe loads. Same shimmer used for
+   the breadcrumb's current crumb. */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(15,51,51,.4) 0%,
+    rgba(30,90,80,.55) 50%,
+    rgba(15,51,51,.4) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-slide 1.4s linear infinite;
+  border-radius: 8px;
+}
+.shimmer-text {
+  display: inline-block;
+  min-width: 80px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    rgba(15,51,51,.4) 0%,
+    rgba(30,90,80,.55) 50%,
+    rgba(15,51,51,.4) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-slide 1.4s linear infinite;
+  color: transparent !important;
+}
+@keyframes shimmer-slide {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+.reader-skeleton-title {
+  height: 36px;
+  width: 60%;
+  margin: 0 0 14px;
+}
+.reader-skeleton-meta {
+  height: 14px;
+  width: 40%;
+  margin-bottom: 28px;
+}
+.reader-skeleton-iframe {
+  width: 100%;
+  min-height: 70vh;
+  border-radius: 12px;
+}
+
+/* ============== CARD CLICK FEEDBACK ============== */
+/* Press-down on click so the navigation transition feels intentional,
+   not abrupt. */
+.ch-card:active {
+  transform: translateY(0) scale(0.997);
+}
+
 /* responsive */
 @media (max-width: 900px) {
   .ch-app { grid-template-columns: 1fr; }

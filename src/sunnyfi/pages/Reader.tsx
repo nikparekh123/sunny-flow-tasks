@@ -7,6 +7,7 @@ import {
   formatDate,
   type Report,
 } from "@/sunnyfi/lib/research";
+import "@/sunnyfi/research.css";
 
 export default function Reader() {
   const { id } = useParams<{ id: string }>();
@@ -41,17 +42,32 @@ export default function Reader() {
     };
   }, [id]);
 
-  if (loading) {
+  if (loading && !report) {
     return (
-      <div className="ch-app" style={{ display: "block", padding: 32 }}>
-        <p style={{ color: "var(--navi-fg3)", fontSize: 13 }}>Loading…</p>
+      <div className="ch-app reader-fade" style={{ display: "block" }}>
+        <main className="ch-main">
+          <div className="ch-breadcrumb">
+            <button
+              type="button"
+              className="crumb"
+              onClick={() => navigate("/research")}
+            >
+              Research
+            </button>
+            {" / "}
+            <span className="current shimmer-text">…</span>
+          </div>
+          <div className="reader-skeleton-title shimmer" />
+          <div className="reader-skeleton-meta shimmer" />
+          <div className="reader-skeleton-iframe shimmer" />
+        </main>
       </div>
     );
   }
 
   if (!report) {
     return (
-      <div className="ch-app" style={{ display: "block", padding: 32 }}>
+      <div className="ch-app reader-fade" style={{ display: "block", padding: 32 }}>
         <p style={{ color: "var(--navi-fg2)" }}>Report not found.</p>
         <button
           className="np-btn ghost"
@@ -64,7 +80,7 @@ export default function Reader() {
   }
 
   return (
-    <div className="ch-app" style={{ display: "block" }}>
+    <div className="ch-app reader-fade" style={{ display: "block" }}>
       <main className="ch-main">
         <div className="ch-breadcrumb">
           <button
@@ -147,9 +163,11 @@ export default function Reader() {
 
         {html ? (
           <iframe
+            key={report.id}
             title={report.title}
             srcDoc={html}
             sandbox="allow-same-origin"
+            className="reader-iframe-fade"
             style={{
               width: "100%",
               minHeight: "70vh",
@@ -159,22 +177,7 @@ export default function Reader() {
             }}
           />
         ) : report.file_url ? (
-          <p style={{ color: "var(--navi-fg3)", fontSize: 13 }}>
-            File attached but not rendered in-browser.{" "}
-            <button
-              className="np-btn ghost"
-              onClick={async () => {
-                try {
-                  const text = await fetchReportHtml(report.file_url);
-                  setHtml(text);
-                } catch (e) {
-                  toast.error((e as Error).message);
-                }
-              }}
-            >
-              Try again
-            </button>
-          </p>
+          <div className="reader-skeleton-iframe shimmer" />
         ) : (
           <p style={{ color: "var(--navi-fg3)", fontSize: 13 }}>
             No file attached.
