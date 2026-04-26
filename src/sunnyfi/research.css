@@ -8,6 +8,23 @@
    only loaded on research pages, so there's no bleed risk.
    ============================================================ */
 
+/* ============== TOKEN BACKFILL ============== */
+/* sunnyfi.css defines --navi-card and --navi-tint-muted but is missing
+   the rest. Re-declare any tokens this file relies on so a missing var
+   never resolves to `transparent` (which is what made hover cards
+   disappear into the bg). */
+:root {
+  --navi-card-2:        rgba(15,51,51,.75);
+  --navi-tint-neon:     rgba(210,230,50,.10);
+  --navi-tint-positive: rgba(168,212,160,.12);
+  --navi-tint-negative: rgba(220,80,60,.10);
+  --navi-tint-warning:  rgba(224,192,96,.08);
+  --navi-fg5:           #1e5a50;
+  --navi-border-bright: #326e64;
+  --navi-surface:       #0f3333;
+  --ease: cubic-bezier(.4,0,.2,1);
+}
+
 /* ============== TOP BAR ============== */
 .np-top {
   display: flex;
