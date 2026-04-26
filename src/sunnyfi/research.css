@@ -141,11 +141,13 @@
 
 
 /* ============== APP SHELL ============== */
+/* Background intentionally inherits from body (--navi-dash-page #061a10).
+   The design uses the deeper near-black for the whole app; cards
+   (rgba(15,51,51,.55)) read more clearly against it. */
 .ch-app {
   display: grid;
   grid-template-columns: 240px 1fr;
   min-height: calc(100vh - 60px);
-  background: var(--navi-page);
   color: var(--navi-fg1);
   font-family: var(--navi-font-sans);
 }
