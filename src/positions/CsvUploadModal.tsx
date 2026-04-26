@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import { SECTORS, type Sector, fmtQty, fmtUSD2 } from './types';
+import { SECTORS, fmtQty, fmtUSD2 } from './types';
 import type { PositionInput } from './usePositions';
 
 interface Props {
@@ -10,90 +9,112 @@ interface Props {
   onConfirm: (rows: PositionInput[]) => Promise<void>;
 }
 
-type Stage = 'pick' | 'preview' | 'error' | 'saving';
+type Stage = 'pick' | 'validating' | 'preview' | 'error' | 'saving';
 
 const VALID_SECTORS = new Set<string>(SECTORS);
 
+interface ValidationError {
+  row: number;
+  field: string;
+  msg: string;
+}
 interface ParseResult {
   rows: PositionInput[];
-  errors: string[];
+  errors: ValidationError[];
 }
 
 function parseCsv(text: string): ParseResult {
   const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (lines.length === 0) return { rows: [], errors: ['Empty file.'] };
+    .replace(/^﻿/, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim()
+    .split('\n')
+    .filter((l) => l.trim().length > 0);
 
-  const header = lines[0].toLowerCase().split(',').map((s) => s.trim());
+  const errors: ValidationError[] = [];
+  if (lines.length === 0) {
+    errors.push({ row: 0, field: '', msg: 'empty file' });
+    return { rows: [], errors };
+  }
+
+  const split = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = '';
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') { inQ = !inQ; continue; }
+      if (c === ',' && !inQ) { out.push(cur); cur = ''; continue; }
+      cur += c;
+    }
+    out.push(cur);
+    return out.map((s) => s.trim());
+  };
+
+  const headers = split(lines[0]).map((h) => h.toLowerCase());
   const required = ['ticker', 'sector', 'quantity', 'avg_cost'];
-  for (const k of required) {
-    if (!header.includes(k)) {
-      return {
-        rows: [],
-        errors: [
-          `Missing required column "${k}". Header must be: ${required.join(', ')}`,
-        ],
-      };
+  for (const col of required) {
+    if (!headers.includes(col)) {
+      errors.push({ row: 0, field: col, msg: `missing required column "${col}"` });
     }
   }
+  if (errors.length > 0) return { rows: [], errors };
+
   const idx = {
-    ticker: header.indexOf('ticker'),
-    sector: header.indexOf('sector'),
-    quantity: header.indexOf('quantity'),
-    avg_cost: header.indexOf('avg_cost'),
+    ticker: headers.indexOf('ticker'),
+    sector: headers.indexOf('sector'),
+    quantity: headers.indexOf('quantity'),
+    avg_cost: headers.indexOf('avg_cost'),
   };
 
   const rows: PositionInput[] = [];
-  const errors: string[] = [];
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(',').map((s) => s.trim());
-    if (cols.length < 4) {
-      errors.push(`Row ${i + 1}: not enough columns.`);
-      continue;
-    }
-    const ticker = cols[idx.ticker].toUpperCase();
-    const sector = cols[idx.sector];
-    const quantity = Number(cols[idx.quantity]);
-    const avg_cost = Number(cols[idx.avg_cost]);
-    if (!ticker) {
-      errors.push(`Row ${i + 1}: missing ticker.`);
-      continue;
-    }
-    if (isNaN(quantity) || quantity <= 0) {
-      errors.push(`Row ${i + 1} (${ticker}): bad quantity "${cols[idx.quantity]}".`);
-      continue;
-    }
-    if (isNaN(avg_cost) || avg_cost < 0) {
-      errors.push(`Row ${i + 1} (${ticker}): bad avg_cost "${cols[idx.avg_cost]}".`);
-      continue;
+    const cols = split(lines[i]);
+    const rowNum = i + 1;
+    const ticker = (cols[idx.ticker] ?? '').toUpperCase();
+    const sector = cols[idx.sector] ?? '';
+    const qty = parseFloat(cols[idx.quantity] ?? '');
+    const avg = parseFloat(cols[idx.avg_cost] ?? '');
+
+    if (!ticker || !/^[A-Z0-9.\-]+$/.test(ticker)) {
+      errors.push({ row: rowNum, field: 'ticker', msg: `invalid ticker "${cols[idx.ticker]}"` });
     }
     if (!VALID_SECTORS.has(sector)) {
-      errors.push(
-        `Row ${i + 1} (${ticker}): unknown sector "${sector}", will be filed under "Other".`,
-      );
+      errors.push({ row: rowNum, field: 'sector', msg: `sector "${sector}" not allowed` });
     }
-    rows.push({ ticker, sector: VALID_SECTORS.has(sector) ? sector : 'Other', quantity, avg_cost });
+    if (isNaN(qty) || qty <= 0) {
+      errors.push({ row: rowNum, field: 'quantity', msg: `must be positive number, got "${cols[idx.quantity]}"` });
+    }
+    if (isNaN(avg) || avg < 0) {
+      errors.push({ row: rowNum, field: 'avg_cost', msg: `must be non-negative, got "${cols[idx.avg_cost]}"` });
+    }
+    if (
+      ticker &&
+      VALID_SECTORS.has(sector) &&
+      !isNaN(qty) && qty > 0 &&
+      !isNaN(avg) && avg >= 0
+    ) {
+      rows.push({ ticker, sector, quantity: qty, avg_cost: avg });
+    }
   }
   return { rows, errors };
 }
 
 export function CsvUploadModal({ open, onClose, onConfirm }: Props) {
   const [stage, setStage] = useState<Stage>('pick');
-  const [text, setText] = useState('');
+  const [filename, setFilename] = useState('');
   const [parsed, setParsed] = useState<ParseResult>({ rows: [], errors: [] });
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Reset on close
   useEffect(() => {
     if (!open) {
       setStage('pick');
-      setText('');
+      setFilename('');
       setParsed({ rows: [], errors: [] });
     }
   }, [open]);
 
-  // Esc to close
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -105,448 +126,262 @@ export function CsvUploadModal({ open, onClose, onConfirm }: Props) {
 
   if (!open) return null;
 
-  const validate = () => {
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    setFilename(file.name);
+    setStage('validating');
+    const text = await file.text();
     const result = parseCsv(text);
     setParsed(result);
-    if (result.rows.length === 0) {
-      setStage('error');
-    } else {
-      setStage('preview');
-    }
+    setStage(result.errors.length === 0 ? 'preview' : 'error');
   };
 
-  const handleFile = async (file: File) => {
-    const txt = await file.text();
-    setText(txt);
-    const result = parseCsv(txt);
-    setParsed(result);
-    setStage(result.rows.length === 0 ? 'error' : 'preview');
-  };
+  const triggerPick = () => inputRef.current?.click();
 
   const handleConfirm = async () => {
     setStage('saving');
     try {
       await onConfirm(parsed.rows);
-      toast.success(`Imported ${parsed.rows.length} positions.`);
+      toast.success(`Replaced ${parsed.rows.length} positions.`);
       onClose();
     } catch (e) {
       toast.error(`Import failed: ${(e as Error).message}`);
       setStage('error');
-      setParsed({ rows: [], errors: [(e as Error).message] });
+      setParsed({
+        rows: [],
+        errors: [{ row: 0, field: '', msg: (e as Error).message }],
+      });
     }
   };
 
-  const sectorCount = new Set(parsed.rows.map((r) => r.sector)).size;
-
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.6)',
-        zIndex: 100,
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'center',
-        padding: '8vh 20px 20px',
-      }}
+      className="np-app"
+      style={{ position: 'fixed', inset: 0, zIndex: 100 }}
       onClick={() => stage !== 'saving' && onClose()}
     >
-      <div
-        role="dialog"
-        aria-label="Upload positions"
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '100%',
-          maxWidth: 560,
-          background: 'var(--owl-surface)',
-          border: '1px solid var(--owl-elevated)',
-          padding: 32,
-          color: 'var(--owl-text-primary)',
-        }}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2
-            style={{
-              fontSize: 20,
-              fontWeight: 500,
-              letterSpacing: '-0.3px',
-            }}
-          >
-            Upload positions
-          </h2>
-          <button
-            onClick={onClose}
-            disabled={stage === 'saving'}
-            aria-label="Close"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--owl-text-muted)',
-              cursor: stage === 'saving' ? 'not-allowed' : 'pointer',
-            }}
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {stage === 'pick' && (
-          <PickStage
-            text={text}
-            onText={setText}
-            onFile={handleFile}
-            onValidate={validate}
-          />
-        )}
-        {stage === 'preview' && (
-          <PreviewStage
-            rows={parsed.rows}
-            sectorCount={sectorCount}
-            warnings={parsed.errors}
-            onConfirm={handleConfirm}
-            onBack={() => setStage('pick')}
-          />
-        )}
-        {stage === 'error' && (
-          <ErrorStage
-            errors={parsed.errors}
-            onRetry={() => setStage('pick')}
-          />
-        )}
-        {stage === 'saving' && (
-          <div
-            style={{
-              padding: 32,
-              textAlign: 'center',
-              color: 'var(--owl-text-muted)',
-              fontSize: 13,
-            }}
-          >
-            Importing {parsed.rows.length} positions…
+      <div className="np-modal-back" onClick={(e) => e.stopPropagation()}>
+        <div className="np-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="np-modal-hd">
+            <div>
+              <div className="np-modal-title">Upload positions</div>
+              <div className="np-modal-sub">
+                CSV columns: ticker, sector, quantity, avg_cost
+              </div>
+            </div>
+            <button
+              className="np-btn ghost"
+              onClick={onClose}
+              disabled={stage === 'saving'}
+              aria-label="Close"
+            >
+              ✕ Close
+            </button>
           </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
-function PickStage({
-  text,
-  onText,
-  onFile,
-  onValidate,
-}: {
-  text: string;
-  onText: (t: string) => void;
-  onFile: (f: File) => void;
-  onValidate: () => void;
-}) {
-  const [dragOver, setDragOver] = useState(false);
-  return (
-    <div className="flex flex-col gap-4">
-      <p style={{ fontSize: 12, color: 'var(--owl-text-muted)', lineHeight: 1.5 }}>
-        CSV format: <code>ticker,sector,quantity,avg_cost</code> (header row required).
-        This <b>replaces</b> all existing positions.
-      </p>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={(e) => handleFile(e.target.files?.[0])}
+          />
 
-      <label
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          const f = e.dataTransfer.files[0];
-          if (f) onFile(f);
-        }}
-        style={{
-          border: dragOver
-            ? '1px solid var(--owl-neon)'
-            : '1px dashed var(--owl-elevated)',
-          padding: '24px 16px',
-          textAlign: 'center',
-          cursor: 'pointer',
-          background: dragOver ? 'var(--owl-tint-neon)' : 'transparent',
-          fontSize: 13,
-          color: 'var(--owl-text-secondary)',
-        }}
-      >
-        Drop a CSV here, or click to choose a file
-        <input
-          type="file"
-          accept=".csv,text/csv"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) onFile(f);
-          }}
-        />
-      </label>
+          {stage === 'pick' && (
+            <div>
+              <div
+                className="np-drop"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.add('over');
+                }}
+                onDragLeave={(e) => e.currentTarget.classList.remove('over')}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.currentTarget.classList.remove('over');
+                  handleFile(e.dataTransfer.files[0]);
+                }}
+              >
+                <div className="hd">Pick a .csv file</div>
+                <div className="sub">Full overwrite of current positions</div>
+                <button className="np-btn neon" onClick={triggerPick}>
+                  ↑ Choose file
+                </button>
+              </div>
+              <pre
+                style={{
+                  marginTop: 18,
+                  padding: 12,
+                  fontSize: 11,
+                  fontFamily: 'var(--navi-font-mono)',
+                  color: 'var(--navi-fg3)',
+                  background: 'rgba(15,51,51,.5)',
+                  borderRadius: 6,
+                  margin: '18px 0 0 0',
+                }}
+              >{`ticker,sector,quantity,avg_cost
+AAPL,Technology,100,150.25
+CCJ,Energy,500,42.10`}</pre>
+            </div>
+          )}
 
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 600,
-          letterSpacing: '1.5px',
-          textTransform: 'uppercase',
-          color: 'var(--owl-text-label)',
-        }}
-      >
-        Or paste below
-      </div>
-      <textarea
-        value={text}
-        onChange={(e) => onText(e.target.value)}
-        placeholder="ticker,sector,quantity,avg_cost&#10;AAPL,Technology,100,150.00&#10;MSFT,Technology,50,300.00"
-        rows={6}
-        style={{
-          background: 'rgba(15,51,51,0.6)',
-          border: 'none',
-          color: 'var(--owl-text-primary)',
-          fontFamily: 'var(--owl-font-mono)',
-          fontSize: 12,
-          padding: 12,
-          outline: 'none',
-          resize: 'vertical',
-          width: '100%',
-        }}
-      />
-      <div className="flex justify-end gap-2">
-        <button
-          onClick={onValidate}
-          disabled={!text.trim()}
-          style={{
-            background: 'var(--owl-tint-neon)',
-            color: 'var(--owl-neon)',
-            border: 'none',
-            padding: '8px 14px',
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: text.trim() ? 'pointer' : 'not-allowed',
-            opacity: text.trim() ? 1 : 0.5,
-          }}
-        >
-          Validate
-        </button>
-      </div>
-    </div>
-  );
-}
+          {stage === 'validating' && (
+            <div
+              style={{
+                padding: '60px 0',
+                textAlign: 'center',
+                color: 'var(--navi-fg2)',
+              }}
+            >
+              Parsing {filename}…
+            </div>
+          )}
 
-function PreviewStage({
-  rows,
-  sectorCount,
-  warnings,
-  onConfirm,
-  onBack,
-}: {
-  rows: PositionInput[];
-  sectorCount: number;
-  warnings: string[];
-  onConfirm: () => void;
-  onBack: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <div
-        style={{
-          padding: 12,
-          background: 'var(--owl-tint-positive)',
-          color: 'var(--owl-positive)',
-          fontSize: 13,
-        }}
-      >
-        ✓ Parsed {rows.length} positions across {sectorCount} sectors. Ready to import.
-      </div>
+          {stage === 'error' && (
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <div className="np-modal-error">
+                <div className="hd">
+                  ⚠ {parsed.errors.length} validation issue
+                  {parsed.errors.length === 1 ? '' : 's'}
+                </div>
+                <div className="sub">file: {filename || '(no file)'}</div>
+              </div>
+              <div className="np-error-list">
+                {parsed.errors.slice(0, 60).map((e, i) => (
+                  <div key={i} className="row">
+                    <span className="r">row {e.row}</span>
+                    <span className="f">{e.field}</span>
+                    <span className="m">{e.msg}</span>
+                  </div>
+                ))}
+                {parsed.errors.length > 60 && (
+                  <div style={{ padding: 8, color: 'var(--navi-fg3)' }}>
+                    … {parsed.errors.length - 60} more
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  marginTop: 16,
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: 8,
+                }}
+              >
+                <button className="np-btn ghost" onClick={onClose}>
+                  Cancel
+                </button>
+                <button className="np-btn tinted" onClick={triggerPick}>
+                  ↑ Different file
+                </button>
+              </div>
+            </div>
+          )}
 
-      <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr>
-              <Th>Ticker</Th>
-              <Th>Sector</Th>
-              <Th align="right">Qty</Th>
-              <Th align="right">Avg cost</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.slice(0, 50).map((r, i) => (
-              <tr key={i}>
-                <Td>{r.ticker}</Td>
-                <Td>
-                  <span style={{ color: 'var(--owl-text-muted)' }}>{r.sector}</span>
-                </Td>
-                <Td align="right">{fmtQty(r.quantity)}</Td>
-                <Td align="right">{fmtUSD2(r.avg_cost)}</Td>
-              </tr>
-            ))}
-            {rows.length > 50 && (
-              <tr>
-                <td
-                  colSpan={4}
+          {stage === 'preview' && (
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <div
+                style={{
+                  marginBottom: 14,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'baseline',
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      color: 'var(--navi-neon)',
+                      fontWeight: 500,
+                      fontSize: 14,
+                    }}
+                  >
+                    ✓ {parsed.rows.length} rows ready
+                  </div>
+                  <div className="np-modal-sub">
+                    file: {filename} · will replace all current positions
+                  </div>
+                </div>
+                <span className="np-pill">
+                  <span className="dot" />
+                  preview
+                </span>
+              </div>
+              <div
+                style={{
+                  maxHeight: 320,
+                  overflowY: 'auto',
+                  background: 'rgba(15,51,51,.5)',
+                  borderRadius: 6,
+                }}
+              >
+                <table className="np-table" style={{ fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th>Ticker</th>
+                      <th>Sector</th>
+                      <th>Qty</th>
+                      <th>Avg cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsed.rows.slice(0, 80).map((r, i) => (
+                      <tr key={i}>
+                        <td className="ticker">{r.ticker}</td>
+                        <td className="sector-cell">{r.sector}</td>
+                        <td className="num">{fmtQty(r.quantity)}</td>
+                        <td className="num">{fmtUSD2(r.avg_cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {parsed.rows.length > 80 && (
+                <div
                   style={{
-                    padding: 8,
-                    textAlign: 'center',
+                    marginTop: 8,
                     fontSize: 11,
-                    color: 'var(--owl-text-muted)',
+                    color: 'var(--navi-fg3)',
                   }}
                 >
-                  + {rows.length - 50} more rows
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  Showing first 80 of {parsed.rows.length} rows
+                </div>
+              )}
+              <div
+                style={{
+                  marginTop: 16,
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  gap: 8,
+                }}
+              >
+                <button className="np-btn ghost" onClick={onClose}>
+                  Cancel
+                </button>
+                <button className="np-btn tinted" onClick={triggerPick}>
+                  ↑ Different file
+                </button>
+                <button className="np-btn neon" onClick={handleConfirm}>
+                  ✓ Replace positions
+                </button>
+              </div>
+            </div>
+          )}
 
-      {warnings.length > 0 && (
-        <div
-          style={{
-            padding: 12,
-            background: 'var(--owl-tint-warning)',
-            color: 'var(--owl-warning)',
-            fontSize: 12,
-            maxHeight: 100,
-            overflowY: 'auto',
-          }}
-        >
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>
-            {warnings.length} warning{warnings.length === 1 ? '' : 's'}:
-          </div>
-          {warnings.map((w, i) => (
-            <div key={i}>• {w}</div>
-          ))}
+          {stage === 'saving' && (
+            <div
+              style={{
+                padding: 32,
+                textAlign: 'center',
+                color: 'var(--navi-fg2)',
+                fontSize: 13,
+              }}
+            >
+              Importing {parsed.rows.length} positions…
+            </div>
+          )}
         </div>
-      )}
-
-      <div className="flex justify-end gap-2">
-        <button
-          onClick={onBack}
-          style={{
-            background: 'transparent',
-            color: 'var(--owl-text-muted)',
-            border: 'none',
-            padding: '8px 14px',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
-        >
-          Back
-        </button>
-        <button
-          onClick={onConfirm}
-          style={{
-            background: 'var(--owl-tint-neon)',
-            color: 'var(--owl-neon)',
-            border: 'none',
-            padding: '8px 14px',
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: 'pointer',
-          }}
-        >
-          Confirm import
-        </button>
       </div>
     </div>
-  );
-}
-
-function ErrorStage({
-  errors,
-  onRetry,
-}: {
-  errors: string[];
-  onRetry: () => void;
-}) {
-  return (
-    <div className="flex flex-col gap-4">
-      <div
-        style={{
-          padding: 12,
-          background: 'var(--owl-tint-negative)',
-          color: 'var(--owl-negative)',
-          fontSize: 13,
-          fontWeight: 500,
-        }}
-      >
-        ✗ Import failed
-      </div>
-      <ul
-        style={{
-          fontSize: 12,
-          color: 'var(--owl-text-secondary)',
-          lineHeight: 1.6,
-          paddingLeft: 16,
-        }}
-      >
-        {errors.map((e, i) => (
-          <li key={i}>{e}</li>
-        ))}
-      </ul>
-      <div className="flex justify-end">
-        <button
-          onClick={onRetry}
-          style={{
-            background: 'var(--owl-tint-neon)',
-            color: 'var(--owl-neon)',
-            border: 'none',
-            padding: '8px 14px',
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: 'pointer',
-          }}
-        >
-          Retry
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Th({
-  children,
-  align,
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'right';
-}) {
-  return (
-    <th
-      style={{
-        textAlign: align ?? 'left',
-        padding: '8px',
-        fontSize: 9,
-        fontWeight: 600,
-        letterSpacing: '1.2px',
-        textTransform: 'uppercase',
-        color: 'var(--owl-text-muted)',
-        borderBottom: '1px solid var(--owl-elevated)',
-      }}
-    >
-      {children}
-    </th>
-  );
-}
-function Td({
-  children,
-  align,
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'right';
-}) {
-  return (
-    <td
-      style={{
-        padding: '6px 8px',
-        textAlign: align ?? 'left',
-        fontFamily: align === 'right' ? 'var(--owl-font-mono)' : undefined,
-        borderBottom: '1px solid var(--owl-line)',
-      }}
-    >
-      {children}
-    </td>
   );
 }
