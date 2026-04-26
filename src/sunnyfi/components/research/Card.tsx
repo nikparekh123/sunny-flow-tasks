@@ -1,9 +1,11 @@
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   type Report,
   type CardSize,
   deriveSize,
   formatDate,
+  fetchReportHtml,
 } from "@/sunnyfi/lib/research";
 
 interface Props {
@@ -16,8 +18,25 @@ interface Props {
 
 export function Card({ r, primaryTag, size: sizeOverride }: Props) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const size = sizeOverride ?? deriveSize(r);
   const maxTags = size === "s" ? 2 : 4;
+
+  // Prefetch on hover so by the time the user clicks, both the report
+  // metadata and the file body are warm in React Query's cache. Reader
+  // reads from the same query keys.
+  const prefetch = () => {
+    qc.setQueryData(["report", r.id], r);
+    if (r.file_url) {
+      qc.prefetchQuery({
+        queryKey: ["report-html", r.id],
+        queryFn: () => fetchReportHtml(r.file_url),
+        // 5 minutes — long enough that the prefetch isn't wasted if the
+        // user ponders before clicking.
+        staleTime: 5 * 60_000,
+      });
+    }
+  };
 
   const onClick = () => navigate(`/research/reports/${r.id}`);
   const onKey = (e: React.KeyboardEvent) => {
@@ -32,6 +51,8 @@ export function Card({ r, primaryTag, size: sizeOverride }: Props) {
       className={`ch-card size-${size} ${r.featured ? "featured" : ""}`}
       onClick={onClick}
       onKeyDown={onKey}
+      onMouseEnter={prefetch}
+      onFocus={prefetch}
       type="button"
     >
       {r.pinned && (

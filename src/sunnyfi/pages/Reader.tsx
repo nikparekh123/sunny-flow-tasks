@@ -1,48 +1,36 @@
-import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import {
   fetchReportById,
   fetchReportHtml,
   formatDate,
-  type Report,
 } from "@/sunnyfi/lib/research";
 import "@/sunnyfi/research.css";
 
 export default function Reader() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [report, setReport] = useState<Report | null>(null);
-  const [html, setHtml] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!id) return;
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      try {
-        const r = await fetchReportById(id);
-        if (cancelled) return;
-        setReport(r);
-        if (r?.file_url) {
-          const text = await fetchReportHtml(r.file_url);
-          if (cancelled) return;
-          setHtml(text);
-        }
-      } catch (e) {
-        if (!cancelled) setError((e as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [id]);
+  // Two queries so the cache keys match what Card.tsx prefetches on hover:
+  // ["report", id] for metadata and ["report-html", id] for the file body.
+  const reportQ = useQuery({
+    queryKey: ["report", id],
+    queryFn: () => fetchReportById(id!),
+    enabled: !!id,
+  });
 
-  if (loading && !report) {
+  const report = reportQ.data ?? null;
+
+  const htmlQ = useQuery({
+    queryKey: ["report-html", id],
+    queryFn: () => fetchReportHtml(report?.file_url ?? null),
+    enabled: !!report?.file_url,
+  });
+
+  const html = htmlQ.data ?? null;
+  const error = (reportQ.error || htmlQ.error) as Error | undefined;
+
+  if (reportQ.isLoading) {
     return (
       <div className="ch-app reader-fade" style={{ display: "block" }}>
         <main className="ch-main">
@@ -67,7 +55,10 @@ export default function Reader() {
 
   if (!report) {
     return (
-      <div className="ch-app reader-fade" style={{ display: "block", padding: 32 }}>
+      <div
+        className="ch-app reader-fade"
+        style={{ display: "block", padding: 32 }}
+      >
         <p style={{ color: "var(--navi-fg2)" }}>Report not found.</p>
         <button
           className="np-btn ghost"
@@ -157,7 +148,7 @@ export default function Reader() {
               marginBottom: 16,
             }}
           >
-            Couldn't load file: {error}
+            Couldn't load file: {error.message}
           </div>
         )}
 
