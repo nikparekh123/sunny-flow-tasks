@@ -1,227 +1,263 @@
-export type ReportType = "single" | "macro" | "theme" | "earn";
-export type SectorKey = "tech" | "energy" | "fin" | "hlth" | "macro" | "indu" | "stpl";
-export type FreshState = "new" | "unread" | "read";
-export type Visibility = "Team" | "Firm-wide" | "Private";
-
-export interface Report {
-  d: string;
-  tickers: string[];
-  typ: ReportType;
-  sec: SectorKey;
-  sectors: string[];
-  title: string;
-  author: string;
-  read: string;
-  star: boolean;
-  fresh: FreshState;
-  tags: string[];
-  summary: string;
-  visibility: Visibility;
-}
-
-export type ViewKey = "latest" | "sector" | "author" | "type" | "starred";
-
-export const typeLabel: Record<ReportType, string> = {
-  single: "Single",
-  macro: "Macro",
-  theme: "Theme",
-  earn: "Earnings",
-};
-
-export const secLabel: Record<SectorKey, string> = {
-  tech: "Technology",
-  energy: "Energy",
-  fin: "Financials",
-  hlth: "Healthcare",
-  macro: "Macro",
-  indu: "Industrials",
-  stpl: "Staples",
-};
-
-// Seed data removed — the app now starts with an empty `reports` table and
-// grows only through real uploads.
-
-export const SECTORS: { k: SectorKey | "all"; label: string; count: number }[] = [
-  { k: "all",    label: "All",         count: 168 },
-  { k: "tech",   label: "Technology",  count: 42 },
-  { k: "energy", label: "Energy",      count: 31 },
-  { k: "fin",    label: "Financials",  count: 38 },
-  { k: "hlth",   label: "Healthcare",  count: 22 },
-  { k: "macro",  label: "Macro",       count: 19 },
-  { k: "indu",   label: "Industrials", count: 9 },
-  { k: "stpl",   label: "Staples",     count: 7 },
-];
-
-export const TYPES: { k: ReportType | "all"; label: string; count: number }[] = [
-  { k: "all",    label: "All",          count: 168 },
-  { k: "single", label: "Single-stock", count: 84 },
-  { k: "macro",  label: "Macro",        count: 41 },
-  { k: "theme",  label: "Thematic",     count: 23 },
-  { k: "earn",   label: "Earnings",     count: 20 },
-];
-
-export const RECENCY = [
-  { k: "1d",  label: "Today",      count: 6 },
-  { k: "7d",  label: "This week",  count: 24 },
-  { k: "30d", label: "This month", count: 71 },
-  { k: "90d", label: "This qtr",   count: 168 },
-];
-
-export const VIEWS: { k: ViewKey; label: string; count: number | null }[] = [
-  { k: "latest",  label: "Latest",    count: 168 },
-  { k: "sector",  label: "By sector", count: null },
-  { k: "author",  label: "By author", count: null },
-  { k: "type",    label: "By type",   count: null },
-  { k: "starred", label: "Starred",   count: 12 },
-];
-
-export interface Group<T extends Report = Report> {
-  key: string;
-  title: string | null;
-  items: T[];
-}
-
-export function groupRows<T extends Report>(rows: T[], view: ViewKey): Group<T>[] {
-  if (view === "latest") return [{ key: "_", title: null, items: rows }];
-  if (view === "starred") return [{ key: "starred", title: null, items: rows.filter((r) => r.star) }];
-  if (view === "sector") {
-    const order: SectorKey[] = ["tech", "energy", "fin", "macro", "hlth"];
-    return order
-      .map((k) => ({ key: k, title: secLabel[k] || k, items: rows.filter((r) => r.sec === k) }))
-      .filter((g) => g.items.length);
-  }
-  if (view === "author") {
-    const authors = [...new Set(rows.map((r) => r.author))].sort();
-    return authors.map((a) => ({ key: a, title: a, items: rows.filter((r) => r.author === a) }));
-  }
-  if (view === "type") {
-    const order: ReportType[] = ["single", "macro", "theme", "earn"];
-    return order
-      .map((k) => ({ key: k, title: typeLabel[k], items: rows.filter((r) => r.typ === k) }))
-      .filter((g) => g.items.length);
-  }
-  return [{ key: "_", title: null, items: rows }];
-}
-
-// ---------- Supabase mapping ----------
+/**
+ * Research Hub data layer — tag-driven, no sectors/types.
+ *
+ * Talks to the post-redesign Supabase schema:
+ *   reports(id, title, description, tags TEXT[], featured, pinned, size,
+ *           file_url, starred, created_at, author_id)
+ *   tags(name, description, pinned, ...)
+ *   tag_stats VIEW (name, pinned, description, count, last_updated)
+ *   related_tags(p_tag, p_limit) RPC
+ */
 import { supabase } from "@/integrations/supabase/client";
 
-type DbReport = {
+export type CardSize = "xl" | "l" | "wide" | "m" | "s";
+export type TagGroup = "pinned" | "tickers" | "themes" | "custom";
+
+export interface Report {
   id: string;
   title: string;
-  tickers: string[] | null;
-  report_type: string;
-  primary_sector: string | null;
-  sectors: string[] | null;
-  author: string | null;
-  published_at: string | null;
-  read_minutes: number | null;
-  tags: string[] | null;
-  summary: string | null;
-  visibility: string;
-  file_path: string | null;
+  description: string | null;
+  tags: string[];
+  featured: boolean;
+  pinned: boolean;
+  size: CardSize | null;        // explicit override; null → derive
+  file_url: string | null;
   starred: boolean;
-  created_at: string;
-};
-
-const sectorKeyFromLabel = (s?: string | null): SectorKey => {
-  const v = (s || "").toLowerCase();
-  if (v.startsWith("tech")) return "tech";
-  if (v.startsWith("energ")) return "energy";
-  if (v.startsWith("financ") || v === "fin") return "fin";
-  if (v.startsWith("health") || v === "hlth") return "hlth";
-  if (v.startsWith("macro")) return "macro";
-  if (v.startsWith("indu")) return "indu";
-  if (v.startsWith("stap") || v === "stpl") return "stpl";
-  return "tech";
-};
-
-const formatShortDate = (iso: string | null): string => {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleString("en-US", { month: "short", day: "numeric" });
-};
-
-export interface ReportRow extends Report {
-  id: string;
-  file_path: string | null;
+  created_at: string;           // ISO
+  author_id: string | null;
 }
 
-export function dbToReport(r: DbReport): ReportRow {
-  const typ = (["single", "macro", "theme", "earn"].includes(r.report_type) ? r.report_type : "single") as ReportType;
-  const sec = sectorKeyFromLabel(r.primary_sector);
+export interface Tag {
+  name: string;
+  description: string | null;
+  pinned: boolean;
+  count: number;
+  last_updated: string | null;  // ISO
+  group: TagGroup;
+}
+
+// ─── DB row types ─────────────────────────────────────────────
+interface DbReport {
+  id: string;
+  title: string;
+  description: string | null;
+  tags: string[] | null;
+  featured: boolean;
+  pinned: boolean;
+  size: string | null;
+  file_url: string | null;
+  starred: boolean;
+  created_at: string;
+  author_id: string | null;
+}
+
+interface DbTagStat {
+  name: string;
+  description: string | null;
+  pinned: boolean;
+  count: number;
+  last_updated: string | null;
+}
+
+// ─── Group classification ─────────────────────────────────────
+const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,5}$/;
+function classifyGroup(name: string, pinned: boolean): TagGroup {
+  if (pinned) return "pinned";
+  if (TICKER_RE.test(name)) return "tickers";
+  // multi-word lowercase = theme; single-word lowercase = custom
+  if (/[a-z]/.test(name) && /\s/.test(name.trim())) return "themes";
+  if (/^[a-z]/.test(name)) return "themes";
+  return "custom";
+}
+
+// ─── Card-size derivation ─────────────────────────────────────
+const DAY_MS = 86_400_000;
+export function deriveSize(r: Report): CardSize {
+  if (r.size) return r.size;
+  if (r.featured) return "xl";
+  const days = (Date.now() - new Date(r.created_at).getTime()) / DAY_MS;
+  if (r.pinned && days <= 7) return "l";
+  if (days <= 7 && r.description) return "m";
+  if (days <= 30) return "s";
+  return "s";
+}
+
+// ─── Date formatting ──────────────────────────────────────────
+export function formatDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+// ─── Mappers ──────────────────────────────────────────────────
+function dbToReport(r: DbReport): Report {
+  const validSizes: CardSize[] = ["xl", "l", "wide", "m", "s"];
+  const size =
+    r.size && validSizes.includes(r.size as CardSize)
+      ? (r.size as CardSize)
+      : null;
   return {
     id: r.id,
-    d: formatShortDate(r.published_at || r.created_at),
-    tickers: r.tickers || [],
-    typ,
-    sec,
-    sectors: r.sectors && r.sectors.length ? r.sectors : [secLabel[sec]],
     title: r.title,
-    author: r.author || "—",
-    read: (r.read_minutes ?? 10) + "m",
-    star: !!r.starred,
-    fresh: "read",
-    tags: r.tags || [],
-    summary: r.summary || "",
-    visibility: (["Team", "Firm-wide", "Private"].includes(r.visibility) ? r.visibility : "Team") as Visibility,
-    file_path: r.file_path,
+    description: r.description,
+    tags: r.tags ?? [],
+    featured: r.featured,
+    pinned: r.pinned,
+    size,
+    file_url: r.file_url,
+    starred: r.starred,
+    created_at: r.created_at,
+    author_id: r.author_id,
   };
 }
 
-export function getReportPublicUrl(file_path: string | null): string | null {
-  if (!file_path) return null;
-  const { data } = supabase.storage.from("reports").getPublicUrl(file_path);
-  return data.publicUrl ?? null;
+function dbToTag(t: DbTagStat): Tag {
+  return {
+    name: t.name,
+    description: t.description,
+    pinned: t.pinned,
+    count: t.count,
+    last_updated: t.last_updated,
+    group: classifyGroup(t.name, t.pinned),
+  };
 }
 
-// Supabase Storage forces HTML files to be served as text/plain for XSS
-// protection — so opening the public URL renders the source, not the page.
-// Workaround: download the bytes, wrap them in a client-side Blob with
-// text/html, and open that blob URL. The browser renders it normally.
-export async function deleteReport(id: string, file_path: string | null): Promise<void> {
-  if (file_path) {
-    const { error: rmErr } = await supabase.storage.from("reports").remove([file_path]);
-    // If the file is already gone, press on — we still want to remove the row.
-    if (rmErr && !/not.?found/i.test(rmErr.message)) throw rmErr;
+// ─── Queries ──────────────────────────────────────────────────
+
+export async function fetchReports(): Promise<Report[]> {
+  const { data, error } = await supabase
+    .from("reports" as never)
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as DbReport[]).map(dbToReport);
+}
+
+export async function fetchReportById(id: string): Promise<Report | null> {
+  const { data, error } = await supabase
+    .from("reports" as never)
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? dbToReport(data as unknown as DbReport) : null;
+}
+
+export async function fetchTags(): Promise<Tag[]> {
+  // Read from the tag_stats view (joins reports for counts).
+  const { data, error } = await supabase
+    .from("tag_stats" as never)
+    .select("*")
+    .order("count", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as unknown as DbTagStat[]).map(dbToTag);
+}
+
+export async function fetchRelatedTags(
+  tag: string,
+  limit = 8,
+): Promise<{ name: string; count: number }[]> {
+  const { data, error } = await (supabase.rpc as unknown as (
+    name: string,
+    args: { p_tag: string; p_limit: number },
+  ) => Promise<{ data: { name: string; count: number }[] | null; error: unknown }>)(
+    "related_tags",
+    { p_tag: tag, p_limit: limit },
+  );
+  if (error) throw error;
+  return data ?? [];
+}
+
+export interface NewReport {
+  title: string;
+  description: string;
+  tags: string[];
+  featured: boolean;
+  pinned: boolean;
+  file?: File;
+}
+
+export async function createReport(input: NewReport): Promise<Report> {
+  // Upload file first if present.
+  let file_url: string | null = null;
+  if (input.file) {
+    const ext = input.file.name.split(".").pop()?.toLowerCase() ?? "bin";
+    const path = `${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("reports")
+      .upload(path, input.file);
+    if (upErr) throw upErr;
+    file_url = path;
   }
-  const { error } = await supabase.from("reports").delete().eq("id", id);
+
+  const { data: authData } = await supabase.auth.getUser();
+  const author_id = authData.user?.id ?? null;
+
+  const { data, error } = await supabase
+    .from("reports" as never)
+    .insert({
+      title: input.title.trim(),
+      description: input.description.trim() || null,
+      tags: input.tags.map((t) => t.replace(/^#/, "").trim()).filter(Boolean),
+      featured: input.featured,
+      pinned: input.pinned,
+      file_url,
+      author_id,
+    } as never)
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  return dbToReport(data as unknown as DbReport);
+}
+
+export async function setTagPinned(
+  name: string,
+  pinned: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from("tags" as never)
+    .upsert({ name, pinned } as never)
+    .eq("name", name);
   if (error) throw error;
 }
 
-// Supabase Storage forces HTML files to be served as text/plain for XSS
-// protection, so `<iframe src=publicUrl>` would show the source, not the
-// page. We download the bytes and return them so the caller can feed
-// `srcDoc` on an iframe — that always renders as HTML.
-export async function fetchReportHtml(file_path: string | null): Promise<string> {
-  if (!file_path) throw new Error("No file attached to this report");
-  const { data, error } = await supabase.storage.from("reports").download(file_path);
+export async function setTagDescription(
+  name: string,
+  description: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("tags" as never)
+    .upsert({ name, description } as never)
+    .eq("name", name);
+  if (error) throw error;
+}
+
+export async function deleteReport(
+  id: string,
+  file_url: string | null,
+): Promise<void> {
+  if (file_url) {
+    const { error: rmErr } = await supabase.storage
+      .from("reports")
+      .remove([file_url]);
+    if (rmErr && !/not.?found/i.test(rmErr.message)) throw rmErr;
+  }
+  const { error } = await supabase
+    .from("reports" as never)
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function fetchReportHtml(file_url: string | null): Promise<string> {
+  if (!file_url) throw new Error("No file attached to this report");
+  const { data, error } = await supabase.storage
+    .from("reports")
+    .download(file_url);
   if (error || !data) throw error ?? new Error("Download failed");
   return data.text();
 }
-
-export async function fetchReportById(id: string): Promise<ReportRow | null> {
-  const { data, error } = await supabase.from("reports").select("*").eq("id", id).maybeSingle();
-  if (error) throw error;
-  return data ? dbToReport(data as DbReport) : null;
-}
-
-export async function setReportStar(id: string, starred: boolean): Promise<void> {
-  const { error } = await supabase.from("reports").update({ starred }).eq("id", id);
-  if (error) throw error;
-}
-
-export async function fetchReports(): Promise<ReportRow[]> {
-  const { data, error } = await supabase
-    .from("reports")
-    .select("*")
-    .order("published_at", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data as DbReport[]).map(dbToReport);
-}
-
-// Sample-data auto-seed intentionally removed. The `reports` table starts
-// empty and only populates from real uploads via the UploadModal.
-

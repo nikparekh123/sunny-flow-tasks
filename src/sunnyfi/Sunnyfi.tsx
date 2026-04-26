@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard';
 import AuthCallback from './pages/AuthCallback';
 import Index from './pages/Index';
 import Reader from './pages/Reader';
+import TagArea from './pages/TagArea';
 import RequireAuth from './components/RequireAuth';
 
 export default function Sunnyfi() {
@@ -31,6 +32,14 @@ export default function Sunnyfi() {
         element={
           <RequireAuth>
             <Index />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/research/tags/:tag"
+        element={
+          <RequireAuth>
+            <TagArea />
           </RequireAuth>
         }
       />
