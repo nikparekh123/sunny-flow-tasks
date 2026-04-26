@@ -211,6 +211,13 @@ export async function createReport(input: NewReport): Promise<Report> {
     .select()
     .maybeSingle();
   if (error) throw error;
+  if (!data) {
+    // RLS lets the insert through but blocks the SELECT-after-insert. Most
+    // likely the signed-in user's email is not in the `members` allowlist.
+    throw new Error(
+      "Insert blocked by RLS — your email is not in the members allowlist.",
+    );
+  }
   return dbToReport(data as unknown as DbReport);
 }
 
