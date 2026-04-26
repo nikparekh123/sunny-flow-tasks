@@ -1,8 +1,9 @@
 /* Sunnyfi (research-hub) tokens + app-specific styles. Imported
- * from src/sunnyfi/Sunnyfi.tsx so it only loads on sunnyfi.co. */
+ * from src/sunnyfi/Sunnyfi.tsx so it only loads on sunnyfi.co.
+ * No @layer wrappers — Tailwind's @tailwind base lives in src/index.css
+ * and PostCSS resolves @layer per-file, which trips up the build. */
 
-@layer base {
-  :root {
+:root {
     /* Navi Research Hub palette */
     --navi-page:          #0a2828;
     --navi-dash-page:     #061a10;
@@ -95,23 +96,22 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
   }
+
+/* Box-sizing + global border-color already set in src/index.css; no need
+ * to re-apply here. The body styles below intentionally take precedence
+ * on sunnyfi.co routes since this file is only loaded by Sunnyfi.tsx. */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
 }
-
-@layer base {
-  * { @apply border-border; box-sizing: border-box; }
-
-  html, body, #root {
-    margin: 0; padding: 0;
-    min-height: 100vh;
-  }
-  body {
-    background: var(--navi-dash-page);
-    color: var(--navi-fg1);
-    font-family: var(--navi-font-sans);
-    font-size: var(--navi-body-size);
-    line-height: var(--navi-body-lh);
-    -webkit-font-smoothing: antialiased;
-  }
+body {
+  background: var(--navi-dash-page);
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+  font-size: var(--navi-body-size);
+  line-height: var(--navi-body-lh);
+  -webkit-font-smoothing: antialiased;
 }
 
 @keyframes navi-pulse  { 0%,100%{opacity:1} 50%{opacity:.3} }
