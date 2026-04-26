@@ -1,12 +1,144 @@
 /* ============================================================
    Research Hub — Cards Hub v2 design.
    Ported from design_handoff_research_hub/Cards Hub v2.html.
-   All rules scoped under .ch-app or descendants of .np-top so
-   they coexist with the rest of the Sunnyfi app.
 
-   This file extends sunnyfi.css (which already provides
-   --navi-* tokens, np-top, np-btn, np-modal, etc.).
+   sunnyfi.css already supplies the --navi-* tokens, but NOT the
+   np-* primitives (those only exist scoped under .np-app inside
+   positions.css). So this file ships them too, unscoped — it's
+   only loaded on research pages, so there's no bleed risk.
    ============================================================ */
+
+/* ============== TOP BAR ============== */
+.np-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 32px;
+  border-bottom: 1px solid rgba(30,90,80,.25);
+  background: var(--navi-dash-page);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.np-brand {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  letter-spacing: 2.8px;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--navi-neon);
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  gap: 3px;
+}
+.np-brand .cursor {
+  display: inline-block;
+  width: 0.5ch;
+  height: 0.9em;
+  background: var(--navi-neon);
+  vertical-align: -0.05em;
+  animation: navi-blink 1s steps(1) infinite;
+}
+.np-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ============== BUTTONS ============== */
+.np-btn {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity .15s var(--ease, cubic-bezier(.4,0,.2,1));
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+.np-btn:hover { opacity: 0.75; }
+.np-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.np-btn.ghost   { background: transparent;          color: var(--navi-fg2);   }
+.np-btn.tinted  { background: rgba(15,51,51,.7);    color: var(--navi-fg2);   }
+.np-btn.neon    { background: var(--navi-tint-neon); color: var(--navi-neon); }
+.np-btn.danger  { background: var(--navi-tint-negative); color: var(--navi-negative); }
+
+/* ============== STATUS PILL ============== */
+.np-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  padding: 4px 10px;
+  background: rgba(15,51,51,.5);
+  border-radius: 100px;
+}
+.np-pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--navi-neon);
+  animation: navi-pulse 2.5s var(--ease, cubic-bezier(.4,0,.2,1)) infinite;
+}
+
+/* ============== MODAL ============== */
+.np-modal-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(6,26,16,0.75);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  animation: navi-fade-up .25s var(--ease, cubic-bezier(.4,0,.2,1));
+}
+.np-modal {
+  background: var(--navi-surface);
+  border: 1px solid var(--navi-border-bright);
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 880px;
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+}
+.np-modal-hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid rgba(30,90,80,.3);
+}
+.np-modal-title {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--navi-fg1);
+}
+.np-modal-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+  margin-top: 4px;
+}
+
+/* ============== KEYFRAMES ============== */
+@keyframes navi-pulse   { 0%,100%{opacity:1} 50%{opacity:.3} }
+@keyframes navi-blink   { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes navi-fade-up { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
 
 /* ============== APP SHELL ============== */
 .ch-app {
