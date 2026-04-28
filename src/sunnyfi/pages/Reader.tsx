@@ -180,7 +180,7 @@ export default function Reader() {
             key={report.id}
             title={report.title}
             srcDoc={html}
-            sandbox="allow-same-origin"
+            sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox"
             className="reader-iframe-fade"
             style={{
               width: "100%",
