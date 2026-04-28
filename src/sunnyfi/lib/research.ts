@@ -271,15 +271,31 @@ export async function updateReport(
   if (patch.featured !== undefined) cleaned.featured = patch.featured;
   if (patch.pinned !== undefined) cleaned.pinned = patch.pinned;
 
-  const { data, error } = await supabase
+  const updatePromise = supabase
     .from("reports" as never)
     .update(cleaned as never)
     .eq("id", id)
     .select()
     .maybeSingle();
-  if (error) throw error;
-  if (!data) throw new Error("Update blocked or report not found.");
-  return dbToReport(data as unknown as DbReport);
+
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error("Update timed out after 15s. The DB may be unreachable or a trigger is hanging.")),
+      15_000,
+    ),
+  );
+
+  const result = (await Promise.race([updatePromise, timeout])) as Awaited<
+    typeof updatePromise
+  >;
+
+  if (result.error) throw new Error(`Update failed: ${result.error.message}`);
+  if (!result.data) {
+    throw new Error(
+      "Update returned 0 rows. Either the report ID is wrong or the UPDATE RLS policy is missing.",
+    );
+  }
+  return dbToReport(result.data as unknown as DbReport);
 }
 
 export async function setTagPinned(
