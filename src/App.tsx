@@ -7,8 +7,8 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AuthProvider } from '@/hooks/useAuth';
 import Index from './pages/Index.tsx';
-import RulesPage from './pages/RulesPage.tsx';
-import NotFound from './pages/NotFound.tsx';
+const RulesPage = lazy(() => import('./pages/RulesPage.tsx'));
+const NotFound = lazy(() => import('./pages/NotFound.tsx'));
 
 // One repo serves three apps via different hostnames:
 //   sunnyfi.co / www.sunnyfi.co → Sunnyfi (Landing, Dashboard, Research, …)
@@ -53,11 +53,13 @@ const SuspenseFallback = () => (
 
 function TasksApp() {
   return (
-    <Routes>
-      <Route path="/" element={<Index />} />
-      <Route path="/rules" element={<RulesPage />} />
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <Suspense fallback={<SuspenseFallback />}>
+      <Routes>
+        <Route path="/" element={<Index />} />
+        <Route path="/rules" element={<RulesPage />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Suspense>
   );
 }
 
