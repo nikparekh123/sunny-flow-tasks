@@ -245,6 +245,43 @@ export async function createReport(input: NewReport): Promise<Report> {
   return dbToReport(data as unknown as DbReport);
 }
 
+export interface UpdateReportInput {
+  title?: string;
+  description?: string | null;
+  tags?: string[];
+  featured?: boolean;
+  pinned?: boolean;
+}
+
+export async function updateReport(
+  id: string,
+  patch: UpdateReportInput,
+): Promise<Report> {
+  const cleaned: Record<string, unknown> = {};
+  if (patch.title !== undefined) cleaned.title = patch.title.trim();
+  if (patch.description !== undefined) {
+    cleaned.description =
+      patch.description === null ? null : patch.description.trim() || null;
+  }
+  if (patch.tags !== undefined) {
+    cleaned.tags = patch.tags
+      .map((t) => t.replace(/^#/, "").trim())
+      .filter(Boolean);
+  }
+  if (patch.featured !== undefined) cleaned.featured = patch.featured;
+  if (patch.pinned !== undefined) cleaned.pinned = patch.pinned;
+
+  const { data, error } = await supabase
+    .from("reports" as never)
+    .update(cleaned as never)
+    .eq("id", id)
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Update blocked or report not found.");
+  return dbToReport(data as unknown as DbReport);
+}
+
 export async function setTagPinned(
   name: string,
   pinned: boolean,

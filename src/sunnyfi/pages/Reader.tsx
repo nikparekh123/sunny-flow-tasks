@@ -1,15 +1,20 @@
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchReportById,
   fetchReportHtml,
+  fetchTags,
   formatDate,
 } from "@/sunnyfi/lib/research";
+import { EditReportModal } from "@/sunnyfi/components/research/EditReportModal";
 import "@/sunnyfi/research.css";
 
 export default function Reader() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
 
   // Two queries so the cache keys match what Card.tsx prefetches on hover:
   // ["report", id] for metadata and ["report-html", id] for the file body.
@@ -18,6 +23,7 @@ export default function Reader() {
     queryFn: () => fetchReportById(id!),
     enabled: !!id,
   });
+  const tagsQ = useQuery({ queryKey: ["tags"], queryFn: fetchTags });
 
   const report = reportQ.data ?? null;
 
@@ -86,17 +92,34 @@ export default function Reader() {
         </div>
 
         <div style={{ marginBottom: 24 }}>
-          <h1
+          <div
             style={{
-              fontSize: 36,
-              fontWeight: 300,
-              letterSpacing: "-1px",
-              margin: "0 0 12px",
-              color: "var(--navi-fg1)",
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 16,
+              marginBottom: 12,
             }}
           >
-            {report.title}
-          </h1>
+            <h1
+              style={{
+                fontSize: 36,
+                fontWeight: 300,
+                letterSpacing: "-1px",
+                margin: 0,
+                color: "var(--navi-fg1)",
+              }}
+            >
+              {report.title}
+            </h1>
+            <button
+              className="np-btn tinted"
+              onClick={() => setEditing(true)}
+              style={{ flexShrink: 0 }}
+            >
+              ✎ Edit
+            </button>
+          </div>
           <div
             style={{
               display: "flex",
@@ -175,6 +198,21 @@ export default function Reader() {
           </p>
         )}
       </main>
+
+      <EditReportModal
+        open={editing}
+        onClose={() => setEditing(false)}
+        report={report}
+        knownTags={(tagsQ.data ?? []).map((t) => t.name)}
+        onSaved={(updated) => {
+          // Update both the single-report cache and the list cache so the
+          // reader, the rail, and any open list views all reflect the edit
+          // immediately — no refetch round-trip needed.
+          qc.setQueryData(["report", report.id], updated);
+          qc.invalidateQueries({ queryKey: ["reports"] });
+          qc.invalidateQueries({ queryKey: ["tags"] });
+        }}
+      />
     </div>
   );
 }
