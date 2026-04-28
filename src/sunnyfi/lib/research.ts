@@ -182,15 +182,39 @@ export interface NewReport {
 }
 
 export async function createReport(input: NewReport): Promise<Report> {
-  // Upload file first if present.
+  // Upload file first if present. Wrapped in a timeout so a stalled
+  // storage request fails loudly instead of leaving the UI stuck on
+  // "Publishing…" forever.
   let file_url: string | null = null;
   if (input.file) {
     const ext = input.file.name.split(".").pop()?.toLowerCase() ?? "bin";
     const path = `${crypto.randomUUID()}.${ext}`;
-    const { error: upErr } = await supabase.storage
+
+    const uploadPromise = supabase.storage
       .from("reports")
-      .upload(path, input.file);
-    if (upErr) throw upErr;
+      .upload(path, input.file, {
+        contentType: input.file.type || "application/octet-stream",
+        upsert: false,
+      });
+
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              "Storage upload timed out after 30s. The bucket may be misconfigured, or the file is too large.",
+            ),
+          ),
+        30_000,
+      ),
+    );
+
+    const result = (await Promise.race([uploadPromise, timeout])) as Awaited<
+      typeof uploadPromise
+    >;
+    if (result.error) {
+      throw new Error(`Storage upload failed: ${result.error.message}`);
+    }
     file_url = path;
   }
 
