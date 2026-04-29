@@ -43,33 +43,57 @@ export function Sidebar({ tasks }: SidebarProps) {
         minWidth: 240,
       }}
     >
-      {/* Brand */}
-      <div className="flex items-center gap-[9px] px-[6px] py-[2px]">
-        <div
+      {/* Brand: SUNNYFI▎ / TASKS — clickable home link back to dashboard */}
+      <div
+        className="flex items-center gap-[10px] px-[6px] py-[2px]"
+        style={{ flexWrap: 'wrap' }}
+      >
+        <a
+          href="https://www.sunnyfi.co/dashboard"
+          title="Back to dashboard"
           style={{
-            width: 18,
-            height: 18,
-            background: 'var(--owl-neon)',
-            borderRadius: 2,
-            transform: 'rotate(10deg)',
-            boxShadow: '0 0 0 2px rgba(210,230,50,0.15)',
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '2.8px',
+            textTransform: 'uppercase',
+            color: 'var(--owl-neon)',
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 3,
           }}
-        />
-        <div
-          className="text-[13px] font-bold tracking-[0.5px]"
-          style={{ color: 'var(--owl-text-primary)' }}
         >
-          S To dos
+          Sunnyfi
           <span
-            className="inline-block align-[-2px] ml-[1px]"
             style={{
-              width: 2,
-              height: '0.8em',
+              display: 'inline-block',
+              width: '0.5ch',
+              height: '0.9em',
               background: 'var(--owl-neon)',
               animation: 'owl-blink 1s step-end infinite',
             }}
           />
-        </div>
+        </a>
+        <span
+          style={{
+            color: 'var(--owl-text-muted)',
+            fontSize: 14,
+            fontWeight: 300,
+          }}
+        >
+          /
+        </span>
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 500,
+            letterSpacing: '2.8px',
+            textTransform: 'uppercase',
+            color: 'var(--owl-text-secondary)',
+          }}
+        >
+          Tasks
+        </span>
       </div>
 
       {/* Activity stats */}

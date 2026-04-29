@@ -63,9 +63,13 @@ export default function PositionsPage() {
     <div className="np-app">
       {/* Top bar */}
       <header className="np-top">
-        <a className="np-brand" href={DASHBOARD_URL} title="Back to dashboard">
-          Sunnyfi<span className="cursor" />
-        </a>
+        <div className="np-brand-row">
+          <a className="np-brand" href={DASHBOARD_URL} title="Back to dashboard">
+            Sunnyfi<span className="cursor" />
+          </a>
+          <span className="np-crumb-sep">/</span>
+          <span className="np-crumb">POSITIONS</span>
+        </div>
         <div className="np-actions">
           <PriceTimestamp last={portfolio.last_updated} />
           <button

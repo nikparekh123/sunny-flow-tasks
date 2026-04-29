@@ -63,6 +63,26 @@
   gap: 10px;
 }
 
+/* Breadcrumb after the brand: "SUNNYFI▎ / RESEARCH". */
+.np-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.np-crumb-sep {
+  color: var(--navi-fg4);
+  font-size: 14px;
+  font-weight: 300;
+}
+.np-crumb {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  letter-spacing: 2.8px;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--navi-fg2);
+}
+
 /* ============== BUTTONS ============== */
 .np-btn {
   font-family: var(--navi-font-sans);

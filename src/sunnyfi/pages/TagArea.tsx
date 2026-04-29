@@ -288,9 +288,13 @@ function ResearchTopBar({
 }) {
   return (
     <header className="np-top">
-      <a className="np-brand" href={DASHBOARD_URL} title="Back to dashboard">
-        Sunnyfi<span className="cursor" />
-      </a>
+      <div className="np-brand-row">
+        <a className="np-brand" href={DASHBOARD_URL} title="Back to dashboard">
+          Sunnyfi<span className="cursor" />
+        </a>
+        <span className="np-crumb-sep">/</span>
+        <span className="np-crumb">RESEARCH</span>
+      </div>
       <div className="np-actions">
         <button className="np-btn ghost" onClick={onSearch}>
           ⌕ Search

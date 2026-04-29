@@ -92,6 +92,28 @@
   gap: 10px;
 }
 
+/* Breadcrumb style: "SUNNYFI▎ / POSITIONS". The brand stays neon and
+   clickable; the crumb is muted. Uses the same letter-spacing/uppercase
+   so the eye reads them as one unit. */
+.np-app .np-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.np-app .np-crumb-sep {
+  color: var(--navi-fg4);
+  font-size: 14px;
+  font-weight: 300;
+}
+.np-app .np-crumb {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  letter-spacing: 2.8px;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--navi-fg2);
+}
+
 /* ============== STAGE ============== */
 .np-stage {
   max-width: 1480px;
