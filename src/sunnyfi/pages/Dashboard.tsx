@@ -102,7 +102,10 @@ export default function Dashboard() {
 
     if (t.status !== "live") return;
     if (t.internal) { navigate(t.internal); return; }
-    if (t.href)     { window.open(t.href, "_blank", "noopener,noreferrer"); return; }
+    // External tools (Tasks on todos.sunnyfi.co, Positions on
+    // positions.sunnyfi.co) live on different subdomains — same-tab nav
+    // does a full document load to that origin.
+    if (t.href)     { window.location.href = t.href; return; }
   };
 
   const onLogout = () => {
