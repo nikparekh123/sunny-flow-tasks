@@ -106,6 +106,98 @@ export async function setHold(
   if (error) throw error;
 }
 
+/**
+ * Two-stage DCF intrinsic value per share.
+ * - Years 1-10: project FCF growing at `stage1_growth_pct`
+ * - Terminal: Gordon growth model with `terminal_growth_pct`
+ * - Discount everything to PV at `discount_rate_pct`
+ *
+ * Returns intrinsic per share, or null if inputs are invalid (e.g.
+ * discount ≤ terminal makes the terminal value diverge).
+ */
+export function dcfIntrinsic(opts: {
+  total_owner_earnings: number; // starting FCF (in millions, matches CSV)
+  shares_outstanding: number;   // millions
+  stage1_growth_pct: number;
+  discount_rate_pct: number;
+  terminal_growth_pct: number;
+}): number | null {
+  const { total_owner_earnings, shares_outstanding } = opts;
+  const g = opts.stage1_growth_pct / 100;
+  const d = opts.discount_rate_pct / 100;
+  const tg = opts.terminal_growth_pct / 100;
+  if (!shares_outstanding || shares_outstanding <= 0) return null;
+  if (d <= tg) return null; // Gordon model diverges
+  // Stage 1: 10 years of growth, discounted.
+  let pv = 0;
+  let fcf = total_owner_earnings;
+  for (let y = 1; y <= 10; y++) {
+    fcf = fcf * (1 + g);
+    pv += fcf / Math.pow(1 + d, y);
+  }
+  // Terminal value at end of year 10, discounted back.
+  const tv = (fcf * (1 + tg)) / (d - tg);
+  pv += tv / Math.pow(1 + d, 10);
+  return pv / shares_outstanding;
+}
+
+export interface AssumptionPatch {
+  stage1_growth_pct?: number;
+  discount_rate_pct?: number;
+  terminal_growth_pct?: number;
+}
+
+/**
+ * Save assumption changes for a single ticker, recomputing intrinsic from
+ * the existing total_owner_earnings + shares_outstanding (those don't move
+ * unless you re-import the CSV). Returns the updated row.
+ */
+export async function updateAssumptions(
+  ticker: string,
+  patch: AssumptionPatch,
+): Promise<Stock> {
+  // Read current row to recompute intrinsic from the new inputs.
+  const { data: current, error: readErr } = await supabase
+    .from("snowball" as never)
+    .select("*")
+    .eq("ticker", ticker)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!current) throw new Error(`Ticker ${ticker} not found.`);
+
+  const row = current as unknown as Stock;
+  const merged = {
+    total_owner_earnings: row.total_owner_earnings ?? 0,
+    shares_outstanding: row.shares_outstanding ?? 0,
+    stage1_growth_pct:
+      patch.stage1_growth_pct ?? row.stage1_growth_pct ?? 0,
+    discount_rate_pct:
+      patch.discount_rate_pct ?? row.discount_rate_pct ?? 0,
+    terminal_growth_pct:
+      patch.terminal_growth_pct ?? row.terminal_growth_pct ?? 0,
+  };
+  const newIntrinsic = dcfIntrinsic(merged);
+
+  const updatePatch: Record<string, unknown> = { ...patch };
+  if (newIntrinsic != null) {
+    updatePatch.intrinsic_value = newIntrinsic;
+    // Recompute the three TBP fields with their margins of safety.
+    updatePatch.tbp_aggressive_15 = newIntrinsic * 0.85;
+    updatePatch.tbp_conservative_30 = newIntrinsic * 0.7;
+    updatePatch.tbp_deep_value_50 = newIntrinsic * 0.5;
+  }
+
+  const { data, error } = await supabase
+    .from("snowball" as never)
+    .update(updatePatch as never)
+    .eq("ticker", ticker)
+    .select()
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Update blocked or row not found.");
+  return data as unknown as Stock;
+}
+
 // ─── Sorting / filtering ──────────────────────────────────────
 export function sortStocks(
   list: ComputedStock[],

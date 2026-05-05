@@ -12,6 +12,8 @@ import {
   fetchStocks,
   setWatch,
   sortStocks,
+  updateAssumptions,
+  dcfIntrinsic,
   fmtMcap,
   fmtPrice,
   fmtPrice2,
@@ -365,8 +367,70 @@ function DetailDrawer({
   onClose: () => void;
   onToggleWatch: () => void;
 }) {
+  const qc = useQueryClient();
   const s = stock;
   const tier = s.tier ?? 4;
+
+  // Local slider state — diverges from the saved row until "Save & recalc".
+  const [growth, setGrowth] = useState<number>(s.stage1_growth_pct ?? 5);
+  const [discount, setDiscount] = useState<number>(s.discount_rate_pct ?? 10);
+  const [terminal, setTerminal] = useState<number>(s.terminal_growth_pct ?? 2.5);
+  const [saving, setSaving] = useState(false);
+
+  // Reset when a different stock is opened.
+  useMemo(() => {
+    setGrowth(s.stage1_growth_pct ?? 5);
+    setDiscount(s.discount_rate_pct ?? 10);
+    setTerminal(s.terminal_growth_pct ?? 2.5);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.ticker]);
+
+  // Live recompute as user drags.
+  const liveIntrinsic = useMemo(
+    () =>
+      dcfIntrinsic({
+        total_owner_earnings: s.total_owner_earnings ?? 0,
+        shares_outstanding: s.shares_outstanding ?? 0,
+        stage1_growth_pct: growth,
+        discount_rate_pct: discount,
+        terminal_growth_pct: terminal,
+      }),
+    [growth, discount, terminal, s.total_owner_earnings, s.shares_outstanding],
+  );
+
+  const liveUpside =
+    liveIntrinsic != null && s.price && s.price > 0
+      ? ((liveIntrinsic - s.price) / s.price) * 100
+      : null;
+
+  const dirty =
+    growth !== (s.stage1_growth_pct ?? 5) ||
+    discount !== (s.discount_rate_pct ?? 10) ||
+    terminal !== (s.terminal_growth_pct ?? 2.5);
+
+  const valid = liveIntrinsic != null;
+
+  const handleSave = async () => {
+    if (!dirty || !valid) return;
+    setSaving(true);
+    try {
+      await updateAssumptions(s.ticker, {
+        stage1_growth_pct: growth,
+        discount_rate_pct: discount,
+        terminal_growth_pct: terminal,
+      });
+      qc.invalidateQueries({ queryKey: ["snowball", "stocks"] });
+      toast.success(`${s.ticker} updated.`);
+    } catch (e) {
+      toast.error(`Save failed: ${(e as Error).message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const displayedIntrinsic = dirty ? liveIntrinsic : s.intrinsic_value;
+  const displayedUpside = dirty ? liveUpside : s.upside;
+
   return (
     <div className="sb-drawer-overlay" onClick={onClose}>
       <div className="sb-drawer" onClick={(e) => e.stopPropagation()}>
@@ -378,43 +442,105 @@ function DetailDrawer({
           <div className="meta">
             {s.name} · {s.sector ?? "—"} · {fmtMcap(s.market_cap)}
           </div>
-          <div className="upside">{fmtUps(s.upside)}</div>
+          <div className="upside">{fmtUps(displayedUpside ?? 0)}</div>
           <div className="badge">
             margin of safety · {TIER_LABEL[tier]}
+            {dirty ? " · live preview" : ""}
           </div>
         </div>
 
         <h3>The story</h3>
         <div className="sb-story">
           Trading at <strong>{fmtPrice2(s.price)}</strong> against an estimated
-          intrinsic value of <strong>{fmtPrice2(s.intrinsic_value)}</strong>.{" "}
-          {s.upside > 15
+          intrinsic value of <strong>{fmtPrice2(displayedIntrinsic)}</strong>.{" "}
+          {(displayedUpside ?? 0) > 15
             ? "Market is mispricing this lower than the fundamentals justify — meaningful margin of safety."
-            : s.upside > 0
+            : (displayedUpside ?? 0) > 0
               ? "Fundamentals support modest upside from current levels."
-              : s.upside > -15
+              : (displayedUpside ?? 0) > -15
                 ? "Close to fair value; little margin in either direction."
                 : "Market may be pricing in growth that the fundamentals do not yet support."}
-          {s.distance_to_buy ? ` Status: ${s.distance_to_buy}.` : ""}
+          {s.distance_to_buy && !dirty ? ` Status: ${s.distance_to_buy}.` : ""}
         </div>
 
-        <h3>Target buy prices</h3>
+        <h3>Target buy prices {dirty && <span style={{ color: "var(--navi-neon)", fontWeight: 500, letterSpacing: 0 }}>(live)</span>}</h3>
         <div className="sb-tbp-grid">
           <div className="sb-lens">
             <div className="lbl">Aggressive 15%</div>
-            <div className="val">{fmtPrice2(s.tbp_aggressive_15)}</div>
+            <div className="val">
+              {fmtPrice2(
+                dirty && liveIntrinsic != null
+                  ? liveIntrinsic * 0.85
+                  : s.tbp_aggressive_15,
+              )}
+            </div>
             <div className="sub">small margin</div>
           </div>
           <div className="sb-lens">
             <div className="lbl">Conservative 30%</div>
-            <div className="val">{fmtPrice2(s.tbp_conservative_30)}</div>
+            <div className="val">
+              {fmtPrice2(
+                dirty && liveIntrinsic != null
+                  ? liveIntrinsic * 0.7
+                  : s.tbp_conservative_30,
+              )}
+            </div>
             <div className="sub">standard</div>
           </div>
           <div className="sb-lens">
             <div className="lbl">Deep value 50%</div>
-            <div className="val">{fmtPrice2(s.tbp_deep_value_50)}</div>
+            <div className="val">
+              {fmtPrice2(
+                dirty && liveIntrinsic != null
+                  ? liveIntrinsic * 0.5
+                  : s.tbp_deep_value_50,
+              )}
+            </div>
             <div className="sub">strict</div>
           </div>
+        </div>
+
+        <h3>Tune assumptions</h3>
+        <div className="sb-slider-block">
+          <Slider
+            label="Stage 1 growth"
+            value={growth}
+            min={-20}
+            max={50}
+            step={0.5}
+            unit="%"
+            onChange={setGrowth}
+          />
+          <Slider
+            label="Discount rate (WACC)"
+            value={discount}
+            min={4}
+            max={20}
+            step={0.25}
+            unit="%"
+            onChange={setDiscount}
+          />
+          <Slider
+            label="Terminal growth"
+            value={terminal}
+            min={0}
+            max={5}
+            step={0.25}
+            unit="%"
+            onChange={setTerminal}
+          />
+          {!valid && (
+            <div
+              style={{
+                color: "var(--navi-negative)",
+                fontSize: 11,
+                marginTop: 8,
+                fontFamily: "var(--navi-font-mono)",
+              }}
+            >
+              Discount must exceed terminal growth (Gordon model diverges).
+            </div>
+          )}
         </div>
 
         <h3>Fundamentals</h3>
@@ -429,24 +555,67 @@ function DetailDrawer({
             }
           />
           <Fund l="Today" v={fmtPct(s.change_pct, 2)} />
-          <Fund l="Stage 1 growth" v={fmtPct(s.stage1_growth_pct, 1)} />
-          <Fund l="Discount rate" v={fmtPct(s.discount_rate_pct, 2)} />
-          <Fund l="Terminal growth" v={fmtPct(s.terminal_growth_pct, 1)} />
+          <Fund l="Owner earnings" v={fmtPrice(s.total_owner_earnings)} />
+          <Fund l="Shares out" v={s.shares_outstanding != null ? `${(s.shares_outstanding).toFixed(1)}M` : "—"} />
           <Fund l="Dividend yield" v={fmtPct(s.dividend_yield_pct, 2)} />
           <Fund l="Industry" v={s.industry ?? "—"} />
           <Fund l="Earnings" v={s.earnings_date ?? "—"} />
+          <Fund l="Distance" v={s.distance_to_buy ?? "—"} />
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
           <button
-            className="sb-btn-tinted"
+            className="sb-btn-primary"
             style={{ flex: 1 }}
-            onClick={onToggleWatch}
+            disabled={!dirty || !valid || saving}
+            onClick={handleSave}
           >
-            {s.watchlist ? "★ Remove from watchlist" : "☆ Add to watchlist"}
+            {saving ? "Saving…" : dirty ? "Save & recalc ↗" : "No changes"}
+          </button>
+          <button className="sb-btn-tinted" onClick={onToggleWatch}>
+            {s.watchlist ? "★ Remove" : "☆ Watchlist"}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  unit,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  unit?: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="sb-slider-row">
+      <div className="top">
+        <span className="l">{label}</span>
+        <span className="v">
+          {value.toFixed(step < 1 ? 2 : 1)}
+          {unit ?? ""}
+        </span>
+      </div>
+      <input
+        type="range"
+        className="sb-slider"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
     </div>
   );
 }
