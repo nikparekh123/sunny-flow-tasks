@@ -139,10 +139,14 @@ Deno.serve(async (req) => {
           const inv =
             fin?.cash_flow_statement?.net_cash_flow_from_investing_activities
               ?.value ?? null;
+          // Reference's weighted_shares_outstanding is the current actual
+          // share count. Polygon's TTM `diluted_average_shares` is unreliable
+          // (sums quarters instead of averaging for some tickers, e.g. AAPL
+          // returns ~3× the real number). Always prefer reference.
           const apiShares =
+            ref?.weighted_shares_outstanding ??
             fin?.income_statement?.diluted_average_shares?.value ??
             fin?.income_statement?.basic_average_shares?.value ??
-            ref?.weighted_shares_outstanding ??
             null;
 
           // Owner earnings ≈ CFO + investing (investing is negative for net
