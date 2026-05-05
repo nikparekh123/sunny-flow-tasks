@@ -19,6 +19,7 @@ const AuthCallback = lazy(() => import('./pages/AuthCallback'));
 const Index        = lazy(() => import('./pages/Index'));
 const Reader       = lazy(() => import('./pages/Reader'));
 const TagArea      = lazy(() => import('./pages/TagArea'));
+const Snowball     = lazy(() => import('./pages/Snowball'));
 
 function PageFallback() {
   return (
@@ -74,6 +75,14 @@ export default function Sunnyfi() {
           element={
             <RequireAuth>
               <Reader />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/snowball"
+          element={
+            <RequireAuth>
+              <Snowball />
             </RequireAuth>
           }
         />

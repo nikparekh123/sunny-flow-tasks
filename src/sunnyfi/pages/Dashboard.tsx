@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Status = "live" | "soon";
 interface Tool {
-  key: "tasks" | "research" | "positions" | "journal" | "signals" | "calendar";
+  key: "tasks" | "research" | "positions" | "snowball" | "signals" | "calendar";
   name: string;
   desc: string;
   status: Status;
@@ -15,12 +15,12 @@ interface Tool {
 }
 
 const TOOLS: Tool[] = [
-  { key: "tasks",    name: "Tasks",        desc: "Daily workflow",  status: "live", hotkey: "1", href: "https://todos.sunnyfi.co" },
-  { key: "research", name: "Research Hub", desc: "Notes & theses",  status: "live", hotkey: "2", internal: "/research" },
-  { key: "positions", name: "Positions",   desc: "Holdings & P&L",  status: "live", hotkey: "3", href: "https://positions.sunnyfi.co" },
-  { key: "journal",  name: "Journal",      desc: "Trade log",       status: "soon", hotkey: "4" },
-  { key: "signals",  name: "Signals",      desc: "Alerts & flows",  status: "soon", hotkey: "5" },
-  { key: "calendar", name: "Calendar",     desc: "Events",          status: "soon", hotkey: "6" },
+  { key: "tasks",    name: "Tasks",        desc: "Daily workflow",   status: "live", hotkey: "1", href: "https://todos.sunnyfi.co" },
+  { key: "research", name: "Research Hub", desc: "Notes & theses",   status: "live", hotkey: "2", internal: "/research" },
+  { key: "positions", name: "Positions",   desc: "Holdings & P&L",   status: "live", hotkey: "3", href: "https://positions.sunnyfi.co" },
+  { key: "snowball", name: "Snowball",     desc: "DCF & valuation",  status: "live", hotkey: "4", internal: "/snowball" },
+  { key: "signals",  name: "Signals",      desc: "Alerts & flows",   status: "soon", hotkey: "5" },
+  { key: "calendar", name: "Calendar",     desc: "Events",           status: "soon", hotkey: "6" },
 ];
 
 const ICON_STYLE = { fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -30,7 +30,8 @@ function ToolIcon({ name }: { name: Tool["key"] }) {
     tasks:    g(<><rect x="3" y="4" width="18" height="16" rx="1" /><path d="M7 9h10M7 13h7M7 17h4" /></>),
     research: g(<><path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4V4z" /><path d="M8 9h8M8 13h8M8 17h5" /></>),
     positions: g(<><rect x="3" y="3" width="8" height="13" /><rect x="13" y="3" width="8" height="8" /><rect x="3" y="18" width="8" height="3" /><rect x="13" y="13" width="8" height="8" /></>),
-    journal:  g(<><path d="M5 3h12a2 2 0 0 1 2 2v16l-4-2-4 2-4-2-4 2V5a2 2 0 0 1 2-2z" /><path d="M9 8h8M9 12h6" /></>),
+    // Snowball icon: stacked spheres growing — value compounding metaphor.
+    snowball: g(<><circle cx="12" cy="17" r="4" /><circle cx="12" cy="9" r="2.5" /><circle cx="12" cy="4" r="1.4" /></>),
     signals:  g(<><path d="M3 18l5-7 4 4 5-8 4 5" /><circle cx="8" cy="11" r="1.2" /><circle cx="12" cy="15" r="1.2" /><circle cx="17" cy="7" r="1.2" /></>),
     calendar: g(<><rect x="3" y="5" width="18" height="16" rx="1" /><path d="M3 10h18M8 3v4M16 3v4" /></>),
   };
