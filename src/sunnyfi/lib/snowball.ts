@@ -35,9 +35,12 @@ export interface Stock {
 
 /** Computed view of a Stock with the derived fields used by the UI. */
 export interface ComputedStock extends Stock {
-  upside: number;          // % margin of safety, derived
-  market_cap: number;      // USD billions, derived
-  rank?: number;           // populated by sort step
+  upside: number;             // (intrinsic − price) / price × 100  — % gain needed to reach intrinsic
+  margin_of_safety: number;   // (intrinsic − price) / intrinsic × 100  — discount from intrinsic; Buffett's preferred framing
+  market_cap: number;         // USD billions
+  rank?: number;
+  /** Sentinel for sort/filter: true if intrinsic_value is null/negative (bad data) */
+  intrinsic_invalid: boolean;
 }
 
 /** Tier labels match the 6-step gradient in snowball.css. */
@@ -67,11 +70,19 @@ export const SORTS: SortKey[] = [
 function compute(s: Stock): ComputedStock {
   const price = s.price ?? 0;
   const intrinsic = s.intrinsic_value ?? 0;
-  const upside = price > 0 ? ((intrinsic - price) / price) * 100 : 0;
+  const intrinsic_invalid = intrinsic <= 0; // null or non-positive = bad data
+  const upside = price > 0 && !intrinsic_invalid
+    ? ((intrinsic - price) / price) * 100
+    : 0;
+  // Margin of safety: % discount from intrinsic. Positive = trading
+  // below intrinsic (good for value investor). Negative = premium.
+  const margin_of_safety = !intrinsic_invalid
+    ? ((intrinsic - price) / intrinsic) * 100
+    : 0;
   const shares = s.shares_outstanding ?? 0;
   // shares are in millions in the CSV → market cap in $B = price × shares / 1000
   const market_cap = (price * shares) / 1000;
-  return { ...s, upside, market_cap };
+  return { ...s, upside, margin_of_safety, market_cap, intrinsic_invalid };
 }
 
 // ─── Queries ──────────────────────────────────────────────────
@@ -286,15 +297,28 @@ export async function updateAssumptions(
 }
 
 // ─── Sorting / filtering ──────────────────────────────────────
+/**
+ * Sort with invalid-intrinsic stocks pushed to the bottom for any
+ * value-based sort (Most undervalued / overvalued / Market cap). They'd
+ * otherwise pollute the rankings — a stock with a negative intrinsic from
+ * bad data shouldn't show up as "extremely overvalued".
+ */
 export function sortStocks(
   list: ComputedStock[],
   by: SortKey,
 ): ComputedStock[] {
   const r = [...list];
-  if (by === "Most undervalued") r.sort((a, b) => b.upside - a.upside);
-  else if (by === "Most overvalued") r.sort((a, b) => a.upside - b.upside);
-  else if (by === "Market cap") r.sort((a, b) => b.market_cap - a.market_cap);
-  else r.sort((a, b) => a.ticker.localeCompare(b.ticker));
+  const cmp = (a: ComputedStock, b: ComputedStock) => {
+    // Always push invalid-data stocks to the end first.
+    if (a.intrinsic_invalid !== b.intrinsic_invalid) {
+      return a.intrinsic_invalid ? 1 : -1;
+    }
+    if (by === "Most undervalued") return b.upside - a.upside;
+    if (by === "Most overvalued") return a.upside - b.upside;
+    if (by === "Market cap")     return b.market_cap - a.market_cap;
+    return a.ticker.localeCompare(b.ticker);
+  };
+  r.sort(cmp);
   return r.map((s, i) => ({ ...s, rank: i + 1 }));
 }
 

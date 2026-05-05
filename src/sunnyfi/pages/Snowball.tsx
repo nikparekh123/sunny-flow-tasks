@@ -53,6 +53,7 @@ export default function Snowball() {
   const [filter, setFilter] = useState<string>("All");
   const [sort, setSort] = useState<SortKey>("Most undervalued");
   const [watchOnly, setWatchOnly] = useState(false);
+  const [hideOvervalued, setHideOvervalued] = useState(false);
   const [opened, setOpened] = useState<ComputedStock | null>(null);
   const [shown, setShown] = useState(PAGE_SIZE);
   const [refreshing, setRefreshing] = useState(false);
@@ -99,8 +100,12 @@ export default function Snowball() {
     let r = all;
     if (filter !== "All") r = r.filter((s) => s.sector === filter);
     if (watchOnly) r = r.filter((s) => s.watchlist);
+    if (hideOvervalued) {
+      // Keep only undervalued (intrinsic > price) and exclude bad data.
+      r = r.filter((s) => !s.intrinsic_invalid && s.upside > 0);
+    }
     return sortStocks(r, sort);
-  }, [all, filter, sort, watchOnly]);
+  }, [all, filter, sort, watchOnly, hideOvervalued]);
 
   // Reset paging when the visible list size changes meaningfully.
   const filteredLen = filtered.length;
@@ -213,6 +218,13 @@ export default function Snowball() {
                   title="Set the universe-wide growth/discount/terminal assumptions"
                 >
                   ⚙ Defaults
+                </button>
+                <button
+                  className={"sb-toggle " + (hideOvervalued ? "on" : "")}
+                  onClick={() => setHideOvervalued((v) => !v)}
+                  title="Show only stocks where intrinsic > price"
+                >
+                  ↑ Undervalued only
                 </button>
                 <button
                   className={"sb-toggle " + (watchOnly ? "on" : "")}
@@ -510,12 +522,43 @@ function Card({
         </div>
       </div>
 
-      <div className="upside">{fmtUps(s.upside)}</div>
+      <div className="upside">
+        {s.intrinsic_invalid ? "—" : fmtUps(s.upside)}
+      </div>
 
       <div className="intrinsic-row">
         <span className="l">Intrinsic</span>
-        <span className="v">{fmtPrice2(s.intrinsic_value)}</span>
+        <span className="v">
+          {s.intrinsic_invalid ? "—" : fmtPrice2(s.intrinsic_value)}
+        </span>
       </div>
+
+      {/* Margin of safety pill — Buffett's framing: "trading at X% off
+          intrinsic". Positive = undervalued (good). Hidden when we don't
+          have valid data. */}
+      {!s.intrinsic_invalid && (
+        <div
+          style={{
+            fontSize: 10,
+            fontFamily: "var(--navi-font-mono)",
+            opacity: 0.85,
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "4px 12px",
+            background: "rgba(0,0,0,.18)",
+            borderRadius: 100,
+          }}
+        >
+          <span style={{ letterSpacing: 1, textTransform: "uppercase" }}>
+            Margin of safety
+          </span>
+          <strong>
+            {s.margin_of_safety > 0
+              ? `${s.margin_of_safety.toFixed(0)}% off`
+              : `${Math.abs(s.margin_of_safety).toFixed(0)}% premium`}
+          </strong>
+        </div>
+      )}
 
       {has52 ? (
         <Range52w price={s.price!} low={s.low_52w!} high={s.high_52w!} />
