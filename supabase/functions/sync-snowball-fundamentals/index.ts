@@ -30,6 +30,8 @@ interface FinResp {
         diluted_average_shares?: { value?: number };
         basic_average_shares?: { value?: number };
         revenues?: { value?: number };
+        net_income_loss?: { value?: number };
+        net_income_loss_attributable_to_parent?: { value?: number };
       };
     };
   }[];
@@ -48,6 +50,20 @@ interface ExistingRow {
   stage1_growth_pct: number | null;
   discount_rate_pct: number | null;
   terminal_growth_pct: number | null;
+  sector: string | null;
+}
+
+/**
+ * For financial-sector tickers (banks, insurers), Polygon's "investing
+ * activities" line includes loans + securities portfolios, which makes
+ * Owner Earnings come out hugely negative when computed as CFO + investing.
+ * For these, use Net Income as the owner-earnings proxy instead — that's
+ * Buffett's recommended approach for financials.
+ */
+function isFinancialSector(sector: string | null | undefined): boolean {
+  if (!sector) return false;
+  const s = sector.toLowerCase();
+  return s.includes("financ") || s.includes("bank") || s.includes("insur");
 }
 
 // Two-stage DCF (mirrors the client-side `dcfIntrinsic`).
@@ -107,11 +123,11 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 1) Read all tickers and their existing assumptions.
+    // 1) Read all tickers and their existing assumptions + sector.
     const { data: rows, error: readErr } = await admin
       .from("snowball")
       .select(
-        "ticker, stage1_growth_pct, discount_rate_pct, terminal_growth_pct",
+        "ticker, stage1_growth_pct, discount_rate_pct, terminal_growth_pct, sector",
       );
     if (readErr) throw readErr;
     const tickers = (rows ?? []) as ExistingRow[];
@@ -139,6 +155,12 @@ Deno.serve(async (req) => {
           const inv =
             fin?.cash_flow_statement?.net_cash_flow_from_investing_activities
               ?.value ?? null;
+          const netIncome =
+            fin?.income_statement?.net_income_loss_attributable_to_parent
+              ?.value ??
+            fin?.income_statement?.net_income_loss?.value ??
+            null;
+
           // Reference's weighted_shares_outstanding is the current actual
           // share count. Polygon's TTM `diluted_average_shares` is unreliable
           // (sums quarters instead of averaging for some tickers, e.g. AAPL
@@ -149,10 +171,18 @@ Deno.serve(async (req) => {
             fin?.income_statement?.basic_average_shares?.value ??
             null;
 
-          // Owner earnings ≈ CFO + investing (investing is negative for net
-          // CapEx + acquisitions). Convert USD → millions to match CSV scale.
-          const oe =
-            cfo != null && inv != null ? (cfo + inv) / 1_000_000 : null;
+          // Owner earnings — branch by sector. Banks/insurers report huge
+          // "investing activities" (loans, securities portfolios) that
+          // aren't real CapEx, so CFO + investing comes out wildly negative
+          // for them. For financials, use Net Income directly — Buffett's
+          // recommended approach.
+          let oe: number | null;
+          if (isFinancialSector(row.sector)) {
+            oe = netIncome != null ? netIncome / 1_000_000 : null;
+          } else {
+            oe =
+              cfo != null && inv != null ? (cfo + inv) / 1_000_000 : null;
+          }
           // Shares are reported in raw count; CSV uses millions.
           const sharesMm =
             apiShares != null ? apiShares / 1_000_000 : null;
