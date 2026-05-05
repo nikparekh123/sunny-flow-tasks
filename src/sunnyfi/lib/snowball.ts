@@ -157,7 +157,7 @@ export interface SnowballDefaults {
 export const DEFAULT_ASSUMPTIONS: SnowballDefaults = {
   growth: 8,
   discount: 10,
-  terminal: 2.5,
+  terminal: 2,
 };
 
 export function loadDefaults(): SnowballDefaults {
@@ -305,12 +305,14 @@ export const fmtUps = (u: number | null | undefined): string => {
 };
 
 export const fmtPrice = (p: number | null | undefined): string => {
-  if (p == null || isNaN(p)) return "—";
+  // Treat 0 as "no price" too — a literal $0 on the card is misleading
+  // and usually means we don't have a quote for that ticker.
+  if (p == null || isNaN(p) || p === 0) return "—";
   return "$" + p.toFixed(p < 10 ? 2 : 0);
 };
 
 export const fmtPrice2 = (p: number | null | undefined): string => {
-  if (p == null || isNaN(p)) return "—";
+  if (p == null || isNaN(p) || p === 0) return "—";
   return "$" + p.toFixed(2);
 };
 
