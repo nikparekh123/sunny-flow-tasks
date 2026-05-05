@@ -107,6 +107,25 @@ export async function setHold(
 }
 
 /**
+ * Trigger the refresh-snowball edge function on demand. Returns the
+ * function's response so the UI can surface { updated, total, missing }.
+ */
+export interface RefreshResult {
+  updated: number;
+  total: number;
+  missing: string[];
+  missing_count: number;
+  timestamp: string;
+}
+export async function refreshSnowball(): Promise<RefreshResult> {
+  const { data, error } = await supabase.functions.invoke("refresh-snowball", {
+    body: {},
+  });
+  if (error) throw error;
+  return data as RefreshResult;
+}
+
+/**
  * Two-stage DCF intrinsic value per share.
  * - Years 1-10: project FCF growing at `stage1_growth_pct`
  * - Terminal: Gordon growth model with `terminal_growth_pct`

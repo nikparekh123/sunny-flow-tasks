@@ -13,6 +13,7 @@ import {
   setWatch,
   sortStocks,
   updateAssumptions,
+  refreshSnowball,
   dcfIntrinsic,
   fmtMcap,
   fmtPrice,
@@ -49,6 +50,23 @@ export default function Snowball() {
   const [watchOnly, setWatchOnly] = useState(false);
   const [opened, setOpened] = useState<ComputedStock | null>(null);
   const [shown, setShown] = useState(PAGE_SIZE);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const r = await refreshSnowball();
+      stocksQ.refetch();
+      const msg = r.missing_count > 0
+        ? `Updated ${r.updated}/${r.total} (${r.missing_count} skipped)`
+        : `Updated ${r.updated}/${r.total} prices`;
+      toast.success(msg);
+    } catch (e) {
+      toast.error(`Refresh failed: ${(e as Error).message}`);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     let r = all;
@@ -108,6 +126,14 @@ export default function Snowball() {
                 })}`
               : "no quote yet"}
           </span>
+          <button
+            className="np-btn ghost"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Pull live prices + 52-week ranges from Polygon now"
+          >
+            ↻ {refreshing ? "Refreshing…" : "Refresh prices"}
+          </button>
         </div>
       </header>
 
