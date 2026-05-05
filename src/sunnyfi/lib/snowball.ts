@@ -126,6 +126,74 @@ export async function refreshSnowball(): Promise<RefreshResult> {
 }
 
 /**
+ * Slow batch — pulls reference (name/sector/shares) + TTM financials
+ * (CFO, investing → owner earnings) for every ticker, recomputes intrinsic
+ * from the analyst's saved assumptions. Run weekly or manually after
+ * earnings season.
+ */
+export async function syncFundamentals(): Promise<RefreshResult> {
+  const { data, error } = await supabase.functions.invoke(
+    "sync-snowball-fundamentals",
+    { body: {} },
+  );
+  if (error) throw error;
+  return data as RefreshResult;
+}
+
+/**
+ * Apply universe-wide DCF defaults: sets growth/discount/terminal on every
+ * ticker and recomputes intrinsic + TBPs server-side. Returns the count of
+ * rows updated. The chosen values are also cached in localStorage so the
+ * defaults modal opens with the last-used numbers.
+ */
+export const SNOWBALL_DEFAULTS_KEY = "snowball.defaults.v1";
+
+export interface SnowballDefaults {
+  growth: number;
+  discount: number;
+  terminal: number;
+}
+
+export const DEFAULT_ASSUMPTIONS: SnowballDefaults = {
+  growth: 8,
+  discount: 10,
+  terminal: 2.5,
+};
+
+export function loadDefaults(): SnowballDefaults {
+  if (typeof window === "undefined") return DEFAULT_ASSUMPTIONS;
+  try {
+    const raw = localStorage.getItem(SNOWBALL_DEFAULTS_KEY);
+    if (!raw) return DEFAULT_ASSUMPTIONS;
+    const v = JSON.parse(raw) as Partial<SnowballDefaults>;
+    return {
+      growth:   typeof v.growth   === "number" ? v.growth   : DEFAULT_ASSUMPTIONS.growth,
+      discount: typeof v.discount === "number" ? v.discount : DEFAULT_ASSUMPTIONS.discount,
+      terminal: typeof v.terminal === "number" ? v.terminal : DEFAULT_ASSUMPTIONS.terminal,
+    };
+  } catch {
+    return DEFAULT_ASSUMPTIONS;
+  }
+}
+
+export function saveDefaults(d: SnowballDefaults): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SNOWBALL_DEFAULTS_KEY, JSON.stringify(d));
+}
+
+export async function applyDefaults(d: SnowballDefaults): Promise<number> {
+  const { data, error } = await (supabase.rpc as unknown as (
+    name: string,
+    args: { p_growth: number; p_discount: number; p_terminal: number },
+  ) => Promise<{ data: number | null; error: unknown }>)(
+    "snowball_apply_defaults",
+    { p_growth: d.growth, p_discount: d.discount, p_terminal: d.terminal },
+  );
+  if (error) throw error;
+  return data ?? 0;
+}
+
+/**
  * Two-stage DCF intrinsic value per share.
  * - Years 1-10: project FCF growing at `stage1_growth_pct`
  * - Terminal: Gordon growth model with `terminal_growth_pct`

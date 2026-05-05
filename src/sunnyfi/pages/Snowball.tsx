@@ -14,6 +14,11 @@ import {
   sortStocks,
   updateAssumptions,
   refreshSnowball,
+  syncFundamentals,
+  applyDefaults,
+  loadDefaults,
+  saveDefaults,
+  type SnowballDefaults,
   dcfIntrinsic,
   fmtMcap,
   fmtPrice,
@@ -51,6 +56,8 @@ export default function Snowball() {
   const [opened, setOpened] = useState<ComputedStock | null>(null);
   const [shown, setShown] = useState(PAGE_SIZE);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [showDefaults, setShowDefaults] = useState(false);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -65,6 +72,26 @@ export default function Snowball() {
       toast.error(`Refresh failed: ${(e as Error).message}`);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const handleSync = async () => {
+    if (!confirm(
+      "Pull fundamentals (CFO, investing, shares, name) for all 524 tickers from Polygon?\n\n" +
+      "Takes ~3-5 minutes. Recomputes intrinsic value from your saved assumptions × API fundamentals."
+    )) return;
+    setSyncing(true);
+    try {
+      const r = await syncFundamentals();
+      stocksQ.refetch();
+      const msg = r.missing_count > 0
+        ? `Synced ${r.updated}/${r.total} (${r.missing_count} skipped)`
+        : `Synced ${r.updated}/${r.total} fundamentals`;
+      toast.success(msg);
+    } catch (e) {
+      toast.error(`Sync failed: ${(e as Error).message}`);
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -129,10 +156,18 @@ export default function Snowball() {
           <button
             className="np-btn ghost"
             onClick={handleRefresh}
-            disabled={refreshing}
-            title="Pull live prices + 52-week ranges from Polygon now"
+            disabled={refreshing || syncing}
+            title="Pull live prices + 52-week ranges from Polygon (fast)"
           >
             ↻ {refreshing ? "Refreshing…" : "Refresh prices"}
+          </button>
+          <button
+            className="np-btn tinted"
+            onClick={handleSync}
+            disabled={refreshing || syncing}
+            title="Pull fundamentals (CFO, shares, names) — slow, run weekly"
+          >
+            ⟳ {syncing ? "Syncing…" : "Sync fundamentals"}
           </button>
         </div>
       </header>
@@ -172,6 +207,13 @@ export default function Snowball() {
                 </label>
               </div>
               <div className="sb-tb-group sb-tb-right">
+                <button
+                  className="sb-toggle"
+                  onClick={() => setShowDefaults(true)}
+                  title="Set the universe-wide growth/discount/terminal assumptions"
+                >
+                  ⚙ Defaults
+                </button>
                 <button
                   className={"sb-toggle " + (watchOnly ? "on" : "")}
                   onClick={() => setWatchOnly((v) => !v)}
@@ -284,6 +326,138 @@ export default function Snowball() {
           onToggleWatch={() => toggleWatch(opened.ticker, opened.watchlist)}
         />
       )}
+
+      {showDefaults && (
+        <DefaultsModal
+          onClose={() => setShowDefaults(false)}
+          onApplied={() => stocksQ.refetch()}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Defaults modal ───────────────────────────────────────────
+function DefaultsModal({
+  onClose,
+  onApplied,
+}: {
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const initial = loadDefaults();
+  const [d, setD] = useState<SnowballDefaults>(initial);
+  const [saving, setSaving] = useState(false);
+  const valid = d.discount > d.terminal;
+
+  const handleApply = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      const n = await applyDefaults(d);
+      saveDefaults(d);
+      toast.success(`Applied to ${n} tickers.`);
+      onApplied();
+      onClose();
+    } catch (e) {
+      toast.error(`Failed: ${(e as Error).message}`);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="sb-drawer-overlay" onClick={onClose}>
+      <div
+        className="sb-drawer"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 480 }}
+      >
+        <div className="sb-drawer-hero tier tier-3" style={{ marginBottom: 16 }}>
+          <button className="close" onClick={onClose}>
+            ✕
+          </button>
+          <div className="ticker">⚙ Defaults</div>
+          <div className="meta">
+            Universe-wide DCF assumptions. Applies to all 524 tickers and
+            recomputes every intrinsic value + target buy price.
+          </div>
+        </div>
+
+        <div className="sb-slider-block">
+          <Slider
+            label="Stage 1 growth"
+            value={d.growth}
+            min={-20}
+            max={50}
+            step={0.5}
+            unit="%"
+            onChange={(v) => setD({ ...d, growth: v })}
+          />
+          <Slider
+            label="Discount rate (WACC)"
+            value={d.discount}
+            min={4}
+            max={20}
+            step={0.25}
+            unit="%"
+            onChange={(v) => setD({ ...d, discount: v })}
+          />
+          <Slider
+            label="Terminal growth"
+            value={d.terminal}
+            min={0}
+            max={5}
+            step={0.25}
+            unit="%"
+            onChange={(v) => setD({ ...d, terminal: v })}
+          />
+          {!valid && (
+            <div
+              style={{
+                color: "var(--navi-negative)",
+                fontSize: 11,
+                marginTop: 8,
+                fontFamily: "var(--navi-font-mono)",
+              }}
+            >
+              Discount must exceed terminal growth.
+            </div>
+          )}
+        </div>
+
+        <p
+          style={{
+            fontSize: 11,
+            color: "var(--navi-fg3)",
+            marginTop: 16,
+            fontFamily: "var(--navi-font-mono)",
+            lineHeight: 1.5,
+          }}
+        >
+          ⚠ This overwrites any per-ticker customizations you've made via
+          the drawer sliders. Individual overrides can be set again
+          afterwards.
+        </p>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+          <button
+            className="sb-btn-tinted"
+            style={{ flex: 1 }}
+            onClick={onClose}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          <button
+            className="sb-btn-primary"
+            style={{ flex: 1 }}
+            onClick={handleApply}
+            disabled={!valid || saving}
+          >
+            {saving ? "Applying…" : "Apply to all"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
