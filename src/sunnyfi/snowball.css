@@ -208,14 +208,18 @@
   font-family: var(--navi-font-mono);
 }
 
-/* grid */
+/* grid — 5 across at desktop, gracefully degrades */
 .sb-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(5, 1fr);
   gap: 12px;
 }
+@media (max-width: 1240px) { .sb-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 980px)  { .sb-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 720px)  { .sb-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px)  { .sb-grid { grid-template-columns: 1fr; } }
 
-/* card */
+/* card — taller + slimmer for the 5-up grid */
 .sb-card {
   border-radius: 20px;
   padding: 16px 18px;
@@ -224,7 +228,7 @@
   transition: transform .25s cubic-bezier(.4,0,.2,1), box-shadow .25s;
   display: flex; flex-direction: column;
   gap: 10px;
-  min-height: 240px;
+  min-height: 300px;
   overflow: hidden;
   border: none;
   font: inherit; color: inherit;
@@ -270,8 +274,8 @@
 
 .sb-card .upside {
   font-family: var(--navi-font-sans);
-  font-size: 56px; font-weight: 800;
-  letter-spacing: -3px; line-height: 1;
+  font-size: 44px; font-weight: 800;
+  letter-spacing: -2px; line-height: 1;
 }
 
 .sb-card .intrinsic-row {

@@ -34,7 +34,7 @@ import "@/sunnyfi/research.css"; // np-top + np-btn + np-pill primitives
 import "@/sunnyfi/snowball.css";
 
 const DASHBOARD_URL = "https://www.sunnyfi.co/dashboard";
-const PAGE_SIZE = 60;
+const PAGE_SIZE = 50;
 
 export default function Snowball() {
   const qc = useQueryClient();
