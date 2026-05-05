@@ -651,16 +651,28 @@ function DetailDrawer({
 
         <h3>The story</h3>
         <div className="sb-story">
-          Trading at <strong>{fmtPrice2(s.price)}</strong> against an estimated
-          intrinsic value of <strong>{fmtPrice2(displayedIntrinsic)}</strong>.{" "}
-          {(displayedUpside ?? 0) > 15
-            ? "Market is mispricing this lower than the fundamentals justify — meaningful margin of safety."
-            : (displayedUpside ?? 0) > 0
-              ? "Fundamentals support modest upside from current levels."
-              : (displayedUpside ?? 0) > -15
-                ? "Close to fair value; little margin in either direction."
-                : "Market may be pricing in growth that the fundamentals do not yet support."}
-          {s.distance_to_buy && !dirty ? ` Status: ${s.distance_to_buy}.` : ""}
+          {s.price && s.price > 0 ? (
+            <>
+              Trading at <strong>{fmtPrice2(s.price)}</strong> against an
+              estimated intrinsic value of{" "}
+              <strong>{fmtPrice2(displayedIntrinsic)}</strong>.{" "}
+              {(displayedUpside ?? 0) > 15
+                ? "Market is mispricing this lower than the fundamentals justify — meaningful margin of safety."
+                : (displayedUpside ?? 0) > 0
+                  ? "Fundamentals support modest upside from current levels."
+                  : (displayedUpside ?? 0) > -15
+                    ? "Close to fair value; little margin in either direction."
+                    : "Market may be pricing in growth that the fundamentals do not yet support."}
+              {s.distance_to_buy && !dirty ? ` Status: ${s.distance_to_buy}.` : ""}
+            </>
+          ) : (
+            <>
+              Estimated intrinsic value{" "}
+              <strong>{fmtPrice2(displayedIntrinsic)}</strong> per share. No
+              live quote yet — click <strong>↻ Refresh prices</strong> to pull
+              the latest from Polygon.
+            </>
+          )}
         </div>
 
         <h3>Target buy prices {dirty && <span style={{ color: "var(--navi-neon)", fontWeight: 500, letterSpacing: 0 }}>(live)</span>}</h3>
