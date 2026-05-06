@@ -80,12 +80,28 @@ export const SORTS: SortKey[] = [
   "A → Z",
 ];
 
+// ─── Tier from margin of safety ───────────────────────────────
+/**
+ * Map margin-of-safety (% discount from intrinsic) to a tier 1-6.
+ * Tier 1 = deep value (neon gradient), Tier 6 = severely overvalued (black).
+ * Buckets are symmetric around 0% so "fair value" lands in tier 4.
+ */
+function tierFromMoS(mos: number, invalid: boolean): number {
+  if (invalid) return 6; // bad data → render as overvalued / black
+  if (mos >= 30) return 1;   // ≥ 30% off intrinsic — strong buy
+  if (mos >= 15) return 2;   // 15-30% off — undervalued
+  if (mos >= 5)  return 3;   // 5-15% off — slight upside
+  if (mos >= -5) return 4;   // within ±5% — fair value
+  if (mos >= -20) return 5;  // 5-20% premium — watch
+  return 6;                  // > 20% premium — overvalued
+}
+
 // ─── Compute derived fields ───────────────────────────────────
 function compute(s: Stock): ComputedStock {
   const price = s.price ?? 0;
   // Prefer the weighted three-lens intrinsic; fall back to single-DCF.
   const intrinsic = s.intrinsic_weighted ?? s.intrinsic_value ?? 0;
-  const intrinsic_invalid = intrinsic <= 0;
+  const intrinsic_invalid = intrinsic <= 0 || price <= 0;
   const upside = price > 0 && !intrinsic_invalid
     ? ((intrinsic - price) / price) * 100
     : 0;
@@ -94,7 +110,10 @@ function compute(s: Stock): ComputedStock {
     : 0;
   const shares = s.shares_outstanding ?? 0;
   const market_cap = (price * shares) / 1000;
-  return { ...s, upside, margin_of_safety, market_cap, intrinsic_invalid };
+  // Derive tier live from MoS so the gradient always matches the upside,
+  // overriding the (often stale) CSV-derived `tier` column.
+  const tier = tierFromMoS(margin_of_safety, intrinsic_invalid);
+  return { ...s, tier, upside, margin_of_safety, market_cap, intrinsic_invalid };
 }
 
 // ─── Queries ──────────────────────────────────────────────────
