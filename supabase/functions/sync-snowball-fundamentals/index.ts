@@ -100,15 +100,25 @@ function dcfIntrinsic(
   return pv / shares;
 }
 
-async function fetchFinancials(ticker: string, apiKey: string) {
-  const url = new URL("https://api.polygon.io/vX/reference/financials");
-  url.searchParams.set("ticker", ticker);
-  url.searchParams.set("timeframe", "ttm");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("apiKey", apiKey);
-  const r = await fetch(url.toString());
-  if (!r.ok) return null;
-  return (await r.json()) as FinResp;
+async function fetchFinancials(
+  ticker: string,
+  apiKey: string,
+): Promise<FinResp | null> {
+  // Try TTM first (rolling 4 quarters). Some tickers — newer listings,
+  // companies between filings, ones Polygon hasn't aggregated yet — have
+  // no TTM record. For those fall back to the most recent annual filing.
+  for (const timeframe of ["ttm", "annual"] as const) {
+    const url = new URL("https://api.polygon.io/vX/reference/financials");
+    url.searchParams.set("ticker", ticker);
+    url.searchParams.set("timeframe", timeframe);
+    url.searchParams.set("limit", "1");
+    url.searchParams.set("apiKey", apiKey);
+    const r = await fetch(url.toString());
+    if (!r.ok) continue;
+    const data = (await r.json()) as FinResp;
+    if (data?.results && data.results.length > 0) return data;
+  }
+  return null;
 }
 
 async function fetchReference(ticker: string, apiKey: string) {
