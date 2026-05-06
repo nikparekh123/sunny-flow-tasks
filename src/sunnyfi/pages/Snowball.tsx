@@ -18,7 +18,9 @@ import {
   applyDefaults,
   loadDefaults,
   saveDefaults,
+  addStock,
   type SnowballDefaults,
+  type NewStockInput,
   dcfIntrinsic,
   fmtMcap,
   fmtPrice,
@@ -60,6 +62,7 @@ export default function Snowball() {
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [showDefaults, setShowDefaults] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -181,6 +184,9 @@ export default function Snowball() {
             title="Pull fundamentals (CFO, shares, names) — slow, run weekly"
           >
             ⟳ {syncing ? "Syncing…" : "Sync fundamentals"}
+          </button>
+          <button className="np-btn neon" onClick={() => setShowAdd(true)}>
+            + Add stock
           </button>
         </div>
       </header>
@@ -360,6 +366,213 @@ export default function Snowball() {
           onApplied={() => stocksQ.refetch()}
         />
       )}
+
+      {showAdd && (
+        <AddStockModal
+          onClose={() => setShowAdd(false)}
+          onAdded={() => stocksQ.refetch()}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Add stock modal ──────────────────────────────────────────
+function AddStockModal({
+  onClose,
+  onAdded,
+}: {
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const initial = loadDefaults();
+  const [ticker, setTicker] = useState("");
+  const [growth, setGrowth] = useState(initial.growth);
+  const [discount, setDiscount] = useState(initial.discount);
+  const [terminal, setTerminal] = useState(initial.terminal);
+  const [targetPe, setTargetPe] = useState(18);
+  const [targetEvEbitda, setTargetEvEbitda] = useState(12);
+  const [pin, setPin] = useState(false);
+  const [hold, setHold] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const valid = ticker.trim().length > 0 && discount > terminal;
+
+  const handleSave = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      const input: NewStockInput = {
+        ticker: ticker.trim().toUpperCase(),
+        stage1_growth_pct: growth,
+        discount_rate_pct: discount,
+        terminal_growth_pct: terminal,
+        target_pe: targetPe,
+        target_ev_ebitda: targetEvEbitda,
+        watchlist: pin,
+        hold_position: hold,
+      };
+      await addStock(input);
+      toast.success(
+        `${input.ticker} added. Click "⟳ Sync fundamentals" to pull data.`,
+      );
+      onAdded();
+      onClose();
+    } catch (e) {
+      toast.error((e as Error).message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="sb-drawer-overlay" onClick={onClose}>
+      <div
+        className="sb-drawer"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 480 }}
+      >
+        <div className="sb-drawer-hero tier tier-3" style={{ marginBottom: 16 }}>
+          <button className="close" onClick={onClose}>
+            ✕
+          </button>
+          <div className="ticker">+ Add stock</div>
+          <div className="meta">
+            Adds the ticker to the universe with your assumptions. Name,
+            sector, price, EPS, EBITDA, and shares are filled in by the
+            next "Sync fundamentals" run.
+          </div>
+        </div>
+
+        <h3>Ticker</h3>
+        <input
+          type="text"
+          className="sb-search"
+          style={{ width: "100%" }}
+          placeholder="e.g. AAPL"
+          autoFocus
+          value={ticker}
+          onChange={(e) => setTicker(e.target.value.toUpperCase())}
+        />
+
+        <h3>Assumptions</h3>
+        <div className="sb-slider-block">
+          <Slider
+            label="Stage 1 growth"
+            value={growth}
+            min={-20}
+            max={50}
+            step={0.5}
+            unit="%"
+            onChange={setGrowth}
+          />
+          <Slider
+            label="Discount rate (WACC)"
+            value={discount}
+            min={4}
+            max={20}
+            step={0.25}
+            unit="%"
+            onChange={setDiscount}
+          />
+          <Slider
+            label="Terminal growth"
+            value={terminal}
+            min={0}
+            max={5}
+            step={0.25}
+            unit="%"
+            onChange={setTerminal}
+          />
+          <Slider
+            label="Target P/E"
+            value={targetPe}
+            min={5}
+            max={50}
+            step={0.5}
+            unit="x"
+            onChange={setTargetPe}
+          />
+          <Slider
+            label="Target EV/EBITDA"
+            value={targetEvEbitda}
+            min={3}
+            max={30}
+            step={0.5}
+            unit="x"
+            onChange={setTargetEvEbitda}
+          />
+          {discount <= terminal && (
+            <div
+              style={{
+                color: "var(--navi-negative)",
+                fontSize: 11,
+                marginTop: 8,
+                fontFamily: "var(--navi-font-mono)",
+              }}
+            >
+              Discount must exceed terminal growth.
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 18, display: "flex", gap: 24 }}>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              color: "var(--navi-fg2)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={pin}
+              onChange={(e) => setPin(e.target.checked)}
+              style={{ accentColor: "var(--navi-neon)" }}
+            />
+            ★ Add to watchlist
+          </label>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              color: "var(--navi-fg2)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={hold}
+              onChange={(e) => setHold(e.target.checked)}
+              style={{ accentColor: "var(--navi-neon)" }}
+            />
+            I hold this
+          </label>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, marginTop: 24 }}>
+          <button
+            className="sb-btn-tinted"
+            style={{ flex: 1 }}
+            onClick={onClose}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          <button
+            className="sb-btn-primary"
+            style={{ flex: 1 }}
+            onClick={handleSave}
+            disabled={!valid || saving}
+          >
+            {saving ? "Adding…" : "Add stock"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

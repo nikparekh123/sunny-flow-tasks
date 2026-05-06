@@ -223,6 +223,51 @@ export function saveDefaults(d: SnowballDefaults): void {
   localStorage.setItem(SNOWBALL_DEFAULTS_KEY, JSON.stringify(d));
 }
 
+/**
+ * Insert a new ticker into the universe with the given assumptions.
+ * Everything else (name, price, sector, fundamentals) gets backfilled by
+ * the next sync-snowball-fundamentals + refresh-snowball runs.
+ */
+export interface NewStockInput {
+  ticker: string;
+  stage1_growth_pct?: number;
+  discount_rate_pct?: number;
+  terminal_growth_pct?: number;
+  target_pe?: number;
+  target_ev_ebitda?: number;
+  hold_position?: boolean;
+  watchlist?: boolean;
+}
+
+export async function addStock(input: NewStockInput): Promise<void> {
+  const ticker = input.ticker.trim().toUpperCase();
+  if (!ticker) throw new Error("Ticker is required.");
+  if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(ticker)) {
+    throw new Error(`Invalid ticker format: "${ticker}"`);
+  }
+  const defaults = loadDefaults();
+  const row = {
+    ticker,
+    name: ticker, // placeholder until sync fills in the real name
+    stage1_growth_pct: input.stage1_growth_pct ?? defaults.growth,
+    discount_rate_pct: input.discount_rate_pct ?? defaults.discount,
+    terminal_growth_pct: input.terminal_growth_pct ?? defaults.terminal,
+    target_pe: input.target_pe ?? 18,
+    target_ev_ebitda: input.target_ev_ebitda ?? 12,
+    hold_position: input.hold_position ?? false,
+    watchlist: input.watchlist ?? false,
+  };
+  const { error } = await supabase
+    .from("snowball" as never)
+    .insert(row as never);
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error(`${ticker} already exists in the universe.`);
+    }
+    throw error;
+  }
+}
+
 export async function applyDefaults(d: SnowballDefaults): Promise<number> {
   const { data, error } = await (supabase.rpc as unknown as (
     name: string,
