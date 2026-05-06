@@ -54,6 +54,7 @@ export default function Snowball() {
   const [sort, setSort] = useState<SortKey>("Most undervalued");
   const [watchOnly, setWatchOnly] = useState(false);
   const [hideOvervalued, setHideOvervalued] = useState(false);
+  const [search, setSearch] = useState("");
   const [opened, setOpened] = useState<ComputedStock | null>(null);
   const [shown, setShown] = useState(PAGE_SIZE);
   const [refreshing, setRefreshing] = useState(false);
@@ -101,11 +102,18 @@ export default function Snowball() {
     if (filter !== "All") r = r.filter((s) => s.sector === filter);
     if (watchOnly) r = r.filter((s) => s.watchlist);
     if (hideOvervalued) {
-      // Keep only undervalued (intrinsic > price) and exclude bad data.
       r = r.filter((s) => !s.intrinsic_invalid && s.upside > 0);
     }
+    const q = search.trim().toLowerCase();
+    if (q) {
+      r = r.filter(
+        (s) =>
+          s.ticker.toLowerCase().includes(q) ||
+          s.name.toLowerCase().includes(q),
+      );
+    }
     return sortStocks(r, sort);
-  }, [all, filter, sort, watchOnly, hideOvervalued]);
+  }, [all, filter, sort, watchOnly, hideOvervalued, search]);
 
   // Reset paging when the visible list size changes meaningfully.
   const filteredLen = filtered.length;
@@ -181,6 +189,13 @@ export default function Snowball() {
         <div className="sb-controls">
           <div className="sb-toolbar">
             <div className="sb-tb-row">
+              <input
+                type="text"
+                className="sb-search"
+                placeholder="⌕ Search ticker or name…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
               <div className="sb-tb-group">
                 <label className="sb-select">
                   <span className="sb-select-lbl">Sector</span>
@@ -718,7 +733,34 @@ function DetailDrawer({
           )}
         </div>
 
-        <h3>Target buy prices {dirty && <span style={{ color: "var(--navi-neon)", fontWeight: 500, letterSpacing: 0 }}>(live)</span>}</h3>
+        <h3>Three lenses</h3>
+        <div className="sb-tbp-grid">
+          <div className="sb-lens">
+            <div className="lbl">DCF</div>
+            <div className="val">
+              {fmtPrice2(dirty ? liveIntrinsic : s.intrinsic_dcf)}
+            </div>
+            <div className="sub">
+              weight {Math.round((s.weight_dcf ?? 0.4) * 100)}%
+            </div>
+          </div>
+          <div className="sb-lens">
+            <div className="lbl">P/E</div>
+            <div className="val">{fmtPrice2(s.intrinsic_pe)}</div>
+            <div className="sub">
+              eps {fmtPrice2(s.eps_ttm)} × {(s.target_pe ?? 18).toFixed(0)}x
+            </div>
+          </div>
+          <div className="sb-lens">
+            <div className="lbl">EV/EBITDA</div>
+            <div className="val">{fmtPrice2(s.intrinsic_ev_ebitda)}</div>
+            <div className="sub">
+              ebitda × {(s.target_ev_ebitda ?? 12).toFixed(0)}x
+            </div>
+          </div>
+        </div>
+
+        <h3>Target buy prices</h3>
         <div className="sb-tbp-grid">
           <div className="sb-lens">
             <div className="lbl">Aggressive 15%</div>
@@ -729,7 +771,6 @@ function DetailDrawer({
                   : s.tbp_aggressive_15,
               )}
             </div>
-            <div className="sub">small margin</div>
           </div>
           <div className="sb-lens">
             <div className="lbl">Conservative 30%</div>
@@ -740,7 +781,6 @@ function DetailDrawer({
                   : s.tbp_conservative_30,
               )}
             </div>
-            <div className="sub">standard</div>
           </div>
           <div className="sb-lens">
             <div className="lbl">Deep value 50%</div>
@@ -751,7 +791,6 @@ function DetailDrawer({
                   : s.tbp_deep_value_50,
               )}
             </div>
-            <div className="sub">strict</div>
           </div>
         </div>
 

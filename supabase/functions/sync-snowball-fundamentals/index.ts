@@ -25,6 +25,8 @@ interface FinResp {
       cash_flow_statement?: {
         net_cash_flow_from_operating_activities?: { value?: number };
         net_cash_flow_from_investing_activities?: { value?: number };
+        // For EBITDA: D&A is typically buried here (not always present).
+        depreciation_and_amortization?: { value?: number };
       };
       income_statement?: {
         diluted_average_shares?: { value?: number };
@@ -32,6 +34,17 @@ interface FinResp {
         revenues?: { value?: number };
         net_income_loss?: { value?: number };
         net_income_loss_attributable_to_parent?: { value?: number };
+        diluted_earnings_per_share?: { value?: number };
+        basic_earnings_per_share?: { value?: number };
+        operating_income_loss?: { value?: number };
+        // Some filings expose D&A here too.
+        depreciation_and_amortization?: { value?: number };
+      };
+      balance_sheet?: {
+        long_term_debt?: { value?: number };
+        // Cash + equivalents not always broken out — use current assets'
+        // first slot or fall back.
+        cash_and_cash_equivalents_at_carrying_value?: { value?: number };
       };
     };
   }[];
@@ -183,6 +196,32 @@ Deno.serve(async (req) => {
             oe =
               cfo != null && inv != null ? (cfo + inv) / 1_000_000 : null;
           }
+
+          // ── Additional inputs for P/E and EV/EBITDA lenses ────────────
+          const eps =
+            fin?.income_statement?.diluted_earnings_per_share?.value ??
+            fin?.income_statement?.basic_earnings_per_share?.value ??
+            null;
+
+          // EBITDA ≈ Operating income + D&A. Polygon doesn't always report
+          // D&A; if missing, fall back to operating income (a downward bias
+          // — undercounts EBITDA, conservative).
+          const opIncome =
+            fin?.income_statement?.operating_income_loss?.value ?? null;
+          const da =
+            fin?.income_statement?.depreciation_and_amortization?.value ??
+            fin?.cash_flow_statement?.depreciation_and_amortization?.value ??
+            0;
+          const ebitda =
+            opIncome != null ? (opIncome + (da ?? 0)) / 1_000_000 : null;
+
+          // Net debt = total debt − cash; both for the EV → equity bridge.
+          const debtRaw = fin?.balance_sheet?.long_term_debt?.value ?? null;
+          const cashRaw =
+            fin?.balance_sheet?.cash_and_cash_equivalents_at_carrying_value
+              ?.value ?? null;
+          const debt = debtRaw != null ? debtRaw / 1_000_000 : null;
+          const cash = cashRaw != null ? cashRaw / 1_000_000 : null;
           // Shares are reported in raw count; CSV uses millions.
           const sharesMm =
             apiShares != null ? apiShares / 1_000_000 : null;
@@ -192,6 +231,10 @@ Deno.serve(async (req) => {
           if (ref?.sic_description) patch.industry = ref.sic_description;
           if (oe != null) patch.total_owner_earnings = oe;
           if (sharesMm != null) patch.shares_outstanding = sharesMm;
+          if (eps != null) patch.eps_ttm = eps;
+          if (ebitda != null) patch.ebitda_ttm = ebitda;
+          if (debt != null) patch.total_debt = debt;
+          if (cash != null) patch.cash_and_equivalents = cash;
 
           // If we have all the inputs, recompute intrinsic + TBPs from the
           // analyst's existing assumptions.

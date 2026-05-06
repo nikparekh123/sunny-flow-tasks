@@ -31,6 +31,20 @@ export interface Stock {
   high_52w: number | null;
   change_pct: number | null;
   last_quote_at: string | null;
+  // Three-lens valuation inputs + outputs
+  eps_ttm: number | null;
+  ebitda_ttm: number | null;
+  total_debt: number | null;
+  cash_and_equivalents: number | null;
+  target_pe: number | null;
+  target_ev_ebitda: number | null;
+  intrinsic_dcf: number | null;
+  intrinsic_pe: number | null;
+  intrinsic_ev_ebitda: number | null;
+  intrinsic_weighted: number | null;
+  weight_dcf: number | null;
+  weight_pe: number | null;
+  weight_ev_ebitda: number | null;
 }
 
 /** Computed view of a Stock with the derived fields used by the UI. */
@@ -69,18 +83,16 @@ export const SORTS: SortKey[] = [
 // ─── Compute derived fields ───────────────────────────────────
 function compute(s: Stock): ComputedStock {
   const price = s.price ?? 0;
-  const intrinsic = s.intrinsic_value ?? 0;
-  const intrinsic_invalid = intrinsic <= 0; // null or non-positive = bad data
+  // Prefer the weighted three-lens intrinsic; fall back to single-DCF.
+  const intrinsic = s.intrinsic_weighted ?? s.intrinsic_value ?? 0;
+  const intrinsic_invalid = intrinsic <= 0;
   const upside = price > 0 && !intrinsic_invalid
     ? ((intrinsic - price) / price) * 100
     : 0;
-  // Margin of safety: % discount from intrinsic. Positive = trading
-  // below intrinsic (good for value investor). Negative = premium.
   const margin_of_safety = !intrinsic_invalid
     ? ((intrinsic - price) / intrinsic) * 100
     : 0;
   const shares = s.shares_outstanding ?? 0;
-  // shares are in millions in the CSV → market cap in $B = price × shares / 1000
   const market_cap = (price * shares) / 1000;
   return { ...s, upside, margin_of_safety, market_cap, intrinsic_invalid };
 }
@@ -325,7 +337,7 @@ export function sortStocks(
 // ─── Formatters ───────────────────────────────────────────────
 export const fmtUps = (u: number | null | undefined): string => {
   if (u == null || isNaN(u)) return "—";
-  return (u >= 0 ? "+" : "") + u.toFixed(1) + "%";
+  return (u >= 0 ? "+" : "") + Math.round(u) + "%";
 };
 
 export const fmtPrice = (p: number | null | undefined): string => {

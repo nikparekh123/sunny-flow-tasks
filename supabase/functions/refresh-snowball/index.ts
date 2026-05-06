@@ -61,49 +61,30 @@ async function fetchSnapshotBatch(
   return out;
 }
 
-interface AggsResponse {
-  results?: { h?: number; l?: number; c?: number }[];
-  status?: string;
-}
-
-async function fetch52w(
-  ticker: string,
-  apiKey: string,
-): Promise<{ low: number | null; high: number | null }> {
-  const to = new Date();
-  const from = new Date(to);
-  from.setFullYear(from.getFullYear() - 1);
-  const fmt = (d: Date) => d.toISOString().slice(0, 10);
-
-  const url = new URL(
-    `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(
-      ticker,
-    )}/range/1/day/${fmt(from)}/${fmt(to)}`,
-  );
-  url.searchParams.set("adjusted", "true");
-  url.searchParams.set("sort", "asc");
-  url.searchParams.set("limit", "300");
-  url.searchParams.set("apiKey", apiKey);
-
-  const resp = await fetch(url.toString());
-  if (!resp.ok) return { low: null, high: null };
-  const data = (await resp.json()) as AggsResponse;
-  const bars = data.results ?? [];
-  if (bars.length === 0) return { low: null, high: null };
-  const lows = bars.map((b) => b.l ?? Infinity);
-  const highs = bars.map((b) => b.h ?? -Infinity);
-  return { low: Math.min(...lows), high: Math.max(...highs) };
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Diagnostic envelope — capture any error and report it as JSON instead
+  // of letting the Edge Runtime swallow it into a useless 500.
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const polygonKey = Deno.env.get("POLYGON_API_KEY");
+
+    if (!supabaseUrl) {
+      return new Response(
+        JSON.stringify({ error: "SUPABASE_URL not set" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    if (!serviceRoleKey) {
+      return new Response(
+        JSON.stringify({ error: "SUPABASE_SERVICE_ROLE_KEY not set" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     if (!polygonKey) {
       return new Response(
@@ -133,7 +114,10 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 2) Snapshot in batches of 200.
+    // 2) Snapshot in batches of 200. This is the only API call we do —
+    //    52-week aggregates (1 call per ticker) blow past the Edge
+    //    Function CPU/wall-clock budget. They live in a separate function
+    //    `refresh-snowball-52w` (run weekly) if needed.
     const batchSize = 200;
     const snapshots = new Map<string, SnapshotTicker>();
     for (let i = 0; i < tickers.length; i += batchSize) {
@@ -142,53 +126,39 @@ Deno.serve(async (req) => {
       for (const [k, v] of part) snapshots.set(k, v);
     }
 
-    // 3) For each ticker, fetch 52w from aggregates. Keep concurrency
-    //    modest (8 at a time) so we stay polite even on a paid plan.
-    const concurrency = 8;
-    const queue = [...tickers];
-    const ranges = new Map<
-      string,
-      { low: number | null; high: number | null }
-    >();
-
-    async function worker() {
-      while (queue.length > 0) {
-        const t = queue.shift()!;
-        try {
-          ranges.set(t, await fetch52w(t, polygonKey!));
-        } catch {
-          ranges.set(t, { low: null, high: null });
-        }
-      }
-    }
-    await Promise.all(Array.from({ length: concurrency }, worker));
-
-    // 4) Write back.
+    // 3) Write back in a single bulk upsert via parallel updates (chunked).
     const now = new Date().toISOString();
     let updated = 0;
     const missing: string[] = [];
 
+    // Build all the patches first, then run them in parallel chunks.
+    const writes: { ticker: string; patch: Record<string, unknown> }[] = [];
     for (const t of tickers) {
       const snap = snapshots.get(t);
-      const range = ranges.get(t) ?? { low: null, high: null };
       const last =
         snap?.lastTrade?.p ?? snap?.day?.c ?? snap?.prevDay?.c ?? null;
-      if (last == null && range.low == null && range.high == null) {
+      if (last == null) {
         missing.push(t);
         continue;
       }
-      const patch: Record<string, unknown> = { last_quote_at: now };
-      if (last != null) patch.price = last;
-      if (range.low != null) patch.low_52w = range.low;
-      if (range.high != null) patch.high_52w = range.high;
+      const patch: Record<string, unknown> = { last_quote_at: now, price: last };
       if (snap?.todaysChangePerc != null) patch.change_pct = snap.todaysChangePerc;
+      writes.push({ ticker: t, patch });
+    }
 
-      const { error: upErr } = await admin
-        .from("snowball")
-        .update(patch)
-        .eq("ticker", t);
-      if (upErr) missing.push(`${t} (${upErr.message})`);
-      else updated++;
+    // Run updates in parallel chunks of 25 to keep CPU bounded.
+    const chunk = 25;
+    for (let i = 0; i < writes.length; i += chunk) {
+      const slice = writes.slice(i, i + chunk);
+      const results = await Promise.all(
+        slice.map((w) =>
+          admin.from("snowball").update(w.patch).eq("ticker", w.ticker),
+        ),
+      );
+      results.forEach((r, idx) => {
+        if (r.error) missing.push(`${slice[idx].ticker} (${r.error.message})`);
+        else updated++;
+      });
     }
 
     return new Response(
@@ -202,8 +172,17 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
+    // Log everything we can see — the Edge Runtime's default 500 page
+    // truncates messages, so we serialize the whole error here.
+    console.error("refresh-snowball error", err);
+    const e = err as Error & { cause?: unknown };
     return new Response(
-      JSON.stringify({ error: (err as Error).message || "Server error" }),
+      JSON.stringify({
+        error: e?.message || String(err) || "Server error",
+        name: e?.name,
+        stack: e?.stack,
+        cause: e?.cause ? String(e.cause) : undefined,
+      }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

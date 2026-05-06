@@ -51,6 +51,21 @@
   border-bottom: 1px solid rgba(30,90,80,.25);
   padding: 12px 16px;
 }
+.sb-search {
+  background: var(--navi-page);
+  border: 1px solid var(--navi-border-bright);
+  border-radius: 8px;
+  height: 34px;
+  padding: 0 14px;
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  width: 240px;
+  outline: none;
+  transition: border-color .15s;
+}
+.sb-search:focus { border-color: var(--navi-neon); }
+.sb-search::placeholder { color: var(--navi-fg4); }
 .sb-tb-row {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
