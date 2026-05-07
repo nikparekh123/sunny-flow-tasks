@@ -15,6 +15,7 @@ import {
   updateAssumptions,
   refreshSnowball,
   syncFundamentals,
+  recomputeAll,
   loadDefaults,
   addStock,
   applySectorDefaults,
@@ -89,9 +90,14 @@ export default function Snowball() {
         { id: toastId },
       );
       const r2 = await syncFundamentals();
+      toast.loading(
+        `Fundamentals: ${r2.updated}/${r2.total}. Recomputing lenses…`,
+        { id: toastId },
+      );
+      await recomputeAll();
       stocksQ.refetch();
       toast.success(
-        `Synced ${r2.updated}/${r2.total} stocks. Sector + 5-yr CAGR applied. Click ⛁ Sector defaults next to recompute lenses.`,
+        `Synced ${r2.updated}/${r2.total} stocks. Lenses updated. Open any drawer to see the new values.`,
         { id: toastId },
       );
     } catch (e) {
