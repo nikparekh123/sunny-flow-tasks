@@ -363,6 +363,10 @@ Deno.serve(async (req) => {
           if (sharesMm != null) patch.shares_outstanding = sharesMm;
           if (eps != null) patch.eps_ttm = eps;
           if (ebitda != null) patch.ebitda_ttm = ebitda;
+          // Revenue (for the EV/Revenue lens — works on unprofitable
+          // growth names where every other lens is negative).
+          const revRaw = fin?.income_statement?.revenues?.value ?? null;
+          if (revRaw != null) patch.revenue_ttm = revRaw / 1_000_000;
           if (debt != null) patch.total_debt = debt;
           if (cash != null) patch.cash_and_equivalents = cash;
 

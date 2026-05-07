@@ -42,14 +42,19 @@ export interface Stock {
   intrinsic_dcf: number | null;
   intrinsic_pe: number | null;
   intrinsic_ev_ebitda: number | null;
+  intrinsic_ev_revenue: number | null;
   intrinsic_epv: number | null;
   intrinsic_earnings_yield: number | null;
   intrinsic_weighted: number | null;
   weight_dcf: number | null;
   weight_pe: number | null;
   weight_ev_ebitda: number | null;
+  weight_ev_revenue: number | null;
   weight_epv: number | null;
   weight_earnings_yield: number | null;
+  // EV/Revenue lens inputs
+  revenue_ttm: number | null;
+  target_ev_revenue: number | null;
   // Quality
   equity_book: number | null;
   net_income_ttm: number | null;
@@ -318,6 +323,7 @@ export interface SectorDefault {
   sector: string;
   target_pe: number;
   target_ev_ebitda: number;
+  default_ev_revenue: number;            // EV/Revenue multiple
   default_growth_pct: number;            // Stage 1
   default_stage2_growth_pct: number;     // Stage 2
   default_discount_rate_pct: number;     // WACC
@@ -373,6 +379,7 @@ export const applySectorMultiples = applySectorDefaults;
 export interface MultiplePatch {
   target_pe?: number;
   target_ev_ebitda?: number;
+  target_ev_revenue?: number;
 }
 
 export async function updateMultiples(

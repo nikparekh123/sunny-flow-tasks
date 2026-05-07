@@ -522,6 +522,17 @@ function SectorMultiplesModal({
                     updateRow(r.sector, { target_ev_ebitda: v })
                   }
                 />
+                <Slider
+                  label="Target EV/Revenue"
+                  value={r.default_ev_revenue}
+                  min={0.5}
+                  max={20}
+                  step={0.25}
+                  unit="x"
+                  onChange={(v) =>
+                    updateRow(r.sector, { default_ev_revenue: v })
+                  }
+                />
               </div>
             ))}
           </div>
@@ -957,6 +968,7 @@ function DetailDrawer({
   const [terminal, setTerminal] = useState<number>(s.terminal_growth_pct ?? 2.5);
   const [tpe, setTpe] = useState<number>(s.target_pe ?? 18);
   const [tev, setTev] = useState<number>(s.target_ev_ebitda ?? 12);
+  const [tevr, setTevr] = useState<number>(s.target_ev_revenue ?? 3);
   const [saving, setSaving] = useState(false);
 
   // Reset when a different stock is opened.
@@ -967,6 +979,7 @@ function DetailDrawer({
     setTerminal(s.terminal_growth_pct ?? 2.5);
     setTpe(s.target_pe ?? 18);
     setTev(s.target_ev_ebitda ?? 12);
+    setTevr(s.target_ev_revenue ?? 3);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.ticker]);
 
@@ -995,7 +1008,8 @@ function DetailDrawer({
     discount !== (s.discount_rate_pct ?? 10) ||
     terminal !== (s.terminal_growth_pct ?? 2.5) ||
     tpe !== (s.target_pe ?? 18) ||
-    tev !== (s.target_ev_ebitda ?? 12);
+    tev !== (s.target_ev_ebitda ?? 12) ||
+    tevr !== (s.target_ev_revenue ?? 3);
 
   const valid = liveIntrinsic != null;
 
@@ -1004,10 +1018,15 @@ function DetailDrawer({
     setSaving(true);
     try {
       // 1) Save the multiple overrides separately (DCF doesn't depend on them).
-      if (tpe !== (s.target_pe ?? 18) || tev !== (s.target_ev_ebitda ?? 12)) {
+      if (
+        tpe !== (s.target_pe ?? 18) ||
+        tev !== (s.target_ev_ebitda ?? 12) ||
+        tevr !== (s.target_ev_revenue ?? 3)
+      ) {
         await updateMultiples(s.ticker, {
           target_pe: tpe,
           target_ev_ebitda: tev,
+          target_ev_revenue: tevr,
         });
       }
       // 2) Then assumption update — this also triggers DCF recompute.
@@ -1081,17 +1100,22 @@ function DetailDrawer({
           <Lens
             label="DCF"
             value={dirty ? liveIntrinsic : s.intrinsic_dcf}
-            sub={`${Math.round((s.weight_dcf ?? 0.3) * 100)}% · growth`}
+            sub={`${Math.round((s.weight_dcf ?? 0.25) * 100)}% · growth`}
           />
           <Lens
             label="EPV"
             value={s.intrinsic_epv}
-            sub={`${Math.round((s.weight_epv ?? 0.25) * 100)}% · no-growth`}
+            sub={`${Math.round((s.weight_epv ?? 0.2) * 100)}% · no-growth`}
           />
           <Lens
             label="EV/EBITDA"
             value={s.intrinsic_ev_ebitda}
-            sub={`${Math.round((s.weight_ev_ebitda ?? 0.2) * 100)}% · ${(s.target_ev_ebitda ?? 12).toFixed(0)}x`}
+            sub={`${Math.round((s.weight_ev_ebitda ?? 0.15) * 100)}% · ${(s.target_ev_ebitda ?? 12).toFixed(0)}x`}
+          />
+          <Lens
+            label="EV/Revenue"
+            value={s.intrinsic_ev_revenue}
+            sub={`${Math.round((s.weight_ev_revenue ?? 0.15) * 100)}% · ${(s.target_ev_revenue ?? 3).toFixed(1)}x`}
           />
           <Lens
             label="P/E"
@@ -1249,6 +1273,15 @@ function DetailDrawer({
             step={0.5}
             unit="x"
             onChange={setTev}
+          />
+          <Slider
+            label="Target EV/Revenue"
+            value={tevr}
+            min={0.5}
+            max={20}
+            step={0.25}
+            unit="x"
+            onChange={setTevr}
           />
           {!valid && (
             <div
