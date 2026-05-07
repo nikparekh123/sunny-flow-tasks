@@ -246,6 +246,7 @@ export function saveDefaults(d: SnowballDefaults): void {
  */
 export interface NewStockInput {
   ticker: string;
+  sector?: string;
   stage1_growth_pct?: number;
   stage2_growth_pct?: number;
   discount_rate_pct?: number;
@@ -266,6 +267,7 @@ export async function addStock(input: NewStockInput): Promise<void> {
   const row = {
     ticker,
     name: ticker,
+    sector: input.sector ?? null,
     stage1_growth_pct: input.stage1_growth_pct ?? defaults.growth,
     stage2_growth_pct:
       input.stage2_growth_pct ??

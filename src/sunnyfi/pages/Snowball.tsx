@@ -15,17 +15,12 @@ import {
   updateAssumptions,
   refreshSnowball,
   syncFundamentals,
-  applyDefaults,
   loadDefaults,
-  saveDefaults,
   addStock,
-  applySectorMultiples,
   applySectorDefaults,
-  applyHistoricalGrowth,
   fetchSectorDefaults,
   saveSectorDefaults,
   updateMultiples,
-  type SnowballDefaults,
   type NewStockInput,
   type SectorDefault,
   dcfIntrinsic,
@@ -73,41 +68,27 @@ export default function Snowball() {
   const setOpened = (s: ComputedStock | null) =>
     setOpenedTicker(s?.ticker ?? null);
   const [shown, setShown] = useState(PAGE_SIZE);
-  const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [showDefaults, setShowDefaults] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [showSectors, setShowSectors] = useState(false);
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    try {
-      const r = await refreshSnowball();
-      stocksQ.refetch();
-      const msg = r.missing_count > 0
-        ? `Updated ${r.updated}/${r.total} (${r.missing_count} skipped)`
-        : `Updated ${r.updated}/${r.total} prices`;
-      toast.success(msg);
-    } catch (e) {
-      toast.error(`Refresh failed: ${(e as Error).message}`);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
+  /**
+   * Single "Sync from API" runs both edge functions sequentially:
+   *   1. refresh-snowball        → live price + change %
+   *   2. sync-snowball-fundamentals → financials + 5-yr CAGR + auto-apply
+   * Then refetches the table. Total ~3-5 min.
+   */
   const handleSync = async () => {
-    if (!confirm(
-      "Pull fundamentals (CFO, investing, shares, name) for all 524 tickers from Polygon?\n\n" +
-      "Takes ~3-5 minutes. Recomputes intrinsic value from your saved assumptions × API fundamentals."
-    )) return;
     setSyncing(true);
     try {
-      const r = await syncFundamentals();
+      toast.info("Pulling prices…");
+      const r1 = await refreshSnowball();
+      toast.info(`Prices done (${r1.updated}/${r1.total}). Pulling fundamentals…`);
+      const r2 = await syncFundamentals();
       stocksQ.refetch();
-      const msg = r.missing_count > 0
-        ? `Synced ${r.updated}/${r.total} (${r.missing_count} skipped)`
-        : `Synced ${r.updated}/${r.total} fundamentals`;
-      toast.success(msg);
+      toast.success(
+        `Synced ${r2.updated}/${r2.total} stocks. Fundamentals + historical growth applied.`,
+      );
     } catch (e) {
       toast.error(`Sync failed: ${(e as Error).message}`);
     } finally {
@@ -183,20 +164,12 @@ export default function Snowball() {
               : "no quote yet"}
           </span>
           <button
-            className="np-btn ghost"
-            onClick={handleRefresh}
-            disabled={refreshing || syncing}
-            title="Pull live prices + 52-week ranges from Polygon (fast)"
-          >
-            ↻ {refreshing ? "Refreshing…" : "Refresh prices"}
-          </button>
-          <button
             className="np-btn tinted"
             onClick={handleSync}
-            disabled={refreshing || syncing}
-            title="Pull fundamentals (CFO, shares, names) — slow, run weekly"
+            disabled={syncing}
+            title="Pull live prices + fundamentals from Polygon, recompute intrinsics"
           >
-            ⟳ {syncing ? "Syncing…" : "Sync fundamentals"}
+            ↻ {syncing ? "Syncing…" : "Sync from API"}
           </button>
           <button className="np-btn neon" onClick={() => setShowAdd(true)}>
             + Add stock
@@ -248,41 +221,15 @@ export default function Snowball() {
               <div className="sb-tb-group sb-tb-right">
                 <button
                   className="sb-toggle"
-                  onClick={() => setShowDefaults(true)}
-                  title="Set the universe-wide growth/discount/terminal assumptions"
-                >
-                  ⚙ Defaults
-                </button>
-                <button
-                  className="sb-toggle"
                   onClick={() => setShowSectors(true)}
-                  title="Tune full per-sector valuation regime: growth, discount, multiples"
+                  title="Tune per-sector valuation regime: growth, discount, multiples"
                 >
                   ⛁ Sector defaults
                 </button>
                 <button
-                  className="sb-toggle"
-                  onClick={async () => {
-                    if (!confirm(
-                      "Set Stage 1 growth = each stock's 5-year net-income CAGR?\n\n" +
-                      "Only affects stocks WITHOUT the ✎ MANUAL badge. Manually-tuned stocks keep their custom growth."
-                    )) return;
-                    try {
-                      const n = await applyHistoricalGrowth();
-                      stocksQ.refetch();
-                      toast.success(`Historical growth applied to ${n} stocks.`);
-                    } catch (e) {
-                      toast.error((e as Error).message);
-                    }
-                  }}
-                  title="Use 5-year CAGR per stock; skips manually-customized stocks"
-                >
-                  ↺ Apply 5-yr historical
-                </button>
-                <button
                   className={"sb-toggle " + (qualityOnly ? "on" : "")}
                   onClick={() => setQualityOnly((v) => !v)}
-                  title="Show only stocks with ROE ≥ 15% — Buffett-style quality screen"
+                  title="Show only stocks with ROE ≥ 15%"
                 >
                   ★ Quality only
                 </button>
@@ -396,13 +343,6 @@ export default function Snowball() {
           stock={opened}
           onClose={() => setOpened(null)}
           onToggleWatch={() => toggleWatch(opened.ticker, opened.watchlist)}
-        />
-      )}
-
-      {showDefaults && (
-        <DefaultsModal
-          onClose={() => setShowDefaults(false)}
-          onApplied={() => stocksQ.refetch()}
         />
       )}
 
@@ -615,6 +555,7 @@ function AddStockModal({
 }) {
   const initial = loadDefaults();
   const [ticker, setTicker] = useState("");
+  const [sector, setSector] = useState<string>("Technology");
   const [growth, setGrowth] = useState(initial.growth);
   const [growth2, setGrowth2] = useState(
     initial.growth2 ?? (initial.growth + initial.terminal) / 2,
@@ -627,6 +568,16 @@ function AddStockModal({
   const [hold, setHold] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Pull live sector list so what we offer matches what sector defaults
+  // know about — guarantees the new stock's sector will JOIN.
+  const [sectors, setSectors] = useState<string[]>([]);
+  useMemo(() => {
+    fetchSectorDefaults()
+      .then((rows) => setSectors(rows.map((r) => r.sector)))
+      .catch(() => setSectors([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const valid = ticker.trim().length > 0 && discount > terminal;
 
   const handleSave = async () => {
@@ -635,6 +586,7 @@ function AddStockModal({
     try {
       const input: NewStockInput = {
         ticker: ticker.trim().toUpperCase(),
+        sector,
         stage1_growth_pct: growth,
         stage2_growth_pct: growth2,
         discount_rate_pct: discount,
@@ -685,6 +637,34 @@ function AddStockModal({
           value={ticker}
           onChange={(e) => setTicker(e.target.value.toUpperCase())}
         />
+
+        <h3>Sector</h3>
+        <select
+          className="sb-search"
+          style={{ width: "100%", fontFamily: "var(--navi-font-sans)" }}
+          value={sector}
+          onChange={(e) => setSector(e.target.value)}
+        >
+          {sectors.length === 0 ? (
+            <option value="Technology">Technology</option>
+          ) : (
+            sectors.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))
+          )}
+        </select>
+        <p
+          style={{
+            fontSize: 11,
+            color: "var(--navi-fg3)",
+            marginTop: 6,
+            fontFamily: "var(--navi-font-mono)",
+          }}
+        >
+          Sector decides which sector-defaults regime this stock inherits.
+        </p>
 
         <h3>Assumptions</h3>
         <div className="sb-slider-block">
@@ -819,138 +799,9 @@ function AddStockModal({
 }
 
 // ─── Defaults modal ───────────────────────────────────────────
-function DefaultsModal({
-  onClose,
-  onApplied,
-}: {
-  onClose: () => void;
-  onApplied: () => void;
-}) {
-  const initial = loadDefaults();
-  const [d, setD] = useState<SnowballDefaults>(initial);
-  const [saving, setSaving] = useState(false);
-  const valid = d.discount > d.terminal;
-
-  const handleApply = async () => {
-    if (!valid) return;
-    setSaving(true);
-    try {
-      const n = await applyDefaults(d);
-      saveDefaults(d);
-      toast.success(`Applied to ${n} tickers.`);
-      onApplied();
-      onClose();
-    } catch (e) {
-      toast.error(`Failed: ${(e as Error).message}`);
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="sb-drawer-overlay" onClick={onClose}>
-      <div
-        className="sb-drawer"
-        onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 480 }}
-      >
-        <div className="sb-drawer-hero tier tier-3" style={{ marginBottom: 16 }}>
-          <button className="close" onClick={onClose}>
-            ✕
-          </button>
-          <div className="ticker">⚙ Defaults</div>
-          <div className="meta">
-            Universe-wide DCF assumptions. Applies to all 524 tickers and
-            recomputes every intrinsic value + target buy price.
-          </div>
-        </div>
-
-        <div className="sb-slider-block">
-          <Slider
-            label="Stage 1 growth · years 1-5"
-            value={d.growth}
-            min={-20}
-            max={50}
-            step={0.5}
-            unit="%"
-            onChange={(v) => setD({ ...d, growth: v })}
-          />
-          <Slider
-            label="Stage 2 growth · years 6-10"
-            value={d.growth2 ?? (d.growth + d.terminal) / 2}
-            min={-10}
-            max={30}
-            step={0.5}
-            unit="%"
-            onChange={(v) => setD({ ...d, growth2: v })}
-          />
-          <Slider
-            label="Terminal growth · year 11+"
-            value={d.terminal}
-            min={0}
-            max={5}
-            step={0.25}
-            unit="%"
-            onChange={(v) => setD({ ...d, terminal: v })}
-          />
-          <Slider
-            label="Discount rate (WACC)"
-            value={d.discount}
-            min={4}
-            max={20}
-            step={0.25}
-            unit="%"
-            onChange={(v) => setD({ ...d, discount: v })}
-          />
-          {!valid && (
-            <div
-              style={{
-                color: "var(--navi-negative)",
-                fontSize: 11,
-                marginTop: 8,
-                fontFamily: "var(--navi-font-mono)",
-              }}
-            >
-              Discount must exceed terminal growth.
-            </div>
-          )}
-        </div>
-
-        <p
-          style={{
-            fontSize: 11,
-            color: "var(--navi-fg3)",
-            marginTop: 16,
-            fontFamily: "var(--navi-font-mono)",
-            lineHeight: 1.5,
-          }}
-        >
-          ⚠ This overwrites any per-ticker customizations you've made via
-          the drawer sliders. Individual overrides can be set again
-          afterwards.
-        </p>
-
-        <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-          <button
-            className="sb-btn-tinted"
-            style={{ flex: 1 }}
-            onClick={onClose}
-            disabled={saving}
-          >
-            Cancel
-          </button>
-          <button
-            className="sb-btn-primary"
-            style={{ flex: 1 }}
-            onClick={handleApply}
-            disabled={!valid || saving}
-          >
-            {saving ? "Applying…" : "Apply to all"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+// (DefaultsModal removed — sector defaults cover the same need with
+// per-sector granularity. Universe-wide tuning lives at the SQL layer
+// via snowball_apply_defaults() if you want it back.)
 
 // ─── Card ─────────────────────────────────────────────────────
 function Card({
@@ -1354,20 +1205,20 @@ function DetailDrawer({
               ✎ MANUAL
             </span>
           )}
+          {s.historical_growth_pct != null && (
+            <span
+              style={{
+                color: "var(--navi-fg3)",
+                fontSize: 10,
+                fontWeight: 400,
+                marginLeft: 8,
+                fontFamily: "var(--navi-font-mono)",
+              }}
+            >
+              · 5y CAGR {s.historical_growth_pct.toFixed(1)}%
+            </span>
+          )}
         </h3>
-        {s.historical_growth_pct != null && (
-          <button
-            className="sb-btn-tinted"
-            style={{ marginBottom: 12, fontSize: 11 }}
-            onClick={() => {
-              setGrowth(s.historical_growth_pct ?? growth);
-              setGrowth2(((s.historical_growth_pct ?? growth) + terminal) / 2);
-            }}
-            title="Auto-fill Stage 1 with 5-year historical net-income CAGR; Stage 2 fades to terminal"
-          >
-            ↺ Use 5-yr historical · {s.historical_growth_pct.toFixed(1)}%
-          </button>
-        )}
         <div className="sb-slider-block">
           <Slider
             label="Stage 1 growth · y1-5"
