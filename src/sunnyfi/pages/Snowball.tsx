@@ -555,6 +555,9 @@ function AddStockModal({
   const initial = loadDefaults();
   const [ticker, setTicker] = useState("");
   const [growth, setGrowth] = useState(initial.growth);
+  const [growth2, setGrowth2] = useState(
+    initial.growth2 ?? (initial.growth + initial.terminal) / 2,
+  );
   const [discount, setDiscount] = useState(initial.discount);
   const [terminal, setTerminal] = useState(initial.terminal);
   const [targetPe, setTargetPe] = useState(18);
@@ -572,6 +575,7 @@ function AddStockModal({
       const input: NewStockInput = {
         ticker: ticker.trim().toUpperCase(),
         stage1_growth_pct: growth,
+        stage2_growth_pct: growth2,
         discount_rate_pct: discount,
         terminal_growth_pct: terminal,
         target_pe: targetPe,
@@ -624,13 +628,31 @@ function AddStockModal({
         <h3>Assumptions</h3>
         <div className="sb-slider-block">
           <Slider
-            label="Stage 1 growth"
+            label="Stage 1 growth · y1-5"
             value={growth}
             min={-20}
             max={50}
             step={0.5}
             unit="%"
             onChange={setGrowth}
+          />
+          <Slider
+            label="Stage 2 growth · y6-10"
+            value={growth2}
+            min={-10}
+            max={30}
+            step={0.5}
+            unit="%"
+            onChange={setGrowth2}
+          />
+          <Slider
+            label="Terminal growth · y11+"
+            value={terminal}
+            min={0}
+            max={5}
+            step={0.25}
+            unit="%"
+            onChange={setTerminal}
           />
           <Slider
             label="Discount rate (WACC)"
@@ -640,15 +662,6 @@ function AddStockModal({
             step={0.25}
             unit="%"
             onChange={setDiscount}
-          />
-          <Slider
-            label="Terminal growth"
-            value={terminal}
-            min={0}
-            max={5}
-            step={0.25}
-            unit="%"
-            onChange={setTerminal}
           />
           <Slider
             label="Target P/E"
@@ -792,13 +805,31 @@ function DefaultsModal({
 
         <div className="sb-slider-block">
           <Slider
-            label="Stage 1 growth"
+            label="Stage 1 growth · years 1-5"
             value={d.growth}
             min={-20}
             max={50}
             step={0.5}
             unit="%"
             onChange={(v) => setD({ ...d, growth: v })}
+          />
+          <Slider
+            label="Stage 2 growth · years 6-10"
+            value={d.growth2 ?? (d.growth + d.terminal) / 2}
+            min={-10}
+            max={30}
+            step={0.5}
+            unit="%"
+            onChange={(v) => setD({ ...d, growth2: v })}
+          />
+          <Slider
+            label="Terminal growth · year 11+"
+            value={d.terminal}
+            min={0}
+            max={5}
+            step={0.25}
+            unit="%"
+            onChange={(v) => setD({ ...d, terminal: v })}
           />
           <Slider
             label="Discount rate (WACC)"
@@ -808,15 +839,6 @@ function DefaultsModal({
             step={0.25}
             unit="%"
             onChange={(v) => setD({ ...d, discount: v })}
-          />
-          <Slider
-            label="Terminal growth"
-            value={d.terminal}
-            min={0}
-            max={5}
-            step={0.25}
-            unit="%"
-            onChange={(v) => setD({ ...d, terminal: v })}
           />
           {!valid && (
             <div
@@ -1024,7 +1046,11 @@ function DetailDrawer({
   const tier = s.tier ?? 4;
 
   // Local slider state — diverges from the saved row until "Save & recalc".
+  const defaultStage2 = (s.stage1_growth_pct ?? 8) / 2;
   const [growth, setGrowth] = useState<number>(s.stage1_growth_pct ?? 5);
+  const [growth2, setGrowth2] = useState<number>(
+    s.stage2_growth_pct ?? defaultStage2,
+  );
   const [discount, setDiscount] = useState<number>(s.discount_rate_pct ?? 10);
   const [terminal, setTerminal] = useState<number>(s.terminal_growth_pct ?? 2.5);
   const [tpe, setTpe] = useState<number>(s.target_pe ?? 18);
@@ -1034,6 +1060,7 @@ function DetailDrawer({
   // Reset when a different stock is opened.
   useMemo(() => {
     setGrowth(s.stage1_growth_pct ?? 5);
+    setGrowth2(s.stage2_growth_pct ?? (s.stage1_growth_pct ?? 8) / 2);
     setDiscount(s.discount_rate_pct ?? 10);
     setTerminal(s.terminal_growth_pct ?? 2.5);
     setTpe(s.target_pe ?? 18);
@@ -1048,10 +1075,11 @@ function DetailDrawer({
         total_owner_earnings: s.total_owner_earnings ?? 0,
         shares_outstanding: s.shares_outstanding ?? 0,
         stage1_growth_pct: growth,
+        stage2_growth_pct: growth2,
         discount_rate_pct: discount,
         terminal_growth_pct: terminal,
       }),
-    [growth, discount, terminal, s.total_owner_earnings, s.shares_outstanding],
+    [growth, growth2, discount, terminal, s.total_owner_earnings, s.shares_outstanding],
   );
 
   const liveUpside =
@@ -1061,6 +1089,7 @@ function DetailDrawer({
 
   const dirty =
     growth !== (s.stage1_growth_pct ?? 5) ||
+    growth2 !== (s.stage2_growth_pct ?? defaultStage2) ||
     discount !== (s.discount_rate_pct ?? 10) ||
     terminal !== (s.terminal_growth_pct ?? 2.5) ||
     tpe !== (s.target_pe ?? 18) ||
@@ -1082,6 +1111,7 @@ function DetailDrawer({
       // 2) Then assumption update — this also triggers DCF recompute.
       await updateAssumptions(s.ticker, {
         stage1_growth_pct: growth,
+        stage2_growth_pct: growth2,
         discount_rate_pct: discount,
         terminal_growth_pct: terminal,
       });
@@ -1237,13 +1267,31 @@ function DetailDrawer({
         <h3>Tune assumptions</h3>
         <div className="sb-slider-block">
           <Slider
-            label="Stage 1 growth"
+            label="Stage 1 growth · y1-5"
             value={growth}
             min={-20}
             max={50}
             step={0.5}
             unit="%"
             onChange={setGrowth}
+          />
+          <Slider
+            label="Stage 2 growth · y6-10"
+            value={growth2}
+            min={-10}
+            max={30}
+            step={0.5}
+            unit="%"
+            onChange={setGrowth2}
+          />
+          <Slider
+            label="Terminal growth · y11+"
+            value={terminal}
+            min={0}
+            max={5}
+            step={0.25}
+            unit="%"
+            onChange={setTerminal}
           />
           <Slider
             label="Discount rate (WACC)"
@@ -1253,15 +1301,6 @@ function DetailDrawer({
             step={0.25}
             unit="%"
             onChange={setDiscount}
-          />
-          <Slider
-            label="Terminal growth"
-            value={terminal}
-            min={0}
-            max={5}
-            step={0.25}
-            unit="%"
-            onChange={setTerminal}
           />
           <Slider
             label="Target P/E"

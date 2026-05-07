@@ -13,6 +13,7 @@ export interface Stock {
   shares_outstanding: number | null;
   intrinsic_value: number | null;
   stage1_growth_pct: number | null;
+  stage2_growth_pct: number | null;
   discount_rate_pct: number | null;
   terminal_growth_pct: number | null;
   total_owner_earnings: number | null;
@@ -200,13 +201,15 @@ export async function syncFundamentals(): Promise<RefreshResult> {
 export const SNOWBALL_DEFAULTS_KEY = "snowball.defaults.v1";
 
 export interface SnowballDefaults {
-  growth: number;
+  growth: number;       // stage 1 (years 1-5)
+  growth2?: number;     // stage 2 (years 6-10); if omitted, falls back to (growth+terminal)/2
   discount: number;
   terminal: number;
 }
 
 export const DEFAULT_ASSUMPTIONS: SnowballDefaults = {
   growth: 8,
+  growth2: 5,
   discount: 10,
   terminal: 2,
 };
@@ -219,6 +222,7 @@ export function loadDefaults(): SnowballDefaults {
     const v = JSON.parse(raw) as Partial<SnowballDefaults>;
     return {
       growth:   typeof v.growth   === "number" ? v.growth   : DEFAULT_ASSUMPTIONS.growth,
+      growth2:  typeof v.growth2  === "number" ? v.growth2  : DEFAULT_ASSUMPTIONS.growth2,
       discount: typeof v.discount === "number" ? v.discount : DEFAULT_ASSUMPTIONS.discount,
       terminal: typeof v.terminal === "number" ? v.terminal : DEFAULT_ASSUMPTIONS.terminal,
     };
@@ -240,6 +244,7 @@ export function saveDefaults(d: SnowballDefaults): void {
 export interface NewStockInput {
   ticker: string;
   stage1_growth_pct?: number;
+  stage2_growth_pct?: number;
   discount_rate_pct?: number;
   terminal_growth_pct?: number;
   target_pe?: number;
@@ -257,8 +262,12 @@ export async function addStock(input: NewStockInput): Promise<void> {
   const defaults = loadDefaults();
   const row = {
     ticker,
-    name: ticker, // placeholder until sync fills in the real name
+    name: ticker,
     stage1_growth_pct: input.stage1_growth_pct ?? defaults.growth,
+    stage2_growth_pct:
+      input.stage2_growth_pct ??
+      defaults.growth2 ??
+      (defaults.growth + defaults.terminal) / 2,
     discount_rate_pct: input.discount_rate_pct ?? defaults.discount,
     terminal_growth_pct: input.terminal_growth_pct ?? defaults.terminal,
     target_pe: input.target_pe ?? 18,
@@ -280,10 +289,20 @@ export async function addStock(input: NewStockInput): Promise<void> {
 export async function applyDefaults(d: SnowballDefaults): Promise<number> {
   const { data, error } = await (supabase.rpc as unknown as (
     name: string,
-    args: { p_growth: number; p_discount: number; p_terminal: number },
+    args: {
+      p_growth: number;
+      p_discount: number;
+      p_terminal: number;
+      p_growth2?: number;
+    },
   ) => Promise<{ data: number | null; error: unknown }>)(
     "snowball_apply_defaults",
-    { p_growth: d.growth, p_discount: d.discount, p_terminal: d.terminal },
+    {
+      p_growth: d.growth,
+      p_discount: d.discount,
+      p_terminal: d.terminal,
+      p_growth2: d.growth2 ?? (d.growth + d.terminal) / 2,
+    },
   );
   if (error) throw error;
   return data ?? 0;
@@ -341,35 +360,47 @@ export async function updateMultiples(
 }
 
 /**
- * Two-stage DCF intrinsic value per share.
- * - Years 1-10: project FCF growing at `stage1_growth_pct`
- * - Terminal: Gordon growth model with `terminal_growth_pct`
+ * Three-stage DCF intrinsic value per share.
+ * - Years 1-5:  high growth at `stage1_growth_pct`
+ * - Years 6-10: fade growth at `stage2_growth_pct` (defaults to (stage1+terminal)/2)
+ * - Year 11+:   Gordon perpetuity at `terminal_growth_pct`
  * - Discount everything to PV at `discount_rate_pct`
  *
  * Returns intrinsic per share, or null if inputs are invalid (e.g.
  * discount ≤ terminal makes the terminal value diverge).
  */
 export function dcfIntrinsic(opts: {
-  total_owner_earnings: number; // starting FCF (in millions, matches CSV)
-  shares_outstanding: number;   // millions
+  total_owner_earnings: number;
+  shares_outstanding: number;
   stage1_growth_pct: number;
+  stage2_growth_pct?: number;
   discount_rate_pct: number;
   terminal_growth_pct: number;
 }): number | null {
   const { total_owner_earnings, shares_outstanding } = opts;
-  const g = opts.stage1_growth_pct / 100;
-  const d = opts.discount_rate_pct / 100;
+  const g1 = opts.stage1_growth_pct / 100;
   const tg = opts.terminal_growth_pct / 100;
+  const d = opts.discount_rate_pct / 100;
+  // Stage 2 defaults to halfway between stage 1 and terminal.
+  const g2 =
+    opts.stage2_growth_pct != null
+      ? opts.stage2_growth_pct / 100
+      : (g1 + tg) / 2;
   if (!shares_outstanding || shares_outstanding <= 0) return null;
-  if (d <= tg) return null; // Gordon model diverges
-  // Stage 1: 10 years of growth, discounted.
+  if (d <= tg) return null;
   let pv = 0;
   let fcf = total_owner_earnings;
-  for (let y = 1; y <= 10; y++) {
-    fcf = fcf * (1 + g);
+  // Stage 1: years 1-5
+  for (let y = 1; y <= 5; y++) {
+    fcf = fcf * (1 + g1);
     pv += fcf / Math.pow(1 + d, y);
   }
-  // Terminal value at end of year 10, discounted back.
+  // Stage 2: years 6-10
+  for (let y = 6; y <= 10; y++) {
+    fcf = fcf * (1 + g2);
+    pv += fcf / Math.pow(1 + d, y);
+  }
+  // Terminal at end of year 10
   const tv = (fcf * (1 + tg)) / (d - tg);
   pv += tv / Math.pow(1 + d, 10);
   return pv / shares_outstanding;
@@ -377,6 +408,7 @@ export function dcfIntrinsic(opts: {
 
 export interface AssumptionPatch {
   stage1_growth_pct?: number;
+  stage2_growth_pct?: number;
   discount_rate_pct?: number;
   terminal_growth_pct?: number;
 }
@@ -405,6 +437,8 @@ export async function updateAssumptions(
     shares_outstanding: row.shares_outstanding ?? 0,
     stage1_growth_pct:
       patch.stage1_growth_pct ?? row.stage1_growth_pct ?? 0,
+    stage2_growth_pct:
+      patch.stage2_growth_pct ?? row.stage2_growth_pct ?? undefined,
     discount_rate_pct:
       patch.discount_rate_pct ?? row.discount_rate_pct ?? 0,
     terminal_growth_pct:
