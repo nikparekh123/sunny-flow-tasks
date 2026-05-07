@@ -19,6 +19,8 @@ import {
   loadDefaults,
   saveDefaults,
   addStock,
+  applySectorMultiples,
+  updateMultiples,
   type SnowballDefaults,
   type NewStockInput,
   dcfIntrinsic,
@@ -239,6 +241,25 @@ export default function Snowball() {
                   title="Set the universe-wide growth/discount/terminal assumptions"
                 >
                   ⚙ Defaults
+                </button>
+                <button
+                  className="sb-toggle"
+                  onClick={async () => {
+                    if (!confirm(
+                      "Apply sector-default P/E and EV/EBITDA multiples to every stock?\n\n" +
+                      "Per-stock customizations will be overwritten. Edit the snowball_sector_defaults table to tune the bands."
+                    )) return;
+                    try {
+                      const n = await applySectorMultiples();
+                      stocksQ.refetch();
+                      toast.success(`Sector multiples applied to ${n} stocks.`);
+                    } catch (e) {
+                      toast.error((e as Error).message);
+                    }
+                  }}
+                  title="Apply industry-median P/E and EV/EBITDA multiples by sector"
+                >
+                  ⛁ Sector multiples
                 </button>
                 <button
                   className={"sb-toggle " + (hideOvervalued ? "on" : "")}
@@ -846,6 +867,8 @@ function DetailDrawer({
   const [growth, setGrowth] = useState<number>(s.stage1_growth_pct ?? 5);
   const [discount, setDiscount] = useState<number>(s.discount_rate_pct ?? 10);
   const [terminal, setTerminal] = useState<number>(s.terminal_growth_pct ?? 2.5);
+  const [tpe, setTpe] = useState<number>(s.target_pe ?? 18);
+  const [tev, setTev] = useState<number>(s.target_ev_ebitda ?? 12);
   const [saving, setSaving] = useState(false);
 
   // Reset when a different stock is opened.
@@ -853,6 +876,8 @@ function DetailDrawer({
     setGrowth(s.stage1_growth_pct ?? 5);
     setDiscount(s.discount_rate_pct ?? 10);
     setTerminal(s.terminal_growth_pct ?? 2.5);
+    setTpe(s.target_pe ?? 18);
+    setTev(s.target_ev_ebitda ?? 12);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.ticker]);
 
@@ -877,7 +902,9 @@ function DetailDrawer({
   const dirty =
     growth !== (s.stage1_growth_pct ?? 5) ||
     discount !== (s.discount_rate_pct ?? 10) ||
-    terminal !== (s.terminal_growth_pct ?? 2.5);
+    terminal !== (s.terminal_growth_pct ?? 2.5) ||
+    tpe !== (s.target_pe ?? 18) ||
+    tev !== (s.target_ev_ebitda ?? 12);
 
   const valid = liveIntrinsic != null;
 
@@ -885,6 +912,14 @@ function DetailDrawer({
     if (!dirty || !valid) return;
     setSaving(true);
     try {
+      // 1) Save the multiple overrides separately (DCF doesn't depend on them).
+      if (tpe !== (s.target_pe ?? 18) || tev !== (s.target_ev_ebitda ?? 12)) {
+        await updateMultiples(s.ticker, {
+          target_pe: tpe,
+          target_ev_ebitda: tev,
+        });
+      }
+      // 2) Then assumption update — this also triggers DCF recompute.
       await updateAssumptions(s.ticker, {
         stage1_growth_pct: growth,
         discount_rate_pct: discount,
@@ -1035,6 +1070,24 @@ function DetailDrawer({
             step={0.25}
             unit="%"
             onChange={setTerminal}
+          />
+          <Slider
+            label="Target P/E"
+            value={tpe}
+            min={5}
+            max={50}
+            step={0.5}
+            unit="x"
+            onChange={setTpe}
+          />
+          <Slider
+            label="Target EV/EBITDA"
+            value={tev}
+            min={3}
+            max={30}
+            step={0.5}
+            unit="x"
+            onChange={setTev}
           />
           {!valid && (
             <div

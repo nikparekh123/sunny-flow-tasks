@@ -280,6 +280,57 @@ export async function applyDefaults(d: SnowballDefaults): Promise<number> {
   return data ?? 0;
 }
 
+// ─── Sector defaults ──────────────────────────────────────────
+export interface SectorDefault {
+  sector: string;
+  target_pe: number;
+  target_ev_ebitda: number;
+  default_growth_pct: number;
+}
+
+export async function fetchSectorDefaults(): Promise<SectorDefault[]> {
+  const { data, error } = await supabase
+    .from("snowball_sector_defaults" as never)
+    .select("*")
+    .order("sector");
+  if (error) throw error;
+  return (data ?? []) as unknown as SectorDefault[];
+}
+
+export async function saveSectorDefaults(rows: SectorDefault[]): Promise<void> {
+  const { error } = await supabase
+    .from("snowball_sector_defaults" as never)
+    .upsert(rows as never);
+  if (error) throw error;
+}
+
+export async function applySectorMultiples(): Promise<number> {
+  const { data, error } = await (supabase.rpc as unknown as (
+    name: string,
+  ) => Promise<{ data: number | null; error: unknown }>)(
+    "snowball_apply_sector_multiples",
+  );
+  if (error) throw error;
+  return data ?? 0;
+}
+
+// ─── Per-stock multiple override ──────────────────────────────
+export interface MultiplePatch {
+  target_pe?: number;
+  target_ev_ebitda?: number;
+}
+
+export async function updateMultiples(
+  ticker: string,
+  patch: MultiplePatch,
+): Promise<void> {
+  const { error } = await supabase
+    .from("snowball" as never)
+    .update(patch as never)
+    .eq("ticker", ticker);
+  if (error) throw error;
+}
+
 /**
  * Two-stage DCF intrinsic value per share.
  * - Years 1-10: project FCF growing at `stage1_growth_pct`
