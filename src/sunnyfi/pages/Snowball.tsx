@@ -20,6 +20,7 @@ import {
   saveDefaults,
   addStock,
   applySectorMultiples,
+  applySectorDefaults,
   applyHistoricalGrowth,
   fetchSectorDefaults,
   saveSectorDefaults,
@@ -255,9 +256,9 @@ export default function Snowball() {
                 <button
                   className="sb-toggle"
                   onClick={() => setShowSectors(true)}
-                  title="Tune target P/E and EV/EBITDA per sector via sliders"
+                  title="Tune full per-sector valuation regime: growth, discount, multiples"
                 >
-                  ⛁ Sector multiples
+                  ⛁ Sector defaults
                 </button>
                 <button
                   className="sb-toggle"
@@ -452,9 +453,8 @@ function SectorMultiplesModal({
     if (!rows) return;
     setSaving(true);
     try {
-      // Save the table, then propagate to every snowball row by sector.
       await saveSectorDefaults(rows);
-      const n = await applySectorMultiples();
+      const n = await applySectorDefaults();
       toast.success(`Saved & applied to ${n} stocks.`);
       onApplied();
       onClose();
@@ -475,11 +475,12 @@ function SectorMultiplesModal({
           <button className="close" onClick={onClose}>
             ✕
           </button>
-          <div className="ticker">⛁ Sector multiples</div>
+          <div className="ticker">⛁ Sector defaults</div>
           <div className="meta">
-            Target P/E and EV/EBITDA per sector. Saving overwrites every
-            stock's <code>target_pe</code> and <code>target_ev_ebitda</code>{" "}
-            with its sector's value, then recomputes intrinsic.
+            Full per-sector valuation regime: Stage 1 growth, Stage 2,
+            discount rate (WACC), target P/E, target EV/EBITDA. Saving
+            overwrites every stock in the sector and recomputes lenses.
+            Per-stock customizations get reset.
           </div>
         </div>
 
@@ -523,6 +524,39 @@ function SectorMultiplesModal({
                 >
                   {r.sector}
                 </div>
+                <Slider
+                  label="Stage 1 growth · y1-5"
+                  value={r.default_growth_pct}
+                  min={-10}
+                  max={30}
+                  step={0.5}
+                  unit="%"
+                  onChange={(v) =>
+                    updateRow(r.sector, { default_growth_pct: v })
+                  }
+                />
+                <Slider
+                  label="Stage 2 growth · y6-10"
+                  value={r.default_stage2_growth_pct}
+                  min={-5}
+                  max={20}
+                  step={0.5}
+                  unit="%"
+                  onChange={(v) =>
+                    updateRow(r.sector, { default_stage2_growth_pct: v })
+                  }
+                />
+                <Slider
+                  label="Discount rate (WACC)"
+                  value={r.default_discount_rate_pct}
+                  min={4}
+                  max={20}
+                  step={0.25}
+                  unit="%"
+                  onChange={(v) =>
+                    updateRow(r.sector, { default_discount_rate_pct: v })
+                  }
+                />
                 <Slider
                   label="Target P/E"
                   value={r.target_pe}

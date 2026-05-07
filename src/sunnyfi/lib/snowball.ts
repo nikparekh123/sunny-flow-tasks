@@ -316,7 +316,9 @@ export interface SectorDefault {
   sector: string;
   target_pe: number;
   target_ev_ebitda: number;
-  default_growth_pct: number;
+  default_growth_pct: number;            // Stage 1
+  default_stage2_growth_pct: number;     // Stage 2
+  default_discount_rate_pct: number;     // WACC
 }
 
 export async function fetchSectorDefaults(): Promise<SectorDefault[]> {
@@ -350,15 +352,20 @@ export async function applyHistoricalGrowth(): Promise<number> {
   return data ?? 0;
 }
 
-export async function applySectorMultiples(): Promise<number> {
+/** Apply ALL sector defaults (g1, g2, discount, target P/E, target EV/EBITDA)
+ *  to every stock by sector match, then recompute lenses. */
+export async function applySectorDefaults(): Promise<number> {
   const { data, error } = await (supabase.rpc as unknown as (
     name: string,
   ) => Promise<{ data: number | null; error: unknown }>)(
-    "snowball_apply_sector_multiples",
+    "snowball_apply_sector_defaults",
   );
   if (error) throw error;
   return data ?? 0;
 }
+
+/** @deprecated use applySectorDefaults — multiples-only is gone */
+export const applySectorMultiples = applySectorDefaults;
 
 // ─── Per-stock multiple override ──────────────────────────────
 export interface MultiplePatch {
