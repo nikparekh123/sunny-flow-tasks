@@ -20,9 +20,12 @@ import {
   saveDefaults,
   addStock,
   applySectorMultiples,
+  fetchSectorDefaults,
+  saveSectorDefaults,
   updateMultiples,
   type SnowballDefaults,
   type NewStockInput,
+  type SectorDefault,
   dcfIntrinsic,
   fmtMcap,
   fmtPrice,
@@ -57,7 +60,6 @@ export default function Snowball() {
   const [filter, setFilter] = useState<string>("All");
   const [sort, setSort] = useState<SortKey>("Most undervalued");
   const [watchOnly, setWatchOnly] = useState(false);
-  const [hideOvervalued, setHideOvervalued] = useState(false);
   const [qualityOnly, setQualityOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [opened, setOpened] = useState<ComputedStock | null>(null);
@@ -66,6 +68,7 @@ export default function Snowball() {
   const [syncing, setSyncing] = useState(false);
   const [showDefaults, setShowDefaults] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
+  const [showSectors, setShowSectors] = useState(false);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -107,9 +110,6 @@ export default function Snowball() {
     let r = all;
     if (filter !== "All") r = r.filter((s) => s.sector === filter);
     if (watchOnly) r = r.filter((s) => s.watchlist);
-    if (hideOvervalued) {
-      r = r.filter((s) => !s.intrinsic_invalid && s.upside > 0);
-    }
     if (qualityOnly) r = r.filter((s) => s.is_high_quality);
     const q = search.trim().toLowerCase();
     if (q) {
@@ -120,7 +120,7 @@ export default function Snowball() {
       );
     }
     return sortStocks(r, sort);
-  }, [all, filter, sort, watchOnly, hideOvervalued, qualityOnly, search]);
+  }, [all, filter, sort, watchOnly, qualityOnly, search]);
 
   // Reset paging when the visible list size changes meaningfully.
   const filteredLen = filtered.length;
@@ -246,29 +246,10 @@ export default function Snowball() {
                 </button>
                 <button
                   className="sb-toggle"
-                  onClick={async () => {
-                    if (!confirm(
-                      "Apply sector-default P/E and EV/EBITDA multiples to every stock?\n\n" +
-                      "Per-stock customizations will be overwritten. Edit the snowball_sector_defaults table to tune the bands."
-                    )) return;
-                    try {
-                      const n = await applySectorMultiples();
-                      stocksQ.refetch();
-                      toast.success(`Sector multiples applied to ${n} stocks.`);
-                    } catch (e) {
-                      toast.error((e as Error).message);
-                    }
-                  }}
-                  title="Apply industry-median P/E and EV/EBITDA multiples by sector"
+                  onClick={() => setShowSectors(true)}
+                  title="Tune target P/E and EV/EBITDA per sector via sliders"
                 >
                   ⛁ Sector multiples
-                </button>
-                <button
-                  className={"sb-toggle " + (hideOvervalued ? "on" : "")}
-                  onClick={() => setHideOvervalued((v) => !v)}
-                  title="Show only stocks where intrinsic > price"
-                >
-                  ↑ Undervalued only
                 </button>
                 <button
                   className={"sb-toggle " + (qualityOnly ? "on" : "")}
@@ -403,6 +384,162 @@ export default function Snowball() {
           onAdded={() => stocksQ.refetch()}
         />
       )}
+
+      {showSectors && (
+        <SectorMultiplesModal
+          onClose={() => setShowSectors(false)}
+          onApplied={() => stocksQ.refetch()}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Sector multiples modal ───────────────────────────────────
+function SectorMultiplesModal({
+  onClose,
+  onApplied,
+}: {
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const [rows, setRows] = useState<SectorDefault[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load on mount.
+  useMemo(() => {
+    fetchSectorDefaults()
+      .then(setRows)
+      .catch((e) => setError((e as Error).message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const updateRow = (sector: string, patch: Partial<SectorDefault>) => {
+    setRows((prev) =>
+      prev?.map((r) => (r.sector === sector ? { ...r, ...patch } : r)) ?? null,
+    );
+  };
+
+  const handleSaveAndApply = async () => {
+    if (!rows) return;
+    setSaving(true);
+    try {
+      // Save the table, then propagate to every snowball row by sector.
+      await saveSectorDefaults(rows);
+      const n = await applySectorMultiples();
+      toast.success(`Saved & applied to ${n} stocks.`);
+      onApplied();
+      onClose();
+    } catch (e) {
+      toast.error(`Failed: ${(e as Error).message}`);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="sb-drawer-overlay" onClick={onClose}>
+      <div
+        className="sb-drawer"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 640 }}
+      >
+        <div className="sb-drawer-hero tier tier-3" style={{ marginBottom: 16 }}>
+          <button className="close" onClick={onClose}>
+            ✕
+          </button>
+          <div className="ticker">⛁ Sector multiples</div>
+          <div className="meta">
+            Target P/E and EV/EBITDA per sector. Saving overwrites every
+            stock's <code>target_pe</code> and <code>target_ev_ebitda</code>{" "}
+            with its sector's value, then recomputes intrinsic.
+          </div>
+        </div>
+
+        {error && (
+          <div
+            style={{
+              color: "var(--navi-negative)",
+              fontSize: 12,
+              padding: 12,
+              fontFamily: "var(--navi-font-mono)",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {rows == null && !error && (
+          <div style={{ color: "var(--navi-fg3)", padding: 12, fontSize: 13 }}>
+            Loading…
+          </div>
+        )}
+
+        {rows && (
+          <div className="sb-slider-block" style={{ padding: 18 }}>
+            {rows.map((r) => (
+              <div
+                key={r.sector}
+                style={{
+                  marginBottom: 22,
+                  paddingBottom: 18,
+                  borderBottom: "1px solid rgba(30,90,80,.18)",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "var(--navi-fg1)",
+                    marginBottom: 12,
+                  }}
+                >
+                  {r.sector}
+                </div>
+                <Slider
+                  label="Target P/E"
+                  value={r.target_pe}
+                  min={5}
+                  max={50}
+                  step={0.5}
+                  unit="x"
+                  onChange={(v) => updateRow(r.sector, { target_pe: v })}
+                />
+                <Slider
+                  label="Target EV/EBITDA"
+                  value={r.target_ev_ebitda}
+                  min={3}
+                  max={30}
+                  step={0.5}
+                  unit="x"
+                  onChange={(v) =>
+                    updateRow(r.sector, { target_ev_ebitda: v })
+                  }
+                />
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 24 }}>
+          <button
+            className="sb-btn-tinted"
+            style={{ flex: 1 }}
+            onClick={onClose}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          <button
+            className="sb-btn-primary"
+            style={{ flex: 1 }}
+            onClick={handleSaveAndApply}
+            disabled={!rows || saving}
+          >
+            {saving ? "Applying…" : "Save & apply to universe"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
