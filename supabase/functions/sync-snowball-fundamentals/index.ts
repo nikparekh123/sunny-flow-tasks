@@ -302,7 +302,25 @@ Deno.serve(async (req) => {
           const niRaw = netIncome;
           if (equityRaw != null) patch.equity_book = equityRaw / 1_000_000;
           if (niRaw != null) patch.net_income_ttm = niRaw / 1_000_000;
-          if (histCagr != null) patch.historical_growth_pct = histCagr;
+          if (histCagr != null) {
+            patch.historical_growth_pct = histCagr;
+            // Auto-apply: if this stock hasn't been manually customized,
+            // sync sets its Stage 1 growth to the 5-yr CAGR. User can
+            // override later via the drawer sliders (which sets is_customized).
+            // We need the current is_customized to decide; fetch it.
+            const { data: cur } = await admin
+              .from("snowball")
+              .select("is_customized")
+              .eq("ticker", t)
+              .maybeSingle();
+            const isCustom =
+              (cur as { is_customized?: boolean } | null)?.is_customized ?? false;
+            if (!isCustom) {
+              patch.stage1_growth_pct = histCagr;
+              // Stage 2 fades from CAGR toward terminal (default 2%).
+              patch.stage2_growth_pct = Math.max(2, (histCagr + 2) / 2);
+            }
+          }
 
           // If we have all the inputs, recompute intrinsic + TBPs from the
           // analyst's existing assumptions.

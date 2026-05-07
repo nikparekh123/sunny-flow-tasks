@@ -20,6 +20,7 @@ import {
   saveDefaults,
   addStock,
   applySectorMultiples,
+  applyHistoricalGrowth,
   fetchSectorDefaults,
   saveSectorDefaults,
   updateMultiples,
@@ -257,6 +258,25 @@ export default function Snowball() {
                   title="Tune target P/E and EV/EBITDA per sector via sliders"
                 >
                   ⛁ Sector multiples
+                </button>
+                <button
+                  className="sb-toggle"
+                  onClick={async () => {
+                    if (!confirm(
+                      "Set Stage 1 growth = each stock's 5-year net-income CAGR?\n\n" +
+                      "Only affects stocks WITHOUT the ✎ MANUAL badge. Manually-tuned stocks keep their custom growth."
+                    )) return;
+                    try {
+                      const n = await applyHistoricalGrowth();
+                      stocksQ.refetch();
+                      toast.success(`Historical growth applied to ${n} stocks.`);
+                    } catch (e) {
+                      toast.error((e as Error).message);
+                    }
+                  }}
+                  title="Use 5-year CAGR per stock; skips manually-customized stocks"
+                >
+                  ↺ Apply 5-yr historical
                 </button>
                 <button
                   className={"sb-toggle " + (qualityOnly ? "on" : "")}

@@ -335,6 +335,21 @@ export async function saveSectorDefaults(rows: SectorDefault[]): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * For every non-customized stock that has a historical_growth_pct, set
+ * its Stage 1 to that historical CAGR and Stage 2 to a fade halfway to
+ * terminal. Then recompute lenses. Returns count of stocks updated.
+ */
+export async function applyHistoricalGrowth(): Promise<number> {
+  const { data, error } = await (supabase.rpc as unknown as (
+    name: string,
+  ) => Promise<{ data: number | null; error: unknown }>)(
+    "snowball_apply_historical_growth",
+  );
+  if (error) throw error;
+  return data ?? 0;
+}
+
 export async function applySectorMultiples(): Promise<number> {
   const { data, error } = await (supabase.rpc as unknown as (
     name: string,
