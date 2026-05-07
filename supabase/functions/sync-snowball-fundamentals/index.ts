@@ -57,9 +57,73 @@ interface FinResp {
 interface TickerRefResp {
   results?: {
     name?: string;
+    sic_code?: string;
     sic_description?: string;
     weighted_shares_outstanding?: number;
   };
+}
+
+/**
+ * Map a Polygon SIC code to a GICS-style sector that matches our
+ * snowball_sector_defaults table. Heuristic but covers most common
+ * tickers. Falls back to null if no match — user picks manually.
+ */
+function sectorFromSic(sic: string | undefined | null): string | null {
+  if (!sic) return null;
+  const code = parseInt(sic, 10);
+  if (isNaN(code)) return null;
+  // Pharmaceuticals (chemical sub-range)
+  if (code >= 2830 && code <= 2839) return "Healthcare";
+  // Computer services / software / data processing
+  if (code >= 7370 && code <= 7379) return "Technology";
+  // Health services
+  if (code >= 8000 && code <= 8099) return "Healthcare";
+  // Communications + Motion Pictures
+  if (code >= 4800 && code <= 4899) return "Communication Services";
+  if (code >= 7800 && code <= 7899) return "Communication Services";
+  // Utilities
+  if (code >= 4900 && code <= 4999) return "Utilities";
+  // Pipelines (oil/gas)
+  if (code >= 4600 && code <= 4699) return "Energy";
+  // Finance / Insurance / Holdings
+  if (code >= 6000 && code <= 6499) return "Financials";
+  if (code >= 6700 && code <= 6799) return "Financials";
+  // Real estate
+  if (code >= 6500 && code <= 6599) return "Real Estate";
+  // Oil & Gas extraction + Petroleum refining
+  if (code >= 1300 && code <= 1399) return "Energy";
+  if (code >= 2900 && code <= 2999) return "Energy";
+  // Electronic / semiconductor manufacturing
+  if (code >= 3600 && code <= 3699) return "Technology";
+  // Food (consumer non-cyclical)
+  if (code >= 2000 && code <= 2099) return "Consumer Non-Cyclicals";
+  if (code >= 2100 && code <= 2199) return "Consumer Non-Cyclicals";
+  // Retail / wholesale / hotels / personal services / educational
+  if (code >= 5000 && code <= 5999) return "Consumer Discretionary";
+  if (code >= 7000 && code <= 7299) return "Consumer Discretionary";
+  if (code >= 8200 && code <= 8499) return "Consumer Discretionary";
+  // Apparel / textile / leather / furniture / misc manuf consumer
+  if (code >= 2200 && code <= 2399) return "Consumer Discretionary";
+  if (code >= 2500 && code <= 2599) return "Consumer Discretionary";
+  if (code >= 3100 && code <= 3199) return "Consumer Discretionary";
+  if (code >= 3900 && code <= 3999) return "Consumer Discretionary";
+  // Materials (chemicals, metals, paper, lumber, mining ex-pharma/energy)
+  if (code >= 1000 && code <= 1499) return "Materials";
+  if (code >= 2400 && code <= 2499) return "Materials";
+  if (code >= 2600 && code <= 2699) return "Materials";
+  if (code >= 2800 && code <= 2899) return "Materials";
+  if (code >= 3000 && code <= 3099) return "Materials";
+  if (code >= 3200 && code <= 3399) return "Materials";
+  // Industrials catch-all (machinery, transport, construction, fabricated metal)
+  if (code >= 1500 && code <= 1799) return "Industrials";
+  if (code >= 2700 && code <= 2799) return "Industrials";
+  if (code >= 3400 && code <= 3599) return "Industrials";
+  if (code >= 3700 && code <= 3799) return "Industrials";
+  if (code >= 4000 && code <= 4799) return "Industrials";
+  if (code >= 8100 && code <= 8199) return "Industrials";
+  // Measuring instruments straddle healthcare/industrials — bias healthcare for medical
+  if (code >= 3800 && code <= 3899) return "Industrials";
+  return null;
 }
 
 interface ExistingRow {
@@ -68,6 +132,7 @@ interface ExistingRow {
   discount_rate_pct: number | null;
   terminal_growth_pct: number | null;
   sector: string | null;
+  is_customized?: boolean;
 }
 
 /**
@@ -287,6 +352,13 @@ Deno.serve(async (req) => {
           const patch: Record<string, unknown> = {};
           if (ref?.name) patch.name = ref.name;
           if (ref?.sic_description) patch.industry = ref.sic_description;
+          // Auto-derive sector from SIC if the stock has none. We don't
+          // overwrite an existing sector — that respects user's manual
+          // pick from Add Stock or earlier overrides.
+          if (!row.sector) {
+            const derived = sectorFromSic(ref?.sic_code);
+            if (derived) patch.sector = derived;
+          }
           if (oe != null) patch.total_owner_earnings = oe;
           if (sharesMm != null) patch.shares_outstanding = sharesMm;
           if (eps != null) patch.eps_ttm = eps;
