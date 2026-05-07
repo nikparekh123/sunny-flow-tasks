@@ -104,13 +104,16 @@ function dcfIntrinsic(
   return pv / shares;
 }
 
+/**
+ * Fetch the most-recent financials record (TTM preferred, annual fallback)
+ * AND up to 5 historical annual filings for CAGR computation.
+ */
 async function fetchFinancials(
   ticker: string,
   apiKey: string,
-): Promise<FinResp | null> {
-  // Try TTM first (rolling 4 quarters). Some tickers — newer listings,
-  // companies between filings, ones Polygon hasn't aggregated yet — have
-  // no TTM record. For those fall back to the most recent annual filing.
+): Promise<{ latest: FinResp | null; history: FinResp | null }> {
+  // Latest record — TTM preferred for freshness.
+  let latest: FinResp | null = null;
   for (const timeframe of ["ttm", "annual"] as const) {
     const url = new URL("https://api.polygon.io/vX/reference/financials");
     url.searchParams.set("ticker", ticker);
@@ -120,9 +123,49 @@ async function fetchFinancials(
     const r = await fetch(url.toString());
     if (!r.ok) continue;
     const data = (await r.json()) as FinResp;
-    if (data?.results && data.results.length > 0) return data;
+    if (data?.results && data.results.length > 0) {
+      latest = data;
+      break;
+    }
   }
-  return null;
+  // History — last 5 annual filings, used to derive 5-yr CAGR.
+  let history: FinResp | null = null;
+  const histUrl = new URL("https://api.polygon.io/vX/reference/financials");
+  histUrl.searchParams.set("ticker", ticker);
+  histUrl.searchParams.set("timeframe", "annual");
+  histUrl.searchParams.set("limit", "5");
+  histUrl.searchParams.set("sort", "period_of_report_date");
+  histUrl.searchParams.set("order", "desc");
+  histUrl.searchParams.set("apiKey", apiKey);
+  const hr = await fetch(histUrl.toString());
+  if (hr.ok) history = (await hr.json()) as FinResp;
+  return { latest, history };
+}
+
+/**
+ * Compute the 5-year CAGR of net income from a sorted (newest-first)
+ * list of annual filings. Returns null if insufficient data, negative
+ * starting value, or implausible CAGR (cap at ±50% to avoid garbage).
+ */
+function computeHistoricalCagr(history: FinResp | null): number | null {
+  const results = history?.results;
+  if (!results || results.length < 2) return null;
+  // results[0] = newest, results[N-1] = oldest
+  const newest = results[0]?.financials?.income_statement
+    ?.net_income_loss_attributable_to_parent?.value
+    ?? results[0]?.financials?.income_statement?.net_income_loss?.value
+    ?? null;
+  const oldest = results[results.length - 1]?.financials?.income_statement
+    ?.net_income_loss_attributable_to_parent?.value
+    ?? results[results.length - 1]?.financials?.income_statement?.net_income_loss?.value
+    ?? null;
+  if (newest == null || oldest == null) return null;
+  if (oldest <= 0 || newest <= 0) return null; // CAGR undefined for negative
+  const periods = results.length - 1; // 5 filings = 4 intervals
+  const cagr = Math.pow(newest / oldest, 1 / periods) - 1;
+  const pct = cagr * 100;
+  if (!isFinite(pct)) return null;
+  return Math.max(-50, Math.min(50, pct)); // clamp
 }
 
 async function fetchReference(ticker: string, apiKey: string) {
@@ -169,13 +212,14 @@ Deno.serve(async (req) => {
         const row = queue.shift()!;
         const t = row.ticker.toUpperCase();
         try {
-          const [refResp, finResp] = await Promise.all([
+          const [refResp, finBundle] = await Promise.all([
             fetchReference(t, polygonKey!),
             fetchFinancials(t, polygonKey!),
           ]);
 
           const ref = refResp?.results;
-          const fin = finResp?.results?.[0]?.financials;
+          const fin = finBundle.latest?.results?.[0]?.financials;
+          const histCagr = computeHistoricalCagr(finBundle.history);
           const cfo =
             fin?.cash_flow_statement?.net_cash_flow_from_operating_activities
               ?.value ?? null;
@@ -258,6 +302,7 @@ Deno.serve(async (req) => {
           const niRaw = netIncome;
           if (equityRaw != null) patch.equity_book = equityRaw / 1_000_000;
           if (niRaw != null) patch.net_income_ttm = niRaw / 1_000_000;
+          if (histCagr != null) patch.historical_growth_pct = histCagr;
 
           // If we have all the inputs, recompute intrinsic + TBPs from the
           // analyst's existing assumptions.

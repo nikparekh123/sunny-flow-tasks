@@ -62,7 +62,14 @@ export default function Snowball() {
   const [watchOnly, setWatchOnly] = useState(false);
   const [qualityOnly, setQualityOnly] = useState(false);
   const [search, setSearch] = useState("");
-  const [opened, setOpened] = useState<ComputedStock | null>(null);
+  const [openedTicker, setOpenedTicker] = useState<string | null>(null);
+  // Drawer always reads from the current query cache so a save → refetch
+  // surfaces the new values immediately without manual remount.
+  const opened = openedTicker
+    ? (all.find((s) => s.ticker === openedTicker) ?? null)
+    : null;
+  const setOpened = (s: ComputedStock | null) =>
+    setOpenedTicker(s?.ticker ?? null);
   const [shown, setShown] = useState(PAGE_SIZE);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -919,7 +926,21 @@ function Card({
       }
     >
       {ranked && <span className="sb-rank">#{s.rank}</span>}
-      {s.is_high_quality && (
+      {s.is_customized && (
+        <span
+          className="sb-hold-tag"
+          style={{
+            top: 12,
+            right: 44,
+            background: "rgba(210,230,50,.30)",
+            color: "rgba(0,0,0,.95)",
+          }}
+          title="Manually adjusted — your assumptions, not universe defaults"
+        >
+          ✎ MANUAL
+        </span>
+      )}
+      {s.is_high_quality && !s.is_customized && (
         <span
           className="sb-hold-tag"
           style={{
@@ -928,7 +949,7 @@ function Card({
             background: "rgba(210,230,50,.30)",
             color: "rgba(0,0,0,.95)",
           }}
-          title={`5-yr ROE ${s.roe?.toFixed(0)}% — high quality business`}
+          title={`ROE ${s.roe?.toFixed(0)}% — high quality business`}
         >
           ★ QUALITY
         </span>
@@ -1264,7 +1285,35 @@ function DetailDrawer({
           </div>
         </div>
 
-        <h3>Tune assumptions</h3>
+        <h3>
+          Tune assumptions{" "}
+          {s.is_customized && (
+            <span
+              style={{
+                color: "var(--navi-neon)",
+                fontSize: 9,
+                fontWeight: 500,
+                letterSpacing: 1,
+                marginLeft: 8,
+              }}
+            >
+              ✎ MANUAL
+            </span>
+          )}
+        </h3>
+        {s.historical_growth_pct != null && (
+          <button
+            className="sb-btn-tinted"
+            style={{ marginBottom: 12, fontSize: 11 }}
+            onClick={() => {
+              setGrowth(s.historical_growth_pct ?? growth);
+              setGrowth2(((s.historical_growth_pct ?? growth) + terminal) / 2);
+            }}
+            title="Auto-fill Stage 1 with 5-year historical net-income CAGR; Stage 2 fades to terminal"
+          >
+            ↺ Use 5-yr historical · {s.historical_growth_pct.toFixed(1)}%
+          </button>
+        )}
         <div className="sb-slider-block">
           <Slider
             label="Stage 1 growth · y1-5"

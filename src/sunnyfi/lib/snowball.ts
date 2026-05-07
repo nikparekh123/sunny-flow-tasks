@@ -53,8 +53,11 @@ export interface Stock {
   // Quality
   equity_book: number | null;
   net_income_ttm: number | null;
-  roe: number | null;            // % (e.g. 24.5 means 24.5%)
+  roe: number | null;
   is_high_quality: boolean;
+  // Customization tracking + historical growth (Phase B)
+  is_customized: boolean;
+  historical_growth_pct: number | null;
 }
 
 /** Computed view of a Stock with the derived fields used by the UI. */
@@ -354,7 +357,7 @@ export async function updateMultiples(
 ): Promise<void> {
   const { error } = await supabase
     .from("snowball" as never)
-    .update(patch as never)
+    .update({ ...patch, is_customized: true } as never)
     .eq("ticker", ticker);
   if (error) throw error;
 }
@@ -447,9 +450,10 @@ export async function updateAssumptions(
   const newIntrinsic = dcfIntrinsic(merged);
 
   const updatePatch: Record<string, unknown> = { ...patch };
+  // Mark as manually customized so the UI can badge it.
+  updatePatch.is_customized = true;
   if (newIntrinsic != null) {
     updatePatch.intrinsic_value = newIntrinsic;
-    // Recompute the three TBP fields with their margins of safety.
     updatePatch.tbp_aggressive_15 = newIntrinsic * 0.85;
     updatePatch.tbp_conservative_30 = newIntrinsic * 0.7;
     updatePatch.tbp_deep_value_50 = newIntrinsic * 0.5;
