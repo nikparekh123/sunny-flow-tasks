@@ -1144,47 +1144,33 @@ function DetailDrawer({
         <h3>Five lenses · weighted</h3>
         <div
           className="sb-tbp-grid"
-          style={{ gridTemplateColumns: "repeat(5, 1fr)" }}
+          style={{ gridTemplateColumns: "repeat(3, 1fr)" }}
         >
-          <div className="sb-lens">
-            <div className="lbl">DCF</div>
-            <div className="val">
-              {fmtPrice2(dirty ? liveIntrinsic : s.intrinsic_dcf)}
-            </div>
-            <div className="sub">
-              {Math.round((s.weight_dcf ?? 0.30) * 100)}% growth
-            </div>
-          </div>
-          <div className="sb-lens">
-            <div className="lbl">EPV</div>
-            <div className="val">{fmtPrice2(s.intrinsic_epv)}</div>
-            <div className="sub">
-              {Math.round((s.weight_epv ?? 0.25) * 100)}% no-growth
-            </div>
-          </div>
-          <div className="sb-lens">
-            <div className="lbl">EV/EBITDA</div>
-            <div className="val">{fmtPrice2(s.intrinsic_ev_ebitda)}</div>
-            <div className="sub">
-              {Math.round((s.weight_ev_ebitda ?? 0.20) * 100)}% × {(s.target_ev_ebitda ?? 12).toFixed(0)}x
-            </div>
-          </div>
-          <div className="sb-lens">
-            <div className="lbl">P/E</div>
-            <div className="val">{fmtPrice2(s.intrinsic_pe)}</div>
-            <div className="sub">
-              {Math.round((s.weight_pe ?? 0.15) * 100)}% × {(s.target_pe ?? 18).toFixed(0)}x
-            </div>
-          </div>
-          <div className="sb-lens">
-            <div className="lbl">Earn yield</div>
-            <div className="val">
-              {fmtPrice2(s.intrinsic_earnings_yield)}
-            </div>
-            <div className="sub">
-              {Math.round((s.weight_earnings_yield ?? 0.10) * 100)}% EPS / WACC
-            </div>
-          </div>
+          <Lens
+            label="DCF"
+            value={dirty ? liveIntrinsic : s.intrinsic_dcf}
+            sub={`${Math.round((s.weight_dcf ?? 0.3) * 100)}% · growth`}
+          />
+          <Lens
+            label="EPV"
+            value={s.intrinsic_epv}
+            sub={`${Math.round((s.weight_epv ?? 0.25) * 100)}% · no-growth`}
+          />
+          <Lens
+            label="EV/EBITDA"
+            value={s.intrinsic_ev_ebitda}
+            sub={`${Math.round((s.weight_ev_ebitda ?? 0.2) * 100)}% · ${(s.target_ev_ebitda ?? 12).toFixed(0)}x`}
+          />
+          <Lens
+            label="P/E"
+            value={s.intrinsic_pe}
+            sub={`${Math.round((s.weight_pe ?? 0.15) * 100)}% · ${(s.target_pe ?? 18).toFixed(0)}x`}
+          />
+          <Lens
+            label="Earn yield"
+            value={s.intrinsic_earnings_yield}
+            sub={`${Math.round((s.weight_earnings_yield ?? 0.1) * 100)}% · EPS/WACC`}
+          />
         </div>
 
         {s.intrinsic_dcf != null && s.intrinsic_epv != null && (
@@ -1399,6 +1385,24 @@ function Fund({ l, v }: { l: string; v: string }) {
     <div className="sb-fund">
       <div className="l">{l}</div>
       <div className="v">{v}</div>
+    </div>
+  );
+}
+
+function Lens({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: number | null;
+  sub: string;
+}) {
+  return (
+    <div className="sb-lens">
+      <div className="lbl">{label}</div>
+      <div className="val">{fmtPrice2(value)}</div>
+      <div className="sub" style={{ whiteSpace: "nowrap" }}>{sub}</div>
     </div>
   );
 }
