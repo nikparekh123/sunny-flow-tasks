@@ -42,11 +42,18 @@ export interface Stock {
   intrinsic_pe: number | null;
   intrinsic_ev_ebitda: number | null;
   intrinsic_epv: number | null;
+  intrinsic_earnings_yield: number | null;
   intrinsic_weighted: number | null;
   weight_dcf: number | null;
   weight_pe: number | null;
   weight_ev_ebitda: number | null;
   weight_epv: number | null;
+  weight_earnings_yield: number | null;
+  // Quality
+  equity_book: number | null;
+  net_income_ttm: number | null;
+  roe: number | null;            // % (e.g. 24.5 means 24.5%)
+  is_high_quality: boolean;
 }
 
 /** Computed view of a Stock with the derived fields used by the UI. */

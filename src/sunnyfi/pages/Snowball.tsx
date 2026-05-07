@@ -58,6 +58,7 @@ export default function Snowball() {
   const [sort, setSort] = useState<SortKey>("Most undervalued");
   const [watchOnly, setWatchOnly] = useState(false);
   const [hideOvervalued, setHideOvervalued] = useState(false);
+  const [qualityOnly, setQualityOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [opened, setOpened] = useState<ComputedStock | null>(null);
   const [shown, setShown] = useState(PAGE_SIZE);
@@ -109,6 +110,7 @@ export default function Snowball() {
     if (hideOvervalued) {
       r = r.filter((s) => !s.intrinsic_invalid && s.upside > 0);
     }
+    if (qualityOnly) r = r.filter((s) => s.is_high_quality);
     const q = search.trim().toLowerCase();
     if (q) {
       r = r.filter(
@@ -118,7 +120,7 @@ export default function Snowball() {
       );
     }
     return sortStocks(r, sort);
-  }, [all, filter, sort, watchOnly, hideOvervalued, search]);
+  }, [all, filter, sort, watchOnly, hideOvervalued, qualityOnly, search]);
 
   // Reset paging when the visible list size changes meaningfully.
   const filteredLen = filtered.length;
@@ -267,6 +269,13 @@ export default function Snowball() {
                   title="Show only stocks where intrinsic > price"
                 >
                   ↑ Undervalued only
+                </button>
+                <button
+                  className={"sb-toggle " + (qualityOnly ? "on" : "")}
+                  onClick={() => setQualityOnly((v) => !v)}
+                  title="Show only stocks with ROE ≥ 15% — Buffett-style quality screen"
+                >
+                  ★ Quality only
                 </button>
                 <button
                   className={"sb-toggle " + (watchOnly ? "on" : "")}
@@ -751,6 +760,20 @@ function Card({
       }
     >
       {ranked && <span className="sb-rank">#{s.rank}</span>}
+      {s.is_high_quality && (
+        <span
+          className="sb-hold-tag"
+          style={{
+            top: 12,
+            right: s.hold_position ? 92 : 44,
+            background: "rgba(210,230,50,.30)",
+            color: "rgba(0,0,0,.95)",
+          }}
+          title={`5-yr ROE ${s.roe?.toFixed(0)}% — high quality business`}
+        >
+          ★ QUALITY
+        </span>
+      )}
       {s.hold_position && <span className="sb-hold-tag">HOLD</span>}
       <button
         type="button"
@@ -981,10 +1004,10 @@ function DetailDrawer({
           )}
         </div>
 
-        <h3>Four lenses · weighted</h3>
+        <h3>Five lenses · weighted</h3>
         <div
           className="sb-tbp-grid"
-          style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
+          style={{ gridTemplateColumns: "repeat(5, 1fr)" }}
         >
           <div className="sb-lens">
             <div className="lbl">DCF</div>
@@ -992,21 +1015,21 @@ function DetailDrawer({
               {fmtPrice2(dirty ? liveIntrinsic : s.intrinsic_dcf)}
             </div>
             <div className="sub">
-              {Math.round((s.weight_dcf ?? 0.35) * 100)}% growth model
+              {Math.round((s.weight_dcf ?? 0.30) * 100)}% growth
             </div>
           </div>
           <div className="sb-lens">
             <div className="lbl">EPV</div>
             <div className="val">{fmtPrice2(s.intrinsic_epv)}</div>
             <div className="sub">
-              {Math.round((s.weight_epv ?? 0.25) * 100)}% no-growth floor
+              {Math.round((s.weight_epv ?? 0.25) * 100)}% no-growth
             </div>
           </div>
           <div className="sb-lens">
             <div className="lbl">EV/EBITDA</div>
             <div className="val">{fmtPrice2(s.intrinsic_ev_ebitda)}</div>
             <div className="sub">
-              {Math.round((s.weight_ev_ebitda ?? 0.25) * 100)}% × {(s.target_ev_ebitda ?? 12).toFixed(0)}x
+              {Math.round((s.weight_ev_ebitda ?? 0.20) * 100)}% × {(s.target_ev_ebitda ?? 12).toFixed(0)}x
             </div>
           </div>
           <div className="sb-lens">
@@ -1014,6 +1037,15 @@ function DetailDrawer({
             <div className="val">{fmtPrice2(s.intrinsic_pe)}</div>
             <div className="sub">
               {Math.round((s.weight_pe ?? 0.15) * 100)}% × {(s.target_pe ?? 18).toFixed(0)}x
+            </div>
+          </div>
+          <div className="sb-lens">
+            <div className="lbl">Earn yield</div>
+            <div className="val">
+              {fmtPrice2(s.intrinsic_earnings_yield)}
+            </div>
+            <div className="sub">
+              {Math.round((s.weight_earnings_yield ?? 0.10) * 100)}% EPS / WACC
             </div>
           </div>
         </div>
@@ -1157,6 +1189,14 @@ function DetailDrawer({
           <Fund l="Dividend yield" v={fmtPct(s.dividend_yield_pct, 2)} />
           <Fund l="Industry" v={s.industry ?? "—"} />
           <Fund l="Earnings" v={s.earnings_date ?? "—"} />
+          <Fund
+            l="ROE"
+            v={
+              s.roe != null
+                ? `${s.roe.toFixed(1)}%${s.is_high_quality ? " ★" : ""}`
+                : "—"
+            }
+          />
           <Fund l="Distance" v={s.distance_to_buy ?? "—"} />
         </div>
 

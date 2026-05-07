@@ -45,6 +45,10 @@ interface FinResp {
         // Cash + equivalents not always broken out — use current assets'
         // first slot or fall back.
         cash_and_cash_equivalents_at_carrying_value?: { value?: number };
+        // For ROE = net_income / equity. Polygon reports "equity" or
+        // "equity_attributable_to_parent" depending on filing.
+        equity?: { value?: number };
+        equity_attributable_to_parent?: { value?: number };
       };
     };
   }[];
@@ -245,6 +249,15 @@ Deno.serve(async (req) => {
           if (ebitda != null) patch.ebitda_ttm = ebitda;
           if (debt != null) patch.total_debt = debt;
           if (cash != null) patch.cash_and_equivalents = cash;
+
+          // Equity book value (for ROE) and net income TTM.
+          const equityRaw =
+            fin?.balance_sheet?.equity_attributable_to_parent?.value ??
+            fin?.balance_sheet?.equity?.value ??
+            null;
+          const niRaw = netIncome;
+          if (equityRaw != null) patch.equity_book = equityRaw / 1_000_000;
+          if (niRaw != null) patch.net_income_ttm = niRaw / 1_000_000;
 
           // If we have all the inputs, recompute intrinsic + TBPs from the
           // analyst's existing assumptions.
