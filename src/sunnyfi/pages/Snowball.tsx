@@ -74,23 +74,28 @@ export default function Snowball() {
 
   /**
    * Single "Sync from API" runs both edge functions sequentially:
-   *   1. refresh-snowball        → live price + change %
-   *   2. sync-snowball-fundamentals → financials + 5-yr CAGR + auto-apply
-   * Then refetches the table. Total ~3-5 min.
+   *   1. refresh-snowball         → live price + change %
+   *   2. sync-snowball-fundamentals → financials + 5-yr CAGR + auto-derive sector
+   * Then refetches the table. Total ~3-5 min. Uses a single loading
+   * toast that updates in place so we don't spam notifications.
    */
   const handleSync = async () => {
     setSyncing(true);
+    const toastId = toast.loading("Pulling live prices from Polygon…");
     try {
-      toast.info("Pulling prices…");
       const r1 = await refreshSnowball();
-      toast.info(`Prices done (${r1.updated}/${r1.total}). Pulling fundamentals…`);
+      toast.loading(
+        `Prices: ${r1.updated}/${r1.total}. Pulling fundamentals (this is the slow one, 3-5 min)…`,
+        { id: toastId },
+      );
       const r2 = await syncFundamentals();
       stocksQ.refetch();
       toast.success(
-        `Synced ${r2.updated}/${r2.total} stocks. Fundamentals + historical growth applied.`,
+        `Synced ${r2.updated}/${r2.total} stocks. Sector + 5-yr CAGR applied. Click ⛁ Sector defaults next to recompute lenses.`,
+        { id: toastId },
       );
     } catch (e) {
-      toast.error(`Sync failed: ${(e as Error).message}`);
+      toast.error(`Sync failed: ${(e as Error).message}`, { id: toastId });
     } finally {
       setSyncing(false);
     }
@@ -555,7 +560,6 @@ function AddStockModal({
 }) {
   const initial = loadDefaults();
   const [ticker, setTicker] = useState("");
-  const [sector, setSector] = useState<string>("Technology");
   const [growth, setGrowth] = useState(initial.growth);
   const [growth2, setGrowth2] = useState(
     initial.growth2 ?? (initial.growth + initial.terminal) / 2,
@@ -568,16 +572,6 @@ function AddStockModal({
   const [hold, setHold] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Pull live sector list so what we offer matches what sector defaults
-  // know about — guarantees the new stock's sector will JOIN.
-  const [sectors, setSectors] = useState<string[]>([]);
-  useMemo(() => {
-    fetchSectorDefaults()
-      .then((rows) => setSectors(rows.map((r) => r.sector)))
-      .catch(() => setSectors([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const valid = ticker.trim().length > 0 && discount > terminal;
 
   const handleSave = async () => {
@@ -586,7 +580,6 @@ function AddStockModal({
     try {
       const input: NewStockInput = {
         ticker: ticker.trim().toUpperCase(),
-        sector,
         stage1_growth_pct: growth,
         stage2_growth_pct: growth2,
         discount_rate_pct: discount,
@@ -598,7 +591,7 @@ function AddStockModal({
       };
       await addStock(input);
       toast.success(
-        `${input.ticker} added. Click "⟳ Sync fundamentals" to pull data.`,
+        `${input.ticker} added. Click "↻ Sync from API" to pull price, fundamentals, and sector.`,
       );
       onAdded();
       onClose();
@@ -637,24 +630,6 @@ function AddStockModal({
           value={ticker}
           onChange={(e) => setTicker(e.target.value.toUpperCase())}
         />
-
-        <h3>Sector</h3>
-        <select
-          className="sb-search"
-          style={{ width: "100%", fontFamily: "var(--navi-font-sans)" }}
-          value={sector}
-          onChange={(e) => setSector(e.target.value)}
-        >
-          {sectors.length === 0 ? (
-            <option value="Technology">Technology</option>
-          ) : (
-            sectors.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))
-          )}
-        </select>
         <p
           style={{
             fontSize: 11,
@@ -663,10 +638,11 @@ function AddStockModal({
             fontFamily: "var(--navi-font-mono)",
           }}
         >
-          Sector decides which sector-defaults regime this stock inherits.
+          Sector, name, price, and fundamentals are pulled from Polygon
+          when you click ↻ Sync from API after saving.
         </p>
 
-        <h3>Assumptions</h3>
+        <h3>Assumptions · starting values</h3>
         <div className="sb-slider-block">
           <Slider
             label="Stage 1 growth · y1-5"
