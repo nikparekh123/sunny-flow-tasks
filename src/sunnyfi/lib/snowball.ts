@@ -375,6 +375,15 @@ export async function updateMultiples(
     .update({ ...patch, is_customized: true } as never)
     .eq("ticker", ticker);
   if (error) throw error;
+  // Same recompute-all pattern so EV/EBITDA and weighted update too.
+  const { error: rcErr } = await (supabase.rpc as unknown as (
+    name: string,
+    args: { p_ticker: string },
+  ) => Promise<{ error: unknown }>)(
+    "snowball_recompute_one",
+    { p_ticker: ticker },
+  );
+  if (rcErr) throw rcErr;
 }
 
 /**
@@ -432,56 +441,39 @@ export interface AssumptionPatch {
 }
 
 /**
- * Save assumption changes for a single ticker, recomputing intrinsic from
- * the existing total_owner_earnings + shares_outstanding (those don't move
- * unless you re-import the CSV). Returns the updated row.
+ * Save assumption changes for a single ticker. Writes the new assumptions,
+ * then asks the server to recompute ALL 5 lenses + weighted intrinsic so
+ * the headline value matches the saved inputs (not just the DCF lens).
  */
 export async function updateAssumptions(
   ticker: string,
   patch: AssumptionPatch,
 ): Promise<Stock> {
-  // Read current row to recompute intrinsic from the new inputs.
-  const { data: current, error: readErr } = await supabase
+  // 1) Write the new assumption values + mark customized.
+  const { error: upErr } = await supabase
+    .from("snowball" as never)
+    .update({ ...patch, is_customized: true } as never)
+    .eq("ticker", ticker);
+  if (upErr) throw upErr;
+
+  // 2) Recompute every lens server-side using the freshly-saved inputs.
+  const { error: rcErr } = await (supabase.rpc as unknown as (
+    name: string,
+    args: { p_ticker: string },
+  ) => Promise<{ error: unknown }>)(
+    "snowball_recompute_one",
+    { p_ticker: ticker },
+  );
+  if (rcErr) throw rcErr;
+
+  // 3) Read back the post-recompute row.
+  const { data, error } = await supabase
     .from("snowball" as never)
     .select("*")
     .eq("ticker", ticker)
     .maybeSingle();
-  if (readErr) throw readErr;
-  if (!current) throw new Error(`Ticker ${ticker} not found.`);
-
-  const row = current as unknown as Stock;
-  const merged = {
-    total_owner_earnings: row.total_owner_earnings ?? 0,
-    shares_outstanding: row.shares_outstanding ?? 0,
-    stage1_growth_pct:
-      patch.stage1_growth_pct ?? row.stage1_growth_pct ?? 0,
-    stage2_growth_pct:
-      patch.stage2_growth_pct ?? row.stage2_growth_pct ?? undefined,
-    discount_rate_pct:
-      patch.discount_rate_pct ?? row.discount_rate_pct ?? 0,
-    terminal_growth_pct:
-      patch.terminal_growth_pct ?? row.terminal_growth_pct ?? 0,
-  };
-  const newIntrinsic = dcfIntrinsic(merged);
-
-  const updatePatch: Record<string, unknown> = { ...patch };
-  // Mark as manually customized so the UI can badge it.
-  updatePatch.is_customized = true;
-  if (newIntrinsic != null) {
-    updatePatch.intrinsic_value = newIntrinsic;
-    updatePatch.tbp_aggressive_15 = newIntrinsic * 0.85;
-    updatePatch.tbp_conservative_30 = newIntrinsic * 0.7;
-    updatePatch.tbp_deep_value_50 = newIntrinsic * 0.5;
-  }
-
-  const { data, error } = await supabase
-    .from("snowball" as never)
-    .update(updatePatch as never)
-    .eq("ticker", ticker)
-    .select()
-    .maybeSingle();
   if (error) throw error;
-  if (!data) throw new Error("Update blocked or row not found.");
+  if (!data) throw new Error("Row not found after update.");
   return data as unknown as Stock;
 }
 
