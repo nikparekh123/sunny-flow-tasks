@@ -41,10 +41,12 @@ export interface Stock {
   intrinsic_dcf: number | null;
   intrinsic_pe: number | null;
   intrinsic_ev_ebitda: number | null;
+  intrinsic_epv: number | null;
   intrinsic_weighted: number | null;
   weight_dcf: number | null;
   weight_pe: number | null;
   weight_ev_ebitda: number | null;
+  weight_epv: number | null;
 }
 
 /** Computed view of a Stock with the derived fields used by the UI. */

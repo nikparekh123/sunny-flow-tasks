@@ -981,32 +981,69 @@ function DetailDrawer({
           )}
         </div>
 
-        <h3>Three lenses</h3>
-        <div className="sb-tbp-grid">
+        <h3>Four lenses · weighted</h3>
+        <div
+          className="sb-tbp-grid"
+          style={{ gridTemplateColumns: "repeat(4, 1fr)" }}
+        >
           <div className="sb-lens">
             <div className="lbl">DCF</div>
             <div className="val">
               {fmtPrice2(dirty ? liveIntrinsic : s.intrinsic_dcf)}
             </div>
             <div className="sub">
-              weight {Math.round((s.weight_dcf ?? 0.4) * 100)}%
+              {Math.round((s.weight_dcf ?? 0.35) * 100)}% growth model
             </div>
           </div>
           <div className="sb-lens">
-            <div className="lbl">P/E</div>
-            <div className="val">{fmtPrice2(s.intrinsic_pe)}</div>
+            <div className="lbl">EPV</div>
+            <div className="val">{fmtPrice2(s.intrinsic_epv)}</div>
             <div className="sub">
-              eps {fmtPrice2(s.eps_ttm)} × {(s.target_pe ?? 18).toFixed(0)}x
+              {Math.round((s.weight_epv ?? 0.25) * 100)}% no-growth floor
             </div>
           </div>
           <div className="sb-lens">
             <div className="lbl">EV/EBITDA</div>
             <div className="val">{fmtPrice2(s.intrinsic_ev_ebitda)}</div>
             <div className="sub">
-              ebitda × {(s.target_ev_ebitda ?? 12).toFixed(0)}x
+              {Math.round((s.weight_ev_ebitda ?? 0.25) * 100)}% × {(s.target_ev_ebitda ?? 12).toFixed(0)}x
+            </div>
+          </div>
+          <div className="sb-lens">
+            <div className="lbl">P/E</div>
+            <div className="val">{fmtPrice2(s.intrinsic_pe)}</div>
+            <div className="sub">
+              {Math.round((s.weight_pe ?? 0.15) * 100)}% × {(s.target_pe ?? 18).toFixed(0)}x
             </div>
           </div>
         </div>
+
+        {s.intrinsic_dcf != null && s.intrinsic_epv != null && (
+          <div
+            style={{
+              fontSize: 11,
+              fontFamily: "var(--navi-font-mono)",
+              color: "var(--navi-fg3)",
+              marginTop: 8,
+              padding: "8px 12px",
+              background: "rgba(0,0,0,.18)",
+              borderRadius: 6,
+            }}
+          >
+            <strong style={{ color: "var(--navi-fg2)" }}>Growth premium:</strong>{" "}
+            DCF is{" "}
+            <span
+              style={{
+                color: "var(--navi-neon)",
+                fontWeight: 500,
+              }}
+            >
+              {(((s.intrinsic_dcf - s.intrinsic_epv) / s.intrinsic_epv) * 100).toFixed(0)}%
+            </span>{" "}
+            higher than EPV — that's what you're paying for future growth. Big
+            gap = expensive optionality.
+          </div>
+        )}
 
         <h3>Target buy prices</h3>
         <div className="sb-tbp-grid">
