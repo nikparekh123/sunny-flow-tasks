@@ -150,8 +150,16 @@ Deno.serve(async (req) => {
     const writes: { ticker: string; patch: Record<string, unknown> }[] = [];
     for (const t of tickers) {
       const snap = snapshots.get(t);
+      // Polygon writes 0 (not null) into lastTrade.p / day.c during
+      // pre-market sessions, so `??` fallback locks in the zero. Use a
+      // positive-number guard and fall through to prevDay.c (yesterday's
+      // close), which is always populated.
+      const pickPrice = (n: unknown): number | null =>
+        typeof n === "number" && n > 0 ? n : null;
       const last =
-        snap?.lastTrade?.p ?? snap?.day?.c ?? snap?.prevDay?.c ?? null;
+        pickPrice(snap?.lastTrade?.p) ??
+        pickPrice(snap?.day?.c) ??
+        pickPrice(snap?.prevDay?.c);
       if (last == null) {
         missing.push(t);
         continue;
