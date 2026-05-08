@@ -461,6 +461,40 @@ export function dcfIntrinsic(opts: {
   return pv / shares_outstanding;
 }
 
+export interface LensWeightsPatch {
+  weight_dcf: number;
+  weight_epv: number;
+  weight_ev_ebitda: number;
+  weight_ev_revenue: number;
+  weight_pe: number;
+  weight_earnings_yield: number;
+}
+
+/**
+ * Persist per-lens weights for a single ticker. Excluded lenses are passed
+ * as 0; the caller is responsible for normalising the live (kept) lenses
+ * so the saved weights sum to 1. Triggers a server-side recompute so the
+ * weighted intrinsic_value picks up the new mix.
+ */
+export async function updateLensWeights(
+  ticker: string,
+  weights: LensWeightsPatch,
+): Promise<void> {
+  const { error } = await supabase
+    .from("snowball" as never)
+    .update({ ...weights, is_customized: true } as never)
+    .eq("ticker", ticker);
+  if (error) throw error;
+  const { error: rcErr } = await (supabase.rpc as unknown as (
+    name: string,
+    args: { p_ticker: string },
+  ) => Promise<{ error: unknown }>)(
+    "snowball_recompute_one",
+    { p_ticker: ticker },
+  );
+  if (rcErr) throw rcErr;
+}
+
 export interface AssumptionPatch {
   stage1_growth_pct?: number;
   stage2_growth_pct?: number;
