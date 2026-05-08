@@ -5,7 +5,7 @@
  * function from Polygon). Static analysis fields (intrinsic, growth, tier)
  * come from the CSV import; price + 52w high/low come from Polygon.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -23,6 +23,10 @@ import {
   saveSectorDefaults,
   updateMultiples,
   updateLensWeights,
+  updateTags,
+  hydrateNewStock,
+  suggestTags,
+  normalizeTag,
   type NewStockInput,
   type SectorDefault,
   dcfIntrinsic,
@@ -56,7 +60,16 @@ export default function Snowball() {
     return Array.from(s).sort();
   }, [all]);
 
+  // Distinct lower-cased tags across the whole universe — used by the
+  // toolbar filter and by the per-stock tag editor for de-dup suggestions.
+  const universeTags = useMemo(() => {
+    const s = new Set<string>();
+    all.forEach((x) => x.tags?.forEach((t) => t && s.add(t)));
+    return Array.from(s).sort();
+  }, [all]);
+
   const [filter, setFilter] = useState<string>("All");
+  const [tagFilter, setTagFilter] = useState<string>("All");
   const [sort, setSort] = useState<SortKey>("Most undervalued");
   const [watchOnly, setWatchOnly] = useState(false);
   const [qualityOnly, setQualityOnly] = useState(false);
@@ -111,6 +124,7 @@ export default function Snowball() {
   const filtered = useMemo(() => {
     let r = all;
     if (filter !== "All") r = r.filter((s) => s.sector === filter);
+    if (tagFilter !== "All") r = r.filter((s) => s.tags?.includes(tagFilter));
     if (watchOnly) r = r.filter((s) => s.watchlist);
     if (qualityOnly) r = r.filter((s) => s.is_high_quality);
     const q = search.trim().toLowerCase();
@@ -122,7 +136,7 @@ export default function Snowball() {
       );
     }
     return sortStocks(r, sort);
-  }, [all, filter, sort, watchOnly, qualityOnly, search]);
+  }, [all, filter, tagFilter, sort, watchOnly, qualityOnly, search]);
 
   // Reset paging when the visible list size changes meaningfully.
   const filteredLen = filtered.length;
@@ -210,6 +224,21 @@ export default function Snowball() {
                     {["All", ...sectors].map((s) => (
                       <option key={s} value={s}>
                         {s}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="sb-select-caret">▾</span>
+                </label>
+                <label className="sb-select">
+                  <span className="sb-select-lbl">Tag</span>
+                  <select
+                    value={tagFilter}
+                    onChange={(e) => setTagFilter(e.target.value)}
+                    disabled={universeTags.length === 0}
+                  >
+                    {["All", ...universeTags].map((t) => (
+                      <option key={t} value={t}>
+                        {t === "All" ? "All" : `# ${t}`}
                       </option>
                     ))}
                   </select>
@@ -353,6 +382,7 @@ export default function Snowball() {
       {opened && (
         <DetailDrawer
           stock={opened}
+          universeTags={universeTags}
           onClose={() => setOpened(null)}
           onToggleWatch={() => toggleWatch(opened.ticker, opened.watchlist)}
         />
@@ -595,26 +625,47 @@ function AddStockModal({
   const handleSave = async () => {
     if (!valid) return;
     setSaving(true);
+    const input: NewStockInput = {
+      ticker: ticker.trim().toUpperCase(),
+      stage1_growth_pct: growth,
+      stage2_growth_pct: growth2,
+      discount_rate_pct: discount,
+      terminal_growth_pct: terminal,
+      target_pe: targetPe,
+      target_ev_ebitda: targetEvEbitda,
+      watchlist: pin,
+      hold_position: hold,
+    };
+    const toastId = toast.loading(`Adding ${input.ticker}…`);
     try {
-      const input: NewStockInput = {
-        ticker: ticker.trim().toUpperCase(),
-        stage1_growth_pct: growth,
-        stage2_growth_pct: growth2,
-        discount_rate_pct: discount,
-        terminal_growth_pct: terminal,
-        target_pe: targetPe,
-        target_ev_ebitda: targetEvEbitda,
-        watchlist: pin,
-        hold_position: hold,
-      };
       await addStock(input);
-      toast.success(
-        `${input.ticker} added. Click "↻ Sync from API" to pull price, fundamentals, and sector.`,
+      toast.loading(
+        `${input.ticker} added. Pulling price + fundamentals from Polygon…`,
+        { id: toastId },
       );
+      // Close the modal first — hydration runs in background and refetches
+      // when complete so the new card materialises with real data.
       onAdded();
       onClose();
+      // Auto-hydrate so the user doesn't have to click "Sync from API"
+      // for a single new ticker. Per-ticker path is fast (~5s).
+      try {
+        await hydrateNewStock(input.ticker);
+        toast.success(
+          `${input.ticker} added with live data. Open the card to inspect.`,
+          { id: toastId },
+        );
+      } catch (hydrateErr) {
+        // Insert succeeded; only the backfill failed. Tell the user so
+        // they can retry via the universe-wide ↻ button.
+        toast.error(
+          `${input.ticker} added but auto-fetch failed: ${(hydrateErr as Error).message}. Try ↻ Sync from API.`,
+          { id: toastId, duration: 8000 },
+        );
+      }
+      onAdded();
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error((e as Error).message, { id: toastId });
       setSaving(false);
     }
   };
@@ -977,10 +1028,12 @@ const LENS_META: ReadonlyArray<{
 
 function DetailDrawer({
   stock,
+  universeTags,
   onClose,
   onToggleWatch,
 }: {
   stock: ComputedStock;
+  universeTags: string[];
   onClose: () => void;
   onToggleWatch: () => void;
 }) {
@@ -1018,6 +1071,10 @@ function DetailDrawer({
   const [lensOn, setLensOn] = useState<Record<LensKey, boolean>>(initial.enabled);
   const [lensW, setLensW] = useState<Record<LensKey, number>>(initial.raw);
 
+  // Tags — local copy persists immediately on add/remove (no batch with
+  // the recompute pipeline so users get instant feedback).
+  const [tags, setTags] = useState<string[]>(s.tags ?? []);
+
   // Reset all local state when a different stock is opened.
   useMemo(() => {
     setGrowth(s.stage1_growth_pct ?? 5);
@@ -1030,8 +1087,21 @@ function DetailDrawer({
     const re = initLensState(s);
     setLensOn(re.enabled);
     setLensW(re.raw);
+    setTags(s.tags ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.ticker]);
+
+  const persistTags = async (next: string[]) => {
+    const prev = tags;
+    setTags(next); // optimistic
+    try {
+      await updateTags(s.ticker, next);
+      qc.invalidateQueries({ queryKey: ["snowball", "stocks"] });
+    } catch (e) {
+      setTags(prev);
+      toast.error(`Couldn't update tags: ${(e as Error).message}`);
+    }
+  };
 
   // Live recompute as user drags.
   const liveDcf = useMemo(
@@ -1213,6 +1283,13 @@ function DetailDrawer({
                 </>
               )}
             </div>
+
+            <h3>Tags</h3>
+            <TagEditor
+              tags={tags}
+              universeTags={universeTags}
+              onChange={persistTags}
+            />
 
             <h3>Target buy prices</h3>
             <div className="sb-tbp-grid">
@@ -1473,6 +1550,149 @@ function Fund({ l, v }: { l: string; v: string }) {
     <div className="sb-fund">
       <div className="l">{l}</div>
       <div className="v">{v}</div>
+    </div>
+  );
+}
+
+// ─── Tag editor ───────────────────────────────────────────────
+/**
+ * Tag chip editor with similarity prompts. As the user types, we surface
+ * any existing universe tag that scores ≥ 0.55 similarity so they can
+ * pick it instead of creating a near-duplicate ("compounders" vs
+ * "compounder").
+ */
+function TagEditor({
+  tags,
+  universeTags,
+  onChange,
+}: {
+  tags: string[];
+  universeTags: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const suggestions = useMemo(
+    () => suggestTags(draft, universeTags, tags),
+    [draft, universeTags, tags],
+  );
+  const draftNorm = normalizeTag(draft);
+  // Treat ≥ 0.55 (substring or near-bigram match) as "probably the same".
+  const dupCandidate = suggestions.find((s) => s.score >= 0.55);
+
+  const commit = (raw: string) => {
+    const n = normalizeTag(raw);
+    if (!n) return;
+    if (tags.includes(n)) {
+      setDraft("");
+      return;
+    }
+    onChange([...tags, n]);
+    setDraft("");
+    inputRef.current?.focus();
+  };
+
+  const remove = (t: string) => onChange(tags.filter((x) => x !== t));
+
+  return (
+    <div className="sb-tag-editor">
+      <div className="sb-tag-chiprow">
+        {tags.length === 0 && (
+          <span className="sb-tag-empty">No tags yet — add one below.</span>
+        )}
+        {tags.map((t) => (
+          <span key={t} className="sb-tag-chip">
+            <span className="t">#{t}</span>
+            <button
+              type="button"
+              className="x"
+              onClick={() => remove(t)}
+              aria-label={`Remove ${t}`}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+      </div>
+
+      <div className="sb-tag-inputrow">
+        <input
+          ref={inputRef}
+          type="text"
+          className="sb-tag-input"
+          placeholder="Add a tag (e.g. compounder, AI infra)…"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              commit(draft);
+            } else if (e.key === "Backspace" && draft === "" && tags.length > 0) {
+              remove(tags[tags.length - 1]);
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="sb-btn-tinted"
+          disabled={!draftNorm || tags.includes(draftNorm)}
+          onClick={() => commit(draft)}
+        >
+          + Add
+        </button>
+      </div>
+
+      {dupCandidate && draftNorm !== dupCandidate.tag && (
+        <div className="sb-tag-dup">
+          <span>
+            Similar tag exists: <strong>#{dupCandidate.tag}</strong> — use it instead?
+          </span>
+          <button
+            type="button"
+            className="sb-tag-dup-use"
+            onClick={() => commit(dupCandidate.tag)}
+          >
+            Use existing
+          </button>
+        </div>
+      )}
+
+      {suggestions.length > 0 && draftNorm && (
+        <div className="sb-tag-suggest">
+          <span className="lbl">Suggestions:</span>
+          {suggestions.map((s) => (
+            <button
+              key={s.tag}
+              type="button"
+              className="sb-tag-suggest-chip"
+              onClick={() => commit(s.tag)}
+              title={`${(s.score * 100).toFixed(0)}% match`}
+            >
+              #{s.tag}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!draftNorm && universeTags.length > 0 && (
+        <div className="sb-tag-suggest sb-tag-suggest-quiet">
+          <span className="lbl">Existing tags:</span>
+          {universeTags
+            .filter((t) => !tags.includes(t))
+            .slice(0, 8)
+            .map((t) => (
+              <button
+                key={t}
+                type="button"
+                className="sb-tag-suggest-chip"
+                onClick={() => commit(t)}
+              >
+                #{t}
+              </button>
+            ))}
+        </div>
+      )}
     </div>
   );
 }

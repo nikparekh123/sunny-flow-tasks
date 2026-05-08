@@ -63,6 +63,8 @@ export interface Stock {
   // Customization tracking + historical growth (Phase B)
   is_customized: boolean;
   historical_growth_pct: number | null;
+  // Free-form per-stock tags (lower-cased, unique). Edited from drawer.
+  tags: string[];
 }
 
 /** Computed view of a Stock with the derived fields used by the UI. */
@@ -131,7 +133,128 @@ function compute(s: Stock): ComputedStock {
   // Derive tier live from MoS so the gradient always matches the upside,
   // overriding the (often stale) CSV-derived `tier` column.
   const tier = tierFromMoS(margin_of_safety, intrinsic_invalid);
-  return { ...s, tier, upside, margin_of_safety, market_cap, intrinsic_invalid };
+  // Tags column is post-migration; older rows may still come back null.
+  const tags = Array.isArray(s.tags) ? s.tags : [];
+  return { ...s, tags, tier, upside, margin_of_safety, market_cap, intrinsic_invalid };
+}
+
+// ─── Tags ─────────────────────────────────────────────────────
+/** Normalise: lower-case, trim, collapse whitespace, drop commas/quotes. */
+export function normalizeTag(raw: string): string {
+  return raw
+    .toLowerCase()
+    .trim()
+    .replace(/[",]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+/**
+ * Tiny similarity score for tag suggestions. Returns 0..1 — anything
+ * above ~0.55 is "probably the same tag". We use a cheap Dice coefficient
+ * over bigrams plus a substring/prefix bonus, which catches "compounders"
+ * vs "compounder" and "ai infra" vs "AI infrastructure".
+ */
+export function tagSimilarity(a: string, b: string): number {
+  const x = normalizeTag(a);
+  const y = normalizeTag(b);
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  if (x.includes(y) || y.includes(x)) return 0.85;
+  const bigrams = (s: string) => {
+    const out: string[] = [];
+    for (let i = 0; i < s.length - 1; i++) out.push(s.slice(i, i + 2));
+    return out;
+  };
+  const ax = bigrams(x);
+  const bx = bigrams(y);
+  if (ax.length === 0 || bx.length === 0) return 0;
+  const set = new Map<string, number>();
+  ax.forEach((g) => set.set(g, (set.get(g) ?? 0) + 1));
+  let overlap = 0;
+  for (const g of bx) {
+    const n = set.get(g) ?? 0;
+    if (n > 0) {
+      overlap += 1;
+      set.set(g, n - 1);
+    }
+  }
+  return (2 * overlap) / (ax.length + bx.length);
+}
+
+export interface TagSuggestion {
+  tag: string;
+  score: number;
+}
+
+/**
+ * Given a draft input, return existing tags ranked by similarity.
+ * The caller dedups against tags already on the current stock.
+ */
+export function suggestTags(
+  input: string,
+  universeTags: string[],
+  excluded: string[] = [],
+): TagSuggestion[] {
+  const draft = normalizeTag(input);
+  if (!draft) return [];
+  const skip = new Set(excluded.map(normalizeTag));
+  return universeTags
+    .filter((t) => !skip.has(t))
+    .map((t) => ({ tag: t, score: tagSimilarity(draft, t) }))
+    .filter((s) => s.score >= 0.4)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6);
+}
+
+export async function updateTags(ticker: string, tags: string[]): Promise<void> {
+  // Normalise + dedupe before persisting so the universe stays clean.
+  const clean = Array.from(
+    new Set(tags.map(normalizeTag).filter((t) => t.length > 0)),
+  );
+  const { error } = await supabase
+    .from("snowball" as never)
+    .update({ tags: clean } as never)
+    .eq("ticker", ticker);
+  if (error) throw error;
+}
+
+// ─── Single-ticker sync ───────────────────────────────────────
+/** Refresh price + 52w for one ticker. Server-side filter; ~1 API call. */
+export async function refreshSnowballOne(ticker: string): Promise<RefreshResult> {
+  const { data, error } = await supabase.functions.invoke("refresh-snowball", {
+    body: { ticker: ticker.toUpperCase() },
+  });
+  if (error) throw error;
+  return data as RefreshResult;
+}
+
+/** Sync fundamentals for one ticker. Server-side filter; ~4 API calls. */
+export async function syncFundamentalsOne(ticker: string): Promise<RefreshResult> {
+  const { data, error } = await supabase.functions.invoke(
+    "sync-snowball-fundamentals",
+    { body: { ticker: ticker.toUpperCase() } },
+  );
+  if (error) throw error;
+  return data as RefreshResult;
+}
+
+/**
+ * End-to-end "fetch this ticker's inputs": price → fundamentals → recompute.
+ * Used right after Add stock so the new row is filled in without waiting
+ * for the next nightly cron.
+ */
+export async function hydrateNewStock(ticker: string): Promise<void> {
+  await refreshSnowballOne(ticker);
+  await syncFundamentalsOne(ticker);
+  // Recompute uses the freshly-saved fundamentals to fill in lens columns.
+  const { error: rcErr } = await (supabase.rpc as unknown as (
+    name: string,
+    args: { p_ticker: string },
+  ) => Promise<{ error: unknown }>)(
+    "snowball_recompute_one",
+    { p_ticker: ticker.toUpperCase() },
+  );
+  if (rcErr) throw rcErr;
 }
 
 // ─── Queries ──────────────────────────────────────────────────

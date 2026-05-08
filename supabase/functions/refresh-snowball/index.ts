@@ -66,6 +66,19 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Optional `{ ticker }` body filters the run to a single stock — used by
+  // "Add stock" so the new row gets a price quote within seconds instead
+  // of waiting for the next universe-wide cron.
+  let onlyTicker: string | null = null;
+  try {
+    const body = (await req.json().catch(() => null)) as
+      | { ticker?: string }
+      | null;
+    if (body?.ticker) onlyTicker = body.ticker.toUpperCase();
+  } catch {
+    /* no-op: empty body is allowed */
+  }
+
   // Diagnostic envelope — capture any error and report it as JSON instead
   // of letting the Edge Runtime swallow it into a useless 500.
   try {
@@ -100,10 +113,12 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 1) Read all tickers from snowball.
-    const { data: rows, error: readErr } = await admin
-      .from("snowball")
-      .select("ticker");
+    // 1) Read all tickers from snowball (or just the one we were asked for).
+    const baseQuery = admin.from("snowball").select("ticker");
+    const tickerQuery = onlyTicker
+      ? baseQuery.eq("ticker", onlyTicker)
+      : baseQuery;
+    const { data: rows, error: readErr } = await tickerQuery;
     if (readErr) throw readErr;
     const tickers = (rows ?? []).map((r) => r.ticker.toUpperCase());
 

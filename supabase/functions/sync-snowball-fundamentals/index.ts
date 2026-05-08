@@ -248,6 +248,19 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Optional `{ ticker }` body limits the sync to a single stock — used by
+  // "Add stock" to backfill name/sector/financials within seconds instead
+  // of waiting for the next universe-wide run.
+  let onlyTicker: string | null = null;
+  try {
+    const body = (await req.json().catch(() => null)) as
+      | { ticker?: string }
+      | null;
+    if (body?.ticker) onlyTicker = body.ticker.toUpperCase();
+  } catch {
+    /* empty body is fine */
+  }
+
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -258,12 +271,17 @@ Deno.serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 1) Read all tickers and their existing assumptions + sector.
-    const { data: rows, error: readErr } = await admin
+    // 1) Read all tickers and their existing assumptions + sector
+    //    (or just the single one requested).
+    const baseQuery = admin
       .from("snowball")
       .select(
         "ticker, stage1_growth_pct, discount_rate_pct, terminal_growth_pct, sector",
       );
+    const tickerQuery = onlyTicker
+      ? baseQuery.eq("ticker", onlyTicker)
+      : baseQuery;
+    const { data: rows, error: readErr } = await tickerQuery;
     if (readErr) throw readErr;
     const tickers = (rows ?? []) as ExistingRow[];
 
