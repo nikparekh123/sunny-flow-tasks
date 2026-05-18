@@ -4,7 +4,7 @@
 // Source of truth is `positions` (owned by the Positions page); Strategy
 // only writes to its own overlay / journal tables.
 
-import { useEffect, useMemo } from 'react';
+import { useEffect, useId, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type {
@@ -28,6 +28,11 @@ interface RawPosition {
 
 export function useStrategy() {
   const qc = useQueryClient();
+  // Unique channel name per hook instance — supabase's .channel(name) returns
+  // the existing channel if one matches, so a shared name causes "cannot add
+  // postgres_changes callbacks after subscribe()" when multiple components
+  // mount useStrategy concurrently (Strategy wrapper + Dashboard + GainsLog).
+  const channelId = useId();
 
   // ── Reads ──────────────────────────────────────────────────────────
   const positionsQ = useQuery({
@@ -79,7 +84,7 @@ export function useStrategy() {
   // ── Realtime subscriptions ─────────────────────────────────────────
   useEffect(() => {
     const ch = supabase
-      .channel('strategy-realtime')
+      .channel(`strategy-realtime-${channelId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'positions' },
@@ -104,7 +109,7 @@ export function useStrategy() {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [qc]);
+  }, [qc, channelId]);
 
   // ── Join into the renderable shape ─────────────────────────────────
   const joined = useMemo(() => {
