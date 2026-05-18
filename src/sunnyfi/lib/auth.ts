@@ -4,6 +4,37 @@ import type { Session, User } from "@supabase/supabase-js";
 const REDIRECT_URL =
   typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : "";
 
+/**
+ * Shared team account. Anyone with the 10-digit code signs in as this user.
+ * To rotate access, change this user's password in Supabase Auth.
+ */
+export const SHARED_LOGIN_EMAIL = "nik@sunnyfi.co";
+
+/** Sign in with the shared 10-digit code (used as the password for SHARED_LOGIN_EMAIL). */
+export async function signInWithCode(code: string): Promise<
+  | { ok: true }
+  | { ok: false; reason: "invalid_code" | "wrong_code" | "network" | "unknown"; message?: string }
+> {
+  const trimmed = code.trim().replace(/\s+/g, "");
+  if (!/^\d{10}$/.test(trimmed)) {
+    return { ok: false, reason: "invalid_code" };
+  }
+  try {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: SHARED_LOGIN_EMAIL,
+      password: trimmed,
+    });
+    if (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 400) return { ok: false, reason: "wrong_code", message: error.message };
+      return { ok: false, reason: "unknown", message: error.message };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: "network", message: e instanceof Error ? e.message : undefined };
+  }
+}
+
 export async function sendMagicLink(email: string): Promise<
   | { ok: true }
   | { ok: false; reason: "invalid_email" | "rate_limited" | "network" | "unknown"; message?: string }
