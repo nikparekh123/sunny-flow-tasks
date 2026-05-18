@@ -95,6 +95,14 @@ export default function Sunnyfi() {
             </RequireAuth>
           }
         />
+        <Route
+          path="/strategy/gains"
+          element={
+            <RequireAuth>
+              <Strategy />
+            </RequireAuth>
+          }
+        />
       </Routes>
     </Suspense>
   );
