@@ -85,7 +85,6 @@ export default function PositionsPage() {
           <span className="np-crumb">POSITIONS</span>
         </div>
         <div className="np-actions">
-          <PriceTimestamp last={portfolio.last_price_update} />
           <button
             className="np-btn ghost"
             onClick={handleRefresh}
@@ -189,19 +188,3 @@ export default function PositionsPage() {
   );
 }
 
-function PriceTimestamp({ last }: { last: string | null }) {
-  const text = last
-    ? `prices · ${new Date(last).toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      })}`
-    : 'prices · never refreshed';
-  return (
-    <span className="np-pill">
-      <span className="dot" />
-      {text}
-    </span>
-  );
-}
