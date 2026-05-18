@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { sendMagicLink, getCurrentSession, checkMemberEmail } from "@/sunnyfi/lib/auth";
+import { signInWithCode, getCurrentSession } from "@/sunnyfi/lib/auth";
 
 function useNow() {
   const [now, setNow] = useState(new Date());
@@ -19,18 +19,15 @@ function formatClock(date: Date, offsetHours: number) {
   return `${h}:${m}`;
 }
 
-type Stage = "idle" | "sending" | "sent" | "error";
-type Recognized = "unknown" | "checking" | "yes" | "no";
+type Stage = "idle" | "signing" | "error";
 
 export default function Landing() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [email, setEmail] = useState("");
-  const [recognized, setRecognized] = useState<Recognized>("unknown");
+  const [code, setCode] = useState("");
   const [stage, setStage] = useState<Stage>("idle");
   const [msg, setMsg] = useState<string | null>(() => {
-    if (params.get("denied") === "1") return "That email isn't on the allowlist. Ask Niket for access.";
-    if (params.get("expired") === "1") return "That link expired. Send yourself a new one.";
+    if (params.get("denied") === "1") return "Wrong code. Ask Niket for the current one.";
     return null;
   });
   const now = useNow();
@@ -38,46 +35,38 @@ export default function Landing() {
 
   // Already signed in? Skip straight to the dashboard.
   useEffect(() => {
-    getCurrentSession().then((s) => { if (s?.user) navigate("/dashboard", { replace: true }); });
+    getCurrentSession().then((s) => {
+      if (s?.user) navigate("/dashboard", { replace: true });
+    });
   }, [navigate]);
 
-  // Debounced allowlist probe as the user types.
-  useEffect(() => {
-    const trimmed = email.trim().toLowerCase();
-    if (!trimmed) { setRecognized("unknown"); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) { setRecognized("unknown"); return; }
-    setRecognized("checking");
-    let cancelled = false;
-    const t = window.setTimeout(async () => {
-      const ok = await checkMemberEmail(trimmed);
-      if (!cancelled) setRecognized(ok ? "yes" : "no");
-    }, 350);
-    return () => { cancelled = true; window.clearTimeout(t); };
-  }, [email]);
+  const trimmed = code.replace(/\s+/g, "");
+  const validShape = /^\d{10}$/.test(trimmed);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (stage === "sending") return;
-    setStage("sending");
+    if (stage === "signing") return;
+    setStage("signing");
     setMsg(null);
-    const res = await sendMagicLink(email);
+    const res = await signInWithCode(trimmed);
     if (res.ok) {
-      setStage("sent");
-      setMsg(`Check ${email.trim().toLowerCase()} — we sent you a sign-in link.`);
+      navigate("/dashboard", { replace: true });
       return;
     }
     setStage("error");
-    if (res.reason === "invalid_email") setMsg("That doesn't look like a valid email.");
-    else if (res.reason === "rate_limited") setMsg("Too many requests. Wait a minute and try again.");
-    else if (res.reason === "network") setMsg("Couldn't reach the server. Check your connection.");
-    else setMsg(res.message || "Something went wrong. Try again.");
+    if (res.reason === "invalid_code") setMsg("That should be a 10-digit number.");
+    else if (res.reason === "wrong_code") setMsg("Wrong code — try again.");
+    else if (res.reason === "network") setMsg("Couldn't reach the server.");
+    else setMsg(res.message || "Something went wrong.");
   };
 
   return (
     <div className="app">
       <div className="landing">
         <div className="landing-top">
-          <div className="wordmark">Sunnyfi<span className="cursor" /></div>
+          <div className="wordmark">
+            Sunnyfi<span className="cursor" />
+          </div>
           <div className="landing-meta">
             <span className="mono">{nyc}</span>
             <span className="meta-sep">·</span>
@@ -97,44 +86,38 @@ export default function Landing() {
           <form className="signin" onSubmit={onSubmit}>
             <label className="signin-label">Sign in</label>
             <div className="signin-row">
-              <div className="signin-input-wrap" data-state={recognized}>
+              <div
+                className="signin-input-wrap"
+                data-state={validShape ? "yes" : "unknown"}
+              >
                 <input
                   className="signin-input"
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  placeholder="you@sunnyfi.co"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={stage === "sending" || stage === "sent"}
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={10}
+                  placeholder="10-digit code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/[^\d]/g, ""))}
+                  disabled={stage === "signing"}
                   required
+                  style={{ letterSpacing: "0.3em" }}
                 />
                 <span className="signin-mark" aria-hidden>
-                  {recognized === "yes" && "✓"}
-                  {recognized === "no"  && "✕"}
+                  {validShape && "✓"}
                 </span>
               </div>
               <button
                 className="signin-btn"
                 type="submit"
-                disabled={
-                  stage === "sending" || stage === "sent" ||
-                  !email.trim() || recognized !== "yes"
-                }
+                disabled={stage === "signing" || !validShape}
               >
-                {stage === "sending" ? "Sending…" : stage === "sent" ? "Sent ↵" : "Send link ↵"}
+                {stage === "signing" ? "Signing in…" : "Sign in ↵"}
               </button>
             </div>
             <div className="signin-hint">
-              {msg
-                ? msg
-                : recognized === "no"
-                  ? "That email isn't on the allowlist. Ask Niket for access."
-                  : recognized === "checking"
-                    ? "Checking…"
-                    : recognized === "yes"
-                      ? "Recognized — send yourself a sign-in link."
-                      : "We'll email you a one-tap sign-in link."}
+              {msg ? msg : "Enter the 10-digit access code."}
             </div>
           </form>
         </div>
