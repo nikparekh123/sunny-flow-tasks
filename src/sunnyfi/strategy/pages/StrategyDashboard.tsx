@@ -15,7 +15,7 @@ import { SellModal } from '../modals/SellModal';
 import { MoveModal, type AllocationImpact } from '../modals/MoveModal';
 import { AddWatchModal } from '../modals/AddWatchModal';
 import { LogGainModal } from '../modals/LogGainModal';
-import { calcBucket, calcPortfolio, calcPosition, mondayOf, type Cadence } from '../calc';
+import { calcBucket, calcPortfolio, calcPosition, type Cadence } from '../calc';
 import type { Bucket, StrategyPosition } from '../types';
 import { useStrategy } from '../useStrategy';
 
@@ -360,24 +360,23 @@ export default function StrategyDashboard({ cadence }: Props) {
           position={modal.position}
           bucket={modal.bucket}
           onClose={() => setModal(null)}
-          onConfirm={({ ticker, kind, amount, notes }) => {
-            // Additive: merge with this week's existing entry.
-            const week = mondayOf();
-            const existing = modal.position.entries.find((e) => e.week_start_date === week);
-            const merged = {
-              ticker,
-              week_start_date: week,
-              options: (existing?.options ?? 0) + (kind === 'options' ? amount : 0),
-              stock: (existing?.stock ?? 0) + (kind === 'stock' ? amount : 0),
-              notes: notes || existing?.notes || undefined,
-            };
-            s.logGain.mutate(merged, {
-              onSuccess: () => {
-                toast.success(`+${amount} ${kind} on ${ticker}`);
-                setModal(null);
+          onConfirm={({ ticker, source, amount, note }) => {
+            s.logGain.mutate(
+              {
+                ticker,
+                gain_date: new Date().toISOString().slice(0, 10),
+                source,
+                amount,
+                note: note || undefined,
               },
-              onError: (e) => toast.error((e as Error).message),
-            });
+              {
+                onSuccess: () => {
+                  toast.success(`${amount >= 0 ? '+' : ''}${amount} ${source} on ${ticker}`);
+                  setModal(null);
+                },
+                onError: (e) => toast.error((e as Error).message),
+              },
+            );
           }}
         />
       )}

@@ -1,12 +1,13 @@
 /**
- * Strategy — SWM-style dashboard + Gains Log.
- * /strategy        → board view (banner + alloc + unassigned + watchlist + 3 buckets)
- * /strategy/gains  → weekly journal matrix
+ * Strategy — SWM-style bucket dashboard.
+ *
+ * v2 note: /strategy/gains has been retired. The gains log is moving to
+ * /positions in the Positions v2 redesign. This route just renders the
+ * bucket dashboard and the cadence + back-to-dashboard appbar.
  */
-import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useStrategy } from '../strategy/useStrategy';
 import StrategyDashboard from '../strategy/pages/StrategyDashboard';
-import GainsLog from '../strategy/pages/GainsLog';
 import type { Cadence } from '../strategy/calc';
 import '@/sunnyfi/strategy.css';
 
@@ -19,13 +20,10 @@ const CADENCE_LABEL: Record<Cadence, string> = {
 
 export default function Strategy() {
   const s = useStrategy();
-  const navigate = useNavigate();
-  const location = useLocation();
   const [params, setParams] = useSearchParams();
 
   const cadenceParam = (params.get('cadence') as Cadence) || 'quarter';
   const cadence: Cadence = CADENCES.includes(cadenceParam) ? cadenceParam : 'quarter';
-  const isGains = location.pathname.endsWith('/gains');
 
   if (s.isLoading) {
     return (
@@ -54,20 +52,6 @@ export default function Strategy() {
           Sunnyfi<span className="cursor" />
         </span>
         <span className="crumb">Strategy</span>
-        <div className="page-nav">
-          <button
-            className={!isGains ? 'on' : ''}
-            onClick={() => navigate({ pathname: '/strategy', search: params.toString() })}
-          >
-            Dashboard
-          </button>
-          <button
-            className={isGains ? 'on' : ''}
-            onClick={() => navigate({ pathname: '/strategy/gains', search: params.toString() })}
-          >
-            Gains Log
-          </button>
-        </div>
         <div className="right">
           <div className="view-toggle" role="group" aria-label="Cadence">
             {CADENCES.map((c) => (
@@ -84,7 +68,7 @@ export default function Strategy() {
         </div>
       </div>
 
-      {isGains ? <GainsLog assigned={s.assigned} /> : <StrategyDashboard cadence={cadence} />}
+      <StrategyDashboard cadence={cadence} />
     </div>
   );
 }

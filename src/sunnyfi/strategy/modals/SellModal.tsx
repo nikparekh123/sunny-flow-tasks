@@ -23,8 +23,12 @@ export function SellModal({ position, bucket, onClose, onConfirm }: Props) {
   const cost = qty * avg;
   const sharePL = proceeds - cost;
   const sharePLPct = cost > 0 ? (sharePL / cost) * 100 : 0;
-  const collected = position.entries.reduce((s, e) => s + (e.options || 0), 0);
-  const realized = position.entries.reduce((s, e) => s + (e.stock || 0), 0);
+  const collected = position.entries
+    .filter((e) => e.source === 'call')
+    .reduce((s, e) => s + (e.amount || 0), 0);
+  const realized = position.entries
+    .filter((e) => e.source === 'stock')
+    .reduce((s, e) => s + (e.amount || 0), 0);
   const total = sharePL + collected + realized;
   const totalPct = cost > 0 ? (total / cost) * 100 : 0;
   const daysHeld = position.overlay?.days_held ?? 0;

@@ -38,8 +38,12 @@ export function EditModal({ position, bucket, cadence, onClose, onSave, onSell, 
   const px = position.current_price ?? avg;
   const daysHeld = position.overlay?.days_held ?? 0;
 
-  const collected = position.entries.reduce((s, e) => s + (e.options || 0), 0);
-  const realized = position.entries.reduce((s, e) => s + (e.stock || 0), 0);
+  const collected = position.entries
+    .filter((e) => e.source === 'call')
+    .reduce((s, e) => s + (e.amount || 0), 0);
+  const realized = position.entries
+    .filter((e) => e.source === 'stock')
+    .reduce((s, e) => s + (e.amount || 0), 0);
 
   const cost = qty * avg;
   const value = qty * px;

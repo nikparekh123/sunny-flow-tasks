@@ -70,8 +70,18 @@ export function calcPosition(
   const sharePL = value - cost;
   const sharePLPct = cost > 0 ? (sharePL / cost) * 100 : 0;
 
-  const collected = p.entries.reduce((s, e) => s + (e.options || 0), 0);
-  const realizedGains = p.entries.reduce((s, e) => s + (e.stock || 0), 0);
+  // v2 schema: gain_entries has a `source` discriminator. Map back to the
+  // old aggregate names to keep the rest of the Strategy page intact:
+  //   collected     ← call (covered-call premium)
+  //   realizedGains ← stock (realized stock gains, dividends)
+  // Put-source gains aren't surfaced on the Strategy page yet (deferred to
+  // the Positions v2 redesign that owns the 3-way split).
+  const collected = p.entries
+    .filter((e) => e.source === 'call')
+    .reduce((s, e) => s + (e.amount || 0), 0);
+  const realizedGains = p.entries
+    .filter((e) => e.source === 'stock')
+    .reduce((s, e) => s + (e.amount || 0), 0);
   const total = sharePL + collected + realizedGains;
 
   const daysInPeriod = PERIOD_DAYS[cadence];

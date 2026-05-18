@@ -213,25 +213,27 @@ export function useStrategy() {
       qc.invalidateQueries({ queryKey: ['strategy', 'overlays'] }),
   });
 
+  // v2: each call inserts ONE gain entry. The Strategy page's old
+  // "this week's options + stock" semantics map to two separate entries
+  // (one call, one stock) created back-to-back.
   const logGain = useMutation({
     mutationFn: async (args: {
       ticker: string;
-      week_start_date: string;
-      options: number;
-      stock: number;
-      notes?: string;
+      gain_date: string;
+      source: 'stock' | 'call' | 'put';
+      amount: number;
+      note?: string;
     }) => {
       const { error } = await supabase
         .from('gain_entries' as never)
-        .upsert(
+        .insert(
           {
             ticker: args.ticker,
-            week_start_date: args.week_start_date,
-            options: args.options,
-            stock: args.stock,
-            notes: args.notes ?? null,
+            gain_date: args.gain_date,
+            source: args.source,
+            amount: args.amount,
+            note: args.note ?? null,
           } as never,
-          { onConflict: 'ticker,week_start_date' },
         );
       if (error) throw error;
     },
@@ -240,12 +242,11 @@ export function useStrategy() {
   });
 
   const deleteGain = useMutation({
-    mutationFn: async (args: { ticker: string; week_start_date: string }) => {
+    mutationFn: async (args: { id: string }) => {
       const { error } = await supabase
         .from('gain_entries' as never)
         .delete()
-        .eq('ticker', args.ticker)
-        .eq('week_start_date', args.week_start_date);
+        .eq('id', args.id);
       if (error) throw error;
     },
     onSuccess: () =>
