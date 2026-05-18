@@ -89,14 +89,35 @@ Deno.serve(async (req) => {
     let updated = 0;
     const missing: string[] = [];
 
+    // Polygon often returns 0 for fields it doesn't have (e.g. lastTrade.p
+    // outside market hours) instead of omitting them. Treat 0 as missing so
+    // we never overwrite real prices with zeros. `??` only falls through on
+    // null/undefined, so we need an explicit positive-number check.
+    const positive = (n: number | undefined | null): number | null =>
+      typeof n === 'number' && n > 0 ? n : null;
+    const pickFirstPositive = (
+      ...nums: Array<number | undefined | null>
+    ): number | null => {
+      for (const n of nums) {
+        const v = positive(n);
+        if (v != null) return v;
+      }
+      return null;
+    };
+
     for (const t of tickers) {
       const item = items.find((x) => x.ticker?.toUpperCase() === t);
       if (!item) {
         missing.push(t);
         continue;
       }
-      const last = item.lastTrade?.p ?? item.lastQuote?.p ?? item.day?.c;
-      const prev = item.prevDay?.c;
+      const last = pickFirstPositive(
+        item.lastTrade?.p,
+        item.lastQuote?.p,
+        item.day?.c,
+        item.prevDay?.c, // fall back to prev close if intraday fields are all zero
+      );
+      const prev = positive(item.prevDay?.c);
       if (last == null && prev == null) {
         missing.push(t);
         continue;

@@ -76,9 +76,10 @@ export default function PositionsPage() {
   };
 
   const handleExport = () => {
-    const lines = ['ticker,sector,quantity,avg_cost'];
+    const lines = ['ticker,sector,quantity,avg_cost,strategy'];
     for (const r of portfolio.rows) {
-      lines.push(`${r.ticker},${r.sector},${r.quantity},${r.avg_cost}`);
+      const strat = overlayByTicker.get(r.ticker) ?? '';
+      lines.push(`${r.ticker},${r.sector},${r.quantity},${r.avg_cost},${strat}`);
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -167,6 +168,12 @@ export default function PositionsPage() {
               >
                 By sector
               </button>
+              <button
+                className={allocView === 'strategy' ? 'on' : ''}
+                onClick={() => setAllocView('strategy')}
+              >
+                By strategy
+              </button>
             </div>
           </div>
           <AllocationTreemap
@@ -174,6 +181,7 @@ export default function PositionsPage() {
             view={allocView}
             height={TREEMAP_HEIGHT}
             maxItems={COMPANION_MAX}
+            overlayByTicker={overlayByTicker}
           />
         </div>
 

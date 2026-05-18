@@ -19,9 +19,7 @@
 .swm-app {
   min-height: 100vh;
   display: flex; flex-direction: column;
-  max-width: 1680px;
-  margin: 0 auto;
-  padding: 14px 22px 36px;
+  padding: 14px 32px 36px;
   gap: 14px;
   background: var(--navi-dash-page);
   color: var(--navi-fg1);
@@ -38,7 +36,7 @@
   border-bottom: 1px solid rgba(30, 90, 80, 0.25);
   background: var(--navi-dash-page);
   position: sticky; top: 0; z-index: 30;
-  margin: -14px -22px 0;
+  margin: -14px -32px 0;
 }
 .swm-appbar .brand {
   display: inline-flex; align-items: center;

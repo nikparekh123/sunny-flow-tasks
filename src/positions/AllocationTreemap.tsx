@@ -4,16 +4,19 @@ import {
   fmtUSDShort,
   aggregateBySector,
   aggregateByTicker,
+  aggregateByStrategy,
   type PositionComputed,
+  type StrategyBucket,
 } from './types';
 
-export type AllocView = 'sector' | 'stock';
+export type AllocView = 'sector' | 'stock' | 'strategy';
 
 interface Props {
   rows: PositionComputed[];
   view: AllocView;
   height?: number;
   maxItems?: number;
+  overlayByTicker?: Map<string, StrategyBucket>;
 }
 
 interface Datum {
@@ -44,6 +47,7 @@ export function AllocationTreemap({
   view,
   height = 600,
   maxItems = 10,
+  overlayByTicker,
 }: Props) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(0);
@@ -58,8 +62,12 @@ export function AllocationTreemap({
   }, []);
 
   // Build the dataset, collapsing tail into "Other" once we exceed maxItems.
+  // "Strategy" view doesn't collapse — only 4 buckets max, always shown.
   const data: Datum[] = useMemo(() => {
     if (rows.length === 0) return [];
+    if (view === 'strategy') {
+      return aggregateByStrategy(rows, overlayByTicker ?? new Map());
+    }
     const base =
       view === 'sector' ? aggregateBySector(rows) : aggregateByTicker(rows);
     if (base.length <= maxItems) return base;
@@ -68,7 +76,7 @@ export function AllocationTreemap({
     const otherVal = rest.reduce((s, d) => s + d.value, 0);
     const otherPct = rest.reduce((s, d) => s + d.pct, 0);
     return [...top, { label: 'Other', value: otherVal, pct: otherPct, isOther: true }];
-  }, [rows, view, maxItems]);
+  }, [rows, view, maxItems, overlayByTicker]);
 
   const layout = useMemo(() => {
     if (data.length === 0) return [];
@@ -208,7 +216,11 @@ export function AllocationTreemap({
       {/* Companion list */}
       <div className="np-treemap-list">
         <div className="np-treemap-list-hd">
-          Top {view === 'stock' ? 'holdings' : 'sectors'}
+          {view === 'stock'
+            ? 'Top holdings'
+            : view === 'sector'
+              ? 'Top sectors'
+              : 'Strategy mix'}
         </div>
         {data.slice(0, 10).map((d, i) => (
           <div
