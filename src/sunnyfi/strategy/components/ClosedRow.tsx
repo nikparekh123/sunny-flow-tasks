@@ -14,8 +14,12 @@ export function ClosedRow({ closed }: Props) {
   const [open, setOpen] = useState(false);
   const totals = closed.reduce(
     (a, p) => {
-      const collected = p.entries.reduce((s, e) => s + (e.options || 0), 0);
-      const realized = p.entries.reduce((s, e) => s + (e.stock || 0), 0);
+      const collected = p.entries
+        .filter((e) => e.source === 'call')
+        .reduce((s, e) => s + (e.amount || 0), 0);
+      const realized = p.entries
+        .filter((e) => e.source === 'stock')
+        .reduce((s, e) => s + (e.amount || 0), 0);
       a.collected += collected;
       a.realized += realized;
       a.total += collected + realized;

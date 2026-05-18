@@ -18,12 +18,24 @@ function addWeeks(monday: string, n: number): string {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-/** Returns 13 weeks oldest → newest. Always 13 entries. */
+/** Returns 13 weeks oldest → newest. Always 13 entries. v2 schema: bucket
+ *  each entry's gain_date back to the containing Monday, sum only 'call'
+ *  source (covered-call premium). */
+function mondayOfDate(iso: string): string {
+  const d = new Date(iso + 'T00:00:00Z');
+  const day = d.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
 export function weeklyPremium(entries: GainEntryRow[]): WeekBucket[] {
   const thisMonday = mondayOf();
   const byWeek = new Map<string, number>();
   for (const e of entries) {
-    byWeek.set(e.week_start_date, (byWeek.get(e.week_start_date) ?? 0) + (e.options || 0));
+    if (e.source !== 'call') continue;
+    const wk = mondayOfDate(e.gain_date);
+    byWeek.set(wk, (byWeek.get(wk) ?? 0) + (e.amount || 0));
   }
   const out: WeekBucket[] = [];
   for (let i = 12; i >= 0; i--) {

@@ -1,33 +1,26 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
-import type { Bucket, StrategyPosition } from '../types';
+import type { Bucket, StrategyPosition, GainSource } from '../types';
 import { BUCKET_META } from '../types';
-import { fmtK, mondayOf } from '../calc';
-
-type Kind = 'options' | 'stock';
+import { fmtK } from '../calc';
 
 interface Props {
   position: StrategyPosition;
   bucket: Bucket;
   onClose: () => void;
-  /** Adds `amount` to this week's existing entry (kind = options | stock). */
+  /** Inserts ONE new gain_entries row. */
   onConfirm: (p: {
     ticker: string;
-    kind: Kind;
+    source: GainSource;
     amount: number;
-    notes: string;
+    note: string;
   }) => void;
 }
 
 export function LogGainModal({ position, bucket, onClose, onConfirm }: Props) {
   const [amount, setAmount] = useState(0);
-  const [kind, setKind] = useState<Kind>('options');
-  const [notes, setNotes] = useState('');
-
-  const thisMonday = mondayOf();
-  const thisWeekEntry = position.entries.find((e) => e.week_start_date === thisMonday);
-  const newOptions = (thisWeekEntry?.options ?? 0) + (kind === 'options' ? amount : 0);
-  const newStock = (thisWeekEntry?.stock ?? 0) + (kind === 'stock' ? amount : 0);
+  const [source, setSource] = useState<GainSource>('call');
+  const [note, setNote] = useState('');
 
   return (
     <Modal accent={`var(--b-${bucket})`} onClose={onClose}>
@@ -45,24 +38,20 @@ export function LogGainModal({ position, bucket, onClose, onConfirm }: Props) {
         <div className="field full">
           <label>Source</label>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => setKind('options')}
-              className={'btn ' + (kind === 'options' ? 'primary' : 'ghost')}
-              style={{ flex: 1 }}
-            >
-              Options premium
-            </button>
-            <button
-              onClick={() => setKind('stock')}
-              className={'btn ' + (kind === 'stock' ? 'primary' : 'ghost')}
-              style={{ flex: 1 }}
-            >
-              Stock (dividend / realized)
-            </button>
+            {(['stock', 'call', 'put'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSource(s)}
+                className={'btn ' + (source === s ? 'primary' : 'ghost')}
+                style={{ flex: 1 }}
+              >
+                {s === 'stock' ? 'Stock' : s === 'call' ? 'Call' : 'Put'}
+              </button>
+            ))}
           </div>
         </div>
         <div className="field">
-          <label>Amount</label>
+          <label>Amount (signed; − for losses)</label>
           <input
             type="number"
             step="50"
@@ -73,11 +62,11 @@ export function LogGainModal({ position, bucket, onClose, onConfirm }: Props) {
           />
         </div>
         <div className="field full">
-          <label>Notes (optional)</label>
+          <label>Note (optional)</label>
           <input
             type="text"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
             placeholder="strike, ex-div date, etc."
           />
         </div>
@@ -85,10 +74,12 @@ export function LogGainModal({ position, bucket, onClose, onConfirm }: Props) {
 
       <div className="verdict-strip">
         <span className="label">
-          this week's entry for <b>{position.ticker}</b>: options{' '}
-          <b>{fmtK(newOptions)}</b> · stock <b>+{fmtK(newStock)}</b>
+          new {source} entry for <b>{position.ticker}</b>
         </span>
-        <span className="total pos">+{fmtK(amount || 0)}</span>
+        <span className={'total ' + (amount >= 0 ? 'pos' : 'neg')}>
+          {amount >= 0 ? '+' : ''}
+          {fmtK(amount || 0)}
+        </span>
       </div>
 
       <div className="actions">
@@ -97,8 +88,8 @@ export function LogGainModal({ position, bucket, onClose, onConfirm }: Props) {
           <button className="btn ghost" onClick={onClose}>cancel</button>
           <button
             className="btn primary"
-            disabled={!amount || amount <= 0}
-            onClick={() => onConfirm({ ticker: position.ticker, kind, amount, notes })}
+            disabled={!amount}
+            onClick={() => onConfirm({ ticker: position.ticker, source, amount, note })}
           >
             ✓ log {fmtK(amount || 0)}
           </button>

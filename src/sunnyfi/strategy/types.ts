@@ -21,13 +21,27 @@ export interface StrategyOverlayRow {
   updated_at: string;
 }
 
+export type GainSource = 'stock' | 'call' | 'put';
+
 export interface GainEntryRow {
   id: string;
   ticker: string;
-  week_start_date: string; // ISO date (Monday)
-  options: number;
-  stock: number;
-  notes: string | null;
+  /** ISO yyyy-mm-dd of the gain event (NOT bucketed to Monday). */
+  gain_date: string;
+  source: GainSource;
+  /** Signed USD. Negative for realized losses. */
+  amount: number;
+  note: string | null;
+}
+
+export interface PutProtectionRow {
+  id: string;
+  ticker: string;
+  total_cost: number;
+  expiry: string;           // ISO yyyy-mm-dd
+  purchase_date: string;    // ISO yyyy-mm-dd
+  created_at: string;
+  updated_at: string;
 }
 
 export interface WatchingRow {
