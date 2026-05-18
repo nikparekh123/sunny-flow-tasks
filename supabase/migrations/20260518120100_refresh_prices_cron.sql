@@ -23,7 +23,7 @@ create extension if not exists pg_net  with schema extensions;
 
 do $$
 declare
-  proj_url text := 'https://yzjivfdieedwghsvshmy.supabase.co';
+  proj_url text := 'https://ziwoutsnuywjnsyfbzsp.supabase.co';
   svc_key  text;
 begin
   -- Pull service-role from Vault. If it isn't there, raise a notice
