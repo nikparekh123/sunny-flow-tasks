@@ -71,21 +71,6 @@ export default function PositionsPage() {
     }
   };
 
-  const handleExport = () => {
-    const lines = ['ticker,sector,quantity,avg_cost,strategy'];
-    for (const r of portfolio.rows) {
-      const strat = overlayByTicker.get(r.ticker) ?? '';
-      lines.push(`${r.ticker},${r.sector},${r.quantity},${r.avg_cost},${strat}`);
-    }
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `positions-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const isDown = portfolio.total_pnl < 0;
 
   return (
@@ -107,13 +92,6 @@ export default function PositionsPage() {
             disabled={refreshPrices.isPending}
           >
             ↻ {refreshPrices.isPending ? 'Refreshing…' : 'Refresh prices'}
-          </button>
-          <button
-            className="np-btn tinted"
-            onClick={handleExport}
-            disabled={portfolio.rows.length === 0}
-          >
-            ↓ Export CSV
           </button>
           <button className="np-btn neon" onClick={() => setShowUpload(true)}>
             ↑ Upload positions
