@@ -1,6 +1,6 @@
 /**
  * refresh-prices — pull live quotes for every ticker in `positions` from
- * Polygon (now massive.com) and write last_price / prev_close / last_updated.
+ * Polygon (now massive.com) and write current_price / prev_close / last_price_update.
  *
  * Invoked manually from the UI when the user clicks "↻ Refresh prices",
  * and on a schedule once per market day via pg_cron.
@@ -101,8 +101,8 @@ Deno.serve(async (req) => {
         missing.push(t);
         continue;
       }
-      const patch: Record<string, unknown> = { last_updated: now };
-      if (last != null) patch.last_price = last;
+      const patch: Record<string, unknown> = { last_price_update: now };
+      if (last != null) patch.current_price = last;
       if (prev != null) patch.prev_close = prev;
       const { error: updateError } = await admin
         .from('positions')

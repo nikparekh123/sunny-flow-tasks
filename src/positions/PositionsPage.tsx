@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import Auth from '@/pages/Auth';
-import { usePositions } from './usePositions';
+import { usePositions, type WatchingRow } from './usePositions';
 import { AllocationTreemap, type AllocView } from './AllocationTreemap';
 import { PositionsTable } from './PositionsTable';
 import { CsvUploadModal } from './CsvUploadModal';
-import { fmtUSD, fmtPct } from './types';
+import { fmtUSD, fmtPct, fmtUSD2 } from './types';
 import { toast } from 'sonner';
 import './positions.css';
 
@@ -15,10 +15,42 @@ const COMPANION_MAX = 10;
 
 export default function PositionsPage() {
   const { user, loading } = useAuth();
-  const { portfolio, isLoading, replacePositions, refreshPrices } =
-    usePositions();
+  const {
+    portfolio,
+    isLoading,
+    overlayByTicker,
+    watching,
+    replacePositions,
+    refreshPrices,
+    addWatching,
+    removeWatching,
+  } = usePositions();
   const [allocView, setAllocView] = useState<AllocView>('sector');
   const [showUpload, setShowUpload] = useState(false);
+  const [showAddWatch, setShowAddWatch] = useState(false);
+
+  // ?ticker=… deep-link: scroll the matching row into view + flash.
+  useEffect(() => {
+    if (isLoading) return;
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('ticker');
+    if (!t) return;
+    // Defer until the table has rendered the row.
+    const id = window.setTimeout(() => {
+      const row = document.querySelector<HTMLElement>(
+        `tr[data-ticker="${t.toUpperCase()}"]`,
+      );
+      if (!row) return;
+      // Smooth-scroll via top calculation rather than scrollIntoView
+      // (the handoff explicitly bans scrollIntoView).
+      const rect = row.getBoundingClientRect();
+      const target = window.scrollY + rect.top - 100;
+      window.scrollTo({ top: target, behavior: 'smooth' });
+      row.classList.add('highlight');
+      window.setTimeout(() => row.classList.remove('highlight'), 1500);
+    }, 200);
+    return () => window.clearTimeout(id);
+  }, [isLoading, portfolio.rows.length]);
 
   if (loading) {
     return (
@@ -71,7 +103,7 @@ export default function PositionsPage() {
           <span className="np-crumb">POSITIONS</span>
         </div>
         <div className="np-actions">
-          <PriceTimestamp last={portfolio.last_updated} />
+          <PriceTimestamp last={portfolio.last_price_update} />
           <button
             className="np-btn ghost"
             onClick={handleRefresh}
@@ -157,9 +189,72 @@ export default function PositionsPage() {
             rows={portfolio.rows}
             onUpload={() => setShowUpload(true)}
             loading={isLoading}
+            overlayByTicker={overlayByTicker}
           />
         </div>
+
+        {/* Watching */}
+        <div className="np-section">
+          <div className="np-section-hd">
+            <div className="np-section-title">
+              Watching · {watching.length}
+            </div>
+            <button
+              className="np-btn ghost"
+              onClick={() => setShowAddWatch(true)}
+            >
+              + add ticker
+            </button>
+          </div>
+          {watching.length === 0 ? (
+            <div className="np-empty">
+              <p>Not watching anything yet. Add a ticker to track its price without buying.</p>
+            </div>
+          ) : (
+            <div className="np-watching-grid">
+              {watching.map((w: WatchingRow) => (
+                <div key={w.id} className="np-watching-card">
+                  <div className="row">
+                    <span className="ticker">{w.ticker}</span>
+                    <span className="px">
+                      {w.current_price != null ? fmtUSD2(w.current_price) : '—'}
+                    </span>
+                  </div>
+                  <div className="row">
+                    <span className="name">{w.name ?? w.sector}</span>
+                  </div>
+                  <button
+                    className="remove"
+                    onClick={() => {
+                      removeWatching.mutate(w.ticker, {
+                        onSuccess: () => toast.success(`${w.ticker} removed`),
+                        onError: (e) => toast.error((e as Error).message),
+                      });
+                    }}
+                  >
+                    × remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {showAddWatch && (
+        <AddWatchModal
+          onClose={() => setShowAddWatch(false)}
+          onConfirm={(payload) => {
+            addWatching.mutate(payload, {
+              onSuccess: () => {
+                toast.success(`Watching ${payload.ticker}`);
+                setShowAddWatch(false);
+              },
+              onError: (e) => toast.error((e as Error).message),
+            });
+          }}
+        />
+      )}
 
       <CsvUploadModal
         open={showUpload}
@@ -169,6 +264,69 @@ export default function PositionsPage() {
           refreshPrices.mutate();
         }}
       />
+    </div>
+  );
+}
+
+function AddWatchModal({
+  onClose,
+  onConfirm,
+}: {
+  onClose: () => void;
+  onConfirm: (p: { ticker: string; name?: string; sector?: string; current_price?: number }) => void;
+}) {
+  const [ticker, setTicker] = useState('');
+  const [name, setName] = useState('');
+  const [sector, setSector] = useState('Other');
+  const [price, setPrice] = useState('');
+
+  return (
+    <div className="strat-modal-backdrop" onClick={onClose}>
+      <div className="strat-modal" onClick={(e) => e.stopPropagation()}>
+        <h2>Add to watching</h2>
+        <div className="strat-field">
+          <label>Ticker</label>
+          <input
+            value={ticker}
+            onChange={(e) => setTicker(e.target.value.toUpperCase())}
+            placeholder="HOOD"
+          />
+        </div>
+        <div className="strat-field">
+          <label>Name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Robinhood" />
+        </div>
+        <div className="strat-field">
+          <label>Sector</label>
+          <input value={sector} onChange={(e) => setSector(e.target.value)} />
+        </div>
+        <div className="strat-field">
+          <label>Current price ($)</label>
+          <input
+            type="number"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder="94.20"
+          />
+        </div>
+        <div className="strat-modal-actions">
+          <button className="np-btn ghost" onClick={onClose}>cancel</button>
+          <button
+            className="np-btn neon"
+            disabled={!ticker.trim()}
+            onClick={() =>
+              onConfirm({
+                ticker: ticker.trim(),
+                name: name.trim() || undefined,
+                sector: sector || 'Other',
+                current_price: price ? Number(price) : undefined,
+              })
+            }
+          >
+            watch
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

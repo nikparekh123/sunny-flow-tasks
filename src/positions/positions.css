@@ -530,3 +530,101 @@
   .np-treemap-card { grid-template-columns: 1fr; }
   .np-treemap-svg-wrap { min-height: 320px; }
 }
+
+/* ─── Strategy badge column ─────────────────────────────────────────── */
+.np-strategy-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 100px;
+  border: 1px solid currentColor;
+  cursor: pointer;
+  text-decoration: none;
+}
+.np-strategy-badge.income { color: var(--navi-neon, #d2e632); background: rgba(210,230,50,.08); }
+.np-strategy-badge.invest { color: #8ab4d4; background: rgba(138,180,212,.08); }
+.np-strategy-badge.yield  { color: var(--navi-positive, #a8d4a0); background: rgba(168,212,160,.10); }
+.np-strategy-badge.none {
+  color: var(--navi-fg4, #2d5a52);
+  border-style: dashed;
+  cursor: default;
+  background: transparent;
+}
+
+/* ─── Watching section ──────────────────────────────────────────────── */
+.np-watching-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.np-watching-card {
+  background: rgba(70, 130, 120, 0.05);
+  border: 1px solid rgba(70, 130, 120, 0.18);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.np-watching-card .row {
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.np-watching-card .ticker {
+  font-family: var(--navi-font-mono);
+  font-weight: 600;
+}
+.np-watching-card .px { font-family: var(--navi-font-mono); }
+.np-watching-card .name {
+  font-size: 11px; color: var(--navi-fg3, #468278);
+}
+.np-watching-card .remove {
+  background: transparent; border: none;
+  font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--navi-fg3, #468278); cursor: pointer; align-self: flex-start;
+}
+
+/* ─── ?ticker= deep-link highlight flash ────────────────────────────── */
+.np-table tbody tr.highlight {
+  background: rgba(210, 230, 50, 0.10);
+  transition: background 0.8s ease-out;
+}
+
+/* ─── Shared modal scaffolding (used by AddWatchModal) ──────────────── */
+.strat-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(6, 26, 16, 0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.strat-modal {
+  background: var(--navi-bg-card, #0a2218);
+  border: 1px solid rgba(70, 130, 120, 0.25);
+  border-radius: 12px;
+  padding: 24px;
+  width: 420px;
+  max-width: 90vw;
+}
+.strat-modal h2 {
+  font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--navi-fg2, #a8d4c8); margin: 0 0 16px;
+}
+.strat-field { margin-bottom: 14px; }
+.strat-field label {
+  display: block;
+  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--navi-fg3, #468278); margin-bottom: 4px;
+}
+.strat-field input {
+  width: 100%;
+  background: rgba(70, 130, 120, 0.08);
+  border: 1px solid rgba(70, 130, 120, 0.25);
+  border-radius: 6px;
+  color: var(--navi-fg1, #cfeae0);
+  padding: 8px 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+.strat-modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 20px;
+}

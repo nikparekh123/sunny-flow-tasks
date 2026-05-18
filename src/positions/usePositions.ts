@@ -12,6 +12,21 @@ export interface PositionInput {
   avg_cost: number;
 }
 
+export type StrategyBucket = 'income' | 'invest' | 'yield';
+
+export interface OverlayLite {
+  ticker: string;
+  bucket: StrategyBucket;
+}
+
+export interface WatchingRow {
+  id: string;
+  ticker: string;
+  name: string | null;
+  sector: string;
+  current_price: number | null;
+}
+
 export function usePositions() {
   const qc = useQueryClient();
 
@@ -27,8 +42,34 @@ export function usePositions() {
     },
   });
 
-  // Realtime: re-fetch whenever positions change (refresh-prices writes,
-  // CSV import, etc.)
+  // Overlays — just the bucket per ticker, for the Strategy badge column.
+  const { data: overlays = [] } = useQuery({
+    queryKey: ['strategy_overlay_lite'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('strategy_overlay' as never)
+        .select('ticker, bucket');
+      if (error) throw error;
+      return (data ?? []) as unknown as OverlayLite[];
+    },
+  });
+
+  // Watching — tickers tracked but not yet bought.
+  const { data: watching = [] } = useQuery({
+    queryKey: ['watching'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('watching' as never)
+        .select('*')
+        .order('ticker');
+      if (error) throw error;
+      return (data ?? []) as unknown as WatchingRow[];
+    },
+  });
+
+  // Realtime: invalidate the relevant query whenever the underlying table
+  // changes. Positions writes come from refresh-prices + CSV import;
+  // overlays come from /strategy; watching is owned by this page.
   useEffect(() => {
     const sub = supabase
       .channel('positions-realtime')
@@ -37,11 +78,53 @@ export function usePositions() {
         { event: '*', schema: 'public', table: 'positions' },
         () => qc.invalidateQueries({ queryKey: ['positions'] }),
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'strategy_overlay' },
+        () => qc.invalidateQueries({ queryKey: ['strategy_overlay_lite'] }),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'watching' },
+        () => qc.invalidateQueries({ queryKey: ['watching'] }),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(sub);
     };
   }, [qc]);
+
+  const overlayByTicker = useMemo(() => {
+    const m = new Map<string, StrategyBucket>();
+    overlays.forEach((o) => m.set(o.ticker, o.bucket));
+    return m;
+  }, [overlays]);
+
+  const addWatching = useMutation({
+    mutationFn: async (row: { ticker: string; name?: string; sector?: string; current_price?: number }) => {
+      const { error } = await supabase
+        .from('watching' as never)
+        .insert({
+          ticker: row.ticker.trim().toUpperCase(),
+          name: row.name ?? null,
+          sector: row.sector ?? 'Other',
+          current_price: row.current_price ?? null,
+        } as never);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['watching'] }),
+  });
+
+  const removeWatching = useMutation({
+    mutationFn: async (ticker: string) => {
+      const { error } = await supabase
+        .from('watching' as never)
+        .delete()
+        .eq('ticker', ticker);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['watching'] }),
+  });
 
   const portfolio = useMemo(
     () => computePortfolio(rawPositions),
@@ -109,7 +192,11 @@ export function usePositions() {
     positions: rawPositions,
     portfolio,
     isLoading,
+    overlayByTicker,
+    watching,
     replacePositions,
     refreshPrices,
+    addWatching,
+    removeWatching,
   };
 }
