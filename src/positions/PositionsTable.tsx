@@ -12,19 +12,28 @@ type SortKey =
   | 'sector'
   | 'quantity'
   | 'avg_cost'
-  | 'last_price'
+  | 'current_price'
   | 'market_value'
   | 'pnl_dollar'
   | 'pnl_pct'
   | 'pct_portfolio';
 
+type Bucket = 'income' | 'invest' | 'yield';
+
 interface Props {
   rows: PositionComputed[];
   onUpload?: () => void;
   loading?: boolean;
+  overlayByTicker?: Map<string, Bucket>;
 }
 
-export function PositionsTable({ rows, onUpload, loading }: Props) {
+const BUCKET_LABEL: Record<Bucket, string> = {
+  income: 'Income',
+  invest: 'Invest',
+  yield: 'Yield',
+};
+
+export function PositionsTable({ rows, onUpload, loading, overlayByTicker }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('market_value');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -70,7 +79,7 @@ export function PositionsTable({ rows, onUpload, loading }: Props) {
             <th onClick={() => onSort('sector')}>Sector{ind('sector')}</th>
             <th onClick={() => onSort('quantity')}>Qty{ind('quantity')}</th>
             <th onClick={() => onSort('avg_cost')}>Avg cost{ind('avg_cost')}</th>
-            <th onClick={() => onSort('last_price')}>Price{ind('last_price')}</th>
+            <th onClick={() => onSort('current_price')}>Price{ind('current_price')}</th>
             <th onClick={() => onSort('market_value')}>
               Mkt value{ind('market_value')}
             </th>
@@ -79,17 +88,18 @@ export function PositionsTable({ rows, onUpload, loading }: Props) {
             <th onClick={() => onSort('pct_portfolio')}>
               % port{ind('pct_portfolio')}
             </th>
+            <th>Strategy</th>
           </tr>
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.id}>
+            <tr key={r.id} data-ticker={r.ticker}>
               <td className="ticker">{r.ticker}</td>
               <td className="sector-cell">{r.sector}</td>
               <td className="num">{fmtQty(r.quantity)}</td>
               <td className="num">{fmtUSD2(r.avg_cost)}</td>
               <td className="num">
-                {r.last_price != null ? fmtUSD2(r.last_price) : '—'}
+                {r.current_price != null ? fmtUSD2(r.current_price) : '—'}
               </td>
               <td className="num strong">{fmtUSD(r.market_value)}</td>
               <td
@@ -118,11 +128,34 @@ export function PositionsTable({ rows, onUpload, loading }: Props) {
                 />
                 {r.pct_portfolio.toFixed(1)}%
               </td>
+              <td>
+                <StrategyBadge bucket={overlayByTicker?.get(r.ticker)} />
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function StrategyBadge({ bucket }: { bucket?: Bucket }) {
+  if (!bucket) {
+    return <span className="np-strategy-badge none">— not in strategy</span>;
+  }
+  return (
+    <a
+      href={`/strategy?ticker=${encodeURIComponent('')}`}
+      onClick={(e) => {
+        e.preventDefault();
+        const row = (e.currentTarget.closest('tr')) as HTMLElement | null;
+        const t = row?.dataset.ticker;
+        if (t) window.location.assign(`/strategy?ticker=${encodeURIComponent(t)}`);
+      }}
+      className={`np-strategy-badge ${bucket}`}
+    >
+      {BUCKET_LABEL[bucket]} ↗
+    </a>
   );
 }
 

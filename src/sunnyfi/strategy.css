@@ -1,0 +1,250 @@
+/* Strategy page — buckets, position cards, journal grid.
+   Reuses np-top / np-btn / np-pill primitives from research.css. */
+
+.strat-page {
+  min-height: 100vh;
+  background: var(--navi-dash-page, #061a10);
+  color: var(--navi-fg1, #cfeae0);
+  font-family: var(--navi-font-sans);
+  padding: 24px 32px 64px;
+}
+
+.strat-banner {
+  background: var(--navi-bg-card, #0a2218);
+  border-radius: 14px;
+  padding: 24px 28px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  margin-bottom: 20px;
+}
+.strat-banner .hero {
+  grid-column: 1 / span 2;
+}
+.strat-banner .hero-label {
+  font-size: 11px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--navi-fg3, #468278);
+}
+.strat-banner .hero-num {
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 48px;
+  font-weight: 500;
+  color: var(--navi-neon, #d2e632);
+  margin-top: 6px;
+  line-height: 1;
+}
+.strat-banner .hero-sub {
+  font-size: 12px;
+  color: var(--navi-fg2, #a8d4c8);
+  margin-top: 8px;
+}
+.strat-banner .stat-label {
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--navi-fg3, #468278);
+}
+.strat-banner .stat-num {
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 22px;
+  margin-top: 4px;
+}
+.strat-banner .stat-num.pos { color: var(--navi-positive, #a8d4a0); }
+.strat-banner .stat-num.neg { color: var(--navi-negative, #d49a8a); }
+
+.strat-alloc {
+  display: grid;
+  grid-template-columns: 40% 40% 20%;
+  height: 8px;
+  border-radius: 100px;
+  overflow: hidden;
+  margin: 20px 0 24px;
+}
+.strat-alloc > div { height: 100%; }
+.strat-alloc .income { background: var(--navi-neon, #d2e632); }
+.strat-alloc .invest { background: #8ab4d4; }
+.strat-alloc .yield  { background: var(--navi-positive, #a8d4a0); }
+
+.strat-unassigned {
+  margin-bottom: 24px;
+}
+.strat-unassigned-hd {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--navi-fg3, #468278); margin-bottom: 10px;
+}
+.strat-unassigned-strip {
+  display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px;
+}
+.strat-unassigned-card {
+  flex: 0 0 180px;
+  background: var(--navi-bg-card, #0a2218);
+  border: 1px solid rgba(70, 130, 120, 0.18);
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.strat-unassigned-card:hover {
+  border-color: var(--navi-neon, #d2e632);
+  background: rgba(210, 230, 50, 0.04);
+}
+.strat-unassigned-card .ticker {
+  font-family: var(--navi-font-mono, monospace);
+  font-weight: 600; font-size: 14px;
+}
+.strat-unassigned-card .name {
+  font-size: 11px; color: var(--navi-fg3, #468278); margin-top: 2px;
+}
+.strat-unassigned-card .px {
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 13px; margin-top: 8px;
+}
+
+.strat-board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.strat-bucket {
+  background: var(--navi-bg-card, #0a2218);
+  border-radius: 12px;
+  padding: 16px;
+  min-height: 280px;
+  display: flex; flex-direction: column;
+}
+.strat-bucket .hd {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 12px;
+}
+.strat-bucket .hd .name {
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 13px; letter-spacing: 1.2px; text-transform: uppercase;
+}
+.strat-bucket.income .name { color: var(--navi-neon, #d2e632); }
+.strat-bucket.invest .name { color: #8ab4d4; }
+.strat-bucket.yield  .name { color: var(--navi-positive, #a8d4a0); }
+.strat-bucket .hd .count {
+  font-size: 11px; color: var(--navi-fg3, #468278);
+}
+.strat-bucket .hd .total {
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 14px;
+}
+.strat-bucket-cards {
+  display: flex; flex-direction: column; gap: 8px; flex: 1;
+}
+.strat-card {
+  background: rgba(70, 130, 120, 0.06);
+  border: 1px solid rgba(70, 130, 120, 0.15);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.strat-card .row {
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.strat-card .ticker {
+  font-family: var(--navi-font-mono, monospace);
+  font-weight: 600; font-size: 13px;
+}
+.strat-card .px {
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 12px;
+}
+.strat-card .meta {
+  font-size: 10px; color: var(--navi-fg3, #468278);
+  margin-top: 4px;
+  display: flex; gap: 10px;
+}
+.strat-card .pnl.pos { color: var(--navi-positive, #a8d4a0); }
+.strat-card .pnl.neg { color: var(--navi-negative, #d49a8a); }
+.strat-card-actions {
+  display: flex; gap: 6px; margin-top: 8px;
+}
+.strat-card-actions button {
+  font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase;
+  background: transparent; color: var(--navi-fg3, #468278);
+  border: 1px solid rgba(70, 130, 120, 0.25);
+  border-radius: 100px; padding: 3px 10px; cursor: pointer;
+}
+.strat-card-actions button:hover { color: var(--navi-fg1, #cfeae0); border-color: var(--navi-fg2); }
+
+.strat-empty {
+  border: 1.5px dashed rgba(50, 110, 100, 0.3);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--navi-fg3, #468278);
+  font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
+  padding: 24px; flex: 1;
+}
+
+.strat-closed {
+  margin-top: 32px;
+}
+.strat-closed-hd {
+  font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--navi-fg3, #468278); margin-bottom: 10px;
+}
+.strat-closed-row {
+  display: grid; grid-template-columns: 60px 1fr 80px 100px;
+  gap: 12px; padding: 8px 0;
+  border-bottom: 1px solid rgba(70, 130, 120, 0.1);
+  font-size: 12px;
+}
+
+/* Modal scaffolding */
+.strat-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(6, 26, 16, 0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.strat-modal {
+  background: var(--navi-bg-card, #0a2218);
+  border: 1px solid rgba(70, 130, 120, 0.25);
+  border-radius: 12px;
+  padding: 24px;
+  width: 420px;
+  max-width: 90vw;
+}
+.strat-modal h2 {
+  font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--navi-fg2, #a8d4c8); margin: 0 0 16px;
+}
+.strat-field { margin-bottom: 14px; }
+.strat-field label {
+  display: block;
+  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--navi-fg3, #468278); margin-bottom: 4px;
+}
+.strat-field input, .strat-field select {
+  width: 100%;
+  background: rgba(70, 130, 120, 0.08);
+  border: 1px solid rgba(70, 130, 120, 0.25);
+  border-radius: 6px;
+  color: var(--navi-fg1);
+  padding: 8px 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+.strat-bucket-picker {
+  display: flex; gap: 6px;
+}
+.strat-bucket-picker button {
+  flex: 1; padding: 8px;
+  background: rgba(70, 130, 120, 0.08);
+  border: 1px solid rgba(70, 130, 120, 0.25);
+  border-radius: 6px;
+  color: var(--navi-fg2);
+  font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase;
+  cursor: pointer;
+}
+.strat-bucket-picker button.on.income { background: rgba(210, 230, 50, 0.15); border-color: var(--navi-neon); color: var(--navi-neon); }
+.strat-bucket-picker button.on.invest { background: rgba(138, 180, 212, 0.15); border-color: #8ab4d4; color: #8ab4d4; }
+.strat-bucket-picker button.on.yield  { background: rgba(168, 212, 160, 0.15); border-color: var(--navi-positive); color: var(--navi-positive); }
+.strat-modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 20px;
+}

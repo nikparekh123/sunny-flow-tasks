@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Status = "live" | "soon";
 interface Tool {
-  key: "tasks" | "research" | "positions" | "snowball" | "signals" | "calendar";
+  key: "tasks" | "research" | "positions" | "snowball" | "strategy" | "calendar";
   name: string;
   desc: string;
   status: Status;
@@ -19,7 +19,7 @@ const TOOLS: Tool[] = [
   { key: "research", name: "Research Hub", desc: "Notes & theses",   status: "live", hotkey: "2", internal: "/research" },
   { key: "positions", name: "Positions",   desc: "Holdings & P&L",   status: "live", hotkey: "3", href: "https://positions.sunnyfi.co" },
   { key: "snowball", name: "Snowball",     desc: "DCF & valuation",  status: "live", hotkey: "4", internal: "/snowball" },
-  { key: "signals",  name: "Signals",      desc: "Alerts & flows",   status: "soon", hotkey: "5" },
+  { key: "strategy", name: "Strategy",     desc: "Buckets & premium", status: "live", hotkey: "5", internal: "/strategy" },
   { key: "calendar", name: "Calendar",     desc: "Events",           status: "soon", hotkey: "6" },
 ];
 
@@ -32,7 +32,8 @@ function ToolIcon({ name }: { name: Tool["key"] }) {
     positions: g(<><rect x="3" y="3" width="8" height="13" /><rect x="13" y="3" width="8" height="8" /><rect x="3" y="18" width="8" height="3" /><rect x="13" y="13" width="8" height="8" /></>),
     // Snowball icon: stacked spheres growing — value compounding metaphor.
     snowball: g(<><circle cx="12" cy="17" r="4" /><circle cx="12" cy="9" r="2.5" /><circle cx="12" cy="4" r="1.4" /></>),
-    signals:  g(<><path d="M3 18l5-7 4 4 5-8 4 5" /><circle cx="8" cy="11" r="1.2" /><circle cx="12" cy="15" r="1.2" /><circle cx="17" cy="7" r="1.2" /></>),
+    // Strategy icon: three stacked buckets — Income / Investment / Yield allocation.
+    strategy: g(<><rect x="3" y="4" width="18" height="4" rx="0.5" /><rect x="3" y="10" width="18" height="4" rx="0.5" /><rect x="3" y="16" width="18" height="4" rx="0.5" /></>),
     calendar: g(<><rect x="3" y="5" width="18" height="16" rx="1" /><path d="M3 10h18M8 3v4M16 3v4" /></>),
   };
   return <svg width={22} height={22} viewBox="0 0 24 24" aria-hidden>{map[name]}</svg>;

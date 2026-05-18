@@ -18,12 +18,13 @@ export type Sector = (typeof SECTORS)[number];
 export interface PositionRow {
   id: string;
   ticker: string;
+  name: string | null;
   sector: Sector;
   quantity: number;
   avg_cost: number;
-  last_price: number | null;
+  current_price: number | null;
   prev_close: number | null;
-  last_updated: string | null;
+  last_price_update: string | null;
 }
 
 export interface PositionComputed extends PositionRow {
@@ -36,13 +37,13 @@ export interface PositionComputed extends PositionRow {
 }
 
 export function computeRow(p: PositionRow, total_market_value: number): PositionComputed {
-  const last = p.last_price ?? p.avg_cost;
+  const last = p.current_price ?? p.avg_cost;
   const market_value = p.quantity * last;
   const cost_basis = p.quantity * p.avg_cost;
   const pnl_dollar = market_value - cost_basis;
   const pnl_pct = cost_basis === 0 ? 0 : (pnl_dollar / cost_basis) * 100;
-  const day_change = p.prev_close != null && p.last_price != null
-    ? p.quantity * (p.last_price - p.prev_close)
+  const day_change = p.prev_close != null && p.current_price != null
+    ? p.quantity * (p.current_price - p.prev_close)
     : 0;
   const pct_portfolio =
     total_market_value === 0 ? 0 : (market_value / total_market_value) * 100;
@@ -56,12 +57,12 @@ export interface PortfolioTotals {
   total_pnl: number;
   total_pnl_pct: number;
   total_day_change: number;
-  last_updated: string | null;
+  last_price_update: string | null;
 }
 
 export function computePortfolio(positions: PositionRow[]): PortfolioTotals {
   const tmv = positions.reduce(
-    (s, p) => s + p.quantity * (p.last_price ?? p.avg_cost),
+    (s, p) => s + p.quantity * (p.current_price ?? p.avg_cost),
     0,
   );
   const rows = positions.map((p) => computeRow(p, tmv));
@@ -70,11 +71,11 @@ export function computePortfolio(positions: PositionRow[]): PortfolioTotals {
   const total_pnl_pct =
     total_cost_basis === 0 ? 0 : (total_pnl / total_cost_basis) * 100;
   const total_day_change = rows.reduce((s, r) => s + r.day_change, 0);
-  const last_updated =
+  const last_price_update =
     positions.reduce<string | null>((acc, p) => {
-      if (!p.last_updated) return acc;
-      if (!acc) return p.last_updated;
-      return p.last_updated > acc ? p.last_updated : acc;
+      if (!p.last_price_update) return acc;
+      if (!acc) return p.last_price_update;
+      return p.last_price_update > acc ? p.last_price_update : acc;
     }, null);
   return {
     rows,
@@ -83,7 +84,7 @@ export function computePortfolio(positions: PositionRow[]): PortfolioTotals {
     total_pnl,
     total_pnl_pct,
     total_day_change,
-    last_updated,
+    last_price_update,
   };
 }
 
