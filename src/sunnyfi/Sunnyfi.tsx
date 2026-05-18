@@ -36,7 +36,7 @@ function PageFallback() {
         fontFamily: 'var(--navi-font-mono, monospace)',
       }}
     >
-      …
+      chunk…
     </div>
   );
 }
