@@ -10,6 +10,10 @@ export interface PositionInput {
   sector: string;
   quantity: number;
   avg_cost: number;
+  /** Optional CSV-supplied strategy bucket. When present, the import upserts
+   *  it into strategy_overlay (with default put_cost/put_frequency the user
+   *  can later edit in /strategy). */
+  strategy?: StrategyBucket;
 }
 
 export type StrategyBucket = 'income' | 'invest' | 'yield';
@@ -143,6 +147,7 @@ export function usePositions() {
           sector: (VALID_SECTORS.has(r.sector) ? r.sector : 'Other') as Sector,
           quantity: Number(r.quantity),
           avg_cost: Number(r.avg_cost),
+          strategy: r.strategy,
         }))
         .filter(
           (r) =>
@@ -162,14 +167,40 @@ export function usePositions() {
 
       if (cleaned.length === 0) return { inserted: 0 };
 
+      // Insert positions (without the strategy field — that lives on overlay).
+      const positionsToInsert = cleaned.map(({ strategy: _s, ...rest }) => {
+        void _s;
+        return rest;
+      });
       const { error: insError } = await supabase
         .from('positions' as never)
-        .insert(cleaned as never);
+        .insert(positionsToInsert as never);
       if (insError) throw insError;
 
-      return { inserted: cleaned.length };
+      // Upsert strategy overlays for rows that included a strategy column.
+      // Defaults for put_cost/put_frequency keep the row valid; user can
+      // tune them later in /strategy.
+      const overlayRows = cleaned
+        .filter((r) => r.strategy)
+        .map((r) => ({
+          ticker: r.ticker,
+          bucket: r.strategy!,
+          put_cost: 0,
+          put_frequency: 'quarterly',
+        }));
+      if (overlayRows.length > 0) {
+        const { error: ovError } = await supabase
+          .from('strategy_overlay' as never)
+          .upsert(overlayRows as never, { onConflict: 'ticker' });
+        if (ovError) throw ovError;
+      }
+
+      return { inserted: cleaned.length, overlaysWritten: overlayRows.length };
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['positions'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['strategy_overlay_lite'] });
+    },
   });
 
   const refreshPrices = useMutation({

@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { SECTORS, fmtQty, fmtUSD2 } from './types';
-import type { PositionInput } from './usePositions';
+import type { PositionInput, StrategyBucket } from './usePositions';
+
+const STRATEGY_ALIASES: Record<string, StrategyBucket> = {
+  income: 'income',
+  invest: 'invest',
+  investment: 'invest',
+  yield: 'yield',
+};
 
 interface Props {
   open: boolean;
@@ -66,6 +73,8 @@ function parseCsv(text: string): ParseResult {
     sector: headers.indexOf('sector'),
     quantity: headers.indexOf('quantity'),
     avg_cost: headers.indexOf('avg_cost'),
+    // Optional column; -1 if absent.
+    strategy: headers.indexOf('strategy'),
   };
 
   const rows: PositionInput[] = [];
@@ -76,6 +85,8 @@ function parseCsv(text: string): ParseResult {
     const sector = cols[idx.sector] ?? '';
     const qty = parseFloat(cols[idx.quantity] ?? '');
     const avg = parseFloat(cols[idx.avg_cost] ?? '');
+    const stratRaw = idx.strategy >= 0 ? (cols[idx.strategy] ?? '').trim().toLowerCase() : '';
+    const strategy = stratRaw ? STRATEGY_ALIASES[stratRaw] : undefined;
 
     if (!ticker || !/^[A-Z0-9.\-]+$/.test(ticker)) {
       errors.push({ row: rowNum, field: 'ticker', msg: `invalid ticker "${cols[idx.ticker]}"` });
@@ -89,13 +100,21 @@ function parseCsv(text: string): ParseResult {
     if (isNaN(avg) || avg < 0) {
       errors.push({ row: rowNum, field: 'avg_cost', msg: `must be non-negative, got "${cols[idx.avg_cost]}"` });
     }
+    if (idx.strategy >= 0 && stratRaw && !strategy) {
+      errors.push({
+        row: rowNum,
+        field: 'strategy',
+        msg: `strategy "${stratRaw}" must be one of income / invest / yield (blank = unassigned)`,
+      });
+    }
     if (
       ticker &&
       VALID_SECTORS.has(sector) &&
       !isNaN(qty) && qty > 0 &&
-      !isNaN(avg) && avg >= 0
+      !isNaN(avg) && avg >= 0 &&
+      (!stratRaw || !!strategy)
     ) {
-      rows.push({ ticker, sector, quantity: qty, avg_cost: avg });
+      rows.push({ ticker, sector, quantity: qty, avg_cost: avg, strategy });
     }
   }
   return { rows, errors };
@@ -167,6 +186,7 @@ export function CsvUploadModal({ open, onClose, onConfirm }: Props) {
               <div className="np-modal-title">Upload positions</div>
               <div className="np-modal-sub">
                 CSV columns: ticker, sector, quantity, avg_cost
+                {' · optional: strategy (income / invest / yield)'}
               </div>
             </div>
             <button
@@ -219,9 +239,10 @@ export function CsvUploadModal({ open, onClose, onConfirm }: Props) {
                   borderRadius: 6,
                   margin: '18px 0 0 0',
                 }}
-              >{`ticker,sector,quantity,avg_cost
-AAPL,Technology,100,150.25
-CCJ,Energy,500,42.10`}</pre>
+              >{`ticker,sector,quantity,avg_cost,strategy
+AAPL,Technology,100,150.25,income
+CCJ,Energy,500,42.10,invest
+JEPI,Financials,300,55.40,yield`}</pre>
             </div>
           )}
 
@@ -322,6 +343,7 @@ CCJ,Energy,500,42.10`}</pre>
                       <th>Sector</th>
                       <th>Qty</th>
                       <th>Avg cost</th>
+                      <th>Strategy</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -331,6 +353,9 @@ CCJ,Energy,500,42.10`}</pre>
                         <td className="sector-cell">{r.sector}</td>
                         <td className="num">{fmtQty(r.quantity)}</td>
                         <td className="num">{fmtUSD2(r.avg_cost)}</td>
+                        <td className="sector-cell">
+                          {r.strategy ?? <span style={{ color: 'var(--navi-fg4)' }}>—</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

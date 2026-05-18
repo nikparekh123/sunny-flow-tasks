@@ -628,3 +628,56 @@
   display: flex; gap: 8px; justify-content: flex-end;
   margin-top: 20px;
 }
+
+/* ===== Grouped positions table (by strategy bucket) ===== */
+.np-table .np-group-hd td {
+  padding: 14px 14px 8px;
+  border-top: 1px solid rgba(50,110,100,0.25);
+  background: rgba(15,51,51,0.45);
+  border-bottom: 1px solid rgba(50,110,100,0.25);
+}
+.np-table tbody tr.np-group-hd:hover { background: rgba(15,51,51,0.45); }
+
+.np-table .np-group-hd:first-child td { border-top: none; }
+
+.np-table .np-group-dot {
+  display: inline-block;
+  width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 10px;
+  vertical-align: 0.05em;
+  box-shadow: 0 0 8px currentColor;
+}
+.np-table .np-group-name {
+  font-size: 13px; font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--navi-fg1);
+}
+.np-table .np-group-count {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+  margin-left: 8px;
+}
+
+.np-table .np-group-foot td {
+  background: rgba(15,51,51,0.5);
+  border-top: 1.5px solid rgba(50,110,100,0.4);
+  font-weight: 600;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.np-table tbody tr.np-group-foot:hover { background: rgba(15,51,51,0.5); }
+
+.np-table .np-group-foot b {
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  font-weight: 600;
+}
+
+/* Per-bucket accent strip on the header row */
+.np-table .np-group-hd.np-group-income     td:first-child { box-shadow: inset 3px 0 0 #d2e632; }
+.np-table .np-group-hd.np-group-invest     td:first-child { box-shadow: inset 3px 0 0 #8ab4d4; }
+.np-table .np-group-hd.np-group-yield      td:first-child { box-shadow: inset 3px 0 0 #a8d4a0; }
+.np-table .np-group-hd.np-group-unassigned td:first-child { box-shadow: inset 3px 0 0 #e0c060; }

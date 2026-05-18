@@ -151,6 +151,39 @@ export function aggregateBySector(rows: PositionComputed[]) {
     .sort((a, b) => b.value - a.value);
 }
 
+// Allocation rollup by strategy bucket. Anything without an overlay falls
+// into "Unassigned" so the chart still adds to 100%.
+export type StrategyBucket = 'income' | 'invest' | 'yield';
+const STRATEGY_LABEL: Record<string, string> = {
+  income: 'Income',
+  invest: 'Investment',
+  yield: 'Yield',
+  unassigned: 'Unassigned',
+};
+export function aggregateByStrategy(
+  rows: PositionComputed[],
+  overlayByTicker: Map<string, StrategyBucket>,
+) {
+  const map = new Map<string, number>();
+  rows.forEach((r) => {
+    const b = overlayByTicker.get(r.ticker) ?? 'unassigned';
+    map.set(b, (map.get(b) || 0) + r.market_value);
+  });
+  const total = Array.from(map.values()).reduce((s, v) => s + v, 0);
+  // Stable order: income → invest → yield → unassigned
+  const order = ['income', 'invest', 'yield', 'unassigned'];
+  return order
+    .filter((k) => map.has(k))
+    .map((k) => {
+      const value = map.get(k) ?? 0;
+      return {
+        label: STRATEGY_LABEL[k] ?? k,
+        value,
+        pct: total === 0 ? 0 : (value / total) * 100,
+      };
+    });
+}
+
 export function aggregateByTicker(rows: PositionComputed[]) {
   const total = rows.reduce((s, r) => s + r.market_value, 0);
   return rows
