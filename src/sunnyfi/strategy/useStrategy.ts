@@ -234,6 +234,55 @@ export function useStrategy() {
       qc.invalidateQueries({ queryKey: ['strategy', 'entries'] }),
   });
 
+  const deleteGain = useMutation({
+    mutationFn: async (args: { ticker: string; week_start_date: string }) => {
+      const { error } = await supabase
+        .from('gain_entries' as never)
+        .delete()
+        .eq('ticker', args.ticker)
+        .eq('week_start_date', args.week_start_date);
+      if (error) throw error;
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['strategy', 'entries'] }),
+  });
+
+  const addWatch = useMutation({
+    mutationFn: async (args: {
+      ticker: string;
+      name: string;
+      sector: string;
+      current_price: number;
+    }) => {
+      const { error } = await supabase
+        .from('watching' as never)
+        .upsert(
+          {
+            ticker: args.ticker,
+            name: args.name,
+            sector: args.sector,
+            current_price: args.current_price,
+          } as never,
+          { onConflict: 'ticker' },
+        );
+      if (error) throw error;
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['strategy', 'watching'] }),
+  });
+
+  const removeWatch = useMutation({
+    mutationFn: async (ticker: string) => {
+      const { error } = await supabase
+        .from('watching' as never)
+        .delete()
+        .eq('ticker', ticker);
+      if (error) throw error;
+    },
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ['strategy', 'watching'] }),
+  });
+
   const isLoading =
     positionsQ.isLoading ||
     overlaysQ.isLoading ||
@@ -248,5 +297,8 @@ export function useStrategy() {
     unassign,
     moveBucket,
     logGain,
+    deleteGain,
+    addWatch,
+    removeWatch,
   };
 }
