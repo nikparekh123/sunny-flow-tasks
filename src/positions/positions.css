@@ -1538,3 +1538,82 @@
   font-size: 10px;
   opacity: 0.85;
 }
+
+/* ── Put protections manager ─────────────────────────────────────── */
+.pp-manager {
+  margin: 12px 0 16px;
+  border: 1px solid var(--navi-elevated, #1a3530);
+  border-radius: 8px;
+  background: rgba(20, 40, 38, 0.35);
+  overflow: hidden;
+}
+.pp-manager-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--navi-elevated, #1a3530);
+  background: rgba(10, 30, 28, 0.4);
+}
+.pp-manager-l {
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--navi-fg3, #a8c4c0);
+}
+.pp-manager-ct {
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 11px;
+  color: var(--navi-fg4, #6e8a86);
+}
+.pp-manager-list {
+  display: flex;
+  flex-direction: column;
+}
+.pp-manager-row {
+  display: grid;
+  grid-template-columns: 88px 1fr 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+  border-top: 1px solid rgba(26, 53, 48, 0.5);
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 12px;
+}
+.pp-manager-row:first-child { border-top: none; }
+.pp-manager-row.expired { opacity: 0.55; }
+.pp-manager-row .ticker.clickable {
+  cursor: pointer;
+  color: var(--navi-fg1, #faf5f0);
+  font-weight: 500;
+}
+.pp-manager-row .ticker.clickable:hover { color: #d2e632; }
+.pp-manager-cost { color: #c4523c; }
+.pp-manager-exp { color: var(--navi-fg4, #6e8a86); font-size: 11px; }
+.pp-manager-clear {
+  font-size: 11px;
+  padding: 4px 10px;
+  color: var(--navi-fg3, #a8c4c0);
+}
+.pp-manager-clear:hover { color: #c4523c; border-color: #c4523c; }
+
+/* ── Put protection confirm chip ─────────────────────────────────── */
+.pp-confirm {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d2e632;
+  border-radius: 6px;
+  background: rgba(210, 230, 50, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pp-confirm-q {
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 12px;
+  color: var(--navi-fg1, #faf5f0);
+}
+.pp-confirm-q b { color: #d2e632; }
+.pp-confirm-actions { display: flex; gap: 6px; }

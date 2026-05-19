@@ -32,7 +32,7 @@ interface Props {
 }
 
 export function PutProtectionPanel({
-  ticker: _ticker,
+  ticker,
   calc,
   editing,
   onEditStart,
@@ -42,12 +42,17 @@ export function PutProtectionPanel({
 }: Props) {
   const [expiry, setExpiry] = useState(calc.expiry ?? defaultExpiry(60));
   const [totalCost, setTotalCost] = useState(calc.has ? String(calc.total_cost) : '');
+  // When the user hits "Save protection" we don't write immediately —
+  // we show a confirmation chip naming the ticker. This catches the
+  // "I had the wrong position open" mistake before it hits the DB.
+  const [pendingSave, setPendingSave] = useState<null | { total_cost: number; expiry: string; purchase_date: string }>(null);
 
   // Re-sync form state when the panel re-opens or switches position.
   useEffect(() => {
     setExpiry(calc.expiry ?? defaultExpiry(60));
     setTotalCost(calc.has ? String(calc.total_cost) : '');
-  }, [editing, calc.expiry, calc.total_cost, calc.has]);
+    setPendingSave(null);
+  }, [editing, calc.expiry, calc.total_cost, calc.has, ticker]);
 
   const previewTotal = parseFloat(totalCost);
   const previewTotalDays = expiry ? daysBetween(todayIso(), expiry) : 0;
@@ -97,6 +102,27 @@ export function PutProtectionPanel({
             <span className="k-lbl">days</span>
           </div>
         )}
+        {pendingSave && (
+          <div className="pp-confirm">
+            <span className="pp-confirm-q">
+              Add put protection for <b>{ticker}</b> · {fmtUSD(pendingSave.total_cost)}?
+            </span>
+            <div className="pp-confirm-actions">
+              <button className="np-btn ghost" onClick={() => setPendingSave(null)}>
+                ✗ cancel
+              </button>
+              <button
+                className="np-btn neon"
+                onClick={() => {
+                  onSave(pendingSave);
+                  setPendingSave(null);
+                }}
+              >
+                ✓ confirm save
+              </button>
+            </div>
+          </div>
+        )}
         <div className="pp-actions">
           {calc.has && (
             <button className="np-btn ghost pp-clear" onClick={onClear}>
@@ -110,9 +136,9 @@ export function PutProtectionPanel({
             onClick={() => {
               const n = parseFloat(totalCost);
               if (!expiry || isNaN(n) || n < 0) return;
-              onSave({ total_cost: n, expiry, purchase_date: todayIso() });
+              setPendingSave({ total_cost: n, expiry, purchase_date: todayIso() });
             }}
-            disabled={!expiry || !totalCost || isNaN(parseFloat(totalCost)) || parseFloat(totalCost) < 0}
+            disabled={!expiry || !totalCost || isNaN(parseFloat(totalCost)) || parseFloat(totalCost) < 0 || pendingSave !== null}
           >
             ✓ Save protection
           </button>
