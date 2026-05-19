@@ -11,6 +11,7 @@ import type {
   StrategyOverlayRow,
   GainEntryRow,
   WatchingRow,
+  PutProtectionRow,
   StrategyPosition,
   Bucket,
   PutFrequency,
@@ -81,6 +82,17 @@ export function useStrategy() {
     },
   });
 
+  const protectionQ = useQuery({
+    queryKey: ['strategy', 'put_protection'],
+    queryFn: async (): Promise<PutProtectionRow[]> => {
+      const { data, error } = await supabase
+        .from('put_protection' as never)
+        .select('*');
+      if (error) throw error;
+      return (data ?? []) as unknown as PutProtectionRow[];
+    },
+  });
+
   // ── Realtime subscriptions ─────────────────────────────────────────
   useEffect(() => {
     const ch = supabase
@@ -105,6 +117,11 @@ export function useStrategy() {
         { event: '*', schema: 'public', table: 'watching' },
         () => qc.invalidateQueries({ queryKey: ['strategy', 'watching'] }),
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'put_protection' },
+        () => qc.invalidateQueries({ queryKey: ['strategy', 'put_protection'] }),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(ch);
@@ -125,6 +142,8 @@ export function useStrategy() {
       arr.push(e);
       entriesByTicker.set(e.ticker, arr);
     });
+    const protectionByTicker = new Map<string, PutProtectionRow>();
+    (protectionQ.data ?? []).forEach((r) => protectionByTicker.set(r.ticker, r));
 
     const tickersInPositions = new Set(positions.map((p) => p.ticker));
 
@@ -137,6 +156,7 @@ export function useStrategy() {
       current_price: p.current_price,
       overlay: overlayByTicker.get(p.ticker) ?? null,
       entries: entriesByTicker.get(p.ticker) ?? [],
+      putProtection: protectionByTicker.get(p.ticker) ?? null,
     }));
 
     // Closed = overlays whose ticker no longer exists in positions.
@@ -151,6 +171,7 @@ export function useStrategy() {
         current_price: null,
         overlay: o,
         entries: entriesByTicker.get(o.ticker) ?? [],
+        putProtection: protectionByTicker.get(o.ticker) ?? null,
       }));
 
     return {
@@ -162,7 +183,7 @@ export function useStrategy() {
       unassigned: fromPositions.filter((p) => p.overlay === null),
       closed,
     };
-  }, [positionsQ.data, overlaysQ.data, entriesQ.data]);
+  }, [positionsQ.data, overlaysQ.data, entriesQ.data, protectionQ.data]);
 
   // ── Mutations ──────────────────────────────────────────────────────
   const setStrategy = useMutation({

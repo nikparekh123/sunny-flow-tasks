@@ -1,7 +1,7 @@
-import type { CSSProperties, DragEvent, MouseEvent } from 'react';
+import type { CSSProperties, DragEvent } from 'react';
 import type { StrategyPosition, Bucket } from '../types';
 import type { PositionCalc } from '../calc';
-import { fmtK, fmtPx } from '../calc';
+import { fmt$, fmtK, fmtPx } from '../calc';
 import { encodeDrag, type DragKind } from './dragdrop';
 
 interface Props {
@@ -63,38 +63,70 @@ export function PositionCard({
       </div>
 
       <div className="pos-meta">
-        {qty.toLocaleString('en-US')} sh @ {fmtPx(avg)} · now {fmtPx(cur)}
+        {qty.toLocaleString('en-US')} sh · buy {fmtPx(avg)} · now {fmtPx(cur)}
       </div>
 
       <div className="nums">
         <div>
-          <div className="k">share P&amp;L</div>
+          <div className="k">unrealized</div>
           <div className={`v ${c.sharePL >= 0 ? 'pos' : 'neg'}`}>
             {fmtSignedK(c.sharePL)}
             <small>
               {c.sharePLPct >= 0 ? '+' : ''}
-              {c.sharePLPct.toFixed(1)}% mark
+              {c.sharePLPct.toFixed(1)}%
             </small>
           </div>
         </div>
         <div>
-          <div className="k">premium · {(c.onTrack * 100).toFixed(0)}% pace</div>
-          <div className="v muted">
-            {fmtK(c.collected)}
-            <small>of {fmtK(c.target)} target</small>
+          <div className="k">realized</div>
+          <div
+            className={
+              'v ' +
+              (c.realizedGains > 0 ? 'pos' : c.realizedGains < 0 ? 'neg' : 'muted')
+            }
+          >
+            {c.realizedGains === 0 ? '—' : fmtSignedK(c.realizedGains)}
           </div>
         </div>
+        {c.collected !== 0 && (
+          <div>
+            <div className="k">premium</div>
+            <div className={`v ${c.collected >= 0 ? 'pos' : 'neg'}`}>
+              {fmtSignedK(c.collected)}
+            </div>
+          </div>
+        )}
       </div>
 
+      {c.putCost > 0 && (
+        <div className="nums">
+          <div>
+            <div className="k">put cost</div>
+            <div className="v">
+              {fmtK(c.putCost)}
+              <small>
+                {c.daysToExpiry > 0 ? `${c.daysToExpiry}d to expiry` : 'expired'}
+              </small>
+            </div>
+          </div>
+          <div>
+            <div className="k">cost / trading day</div>
+            <div className="v">
+              {c.costPerTradingDay != null ? fmt$(c.costPerTradingDay) : '—'}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="totalbar">
-        <span className="label">total profit</span>
+        <span className="label">overall</span>
         <span className={`total ${c.total >= 0 ? 'pos' : 'neg'}`}>
           {fmtSignedK(c.total)}
           <span className="breakdown">
-            shares {fmtSignedK(c.sharePL)}
-            {c.realizedGains > 0 && <> · realized +{fmtK(c.realizedGains)}</>}
-            {' · prem +'}
-            {fmtK(c.collected)}
+            unrlz {fmtSignedK(c.sharePL)}
+            {c.realizedGains !== 0 && <> · rlz {fmtSignedK(c.realizedGains)}</>}
+            {c.collected !== 0 && <> · prem {fmtSignedK(c.collected)}</>}
+            {c.putCost > 0 && <> · put −{fmtK(c.putCost)}</>}
           </span>
         </span>
       </div>

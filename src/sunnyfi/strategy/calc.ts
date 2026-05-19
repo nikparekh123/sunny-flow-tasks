@@ -30,6 +30,13 @@ export interface PositionCalc {
   sharePLPct: number;
   collected: number;
   realizedGains: number;
+  /** Total put protection cost from put_protection.total_cost (0 if none). */
+  putCost: number;
+  /** Calendar days from today to put_protection.expiry (0 if expired/none). */
+  daysToExpiry: number;
+  /** put_cost ÷ trading days remaining (~5/7 of daysToExpiry). null if no protection. */
+  costPerTradingDay: number | null;
+  /** Net total = sharePL + collected + realizedGains − putCost. */
   total: number;
   target: number;
   weeklyTarget: number;
@@ -82,7 +89,24 @@ export function calcPosition(
   const realizedGains = p.entries
     .filter((e) => e.source === 'stock')
     .reduce((s, e) => s + (e.amount || 0), 0);
-  const total = sharePL + collected + realizedGains;
+
+  // Put protection economics. Cost-per-trading-day = total_cost ÷ trading
+  // days remaining to expiry, where trading days ≈ calendar days × 5/7.
+  const putCost = p.putProtection?.total_cost ?? 0;
+  let daysToExpiry = 0;
+  let costPerTradingDay: number | null = null;
+  if (p.putProtection) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const expiry = new Date(p.putProtection.expiry + 'T00:00:00');
+    const diffMs = expiry.getTime() - today.getTime();
+    daysToExpiry = Math.max(0, Math.round(diffMs / 86_400_000));
+    const tradingDaysLeft = Math.max(1, daysToExpiry * (5 / 7));
+    costPerTradingDay = putCost / tradingDaysLeft;
+  }
+
+  // Net total = unrealized + premium + realized − cost of put protection.
+  const total = sharePL + collected + realizedGains - putCost;
 
   const daysInPeriod = PERIOD_DAYS[cadence];
   const target = periodTargetFor(p, cadence);
@@ -104,6 +128,9 @@ export function calcPosition(
     sharePLPct,
     collected,
     realizedGains,
+    putCost,
+    daysToExpiry,
+    costPerTradingDay,
     total,
     target,
     weeklyTarget,
@@ -130,6 +157,8 @@ export interface BucketCalc {
   sharePL: number;
   realizedGains: number;
   collected: number;
+  /** Sum of put_protection.total_cost across positions in this bucket. */
+  putCost: number;
   target: number;
   expected: number;
   shortfall: number;
@@ -153,6 +182,7 @@ export function calcBucket(
       a.sharePL += c.sharePL;
       a.realizedGains += c.realizedGains;
       a.collected += c.collected;
+      a.putCost += c.putCost;
       a.target += c.target;
       a.expected += c.expected;
       a.shortfall += c.shortfall;
@@ -166,6 +196,7 @@ export function calcBucket(
       sharePL: 0,
       realizedGains: 0,
       collected: 0,
+      putCost: 0,
       target: 0,
       expected: 0,
       shortfall: 0,

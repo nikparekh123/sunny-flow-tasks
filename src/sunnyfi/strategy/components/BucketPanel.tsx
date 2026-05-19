@@ -47,25 +47,18 @@ export function BucketPanel({ bucket, variant = '', dropActive, onDrop, children
         </div>
         <div className="stats">
           <div className="stat">
+            <div className="k">cost overall</div>
+            <div className="v">{fmtK(bucket.cost)}</div>
+          </div>
+          <div className="stat">
             <div className="k">share P&amp;L</div>
             <div className={'v ' + (bucket.sharePL >= 0 ? 'pos' : 'neg')}>
               {fmtSignedK(bucket.sharePL)}
             </div>
           </div>
           <div className="stat">
-            <div className="k">premium</div>
-            <div className="v">
-              {fmtK(bucket.collected)}{' '}
-              <span style={{ color: 'var(--navi-fg3)', fontSize: 11, fontWeight: 400 }}>
-                / {fmtK(bucket.target)}
-              </span>
-            </div>
-          </div>
-          <div className="stat">
-            <div className="k">total</div>
-            <div className={'v ' + (bucket.total >= 0 ? 'pos' : 'neg')}>
-              {fmtSignedK(bucket.total)}
-            </div>
+            <div className="k">cost of put</div>
+            <div className="v">{fmtK(bucket.putCost)}</div>
           </div>
         </div>
         {bucket.shortfall > 50 ? (

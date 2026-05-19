@@ -66,6 +66,7 @@ export interface StrategyPosition {
   current_price: number | null;
   overlay: StrategyOverlayRow | null;
   entries: GainEntryRow[];
+  putProtection: PutProtectionRow | null;
 }
 
 export const BUCKET_META: Record<
