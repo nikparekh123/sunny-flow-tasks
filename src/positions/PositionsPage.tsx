@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import Auth from '@/pages/Auth';
 import { usePositions } from './usePositions';
@@ -118,7 +119,9 @@ export default function PositionsPage() {
             Sunnyfi<span className="cursor" />
           </a>
           <span className="np-crumb-sep">/</span>
-          <span className="np-crumb">POSITIONS</span>
+          <Link to="/positions" className="np-crumb-link on">POSITIONS</Link>
+          <span className="np-crumb-sep">/</span>
+          <Link to="/earnings" className="np-crumb-link">EARNINGS</Link>
         </div>
         <div className="np-actions">
           <button
