@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import {
   computePutProtection,
   computePortfolio,
+  type ExpenseEntry,
   type GainEntry,
   type GainSource,
   type PositionRow,
@@ -83,6 +84,19 @@ export function usePositions() {
     },
   });
 
+  // Expenses — outflows tracked separately from gains. Magnitudes only.
+  const { data: expenseEntries = [] } = useQuery({
+    queryKey: ['expenses'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('expenses' as never)
+        .select('*')
+        .order('expense_date', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as ExpenseEntry[];
+    },
+  });
+
   // Overlays — just the bucket per ticker, for the Strategy badge column.
   const { data: overlays = [] } = useQuery({
     queryKey: ['strategy_overlay_lite'],
@@ -139,6 +153,11 @@ export function usePositions() {
         { event: '*', schema: 'public', table: 'put_protection' },
         () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'expenses' },
+        () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(sub);
@@ -178,6 +197,16 @@ export function usePositions() {
     return m;
   }, [putProtections]);
 
+  const expensesByTicker = useMemo(() => {
+    const m = new Map<string, ExpenseEntry[]>();
+    for (const e of expenseEntries) {
+      const arr = m.get(e.ticker) ?? [];
+      arr.push(e);
+      m.set(e.ticker, arr);
+    }
+    return m;
+  }, [expenseEntries]);
+
   const addWatching = useMutation({
     mutationFn: async (row: { ticker: string; name?: string; sector?: string; current_price?: number }) => {
       const { error } = await supabase
@@ -205,8 +234,8 @@ export function usePositions() {
   });
 
   const portfolio = useMemo(
-    () => computePortfolio(rawPositions, gainsByTicker, putCostByTicker),
-    [rawPositions, gainsByTicker, putCostByTicker],
+    () => computePortfolio(rawPositions, gainsByTicker, putCostByTicker, expensesByTicker),
+    [rawPositions, gainsByTicker, putCostByTicker, expensesByTicker],
   );
 
   // Replace all rows with the contents of a CSV. Wipe + insert in one txn-ish
@@ -362,6 +391,40 @@ export function usePositions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
   });
 
+  // ── Expense mutations ──────────────────────────────────────────────
+  const addExpense = useMutation({
+    mutationFn: async (row: {
+      ticker: string;
+      expense_date: string;
+      source: GainSource;
+      amount: number;
+      note?: string | null;
+    }) => {
+      const { error } = await supabase
+        .from('expenses' as never)
+        .insert({
+          ticker: row.ticker.trim().toUpperCase(),
+          expense_date: row.expense_date,
+          source: row.source,
+          amount: Math.abs(row.amount), // expenses are stored as magnitudes
+          note: row.note ?? null,
+        } as never);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+  });
+
+  const deleteExpense = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('expenses' as never)
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+  });
+
   // ── Position status (open ↔ closed) ────────────────────────────────
   const setPositionStatus = useMutation({
     mutationFn: async (args: { ticker: string; status: 'open' | 'closed' }) => {
@@ -388,6 +451,9 @@ export function usePositions() {
     removeWatching,
     addGain,
     deleteGain,
+    addExpense,
+    deleteExpense,
+    expensesByTicker,
     setPutProtection,
     clearPutProtection,
     setPositionStatus,

@@ -100,6 +100,7 @@ export function PositionsTable({
         <thead>
           <tr>
             <th onClick={() => onSort('ticker')}>Ticker{ind('ticker')}</th>
+            <th>Status</th>
             <th onClick={() => onSort('sector')}>Sector{ind('sector')}</th>
             <th onClick={() => onSort('quantity')}>Qty{ind('quantity')}</th>
             <th onClick={() => onSort('avg_cost')}>Avg cost{ind('avg_cost')}</th>
@@ -127,7 +128,7 @@ export function PositionsTable({
             return (
               <Fragment key={g}>
                 <tr className={`np-group-hd np-group-${meta.tone}`}>
-                  <td colSpan={9}>
+                  <td colSpan={10}>
                     <span className="np-group-dot" style={{ background: meta.accent }} />
                     <span className="np-group-name">{meta.name}</span>
                     <span className="np-group-count">· {rowsInGroup.length} positions</span>
@@ -143,6 +144,22 @@ export function PositionsTable({
                       ) : (
                         r.ticker
                       )}
+                    </td>
+                    <td>
+                      <span
+                        className={
+                          'np-status-chip ' +
+                          (r.overall_pl > 0 ? 'up' : r.overall_pl < 0 ? 'down' : 'flat')
+                        }
+                        title={`Overall P&L ${fmtUSD(r.overall_pl)} (unrealized + net realized)`}
+                      >
+                        {r.overall_pl > 0 ? '▲' : r.overall_pl < 0 ? '▼' : '—'}
+                        {r.overall_pl !== 0 && (
+                          <span className="np-status-chip-amt">
+                            {fmtUSD(r.overall_pl)}
+                          </span>
+                        )}
+                      </span>
                     </td>
                     <td className="sector-cell">{r.sector}</td>
                     <td className="num">{fmtQty(r.quantity)}</td>
@@ -170,7 +187,7 @@ export function PositionsTable({
                   </tr>
                 ))}
                 <tr className={`np-group-foot np-group-${meta.tone}`}>
-                  <td colSpan={5}>
+                  <td colSpan={6}>
                     <b>{meta.name} subtotal</b>
                   </td>
                   <td className="num strong">{fmtUSD(subtotal.mv)}</td>
