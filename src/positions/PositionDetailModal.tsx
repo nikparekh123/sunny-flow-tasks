@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   computePutProtection,
-  fmtCompact,
-  fmtPct,
   fmtUSD,
   fmtUSD2,
   fmtQty,
@@ -159,16 +157,6 @@ export function PositionDetailModal({
       }))
       .sort((a, b) => a.weekIdx - b.weekIdx);
   }, [filtered, todayWeek]);
-
-  const weekTotals = useMemo(() => {
-    const totals = Array.from({ length: 12 }, () => 0);
-    ledger.forEach((g) => {
-      const w = weekIdxOf(g.date, todayWeek);
-      if (w >= 0 && w < 12) totals[w] += g.amount;
-    });
-    return totals;
-  }, [ledger, todayWeek]);
-  const maxBar = Math.max(1, ...weekTotals.map(Math.abs));
 
   const counts = useMemo(
     () => ({
