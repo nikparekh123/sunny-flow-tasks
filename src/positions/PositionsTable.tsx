@@ -26,6 +26,8 @@ interface Props {
   onUpload?: () => void;
   loading?: boolean;
   overlayByTicker?: Map<string, Bucket>;
+  /** Clicking a ticker opens the Position Detail modal. */
+  onTickerClick?: (ticker: string) => void;
 }
 
 const GROUP_ORDER: GroupKey[] = ['income', 'invest', 'yield', 'unassigned'];
@@ -42,6 +44,7 @@ export function PositionsTable({
   onUpload,
   loading,
   overlayByTicker,
+  onTickerClick,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('market_value');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -129,7 +132,15 @@ export function PositionsTable({
                 </tr>
                 {rowsInGroup.map((r) => (
                   <tr key={r.id} data-ticker={r.ticker}>
-                    <td className="ticker">{r.ticker}</td>
+                    <td className="ticker">
+                      {onTickerClick ? (
+                        <span className="ticker clickable" onClick={() => onTickerClick(r.ticker)}>
+                          {r.ticker}
+                        </span>
+                      ) : (
+                        r.ticker
+                      )}
+                    </td>
                     <td className="sector-cell">{r.sector}</td>
                     <td className="num">{fmtQty(r.quantity)}</td>
                     <td className="num">{fmtUSD2(r.avg_cost)}</td>
