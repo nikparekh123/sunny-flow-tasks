@@ -90,12 +90,13 @@ export function PositionDetailModal({
   onSetStatus,
 }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
-  // Open the inline log form by default in gain mode so the user lands on
-  // the entry fields. Expense mode uses the put-protection editor instead.
-  const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(mode === 'gain' ? 'gain' : null);
-  // In expense mode the modal collapses to just the put-protection editor —
-  // put cost *is* the expense in this app, so we auto-open the form.
-  const [editPP, setEditPP] = useState(mode === 'expense');
+  // Both modals auto-open their matching inline log form so the user
+  // lands directly on the entry fields. The two views share the same shell:
+  // filter row · log button · auto-form · history list.
+  const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(mode);
+  // Put protection editor is a side trigger in expense mode — closed by
+  // default; the "+ Put protection" button in the filter row toggles it.
+  const [editPP, setEditPP] = useState(false);
 
   // Normalize the two ledgers to a common shape so the rest of the modal
   // doesn't have to branch. Expense rows carry expense_date → date.
@@ -212,28 +213,7 @@ export function PositionDetailModal({
           </div>
         </div>
 
-        {/* PUT PROTECTION — only in expense mode. Put cost is the
-            expense in this app, so it has no place in the gains view. */}
-        {mode === 'expense' && (
-          <PutProtectionPanel
-            ticker={position.ticker}
-            calc={ppCalc}
-            editing={editPP}
-            onEditStart={() => setEditPP(true)}
-            onEditCancel={() => setEditPP(false)}
-            onSave={(p) => {
-              onSetPutProtection({ ticker: position.ticker, ...p });
-              setEditPP(false);
-            }}
-            onClear={() => {
-              onClearPutProtection(position.ticker);
-              setEditPP(false);
-            }}
-          />
-        )}
-
-        {mode === 'gain' && <>
-        {/* SOURCE FILTER */}
+        {/* SOURCE FILTER — same shell in both modes. */}
         <div className="pd-filter">
           <div className="np-status-filter">
             <button className={sourceFilter === 'all' ? 'on' : ''} onClick={() => setSourceFilter('all')}>
@@ -255,9 +235,22 @@ export function PositionDetailModal({
                 + Log gain
               </button>
             ) : (
-              <button className="np-btn add-expense" onClick={() => setShowAdd('expense')}>
-                + Log expense
-              </button>
+              <>
+                {/* Put protection is a special expense type — separate trigger. */}
+                <button
+                  className="np-btn ghost"
+                  onClick={() => { setEditPP(true); setShowAdd(null); }}
+                  title={ppCalc.has ? 'Edit put protection' : 'Add put protection for this position'}
+                >
+                  {ppCalc.has ? `Put · ${fmtUSD(ppCalc.total_cost)}` : '+ Put protection'}
+                </button>
+                <button
+                  className="np-btn add-expense"
+                  onClick={() => { setShowAdd('expense'); setEditPP(false); }}
+                >
+                  + Log expense
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -312,7 +305,27 @@ export function PositionDetailModal({
             </div>
           ))}
         </div>
-        </>}
+
+        {/* Put protection editor — opens inline in expense mode when the
+            user clicks the put chip. Replaces the inline expense form
+            while it's open. */}
+        {mode === 'expense' && editPP && (
+          <PutProtectionPanel
+            ticker={position.ticker}
+            calc={ppCalc}
+            editing={editPP}
+            onEditStart={() => setEditPP(true)}
+            onEditCancel={() => setEditPP(false)}
+            onSave={(p) => {
+              onSetPutProtection({ ticker: position.ticker, ...p });
+              setEditPP(false);
+            }}
+            onClear={() => {
+              onClearPutProtection(position.ticker);
+              setEditPP(false);
+            }}
+          />
+        )}
 
         {mode === 'gain' && showAdd === 'gain' && (
           <PDAddInline
@@ -325,7 +338,7 @@ export function PositionDetailModal({
             }}
           />
         )}
-        {mode === 'expense' && showAdd === 'expense' && (
+        {mode === 'expense' && showAdd === 'expense' && !editPP && (
           <PDAddInline
             ticker={position.ticker}
             kind="expense"
