@@ -12,7 +12,6 @@ import { EditModal } from '../modals/EditModal';
 import { SellModal } from '../modals/SellModal';
 import { MoveModal, type AllocationImpact } from '../modals/MoveModal';
 import { AddWatchModal } from '../modals/AddWatchModal';
-import { LogGainModal } from '../modals/LogGainModal';
 import { calcBucket, calcPortfolio, calcPosition, type Cadence } from '../calc';
 import type { Bucket, StrategyPosition } from '../types';
 import { useStrategy } from '../useStrategy';
@@ -29,7 +28,6 @@ type ModalState =
   | { kind: 'sell'; position: StrategyPosition; bucket: Bucket }
   | { kind: 'move'; position: StrategyPosition; from: Bucket; to: Bucket; impact: AllocationImpact }
   | { kind: 'add-watch' }
-  | { kind: 'log-gain'; position: StrategyPosition; bucket: Bucket }
   | null;
 
 export default function StrategyDashboard({ cadence }: Props) {
@@ -166,9 +164,6 @@ export default function StrategyDashboard({ cadence }: Props) {
                       onDragStart={onDragStart}
                       onDragEnd={onDragEnd}
                       onClick={(pos, b) => setModal({ kind: 'edit', position: pos, bucket: b })}
-                      onLogGain={(pos, b) =>
-                        setModal({ kind: 'log-gain', position: pos, bucket: b })
-                      }
                     />
                   );
                 })}
@@ -324,31 +319,6 @@ export default function StrategyDashboard({ cadence }: Props) {
         />
       )}
 
-      {modal?.kind === 'log-gain' && (
-        <LogGainModal
-          position={modal.position}
-          bucket={modal.bucket}
-          onClose={() => setModal(null)}
-          onConfirm={({ ticker, source, amount, note }) => {
-            s.logGain.mutate(
-              {
-                ticker,
-                gain_date: new Date().toISOString().slice(0, 10),
-                source,
-                amount,
-                note: note || undefined,
-              },
-              {
-                onSuccess: () => {
-                  toast.success(`${amount >= 0 ? '+' : ''}${amount} ${source} on ${ticker}`);
-                  setModal(null);
-                },
-                onError: (e) => toast.error((e as Error).message),
-              },
-            );
-          }}
-        />
-      )}
     </div>
   );
 }
