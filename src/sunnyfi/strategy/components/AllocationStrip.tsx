@@ -22,7 +22,7 @@ export function AllocationStrip({ buckets, portfolio }: Props) {
             <div className="head">
               <div className="name">{b.name}</div>
               <div className="meta">
-                {b.count} positions · {fmtK(b.cost / Math.max(b.count, 1))} avg
+                {b.count} positions
               </div>
             </div>
             <div className="nums">

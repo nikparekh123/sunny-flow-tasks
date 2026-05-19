@@ -59,21 +59,7 @@ export function PositionCard({
           <span className="tk">{p.ticker}</span>
           <span className="sector">{p.sector}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {onLogGain && (
-            <button
-              className="gain-pill"
-              onClick={(e: MouseEvent<HTMLButtonElement>) => {
-                e.stopPropagation();
-                onLogGain(p, bucket);
-              }}
-              title="log a dividend or realized gain"
-            >
-              <span className="plus">+</span>$ gain
-            </button>
-          )}
-          <span className={`verdict-pill ${c.verdict}`}>{verdictLabel}</span>
-        </div>
+        <span className={`verdict-pill ${c.verdict}`}>{verdictLabel}</span>
       </div>
 
       <div className="pos-meta">
