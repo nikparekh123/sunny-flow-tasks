@@ -224,7 +224,7 @@ export function PositionDetailModal({
 
         {/* STATS — only meaningful when reviewing gains; in expense mode
             the modal collapses to just the put-protection editor. */}
-        {mode === 'gain' && <>
+        {mode === 'gain' && (
         <div className="pd-stats">
           <div className="pd-stat">
             <div className="pd-stat-l">Mkt value</div>
@@ -272,8 +272,10 @@ export function PositionDetailModal({
             </div>
           </div>
         </div>
+        )}
 
-        {/* PUT PROTECTION */}
+        {/* PUT PROTECTION — visible in both modes; in expense mode it
+            auto-opens in edit so the user lands on the form directly. */}
         <PutProtectionPanel
           ticker={position.ticker}
           calc={ppCalc}
@@ -290,6 +292,7 @@ export function PositionDetailModal({
           }}
         />
 
+        {mode === 'gain' && <>
         {/* SPARKLINE */}
         {ledger.length > 0 && (
           <div className="pd-spark">
