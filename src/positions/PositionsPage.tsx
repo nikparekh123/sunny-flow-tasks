@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import Auth from '@/pages/Auth';
 import { usePositions } from './usePositions';
@@ -9,7 +10,6 @@ import { PositionDetailModal } from './PositionDetailModal';
 import { GainsLogMatrix } from './GainsLogMatrix';
 import { ExpensesLogMatrix } from './ExpensesLogMatrix';
 import { RealizedSummary } from './RealizedSummary';
-import { PutProtectionsManager } from './PutProtectionsManager';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
 import './positions.css';
@@ -17,6 +17,16 @@ import './positions.css';
 const DASHBOARD_URL = 'https://www.sunnyfi.co/dashboard';
 const TREEMAP_HEIGHT = 600;
 const COMPANION_MAX = 10;
+
+// Persisted view state — survives reloads so the user lands back where they
+// left off instead of always seeing "By sector" + Positions on every refresh.
+const LS_ALLOC = 'np:allocView';
+const LS_POS = 'np:posView';
+function readLS<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  const v = window.localStorage.getItem(key);
+  return v && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+}
 
 export default function PositionsPage() {
   const { user, loading } = useAuth();
@@ -37,8 +47,18 @@ export default function PositionsPage() {
     clearPutProtection,
     setPositionStatus,
   } = usePositions();
-  const [allocView, setAllocView] = useState<AllocView>('sector');
-  const [posView, setPosView] = useState<'table' | 'gains' | 'expenses'>('table');
+  const [allocView, setAllocView] = useState<AllocView>(() =>
+    readLS<AllocView>(LS_ALLOC, ['sector', 'stock', 'strategy', 'pnl'] as const, 'sector'),
+  );
+  const [posView, setPosView] = useState<'table' | 'gains' | 'expenses'>(() =>
+    readLS<'table' | 'gains' | 'expenses'>(LS_POS, ['table', 'gains', 'expenses'] as const, 'table'),
+  );
+  useEffect(() => {
+    try { window.localStorage.setItem(LS_ALLOC, allocView); } catch { /* quota / private mode */ }
+  }, [allocView]);
+  useEffect(() => {
+    try { window.localStorage.setItem(LS_POS, posView); } catch { /* quota / private mode */ }
+  }, [posView]);
   const [showUpload, setShowUpload] = useState(false);
   const [detail, setDetail] = useState<{ ticker: string; mode: 'gain' | 'expense' } | null>(null);
 
@@ -99,7 +119,9 @@ export default function PositionsPage() {
             Sunnyfi<span className="cursor" />
           </a>
           <span className="np-crumb-sep">/</span>
-          <span className="np-crumb">POSITIONS</span>
+          <Link to="/positions" className="np-crumb-link on">POSITIONS</Link>
+          <span className="np-crumb-sep">/</span>
+          <Link to="/earnings" className="np-crumb-link">EARNINGS</Link>
         </div>
         <div className="np-actions">
           <button
@@ -216,18 +238,9 @@ export default function PositionsPage() {
             <RealizedSummary
               portfolio={portfolio}
               overlayByTicker={overlayByTicker}
+              putProtectionByTicker={putProtectionByTicker}
             />
           )}
-          <PutProtectionsManager
-            putProtectionByTicker={putProtectionByTicker}
-            onTickerClick={(t) => setDetail({ ticker: t, mode: 'gain' })}
-            onClear={(t) =>
-              clearPutProtection.mutate(t, {
-                onSuccess: () => toast.success(`Cleared put protection · ${t}`),
-                onError: (e) => toast.error((e as Error).message),
-              })
-            }
-          />
           {posView === 'table' && (
             <PositionsTable
               rows={portfolio.rows}
@@ -249,6 +262,7 @@ export default function PositionsPage() {
             <ExpensesLogMatrix
               rows={portfolio.rows}
               expensesByTicker={expensesByTicker}
+              putProtectionByTicker={putProtectionByTicker}
               onCellClick={(t) => setDetail({ ticker: t, mode: 'expense' })}
               onTickerClick={(t) => setDetail({ ticker: t, mode: 'expense' })}
             />

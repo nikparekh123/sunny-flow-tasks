@@ -4,6 +4,7 @@ import {
   fmtUSD,
   type ExpenseEntry,
   type PositionComputed,
+  type PutProtectionRow,
 } from './types';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -28,34 +29,85 @@ type StatusFilter = 'all' | 'with-expenses' | 'open' | 'closed';
 interface Props {
   rows: PositionComputed[];
   expensesByTicker: Map<string, ExpenseEntry[]>;
+  putProtectionByTicker: Map<string, PutProtectionRow>;
   onCellClick: (ticker: string, weekIdx: number) => void;
   onTickerClick: (ticker: string) => void;
 }
 
-export function ExpensesLogMatrix({ rows, expensesByTicker, onCellClick, onTickerClick }: Props) {
+export function ExpensesLogMatrix({
+  rows,
+  expensesByTicker,
+  putProtectionByTicker,
+  onCellClick,
+  onTickerClick,
+}: Props) {
   const [filter, setFilter] = useState<StatusFilter>('all');
   const todayWeek = useMemo(() => mondayOf(new Date()), []);
+
+  // Build an effective ticker → entries map that folds put-protection cost in
+  // as a synthetic put-source expense. The synthetic entry is dated at the
+  // protection's purchase_date so it lands in the right week column.
+  type EffectiveEntry = ExpenseEntry & { virtual?: boolean };
+  const effectiveByTicker = useMemo(() => {
+    const out = new Map<string, EffectiveEntry[]>();
+    rows.forEach((r) => {
+      const real = expensesByTicker.get(r.ticker) ?? [];
+      const list: EffectiveEntry[] = [...real];
+      const pp = putProtectionByTicker.get(r.ticker);
+      if (pp && pp.total_cost > 0) {
+        list.push({
+          id: `pp:${r.ticker}`,
+          ticker: r.ticker,
+          expense_date: pp.purchase_date ?? new Date().toISOString().slice(0, 10),
+          source: 'put',
+          amount: pp.total_cost,
+          note: 'put protection',
+          virtual: true,
+        });
+      }
+      if (list.length > 0) out.set(r.ticker, list);
+    });
+    return out;
+  }, [rows, expensesByTicker, putProtectionByTicker]);
+
+  const effectiveTotalByTicker = useMemo(() => {
+    const m = new Map<string, number>();
+    effectiveByTicker.forEach((list, t) => {
+      m.set(t, list.reduce((s, e) => s + e.amount, 0));
+    });
+    return m;
+  }, [effectiveByTicker]);
+
+  const hasExpenses = (r: PositionComputed) =>
+    (effectiveTotalByTicker.get(r.ticker) ?? 0) !== 0;
 
   const counts = useMemo(
     () => ({
       all: rows.length,
-      withExpenses: rows.filter((r) => r.expenses_total !== 0).length,
+      withExpenses: rows.filter(hasExpenses).length,
       open: rows.filter((r) => r.status === 'open').length,
       closed: rows.filter((r) => r.status === 'closed').length,
     }),
-    [rows],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, effectiveTotalByTicker],
   );
 
   const filtered = useMemo(() => {
-    if (filter === 'with-expenses') return rows.filter((r) => r.expenses_total !== 0);
+    if (filter === 'with-expenses') return rows.filter(hasExpenses);
     if (filter === 'open') return rows.filter((r) => r.status === 'open');
     if (filter === 'closed') return rows.filter((r) => r.status === 'closed');
     return rows;
-  }, [rows, filter]);
+  }, // eslint-disable-next-line react-hooks/exhaustive-deps
+  [rows, filter, effectiveTotalByTicker]);
 
   const sorted = useMemo(
-    () => [...filtered].sort((a, b) => b.expenses_total - a.expenses_total),
-    [filtered],
+    () =>
+      [...filtered].sort(
+        (a, b) =>
+          (effectiveTotalByTicker.get(b.ticker) ?? 0) -
+          (effectiveTotalByTicker.get(a.ticker) ?? 0),
+      ),
+    [filtered, effectiveTotalByTicker],
   );
 
   const weeklyTotals = useMemo(() => {
@@ -63,7 +115,7 @@ export function ExpensesLogMatrix({ rows, expensesByTicker, onCellClick, onTicke
       stock: 0, call: 0, put: 0, total: 0, n: 0,
     }));
     sorted.forEach((r) => {
-      const entries = expensesByTicker.get(r.ticker) ?? [];
+      const entries = effectiveByTicker.get(r.ticker) ?? [];
       entries.forEach((g) => {
         const w = weekIdxOf(g.expense_date, todayWeek);
         if (w >= 0 && w < WEEK_COUNT) {
@@ -74,7 +126,7 @@ export function ExpensesLogMatrix({ rows, expensesByTicker, onCellClick, onTicke
       });
     });
     return totals;
-  }, [sorted, expensesByTicker, todayWeek]);
+  }, [sorted, effectiveByTicker, todayWeek]);
 
   const grand = {
     total: weeklyTotals.reduce((s, t) => s + t.total, 0),
@@ -115,7 +167,8 @@ export function ExpensesLogMatrix({ rows, expensesByTicker, onCellClick, onTicke
           </thead>
           <tbody>
             {sorted.map((r) => {
-              const entries = expensesByTicker.get(r.ticker) ?? [];
+              const entries = effectiveByTicker.get(r.ticker) ?? [];
+              const tickerTotal = effectiveTotalByTicker.get(r.ticker) ?? 0;
               const byWeek: Record<number, { stock: number; call: number; put: number; total: number }> = {};
               entries.forEach((g) => {
                 const w = weekIdxOf(g.expense_date, todayWeek);
@@ -163,10 +216,10 @@ export function ExpensesLogMatrix({ rows, expensesByTicker, onCellClick, onTicke
                   })}
                   <td className="gl-tot">
                     <div className="gl-tot-amt down">
-                      {r.expenses_total === 0 ? (
+                      {tickerTotal === 0 ? (
                         <span style={{ color: 'var(--navi-fg5)' }}>—</span>
                       ) : (
-                        '−' + fmtUSD(r.expenses_total)
+                        '−' + fmtUSD(tickerTotal)
                       )}
                     </div>
                   </td>

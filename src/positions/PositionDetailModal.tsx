@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   computePutProtection,
-  fmtCompact,
-  fmtPct,
   fmtUSD,
   fmtUSD2,
   fmtQty,
@@ -92,7 +90,12 @@ export function PositionDetailModal({
   onSetStatus,
 }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
-  const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(null);
+  // Both modals auto-open their matching inline log form so the user
+  // lands directly on the entry fields. The two views share the same shell:
+  // filter row · log button · auto-form · history list.
+  const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(mode);
+  // Put protection editor is a side trigger in expense mode — closed by
+  // default; the "+ Put protection" button in the filter row toggles it.
   const [editPP, setEditPP] = useState(false);
 
   // Normalize the two ledgers to a common shape so the rest of the modal
@@ -100,14 +103,26 @@ export function PositionDetailModal({
   type LedgerRow = { id: string; date: string; source: GainSource; amount: number; note?: string };
   const ledger: LedgerRow[] = useMemo(() => {
     if (mode === 'expense') {
-      return expenseEntries.map((e) => ({
+      const rows: LedgerRow[] = expenseEntries.map((e) => ({
         id: e.id, date: e.expense_date, source: e.source, amount: e.amount, note: e.note,
       }));
+      // Surface put-protection cost as a synthetic put-source expense so the
+      // user can see "why is my expense total $X" in one place.
+      if (putProtection && putProtection.total_cost > 0) {
+        rows.push({
+          id: `pp:${putProtection.ticker}`,
+          date: putProtection.purchase_date ?? new Date().toISOString().slice(0, 10),
+          source: 'put',
+          amount: putProtection.total_cost,
+          note: 'put protection',
+        });
+      }
+      return rows;
     }
     return entries.map((e) => ({
       id: e.id, date: e.gain_date, source: e.source, amount: e.amount, note: e.note,
     }));
-  }, [mode, entries, expenseEntries]);
+  }, [mode, entries, expenseEntries, putProtection]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -143,16 +158,6 @@ export function PositionDetailModal({
       }))
       .sort((a, b) => a.weekIdx - b.weekIdx);
   }, [filtered, todayWeek]);
-
-  const weekTotals = useMemo(() => {
-    const totals = Array.from({ length: 12 }, () => 0);
-    ledger.forEach((g) => {
-      const w = weekIdxOf(g.date, todayWeek);
-      if (w >= 0 && w < 12) totals[w] += g.amount;
-    });
-    return totals;
-  }, [ledger, todayWeek]);
-  const maxBar = Math.max(1, ...weekTotals.map(Math.abs));
 
   const counts = useMemo(
     () => ({
@@ -208,101 +213,7 @@ export function PositionDetailModal({
           </div>
         </div>
 
-        {/* STATS */}
-        <div className="pd-stats">
-          <div className="pd-stat">
-            <div className="pd-stat-l">Mkt value</div>
-            <div className="pd-stat-v">
-              {isClosed ? <span className="muted">—</span> : fmtUSD(position.market_value)}
-            </div>
-          </div>
-          <div className="pd-stat">
-            <div className="pd-stat-l">Unrealized</div>
-            <div className={'pd-stat-v ' + (position.pnl_dollar < 0 ? 'down' : position.pnl_dollar > 0 ? 'up' : '')}>
-              {isClosed ? <span className="muted">—</span> : fmtUSD(position.pnl_dollar)}
-            </div>
-            {!isClosed && (
-              <div className={'pd-stat-sub ' + (position.pnl_pct < 0 ? 'down' : 'up')}>
-                {fmtPct(position.pnl_pct)}
-              </div>
-            )}
-          </div>
-          <div className="pd-stat">
-            <div className="pd-stat-l">Realized</div>
-            <div className={'pd-stat-v ' + (position.realized_total < 0 ? 'down' : position.realized_total > 0 ? 'up' : '')}>
-              {position.realized_total === 0 ? <span className="muted">—</span> : fmtUSD(position.realized_total)}
-            </div>
-            {position.realized_total !== 0 && (
-              <div className="pd-stat-sub">
-                {position.realized.stock !== 0 && <span className="rchip rk-s rchip-static">S</span>}
-                {position.realized.stock !== 0 && <span>{fmtCompact(position.realized.stock)}</span>}
-                {position.realized.call !== 0 && <span className="rchip rk-c rchip-static">C</span>}
-                {position.realized.call !== 0 && <span>{fmtCompact(position.realized.call)}</span>}
-                {position.realized.put !== 0 && <span className="rchip rk-p rchip-static">P</span>}
-                {position.realized.put !== 0 && <span>{fmtCompact(position.realized.put)}</span>}
-              </div>
-            )}
-          </div>
-          <div className="pd-stat">
-            <div className="pd-stat-l">Put cost</div>
-            <div className="pd-stat-v down">
-              {position.put_cost > 0 ? '−' + fmtUSD(position.put_cost) : <span className="muted">—</span>}
-            </div>
-          </div>
-          <div className="pd-stat pd-stat-net">
-            <div className="pd-stat-l">Net realized</div>
-            <div className={'pd-stat-v ' + (position.net_realized < 0 ? 'down' : position.net_realized > 0 ? 'up' : '')}>
-              {position.net_realized !== 0 ? fmtUSD(position.net_realized) : <span className="muted">—</span>}
-            </div>
-          </div>
-        </div>
-
-        {/* PUT PROTECTION */}
-        <PutProtectionPanel
-          ticker={position.ticker}
-          calc={ppCalc}
-          editing={editPP}
-          onEditStart={() => setEditPP(true)}
-          onEditCancel={() => setEditPP(false)}
-          onSave={(p) => {
-            onSetPutProtection({ ticker: position.ticker, ...p });
-            setEditPP(false);
-          }}
-          onClear={() => {
-            onClearPutProtection(position.ticker);
-            setEditPP(false);
-          }}
-        />
-
-        {/* SPARKLINE */}
-        {ledger.length > 0 && (
-          <div className="pd-spark">
-            <div className="pd-spark-hd">12-week activity</div>
-            <div className="pd-spark-bars">
-              {weekTotals.map((v, i) => {
-                const isThis = i === 0;
-                const h = Math.max(2, (Math.abs(v) / maxBar) * 44);
-                return (
-                  <div
-                    key={i}
-                    className="pd-spark-col"
-                    title={weekLabel(i) + ': ' + (v ? fmtUSD(v) : 'no entries')}
-                  >
-                    <div
-                      className={'pd-spark-bar ' + (v < 0 ? 'down' : 'up') + (v === 0 ? ' empty' : '')}
-                      style={{ height: h + 'px' }}
-                    />
-                    <div className={'pd-spark-x ' + (isThis ? 'this' : '')}>
-                      {i === 0 ? 'now' : `−${i}w`}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* SOURCE FILTER */}
+        {/* SOURCE FILTER — same shell in both modes. */}
         <div className="pd-filter">
           <div className="np-status-filter">
             <button className={sourceFilter === 'all' ? 'on' : ''} onClick={() => setSourceFilter('all')}>
@@ -324,9 +235,22 @@ export function PositionDetailModal({
                 + Log gain
               </button>
             ) : (
-              <button className="np-btn add-expense" onClick={() => setShowAdd('expense')}>
-                + Log expense
-              </button>
+              <>
+                {/* Put protection is a special expense type — separate trigger. */}
+                <button
+                  className="np-btn ghost"
+                  onClick={() => { setEditPP(true); setShowAdd(null); }}
+                  title={ppCalc.has ? 'Edit put protection' : 'Add put protection for this position'}
+                >
+                  {ppCalc.has ? `Put · ${fmtUSD(ppCalc.total_cost)}` : '+ Put protection'}
+                </button>
+                <button
+                  className="np-btn add-expense"
+                  onClick={() => { setShowAdd('expense'); setEditPP(false); }}
+                >
+                  + Log expense
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -360,19 +284,50 @@ export function PositionDetailModal({
                   <span className="pd-entry-note">
                     {e.note || <span style={{ color: 'var(--navi-fg5)' }}>—</span>}
                   </span>
-                  <button
-                    className="np-btn ghost pd-entry-del"
-                    onClick={() => (mode === 'expense' ? onDeleteExpense(e.id) : onDeleteGain(e.id))}
-                  >
-                    delete
-                  </button>
+                  {e.id.startsWith('pp:') ? (
+                    <button
+                      className="np-btn ghost pd-entry-del"
+                      onClick={() => onClearPutProtection(position.ticker)}
+                      title="Clear the put protection for this position"
+                    >
+                      clear protection
+                    </button>
+                  ) : (
+                    <button
+                      className="np-btn ghost pd-entry-del"
+                      onClick={() => (mode === 'expense' ? onDeleteExpense(e.id) : onDeleteGain(e.id))}
+                    >
+                      delete
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           ))}
         </div>
 
-        {showAdd === 'gain' && (
+        {/* Put protection editor — opens inline in expense mode when the
+            user clicks the put chip. Replaces the inline expense form
+            while it's open. */}
+        {mode === 'expense' && editPP && (
+          <PutProtectionPanel
+            ticker={position.ticker}
+            calc={ppCalc}
+            editing={editPP}
+            onEditStart={() => setEditPP(true)}
+            onEditCancel={() => setEditPP(false)}
+            onSave={(p) => {
+              onSetPutProtection({ ticker: position.ticker, ...p });
+              setEditPP(false);
+            }}
+            onClear={() => {
+              onClearPutProtection(position.ticker);
+              setEditPP(false);
+            }}
+          />
+        )}
+
+        {mode === 'gain' && showAdd === 'gain' && (
           <PDAddInline
             ticker={position.ticker}
             kind="gain"
@@ -383,7 +338,7 @@ export function PositionDetailModal({
             }}
           />
         )}
-        {showAdd === 'expense' && (
+        {mode === 'expense' && showAdd === 'expense' && !editPP && (
           <PDAddInline
             ticker={position.ticker}
             kind="expense"

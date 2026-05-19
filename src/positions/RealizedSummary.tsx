@@ -1,4 +1,4 @@
-import { fmtCompact, fmtUSD, type PortfolioTotals } from './types';
+import { computePutProtection, fmtCompact, fmtUSD, type PortfolioTotals, type PutProtectionRow } from './types';
 import type { StrategyBucket } from './usePositions';
 
 const BUCKET_META: Record<StrategyBucket, { name: string; tone: string; blurb: string }> = {
@@ -11,6 +11,7 @@ const BUCKETS: StrategyBucket[] = ['income', 'invest', 'yield'];
 interface Props {
   portfolio: PortfolioTotals;
   overlayByTicker: Map<string, StrategyBucket>;
+  putProtectionByTicker: Map<string, PutProtectionRow>;
 }
 
 /**
@@ -18,17 +19,18 @@ interface Props {
  *   A — net realized hero + by-source (S/C/P) + Put cost
  *   B — three strategy cards
  */
-export function RealizedSummary({ portfolio, overlayByTicker }: Props) {
+export function RealizedSummary({ portfolio, overlayByTicker, putProtectionByTicker }: Props) {
   // Per-strategy aggregates derived once.
   const byStrategy: Record<StrategyBucket, {
     realized: { stock: number; call: number; put: number; total: number };
     put_cost: number;
+    put_per_week: number;
     market_value: number;
     count: number;
   }> = {
-    income: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, market_value: 0, count: 0 },
-    invest: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, market_value: 0, count: 0 },
-    yield:  { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, market_value: 0, count: 0 },
+    income: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_per_week: 0, market_value: 0, count: 0 },
+    invest: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_per_week: 0, market_value: 0, count: 0 },
+    yield:  { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_per_week: 0, market_value: 0, count: 0 },
   };
   for (const r of portfolio.rows) {
     const b = overlayByTicker.get(r.ticker);
@@ -41,6 +43,15 @@ export function RealizedSummary({ portfolio, overlayByTicker }: Props) {
     s.put_cost       += r.put_cost;
     s.market_value   += r.market_value;
     s.count          += 1;
+    // Per-week put cost: each contract's total_cost / days_to_expiry × 7,
+    // summed across the bucket. Matches the table the user shared.
+    const pp = putProtectionByTicker.get(r.ticker);
+    if (pp) {
+      const calc = computePutProtection(pp);
+      if (calc.has && !calc.expired && calc.cost_per_day > 0) {
+        s.put_per_week += calc.cost_per_day * 7;
+      }
+    }
   }
 
   return (
@@ -115,6 +126,11 @@ export function RealizedSummary({ portfolio, overlayByTicker }: Props) {
                 <span className="np-strat-detail-item">
                   <span className="k">put cost</span>−{fmtCompact(s.put_cost)}
                 </span>
+                {s.put_per_week > 0 && (
+                  <span className="np-strat-detail-item" title="Sum of (put cost ÷ days to expiry) × 7 across active contracts in this bucket">
+                    <span className="k">per wk</span>−{fmtCompact(s.put_per_week)}
+                  </span>
+                )}
                 <span className="np-strat-detail-item">
                   <span className="k">mkt val</span>{fmtCompact(s.market_value)}
                 </span>

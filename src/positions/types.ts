@@ -153,6 +153,11 @@ export interface PositionComputed extends PositionRow {
   net_realized: number;
   /** unrealized P&L + net_realized. The "is this position making money?" answer. */
   overall_pl: number;
+  /** Per-share effective cost basis. avg_cost − (net_realized / quantity).
+   *  Reads as: "what price would I need to sell at to break even on this
+   *  position after all premiums collected, expenses, and put cost?".
+   *  Lower than avg_cost = side trades have paid down the basis. */
+  effective_cost: number;
 }
 
 export function computeRow(
@@ -174,6 +179,10 @@ export function computeRow(
   const pct_portfolio =
     total_market_value === 0 ? 0 : (market_value / total_market_value) * 100;
   const net_realized = realized.total - expenses.total - put_cost;
+  // Effective cost basis: starts at avg_cost, shifts by per-share net realized.
+  // Closed positions get avg_cost as a sensible fallback (quantity can be 0).
+  const effective_cost =
+    p.quantity > 0 ? p.avg_cost - net_realized / p.quantity : p.avg_cost;
   return {
     ...p,
     market_value, cost_basis, pnl_dollar, pnl_pct, day_change, pct_portfolio,
@@ -182,6 +191,7 @@ export function computeRow(
     put_cost,
     net_realized,
     overall_pl: pnl_dollar + net_realized,
+    effective_cost,
   };
 }
 
