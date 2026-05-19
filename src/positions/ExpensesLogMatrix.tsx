@@ -2,8 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   fmtCompact,
   fmtUSD,
-  type GainEntry,
-  type GainSource,
+  type ExpenseEntry,
   type PositionComputed,
 } from './types';
 
@@ -24,24 +23,23 @@ function weekIdxOf(iso: string, todayWeek: Date): number {
   return Math.round((todayWeek.getTime() - w.getTime()) / WEEK_MS);
 }
 
-
-type StatusFilter = 'all' | 'with-gains' | 'open' | 'closed';
+type StatusFilter = 'all' | 'with-expenses' | 'open' | 'closed';
 
 interface Props {
   rows: PositionComputed[];
-  gainsByTicker: Map<string, GainEntry[]>;
+  expensesByTicker: Map<string, ExpenseEntry[]>;
   onCellClick: (ticker: string, weekIdx: number) => void;
   onTickerClick: (ticker: string) => void;
 }
 
-export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick }: Props) {
+export function ExpensesLogMatrix({ rows, expensesByTicker, onCellClick, onTickerClick }: Props) {
   const [filter, setFilter] = useState<StatusFilter>('all');
   const todayWeek = useMemo(() => mondayOf(new Date()), []);
 
   const counts = useMemo(
     () => ({
       all: rows.length,
-      withGains: rows.filter((r) => r.realized_total !== 0).length,
+      withExpenses: rows.filter((r) => r.expenses_total !== 0).length,
       open: rows.filter((r) => r.status === 'open').length,
       closed: rows.filter((r) => r.status === 'closed').length,
     }),
@@ -49,30 +47,25 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
   );
 
   const filtered = useMemo(() => {
-    if (filter === 'with-gains') return rows.filter((r) => r.realized_total !== 0);
+    if (filter === 'with-expenses') return rows.filter((r) => r.expenses_total !== 0);
     if (filter === 'open') return rows.filter((r) => r.status === 'open');
     if (filter === 'closed') return rows.filter((r) => r.status === 'closed');
     return rows;
   }, [rows, filter]);
 
   const sorted = useMemo(
-    () => [...filtered].sort((a, b) => b.realized_total - a.realized_total),
+    () => [...filtered].sort((a, b) => b.expenses_total - a.expenses_total),
     [filtered],
   );
 
-  // Weekly totals across visible rows
   const weeklyTotals = useMemo(() => {
     const totals = Array.from({ length: WEEK_COUNT }, () => ({
-      stock: 0,
-      call: 0,
-      put: 0,
-      total: 0,
-      n: 0,
+      stock: 0, call: 0, put: 0, total: 0, n: 0,
     }));
     sorted.forEach((r) => {
-      const entries = gainsByTicker.get(r.ticker) ?? [];
+      const entries = expensesByTicker.get(r.ticker) ?? [];
       entries.forEach((g) => {
-        const w = weekIdxOf(g.gain_date, todayWeek);
+        const w = weekIdxOf(g.expense_date, todayWeek);
         if (w >= 0 && w < WEEK_COUNT) {
           totals[w][g.source] += g.amount;
           totals[w].total += g.amount;
@@ -81,7 +74,7 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
       });
     });
     return totals;
-  }, [sorted, gainsByTicker, todayWeek]);
+  }, [sorted, expensesByTicker, todayWeek]);
 
   const grand = {
     total: weeklyTotals.reduce((s, t) => s + t.total, 0),
@@ -90,17 +83,13 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
 
   return (
     <div className="gl-wrap">
-      {/* Toolbar */}
       <div className="gl-toolbar">
         <div className="np-status-filter">
           <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>
             All <span className="ct">{counts.all}</span>
           </button>
-          <button
-            className={filter === 'with-gains' ? 'on' : ''}
-            onClick={() => setFilter('with-gains')}
-          >
-            Has gains <span className="ct">{counts.withGains}</span>
+          <button className={filter === 'with-expenses' ? 'on' : ''} onClick={() => setFilter('with-expenses')}>
+            Has expenses <span className="ct">{counts.withExpenses}</span>
           </button>
           <button className={filter === 'open' ? 'on' : ''} onClick={() => setFilter('open')}>
             Open <span className="ct">{counts.open}</span>
@@ -109,10 +98,8 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
             Closed <span className="ct">{counts.closed}</span>
           </button>
         </div>
-        <div className="np-table-legend">tap any cell to add or edit</div>
       </div>
 
-      {/* Matrix */}
       <div className="gl-scroll">
         <table className="gl-table">
           <thead>
@@ -128,10 +115,10 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
           </thead>
           <tbody>
             {sorted.map((r) => {
-              const entries = gainsByTicker.get(r.ticker) ?? [];
+              const entries = expensesByTicker.get(r.ticker) ?? [];
               const byWeek: Record<number, { stock: number; call: number; put: number; total: number }> = {};
               entries.forEach((g) => {
-                const w = weekIdxOf(g.gain_date, todayWeek);
+                const w = weekIdxOf(g.expense_date, todayWeek);
                 if (w >= 0 && w < WEEK_COUNT) {
                   if (!byWeek[w]) byWeek[w] = { stock: 0, call: 0, put: 0, total: 0 };
                   byWeek[w][g.source] += g.amount;
@@ -157,23 +144,15 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
                         key={i}
                         className={'gl-cell ' + (c ? 'filled ' : 'empty ') + (i === 0 ? 'this' : '')}
                         onClick={() => onCellClick(r.ticker, i)}
-                        title={c ? `${fmtUSD(c.total)} · tap to edit` : 'tap to add'}
+                        title={c ? `−${fmtUSD(c.total)} · tap to edit` : 'tap to add'}
                       >
                         {c ? (
                           <div className="gl-cell-in">
-                            <div className={'gl-cell-amt ' + (c.total < 0 ? 'down' : 'up')}>
-                              {fmtCompact(c.total)}
-                            </div>
+                            <div className="gl-cell-amt down">−{fmtCompact(c.total)}</div>
                             <div className="gl-cell-chips">
-                              {c.stock !== 0 && (
-                                <span className={'gl-dot rk-s' + (c.stock < 0 ? ' neg' : '')} />
-                              )}
-                              {c.call !== 0 && (
-                                <span className={'gl-dot rk-c' + (c.call < 0 ? ' neg' : '')} />
-                              )}
-                              {c.put !== 0 && (
-                                <span className={'gl-dot rk-p' + (c.put < 0 ? ' neg' : '')} />
-                              )}
+                              {c.stock !== 0 && <span className="gl-dot rk-s neg" />}
+                              {c.call  !== 0 && <span className="gl-dot rk-c neg" />}
+                              {c.put   !== 0 && <span className="gl-dot rk-p neg" />}
                             </div>
                           </div>
                         ) : (
@@ -183,35 +162,13 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
                     );
                   })}
                   <td className="gl-tot">
-                    <div className={'gl-tot-amt ' + (r.realized_total < 0 ? 'down' : 'up')}>
-                      {r.realized_total === 0 ? (
+                    <div className="gl-tot-amt down">
+                      {r.expenses_total === 0 ? (
                         <span style={{ color: 'var(--navi-fg5)' }}>—</span>
                       ) : (
-                        fmtUSD(r.realized_total)
+                        '−' + fmtUSD(r.expenses_total)
                       )}
                     </div>
-                    {r.realized_total !== 0 && (
-                      <div className="gl-tot-chips">
-                        {r.realized.stock !== 0 && (
-                          <span className={'rchip rk-s' + (r.realized.stock < 0 ? ' neg' : '')}>
-                            <span className="rchip-k">S</span>
-                            {fmtCompact(r.realized.stock)}
-                          </span>
-                        )}
-                        {r.realized.call !== 0 && (
-                          <span className={'rchip rk-c' + (r.realized.call < 0 ? ' neg' : '')}>
-                            <span className="rchip-k">C</span>
-                            {fmtCompact(r.realized.call)}
-                          </span>
-                        )}
-                        {r.realized.put !== 0 && (
-                          <span className={'rchip rk-p' + (r.realized.put < 0 ? ' neg' : '')}>
-                            <span className="rchip-k">P</span>
-                            {fmtCompact(r.realized.put)}
-                          </span>
-                        )}
-                      </div>
-                    )}
                   </td>
                 </tr>
               );
@@ -230,24 +187,11 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
                 <b>Weekly total</b>
                 <div className="gl-pos-sub">{grand.n} entries</div>
               </td>
-              {weeklyTotals.map((t: { stock: number; call: number; put: number; total: number; n: number }, i: number) => (
+              {weeklyTotals.map((t, i) => (
                 <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
                   {t.total !== 0 ? (
                     <div className="gl-cell-in">
-                      <div className={'gl-cell-amt ' + (t.total < 0 ? 'down' : 'up')}>
-                        {fmtCompact(t.total)}
-                      </div>
-                      <div className="gl-cell-chips">
-                        {t.stock !== 0 && (
-                          <span className={'gl-dot rk-s' + (t.stock < 0 ? ' neg' : '')} />
-                        )}
-                        {t.call !== 0 && (
-                          <span className={'gl-dot rk-c' + (t.call < 0 ? ' neg' : '')} />
-                        )}
-                        {t.put !== 0 && (
-                          <span className={'gl-dot rk-p' + (t.put < 0 ? ' neg' : '')} />
-                        )}
-                      </div>
+                      <div className="gl-cell-amt down">−{fmtCompact(t.total)}</div>
                     </div>
                   ) : (
                     <span className="muted">—</span>
@@ -255,8 +199,8 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
                 </td>
               ))}
               <td className="gl-tot">
-                <div className={'gl-tot-amt ' + (grand.total < 0 ? 'down' : 'up')}>
-                  {fmtUSD(grand.total)}
+                <div className="gl-tot-amt down">
+                  {grand.total === 0 ? <span className="muted">—</span> : '−' + fmtUSD(grand.total)}
                 </div>
               </td>
             </tr>
@@ -266,6 +210,3 @@ export function GainsLogMatrix({ rows, gainsByTicker, onCellClick, onTickerClick
     </div>
   );
 }
-
-// Silence unused-import (GainSource is exported but not directly used here).
-void (null as unknown as GainSource);

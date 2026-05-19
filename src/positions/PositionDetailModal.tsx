@@ -6,6 +6,7 @@ import {
   fmtUSD,
   fmtUSD2,
   fmtQty,
+  type ExpenseEntry,
   type GainEntry,
   type GainSource,
   type PositionComputed,
@@ -59,28 +60,36 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 interface Props {
   position: PositionComputed;
   entries: GainEntry[];
+  expenseEntries: ExpenseEntry[];
   putProtection: PutProtectionRow | undefined;
   bucket?: Bucket;
   onClose: () => void;
   onAddGain: (p: { ticker: string; gain_date: string; source: GainSource; amount: number; note?: string }) => void;
   onDeleteGain: (id: string) => void;
+  onAddExpense: (p: { ticker: string; expense_date: string; source: GainSource; amount: number; note?: string }) => void;
+  onDeleteExpense: (id: string) => void;
   onSetPutProtection: (p: { ticker: string; total_cost: number; expiry: string; purchase_date?: string }) => void;
   onClearPutProtection: (ticker: string) => void;
+  onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
 }
 
 export function PositionDetailModal({
   position,
   entries,
+  expenseEntries,
   putProtection,
   bucket,
   onClose,
   onAddGain,
   onDeleteGain,
+  onAddExpense,
+  onDeleteExpense,
   onSetPutProtection,
   onClearPutProtection,
+  onSetStatus,
 }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
-  const [showAdd, setShowAdd] = useState(false);
+  const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(null);
   const [editPP, setEditPP] = useState(false);
 
   useEffect(() => {
@@ -165,7 +174,21 @@ export function PositionDetailModal({
               )}
             </div>
           </div>
-          <button className="np-btn ghost" onClick={onClose}>✕ Close</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className={'np-btn ' + (isClosed ? 'tinted' : 'danger')}
+              onClick={() =>
+                onSetStatus({
+                  ticker: position.ticker,
+                  status: isClosed ? 'open' : 'closed',
+                })
+              }
+              title={isClosed ? 'Reopen this position' : 'Mark as closed (sold)'}
+            >
+              {isClosed ? '↻ Reopen' : '✕ Mark closed'}
+            </button>
+            <button className="np-btn ghost" onClick={onClose}>✕ Close</button>
+          </div>
         </div>
 
         {/* STATS */}
@@ -278,9 +301,14 @@ export function PositionDetailModal({
               <span className="rchip rk-p rchip-static">P</span>Put <span className="ct">{counts.put}</span>
             </button>
           </div>
-          <button className="np-btn add-gain" onClick={() => setShowAdd(true)}>
-            + Log gain
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="np-btn add-gain" onClick={() => setShowAdd('gain')}>
+              + Log gain
+            </button>
+            <button className="np-btn add-expense" onClick={() => setShowAdd('expense')}>
+              + Log expense
+            </button>
+          </div>
         </div>
 
         {/* HISTORY */}
@@ -320,13 +348,25 @@ export function PositionDetailModal({
           ))}
         </div>
 
-        {showAdd && (
+        {showAdd === 'gain' && (
           <PDAddInline
             ticker={position.ticker}
-            onCancel={() => setShowAdd(false)}
-            onSave={(gain) => {
-              onAddGain({ ticker: position.ticker, ...gain });
-              setShowAdd(false);
+            kind="gain"
+            onCancel={() => setShowAdd(null)}
+            onSave={(g) => {
+              onAddGain({ ticker: position.ticker, gain_date: g.date, source: g.source, amount: g.amount, note: g.note });
+              setShowAdd(null);
+            }}
+          />
+        )}
+        {showAdd === 'expense' && (
+          <PDAddInline
+            ticker={position.ticker}
+            kind="expense"
+            onCancel={() => setShowAdd(null)}
+            onSave={(g) => {
+              onAddExpense({ ticker: position.ticker, expense_date: g.date, source: g.source, amount: g.amount, note: g.note });
+              setShowAdd(null);
             }}
           />
         )}
@@ -337,12 +377,14 @@ export function PositionDetailModal({
 
 function PDAddInline({
   ticker,
+  kind,
   onCancel,
   onSave,
 }: {
   ticker: string;
+  kind: 'gain' | 'expense';
   onCancel: () => void;
-  onSave: (g: { gain_date: string; source: GainSource; amount: number; note?: string }) => void;
+  onSave: (g: { date: string; source: GainSource; amount: number; note?: string }) => void;
 }) {
   const [source, setSource] = useState<GainSource>('call');
   const [amount, setAmount] = useState('');
@@ -352,12 +394,12 @@ function PDAddInline({
   const submit = () => {
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt === 0 || !date) return;
-    onSave({ gain_date: date, source, amount: amt, note });
+    onSave({ date, source, amount: amt, note });
   };
 
   return (
     <div className="pd-add-inline">
-      <div className="pd-add-hd">Log a gain on {ticker}</div>
+      <div className="pd-add-hd">Log {kind === 'gain' ? 'a gain' : 'an expense'} on {ticker}</div>
       <div className="qa-grid">
         <div className="qa-field">
           <label>Source</label>

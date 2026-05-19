@@ -1,6 +1,7 @@
 import { useMemo, useRef, useEffect, useState } from 'react';
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import {
+  fmtUSD,
   fmtUSDShort,
   aggregateBySector,
   aggregateByTicker,
@@ -9,7 +10,7 @@ import {
   type StrategyBucket,
 } from './types';
 
-export type AllocView = 'sector' | 'stock' | 'strategy';
+export type AllocView = 'sector' | 'stock' | 'strategy' | 'pnl';
 
 interface Props {
   rows: PositionComputed[];
@@ -24,6 +25,9 @@ interface Datum {
   value: number;
   pct: number;
   isOther?: boolean;
+  /** P&L view only: signed net_realized for the position. */
+  signed?: number;
+  isClosed?: boolean;
 }
 
 // Top item gets the brand neon, rest cycle through a desaturated teal scale.
@@ -63,10 +67,31 @@ export function AllocationTreemap({
 
   // Build the dataset, collapsing tail into "Other" once we exceed maxItems.
   // "Strategy" view doesn't collapse — only 4 buckets max, always shown.
+  // "P&L" view sizes by |net_realized| and tags signed for color.
   const data: Datum[] = useMemo(() => {
     if (rows.length === 0) return [];
     if (view === 'strategy') {
       return aggregateByStrategy(rows, overlayByTicker ?? new Map());
+    }
+    if (view === 'pnl') {
+      const out: Datum[] = rows
+        .filter((r) => r.net_realized !== 0)
+        .map((r) => ({
+          label: r.ticker,
+          value: Math.abs(r.net_realized),
+          pct: 0, // recomputed below
+          signed: r.net_realized,
+          isClosed: r.status === 'closed',
+        }))
+        .sort((a, b) => b.value - a.value);
+      const tot = out.reduce((s, d) => s + d.value, 0);
+      out.forEach((d) => { d.pct = tot > 0 ? (d.value / tot) * 100 : 0; });
+      if (out.length <= maxItems) return out;
+      const top = out.slice(0, maxItems - 1);
+      const rest = out.slice(maxItems - 1);
+      const otherVal = rest.reduce((s, d) => s + d.value, 0);
+      const otherPct = rest.reduce((s, d) => s + d.pct, 0);
+      return [...top, { label: 'Other', value: otherVal, pct: otherPct, isOther: true }];
     }
     const base =
       view === 'sector' ? aggregateBySector(rows) : aggregateByTicker(rows);
@@ -133,14 +158,29 @@ export function AllocationTreemap({
             const w = r.x1 - r.x0;
             const h = r.y1 - r.y0;
             const isOther = r.isOther;
-            const fill = isOther
-              ? 'rgba(50,80,80,0.4)'
-              : paletteFor(i);
-            const text = isOther ? '#a8c4c0' : textOn(i);
+            // P&L view: green for gains, red for losses, regardless of rank.
+            let fill: string;
+            let text: string;
+            if (isOther) {
+              fill = 'rgba(50,80,80,0.4)';
+              text = '#a8c4c0';
+            } else if (view === 'pnl' && typeof r.signed === 'number') {
+              fill = r.signed < 0 ? '#c4523c' : '#a8d4a0';
+              text = '#0a2828';
+            } else {
+              fill = paletteFor(i);
+              text = textOn(i);
+            }
             // Thresholds match design_handoff treemap.jsx.
             const showLabel = w > 48 && h > 24;
             const showPct = w > 70 && h > 44;
             const showValue = w > 100 && h > 64;
+            const labelDisplay =
+              view === 'pnl' && r.isClosed ? `${r.label} (cl)` : r.label;
+            const valueDisplay =
+              view === 'pnl' && typeof r.signed === 'number'
+                ? fmtUSD(r.signed)
+                : fmtUSDShort(r.value);
             return (
               <g key={i} transform={`translate(${r.x0}, ${r.y0})`}>
                 <rect
@@ -176,7 +216,7 @@ export function AllocationTreemap({
                       fontWeight: 500,
                     }}
                   >
-                    {r.label}
+                    {labelDisplay}
                   </text>
                 )}
                 {showPct && (
@@ -204,7 +244,7 @@ export function AllocationTreemap({
                       fontSize: 12,
                     }}
                   >
-                    {fmtUSDShort(r.value)}
+                    {valueDisplay}
                   </text>
                 )}
               </g>
@@ -220,7 +260,9 @@ export function AllocationTreemap({
             ? 'Top holdings'
             : view === 'sector'
               ? 'Top sectors'
-              : 'Strategy mix'}
+              : view === 'strategy'
+                ? 'Strategy mix'
+                : 'P&L by position'}
         </div>
         {data.slice(0, 10).map((d, i) => (
           <div
@@ -230,11 +272,26 @@ export function AllocationTreemap({
             <span className="lbl">
               <span
                 className="swatch"
-                style={{ background: d.isOther ? 'rgba(50,80,80,0.5)' : paletteFor(i) }}
+                style={{
+                  background: d.isOther
+                    ? 'rgba(50,80,80,0.5)'
+                    : view === 'pnl' && typeof d.signed === 'number'
+                      ? d.signed < 0 ? '#c4523c' : '#a8d4a0'
+                      : paletteFor(i),
+                }}
               />
               {d.label}
+              {view === 'pnl' && d.isClosed && (
+                <span style={{ color: 'var(--navi-fg5, #1e5a50)', marginLeft: 6 }}>
+                  (closed)
+                </span>
+              )}
             </span>
-            <span className="pct">{d.pct.toFixed(1)}%</span>
+            <span className="pct">
+              {view === 'pnl' && typeof d.signed === 'number'
+                ? fmtUSD(d.signed)
+                : `${d.pct.toFixed(1)}%`}
+            </span>
           </div>
         ))}
       </div>

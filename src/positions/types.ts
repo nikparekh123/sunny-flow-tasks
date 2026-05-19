@@ -40,6 +40,19 @@ export interface GainEntry {
   created_at: string;
 }
 
+/** An expense entry (outflow). Same Stock/Call/Put split as gains, but
+ *  amount is always stored as a positive magnitude. The UI shows it
+ *  as negative because it lives in the expenses table. */
+export interface ExpenseEntry {
+  id: string;
+  ticker: string;
+  expense_date: string;     // ISO yyyy-mm-dd
+  source: GainSource;       // same source enum
+  amount: number;           // magnitude, always >= 0
+  note: string | null;
+  created_at: string;
+}
+
 export interface PutProtectionRow {
   id: string;
   ticker: string;
@@ -112,6 +125,16 @@ export function aggregateGains(entries: GainEntry[]): GainAggregate {
   return out;
 }
 
+/** Same shape as GainAggregate but for expenses (all positive magnitudes). */
+export function aggregateExpenses(entries: ExpenseEntry[]): GainAggregate {
+  const out: GainAggregate = { stock: 0, call: 0, put: 0, total: 0 };
+  for (const e of entries) {
+    out[e.source] += e.amount;
+    out.total += e.amount;
+  }
+  return out;
+}
+
 export interface PositionComputed extends PositionRow {
   market_value: number;
   cost_basis: number;
@@ -122,15 +145,21 @@ export interface PositionComputed extends PositionRow {
   /** Realized gain aggregate from this ticker's gain_entries. */
   realized: GainAggregate;
   realized_total: number;
+  /** Expense aggregate from this ticker's expenses (magnitudes). */
+  expenses: GainAggregate;
+  expenses_total: number;
   put_cost: number;
-  /** realized_total − put_cost; the bottom line. */
+  /** realized_total − expenses_total − put_cost. */
   net_realized: number;
+  /** unrealized P&L + net_realized. The "is this position making money?" answer. */
+  overall_pl: number;
 }
 
 export function computeRow(
   p: PositionRow,
   total_market_value: number,
   realized: GainAggregate = { stock: 0, call: 0, put: 0, total: 0 },
+  expenses: GainAggregate = { stock: 0, call: 0, put: 0, total: 0 },
   put_cost: number = 0,
 ): PositionComputed {
   const isClosed = p.status === 'closed';
@@ -144,12 +173,15 @@ export function computeRow(
     : 0;
   const pct_portfolio =
     total_market_value === 0 ? 0 : (market_value / total_market_value) * 100;
+  const net_realized = realized.total - expenses.total - put_cost;
   return {
     ...p,
     market_value, cost_basis, pnl_dollar, pnl_pct, day_change, pct_portfolio,
     realized, realized_total: realized.total,
+    expenses, expenses_total: expenses.total,
     put_cost,
-    net_realized: realized.total - put_cost,
+    net_realized,
+    overall_pl: pnl_dollar + net_realized,
   };
 }
 
@@ -164,6 +196,9 @@ export interface PortfolioTotals {
   /** Sum of all realized gains across positions, split by source. */
   realized: GainAggregate;
   realized_total: number;
+  /** Sum of expense magnitudes across positions, split by source. */
+  expenses: GainAggregate;
+  expenses_total: number;
   total_put_cost: number;
   net_realized: number;
   open_count: number;
@@ -174,6 +209,7 @@ export function computePortfolio(
   positions: PositionRow[],
   gainsByTicker: Map<string, GainEntry[]> = new Map(),
   putCostByTicker: Map<string, number> = new Map(),
+  expensesByTicker: Map<string, ExpenseEntry[]> = new Map(),
 ): PortfolioTotals {
   const tmv = positions.reduce(
     (s, p) => p.status === 'closed' ? s : s + p.quantity * (p.current_price ?? p.avg_cost),
@@ -182,8 +218,9 @@ export function computePortfolio(
   const rows = positions.map((p) => {
     const entries = gainsByTicker.get(p.ticker) ?? [];
     const realized = aggregateGains(entries);
+    const expenses = aggregateExpenses(expensesByTicker.get(p.ticker) ?? []);
     const put_cost = putCostByTicker.get(p.ticker) ?? 0;
-    return computeRow(p, tmv, realized, put_cost);
+    return computeRow(p, tmv, realized, expenses, put_cost);
   });
   const total_cost_basis = rows.reduce((s, r) => s + r.cost_basis, 0);
   const total_pnl = tmv - total_cost_basis;
@@ -205,6 +242,15 @@ export function computePortfolio(
     }),
     { stock: 0, call: 0, put: 0, total: 0 },
   );
+  const expenses: GainAggregate = rows.reduce(
+    (acc, r) => ({
+      stock: acc.stock + r.expenses.stock,
+      call: acc.call + r.expenses.call,
+      put: acc.put + r.expenses.put,
+      total: acc.total + r.expenses.total,
+    }),
+    { stock: 0, call: 0, put: 0, total: 0 },
+  );
   const total_put_cost = rows.reduce((s, r) => s + r.put_cost, 0);
   return {
     rows,
@@ -216,8 +262,10 @@ export function computePortfolio(
     last_price_update,
     realized,
     realized_total: realized.total,
+    expenses,
+    expenses_total: expenses.total,
     total_put_cost,
-    net_realized: realized.total - total_put_cost,
+    net_realized: realized.total - expenses.total - total_put_cost,
     open_count: positions.filter((p) => p.status === 'open').length,
     closed_count: positions.filter((p) => p.status === 'closed').length,
   };

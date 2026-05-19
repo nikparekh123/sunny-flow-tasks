@@ -5,9 +5,10 @@ import { usePositions } from './usePositions';
 import { AllocationTreemap, type AllocView } from './AllocationTreemap';
 import { PositionsTable } from './PositionsTable';
 import { CsvUploadModal } from './CsvUploadModal';
-import { QuickAddGainModal } from './QuickAddGainModal';
 import { PositionDetailModal } from './PositionDetailModal';
 import { GainsLogMatrix } from './GainsLogMatrix';
+import { ExpensesLogMatrix } from './ExpensesLogMatrix';
+import { RealizedSummary } from './RealizedSummary';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
 import './positions.css';
@@ -23,18 +24,21 @@ export default function PositionsPage() {
     isLoading,
     overlayByTicker,
     gainsByTicker,
+    expensesByTicker,
     putProtectionByTicker,
     replacePositions,
     refreshPrices,
     addGain,
     deleteGain,
+    addExpense,
+    deleteExpense,
     setPutProtection,
     clearPutProtection,
+    setPositionStatus,
   } = usePositions();
   const [allocView, setAllocView] = useState<AllocView>('sector');
-  const [posView, setPosView] = useState<'table' | 'gains'>('table');
+  const [posView, setPosView] = useState<'table' | 'gains' | 'expenses'>('table');
   const [showUpload, setShowUpload] = useState(false);
-  const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [detailTicker, setDetailTicker] = useState<string | null>(null);
 
   // ?ticker=… deep-link: scroll the matching row into view + flash.
@@ -104,13 +108,6 @@ export default function PositionsPage() {
           >
             ↻ {refreshPrices.isPending ? 'Refreshing…' : 'Refresh'}
           </button>
-          <button
-            className="np-btn add-gain"
-            onClick={() => setShowQuickAdd(true)}
-            title="Log a gain"
-          >
-            + Log gain
-          </button>
           <button className="np-btn neon" onClick={() => setShowUpload(true)}>
             ↑ Upload positions
           </button>
@@ -166,6 +163,12 @@ export default function PositionsPage() {
               >
                 By strategy
               </button>
+              <button
+                className={allocView === 'pnl' ? 'on' : ''}
+                onClick={() => setAllocView('pnl')}
+              >
+                P&amp;L by position
+              </button>
             </div>
           </div>
           <AllocationTreemap
@@ -177,33 +180,44 @@ export default function PositionsPage() {
           />
         </div>
 
-        {/* Positions table / Gains log */}
+        {/* Positions / Gains log / Expenses */}
         <div className="np-section">
           <div className="np-section-hd">
             <div className="np-section-title">
-              Positions · {portfolio.rows.length}
+              {posView === 'table'
+                ? `Positions · ${portfolio.rows.length}`
+                : posView === 'gains'
+                  ? 'Gains log'
+                  : 'Expenses'}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div className="np-view-toggle">
-                <button
-                  className={posView === 'table' ? 'on' : ''}
-                  onClick={() => setPosView('table')}
-                >
-                  Table
-                </button>
-                <button
-                  className={posView === 'gains' ? 'on' : ''}
-                  onClick={() => setPosView('gains')}
-                >
-                  Gains log
-                </button>
-              </div>
-              <div className="np-section-meta">
-                {posView === 'table' ? 'sortable · click any column' : 'click any cell to log'}
-              </div>
+            <div className="np-view-toggle">
+              <button
+                className={posView === 'table' ? 'on' : ''}
+                onClick={() => setPosView('table')}
+              >
+                Positions
+              </button>
+              <button
+                className={posView === 'gains' ? 'on' : ''}
+                onClick={() => setPosView('gains')}
+              >
+                Gains log
+              </button>
+              <button
+                className={posView === 'expenses' ? 'on' : ''}
+                onClick={() => setPosView('expenses')}
+              >
+                Expenses
+              </button>
             </div>
           </div>
-          {posView === 'table' ? (
+          {portfolio.rows.length > 0 && (
+            <RealizedSummary
+              portfolio={portfolio}
+              overlayByTicker={overlayByTicker}
+            />
+          )}
+          {posView === 'table' && (
             <PositionsTable
               rows={portfolio.rows}
               onUpload={() => setShowUpload(true)}
@@ -211,10 +225,19 @@ export default function PositionsPage() {
               overlayByTicker={overlayByTicker}
               onTickerClick={(t) => setDetailTicker(t)}
             />
-          ) : (
+          )}
+          {posView === 'gains' && (
             <GainsLogMatrix
               rows={portfolio.rows}
               gainsByTicker={gainsByTicker}
+              onCellClick={(t) => setDetailTicker(t)}
+              onTickerClick={(t) => setDetailTicker(t)}
+            />
+          )}
+          {posView === 'expenses' && (
+            <ExpensesLogMatrix
+              rows={portfolio.rows}
+              expensesByTicker={expensesByTicker}
               onCellClick={(t) => setDetailTicker(t)}
               onTickerClick={(t) => setDetailTicker(t)}
             />
@@ -232,31 +255,18 @@ export default function PositionsPage() {
         }}
       />
 
-      {showQuickAdd && (
-        <QuickAddGainModal
-          positions={portfolio.rows}
-          onClose={() => setShowQuickAdd(false)}
-          onSave={(p) => {
-            addGain.mutate(p, {
-              onSuccess: () => {
-                toast.success(`+${p.amount} ${p.source} · ${p.ticker}`);
-                setShowQuickAdd(false);
-              },
-              onError: (e) => toast.error((e as Error).message),
-            });
-          }}
-        />
-      )}
-
       {detailTicker && <DetailModalWrapper
         ticker={detailTicker}
         rows={portfolio.rows}
         gainsByTicker={gainsByTicker}
+        expensesByTicker={expensesByTicker}
         putProtectionByTicker={putProtectionByTicker}
         overlayByTicker={overlayByTicker}
         onClose={() => setDetailTicker(null)}
         onAddGain={(p) => addGain.mutate(p, { onError: (e) => toast.error((e as Error).message) })}
         onDeleteGain={(id) => deleteGain.mutate(id, { onError: (e) => toast.error((e as Error).message) })}
+        onAddExpense={(p) => addExpense.mutate(p, { onError: (e) => toast.error((e as Error).message) })}
+        onDeleteExpense={(id) => deleteExpense.mutate(id, { onError: (e) => toast.error((e as Error).message) })}
         onSetPutProtection={(p) =>
           setPutProtection.mutate(p, {
             onSuccess: () => toast.success(`Put protection · ${p.ticker}`),
@@ -266,6 +276,12 @@ export default function PositionsPage() {
         onClearPutProtection={(ticker) =>
           clearPutProtection.mutate(ticker, {
             onSuccess: () => toast.success(`Cleared · ${ticker}`),
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
+        onSetStatus={(p) =>
+          setPositionStatus.mutate(p, {
+            onSuccess: () => toast.success(`${p.ticker} marked ${p.status}`),
             onError: (e) => toast.error((e as Error).message),
           })
         }
@@ -280,13 +296,17 @@ function DetailModalWrapper(props: {
   ticker: string;
   rows: ReturnType<typeof usePositions>['portfolio']['rows'];
   gainsByTicker: ReturnType<typeof usePositions>['gainsByTicker'];
+  expensesByTicker: ReturnType<typeof usePositions>['expensesByTicker'];
   putProtectionByTicker: ReturnType<typeof usePositions>['putProtectionByTicker'];
   overlayByTicker: ReturnType<typeof usePositions>['overlayByTicker'];
   onClose: () => void;
   onAddGain: Parameters<typeof PositionDetailModal>[0]['onAddGain'];
   onDeleteGain: Parameters<typeof PositionDetailModal>[0]['onDeleteGain'];
+  onAddExpense: Parameters<typeof PositionDetailModal>[0]['onAddExpense'];
+  onDeleteExpense: Parameters<typeof PositionDetailModal>[0]['onDeleteExpense'];
   onSetPutProtection: Parameters<typeof PositionDetailModal>[0]['onSetPutProtection'];
   onClearPutProtection: Parameters<typeof PositionDetailModal>[0]['onClearPutProtection'];
+  onSetStatus: Parameters<typeof PositionDetailModal>[0]['onSetStatus'];
 }) {
   const pos = useMemo(
     () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
@@ -294,19 +314,24 @@ function DetailModalWrapper(props: {
   );
   if (!pos) return null;
   const entries = props.gainsByTicker.get(props.ticker) ?? [];
+  const expenses = props.expensesByTicker.get(props.ticker) ?? [];
   const pp = props.putProtectionByTicker.get(props.ticker);
   const bucket = props.overlayByTicker.get(props.ticker);
   return (
     <PositionDetailModal
       position={pos}
       entries={entries}
+      expenseEntries={expenses}
       putProtection={pp}
       bucket={bucket}
       onClose={props.onClose}
       onAddGain={props.onAddGain}
       onDeleteGain={props.onDeleteGain}
+      onAddExpense={props.onAddExpense}
+      onDeleteExpense={props.onDeleteExpense}
       onSetPutProtection={props.onSetPutProtection}
       onClearPutProtection={props.onClearPutProtection}
+      onSetStatus={props.onSetStatus}
     />
   );
 }
