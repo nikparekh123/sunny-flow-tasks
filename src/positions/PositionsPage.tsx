@@ -235,6 +235,7 @@ export default function PositionsPage() {
             <RealizedSummary
               portfolio={portfolio}
               overlayByTicker={overlayByTicker}
+              putProtectionByTicker={putProtectionByTicker}
             />
           )}
           {posView === 'table' && (
