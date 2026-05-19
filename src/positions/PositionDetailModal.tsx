@@ -100,14 +100,26 @@ export function PositionDetailModal({
   type LedgerRow = { id: string; date: string; source: GainSource; amount: number; note?: string };
   const ledger: LedgerRow[] = useMemo(() => {
     if (mode === 'expense') {
-      return expenseEntries.map((e) => ({
+      const rows: LedgerRow[] = expenseEntries.map((e) => ({
         id: e.id, date: e.expense_date, source: e.source, amount: e.amount, note: e.note,
       }));
+      // Surface put-protection cost as a synthetic put-source expense so the
+      // user can see "why is my expense total $X" in one place.
+      if (putProtection && putProtection.total_cost > 0) {
+        rows.push({
+          id: `pp:${putProtection.ticker}`,
+          date: putProtection.purchase_date ?? new Date().toISOString().slice(0, 10),
+          source: 'put',
+          amount: putProtection.total_cost,
+          note: 'put protection',
+        });
+      }
+      return rows;
     }
     return entries.map((e) => ({
       id: e.id, date: e.gain_date, source: e.source, amount: e.amount, note: e.note,
     }));
-  }, [mode, entries, expenseEntries]);
+  }, [mode, entries, expenseEntries, putProtection]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -360,12 +372,22 @@ export function PositionDetailModal({
                   <span className="pd-entry-note">
                     {e.note || <span style={{ color: 'var(--navi-fg5)' }}>—</span>}
                   </span>
-                  <button
-                    className="np-btn ghost pd-entry-del"
-                    onClick={() => (mode === 'expense' ? onDeleteExpense(e.id) : onDeleteGain(e.id))}
-                  >
-                    delete
-                  </button>
+                  {e.id.startsWith('pp:') ? (
+                    <button
+                      className="np-btn ghost pd-entry-del"
+                      onClick={() => onClearPutProtection(position.ticker)}
+                      title="Clear the put protection for this position"
+                    >
+                      clear protection
+                    </button>
+                  ) : (
+                    <button
+                      className="np-btn ghost pd-entry-del"
+                      onClick={() => (mode === 'expense' ? onDeleteExpense(e.id) : onDeleteGain(e.id))}
+                    >
+                      delete
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

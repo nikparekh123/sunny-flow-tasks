@@ -249,6 +249,7 @@ export default function PositionsPage() {
             <ExpensesLogMatrix
               rows={portfolio.rows}
               expensesByTicker={expensesByTicker}
+              putProtectionByTicker={putProtectionByTicker}
               onCellClick={(t) => setDetail({ ticker: t, mode: 'expense' })}
               onTickerClick={(t) => setDetail({ ticker: t, mode: 'expense' })}
             />
