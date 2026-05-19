@@ -1695,3 +1695,14 @@
   transition: color 0.15s;
 }
 .pd-earnings-clear:hover { color: var(--navi-negative, #e87060); }
+
+/* "current −$78k" muted sub-line under the put cost item — shows the
+   mark-to-market value from the live Polygon quote when one is available. */
+.np-strat-detail-sub {
+  display: block;
+  font-size: 10px;
+  color: var(--navi-fg4, #325050);
+  margin-top: 2px;
+  margin-left: 0;
+  letter-spacing: 0.2px;
+}

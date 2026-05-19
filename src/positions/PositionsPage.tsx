@@ -44,6 +44,7 @@ export default function PositionsPage() {
     deleteExpense,
     setPutProtection,
     clearPutProtection,
+    refreshPutQuotes,
     setPositionStatus,
     setEarningsDate,
   } = usePositions();
@@ -85,6 +86,18 @@ export default function PositionsPage() {
     return () => window.clearTimeout(id);
   }, [isLoading, portfolio.rows.length]);
 
+  // Auto-refresh put quotes once per browser session. Cheap (one API call
+  // per active put contract), and ensures the strategy cards show a fresh
+  // mark-to-market without the user clicking Refresh.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const KEY = 'np:put-quotes-refreshed';
+    if (window.sessionStorage.getItem(KEY)) return;
+    window.sessionStorage.setItem(KEY, '1');
+    refreshPutQuotes.mutate();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (loading) {
     return (
       <div className="np-app" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -95,18 +108,35 @@ export default function PositionsPage() {
   if (!user) return <Auth />;
 
   const handleRefresh = async () => {
+    // Refresh stock prices and put-protection mark-to-market in parallel.
+    // The two settle independently — one failing doesn't block the other.
     try {
-      const result = await refreshPrices.mutateAsync();
-      const missing = result?.missing?.length ?? 0;
-      toast.success(
-        missing > 0
-          ? `Updated ${result.updated}/${result.total} (${missing} skipped)`
-          : `Updated ${result.updated}/${result.total} prices`,
-      );
+      const [priceResult, putResult] = await Promise.allSettled([
+        refreshPrices.mutateAsync(),
+        refreshPutQuotes.mutateAsync(),
+      ]);
+      if (priceResult.status === 'fulfilled') {
+        const r = priceResult.value;
+        const missing = r?.missing?.length ?? 0;
+        toast.success(
+          missing > 0
+            ? `Updated ${r.updated}/${r.total} prices (${missing} skipped)`
+            : `Updated ${r.updated}/${r.total} prices`,
+        );
+      } else {
+        toast.error(`Prices: ${(priceResult.reason as Error).message}`);
+      }
+      if (putResult.status === 'fulfilled' && putResult.value.total > 0) {
+        const r = putResult.value;
+        toast.success(`Put quotes: ${r.updated}/${r.total} updated`);
+      } else if (putResult.status === 'rejected') {
+        toast.error(`Put quotes: ${(putResult.reason as Error).message}`);
+      }
     } catch (e) {
       toast.error(`Refresh failed: ${(e as Error).message}`);
     }
   };
+
 
   const isDown = portfolio.total_pnl < 0;
 

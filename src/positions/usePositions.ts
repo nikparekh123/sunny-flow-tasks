@@ -310,6 +310,8 @@ export function usePositions() {
       total_cost: number;
       expiry: string;
       purchase_date?: string;
+      contracts?: number | null;
+      strike?: number | null;
     }) => {
       const today = new Date().toISOString().slice(0, 10);
       const { error } = await supabase
@@ -320,10 +322,29 @@ export function usePositions() {
             total_cost: row.total_cost,
             expiry: row.expiry,
             purchase_date: row.purchase_date ?? today,
+            contracts: row.contracts ?? null,
+            strike: row.strike ?? null,
+            // Clear the cached quote on edit; the next refresh fills it in.
+            current_premium: null,
+            current_premium_at: null,
           } as never,
           { onConflict: 'ticker' },
         );
       if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
+  });
+
+  // Pull live per-contract premiums from Polygon for every put_protection
+  // row that has contracts + strike + expiry. Backed by an edge function;
+  // see supabase/functions/refresh-put-quotes/index.ts.
+  const refreshPutQuotes = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('refresh-put-quotes', {
+        body: {},
+      });
+      if (error) throw error;
+      return data as { updated: number; skipped: number; total: number };
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
   });
@@ -413,6 +434,7 @@ export function usePositions() {
     expensesByTicker,
     setPutProtection,
     clearPutProtection,
+    refreshPutQuotes,
     setPositionStatus,
     setEarningsDate,
   };
