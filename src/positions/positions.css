@@ -1386,3 +1386,118 @@
   .pp-stats { grid-template-columns: repeat(2, 1fr); }
   .pp-form  { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+   Positions v2 Phase 3 — Realized summary strips
+   ============================================================ */
+.np-realized-strip {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr 1.2fr;
+  gap: 1px;
+  background: rgba(30,90,80,.25);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.np-realized-cell {
+  background: var(--navi-card, rgba(15,51,51,.55));
+  padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.np-realized-cell.total { background: rgba(15,51,51,.85); }
+.np-realized-label {
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: var(--navi-fg3);
+  display: inline-flex; align-items: center;
+}
+.np-realized-protect {
+  color: var(--navi-fg5, #1e5a50);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  margin-left: 6px;
+}
+.np-realized-value {
+  font-family: var(--navi-font-mono);
+  font-size: 22px; font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--navi-fg1);
+  line-height: 1.05;
+}
+.np-realized-value.up   { color: var(--navi-positive, #a8d4a0); }
+.np-realized-value.down { color: var(--navi-negative); }
+.np-realized-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+  margin-top: 4px;
+  letter-spacing: 0;
+}
+.np-realized-sub .dim { color: var(--navi-fg5, #1e5a50); }
+
+.np-strategy-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.np-strat-cell {
+  background: var(--navi-card, rgba(15,51,51,.55));
+  border-radius: 10px;
+  padding: 14px 16px 12px;
+  border-top: 2px solid;
+}
+.np-strat-cell.st-income { border-top-color: #326e64; }
+.np-strat-cell.st-invest { border-top-color: var(--navi-neon); }
+.np-strat-cell.st-yield  { border-top-color: var(--navi-warning, #e0c060); }
+.np-strat-hd {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.np-strat-badge {
+  font-size: 10px; font-weight: 500;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  border: 1px solid;
+}
+.np-strat-badge.st-income { background: rgba(50,110,100,.15);  color: #a8c4c0;             border-color: rgba(50,110,100,.5); }
+.np-strat-badge.st-invest { background: rgba(210,230,50,.08);  color: var(--navi-neon);    border-color: rgba(210,230,50,.35); }
+.np-strat-badge.st-yield  { background: rgba(224,192,96,.10);  color: var(--navi-warning, #e0c060); border-color: rgba(224,192,96,.35); }
+.np-strat-blurb {
+  font-size: 10px;
+  color: var(--navi-fg4);
+  font-style: italic;
+}
+.np-strat-value {
+  font-family: var(--navi-font-mono);
+  font-size: 24px; font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--navi-fg1);
+  line-height: 1.05;
+  margin-bottom: 8px;
+}
+.np-strat-value.up   { color: var(--navi-positive, #a8d4a0); }
+.np-strat-value.down { color: var(--navi-negative); }
+.np-strat-detail {
+  display: flex; flex-wrap: wrap; gap: 12px 16px;
+  border-top: 1px dashed rgba(30,90,80,.3);
+  padding-top: 8px;
+}
+.np-strat-detail-item {
+  font-family: var(--navi-font-mono);
+  font-size: 11px; color: var(--navi-fg2);
+  display: inline-flex; align-items: baseline; gap: 6px;
+}
+.np-strat-detail-item .k {
+  font-family: var(--navi-font-sans);
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--navi-fg4);
+}
+
+@media (max-width: 900px) {
+  .np-realized-strip { grid-template-columns: 1fr 1fr; }
+  .np-strategy-strip { grid-template-columns: 1fr; }
+}

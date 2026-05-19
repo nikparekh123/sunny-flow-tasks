@@ -8,6 +8,7 @@ import { CsvUploadModal } from './CsvUploadModal';
 import { QuickAddGainModal } from './QuickAddGainModal';
 import { PositionDetailModal } from './PositionDetailModal';
 import { GainsLogMatrix } from './GainsLogMatrix';
+import { RealizedSummary } from './RealizedSummary';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
 import './positions.css';
@@ -30,6 +31,7 @@ export default function PositionsPage() {
     deleteGain,
     setPutProtection,
     clearPutProtection,
+    setPositionStatus,
   } = usePositions();
   const [allocView, setAllocView] = useState<AllocView>('sector');
   const [posView, setPosView] = useState<'table' | 'gains'>('table');
@@ -166,6 +168,12 @@ export default function PositionsPage() {
               >
                 By strategy
               </button>
+              <button
+                className={allocView === 'pnl' ? 'on' : ''}
+                onClick={() => setAllocView('pnl')}
+              >
+                P&amp;L by position
+              </button>
             </div>
           </div>
           <AllocationTreemap
@@ -203,6 +211,12 @@ export default function PositionsPage() {
               </div>
             </div>
           </div>
+          {portfolio.rows.length > 0 && (
+            <RealizedSummary
+              portfolio={portfolio}
+              overlayByTicker={overlayByTicker}
+            />
+          )}
           {posView === 'table' ? (
             <PositionsTable
               rows={portfolio.rows}
@@ -269,6 +283,12 @@ export default function PositionsPage() {
             onError: (e) => toast.error((e as Error).message),
           })
         }
+        onSetStatus={(p) =>
+          setPositionStatus.mutate(p, {
+            onSuccess: () => toast.success(`${p.ticker} marked ${p.status}`),
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
       />}
     </div>
   );
@@ -287,6 +307,7 @@ function DetailModalWrapper(props: {
   onDeleteGain: Parameters<typeof PositionDetailModal>[0]['onDeleteGain'];
   onSetPutProtection: Parameters<typeof PositionDetailModal>[0]['onSetPutProtection'];
   onClearPutProtection: Parameters<typeof PositionDetailModal>[0]['onClearPutProtection'];
+  onSetStatus: Parameters<typeof PositionDetailModal>[0]['onSetStatus'];
 }) {
   const pos = useMemo(
     () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
@@ -307,6 +328,7 @@ function DetailModalWrapper(props: {
       onDeleteGain={props.onDeleteGain}
       onSetPutProtection={props.onSetPutProtection}
       onClearPutProtection={props.onClearPutProtection}
+      onSetStatus={props.onSetStatus}
     />
   );
 }

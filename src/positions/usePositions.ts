@@ -362,6 +362,18 @@ export function usePositions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
   });
 
+  // ── Position status (open ↔ closed) ────────────────────────────────
+  const setPositionStatus = useMutation({
+    mutationFn: async (args: { ticker: string; status: 'open' | 'closed' }) => {
+      const { error } = await supabase
+        .from('positions' as never)
+        .update({ status: args.status } as never)
+        .eq('ticker', args.ticker);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['positions'] }),
+  });
+
   return {
     positions: rawPositions,
     portfolio,
@@ -378,6 +390,7 @@ export function usePositions() {
     deleteGain,
     setPutProtection,
     clearPutProtection,
+    setPositionStatus,
   };
 }
 

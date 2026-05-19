@@ -49,7 +49,9 @@ export function PositionsTable({
   const [sortKey, setSortKey] = useState<SortKey>('market_value');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  // Group by strategy bucket, then sort within each group.
+  // Group by strategy bucket, then sort within each group. Closed positions
+  // skip the grouped table entirely — they show up in the Gains Log matrix
+  // (with the "Closed" filter) and the Position Detail modal instead.
   const grouped = useMemo(() => {
     const map: Record<GroupKey, PositionComputed[]> = {
       income: [],
@@ -58,6 +60,7 @@ export function PositionsTable({
       unassigned: [],
     };
     for (const r of rows) {
+      if (r.status === 'closed') continue;
       const b = overlayByTicker?.get(r.ticker) ?? 'unassigned';
       map[b].push(r);
     }

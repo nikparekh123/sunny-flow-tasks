@@ -66,6 +66,7 @@ interface Props {
   onDeleteGain: (id: string) => void;
   onSetPutProtection: (p: { ticker: string; total_cost: number; expiry: string; purchase_date?: string }) => void;
   onClearPutProtection: (ticker: string) => void;
+  onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
 }
 
 export function PositionDetailModal({
@@ -78,6 +79,7 @@ export function PositionDetailModal({
   onDeleteGain,
   onSetPutProtection,
   onClearPutProtection,
+  onSetStatus,
 }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
   const [showAdd, setShowAdd] = useState(false);
@@ -165,7 +167,21 @@ export function PositionDetailModal({
               )}
             </div>
           </div>
-          <button className="np-btn ghost" onClick={onClose}>✕ Close</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              className={'np-btn ' + (isClosed ? 'tinted' : 'danger')}
+              onClick={() =>
+                onSetStatus({
+                  ticker: position.ticker,
+                  status: isClosed ? 'open' : 'closed',
+                })
+              }
+              title={isClosed ? 'Reopen this position' : 'Mark as closed (sold)'}
+            >
+              {isClosed ? '↻ Reopen' : '✕ Mark closed'}
+            </button>
+            <button className="np-btn ghost" onClick={onClose}>✕ Close</button>
+          </div>
         </div>
 
         {/* STATS */}
