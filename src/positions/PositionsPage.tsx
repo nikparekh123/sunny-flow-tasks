@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import Auth from '@/pages/Auth';
 import { usePositions } from './usePositions';
 import { AllocationTreemap, type AllocView } from './AllocationTreemap';
 import { PositionsTable } from './PositionsTable';
 import { CsvUploadModal } from './CsvUploadModal';
+import { QuickAddGainModal } from './QuickAddGainModal';
+import { PositionDetailModal } from './PositionDetailModal';
+import { GainsLogMatrix } from './GainsLogMatrix';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
 import './positions.css';
@@ -19,11 +22,20 @@ export default function PositionsPage() {
     portfolio,
     isLoading,
     overlayByTicker,
+    gainsByTicker,
+    putProtectionByTicker,
     replacePositions,
     refreshPrices,
+    addGain,
+    deleteGain,
+    setPutProtection,
+    clearPutProtection,
   } = usePositions();
   const [allocView, setAllocView] = useState<AllocView>('sector');
+  const [posView, setPosView] = useState<'table' | 'gains'>('table');
   const [showUpload, setShowUpload] = useState(false);
+  const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [detailTicker, setDetailTicker] = useState<string | null>(null);
 
   // ?ticker=… deep-link: scroll the matching row into view + flash.
   useEffect(() => {
@@ -85,13 +97,19 @@ export default function PositionsPage() {
           <span className="np-crumb">POSITIONS</span>
         </div>
         <div className="np-actions">
-          <PriceTimestamp last={portfolio.last_price_update} />
           <button
             className="np-btn ghost"
             onClick={handleRefresh}
             disabled={refreshPrices.isPending}
           >
-            ↻ {refreshPrices.isPending ? 'Refreshing…' : 'Refresh prices'}
+            ↻ {refreshPrices.isPending ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <button
+            className="np-btn add-gain"
+            onClick={() => setShowQuickAdd(true)}
+            title="Log a gain"
+          >
+            + Log gain
           </button>
           <button className="np-btn neon" onClick={() => setShowUpload(true)}>
             ↑ Upload positions
@@ -159,20 +177,48 @@ export default function PositionsPage() {
           />
         </div>
 
-        {/* Positions table */}
+        {/* Positions table / Gains log */}
         <div className="np-section">
           <div className="np-section-hd">
             <div className="np-section-title">
               Positions · {portfolio.rows.length}
             </div>
-            <div className="np-section-meta">sortable · click any column</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div className="np-view-toggle">
+                <button
+                  className={posView === 'table' ? 'on' : ''}
+                  onClick={() => setPosView('table')}
+                >
+                  Table
+                </button>
+                <button
+                  className={posView === 'gains' ? 'on' : ''}
+                  onClick={() => setPosView('gains')}
+                >
+                  Gains log
+                </button>
+              </div>
+              <div className="np-section-meta">
+                {posView === 'table' ? 'sortable · click any column' : 'click any cell to log'}
+              </div>
+            </div>
           </div>
-          <PositionsTable
-            rows={portfolio.rows}
-            onUpload={() => setShowUpload(true)}
-            loading={isLoading}
-            overlayByTicker={overlayByTicker}
-          />
+          {posView === 'table' ? (
+            <PositionsTable
+              rows={portfolio.rows}
+              onUpload={() => setShowUpload(true)}
+              loading={isLoading}
+              overlayByTicker={overlayByTicker}
+              onTickerClick={(t) => setDetailTicker(t)}
+            />
+          ) : (
+            <GainsLogMatrix
+              rows={portfolio.rows}
+              gainsByTicker={gainsByTicker}
+              onCellClick={(t) => setDetailTicker(t)}
+              onTickerClick={(t) => setDetailTicker(t)}
+            />
+          )}
         </div>
 
       </div>
@@ -185,23 +231,83 @@ export default function PositionsPage() {
           refreshPrices.mutate();
         }}
       />
+
+      {showQuickAdd && (
+        <QuickAddGainModal
+          positions={portfolio.rows}
+          onClose={() => setShowQuickAdd(false)}
+          onSave={(p) => {
+            addGain.mutate(p, {
+              onSuccess: () => {
+                toast.success(`+${p.amount} ${p.source} · ${p.ticker}`);
+                setShowQuickAdd(false);
+              },
+              onError: (e) => toast.error((e as Error).message),
+            });
+          }}
+        />
+      )}
+
+      {detailTicker && <DetailModalWrapper
+        ticker={detailTicker}
+        rows={portfolio.rows}
+        gainsByTicker={gainsByTicker}
+        putProtectionByTicker={putProtectionByTicker}
+        overlayByTicker={overlayByTicker}
+        onClose={() => setDetailTicker(null)}
+        onAddGain={(p) => addGain.mutate(p, { onError: (e) => toast.error((e as Error).message) })}
+        onDeleteGain={(id) => deleteGain.mutate(id, { onError: (e) => toast.error((e as Error).message) })}
+        onSetPutProtection={(p) =>
+          setPutProtection.mutate(p, {
+            onSuccess: () => toast.success(`Put protection · ${p.ticker}`),
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
+        onClearPutProtection={(ticker) =>
+          clearPutProtection.mutate(ticker, {
+            onSuccess: () => toast.success(`Cleared · ${ticker}`),
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
+      />}
     </div>
   );
 }
 
-function PriceTimestamp({ last }: { last: string | null }) {
-  const text = last
-    ? `prices · ${new Date(last).toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      })}`
-    : 'prices · never refreshed';
+// Small wrapper that resolves the ticker → row + entries + protection before
+// rendering the detail modal, so the parent stays uncluttered.
+function DetailModalWrapper(props: {
+  ticker: string;
+  rows: ReturnType<typeof usePositions>['portfolio']['rows'];
+  gainsByTicker: ReturnType<typeof usePositions>['gainsByTicker'];
+  putProtectionByTicker: ReturnType<typeof usePositions>['putProtectionByTicker'];
+  overlayByTicker: ReturnType<typeof usePositions>['overlayByTicker'];
+  onClose: () => void;
+  onAddGain: Parameters<typeof PositionDetailModal>[0]['onAddGain'];
+  onDeleteGain: Parameters<typeof PositionDetailModal>[0]['onDeleteGain'];
+  onSetPutProtection: Parameters<typeof PositionDetailModal>[0]['onSetPutProtection'];
+  onClearPutProtection: Parameters<typeof PositionDetailModal>[0]['onClearPutProtection'];
+}) {
+  const pos = useMemo(
+    () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
+    [props.rows, props.ticker],
+  );
+  if (!pos) return null;
+  const entries = props.gainsByTicker.get(props.ticker) ?? [];
+  const pp = props.putProtectionByTicker.get(props.ticker);
+  const bucket = props.overlayByTicker.get(props.ticker);
   return (
-    <span className="np-pill">
-      <span className="dot" />
-      {text}
-    </span>
+    <PositionDetailModal
+      position={pos}
+      entries={entries}
+      putProtection={pp}
+      bucket={bucket}
+      onClose={props.onClose}
+      onAddGain={props.onAddGain}
+      onDeleteGain={props.onDeleteGain}
+      onSetPutProtection={props.onSetPutProtection}
+      onClearPutProtection={props.onClearPutProtection}
+    />
   );
 }
+

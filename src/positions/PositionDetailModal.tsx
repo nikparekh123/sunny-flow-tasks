@@ -1,0 +1,419 @@
+import { useEffect, useMemo, useState } from 'react';
+import {
+  computePutProtection,
+  fmtCompact,
+  fmtPct,
+  fmtUSD,
+  fmtUSD2,
+  fmtQty,
+  type GainEntry,
+  type GainSource,
+  type PositionComputed,
+  type PutProtectionRow,
+} from './types';
+import { PutProtectionPanel } from './PutProtectionPanel';
+
+const SOURCE_META: Record<GainSource, { label: string; short: string }> = {
+  stock: { label: 'Stock', short: 'S' },
+  call:  { label: 'Call',  short: 'C' },
+  put:   { label: 'Put',   short: 'P' },
+};
+
+type Bucket = 'income' | 'invest' | 'yield';
+const BUCKET_LABEL: Record<Bucket, string> = {
+  income: 'Income',
+  invest: 'Investment',
+  yield: 'Yield',
+};
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function mondayOf(d: Date): Date {
+  const x = new Date(d);
+  const day = (x.getUTCDay() + 6) % 7;
+  x.setUTCDate(x.getUTCDate() - day);
+  x.setUTCHours(0, 0, 0, 0);
+  return x;
+}
+
+function weekIdxOf(iso: string, todayWeek: Date): number {
+  const d = new Date(iso + 'T12:00:00Z');
+  const w = mondayOf(d);
+  return Math.round((todayWeek.getTime() - w.getTime()) / WEEK_MS);
+}
+
+function weekLabel(idx: number): string {
+  if (idx === 0) return 'This wk';
+  if (idx === 1) return 'Last wk';
+  return `−${idx}w`;
+}
+
+function weekDateLabel(idx: number, todayWeek: Date): string {
+  const d = new Date(todayWeek.getTime() - idx * WEEK_MS);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+interface Props {
+  position: PositionComputed;
+  entries: GainEntry[];
+  putProtection: PutProtectionRow | undefined;
+  bucket?: Bucket;
+  onClose: () => void;
+  onAddGain: (p: { ticker: string; gain_date: string; source: GainSource; amount: number; note?: string }) => void;
+  onDeleteGain: (id: string) => void;
+  onSetPutProtection: (p: { ticker: string; total_cost: number; expiry: string; purchase_date?: string }) => void;
+  onClearPutProtection: (ticker: string) => void;
+}
+
+export function PositionDetailModal({
+  position,
+  entries,
+  putProtection,
+  bucket,
+  onClose,
+  onAddGain,
+  onDeleteGain,
+  onSetPutProtection,
+  onClearPutProtection,
+}: Props) {
+  const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
+  const [showAdd, setShowAdd] = useState(false);
+  const [editPP, setEditPP] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  const todayWeek = useMemo(() => mondayOf(new Date()), []);
+
+  const filtered = useMemo(() => {
+    const list = sourceFilter === 'all' ? entries : entries.filter((e) => e.source === sourceFilter);
+    return [...list].sort((a, b) => b.gain_date.localeCompare(a.gain_date));
+  }, [entries, sourceFilter]);
+
+  const grouped = useMemo(() => {
+    const groups: Record<number, GainEntry[]> = {};
+    filtered.forEach((e) => {
+      const w = weekIdxOf(e.gain_date, todayWeek);
+      if (!groups[w]) groups[w] = [];
+      groups[w].push(e);
+    });
+    return Object.entries(groups)
+      .map(([w, items]) => ({
+        weekIdx: parseInt(w, 10),
+        items,
+        total: items.reduce((s, x) => s + x.amount, 0),
+      }))
+      .sort((a, b) => a.weekIdx - b.weekIdx);
+  }, [filtered, todayWeek]);
+
+  const weekTotals = useMemo(() => {
+    const totals = Array.from({ length: 12 }, () => 0);
+    entries.forEach((g) => {
+      const w = weekIdxOf(g.gain_date, todayWeek);
+      if (w >= 0 && w < 12) totals[w] += g.amount;
+    });
+    return totals;
+  }, [entries, todayWeek]);
+  const maxBar = Math.max(1, ...weekTotals.map(Math.abs));
+
+  const counts = useMemo(
+    () => ({
+      all: entries.length,
+      stock: entries.filter((e) => e.source === 'stock').length,
+      call: entries.filter((e) => e.source === 'call').length,
+      put: entries.filter((e) => e.source === 'put').length,
+    }),
+    [entries],
+  );
+
+  const ppCalc = computePutProtection(putProtection);
+  const isClosed = position.status === 'closed';
+
+  return (
+    <div className="np-modal-back" onClick={onClose}>
+      <div className="np-modal pd-modal" onClick={(e) => e.stopPropagation()}>
+        {/* HEADER */}
+        <div className="pd-hd">
+          <div>
+            <div className="pd-ticker">
+              {position.ticker}
+              {isClosed && <span className="status-pill closed">closed</span>}
+            </div>
+            <div className="pd-meta">
+              {bucket && <span className={'strategy-badge st-' + bucket}>{BUCKET_LABEL[bucket]}</span>}
+              <span className="pd-meta-dot">·</span>
+              <span>{position.sector}</span>
+              {!isClosed && (
+                <>
+                  <span className="pd-meta-dot">·</span>
+                  <span>
+                    {fmtQty(position.quantity)} sh @ {fmtUSD2(position.avg_cost)}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+          <button className="np-btn ghost" onClick={onClose}>✕ Close</button>
+        </div>
+
+        {/* STATS */}
+        <div className="pd-stats">
+          <div className="pd-stat">
+            <div className="pd-stat-l">Mkt value</div>
+            <div className="pd-stat-v">
+              {isClosed ? <span className="muted">—</span> : fmtUSD(position.market_value)}
+            </div>
+          </div>
+          <div className="pd-stat">
+            <div className="pd-stat-l">Unrealized</div>
+            <div className={'pd-stat-v ' + (position.pnl_dollar < 0 ? 'down' : position.pnl_dollar > 0 ? 'up' : '')}>
+              {isClosed ? <span className="muted">—</span> : fmtUSD(position.pnl_dollar)}
+            </div>
+            {!isClosed && (
+              <div className={'pd-stat-sub ' + (position.pnl_pct < 0 ? 'down' : 'up')}>
+                {fmtPct(position.pnl_pct)}
+              </div>
+            )}
+          </div>
+          <div className="pd-stat">
+            <div className="pd-stat-l">Realized</div>
+            <div className={'pd-stat-v ' + (position.realized_total < 0 ? 'down' : position.realized_total > 0 ? 'up' : '')}>
+              {position.realized_total === 0 ? <span className="muted">—</span> : fmtUSD(position.realized_total)}
+            </div>
+            {position.realized_total !== 0 && (
+              <div className="pd-stat-sub">
+                {position.realized.stock !== 0 && <span className="rchip rk-s rchip-static">S</span>}
+                {position.realized.stock !== 0 && <span>{fmtCompact(position.realized.stock)}</span>}
+                {position.realized.call !== 0 && <span className="rchip rk-c rchip-static">C</span>}
+                {position.realized.call !== 0 && <span>{fmtCompact(position.realized.call)}</span>}
+                {position.realized.put !== 0 && <span className="rchip rk-p rchip-static">P</span>}
+                {position.realized.put !== 0 && <span>{fmtCompact(position.realized.put)}</span>}
+              </div>
+            )}
+          </div>
+          <div className="pd-stat">
+            <div className="pd-stat-l">Put cost</div>
+            <div className="pd-stat-v down">
+              {position.put_cost > 0 ? '−' + fmtUSD(position.put_cost) : <span className="muted">—</span>}
+            </div>
+          </div>
+          <div className="pd-stat pd-stat-net">
+            <div className="pd-stat-l">Net realized</div>
+            <div className={'pd-stat-v ' + (position.net_realized < 0 ? 'down' : position.net_realized > 0 ? 'up' : '')}>
+              {position.net_realized !== 0 ? fmtUSD(position.net_realized) : <span className="muted">—</span>}
+            </div>
+          </div>
+        </div>
+
+        {/* PUT PROTECTION */}
+        <PutProtectionPanel
+          ticker={position.ticker}
+          calc={ppCalc}
+          editing={editPP}
+          onEditStart={() => setEditPP(true)}
+          onEditCancel={() => setEditPP(false)}
+          onSave={(p) => {
+            onSetPutProtection({ ticker: position.ticker, ...p });
+            setEditPP(false);
+          }}
+          onClear={() => {
+            onClearPutProtection(position.ticker);
+            setEditPP(false);
+          }}
+        />
+
+        {/* SPARKLINE */}
+        {entries.length > 0 && (
+          <div className="pd-spark">
+            <div className="pd-spark-hd">12-week activity</div>
+            <div className="pd-spark-bars">
+              {weekTotals.map((v, i) => {
+                const isThis = i === 0;
+                const h = Math.max(2, (Math.abs(v) / maxBar) * 44);
+                return (
+                  <div
+                    key={i}
+                    className="pd-spark-col"
+                    title={weekLabel(i) + ': ' + (v ? fmtUSD(v) : 'no entries')}
+                  >
+                    <div
+                      className={'pd-spark-bar ' + (v < 0 ? 'down' : 'up') + (v === 0 ? ' empty' : '')}
+                      style={{ height: h + 'px' }}
+                    />
+                    <div className={'pd-spark-x ' + (isThis ? 'this' : '')}>
+                      {i === 0 ? 'now' : `−${i}w`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* SOURCE FILTER */}
+        <div className="pd-filter">
+          <div className="np-status-filter">
+            <button className={sourceFilter === 'all' ? 'on' : ''} onClick={() => setSourceFilter('all')}>
+              All <span className="ct">{counts.all}</span>
+            </button>
+            <button className={sourceFilter === 'stock' ? 'on' : ''} onClick={() => setSourceFilter('stock')}>
+              <span className="rchip rk-s rchip-static">S</span>Stock <span className="ct">{counts.stock}</span>
+            </button>
+            <button className={sourceFilter === 'call' ? 'on' : ''} onClick={() => setSourceFilter('call')}>
+              <span className="rchip rk-c rchip-static">C</span>Call <span className="ct">{counts.call}</span>
+            </button>
+            <button className={sourceFilter === 'put' ? 'on' : ''} onClick={() => setSourceFilter('put')}>
+              <span className="rchip rk-p rchip-static">P</span>Put <span className="ct">{counts.put}</span>
+            </button>
+          </div>
+          <button className="np-btn add-gain" onClick={() => setShowAdd(true)}>
+            + Log gain
+          </button>
+        </div>
+
+        {/* HISTORY */}
+        <div className="pd-history">
+          {grouped.length === 0 && (
+            <div className="pd-empty">
+              No {sourceFilter === 'all' ? '' : sourceFilter + ' '}entries yet.
+            </div>
+          )}
+          {grouped.map((g) => (
+            <div key={g.weekIdx} className="pd-week-group">
+              <div className="pd-week-hd">
+                <span className="pd-week-l">{weekLabel(g.weekIdx)}</span>
+                <span className="pd-week-d">{weekDateLabel(g.weekIdx, todayWeek)}</span>
+                <span className={'pd-week-tot ' + (g.total < 0 ? 'down' : 'up')}>
+                  {fmtUSD(g.total)}
+                </span>
+              </div>
+              {g.items.map((e) => (
+                <div key={e.id} className="pd-entry">
+                  <span className={'rchip rk-' + e.source.charAt(0) + ' rchip-static'}>
+                    {SOURCE_META[e.source].short}
+                  </span>
+                  <span className="pd-entry-date">{e.gain_date}</span>
+                  <span className={'pd-entry-amt ' + (e.amount < 0 ? 'down' : 'up')}>
+                    {fmtUSD(e.amount)}
+                  </span>
+                  <span className="pd-entry-note">
+                    {e.note || <span style={{ color: 'var(--navi-fg5)' }}>—</span>}
+                  </span>
+                  <button className="np-btn ghost pd-entry-del" onClick={() => onDeleteGain(e.id)}>
+                    delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {showAdd && (
+          <PDAddInline
+            ticker={position.ticker}
+            onCancel={() => setShowAdd(false)}
+            onSave={(gain) => {
+              onAddGain({ ticker: position.ticker, ...gain });
+              setShowAdd(false);
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PDAddInline({
+  ticker,
+  onCancel,
+  onSave,
+}: {
+  ticker: string;
+  onCancel: () => void;
+  onSave: (g: { gain_date: string; source: GainSource; amount: number; note?: string }) => void;
+}) {
+  const [source, setSource] = useState<GainSource>('call');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [date, setDate] = useState(todayIso());
+
+  const submit = () => {
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt === 0 || !date) return;
+    onSave({ gain_date: date, source, amount: amt, note });
+  };
+
+  return (
+    <div className="pd-add-inline">
+      <div className="pd-add-hd">Log a gain on {ticker}</div>
+      <div className="qa-grid">
+        <div className="qa-field">
+          <label>Source</label>
+          <div className="qa-source">
+            {(['stock', 'call', 'put'] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                className={'qa-source-btn ' + s + (source === s ? ' on' : '')}
+                onClick={() => setSource(s)}
+              >
+                <span className={'rchip rk-' + s.charAt(0) + ' rchip-static'}>
+                  {SOURCE_META[s].short}
+                </span>
+                {SOURCE_META[s].label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="qa-field">
+          <label>Amount</label>
+          <input
+            className="np-input qa-amount"
+            type="number"
+            step="50"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0"
+            autoFocus
+          />
+        </div>
+        <div className="qa-field">
+          <label>Date</label>
+          <input
+            type="date"
+            className="np-input"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+        </div>
+        <div className="qa-field">
+          <label>Note (optional)</label>
+          <input
+            className="np-input"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="strike, ex-div, source, etc."
+          />
+        </div>
+      </div>
+      <div className="qa-actions" style={{ justifyContent: 'flex-end' }}>
+        <button className="np-btn ghost" onClick={onCancel}>Cancel</button>
+        <button className="np-btn neon" onClick={submit} disabled={!amount || isNaN(parseFloat(amount))}>
+          ✓ Add entry
+        </button>
+      </div>
+    </div>
+  );
+}
