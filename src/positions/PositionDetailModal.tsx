@@ -222,105 +222,27 @@ export function PositionDetailModal({
           </div>
         </div>
 
-        {/* STATS — only meaningful when reviewing gains; in expense mode
-            the modal collapses to just the put-protection editor. */}
-        {mode === 'gain' && (
-        <div className="pd-stats">
-          <div className="pd-stat">
-            <div className="pd-stat-l">Mkt value</div>
-            <div className="pd-stat-v">
-              {isClosed ? <span className="muted">—</span> : fmtUSD(position.market_value)}
-            </div>
-          </div>
-          <div className="pd-stat">
-            <div className="pd-stat-l">Unrealized</div>
-            <div className={'pd-stat-v ' + (position.pnl_dollar < 0 ? 'down' : position.pnl_dollar > 0 ? 'up' : '')}>
-              {isClosed ? <span className="muted">—</span> : fmtUSD(position.pnl_dollar)}
-            </div>
-            {!isClosed && (
-              <div className={'pd-stat-sub ' + (position.pnl_pct < 0 ? 'down' : 'up')}>
-                {fmtPct(position.pnl_pct)}
-              </div>
-            )}
-          </div>
-          <div className="pd-stat">
-            <div className="pd-stat-l">Realized</div>
-            <div className={'pd-stat-v ' + (position.realized_total < 0 ? 'down' : position.realized_total > 0 ? 'up' : '')}>
-              {position.realized_total === 0 ? <span className="muted">—</span> : fmtUSD(position.realized_total)}
-            </div>
-            {position.realized_total !== 0 && (
-              <div className="pd-stat-sub">
-                {position.realized.stock !== 0 && <span className="rchip rk-s rchip-static">S</span>}
-                {position.realized.stock !== 0 && <span>{fmtCompact(position.realized.stock)}</span>}
-                {position.realized.call !== 0 && <span className="rchip rk-c rchip-static">C</span>}
-                {position.realized.call !== 0 && <span>{fmtCompact(position.realized.call)}</span>}
-                {position.realized.put !== 0 && <span className="rchip rk-p rchip-static">P</span>}
-                {position.realized.put !== 0 && <span>{fmtCompact(position.realized.put)}</span>}
-              </div>
-            )}
-          </div>
-          <div className="pd-stat">
-            <div className="pd-stat-l">Put cost</div>
-            <div className="pd-stat-v down">
-              {position.put_cost > 0 ? '−' + fmtUSD(position.put_cost) : <span className="muted">—</span>}
-            </div>
-          </div>
-          <div className="pd-stat pd-stat-net">
-            <div className="pd-stat-l">Net realized</div>
-            <div className={'pd-stat-v ' + (position.net_realized < 0 ? 'down' : position.net_realized > 0 ? 'up' : '')}>
-              {position.net_realized !== 0 ? fmtUSD(position.net_realized) : <span className="muted">—</span>}
-            </div>
-          </div>
-        </div>
+        {/* PUT PROTECTION — only in expense mode. Put cost is the
+            expense in this app, so it has no place in the gains view. */}
+        {mode === 'expense' && (
+          <PutProtectionPanel
+            ticker={position.ticker}
+            calc={ppCalc}
+            editing={editPP}
+            onEditStart={() => setEditPP(true)}
+            onEditCancel={() => setEditPP(false)}
+            onSave={(p) => {
+              onSetPutProtection({ ticker: position.ticker, ...p });
+              setEditPP(false);
+            }}
+            onClear={() => {
+              onClearPutProtection(position.ticker);
+              setEditPP(false);
+            }}
+          />
         )}
-
-        {/* PUT PROTECTION — visible in both modes; in expense mode it
-            auto-opens in edit so the user lands on the form directly. */}
-        <PutProtectionPanel
-          ticker={position.ticker}
-          calc={ppCalc}
-          editing={editPP}
-          onEditStart={() => setEditPP(true)}
-          onEditCancel={() => setEditPP(false)}
-          onSave={(p) => {
-            onSetPutProtection({ ticker: position.ticker, ...p });
-            setEditPP(false);
-          }}
-          onClear={() => {
-            onClearPutProtection(position.ticker);
-            setEditPP(false);
-          }}
-        />
 
         {mode === 'gain' && <>
-        {/* SPARKLINE */}
-        {ledger.length > 0 && (
-          <div className="pd-spark">
-            <div className="pd-spark-hd">12-week activity</div>
-            <div className="pd-spark-bars">
-              {weekTotals.map((v, i) => {
-                const isThis = i === 0;
-                const h = Math.max(2, (Math.abs(v) / maxBar) * 44);
-                return (
-                  <div
-                    key={i}
-                    className="pd-spark-col"
-                    title={weekLabel(i) + ': ' + (v ? fmtUSD(v) : 'no entries')}
-                  >
-                    <div
-                      className={'pd-spark-bar ' + (v < 0 ? 'down' : 'up') + (v === 0 ? ' empty' : '')}
-                      style={{ height: h + 'px' }}
-                    />
-                    <div className={'pd-spark-x ' + (isThis ? 'this' : '')}>
-                      {i === 0 ? 'now' : `−${i}w`}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/* SOURCE FILTER */}
         <div className="pd-filter">
           <div className="np-status-filter">
