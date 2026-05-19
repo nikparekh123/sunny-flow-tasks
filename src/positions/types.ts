@@ -28,6 +28,16 @@ export interface PositionRow {
   prev_close: number | null;
   last_price_update: string | null;
   status: PositionStatus;
+  /** Next earnings date as ISO 'YYYY-MM-DD', or null if none scheduled. */
+  earnings_date: string | null;
+}
+
+/** Days between today (UTC) and an ISO date string. Negative = in the past. */
+export function daysUntil(iso: string): number {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const target = new Date(iso + 'T00:00:00Z');
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
 export interface GainEntry {

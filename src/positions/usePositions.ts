@@ -385,6 +385,18 @@ export function usePositions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['positions'] }),
   });
 
+  // ── Earnings date (single date per position) ──────────────────────
+  const setEarningsDate = useMutation({
+    mutationFn: async (args: { ticker: string; earnings_date: string | null }) => {
+      const { error } = await supabase
+        .from('positions' as never)
+        .update({ earnings_date: args.earnings_date } as never)
+        .eq('ticker', args.ticker);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['positions'] }),
+  });
+
   return {
     positions: rawPositions,
     portfolio,
@@ -402,6 +414,7 @@ export function usePositions() {
     setPutProtection,
     clearPutProtection,
     setPositionStatus,
+    setEarningsDate,
   };
 }
 

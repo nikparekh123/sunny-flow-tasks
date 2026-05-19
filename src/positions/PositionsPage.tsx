@@ -45,6 +45,7 @@ export default function PositionsPage() {
     setPutProtection,
     clearPutProtection,
     setPositionStatus,
+    setEarningsDate,
   } = usePositions();
   const [allocView, setAllocView] = useState<AllocView>(() =>
     readLS<AllocView>(LS_ALLOC, ['sector', 'stock', 'strategy', 'pnl'] as const, 'sector'),
@@ -308,6 +309,17 @@ export default function PositionsPage() {
             onError: (e) => toast.error((e as Error).message),
           })
         }
+        onSetEarningsDate={(p) =>
+          setEarningsDate.mutate(p, {
+            onSuccess: () =>
+              toast.success(
+                p.earnings_date
+                  ? `Earnings ${p.earnings_date} · ${p.ticker}`
+                  : `Cleared earnings · ${p.ticker}`,
+              ),
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
       />}
     </div>
   );
@@ -331,6 +343,7 @@ function DetailModalWrapper(props: {
   onSetPutProtection: Parameters<typeof PositionDetailModal>[0]['onSetPutProtection'];
   onClearPutProtection: Parameters<typeof PositionDetailModal>[0]['onClearPutProtection'];
   onSetStatus: Parameters<typeof PositionDetailModal>[0]['onSetStatus'];
+  onSetEarningsDate: Parameters<typeof PositionDetailModal>[0]['onSetEarningsDate'];
 }) {
   const pos = useMemo(
     () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
@@ -357,6 +370,7 @@ function DetailModalWrapper(props: {
       onSetPutProtection={props.onSetPutProtection}
       onClearPutProtection={props.onClearPutProtection}
       onSetStatus={props.onSetStatus}
+      onSetEarningsDate={props.onSetEarningsDate}
     />
   );
 }

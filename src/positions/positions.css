@@ -1617,3 +1617,81 @@
 }
 .pp-confirm-q b { color: #d2e632; }
 .pp-confirm-actions { display: flex; gap: 6px; }
+
+/* ── Earnings countdown chip + row highlight ─────────────────────
+   Quiet 'queued' for 8–30 days out, warm 'soon' for 3–7 days,
+   urgent for ≤2 days where the whole row also gets a left-border
+   accent + subtle tint so the eye catches it scanning the table. */
+.np-earn-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 100px;
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.np-earn-chip.queued {
+  background: rgba(70, 130, 120, 0.18);
+  color: var(--navi-fg2, #a8c4c0);
+}
+.np-earn-chip.soon {
+  background: rgba(224, 192, 96, 0.18);
+  color: var(--navi-warning, #e0c060);
+}
+.np-earn-chip.urgent {
+  background: rgba(232, 112, 96, 0.20);
+  color: var(--navi-negative, #e87060);
+  font-weight: 600;
+}
+
+/* Row-level treatment when the position has earnings ≤2 days out. */
+.np-table tbody tr.np-row-earn-urgent td:first-child {
+  box-shadow: inset 3px 0 0 var(--navi-negative, #e87060);
+}
+.np-table tbody tr.np-row-earn-urgent {
+  background: rgba(232, 112, 96, 0.05);
+}
+.np-table tbody tr.np-row-earn-urgent:hover {
+  background: rgba(232, 112, 96, 0.10);
+}
+
+/* Slightly softer accent for the 3-7d "soon" tier — opt-in via the
+   class so the table reads calmer when nothing is urgent. */
+.np-table tbody tr.np-row-earn-soon td:first-child {
+  box-shadow: inset 3px 0 0 rgba(224, 192, 96, 0.6);
+}
+
+/* ── Earnings date field inside the Position Detail modal header ── */
+.pd-earnings-field {
+  margin-top: 8px;
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.pd-meta-l {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--navi-fg4, #325050);
+}
+.pd-earnings-input {
+  width: 160px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.pd-earnings-clear {
+  background: transparent;
+  border: none;
+  color: var(--navi-fg4, #325050);
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  transition: color 0.15s;
+}
+.pd-earnings-clear:hover { color: var(--navi-negative, #e87060); }
