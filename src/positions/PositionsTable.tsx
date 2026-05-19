@@ -12,6 +12,7 @@ type SortKey =
   | 'sector'
   | 'quantity'
   | 'avg_cost'
+  | 'effective_cost'
   | 'current_price'
   | 'market_value'
   | 'pnl_dollar'
@@ -104,6 +105,12 @@ export function PositionsTable({
             <th onClick={() => onSort('sector')}>Sector{ind('sector')}</th>
             <th onClick={() => onSort('quantity')}>Qty{ind('quantity')}</th>
             <th onClick={() => onSort('avg_cost')}>Avg cost{ind('avg_cost')}</th>
+            <th
+              onClick={() => onSort('effective_cost')}
+              title="Avg cost adjusted for collected premiums, expenses, and put cost. The break-even price."
+            >
+              Net cost{ind('effective_cost')}
+            </th>
             <th onClick={() => onSort('current_price')}>Price{ind('current_price')}</th>
             <th onClick={() => onSort('market_value')}>Mkt value{ind('market_value')}</th>
             <th onClick={() => onSort('pnl_dollar')}>P&amp;L $ {ind('pnl_dollar')}</th>
@@ -128,7 +135,7 @@ export function PositionsTable({
             return (
               <Fragment key={g}>
                 <tr className={`np-group-hd np-group-${meta.tone}`}>
-                  <td colSpan={10}>
+                  <td colSpan={11}>
                     <span className="np-group-dot" style={{ background: meta.accent }} />
                     <span className="np-group-name">{meta.name}</span>
                     <span className="np-group-count">· {rowsInGroup.length} positions</span>
@@ -164,6 +171,19 @@ export function PositionsTable({
                     <td className="sector-cell">{r.sector}</td>
                     <td className="num">{fmtQty(r.quantity)}</td>
                     <td className="num">{fmtUSD2(r.avg_cost)}</td>
+                    <td
+                      className={
+                        'num ' +
+                        (r.effective_cost < r.avg_cost
+                          ? 'up'
+                          : r.effective_cost > r.avg_cost
+                            ? 'down'
+                            : '')
+                      }
+                      title={`avg ${fmtUSD2(r.avg_cost)} − net realized ${fmtUSD(r.net_realized)} / ${fmtQty(r.quantity)} sh`}
+                    >
+                      {fmtUSD2(r.effective_cost)}
+                    </td>
                     <td className="num">
                       {r.current_price != null ? fmtUSD2(r.current_price) : '—'}
                     </td>
@@ -187,7 +207,7 @@ export function PositionsTable({
                   </tr>
                 ))}
                 <tr className={`np-group-foot np-group-${meta.tone}`}>
-                  <td colSpan={6}>
+                  <td colSpan={7}>
                     <b>{meta.name} subtotal</b>
                   </td>
                   <td className="num strong">{fmtUSD(subtotal.mv)}</td>
