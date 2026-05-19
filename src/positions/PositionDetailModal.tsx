@@ -92,7 +92,9 @@ export function PositionDetailModal({
   onSetStatus,
 }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
-  const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(null);
+  // Open the inline log form by default in gain mode so the user lands on
+  // the entry fields. Expense mode uses the put-protection editor instead.
+  const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(mode === 'gain' ? 'gain' : null);
   // In expense mode the modal collapses to just the put-protection editor —
   // put cost *is* the expense in this app, so we auto-open the form.
   const [editPP, setEditPP] = useState(mode === 'expense');
