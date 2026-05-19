@@ -402,7 +402,7 @@ export function PositionDetailModal({
         </div>
         </>}
 
-        {showAdd === 'gain' && (
+        {mode === 'gain' && showAdd === 'gain' && (
           <PDAddInline
             ticker={position.ticker}
             kind="gain"
@@ -413,7 +413,7 @@ export function PositionDetailModal({
             }}
           />
         )}
-        {showAdd === 'expense' && (
+        {mode === 'expense' && showAdd === 'expense' && (
           <PDAddInline
             ticker={position.ticker}
             kind="expense"
