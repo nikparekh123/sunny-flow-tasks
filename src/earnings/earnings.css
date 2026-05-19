@@ -236,6 +236,13 @@
   color: var(--navi-fg5, #4a6864);
 }
 
+.er-hint {
+  font-family: var(--navi-font-body, system-ui, sans-serif);
+  font-size: 12px;
+  color: var(--navi-fg4, #6e8a86);
+  margin: 0 0 2px;
+}
+
 .er-history {
   display: flex;
   flex-direction: column;

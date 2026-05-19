@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useEarnings } from './useEarnings';
 import {
@@ -12,6 +12,7 @@ import {
 export function TickerHub() {
   const { ticker: rawTicker } = useParams<{ ticker: string }>();
   const ticker = (rawTicker ?? '').toUpperCase();
+  const nav = useNavigate();
   const { eventsByTicker, peersByTicker, addPeer, removePeer, upsertEvent } = useEarnings();
 
   const events = eventsByTicker.get(ticker) ?? [];
@@ -23,14 +24,19 @@ export function TickerHub() {
   const [newDate, setNewDate] = useState('');
   const [newPeriod, setNewPeriod] = useState('');
 
-  const addUpcoming = () => {
+  // After creating an event, jump straight into its editor so the user
+  // lands on the summary textarea — saves a click and makes the "add
+  // event = write summary" intent obvious.
+  const addEvent = () => {
     if (!newDate) return;
     upsertEvent.mutate(
       { ticker, earnings_date: newDate, fiscal_period: newPeriod || null },
       {
         onSuccess: () => {
-          toast.success(`Logged earnings event · ${ticker} ${newDate}`);
+          toast.success(`Created · ${ticker} ${newDate}`);
+          const target = `/earnings/${ticker}/${newDate}`;
           setNewDate(''); setNewPeriod('');
+          nav(target);
         },
         onError: (e) => toast.error((e as Error).message),
       },
@@ -44,37 +50,50 @@ export function TickerHub() {
         <h1 className="er-hub-title">{ticker}</h1>
       </div>
 
-      {/* Upcoming card */}
+      {/* Add event — works for past OR upcoming dates. Picking a date
+          past today logs a historical earnings; picking a future date
+          logs an upcoming one. Either way, saving jumps to the editor. */}
       <section className="er-hub-section">
-        <h2 className="er-bucket-hd">Upcoming</h2>
-        {upcoming.length === 0 ? (
-          <div className="er-add-event">
-            <input
-              type="date"
-              className="np-input"
-              value={newDate}
-              onChange={(e) => setNewDate(e.target.value)}
-            />
-            <input
-              className="np-input"
-              placeholder="Fiscal period (e.g. Q1 26)"
-              value={newPeriod}
-              onChange={(e) => setNewPeriod(e.target.value)}
-            />
-            <button className="np-btn neon" onClick={addUpcoming} disabled={!newDate}>
-              + Add upcoming event
-            </button>
-          </div>
-        ) : (
+        <h2 className="er-bucket-hd">+ Log earnings event</h2>
+        <p className="er-hint">
+          Pick a date — past or upcoming. You'll be taken to the editor to write the summary.
+        </p>
+        <div className="er-add-event">
+          <input
+            type="date"
+            className="np-input"
+            value={newDate}
+            onChange={(e) => setNewDate(e.target.value)}
+          />
+          <input
+            className="np-input"
+            placeholder="Fiscal period (e.g. Q1 26)"
+            value={newPeriod}
+            onChange={(e) => setNewPeriod(e.target.value)}
+          />
+          <button className="np-btn neon" onClick={addEvent} disabled={!newDate}>
+            + Add &amp; write summary
+          </button>
+        </div>
+      </section>
+
+      {/* Upcoming */}
+      {upcoming.length > 0 && (
+        <section className="er-hub-section">
+          <h2 className="er-bucket-hd">
+            Upcoming <span className="er-bucket-ct">· {upcoming.length}</span>
+          </h2>
           <div className="er-cards">
             {upcoming.map((e) => <EventRow key={e.id} ticker={ticker} event={e} />)}
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {/* History */}
       <section className="er-hub-section">
-        <h2 className="er-bucket-hd">History {history.length > 0 && <span className="er-bucket-ct">· {history.length}</span>}</h2>
+        <h2 className="er-bucket-hd">
+          History {history.length > 0 && <span className="er-bucket-ct">· {history.length}</span>}
+        </h2>
         {history.length === 0 ? (
           <p className="er-empty-l">No past earnings logged for {ticker} yet.</p>
         ) : (
