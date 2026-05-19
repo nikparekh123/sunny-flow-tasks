@@ -1,74 +1,40 @@
 /**
  * Strategy — SWM-style bucket dashboard.
  *
- * v2 note: /strategy/gains has been retired. The gains log is moving to
- * /positions in the Positions v2 redesign. This route just renders the
- * bucket dashboard and the cadence + back-to-dashboard appbar.
+ * Header matches Positions: np-app shell, np-top breadcrumbs with
+ * Sunnyfi-wordmark linking back to the dashboard. Cadence is fixed at
+ * 'quarter'; the previous month/quarter/year toggle + Live dot were
+ * removed.
  */
-import { useSearchParams } from 'react-router-dom';
 import { useStrategy } from '../strategy/useStrategy';
 import StrategyDashboard from '../strategy/pages/StrategyDashboard';
-import type { Cadence } from '../strategy/calc';
+import '@/positions/positions.css';
 import '@/sunnyfi/strategy.css';
 
-const CADENCES: Cadence[] = ['month', 'quarter', 'year'];
-const CADENCE_LABEL: Record<Cadence, string> = {
-  month: 'Month',
-  quarter: 'Quarter',
-  year: 'Year',
-};
+const DASHBOARD_URL = 'https://www.sunnyfi.co/dashboard';
 
 export default function Strategy() {
   const s = useStrategy();
-  const [params, setParams] = useSearchParams();
-
-  const cadenceParam = (params.get('cadence') as Cadence) || 'quarter';
-  const cadence: Cadence = CADENCES.includes(cadenceParam) ? cadenceParam : 'quarter';
-
-  if (s.isLoading) {
-    return (
-      <div className="swm-app">
-        <div className="swm-appbar">
-          <span className="brand">
-            Sunnyfi<span className="cursor" />
-          </span>
-          <span className="crumb">Strategy</span>
-        </div>
-        <div style={{ padding: 32, color: 'var(--navi-fg3)' }}>Loading…</div>
-      </div>
-    );
-  }
-
-  const setCadence = (c: Cadence) => {
-    const p = new URLSearchParams(params);
-    p.set('cadence', c);
-    setParams(p, { replace: true });
-  };
 
   return (
-    <div className="swm-app">
-      <div className="swm-appbar">
-        <span className="brand">
-          Sunnyfi<span className="cursor" />
-        </span>
-        <span className="crumb">Strategy</span>
-        <div className="right">
-          <div className="view-toggle" role="group" aria-label="Cadence">
-            {CADENCES.map((c) => (
-              <button
-                key={c}
-                className={cadence === c ? 'on' : ''}
-                onClick={() => setCadence(c)}
-              >
-                {CADENCE_LABEL[c]}
-              </button>
-            ))}
-          </div>
-          <span className="live-dot">Live</span>
+    <div className="np-app">
+      <header className="np-top">
+        <div className="np-brand-row">
+          <a className="np-brand" href={DASHBOARD_URL} title="Back to dashboard">
+            Sunnyfi<span className="cursor" />
+          </a>
+          <span className="np-crumb-sep">/</span>
+          <span className="np-crumb">STRATEGY</span>
         </div>
-      </div>
+      </header>
 
-      <StrategyDashboard cadence={cadence} />
+      <div className="np-stage">
+        {s.isLoading ? (
+          <div style={{ padding: 32, color: 'var(--navi-fg3)' }}>Loading…</div>
+        ) : (
+          <StrategyDashboard cadence="quarter" />
+        )}
+      </div>
     </div>
   );
 }
