@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Banner } from '../components/Banner';
 import { AllocationStrip } from '../components/AllocationStrip';
-import { UnassignedStrip } from '../components/UnassignedStrip';
-import { WatchlistStrip } from '../components/WatchlistStrip';
 import { BucketPanel } from '../components/BucketPanel';
 import { PositionCard } from '../components/PositionCard';
 import { ClosedRow } from '../components/ClosedRow';
@@ -143,35 +141,6 @@ export default function StrategyDashboard({ cadence }: Props) {
     <div className={appClass}>
       <Banner portfolio={portfolio} cadence={cadence} weeklyHistory={weeklyHistory} />
       <AllocationStrip buckets={bucketCalcs} portfolio={portfolio} />
-
-      <UnassignedStrip
-        items={s.unassigned}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onCardClick={(p) =>
-          setModal({
-            kind: 'buy',
-            ticker: p.ticker,
-            bucket: 'income',
-            currentPx: p.current_price ?? p.avg_cost ?? 0,
-            existing: p,
-          })
-        }
-      />
-
-      <WatchlistStrip
-        items={s.watching}
-        dropActive={watchDropActive}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onDelete={(ticker) =>
-          s.removeWatch.mutate(ticker, {
-            onError: (e) => toast.error((e as Error).message),
-          })
-        }
-        onAdd={() => setModal({ kind: 'add-watch' })}
-        onDropFromBucket={handleDropOnWatch}
-      />
 
       <div className="board three-col">
         {BUCKETS.map((key) => {
