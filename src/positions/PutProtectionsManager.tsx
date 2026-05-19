@@ -63,9 +63,7 @@ export function PutProtectionsManager({ putProtectionByTicker, onTickerClick, on
             </span>
             <button
               className="np-btn ghost pp-manager-clear"
-              onClick={() => {
-                if (window.confirm(`Clear put protection for ${r.ticker}?`)) onClear(r.ticker);
-              }}
+              onClick={() => onClear(r.ticker)}
               title={`Remove put protection on ${r.ticker}`}
             >
               ✕ clear
