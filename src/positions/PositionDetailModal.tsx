@@ -93,7 +93,9 @@ export function PositionDetailModal({
 }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
   const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(null);
-  const [editPP, setEditPP] = useState(false);
+  // In expense mode the modal collapses to just the put-protection editor —
+  // put cost *is* the expense in this app, so we auto-open the form.
+  const [editPP, setEditPP] = useState(mode === 'expense');
 
   // Normalize the two ledgers to a common shape so the rest of the modal
   // doesn't have to branch. Expense rows carry expense_date → date.
@@ -220,7 +222,9 @@ export function PositionDetailModal({
           </div>
         </div>
 
-        {/* STATS */}
+        {/* STATS — only meaningful when reviewing gains; in expense mode
+            the modal collapses to just the put-protection editor. */}
+        {mode === 'gain' && <>
         <div className="pd-stats">
           <div className="pd-stat">
             <div className="pd-stat-l">Mkt value</div>
@@ -393,6 +397,7 @@ export function PositionDetailModal({
             </div>
           ))}
         </div>
+        </>}
 
         {showAdd === 'gain' && (
           <PDAddInline
