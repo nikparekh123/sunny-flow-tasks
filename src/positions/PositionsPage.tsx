@@ -9,6 +9,7 @@ import { PositionDetailModal } from './PositionDetailModal';
 import { GainsLogMatrix } from './GainsLogMatrix';
 import { ExpensesLogMatrix } from './ExpensesLogMatrix';
 import { RealizedSummary } from './RealizedSummary';
+import { PutProtectionsManager } from './PutProtectionsManager';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
 import './positions.css';
@@ -217,6 +218,16 @@ export default function PositionsPage() {
               overlayByTicker={overlayByTicker}
             />
           )}
+          <PutProtectionsManager
+            putProtectionByTicker={putProtectionByTicker}
+            onTickerClick={(t) => setDetail({ ticker: t, mode: 'gain' })}
+            onClear={(t) =>
+              clearPutProtection.mutate(t, {
+                onSuccess: () => toast.success(`Cleared put protection · ${t}`),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+          />
           {posView === 'table' && (
             <PositionsTable
               rows={portfolio.rows}
