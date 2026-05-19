@@ -39,7 +39,7 @@ export default function PositionsPage() {
   const [allocView, setAllocView] = useState<AllocView>('sector');
   const [posView, setPosView] = useState<'table' | 'gains' | 'expenses'>('table');
   const [showUpload, setShowUpload] = useState(false);
-  const [detailTicker, setDetailTicker] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ ticker: string; mode: 'gain' | 'expense' } | null>(null);
 
   // ?ticker=… deep-link: scroll the matching row into view + flash.
   useEffect(() => {
@@ -223,23 +223,23 @@ export default function PositionsPage() {
               onUpload={() => setShowUpload(true)}
               loading={isLoading}
               overlayByTicker={overlayByTicker}
-              onTickerClick={(t) => setDetailTicker(t)}
+              onTickerClick={(t) => setDetail({ ticker: t, mode: 'gain' })}
             />
           )}
           {posView === 'gains' && (
             <GainsLogMatrix
               rows={portfolio.rows}
               gainsByTicker={gainsByTicker}
-              onCellClick={(t) => setDetailTicker(t)}
-              onTickerClick={(t) => setDetailTicker(t)}
+              onCellClick={(t) => setDetail({ ticker: t, mode: 'gain' })}
+              onTickerClick={(t) => setDetail({ ticker: t, mode: 'gain' })}
             />
           )}
           {posView === 'expenses' && (
             <ExpensesLogMatrix
               rows={portfolio.rows}
               expensesByTicker={expensesByTicker}
-              onCellClick={(t) => setDetailTicker(t)}
-              onTickerClick={(t) => setDetailTicker(t)}
+              onCellClick={(t) => setDetail({ ticker: t, mode: 'expense' })}
+              onTickerClick={(t) => setDetail({ ticker: t, mode: 'expense' })}
             />
           )}
         </div>
@@ -255,14 +255,15 @@ export default function PositionsPage() {
         }}
       />
 
-      {detailTicker && <DetailModalWrapper
-        ticker={detailTicker}
+      {detail && <DetailModalWrapper
+        ticker={detail.ticker}
+        mode={detail.mode}
         rows={portfolio.rows}
         gainsByTicker={gainsByTicker}
         expensesByTicker={expensesByTicker}
         putProtectionByTicker={putProtectionByTicker}
         overlayByTicker={overlayByTicker}
-        onClose={() => setDetailTicker(null)}
+        onClose={() => setDetail(null)}
         onAddGain={(p) => addGain.mutate(p, { onError: (e) => toast.error((e as Error).message) })}
         onDeleteGain={(id) => deleteGain.mutate(id, { onError: (e) => toast.error((e as Error).message) })}
         onAddExpense={(p) => addExpense.mutate(p, { onError: (e) => toast.error((e as Error).message) })}
@@ -294,6 +295,7 @@ export default function PositionsPage() {
 // rendering the detail modal, so the parent stays uncluttered.
 function DetailModalWrapper(props: {
   ticker: string;
+  mode: 'gain' | 'expense';
   rows: ReturnType<typeof usePositions>['portfolio']['rows'];
   gainsByTicker: ReturnType<typeof usePositions>['gainsByTicker'];
   expensesByTicker: ReturnType<typeof usePositions>['expensesByTicker'];
@@ -324,6 +326,7 @@ function DetailModalWrapper(props: {
       expenseEntries={expenses}
       putProtection={pp}
       bucket={bucket}
+      mode={props.mode}
       onClose={props.onClose}
       onAddGain={props.onAddGain}
       onDeleteGain={props.onDeleteGain}
