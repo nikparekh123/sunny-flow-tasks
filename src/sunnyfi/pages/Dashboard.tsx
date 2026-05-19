@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Status = "live" | "soon";
 interface Tool {
-  key: "tasks" | "research" | "positions" | "snowball" | "strategy" | "calendar";
+  key: "tasks" | "research" | "positions" | "snowball" | "strategy" | "earnings";
   name: string;
   desc: string;
   status: Status;
@@ -20,7 +20,7 @@ const TOOLS: Tool[] = [
   { key: "positions", name: "Positions",   desc: "Holdings & P&L",   status: "live", hotkey: "3", href: "https://positions.sunnyfi.co" },
   { key: "snowball", name: "Snowball",     desc: "DCF & valuation",  status: "live", hotkey: "4", internal: "/snowball" },
   { key: "strategy", name: "Strategy",     desc: "Buckets & premium", status: "live", hotkey: "5", internal: "/strategy" },
-  { key: "calendar", name: "Calendar",     desc: "Events",           status: "soon", hotkey: "6" },
+  { key: "earnings", name: "Earnings",     desc: "Calls & summaries", status: "live", hotkey: "6", internal: "/earnings" },
 ];
 
 const ICON_STYLE = { fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -34,7 +34,8 @@ function ToolIcon({ name }: { name: Tool["key"] }) {
     snowball: g(<><circle cx="12" cy="17" r="4" /><circle cx="12" cy="9" r="2.5" /><circle cx="12" cy="4" r="1.4" /></>),
     // Strategy icon: three stacked buckets — Income / Investment / Yield allocation.
     strategy: g(<><rect x="3" y="4" width="18" height="4" rx="0.5" /><rect x="3" y="10" width="18" height="4" rx="0.5" /><rect x="3" y="16" width="18" height="4" rx="0.5" /></>),
-    calendar: g(<><rect x="3" y="5" width="18" height="16" rx="1" /><path d="M3 10h18M8 3v4M16 3v4" /></>),
+    // Earnings icon: speaker + chart line — a call with results.
+    earnings: g(<><path d="M4 12h3l3 4 4-12 3 8h3" /></>),
   };
   return <svg width={22} height={22} viewBox="0 0 24 24" aria-hidden>{map[name]}</svg>;
 }
