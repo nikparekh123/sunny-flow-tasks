@@ -63,6 +63,8 @@ interface Props {
   expenseEntries: ExpenseEntry[];
   putProtection: PutProtectionRow | undefined;
   bucket?: Bucket;
+  /** Which ledger this modal is viewing. Defaults to 'gain'. */
+  mode?: 'gain' | 'expense';
   onClose: () => void;
   onAddGain: (p: { ticker: string; gain_date: string; source: GainSource; amount: number; note?: string }) => void;
   onDeleteGain: (id: string) => void;
@@ -79,6 +81,7 @@ export function PositionDetailModal({
   expenseEntries,
   putProtection,
   bucket,
+  mode = 'gain',
   onClose,
   onAddGain,
   onDeleteGain,
@@ -91,6 +94,20 @@ export function PositionDetailModal({
   const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
   const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(null);
   const [editPP, setEditPP] = useState(false);
+
+  // Normalize the two ledgers to a common shape so the rest of the modal
+  // doesn't have to branch. Expense rows carry expense_date → date.
+  type LedgerRow = { id: string; date: string; source: GainSource; amount: number; note?: string };
+  const ledger: LedgerRow[] = useMemo(() => {
+    if (mode === 'expense') {
+      return expenseEntries.map((e) => ({
+        id: e.id, date: e.expense_date, source: e.source, amount: e.amount, note: e.note,
+      }));
+    }
+    return entries.map((e) => ({
+      id: e.id, date: e.gain_date, source: e.source, amount: e.amount, note: e.note,
+    }));
+  }, [mode, entries, expenseEntries]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -107,14 +124,14 @@ export function PositionDetailModal({
   const todayWeek = useMemo(() => mondayOf(new Date()), []);
 
   const filtered = useMemo(() => {
-    const list = sourceFilter === 'all' ? entries : entries.filter((e) => e.source === sourceFilter);
-    return [...list].sort((a, b) => b.gain_date.localeCompare(a.gain_date));
-  }, [entries, sourceFilter]);
+    const list = sourceFilter === 'all' ? ledger : ledger.filter((e) => e.source === sourceFilter);
+    return [...list].sort((a, b) => b.date.localeCompare(a.date));
+  }, [ledger, sourceFilter]);
 
   const grouped = useMemo(() => {
-    const groups: Record<number, GainEntry[]> = {};
+    const groups: Record<number, LedgerRow[]> = {};
     filtered.forEach((e) => {
-      const w = weekIdxOf(e.gain_date, todayWeek);
+      const w = weekIdxOf(e.date, todayWeek);
       if (!groups[w]) groups[w] = [];
       groups[w].push(e);
     });
@@ -129,22 +146,22 @@ export function PositionDetailModal({
 
   const weekTotals = useMemo(() => {
     const totals = Array.from({ length: 12 }, () => 0);
-    entries.forEach((g) => {
-      const w = weekIdxOf(g.gain_date, todayWeek);
+    ledger.forEach((g) => {
+      const w = weekIdxOf(g.date, todayWeek);
       if (w >= 0 && w < 12) totals[w] += g.amount;
     });
     return totals;
-  }, [entries, todayWeek]);
+  }, [ledger, todayWeek]);
   const maxBar = Math.max(1, ...weekTotals.map(Math.abs));
 
   const counts = useMemo(
     () => ({
-      all: entries.length,
-      stock: entries.filter((e) => e.source === 'stock').length,
-      call: entries.filter((e) => e.source === 'call').length,
-      put: entries.filter((e) => e.source === 'put').length,
+      all: ledger.length,
+      stock: ledger.filter((e) => e.source === 'stock').length,
+      call: ledger.filter((e) => e.source === 'call').length,
+      put: ledger.filter((e) => e.source === 'put').length,
     }),
-    [entries],
+    [ledger],
   );
 
   const ppCalc = computePutProtection(putProtection);
@@ -258,7 +275,7 @@ export function PositionDetailModal({
         />
 
         {/* SPARKLINE */}
-        {entries.length > 0 && (
+        {ledger.length > 0 && (
           <div className="pd-spark">
             <div className="pd-spark-hd">12-week activity</div>
             <div className="pd-spark-bars">
@@ -302,12 +319,15 @@ export function PositionDetailModal({
             </button>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="np-btn add-gain" onClick={() => setShowAdd('gain')}>
-              + Log gain
-            </button>
-            <button className="np-btn add-expense" onClick={() => setShowAdd('expense')}>
-              + Log expense
-            </button>
+            {mode === 'gain' ? (
+              <button className="np-btn add-gain" onClick={() => setShowAdd('gain')}>
+                + Log gain
+              </button>
+            ) : (
+              <button className="np-btn add-expense" onClick={() => setShowAdd('expense')}>
+                + Log expense
+              </button>
+            )}
           </div>
         </div>
 
@@ -315,7 +335,8 @@ export function PositionDetailModal({
         <div className="pd-history">
           {grouped.length === 0 && (
             <div className="pd-empty">
-              No {sourceFilter === 'all' ? '' : sourceFilter + ' '}entries yet.
+              No {sourceFilter === 'all' ? '' : sourceFilter + ' '}
+              {mode === 'expense' ? 'expenses' : 'gains'} yet.
             </div>
           )}
           {grouped.map((g) => (
@@ -323,8 +344,8 @@ export function PositionDetailModal({
               <div className="pd-week-hd">
                 <span className="pd-week-l">{weekLabel(g.weekIdx)}</span>
                 <span className="pd-week-d">{weekDateLabel(g.weekIdx, todayWeek)}</span>
-                <span className={'pd-week-tot ' + (g.total < 0 ? 'down' : 'up')}>
-                  {fmtUSD(g.total)}
+                <span className={'pd-week-tot ' + (mode === 'expense' || g.total < 0 ? 'down' : 'up')}>
+                  {mode === 'expense' ? '−' + fmtUSD(g.total) : fmtUSD(g.total)}
                 </span>
               </div>
               {g.items.map((e) => (
@@ -332,14 +353,17 @@ export function PositionDetailModal({
                   <span className={'rchip rk-' + e.source.charAt(0) + ' rchip-static'}>
                     {SOURCE_META[e.source].short}
                   </span>
-                  <span className="pd-entry-date">{e.gain_date}</span>
-                  <span className={'pd-entry-amt ' + (e.amount < 0 ? 'down' : 'up')}>
-                    {fmtUSD(e.amount)}
+                  <span className="pd-entry-date">{e.date}</span>
+                  <span className={'pd-entry-amt ' + (mode === 'expense' || e.amount < 0 ? 'down' : 'up')}>
+                    {mode === 'expense' ? '−' + fmtUSD(e.amount) : fmtUSD(e.amount)}
                   </span>
                   <span className="pd-entry-note">
                     {e.note || <span style={{ color: 'var(--navi-fg5)' }}>—</span>}
                   </span>
-                  <button className="np-btn ghost pd-entry-del" onClick={() => onDeleteGain(e.id)}>
+                  <button
+                    className="np-btn ghost pd-entry-del"
+                    onClick={() => (mode === 'expense' ? onDeleteExpense(e.id) : onDeleteGain(e.id))}
+                  >
                     delete
                   </button>
                 </div>
