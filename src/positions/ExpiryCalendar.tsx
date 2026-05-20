@@ -267,37 +267,54 @@ function Lane({
     <div className={`exp-lane ${kind}`}>
       <span className={`exp-lane-tag ${kind}`}>{kind === 'put' ? 'P' : 'C'}</span>
       <div className={`exp-rule ${kind}`} />
-      {trades.map((t) => (
-        <Marker
-          key={t.id}
-          t={t}
-          pct={pctFor(t.expiry)}
-          closed={closedSet.has(t.id)}
-          onClick={onClick}
-        />
-      ))}
+      {trades.map((t) => {
+        const expiryPct = pctFor(t.expiry);
+        const tradePct = pctFor(t.trade_date);
+        // Clamp left edge to 0 — if the trade opened before the visible
+        // range, the bar starts at the left wall (with a "·····" cap to
+        // indicate it extends off-screen).
+        const clampedLeft = Math.max(0, tradePct);
+        const width = Math.max(2, expiryPct - clampedLeft);
+        const extendsLeft = tradePct < 0;
+        return (
+          <Bar
+            key={t.id}
+            t={t}
+            left={clampedLeft}
+            width={width}
+            extendsLeft={extendsLeft}
+            closed={closedSet.has(t.id)}
+            onClick={onClick}
+          />
+        );
+      })}
     </div>
   );
 }
 
-function Marker({
+function Bar({
   t,
-  pct,
+  left,
+  width,
+  extendsLeft,
   closed,
   onClick,
 }: {
   t: OptionTrade;
-  pct: number;
+  left: number;
+  width: number;
+  extendsLeft: boolean;
   closed: boolean;
   onClick: () => void;
 }) {
   const isShort = t.direction === 'short';
   const cls =
-    'exp-marker ' +
+    'exp-bar ' +
     t.option_type +
     ' ' +
     (isShort ? 'short' : 'long') +
-    (closed ? ' closed' : '');
+    (closed ? ' closed' : '') +
+    (extendsLeft ? ' extends' : '');
   const expiryD = new Date(t.expiry + 'T00:00:00Z');
   const expiryLabel = expiryD.toLocaleDateString('en-US', {
     month: 'short',
@@ -307,18 +324,21 @@ function Marker({
   const notional = t.contracts * 100 * t.premium;
   const title =
     `${t.ticker} · ${t.direction} ${t.option_type} ${t.contracts}× $${t.strike} · ` +
-    `expires ${expiryLabel} · ${fmtCompact(notional)} premium` +
+    `opened ${t.trade_date} · expires ${expiryLabel} · ` +
+    `${fmtCompact(notional)} premium` +
     (closed ? ' · closed' : '');
   return (
     <button
       type="button"
       className={cls}
-      style={{ left: `${pct}%` }}
+      style={{ left: `${left}%`, width: `${width}%` }}
       title={title}
       onClick={onClick}
     >
-      <span className="exp-marker-strike">${t.strike}</span>
-      {t.contracts > 1 && <span className="exp-marker-x">×{t.contracts}</span>}
+      <span className="exp-bar-label">
+        <span className="exp-bar-strike">${t.strike}</span>
+        {t.contracts > 1 && <span className="exp-bar-x">×{t.contracts}</span>}
+      </span>
     </button>
   );
 }

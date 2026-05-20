@@ -3033,60 +3033,77 @@
 .np-app .exp-rule.put  { background: rgba(232,112,96,.30); }
 .np-app .exp-rule.call { background: rgba(168,212,160,.30); }
 
-/* Markers */
-.np-app .exp-marker {
+/* Bars — span from trade_date (left edge) to expiry (right edge) */
+.np-app .exp-bar {
   position: absolute;
   top: 50%;
-  transform: translate(-50%, -50%);
+  transform: translateY(-50%);
+  height: 20px;
+  min-width: 8px;
   border: 1.5px solid;
-  border-radius: 14px;
-  padding: 3px 8px;
+  border-radius: 6px;
+  padding: 0 8px;
   font-family: var(--navi-font-mono);
   font-size: 10px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  display: inline-flex;
+  overflow: hidden;
+  display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: flex-end; /* label hugs the expiry edge */
   line-height: 1;
-  transition: transform .12s var(--np-ease), box-shadow .15s var(--np-ease);
+  transition: transform .12s var(--np-ease), box-shadow .15s var(--np-ease), height .12s var(--np-ease);
   z-index: 1;
+  text-align: right;
+  box-sizing: border-box;
 }
-.np-app .exp-marker.put.short {
+.np-app .exp-bar.put.short {
   background: var(--navi-negative);
   border-color: var(--navi-negative);
   color: #200808;
 }
-.np-app .exp-marker.put.long {
-  background: rgba(232,112,96,.12);
+.np-app .exp-bar.put.long {
+  background: rgba(232,112,96,.18);
   border-color: var(--navi-negative);
   color: var(--navi-negative);
 }
-.np-app .exp-marker.call.short {
+.np-app .exp-bar.call.short {
   background: var(--navi-positive);
   border-color: var(--navi-positive);
   color: #0a1a0a;
 }
-.np-app .exp-marker.call.long {
-  background: rgba(168,212,160,.12);
+.np-app .exp-bar.call.long {
+  background: rgba(168,212,160,.18);
   border-color: var(--navi-positive);
   color: var(--navi-positive);
 }
-.np-app .exp-marker.closed {
+.np-app .exp-bar.closed {
   opacity: .45;
   filter: grayscale(.4);
 }
-.np-app .exp-marker:hover {
+/* When the open is before the visible window, fade the left edge so the
+   bar visually "continues" off-screen. */
+.np-app .exp-bar.extends {
+  border-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  -webkit-mask-image: linear-gradient(90deg, rgba(0,0,0,.35) 0, #000 24px);
+          mask-image: linear-gradient(90deg, rgba(0,0,0,.35) 0, #000 24px);
+}
+.np-app .exp-bar:hover {
   z-index: 3;
-  transform: translate(-50%, -50%) scale(1.08);
+  height: 22px;
   box-shadow: 0 6px 18px -8px rgba(0,0,0,.5);
 }
-.np-app .exp-marker-strike { letter-spacing: -.2px; }
-.np-app .exp-marker-x {
-  opacity: .75;
-  font-weight: 500;
+.np-app .exp-bar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
 }
+.np-app .exp-bar-strike { letter-spacing: -.2px; }
+.np-app .exp-bar-x { opacity: .75; font-weight: 500; }
 
 /* Today line */
 .np-app .exp-today-line {
