@@ -3,6 +3,7 @@ import { useAuth } from '@/hooks/useAuth';
 import Auth from '@/pages/Auth';
 import { usePositions } from './usePositions';
 import { AllocationTreemap, type AllocView } from './AllocationTreemap';
+import { PnLByPosition } from './PnLByPosition';
 import { PositionsTable } from './PositionsTable';
 import { CsvUploadModal } from './CsvUploadModal';
 import { PositionDetailModal } from './PositionDetailModal';
@@ -188,13 +189,21 @@ export default function PositionsPage() {
               </button>
             </div>
           </div>
-          <AllocationTreemap
-            rows={portfolio.rows}
-            view={allocView}
-            height={TREEMAP_HEIGHT}
-            maxItems={COMPANION_MAX}
-            overlayByTicker={overlayByTicker}
-          />
+          {allocView === 'pnl' ? (
+            <PnLByPosition
+              rows={portfolio.rows}
+              tradesByTicker={tradesByTicker}
+              onTickerClick={(t) => setInsightTicker(t)}
+            />
+          ) : (
+            <AllocationTreemap
+              rows={portfolio.rows}
+              view={allocView}
+              height={TREEMAP_HEIGHT}
+              maxItems={COMPANION_MAX}
+              overlayByTicker={overlayByTicker}
+            />
+          )}
         </div>
 
         {/* Positions */}
