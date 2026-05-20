@@ -228,7 +228,7 @@ export function PositionsTable({
                             ? 'down'
                             : '')
                       }
-                      title={`avg ${fmtUSD2(r.avg_cost)} − net realized ${fmtUSD(r.net_realized)} / ${fmtQty(r.quantity)} sh`}
+                      title={`avg ${fmtUSD2(r.avg_cost)} − net options cash ${fmtUSD(r.net_options_cash)} / ${fmtQty(r.quantity)} sh`}
                     >
                       {fmtUSD2(r.effective_cost)}
                     </td>

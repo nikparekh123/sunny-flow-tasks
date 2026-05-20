@@ -142,6 +142,25 @@ export function liveOptionsByTicker(trades: OptionTrade[]): Map<string, LiveOpti
   return out;
 }
 
+/** Net cash from options activity per ticker — sum of every trade's
+ *  signed cash flow (collected = +, paid = −). Includes BOTH live opens
+ *  (their premium effect) AND closed pairs (their realized contribution).
+ *
+ *  Used by effective_cost so the "net cost" reflects premium you've
+ *  already paid for live protective puts, not just realized P&L. */
+export function netOptionsCashByTicker(trades: OptionTrade[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const t of trades) {
+    const isCashIn =
+      (t.action === 'open' && t.direction === 'short') ||
+      (t.action === 'close' && t.direction === 'long');
+    const notional = t.contracts * 100 * t.premium;
+    const signed = isCashIn ? notional : -notional;
+    out.set(t.ticker, (out.get(t.ticker) ?? 0) + signed);
+  }
+  return out;
+}
+
 /** Total realized P&L from all closed pairs per ticker. */
 export function realizedPLByTicker(trades: OptionTrade[]): Map<string, number> {
   const byId = new Map<string, OptionTrade>();
@@ -189,10 +208,15 @@ export interface PositionComputed extends PositionRow {
   realized_pl: number;
   /** Live open option positions (remaining contracts > 0) for this ticker. */
   live_options: LiveOption[];
+  /** Net cash from options activity (premium collected − premium paid)
+   *  including live opens. Drives effective_cost. */
+  net_options_cash: number;
   /** unrealized P&L + realized_pl. "Is this position making money?" */
   overall_pl: number;
-  /** Per-share effective basis. avg_cost − realized_pl / quantity.
-   *  Lower than avg_cost = options activity has paid down the basis. */
+  /** Per-share effective basis. avg_cost − net_options_cash / quantity.
+   *  Lower than avg_cost = options activity has paid down your basis
+   *  (net premium received). Higher than avg_cost = you've paid more in
+   *  premium (e.g. for protective puts) than you've taken back in. */
   effective_cost: number;
 }
 
@@ -200,6 +224,7 @@ export function computeRow(
   p: PositionRow,
   total_market_value: number,
   realized_pl: number,
+  net_options_cash: number,
   live_options: LiveOption[],
 ): PositionComputed {
   const isClosed = p.status === 'closed';
@@ -213,12 +238,16 @@ export function computeRow(
     : 0;
   const pct_portfolio =
     total_market_value === 0 ? 0 : (market_value / total_market_value) * 100;
+  // Effective cost subtracts NET cash from options (not just realized).
+  // Premium paid for live protective puts shows up here as a higher
+  // effective cost; premium collected on live short opens lowers it.
   const effective_cost =
-    p.quantity > 0 ? p.avg_cost - realized_pl / p.quantity : p.avg_cost;
+    p.quantity > 0 ? p.avg_cost - net_options_cash / p.quantity : p.avg_cost;
   return {
     ...p,
     market_value, cost_basis, pnl_dollar, pnl_pct, day_change, pct_portfolio,
     realized_pl,
+    net_options_cash,
     live_options,
     overall_pl: pnl_dollar + realized_pl,
     effective_cost,
@@ -250,13 +279,15 @@ export function computePortfolio(
     0,
   );
   const realizedByTicker = realizedPLByTicker(trades);
+  const netCashByTicker = netOptionsCashByTicker(trades);
   const liveByTicker = liveOptionsByTicker(trades);
   const obligationByTicker = openShortPutObligation(trades);
 
   const rows = positions.map((p) => {
     const realized = realizedByTicker.get(p.ticker) ?? 0;
+    const netCash = netCashByTicker.get(p.ticker) ?? 0;
     const live = liveByTicker.get(p.ticker) ?? [];
-    return computeRow(p, tmv, realized, live);
+    return computeRow(p, tmv, realized, netCash, live);
   });
   const total_cost_basis = rows.reduce((s, r) => s + r.cost_basis, 0);
   const total_pnl = tmv - total_cost_basis;
