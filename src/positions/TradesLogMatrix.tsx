@@ -111,14 +111,15 @@ export function TradesLogMatrix({
   const isProtectiveTrade = (t: OptionTrade) =>
     t.option_type === 'put' && t.direction === 'long';
   const slotValueForOpen = useMemo(() => {
-    const byId = new Map<string, OptionTrade>();
-    for (const t of trades) byId.set(t.id, t);
+    // closes_trade_id index, built once across every ticker's trades.
     const closesByOpen = new Map<string, OptionTrade[]>();
-    for (const t of trades) {
-      if (t.action !== 'close' || !t.closes_trade_id) continue;
-      const arr = closesByOpen.get(t.closes_trade_id) ?? [];
-      arr.push(t);
-      closesByOpen.set(t.closes_trade_id, arr);
+    for (const list of tradesByTicker.values()) {
+      for (const t of list) {
+        if (t.action !== 'close' || !t.closes_trade_id) continue;
+        const arr = closesByOpen.get(t.closes_trade_id) ?? [];
+        arr.push(t);
+        closesByOpen.set(t.closes_trade_id, arr);
+      }
     }
     return (open: OptionTrade): number => {
       const closes = closesByOpen.get(open.id) ?? [];
@@ -128,7 +129,7 @@ export function TradesLogMatrix({
       const notional = open.contracts * 100 * open.premium;
       return open.direction === 'short' ? notional : -notional;
     };
-  }, [trades]);
+  }, [tradesByTicker]);
 
   // Column totals — sum of every cell's signed value at that column index.
   // Mirrors what the user sees in the matrix: realized for closed positions,
