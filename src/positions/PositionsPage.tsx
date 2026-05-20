@@ -350,7 +350,7 @@ export default function PositionsPage() {
 
       {detail && <DetailModalWrapper
         ticker={detail.ticker}
-        initialTab={detail.mode}
+        mode={detail.mode}
         initialSource={detail.source}
         onViewHistory={(which) => {
           setPosView(which === 'expense' ? 'expenses' : 'gains');
