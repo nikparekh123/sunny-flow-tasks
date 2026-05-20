@@ -7,6 +7,7 @@ import { PositionsTable } from './PositionsTable';
 import { CsvUploadModal } from './CsvUploadModal';
 import { PositionDetailModal } from './PositionDetailModal';
 import { PositionInsightModal } from './PositionInsightModal';
+import { TradesLogMatrix } from './TradesLogMatrix';
 import { RealizedSummary } from './RealizedSummary';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
@@ -17,6 +18,7 @@ const TREEMAP_HEIGHT = 600;
 const COMPANION_MAX = 10;
 
 const LS_ALLOC = 'np:allocView';
+const LS_POS = 'np:posView';
 function readLS<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   if (typeof window === 'undefined') return fallback;
   const v = window.localStorage.getItem(key);
@@ -42,9 +44,15 @@ export default function PositionsPage() {
   const [allocView, setAllocView] = useState<AllocView>(() =>
     readLS<AllocView>(LS_ALLOC, ['sector', 'stock', 'strategy', 'pnl'] as const, 'sector'),
   );
+  const [posView, setPosView] = useState<'table' | 'trades'>(() =>
+    readLS<'table' | 'trades'>(LS_POS, ['table', 'trades'] as const, 'table'),
+  );
   useEffect(() => {
     try { window.localStorage.setItem(LS_ALLOC, allocView); } catch { /* private mode */ }
   }, [allocView]);
+  useEffect(() => {
+    try { window.localStorage.setItem(LS_POS, posView); } catch { /* private mode */ }
+  }, [posView]);
   const [showUpload, setShowUpload] = useState(false);
   // Two-layer modal: ticker click opens insight (read), insight's action
   // buttons promote to the write modal in either 'open' or 'close' tab.
@@ -198,15 +206,48 @@ export default function PositionsPage() {
             />
           )}
           <div className="np-section-hd">
-            <div className="np-section-title">Positions · {portfolio.rows.length}</div>
+            <div className="np-section-title">
+              {posView === 'table' ? `Positions · ${portfolio.rows.length}` : 'Trades'}
+            </div>
+            <div className="np-view-toggle">
+              <button
+                className={posView === 'table' ? 'on' : ''}
+                onClick={() => setPosView('table')}
+              >
+                Positions
+              </button>
+              <button
+                className={posView === 'trades' ? 'on' : ''}
+                onClick={() => setPosView('trades')}
+              >
+                Trades
+              </button>
+            </div>
           </div>
-          <PositionsTable
-            rows={portfolio.rows}
-            onUpload={() => setShowUpload(true)}
-            loading={isLoading}
-            overlayByTicker={overlayByTicker}
-            onTickerClick={(t) => setInsightTicker(t)}
-          />
+          {posView === 'table' && (
+            <PositionsTable
+              rows={portfolio.rows}
+              onUpload={() => setShowUpload(true)}
+              loading={isLoading}
+              overlayByTicker={overlayByTicker}
+              onTickerClick={(t) => setInsightTicker(t)}
+            />
+          )}
+          {posView === 'trades' && (
+            <TradesLogMatrix
+              rows={portfolio.rows}
+              tradesByTicker={tradesByTicker}
+              liveByTicker={liveByTicker}
+              realizedByTicker={realizedByTicker}
+              onTickerClick={(t) => setInsightTicker(t)}
+              // Cell click: if the ticker has live opens, default to Close
+              // tab (most likely the user wants to close); otherwise Open.
+              onCellClick={(t) => {
+                const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
+                setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
+              }}
+            />
+          )}
         </div>
       </div>
 
