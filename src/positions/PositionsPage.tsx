@@ -8,7 +8,7 @@ import { CsvUploadModal } from './CsvUploadModal';
 import { PositionDetailModal } from './PositionDetailModal';
 import { PositionInsightModal } from './PositionInsightModal';
 import { TradesLogMatrix } from './TradesLogMatrix';
-import { TimelineMatrix } from './TimelineMatrix';
+import { ExpiryCalendar } from './ExpiryCalendar';
 import { RealizedSummary } from './RealizedSummary';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
@@ -212,7 +212,7 @@ export default function PositionsPage() {
                 ? `Positions · ${portfolio.rows.length}`
                 : posView === 'trades'
                   ? 'Trades'
-                  : 'Timeline'}
+                  : 'Calendar'}
             </div>
             <div className="np-view-toggle">
               <button
@@ -231,7 +231,7 @@ export default function PositionsPage() {
                 className={posView === 'timeline' ? 'on' : ''}
                 onClick={() => setPosView('timeline')}
               >
-                Timeline
+                Calendar
               </button>
             </div>
           </div>
@@ -260,12 +260,8 @@ export default function PositionsPage() {
             />
           )}
           {posView === 'timeline' && (
-            <TimelineMatrix
-              rows={portfolio.rows}
+            <ExpiryCalendar
               tradesByTicker={tradesByTicker}
-              liveByTicker={liveByTicker}
-              realizedByTicker={realizedByTicker}
-              // Read-only: ticker click → insight modal; no add/edit hooks.
               onTickerClick={(t) => setInsightTicker(t)}
             />
           )}

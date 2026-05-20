@@ -2836,3 +2836,233 @@
 .gl-cell-state.live    { color: var(--navi-neon); }
 .gl-cell-state.partial { color: var(--navi-warning); }
 .gl-cell-state.closed  { color: var(--navi-fg4); }
+
+/* ============================================================
+   Expiry Calendar — weekly view, options plotted on expiry date
+   ============================================================ */
+.np-app .cal-wrap {
+  background: var(--navi-card);
+  border: 1px solid rgba(50,110,100,.25);
+  border-radius: 14px;
+  padding: 18px;
+}
+.np-app .cal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.np-app .cal-nav {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 10px;
+  padding: 3px;
+}
+.np-app .cal-nav button {
+  background: transparent;
+  color: var(--navi-fg2);
+  border: 0;
+  padding: 6px 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .cal-nav button:hover { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .cal-nav button.on   { color: var(--navi-neon); background: var(--navi-tint-neon); }
+
+.np-app .cal-range {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.np-app .cal-range-week {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+  letter-spacing: -.2px;
+}
+.np-app .cal-range-year {
+  font-size: 11px;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+}
+
+.np-app .cal-summary {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 18px;
+  align-items: center;
+}
+.np-app .cal-sum-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.np-app .cal-sum-k {
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.np-app .cal-sum-v {
+  font-family: var(--navi-font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+}
+.np-app .cal-sum-v.up   { color: var(--navi-positive); }
+.np-app .cal-sum-v.down { color: var(--navi-negative); }
+
+.np-app .cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  align-items: stretch;
+}
+.np-app .cal-day {
+  background: rgba(15,51,51,.45);
+  border: 1px solid rgba(50,110,100,.22);
+  border-radius: 10px;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color .15s var(--np-ease);
+}
+.np-app .cal-day.weekend { background: rgba(15,51,51,.25); }
+.np-app .cal-day.past    { opacity: .55; }
+.np-app .cal-day.today   {
+  border-color: var(--navi-neon);
+  box-shadow: 0 0 0 1px rgba(210,230,50,.25), 0 6px 18px -10px rgba(210,230,50,.5);
+  opacity: 1;
+}
+
+.np-app .cal-day-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid rgba(50,110,100,.18);
+}
+.np-app .cal-dow {
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+}
+.np-app .cal-dom {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+}
+.np-app .cal-day.today .cal-dow { color: var(--navi-neon); }
+.np-app .cal-day.today .cal-dom { color: var(--navi-neon); }
+
+.np-app .cal-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  flex: 1;
+  min-height: 0;
+}
+.np-app .cal-day-empty {
+  margin: auto;
+  color: var(--navi-fg5);
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+
+.np-app .cal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(15,51,51,.7);
+  border: 1px solid rgba(50,110,100,.35);
+  border-left-width: 3px;
+  border-radius: 7px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--navi-fg1);
+  transition: transform .12s var(--np-ease), border-color .15s var(--np-ease), background .15s var(--np-ease);
+  font-family: var(--navi-font-sans);
+}
+.np-app .cal-card:hover {
+  transform: translateY(-1px);
+  background: rgba(15,51,51,.92);
+}
+.np-app .cal-card.short {
+  border-left-color: var(--navi-positive);
+  background: linear-gradient(90deg, rgba(168,212,160,.10), rgba(15,51,51,.7) 40%);
+}
+.np-app .cal-card.short:hover { border-color: var(--navi-positive); }
+.np-app .cal-card.long {
+  border-left-color: var(--navi-negative);
+  background: linear-gradient(90deg, rgba(232,112,96,.10), rgba(15,51,51,.7) 40%);
+}
+.np-app .cal-card.long:hover { border-color: var(--navi-negative); }
+.np-app .cal-card.closed {
+  border-left-color: var(--navi-fg4);
+  background: rgba(15,51,51,.45);
+  color: var(--navi-fg3);
+}
+.np-app .cal-card.closed .cal-card-tk { text-decoration: line-through; opacity: .8; }
+
+.np-app .cal-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.np-app .cal-card-tk {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -.1px;
+  color: inherit;
+}
+.np-app .cal-card-side {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(50,110,100,.25);
+}
+.np-app .cal-card.short .cal-card-side { color: var(--navi-positive); background: rgba(168,212,160,.15); }
+.np-app .cal-card.long  .cal-card-side { color: var(--navi-negative); background: rgba(232,112,96,.15); }
+.np-app .cal-card.closed .cal-card-side { color: var(--navi-fg3); }
+
+.np-app .cal-card-mid {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg2);
+}
+.np-app .cal-card-strike { font-weight: 500; }
+.np-app .cal-card-qty    { color: var(--navi-fg3); }
+
+.np-app .cal-card-prem {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+  letter-spacing: .2px;
+}
+
+@media (max-width: 1024px) {
+  .np-app .cal-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .np-app .cal-day { min-height: 180px; }
+}
