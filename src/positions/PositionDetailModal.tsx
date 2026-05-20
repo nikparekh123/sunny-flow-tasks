@@ -493,22 +493,36 @@ function CloseFields({
     <>
       <div className="pp-field">
         <div className="pp-field-label">Closing which position?</div>
-        <div className="pp-close-picker">
+        <div className="pp-close-picker" role="radiogroup">
           {liveOpens.map((lo) => {
+            const isSelected = form.target_id === lo.open.id;
             const sign = lo.open.direction === 'short' ? '−' : '+';
-            const label = `${sign}${lo.remaining_contracts} ${lo.open.option_type.toUpperCase()} $${lo.open.strike} exp ${lo.open.expiry} @ $${lo.open.premium}/sh`;
             return (
-              <button
+              <label
                 key={lo.open.id}
-                type="button"
-                className={'pp-close-pick' + (form.target_id === lo.open.id ? ' on' : '')}
-                onClick={() => set('target_id', lo.open.id)}
+                className={'pp-close-pick' + (isSelected ? ' on' : '')}
               >
+                <input
+                  type="radio"
+                  name="close-target"
+                  value={lo.open.id}
+                  checked={isSelected}
+                  onChange={() => set('target_id', lo.open.id)}
+                  className="pp-close-pick-radio"
+                />
+                <span className="pp-close-pick-dot" aria-hidden />
                 <span className={'pp-mini-glyph ' + (lo.open.direction === 'short' ? 'neg' : 'pos')}>
                   {lo.open.option_type === 'put' ? 'P' : 'C'}
                 </span>
-                <span className="pp-close-pick-label">{label}</span>
-              </button>
+                <div className="pp-close-pick-body">
+                  <div className="pp-close-pick-headline">
+                    {sign}{lo.remaining_contracts} {lo.open.option_type.toUpperCase()} ${lo.open.strike}
+                  </div>
+                  <div className="pp-close-pick-sub">
+                    exp {lo.open.expiry} · opened @ ${lo.open.premium}/sh
+                  </div>
+                </div>
+              </label>
             );
           })}
         </div>

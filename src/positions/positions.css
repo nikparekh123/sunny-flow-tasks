@@ -2683,3 +2683,94 @@
 .tl-bar-closed .tl-bar-text {
   color: var(--navi-fg2);
 }
+
+/* ── Close-position picker: clear radio-pill semantics ─────────────
+   The previous flat list invited mis-clicks. Each open is now a
+   labeled radio card with a visible filled dot when selected. The
+   active card has a neon border + tint so the user can see at a
+   glance which one will get closed when they hit Save. */
+.pp-close-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pp-close-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(30,90,80,.4);
+  background: rgba(15,51,51,.4);
+  cursor: pointer;
+  font-family: var(--navi-font-mono, monospace);
+  transition: all .12s var(--np-ease);
+}
+.pp-close-pick:hover {
+  border-color: rgba(210,230,50,.35);
+  background: rgba(15,51,51,.6);
+}
+.pp-close-pick.on {
+  border-color: var(--navi-neon);
+  background: rgba(210,230,50,.06);
+  box-shadow: 0 0 0 1px rgba(210,230,50,.25) inset;
+}
+.pp-close-pick-radio {
+  /* native input hidden — we render our own dot. Still focusable via tab. */
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.pp-close-pick-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(70,130,120,.5);
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  transition: all .12s var(--np-ease);
+}
+.pp-close-pick.on .pp-close-pick-dot {
+  border-color: var(--navi-neon);
+  background: var(--navi-neon);
+  box-shadow: inset 0 0 0 3px var(--navi-page);
+}
+.pp-close-pick-body { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.pp-close-pick-headline {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+}
+.pp-close-pick-sub {
+  font-size: 11px;
+  color: var(--navi-fg4);
+}
+
+/* Tesla-style chart additions: right-side Y axis scale labels. */
+.pi-chart-canvas {
+  position: relative;
+}
+.pi-chart-yaxis {
+  position: absolute;
+  top: 0; bottom: 0;
+  right: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+}
+.pi-chart-yaxis span {
+  display: block;
+  text-align: right;
+  background: rgba(6,26,16,.7);
+  padding: 0 4px;
+  border-radius: 2px;
+  line-height: 1.4;
+}
+.pi-chart-y-top { color: var(--navi-positive); }
+.pi-chart-y-mid { color: var(--navi-fg4); }
+.pi-chart-y-zero { color: var(--navi-fg3); font-weight: 500; }
+.pi-chart-y-bot { color: var(--navi-negative); }

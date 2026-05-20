@@ -370,69 +370,92 @@ export function PositionInsightModal({
 
 // ─── Chart ────────────────────────────────────────────────────────────
 
+/**
+ * Tesla-style bidirectional chart. Same pattern as the Tesla energy app's
+ * "Grid" view:
+ *   - One solid color bar per week, per direction (no stacking inside a bar)
+ *   - Premium collected goes UP (green); premium paid goes DOWN (coral)
+ *   - Zero baseline runs across the middle
+ *   - Y-axis tick labels float on the right (peak / half / zero)
+ *   - X-axis labels are spaced months across the bottom
+ *
+ * The per-source (call vs put) breakdown lives in the stats cards above
+ * this chart, so the chart itself can stay clean and high-contrast.
+ */
 function ChartBidirectional({
   bins, earningsWeekIdx,
 }: {
   bins: Array<{ collected_call: number; collected_put: number; paid_call: number; paid_put: number }>;
   earningsWeekIdx: number | null;
 }) {
-  const maxAbs = Math.max(
-    1,
-    ...bins.flatMap((b) => [
-      b.collected_call + b.collected_put,
-      b.paid_call + b.paid_put,
-    ]),
-  );
+  const collectedSeries = bins.map((b) => b.collected_call + b.collected_put);
+  const paidSeries = bins.map((b) => b.paid_call + b.paid_put);
+  const maxAbs = Math.max(1, ...collectedSeries, ...paidSeries);
+
+  // Round the y-axis max to a "nice" number for the side scale labels.
+  const niceMax = roundUpNice(maxAbs);
 
   const W = 100;
-  const H = 220;
+  const H = 240;
   const midY = H / 2;
-  const half = midY - 8;
+  const half = midY - 12;
   const colCount = bins.length;
   const colW = W / colCount;
-  const barW = colW * 0.55;
+  const barW = colW * 0.65;
 
   return (
     <div className="pi-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="pi-chart-svg">
-        <line x1="0" y1={midY} x2={W} y2={midY} stroke="rgba(30,90,80,0.5)" strokeWidth="0.2" />
-        <line x1="0" y1={midY - half} x2={W} y2={midY - half} stroke="rgba(30,90,80,0.2)" strokeWidth="0.15" strokeDasharray="0.5,0.5" />
-        <line x1="0" y1={midY + half} x2={W} y2={midY + half} stroke="rgba(30,90,80,0.2)" strokeWidth="0.15" strokeDasharray="0.5,0.5" />
+      <div className="pi-chart-canvas">
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="pi-chart-svg">
+          {/* Zero line + half-amplitude guides */}
+          <line x1="0" y1={midY} x2={W} y2={midY} stroke="rgba(30,90,80,0.7)" strokeWidth="0.18" />
+          <line x1="0" y1={midY - half}     x2={W} y2={midY - half}     stroke="rgba(30,90,80,0.25)" strokeWidth="0.12" strokeDasharray="0.4,0.6" />
+          <line x1="0" y1={midY - half / 2} x2={W} y2={midY - half / 2} stroke="rgba(30,90,80,0.15)" strokeWidth="0.1"  strokeDasharray="0.3,0.7" />
+          <line x1="0" y1={midY + half / 2} x2={W} y2={midY + half / 2} stroke="rgba(30,90,80,0.15)" strokeWidth="0.1"  strokeDasharray="0.3,0.7" />
+          <line x1="0" y1={midY + half}     x2={W} y2={midY + half}     stroke="rgba(30,90,80,0.25)" strokeWidth="0.12" strokeDasharray="0.4,0.6" />
 
-        {earningsWeekIdx != null && earningsWeekIdx >= 0 && earningsWeekIdx < colCount && (
-          <line
-            x1={(colCount - earningsWeekIdx - 0.5) * colW}
-            y1="0"
-            x2={(colCount - earningsWeekIdx - 0.5) * colW}
-            y2={H}
-            stroke="var(--navi-neon)"
-            strokeWidth="0.3"
-            strokeDasharray="1,1"
-            opacity="0.7"
-          />
-        )}
+          {/* Earnings marker — vertical dashed neon line on the relevant week. */}
+          {earningsWeekIdx != null && earningsWeekIdx >= 0 && earningsWeekIdx < colCount && (
+            <line
+              x1={(colCount - earningsWeekIdx - 0.5) * colW}
+              y1="0"
+              x2={(colCount - earningsWeekIdx - 0.5) * colW}
+              y2={H}
+              stroke="var(--navi-neon)"
+              strokeWidth="0.3"
+              strokeDasharray="1,1"
+              opacity="0.7"
+            />
+          )}
 
-        {bins.map((b, i) => {
-          const x = (colCount - i - 1) * colW + (colW - barW) / 2;
-          // Stack collected upward
-          let yU = midY;
-          const segCallUp = (b.collected_call / maxAbs) * half;
-          const segPutUp  = (b.collected_put  / maxAbs) * half;
-          // Stack paid downward
-          let yD = midY;
-          const segCallDn = (b.paid_call / maxAbs) * half;
-          const segPutDn  = (b.paid_put  / maxAbs) * half;
+          {/* Bars — newest week on the right. */}
+          {bins.map((_, i) => {
+            const x = (colCount - i - 1) * colW + (colW - barW) / 2;
+            const upH   = (collectedSeries[i] / niceMax) * half;
+            const dnH   = (paidSeries[i]      / niceMax) * half;
+            return (
+              <g key={i}>
+                {upH > 0 && (
+                  <rect x={x} y={midY - upH} width={barW} height={upH} fill="var(--navi-positive)" rx="0.3" />
+                )}
+                {dnH > 0 && (
+                  <rect x={x} y={midY}       width={barW} height={dnH} fill="var(--navi-negative)" rx="0.3" />
+                )}
+              </g>
+            );
+          })}
+        </svg>
 
-          return (
-            <g key={i}>
-              {segCallUp > 0 && <rect x={x} y={yU - segCallUp} width={barW} height={segCallUp} fill="var(--navi-neon)" rx="0.2" />}
-              {segPutUp > 0 && <rect x={x} y={yU - segCallUp - segPutUp} width={barW} height={segPutUp} fill="var(--navi-positive)" rx="0.2" />}
-              {segCallDn > 0 && <rect x={x} y={yD} width={barW} height={segCallDn} fill="rgba(232,112,96,.6)" rx="0.2" />}
-              {segPutDn > 0 && <rect x={x} y={yD + segCallDn} width={barW} height={segPutDn} fill="var(--navi-negative)" rx="0.2" />}
-            </g>
-          );
-        })}
-      </svg>
+        {/* Right-side Y axis scale */}
+        <div className="pi-chart-yaxis">
+          <span className="pi-chart-y-top">{fmtUSD(niceMax)}</span>
+          <span className="pi-chart-y-mid">{fmtUSD(niceMax / 2)}</span>
+          <span className="pi-chart-y-zero">$0</span>
+          <span className="pi-chart-y-mid">−{fmtUSD(niceMax / 2)}</span>
+          <span className="pi-chart-y-bot">−{fmtUSD(niceMax)}</span>
+        </div>
+      </div>
+
       <div className="pi-chart-xaxis">
         <span>−12mo</span>
         <span>−9mo</span>
@@ -440,13 +463,27 @@ function ChartBidirectional({
         <span>−3mo</span>
         <span>now</span>
       </div>
+
       <div className="pi-chart-legend">
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-neon)' }} />Call collected
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-positive)' }} />Put collected
+        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-positive)' }} />Premium collected
         <span className="pi-chart-legend-sep">·</span>
-        <span className="pi-chart-legend-dot" style={{ background: 'rgba(232,112,96,.6)' }} />Call paid
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-negative)' }} />Put paid
+        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-negative)' }} />Premium paid
       </div>
     </div>
   );
+}
+
+/** Round a value up to a "nice" round number for axis labels.
+ *  e.g. 4321 → 5000, 87000 → 100000, 14 → 20. */
+function roundUpNice(v: number): number {
+  if (v <= 0) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const base = Math.pow(10, exp);
+  const norm = v / base;
+  let nice: number;
+  if (norm <= 1) nice = 1;
+  else if (norm <= 2) nice = 2;
+  else if (norm <= 5) nice = 5;
+  else nice = 10;
+  return nice * base;
 }
