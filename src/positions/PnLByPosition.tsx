@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  closeRealizedPL,
   fmtCompact,
   fmtUSD,
   type OptionTrade,
@@ -7,25 +8,21 @@ import {
 } from './types';
 
 /**
- * P&L by Position — Tesla-Energy-style mirrored bar chart.
+ * P&L by Position — multi-view performance card.
  *
- * Layout mirrors the AllocationTreemap card it sits next to: 1fr + 240px
- * grid, no outline, matching padding / radius / surface — so toggling
- * between the four allocation views feels cohesive.
+ *   Overall  | Stock | Options
+ *                       └─ All | Short calls | Long calls | Short puts | Long puts
  *
- *   ┌───────────────────────────────────┬────────────────┐
- *   │                                   │ [Contribs|Cov] │
- *   │  ▇                                │                │
- *   │  ▇  ▇                             │  ●NVDA $2.1k   │
- *   │  ─────────────── 0 ─────────────  │  ●META $1.3k   │
- *   │              ▆                    │  ●META −$6.9k  │
- *   │              ▆                    │                │
- *   │  NVDA META ADBE META              │                │
- *   │  Net P&L: −$2,775                 │                │
- *   └───────────────────────────────────┴────────────────┘
+ *   Overall/Stock  → per-ticker mirrored bars (overall_pl or pnl_dollar)
+ *   Options        → DAILY stacked bars (Tesla style). Each bar is a
+ *                    close date; segments stacked by ticker. Positive
+ *                    realized goes up, negative goes down.
  *
- * Each ticker bar = `overall_pl` (mark + realized). Sorted signed-desc
- * so winners cluster left, losers right.
+ *   Side panel: tabbed [Contributors | Put coverage].
+ *
+ * Color rule (per user):
+ *   • Profits = neon + secondary greens (cycle by ticker rank)
+ *   • Losses  = red shades
  */
 
 interface Props {
@@ -34,18 +31,39 @@ interface Props {
   onTickerClick?: (ticker: string) => void;
 }
 
+type View = 'overall' | 'stock' | 'options';
+type OptionDir = 'all' | 'short-call' | 'long-call' | 'short-put' | 'long-put';
+type SidePanel = 'contrib' | 'coverage';
+
 interface Item {
   ticker: string;
   sector: string;
   pl: number;
 }
 
-type SidePanel = 'contrib' | 'coverage';
+interface CloseEvent {
+  date: string;   // ISO YYYY-MM-DD
+  ticker: string;
+  value: number;  // signed realized P&L
+}
+
+// Profit palette — neon first, then "the other greens" (per user).
+const POS_PALETTE = ['#d2e632', '#a8d4a0', '#6dd1c5', '#326e64', '#a8c4c0'];
+// Loss palette — varying reds.
+const NEG_PALETTE = ['#e87060', '#c85a4e', '#a64a40', '#7d3b33', '#5a2a24'];
+
+function paletteColor(positive: boolean, rank: number): string {
+  const p = positive ? POS_PALETTE : NEG_PALETTE;
+  return p[Math.max(0, rank) % p.length];
+}
 
 export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
+  const [view, setView] = useState<View>('overall');
+  const [optDir, setOptDir] = useState<OptionDir>('all');
   const [tab, setTab] = useState<SidePanel>('contrib');
 
-  const items = useMemo<Item[]>(
+  // ── Per-ticker items for Overall / Stock views ──────────────────
+  const itemsOverall = useMemo<Item[]>(
     () =>
       rows
         .map((r) => ({ ticker: r.ticker, sector: r.sector, pl: r.overall_pl }))
@@ -53,13 +71,69 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
         .sort((a, b) => b.pl - a.pl),
     [rows],
   );
+  const itemsStock = useMemo<Item[]>(
+    () =>
+      rows
+        .map((r) => ({ ticker: r.ticker, sector: r.sector, pl: r.pnl_dollar }))
+        .filter((x) => Math.abs(x.pl) >= 1)
+        .sort((a, b) => b.pl - a.pl),
+    [rows],
+  );
 
-  const gains = useMemo(() => items.filter((x) => x.pl > 0), [items]);
-  const losses = useMemo(() => items.filter((x) => x.pl < 0), [items]);
-  const totalGain = useMemo(() => gains.reduce((s, x) => s + x.pl, 0), [gains]);
-  const totalLoss = useMemo(() => losses.reduce((s, x) => s + x.pl, 0), [losses]);
+  // ── Close events for Options view ──────────────────────────────
+  const closeEvents = useMemo<CloseEvent[]>(() => {
+    const openById = new Map<string, OptionTrade>();
+    for (const list of tradesByTicker.values()) {
+      for (const t of list) if (t.action === 'open') openById.set(t.id, t);
+    }
+    const out: CloseEvent[] = [];
+    for (const list of tradesByTicker.values()) {
+      for (const t of list) {
+        if (t.action !== 'close' || !t.closes_trade_id) continue;
+        const open = openById.get(t.closes_trade_id);
+        if (!open) continue;
+        const sig = `${open.direction}-${open.option_type}` as OptionDir;
+        if (optDir !== 'all' && sig !== optDir) continue;
+        out.push({
+          date: t.trade_date,
+          ticker: t.ticker,
+          value: closeRealizedPL(t, open),
+        });
+      }
+    }
+    return out;
+  }, [tradesByTicker, optDir]);
+
+  // Ticker → rank (by total |realized| in current filter) for color.
+  const tickerRank = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const c of closeEvents) {
+      totals.set(c.ticker, (totals.get(c.ticker) ?? 0) + Math.abs(c.value));
+    }
+    const order = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+    const m = new Map<string, number>();
+    order.forEach((t, i) => m.set(t, i));
+    return m;
+  }, [closeEvents]);
+
+  // Per-view items shown in chart column for Overall / Stock.
+  const items = view === 'stock' ? itemsStock : itemsOverall;
+  const gains = items.filter((x) => x.pl > 0);
+  const losses = items.filter((x) => x.pl < 0);
+  const totalGain = gains.reduce((s, x) => s + x.pl, 0);
+  const totalLoss = losses.reduce((s, x) => s + x.pl, 0);
   const net = totalGain + totalLoss;
+  const maxAbs =
+    items.length > 0 ? Math.max(...items.map((x) => Math.abs(x.pl))) : 0;
 
+  // For Options view, recompute header sums based on closeEvents.
+  const optGains = closeEvents.filter((c) => c.value > 0);
+  const optLosses = closeEvents.filter((c) => c.value < 0);
+  const optTotalGain = optGains.reduce((s, c) => s + c.value, 0);
+  const optTotalLoss = optLosses.reduce((s, c) => s + c.value, 0);
+  const optNet = optTotalGain + optTotalLoss;
+
+  // ── Put cost coverage ──────────────────────────────────────────
   const putCostPaid = useMemo(() => {
     let total = 0;
     for (const list of tradesByTicker.values()) {
@@ -75,66 +149,106 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
     }
     return total;
   }, [tradesByTicker]);
-
   const realized = useMemo(
     () => rows.reduce((s, r) => s + r.realized_pl, 0),
     [rows],
   );
   const coveragePct = putCostPaid > 0 ? (realized / putCostPaid) * 100 : 0;
 
-  const maxAbs = useMemo(
-    () => (items.length > 0 ? Math.max(...items.map((x) => Math.abs(x.pl))) : 0),
-    [items],
-  );
+  // Headline stats based on active view
+  const headG = view === 'options' ? optTotalGain : totalGain;
+  const headL = view === 'options' ? optTotalLoss : totalLoss;
+  const headN = view === 'options' ? optNet : net;
 
-  if (items.length === 0) {
-    return (
-      <div className="np-treemap-card">
-        <div
-          className="np-treemap-svg-wrap"
-          style={{
-            color: 'var(--navi-fg3)',
-            justifyContent: 'center',
-            alignItems: 'center',
-            fontFamily: 'var(--navi-font-mono)',
-            fontSize: 12,
-          }}
-        >
-          no P&amp;L to chart yet
-        </div>
-        <div />
-      </div>
-    );
-  }
+  // Empty state guard
+  const empty =
+    view === 'options'
+      ? closeEvents.length === 0
+      : items.length === 0;
 
   return (
     <div className="np-treemap-card pnl-card">
-      {/* LEFT: chart + net summary */}
+      {/* LEFT: view toggles + chart */}
       <div className="pnl-chart-col">
+        <div className="pnl-view-bar">
+          <div className="pnl-view-toggle">
+            <button
+              className={view === 'overall' ? 'on' : ''}
+              onClick={() => setView('overall')}
+            >
+              Overall
+            </button>
+            <button
+              className={view === 'stock' ? 'on' : ''}
+              onClick={() => setView('stock')}
+            >
+              Stock
+            </button>
+            <button
+              className={view === 'options' ? 'on' : ''}
+              onClick={() => setView('options')}
+            >
+              Options
+            </button>
+          </div>
+          {view === 'options' && (
+            <div className="pnl-subfilter">
+              {([
+                ['all', 'All'],
+                ['short-call', 'Short calls'],
+                ['long-call', 'Long calls'],
+                ['short-put', 'Short puts'],
+                ['long-put', 'Long puts'],
+              ] as const).map(([k, label]) => (
+                <button
+                  key={k}
+                  className={optDir === k ? 'on' : ''}
+                  onClick={() => setOptDir(k)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="pnl-chart-hd">
           <div className="pnl-chart-stat">
             <span className="pnl-chart-stat-k">↑ Gains</span>
-            <span className="pnl-chart-stat-v up">{fmtUSD(totalGain)}</span>
+            <span className="pnl-chart-stat-v up">{fmtUSD(headG)}</span>
           </div>
           <div className="pnl-chart-stat">
             <span className="pnl-chart-stat-k">↓ Losses</span>
             <span className="pnl-chart-stat-v down">
-              {totalLoss < 0
-                ? '−' + fmtUSD(Math.abs(totalLoss))
-                : fmtUSD(totalLoss)}
+              {headL < 0 ? '−' + fmtUSD(Math.abs(headL)) : fmtUSD(headL)}
             </span>
           </div>
           <div className="pnl-chart-stat right">
-            <span className="pnl-chart-stat-k">Net P&amp;L</span>
-            <span className={'pnl-chart-stat-v ' + (net >= 0 ? 'up' : 'down')}>
-              {net >= 0 ? fmtUSD(net) : '−' + fmtUSD(Math.abs(net))}
+            <span className="pnl-chart-stat-k">Net</span>
+            <span className={'pnl-chart-stat-v ' + (headN >= 0 ? 'up' : 'down')}>
+              {headN >= 0 ? fmtUSD(headN) : '−' + fmtUSD(Math.abs(headN))}
             </span>
           </div>
         </div>
-        <PnLBars items={items} maxAbs={maxAbs} onTickerClick={onTickerClick} />
+
+        {empty ? (
+          <div className="pnl-empty-area">
+            {view === 'options'
+              ? 'No closed option trades match this filter.'
+              : 'No positions with P&L yet.'}
+          </div>
+        ) : view === 'options' ? (
+          <OptionsDailyBars events={closeEvents} tickerRank={tickerRank} />
+        ) : (
+          <PerTickerBars
+            items={items}
+            maxAbs={maxAbs}
+            onTickerClick={onTickerClick}
+          />
+        )}
       </div>
 
-      {/* RIGHT: tabbed side panel */}
+      {/* RIGHT: tabs + content */}
       <div className="pnl-side">
         <div className="pnl-tabs">
           <button
@@ -154,39 +268,13 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
         </div>
 
         {tab === 'contrib' && (
-          <div className="pnl-contrib">
-            {gains.length > 0 && (
-              <>
-                <div className="np-treemap-list-hd">↑ Gain</div>
-                {gains.slice(0, 5).map((g) => (
-                  <ContribRow
-                    key={g.ticker}
-                    ticker={g.ticker}
-                    value={g.pl}
-                    pct={totalGain > 0 ? (g.pl / totalGain) * 100 : 0}
-                    positive
-                    onClick={() => onTickerClick?.(g.ticker)}
-                  />
-                ))}
-              </>
-            )}
-            {losses.length > 0 && (
-              <>
-                <div className="np-treemap-list-hd" style={{ marginTop: 14 }}>
-                  ↓ Loss
-                </div>
-                {losses.slice(0, 5).map((l) => (
-                  <ContribRow
-                    key={l.ticker}
-                    ticker={l.ticker}
-                    value={l.pl}
-                    pct={totalLoss < 0 ? (l.pl / totalLoss) * 100 : 0}
-                    onClick={() => onTickerClick?.(l.ticker)}
-                  />
-                ))}
-              </>
-            )}
-          </div>
+          <ContributorsList
+            view={view}
+            items={items}
+            closeEvents={closeEvents}
+            tickerRank={tickerRank}
+            onTickerClick={onTickerClick}
+          />
         )}
 
         {tab === 'coverage' && (
@@ -203,7 +291,7 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
 
 // ──────────────────────────────────────────────────────────────────────
 
-function PnLBars({
+function PerTickerBars({
   items,
   maxAbs,
   onTickerClick,
@@ -213,7 +301,7 @@ function PnLBars({
   onTickerClick?: (ticker: string) => void;
 }) {
   const W = 1000;
-  const H = 420;
+  const H = 380;
   const PAD_TOP = 14;
   const PAD_BOTTOM = 32;
   const AXIS_W = 48;
@@ -230,6 +318,249 @@ function PnLBars({
       preserveAspectRatio="xMidYMid meet"
       className="pnl-svg"
     >
+      <ChartGrid
+        barAreaW={barAreaW}
+        W={W}
+        PAD_TOP={PAD_TOP}
+        usableH={usableH}
+        zeroY={zeroY}
+        halfH={halfH}
+        maxAbs={maxAbs}
+      />
+      {items.map((it, i) => {
+        const cx = i * slotW + slotW / 2;
+        const barHeight = maxAbs > 0 ? (Math.abs(it.pl) / maxAbs) * halfH : 0;
+        const y = it.pl >= 0 ? zeroY - barHeight : zeroY;
+        const fill = it.pl >= 0 ? 'var(--navi-neon)' : 'var(--navi-negative)';
+        return (
+          <g
+            key={it.ticker}
+            style={{ cursor: onTickerClick ? 'pointer' : 'default' }}
+            onClick={() => onTickerClick?.(it.ticker)}
+          >
+            <title>
+              {it.ticker} · {it.pl >= 0 ? '+' : '−'}
+              {fmtUSD(Math.abs(it.pl))}
+            </title>
+            <rect
+              x={cx - barW / 2}
+              y={y}
+              width={barW}
+              height={Math.max(2, barHeight)}
+              fill={fill}
+              rx="3"
+            />
+            <text
+              x={cx}
+              y={H - 10}
+              textAnchor="middle"
+              fill="var(--navi-fg2)"
+              fontSize="11"
+              fontFamily="var(--navi-font-sans)"
+              fontWeight="500"
+            >
+              {it.ticker}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function OptionsDailyBars({
+  events,
+  tickerRank,
+}: {
+  events: CloseEvent[];
+  tickerRank: Map<string, number>;
+}) {
+  const W = 1000;
+  const H = 380;
+  const PAD_TOP = 14;
+  const PAD_BOTTOM = 32;
+  const AXIS_W = 48;
+  const usableH = H - PAD_TOP - PAD_BOTTOM;
+  const zeroY = PAD_TOP + usableH / 2;
+  const halfH = usableH / 2;
+  const chartW = W - AXIS_W;
+
+  // Group by date
+  const byDate = useMemo(() => {
+    const m = new Map<string, CloseEvent[]>();
+    for (const e of events) {
+      const arr = m.get(e.date) ?? [];
+      arr.push(e);
+      m.set(e.date, arr);
+    }
+    return m;
+  }, [events]);
+
+  const dates = useMemo(() => [...byDate.keys()].sort(), [byDate]);
+  const dayMs = 86_400_000;
+  const minMs = dates.length > 0 ? new Date(dates[0]).getTime() : 0;
+  const maxMs =
+    dates.length > 0 ? new Date(dates[dates.length - 1]).getTime() : 0;
+  const span = Math.max(1, Math.round((maxMs - minMs) / dayMs)) + 2;
+
+  // Y scale: max |pos sum| or |neg sum| across days
+  const maxAbs = useMemo(() => {
+    let m = 0;
+    for (const arr of byDate.values()) {
+      let pos = 0,
+        neg = 0;
+      for (const e of arr) {
+        if (e.value > 0) pos += e.value;
+        else neg += Math.abs(e.value);
+      }
+      m = Math.max(m, pos, neg);
+    }
+    return m;
+  }, [byDate]);
+
+  // X coord helper
+  const xFor = (iso: string): number => {
+    if (dates.length === 1) return chartW / 2;
+    const t = new Date(iso).getTime();
+    const dayIdx = Math.round((t - minMs) / dayMs) + 1;
+    return (dayIdx / span) * chartW;
+  };
+  const barW = Math.min(18, Math.max(4, (chartW / span) * 0.65));
+
+  // X-axis tick labels — show ~5 evenly-spaced dates
+  const tickIndices = useMemo(() => {
+    const n = Math.min(5, dates.length);
+    if (n === 0) return [];
+    if (n === 1) return [0];
+    return Array.from({ length: n }, (_, i) =>
+      Math.round((i * (dates.length - 1)) / (n - 1)),
+    );
+  }, [dates]);
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="xMidYMid meet"
+      className="pnl-svg"
+    >
+      <ChartGrid
+        barAreaW={chartW}
+        W={W}
+        PAD_TOP={PAD_TOP}
+        usableH={usableH}
+        zeroY={zeroY}
+        halfH={halfH}
+        maxAbs={maxAbs}
+      />
+
+      {/* Stacked daily bars */}
+      {[...byDate.entries()].map(([date, list]) => {
+        const cx = xFor(date);
+        const pos = list
+          .filter((e) => e.value > 0)
+          .sort(
+            (a, b) =>
+              (tickerRank.get(a.ticker) ?? 99) -
+              (tickerRank.get(b.ticker) ?? 99),
+          );
+        const neg = list
+          .filter((e) => e.value < 0)
+          .sort(
+            (a, b) =>
+              (tickerRank.get(a.ticker) ?? 99) -
+              (tickerRank.get(b.ticker) ?? 99),
+          );
+
+        let posY = zeroY;
+        let negY = zeroY;
+        const rects: React.ReactNode[] = [];
+        pos.forEach((e, i) => {
+          const h = maxAbs > 0 ? (e.value / maxAbs) * halfH : 0;
+          posY -= h;
+          rects.push(
+            <rect
+              key={`${date}-p-${i}`}
+              x={cx - barW / 2}
+              y={posY}
+              width={barW}
+              height={Math.max(1, h)}
+              fill={paletteColor(true, tickerRank.get(e.ticker) ?? 99)}
+              rx="1"
+            >
+              <title>
+                {e.ticker} · +{fmtUSD(e.value)} · {date}
+              </title>
+            </rect>,
+          );
+        });
+        neg.forEach((e, i) => {
+          const h = maxAbs > 0 ? (Math.abs(e.value) / maxAbs) * halfH : 0;
+          rects.push(
+            <rect
+              key={`${date}-n-${i}`}
+              x={cx - barW / 2}
+              y={negY}
+              width={barW}
+              height={Math.max(1, h)}
+              fill={paletteColor(false, tickerRank.get(e.ticker) ?? 99)}
+              rx="1"
+            >
+              <title>
+                {e.ticker} · −{fmtUSD(Math.abs(e.value))} · {date}
+              </title>
+            </rect>,
+          );
+          negY += h;
+        });
+        return <g key={date}>{rects}</g>;
+      })}
+
+      {/* X-axis date ticks */}
+      {tickIndices.map((di) => {
+        const date = dates[di];
+        const cx = xFor(date);
+        const label = new Date(date).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          timeZone: 'UTC',
+        });
+        return (
+          <text
+            key={date}
+            x={cx}
+            y={H - 10}
+            textAnchor="middle"
+            fill="var(--navi-fg2)"
+            fontSize="11"
+            fontFamily="var(--navi-font-mono)"
+          >
+            {label}
+          </text>
+        );
+      })}
+    </svg>
+  );
+}
+
+function ChartGrid({
+  barAreaW,
+  W,
+  PAD_TOP,
+  usableH,
+  zeroY,
+  halfH,
+  maxAbs,
+}: {
+  barAreaW: number;
+  W: number;
+  PAD_TOP: number;
+  usableH: number;
+  zeroY: number;
+  halfH: number;
+  maxAbs: number;
+}) {
+  return (
+    <>
       <line
         x1={0}
         x2={barAreaW}
@@ -253,8 +584,6 @@ function PnLBars({
         strokeDasharray="4 4"
         opacity="0.6"
       />
-
-      {/* Right-side axis labels */}
       <text
         x={W - 4}
         y={PAD_TOP + 10}
@@ -305,46 +634,80 @@ function PnLBars({
       >
         −{fmtCompact(maxAbs)}
       </text>
+    </>
+  );
+}
 
-      {items.map((it, i) => {
-        const cx = i * slotW + slotW / 2;
-        const barHeight = maxAbs > 0 ? (Math.abs(it.pl) / maxAbs) * halfH : 0;
-        const y = it.pl >= 0 ? zeroY - barHeight : zeroY;
-        const fill =
-          it.pl >= 0 ? 'var(--navi-positive)' : 'var(--navi-negative)';
-        return (
-          <g
-            key={it.ticker}
-            style={{ cursor: onTickerClick ? 'pointer' : 'default' }}
-            onClick={() => onTickerClick?.(it.ticker)}
-          >
-            <title>
-              {it.ticker} · {it.pl >= 0 ? '+' : '−'}
-              {fmtUSD(Math.abs(it.pl))}
-            </title>
-            <rect
-              x={cx - barW / 2}
-              y={y}
-              width={barW}
-              height={Math.max(2, barHeight)}
-              fill={fill}
-              rx="3"
+function ContributorsList({
+  view,
+  items,
+  closeEvents,
+  tickerRank,
+  onTickerClick,
+}: {
+  view: View;
+  items: Item[];
+  closeEvents: CloseEvent[];
+  tickerRank: Map<string, number>;
+  onTickerClick?: (ticker: string) => void;
+}) {
+  // For Options view: aggregate closeEvents by ticker
+  const optItems = useMemo<Item[]>(() => {
+    if (view !== 'options') return [];
+    const m = new Map<string, number>();
+    for (const e of closeEvents) {
+      m.set(e.ticker, (m.get(e.ticker) ?? 0) + e.value);
+    }
+    return [...m.entries()]
+      .map(([ticker, pl]) => ({ ticker, sector: '', pl }))
+      .filter((x) => Math.abs(x.pl) >= 1)
+      .sort((a, b) => b.pl - a.pl);
+  }, [view, closeEvents]);
+
+  const rowItems = view === 'options' ? optItems : items;
+  const gains = rowItems.filter((x) => x.pl > 0);
+  const losses = rowItems.filter((x) => x.pl < 0);
+  const totalGain = gains.reduce((s, x) => s + x.pl, 0);
+  const totalLoss = losses.reduce((s, x) => s + x.pl, 0);
+
+  return (
+    <div className="pnl-contrib">
+      {gains.length > 0 && (
+        <>
+          <div className="np-treemap-list-hd">↑ Gain</div>
+          {gains.slice(0, 5).map((g) => (
+            <ContribRow
+              key={g.ticker}
+              ticker={g.ticker}
+              value={g.pl}
+              pct={totalGain > 0 ? (g.pl / totalGain) * 100 : 0}
+              positive
+              rank={tickerRank.get(g.ticker) ?? 0}
+              useNeon={view !== 'options'}
+              onClick={() => onTickerClick?.(g.ticker)}
             />
-            <text
-              x={cx}
-              y={H - 10}
-              textAnchor="middle"
-              fill="var(--navi-fg2)"
-              fontSize="11"
-              fontFamily="var(--navi-font-sans)"
-              fontWeight="500"
-            >
-              {it.ticker}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+          ))}
+        </>
+      )}
+      {losses.length > 0 && (
+        <>
+          <div className="np-treemap-list-hd" style={{ marginTop: 14 }}>
+            ↓ Loss
+          </div>
+          {losses.slice(0, 5).map((l) => (
+            <ContribRow
+              key={l.ticker}
+              ticker={l.ticker}
+              value={l.pl}
+              pct={totalLoss < 0 ? (l.pl / totalLoss) * 100 : 0}
+              rank={tickerRank.get(l.ticker) ?? 0}
+              useNeon={view !== 'options'}
+              onClick={() => onTickerClick?.(l.ticker)}
+            />
+          ))}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -353,14 +716,25 @@ function ContribRow({
   value,
   pct,
   positive,
+  rank,
+  useNeon,
   onClick,
 }: {
   ticker: string;
   value: number;
   pct: number;
   positive?: boolean;
+  rank: number;
+  useNeon: boolean;
   onClick?: () => void;
 }) {
+  // Overall/Stock views: neon/red. Options view: ticker-ranked palette
+  // so it matches the stacked bars.
+  const swatchColor = useNeon
+    ? positive
+      ? 'var(--navi-neon)'
+      : 'var(--navi-negative)'
+    : paletteColor(!!positive, rank);
   return (
     <button
       type="button"
@@ -369,14 +743,7 @@ function ContribRow({
       disabled={!onClick}
     >
       <span className="lbl">
-        <span
-          className="swatch"
-          style={{
-            background: positive
-              ? 'var(--navi-positive)'
-              : 'var(--navi-negative)',
-          }}
-        />
+        <span className="swatch" style={{ background: swatchColor }} />
         {ticker}
       </span>
       <span className="pct">
