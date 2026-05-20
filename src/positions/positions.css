@@ -1301,7 +1301,7 @@
 }
 .gl-cell-amt.up   { color: var(--navi-positive, #a8d4a0); }
 .gl-cell-amt.down { color: var(--navi-negative); }
-.gl-cell-chips { display: inline-flex; gap: 3px; }
+.gl-cell-chips { display: inline-flex; gap: 5px; align-items: center; }
 
 .gl-table td.gl-tot {
   text-align: right;
@@ -2830,7 +2830,7 @@
   font-size: 8px;
   letter-spacing: 0.4px;
   text-transform: lowercase;
-  margin-left: 4px;
+  line-height: 1;
   color: var(--navi-fg4);
 }
 .gl-cell-state.live    { color: var(--navi-neon); }
