@@ -2505,18 +2505,19 @@
   pointer-events: none;
 }
 
-/* Group header row (ticker name + sector) */
+/* Group header row — kept quiet so the table reads as one continuous
+   matrix rather than separate "cards" per ticker. */
 .tl-table .tl-group-row td {
-  background: rgba(20,55,50,.55);
-  border-top: 1px solid rgba(30,90,80,.5);
-  border-bottom: 1px solid rgba(30,90,80,.25);
-  padding: 10px 14px;
+  background: rgba(15,51,51,.30);
+  border-top: 1px solid rgba(30,90,80,.20);
+  border-bottom: 1px solid rgba(30,90,80,.10);
+  padding: 6px 14px;
 }
 .tl-table .tl-group-row .ticker {
   font-family: var(--navi-font-sans);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: -0.3px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
   color: var(--navi-fg1);
   cursor: pointer;
   margin-right: 8px;
@@ -2524,9 +2525,9 @@
 .tl-table .tl-group-row .ticker:hover { color: var(--navi-neon); }
 .tl-group-meta {
   font-family: var(--navi-font-mono, monospace);
-  font-size: 11px;
+  font-size: 10px;
   color: var(--navi-fg4);
-  margin-left: 8px;
+  margin-left: 4px;
 }
 
 /* Track row — the row containing a bar */
@@ -2614,6 +2615,7 @@
   background: rgba(70,90,90,.4);
   border: 1px solid rgba(70,90,90,.6);
   color: var(--navi-fg2);
+  overflow: visible;  /* let the realized label spill past the bar edge if needed */
 }
 .tl-bar-future {
   background: transparent;
@@ -2629,9 +2631,20 @@
   font-weight: 600;
   font-size: 10px;
   white-space: nowrap;
+  /* Float just past the right edge of the gray-ghost bar in a pill, so
+     it's legible even if the gray segment is only a few pixels wide. */
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 1px 6px;
+  border-radius: 100px;
+  background: var(--navi-page);
+  border: 1px solid rgba(30,90,80,.4);
+  z-index: 2;
 }
-.tl-bar-realized.up   { color: var(--navi-positive); }
-.tl-bar-realized.down { color: var(--navi-negative); }
+.tl-bar-realized.up   { color: var(--navi-positive); border-color: rgba(168,212,160,.5); }
+.tl-bar-realized.down { color: var(--navi-negative); border-color: rgba(232,112,96,.5); }
 
 /* Today's vertical line — drawn inside each track */
 .tl-today-line {
@@ -2644,17 +2657,17 @@
   box-shadow: 0 0 4px rgba(210,230,50,.4);
 }
 
-/* Subtotal row */
+/* Subtotal row — also kept subtle. Just a thin tint band. */
 .tl-table .tl-subtotal-row td {
-  background: rgba(15,51,51,.4);
-  border-top: 1px solid rgba(30,90,80,.25);
-  border-bottom: 2px solid rgba(30,90,80,.4);
-  padding: 8px 14px;
+  background: rgba(15,51,51,.20);
+  border-top: 1px solid rgba(30,90,80,.10);
+  border-bottom: 1px solid rgba(30,90,80,.20);
+  padding: 5px 14px;
   font-family: var(--navi-font-mono, monospace);
-  font-size: 11px;
-  color: var(--navi-fg3);
+  font-size: 10px;
+  color: var(--navi-fg4);
 }
-.tl-table .tl-subtotal-row b { color: var(--navi-fg2); }
+.tl-table .tl-subtotal-row b { color: var(--navi-fg3); font-weight: 500; }
 .tl-table .tl-subtotal-row .up   { color: var(--navi-positive); }
 .tl-table .tl-subtotal-row .down { color: var(--navi-negative); }
 .tl-subtotal-sep { color: var(--navi-fg5); }
