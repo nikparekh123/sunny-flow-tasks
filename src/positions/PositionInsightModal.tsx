@@ -1,24 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  closeRealizedPL,
+  daysUntil,
   fmtUSD,
   fmtUSD2,
   fmtQty,
-  daysUntil,
-  type ExpenseEntry,
-  type GainEntry,
-  type GainSource,
+  type LiveOption,
+  type OptionTrade,
   type PositionComputed,
-  type PutProtectionRow,
 } from './types';
 
 /**
  * Position insight (read) modal — Tesla-style P&L dashboard for one ticker.
  *
- * Header carries the earnings-date strip. A bidirectional weekly bar chart
- * shows gains stacked upward and expenses stacked downward, source-coded.
- * Breakdown chips + a chronological activity list sit below. The two
- * actions at the bottom ("+ Log gain" / "+ Log expense") open the write
- * modal (PositionDetailModal).
+ * Header → earnings strip → three big stats → 52-week bidirectional chart
+ *   (premium collected vs paid) → live positions list → recent trade
+ *   activity.
+ *
+ * Replaces the previous gain/expense view with a unified trade ledger.
  */
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -43,38 +42,32 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   yield: 'Yield',
 };
 
-const SOURCE_LABEL: Record<GainSource, string> = {
-  stock: 'Stock', call: 'Call', put: 'Put',
-};
-
-const SOURCE_GLYPH: Record<GainSource, string> = {
-  stock: 'S', call: 'C', put: 'P',
-};
-
 interface Props {
   position: PositionComputed;
-  entries: GainEntry[];
-  expenseEntries: ExpenseEntry[];
-  putProtection: PutProtectionRow | undefined;
+  trades: OptionTrade[];          // all option_trades for this ticker
+  liveOpens: LiveOption[];
+  realizedTotal: number;          // realized P&L on this ticker
   bucket?: Bucket;
   onClose: () => void;
   onSetEarningsDate: (p: { ticker: string; earnings_date: string | null }) => void;
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
-  onAddGain: () => void;        // opens the write modal in gain mode
-  onAddExpense: () => void;     // opens the write modal in expense mode
+  onOpenTrade: () => void;        // opens write modal in 'open' tab
+  onCloseTrade: () => void;       // opens write modal in 'close' tab
+  onDeletePosition: (ticker: string) => void;
 }
 
 export function PositionInsightModal({
   position,
-  entries,
-  expenseEntries,
-  putProtection,
+  trades,
+  liveOpens,
+  realizedTotal,
   bucket,
   onClose,
   onSetEarningsDate,
   onSetStatus,
-  onAddGain,
-  onAddExpense,
+  onOpenTrade,
+  onCloseTrade,
+  onDeletePosition,
 }: Props) {
   const [editingEarnings, setEditingEarnings] = useState(false);
   const [draftEarnings, setDraftEarnings] = useState(position.earnings_date ?? '');
@@ -92,46 +85,47 @@ export function PositionInsightModal({
   const isClosed = position.status === 'closed';
   const todayWeek = useMemo(() => mondayOf(new Date()), []);
 
-  // Aggregate weekly: gains stacked upward, expenses stacked downward.
-  // Each bin holds amounts per source for both directions.
-  type Bin = {
-    gains:    { stock: number; call: number; put: number };
-    expenses: { stock: number; call: number; put: number };
-  };
-  const bins: Bin[] = useMemo(() => {
-    const arr: Bin[] = Array.from({ length: WEEK_COUNT }, () => ({
-      gains:    { stock: 0, call: 0, put: 0 },
-      expenses: { stock: 0, call: 0, put: 0 },
-    }));
-    for (const e of entries) {
-      const w = weekIdxOf(e.gain_date, todayWeek);
-      if (w >= 0 && w < WEEK_COUNT) arr[w].gains[e.source] += e.amount;
-    }
-    for (const e of expenseEntries) {
-      const w = weekIdxOf(e.expense_date, todayWeek);
-      if (w >= 0 && w < WEEK_COUNT) arr[w].expenses[e.source] += Math.abs(e.amount);
-    }
-    // Synthetic put-protection expense on its purchase week, so the chart
-    // tells the full story without forcing a separate ledger row.
-    if (putProtection && putProtection.total_cost > 0 && putProtection.purchase_date) {
-      const w = weekIdxOf(putProtection.purchase_date, todayWeek);
-      if (w >= 0 && w < WEEK_COUNT) arr[w].expenses.put += putProtection.total_cost;
+  // Per-week premium flow. Above-zero = premium collected (cash in),
+  // below-zero = premium paid (cash out). Each direction segmented by
+  // option type (call vs put) so the user reads the split at a glance.
+  const bins = useMemo(() => {
+    const empty = () => ({
+      collected_call: 0, collected_put: 0,
+      paid_call: 0,     paid_put: 0,
+    });
+    const arr = Array.from({ length: WEEK_COUNT }, empty);
+    const byId = new Map<string, OptionTrade>();
+    for (const t of trades) byId.set(t.id, t);
+
+    for (const t of trades) {
+      const w = weekIdxOf(t.trade_date, todayWeek);
+      if (w < 0 || w >= WEEK_COUNT) continue;
+      const notional = t.contracts * 100 * t.premium;
+      // open short / close long → cash IN
+      // open long  / close short → cash OUT
+      const isCashIn =
+        (t.action === 'open' && t.direction === 'short') ||
+        (t.action === 'close' && t.direction === 'long');
+      if (isCashIn) {
+        if (t.option_type === 'call') arr[w].collected_call += notional;
+        else                          arr[w].collected_put  += notional;
+      } else {
+        if (t.option_type === 'call') arr[w].paid_call += notional;
+        else                          arr[w].paid_put  += notional;
+      }
     }
     return arr;
-  }, [entries, expenseEntries, putProtection, todayWeek]);
+  }, [trades, todayWeek]);
 
   const totals = useMemo(() => {
-    let gain = { stock: 0, call: 0, put: 0, total: 0 };
-    let exp  = { stock: 0, call: 0, put: 0, total: 0 };
+    let collected = 0, paid = 0, callC = 0, callP = 0, putC = 0, putP = 0;
     for (const b of bins) {
-      (Object.keys(b.gains) as GainSource[]).forEach((k) => {
-        gain[k] += b.gains[k];
-        gain.total += b.gains[k];
-        exp[k] += b.expenses[k];
-        exp.total += b.expenses[k];
-      });
+      collected += b.collected_call + b.collected_put;
+      paid      += b.paid_call + b.paid_put;
+      callC += b.collected_call; callP += b.paid_call;
+      putC  += b.collected_put;  putP  += b.paid_put;
     }
-    return { gain, exp, net: gain.total - exp.total };
+    return { collected, paid, callC, callP, putC, putP };
   }, [bins]);
 
   const earnDays = position.earnings_date ? daysUntil(position.earnings_date) : null;
@@ -150,43 +144,23 @@ export function PositionInsightModal({
     setEditingEarnings(false);
   };
 
-  // Merge all entries into a single chronological feed for the activity list.
-  type FeedRow = {
-    id: string;
-    date: string;
-    source: GainSource;
-    amount: number;  // signed: gains positive, expenses negative
-    label: string;
-    kind: 'gain' | 'expense' | 'protection';
-  };
-  const feed: FeedRow[] = useMemo(() => {
-    const out: FeedRow[] = [];
-    for (const e of entries) {
-      out.push({
-        id: e.id, date: e.gain_date, source: e.source,
-        amount: e.amount, label: e.note || `${SOURCE_LABEL[e.source]} gain`,
-        kind: 'gain',
+  // Recent activity feed — trades sorted desc with realized P&L on closes.
+  const feed = useMemo(() => {
+    const byId = new Map<string, OptionTrade>();
+    for (const t of trades) byId.set(t.id, t);
+    return [...trades]
+      .sort((a, b) => b.trade_date.localeCompare(a.trade_date))
+      .slice(0, 14)
+      .map((t) => {
+        const realized = t.action === 'close' && t.closes_trade_id
+          ? closeRealizedPL(t, byId.get(t.closes_trade_id)!)
+          : 0;
+        const cashFlow = t.contracts * 100 * t.premium *
+          ((t.action === 'open' && t.direction === 'short') ||
+           (t.action === 'close' && t.direction === 'long') ? 1 : -1);
+        return { t, realized, cashFlow };
       });
-    }
-    for (const e of expenseEntries) {
-      out.push({
-        id: e.id, date: e.expense_date, source: e.source,
-        amount: -Math.abs(e.amount), label: e.note || `${SOURCE_LABEL[e.source]} expense`,
-        kind: 'expense',
-      });
-    }
-    if (putProtection && putProtection.total_cost > 0) {
-      out.push({
-        id: `pp:${putProtection.id}`,
-        date: putProtection.purchase_date,
-        source: 'put',
-        amount: -putProtection.total_cost,
-        label: 'put protection',
-        kind: 'protection',
-      });
-    }
-    return out.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
-  }, [entries, expenseEntries, putProtection]);
+  }, [trades]);
 
   return (
     <div className="pi-stage" onClick={onClose}>
@@ -255,74 +229,138 @@ export function PositionInsightModal({
           )}
         </div>
 
-        {/* Two big stat numbers */}
+        {/* Three big stat numbers */}
         <div className="pi-stats">
           <div className="pi-stat">
-            <div className="pi-stat-l">↑ Gains · 52wk</div>
-            <div className="pi-stat-v pos">{fmtUSD(totals.gain.total)}</div>
-            <div className="pi-stat-sub">{entries.length} {entries.length === 1 ? 'entry' : 'entries'}</div>
-          </div>
-          <div className="pi-stat">
-            <div className="pi-stat-l">↓ Expenses · 52wk</div>
-            <div className="pi-stat-v neg">−{fmtUSD(totals.exp.total)}</div>
+            <div className="pi-stat-l">↑ Premium collected · 52wk</div>
+            <div className="pi-stat-v pos">{fmtUSD(totals.collected)}</div>
             <div className="pi-stat-sub">
-              {expenseEntries.length + (putProtection ? 1 : 0)} items
+              {totals.callC > 0 && `C ${fmtUSD(totals.callC)}`}
+              {totals.callC > 0 && totals.putC > 0 && ' · '}
+              {totals.putC > 0 && `P ${fmtUSD(totals.putC)}`}
+              {totals.collected === 0 && '—'}
             </div>
           </div>
           <div className="pi-stat">
-            <div className="pi-stat-l">Net realized</div>
-            <div className={'pi-stat-v ' + (totals.net < 0 ? 'neg' : totals.net > 0 ? 'pos' : '')}>
-              {totals.net >= 0 ? fmtUSD(totals.net) : '−' + fmtUSD(Math.abs(totals.net))}
+            <div className="pi-stat-l">↓ Premium paid · 52wk</div>
+            <div className="pi-stat-v neg">−{fmtUSD(totals.paid)}</div>
+            <div className="pi-stat-sub">
+              {totals.callP > 0 && `C ${fmtUSD(totals.callP)}`}
+              {totals.callP > 0 && totals.putP > 0 && ' · '}
+              {totals.putP > 0 && `P ${fmtUSD(totals.putP)}`}
+              {totals.paid === 0 && '—'}
             </div>
-            <div className="pi-stat-sub">last 52 weeks</div>
+          </div>
+          <div className="pi-stat">
+            <div className="pi-stat-l">Realized P&amp;L</div>
+            <div className={'pi-stat-v ' + (realizedTotal < 0 ? 'neg' : realizedTotal > 0 ? 'pos' : '')}>
+              {realizedTotal >= 0 ? fmtUSD(realizedTotal) : '−' + fmtUSD(Math.abs(realizedTotal))}
+            </div>
+            <div className="pi-stat-sub">from closed pairs</div>
           </div>
         </div>
 
         {/* Bidirectional chart */}
-        <ChartBidirectional bins={bins} earningsWeekIdx={
-          position.earnings_date ? weekIdxOf(position.earnings_date, todayWeek) : null
-        } />
+        <ChartBidirectional
+          bins={bins}
+          earningsWeekIdx={position.earnings_date ? weekIdxOf(position.earnings_date, todayWeek) : null}
+        />
 
-        {/* Source breakdown */}
-        <div className="pi-breakdown">
-          <SourceBreakdown title="↑ Gains by source" totals={totals.gain} kind="gain" />
-          <SourceBreakdown title="↓ Expenses by source" totals={totals.exp} kind="expense" />
+        {/* Live positions list */}
+        <div className="pi-activity">
+          <div className="pi-section-l">Live positions · {liveOpens.length}</div>
+          {liveOpens.length === 0 ? (
+            <div className="pi-activity-empty">No live option positions on {position.ticker}.</div>
+          ) : (
+            <div className="pi-activity-list">
+              {liveOpens.map((lo) => {
+                const sign = lo.open.direction === 'short' ? '−' : '+';
+                const cls = lo.open.direction === 'short' ? 'neg' : 'pos';
+                return (
+                  <div key={lo.open.id} className="pi-activity-row">
+                    <span className={'pi-mini-glyph ' + cls}>
+                      {lo.open.option_type === 'put' ? 'P' : 'C'}
+                    </span>
+                    <span className="pi-activity-date">{lo.open.trade_date}</span>
+                    <span className={'pi-activity-amt ' + cls}>
+                      {sign}{lo.remaining_contracts} @ ${lo.open.strike}
+                    </span>
+                    <span className="pi-activity-label">
+                      exp {lo.open.expiry} · ${lo.open.premium}/sh
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Recent activity */}
         <div className="pi-activity">
           <div className="pi-section-l">Recent activity</div>
           {feed.length === 0 ? (
-            <div className="pi-activity-empty">No entries yet — log a gain or expense to start.</div>
+            <div className="pi-activity-empty">No trades yet — open a position to start.</div>
           ) : (
             <div className="pi-activity-list">
-              {feed.map((row) => (
-                <div key={row.id} className="pi-activity-row">
-                  <span className={'pi-mini-glyph ' + (row.kind === 'gain' ? 'pos' : 'neg')}>
-                    {SOURCE_GLYPH[row.source]}
-                  </span>
-                  <span className="pi-activity-date">{row.date}</span>
-                  <span className={'pi-activity-amt ' + (row.amount < 0 ? 'neg' : 'pos')}>
-                    {row.amount < 0 ? '−' : ''}{fmtUSD(Math.abs(row.amount))}
-                  </span>
-                  <span className="pi-activity-label">{row.label}</span>
-                </div>
-              ))}
+              {feed.map(({ t, realized, cashFlow }) => {
+                const cls = cashFlow > 0 ? 'pos' : 'neg';
+                return (
+                  <div key={t.id} className="pi-activity-row">
+                    <span className={'pi-mini-glyph ' + cls}>
+                      {t.option_type === 'put' ? 'P' : 'C'}
+                    </span>
+                    <span className="pi-activity-date">{t.trade_date}</span>
+                    <span className={'pi-activity-amt ' + cls}>
+                      {cashFlow >= 0 ? fmtUSD(cashFlow) : '−' + fmtUSD(Math.abs(cashFlow))}
+                    </span>
+                    <span className="pi-activity-label">
+                      {t.action} {t.direction} {t.option_type} {t.contracts}× ${t.strike}
+                      {t.action === 'close' && realized !== 0 && (
+                        <span className={'pi-realized ' + (realized > 0 ? 'pos' : 'neg')}>
+                          {' '}· {realized >= 0 ? '+' : '−'}{fmtUSD(Math.abs(realized))} realized
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* Footer actions */}
+        {/* Footer */}
         <div className="pi-foot">
-          <button
-            className="pi-link danger"
-            onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
-          >
-            {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
-          </button>
+          <div className="pi-foot-start">
+            <button
+              className="pi-link danger"
+              onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
+            >
+              {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
+            </button>
+            <button
+              className="pi-link danger pi-link-strong"
+              onClick={() => {
+                const counts = `${trades.length} trade${trades.length === 1 ? '' : 's'}`;
+                if (window.confirm(
+                  `Delete ${position.ticker} entirely?\n\nThis removes the position row plus ${counts}.\nAction cannot be undone.`,
+                )) {
+                  onDeletePosition(position.ticker);
+                }
+              }}
+            >
+              🗑 Delete position
+            </button>
+          </div>
           <div className="pi-foot-end">
-            <button className="pp-btn pp-btn-text" onClick={onAddExpense}>+ Log expense</button>
-            <button className="pp-btn pp-btn-neon" onClick={onAddGain}>+ Log gain</button>
+            <button
+              className="pp-btn pp-btn-text"
+              onClick={onCloseTrade}
+              disabled={liveOpens.length === 0}
+              title={liveOpens.length === 0 ? 'No live positions to close' : ''}
+            >
+              − Close position
+            </button>
+            <button className="pp-btn pp-btn-neon" onClick={onOpenTrade}>+ Open position</button>
           </div>
         </div>
       </div>
@@ -330,53 +368,37 @@ export function PositionInsightModal({
   );
 }
 
-/** Bidirectional bar chart — gains stack upward, expenses stack downward.
- *  All sources color-coded; each week is a single composite bar. */
+// ─── Chart ────────────────────────────────────────────────────────────
+
 function ChartBidirectional({
   bins, earningsWeekIdx,
 }: {
-  bins: Array<{ gains: Record<GainSource, number>; expenses: Record<GainSource, number> }>;
+  bins: Array<{ collected_call: number; collected_put: number; paid_call: number; paid_put: number }>;
   earningsWeekIdx: number | null;
 }) {
-  const SOURCES: GainSource[] = ['stock', 'call', 'put'];
-
-  // Find the max absolute value for scaling. Y axis is symmetric around zero.
   const maxAbs = Math.max(
     1,
     ...bins.flatMap((b) => [
-      SOURCES.reduce((s, k) => s + b.gains[k], 0),
-      SOURCES.reduce((s, k) => s + b.expenses[k], 0),
+      b.collected_call + b.collected_put,
+      b.paid_call + b.paid_put,
     ]),
   );
 
-  const W = 100;        // logical width (per cent)
-  const H = 220;        // total height in px
+  const W = 100;
+  const H = 220;
   const midY = H / 2;
-  const half = midY - 8; // px usable on each side of zero
+  const half = midY - 8;
   const colCount = bins.length;
   const colW = W / colCount;
   const barW = colW * 0.55;
 
-  const gainColor: Record<GainSource, string> = {
-    stock: 'var(--navi-fg2)',     // muted teal
-    call:  'var(--navi-neon)',    // hero color
-    put:   'var(--navi-positive)', // light green
-  };
-  const expColor: Record<GainSource, string> = {
-    stock: 'var(--navi-warning)',  // amber
-    call:  'rgba(232,112,96,.6)',  // softer red
-    put:   'var(--navi-negative)', // coral — the dominant expense in this app
-  };
-
   return (
     <div className="pi-chart">
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="pi-chart-svg">
-        {/* Grid */}
         <line x1="0" y1={midY} x2={W} y2={midY} stroke="rgba(30,90,80,0.5)" strokeWidth="0.2" />
         <line x1="0" y1={midY - half} x2={W} y2={midY - half} stroke="rgba(30,90,80,0.2)" strokeWidth="0.15" strokeDasharray="0.5,0.5" />
         <line x1="0" y1={midY + half} x2={W} y2={midY + half} stroke="rgba(30,90,80,0.2)" strokeWidth="0.15" strokeDasharray="0.5,0.5" />
 
-        {/* Earnings vertical marker */}
         {earningsWeekIdx != null && earningsWeekIdx >= 0 && earningsWeekIdx < colCount && (
           <line
             x1={(colCount - earningsWeekIdx - 0.5) * colW}
@@ -390,45 +412,27 @@ function ChartBidirectional({
           />
         )}
 
-        {/* Bars — newest week on the right, like Tesla */}
         {bins.map((b, i) => {
           const x = (colCount - i - 1) * colW + (colW - barW) / 2;
-          const gainTotal = SOURCES.reduce((s, k) => s + b.gains[k], 0);
-          const expTotal = SOURCES.reduce((s, k) => s + b.expenses[k], 0);
-          const gainPx = (gainTotal / maxAbs) * half;
-          const expPx  = (expTotal  / maxAbs) * half;
+          // Stack collected upward
+          let yU = midY;
+          const segCallUp = (b.collected_call / maxAbs) * half;
+          const segPutUp  = (b.collected_put  / maxAbs) * half;
+          // Stack paid downward
+          let yD = midY;
+          const segCallDn = (b.paid_call / maxAbs) * half;
+          const segPutDn  = (b.paid_put  / maxAbs) * half;
 
-          // Stack gains upward (Stock at base, Call on top, Put on top of that)
-          let yCursor = midY;
-          const gainSegs = SOURCES.map((k) => {
-            const seg = (b.gains[k] / maxAbs) * half;
-            const segY = yCursor - seg;
-            const out = { k, y: segY, h: seg, fill: gainColor[k] };
-            yCursor -= seg;
-            return out;
-          });
-          // Stack expenses downward
-          yCursor = midY;
-          const expSegs = SOURCES.map((k) => {
-            const seg = (b.expenses[k] / maxAbs) * half;
-            const out = { k, y: yCursor, h: seg, fill: expColor[k] };
-            yCursor += seg;
-            return out;
-          });
-          void gainPx; void expPx; // available for tooltip later
           return (
             <g key={i}>
-              {gainSegs.map((s) => s.h > 0 && (
-                <rect key={'g'+s.k} x={x} y={s.y} width={barW} height={s.h} fill={s.fill} rx="0.2" />
-              ))}
-              {expSegs.map((s) => s.h > 0 && (
-                <rect key={'e'+s.k} x={x} y={s.y} width={barW} height={s.h} fill={s.fill} rx="0.2" />
-              ))}
+              {segCallUp > 0 && <rect x={x} y={yU - segCallUp} width={barW} height={segCallUp} fill="var(--navi-neon)" rx="0.2" />}
+              {segPutUp > 0 && <rect x={x} y={yU - segCallUp - segPutUp} width={barW} height={segPutUp} fill="var(--navi-positive)" rx="0.2" />}
+              {segCallDn > 0 && <rect x={x} y={yD} width={barW} height={segCallDn} fill="rgba(232,112,96,.6)" rx="0.2" />}
+              {segPutDn > 0 && <rect x={x} y={yD + segCallDn} width={barW} height={segPutDn} fill="var(--navi-negative)" rx="0.2" />}
             </g>
           );
         })}
       </svg>
-      {/* X axis labels — just a sparse tick set */}
       <div className="pi-chart-xaxis">
         <span>−12mo</span>
         <span>−9mo</span>
@@ -437,51 +441,11 @@ function ChartBidirectional({
         <span>now</span>
       </div>
       <div className="pi-chart-legend">
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-fg2)' }} />Stock
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-neon)' }} />Call
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-positive)' }} />Put gain
+        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-neon)' }} />Call collected
+        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-positive)' }} />Put collected
         <span className="pi-chart-legend-sep">·</span>
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-negative)' }} />Put expense
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-warning)' }} />Stock exp
-      </div>
-    </div>
-  );
-}
-
-function SourceBreakdown({
-  title, totals, kind,
-}: {
-  title: string;
-  totals: { stock: number; call: number; put: number; total: number };
-  kind: 'gain' | 'expense';
-}) {
-  if (totals.total === 0) {
-    return (
-      <div className="pi-bd-card">
-        <div className="pi-section-l">{title}</div>
-        <div className="pi-bd-empty">—</div>
-      </div>
-    );
-  }
-  const rows: Array<{ k: GainSource; pct: number; amt: number }> = [
-    { k: 'stock', pct: (totals.stock / totals.total) * 100, amt: totals.stock },
-    { k: 'call',  pct: (totals.call  / totals.total) * 100, amt: totals.call },
-    { k: 'put',   pct: (totals.put   / totals.total) * 100, amt: totals.put },
-  ].filter((r) => r.amt > 0).sort((a, b) => b.amt - a.amt);
-  return (
-    <div className="pi-bd-card">
-      <div className="pi-section-l">{title}</div>
-      <div className="pi-bd-rows">
-        {rows.map((r) => (
-          <div key={r.k} className="pi-bd-row">
-            <span className={'pi-mini-glyph ' + (kind === 'gain' ? 'pos' : 'neg')}>{SOURCE_GLYPH[r.k]}</span>
-            <span className="pi-bd-pct">{r.pct.toFixed(0)}%</span>
-            <span className="pi-bd-label">{SOURCE_LABEL[r.k]}</span>
-            <span className={'pi-bd-amt ' + (kind === 'gain' ? 'pos' : 'neg')}>
-              {kind === 'expense' ? '−' : ''}{fmtUSD(r.amt)}
-            </span>
-          </div>
-        ))}
+        <span className="pi-chart-legend-dot" style={{ background: 'rgba(232,112,96,.6)' }} />Call paid
+        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-negative)' }} />Put paid
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { computePutProtection, fmtCompact, fmtUSD, type PortfolioTotals, type PutProtectionRow } from './types';
+import { fmtCompact, fmtUSD, type OptionTrade, type PortfolioTotals } from './types';
 import type { StrategyBucket } from './usePositions';
 
 const BUCKET_META: Record<StrategyBucket, { name: string; tone: string; blurb: string }> = {
@@ -11,138 +11,98 @@ const BUCKETS: StrategyBucket[] = ['income', 'invest', 'yield'];
 interface Props {
   portfolio: PortfolioTotals;
   overlayByTicker: Map<string, StrategyBucket>;
-  putProtectionByTicker: Map<string, PutProtectionRow>;
+  realizedByTicker: Map<string, number>;
+  liveByTicker: Map<string, Array<{ open: OptionTrade; remaining_contracts: number }>>;
 }
 
 /**
  * Two stacked strips above the positions table:
- *   A — net realized hero + by-source (S/C/P) + Put cost
- *   B — three strategy cards
+ *   A — net realized hero + open contracts breakdown
+ *   B — three strategy cards (Income / Investment / Yield)
+ *
+ * "Realized" is now Σ closed-pair P&L on option_trades — gains and expenses
+ * are not separate anymore.
  */
-export function RealizedSummary({ portfolio, overlayByTicker, putProtectionByTicker }: Props) {
+export function RealizedSummary({ portfolio, overlayByTicker, realizedByTicker, liveByTicker }: Props) {
   // Per-strategy aggregates derived once.
   const byStrategy: Record<StrategyBucket, {
-    realized: { stock: number; call: number; put: number; total: number };
-    put_cost: number;
-    put_current: number;        // sum of mark-to-market value of active puts
-    put_current_known: boolean; // true if at least one contract has a fresh quote
-    put_per_week: number;
+    realized: number;
+    open_put_obligation: number;
+    live_options: number;
     market_value: number;
     count: number;
   }> = {
-    income: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_current: 0, put_current_known: false, put_per_week: 0, market_value: 0, count: 0 },
-    invest: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_current: 0, put_current_known: false, put_per_week: 0, market_value: 0, count: 0 },
-    yield:  { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_current: 0, put_current_known: false, put_per_week: 0, market_value: 0, count: 0 },
+    income: { realized: 0, open_put_obligation: 0, live_options: 0, market_value: 0, count: 0 },
+    invest: { realized: 0, open_put_obligation: 0, live_options: 0, market_value: 0, count: 0 },
+    yield:  { realized: 0, open_put_obligation: 0, live_options: 0, market_value: 0, count: 0 },
   };
   for (const r of portfolio.rows) {
     const b = overlayByTicker.get(r.ticker);
     if (!b) continue;
     const s = byStrategy[b];
-    s.realized.stock += r.realized.stock;
-    s.realized.call  += r.realized.call;
-    s.realized.put   += r.realized.put;
-    s.realized.total += r.realized.total;
-    s.put_cost       += r.put_cost;
-    s.market_value   += r.market_value;
-    s.count          += 1;
-    const pp = putProtectionByTicker.get(r.ticker);
-    if (pp) {
-      const calc = computePutProtection(pp);
-      // Per-week put cost: each contract's total_cost / days_to_expiry × 7.
-      if (calc.has && !calc.expired && calc.cost_per_day > 0) {
-        s.put_per_week += calc.cost_per_day * 7;
-      }
-      // Mark-to-market: only contracts with a fetched quote contribute.
-      if (calc.current_value != null) {
-        s.put_current += calc.current_value;
-        s.put_current_known = true;
+    s.realized        += realizedByTicker.get(r.ticker) ?? 0;
+    s.market_value    += r.market_value;
+    s.count           += 1;
+    const live = liveByTicker.get(r.ticker) ?? [];
+    s.live_options += live.length;
+    for (const lo of live) {
+      if (lo.open.option_type === 'put' && lo.open.direction === 'short') {
+        s.open_put_obligation += lo.remaining_contracts * 100 * lo.open.strike;
       }
     }
   }
 
   return (
     <>
-      {/* Strip A — by source */}
+      {/* Strip A — portfolio realized + open obligation */}
       <div className="np-realized-strip">
         <div className="np-realized-cell total">
           <div className="np-realized-label">Net realized</div>
-          <div className={'np-realized-value ' + (portfolio.net_realized < 0 ? 'down' : 'up')}>
-            {fmtUSD(portfolio.net_realized)}
+          <div className={'np-realized-value ' + (portfolio.realized_pl < 0 ? 'down' : 'up')}>
+            {portfolio.realized_pl >= 0 ? fmtUSD(portfolio.realized_pl) : '−' + fmtUSD(Math.abs(portfolio.realized_pl))}
           </div>
-          <div className="np-realized-sub">
-            realized {fmtCompact(portfolio.realized_total)}{' '}
-            <span className="dim">−</span> put cost {fmtCompact(portfolio.total_put_cost)}
-          </div>
+          <div className="np-realized-sub">closed option pairs</div>
         </div>
         <div className="np-realized-cell">
-          <div className="np-realized-label">
-            <span className="rchip rk-s rchip-static">S</span>Stock
+          <div className="np-realized-label">Open obligation</div>
+          <div className="np-realized-value">
+            {portfolio.open_put_obligation > 0
+              ? fmtUSD(portfolio.open_put_obligation)
+              : <span className="muted">—</span>}
           </div>
-          <div className={'np-realized-value ' + (portfolio.realized.stock < 0 ? 'down' : 'up')}>
-            {fmtUSD(portfolio.realized.stock)}
-          </div>
+          <div className="np-realized-sub">short put strikes × contracts</div>
         </div>
         <div className="np-realized-cell">
-          <div className="np-realized-label">
-            <span className="rchip rk-c rchip-static">C</span>Call
+          <div className="np-realized-label">Live contracts</div>
+          <div className="np-realized-value">
+            {Array.from(liveByTicker.values()).reduce((s, l) => s + l.length, 0)}
           </div>
-          <div className={'np-realized-value ' + (portfolio.realized.call < 0 ? 'down' : 'up')}>
-            {fmtUSD(portfolio.realized.call)}
-          </div>
-        </div>
-        <div className="np-realized-cell">
-          <div className="np-realized-label">
-            <span className="rchip rk-p rchip-static">P</span>Put
-          </div>
-          <div className={'np-realized-value ' + (portfolio.realized.put < 0 ? 'down' : 'up')}>
-            {fmtUSD(portfolio.realized.put)}
-          </div>
-        </div>
-        <div className="np-realized-cell">
-          <div className="np-realized-label">
-            Put cost{' '}
-            <span className="np-realized-protect">protect</span>
-          </div>
-          <div className="np-realized-value down">
-            {portfolio.total_put_cost > 0 ? '−' + fmtUSD(portfolio.total_put_cost) : <span className="muted">—</span>}
-          </div>
+          <div className="np-realized-sub">open positions across portfolio</div>
         </div>
       </div>
 
-      {/* Strip B — by strategy */}
+      {/* Strip B — by strategy bucket */}
       <div className="np-strategy-strip">
         {BUCKETS.map((k) => {
           const s = byStrategy[k];
           if (s.count === 0) return null;
           const meta = BUCKET_META[k];
-          const net = s.realized.total - s.put_cost;
           return (
             <div key={k} className={'np-strat-cell st-' + k}>
               <div className="np-strat-hd">
                 <span className={'np-strat-badge st-' + k}>{meta.name}</span>
                 <span className="np-strat-blurb">{meta.blurb}</span>
               </div>
-              <div className={'np-strat-value ' + (net < 0 ? 'down' : 'up')}>
-                {fmtUSD(net)}
+              <div className={'np-strat-value ' + (s.realized < 0 ? 'down' : 'up')}>
+                {s.realized >= 0 ? fmtUSD(s.realized) : '−' + fmtUSD(Math.abs(s.realized))}
               </div>
               <div className="np-strat-detail">
                 <span className="np-strat-detail-item">
-                  <span className="k">realized</span>{fmtCompact(s.realized.total)}
+                  <span className="k">live</span>{s.live_options}
                 </span>
-                <span className="np-strat-detail-item">
-                  <span className="k">put cost</span>−{fmtCompact(s.put_cost)}
-                  {s.put_current_known && (
-                    <span
-                      className="np-strat-detail-sub"
-                      title="Mark-to-market: live put premiums × contracts × 100"
-                    >
-                      current −{fmtCompact(s.put_current)}
-                    </span>
-                  )}
-                </span>
-                {s.put_per_week > 0 && (
-                  <span className="np-strat-detail-item" title="Sum of (put cost ÷ days to expiry) × 7 across active contracts in this bucket">
-                    <span className="k">per wk</span>−{fmtCompact(s.put_per_week)}
+                {s.open_put_obligation > 0 && (
+                  <span className="np-strat-detail-item">
+                    <span className="k">put oblig</span>{fmtCompact(s.open_put_obligation)}
                   </span>
                 )}
                 <span className="np-strat-detail-item">

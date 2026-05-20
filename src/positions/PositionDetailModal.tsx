@@ -1,34 +1,27 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  closeRealizedPL,
   fmtUSD,
   fmtUSD2,
   fmtQty,
-  type ExpenseEntry,
-  type GainEntry,
-  type GainSource,
+  type Direction,
+  type LiveOption,
+  type OptionTrade,
+  type OptionType,
   type PositionComputed,
-  type PutProtectionRow,
 } from './types';
 
 /**
- * Position detail modal — Variant B (Sidecar) per design_handoff_position_popup.
+ * Trade logger — Open / Close tabs.
  *
- * Single unified modal. Internal Gain ↔ Expense tabs let the user switch
- * ledgers without closing. Source segmented control progressively reveals
- * the right field set (stock vs option). Option fields auto-compute the
- * total via contracts × 100 × premium. A live sidecar rail on the right
- * mirrors the entry as it's being filled in.
+ * Open: enter a new options position (long/short call/put). The total cash
+ * impact is computed as contracts × 100 × premium and signed by direction.
  *
- * Inline ledger history is NOT shown here — users get the full timeline
- * via the page-level Gains / Expenses tabs (the "View full history →"
- * link in the rail switches the page-level view).
+ * Close: pick from the position's live opens, enter the close premium and
+ * contracts, and the realized P&L is shown live in the rail before save.
+ * Closes are linked to the source open via closes_trade_id so partial
+ * closes work naturally.
  */
-
-const SOURCE_META: Record<GainSource, { label: string; short: string }> = {
-  stock: { label: 'Stock', short: 'S' },
-  call:  { label: 'Call',  short: 'C' },
-  put:   { label: 'Put',   short: 'P' },
-};
 
 type Bucket = 'income' | 'invest' | 'yield';
 const BUCKET_LABEL: Record<Bucket, string> = {
@@ -41,92 +34,95 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 
 interface Props {
   position: PositionComputed;
-  entries: GainEntry[];
-  expenseEntries: ExpenseEntry[];
-  putProtection: PutProtectionRow | undefined;
+  liveOpens: LiveOption[];
   bucket?: Bucket;
-  /** Which tab opens first. Defaults to 'gain'. */
-  initialTab?: 'gain' | 'expense';
-  /** Which source is pre-selected. Defaults to 'call'. Pass 'put' when
-   *  opening from a put-expense context, etc. */
-  initialSource?: GainSource;
+  initialTab?: 'open' | 'close';
+  /** Pre-selected live open for the close tab. */
+  initialCloseTarget?: string;
   onClose: () => void;
-  onAddGain: (p: { ticker: string; gain_date: string; source: GainSource; amount: number; note?: string }) => void;
-  onDeleteGain: (id: string) => void;
-  onAddExpense: (p: { ticker: string; expense_date: string; source: GainSource; amount: number; note?: string }) => void;
-  onDeleteExpense: (id: string) => void;
-  onSetPutProtection: (p: { ticker: string; total_cost: number; expiry: string; purchase_date?: string; contracts?: number | null; strike?: number | null }) => void;
-  onClearPutProtection: (ticker: string) => void;
+  onAddTrade: (p: {
+    ticker: string;
+    trade_date: string;
+    action: 'open' | 'close';
+    option_type: OptionType;
+    direction: Direction;
+    contracts: number;
+    strike: number;
+    premium: number;
+    expiry: string;
+    closes_trade_id?: string | null;
+    note?: string | null;
+  }) => void;
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
-  onSetEarningsDate: (p: { ticker: string; earnings_date: string | null }) => void;
-  /** Open the matching page-level tab and close the modal. */
-  onViewHistory?: (which: 'gain' | 'expense') => void;
 }
 
-// Tab state lives in the modal; source + entry form state lives below.
-type Tab = 'gain' | 'expense';
-type Source = GainSource;
+type Tab = 'open' | 'close';
 
-interface EntryForm {
-  // Option fields (call / put)
-  strike: string;
+interface OpenForm {
+  option_type: OptionType;
+  direction: Direction;
   contracts: string;
-  expiry: string;
+  strike: string;
   premium: string;
-  // Stock fields
-  amount: string;
-  shares: string;
-  // Common
+  expiry: string;
   date: string;
   note: string;
 }
 
-const blankEntry = (): EntryForm => ({
-  strike: '',
+interface CloseForm {
+  target_id: string;       // open trade we're closing against
+  contracts: string;
+  premium: string;
+  date: string;
+  note: string;
+}
+
+const blankOpen = (): OpenForm => ({
+  option_type: 'put',
+  direction: 'short',
   contracts: '',
-  expiry: '',
+  strike: '',
   premium: '',
-  amount: '',
-  shares: '',
+  expiry: '',
+  date: todayIso(),
+  note: '',
+});
+
+const blankClose = (targetId: string): CloseForm => ({
+  target_id: targetId,
+  contracts: '',
+  premium: '',
   date: todayIso(),
   note: '',
 });
 
 export function PositionDetailModal({
   position,
-  entries,
-  expenseEntries,
-  putProtection,
+  liveOpens,
   bucket,
-  initialTab = 'gain',
-  initialSource = 'call',
+  initialTab = 'open',
+  initialCloseTarget,
   onClose,
-  onAddGain,
-  onDeleteGain: _onDeleteGain,
-  onAddExpense,
-  onDeleteExpense: _onDeleteExpense,
-  onSetPutProtection,
-  onClearPutProtection: _onClearPutProtection,
+  onAddTrade,
   onSetStatus,
-  onSetEarningsDate: _onSetEarningsDate,
-  onViewHistory,
 }: Props) {
-  // Silence unused-callback warnings — delete/clear are still wired in
-  // through the page-level views, not the modal.
-  void _onDeleteGain; void _onDeleteExpense; void _onClearPutProtection; void _onSetEarningsDate;
+  const [tab, setTab] = useState<Tab>(liveOpens.length === 0 ? 'open' : initialTab);
+  const [openForm, setOpenForm] = useState<OpenForm>(blankOpen());
+  const [closeForm, setCloseForm] = useState<CloseForm>(
+    blankClose(initialCloseTarget ?? liveOpens[0]?.open.id ?? ''),
+  );
 
-  const [tab, setTab] = useState<Tab>(initialTab);
-  const [source, setSource] = useState<Source>(initialSource);
-  const [entry, setEntry] = useState<EntryForm>(blankEntry());
-
-  const set = <K extends keyof EntryForm>(k: K, v: EntryForm[K]) =>
-    setEntry((prev) => ({ ...prev, [k]: v }));
-
-  // Close on Escape, lock body scroll while the modal is open.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
+    // When the live opens list changes (or we mount), make sure the close
+    // target is one of them.
+    if (liveOpens.length > 0 && !liveOpens.some((l) => l.open.id === closeForm.target_id)) {
+      setCloseForm((prev) => ({ ...prev, target_id: liveOpens[0].open.id }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveOpens.length]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => {
@@ -135,107 +131,82 @@ export function PositionDetailModal({
     };
   }, [onClose]);
 
-  const isExp = tab === 'expense';
-  const netCls = isExp ? 'neg' : 'pos';
   const isClosed = position.status === 'closed';
 
-  // Aggregates for the rail's net big-number — week + YTD.
-  const summary = useMemo(() => {
-    const today = new Date(); today.setUTCHours(0, 0, 0, 0);
-    const weekStart = new Date(today.getTime() - 7 * 86400000);
-    const yearStart = new Date(Date.UTC(today.getUTCFullYear(), 0, 1));
-    const fold = (rows: Array<{ date: string; amount: number }>) => {
-      let netWk = 0, netYtd = 0, count = 0;
-      for (const r of rows) {
-        const d = new Date(r.date + 'T00:00:00Z');
-        if (d >= yearStart) netYtd += r.amount;
-        if (d >= weekStart) netWk += r.amount;
-        count += 1;
-      }
-      return { netWk, netYtd, count };
-    };
-    return {
-      gain: fold(entries.map((e) => ({ date: e.gain_date, amount: e.amount }))),
-      // Expense rows store magnitudes; flip sign for the rail.
-      expense: fold(expenseEntries.map((e) => ({ date: e.expense_date, amount: -Math.abs(e.amount) }))),
-    };
-  }, [entries, expenseEntries]);
+  // ── Open tab math ──────────────────────────────────────────────
+  const openTotal =
+    (parseFloat(openForm.contracts) || 0) * 100 * (parseFloat(openForm.premium) || 0);
+  const openSignedTotal = openForm.direction === 'short' ? openTotal : -openTotal;
+  const canSubmitOpen =
+    !!openForm.contracts && !!openForm.strike && !!openForm.premium && !!openForm.expiry &&
+    parseFloat(openForm.contracts) > 0 && parseFloat(openForm.strike) > 0 && parseFloat(openForm.premium) >= 0;
 
-  const st = summary[tab];
+  // ── Close tab math ─────────────────────────────────────────────
+  const closeTarget = useMemo(
+    () => liveOpens.find((l) => l.open.id === closeForm.target_id) ?? null,
+    [liveOpens, closeForm.target_id],
+  );
+  const closeContractsN = parseInt(closeForm.contracts, 10) || 0;
+  const closePremiumN = parseFloat(closeForm.premium) || 0;
+  const canSubmitClose =
+    !!closeTarget &&
+    closeContractsN > 0 &&
+    closeContractsN <= closeTarget.remaining_contracts &&
+    closePremiumN >= 0;
+  const closeRealized = closeTarget
+    ? closeRealizedPL(
+        {
+          ...closeTarget.open,
+          action: 'close',
+          contracts: closeContractsN,
+          premium: closePremiumN,
+        },
+        closeTarget.open,
+      )
+    : 0;
 
-  // Total auto-calc: contracts × 100 × premium. Sign controlled by tab.
-  const optionTotal =
-    (parseFloat(entry.contracts) || 0) * 100 * (parseFloat(entry.premium) || 0);
-  const signedTotal = (isExp ? -1 : 1) * optionTotal;
+  const submitOpen = () => {
+    if (!canSubmitOpen) return;
+    onAddTrade({
+      ticker: position.ticker,
+      trade_date: openForm.date,
+      action: 'open',
+      option_type: openForm.option_type,
+      direction: openForm.direction,
+      contracts: parseInt(openForm.contracts, 10),
+      strike: parseFloat(openForm.strike),
+      premium: parseFloat(openForm.premium),
+      expiry: openForm.expiry,
+      note: openForm.note || null,
+    });
+    setOpenForm(blankOpen());
+  };
 
-  // Live preview row in the rail. For stock, sign is just tab.
-  const previewAmt =
-    source === 'stock'
-      ? (parseFloat(entry.amount) || 0) * (isExp ? -1 : 1)
-      : signedTotal;
-  const previewLabel =
-    source === 'call' ? (isExp ? 'call expense' : 'calls sold')
-    : source === 'put' ? (isExp ? 'put protection' : 'puts sold')
-    : isExp ? 'stock expense' : 'stock gain';
-
-  const canSubmit = (() => {
-    if (!entry.date) return false;
-    if (source === 'stock') return !!entry.amount && parseFloat(entry.amount) > 0;
-    return !!entry.strike && !!entry.contracts && !!entry.expiry && !!entry.premium
-      && parseFloat(entry.contracts) > 0 && parseFloat(entry.premium) > 0;
-  })();
-
-  const submit = () => {
-    if (!canSubmit) return;
-    const total = source === 'stock' ? parseFloat(entry.amount) : optionTotal;
-    if (!total || isNaN(total)) return;
-    const noteLine = source === 'stock'
-      ? entry.note
-      : [
-          entry.note,
-          `${entry.contracts}× $${entry.strike} ${source} exp ${entry.expiry} @ $${entry.premium}/sh`,
-        ].filter(Boolean).join(' · ');
-    if (isExp) {
-      // Expenses store magnitudes; total is always positive.
-      onAddExpense({
-        ticker: position.ticker,
-        expense_date: entry.date,
-        source,
-        amount: Math.abs(total),
-        note: noteLine || undefined,
-      });
-      // For put expenses with structured data, also upsert put_protection so
-      // the strategy cards' MTM works.
-      if (source === 'put') {
-        onSetPutProtection({
-          ticker: position.ticker,
-          total_cost: Math.abs(total),
-          expiry: entry.expiry,
-          purchase_date: entry.date,
-          contracts: parseInt(entry.contracts, 10) || null,
-          strike: parseFloat(entry.strike) || null,
-        });
-      }
-    } else {
-      onAddGain({
-        ticker: position.ticker,
-        gain_date: entry.date,
-        source,
-        amount: total,
-        note: noteLine || undefined,
-      });
-    }
-    setEntry(blankEntry());
-    setSource(source); // reset to current source for next entry
+  const submitClose = () => {
+    if (!canSubmitClose || !closeTarget) return;
+    onAddTrade({
+      ticker: position.ticker,
+      trade_date: closeForm.date,
+      action: 'close',
+      option_type: closeTarget.open.option_type,
+      direction: closeTarget.open.direction,
+      contracts: closeContractsN,
+      strike: closeTarget.open.strike,
+      premium: closePremiumN,
+      expiry: closeTarget.open.expiry,
+      closes_trade_id: closeTarget.open.id,
+      note: closeForm.note || null,
+    });
+    setCloseForm(blankClose(closeForm.target_id));
   };
 
   return (
     <div className="pp-stage" onClick={onClose}>
-      <div className="pp-popup" role="dialog" aria-labelledby="pp-ticker" onClick={(e) => e.stopPropagation()}>
+      <div className="pp-popup" role="dialog" onClick={(e) => e.stopPropagation()}>
         {/* HEAD */}
         <div className="pp-popup-head">
           <div className="pp-head-info">
-            <h2 className="pp-popup-ticker" id="pp-ticker">{position.ticker}</h2>
+            <h2 className="pp-popup-ticker">{position.ticker}</h2>
             <div className="pp-popup-sub">
               {bucket && <span>{BUCKET_LABEL[bucket]}</span>}
               {bucket && <span className="dot">·</span>}
@@ -249,59 +220,42 @@ export function PositionDetailModal({
               {isClosed && <span className="pp-pill-closed">closed</span>}
             </div>
           </div>
-          <div className="pp-popup-head-actions">
-            <button className="pp-icon-btn" onClick={onClose} aria-label="Close">✕ Close</button>
-          </div>
+          <button className="pp-icon-btn" onClick={onClose}>✕ Close</button>
         </div>
 
         {/* TABS */}
         <div className="pp-tab-row">
-          <button className={'pp-tab' + (tab === 'gain' ? ' on' : '')} onClick={() => setTab('gain')}>
-            Gain<span className="pp-tab-count">{entries.length}</span>
+          <button
+            className={'pp-tab' + (tab === 'open' ? ' on' : '')}
+            onClick={() => setTab('open')}
+          >
+            Open<span className="pp-tab-count">{liveOpens.length}</span>
           </button>
-          <button className={'pp-tab' + (tab === 'expense' ? ' on' : '')} onClick={() => setTab('expense')}>
-            Expense<span className="pp-tab-count">{expenseEntries.length}</span>
+          <button
+            className={'pp-tab' + (tab === 'close' ? ' on' : '') + (liveOpens.length === 0 ? ' disabled' : '')}
+            onClick={() => liveOpens.length > 0 && setTab('close')}
+            disabled={liveOpens.length === 0}
+            title={liveOpens.length === 0 ? 'No live positions to close' : ''}
+          >
+            Close
           </button>
         </div>
 
         {/* SIDECAR */}
         <div className="pp-sidecar">
-          {/* LEFT — form */}
           <div className="pp-form">
-            <div className="pp-field">
-              <div className="pp-field-label">Source</div>
-              <SourceSeg value={source} onChange={setSource} />
-            </div>
-
-            {source === 'stock' ? (
-              <StockFields entry={entry} set={set} />
+            {tab === 'open' ? (
+              <OpenFields form={openForm} setForm={setOpenForm} />
             ) : (
-              <OptionFields source={source} entry={entry} set={set} tab={tab} signedTotal={signedTotal} optionTotal={optionTotal} />
+              <CloseFields
+                form={closeForm}
+                setForm={setCloseForm}
+                liveOpens={liveOpens}
+                target={closeTarget}
+              />
             )}
-
-            <div className="pp-form-grid cols-2">
-              <div className="pp-field">
-                <div className="pp-field-label">Date</div>
-                <input
-                  className="pp-input mono"
-                  type="date"
-                  value={entry.date}
-                  onChange={(e) => set('date', e.target.value)}
-                />
-              </div>
-              <div className="pp-field">
-                <div className="pp-field-label">Note (optional)</div>
-                <input
-                  className="pp-input"
-                  value={entry.note}
-                  onChange={(e) => set('note', e.target.value)}
-                  placeholder="strike, ex-div, source, etc."
-                />
-              </div>
-            </div>
           </div>
 
-          {/* RIGHT — rail */}
           <aside className="pp-rail">
             <div className="pp-rail-section">
               <div className="pp-rail-lbl">Position</div>
@@ -322,59 +276,85 @@ export function PositionDetailModal({
             <div className="pp-rail-divider" />
 
             <div className="pp-rail-section">
-              <div className="pp-rail-lbl">Net · {isExp ? 'expense' : 'gain'}</div>
-              <div className={'pp-rail-bignum ' + netCls}>{fmtSigned(st.netWk)}</div>
-              <div className="pp-rail-sub">
-                {st.count} {st.count === 1 ? 'entry' : 'entries'} · this wk · YTD {fmtSigned(st.netYtd)}
-              </div>
+              <div className="pp-rail-lbl">Live positions · {liveOpens.length}</div>
+              {liveOpens.length === 0 ? (
+                <div className="pp-rail-sub">none open</div>
+              ) : (
+                <div className="pp-rail-livelist">
+                  {liveOpens.slice(0, 4).map((lo) => (
+                    <div key={lo.open.id} className="pp-rail-live-row">
+                      <span className={'pp-mini-glyph ' + (lo.open.direction === 'short' ? 'neg' : 'pos')}>
+                        {lo.open.option_type === 'put' ? 'P' : 'C'}
+                      </span>
+                      <span className="pp-rail-live-meta">
+                        {lo.open.direction === 'short' ? '−' : '+'}{lo.remaining_contracts} @ ${lo.open.strike}
+                      </span>
+                      <span className="pp-rail-live-exp">{lo.open.expiry}</span>
+                    </div>
+                  ))}
+                  {liveOpens.length > 4 && (
+                    <div className="pp-rail-sub">+ {liveOpens.length - 4} more</div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="pp-rail-divider" />
 
             <div className="pp-rail-section">
-              <div className="pp-rail-lbl">Entry preview</div>
-              <div className={'pp-preview-row ' + (previewAmt < 0 ? 'neg' : previewAmt > 0 ? 'pos' : '')}>
-                <span className={'pp-mini-glyph ' + (source === 'stock' ? '' : 'neon')}>
-                  {SOURCE_META[source].short}
-                </span>
-                <span className="pp-preview-date">{entry.date}</span>
-                {previewAmt !== 0 ? (
-                  <span className={'pp-preview-amt ' + (previewAmt < 0 ? 'neg' : 'pos')}>
-                    {fmtSigned(previewAmt)}
-                  </span>
-                ) : (
-                  <span className="pp-preview-empty">— fill amount —</span>
-                )}
-                <span className="pp-preview-meta">{previewLabel}</span>
+              <div className="pp-rail-lbl">
+                {tab === 'open' ? 'New trade preview' : 'Realized P&L'}
               </div>
-            </div>
-
-            <div className="pp-rail-divider" />
-
-            <div className="pp-rail-links">
-              {onViewHistory && (
-                <button className="pp-rail-link" onClick={() => onViewHistory(tab)}>
-                  View full history →
-                </button>
+              {tab === 'open' ? (
+                <>
+                  <div className={'pp-rail-bignum ' + (openSignedTotal > 0 ? 'pos' : openSignedTotal < 0 ? 'neg' : '')}>
+                    {openSignedTotal === 0
+                      ? '—'
+                      : openSignedTotal > 0
+                        ? fmtUSD(openSignedTotal)
+                        : '−' + fmtUSD(Math.abs(openSignedTotal))}
+                  </div>
+                  <div className="pp-rail-sub">
+                    {openForm.direction === 'short' ? 'premium collected' : 'premium paid'}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className={'pp-rail-bignum ' + (closeRealized > 0 ? 'pos' : closeRealized < 0 ? 'neg' : '')}>
+                    {closeRealized === 0
+                      ? '—'
+                      : closeRealized > 0
+                        ? fmtUSD(closeRealized)
+                        : '−' + fmtUSD(Math.abs(closeRealized))}
+                  </div>
+                  <div className="pp-rail-sub">
+                    {closeTarget ? `vs ${closeTarget.open.direction} open @ $${closeTarget.open.premium}/sh` : 'pick a position'}
+                  </div>
+                </>
               )}
-              <button
-                className="pp-rail-link danger"
-                onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
-              >
-                {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
-              </button>
             </div>
           </aside>
         </div>
 
         {/* FOOT */}
         <div className="pp-popup-foot">
-          <div />
+          <button
+            className="pi-link danger"
+            onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
+          >
+            {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
+          </button>
           <div className="pp-popup-foot-end">
             <button className="pp-btn pp-btn-text" onClick={onClose}>Cancel</button>
-            <button className="pp-btn pp-btn-neon" onClick={submit} disabled={!canSubmit}>
-              ✓ Add {isExp ? 'expense' : 'gain'}
-            </button>
+            {tab === 'open' ? (
+              <button className="pp-btn pp-btn-neon" onClick={submitOpen} disabled={!canSubmitOpen}>
+                ✓ Open position
+              </button>
+            ) : (
+              <button className="pp-btn pp-btn-neon" onClick={submitClose} disabled={!canSubmitClose}>
+                ✓ Close position
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -382,54 +362,63 @@ export function PositionDetailModal({
   );
 }
 
-// ───────────────────────────────────────────── helpers + sub-components
+// ───────────────────────── Sub-components
 
-function fmtSigned(n: number): string {
-  if (!n) return '$0';
-  const sign = n < 0 ? '−' : '';
-  return sign + '$' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 });
-}
-
-function SourceSeg({ value, onChange }: { value: Source; onChange: (s: Source) => void }) {
-  const opts: Array<{ k: Source; label: string; g: string }> = [
-    { k: 'stock', label: 'Stock', g: 'S' },
-    { k: 'call',  label: 'Call',  g: 'C' },
-    { k: 'put',   label: 'Put',   g: 'P' },
-  ];
-  return (
-    <div className="pp-source-seg" role="tablist">
-      {opts.map((o) => (
-        <button
-          key={o.k}
-          type="button"
-          className={'pp-source-opt' + (value === o.k ? ' on' : '')}
-          onClick={() => onChange(o.k)}
-        >
-          <span className="pp-glyph-tile">{o.g}</span>
-          <span>{o.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function OptionFields({
-  source, entry, set, tab, signedTotal, optionTotal,
+function OpenFields({
+  form, setForm,
 }: {
-  source: Source;
-  entry: EntryForm;
-  set: <K extends keyof EntryForm>(k: K, v: EntryForm[K]) => void;
-  tab: Tab;
-  signedTotal: number;
-  optionTotal: number;
+  form: OpenForm;
+  setForm: (f: OpenForm) => void;
 }) {
-  const sign = tab === 'expense' ? 'neg' : 'pos';
+  const set = <K extends keyof OpenForm>(k: K, v: OpenForm[K]) =>
+    setForm({ ...form, [k]: v });
+
   return (
     <>
       <div className="pp-form-grid cols-2">
         <div className="pp-field">
+          <div className="pp-field-label">Option type</div>
+          <div className="pp-source-seg">
+            {(['call', 'put'] as OptionType[]).map((k) => (
+              <button
+                key={k}
+                type="button"
+                className={'pp-source-opt' + (form.option_type === k ? ' on' : '')}
+                onClick={() => set('option_type', k)}
+              >
+                <span className="pp-glyph-tile">{k === 'call' ? 'C' : 'P'}</span>
+                <span>{k === 'call' ? 'Call' : 'Put'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">Direction</div>
+          <div className="pp-source-seg">
+            <button
+              type="button"
+              className={'pp-source-opt' + (form.direction === 'short' ? ' on' : '')}
+              onClick={() => set('direction', 'short')}
+            >
+              <span className="pp-glyph-tile">−</span>
+              <span>Short</span>
+            </button>
+            <button
+              type="button"
+              className={'pp-source-opt' + (form.direction === 'long' ? ' on' : '')}
+              onClick={() => set('direction', 'long')}
+            >
+              <span className="pp-glyph-tile">+</span>
+              <span>Long</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
           <div className="pp-field-label">Strike</div>
-          <MoneyInput value={entry.strike} onChange={(v) => set('strike', v)} placeholder="0.00" />
+          <MoneyInput value={form.strike} onChange={(v) => set('strike', v)} placeholder="0.00" />
         </div>
         <div className="pp-field">
           <div className="pp-field-label">Contracts</div>
@@ -438,64 +427,138 @@ function OptionFields({
             type="number"
             min="1"
             step="1"
-            value={entry.contracts}
+            value={form.contracts}
             onChange={(e) => set('contracts', e.target.value)}
             placeholder="0"
           />
         </div>
       </div>
+
       <div className="pp-form-grid cols-2">
         <div className="pp-field">
           <div className="pp-field-label">Expiry</div>
           <input
             className="pp-input mono"
             type="date"
-            value={entry.expiry}
+            value={form.expiry}
             onChange={(e) => set('expiry', e.target.value)}
           />
         </div>
         <div className="pp-field">
           <div className="pp-field-label">
-            {source === 'put' ? 'Premium paid / sh' : 'Premium / sh'}
+            {form.direction === 'short' ? 'Premium collected / sh' : 'Premium paid / sh'}
           </div>
-          <MoneyInput value={entry.premium} onChange={(v) => set('premium', v)} placeholder="0.00" />
+          <MoneyInput value={form.premium} onChange={(v) => set('premium', v)} placeholder="0.00" />
         </div>
       </div>
-      <div className="pp-field">
-        <div className="pp-field-label">Total</div>
-        <div className={'pp-calc-tile ' + sign}>
-          <span className="num">{optionTotal > 0 ? fmtSigned(signedTotal) : '—'}</span>
-          <span className="formula">contracts × 100 × premium</span>
+
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">Date</div>
+          <input
+            className="pp-input mono"
+            type="date"
+            value={form.date}
+            onChange={(e) => set('date', e.target.value)}
+          />
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">Note (optional)</div>
+          <input
+            className="pp-input"
+            value={form.note}
+            onChange={(e) => set('note', e.target.value)}
+            placeholder="thesis, source, etc."
+          />
         </div>
       </div>
     </>
   );
 }
 
-function StockFields({
-  entry, set,
+function CloseFields({
+  form, setForm, liveOpens, target,
 }: {
-  entry: EntryForm;
-  set: <K extends keyof EntryForm>(k: K, v: EntryForm[K]) => void;
+  form: CloseForm;
+  setForm: (f: CloseForm) => void;
+  liveOpens: LiveOption[];
+  target: LiveOption | null;
 }) {
+  const set = <K extends keyof CloseForm>(k: K, v: CloseForm[K]) =>
+    setForm({ ...form, [k]: v });
+
   return (
-    <div className="pp-form-grid cols-2">
+    <>
       <div className="pp-field">
-        <div className="pp-field-label">Amount</div>
-        <MoneyInput value={entry.amount} onChange={(v) => set('amount', v)} placeholder="0.00" />
+        <div className="pp-field-label">Closing which position?</div>
+        <div className="pp-close-picker">
+          {liveOpens.map((lo) => {
+            const sign = lo.open.direction === 'short' ? '−' : '+';
+            const label = `${sign}${lo.remaining_contracts} ${lo.open.option_type.toUpperCase()} $${lo.open.strike} exp ${lo.open.expiry} @ $${lo.open.premium}/sh`;
+            return (
+              <button
+                key={lo.open.id}
+                type="button"
+                className={'pp-close-pick' + (form.target_id === lo.open.id ? ' on' : '')}
+                onClick={() => set('target_id', lo.open.id)}
+              >
+                <span className={'pp-mini-glyph ' + (lo.open.direction === 'short' ? 'neg' : 'pos')}>
+                  {lo.open.option_type === 'put' ? 'P' : 'C'}
+                </span>
+                <span className="pp-close-pick-label">{label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
-      <div className="pp-field">
-        <div className="pp-field-label">Shares (optional)</div>
-        <input
-          className="pp-input mono"
-          type="number"
-          value={entry.shares}
-          onChange={(e) => set('shares', e.target.value)}
-          placeholder="0"
-        />
-        <div className="pp-field-hint">leave blank for ad-hoc dividends</div>
+
+      {target && (
+        <div className="pp-form-grid cols-2">
+          <div className="pp-field">
+            <div className="pp-field-label">Contracts to close</div>
+            <input
+              className="pp-input mono"
+              type="number"
+              min="1"
+              max={target.remaining_contracts}
+              step="1"
+              value={form.contracts}
+              onChange={(e) => set('contracts', e.target.value)}
+              placeholder={String(target.remaining_contracts)}
+            />
+            <div className="pp-field-hint">up to {target.remaining_contracts} remaining</div>
+          </div>
+          <div className="pp-field">
+            <div className="pp-field-label">
+              {target.open.direction === 'short' ? 'Premium paid back / sh' : 'Premium collected / sh'}
+            </div>
+            <MoneyInput value={form.premium} onChange={(v) => set('premium', v)} placeholder="0.00" />
+            <div className="pp-field-hint">opened at ${target.open.premium}/sh</div>
+          </div>
+        </div>
+      )}
+
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">Date</div>
+          <input
+            className="pp-input mono"
+            type="date"
+            value={form.date}
+            onChange={(e) => set('date', e.target.value)}
+          />
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">Note (optional)</div>
+          <input
+            className="pp-input"
+            value={form.note}
+            onChange={(e) => set('note', e.target.value)}
+            placeholder="exit reason, etc."
+          />
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -521,6 +584,5 @@ function MoneyInput({
   );
 }
 
-// Keep these imports referenced so TS doesn't flag the file when types
-// are imported elsewhere; PutProtectionRow is part of Props above.
-void {} as unknown as PutProtectionRow;
+// Silence unused import warnings in case any are tree-shaken.
+void {} as unknown as OptionTrade;
