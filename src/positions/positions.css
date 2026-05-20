@@ -2511,12 +2511,6 @@
 .tl-table thead .gl-tot {
   z-index: 3;
 }
-/* Group/subtotal rows colSpan everything; keep their backgrounds
-   continuous over the sticky background. */
-.tl-table .tl-group-row td,
-.tl-table .tl-subtotal-row td {
-  position: relative;
-}
 .tl-table .tl-day-th.today {
   background: rgba(210,230,50,.06);
 }
@@ -2535,110 +2529,54 @@
   pointer-events: none;
 }
 
-/* Group header row — kept quiet so the table reads as one continuous
-   matrix rather than separate "cards" per ticker. */
-.tl-table .tl-group-row td {
-  background: rgba(15,51,51,.30);
-  border-top: 1px solid rgba(30,90,80,.20);
-  border-bottom: 1px solid rgba(30,90,80,.10);
-  padding: 6px 14px;
-}
-.tl-table .tl-group-row .ticker {
-  font-family: var(--navi-font-sans);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0;
-  color: var(--navi-fg1);
-  cursor: pointer;
-  margin-right: 8px;
-}
-.tl-table .tl-group-row .ticker:hover { color: var(--navi-neon); }
-.tl-group-meta {
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 10px;
-  color: var(--navi-fg4);
-  margin-left: 4px;
-}
-
-/* Track row — the row containing a bar */
-.tl-table .tl-track-row td.gl-pos {
-  padding: 6px 12px;
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 11px;
-  color: var(--navi-fg2);
-}
-.tl-table .tl-track-row:hover td.gl-pos {
-  background: rgba(15,51,51,.5);
-}
-.tl-row-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 3px;
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--navi-page);
-  margin-right: 6px;
-  flex-shrink: 0;
-}
-.tl-row-glyph.short  { background: var(--navi-positive); }
-.tl-row-glyph.long   { background: var(--navi-negative); }
-.tl-row-glyph.shares { background: rgba(70,130,120,.6); color: var(--navi-fg1); }
-.tl-row-sub {
-  color: var(--navi-fg4);
-  font-size: 10px;
-}
-
-/* The wide cell that hosts the bars */
+/* The wide cell that hosts the bars. Same overall row height as the
+   Trades matrix so the two views feel like the same table — just with
+   bars instead of weekly numbers in the cells. */
 .tl-table .tl-track-cell {
   padding: 0;
   position: relative;
+  height: 44px;
 }
 .tl-table .tl-track {
   position: relative;
-  height: 28px;
-  margin: 4px 0;
+  height: 100%;
+  width: 100%;
+}
+/* A "slot" is a horizontal lane within the row that can hold one
+   contract's bar. Multiple contracts on the same ticker stack vertically
+   inside the row. */
+.tl-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
 }
 
 /* The bars */
 .tl-bar {
   position: absolute;
-  top: 4px;
-  bottom: 4px;
-  border-radius: 4px;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 3px;
   display: flex;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 4px;
   font-family: var(--navi-font-mono, monospace);
-  font-size: 10px;
+  font-size: 9px;
   overflow: hidden;
   z-index: 1;
   cursor: pointer;
 }
-.tl-bar-shares {
-  background: rgba(70,130,120,.18);
-  border: 1px solid rgba(70,130,120,.35);
-  z-index: 0;
-  cursor: default;
-}
-.tl-bar-shares .tl-bar-label {
-  color: var(--navi-fg3);
-  font-size: 10px;
-  white-space: nowrap;
-}
 /* Direction drives the bar color. Calls vs puts are distinguished by
- * the row glyph (C / P) and the row label — keeping the bar palette
- * simple makes it easy to read "what made money / what cost me". */
+ * the row glyph (C / P) and the row label. Solid bright fills (no
+ * gradient, no transparency) so the bars read at a glance. */
 .tl-bar-short-put,
 .tl-bar-short-call {
-  background: linear-gradient(180deg, var(--navi-positive) 0%, rgba(168,212,160,.55) 100%);
+  background: var(--navi-positive);
   color: var(--navi-page);
 }
 .tl-bar-long-put,
 .tl-bar-long-call {
-  background: linear-gradient(180deg, var(--navi-negative) 0%, rgba(232,112,96,.55) 100%);
+  background: var(--navi-negative);
   color: var(--navi-page);
 }
 .tl-bar-closed {
@@ -2647,16 +2585,15 @@
   color: var(--navi-fg2);
   overflow: visible;  /* let the realized label spill past the bar edge if needed */
 }
+/* The future segment is the "still in force" portion: today → expiry.
+   Same solid bright color as the open direction, with a real arrow tip
+   carved out of the right edge using clip-path. */
 .tl-bar-future {
-  background: transparent;
-  border-top: 1px dashed rgba(70,130,120,.5);
-  border-bottom: 1px dashed rgba(70,130,120,.5);
-  display: flex;
-  justify-content: flex-end;
-  color: rgba(70,130,120,.7);
   cursor: default;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%);
 }
-.tl-bar-arrow { font-size: 12px; line-height: 1; padding-right: 2px; }
+.tl-bar-future.tl-future-short { background: var(--navi-positive); }
+.tl-bar-future.tl-future-long  { background: var(--navi-negative); }
 .tl-bar-realized {
   font-weight: 600;
   font-size: 10px;
@@ -2686,21 +2623,6 @@
   z-index: 2;
   box-shadow: 0 0 4px rgba(210,230,50,.4);
 }
-
-/* Subtotal row — also kept subtle. Just a thin tint band. */
-.tl-table .tl-subtotal-row td {
-  background: rgba(15,51,51,.20);
-  border-top: 1px solid rgba(30,90,80,.10);
-  border-bottom: 1px solid rgba(30,90,80,.20);
-  padding: 5px 14px;
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 10px;
-  color: var(--navi-fg4);
-}
-.tl-table .tl-subtotal-row b { color: var(--navi-fg3); font-weight: 500; }
-.tl-table .tl-subtotal-row .up   { color: var(--navi-positive); }
-.tl-table .tl-subtotal-row .down { color: var(--navi-negative); }
-.tl-subtotal-sep { color: var(--navi-fg5); }
 
 .tl-table .tl-foot-spacer {
   padding: 10px 16px;

@@ -1,33 +1,29 @@
-import { Fragment, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   closeRealizedPL,
   fmtCompact,
   fmtUSD,
-  fmtUSD2,
   type LiveOption,
   type OptionTrade,
   type PositionComputed,
 } from './types';
 
 /**
- * Timeline view — same shell as the Trades matrix (gl-table classes,
- * same toolbar with filter pills + timeframe selector), but each row is
- * a single contract drawn as a Gantt-style bar over daily columns
- * instead of weekly aggregate cells.
+ * Timeline view — same row layout as the Trades matrix.
  *
- * Visual model per ticker:
- *   [group header row — ticker, sector, share count]
- *   [shares row — quiet teal bar covering the whole range]
- *   [option row × N — one row per OPEN trade, with bar from open → close]
- *   [subtotal row — realized, live count, put obligation]
+ * One row per ticker (no group headers, no subtotal rows, no shares row).
+ * Inside the row's day strip every option contract is rendered as a thin
+ * Gantt-style bar, absolutely positioned and stacked vertically so multiple
+ * contracts on the same ticker sit at different y-offsets without
+ * overlapping.
  *
- * Day columns are rendered as actual <th>/<td> cells with day-of-month
- * tickmarks. Bars are absolutely positioned inside a colSpan wrapper
- * cell so they can stretch across days without breaking the table grid.
+ * Same toolbar (filter pills + timeframe selector), same `Realized` column
+ * on the right, same `Portfolio` footer row across the bottom — Timeline
+ * reads as a different view of the same table.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const DAY_OPTIONS = [60, 120, 180, 365] as const; // total visible days (past+future)
+const DAY_OPTIONS = [60, 120, 180, 365] as const;
 type Days = typeof DAY_OPTIONS[number];
 const LS_DAYS = 'np:timelineDays';
 function readDaysLS(): Days {
@@ -35,8 +31,6 @@ function readDaysLS(): Days {
   const v = parseInt(window.localStorage.getItem(LS_DAYS) ?? '', 10);
   return (DAY_OPTIONS as readonly number[]).includes(v) ? (v as Days) : 120;
 }
-/** Ratio of past:future days within the visible window. ~40% past, 60% future
- *  is a sensible default for an options trader watching upcoming expiries. */
 function splitDays(total: Days): { past: number; future: number } {
   const past = Math.round(total * 0.4);
   return { past, future: total - past };
@@ -66,7 +60,6 @@ interface Props {
 
 interface ResolvedTrade {
   open: OptionTrade;
-  closes: OptionTrade[];
   remaining: number;
   firstCloseDate: string | null;
   realized: number;
@@ -92,7 +85,6 @@ function resolveTrades(trades: OptionTrade[]): ResolvedTrade[] {
     const realized = closes.reduce((s, c) => s + closeRealizedPL(c, t), 0);
     out.push({
       open: t,
-      closes,
       remaining,
       firstCloseDate: closes[0]?.trade_date ?? null,
       realized,
@@ -125,7 +117,6 @@ export function TimelineMatrix({
   const today = useMemo(() => startOfDayUTC(new Date()), []);
   const rangeStart = useMemo(() => new Date(today.getTime() - DAYS_PAST * DAY_MS), [today, DAYS_PAST]);
   const rangeStartIso = rangeStart.toISOString().slice(0, 10);
-  const todayIso = today.toISOString().slice(0, 10);
 
   const counts = useMemo(
     () => ({
@@ -144,7 +135,6 @@ export function TimelineMatrix({
     return rows;
   }, [rows, filter, tradesByTicker]);
 
-  // Same sort as Trades matrix: realized desc.
   const sorted = useMemo(
     () =>
       [...filtered].sort(
@@ -153,18 +143,13 @@ export function TimelineMatrix({
     [filtered, realizedByTicker],
   );
 
-  // For each day index, label which to render. We show the day-of-month
-  // every 3 days at 60d zoom, less frequently at wider zooms.
   const tickInterval = days <= 60 ? 3 : days <= 120 ? 7 : days <= 180 ? 14 : 30;
-
-  // Convert an ISO date to a day-index inside the visible window.
   const dx = (iso: string) =>
     Math.max(0, Math.min(totalDays, daysBetween(rangeStartIso, iso)));
   const todayDx = DAYS_PAST;
 
   return (
     <div className="gl-wrap">
-      {/* Toolbar — same shell as Trades matrix */}
       <div className="gl-toolbar">
         <div className="np-status-filter">
           <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>
@@ -228,107 +213,71 @@ export function TimelineMatrix({
               <th className="gl-tot">Realized</th>
             </tr>
           </thead>
+
           <tbody>
             {sorted.map((r) => {
               const trades = tradesByTicker.get(r.ticker) ?? [];
               const resolved = resolveTrades(trades);
               const live = liveByTicker.get(r.ticker) ?? [];
               const realized = realizedByTicker.get(r.ticker) ?? 0;
-              const obligation = live.reduce(
-                (s, lo) =>
-                  s + (lo.open.option_type === 'put' && lo.open.direction === 'short'
-                    ? lo.remaining_contracts * 100 * lo.open.strike
-                    : 0),
-                0,
-              );
-              const isClosedPos = r.status === 'closed';
+              // Vertical slots inside the row. Max 4 visible; if more
+              // contracts exist they all share the bottom slot.
+              const MAX_SLOTS = 4;
+              const slotCount = Math.min(MAX_SLOTS, Math.max(1, resolved.length));
 
               return (
-                <Fragment key={r.ticker}>
-                  {/* Group header */}
-                  <tr className="tl-group-row">
-                    <td colSpan={totalDays + 2}>
-                      <span
-                        className="ticker clickable"
-                        onClick={() => onTickerClick(r.ticker)}
-                      >
-                        {r.ticker}
-                      </span>
-                      {isClosedPos && <span className="status-pill closed">closed</span>}
-                      <span className="tl-group-meta">
-                        {r.sector}
-                        {r.quantity > 0 && ` · ${r.quantity.toLocaleString()} sh @ ${fmtUSD2(r.avg_cost)}`}
-                      </span>
-                    </td>
-                  </tr>
+                <tr
+                  key={r.ticker}
+                  className={r.status === 'closed' ? 'closed-row' : ''}
+                  onClick={() => onTickerClick(r.ticker)}
+                >
+                  <td className="gl-pos">
+                    <span className="ticker clickable">{r.ticker}</span>
+                    {r.status === 'closed' && <span className="status-pill closed">closed</span>}
+                    <div className="gl-pos-sub">
+                      {r.sector}
+                      {live.length > 0 && <span className="gl-live-count"> · {live.length} live</span>}
+                    </div>
+                  </td>
 
-                  {/* Shares row */}
-                  {r.quantity > 0 && (
-                    <tr className="tl-track-row tl-shares">
-                      <td className="gl-pos">
-                        <span className="tl-row-glyph shares">S</span>
-                        shares
-                      </td>
-                      <td colSpan={totalDays} className="tl-track-cell">
-                        <div className="tl-track">
+                  <td colSpan={totalDays} className="tl-track-cell">
+                    <div className="tl-track">
+                      {resolved.map((rt, idx) => {
+                        const slot = Math.min(idx, slotCount - 1);
+                        const isShort = rt.open.direction === 'short';
+                        const isPut = rt.open.option_type === 'put';
+                        const openOffset = dx(rt.open.trade_date);
+                        const expiryOffset = dx(rt.open.expiry);
+                        const closeOffset = rt.firstCloseDate ? dx(rt.firstCloseDate) : null;
+                        const liveEnd = closeOffset != null
+                          ? closeOffset
+                          : Math.min(todayDx, expiryOffset);
+                        const liveWidth = Math.max(0, liveEnd - openOffset);
+                        const grayWidth = closeOffset != null ? Math.max(0, expiryOffset - closeOffset) : 0;
+                        const futureWidth = closeOffset == null
+                          ? Math.max(0, expiryOffset - Math.max(openOffset, todayDx))
+                          : 0;
+                        const liveColorClass = isShort
+                          ? (isPut ? 'tl-bar-short-put' : 'tl-bar-short-call')
+                          : (isPut ? 'tl-bar-long-put' : 'tl-bar-long-call');
+                        const realizedColor = rt.realized > 0 ? 'up' : rt.realized < 0 ? 'down' : '';
+                        // Position by slot — each slot is 6px tall with 2px gap.
+                        const slotTopPercent = (slot / slotCount) * 100;
+                        const slotHeightPercent = 100 / slotCount;
+                        const onClick = (e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          onBarClick(r.ticker, rt.open.id);
+                        };
+
+                        return (
                           <div
-                            className="tl-bar tl-bar-shares"
+                            key={rt.open.id}
+                            className="tl-slot"
                             style={{
-                              left: `calc(${(0 / totalDays) * 100}%)`,
-                              width: `calc(${(totalDays / totalDays) * 100}%)`,
+                              top: `${slotTopPercent}%`,
+                              height: `${slotHeightPercent}%`,
                             }}
-                            title={`${r.quantity.toLocaleString()} sh @ ${fmtUSD2(r.avg_cost)}`}
                           >
-                            <span className="tl-bar-label">
-                              {r.quantity.toLocaleString()} · basis {fmtUSD2(r.avg_cost)}
-                            </span>
-                          </div>
-                          <TodayLine percent={(todayDx / totalDays) * 100} />
-                        </div>
-                      </td>
-                      <td className="gl-tot">
-                        <div className="gl-tot-amt">{fmtCompact(r.market_value)}</div>
-                      </td>
-                    </tr>
-                  )}
-
-                  {/* Option rows */}
-                  {resolved.map((rt) => {
-                    const isShort = rt.open.direction === 'short';
-                    const isPut = rt.open.option_type === 'put';
-                    const openOffset = dx(rt.open.trade_date);
-                    const expiryOffset = dx(rt.open.expiry);
-                    const closeOffset = rt.firstCloseDate ? dx(rt.firstCloseDate) : null;
-                    const liveEnd = closeOffset != null
-                      ? closeOffset
-                      : Math.min(todayDx, expiryOffset);
-                    const liveWidth = Math.max(0, liveEnd - openOffset);
-                    const grayStart = closeOffset;
-                    const grayWidth = grayStart != null ? Math.max(0, expiryOffset - grayStart) : 0;
-                    const futureWidth = closeOffset == null
-                      ? Math.max(0, expiryOffset - Math.max(openOffset, todayDx))
-                      : 0;
-                    const liveColorClass = isShort
-                      ? (isPut ? 'tl-bar-short-put' : 'tl-bar-short-call')
-                      : (isPut ? 'tl-bar-long-put' : 'tl-bar-long-call');
-                    const labelSign = isShort ? '−' : '+';
-                    const realizedColor = rt.realized > 0 ? 'up' : rt.realized < 0 ? 'down' : '';
-
-                    return (
-                      <tr
-                        key={rt.open.id}
-                        className="tl-track-row"
-                        onClick={() => onBarClick(r.ticker, rt.open.id)}
-                      >
-                        <td className="gl-pos">
-                          <span className={'tl-row-glyph ' + (isShort ? 'short' : 'long')}>
-                            {isPut ? 'P' : 'C'}
-                          </span>
-                          {labelSign}{rt.open.contracts} ${rt.open.strike}
-                          <span className="tl-row-sub"> · exp {rt.open.expiry}</span>
-                        </td>
-                        <td colSpan={totalDays} className="tl-track-cell">
-                          <div className="tl-track">
                             {liveWidth > 0 && (
                               <div
                                 className={'tl-bar ' + liveColorClass}
@@ -336,17 +285,19 @@ export function TimelineMatrix({
                                   left: `${(openOffset / totalDays) * 100}%`,
                                   width: `${(liveWidth / totalDays) * 100}%`,
                                 }}
-                                title={`Open ${rt.open.trade_date} · ${rt.open.contracts}× @ $${rt.open.premium}/sh`}
+                                title={`Open ${rt.open.trade_date} · ${rt.open.contracts}× ${isPut ? 'P' : 'C'} $${rt.open.strike} @ $${rt.open.premium}/sh`}
+                                onClick={onClick}
                               />
                             )}
-                            {grayStart != null && grayWidth > 0 && (
+                            {closeOffset != null && grayWidth > 0 && (
                               <div
                                 className="tl-bar tl-bar-closed"
                                 style={{
-                                  left: `${(grayStart / totalDays) * 100}%`,
+                                  left: `${(closeOffset / totalDays) * 100}%`,
                                   width: `${(grayWidth / totalDays) * 100}%`,
                                 }}
                                 title={`Closed ${rt.firstCloseDate} · realized ${rt.realized >= 0 ? '+' : '−'}${fmtUSD(Math.abs(rt.realized))}`}
+                                onClick={onClick}
                               >
                                 <span className={'tl-bar-realized ' + realizedColor}>
                                   {rt.realized >= 0 ? '+' : '−'}{fmtCompact(Math.abs(rt.realized))}
@@ -355,57 +306,34 @@ export function TimelineMatrix({
                             )}
                             {futureWidth > 0 && (
                               <div
-                                className="tl-bar tl-bar-future"
+                                className={'tl-bar tl-bar-future ' + (isShort ? 'tl-future-short' : 'tl-future-long')}
                                 style={{
                                   left: `${(Math.max(openOffset, todayDx) / totalDays) * 100}%`,
                                   width: `${(futureWidth / totalDays) * 100}%`,
                                 }}
                                 title={`Until expiry ${rt.open.expiry}`}
-                              >
-                                <span className="tl-bar-arrow">►</span>
-                              </div>
+                                onClick={onClick}
+                              />
                             )}
-                            <TodayLine percent={(todayDx / totalDays) * 100} />
                           </div>
-                        </td>
-                        <td className="gl-tot">
-                          {rt.is_live ? (
-                            <div className="gl-tot-amt" style={{ color: 'var(--navi-fg2)' }}>
-                              {rt.remaining}× live
-                            </div>
-                          ) : (
-                            <div className={'gl-tot-amt ' + realizedColor}>
-                              {rt.realized >= 0 ? '+' : '−'}{fmtCompact(Math.abs(rt.realized))}
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        );
+                      })}
+                      <TodayLine percent={(todayDx / totalDays) * 100} />
+                    </div>
+                  </td>
 
-                  {/* Subtotal */}
-                  <tr className="tl-subtotal-row">
-                    <td colSpan={totalDays + 2}>
-                      <b>{r.ticker} subtotal</b>
-                      <span className="tl-subtotal-sep"> · </span>
-                      <span className={realized < 0 ? 'down' : 'up'}>
-                        realized {realized >= 0 ? '+' : '−'}{fmtCompact(Math.abs(realized))}
-                      </span>
-                      {live.length > 0 && (
-                        <>
-                          <span className="tl-subtotal-sep"> · </span>
-                          <span>{live.length} live</span>
-                        </>
+                  <td className="gl-tot">
+                    <div className={'gl-tot-amt ' + (realized < 0 ? 'down' : realized > 0 ? 'up' : '')}>
+                      {realized === 0 ? (
+                        <span style={{ color: 'var(--navi-fg5)' }}>—</span>
+                      ) : realized >= 0 ? (
+                        fmtUSD(realized)
+                      ) : (
+                        '−' + fmtUSD(Math.abs(realized))
                       )}
-                      {obligation > 0 && (
-                        <>
-                          <span className="tl-subtotal-sep"> · </span>
-                          <span>put oblig {fmtCompact(obligation)}</span>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                </Fragment>
+                    </div>
+                  </td>
+                </tr>
               );
             })}
 
@@ -417,37 +345,26 @@ export function TimelineMatrix({
               </tr>
             )}
           </tbody>
+
           {sorted.length > 0 && (() => {
-            // Portfolio-wide aggregates across the visible filter set.
             let grandRealized = 0;
             let grandLive = 0;
-            let grandObligation = 0;
             for (const r of sorted) {
               grandRealized += realizedByTicker.get(r.ticker) ?? 0;
               const live = liveByTicker.get(r.ticker) ?? [];
               grandLive += live.length;
-              for (const lo of live) {
-                if (lo.open.option_type === 'put' && lo.open.direction === 'short') {
-                  grandObligation += lo.remaining_contracts * 100 * lo.open.strike;
-                }
-              }
             }
             return (
               <tfoot>
                 <tr className="gl-foot">
                   <td className="gl-pos">
                     <b>Portfolio</b>
-                    <div className="gl-pos-sub">{sorted.length} positions</div>
+                    <div className="gl-pos-sub">{sorted.length} positions · {grandLive} live</div>
                   </td>
-                  <td colSpan={totalDays} className="tl-foot-spacer">
-                    <span>
-                      {grandLive} live
-                      {grandObligation > 0 && ` · put oblig ${fmtCompact(grandObligation)}`}
-                    </span>
-                  </td>
+                  <td colSpan={totalDays} className="tl-foot-spacer" />
                   <td className="gl-tot">
                     <div className={'gl-tot-amt ' + (grandRealized < 0 ? 'down' : grandRealized > 0 ? 'up' : '')}>
-                      {grandRealized >= 0 ? '+' : '−'}{fmtCompact(Math.abs(grandRealized))}
+                      {grandRealized === 0 ? '$0' : grandRealized > 0 ? fmtUSD(grandRealized) : '−' + fmtUSD(Math.abs(grandRealized))}
                     </div>
                   </td>
                 </tr>
@@ -460,8 +377,7 @@ export function TimelineMatrix({
   );
 }
 
-/** Today's vertical neon line drawn inside a track. Absolutely positioned
- *  so each row can show its own copy without z-index gymnastics. */
+/** Today's vertical neon line drawn inside the track. */
 function TodayLine({ percent }: { percent: number }) {
   return (
     <div
