@@ -8,6 +8,7 @@ import { CsvUploadModal } from './CsvUploadModal';
 import { PositionDetailModal } from './PositionDetailModal';
 import { PositionInsightModal } from './PositionInsightModal';
 import { TradesLogMatrix } from './TradesLogMatrix';
+import { TimelineMatrix } from './TimelineMatrix';
 import { RealizedSummary } from './RealizedSummary';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
@@ -44,8 +45,8 @@ export default function PositionsPage() {
   const [allocView, setAllocView] = useState<AllocView>(() =>
     readLS<AllocView>(LS_ALLOC, ['sector', 'stock', 'strategy', 'pnl'] as const, 'sector'),
   );
-  const [posView, setPosView] = useState<'table' | 'trades'>(() =>
-    readLS<'table' | 'trades'>(LS_POS, ['table', 'trades'] as const, 'table'),
+  const [posView, setPosView] = useState<'table' | 'trades' | 'timeline'>(() =>
+    readLS<'table' | 'trades' | 'timeline'>(LS_POS, ['table', 'trades', 'timeline'] as const, 'table'),
   );
   useEffect(() => {
     try { window.localStorage.setItem(LS_ALLOC, allocView); } catch { /* private mode */ }
@@ -207,7 +208,11 @@ export default function PositionsPage() {
           )}
           <div className="np-section-hd">
             <div className="np-section-title">
-              {posView === 'table' ? `Positions · ${portfolio.rows.length}` : 'Trades'}
+              {posView === 'table'
+                ? `Positions · ${portfolio.rows.length}`
+                : posView === 'trades'
+                  ? 'Trades'
+                  : 'Timeline'}
             </div>
             <div className="np-view-toggle">
               <button
@@ -221,6 +226,12 @@ export default function PositionsPage() {
                 onClick={() => setPosView('trades')}
               >
                 Trades
+              </button>
+              <button
+                className={posView === 'timeline' ? 'on' : ''}
+                onClick={() => setPosView('timeline')}
+              >
+                Timeline
               </button>
             </div>
           </div>
@@ -243,6 +254,22 @@ export default function PositionsPage() {
               // Cell click: if the ticker has live opens, default to Close
               // tab (most likely the user wants to close); otherwise Open.
               onCellClick={(t) => {
+                const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
+                setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
+              }}
+            />
+          )}
+          {posView === 'timeline' && (
+            <TimelineMatrix
+              rows={portfolio.rows}
+              tradesByTicker={tradesByTicker}
+              liveByTicker={liveByTicker}
+              realizedByTicker={realizedByTicker}
+              onTickerClick={(t) => setInsightTicker(t)}
+              onBarClick={(t) => {
+                // Clicking a bar opens the write modal for that ticker.
+                // We default to the close tab since clicking a bar usually
+                // means "I want to act on this contract."
                 const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
                 setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
               }}
