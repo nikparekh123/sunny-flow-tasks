@@ -33,7 +33,6 @@ interface Props {
 
 type View = 'overall' | 'stock' | 'options';
 type OptionDir = 'all' | 'short-call' | 'long-call' | 'short-put' | 'long-put';
-type SidePanel = 'contrib' | 'coverage';
 
 interface Item {
   ticker: string;
@@ -60,7 +59,6 @@ function paletteColor(positive: boolean, rank: number): string {
 export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
   const [view, setView] = useState<View>('overall');
   const [optDir, setOptDir] = useState<OptionDir>('all');
-  const [tab, setTab] = useState<SidePanel>('contrib');
 
   // ── Per-ticker items for Overall / Stock views ──────────────────
   const itemsOverall = useMemo<Item[]>(
@@ -248,43 +246,23 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
         )}
       </div>
 
-      {/* RIGHT: tabs + content */}
-      <div className="pnl-side">
-        <div className="pnl-tabs">
-          <button
-            className={tab === 'contrib' ? 'on' : ''}
-            onClick={() => setTab('contrib')}
-          >
-            Contributors
-          </button>
-          <button
-            className={tab === 'coverage' ? 'on' : ''}
-            onClick={() => setTab('coverage')}
-            disabled={putCostPaid === 0}
-            title={putCostPaid === 0 ? 'No protective puts open' : ''}
-          >
-            Put coverage
-          </button>
+      {/* RIGHT: Put protection box */}
+      <aside className="pnl-side">
+        <div className="pnl-protection-box">
+          <div className="pnl-protection-hd">Put protection</div>
+          {putCostPaid > 0 ? (
+            <PutCostCoverage
+              putCost={putCostPaid}
+              realized={realized}
+              pct={coveragePct}
+            />
+          ) : (
+            <div className="pnl-protection-empty">
+              No protective puts open.
+            </div>
+          )}
         </div>
-
-        {tab === 'contrib' && (
-          <ContributorsList
-            view={view}
-            items={items}
-            closeEvents={closeEvents}
-            tickerRank={tickerRank}
-            onTickerClick={onTickerClick}
-          />
-        )}
-
-        {tab === 'coverage' && (
-          <PutCostCoverage
-            putCost={putCostPaid}
-            realized={realized}
-            pct={coveragePct}
-          />
-        )}
-      </div>
+      </aside>
     </div>
   );
 }
@@ -635,124 +613,6 @@ function ChartGrid({
         −{fmtCompact(maxAbs)}
       </text>
     </>
-  );
-}
-
-function ContributorsList({
-  view,
-  items,
-  closeEvents,
-  tickerRank,
-  onTickerClick,
-}: {
-  view: View;
-  items: Item[];
-  closeEvents: CloseEvent[];
-  tickerRank: Map<string, number>;
-  onTickerClick?: (ticker: string) => void;
-}) {
-  // For Options view: aggregate closeEvents by ticker
-  const optItems = useMemo<Item[]>(() => {
-    if (view !== 'options') return [];
-    const m = new Map<string, number>();
-    for (const e of closeEvents) {
-      m.set(e.ticker, (m.get(e.ticker) ?? 0) + e.value);
-    }
-    return [...m.entries()]
-      .map(([ticker, pl]) => ({ ticker, sector: '', pl }))
-      .filter((x) => Math.abs(x.pl) >= 1)
-      .sort((a, b) => b.pl - a.pl);
-  }, [view, closeEvents]);
-
-  const rowItems = view === 'options' ? optItems : items;
-  const gains = rowItems.filter((x) => x.pl > 0);
-  const losses = rowItems.filter((x) => x.pl < 0);
-  const totalGain = gains.reduce((s, x) => s + x.pl, 0);
-  const totalLoss = losses.reduce((s, x) => s + x.pl, 0);
-
-  return (
-    <div className="pnl-contrib">
-      {gains.length > 0 && (
-        <>
-          <div className="np-treemap-list-hd">↑ Gain</div>
-          {gains.slice(0, 5).map((g) => (
-            <ContribRow
-              key={g.ticker}
-              ticker={g.ticker}
-              value={g.pl}
-              pct={totalGain > 0 ? (g.pl / totalGain) * 100 : 0}
-              positive
-              rank={tickerRank.get(g.ticker) ?? 0}
-              useNeon={view !== 'options'}
-              onClick={() => onTickerClick?.(g.ticker)}
-            />
-          ))}
-        </>
-      )}
-      {losses.length > 0 && (
-        <>
-          <div className="np-treemap-list-hd" style={{ marginTop: 14 }}>
-            ↓ Loss
-          </div>
-          {losses.slice(0, 5).map((l) => (
-            <ContribRow
-              key={l.ticker}
-              ticker={l.ticker}
-              value={l.pl}
-              pct={totalLoss < 0 ? (l.pl / totalLoss) * 100 : 0}
-              rank={tickerRank.get(l.ticker) ?? 0}
-              useNeon={view !== 'options'}
-              onClick={() => onTickerClick?.(l.ticker)}
-            />
-          ))}
-        </>
-      )}
-    </div>
-  );
-}
-
-function ContribRow({
-  ticker,
-  value,
-  pct,
-  positive,
-  rank,
-  useNeon,
-  onClick,
-}: {
-  ticker: string;
-  value: number;
-  pct: number;
-  positive?: boolean;
-  rank: number;
-  useNeon: boolean;
-  onClick?: () => void;
-}) {
-  // Overall/Stock views: neon/red. Options view: ticker-ranked palette
-  // so it matches the stacked bars.
-  const swatchColor = useNeon
-    ? positive
-      ? 'var(--navi-neon)'
-      : 'var(--navi-negative)'
-    : paletteColor(!!positive, rank);
-  return (
-    <button
-      type="button"
-      className="np-treemap-row pnl-contrib-row"
-      onClick={onClick}
-      disabled={!onClick}
-    >
-      <span className="lbl">
-        <span className="swatch" style={{ background: swatchColor }} />
-        {ticker}
-      </span>
-      <span className="pct">
-        <span className={'pnl-contrib-val ' + (positive ? 'up' : 'down')}>
-          {value >= 0 ? fmtUSD(value) : '−' + fmtUSD(Math.abs(value))}
-        </span>
-        <span className="pnl-contrib-pct">{Math.abs(pct).toFixed(0)}%</span>
-      </span>
-    </button>
   );
 }
 

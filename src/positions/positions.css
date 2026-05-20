@@ -3140,7 +3140,10 @@
    P&L by Position — slots into the AllocationTreemap card shell
    (.np-treemap-card) so it matches sector / stock / strategy.
    ============================================================ */
-.np-app .pnl-card { /* uses .np-treemap-card grid + surface */ }
+.np-app .pnl-card {
+  /* Wider side panel to give Put protection more breathing room */
+  grid-template-columns: 1fr 300px;
+}
 
 .np-app .pnl-chart-col {
   display: flex;
@@ -3213,15 +3216,24 @@
 }
 .np-app .pnl-chart-hd {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 32px;
+  flex-wrap: nowrap;
 }
 .np-app .pnl-chart-stat {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
 }
-.np-app .pnl-chart-stat.right { margin-left: auto; }
+.np-app .pnl-chart-stat.right {
+  margin-left: auto;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.35);
+  align-items: center;
+}
 .np-app .pnl-chart-stat-k {
   font-size: 8px;
   font-weight: 600;
@@ -3229,12 +3241,19 @@
   text-transform: uppercase;
   color: var(--navi-fg5);
 }
+.np-app .pnl-chart-stat.right .pnl-chart-stat-k {
+  color: var(--navi-fg2);
+}
 .np-app .pnl-chart-stat-v {
   font-family: var(--navi-font-sans);
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 600;
   letter-spacing: -.4px;
   line-height: 1;
+}
+.np-app .pnl-chart-stat.right .pnl-chart-stat-v {
+  font-size: 26px;
+  letter-spacing: -.6px;
 }
 .np-app .pnl-chart-stat-v.up   { color: var(--navi-neon); }
 .np-app .pnl-chart-stat-v.down { color: var(--navi-negative); }
@@ -3246,12 +3265,39 @@
   min-height: 360px;
 }
 
-/* RIGHT panel: tabs + content (matches treemap-list typography) */
+/* RIGHT panel: Put protection box (boxed feel, distinct from main card) */
 .np-app .pnl-side {
   display: flex;
   flex-direction: column;
-  gap: 12px;
   min-height: 460px;
+}
+.np-app .pnl-protection-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: rgba(15,51,51,.40);
+  border: 1px solid rgba(50,110,100,.35);
+  border-radius: 12px;
+  padding: 22px 20px 26px;
+}
+.np-app .pnl-protection-hd {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+  text-align: center;
+}
+.np-app .pnl-protection-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  padding: 24px 0;
 }
 .np-app .pnl-tabs {
   display: inline-flex;
@@ -3306,11 +3352,11 @@
   color: var(--navi-fg3);
 }
 
-/* Solar-offset coverage tab */
+/* Solar-offset coverage visual */
 .np-app .pnl-coverage {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 22px;
   align-items: center;
   justify-content: center;
   flex: 1;
@@ -3321,10 +3367,10 @@
   flex-direction: column;
   align-items: center;
   font-family: var(--navi-font-sans);
-  font-size: 36px;
+  font-size: 48px;
   font-weight: 600;
   color: var(--navi-fg1);
-  letter-spacing: -1px;
+  letter-spacing: -1.5px;
   line-height: 1;
 }
 .np-app .pnl-coverage-pct-sub {
@@ -3333,13 +3379,13 @@
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--navi-fg5);
-  margin-top: 4px;
+  margin-top: 6px;
 }
 .np-app .pnl-coverage-body {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  height: 220px;
+  gap: 20px;
+  height: 240px;
   width: 100%;
   align-items: end;
 }
@@ -3347,29 +3393,29 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   height: 100%;
   justify-content: flex-end;
 }
 .np-app .pnl-cov-bar-wrap {
   width: 100%;
-  max-width: 64px;
-  height: 70%;
+  max-width: 84px;
+  height: 72%;
   display: flex;
   align-items: flex-end;
   justify-content: center;
 }
 .np-app .pnl-cov-bar {
   width: 100%;
-  border-radius: 4px 4px 0 0;
-  min-height: 4px;
+  border-radius: 6px 6px 0 0;
+  min-height: 6px;
   transition: height .35s var(--np-ease);
 }
 .np-app .pnl-cov-bar.gold { background: var(--navi-warning); }
 .np-app .pnl-cov-bar.blue { background: var(--navi-neon); }
 .np-app .pnl-cov-val {
   font-family: var(--navi-font-mono);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--navi-fg1);
 }
