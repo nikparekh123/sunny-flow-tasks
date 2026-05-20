@@ -2775,64 +2775,10 @@
 .pi-chart-y-zero { color: var(--navi-fg3); font-weight: 500; }
 .pi-chart-y-bot { color: var(--navi-negative); }
 
-/* Per-trade boxes inside a weekly cell — each trade keeps its own row so
-   two trades in the same week stack vertically instead of merging into
-   one number. The `+` empty-cell affordance is unchanged. */
-.gl-cell-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  width: 100%;
-  padding: 2px;
-}
-.gl-trade-box {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  padding: 2px 5px;
-  border-radius: 3px;
-  background: rgba(15,51,51,.55);
-  border: 1px solid rgba(30,90,80,.4);
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 10px;
-  line-height: 1.2;
-}
-.gl-trade-box.up {
-  background: rgba(168,212,160,.10);
-  border-color: rgba(168,212,160,.4);
-}
-.gl-trade-box.down {
-  background: rgba(232,112,96,.10);
-  border-color: rgba(232,112,96,.4);
-}
-.gl-trade-box-amt {
-  font-weight: 500;
-  color: var(--navi-fg1);
-}
-.gl-trade-box.up   .gl-trade-box-amt { color: var(--navi-positive); }
-.gl-trade-box.down .gl-trade-box-amt { color: var(--navi-negative); }
-.gl-trade-box-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--navi-fg4);
-  font-size: 8px;
-  letter-spacing: 0.4px;
-  text-transform: lowercase;
-}
-.gl-trade-box-type {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 11px; height: 11px;
-  border-radius: 2px;
-  background: rgba(70,130,120,.35);
-  color: var(--navi-fg2);
-  font-size: 8px;
-  font-weight: 600;
-  line-height: 1;
-}
+/* Trades matrix — each cell holds exactly one trade. The per-cell action
+   tag ("op P" / "cl C") sits below the amount in muted mono. No border
+   pill — the cell is just the colored number, like the original weekly
+   matrix. */
 
 .pi-chart-total { color: var(--navi-fg3); font-family: var(--navi-font-mono, monospace); font-size: 11px; }
 .pi-chart-total b { font-weight: 600; color: var(--navi-fg1); }
