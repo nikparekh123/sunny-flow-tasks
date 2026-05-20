@@ -3146,10 +3146,10 @@
   flex-direction: column;
   gap: 28px;
   padding: 28px 32px;
-  background: #050d0d;
-  border: 1px solid rgba(50,110,100,.22);
+  background: var(--navi-card);
+  border: 1px solid rgba(50,110,100,.25);
   border-radius: 14px;
-  color: #fff;
+  color: var(--navi-fg1);
 }
 .np-app .pnl-empty {
   padding: 80px;
@@ -3170,10 +3170,11 @@
   gap: 4px;
 }
 .np-app .pnl-stat-k {
-  font-size: 13px;
-  font-weight: 400;
-  color: rgba(255,255,255,.55);
-  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--navi-fg3);
+  letter-spacing: .6px;
+  text-transform: uppercase;
 }
 .np-app .pnl-stat-v {
   font-family: var(--navi-font-sans);
@@ -3202,12 +3203,12 @@
   display: flex;
   align-items: baseline;
   gap: 12px;
-  border-top: 1px solid rgba(255,255,255,.08);
+  border-top: 1px solid rgba(50,110,100,.22);
   padding-top: 18px;
 }
 .np-app .pnl-net-k {
-  font-size: 16px;
-  color: rgba(255,255,255,.75);
+  font-size: 14px;
+  color: var(--navi-fg2);
   font-weight: 500;
 }
 .np-app .pnl-net-v {
@@ -3233,9 +3234,11 @@
   gap: 4px;
 }
 .np-app .pnl-section-hd {
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 500;
-  color: rgba(255,255,255,.65);
+  color: var(--navi-fg3);
+  letter-spacing: .6px;
+  text-transform: uppercase;
   margin-bottom: 10px;
 }
 .np-app .pnl-row {
@@ -3245,8 +3248,8 @@
   gap: 12px;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid rgba(255,255,255,.06);
-  color: #fff;
+  border-bottom: 1px solid rgba(50,110,100,.18);
+  color: var(--navi-fg1);
   padding: 10px 0;
   font-family: var(--navi-font-sans);
   font-size: 14px;
@@ -3256,7 +3259,7 @@
 }
 .np-app .pnl-row:disabled { cursor: default; }
 .np-app .pnl-row:hover:not(:disabled) {
-  background: rgba(255,255,255,.03);
+  background: rgba(50,110,100,.12);
 }
 .np-app .pnl-dot {
   width: 10px;
@@ -3270,7 +3273,7 @@
   letter-spacing: -.2px;
 }
 .np-app .pnl-row-sec {
-  color: rgba(255,255,255,.45);
+  color: var(--navi-fg3);
   font-size: 12px;
 }
 .np-app .pnl-row-val {
@@ -3282,14 +3285,14 @@
 .np-app .pnl-row-val.down { color: var(--navi-negative); }
 .np-app .pnl-row-pct {
   font-family: var(--navi-font-mono);
-  color: rgba(255,255,255,.55);
+  color: var(--navi-fg3);
   justify-self: end;
   font-size: 13px;
 }
 
 /* Solar-offset-style coverage section */
 .np-app .pnl-coverage {
-  border-top: 1px solid rgba(255,255,255,.08);
+  border-top: 1px solid rgba(50,110,100,.22);
   padding-top: 24px;
   display: flex;
   flex-direction: column;
@@ -3301,14 +3304,15 @@
   justify-content: space-between;
 }
 .np-app .pnl-coverage-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
-  color: #fff;
+  color: var(--navi-fg1);
+  letter-spacing: -.2px;
 }
 .np-app .pnl-coverage-pct {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 500;
-  color: rgba(255,255,255,.75);
+  color: var(--navi-fg2);
   font-family: var(--navi-font-mono);
 }
 .np-app .pnl-coverage-body {
@@ -3341,20 +3345,23 @@
   min-height: 4px;
   transition: height .35s var(--np-ease);
 }
-.np-app .pnl-cov-bar.gold { background: #f5a623; }
-.np-app .pnl-cov-bar.blue { background: #3a76e3; }
+.np-app .pnl-cov-bar.gold { background: var(--navi-warning); }
+.np-app .pnl-cov-bar.blue { background: var(--navi-neon); }
 .np-app .pnl-cov-val {
   font-family: var(--navi-font-sans);
   font-size: 20px;
   font-weight: 600;
-  color: #fff;
+  color: var(--navi-fg1);
+  letter-spacing: -.3px;
 }
 .np-app .pnl-cov-label {
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 500;
+  letter-spacing: .6px;
+  text-transform: uppercase;
 }
-.np-app .pnl-cov-label.gold { color: #f5a623; }
-.np-app .pnl-cov-label.blue { color: #3a76e3; }
+.np-app .pnl-cov-label.gold { color: var(--navi-warning); }
+.np-app .pnl-cov-label.blue { color: var(--navi-neon); }
 .np-app .pnl-cov-spacer {
   height: 80%;
   display: flex;
@@ -3363,7 +3370,7 @@
 }
 .np-app .pnl-cov-dashes {
   width: 100%;
-  border-top: 1px dashed rgba(255,255,255,.25);
+  border-top: 1px dashed rgba(50,110,100,.45);
 }
 
 /* Signals column (PositionsTable) — chips only render when actionable */

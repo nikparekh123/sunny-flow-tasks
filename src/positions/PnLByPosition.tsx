@@ -210,14 +210,14 @@ function PnLBars({
           x2={barAreaW}
           y1={PAD_TOP + halfH * 0.5}
           y2={PAD_TOP + halfH * 0.5}
-          stroke="rgba(255,255,255,.06)"
+          stroke="rgba(50,110,100,.18)"
         />
         <line
           x1={0}
           x2={barAreaW}
           y1={PAD_TOP + halfH * 1.5}
           y2={PAD_TOP + halfH * 1.5}
-          stroke="rgba(255,255,255,.06)"
+          stroke="rgba(50,110,100,.18)"
         />
         {/* Zero line */}
         <line
@@ -225,7 +225,7 @@ function PnLBars({
           x2={barAreaW}
           y1={zeroY}
           y2={zeroY}
-          stroke="rgba(255,255,255,.20)"
+          stroke="rgba(50,110,100,.55)"
           strokeDasharray="4 4"
         />
 
@@ -234,7 +234,7 @@ function PnLBars({
           x={W - 4}
           y={PAD_TOP + 10}
           textAnchor="end"
-          fill="rgba(255,255,255,.55)"
+          fill="var(--navi-fg2)"
           fontSize="11"
           fontFamily="var(--navi-font-mono)"
         >
@@ -244,7 +244,7 @@ function PnLBars({
           x={W - 4}
           y={PAD_TOP + halfH * 0.5 + 4}
           textAnchor="end"
-          fill="rgba(255,255,255,.30)"
+          fill="var(--navi-fg4)"
           fontSize="10"
           fontFamily="var(--navi-font-mono)"
         >
@@ -254,7 +254,7 @@ function PnLBars({
           x={W - 4}
           y={zeroY + 3}
           textAnchor="end"
-          fill="rgba(255,255,255,.55)"
+          fill="var(--navi-fg2)"
           fontSize="11"
           fontFamily="var(--navi-font-mono)"
         >
@@ -264,7 +264,7 @@ function PnLBars({
           x={W - 4}
           y={PAD_TOP + halfH * 1.5 + 4}
           textAnchor="end"
-          fill="rgba(255,255,255,.30)"
+          fill="var(--navi-fg4)"
           fontSize="10"
           fontFamily="var(--navi-font-mono)"
         >
@@ -274,7 +274,7 @@ function PnLBars({
           x={W - 4}
           y={PAD_TOP + usableH + 4}
           textAnchor="end"
-          fill="rgba(255,255,255,.55)"
+          fill="var(--navi-fg2)"
           fontSize="11"
           fontFamily="var(--navi-font-mono)"
         >
@@ -311,7 +311,7 @@ function PnLBars({
                 x={cx}
                 y={H - 8}
                 textAnchor="middle"
-                fill="rgba(255,255,255,.55)"
+                fill="var(--navi-fg2)"
                 fontSize="11"
                 fontFamily="var(--navi-font-sans)"
                 fontWeight="500"
