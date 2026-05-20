@@ -235,8 +235,17 @@ export default function PositionsPage() {
           />
         </div>
 
-        {/* Positions / Gains log / Expenses */}
+        {/* Positions / Gains / Expenses
+            Summary bars always sit above the toggle: they describe the
+            portfolio as a whole and shouldn't feel gated by the table view. */}
         <div className="np-section">
+          {portfolio.rows.length > 0 && (
+            <RealizedSummary
+              portfolio={portfolio}
+              overlayByTicker={overlayByTicker}
+              putProtectionByTicker={putProtectionByTicker}
+            />
+          )}
           <div className="np-section-hd">
             <div className="np-section-title">
               {posView === 'table'
@@ -266,13 +275,6 @@ export default function PositionsPage() {
               </button>
             </div>
           </div>
-          {portfolio.rows.length > 0 && (
-            <RealizedSummary
-              portfolio={portfolio}
-              overlayByTicker={overlayByTicker}
-              putProtectionByTicker={putProtectionByTicker}
-            />
-          )}
           {posView === 'table' && (
             <PositionsTable
               rows={portfolio.rows}

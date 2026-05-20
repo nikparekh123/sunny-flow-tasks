@@ -22,7 +22,7 @@ import {
  */
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-const WEEK_COUNT = 12;
+const WEEK_COUNT = 52;
 
 function mondayOf(d: Date): Date {
   const x = new Date(d);
@@ -258,12 +258,12 @@ export function PositionInsightModal({
         {/* Two big stat numbers */}
         <div className="pi-stats">
           <div className="pi-stat">
-            <div className="pi-stat-l">↑ Gains · 12wk</div>
+            <div className="pi-stat-l">↑ Gains · 52wk</div>
             <div className="pi-stat-v pos">{fmtUSD(totals.gain.total)}</div>
             <div className="pi-stat-sub">{entries.length} {entries.length === 1 ? 'entry' : 'entries'}</div>
           </div>
           <div className="pi-stat">
-            <div className="pi-stat-l">↓ Expenses · 12wk</div>
+            <div className="pi-stat-l">↓ Expenses · 52wk</div>
             <div className="pi-stat-v neg">−{fmtUSD(totals.exp.total)}</div>
             <div className="pi-stat-sub">
               {expenseEntries.length + (putProtection ? 1 : 0)} items
@@ -274,7 +274,7 @@ export function PositionInsightModal({
             <div className={'pi-stat-v ' + (totals.net < 0 ? 'neg' : totals.net > 0 ? 'pos' : '')}>
               {totals.net >= 0 ? fmtUSD(totals.net) : '−' + fmtUSD(Math.abs(totals.net))}
             </div>
-            <div className="pi-stat-sub">last 12 weeks</div>
+            <div className="pi-stat-sub">last 52 weeks</div>
           </div>
         </div>
 
@@ -430,9 +430,10 @@ function ChartBidirectional({
       </svg>
       {/* X axis labels — just a sparse tick set */}
       <div className="pi-chart-xaxis">
-        <span>−11w</span>
-        <span>−8w</span>
-        <span>−4w</span>
+        <span>−12mo</span>
+        <span>−9mo</span>
+        <span>−6mo</span>
+        <span>−3mo</span>
         <span>now</span>
       </div>
       <div className="pi-chart-legend">
