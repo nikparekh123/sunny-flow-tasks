@@ -105,34 +105,64 @@ export function TradesLogMatrix({
     [filtered, realizedByTicker],
   );
 
-  // Weekly totals across visible rows.
-  const weeklyTotals = useMemo(() => {
-    const totals = Array.from({ length: WEEK_COUNT }, () => ({
-      collected: 0, paid: 0, n: 0,
-    }));
+  // Helper used by both the column totals (footer) and per-row rendering:
+  // returns the slot's signed value (cash flow for live positions,
+  // realized P&L for closed pairs).
+  const isProtectiveTrade = (t: OptionTrade) =>
+    t.option_type === 'put' && t.direction === 'long';
+  const slotValueForOpen = useMemo(() => {
+    const byId = new Map<string, OptionTrade>();
+    for (const t of trades) byId.set(t.id, t);
+    const closesByOpen = new Map<string, OptionTrade[]>();
+    for (const t of trades) {
+      if (t.action !== 'close' || !t.closes_trade_id) continue;
+      const arr = closesByOpen.get(t.closes_trade_id) ?? [];
+      arr.push(t);
+      closesByOpen.set(t.closes_trade_id, arr);
+    }
+    return (open: OptionTrade): number => {
+      const closes = closesByOpen.get(open.id) ?? [];
+      if (closes.length > 0) {
+        return closes.reduce((s, c) => s + closeRealizedPL(c, open), 0);
+      }
+      const notional = open.contracts * 100 * open.premium;
+      return open.direction === 'short' ? notional : -notional;
+    };
+  }, [trades]);
+
+  // Column totals — sum of every cell's signed value at that column index.
+  // Mirrors what the user sees in the matrix: realized for closed positions,
+  // cash flow for live ones.
+  const columnTotals = useMemo(() => {
+    const totals = Array.from({ length: WEEK_COUNT }, () => 0);
     sorted.forEach((r) => {
-      const trades = tradesByTicker.get(r.ticker) ?? [];
-      trades.forEach((t) => {
-        const w = weekIdxOf(t.trade_date, todayWeek);
-        if (w < 0 || w >= WEEK_COUNT) return;
-        const notional = t.contracts * 100 * t.premium;
-        const isCashIn =
-          (t.action === 'open' && t.direction === 'short') ||
-          (t.action === 'close' && t.direction === 'long');
-        if (isCashIn) totals[w].collected += notional;
-        else          totals[w].paid      += notional;
-        totals[w].n += 1;
+      const opens = (tradesByTicker.get(r.ticker) ?? [])
+        .filter((t) => t.action === 'open')
+        .sort((a, b) => {
+          const aP = isProtectiveTrade(a) ? 0 : 1;
+          const bP = isProtectiveTrade(b) ? 0 : 1;
+          if (aP !== bP) return aP - bP;
+          return aP === 0
+            ? a.trade_date !== b.trade_date
+              ? a.trade_date.localeCompare(b.trade_date)
+              : a.created_at.localeCompare(b.created_at)
+            : b.trade_date !== a.trade_date
+              ? b.trade_date.localeCompare(a.trade_date)
+              : b.created_at.localeCompare(a.created_at);
+        });
+      opens.forEach((open, i) => {
+        if (i < WEEK_COUNT) totals[i] += slotValueForOpen(open);
       });
     });
     return totals;
-  }, [sorted, tradesByTicker, todayWeek, WEEK_COUNT]);
+  }, [sorted, tradesByTicker, WEEK_COUNT, slotValueForOpen]);
 
-  const grand = {
-    collected: weeklyTotals.reduce((s, t) => s + t.collected, 0),
-    paid:      weeklyTotals.reduce((s, t) => s + t.paid, 0),
-    n:         weeklyTotals.reduce((s, t) => s + t.n, 0),
-  };
-  const grandNet = grand.collected - grand.paid;
+  const grandColumnTotal = columnTotals.reduce((s, v) => s + v, 0);
+  const totalTradesCount = useMemo(
+    () =>
+      sorted.reduce((s, r) => s + (tradesByTicker.get(r.ticker)?.length ?? 0), 0),
+    [sorted, tradesByTicker],
+  );
 
   return (
     <div className="gl-wrap">
@@ -323,28 +353,27 @@ export function TradesLogMatrix({
           <tfoot>
             <tr className="gl-foot">
               <td className="gl-pos">
-                <b>Weekly net</b>
-                <div className="gl-pos-sub">{grand.n} trades</div>
+                <b>Column total</b>
+                <div className="gl-pos-sub">{totalTradesCount} trades · realized + live</div>
               </td>
-              {weeklyTotals.map((t, i) => {
-                const net = t.collected - t.paid;
-                return (
-                  <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
-                    {net !== 0 ? (
-                      <div className="gl-cell-in">
-                        <div className={'gl-cell-amt ' + (net < 0 ? 'down' : 'up')}>
-                          {net >= 0 ? fmtCompact(net) : '−' + fmtCompact(Math.abs(net))}
-                        </div>
+              {columnTotals.map((net, i) => (
+                <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
+                  {net !== 0 ? (
+                    <div className="gl-cell-in">
+                      <div className={'gl-cell-amt ' + (net < 0 ? 'down' : 'up')}>
+                        {net >= 0 ? fmtCompact(net) : '−' + fmtCompact(Math.abs(net))}
                       </div>
-                    ) : (
-                      <span className="muted">—</span>
-                    )}
-                  </td>
-                );
-              })}
+                    </div>
+                  ) : (
+                    <span className="muted">—</span>
+                  )}
+                </td>
+              ))}
               <td className="gl-tot">
-                <div className={'gl-tot-amt ' + (grandNet < 0 ? 'down' : grandNet > 0 ? 'up' : '')}>
-                  {grandNet >= 0 ? fmtUSD(grandNet) : '−' + fmtUSD(Math.abs(grandNet))}
+                <div className={'gl-tot-amt ' + (grandColumnTotal < 0 ? 'down' : grandColumnTotal > 0 ? 'up' : '')}>
+                  {grandColumnTotal >= 0
+                    ? fmtUSD(grandColumnTotal)
+                    : '−' + fmtUSD(Math.abs(grandColumnTotal))}
                 </div>
               </td>
             </tr>
