@@ -192,9 +192,19 @@ export function TradesLogMatrix({
                   ? b.trade_date.localeCompare(a.trade_date)
                   : b.created_at.localeCompare(a.created_at),
               );
+              const byId = new Map<string, OptionTrade>();
+              for (const t of trades) byId.set(t.id, t);
               const slotFor = (idx: number) => {
                 const t = sortedTrades[idx];
                 if (!t) return null;
+                // For closes, show REALIZED P&L (sell-price − buy-price ×
+                // contracts × 100, signed by direction). That way a profitable
+                // close shows green even though the cash motion is "out".
+                if (t.action === 'close' && t.closes_trade_id) {
+                  const open = byId.get(t.closes_trade_id);
+                  if (open) return { trade: t, signed: closeRealizedPL(t, open) };
+                }
+                // For opens (and orphan closes), fall back to signed cash flow.
                 const notional = t.contracts * 100 * t.premium;
                 const isCashIn =
                   (t.action === 'open' && t.direction === 'short') ||
