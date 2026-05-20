@@ -131,10 +131,27 @@ export function TradesLogMatrix({
     };
   }, [tradesByTicker]);
 
-  // Column totals — sum of every cell's signed value at that column index.
-  // Mirrors what the user sees in the matrix: realized for closed positions,
-  // cash flow for live ones.
-  const columnTotals = useMemo(() => {
+  // Per-ticker collected (premium income from cash-in trades) and realized
+  // (P&L from closed pairs). Used by the right column and footer to answer
+  // "what % of premium I collected is actually realized?"
+  const collectedByTicker = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [ticker, list] of tradesByTicker) {
+      let collected = 0;
+      for (const t of list) {
+        const isCashIn =
+          (t.action === 'open' && t.direction === 'short') ||
+          (t.action === 'close' && t.direction === 'long');
+        if (isCashIn) collected += t.contracts * 100 * t.premium;
+      }
+      m.set(ticker, collected);
+    }
+    return m;
+  }, [tradesByTicker]);
+
+  // Column-wise collected. For each column slot, sum the collected portion
+  // (positive cash-in only) across all visible tickers.
+  const columnCollected = useMemo(() => {
     const totals = Array.from({ length: WEEK_COUNT }, () => 0);
     sorted.forEach((r) => {
       const opens = (tradesByTicker.get(r.ticker) ?? [])
@@ -152,13 +169,29 @@ export function TradesLogMatrix({
               : b.created_at.localeCompare(a.created_at);
         });
       opens.forEach((open, i) => {
-        if (i < WEEK_COUNT) totals[i] += slotValueForOpen(open);
+        if (i >= WEEK_COUNT) return;
+        // Sum collected = open's cash-in for shorts, plus its closes' cash-in
+        // (for long closes). For long opens (protective puts), collected = 0
+        // at the open; closes against them get counted when the close is
+        // long-direction (i.e., never for protective puts — they're a pure
+        // cost). This keeps "collected" semantically = premium income.
+        if (open.direction === 'short') {
+          totals[i] += open.contracts * 100 * open.premium;
+        }
       });
     });
     return totals;
-  }, [sorted, tradesByTicker, WEEK_COUNT, slotValueForOpen]);
+  }, [sorted, tradesByTicker, WEEK_COUNT]);
 
-  const grandColumnTotal = columnTotals.reduce((s, v) => s + v, 0);
+  const grandCollected = useMemo(
+    () => Array.from(collectedByTicker.values()).reduce((s, v) => s + v, 0),
+    [collectedByTicker],
+  );
+  const grandRealized = useMemo(
+    () => sorted.reduce((s, r) => s + (realizedByTicker.get(r.ticker) ?? 0), 0),
+    [sorted, realizedByTicker],
+  );
+  const grandPct = grandCollected > 0 ? (grandRealized / grandCollected) * 100 : 0;
   const totalTradesCount = useMemo(
     () =>
       sorted.reduce((s, r) => s + (tradesByTicker.get(r.ticker)?.length ?? 0), 0),
@@ -339,6 +372,16 @@ export function TradesLogMatrix({
                         '−' + fmtUSD(Math.abs(realized))
                       )}
                     </div>
+                    {(() => {
+                      const collected = collectedByTicker.get(r.ticker) ?? 0;
+                      if (collected <= 0) return null;
+                      const pct = (realized / collected) * 100;
+                      return (
+                        <div className="gl-tot-sub">
+                          {pct >= 0 ? '+' : ''}{pct.toFixed(0)}% of {fmtCompact(collected)}
+                        </div>
+                      );
+                    })()}
                   </td>
                 </tr>
               );
@@ -354,15 +397,16 @@ export function TradesLogMatrix({
           <tfoot>
             <tr className="gl-foot">
               <td className="gl-pos">
-                <b>Column total</b>
-                <div className="gl-pos-sub">{totalTradesCount} trades · realized + live</div>
+                <b>Collected</b>
+                <div className="gl-pos-sub">{totalTradesCount} trades · premium in</div>
               </td>
-              {columnTotals.map((net, i) => (
+              {columnCollected.map((collected, i) => (
                 <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
-                  {net !== 0 ? (
+                  {collected > 0 ? (
                     <div className="gl-cell-in">
-                      <div className={'gl-cell-amt ' + (net < 0 ? 'down' : 'up')}>
-                        {net >= 0 ? fmtCompact(net) : '−' + fmtCompact(Math.abs(net))}
+                      <div className="gl-cell-amt up">{fmtCompact(collected)}</div>
+                      <div className="gl-cell-chips">
+                        <span className="gl-cell-state">collected</span>
                       </div>
                     </div>
                   ) : (
@@ -371,11 +415,14 @@ export function TradesLogMatrix({
                 </td>
               ))}
               <td className="gl-tot">
-                <div className={'gl-tot-amt ' + (grandColumnTotal < 0 ? 'down' : grandColumnTotal > 0 ? 'up' : '')}>
-                  {grandColumnTotal >= 0
-                    ? fmtUSD(grandColumnTotal)
-                    : '−' + fmtUSD(Math.abs(grandColumnTotal))}
+                <div className="gl-tot-amt up">
+                  {fmtCompact(grandCollected)}
                 </div>
+                {grandCollected > 0 && (
+                  <div className="gl-tot-sub">
+                    {grandRealized >= 0 ? '' : '−'}{fmtCompact(Math.abs(grandRealized))} realized · {grandPct >= 0 ? '+' : ''}{grandPct.toFixed(0)}%
+                  </div>
+                )}
               </td>
             </tr>
           </tfoot>
