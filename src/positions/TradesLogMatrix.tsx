@@ -184,27 +184,23 @@ export function TradesLogMatrix({
               const live = liveByTicker.get(r.ticker) ?? [];
               const realized = realizedByTicker.get(r.ticker) ?? 0;
 
-              // Per-week aggregate for this ticker.
-              const byWeek: Record<number, CellAggregate> = {};
-              const byId = new Map<string, OptionTrade>();
-              for (const t of trades) byId.set(t.id, t);
-              trades.forEach((t) => {
-                const w = weekIdxOf(t.trade_date, todayWeek);
-                if (w < 0 || w >= WEEK_COUNT) return;
-                if (!byWeek[w]) byWeek[w] = {
-                  collected_call: 0, collected_put: 0,
-                  paid_call: 0, paid_put: 0, trade_count: 0,
-                };
+              // One slot per trade, newest first. Two trades on the same
+              // day each get their own column rather than sharing a cell.
+              // Empty slots (beyond this ticker's trade count) get a + cell.
+              const sortedTrades = trades.slice().sort((a, b) =>
+                b.trade_date !== a.trade_date
+                  ? b.trade_date.localeCompare(a.trade_date)
+                  : b.created_at.localeCompare(a.created_at),
+              );
+              const slotFor = (idx: number) => {
+                const t = sortedTrades[idx];
+                if (!t) return null;
                 const notional = t.contracts * 100 * t.premium;
                 const isCashIn =
                   (t.action === 'open' && t.direction === 'short') ||
                   (t.action === 'close' && t.direction === 'long');
-                const bucket = isCashIn
-                  ? (t.option_type === 'call' ? 'collected_call' : 'collected_put')
-                  : (t.option_type === 'call' ? 'paid_call' : 'paid_put');
-                byWeek[w][bucket] += notional;
-                byWeek[w].trade_count += 1;
-              });
+                return { trade: t, signed: isCashIn ? notional : -notional };
+              };
 
               return (
                 <tr key={r.ticker} className={r.status === 'closed' ? 'closed-row' : ''}>
@@ -223,30 +219,29 @@ export function TradesLogMatrix({
                   </td>
 
                   {Array.from({ length: WEEK_COUNT }, (_, i) => {
-                    const c = byWeek[i];
-                    const net = c ? (c.collected_call + c.collected_put - c.paid_call - c.paid_put) : 0;
+                    const slot = slotFor(i);
                     return (
                       <td
                         key={i}
-                        className={'gl-cell ' + (c ? 'filled ' : 'empty ') + (i === 0 ? 'this' : '')}
+                        className={'gl-cell ' + (slot ? 'filled ' : 'empty ') + (i === 0 ? 'this' : '')}
                         onClick={() => onCellClick(r.ticker, i)}
-                        title={c
-                          ? `${c.trade_count} trade${c.trade_count === 1 ? '' : 's'} · net ${fmtUSD(net)}`
+                        title={slot
+                          ? `${slot.trade.action} ${slot.trade.direction} ${slot.trade.option_type} ${slot.trade.contracts}× $${slot.trade.strike} · ${slot.trade.trade_date} · ${fmtUSD(slot.signed)}`
                           : 'tap to open a new position'
                         }
                       >
-                        {c ? (
+                        {slot ? (
                           <div className="gl-cell-in">
-                            <div className={'gl-cell-amt ' + (net < 0 ? 'down' : net > 0 ? 'up' : '')}>
-                              {net >= 0 ? fmtCompact(net) : '−' + fmtCompact(Math.abs(net))}
+                            <div className={'gl-cell-amt ' + (slot.signed < 0 ? 'down' : slot.signed > 0 ? 'up' : '')}>
+                              {slot.signed >= 0 ? fmtCompact(slot.signed) : '−' + fmtCompact(Math.abs(slot.signed))}
                             </div>
                             <div className="gl-cell-chips">
-                              {(c.collected_call > 0 || c.paid_call > 0) && (
-                                <span className={'gl-dot rk-c' + (c.collected_call < c.paid_call ? ' neg' : '')} />
-                              )}
-                              {(c.collected_put > 0 || c.paid_put > 0) && (
-                                <span className={'gl-dot rk-p' + (c.collected_put < c.paid_put ? ' neg' : '')} />
-                              )}
+                              <span
+                                className={
+                                  'gl-dot rk-' + (slot.trade.option_type === 'put' ? 'p' : 'c') +
+                                  (slot.signed < 0 ? ' neg' : '')
+                                }
+                              />
                             </div>
                           </div>
                         ) : (
