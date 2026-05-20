@@ -2898,8 +2898,8 @@
   border-radius: 6px;
   border: 1.5px solid;
 }
-.np-app .exp-leg.put.short  { background: var(--navi-negative); border-color: var(--navi-negative); }
-.np-app .exp-leg.put.long   { background: transparent;          border-color: var(--navi-negative); }
+.np-app .exp-leg.put.short  { background: transparent;          border-color: var(--navi-negative); }
+.np-app .exp-leg.put.long   { background: var(--navi-negative); border-color: var(--navi-negative); }
 .np-app .exp-leg.call.short { background: var(--navi-positive); border-color: var(--navi-positive); }
 .np-app .exp-leg.call.long  { background: transparent;          border-color: var(--navi-positive); }
 
@@ -3058,15 +3058,17 @@
   text-align: right;
   box-sizing: border-box;
 }
+/* Short put = outline (cash-secured put, premium collected) */
 .np-app .exp-bar.put.short {
-  background: var(--navi-negative);
-  border-color: var(--navi-negative);
-  color: #200808;
-}
-.np-app .exp-bar.put.long {
   background: rgba(232,112,96,.18);
   border-color: var(--navi-negative);
   color: var(--navi-negative);
+}
+/* Long put = filled (protective put, premium paid) */
+.np-app .exp-bar.put.long {
+  background: var(--navi-negative);
+  border-color: var(--navi-negative);
+  color: #200808;
 }
 .np-app .exp-bar.call.short {
   background: var(--navi-positive);
