@@ -24,13 +24,15 @@ export function RealizedSummary({ portfolio, overlayByTicker, putProtectionByTic
   const byStrategy: Record<StrategyBucket, {
     realized: { stock: number; call: number; put: number; total: number };
     put_cost: number;
+    put_current: number;        // sum of mark-to-market value of active puts
+    put_current_known: boolean; // true if at least one contract has a fresh quote
     put_per_week: number;
     market_value: number;
     count: number;
   }> = {
-    income: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_per_week: 0, market_value: 0, count: 0 },
-    invest: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_per_week: 0, market_value: 0, count: 0 },
-    yield:  { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_per_week: 0, market_value: 0, count: 0 },
+    income: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_current: 0, put_current_known: false, put_per_week: 0, market_value: 0, count: 0 },
+    invest: { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_current: 0, put_current_known: false, put_per_week: 0, market_value: 0, count: 0 },
+    yield:  { realized: { stock: 0, call: 0, put: 0, total: 0 }, put_cost: 0, put_current: 0, put_current_known: false, put_per_week: 0, market_value: 0, count: 0 },
   };
   for (const r of portfolio.rows) {
     const b = overlayByTicker.get(r.ticker);
@@ -43,13 +45,17 @@ export function RealizedSummary({ portfolio, overlayByTicker, putProtectionByTic
     s.put_cost       += r.put_cost;
     s.market_value   += r.market_value;
     s.count          += 1;
-    // Per-week put cost: each contract's total_cost / days_to_expiry × 7,
-    // summed across the bucket. Matches the table the user shared.
     const pp = putProtectionByTicker.get(r.ticker);
     if (pp) {
       const calc = computePutProtection(pp);
+      // Per-week put cost: each contract's total_cost / days_to_expiry × 7.
       if (calc.has && !calc.expired && calc.cost_per_day > 0) {
         s.put_per_week += calc.cost_per_day * 7;
+      }
+      // Mark-to-market: only contracts with a fetched quote contribute.
+      if (calc.current_value != null) {
+        s.put_current += calc.current_value;
+        s.put_current_known = true;
       }
     }
   }
@@ -125,6 +131,14 @@ export function RealizedSummary({ portfolio, overlayByTicker, putProtectionByTic
                 </span>
                 <span className="np-strat-detail-item">
                   <span className="k">put cost</span>−{fmtCompact(s.put_cost)}
+                  {s.put_current_known && (
+                    <span
+                      className="np-strat-detail-sub"
+                      title="Mark-to-market: live put premiums × contracts × 100"
+                    >
+                      current −{fmtCompact(s.put_current)}
+                    </span>
+                  )}
                 </span>
                 {s.put_per_week > 0 && (
                   <span className="np-strat-detail-item" title="Sum of (put cost ÷ days to expiry) × 7 across active contracts in this bucket">

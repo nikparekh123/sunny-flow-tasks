@@ -17,7 +17,6 @@ const NotFound = lazy(() => import('./pages/NotFound.tsx'));
 // Hostname is detected at first paint; each app is lazy-loaded so users
 // only download the bundle for the host they're on.
 const PositionsPage = lazy(() => import('./positions/PositionsPage'));
-const EarningsPage = lazy(() => import('./earnings/EarningsPage'));
 const Sunnyfi = lazy(() => import('./sunnyfi/Sunnyfi'));
 
 type App = 'tasks' | 'positions' | 'sunnyfi';
@@ -69,12 +68,9 @@ const App = () => {
 
   let content: React.ReactNode;
   if (which === 'positions') {
-    // The positions hostname serves /positions (default) and /earnings as
-    // sibling routes. They share the same auth, hostname, and design tokens.
     content = (
       <Suspense fallback={<SuspenseFallback />}>
         <Routes>
-          <Route path="/earnings/*" element={<EarningsPage />} />
           <Route path="*" element={<PositionsPage />} />
         </Routes>
       </Suspense>

@@ -28,6 +28,16 @@ export interface PositionRow {
   prev_close: number | null;
   last_price_update: string | null;
   status: PositionStatus;
+  /** Next earnings date as ISO 'YYYY-MM-DD', or null if none scheduled. */
+  earnings_date: string | null;
+}
+
+/** Days between today (UTC) and an ISO date string. Negative = in the past. */
+export function daysUntil(iso: string): number {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const target = new Date(iso + 'T00:00:00Z');
+  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
 export interface GainEntry {
@@ -59,6 +69,16 @@ export interface PutProtectionRow {
   total_cost: number;
   expiry: string;
   purchase_date: string;
+  /** Number of put contracts (each = 100 shares of underlying). Optional
+   *  for backward compat with older rows. */
+  contracts: number | null;
+  /** Per-share strike price. */
+  strike: number | null;
+  /** Latest per-share premium from Polygon. Multiply by contracts × 100
+   *  to get the position's current market value. */
+  current_premium: number | null;
+  /** ISO timestamp of the last successful quote fetch. */
+  current_premium_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -75,6 +95,17 @@ export interface PutProtectionCalc {
   cost_incurred: number;
   cost_remaining: number;
   expired: boolean;
+  /** Market quote fields — null until a quote is fetched from Polygon. */
+  contracts: number | null;
+  strike: number | null;
+  current_premium: number | null;
+  current_premium_at: string | null;
+  /** Total mark-to-market value of the contract today, in dollars.
+   *  contracts × 100 × current_premium. Null if any input is missing. */
+  current_value: number | null;
+  /** current_value − total_cost. Positive = the puts have appreciated
+   *  since purchase. Null if current_value is null. */
+  mark_to_market_pl: number | null;
 }
 
 export function computePutProtection(pp: PutProtectionRow | undefined): PutProtectionCalc {
@@ -83,6 +114,8 @@ export function computePutProtection(pp: PutProtectionRow | undefined): PutProte
       has: false, total_cost: 0, expiry: null, purchase_date: null,
       total_days: 0, days_to_expiry: 0, days_elapsed: 0,
       cost_per_day: 0, cost_incurred: 0, cost_remaining: 0, expired: false,
+      contracts: null, strike: null, current_premium: null, current_premium_at: null,
+      current_value: null, mark_to_market_pl: null,
     };
   }
   const today = new Date();
@@ -94,6 +127,12 @@ export function computePutProtection(pp: PutProtectionRow | undefined): PutProte
   const cost_per_day = pp.total_cost / total_days;
   const cost_incurred = Math.min(pp.total_cost, cost_per_day * days_elapsed);
   const cost_remaining = Math.max(0, pp.total_cost - cost_incurred);
+  const current_value =
+    pp.contracts != null && pp.current_premium != null
+      ? pp.contracts * 100 * pp.current_premium
+      : null;
+  const mark_to_market_pl =
+    current_value != null ? current_value - pp.total_cost : null;
   return {
     has: true,
     total_cost: pp.total_cost,
@@ -106,6 +145,12 @@ export function computePutProtection(pp: PutProtectionRow | undefined): PutProte
     cost_incurred,
     cost_remaining,
     expired: days_to_expiry <= 0,
+    contracts: pp.contracts,
+    strike: pp.strike,
+    current_premium: pp.current_premium,
+    current_premium_at: pp.current_premium_at,
+    current_value,
+    mark_to_market_pl,
   };
 }
 

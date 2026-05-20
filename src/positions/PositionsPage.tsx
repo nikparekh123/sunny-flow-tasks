@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import Auth from '@/pages/Auth';
 import { usePositions } from './usePositions';
@@ -45,7 +44,9 @@ export default function PositionsPage() {
     deleteExpense,
     setPutProtection,
     clearPutProtection,
+    refreshPutQuotes,
     setPositionStatus,
+    setEarningsDate,
   } = usePositions();
   const [allocView, setAllocView] = useState<AllocView>(() =>
     readLS<AllocView>(LS_ALLOC, ['sector', 'stock', 'strategy', 'pnl'] as const, 'sector'),
@@ -85,6 +86,18 @@ export default function PositionsPage() {
     return () => window.clearTimeout(id);
   }, [isLoading, portfolio.rows.length]);
 
+  // Auto-refresh put quotes once per browser session. Cheap (one API call
+  // per active put contract), and ensures the strategy cards show a fresh
+  // mark-to-market without the user clicking Refresh.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const KEY = 'np:put-quotes-refreshed';
+    if (window.sessionStorage.getItem(KEY)) return;
+    window.sessionStorage.setItem(KEY, '1');
+    refreshPutQuotes.mutate();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (loading) {
     return (
       <div className="np-app" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -95,18 +108,35 @@ export default function PositionsPage() {
   if (!user) return <Auth />;
 
   const handleRefresh = async () => {
+    // Refresh stock prices and put-protection mark-to-market in parallel.
+    // The two settle independently — one failing doesn't block the other.
     try {
-      const result = await refreshPrices.mutateAsync();
-      const missing = result?.missing?.length ?? 0;
-      toast.success(
-        missing > 0
-          ? `Updated ${result.updated}/${result.total} (${missing} skipped)`
-          : `Updated ${result.updated}/${result.total} prices`,
-      );
+      const [priceResult, putResult] = await Promise.allSettled([
+        refreshPrices.mutateAsync(),
+        refreshPutQuotes.mutateAsync(),
+      ]);
+      if (priceResult.status === 'fulfilled') {
+        const r = priceResult.value;
+        const missing = r?.missing?.length ?? 0;
+        toast.success(
+          missing > 0
+            ? `Updated ${r.updated}/${r.total} prices (${missing} skipped)`
+            : `Updated ${r.updated}/${r.total} prices`,
+        );
+      } else {
+        toast.error(`Prices: ${(priceResult.reason as Error).message}`);
+      }
+      if (putResult.status === 'fulfilled' && putResult.value.total > 0) {
+        const r = putResult.value;
+        toast.success(`Put quotes: ${r.updated}/${r.total} updated`);
+      } else if (putResult.status === 'rejected') {
+        toast.error(`Put quotes: ${(putResult.reason as Error).message}`);
+      }
     } catch (e) {
       toast.error(`Refresh failed: ${(e as Error).message}`);
     }
   };
+
 
   const isDown = portfolio.total_pnl < 0;
 
@@ -119,9 +149,7 @@ export default function PositionsPage() {
             Sunnyfi<span className="cursor" />
           </a>
           <span className="np-crumb-sep">/</span>
-          <Link to="/positions" className="np-crumb-link on">POSITIONS</Link>
-          <span className="np-crumb-sep">/</span>
-          <Link to="/earnings" className="np-crumb-link">EARNINGS</Link>
+          <span className="np-crumb">POSITIONS</span>
         </div>
         <div className="np-actions">
           <button
@@ -311,6 +339,17 @@ export default function PositionsPage() {
             onError: (e) => toast.error((e as Error).message),
           })
         }
+        onSetEarningsDate={(p) =>
+          setEarningsDate.mutate(p, {
+            onSuccess: () =>
+              toast.success(
+                p.earnings_date
+                  ? `Earnings ${p.earnings_date} · ${p.ticker}`
+                  : `Cleared earnings · ${p.ticker}`,
+              ),
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
       />}
     </div>
   );
@@ -334,6 +373,7 @@ function DetailModalWrapper(props: {
   onSetPutProtection: Parameters<typeof PositionDetailModal>[0]['onSetPutProtection'];
   onClearPutProtection: Parameters<typeof PositionDetailModal>[0]['onClearPutProtection'];
   onSetStatus: Parameters<typeof PositionDetailModal>[0]['onSetStatus'];
+  onSetEarningsDate: Parameters<typeof PositionDetailModal>[0]['onSetEarningsDate'];
 }) {
   const pos = useMemo(
     () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
@@ -360,6 +400,7 @@ function DetailModalWrapper(props: {
       onSetPutProtection={props.onSetPutProtection}
       onClearPutProtection={props.onClearPutProtection}
       onSetStatus={props.onSetStatus}
+      onSetEarningsDate={props.onSetEarningsDate}
     />
   );
 }

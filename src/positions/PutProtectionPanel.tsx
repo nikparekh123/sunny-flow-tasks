@@ -27,7 +27,13 @@ interface Props {
   editing: boolean;
   onEditStart: () => void;
   onEditCancel: () => void;
-  onSave: (p: { total_cost: number; expiry: string; purchase_date: string }) => void;
+  onSave: (p: {
+    total_cost: number;
+    expiry: string;
+    purchase_date: string;
+    contracts: number | null;
+    strike: number | null;
+  }) => void;
   onClear: () => void;
 }
 
@@ -42,17 +48,27 @@ export function PutProtectionPanel({
 }: Props) {
   const [expiry, setExpiry] = useState(calc.expiry ?? defaultExpiry(60));
   const [totalCost, setTotalCost] = useState(calc.has ? String(calc.total_cost) : '');
+  const [contracts, setContracts] = useState(calc.contracts != null ? String(calc.contracts) : '');
+  const [strike, setStrike] = useState(calc.strike != null ? String(calc.strike) : '');
   // When the user hits "Save protection" we don't write immediately —
   // we show a confirmation chip naming the ticker. This catches the
   // "I had the wrong position open" mistake before it hits the DB.
-  const [pendingSave, setPendingSave] = useState<null | { total_cost: number; expiry: string; purchase_date: string }>(null);
+  const [pendingSave, setPendingSave] = useState<null | {
+    total_cost: number;
+    expiry: string;
+    purchase_date: string;
+    contracts: number | null;
+    strike: number | null;
+  }>(null);
 
   // Re-sync form state when the panel re-opens or switches position.
   useEffect(() => {
     setExpiry(calc.expiry ?? defaultExpiry(60));
     setTotalCost(calc.has ? String(calc.total_cost) : '');
+    setContracts(calc.contracts != null ? String(calc.contracts) : '');
+    setStrike(calc.strike != null ? String(calc.strike) : '');
     setPendingSave(null);
-  }, [editing, calc.expiry, calc.total_cost, calc.has, ticker]);
+  }, [editing, calc.expiry, calc.total_cost, calc.has, calc.contracts, calc.strike, ticker]);
 
   const previewTotal = parseFloat(totalCost);
   const previewTotalDays = expiry ? daysBetween(todayIso(), expiry) : 0;
@@ -92,6 +108,31 @@ export function PutProtectionPanel({
               {expiry ? `${previewTotalDays} days from today` : ''}
             </div>
           </div>
+          <div className="qa-field">
+            <label>Contracts</label>
+            <input
+              type="number"
+              step="1"
+              min="1"
+              className="np-input"
+              value={contracts}
+              onChange={(e) => setContracts(e.target.value)}
+              placeholder="e.g. 3"
+            />
+            <div className="pp-form-hint">each contract = 100 shares</div>
+          </div>
+          <div className="qa-field">
+            <label>Strike price (USD)</label>
+            <input
+              type="number"
+              step="0.50"
+              className="np-input"
+              value={strike}
+              onChange={(e) => setStrike(e.target.value)}
+              placeholder="e.g. 480"
+            />
+            <div className="pp-form-hint">per-share strike</div>
+          </div>
         </div>
         {previewTotal > 0 && previewTotalDays > 0 && (
           <div className="pp-form-preview">
@@ -105,7 +146,11 @@ export function PutProtectionPanel({
         {pendingSave && (
           <div className="pp-confirm">
             <span className="pp-confirm-q">
-              Add put protection for <b>{ticker}</b> · {fmtUSD(pendingSave.total_cost)}?
+              Add put protection for <b>{ticker}</b> · {fmtUSD(pendingSave.total_cost)}
+              {pendingSave.contracts != null && pendingSave.strike != null && (
+                <span> · {pendingSave.contracts}× ${pendingSave.strike} strike</span>
+              )}
+              ?
             </span>
             <div className="pp-confirm-actions">
               <button className="np-btn ghost" onClick={() => setPendingSave(null)}>
@@ -136,7 +181,15 @@ export function PutProtectionPanel({
             onClick={() => {
               const n = parseFloat(totalCost);
               if (!expiry || isNaN(n) || n < 0) return;
-              setPendingSave({ total_cost: n, expiry, purchase_date: todayIso() });
+              const c = contracts.trim() ? parseInt(contracts, 10) : NaN;
+              const s = strike.trim() ? parseFloat(strike) : NaN;
+              setPendingSave({
+                total_cost: n,
+                expiry,
+                purchase_date: todayIso(),
+                contracts: !isNaN(c) && c > 0 ? c : null,
+                strike: !isNaN(s) && s > 0 ? s : null,
+              });
             }}
             disabled={!expiry || !totalCost || isNaN(parseFloat(totalCost)) || parseFloat(totalCost) < 0 || pendingSave !== null}
           >
@@ -183,7 +236,33 @@ export function PutProtectionPanel({
         <div className="pp-stat">
           <div className="pp-stat-l">Cost paid</div>
           <div className="pp-stat-v down">−{fmtUSD(calc.total_cost)}</div>
-          <div className="pp-stat-sub-line">total premium</div>
+          {calc.contracts != null && calc.strike != null ? (
+            <div className="pp-stat-sub-line">
+              {calc.contracts}× ${fmtUSD2(calc.strike).replace('$', '')} strike
+            </div>
+          ) : (
+            <div className="pp-stat-sub-line">total premium</div>
+          )}
+        </div>
+        <div className="pp-stat">
+          <div className="pp-stat-l">Current value</div>
+          {calc.current_value != null ? (
+            <>
+              <div className={'pp-stat-v ' + ((calc.mark_to_market_pl ?? 0) < 0 ? 'down' : 'up')}>
+                −{fmtUSD(calc.current_value)}
+              </div>
+              <div className="pp-stat-sub-line">
+                {(calc.mark_to_market_pl ?? 0) >= 0 ? '+' : '−'}{fmtUSD(Math.abs(calc.mark_to_market_pl ?? 0))} vs cost
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="pp-stat-v"><span className="muted">—</span></div>
+              <div className="pp-stat-sub-line">
+                {calc.contracts && calc.strike ? 'awaiting quote' : 'set contracts + strike'}
+              </div>
+            </>
+          )}
         </div>
         <div className="pp-stat">
           <div className="pp-stat-l">Expiry</div>

@@ -1,11 +1,28 @@
 import { useMemo, useState, Fragment } from 'react';
 import {
+  daysUntil,
   fmtUSD,
   fmtUSD2,
   fmtPct,
   fmtQty,
   type PositionComputed,
 } from './types';
+
+/** Format earnings countdown like "▶ today", "▶ tomorrow", "▶ 5d". */
+function fmtCountdown(daysOut: number): string {
+  if (daysOut === 0) return '▶ today';
+  if (daysOut === 1) return '▶ tomorrow';
+  if (daysOut < 0) return `▶ ${-daysOut}d ago`;
+  return `▶ ${daysOut}d`;
+}
+
+/** Urgency tier: 'urgent' ≤2 days, 'soon' ≤7 days, 'queued' ≤30 days, else null. */
+function urgencyOf(daysOut: number): 'urgent' | 'soon' | 'queued' | null {
+  if (daysOut < 0 || daysOut > 30) return null;
+  if (daysOut <= 2) return 'urgent';
+  if (daysOut <= 7) return 'soon';
+  return 'queued';
+}
 
 type SortKey =
   | 'ticker'
@@ -141,8 +158,13 @@ export function PositionsTable({
                     <span className="np-group-count">· {rowsInGroup.length} positions</span>
                   </td>
                 </tr>
-                {rowsInGroup.map((r) => (
-                  <tr key={r.id} data-ticker={r.ticker}>
+                {rowsInGroup.map((r) => {
+                  // Earnings countdown — only when a date is set and within 30 days.
+                  const earnDays = r.earnings_date ? daysUntil(r.earnings_date) : null;
+                  const urgency = earnDays != null ? urgencyOf(earnDays) : null;
+                  const rowClass = urgency ? `np-row-earn-${urgency}` : '';
+                return (
+                  <tr key={r.id} data-ticker={r.ticker} className={rowClass}>
                     <td className="ticker">
                       {onTickerClick ? (
                         <span className="ticker clickable" onClick={() => onTickerClick(r.ticker)}>
@@ -150,6 +172,14 @@ export function PositionsTable({
                         </span>
                       ) : (
                         r.ticker
+                      )}
+                      {urgency && earnDays != null && (
+                        <span
+                          className={'np-earn-chip ' + urgency}
+                          title={`Earnings ${r.earnings_date} (${fmtCountdown(earnDays)})`}
+                        >
+                          {fmtCountdown(earnDays)}
+                        </span>
                       )}
                     </td>
                     <td>
@@ -205,7 +235,7 @@ export function PositionsTable({
                       {r.pct_portfolio.toFixed(1)}%
                     </td>
                   </tr>
-                ))}
+                );})}
                 <tr className={`np-group-foot np-group-${meta.tone}`}>
                   <td colSpan={7}>
                     <b>{meta.name} subtotal</b>

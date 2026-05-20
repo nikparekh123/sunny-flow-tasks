@@ -71,6 +71,7 @@ interface Props {
   onSetPutProtection: (p: { ticker: string; total_cost: number; expiry: string; purchase_date?: string }) => void;
   onClearPutProtection: (ticker: string) => void;
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
+  onSetEarningsDate: (p: { ticker: string; earnings_date: string | null }) => void;
 }
 
 export function PositionDetailModal({
@@ -88,6 +89,7 @@ export function PositionDetailModal({
   onSetPutProtection,
   onClearPutProtection,
   onSetStatus,
+  onSetEarningsDate,
 }: Props) {
   const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
   // Both modals auto-open their matching inline log form so the user
@@ -193,6 +195,30 @@ export function PositionDetailModal({
                     {fmtQty(position.quantity)} sh @ {fmtUSD2(position.avg_cost)}
                   </span>
                 </>
+              )}
+            </div>
+            <div className="pd-meta pd-earnings-field">
+              <label className="pd-meta-l">Earnings date</label>
+              <input
+                type="date"
+                className="np-input pd-earnings-input"
+                value={position.earnings_date ?? ''}
+                onChange={(e) =>
+                  onSetEarningsDate({
+                    ticker: position.ticker,
+                    earnings_date: e.target.value || null,
+                  })
+                }
+              />
+              {position.earnings_date && (
+                <button
+                  type="button"
+                  className="pd-earnings-clear"
+                  onClick={() => onSetEarningsDate({ ticker: position.ticker, earnings_date: null })}
+                  title="Clear earnings date"
+                >
+                  clear
+                </button>
               )}
             </div>
           </div>
