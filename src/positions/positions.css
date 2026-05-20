@@ -2859,3 +2859,21 @@
 
 /* Timeline bars are read-only — no pointer cursor, no hover lift. */
 .tl-bar-readonly { cursor: default; }
+
+/* Day-change chip next to ticker — small ▲/▼ with absolute %. Up = teal-
+   green (sized to match the existing .np-earn-chip), Down = coral. */
+.np-day-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.np-day-chip.up   { background: rgba(168,212,160,.14); color: var(--navi-positive); }
+.np-day-chip.down { background: rgba(232,112,96,.14);  color: var(--navi-negative); }
+.np-day-chip.flat { background: rgba(70,130,120,.14);  color: var(--navi-fg3); }
