@@ -394,6 +394,34 @@ export function usePositions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
   });
 
+  // ── Delete position (and all linked rows) ─────────────────────────
+  // Wipes everything tied to this ticker: position row, gains, expenses,
+  // and put_protection. Used when the user wants a clean slate to re-add
+  // a position with the new structured fields.
+  const deletePosition = useMutation({
+    mutationFn: async (ticker: string) => {
+      const t = ticker.trim().toUpperCase();
+      // Order matters less here since there are no FK constraints between
+      // these tables (ticker is just a text column on each), but we still
+      // delete dependents first for narrative clarity.
+      const tables = ['gain_entries', 'expenses', 'put_protection', 'positions'] as const;
+      for (const table of tables) {
+        const { error } = await supabase
+          .from(table as never)
+          .delete()
+          .eq('ticker', t);
+        if (error) throw new Error(`${table}: ${error.message}`);
+      }
+      return { ticker: t };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['gain_entries'] });
+      qc.invalidateQueries({ queryKey: ['expenses'] });
+      qc.invalidateQueries({ queryKey: ['put_protection'] });
+    },
+  });
+
   // ── Position status (open ↔ closed) ────────────────────────────────
   const setPositionStatus = useMutation({
     mutationFn: async (args: { ticker: string; status: 'open' | 'closed' }) => {
@@ -437,6 +465,7 @@ export function usePositions() {
     refreshPutQuotes,
     setPositionStatus,
     setEarningsDate,
+    deletePosition,
   };
 }
 

@@ -48,6 +48,7 @@ export default function PositionsPage() {
     refreshPutQuotes,
     setPositionStatus,
     setEarningsDate,
+    deletePosition,
   } = usePositions();
   const [allocView, setAllocView] = useState<AllocView>(() =>
     readLS<AllocView>(LS_ALLOC, ['sector', 'stock', 'strategy', 'pnl'] as const, 'sector'),
@@ -346,6 +347,15 @@ export default function PositionsPage() {
         }
         onAddGain={() => { setDetail({ ticker: insightTicker, mode: 'gain' }); setInsightTicker(null); }}
         onAddExpense={() => { setDetail({ ticker: insightTicker, mode: 'expense' }); setInsightTicker(null); }}
+        onDeletePosition={(t) =>
+          deletePosition.mutate(t, {
+            onSuccess: () => {
+              toast.success(`Deleted ${t} and all linked entries`);
+              setInsightTicker(null);
+            },
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
       />}
 
       {detail && <DetailModalWrapper
@@ -469,6 +479,7 @@ function InsightModalWrapper(props: {
   onSetEarningsDate: Parameters<typeof PositionInsightModal>[0]['onSetEarningsDate'];
   onAddGain: () => void;
   onAddExpense: () => void;
+  onDeletePosition: (ticker: string) => void;
 }) {
   const pos = useMemo(
     () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
@@ -487,6 +498,7 @@ function InsightModalWrapper(props: {
       onSetEarningsDate={props.onSetEarningsDate}
       onAddGain={props.onAddGain}
       onAddExpense={props.onAddExpense}
+      onDeletePosition={props.onDeletePosition}
     />
   );
 }

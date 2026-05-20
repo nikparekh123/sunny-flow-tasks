@@ -62,6 +62,7 @@ interface Props {
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
   onAddGain: () => void;        // opens the write modal in gain mode
   onAddExpense: () => void;     // opens the write modal in expense mode
+  onDeletePosition: (ticker: string) => void;
 }
 
 export function PositionInsightModal({
@@ -75,6 +76,7 @@ export function PositionInsightModal({
   onSetStatus,
   onAddGain,
   onAddExpense,
+  onDeletePosition,
 }: Props) {
   const [editingEarnings, setEditingEarnings] = useState(false);
   const [draftEarnings, setDraftEarnings] = useState(position.earnings_date ?? '');
@@ -314,12 +316,33 @@ export function PositionInsightModal({
 
         {/* Footer actions */}
         <div className="pi-foot">
-          <button
-            className="pi-link danger"
-            onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
-          >
-            {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
-          </button>
+          <div className="pi-foot-start">
+            <button
+              className="pi-link danger"
+              onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
+            >
+              {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
+            </button>
+            <button
+              className="pi-link danger pi-link-strong"
+              onClick={() => {
+                const counts =
+                  `${entries.length} gain${entries.length === 1 ? '' : 's'} · ` +
+                  `${expenseEntries.length} expense${expenseEntries.length === 1 ? '' : 's'}` +
+                  (putProtection ? ` · 1 put protection` : '');
+                if (window.confirm(
+                  `Delete ${position.ticker} entirely?\n\n` +
+                  `This removes the position row plus ${counts}.\n` +
+                  `Action cannot be undone.`,
+                )) {
+                  onDeletePosition(position.ticker);
+                }
+              }}
+              title="Delete position and all linked gains, expenses, and put protection"
+            >
+              🗑 Delete position
+            </button>
+          </div>
           <div className="pi-foot-end">
             <button className="pp-btn pp-btn-text" onClick={onAddExpense}>+ Log expense</button>
             <button className="pp-btn pp-btn-neon" onClick={onAddGain}>+ Log gain</button>

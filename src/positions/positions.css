@@ -2462,3 +2462,12 @@
    provides horizontal overflow. */
 .gl-table .gl-wk { min-width: 38px; }
 .gl-table .gl-cell { min-width: 38px; }
+
+/* Footer: group "Mark closed" + "Delete position" on the left. */
+.pi-foot-start {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+.pi-link-strong { font-weight: 500; }
+.pi-link-strong:hover { color: var(--navi-negative); }
