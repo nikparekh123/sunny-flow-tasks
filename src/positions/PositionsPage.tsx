@@ -238,7 +238,7 @@ export default function PositionsPage() {
               {posView === 'table'
                 ? `Positions · ${portfolio.rows.length}`
                 : posView === 'gains'
-                  ? 'Gains log'
+                  ? 'Gains'
                   : 'Expenses'}
             </div>
             <div className="np-view-toggle">
@@ -252,7 +252,7 @@ export default function PositionsPage() {
                 className={posView === 'gains' ? 'on' : ''}
                 onClick={() => setPosView('gains')}
               >
-                Gains log
+                Gains
               </button>
               <button
                 className={posView === 'expenses' ? 'on' : ''}
@@ -310,7 +310,11 @@ export default function PositionsPage() {
 
       {detail && <DetailModalWrapper
         ticker={detail.ticker}
-        mode={detail.mode}
+        initialTab={detail.mode}
+        onViewHistory={(which) => {
+          setPosView(which === 'expense' ? 'expenses' : 'gains');
+          setDetail(null);
+        }}
         rows={portfolio.rows}
         gainsByTicker={gainsByTicker}
         expensesByTicker={expensesByTicker}
@@ -374,6 +378,7 @@ function DetailModalWrapper(props: {
   onClearPutProtection: Parameters<typeof PositionDetailModal>[0]['onClearPutProtection'];
   onSetStatus: Parameters<typeof PositionDetailModal>[0]['onSetStatus'];
   onSetEarningsDate: Parameters<typeof PositionDetailModal>[0]['onSetEarningsDate'];
+  onViewHistory: Parameters<typeof PositionDetailModal>[0]['onViewHistory'];
 }) {
   const pos = useMemo(
     () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
@@ -391,7 +396,8 @@ function DetailModalWrapper(props: {
       expenseEntries={expenses}
       putProtection={pp}
       bucket={bucket}
-      mode={props.mode}
+      initialTab={props.mode}
+      onViewHistory={props.onViewHistory}
       onClose={props.onClose}
       onAddGain={props.onAddGain}
       onDeleteGain={props.onDeleteGain}
