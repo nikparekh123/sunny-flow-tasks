@@ -65,7 +65,7 @@ export default function PositionsPage() {
   // Two-layer modal: clicking a ticker opens the read-only insight view;
   // the logger (write modal) opens *from* the insight via "+ Log gain/expense".
   const [insightTicker, setInsightTicker] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ ticker: string; mode: 'gain' | 'expense' } | null>(null);
+  const [detail, setDetail] = useState<{ ticker: string; mode: 'gain' | 'expense'; source?: 'stock' | 'call' | 'put' } | null>(null);
 
   // ?ticker=… deep-link: scroll the matching row into view + flash.
   useEffect(() => {
@@ -286,7 +286,10 @@ export default function PositionsPage() {
             <GainsLogMatrix
               rows={portfolio.rows}
               gainsByTicker={gainsByTicker}
-              onCellClick={(t) => setInsightTicker(t)}
+              // Cell click = "I want to log/edit this thing" → open the
+              // logger pre-filled with gain mode + call source (most common).
+              onCellClick={(t) => setDetail({ ticker: t, mode: 'gain', source: 'call' })}
+              // Ticker name click = "show me this position" → open insight.
               onTickerClick={(t) => setInsightTicker(t)}
             />
           )}
@@ -295,7 +298,9 @@ export default function PositionsPage() {
               rows={portfolio.rows}
               expensesByTicker={expensesByTicker}
               putProtectionByTicker={putProtectionByTicker}
-              onCellClick={(t) => setInsightTicker(t)}
+              // Cell click → logger in expense mode + put source (most
+              // expenses on this app are put protection).
+              onCellClick={(t) => setDetail({ ticker: t, mode: 'expense', source: 'put' })}
               onTickerClick={(t) => setInsightTicker(t)}
             />
           )}
@@ -344,6 +349,7 @@ export default function PositionsPage() {
       {detail && <DetailModalWrapper
         ticker={detail.ticker}
         initialTab={detail.mode}
+        initialSource={detail.source}
         onViewHistory={(which) => {
           setPosView(which === 'expense' ? 'expenses' : 'gains');
           setDetail(null);
@@ -397,6 +403,7 @@ export default function PositionsPage() {
 function DetailModalWrapper(props: {
   ticker: string;
   mode: 'gain' | 'expense';
+  initialSource?: 'stock' | 'call' | 'put';
   rows: ReturnType<typeof usePositions>['portfolio']['rows'];
   gainsByTicker: ReturnType<typeof usePositions>['gainsByTicker'];
   expensesByTicker: ReturnType<typeof usePositions>['expensesByTicker'];
@@ -430,6 +437,7 @@ function DetailModalWrapper(props: {
       putProtection={pp}
       bucket={bucket}
       initialTab={props.mode}
+      initialSource={props.initialSource}
       onViewHistory={props.onViewHistory}
       onClose={props.onClose}
       onAddGain={props.onAddGain}

@@ -2428,3 +2428,37 @@
   border-top: 1px solid rgba(30,90,80,.18);
 }
 .pi-foot-end { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+
+/* ── Matrix timeframe selector (12w / 26w / 52w / 104w) ──────────── */
+.gl-timeframe {
+  display: inline-flex;
+  background: rgba(15,51,51,.5);
+  border-radius: 100px;
+  padding: 3px;
+  gap: 2px;
+  margin-left: auto;
+}
+.gl-timeframe button {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  color: var(--navi-fg4);
+  padding: 5px 12px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all .15s var(--np-ease);
+  letter-spacing: 0.4px;
+}
+.gl-timeframe button:hover { color: var(--navi-fg2); }
+.gl-timeframe button.on {
+  background: var(--navi-tint-neon);
+  color: var(--navi-neon);
+}
+
+/* Ensure the matrix columns keep a minimum width so 52+ weeks doesn't
+   crush them into unreadable slivers. The .gl-scroll wrapper already
+   provides horizontal overflow. */
+.gl-table .gl-wk { min-width: 38px; }
+.gl-table .gl-cell { min-width: 38px; }

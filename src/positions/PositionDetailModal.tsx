@@ -47,6 +47,9 @@ interface Props {
   bucket?: Bucket;
   /** Which tab opens first. Defaults to 'gain'. */
   initialTab?: 'gain' | 'expense';
+  /** Which source is pre-selected. Defaults to 'call'. Pass 'put' when
+   *  opening from a put-expense context, etc. */
+  initialSource?: GainSource;
   onClose: () => void;
   onAddGain: (p: { ticker: string; gain_date: string; source: GainSource; amount: number; note?: string }) => void;
   onDeleteGain: (id: string) => void;
@@ -96,6 +99,7 @@ export function PositionDetailModal({
   putProtection,
   bucket,
   initialTab = 'gain',
+  initialSource = 'call',
   onClose,
   onAddGain,
   onDeleteGain: _onDeleteGain,
@@ -112,7 +116,7 @@ export function PositionDetailModal({
   void _onDeleteGain; void _onDeleteExpense; void _onClearPutProtection; void _onSetEarningsDate;
 
   const [tab, setTab] = useState<Tab>(initialTab);
-  const [source, setSource] = useState<Source>('call');
+  const [source, setSource] = useState<Source>(initialSource);
   const [entry, setEntry] = useState<EntryForm>(blankEntry());
 
   const set = <K extends keyof EntryForm>(k: K, v: EntryForm[K]) =>
