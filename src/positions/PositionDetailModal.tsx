@@ -180,6 +180,7 @@ export function PositionDetailModal({
       note: openForm.note || null,
     });
     setOpenForm(blankOpen());
+    onClose(); // dismiss after submit; the parent toast confirms success/failure
   };
 
   const submitClose = () => {
@@ -198,6 +199,7 @@ export function PositionDetailModal({
       note: closeForm.note || null,
     });
     setCloseForm(blankClose(closeForm.target_id));
+    onClose();
   };
 
   return (
