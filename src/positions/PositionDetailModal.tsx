@@ -118,9 +118,44 @@ export function PositionDetailModal({
   const [tab, setTab] = useState<Tab>(initialTab);
   const [source, setSource] = useState<Source>(initialSource);
   const [entry, setEntry] = useState<EntryForm>(blankEntry());
+  // True when the current form represents an EDIT of an existing
+  // put_protection row (expense mode + put source + the position already has
+  // put protection). In edit mode we only upsert put_protection on save;
+  // we don't also create a new expense row, otherwise the same protection
+  // would double-count in the matrix.
+  const isEditingPutProtection =
+    tab === 'expense' && source === 'put' && !!putProtection;
 
   const set = <K extends keyof EntryForm>(k: K, v: EntryForm[K]) =>
     setEntry((prev) => ({ ...prev, [k]: v }));
+
+  // Pre-fill the form when opening into edit-an-existing-put context.
+  // Re-runs if the user toggles into put-expense mode after open.
+  useEffect(() => {
+    if (isEditingPutProtection && putProtection) {
+      // Derive premium-per-share from total / (contracts × 100) when we
+      // have the structured fields; otherwise leave premium blank so the
+      // user can fill it in.
+      const contracts = putProtection.contracts ?? null;
+      const strike = putProtection.strike ?? null;
+      const premium = contracts && contracts > 0
+        ? (putProtection.total_cost / (contracts * 100))
+        : null;
+      setEntry({
+        strike: strike != null ? String(strike) : '',
+        contracts: contracts != null ? String(contracts) : '',
+        expiry: putProtection.expiry,
+        premium: premium != null ? premium.toFixed(2) : '',
+        amount: '',
+        shares: '',
+        date: putProtection.purchase_date,
+        note: '',
+      });
+    }
+    // intentionally only watch the edit-trigger and the row identity so
+    // typing into other fields doesn't reset state
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditingPutProtection, putProtection?.id]);
 
   // Close on Escape, lock body scroll while the modal is open.
   useEffect(() => {
@@ -196,17 +231,11 @@ export function PositionDetailModal({
           `${entry.contracts}× $${entry.strike} ${source} exp ${entry.expiry} @ $${entry.premium}/sh`,
         ].filter(Boolean).join(' · ');
     if (isExp) {
-      // Expenses store magnitudes; total is always positive.
-      onAddExpense({
-        ticker: position.ticker,
-        expense_date: entry.date,
-        source,
-        amount: Math.abs(total),
-        note: noteLine || undefined,
-      });
-      // For put expenses with structured data, also upsert put_protection so
-      // the strategy cards' MTM works.
       if (source === 'put') {
+        // Put expense = put protection. Store it ONLY in put_protection
+        // (the strategy cards mark it to market from there, and the
+        // expense matrix surfaces it as a synthetic row). Writing into
+        // both `expenses` and `put_protection` would double-count.
         onSetPutProtection({
           ticker: position.ticker,
           total_cost: Math.abs(total),
@@ -214,6 +243,15 @@ export function PositionDetailModal({
           purchase_date: entry.date,
           contracts: parseInt(entry.contracts, 10) || null,
           strike: parseFloat(entry.strike) || null,
+        });
+      } else {
+        // Stock / call expenses go into the expenses table.
+        onAddExpense({
+          ticker: position.ticker,
+          expense_date: entry.date,
+          source,
+          amount: Math.abs(total),
+          note: noteLine || undefined,
         });
       }
     } else {
@@ -373,7 +411,7 @@ export function PositionDetailModal({
           <div className="pp-popup-foot-end">
             <button className="pp-btn pp-btn-text" onClick={onClose}>Cancel</button>
             <button className="pp-btn pp-btn-neon" onClick={submit} disabled={!canSubmit}>
-              ✓ Add {isExp ? 'expense' : 'gain'}
+              ✓ {isEditingPutProtection ? 'Save put protection' : `Add ${isExp ? 'expense' : 'gain'}`}
             </button>
           </div>
         </div>
