@@ -184,32 +184,41 @@ export function TradesLogMatrix({
               const live = liveByTicker.get(r.ticker) ?? [];
               const realized = realizedByTicker.get(r.ticker) ?? 0;
 
-              // One slot per trade, newest first. Two trades on the same
-              // day each get their own column rather than sharing a cell.
-              // Empty slots (beyond this ticker's trade count) get a + cell.
-              const sortedTrades = trades.slice().sort((a, b) =>
-                b.trade_date !== a.trade_date
-                  ? b.trade_date.localeCompare(a.trade_date)
-                  : b.created_at.localeCompare(a.created_at),
-              );
-              const byId = new Map<string, OptionTrade>();
-              for (const t of trades) byId.set(t.id, t);
+              // One slot per POSITION (= one open trade + its matched
+              // closes). When the user closes a position, the same column
+              // updates to show realized P&L — no second column for the
+              // close. Columns are ordered newest open first.
+              const opens = trades
+                .filter((t) => t.action === 'open')
+                .sort((a, b) =>
+                  b.trade_date !== a.trade_date
+                    ? b.trade_date.localeCompare(a.trade_date)
+                    : b.created_at.localeCompare(a.created_at),
+                );
+              // Build close index: open.id → list of closes against it
+              const closesByOpen = new Map<string, OptionTrade[]>();
+              for (const t of trades) {
+                if (t.action !== 'close' || !t.closes_trade_id) continue;
+                const arr = closesByOpen.get(t.closes_trade_id) ?? [];
+                arr.push(t);
+                closesByOpen.set(t.closes_trade_id, arr);
+              }
               const slotFor = (idx: number) => {
-                const t = sortedTrades[idx];
-                if (!t) return null;
-                // For closes, show REALIZED P&L (sell-price − buy-price ×
-                // contracts × 100, signed by direction). That way a profitable
-                // close shows green even though the cash motion is "out".
-                if (t.action === 'close' && t.closes_trade_id) {
-                  const open = byId.get(t.closes_trade_id);
-                  if (open) return { trade: t, signed: closeRealizedPL(t, open) };
+                const open = opens[idx];
+                if (!open) return null;
+                const closes = closesByOpen.get(open.id) ?? [];
+                const closedContracts = closes.reduce((s, c) => s + c.contracts, 0);
+                const isFullyClosed = closedContracts >= open.contracts;
+                const isPartial = closes.length > 0 && !isFullyClosed;
+                if (closes.length > 0) {
+                  // Realized P&L summed across matched closes.
+                  const realized = closes.reduce((s, c) => s + closeRealizedPL(c, open), 0);
+                  return { trade: open, signed: realized, isFullyClosed, isPartial };
                 }
-                // For opens (and orphan closes), fall back to signed cash flow.
-                const notional = t.contracts * 100 * t.premium;
-                const isCashIn =
-                  (t.action === 'open' && t.direction === 'short') ||
-                  (t.action === 'close' && t.direction === 'long');
-                return { trade: t, signed: isCashIn ? notional : -notional };
+                // Live (no closes yet): show the open's signed cash flow.
+                const notional = open.contracts * 100 * open.premium;
+                const isCashIn = open.direction === 'short';
+                return { trade: open, signed: isCashIn ? notional : -notional, isFullyClosed: false, isPartial: false };
               };
 
               return (
@@ -230,13 +239,20 @@ export function TradesLogMatrix({
 
                   {Array.from({ length: WEEK_COUNT }, (_, i) => {
                     const slot = slotFor(i);
+                    const stateLabel = !slot
+                      ? ''
+                      : slot.isFullyClosed
+                        ? 'closed'
+                        : slot.isPartial
+                          ? 'partial'
+                          : 'live';
                     return (
                       <td
                         key={i}
                         className={'gl-cell ' + (slot ? 'filled ' : 'empty ') + (i === 0 ? 'this' : '')}
                         onClick={() => onCellClick(r.ticker, i)}
                         title={slot
-                          ? `${slot.trade.action} ${slot.trade.direction} ${slot.trade.option_type} ${slot.trade.contracts}× $${slot.trade.strike} · ${slot.trade.trade_date} · ${fmtUSD(slot.signed)}`
+                          ? `${slot.trade.direction} ${slot.trade.option_type} ${slot.trade.contracts}× $${slot.trade.strike} · opened ${slot.trade.trade_date} · ${stateLabel} · ${fmtUSD(slot.signed)}`
                           : 'tap to open a new position'
                         }
                       >
@@ -252,6 +268,7 @@ export function TradesLogMatrix({
                                   (slot.signed < 0 ? ' neg' : '')
                                 }
                               />
+                              <span className={'gl-cell-state ' + stateLabel}>{stateLabel}</span>
                             </div>
                           </div>
                         ) : (
