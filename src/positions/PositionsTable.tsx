@@ -1,11 +1,13 @@
 import { useMemo, useState, Fragment } from 'react';
 import {
+  chipsForSignals,
   daysUntil,
   fmtUSD,
   fmtUSD2,
   fmtPct,
   fmtQty,
   type PositionComputed,
+  type TickerSignals,
 } from './types';
 
 /** Format earnings countdown like "▶ today", "▶ tomorrow", "▶ 5d". */
@@ -44,6 +46,8 @@ interface Props {
   onUpload?: () => void;
   loading?: boolean;
   overlayByTicker?: Map<string, Bucket>;
+  /** Daily technical indicators per ticker (RSI, MA cross, ROC). */
+  signalsByTicker?: Map<string, TickerSignals>;
   /** Clicking a ticker opens the Position Detail modal. */
   onTickerClick?: (ticker: string) => void;
 }
@@ -62,6 +66,7 @@ export function PositionsTable({
   onUpload,
   loading,
   overlayByTicker,
+  signalsByTicker,
   onTickerClick,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('market_value');
@@ -119,6 +124,7 @@ export function PositionsTable({
           <tr>
             <th onClick={() => onSort('ticker')}>Ticker{ind('ticker')}</th>
             <th>Status</th>
+            <th title="Technical signals — only shown when actionable (RSI extremes, MA cross, big moves)">Signals</th>
             <th onClick={() => onSort('sector')}>Sector{ind('sector')}</th>
             <th onClick={() => onSort('quantity')}>Qty{ind('quantity')}</th>
             <th onClick={() => onSort('avg_cost')}>Avg cost{ind('avg_cost')}</th>
@@ -152,7 +158,7 @@ export function PositionsTable({
             return (
               <Fragment key={g}>
                 <tr className={`np-group-hd np-group-${meta.tone}`}>
-                  <td colSpan={11}>
+                  <td colSpan={12}>
                     <span className="np-group-dot" style={{ background: meta.accent }} />
                     <span className="np-group-name">{meta.name}</span>
                     <span className="np-group-count">· {rowsInGroup.length} positions</span>
@@ -216,6 +222,23 @@ export function PositionsTable({
                         )}
                       </span>
                     </td>
+                    <td className="signals-cell">
+                      {(() => {
+                        const sig = signalsByTicker?.get(r.ticker);
+                        if (!sig) return null;
+                        const chips = chipsForSignals(sig);
+                        if (chips.length === 0) return null;
+                        return (
+                          <div className="np-sig-strip">
+                            {chips.map((c, i) => (
+                              <span key={i} className={`np-sig-chip ${c.tone}`} title={c.title}>
+                                {c.label}
+                              </span>
+                            ))}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className="sector-cell">{r.sector}</td>
                     <td className="num">{fmtQty(r.quantity)}</td>
                     <td className="num">{fmtUSD2(r.avg_cost)}</td>
@@ -255,7 +278,7 @@ export function PositionsTable({
                   </tr>
                 );})}
                 <tr className={`np-group-foot np-group-${meta.tone}`}>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <b>{meta.name} subtotal</b>
                   </td>
                   <td className="num strong">{fmtUSD(subtotal.mv)}</td>

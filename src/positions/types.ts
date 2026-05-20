@@ -53,6 +53,103 @@ export function daysUntil(iso: string): number {
   return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
+// ── Ticker signals (technicals) ─────────────────────────────────────
+
+export interface TickerSignals {
+  ticker: string;
+  asof_date: string;
+  price: number | null;
+  ma20: number | null;
+  ma50: number | null;
+  ma200: number | null;
+  rsi14: number | null;
+  chg_5d_pct: number | null;
+  chg_21d_pct: number | null;
+  updated_at: string;
+}
+
+export interface SignalChip {
+  label: string;
+  tone: 'up' | 'down' | 'warn' | 'cool';
+  title: string;
+}
+
+/**
+ * Reduce raw signals → a small list of chips, but ONLY when they're
+ * actionable. The goal is to keep the signals column quiet most of the
+ * time and shout when something matters.
+ *
+ * Rules:
+ *   MA   — below 200d ("downtrend") or >10% above 50d ("stretched")
+ *          or >7% below 50d ("pullback"). Mutually exclusive.
+ *   RSI  — only when ≥70 ("overbought") or ≤30 ("oversold").
+ *   ROC  — 5-day move ≥|5%|, 21-day move ≥|10%|.
+ */
+export function chipsForSignals(s: TickerSignals): SignalChip[] {
+  const chips: SignalChip[] = [];
+
+  // MA chip
+  if (s.price != null && s.ma50 != null && s.ma50 > 0) {
+    const pctVs50 = ((s.price - s.ma50) / s.ma50) * 100;
+    if (s.ma200 != null && s.ma200 > 0 && s.price < s.ma200) {
+      chips.push({
+        label: '↓ 200d',
+        tone: 'down',
+        title: `Price $${s.price.toFixed(2)} is below the 200-day MA ($${s.ma200.toFixed(2)}) — long-term downtrend`,
+      });
+    } else if (pctVs50 >= 10) {
+      chips.push({
+        label: 'stretched',
+        tone: 'warn',
+        title: `Price is ${pctVs50.toFixed(1)}% above 50-day MA — extended; good window to sell calls`,
+      });
+    } else if (pctVs50 <= -7) {
+      chips.push({
+        label: 'pullback',
+        tone: 'cool',
+        title: `Price is ${pctVs50.toFixed(1)}% below 50-day MA — pullback; good window to sell puts`,
+      });
+    }
+  }
+
+  // RSI chip
+  if (s.rsi14 != null) {
+    if (s.rsi14 >= 70) {
+      chips.push({
+        label: `RSI ${s.rsi14.toFixed(0)}`,
+        tone: 'warn',
+        title: `RSI ${s.rsi14.toFixed(1)} — overbought; sell-call window`,
+      });
+    } else if (s.rsi14 <= 30) {
+      chips.push({
+        label: `RSI ${s.rsi14.toFixed(0)}`,
+        tone: 'cool',
+        title: `RSI ${s.rsi14.toFixed(1)} — oversold; sell-put window`,
+      });
+    }
+  }
+
+  // ROC chips
+  if (s.chg_5d_pct != null && Math.abs(s.chg_5d_pct) >= 5) {
+    const sign = s.chg_5d_pct >= 0 ? '+' : '';
+    chips.push({
+      label: `${sign}${s.chg_5d_pct.toFixed(1)}%w`,
+      tone: s.chg_5d_pct >= 0 ? 'up' : 'down',
+      title: `${s.chg_5d_pct >= 0 ? 'Up' : 'Down'} ${Math.abs(s.chg_5d_pct).toFixed(1)}% over the last 5 trading days`,
+    });
+  }
+  if (s.chg_21d_pct != null && Math.abs(s.chg_21d_pct) >= 10) {
+    const sign = s.chg_21d_pct >= 0 ? '+' : '';
+    chips.push({
+      label: `${sign}${s.chg_21d_pct.toFixed(1)}%m`,
+      tone: s.chg_21d_pct >= 0 ? 'up' : 'down',
+      title: `${s.chg_21d_pct >= 0 ? 'Up' : 'Down'} ${Math.abs(s.chg_21d_pct).toFixed(1)}% over the last ~21 trading days`,
+    });
+  }
+
+  return chips;
+}
+
 // ── Option trades ────────────────────────────────────────────────────
 
 export type OptionType = 'call' | 'put';

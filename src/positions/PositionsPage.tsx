@@ -35,6 +35,7 @@ export default function PositionsPage() {
     tradesByTicker,
     liveByTicker,
     realizedByTicker,
+    signalsByTicker,
     replacePositions,
     refreshPrices,
     addTrade,
@@ -241,6 +242,7 @@ export default function PositionsPage() {
               onUpload={() => setShowUpload(true)}
               loading={isLoading}
               overlayByTicker={overlayByTicker}
+              signalsByTicker={signalsByTicker}
               onTickerClick={(t) => setInsightTicker(t)}
             />
           )}

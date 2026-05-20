@@ -3136,6 +3136,52 @@
   .np-app .exp-grid { grid-template-columns: 100px 1fr; }
 }
 
+/* Signals column (PositionsTable) — chips only render when actionable */
+.np-app .signals-cell {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+.np-app .np-sig-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 180px;
+}
+.np-app .np-sig-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  border: 1px solid;
+  white-space: nowrap;
+  line-height: 1.3;
+  cursor: help;
+}
+.np-app .np-sig-chip.up {
+  color: var(--navi-positive);
+  background: rgba(168,212,160,.10);
+  border-color: rgba(168,212,160,.45);
+}
+.np-app .np-sig-chip.down {
+  color: var(--navi-negative);
+  background: rgba(232,112,96,.10);
+  border-color: rgba(232,112,96,.45);
+}
+.np-app .np-sig-chip.warn {
+  color: var(--navi-warning);
+  background: rgba(224,192,96,.10);
+  border-color: rgba(224,192,96,.50);
+}
+.np-app .np-sig-chip.cool {
+  color: #6dd1c5;
+  background: rgba(109,209,197,.10);
+  border-color: rgba(109,209,197,.45);
+}
+
 /* Old single-week styles (kept for backward compat, no-ops if unused) */
 .np-app .cal-wrap {
   background: var(--navi-card);

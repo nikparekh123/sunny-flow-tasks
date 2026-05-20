@@ -11,6 +11,7 @@ import {
   type OptionType,
   type PositionRow,
   type Sector,
+  type TickerSignals,
   SECTORS,
 } from './types';
 
@@ -66,6 +67,19 @@ export function usePositions() {
     },
   });
 
+  // Daily technical indicators — populated by the refresh-signals edge
+  // function (post-market-close cron). Read-only on the client.
+  const { data: signalsRaw = [] } = useQuery({
+    queryKey: ['ticker_signals'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ticker_signals' as never)
+        .select('*');
+      if (error) throw error;
+      return (data ?? []) as unknown as TickerSignals[];
+    },
+  });
+
   const { data: overlays = [] } = useQuery({
     queryKey: ['strategy_overlay_lite'],
     queryFn: async () => {
@@ -113,6 +127,12 @@ export function usePositions() {
 
   const liveByTicker = useMemo(() => liveOptionsByTicker(trades), [trades]);
   const realizedByTicker = useMemo(() => realizedPLByTicker(trades), [trades]);
+
+  const signalsByTicker = useMemo(() => {
+    const m = new Map<string, TickerSignals>();
+    for (const s of signalsRaw) m.set(s.ticker, s);
+    return m;
+  }, [signalsRaw]);
 
   const overlayByTicker = useMemo(() => {
     const m = new Map<string, StrategyBucket>();
@@ -299,6 +319,7 @@ export function usePositions() {
     tradesByTicker,
     liveByTicker,
     realizedByTicker,
+    signalsByTicker,
     replacePositions,
     refreshPrices,
     addTrade,
