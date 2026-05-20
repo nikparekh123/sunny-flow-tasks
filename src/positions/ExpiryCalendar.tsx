@@ -1,25 +1,25 @@
-import { useMemo, useState } from 'react';
-import { fmtCompact, type OptionTrade } from './types';
+import { Fragment, useMemo, useState } from 'react';
+import { fmtCompact, type OptionTrade, type PositionComputed } from './types';
 
 /**
- * Expiry calendar — one week at a time, days as columns.
+ * Expiry timeline — tickers fixed on the left, time on the right.
  *
- * Each option OPEN is plotted on its expiry date. Multiple opens on the
- * same day stack inside the day cell. No hour grid — option expiry is a
- * date concern, not a time concern (US options expire 16:00 ET regardless).
+ * For each ticker we draw two horizontal lanes:
+ *   • Put lane  — red rule, markers for every put open in range
+ *   • Call lane — green rule, markers for every call open in range
  *
- * Color/state:
- *   - short open (cash collected) → green tint
- *   - long open  (cash paid)      → red tint   (protective puts mostly)
- *   - fully closed open           → muted/strikethrough (history)
+ * Markers are placed by expiry date along a continuous calendar axis
+ * (today line in neon). Short = filled, Long = outlined; fully-closed
+ * opens render muted. Click a marker or a ticker → insight modal.
  *
- * Clicking a card opens the position insight modal.
+ * This is event-driven by design: each option is an event on a ticker's
+ * lane, not the other way around.
  */
 
-interface Props {
-  tradesByTicker: Map<string, OptionTrade[]>;
-  onTickerClick: (ticker: string) => void;
-}
+const DAY_MS = 24 * 60 * 60 * 1000;
+const RANGE_OPTIONS = [30, 60, 90, 180] as const;
+type Range = typeof RANGE_OPTIONS[number];
+const LS_RANGE = 'np:calRange';
 
 function startOfDayUTC(d: Date): Date {
   const x = new Date(d);
@@ -40,179 +40,285 @@ function addDays(d: Date, n: number): Date {
 function isoDay(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
-function fmtMonthDay(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+function readRangeLS(): Range {
+  if (typeof window === 'undefined') return 90;
+  const v = parseInt(window.localStorage.getItem(LS_RANGE) ?? '', 10);
+  return (RANGE_OPTIONS as readonly number[]).includes(v) ? (v as Range) : 90;
 }
 
-export function ExpiryCalendar({ tradesByTicker, onTickerClick }: Props) {
-  const todayMonday = useMemo(() => mondayOf(new Date()), []);
-  const todayIso = useMemo(() => isoDay(startOfDayUTC(new Date())), []);
-  const [weekOffset, setWeekOffset] = useState(0);
+interface Props {
+  rows: PositionComputed[];
+  tradesByTicker: Map<string, OptionTrade[]>;
+  onTickerClick: (ticker: string) => void;
+}
 
-  const weekStart = useMemo(() => addDays(todayMonday, weekOffset * 7), [todayMonday, weekOffset]);
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+export function ExpiryCalendar({ rows, tradesByTicker, onTickerClick }: Props) {
+  const [range, setRangeState] = useState<Range>(() => readRangeLS());
+  const setRange = (r: Range) => {
+    setRangeState(r);
+    try { window.localStorage.setItem(LS_RANGE, String(r)); } catch { /* private */ }
+  };
 
-  // Index expiry-date → list of {open, isClosed}, computed once.
-  const expiryIndex = useMemo(() => {
-    const closedQtyByOpen = new Map<string, number>();
-    const openQtyById = new Map<string, number>();
+  const today = useMemo(() => startOfDayUTC(new Date()), []);
+  // Show one extra week of history on the left so just-expired markers
+  // are still visible.
+  const start = useMemo(() => addDays(mondayOf(today), -7), [today]);
+  const end = useMemo(() => addDays(start, range + 7), [start, range]);
+  const totalDays = useMemo(
+    () => Math.round((end.getTime() - start.getTime()) / DAY_MS),
+    [start, end],
+  );
+  const startIso = useMemo(() => isoDay(start), [start]);
+  const endIso = useMemo(() => isoDay(end), [end]);
+
+  // Close index — open id → fully closed?
+  const closedSet = useMemo(() => {
+    const closedQty = new Map<string, number>();
+    const openQty = new Map<string, number>();
     for (const list of tradesByTicker.values()) {
       for (const t of list) {
-        if (t.action === 'open') openQtyById.set(t.id, t.contracts);
+        if (t.action === 'open') openQty.set(t.id, t.contracts);
         if (t.action === 'close' && t.closes_trade_id) {
-          closedQtyByOpen.set(
+          closedQty.set(
             t.closes_trade_id,
-            (closedQtyByOpen.get(t.closes_trade_id) ?? 0) + t.contracts,
+            (closedQty.get(t.closes_trade_id) ?? 0) + t.contracts,
           );
         }
       }
     }
-    const map = new Map<string, Array<{ open: OptionTrade; isClosed: boolean }>>();
-    for (const list of tradesByTicker.values()) {
-      for (const t of list) {
-        if (t.action !== 'open') continue;
-        const closed = (closedQtyByOpen.get(t.id) ?? 0) >= t.contracts;
-        const arr = map.get(t.expiry) ?? [];
-        arr.push({ open: t, isClosed: closed });
-        map.set(t.expiry, arr);
-      }
+    const s = new Set<string>();
+    for (const [id, q] of closedQty) {
+      if (q >= (openQty.get(id) ?? Infinity)) s.add(id);
     }
-    // Sort each day's stack: live first, then by ticker.
-    for (const arr of map.values()) {
-      arr.sort((a, b) => {
-        if (a.isClosed !== b.isClosed) return a.isClosed ? 1 : -1;
-        return a.open.ticker.localeCompare(b.open.ticker);
-      });
-    }
-    return map;
+    return s;
   }, [tradesByTicker]);
 
-  // Weekly totals across the visible days — count + collected/paid.
-  const weekSummary = useMemo(() => {
-    let count = 0;
-    let collected = 0;
-    let paid = 0;
-    for (const d of days) {
-      const items = expiryIndex.get(isoDay(d)) ?? [];
-      for (const { open, isClosed } of items) {
-        if (isClosed) continue;
-        count += 1;
-        const notional = open.contracts * 100 * open.premium;
-        if (open.direction === 'short') collected += notional;
-        else paid += notional;
+  // Per-ticker P/C bucketing, filtered to the visible range.
+  const tickerData = useMemo(() => {
+    const out: Array<{
+      ticker: string;
+      sector: string;
+      puts: OptionTrade[];
+      calls: OptionTrade[];
+    }> = [];
+    for (const r of rows) {
+      const list = tradesByTicker.get(r.ticker) ?? [];
+      const puts: OptionTrade[] = [];
+      const calls: OptionTrade[] = [];
+      for (const t of list) {
+        if (t.action !== 'open') continue;
+        if (t.expiry < startIso || t.expiry >= endIso) continue;
+        (t.option_type === 'put' ? puts : calls).push(t);
       }
+      if (puts.length === 0 && calls.length === 0) continue;
+      out.push({ ticker: r.ticker, sector: r.sector, puts, calls });
     }
-    return { count, collected, paid };
-  }, [days, expiryIndex]);
+    out.sort(
+      (a, b) =>
+        b.puts.length + b.calls.length - (a.puts.length + a.calls.length),
+    );
+    return out;
+  }, [rows, tradesByTicker, startIso, endIso]);
 
-  const weekLabel = `${fmtMonthDay(days[0])} – ${fmtMonthDay(days[6])}`;
-  const yearLabel = days[0].getUTCFullYear();
+  // Week ticks + month labels.
+  const weekTicks = useMemo(() => {
+    const ticks: Array<{ pct: number; monthLabel?: string }> = [];
+    let cursor = mondayOf(start);
+    let lastMonth = -1;
+    while (cursor < end) {
+      const pct =
+        ((cursor.getTime() - start.getTime()) / (totalDays * DAY_MS)) * 100;
+      const m = cursor.getUTCMonth();
+      const monthLabel =
+        m !== lastMonth
+          ? cursor.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })
+          : undefined;
+      lastMonth = m;
+      ticks.push({ pct, monthLabel });
+      cursor = addDays(cursor, 7);
+    }
+    return ticks;
+  }, [start, end, totalDays]);
+
+  const todayPct = useMemo(
+    () => ((today.getTime() - start.getTime()) / (totalDays * DAY_MS)) * 100,
+    [today, start, totalDays],
+  );
+
+  function pctFor(iso: string): number {
+    const d = new Date(iso + 'T00:00:00Z');
+    return ((d.getTime() - start.getTime()) / (totalDays * DAY_MS)) * 100;
+  }
 
   return (
-    <div className="cal-wrap">
-      <div className="cal-toolbar">
-        <div className="cal-nav">
-          <button onClick={() => setWeekOffset((o) => o - 1)} title="Previous week">◀</button>
-          <button
-            className={weekOffset === 0 ? 'on' : ''}
-            onClick={() => setWeekOffset(0)}
-          >
-            Today
-          </button>
-          <button onClick={() => setWeekOffset((o) => o + 1)} title="Next week">▶</button>
+    <div className="exp-wrap">
+      <div className="exp-toolbar">
+        <div className="exp-range">
+          {RANGE_OPTIONS.map((d) => (
+            <button
+              key={d}
+              className={range === d ? 'on' : ''}
+              onClick={() => setRange(d)}
+              title={`Show next ${d} days`}
+            >
+              {d}d
+            </button>
+          ))}
         </div>
-        <div className="cal-range">
-          <div className="cal-range-week">{weekLabel}</div>
-          <div className="cal-range-year">{yearLabel}</div>
-        </div>
-        <div className="cal-summary">
-          <span className="cal-sum-item">
-            <span className="cal-sum-k">Expiring</span>
-            <span className="cal-sum-v">{weekSummary.count}</span>
+        <div className="exp-legend">
+          <span className="exp-legend-item">
+            <i className="exp-leg put short" /> short put
           </span>
-          {weekSummary.collected > 0 && (
-            <span className="cal-sum-item">
-              <span className="cal-sum-k">Collected</span>
-              <span className="cal-sum-v up">{fmtCompact(weekSummary.collected)}</span>
-            </span>
-          )}
-          {weekSummary.paid > 0 && (
-            <span className="cal-sum-item">
-              <span className="cal-sum-k">Paid</span>
-              <span className="cal-sum-v down">−{fmtCompact(weekSummary.paid)}</span>
-            </span>
-          )}
+          <span className="exp-legend-item">
+            <i className="exp-leg put long" /> long put
+          </span>
+          <span className="exp-legend-item">
+            <i className="exp-leg call short" /> short call
+          </span>
+          <span className="exp-legend-item">
+            <i className="exp-leg call long" /> long call
+          </span>
         </div>
       </div>
 
-      <div className="cal-grid">
-        {days.map((d, i) => {
-          const iso = isoDay(d);
-          const items = expiryIndex.get(iso) ?? [];
-          const isToday = iso === todayIso;
-          const isPast = iso < todayIso;
-          const isWeekend = i >= 5;
-          return (
-            <div
-              key={iso}
-              className={
-                'cal-day' +
-                (isToday ? ' today' : '') +
-                (isPast ? ' past' : '') +
-                (isWeekend ? ' weekend' : '')
-              }
-            >
-              <div className="cal-day-hd">
-                <span className="cal-dow">
-                  {d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' })}
-                </span>
-                <span className="cal-dom">{d.getUTCDate()}</span>
+      {tickerData.length === 0 ? (
+        <div className="exp-empty">
+          No option expiries in the next {range} days.
+        </div>
+      ) : (
+        <div className="exp-grid">
+          <div className="exp-hd-ticker" />
+          <div className="exp-hd-axis">
+            {weekTicks.map((t, i) => (
+              <div key={i} className="exp-week" style={{ left: `${t.pct}%` }}>
+                {t.monthLabel && <span className="exp-month">{t.monthLabel}</span>}
+                <span className="exp-week-tick" />
               </div>
-              <div className="cal-day-body">
-                {items.length === 0 ? (
-                  <div className="cal-day-empty">—</div>
-                ) : (
-                  items.map(({ open, isClosed }) => {
-                    const isShort = open.direction === 'short';
-                    const sideClass = isClosed
-                      ? 'closed'
-                      : isShort
-                        ? 'short'
-                        : 'long';
-                    const typeChar = open.option_type === 'put' ? 'P' : 'C';
-                    const notional = open.contracts * 100 * open.premium;
-                    const title =
-                      `${open.ticker} · ${open.direction} ${open.option_type} ` +
-                      `${open.contracts}× $${open.strike} @ $${open.premium} · ` +
-                      `opened ${open.trade_date}${isClosed ? ' · closed' : ''}`;
-                    return (
-                      <button
-                        key={open.id}
-                        type="button"
-                        className={`cal-card ${sideClass} type-${open.option_type}`}
-                        title={title}
-                        onClick={() => onTickerClick(open.ticker)}
-                      >
-                        <div className="cal-card-top">
-                          <span className="cal-card-tk">{open.ticker}</span>
-                          <span className="cal-card-side">
-                            {isShort ? '−' : '+'}{typeChar}
-                          </span>
-                        </div>
-                        <div className="cal-card-mid">
-                          <span className="cal-card-strike">${open.strike}</span>
-                          <span className="cal-card-qty">×{open.contracts}</span>
-                        </div>
-                        <div className="cal-card-prem">{fmtCompact(notional)}</div>
-                      </button>
-                    );
-                  })
+            ))}
+            {todayPct >= 0 && todayPct <= 100 && (
+              <div className="exp-today-line hd" style={{ left: `${todayPct}%` }}>
+                <span className="exp-today-label">Today</span>
+              </div>
+            )}
+          </div>
+
+          {tickerData.map(({ ticker, sector, puts, calls }) => (
+            <Fragment key={ticker}>
+              <div className="exp-ticker">
+                <button
+                  className="exp-ticker-name"
+                  onClick={() => onTickerClick(ticker)}
+                  title={`Open ${ticker} insight`}
+                >
+                  {ticker}
+                </button>
+                <div className="exp-ticker-sub">
+                  {sector}
+                  <span className="exp-ticker-counts">
+                    {puts.length > 0 && <span className="put">{puts.length}P</span>}
+                    {calls.length > 0 && <span className="call">{calls.length}C</span>}
+                  </span>
+                </div>
+              </div>
+              <div className="exp-lanes">
+                <Lane
+                  kind="put"
+                  trades={puts}
+                  pctFor={pctFor}
+                  closedSet={closedSet}
+                  onClick={() => onTickerClick(ticker)}
+                />
+                <Lane
+                  kind="call"
+                  trades={calls}
+                  pctFor={pctFor}
+                  closedSet={closedSet}
+                  onClick={() => onTickerClick(ticker)}
+                />
+                {todayPct >= 0 && todayPct <= 100 && (
+                  <div
+                    className="exp-today-line body"
+                    style={{ left: `${todayPct}%` }}
+                  />
                 )}
               </div>
-            </div>
-          );
-        })}
-      </div>
+            </Fragment>
+          ))}
+        </div>
+      )}
     </div>
+  );
+}
+
+function Lane({
+  kind,
+  trades,
+  pctFor,
+  closedSet,
+  onClick,
+}: {
+  kind: 'put' | 'call';
+  trades: OptionTrade[];
+  pctFor: (iso: string) => number;
+  closedSet: Set<string>;
+  onClick: () => void;
+}) {
+  return (
+    <div className={`exp-lane ${kind}`}>
+      <span className={`exp-lane-tag ${kind}`}>{kind === 'put' ? 'P' : 'C'}</span>
+      <div className={`exp-rule ${kind}`} />
+      {trades.map((t) => (
+        <Marker
+          key={t.id}
+          t={t}
+          pct={pctFor(t.expiry)}
+          closed={closedSet.has(t.id)}
+          onClick={onClick}
+        />
+      ))}
+    </div>
+  );
+}
+
+function Marker({
+  t,
+  pct,
+  closed,
+  onClick,
+}: {
+  t: OptionTrade;
+  pct: number;
+  closed: boolean;
+  onClick: () => void;
+}) {
+  const isShort = t.direction === 'short';
+  const cls =
+    'exp-marker ' +
+    t.option_type +
+    ' ' +
+    (isShort ? 'short' : 'long') +
+    (closed ? ' closed' : '');
+  const expiryD = new Date(t.expiry + 'T00:00:00Z');
+  const expiryLabel = expiryD.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  const notional = t.contracts * 100 * t.premium;
+  const title =
+    `${t.ticker} · ${t.direction} ${t.option_type} ${t.contracts}× $${t.strike} · ` +
+    `expires ${expiryLabel} · ${fmtCompact(notional)} premium` +
+    (closed ? ' · closed' : '');
+  return (
+    <button
+      type="button"
+      className={cls}
+      style={{ left: `${pct}%` }}
+      title={title}
+      onClick={onClick}
+    >
+      <span className="exp-marker-strike">${t.strike}</span>
+      {t.contracts > 1 && <span className="exp-marker-x">×{t.contracts}</span>}
+    </button>
   );
 }

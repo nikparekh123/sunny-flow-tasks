@@ -2838,8 +2838,286 @@
 .gl-cell-state.closed  { color: var(--navi-fg4); }
 
 /* ============================================================
-   Expiry Calendar — weekly view, options plotted on expiry date
+   Expiry Calendar — swimlane Gantt
+   Tickers on the left, time on the right; each ticker has two lanes
+   (Put / Call) with markers plotted at the expiry date.
    ============================================================ */
+.np-app .exp-wrap {
+  background: var(--navi-card);
+  border: 1px solid rgba(50,110,100,.25);
+  border-radius: 14px;
+  padding: 18px;
+}
+.np-app .exp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.np-app .exp-range {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 10px;
+  padding: 3px;
+}
+.np-app .exp-range button {
+  background: transparent;
+  color: var(--navi-fg2);
+  border: 0;
+  padding: 6px 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .exp-range button:hover { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .exp-range button.on    { color: var(--navi-neon); background: var(--navi-tint-neon); }
+
+.np-app .exp-legend {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 14px;
+  font-size: 10px;
+  color: var(--navi-fg3);
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.np-app .exp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.np-app .exp-leg {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 6px;
+  border: 1.5px solid;
+}
+.np-app .exp-leg.put.short  { background: var(--navi-negative); border-color: var(--navi-negative); }
+.np-app .exp-leg.put.long   { background: transparent;          border-color: var(--navi-negative); }
+.np-app .exp-leg.call.short { background: var(--navi-positive); border-color: var(--navi-positive); }
+.np-app .exp-leg.call.long  { background: transparent;          border-color: var(--navi-positive); }
+
+.np-app .exp-empty {
+  padding: 48px;
+  text-align: center;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+
+.np-app .exp-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  row-gap: 4px;
+  align-items: stretch;
+}
+
+/* Header row */
+.np-app .exp-hd-ticker { /* empty top-left corner */ }
+.np-app .exp-hd-axis {
+  position: relative;
+  height: 28px;
+  border-bottom: 1px solid rgba(50,110,100,.25);
+  margin-bottom: 6px;
+}
+.np-app .exp-week {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+}
+.np-app .exp-month {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 10px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  white-space: nowrap;
+}
+.np-app .exp-week-tick {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  height: 6px;
+  background: rgba(50,110,100,.45);
+}
+
+/* Ticker column */
+.np-app .exp-ticker {
+  padding: 8px 12px 8px 0;
+  border-right: 1px solid rgba(50,110,100,.22);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.np-app .exp-ticker-name {
+  background: none;
+  border: 0;
+  color: var(--navi-fg1);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  letter-spacing: -.1px;
+  transition: color .15s var(--np-ease);
+}
+.np-app .exp-ticker-name:hover { color: var(--navi-neon); }
+.np-app .exp-ticker-sub {
+  font-size: 10px;
+  color: var(--navi-fg3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.np-app .exp-ticker-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--navi-font-mono);
+  margin-left: auto;
+}
+.np-app .exp-ticker-counts .put  { color: var(--navi-negative); }
+.np-app .exp-ticker-counts .call { color: var(--navi-positive); }
+
+/* Lanes container (one per ticker row) */
+.np-app .exp-lanes {
+  position: relative;
+  padding: 4px 4px 4px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.np-app .exp-lane {
+  position: relative;
+  height: 28px;
+}
+.np-app .exp-lane-tag {
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: .4px;
+  font-weight: 600;
+  background: var(--navi-surface);
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+.np-app .exp-lane-tag.put  { color: var(--navi-negative); border: 1px solid rgba(232,112,96,.45); }
+.np-app .exp-lane-tag.call { color: var(--navi-positive); border: 1px solid rgba(168,212,160,.45); }
+
+.np-app .exp-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+.np-app .exp-rule.put  { background: rgba(232,112,96,.30); }
+.np-app .exp-rule.call { background: rgba(168,212,160,.30); }
+
+/* Markers */
+.np-app .exp-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border: 1.5px solid;
+  border-radius: 14px;
+  padding: 3px 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
+  transition: transform .12s var(--np-ease), box-shadow .15s var(--np-ease);
+  z-index: 1;
+}
+.np-app .exp-marker.put.short {
+  background: var(--navi-negative);
+  border-color: var(--navi-negative);
+  color: #200808;
+}
+.np-app .exp-marker.put.long {
+  background: rgba(232,112,96,.12);
+  border-color: var(--navi-negative);
+  color: var(--navi-negative);
+}
+.np-app .exp-marker.call.short {
+  background: var(--navi-positive);
+  border-color: var(--navi-positive);
+  color: #0a1a0a;
+}
+.np-app .exp-marker.call.long {
+  background: rgba(168,212,160,.12);
+  border-color: var(--navi-positive);
+  color: var(--navi-positive);
+}
+.np-app .exp-marker.closed {
+  opacity: .45;
+  filter: grayscale(.4);
+}
+.np-app .exp-marker:hover {
+  z-index: 3;
+  transform: translate(-50%, -50%) scale(1.08);
+  box-shadow: 0 6px 18px -8px rgba(0,0,0,.5);
+}
+.np-app .exp-marker-strike { letter-spacing: -.2px; }
+.np-app .exp-marker-x {
+  opacity: .75;
+  font-weight: 500;
+}
+
+/* Today line */
+.np-app .exp-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--navi-neon);
+  pointer-events: none;
+  z-index: 0;
+}
+.np-app .exp-today-line.body {
+  box-shadow: 0 0 6px rgba(210,230,50,.45);
+}
+.np-app .exp-today-label {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 9px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--navi-neon);
+  font-family: var(--navi-font-mono);
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .np-app .exp-grid { grid-template-columns: 100px 1fr; }
+}
+
+/* Old single-week styles (kept for backward compat, no-ops if unused) */
 .np-app .cal-wrap {
   background: var(--navi-card);
   border: 1px solid rgba(50,110,100,.25);

@@ -261,6 +261,7 @@ export default function PositionsPage() {
           )}
           {posView === 'timeline' && (
             <ExpiryCalendar
+              rows={portfolio.rows}
               tradesByTicker={tradesByTicker}
               onTickerClick={(t) => setInsightTicker(t)}
             />
