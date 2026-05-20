@@ -6,6 +6,7 @@ import { AllocationTreemap, type AllocView } from './AllocationTreemap';
 import { PositionsTable } from './PositionsTable';
 import { CsvUploadModal } from './CsvUploadModal';
 import { PositionDetailModal } from './PositionDetailModal';
+import { PositionInsightModal } from './PositionInsightModal';
 import { GainsLogMatrix } from './GainsLogMatrix';
 import { ExpensesLogMatrix } from './ExpensesLogMatrix';
 import { RealizedSummary } from './RealizedSummary';
@@ -61,7 +62,10 @@ export default function PositionsPage() {
     try { window.localStorage.setItem(LS_POS, posView); } catch { /* quota / private mode */ }
   }, [posView]);
   const [showUpload, setShowUpload] = useState(false);
-  const [detail, setDetail] = useState<{ ticker: string; mode: 'gain' | 'expense' } | null>(null);
+  // Two-layer modal: clicking a ticker opens the read-only insight view;
+  // the logger (write modal) opens *from* the insight via "+ Log gain/expense".
+  const [insightTicker, setInsightTicker] = useState<string | null>(null);
+  const [detail, setDetail] = useState<{ ticker: string; mode: 'gain' | 'expense'; source?: 'stock' | 'call' | 'put' } | null>(null);
 
   // ?ticker=… deep-link: scroll the matching row into view + flash.
   useEffect(() => {
@@ -231,14 +235,23 @@ export default function PositionsPage() {
           />
         </div>
 
-        {/* Positions / Gains log / Expenses */}
+        {/* Positions / Gains / Expenses
+            Summary bars always sit above the toggle: they describe the
+            portfolio as a whole and shouldn't feel gated by the table view. */}
         <div className="np-section">
+          {portfolio.rows.length > 0 && (
+            <RealizedSummary
+              portfolio={portfolio}
+              overlayByTicker={overlayByTicker}
+              putProtectionByTicker={putProtectionByTicker}
+            />
+          )}
           <div className="np-section-hd">
             <div className="np-section-title">
               {posView === 'table'
                 ? `Positions · ${portfolio.rows.length}`
                 : posView === 'gains'
-                  ? 'Gains log'
+                  ? 'Gains'
                   : 'Expenses'}
             </div>
             <div className="np-view-toggle">
@@ -252,7 +265,7 @@ export default function PositionsPage() {
                 className={posView === 'gains' ? 'on' : ''}
                 onClick={() => setPosView('gains')}
               >
-                Gains log
+                Gains
               </button>
               <button
                 className={posView === 'expenses' ? 'on' : ''}
@@ -262,28 +275,24 @@ export default function PositionsPage() {
               </button>
             </div>
           </div>
-          {portfolio.rows.length > 0 && (
-            <RealizedSummary
-              portfolio={portfolio}
-              overlayByTicker={overlayByTicker}
-              putProtectionByTicker={putProtectionByTicker}
-            />
-          )}
           {posView === 'table' && (
             <PositionsTable
               rows={portfolio.rows}
               onUpload={() => setShowUpload(true)}
               loading={isLoading}
               overlayByTicker={overlayByTicker}
-              onTickerClick={(t) => setDetail({ ticker: t, mode: 'gain' })}
+              onTickerClick={(t) => setInsightTicker(t)}
             />
           )}
           {posView === 'gains' && (
             <GainsLogMatrix
               rows={portfolio.rows}
               gainsByTicker={gainsByTicker}
-              onCellClick={(t) => setDetail({ ticker: t, mode: 'gain' })}
-              onTickerClick={(t) => setDetail({ ticker: t, mode: 'gain' })}
+              // Cell click = "I want to log/edit this thing" → open the
+              // logger pre-filled with gain mode + call source (most common).
+              onCellClick={(t) => setDetail({ ticker: t, mode: 'gain', source: 'call' })}
+              // Ticker name click = "show me this position" → open insight.
+              onTickerClick={(t) => setInsightTicker(t)}
             />
           )}
           {posView === 'expenses' && (
@@ -291,8 +300,10 @@ export default function PositionsPage() {
               rows={portfolio.rows}
               expensesByTicker={expensesByTicker}
               putProtectionByTicker={putProtectionByTicker}
-              onCellClick={(t) => setDetail({ ticker: t, mode: 'expense' })}
-              onTickerClick={(t) => setDetail({ ticker: t, mode: 'expense' })}
+              // Cell click → logger in expense mode + put source (most
+              // expenses on this app are put protection).
+              onCellClick={(t) => setDetail({ ticker: t, mode: 'expense', source: 'put' })}
+              onTickerClick={(t) => setInsightTicker(t)}
             />
           )}
         </div>
@@ -308,9 +319,43 @@ export default function PositionsPage() {
         }}
       />
 
+      {insightTicker && <InsightModalWrapper
+        ticker={insightTicker}
+        rows={portfolio.rows}
+        gainsByTicker={gainsByTicker}
+        expensesByTicker={expensesByTicker}
+        putProtectionByTicker={putProtectionByTicker}
+        overlayByTicker={overlayByTicker}
+        onClose={() => setInsightTicker(null)}
+        onSetStatus={(p) =>
+          setPositionStatus.mutate(p, {
+            onSuccess: () => toast.success(`${p.ticker} marked ${p.status}`),
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
+        onSetEarningsDate={(p) =>
+          setEarningsDate.mutate(p, {
+            onSuccess: () =>
+              toast.success(
+                p.earnings_date
+                  ? `Earnings ${p.earnings_date} · ${p.ticker}`
+                  : `Cleared earnings · ${p.ticker}`,
+              ),
+            onError: (e) => toast.error((e as Error).message),
+          })
+        }
+        onAddGain={() => { setDetail({ ticker: insightTicker, mode: 'gain' }); setInsightTicker(null); }}
+        onAddExpense={() => { setDetail({ ticker: insightTicker, mode: 'expense' }); setInsightTicker(null); }}
+      />}
+
       {detail && <DetailModalWrapper
         ticker={detail.ticker}
-        mode={detail.mode}
+        initialTab={detail.mode}
+        initialSource={detail.source}
+        onViewHistory={(which) => {
+          setPosView(which === 'expense' ? 'expenses' : 'gains');
+          setDetail(null);
+        }}
         rows={portfolio.rows}
         gainsByTicker={gainsByTicker}
         expensesByTicker={expensesByTicker}
@@ -360,6 +405,7 @@ export default function PositionsPage() {
 function DetailModalWrapper(props: {
   ticker: string;
   mode: 'gain' | 'expense';
+  initialSource?: 'stock' | 'call' | 'put';
   rows: ReturnType<typeof usePositions>['portfolio']['rows'];
   gainsByTicker: ReturnType<typeof usePositions>['gainsByTicker'];
   expensesByTicker: ReturnType<typeof usePositions>['expensesByTicker'];
@@ -374,6 +420,7 @@ function DetailModalWrapper(props: {
   onClearPutProtection: Parameters<typeof PositionDetailModal>[0]['onClearPutProtection'];
   onSetStatus: Parameters<typeof PositionDetailModal>[0]['onSetStatus'];
   onSetEarningsDate: Parameters<typeof PositionDetailModal>[0]['onSetEarningsDate'];
+  onViewHistory: Parameters<typeof PositionDetailModal>[0]['onViewHistory'];
 }) {
   const pos = useMemo(
     () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
@@ -391,7 +438,9 @@ function DetailModalWrapper(props: {
       expenseEntries={expenses}
       putProtection={pp}
       bucket={bucket}
-      mode={props.mode}
+      initialTab={props.mode}
+      initialSource={props.initialSource}
+      onViewHistory={props.onViewHistory}
       onClose={props.onClose}
       onAddGain={props.onAddGain}
       onDeleteGain={props.onDeleteGain}
@@ -405,3 +454,39 @@ function DetailModalWrapper(props: {
   );
 }
 
+
+// Wrapper for the read-only insight modal. Resolves ticker → position +
+// entries + put protection from the parent's data and forwards mutations.
+function InsightModalWrapper(props: {
+  ticker: string;
+  rows: ReturnType<typeof usePositions>['portfolio']['rows'];
+  gainsByTicker: ReturnType<typeof usePositions>['gainsByTicker'];
+  expensesByTicker: ReturnType<typeof usePositions>['expensesByTicker'];
+  putProtectionByTicker: ReturnType<typeof usePositions>['putProtectionByTicker'];
+  overlayByTicker: ReturnType<typeof usePositions>['overlayByTicker'];
+  onClose: () => void;
+  onSetStatus: Parameters<typeof PositionInsightModal>[0]['onSetStatus'];
+  onSetEarningsDate: Parameters<typeof PositionInsightModal>[0]['onSetEarningsDate'];
+  onAddGain: () => void;
+  onAddExpense: () => void;
+}) {
+  const pos = useMemo(
+    () => props.rows.find((r) => r.ticker === props.ticker) ?? null,
+    [props.rows, props.ticker],
+  );
+  if (!pos) return null;
+  return (
+    <PositionInsightModal
+      position={pos}
+      entries={props.gainsByTicker.get(props.ticker) ?? []}
+      expenseEntries={props.expensesByTicker.get(props.ticker) ?? []}
+      putProtection={props.putProtectionByTicker.get(props.ticker)}
+      bucket={props.overlayByTicker.get(props.ticker)}
+      onClose={props.onClose}
+      onSetStatus={props.onSetStatus}
+      onSetEarningsDate={props.onSetEarningsDate}
+      onAddGain={props.onAddGain}
+      onAddExpense={props.onAddExpense}
+    />
+  );
+}

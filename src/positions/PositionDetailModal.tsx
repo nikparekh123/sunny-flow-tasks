@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  computePutProtection,
   fmtUSD,
   fmtUSD2,
   fmtQty,
@@ -10,7 +9,20 @@ import {
   type PositionComputed,
   type PutProtectionRow,
 } from './types';
-import { PutProtectionPanel } from './PutProtectionPanel';
+
+/**
+ * Position detail modal — Variant B (Sidecar) per design_handoff_position_popup.
+ *
+ * Single unified modal. Internal Gain ↔ Expense tabs let the user switch
+ * ledgers without closing. Source segmented control progressively reveals
+ * the right field set (stock vs option). Option fields auto-compute the
+ * total via contracts × 100 × premium. A live sidecar rail on the right
+ * mirrors the entry as it's being filled in.
+ *
+ * Inline ledger history is NOT shown here — users get the full timeline
+ * via the page-level Gains / Expenses tabs (the "View full history →"
+ * link in the rail switches the page-level view).
+ */
 
 const SOURCE_META: Record<GainSource, { label: string; short: string }> = {
   stock: { label: 'Stock', short: 'S' },
@@ -25,34 +37,6 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   yield: 'Yield',
 };
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-function mondayOf(d: Date): Date {
-  const x = new Date(d);
-  const day = (x.getUTCDay() + 6) % 7;
-  x.setUTCDate(x.getUTCDate() - day);
-  x.setUTCHours(0, 0, 0, 0);
-  return x;
-}
-
-function weekIdxOf(iso: string, todayWeek: Date): number {
-  const d = new Date(iso + 'T12:00:00Z');
-  const w = mondayOf(d);
-  return Math.round((todayWeek.getTime() - w.getTime()) / WEEK_MS);
-}
-
-function weekLabel(idx: number): string {
-  if (idx === 0) return 'This wk';
-  if (idx === 1) return 'Last wk';
-  return `−${idx}w`;
-}
-
-function weekDateLabel(idx: number, todayWeek: Date): string {
-  const d = new Date(todayWeek.getTime() - idx * WEEK_MS);
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
-}
-
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 interface Props {
@@ -61,18 +45,52 @@ interface Props {
   expenseEntries: ExpenseEntry[];
   putProtection: PutProtectionRow | undefined;
   bucket?: Bucket;
-  /** Which ledger this modal is viewing. Defaults to 'gain'. */
-  mode?: 'gain' | 'expense';
+  /** Which tab opens first. Defaults to 'gain'. */
+  initialTab?: 'gain' | 'expense';
+  /** Which source is pre-selected. Defaults to 'call'. Pass 'put' when
+   *  opening from a put-expense context, etc. */
+  initialSource?: GainSource;
   onClose: () => void;
   onAddGain: (p: { ticker: string; gain_date: string; source: GainSource; amount: number; note?: string }) => void;
   onDeleteGain: (id: string) => void;
   onAddExpense: (p: { ticker: string; expense_date: string; source: GainSource; amount: number; note?: string }) => void;
   onDeleteExpense: (id: string) => void;
-  onSetPutProtection: (p: { ticker: string; total_cost: number; expiry: string; purchase_date?: string }) => void;
+  onSetPutProtection: (p: { ticker: string; total_cost: number; expiry: string; purchase_date?: string; contracts?: number | null; strike?: number | null }) => void;
   onClearPutProtection: (ticker: string) => void;
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
   onSetEarningsDate: (p: { ticker: string; earnings_date: string | null }) => void;
+  /** Open the matching page-level tab and close the modal. */
+  onViewHistory?: (which: 'gain' | 'expense') => void;
 }
+
+// Tab state lives in the modal; source + entry form state lives below.
+type Tab = 'gain' | 'expense';
+type Source = GainSource;
+
+interface EntryForm {
+  // Option fields (call / put)
+  strike: string;
+  contracts: string;
+  expiry: string;
+  premium: string;
+  // Stock fields
+  amount: string;
+  shares: string;
+  // Common
+  date: string;
+  note: string;
+}
+
+const blankEntry = (): EntryForm => ({
+  strike: '',
+  contracts: '',
+  expiry: '',
+  premium: '',
+  amount: '',
+  shares: '',
+  date: todayIso(),
+  note: '',
+});
 
 export function PositionDetailModal({
   position,
@@ -80,52 +98,31 @@ export function PositionDetailModal({
   expenseEntries,
   putProtection,
   bucket,
-  mode = 'gain',
+  initialTab = 'gain',
+  initialSource = 'call',
   onClose,
   onAddGain,
-  onDeleteGain,
+  onDeleteGain: _onDeleteGain,
   onAddExpense,
-  onDeleteExpense,
+  onDeleteExpense: _onDeleteExpense,
   onSetPutProtection,
-  onClearPutProtection,
+  onClearPutProtection: _onClearPutProtection,
   onSetStatus,
-  onSetEarningsDate,
+  onSetEarningsDate: _onSetEarningsDate,
+  onViewHistory,
 }: Props) {
-  const [sourceFilter, setSourceFilter] = useState<'all' | GainSource>('all');
-  // Both modals auto-open their matching inline log form so the user
-  // lands directly on the entry fields. The two views share the same shell:
-  // filter row · log button · auto-form · history list.
-  const [showAdd, setShowAdd] = useState<null | 'gain' | 'expense'>(mode);
-  // Put protection editor is a side trigger in expense mode — closed by
-  // default; the "+ Put protection" button in the filter row toggles it.
-  const [editPP, setEditPP] = useState(false);
+  // Silence unused-callback warnings — delete/clear are still wired in
+  // through the page-level views, not the modal.
+  void _onDeleteGain; void _onDeleteExpense; void _onClearPutProtection; void _onSetEarningsDate;
 
-  // Normalize the two ledgers to a common shape so the rest of the modal
-  // doesn't have to branch. Expense rows carry expense_date → date.
-  type LedgerRow = { id: string; date: string; source: GainSource; amount: number; note?: string };
-  const ledger: LedgerRow[] = useMemo(() => {
-    if (mode === 'expense') {
-      const rows: LedgerRow[] = expenseEntries.map((e) => ({
-        id: e.id, date: e.expense_date, source: e.source, amount: e.amount, note: e.note,
-      }));
-      // Surface put-protection cost as a synthetic put-source expense so the
-      // user can see "why is my expense total $X" in one place.
-      if (putProtection && putProtection.total_cost > 0) {
-        rows.push({
-          id: `pp:${putProtection.ticker}`,
-          date: putProtection.purchase_date ?? new Date().toISOString().slice(0, 10),
-          source: 'put',
-          amount: putProtection.total_cost,
-          note: 'put protection',
-        });
-      }
-      return rows;
-    }
-    return entries.map((e) => ({
-      id: e.id, date: e.gain_date, source: e.source, amount: e.amount, note: e.note,
-    }));
-  }, [mode, entries, expenseEntries, putProtection]);
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [source, setSource] = useState<Source>(initialSource);
+  const [entry, setEntry] = useState<EntryForm>(blankEntry());
 
+  const set = <K extends keyof EntryForm>(k: K, v: EntryForm[K]) =>
+    setEntry((prev) => ({ ...prev, [k]: v }));
+
+  // Close on Escape, lock body scroll while the modal is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -138,329 +135,392 @@ export function PositionDetailModal({
     };
   }, [onClose]);
 
-  const todayWeek = useMemo(() => mondayOf(new Date()), []);
-
-  const filtered = useMemo(() => {
-    const list = sourceFilter === 'all' ? ledger : ledger.filter((e) => e.source === sourceFilter);
-    return [...list].sort((a, b) => b.date.localeCompare(a.date));
-  }, [ledger, sourceFilter]);
-
-  const grouped = useMemo(() => {
-    const groups: Record<number, LedgerRow[]> = {};
-    filtered.forEach((e) => {
-      const w = weekIdxOf(e.date, todayWeek);
-      if (!groups[w]) groups[w] = [];
-      groups[w].push(e);
-    });
-    return Object.entries(groups)
-      .map(([w, items]) => ({
-        weekIdx: parseInt(w, 10),
-        items,
-        total: items.reduce((s, x) => s + x.amount, 0),
-      }))
-      .sort((a, b) => a.weekIdx - b.weekIdx);
-  }, [filtered, todayWeek]);
-
-  const counts = useMemo(
-    () => ({
-      all: ledger.length,
-      stock: ledger.filter((e) => e.source === 'stock').length,
-      call: ledger.filter((e) => e.source === 'call').length,
-      put: ledger.filter((e) => e.source === 'put').length,
-    }),
-    [ledger],
-  );
-
-  const ppCalc = computePutProtection(putProtection);
+  const isExp = tab === 'expense';
+  const netCls = isExp ? 'neg' : 'pos';
   const isClosed = position.status === 'closed';
 
-  return (
-    <div className="np-modal-back" onClick={onClose}>
-      <div className="np-modal pd-modal" onClick={(e) => e.stopPropagation()}>
-        {/* HEADER */}
-        <div className="pd-hd">
-          <div>
-            <div className="pd-ticker">
-              {position.ticker}
-              {isClosed && <span className="status-pill closed">closed</span>}
-            </div>
-            <div className="pd-meta">
-              {bucket && <span className={'strategy-badge st-' + bucket}>{BUCKET_LABEL[bucket]}</span>}
-              <span className="pd-meta-dot">·</span>
-              <span>{position.sector}</span>
-              {!isClosed && (
-                <>
-                  <span className="pd-meta-dot">·</span>
-                  <span>
-                    {fmtQty(position.quantity)} sh @ {fmtUSD2(position.avg_cost)}
-                  </span>
-                </>
-              )}
-            </div>
-            <div className="pd-meta pd-earnings-field">
-              <label className="pd-meta-l">Earnings date</label>
-              <input
-                type="date"
-                className="np-input pd-earnings-input"
-                value={position.earnings_date ?? ''}
-                onChange={(e) =>
-                  onSetEarningsDate({
-                    ticker: position.ticker,
-                    earnings_date: e.target.value || null,
-                  })
-                }
-              />
-              {position.earnings_date && (
-                <button
-                  type="button"
-                  className="pd-earnings-clear"
-                  onClick={() => onSetEarningsDate({ ticker: position.ticker, earnings_date: null })}
-                  title="Clear earnings date"
-                >
-                  clear
-                </button>
-              )}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              className={'np-btn ' + (isClosed ? 'tinted' : 'danger')}
-              onClick={() =>
-                onSetStatus({
-                  ticker: position.ticker,
-                  status: isClosed ? 'open' : 'closed',
-                })
-              }
-              title={isClosed ? 'Reopen this position' : 'Mark as closed (sold)'}
-            >
-              {isClosed ? '↻ Reopen' : '✕ Mark closed'}
-            </button>
-            <button className="np-btn ghost" onClick={onClose}>✕ Close</button>
-          </div>
-        </div>
+  // Aggregates for the rail's net big-number — week + YTD.
+  const summary = useMemo(() => {
+    const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+    const weekStart = new Date(today.getTime() - 7 * 86400000);
+    const yearStart = new Date(Date.UTC(today.getUTCFullYear(), 0, 1));
+    const fold = (rows: Array<{ date: string; amount: number }>) => {
+      let netWk = 0, netYtd = 0, count = 0;
+      for (const r of rows) {
+        const d = new Date(r.date + 'T00:00:00Z');
+        if (d >= yearStart) netYtd += r.amount;
+        if (d >= weekStart) netWk += r.amount;
+        count += 1;
+      }
+      return { netWk, netYtd, count };
+    };
+    return {
+      gain: fold(entries.map((e) => ({ date: e.gain_date, amount: e.amount }))),
+      // Expense rows store magnitudes; flip sign for the rail.
+      expense: fold(expenseEntries.map((e) => ({ date: e.expense_date, amount: -Math.abs(e.amount) }))),
+    };
+  }, [entries, expenseEntries]);
 
-        {/* SOURCE FILTER — same shell in both modes. */}
-        <div className="pd-filter">
-          <div className="np-status-filter">
-            <button className={sourceFilter === 'all' ? 'on' : ''} onClick={() => setSourceFilter('all')}>
-              All <span className="ct">{counts.all}</span>
-            </button>
-            <button className={sourceFilter === 'stock' ? 'on' : ''} onClick={() => setSourceFilter('stock')}>
-              <span className="rchip rk-s rchip-static">S</span>Stock <span className="ct">{counts.stock}</span>
-            </button>
-            <button className={sourceFilter === 'call' ? 'on' : ''} onClick={() => setSourceFilter('call')}>
-              <span className="rchip rk-c rchip-static">C</span>Call <span className="ct">{counts.call}</span>
-            </button>
-            <button className={sourceFilter === 'put' ? 'on' : ''} onClick={() => setSourceFilter('put')}>
-              <span className="rchip rk-p rchip-static">P</span>Put <span className="ct">{counts.put}</span>
-            </button>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {mode === 'gain' ? (
-              <button className="np-btn add-gain" onClick={() => setShowAdd('gain')}>
-                + Log gain
-              </button>
-            ) : (
-              <>
-                {/* Put protection is a special expense type — separate trigger. */}
-                <button
-                  className="np-btn ghost"
-                  onClick={() => { setEditPP(true); setShowAdd(null); }}
-                  title={ppCalc.has ? 'Edit put protection' : 'Add put protection for this position'}
-                >
-                  {ppCalc.has ? `Put · ${fmtUSD(ppCalc.total_cost)}` : '+ Put protection'}
-                </button>
-                <button
-                  className="np-btn add-expense"
-                  onClick={() => { setShowAdd('expense'); setEditPP(false); }}
-                >
-                  + Log expense
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+  const st = summary[tab];
 
-        {/* HISTORY */}
-        <div className="pd-history">
-          {grouped.length === 0 && (
-            <div className="pd-empty">
-              No {sourceFilter === 'all' ? '' : sourceFilter + ' '}
-              {mode === 'expense' ? 'expenses' : 'gains'} yet.
-            </div>
-          )}
-          {grouped.map((g) => (
-            <div key={g.weekIdx} className="pd-week-group">
-              <div className="pd-week-hd">
-                <span className="pd-week-l">{weekLabel(g.weekIdx)}</span>
-                <span className="pd-week-d">{weekDateLabel(g.weekIdx, todayWeek)}</span>
-                <span className={'pd-week-tot ' + (mode === 'expense' || g.total < 0 ? 'down' : 'up')}>
-                  {mode === 'expense' ? '−' + fmtUSD(g.total) : fmtUSD(g.total)}
-                </span>
-              </div>
-              {g.items.map((e) => (
-                <div key={e.id} className="pd-entry">
-                  <span className={'rchip rk-' + e.source.charAt(0) + ' rchip-static'}>
-                    {SOURCE_META[e.source].short}
-                  </span>
-                  <span className="pd-entry-date">{e.date}</span>
-                  <span className={'pd-entry-amt ' + (mode === 'expense' || e.amount < 0 ? 'down' : 'up')}>
-                    {mode === 'expense' ? '−' + fmtUSD(e.amount) : fmtUSD(e.amount)}
-                  </span>
-                  <span className="pd-entry-note">
-                    {e.note || <span style={{ color: 'var(--navi-fg5)' }}>—</span>}
-                  </span>
-                  {e.id.startsWith('pp:') ? (
-                    <button
-                      className="np-btn ghost pd-entry-del"
-                      onClick={() => onClearPutProtection(position.ticker)}
-                      title="Clear the put protection for this position"
-                    >
-                      clear protection
-                    </button>
-                  ) : (
-                    <button
-                      className="np-btn ghost pd-entry-del"
-                      onClick={() => (mode === 'expense' ? onDeleteExpense(e.id) : onDeleteGain(e.id))}
-                    >
-                      delete
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
+  // Total auto-calc: contracts × 100 × premium. Sign controlled by tab.
+  const optionTotal =
+    (parseFloat(entry.contracts) || 0) * 100 * (parseFloat(entry.premium) || 0);
+  const signedTotal = (isExp ? -1 : 1) * optionTotal;
 
-        {/* Put protection editor — opens inline in expense mode when the
-            user clicks the put chip. Replaces the inline expense form
-            while it's open. */}
-        {mode === 'expense' && editPP && (
-          <PutProtectionPanel
-            ticker={position.ticker}
-            calc={ppCalc}
-            editing={editPP}
-            onEditStart={() => setEditPP(true)}
-            onEditCancel={() => setEditPP(false)}
-            onSave={(p) => {
-              onSetPutProtection({ ticker: position.ticker, ...p });
-              setEditPP(false);
-            }}
-            onClear={() => {
-              onClearPutProtection(position.ticker);
-              setEditPP(false);
-            }}
-          />
-        )}
+  // Live preview row in the rail. For stock, sign is just tab.
+  const previewAmt =
+    source === 'stock'
+      ? (parseFloat(entry.amount) || 0) * (isExp ? -1 : 1)
+      : signedTotal;
+  const previewLabel =
+    source === 'call' ? (isExp ? 'call expense' : 'calls sold')
+    : source === 'put' ? (isExp ? 'put protection' : 'puts sold')
+    : isExp ? 'stock expense' : 'stock gain';
 
-        {mode === 'gain' && showAdd === 'gain' && (
-          <PDAddInline
-            ticker={position.ticker}
-            kind="gain"
-            onCancel={() => setShowAdd(null)}
-            onSave={(g) => {
-              onAddGain({ ticker: position.ticker, gain_date: g.date, source: g.source, amount: g.amount, note: g.note });
-              setShowAdd(null);
-            }}
-          />
-        )}
-        {mode === 'expense' && showAdd === 'expense' && !editPP && (
-          <PDAddInline
-            ticker={position.ticker}
-            kind="expense"
-            onCancel={() => setShowAdd(null)}
-            onSave={(g) => {
-              onAddExpense({ ticker: position.ticker, expense_date: g.date, source: g.source, amount: g.amount, note: g.note });
-              setShowAdd(null);
-            }}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PDAddInline({
-  ticker,
-  kind,
-  onCancel,
-  onSave,
-}: {
-  ticker: string;
-  kind: 'gain' | 'expense';
-  onCancel: () => void;
-  onSave: (g: { date: string; source: GainSource; amount: number; note?: string }) => void;
-}) {
-  const [source, setSource] = useState<GainSource>('call');
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
-  const [date, setDate] = useState(todayIso());
+  const canSubmit = (() => {
+    if (!entry.date) return false;
+    if (source === 'stock') return !!entry.amount && parseFloat(entry.amount) > 0;
+    return !!entry.strike && !!entry.contracts && !!entry.expiry && !!entry.premium
+      && parseFloat(entry.contracts) > 0 && parseFloat(entry.premium) > 0;
+  })();
 
   const submit = () => {
-    const amt = parseFloat(amount);
-    if (isNaN(amt) || amt === 0 || !date) return;
-    onSave({ date, source, amount: amt, note });
+    if (!canSubmit) return;
+    const total = source === 'stock' ? parseFloat(entry.amount) : optionTotal;
+    if (!total || isNaN(total)) return;
+    const noteLine = source === 'stock'
+      ? entry.note
+      : [
+          entry.note,
+          `${entry.contracts}× $${entry.strike} ${source} exp ${entry.expiry} @ $${entry.premium}/sh`,
+        ].filter(Boolean).join(' · ');
+    if (isExp) {
+      // Expenses store magnitudes; total is always positive.
+      onAddExpense({
+        ticker: position.ticker,
+        expense_date: entry.date,
+        source,
+        amount: Math.abs(total),
+        note: noteLine || undefined,
+      });
+      // For put expenses with structured data, also upsert put_protection so
+      // the strategy cards' MTM works.
+      if (source === 'put') {
+        onSetPutProtection({
+          ticker: position.ticker,
+          total_cost: Math.abs(total),
+          expiry: entry.expiry,
+          purchase_date: entry.date,
+          contracts: parseInt(entry.contracts, 10) || null,
+          strike: parseFloat(entry.strike) || null,
+        });
+      }
+    } else {
+      onAddGain({
+        ticker: position.ticker,
+        gain_date: entry.date,
+        source,
+        amount: total,
+        note: noteLine || undefined,
+      });
+    }
+    setEntry(blankEntry());
+    setSource(source); // reset to current source for next entry
   };
 
   return (
-    <div className="pd-add-inline">
-      <div className="pd-add-hd">Log {kind === 'gain' ? 'a gain' : 'an expense'} on {ticker}</div>
-      <div className="qa-grid">
-        <div className="qa-field">
-          <label>Source</label>
-          <div className="qa-source">
-            {(['stock', 'call', 'put'] as const).map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={'qa-source-btn ' + s + (source === s ? ' on' : '')}
-                onClick={() => setSource(s)}
-              >
-                <span className={'rchip rk-' + s.charAt(0) + ' rchip-static'}>
-                  {SOURCE_META[s].short}
-                </span>
-                {SOURCE_META[s].label}
-              </button>
-            ))}
+    <div className="pp-stage" onClick={onClose}>
+      <div className="pp-popup" role="dialog" aria-labelledby="pp-ticker" onClick={(e) => e.stopPropagation()}>
+        {/* HEAD */}
+        <div className="pp-popup-head">
+          <div className="pp-head-info">
+            <h2 className="pp-popup-ticker" id="pp-ticker">{position.ticker}</h2>
+            <div className="pp-popup-sub">
+              {bucket && <span>{BUCKET_LABEL[bucket]}</span>}
+              {bucket && <span className="dot">·</span>}
+              <span>{position.sector}</span>
+              {!isClosed && (
+                <>
+                  <span className="dot">·</span>
+                  <span>{fmtQty(position.quantity)} sh @ {fmtUSD2(position.avg_cost)}</span>
+                </>
+              )}
+              {isClosed && <span className="pp-pill-closed">closed</span>}
+            </div>
+          </div>
+          <div className="pp-popup-head-actions">
+            <button className="pp-icon-btn" onClick={onClose} aria-label="Close">✕ Close</button>
           </div>
         </div>
-        <div className="qa-field">
-          <label>Amount</label>
-          <input
-            className="np-input qa-amount"
-            type="number"
-            step="50"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0"
-            autoFocus
-          />
+
+        {/* TABS */}
+        <div className="pp-tab-row">
+          <button className={'pp-tab' + (tab === 'gain' ? ' on' : '')} onClick={() => setTab('gain')}>
+            Gain<span className="pp-tab-count">{entries.length}</span>
+          </button>
+          <button className={'pp-tab' + (tab === 'expense' ? ' on' : '')} onClick={() => setTab('expense')}>
+            Expense<span className="pp-tab-count">{expenseEntries.length}</span>
+          </button>
         </div>
-        <div className="qa-field">
-          <label>Date</label>
-          <input
-            type="date"
-            className="np-input"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
+
+        {/* SIDECAR */}
+        <div className="pp-sidecar">
+          {/* LEFT — form */}
+          <div className="pp-form">
+            <div className="pp-field">
+              <div className="pp-field-label">Source</div>
+              <SourceSeg value={source} onChange={setSource} />
+            </div>
+
+            {source === 'stock' ? (
+              <StockFields entry={entry} set={set} />
+            ) : (
+              <OptionFields source={source} entry={entry} set={set} tab={tab} signedTotal={signedTotal} optionTotal={optionTotal} />
+            )}
+
+            <div className="pp-form-grid cols-2">
+              <div className="pp-field">
+                <div className="pp-field-label">Date</div>
+                <input
+                  className="pp-input mono"
+                  type="date"
+                  value={entry.date}
+                  onChange={(e) => set('date', e.target.value)}
+                />
+              </div>
+              <div className="pp-field">
+                <div className="pp-field-label">Note (optional)</div>
+                <input
+                  className="pp-input"
+                  value={entry.note}
+                  onChange={(e) => set('note', e.target.value)}
+                  placeholder="strike, ex-div, source, etc."
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT — rail */}
+          <aside className="pp-rail">
+            <div className="pp-rail-section">
+              <div className="pp-rail-lbl">Position</div>
+              <div className="pp-rail-row">
+                <span className="k">Shares</span>
+                <span className="v">{fmtQty(position.quantity)}</span>
+              </div>
+              <div className="pp-rail-row">
+                <span className="k">Avg basis</span>
+                <span className="v">{fmtUSD2(position.avg_cost)}</span>
+              </div>
+              <div className="pp-rail-row">
+                <span className="k">Mkt value</span>
+                <span className="v">{fmtUSD(position.market_value)}</span>
+              </div>
+            </div>
+
+            <div className="pp-rail-divider" />
+
+            <div className="pp-rail-section">
+              <div className="pp-rail-lbl">Net · {isExp ? 'expense' : 'gain'}</div>
+              <div className={'pp-rail-bignum ' + netCls}>{fmtSigned(st.netWk)}</div>
+              <div className="pp-rail-sub">
+                {st.count} {st.count === 1 ? 'entry' : 'entries'} · this wk · YTD {fmtSigned(st.netYtd)}
+              </div>
+            </div>
+
+            <div className="pp-rail-divider" />
+
+            <div className="pp-rail-section">
+              <div className="pp-rail-lbl">Entry preview</div>
+              <div className={'pp-preview-row ' + (previewAmt < 0 ? 'neg' : previewAmt > 0 ? 'pos' : '')}>
+                <span className={'pp-mini-glyph ' + (source === 'stock' ? '' : 'neon')}>
+                  {SOURCE_META[source].short}
+                </span>
+                <span className="pp-preview-date">{entry.date}</span>
+                {previewAmt !== 0 ? (
+                  <span className={'pp-preview-amt ' + (previewAmt < 0 ? 'neg' : 'pos')}>
+                    {fmtSigned(previewAmt)}
+                  </span>
+                ) : (
+                  <span className="pp-preview-empty">— fill amount —</span>
+                )}
+                <span className="pp-preview-meta">{previewLabel}</span>
+              </div>
+            </div>
+
+            <div className="pp-rail-divider" />
+
+            <div className="pp-rail-links">
+              {onViewHistory && (
+                <button className="pp-rail-link" onClick={() => onViewHistory(tab)}>
+                  View full history →
+                </button>
+              )}
+              <button
+                className="pp-rail-link danger"
+                onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
+              >
+                {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
+              </button>
+            </div>
+          </aside>
         </div>
-        <div className="qa-field">
-          <label>Note (optional)</label>
-          <input
-            className="np-input"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="strike, ex-div, source, etc."
-          />
+
+        {/* FOOT */}
+        <div className="pp-popup-foot">
+          <div />
+          <div className="pp-popup-foot-end">
+            <button className="pp-btn pp-btn-text" onClick={onClose}>Cancel</button>
+            <button className="pp-btn pp-btn-neon" onClick={submit} disabled={!canSubmit}>
+              ✓ Add {isExp ? 'expense' : 'gain'}
+            </button>
+          </div>
         </div>
-      </div>
-      <div className="qa-actions" style={{ justifyContent: 'flex-end' }}>
-        <button className="np-btn ghost" onClick={onCancel}>Cancel</button>
-        <button className="np-btn neon" onClick={submit} disabled={!amount || isNaN(parseFloat(amount))}>
-          ✓ Add entry
-        </button>
       </div>
     </div>
   );
 }
+
+// ───────────────────────────────────────────── helpers + sub-components
+
+function fmtSigned(n: number): string {
+  if (!n) return '$0';
+  const sign = n < 0 ? '−' : '';
+  return sign + '$' + Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
+
+function SourceSeg({ value, onChange }: { value: Source; onChange: (s: Source) => void }) {
+  const opts: Array<{ k: Source; label: string; g: string }> = [
+    { k: 'stock', label: 'Stock', g: 'S' },
+    { k: 'call',  label: 'Call',  g: 'C' },
+    { k: 'put',   label: 'Put',   g: 'P' },
+  ];
+  return (
+    <div className="pp-source-seg" role="tablist">
+      {opts.map((o) => (
+        <button
+          key={o.k}
+          type="button"
+          className={'pp-source-opt' + (value === o.k ? ' on' : '')}
+          onClick={() => onChange(o.k)}
+        >
+          <span className="pp-glyph-tile">{o.g}</span>
+          <span>{o.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OptionFields({
+  source, entry, set, tab, signedTotal, optionTotal,
+}: {
+  source: Source;
+  entry: EntryForm;
+  set: <K extends keyof EntryForm>(k: K, v: EntryForm[K]) => void;
+  tab: Tab;
+  signedTotal: number;
+  optionTotal: number;
+}) {
+  const sign = tab === 'expense' ? 'neg' : 'pos';
+  return (
+    <>
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">Strike</div>
+          <MoneyInput value={entry.strike} onChange={(v) => set('strike', v)} placeholder="0.00" />
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">Contracts</div>
+          <input
+            className="pp-input mono"
+            type="number"
+            min="1"
+            step="1"
+            value={entry.contracts}
+            onChange={(e) => set('contracts', e.target.value)}
+            placeholder="0"
+          />
+        </div>
+      </div>
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">Expiry</div>
+          <input
+            className="pp-input mono"
+            type="date"
+            value={entry.expiry}
+            onChange={(e) => set('expiry', e.target.value)}
+          />
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">
+            {source === 'put' ? 'Premium paid / sh' : 'Premium / sh'}
+          </div>
+          <MoneyInput value={entry.premium} onChange={(v) => set('premium', v)} placeholder="0.00" />
+        </div>
+      </div>
+      <div className="pp-field">
+        <div className="pp-field-label">Total</div>
+        <div className={'pp-calc-tile ' + sign}>
+          <span className="num">{optionTotal > 0 ? fmtSigned(signedTotal) : '—'}</span>
+          <span className="formula">contracts × 100 × premium</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function StockFields({
+  entry, set,
+}: {
+  entry: EntryForm;
+  set: <K extends keyof EntryForm>(k: K, v: EntryForm[K]) => void;
+}) {
+  return (
+    <div className="pp-form-grid cols-2">
+      <div className="pp-field">
+        <div className="pp-field-label">Amount</div>
+        <MoneyInput value={entry.amount} onChange={(v) => set('amount', v)} placeholder="0.00" />
+      </div>
+      <div className="pp-field">
+        <div className="pp-field-label">Shares (optional)</div>
+        <input
+          className="pp-input mono"
+          type="number"
+          value={entry.shares}
+          onChange={(e) => set('shares', e.target.value)}
+          placeholder="0"
+        />
+        <div className="pp-field-hint">leave blank for ad-hoc dividends</div>
+      </div>
+    </div>
+  );
+}
+
+function MoneyInput({
+  value, onChange, placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="pp-input-prefix">
+      <span className="pp-pfx">$</span>
+      <input
+        className="pp-input mono"
+        type="number"
+        step="0.01"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
+
+// Keep these imports referenced so TS doesn't flag the file when types
+// are imported elsewhere; PutProtectionRow is part of Props above.
+void {} as unknown as PutProtectionRow;

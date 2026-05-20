@@ -8,7 +8,14 @@ import {
 } from './types';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-const WEEK_COUNT = 12;
+const WEEK_OPTIONS = [12, 26, 52, 104] as const;
+type Weeks = typeof WEEK_OPTIONS[number];
+const LS_EXP_WEEKS = 'np:expensesWeeks';
+function readWeeksLS(key: string): Weeks {
+  if (typeof window === 'undefined') return 12;
+  const v = parseInt(window.localStorage.getItem(key) ?? '', 10);
+  return (WEEK_OPTIONS as readonly number[]).includes(v) ? (v as Weeks) : 12;
+}
 
 function mondayOf(d: Date): Date {
   const x = new Date(d);
@@ -42,6 +49,12 @@ export function ExpensesLogMatrix({
   onTickerClick,
 }: Props) {
   const [filter, setFilter] = useState<StatusFilter>('all');
+  const [weeks, setWeeksState] = useState<Weeks>(() => readWeeksLS(LS_EXP_WEEKS));
+  const setWeeks = (w: Weeks) => {
+    setWeeksState(w);
+    try { window.localStorage.setItem(LS_EXP_WEEKS, String(w)); } catch { /* private mode */ }
+  };
+  const WEEK_COUNT = weeks;
   const todayWeek = useMemo(() => mondayOf(new Date()), []);
 
   // Build an effective ticker → entries map that folds put-protection cost in
@@ -149,6 +162,18 @@ export function ExpensesLogMatrix({
           <button className={filter === 'closed' ? 'on' : ''} onClick={() => setFilter('closed')}>
             Closed <span className="ct">{counts.closed}</span>
           </button>
+        </div>
+        <div className="gl-timeframe">
+          {WEEK_OPTIONS.map((w) => (
+            <button
+              key={w}
+              className={weeks === w ? 'on' : ''}
+              onClick={() => setWeeks(w)}
+              title={`Show ${w} weeks of history`}
+            >
+              {w}w
+            </button>
+          ))}
         </div>
       </div>
 
