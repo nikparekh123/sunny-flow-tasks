@@ -9,22 +9,40 @@ import {
 } from './types';
 
 /**
- * Trades matrix — each column is a SINGLE TRADE on that ticker, ordered
- * by trade_date (newest first). Date-agnostic: column 1 is the most
- * recent trade on the ticker, column 2 is the one before that, etc.
+ * Unified weekly trade matrix.
  *
- * Each cell shows the trade's signed cash flow + an "open"/"close"
- * label so the user can scan what just happened without thinking
- * about which week it was.
+ * One row per position, one column per week. Each cell shows the NET cash
+ * flow that week for that ticker (premium collected − premium paid) plus
+ * coloured dots indicating which option types traded that week (C / P).
  *
- * Realized column on the right = Σ realized P&L for the ticker.
+ * Click a cell → opens the write modal pre-filled for that ticker. If the
+ * ticker has live opens, the modal lands on the Close tab; otherwise on
+ * the Open tab. Tickering the name opens the insight (read) view.
  */
 
-type StatusFilter = 'all' | 'active' | 'open' | 'closed';
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const WEEK_OPTIONS = [12, 26, 52, 104] as const;
+type Weeks = typeof WEEK_OPTIONS[number];
+const LS_TRADES_WEEKS = 'np:tradesWeeks';
+function readWeeksLS(): Weeks {
+  if (typeof window === 'undefined') return 52;
+  const v = parseInt(window.localStorage.getItem(LS_TRADES_WEEKS) ?? '', 10);
+  return (WEEK_OPTIONS as readonly number[]).includes(v) ? (v as Weeks) : 52;
+}
 
-// How many trade columns to render. We compute the max trade count across
-// visible tickers and cap it here so the table can't blow out indefinitely.
-const MAX_COLUMNS = 30;
+function mondayOf(d: Date): Date {
+  const x = new Date(d);
+  const day = (x.getUTCDay() + 6) % 7;
+  x.setUTCDate(x.getUTCDate() - day);
+  x.setUTCHours(0, 0, 0, 0);
+  return x;
+}
+function weekIdxOf(iso: string, todayWeek: Date): number {
+  const d = new Date(iso + 'T12:00:00Z');
+  return Math.round((todayWeek.getTime() - mondayOf(d).getTime()) / WEEK_MS);
+}
+
+type StatusFilter = 'all' | 'active' | 'open' | 'closed';
 
 interface Props {
   rows: PositionComputed[];
@@ -32,6 +50,7 @@ interface Props {
   liveByTicker: Map<string, LiveOption[]>;
   realizedByTicker: Map<string, number>;
   onTickerClick: (ticker: string) => void;
+  /** Cell click. The page decides which tab to open based on live state. */
   onCellClick: (ticker: string, weekIdx: number) => void;
 }
 
@@ -44,6 +63,13 @@ export function TradesLogMatrix({
   onCellClick,
 }: Props) {
   const [filter, setFilter] = useState<StatusFilter>('all');
+  const [weeks, setWeeksState] = useState<Weeks>(() => readWeeksLS());
+  const setWeeks = (w: Weeks) => {
+    setWeeksState(w);
+    try { window.localStorage.setItem(LS_TRADES_WEEKS, String(w)); } catch { /* private */ }
+  };
+  const WEEK_COUNT = weeks;
+  const todayWeek = useMemo(() => mondayOf(new Date()), []);
 
   const counts = useMemo(
     () => ({
@@ -62,7 +88,7 @@ export function TradesLogMatrix({
     return rows;
   }, [rows, filter, tradesByTicker]);
 
-  // Sort tickers by realized P&L desc (matches Timeline).
+  // Sort by realized P&L desc — most-productive tickers float to the top.
   const sorted = useMemo(
     () =>
       [...filtered].sort(
@@ -71,43 +97,34 @@ export function TradesLogMatrix({
     [filtered, realizedByTicker],
   );
 
-  // Build a per-ticker trade list (newest first) + look up the open trade
-  // for each close so we can compute realized P&L per cell.
-  const tradeListsByTicker = useMemo(() => {
-    const m = new Map<string, Array<{ trade: OptionTrade; open: OptionTrade | null }>>();
-    for (const r of sorted) {
-      const trades = (tradesByTicker.get(r.ticker) ?? []).slice();
-      const byId = new Map(trades.map((t) => [t.id, t]));
-      const sortedTrades = trades.sort((a, b) => b.trade_date.localeCompare(a.trade_date));
-      const enriched = sortedTrades.map((t) => ({
-        trade: t,
-        open: t.action === 'close' && t.closes_trade_id ? byId.get(t.closes_trade_id) ?? null : null,
-      }));
-      m.set(r.ticker, enriched);
-    }
-    return m;
-  }, [sorted, tradesByTicker]);
+  // Weekly totals across visible rows.
+  const weeklyTotals = useMemo(() => {
+    const totals = Array.from({ length: WEEK_COUNT }, () => ({
+      collected: 0, paid: 0, n: 0,
+    }));
+    sorted.forEach((r) => {
+      const trades = tradesByTicker.get(r.ticker) ?? [];
+      trades.forEach((t) => {
+        const w = weekIdxOf(t.trade_date, todayWeek);
+        if (w < 0 || w >= WEEK_COUNT) return;
+        const notional = t.contracts * 100 * t.premium;
+        const isCashIn =
+          (t.action === 'open' && t.direction === 'short') ||
+          (t.action === 'close' && t.direction === 'long');
+        if (isCashIn) totals[w].collected += notional;
+        else          totals[w].paid      += notional;
+        totals[w].n += 1;
+      });
+    });
+    return totals;
+  }, [sorted, tradesByTicker, todayWeek, WEEK_COUNT]);
 
-  // Decide how many trade columns to render: the largest trade count across
-  // any visible ticker, capped at MAX_COLUMNS. Minimum 1 so the header
-  // always has at least one column.
-  const colCount = useMemo(() => {
-    let max = 1;
-    for (const list of tradeListsByTicker.values()) {
-      if (list.length > max) max = list.length;
-    }
-    return Math.min(max, MAX_COLUMNS);
-  }, [tradeListsByTicker]);
-
-  // Grand realized across the visible set.
-  const grandRealized = useMemo(
-    () => sorted.reduce((s, r) => s + (realizedByTicker.get(r.ticker) ?? 0), 0),
-    [sorted, realizedByTicker],
-  );
-  const totalTrades = useMemo(
-    () => Array.from(tradeListsByTicker.values()).reduce((s, l) => s + l.length, 0),
-    [tradeListsByTicker],
-  );
+  const grand = {
+    collected: weeklyTotals.reduce((s, t) => s + t.collected, 0),
+    paid:      weeklyTotals.reduce((s, t) => s + t.paid, 0),
+    n:         weeklyTotals.reduce((s, t) => s + t.n, 0),
+  };
+  const grandNet = grand.collected - grand.paid;
 
   return (
     <div className="gl-wrap">
@@ -126,6 +143,18 @@ export function TradesLogMatrix({
             Closed <span className="ct">{counts.closed}</span>
           </button>
         </div>
+        <div className="gl-timeframe">
+          {WEEK_OPTIONS.map((w) => (
+            <button
+              key={w}
+              className={weeks === w ? 'on' : ''}
+              onClick={() => setWeeks(w)}
+              title={`Show ${w} weeks`}
+            >
+              {w}w
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="gl-scroll">
@@ -133,9 +162,9 @@ export function TradesLogMatrix({
           <thead>
             <tr>
               <th className="gl-pos">Position</th>
-              {Array.from({ length: colCount }, (_, i) => (
+              {Array.from({ length: WEEK_COUNT }, (_, i) => (
                 <th key={i} className={'gl-wk ' + (i === 0 ? 'this' : '')}>
-                  <div className="gl-wk-l">#{i + 1}</div>
+                  <div className="gl-wk-l">{i + 1}</div>
                 </th>
               ))}
               <th className="gl-tot">Realized</th>
@@ -143,9 +172,32 @@ export function TradesLogMatrix({
           </thead>
           <tbody>
             {sorted.map((r) => {
-              const list = tradeListsByTicker.get(r.ticker) ?? [];
+              const trades = tradesByTicker.get(r.ticker) ?? [];
               const live = liveByTicker.get(r.ticker) ?? [];
               const realized = realizedByTicker.get(r.ticker) ?? 0;
+
+              // Group trades by week WITHOUT aggregating their amounts —
+              // every trade keeps its own signed cash flow so each one can
+              // render as a separate box inside the weekly cell.
+              interface TradeBox {
+                trade: OptionTrade;
+                signed: number;          // + collected / − paid
+              }
+              const byWeek: Record<number, TradeBox[]> = {};
+              trades.forEach((t) => {
+                const w = weekIdxOf(t.trade_date, todayWeek);
+                if (w < 0 || w >= WEEK_COUNT) return;
+                if (!byWeek[w]) byWeek[w] = [];
+                const notional = t.contracts * 100 * t.premium;
+                const isCashIn =
+                  (t.action === 'open' && t.direction === 'short') ||
+                  (t.action === 'close' && t.direction === 'long');
+                byWeek[w].push({ trade: t, signed: isCashIn ? notional : -notional });
+              });
+              // Newest trade in the week shows on top inside the cell.
+              Object.values(byWeek).forEach((arr) =>
+                arr.sort((a, b) => b.trade.trade_date.localeCompare(a.trade.trade_date)),
+              );
 
               return (
                 <tr key={r.ticker} className={r.status === 'closed' ? 'closed-row' : ''}>
@@ -163,46 +215,45 @@ export function TradesLogMatrix({
                     </div>
                   </td>
 
-                  {Array.from({ length: colCount }, (_, i) => {
-                    const entry = list[i];
-                    if (!entry) {
-                      return (
-                        <td key={i} className={'gl-cell empty ' + (i === 0 ? 'this' : '')} />
-                      );
-                    }
-                    const t = entry.trade;
-                    const isCashIn =
-                      (t.action === 'open' && t.direction === 'short') ||
-                      (t.action === 'close' && t.direction === 'long');
-                    const notional = t.contracts * 100 * t.premium;
-                    const signed = isCashIn ? notional : -notional;
-                    const realizedHere = t.action === 'close' && entry.open
-                      ? closeRealizedPL(t, entry.open)
-                      : 0;
-                    const amtCls = signed > 0 ? 'up' : signed < 0 ? 'down' : '';
+                  {Array.from({ length: WEEK_COUNT }, (_, i) => {
+                    const list = byWeek[i];
                     return (
                       <td
                         key={i}
-                        className={'gl-cell filled ' + (i === 0 ? 'this' : '')}
+                        className={'gl-cell ' + (list ? 'filled ' : 'empty ') + (i === 0 ? 'this' : '')}
                         onClick={() => onCellClick(r.ticker, i)}
-                        title={`${t.action} ${t.direction} ${t.option_type} ${t.contracts}× $${t.strike} @ $${t.premium}/sh · ${t.trade_date}`}
+                        title={
+                          list
+                            ? `${list.length} trade${list.length === 1 ? '' : 's'} this week`
+                            : 'tap to open a new position'
+                        }
                       >
-                        <div className="gl-cell-in">
-                          <div className={'gl-cell-amt ' + amtCls}>
-                            {signed >= 0 ? fmtCompact(signed) : '−' + fmtCompact(Math.abs(signed))}
+                        {list ? (
+                          <div className="gl-cell-stack">
+                            {list.map(({ trade, signed }) => (
+                              <div
+                                key={trade.id}
+                                className={
+                                  'gl-trade-box ' +
+                                  (signed < 0 ? 'down' : signed > 0 ? 'up' : '')
+                                }
+                                title={`${trade.action} ${trade.direction} ${trade.option_type} ${trade.contracts}× $${trade.strike} @ $${trade.premium}/sh`}
+                              >
+                                <span className="gl-trade-box-amt">
+                                  {signed >= 0 ? fmtCompact(signed) : '−' + fmtCompact(Math.abs(signed))}
+                                </span>
+                                <span className="gl-trade-box-tag">
+                                  {trade.action === 'open' ? 'op' : 'cl'}
+                                  <span className="gl-trade-box-type">
+                                    {trade.option_type === 'put' ? 'P' : 'C'}
+                                  </span>
+                                </span>
+                              </div>
+                            ))}
                           </div>
-                          <div className="gl-cell-action">
-                            {t.action === 'open' ? 'open' : 'close'}
-                            <span className="gl-cell-type">
-                              {t.option_type === 'put' ? 'P' : 'C'}
-                            </span>
-                            {realizedHere !== 0 && (
-                              <span className={'gl-cell-realized ' + (realizedHere > 0 ? 'up' : 'down')}>
-                                {realizedHere > 0 ? '+' : '−'}{fmtCompact(Math.abs(realizedHere))}
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                        ) : (
+                          <span className="gl-plus">+</span>
+                        )}
                       </td>
                     );
                   })}
@@ -223,7 +274,7 @@ export function TradesLogMatrix({
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={colCount + 2} style={{ textAlign: 'center', padding: 32, color: 'var(--navi-fg3)' }}>
+                <td colSpan={WEEK_COUNT + 2} style={{ textAlign: 'center', padding: 32, color: 'var(--navi-fg3)' }}>
                   No positions match this filter
                 </td>
               </tr>
@@ -232,13 +283,28 @@ export function TradesLogMatrix({
           <tfoot>
             <tr className="gl-foot">
               <td className="gl-pos">
-                <b>Portfolio</b>
-                <div className="gl-pos-sub">{totalTrades} trades</div>
+                <b>Weekly net</b>
+                <div className="gl-pos-sub">{grand.n} trades</div>
               </td>
-              <td colSpan={colCount} />
+              {weeklyTotals.map((t, i) => {
+                const net = t.collected - t.paid;
+                return (
+                  <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
+                    {net !== 0 ? (
+                      <div className="gl-cell-in">
+                        <div className={'gl-cell-amt ' + (net < 0 ? 'down' : 'up')}>
+                          {net >= 0 ? fmtCompact(net) : '−' + fmtCompact(Math.abs(net))}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                );
+              })}
               <td className="gl-tot">
-                <div className={'gl-tot-amt ' + (grandRealized < 0 ? 'down' : grandRealized > 0 ? 'up' : '')}>
-                  {grandRealized === 0 ? '$0' : grandRealized >= 0 ? fmtUSD(grandRealized) : '−' + fmtUSD(Math.abs(grandRealized))}
+                <div className={'gl-tot-amt ' + (grandNet < 0 ? 'down' : grandNet > 0 ? 'up' : '')}>
+                  {grandNet >= 0 ? fmtUSD(grandNet) : '−' + fmtUSD(Math.abs(grandNet))}
                 </div>
               </td>
             </tr>
@@ -248,3 +314,6 @@ export function TradesLogMatrix({
     </div>
   );
 }
+
+// Silence unused-import lint when nothing imports closeRealizedPL directly.
+void {} as unknown as typeof closeRealizedPL;

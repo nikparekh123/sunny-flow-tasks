@@ -23,6 +23,10 @@ export interface PositionInput {
   avg_cost: number;
   /** Optional CSV-supplied strategy bucket. Upserts into strategy_overlay. */
   strategy?: StrategyBucket;
+  /** Optional CSV-supplied position status. Governs the SHARES status
+   *  on positions.status. Defaults to 'open'. Options are closed via
+   *  the in-app close-trade flow, not this column. */
+  status?: 'open' | 'closed';
 }
 
 export type StrategyBucket = 'income' | 'invest' | 'yield';
@@ -131,6 +135,7 @@ export function usePositions() {
           quantity: Number(r.quantity),
           avg_cost: Number(r.avg_cost),
           strategy: r.strategy,
+          status: r.status ?? 'open',
         }))
         .filter(
           (r) =>
@@ -149,6 +154,7 @@ export function usePositions() {
 
       if (cleaned.length === 0) return { inserted: 0 };
 
+      // Strip the strategy field — it goes to strategy_overlay separately.
       const positionsToInsert = cleaned.map(({ strategy: _s, ...rest }) => {
         void _s;
         return rest;

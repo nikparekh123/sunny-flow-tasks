@@ -265,14 +265,8 @@ export default function PositionsPage() {
               tradesByTicker={tradesByTicker}
               liveByTicker={liveByTicker}
               realizedByTicker={realizedByTicker}
+              // Read-only: ticker click → insight modal; no add/edit hooks.
               onTickerClick={(t) => setInsightTicker(t)}
-              onBarClick={(t) => {
-                // Clicking a bar opens the write modal for that ticker.
-                // We default to the close tab since clicking a bar usually
-                // means "I want to act on this contract."
-                const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
-                setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
-              }}
             />
           )}
         </div>

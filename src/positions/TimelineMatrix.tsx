@@ -54,8 +54,8 @@ interface Props {
   tradesByTicker: Map<string, OptionTrade[]>;
   liveByTicker: Map<string, LiveOption[]>;
   realizedByTicker: Map<string, number>;
+  /** Read-only view: ticker click → insight modal. No add/edit hooks. */
   onTickerClick: (ticker: string) => void;
-  onBarClick: (ticker: string, openId: string) => void;
 }
 
 interface ResolvedTrade {
@@ -103,7 +103,6 @@ export function TimelineMatrix({
   liveByTicker,
   realizedByTicker,
   onTickerClick,
-  onBarClick,
 }: Props) {
   const [filter, setFilter] = useState<StatusFilter>('all');
   const [days, setDaysState] = useState<Days>(() => readDaysLS());
@@ -264,10 +263,6 @@ export function TimelineMatrix({
                         // Position by slot — each slot is 6px tall with 2px gap.
                         const slotTopPercent = (slot / slotCount) * 100;
                         const slotHeightPercent = 100 / slotCount;
-                        const onClick = (e: React.MouseEvent) => {
-                          e.stopPropagation();
-                          onBarClick(r.ticker, rt.open.id);
-                        };
 
                         return (
                           <div
@@ -280,13 +275,12 @@ export function TimelineMatrix({
                           >
                             {liveWidth > 0 && (
                               <div
-                                className={'tl-bar ' + liveColorClass}
+                                className={'tl-bar tl-bar-readonly ' + liveColorClass}
                                 style={{
                                   left: `${(openOffset / totalDays) * 100}%`,
                                   width: `${(liveWidth / totalDays) * 100}%`,
                                 }}
                                 title={`Open ${rt.open.trade_date} · ${rt.open.contracts}× ${isPut ? 'P' : 'C'} $${rt.open.strike} @ $${rt.open.premium}/sh`}
-                                onClick={onClick}
                               >
                                 <span className="tl-bar-text">
                                   open · {rt.open.contracts}{isPut ? 'P' : 'C'} ${rt.open.strike}
@@ -295,13 +289,12 @@ export function TimelineMatrix({
                             )}
                             {closeOffset != null && grayWidth > 0 && (
                               <div
-                                className="tl-bar tl-bar-closed"
+                                className="tl-bar tl-bar-closed tl-bar-readonly"
                                 style={{
                                   left: `${(closeOffset / totalDays) * 100}%`,
                                   width: `${(grayWidth / totalDays) * 100}%`,
                                 }}
                                 title={`Closed ${rt.firstCloseDate} · realized ${rt.realized >= 0 ? '+' : '−'}${fmtUSD(Math.abs(rt.realized))}`}
-                                onClick={onClick}
                               >
                                 <span className="tl-bar-text">close</span>
                                 <span className={'tl-bar-realized ' + realizedColor}>
@@ -317,7 +310,6 @@ export function TimelineMatrix({
                                   width: `${(futureWidth / totalDays) * 100}%`,
                                 }}
                                 title={`Until expiry ${rt.open.expiry}`}
-                                onClick={onClick}
                               />
                             )}
                           </div>

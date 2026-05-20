@@ -73,8 +73,11 @@ function parseCsv(text: string): ParseResult {
     sector: headers.indexOf('sector'),
     quantity: headers.indexOf('quantity'),
     avg_cost: headers.indexOf('avg_cost'),
-    // Optional column; -1 if absent.
+    // Optional columns; -1 if absent.
     strategy: headers.indexOf('strategy'),
+    // status governs the SHARES state. Options remain governed by the
+    // platform (close trades). Accept "open" / "closed" (with aliases).
+    status: headers.indexOf('status'),
   };
 
   const rows: PositionInput[] = [];
@@ -87,6 +90,11 @@ function parseCsv(text: string): ParseResult {
     const avg = parseFloat(cols[idx.avg_cost] ?? '');
     const stratRaw = idx.strategy >= 0 ? (cols[idx.strategy] ?? '').trim().toLowerCase() : '';
     const strategy = stratRaw ? STRATEGY_ALIASES[stratRaw] : undefined;
+    const statusRaw = idx.status >= 0 ? (cols[idx.status] ?? '').trim().toLowerCase() : '';
+    // Map common spellings → canonical 'open' | 'closed'.
+    let status: 'open' | 'closed' | undefined;
+    if (statusRaw === 'open' || statusRaw === 'o' || statusRaw === '') status = statusRaw === '' ? undefined : 'open';
+    else if (statusRaw === 'close' || statusRaw === 'closed' || statusRaw === 'c') status = 'closed';
 
     if (!ticker || !/^[A-Z0-9.\-]+$/.test(ticker)) {
       errors.push({ row: rowNum, field: 'ticker', msg: `invalid ticker "${cols[idx.ticker]}"` });
@@ -107,14 +115,22 @@ function parseCsv(text: string): ParseResult {
         msg: `strategy "${stratRaw}" must be one of income / invest / yield (blank = unassigned)`,
       });
     }
+    if (idx.status >= 0 && statusRaw && status == null) {
+      errors.push({
+        row: rowNum,
+        field: 'status',
+        msg: `status "${statusRaw}" must be open / closed (blank = open)`,
+      });
+    }
     if (
       ticker &&
       VALID_SECTORS.has(sector) &&
       !isNaN(qty) && qty > 0 &&
       !isNaN(avg) && avg >= 0 &&
-      (!stratRaw || !!strategy)
+      (!stratRaw || !!strategy) &&
+      (!statusRaw || status != null)
     ) {
-      rows.push({ ticker, sector, quantity: qty, avg_cost: avg, strategy });
+      rows.push({ ticker, sector, quantity: qty, avg_cost: avg, strategy, status });
     }
   }
   return { rows, errors };
@@ -186,7 +202,7 @@ export function CsvUploadModal({ open, onClose, onConfirm }: Props) {
               <div className="np-modal-title">Upload positions</div>
               <div className="np-modal-sub">
                 CSV columns: ticker, sector, quantity, avg_cost
-                {' · optional: strategy (income / invest / yield)'}
+                {' · optional: strategy (income / invest / yield), status (open / closed)'}
               </div>
             </div>
             <button
@@ -239,10 +255,11 @@ export function CsvUploadModal({ open, onClose, onConfirm }: Props) {
                   borderRadius: 6,
                   margin: '18px 0 0 0',
                 }}
-              >{`ticker,sector,quantity,avg_cost,strategy
-AAPL,Technology,100,150.25,income
-CCJ,Energy,500,42.10,invest
-JEPI,Financials,300,55.40,yield`}</pre>
+              >{`ticker,sector,quantity,avg_cost,strategy,status
+AAPL,Technology,100,150.25,income,open
+CCJ,Energy,500,42.10,invest,open
+JEPI,Financials,300,55.40,yield,open
+NKE,Consumer Discretionary,200,90.00,invest,closed`}</pre>
             </div>
           )}
 
