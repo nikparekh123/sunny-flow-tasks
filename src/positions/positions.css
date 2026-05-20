@@ -2630,3 +2630,56 @@
   font-size: 11px;
   color: var(--navi-fg3);
 }
+
+/* Trades matrix — per-trade cell content (replaces the old dot indicators).
+   Each filled cell now shows the trade amount + an "open" / "close" word
+   and the option type letter, so the user can read what each column is
+   without thinking about dates or hovering. */
+.gl-cell-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.2px;
+  color: var(--navi-fg4);
+  margin-top: 2px;
+  text-transform: lowercase;
+}
+.gl-cell-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: rgba(70,130,120,.3);
+  color: var(--navi-fg2);
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+}
+.gl-cell-realized {
+  font-weight: 500;
+  font-size: 9px;
+}
+.gl-cell-realized.up   { color: var(--navi-positive); }
+.gl-cell-realized.down { color: var(--navi-negative); }
+
+/* Text label inside Timeline bars — "open · 3P $52" or "close" or arrow.
+   Truncates with ellipsis when the bar is narrow. */
+.tl-bar-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 9px;
+  color: var(--navi-page);
+  letter-spacing: 0.2px;
+}
+.tl-bar-closed .tl-bar-text {
+  color: var(--navi-fg2);
+}

@@ -23,13 +23,13 @@ import {
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const DAY_OPTIONS = [60, 120, 180, 365] as const;
+const DAY_OPTIONS = [30, 60, 120, 180, 365] as const;
 type Days = typeof DAY_OPTIONS[number];
 const LS_DAYS = 'np:timelineDays';
 function readDaysLS(): Days {
-  if (typeof window === 'undefined') return 120;
+  if (typeof window === 'undefined') return 60;
   const v = parseInt(window.localStorage.getItem(LS_DAYS) ?? '', 10);
-  return (DAY_OPTIONS as readonly number[]).includes(v) ? (v as Days) : 120;
+  return (DAY_OPTIONS as readonly number[]).includes(v) ? (v as Days) : 60;
 }
 function splitDays(total: Days): { past: number; future: number } {
   const past = Math.round(total * 0.4);
@@ -287,7 +287,11 @@ export function TimelineMatrix({
                                 }}
                                 title={`Open ${rt.open.trade_date} · ${rt.open.contracts}× ${isPut ? 'P' : 'C'} $${rt.open.strike} @ $${rt.open.premium}/sh`}
                                 onClick={onClick}
-                              />
+                              >
+                                <span className="tl-bar-text">
+                                  open · {rt.open.contracts}{isPut ? 'P' : 'C'} ${rt.open.strike}
+                                </span>
+                              </div>
                             )}
                             {closeOffset != null && grayWidth > 0 && (
                               <div
@@ -299,6 +303,7 @@ export function TimelineMatrix({
                                 title={`Closed ${rt.firstCloseDate} · realized ${rt.realized >= 0 ? '+' : '−'}${fmtUSD(Math.abs(rt.realized))}`}
                                 onClick={onClick}
                               >
+                                <span className="tl-bar-text">close</span>
                                 <span className={'tl-bar-realized ' + realizedColor}>
                                   {rt.realized >= 0 ? '+' : '−'}{fmtCompact(Math.abs(rt.realized))}
                                 </span>
