@@ -3137,204 +3137,158 @@
 }
 
 /* ============================================================
-   P&L by Position — Tesla Energy style
-   Hero stats (↑ Gains / ↓ Losses), mirrored bars per ticker,
-   contributor rows, and a solar-offset-style coverage bar.
+   P&L by Position — slots into the AllocationTreemap card shell
+   (.np-treemap-card) so it matches sector / stock / strategy.
    ============================================================ */
-.np-app .pnl-wrap {
+.np-app .pnl-card { /* uses .np-treemap-card grid + surface */ }
+
+.np-app .pnl-chart-col {
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  padding: 28px 32px;
-  background: var(--navi-card);
-  border: 1px solid rgba(50,110,100,.25);
-  border-radius: 14px;
-  color: var(--navi-fg1);
+  gap: 16px;
+  min-height: 420px;
 }
-.np-app .pnl-empty {
-  padding: 80px;
-  text-align: center;
-  color: var(--navi-fg3);
-  font-family: var(--navi-font-mono);
-}
-
-/* Hero header stats (Tesla: huge numbers, tiny labels) */
-.np-app .pnl-hd {
-  display: flex;
-  gap: 64px;
-  flex-wrap: wrap;
-}
-.np-app .pnl-stat {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.np-app .pnl-stat-k {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--navi-fg3);
-  letter-spacing: .6px;
-  text-transform: uppercase;
-}
-.np-app .pnl-stat-v {
-  font-family: var(--navi-font-sans);
-  font-size: 44px;
-  font-weight: 600;
-  letter-spacing: -1px;
-  line-height: 1;
-}
-.np-app .pnl-stat-v.up   { color: var(--navi-positive); }
-.np-app .pnl-stat-v.down { color: var(--navi-negative); }
-
-/* Mirrored bars chart */
-.np-app .pnl-chart-wrap {
-  position: relative;
-  width: 100%;
-  height: 320px;
-}
-.np-app .pnl-svg {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
-/* Net summary line */
-.np-app .pnl-net {
+.np-app .pnl-chart-hd {
   display: flex;
   align-items: baseline;
-  gap: 12px;
-  border-top: 1px solid rgba(50,110,100,.22);
-  padding-top: 18px;
+  gap: 32px;
 }
-.np-app .pnl-net-k {
-  font-size: 14px;
-  color: var(--navi-fg2);
-  font-weight: 500;
+.np-app .pnl-chart-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.np-app .pnl-net-v {
+.np-app .pnl-chart-stat.right { margin-left: auto; }
+.np-app .pnl-chart-stat-k {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+}
+.np-app .pnl-chart-stat-v {
+  font-family: var(--navi-font-sans);
   font-size: 22px;
   font-weight: 600;
   letter-spacing: -.4px;
+  line-height: 1;
 }
-.np-app .pnl-net-v.up   { color: var(--navi-positive); }
-.np-app .pnl-net-v.down { color: var(--navi-negative); }
+.np-app .pnl-chart-stat-v.up   { color: var(--navi-positive); }
+.np-app .pnl-chart-stat-v.down { color: var(--navi-negative); }
 
-/* Contributor columns */
-.np-app .pnl-cols {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 32px;
+.np-app .pnl-svg {
+  width: 100%;
+  height: auto;
+  flex: 1;
+  min-height: 360px;
 }
-@media (max-width: 900px) {
-  .np-app .pnl-cols { grid-template-columns: 1fr; }
-}
-.np-app .pnl-section {
+
+/* RIGHT panel: tabs + content (matches treemap-list typography) */
+.np-app .pnl-side {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-.np-app .pnl-section-hd {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--navi-fg3);
-  letter-spacing: .6px;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-}
-.np-app .pnl-row {
-  display: grid;
-  grid-template-columns: 14px 56px 1fr auto 48px;
-  align-items: center;
   gap: 12px;
+}
+.np-app .pnl-tabs {
+  display: inline-flex;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.np-app .pnl-tabs button {
+  flex: 1;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid rgba(50,110,100,.18);
-  color: var(--navi-fg1);
-  padding: 10px 0;
-  font-family: var(--navi-font-sans);
-  font-size: 14px;
-  text-align: left;
-  cursor: pointer;
-  transition: background .15s var(--np-ease);
-}
-.np-app .pnl-row:disabled { cursor: default; }
-.np-app .pnl-row:hover:not(:disabled) {
-  background: rgba(50,110,100,.12);
-}
-.np-app .pnl-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-.np-app .pnl-dot.up   { background: var(--navi-positive); }
-.np-app .pnl-dot.down { background: var(--navi-negative); }
-.np-app .pnl-row-tk {
-  font-weight: 600;
-  letter-spacing: -.2px;
-}
-.np-app .pnl-row-sec {
-  color: var(--navi-fg3);
-  font-size: 12px;
-}
-.np-app .pnl-row-val {
-  font-family: var(--navi-font-mono);
-  font-weight: 500;
-  justify-self: end;
-}
-.np-app .pnl-row-val.up   { color: var(--navi-positive); }
-.np-app .pnl-row-val.down { color: var(--navi-negative); }
-.np-app .pnl-row-pct {
-  font-family: var(--navi-font-mono);
-  color: var(--navi-fg3);
-  justify-self: end;
-  font-size: 13px;
-}
-
-/* Solar-offset-style coverage section */
-.np-app .pnl-coverage {
-  border-top: 1px solid rgba(50,110,100,.22);
-  padding-top: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-.np-app .pnl-coverage-hd {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.np-app .pnl-coverage-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--navi-fg1);
-  letter-spacing: -.2px;
-}
-.np-app .pnl-coverage-pct {
-  font-size: 14px;
-  font-weight: 500;
   color: var(--navi-fg2);
   font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .pnl-tabs button:hover:not(:disabled) { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .pnl-tabs button.on { color: var(--navi-neon); background: var(--navi-tint-neon); }
+.np-app .pnl-tabs button:disabled { color: var(--navi-fg5); cursor: not-allowed; }
+
+.np-app .pnl-contrib {
+  display: flex;
+  flex-direction: column;
+}
+.np-app .pnl-contrib-row {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(30,90,80,.18);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.np-app .pnl-contrib-row:last-child { border-bottom: none; }
+.np-app .pnl-contrib-row:disabled { cursor: default; }
+.np-app .pnl-contrib-row:hover:not(:disabled) { background: rgba(50,110,100,.10); }
+.np-app .pnl-contrib-val {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 8px;
+}
+.np-app .pnl-contrib-val.up   { color: var(--navi-positive); }
+.np-app .pnl-contrib-val.down { color: var(--navi-negative); }
+.np-app .pnl-contrib-pct {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+}
+
+/* Solar-offset coverage tab */
+.np-app .pnl-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  padding-top: 4px;
+}
+.np-app .pnl-coverage-pct-big {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: var(--navi-font-sans);
+  font-size: 36px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  letter-spacing: -1px;
+  line-height: 1;
+}
+.np-app .pnl-coverage-pct-sub {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+  margin-top: 4px;
 }
 .np-app .pnl-coverage-body {
   display: grid;
-  grid-template-columns: 1fr 80px 1fr;
-  align-items: end;
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
   height: 220px;
-  padding: 0 12%;
+  width: 100%;
+  align-items: end;
 }
 .np-app .pnl-cov-col {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   height: 100%;
   justify-content: flex-end;
 }
 .np-app .pnl-cov-bar-wrap {
   width: 100%;
-  max-width: 96px;
-  height: 80%;
+  max-width: 64px;
+  height: 70%;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -3348,30 +3302,19 @@
 .np-app .pnl-cov-bar.gold { background: var(--navi-warning); }
 .np-app .pnl-cov-bar.blue { background: var(--navi-neon); }
 .np-app .pnl-cov-val {
-  font-family: var(--navi-font-sans);
-  font-size: 20px;
-  font-weight: 600;
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  font-weight: 500;
   color: var(--navi-fg1);
-  letter-spacing: -.3px;
 }
 .np-app .pnl-cov-label {
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: .6px;
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
   text-transform: uppercase;
 }
 .np-app .pnl-cov-label.gold { color: var(--navi-warning); }
 .np-app .pnl-cov-label.blue { color: var(--navi-neon); }
-.np-app .pnl-cov-spacer {
-  height: 80%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.np-app .pnl-cov-dashes {
-  width: 100%;
-  border-top: 1px dashed rgba(50,110,100,.45);
-}
 
 /* Signals column (PositionsTable) — chips only render when actionable */
 .np-app .signals-cell {
