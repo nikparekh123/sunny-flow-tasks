@@ -1,3 +1,17 @@
+// Positions module — shared types + math.
+//
+// Data model (post-rewrite):
+//   - positions      : the underlying stock holdings (ticker + qty + avg cost)
+//   - option_trades  : single ledger of options activity. Each row is either
+//                      an OPEN (sell-to-open or buy-to-open) or a CLOSE
+//                      (matched to a prior open via closes_trade_id).
+//
+// Realized P&L = Σ(close-pair P&L). A close-pair is `(open, close)` where
+//   close.closes_trade_id = open.id. The signed P&L per close row is:
+//     - long open  → close.premium − open.premium  (sell − buy)
+//     - short open → open.premium − close.premium  (collected − bought-back)
+//   times close.contracts × 100.
+
 export const SECTORS = [
   'Technology',
   'Healthcare',
@@ -15,7 +29,6 @@ export const SECTORS = [
 
 export type Sector = (typeof SECTORS)[number];
 export type PositionStatus = 'open' | 'closed';
-export type GainSource = 'stock' | 'call' | 'put';
 
 export interface PositionRow {
   id: string;
@@ -40,145 +53,130 @@ export function daysUntil(iso: string): number {
   return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
-export interface GainEntry {
-  id: string;
-  ticker: string;
-  gain_date: string;        // ISO yyyy-mm-dd
-  source: GainSource;
-  amount: number;           // signed USD
-  note: string | null;
-  created_at: string;
-}
+// ── Option trades ────────────────────────────────────────────────────
 
-/** An expense entry (outflow). Same Stock/Call/Put split as gains, but
- *  amount is always stored as a positive magnitude. The UI shows it
- *  as negative because it lives in the expenses table. */
-export interface ExpenseEntry {
-  id: string;
-  ticker: string;
-  expense_date: string;     // ISO yyyy-mm-dd
-  source: GainSource;       // same source enum
-  amount: number;           // magnitude, always >= 0
-  note: string | null;
-  created_at: string;
-}
+export type OptionType = 'call' | 'put';
+export type Direction = 'long' | 'short';
+export type Action = 'open' | 'close';
 
-export interface PutProtectionRow {
+export interface OptionTrade {
   id: string;
   ticker: string;
-  total_cost: number;
-  expiry: string;
-  purchase_date: string;
-  /** Number of put contracts (each = 100 shares of underlying). Optional
-   *  for backward compat with older rows. */
-  contracts: number | null;
-  /** Per-share strike price. */
-  strike: number | null;
-  /** Latest per-share premium from Polygon. Multiply by contracts × 100
-   *  to get the position's current market value. */
-  current_premium: number | null;
-  /** ISO timestamp of the last successful quote fetch. */
-  current_premium_at: string | null;
+  trade_date: string;          // ISO YYYY-MM-DD
+  action: Action;
+  option_type: OptionType;
+  direction: Direction;        // the side of the OPEN; closes inherit (see helper)
+  contracts: number;           // always positive
+  strike: number;
+  premium: number;             // per-share, always positive
+  expiry: string;              // ISO YYYY-MM-DD
+  closes_trade_id: string | null;
+  note: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface PutProtectionCalc {
-  has: boolean;
-  total_cost: number;
-  expiry: string | null;
-  purchase_date: string | null;
-  total_days: number;
-  days_to_expiry: number;
-  days_elapsed: number;
-  cost_per_day: number;
-  cost_incurred: number;
-  cost_remaining: number;
-  expired: boolean;
-  /** Market quote fields — null until a quote is fetched from Polygon. */
-  contracts: number | null;
-  strike: number | null;
-  current_premium: number | null;
-  current_premium_at: string | null;
-  /** Total mark-to-market value of the contract today, in dollars.
-   *  contracts × 100 × current_premium. Null if any input is missing. */
-  current_value: number | null;
-  /** current_value − total_cost. Positive = the puts have appreciated
-   *  since purchase. Null if current_value is null. */
-  mark_to_market_pl: number | null;
+/** Signed dollar value of a single trade: contracts × 100 × premium, with
+ *  the sign expressing cash direction relative to the user.
+ *    - open  +short = cash IN  (you sold premium)         → +premium
+ *    - open  +long  = cash OUT (you bought)                → −premium
+ *    - close +short = cash OUT (you bought back)           → −premium
+ *    - close +long  = cash IN  (you sold what you owned)   → +premium
+ */
+export function tradeCashFlow(t: OptionTrade): number {
+  const notional = t.contracts * 100 * t.premium;
+  const isCashIn =
+    (t.action === 'open' && t.direction === 'short') ||
+    (t.action === 'close' && t.direction === 'long');
+  return isCashIn ? notional : -notional;
 }
 
-export function computePutProtection(pp: PutProtectionRow | undefined): PutProtectionCalc {
-  if (!pp) {
-    return {
-      has: false, total_cost: 0, expiry: null, purchase_date: null,
-      total_days: 0, days_to_expiry: 0, days_elapsed: 0,
-      cost_per_day: 0, cost_incurred: 0, cost_remaining: 0, expired: false,
-      contracts: null, strike: null, current_premium: null, current_premium_at: null,
-      current_value: null, mark_to_market_pl: null,
-    };
+/** Realized P&L for a single close row, given the open it points to.
+ *  Returns 0 if the close is unmatched (closes_trade_id is null). */
+export function closeRealizedPL(close: OptionTrade, open: OptionTrade): number {
+  if (close.action !== 'close') return 0;
+  const perShare =
+    open.direction === 'short'
+      ? open.premium - close.premium     // collected at open, paid at close
+      : close.premium - open.premium;    // paid at open, collected at close
+  return perShare * close.contracts * 100;
+}
+
+/** Group key for matching opens with closes by-contract. Two trades with
+ *  the same key describe the same underlying contract. */
+export function contractKey(t: OptionTrade): string {
+  return `${t.ticker}|${t.option_type}|${t.strike}|${t.expiry}|${t.direction}`;
+}
+
+/** Aggregate live opens per ticker. An open is "live" if it still has
+ *  remaining contracts after netting matched closes. */
+export interface LiveOption {
+  open: OptionTrade;
+  remaining_contracts: number; // open.contracts − Σ matched closes
+}
+
+export function liveOptionsByTicker(trades: OptionTrade[]): Map<string, LiveOption[]> {
+  const byId = new Map<string, OptionTrade>();
+  for (const t of trades) byId.set(t.id, t);
+
+  // Sum closed contracts against each open.
+  const closedAgainst = new Map<string, number>();
+  for (const t of trades) {
+    if (t.action === 'close' && t.closes_trade_id) {
+      closedAgainst.set(
+        t.closes_trade_id,
+        (closedAgainst.get(t.closes_trade_id) ?? 0) + t.contracts,
+      );
+    }
   }
-  const today = new Date();
-  const expiry = new Date(pp.expiry + 'T16:00:00Z');
-  const purchase = new Date(pp.purchase_date + 'T12:00:00Z');
-  const total_days = Math.max(1, Math.round((expiry.getTime() - purchase.getTime()) / 86_400_000));
-  const days_to_expiry = Math.max(0, Math.ceil((expiry.getTime() - today.getTime()) / 86_400_000));
-  const days_elapsed = Math.max(0, total_days - days_to_expiry);
-  const cost_per_day = pp.total_cost / total_days;
-  const cost_incurred = Math.min(pp.total_cost, cost_per_day * days_elapsed);
-  const cost_remaining = Math.max(0, pp.total_cost - cost_incurred);
-  const current_value =
-    pp.contracts != null && pp.current_premium != null
-      ? pp.contracts * 100 * pp.current_premium
-      : null;
-  const mark_to_market_pl =
-    current_value != null ? current_value - pp.total_cost : null;
-  return {
-    has: true,
-    total_cost: pp.total_cost,
-    expiry: pp.expiry,
-    purchase_date: pp.purchase_date,
-    total_days,
-    days_to_expiry,
-    days_elapsed,
-    cost_per_day,
-    cost_incurred,
-    cost_remaining,
-    expired: days_to_expiry <= 0,
-    contracts: pp.contracts,
-    strike: pp.strike,
-    current_premium: pp.current_premium,
-    current_premium_at: pp.current_premium_at,
-    current_value,
-    mark_to_market_pl,
-  };
-}
 
-export interface GainAggregate {
-  stock: number;
-  call: number;
-  put: number;
-  total: number;
-}
-
-export function aggregateGains(entries: GainEntry[]): GainAggregate {
-  const out: GainAggregate = { stock: 0, call: 0, put: 0, total: 0 };
-  for (const e of entries) {
-    out[e.source] += e.amount;
-    out.total += e.amount;
+  const out = new Map<string, LiveOption[]>();
+  for (const t of trades) {
+    if (t.action !== 'open') continue;
+    const remaining = t.contracts - (closedAgainst.get(t.id) ?? 0);
+    if (remaining <= 0) continue;
+    const list = out.get(t.ticker) ?? [];
+    list.push({ open: t, remaining_contracts: remaining });
+    out.set(t.ticker, list);
   }
   return out;
 }
 
-/** Same shape as GainAggregate but for expenses (all positive magnitudes). */
-export function aggregateExpenses(entries: ExpenseEntry[]): GainAggregate {
-  const out: GainAggregate = { stock: 0, call: 0, put: 0, total: 0 };
-  for (const e of entries) {
-    out[e.source] += e.amount;
-    out.total += e.amount;
+/** Total realized P&L from all closed pairs per ticker. */
+export function realizedPLByTicker(trades: OptionTrade[]): Map<string, number> {
+  const byId = new Map<string, OptionTrade>();
+  for (const t of trades) byId.set(t.id, t);
+
+  const out = new Map<string, number>();
+  for (const t of trades) {
+    if (t.action !== 'close' || !t.closes_trade_id) continue;
+    const open = byId.get(t.closes_trade_id);
+    if (!open) continue;
+    const pl = closeRealizedPL(t, open);
+    out.set(t.ticker, (out.get(t.ticker) ?? 0) + pl);
   }
   return out;
 }
+
+/** Outstanding short-put obligation per ticker: Σ(remaining contracts × 100
+ *  × strike) for live short puts. Approximates "capital at risk" / "put
+ *  protection cost" for the strategy cards. */
+export function openShortPutObligation(trades: OptionTrade[]): Map<string, number> {
+  const live = liveOptionsByTicker(trades);
+  const out = new Map<string, number>();
+  for (const [ticker, list] of live) {
+    let sum = 0;
+    for (const lo of list) {
+      if (lo.open.option_type === 'put' && lo.open.direction === 'short') {
+        sum += lo.remaining_contracts * 100 * lo.open.strike;
+      }
+    }
+    if (sum > 0) out.set(ticker, sum);
+  }
+  return out;
+}
+
+// ── PositionComputed ──────────────────────────────────────────────────
 
 export interface PositionComputed extends PositionRow {
   market_value: number;
@@ -187,30 +185,22 @@ export interface PositionComputed extends PositionRow {
   pnl_pct: number;
   day_change: number;
   pct_portfolio: number;
-  /** Realized gain aggregate from this ticker's gain_entries. */
-  realized: GainAggregate;
-  realized_total: number;
-  /** Expense aggregate from this ticker's expenses (magnitudes). */
-  expenses: GainAggregate;
-  expenses_total: number;
-  put_cost: number;
-  /** realized_total − expenses_total − put_cost. */
-  net_realized: number;
-  /** unrealized P&L + net_realized. The "is this position making money?" answer. */
+  /** Σ realized P&L from closed option pairs on this ticker. */
+  realized_pl: number;
+  /** Live open option positions (remaining contracts > 0) for this ticker. */
+  live_options: LiveOption[];
+  /** unrealized P&L + realized_pl. "Is this position making money?" */
   overall_pl: number;
-  /** Per-share effective cost basis. avg_cost − (net_realized / quantity).
-   *  Reads as: "what price would I need to sell at to break even on this
-   *  position after all premiums collected, expenses, and put cost?".
-   *  Lower than avg_cost = side trades have paid down the basis. */
+  /** Per-share effective basis. avg_cost − realized_pl / quantity.
+   *  Lower than avg_cost = options activity has paid down the basis. */
   effective_cost: number;
 }
 
 export function computeRow(
   p: PositionRow,
   total_market_value: number,
-  realized: GainAggregate = { stock: 0, call: 0, put: 0, total: 0 },
-  expenses: GainAggregate = { stock: 0, call: 0, put: 0, total: 0 },
-  put_cost: number = 0,
+  realized_pl: number,
+  live_options: LiveOption[],
 ): PositionComputed {
   const isClosed = p.status === 'closed';
   const last = p.current_price ?? p.avg_cost;
@@ -223,19 +213,14 @@ export function computeRow(
     : 0;
   const pct_portfolio =
     total_market_value === 0 ? 0 : (market_value / total_market_value) * 100;
-  const net_realized = realized.total - expenses.total - put_cost;
-  // Effective cost basis: starts at avg_cost, shifts by per-share net realized.
-  // Closed positions get avg_cost as a sensible fallback (quantity can be 0).
   const effective_cost =
-    p.quantity > 0 ? p.avg_cost - net_realized / p.quantity : p.avg_cost;
+    p.quantity > 0 ? p.avg_cost - realized_pl / p.quantity : p.avg_cost;
   return {
     ...p,
     market_value, cost_basis, pnl_dollar, pnl_pct, day_change, pct_portfolio,
-    realized, realized_total: realized.total,
-    expenses, expenses_total: expenses.total,
-    put_cost,
-    net_realized,
-    overall_pl: pnl_dollar + net_realized,
+    realized_pl,
+    live_options,
+    overall_pl: pnl_dollar + realized_pl,
     effective_cost,
   };
 }
@@ -248,34 +233,30 @@ export interface PortfolioTotals {
   total_pnl_pct: number;
   total_day_change: number;
   last_price_update: string | null;
-  /** Sum of all realized gains across positions, split by source. */
-  realized: GainAggregate;
-  realized_total: number;
-  /** Sum of expense magnitudes across positions, split by source. */
-  expenses: GainAggregate;
-  expenses_total: number;
-  total_put_cost: number;
-  net_realized: number;
+  /** Σ realized P&L across all positions. */
+  realized_pl: number;
+  /** Σ outstanding short-put obligation across all positions. */
+  open_put_obligation: number;
   open_count: number;
   closed_count: number;
 }
 
 export function computePortfolio(
   positions: PositionRow[],
-  gainsByTicker: Map<string, GainEntry[]> = new Map(),
-  putCostByTicker: Map<string, number> = new Map(),
-  expensesByTicker: Map<string, ExpenseEntry[]> = new Map(),
+  trades: OptionTrade[],
 ): PortfolioTotals {
   const tmv = positions.reduce(
     (s, p) => p.status === 'closed' ? s : s + p.quantity * (p.current_price ?? p.avg_cost),
     0,
   );
+  const realizedByTicker = realizedPLByTicker(trades);
+  const liveByTicker = liveOptionsByTicker(trades);
+  const obligationByTicker = openShortPutObligation(trades);
+
   const rows = positions.map((p) => {
-    const entries = gainsByTicker.get(p.ticker) ?? [];
-    const realized = aggregateGains(entries);
-    const expenses = aggregateExpenses(expensesByTicker.get(p.ticker) ?? []);
-    const put_cost = putCostByTicker.get(p.ticker) ?? 0;
-    return computeRow(p, tmv, realized, expenses, put_cost);
+    const realized = realizedByTicker.get(p.ticker) ?? 0;
+    const live = liveByTicker.get(p.ticker) ?? [];
+    return computeRow(p, tmv, realized, live);
   });
   const total_cost_basis = rows.reduce((s, r) => s + r.cost_basis, 0);
   const total_pnl = tmv - total_cost_basis;
@@ -288,25 +269,8 @@ export function computePortfolio(
       if (!acc) return p.last_price_update;
       return p.last_price_update > acc ? p.last_price_update : acc;
     }, null);
-  const realized: GainAggregate = rows.reduce(
-    (acc, r) => ({
-      stock: acc.stock + r.realized.stock,
-      call: acc.call + r.realized.call,
-      put: acc.put + r.realized.put,
-      total: acc.total + r.realized.total,
-    }),
-    { stock: 0, call: 0, put: 0, total: 0 },
-  );
-  const expenses: GainAggregate = rows.reduce(
-    (acc, r) => ({
-      stock: acc.stock + r.expenses.stock,
-      call: acc.call + r.expenses.call,
-      put: acc.put + r.expenses.put,
-      total: acc.total + r.expenses.total,
-    }),
-    { stock: 0, call: 0, put: 0, total: 0 },
-  );
-  const total_put_cost = rows.reduce((s, r) => s + r.put_cost, 0);
+  const realized_pl = rows.reduce((s, r) => s + r.realized_pl, 0);
+  const open_put_obligation = Array.from(obligationByTicker.values()).reduce((s, v) => s + v, 0);
   return {
     rows,
     total_market_value: tmv,
@@ -315,19 +279,17 @@ export function computePortfolio(
     total_pnl_pct,
     total_day_change,
     last_price_update,
-    realized,
-    realized_total: realized.total,
-    expenses,
-    expenses_total: expenses.total,
-    total_put_cost,
-    net_realized: realized.total - expenses.total - total_put_cost,
+    realized_pl,
+    open_put_obligation,
     open_count: positions.filter((p) => p.status === 'open').length,
     closed_count: positions.filter((p) => p.status === 'closed').length,
   };
 }
 
-// ─── Formatters ─────────────────────────────────────────────────────────────
+// ── Formatters (unchanged from prior version) ─────────────────────────
+
 const MINUS = '−';
+
 export const fmtUSD = (n: number): string => {
   const s = n < 0 ? MINUS : '';
   return (
@@ -362,7 +324,6 @@ export const fmtPct = (n: number): string => {
   const s = n < 0 ? MINUS : n > 0 ? '+' : '';
   return s + Math.abs(n).toFixed(2) + '%';
 };
-/** Compact dollars: $980 / $3.2k / $1.5M. */
 export const fmtCompact = (n: number): string => {
   const sign = n < 0 ? MINUS : '';
   const abs = Math.abs(n);
@@ -382,6 +343,8 @@ export const fmtNum = (n: number, d = 2): string => {
   );
 };
 
+// ── Allocation aggregations (used by treemap) ─────────────────────────
+
 export function aggregateBySector(rows: PositionComputed[]) {
   const map = new Map<string, number>();
   rows.forEach((r) =>
@@ -397,8 +360,6 @@ export function aggregateBySector(rows: PositionComputed[]) {
     .sort((a, b) => b.value - a.value);
 }
 
-// Allocation rollup by strategy bucket. Anything without an overlay falls
-// into "Unassigned" so the chart still adds to 100%.
 export type StrategyBucket = 'income' | 'invest' | 'yield';
 const STRATEGY_LABEL: Record<string, string> = {
   income: 'Income',
@@ -416,7 +377,6 @@ export function aggregateByStrategy(
     map.set(b, (map.get(b) || 0) + r.market_value);
   });
   const total = Array.from(map.values()).reduce((s, v) => s + v, 0);
-  // Stable order: income → invest → yield → unassigned
   const order = ['income', 'invest', 'yield', 'unassigned'];
   return order
     .filter((k) => map.has(k))

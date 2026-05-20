@@ -116,9 +116,12 @@
 
 /* ============== STAGE ============== */
 .np-stage {
-  max-width: 1480px;
+  /* Edge-to-edge layout. Big-monitor users wanted the table to use the
+     full width; the hero still feels balanced because it centers via
+     its own padding. 20px lateral padding keeps content off the edges. */
+  max-width: none;
   margin: 0 auto;
-  padding: 36px 32px 80px;
+  padding: 36px 20px 80px;
 }
 
 /* ============== HERO ============== */

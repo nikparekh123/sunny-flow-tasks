@@ -2,13 +2,14 @@ import { useEffect, useId, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
-  computePutProtection,
   computePortfolio,
-  type ExpenseEntry,
-  type GainEntry,
-  type GainSource,
+  liveOptionsByTicker,
+  realizedPLByTicker,
+  type Action,
+  type Direction,
+  type OptionTrade,
+  type OptionType,
   type PositionRow,
-  type PutProtectionRow,
   type Sector,
   SECTORS,
 } from './types';
@@ -20,9 +21,7 @@ export interface PositionInput {
   sector: string;
   quantity: number;
   avg_cost: number;
-  /** Optional CSV-supplied strategy bucket. When present, the import upserts
-   *  it into strategy_overlay (with default put_cost/put_frequency the user
-   *  can later edit in /strategy). */
+  /** Optional CSV-supplied strategy bucket. Upserts into strategy_overlay. */
   strategy?: StrategyBucket;
 }
 
@@ -35,8 +34,6 @@ export interface OverlayLite {
 
 export function usePositions() {
   const qc = useQueryClient();
-  // Unique channel name per hook instance so multiple components calling
-  // usePositions() don't collide on supabase.channel().
   const channelId = useId();
 
   const { data: rawPositions = [], isLoading } = useQuery({
@@ -51,45 +48,20 @@ export function usePositions() {
     },
   });
 
-  // Gain entries (3-way: stock / call / put). One row per event.
-  const { data: gainEntries = [] } = useQuery({
-    queryKey: ['gain_entries'],
+  // Single source of options activity. Replaces gain_entries / expenses /
+  // put_protection. Each row is either an open or a close.
+  const { data: trades = [] } = useQuery({
+    queryKey: ['option_trades'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('gain_entries' as never)
+        .from('option_trades' as never)
         .select('*')
-        .order('gain_date', { ascending: false });
+        .order('trade_date', { ascending: false });
       if (error) throw error;
-      return (data ?? []) as unknown as GainEntry[];
+      return (data ?? []) as unknown as OptionTrade[];
     },
   });
 
-  // Put protection — one row per ticker (or none).
-  const { data: putProtections = [] } = useQuery({
-    queryKey: ['put_protection'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('put_protection' as never)
-        .select('*');
-      if (error) throw error;
-      return (data ?? []) as unknown as PutProtectionRow[];
-    },
-  });
-
-  // Expenses — outflows tracked separately from gains. Magnitudes only.
-  const { data: expenseEntries = [] } = useQuery({
-    queryKey: ['expenses'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('expenses' as never)
-        .select('*')
-        .order('expense_date', { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as unknown as ExpenseEntry[];
-    },
-  });
-
-  // Overlays — just the bucket per ticker, for the Strategy badge column.
   const { data: overlays = [] } = useQuery({
     queryKey: ['strategy_overlay_lite'],
     queryFn: async () => {
@@ -101,9 +73,7 @@ export function usePositions() {
     },
   });
 
-  // Realtime: invalidate the relevant query whenever the underlying table
-  // changes. Positions writes come from refresh-prices + CSV import;
-  // overlays come from /strategy.
+  // Realtime invalidations.
   useEffect(() => {
     const sub = supabase
       .channel(`positions-realtime-${channelId}`)
@@ -119,24 +89,26 @@ export function usePositions() {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'gain_entries' },
-        () => qc.invalidateQueries({ queryKey: ['gain_entries'] }),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'put_protection' },
-        () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'expenses' },
-        () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+        { event: '*', schema: 'public', table: 'option_trades' },
+        () => qc.invalidateQueries({ queryKey: ['option_trades'] }),
       )
       .subscribe();
-    return () => {
-      supabase.removeChannel(sub);
-    };
+    return () => { supabase.removeChannel(sub); };
   }, [qc, channelId]);
+
+  // ── Derived maps ─────────────────────────────────────────────────
+  const tradesByTicker = useMemo(() => {
+    const m = new Map<string, OptionTrade[]>();
+    for (const t of trades) {
+      const arr = m.get(t.ticker) ?? [];
+      arr.push(t);
+      m.set(t.ticker, arr);
+    }
+    return m;
+  }, [trades]);
+
+  const liveByTicker = useMemo(() => liveOptionsByTicker(trades), [trades]);
+  const realizedByTicker = useMemo(() => realizedPLByTicker(trades), [trades]);
 
   const overlayByTicker = useMemo(() => {
     const m = new Map<string, StrategyBucket>();
@@ -144,52 +116,12 @@ export function usePositions() {
     return m;
   }, [overlays]);
 
-  const gainsByTicker = useMemo(() => {
-    const m = new Map<string, GainEntry[]>();
-    for (const e of gainEntries) {
-      const arr = m.get(e.ticker) ?? [];
-      arr.push(e);
-      m.set(e.ticker, arr);
-    }
-    return m;
-  }, [gainEntries]);
-
-  const putProtectionByTicker = useMemo(() => {
-    const m = new Map<string, PutProtectionRow>();
-    putProtections.forEach((p) => m.set(p.ticker, p));
-    return m;
-  }, [putProtections]);
-
-  /** Map ticker → live cost incurred so far (used for P&L). */
-  const putCostByTicker = useMemo(() => {
-    const m = new Map<string, number>();
-    putProtections.forEach((p) => {
-      // Use the full premium paid as the "cost" against realized gains —
-      // that's the v2 spec (Net realized = realized − put_cost).
-      m.set(p.ticker, p.total_cost);
-    });
-    return m;
-  }, [putProtections]);
-
-  const expensesByTicker = useMemo(() => {
-    const m = new Map<string, ExpenseEntry[]>();
-    for (const e of expenseEntries) {
-      const arr = m.get(e.ticker) ?? [];
-      arr.push(e);
-      m.set(e.ticker, arr);
-    }
-    return m;
-  }, [expenseEntries]);
-
   const portfolio = useMemo(
-    () => computePortfolio(rawPositions, gainsByTicker, putCostByTicker, expensesByTicker),
-    [rawPositions, gainsByTicker, putCostByTicker, expensesByTicker],
+    () => computePortfolio(rawPositions, trades),
+    [rawPositions, trades],
   );
 
-  // Replace all rows with the contents of a CSV. Wipe + insert in one txn-ish
-  // pair of calls. (Supabase JS doesn't expose an explicit transaction so we
-  // delete-then-insert; on insert error we'd need to handle restore — for now
-  // we just surface the error.)
+  // ── Position mutations (mostly unchanged) ───────────────────────
   const replacePositions = useMutation({
     mutationFn: async (rows: PositionInput[]) => {
       const cleaned = rows
@@ -209,16 +141,14 @@ export function usePositions() {
             r.avg_cost >= 0,
         );
 
-      // Wipe existing rows.
       const { error: delError } = await supabase
         .from('positions' as never)
         .delete()
-        .gt('quantity', -1); // matches all rows (quantity is non-negative)
+        .gt('quantity', -1);
       if (delError) throw delError;
 
       if (cleaned.length === 0) return { inserted: 0 };
 
-      // Insert positions (without the strategy field — that lives on overlay).
       const positionsToInsert = cleaned.map(({ strategy: _s, ...rest }) => {
         void _s;
         return rest;
@@ -228,9 +158,6 @@ export function usePositions() {
         .insert(positionsToInsert as never);
       if (insError) throw insError;
 
-      // Upsert strategy overlays for rows that included a strategy column.
-      // put_cost moved to put_protection in v2 schema, so the overlay row
-      // only needs bucket + put_frequency (default quarterly).
       const overlayRows = cleaned
         .filter((r) => r.strategy)
         .map((r) => ({
@@ -269,160 +196,53 @@ export function usePositions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['positions'] }),
   });
 
-  // ── Gain entries mutations ─────────────────────────────────────────
-  const addGain = useMutation({
+  // ── Option-trade mutations ────────────────────────────────────────
+  const addTrade = useMutation({
     mutationFn: async (row: {
       ticker: string;
-      gain_date: string;
-      source: GainSource;
-      amount: number;
-      note?: string | null;
-    }) => {
-      const { error } = await supabase
-        .from('gain_entries' as never)
-        .insert({
-          ticker: row.ticker.trim().toUpperCase(),
-          gain_date: row.gain_date,
-          source: row.source,
-          amount: row.amount,
-          note: row.note ?? null,
-        } as never);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['gain_entries'] }),
-  });
-
-  const deleteGain = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('gain_entries' as never)
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['gain_entries'] }),
-  });
-
-  // ── Put protection mutations ───────────────────────────────────────
-  const setPutProtection = useMutation({
-    mutationFn: async (row: {
-      ticker: string;
-      total_cost: number;
+      trade_date: string;
+      action: Action;
+      option_type: OptionType;
+      direction: Direction;
+      contracts: number;
+      strike: number;
+      premium: number;
       expiry: string;
-      purchase_date?: string;
-      contracts?: number | null;
-      strike?: number | null;
-    }) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const { error } = await supabase
-        .from('put_protection' as never)
-        .upsert(
-          {
-            ticker: row.ticker,
-            total_cost: row.total_cost,
-            expiry: row.expiry,
-            purchase_date: row.purchase_date ?? today,
-            contracts: row.contracts ?? null,
-            strike: row.strike ?? null,
-            // Clear the cached quote on edit; the next refresh fills it in.
-            current_premium: null,
-            current_premium_at: null,
-          } as never,
-          { onConflict: 'ticker' },
-        );
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
-  });
-
-  // Pull live per-contract premiums from Polygon for every put_protection
-  // row that has contracts + strike + expiry. Backed by an edge function;
-  // see supabase/functions/refresh-put-quotes/index.ts.
-  const refreshPutQuotes = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke('refresh-put-quotes', {
-        body: {},
-      });
-      if (error) throw error;
-      return data as { updated: number; skipped: number; total: number };
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
-  });
-
-  const clearPutProtection = useMutation({
-    mutationFn: async (ticker: string) => {
-      const { error } = await supabase
-        .from('put_protection' as never)
-        .delete()
-        .eq('ticker', ticker);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['put_protection'] }),
-  });
-
-  // ── Expense mutations ──────────────────────────────────────────────
-  const addExpense = useMutation({
-    mutationFn: async (row: {
-      ticker: string;
-      expense_date: string;
-      source: GainSource;
-      amount: number;
+      closes_trade_id?: string | null;
       note?: string | null;
     }) => {
       const { error } = await supabase
-        .from('expenses' as never)
+        .from('option_trades' as never)
         .insert({
           ticker: row.ticker.trim().toUpperCase(),
-          expense_date: row.expense_date,
-          source: row.source,
-          amount: Math.abs(row.amount), // expenses are stored as magnitudes
+          trade_date: row.trade_date,
+          action: row.action,
+          option_type: row.option_type,
+          direction: row.direction,
+          contracts: row.contracts,
+          strike: row.strike,
+          premium: row.premium,
+          expiry: row.expiry,
+          closes_trade_id: row.closes_trade_id ?? null,
           note: row.note ?? null,
         } as never);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['option_trades'] }),
   });
 
-  const deleteExpense = useMutation({
+  const deleteTrade = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase
-        .from('expenses' as never)
+        .from('option_trades' as never)
         .delete()
         .eq('id', id);
       if (error) throw error;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['expenses'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['option_trades'] }),
   });
 
-  // ── Delete position (and all linked rows) ─────────────────────────
-  // Wipes everything tied to this ticker: position row, gains, expenses,
-  // and put_protection. Used when the user wants a clean slate to re-add
-  // a position with the new structured fields.
-  const deletePosition = useMutation({
-    mutationFn: async (ticker: string) => {
-      const t = ticker.trim().toUpperCase();
-      // Order matters less here since there are no FK constraints between
-      // these tables (ticker is just a text column on each), but we still
-      // delete dependents first for narrative clarity.
-      const tables = ['gain_entries', 'expenses', 'put_protection', 'positions'] as const;
-      for (const table of tables) {
-        const { error } = await supabase
-          .from(table as never)
-          .delete()
-          .eq('ticker', t);
-        if (error) throw new Error(`${table}: ${error.message}`);
-      }
-      return { ticker: t };
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['positions'] });
-      qc.invalidateQueries({ queryKey: ['gain_entries'] });
-      qc.invalidateQueries({ queryKey: ['expenses'] });
-      qc.invalidateQueries({ queryKey: ['put_protection'] });
-    },
-  });
-
-  // ── Position status (open ↔ closed) ────────────────────────────────
+  // ── Position lifecycle ────────────────────────────────────────────
   const setPositionStatus = useMutation({
     mutationFn: async (args: { ticker: string; status: 'open' | 'closed' }) => {
       const { error } = await supabase
@@ -434,7 +254,6 @@ export function usePositions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['positions'] }),
   });
 
-  // ── Earnings date (single date per position) ──────────────────────
   const setEarningsDate = useMutation({
     mutationFn: async (args: { ticker: string; earnings_date: string | null }) => {
       const { error } = await supabase
@@ -446,28 +265,40 @@ export function usePositions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['positions'] }),
   });
 
+  const deletePosition = useMutation({
+    mutationFn: async (ticker: string) => {
+      const t = ticker.trim().toUpperCase();
+      const tables = ['option_trades', 'positions'] as const;
+      for (const table of tables) {
+        const { error } = await supabase
+          .from(table as never)
+          .delete()
+          .eq('ticker', t);
+        if (error) throw new Error(`${table}: ${error.message}`);
+      }
+      return { ticker: t };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['option_trades'] });
+    },
+  });
+
   return {
     positions: rawPositions,
     portfolio,
     isLoading,
     overlayByTicker,
-    gainsByTicker,
-    putProtectionByTicker,
+    trades,
+    tradesByTicker,
+    liveByTicker,
+    realizedByTicker,
     replacePositions,
     refreshPrices,
-    addGain,
-    deleteGain,
-    addExpense,
-    deleteExpense,
-    expensesByTicker,
-    setPutProtection,
-    clearPutProtection,
-    refreshPutQuotes,
+    addTrade,
+    deleteTrade,
     setPositionStatus,
     setEarningsDate,
     deletePosition,
   };
 }
-
-/** Convenience: expose computePutProtection from the data layer for components. */
-export { computePutProtection };
