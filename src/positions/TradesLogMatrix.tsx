@@ -187,14 +187,34 @@ export function TradesLogMatrix({
               // One slot per POSITION (= one open trade + its matched
               // closes). When the user closes a position, the same column
               // updates to show realized P&L — no second column for the
-              // close. Columns are ordered newest open first.
+              // close.
+              //
+              // Column order:
+              //   1. Protective puts (long-direction puts) anchor the
+              //      leftmost columns, oldest first. They're the long-
+              //      running foundation of an income strategy and
+              //      shouldn't shift when shorter-lived trades happen
+              //      around them.
+              //   2. Everything else (short calls, short puts, long calls)
+              //      sorts newest first to the right.
+              const isProtective = (t: OptionTrade) =>
+                t.option_type === 'put' && t.direction === 'long';
               const opens = trades
                 .filter((t) => t.action === 'open')
-                .sort((a, b) =>
-                  b.trade_date !== a.trade_date
-                    ? b.trade_date.localeCompare(a.trade_date)
-                    : b.created_at.localeCompare(a.created_at),
-                );
+                .sort((a, b) => {
+                  const aP = isProtective(a) ? 0 : 1;
+                  const bP = isProtective(b) ? 0 : 1;
+                  if (aP !== bP) return aP - bP;
+                  // Within the protective bucket: oldest first → stable lanes.
+                  // Within the other bucket: newest first.
+                  return aP === 0
+                    ? a.trade_date !== b.trade_date
+                      ? a.trade_date.localeCompare(b.trade_date)
+                      : a.created_at.localeCompare(b.created_at)
+                    : b.trade_date !== a.trade_date
+                      ? b.trade_date.localeCompare(a.trade_date)
+                      : b.created_at.localeCompare(a.created_at);
+                });
               // Build close index: open.id → list of closes against it
               const closesByOpen = new Map<string, OptionTrade[]>();
               for (const t of trades) {
