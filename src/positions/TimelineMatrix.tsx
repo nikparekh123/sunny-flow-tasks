@@ -417,6 +417,43 @@ export function TimelineMatrix({
               </tr>
             )}
           </tbody>
+          {sorted.length > 0 && (() => {
+            // Portfolio-wide aggregates across the visible filter set.
+            let grandRealized = 0;
+            let grandLive = 0;
+            let grandObligation = 0;
+            for (const r of sorted) {
+              grandRealized += realizedByTicker.get(r.ticker) ?? 0;
+              const live = liveByTicker.get(r.ticker) ?? [];
+              grandLive += live.length;
+              for (const lo of live) {
+                if (lo.open.option_type === 'put' && lo.open.direction === 'short') {
+                  grandObligation += lo.remaining_contracts * 100 * lo.open.strike;
+                }
+              }
+            }
+            return (
+              <tfoot>
+                <tr className="gl-foot">
+                  <td className="gl-pos">
+                    <b>Portfolio</b>
+                    <div className="gl-pos-sub">{sorted.length} positions</div>
+                  </td>
+                  <td colSpan={totalDays} className="tl-foot-spacer">
+                    <span>
+                      {grandLive} live
+                      {grandObligation > 0 && ` · put oblig ${fmtCompact(grandObligation)}`}
+                    </span>
+                  </td>
+                  <td className="gl-tot">
+                    <div className={'gl-tot-amt ' + (grandRealized < 0 ? 'down' : grandRealized > 0 ? 'up' : '')}>
+                      {grandRealized >= 0 ? '+' : '−'}{fmtCompact(Math.abs(grandRealized))}
+                    </div>
+                  </td>
+                </tr>
+              </tfoot>
+            );
+          })()}
         </table>
       </div>
     </div>
