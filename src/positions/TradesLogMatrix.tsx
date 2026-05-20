@@ -131,28 +131,29 @@ export function TradesLogMatrix({
     };
   }, [tradesByTicker]);
 
-  // Per-ticker collected (premium income from cash-in trades) and realized
-  // (P&L from closed pairs). Used by the right column and footer to answer
-  // "what % of premium I collected is actually realized?"
-  const collectedByTicker = useMemo(() => {
+  // Per-ticker protective-put cost (absolute cash spent buying long puts).
+  // This is the "burn" the income strategy has to cover. Used as the
+  // denominator everywhere — right column ("realized as % of put cost")
+  // and footer ("collected as % of put cost").
+  const putCostByTicker = useMemo(() => {
     const m = new Map<string, number>();
     for (const [ticker, list] of tradesByTicker) {
-      let collected = 0;
+      let cost = 0;
       for (const t of list) {
-        const isCashIn =
-          (t.action === 'open' && t.direction === 'short') ||
-          (t.action === 'close' && t.direction === 'long');
-        if (isCashIn) collected += t.contracts * 100 * t.premium;
+        if (t.action === 'open' && t.option_type === 'put' && t.direction === 'long') {
+          cost += t.contracts * 100 * t.premium;
+        }
       }
-      m.set(ticker, collected);
+      m.set(ticker, cost);
     }
     return m;
   }, [tradesByTicker]);
 
-  // Column-wise collected. For each column slot, sum the collected portion
-  // (positive cash-in only) across all visible tickers.
-  const columnCollected = useMemo(() => {
-    const totals = Array.from({ length: WEEK_COUNT }, () => 0);
+  // Column-wise put cost (col 0) and collected (cols 1+). Single pass over
+  // the same sorted opens we render in the body.
+  const { columnPutCost, columnCollected } = useMemo(() => {
+    const putCost = Array.from({ length: WEEK_COUNT }, () => 0);
+    const collected = Array.from({ length: WEEK_COUNT }, () => 0);
     sorted.forEach((r) => {
       const opens = (tradesByTicker.get(r.ticker) ?? [])
         .filter((t) => t.action === 'open')
@@ -170,28 +171,23 @@ export function TradesLogMatrix({
         });
       opens.forEach((open, i) => {
         if (i >= WEEK_COUNT) return;
-        // Sum collected = open's cash-in for shorts, plus its closes' cash-in
-        // (for long closes). For long opens (protective puts), collected = 0
-        // at the open; closes against them get counted when the close is
-        // long-direction (i.e., never for protective puts — they're a pure
-        // cost). This keeps "collected" semantically = premium income.
-        if (open.direction === 'short') {
-          totals[i] += open.contracts * 100 * open.premium;
-        }
+        const notional = open.contracts * 100 * open.premium;
+        if (isProtectiveTrade(open)) putCost[i] += notional;
+        else if (open.direction === 'short') collected[i] += notional;
       });
     });
-    return totals;
+    return { columnPutCost: putCost, columnCollected: collected };
   }, [sorted, tradesByTicker, WEEK_COUNT]);
 
-  const grandCollected = useMemo(
-    () => Array.from(collectedByTicker.values()).reduce((s, v) => s + v, 0),
-    [collectedByTicker],
+  const grandPutCost = useMemo(
+    () => Array.from(putCostByTicker.values()).reduce((s, v) => s + v, 0),
+    [putCostByTicker],
   );
+  const weeklyBurn = WEEK_COUNT > 0 ? grandPutCost / WEEK_COUNT : 0;
   const grandRealized = useMemo(
     () => sorted.reduce((s, r) => s + (realizedByTicker.get(r.ticker) ?? 0), 0),
     [sorted, realizedByTicker],
   );
-  const grandPct = grandCollected > 0 ? (grandRealized / grandCollected) * 100 : 0;
   const totalTradesCount = useMemo(
     () =>
       sorted.reduce((s, r) => s + (tradesByTicker.get(r.ticker)?.length ?? 0), 0),
@@ -373,12 +369,12 @@ export function TradesLogMatrix({
                       )}
                     </div>
                     {(() => {
-                      const collected = collectedByTicker.get(r.ticker) ?? 0;
-                      if (collected <= 0) return null;
-                      const pct = (realized / collected) * 100;
+                      const putCost = putCostByTicker.get(r.ticker) ?? 0;
+                      if (putCost <= 0) return null;
+                      const pct = (realized / putCost) * 100;
                       return (
                         <div className="gl-tot-sub">
-                          {pct >= 0 ? '+' : ''}{pct.toFixed(0)}% of {fmtCompact(collected)}
+                          {pct >= 0 ? '+' : ''}{pct.toFixed(0)}% of {fmtCompact(putCost)}
                         </div>
                       );
                     })()}
@@ -397,30 +393,59 @@ export function TradesLogMatrix({
           <tfoot>
             <tr className="gl-foot">
               <td className="gl-pos">
-                <b>Collected</b>
-                <div className="gl-pos-sub">{totalTradesCount} trades · premium in</div>
+                <b>Total</b>
+                <div className="gl-pos-sub">{totalTradesCount} trades</div>
               </td>
-              {columnCollected.map((collected, i) => (
-                <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
-                  {collected > 0 ? (
-                    <div className="gl-cell-in">
-                      <div className="gl-cell-amt up">{fmtCompact(collected)}</div>
-                      <div className="gl-cell-chips">
-                        <span className="gl-cell-state">collected</span>
+              {Array.from({ length: WEEK_COUNT }, (_, i) => {
+                const putCost = columnPutCost[i];
+                const collected = columnCollected[i];
+                if (putCost > 0) {
+                  // Protective-put column — show cost (neg) and weekly burn.
+                  return (
+                    <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
+                      <div className="gl-cell-in">
+                        <div className="gl-cell-amt down">
+                          −{fmtCompact(putCost)}
+                        </div>
+                        <div className="gl-cell-chips">
+                          <span className="gl-cell-state">
+                            {fmtCompact(putCost / WEEK_COUNT)}/wk
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
+                    </td>
+                  );
+                }
+                if (collected > 0) {
+                  const pct = grandPutCost > 0 ? (collected / grandPutCost) * 100 : 0;
+                  return (
+                    <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
+                      <div className="gl-cell-in">
+                        <div className="gl-cell-amt up">{fmtCompact(collected)}</div>
+                        <div className="gl-cell-chips">
+                          <span className="gl-cell-state">
+                            {pct.toFixed(0)}%
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                  );
+                }
+                return (
+                  <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
                     <span className="muted">—</span>
-                  )}
-                </td>
-              ))}
+                  </td>
+                );
+              })}
               <td className="gl-tot">
-                <div className="gl-tot-amt up">
-                  {fmtCompact(grandCollected)}
+                <div className={'gl-tot-amt ' + (grandRealized < 0 ? 'down' : grandRealized > 0 ? 'up' : '')}>
+                  {grandRealized >= 0
+                    ? fmtUSD(grandRealized)
+                    : '−' + fmtUSD(Math.abs(grandRealized))}
                 </div>
-                {grandCollected > 0 && (
+                {grandPutCost > 0 && (
                   <div className="gl-tot-sub">
-                    {grandRealized >= 0 ? '' : '−'}{fmtCompact(Math.abs(grandRealized))} realized · {grandPct >= 0 ? '+' : ''}{grandPct.toFixed(0)}%
+                    {((grandRealized / grandPutCost) * 100).toFixed(0)}% of {fmtCompact(grandPutCost)} · {fmtCompact(weeklyBurn)}/wk
                   </div>
                 )}
               </td>
