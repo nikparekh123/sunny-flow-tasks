@@ -131,27 +131,86 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
   const optTotalLoss = optLosses.reduce((s, c) => s + c.value, 0);
   const optNet = optTotalGain + optTotalLoss;
 
-  // ── Put cost coverage ──────────────────────────────────────────
-  const putCostPaid = useMemo(() => {
-    let total = 0;
+  // ── Put + Stock burden + weekly burn ───────────────────────────
+  // Total burden = put cost on active long puts + current unrealized
+  // stock loss (net, if portfolio mark is negative). Short premium
+  // realized needs to cover BOTH to break even by the time puts expire.
+  const protection = useMemo(() => {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+
+    // Index of fully-closed opens so we ignore them.
+    const closedQty = new Map<string, number>();
+    const openQty = new Map<string, number>();
     for (const list of tradesByTicker.values()) {
       for (const t of list) {
-        if (
-          t.action === 'open' &&
-          t.option_type === 'put' &&
-          t.direction === 'long'
-        ) {
-          total += t.contracts * 100 * t.premium;
+        if (t.action === 'open') openQty.set(t.id, t.contracts);
+        if (t.action === 'close' && t.closes_trade_id) {
+          closedQty.set(
+            t.closes_trade_id,
+            (closedQty.get(t.closes_trade_id) ?? 0) + t.contracts,
+          );
         }
       }
     }
-    return total;
+    const closedIds = new Set<string>();
+    for (const [id, q] of closedQty) {
+      if (q >= (openQty.get(id) ?? Infinity)) closedIds.add(id);
+    }
+
+    let activeCost = 0;
+    let burn = 0;
+    let weightedWeeks = 0;
+    for (const list of tradesByTicker.values()) {
+      for (const t of list) {
+        if (
+          t.action !== 'open' ||
+          t.option_type !== 'put' ||
+          t.direction !== 'long' ||
+          closedIds.has(t.id)
+        ) continue;
+        const cost = t.contracts * 100 * t.premium;
+        const exp = new Date(t.expiry + 'T00:00:00Z');
+        // Clamp to at least 1 week so we don't divide by ~0 on an
+        // expiring-tomorrow put.
+        const daysLeft = Math.max(
+          7,
+          (exp.getTime() - today.getTime()) / 86_400_000,
+        );
+        const weeksLeft = daysLeft / 7;
+        activeCost += cost;
+        weightedWeeks += cost * weeksLeft;
+        burn += cost / weeksLeft;
+      }
+    }
+    const avgWeeks = activeCost > 0 ? weightedWeeks / activeCost : 0;
+    return { activeCost, avgWeeks, weeklyBurn: burn };
   }, [tradesByTicker]);
+
+  // Total put cost paid (active + already closed) — for the headline
+  // "ever spent on protection" feel, the active number is more useful;
+  // we keep the active value since closed puts no longer need to be
+  // covered.
+  const putCostPaid = protection.activeCost;
+
   const realized = useMemo(
     () => rows.reduce((s, r) => s + r.realized_pl, 0),
     [rows],
   );
-  const coveragePct = putCostPaid > 0 ? (realized / putCostPaid) * 100 : 0;
+
+  // Net unrealized stock mark across the portfolio. If negative, that's
+  // the stock loss component we need to cover too. Refreshes whenever
+  // current_price changes.
+  const stockLoss = useMemo(() => {
+    const netMark = rows.reduce((s, r) => s + r.pnl_dollar, 0);
+    return Math.max(0, -netMark);
+  }, [rows]);
+
+  const totalBurden = putCostPaid + stockLoss;
+  const totalWeeklyBurn =
+    protection.avgWeeks > 0 ? totalBurden / protection.avgWeeks : 0;
+  const coveragePct =
+    totalBurden > 0 ? (realized / totalBurden) * 100 : 0;
 
   // Headline stats based on active view
   const headG = view === 'options' ? optTotalGain : totalGain;
@@ -253,8 +312,11 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
           {putCostPaid > 0 ? (
             <PutCostCoverage
               putCost={putCostPaid}
+              stockLoss={stockLoss}
               realized={realized}
               pct={coveragePct}
+              putBurn={protection.weeklyBurn}
+              totalBurn={totalWeeklyBurn}
             />
           ) : (
             <div className="pnl-protection-empty">
@@ -618,15 +680,24 @@ function ChartGrid({
 
 function PutCostCoverage({
   putCost,
+  stockLoss,
   realized,
   pct,
+  putBurn,
+  totalBurn,
 }: {
   putCost: number;
+  stockLoss: number;
   realized: number;
   pct: number;
+  putBurn: number;
+  totalBurn: number;
 }) {
-  const max = Math.max(putCost, Math.abs(realized), 1);
+  const totalBurden = putCost + stockLoss;
+  const max = Math.max(totalBurden, Math.abs(realized), 1);
+  // Bar heights as % of bar-wrap height (which is bounded by CSS).
   const putH = (putCost / max) * 100;
+  const lossH = (stockLoss / max) * 100;
   const realH = (Math.abs(realized) / max) * 100;
   return (
     <div className="pnl-coverage">
@@ -634,24 +705,69 @@ function PutCostCoverage({
         {pct.toFixed(0)}%
         <span className="pnl-coverage-pct-sub">Covered</span>
       </div>
+
       <div className="pnl-coverage-body">
+        {/* Left: stacked burden (put cost + stock loss) */}
         <div className="pnl-cov-col">
           <div className="pnl-cov-bar-wrap">
-            <div className="pnl-cov-bar gold" style={{ height: `${putH}%` }} />
+            <div className="pnl-cov-stack">
+              {stockLoss > 0 && (
+                <div
+                  className="pnl-cov-seg loss"
+                  style={{ height: `${lossH}%` }}
+                  title={`Stock loss · ${fmtUSD(stockLoss)}`}
+                />
+              )}
+              <div
+                className="pnl-cov-seg cost"
+                style={{ height: `${putH}%` }}
+                title={`Put cost · ${fmtUSD(putCost)}`}
+              />
+            </div>
           </div>
-          <div className="pnl-cov-val">{fmtUSD(putCost)}</div>
-          <div className="pnl-cov-label gold">Put cost paid</div>
+          <div className="pnl-cov-val">{fmtUSD(totalBurden)}</div>
+          <div className="pnl-cov-mini-labels">
+            <span className="pnl-cov-mini cost">
+              {fmtCompact(putCost)} puts
+            </span>
+            {stockLoss > 0 && (
+              <span className="pnl-cov-mini loss">
+                {fmtCompact(stockLoss)} stock
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Right: realized (same scale, so the gap is visible) */}
         <div className="pnl-cov-col">
           <div className="pnl-cov-bar-wrap">
-            <div className="pnl-cov-bar blue" style={{ height: `${realH}%` }} />
+            <div
+              className="pnl-cov-bar realized"
+              style={{ height: `${realH}%` }}
+            />
           </div>
           <div className="pnl-cov-val">
             {realized >= 0
               ? fmtUSD(realized)
               : '−' + fmtUSD(Math.abs(realized))}
           </div>
-          <div className="pnl-cov-label blue">Realized</div>
+          <div className="pnl-cov-mini-labels">
+            <span className="pnl-cov-mini realized">Realized</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Weekly burn rates */}
+      <div className="pnl-burn">
+        <div className="pnl-burn-row">
+          <span className="pnl-burn-dot cost" />
+          <span className="pnl-burn-k">Put cost burn</span>
+          <span className="pnl-burn-v">{fmtCompact(putBurn)}/wk</span>
+        </div>
+        <div className="pnl-burn-row">
+          <span className="pnl-burn-dot total" />
+          <span className="pnl-burn-k">Total to cover</span>
+          <span className="pnl-burn-v">{fmtCompact(totalBurn)}/wk</span>
         </div>
       </div>
     </div>
