@@ -1280,6 +1280,45 @@
 }
 .gl-cell.this { background: rgba(210,230,50,.03); }
 .gl-cell:hover { background: rgba(210,230,50,.08); }
+
+/* Column zones: first N cols are LIVE (faint neon tint), the rest are
+   the closed/history zone (faint muted tint). Boundary cell gets a thin
+   left border so the eye finds the split. */
+.gl-table th.gl-wk.live-zone,
+.gl-table td.gl-cell.live-zone {
+  background: rgba(210,230,50,.04);
+}
+.gl-table th.gl-wk.live-zone.this,
+.gl-table td.gl-cell.live-zone.this {
+  background: rgba(210,230,50,.08);
+}
+.gl-table td.gl-cell.live-zone:hover {
+  background: rgba(210,230,50,.12);
+}
+.gl-table th.gl-wk.closed-zone,
+.gl-table td.gl-cell.closed-zone {
+  background: rgba(30,90,80,.08);
+}
+.gl-table td.gl-cell.closed-zone:hover {
+  background: rgba(30,90,80,.18);
+}
+/* Boundary divider — left border on the FIRST closed col (4th data col
+   = nth-child(5) because the Position cell is nth-child(1)). */
+.gl-table tr > .gl-wk:nth-child(5),
+.gl-table tr > .gl-cell:nth-child(5) {
+  border-left: 1px solid rgba(50,110,100,.4);
+}
+/* "live" sub-caption under the column number, in the header */
+.gl-table th .gl-wk-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--navi-neon);
+  margin-top: 2px;
+  opacity: .8;
+}
 .gl-cell.empty .gl-plus {
   font-family: var(--navi-font-mono);
   color: var(--navi-fg5, #1e5a50);

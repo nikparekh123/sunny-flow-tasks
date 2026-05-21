@@ -22,6 +22,9 @@ import {
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const WEEK_OPTIONS = [12, 26, 52, 104] as const;
+// First N columns are dedicated to LIVE opens (per row). Anything beyond
+// is the closed/history zone.
+const LIVE_COLS = 3;
 type Weeks = typeof WEEK_OPTIONS[number];
 const LS_TRADES_WEEKS = 'np:tradesWeeks';
 function readWeeksLS(): Weeks {
@@ -150,16 +153,45 @@ export function TradesLogMatrix({
   }, [tradesByTicker]);
 
   // Column-wise put cost (long-put opens) and "slot net" (everything else).
-  // "Slot net" uses the same slotValueForOpen as the cells → realized P&L
-  // for closed pairs, signed cash flow for live opens. So the footer is
-  // literally the sum of the cells above it.
+  // Uses the SAME live-first sort that the body uses, so each footer cell
+  // is literally the sum of the cells above it.
   const { columnPutCost, columnSlotNet } = useMemo(() => {
     const putCost = Array.from({ length: WEEK_COUNT }, () => 0);
     const slotNet = Array.from({ length: WEEK_COUNT }, () => 0);
+
+    // Close index across all trades (same as the row builder uses).
+    const closesByOpenGlobal = new Map<string, OptionTrade[]>();
+    for (const list of tradesByTicker.values()) {
+      for (const t of list) {
+        if (t.action !== 'close' || !t.closes_trade_id) continue;
+        const arr = closesByOpenGlobal.get(t.closes_trade_id) ?? [];
+        arr.push(t);
+        closesByOpenGlobal.set(t.closes_trade_id, arr);
+      }
+    }
+    const isFullyClosed = (open: OptionTrade): boolean => {
+      const closes = closesByOpenGlobal.get(open.id) ?? [];
+      return closes.reduce((s, c) => s + c.contracts, 0) >= open.contracts;
+    };
+    const mostRecentCloseDate = (open: OptionTrade): string => {
+      const closes = closesByOpenGlobal.get(open.id) ?? [];
+      if (closes.length === 0) return '';
+      return closes.map((c) => c.trade_date).sort().reverse()[0];
+    };
+
     sorted.forEach((r) => {
       const opens = (tradesByTicker.get(r.ticker) ?? [])
         .filter((t) => t.action === 'open')
         .sort((a, b) => {
+          const aClosed = isFullyClosed(a) ? 1 : 0;
+          const bClosed = isFullyClosed(b) ? 1 : 0;
+          if (aClosed !== bClosed) return aClosed - bClosed;
+          if (aClosed === 1) {
+            const ad = mostRecentCloseDate(a);
+            const bd = mostRecentCloseDate(b);
+            if (ad !== bd) return bd.localeCompare(ad);
+            return b.created_at.localeCompare(a.created_at);
+          }
           const aP = isProtectiveTrade(a) ? 0 : 1;
           const bP = isProtectiveTrade(b) ? 0 : 1;
           if (aP !== bP) return aP - bP;
@@ -173,7 +205,7 @@ export function TradesLogMatrix({
         });
       opens.forEach((open, i) => {
         if (i >= WEEK_COUNT) return;
-        if (isProtectiveTrade(open)) {
+        if (isProtectiveTrade(open) && !isFullyClosed(open)) {
           putCost[i] += open.contracts * 100 * open.premium;
         } else {
           slotNet[i] += slotValueForOpen(open);
@@ -234,11 +266,15 @@ export function TradesLogMatrix({
           <thead>
             <tr>
               <th className="gl-pos">Position</th>
-              {Array.from({ length: WEEK_COUNT }, (_, i) => (
-                <th key={i} className={'gl-wk ' + (i === 0 ? 'this' : '')}>
-                  <div className="gl-wk-l">{i + 1}</div>
-                </th>
-              ))}
+              {Array.from({ length: WEEK_COUNT }, (_, i) => {
+                const zone = i < LIVE_COLS ? 'live-zone' : 'closed-zone';
+                return (
+                  <th key={i} className={`gl-wk ${zone} ` + (i === 0 ? 'this' : '')}>
+                    <div className="gl-wk-l">{i + 1}</div>
+                    {i < LIVE_COLS && <div className="gl-wk-sub">live</div>}
+                  </th>
+                );
+              })}
               <th className="gl-tot">Realized</th>
             </tr>
           </thead>
@@ -248,29 +284,60 @@ export function TradesLogMatrix({
               const live = liveByTicker.get(r.ticker) ?? [];
               const realized = realizedByTicker.get(r.ticker) ?? 0;
 
+              // Build close index FIRST so the sort can decide live vs
+              // fully-closed.
+              const closesByOpen = new Map<string, OptionTrade[]>();
+              for (const t of trades) {
+                if (t.action !== 'close' || !t.closes_trade_id) continue;
+                const arr = closesByOpen.get(t.closes_trade_id) ?? [];
+                arr.push(t);
+                closesByOpen.set(t.closes_trade_id, arr);
+              }
+              const isFullyClosed = (open: OptionTrade): boolean => {
+                const closes = closesByOpen.get(open.id) ?? [];
+                const closedQty = closes.reduce((s, c) => s + c.contracts, 0);
+                return closedQty >= open.contracts;
+              };
+
               // One slot per POSITION (= one open trade + its matched
-              // closes). When the user closes a position, the same column
-              // updates to show realized P&L — no second column for the
-              // close.
+              // closes). The closing flow doesn't add a new column; the
+              // same column flips state.
               //
-              // Column order:
-              //   1. Protective puts (long-direction puts) anchor the
-              //      leftmost columns, oldest first. They're the long-
-              //      running foundation of an income strategy and
-              //      shouldn't shift when shorter-lived trades happen
-              //      around them.
-              //   2. Everything else (short calls, short puts, long calls)
-              //      sorts newest first to the right.
+              // Column order (per row):
+              //   1. LIVE opens first (leftmost). Within live:
+              //        – protective puts oldest first (stable lanes)
+              //        – everything else newest first
+              //   2. CLOSED opens after, most-recently-closed first.
+              //
+              // This keeps live work anchored in cols 1..N (where N =
+              // LIVE_COLS by convention) and pushes history rightward.
               const isProtective = (t: OptionTrade) =>
                 t.option_type === 'put' && t.direction === 'long';
+              const mostRecentCloseDate = (open: OptionTrade): string => {
+                const closes = closesByOpen.get(open.id) ?? [];
+                if (closes.length === 0) return '';
+                return closes
+                  .map((c) => c.trade_date)
+                  .sort()
+                  .reverse()[0];
+              };
               const opens = trades
                 .filter((t) => t.action === 'open')
                 .sort((a, b) => {
+                  const aClosed = isFullyClosed(a) ? 1 : 0;
+                  const bClosed = isFullyClosed(b) ? 1 : 0;
+                  if (aClosed !== bClosed) return aClosed - bClosed; // live first
+                  if (aClosed === 1) {
+                    // Both closed → most-recently-closed first
+                    const ad = mostRecentCloseDate(a);
+                    const bd = mostRecentCloseDate(b);
+                    if (ad !== bd) return bd.localeCompare(ad);
+                    return b.created_at.localeCompare(a.created_at);
+                  }
+                  // Both live → existing protective-put rule, then dates
                   const aP = isProtective(a) ? 0 : 1;
                   const bP = isProtective(b) ? 0 : 1;
                   if (aP !== bP) return aP - bP;
-                  // Within the protective bucket: oldest first → stable lanes.
-                  // Within the other bucket: newest first.
                   return aP === 0
                     ? a.trade_date !== b.trade_date
                       ? a.trade_date.localeCompare(b.trade_date)
@@ -279,14 +346,6 @@ export function TradesLogMatrix({
                       ? b.trade_date.localeCompare(a.trade_date)
                       : b.created_at.localeCompare(a.created_at);
                 });
-              // Build close index: open.id → list of closes against it
-              const closesByOpen = new Map<string, OptionTrade[]>();
-              for (const t of trades) {
-                if (t.action !== 'close' || !t.closes_trade_id) continue;
-                const arr = closesByOpen.get(t.closes_trade_id) ?? [];
-                arr.push(t);
-                closesByOpen.set(t.closes_trade_id, arr);
-              }
               const slotFor = (idx: number) => {
                 const open = opens[idx];
                 if (!open) return null;
@@ -333,7 +392,12 @@ export function TradesLogMatrix({
                     return (
                       <td
                         key={i}
-                        className={'gl-cell ' + (slot ? 'filled ' : 'empty ') + (i === 0 ? 'this' : '')}
+                        className={
+                          'gl-cell ' +
+                          (slot ? 'filled ' : 'empty ') +
+                          (i < LIVE_COLS ? 'live-zone ' : 'closed-zone ') +
+                          (i === 0 ? 'this' : '')
+                        }
                         onClick={() => onCellClick(r.ticker, i)}
                         title={slot
                           ? `${slot.trade.direction} ${slot.trade.option_type} ${slot.trade.contracts}× $${slot.trade.strike} · opened ${slot.trade.trade_date} · ${stateLabel} · ${fmtUSD(slot.signed)}`
@@ -406,7 +470,7 @@ export function TradesLogMatrix({
                 if (putCost > 0) {
                   // Protective-put column — show cost (neg) and weekly burn.
                   return (
-                    <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
+                    <td key={i} className={'gl-cell sum ' + (i < LIVE_COLS ? 'live-zone ' : 'closed-zone ') + (i === 0 ? 'this' : '')}>
                       <div className="gl-cell-in">
                         <div className="gl-cell-amt down">
                           −{fmtCompact(putCost)}
@@ -425,7 +489,7 @@ export function TradesLogMatrix({
                   const pct = grandPutCost > 0 ? (slotNet / grandPutCost) * 100 : 0;
                   const isPos = slotNet >= 0;
                   return (
-                    <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
+                    <td key={i} className={'gl-cell sum ' + (i < LIVE_COLS ? 'live-zone ' : 'closed-zone ') + (i === 0 ? 'this' : '')}>
                       <div className="gl-cell-in">
                         <div className={'gl-cell-amt ' + (isPos ? 'up' : 'down')}>
                           {isPos ? fmtCompact(slotNet) : '−' + fmtCompact(Math.abs(slotNet))}
@@ -440,7 +504,7 @@ export function TradesLogMatrix({
                   );
                 }
                 return (
-                  <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
+                  <td key={i} className={'gl-cell sum ' + (i < LIVE_COLS ? 'live-zone ' : 'closed-zone ') + (i === 0 ? 'this' : '')}>
                     <span className="muted">—</span>
                   </td>
                 );
