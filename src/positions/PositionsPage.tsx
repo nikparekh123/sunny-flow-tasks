@@ -159,18 +159,6 @@ export default function PositionsPage() {
           )}
         </div>
 
-        {/* Stock insights strip */}
-        {portfolio.rows.length > 0 && (
-          <div className="np-section">
-            <StockInsightsStrip
-              rows={portfolio.rows}
-              signalsByTicker={signalsByTicker}
-              liveByTicker={liveByTicker}
-              overlayByTicker={overlayByTicker}
-            />
-          </div>
-        )}
-
         {/* Allocation */}
         <div className="np-section">
           <div className="np-section-hd">
@@ -218,6 +206,18 @@ export default function PositionsPage() {
             />
           )}
         </div>
+
+        {/* Stock insights strip — between Allocation and Positions */}
+        {portfolio.rows.length > 0 && (
+          <div className="np-section">
+            <StockInsightsStrip
+              rows={portfolio.rows}
+              signalsByTicker={signalsByTicker}
+              liveByTicker={liveByTicker}
+              overlayByTicker={overlayByTicker}
+            />
+          </div>
+        )}
 
         {/* Positions */}
         <div className="np-section">

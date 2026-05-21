@@ -1,28 +1,27 @@
 import { useMemo, useState } from 'react';
 import {
-  chipsForSignals,
   daysUntil,
   fmtCompact,
+  fmtPct,
   fmtUSD,
   fmtUSD2,
   type LiveOption,
   type PositionComputed,
-  type SignalChip,
   type TickerSignals,
 } from './types';
 import type { StrategyBucket } from './usePositions';
 
 /**
- * Stock Insights strip — horizontally-scrolling row of compact per-ticker
- * cards. Replaces the old KPI tiles / strategy summary at the top of the
- * positions page.
+ * Stock Insights strip — horizontally-scrolling row of per-ticker cards.
  *
- * Card structure:
- *   compact  ~168×150 — ticker · price · day move · top-2 signals
- *   expanded ~336×280 — adds full signal breakdown + position + options
+ * Cards are calmer than the previous chip-heavy version: plain text
+ * lines, a letter avatar, sector + day move + position P&L. Click any
+ * card to expand it in place; siblings slide aside.
  *
- * Multi-select filter chips above the strip narrow the visible cards;
- * default sort is most-actionable-first (signal-count rank).
+ * Filters:
+ *   • Single-select segmented toggle (mirrors the Allocation/Positions
+ *     toggles elsewhere on the page for visual consistency)
+ *   • Sector dropdown (independent, ANDs with the toggle filter)
  */
 
 interface Props {
@@ -32,34 +31,24 @@ interface Props {
   overlayByTicker: Map<string, StrategyBucket>;
 }
 
-type FilterId =
-  | 'below-200d'
-  | 'above-200d'
-  | 'stretched'
-  | 'pullback'
-  | 'oversold'
-  | 'overbought'
-  | 'down-5d'
-  | 'up-5d'
-  | 'down-21d'
-  | 'up-21d'
-  | 'big-mover'
-  | 'earnings-7d'
-  | 'earnings-30d'
-  | 'has-live'
-  | 'no-live'
-  | 'above-cost'
-  | 'below-cost'
-  | `sector:${string}`;
+type Filter = 'all' | 'below-200d' | 'rsi-extreme' | 'big-move' | 'earnings';
+const FILTERS: Array<{ id: Filter; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'below-200d', label: 'Below 200d' },
+  { id: 'rsi-extreme', label: 'RSI extreme' },
+  { id: 'big-move', label: 'Big move' },
+  { id: 'earnings', label: 'Earnings' },
+];
 
 interface CardModel {
   row: PositionComputed;
   signals?: TickerSignals;
   live: LiveOption[];
-  chips: SignalChip[];
   dayPct: number | null;
   earningsDays: number | null;
   bucket?: StrategyBucket;
+  signalLines: string[]; // plain-text signal lines, ranked
+  actionability: number; // sort score
 }
 
 function dayChange(row: PositionComputed): number | null {
@@ -67,96 +56,83 @@ function dayChange(row: PositionComputed): number | null {
   return ((row.current_price - row.prev_close) / row.prev_close) * 100;
 }
 
-const FILTER_GROUPS: Array<{
-  label: string;
-  filters: Array<{ id: FilterId; label: string }>;
-}> = [
-  {
-    label: 'Trend',
-    filters: [
-      { id: 'below-200d', label: '↓ 200d' },
-      { id: 'above-200d', label: '↑ 200d' },
-      { id: 'stretched', label: 'Stretched' },
-      { id: 'pullback', label: 'Pullback' },
-    ],
-  },
-  {
-    label: 'Momentum',
-    filters: [
-      { id: 'oversold', label: 'Oversold' },
-      { id: 'overbought', label: 'Overbought' },
-    ],
-  },
-  {
-    label: 'Moves',
-    filters: [
-      { id: 'down-5d', label: 'Down 5d' },
-      { id: 'up-5d', label: 'Up 5d' },
-      { id: 'down-21d', label: 'Down 21d' },
-      { id: 'up-21d', label: 'Up 21d' },
-      { id: 'big-mover', label: 'Big mover' },
-    ],
-  },
-  {
-    label: 'Events',
-    filters: [
-      { id: 'earnings-7d', label: '📅 ≤7d' },
-      { id: 'earnings-30d', label: '📅 ≤30d' },
-    ],
-  },
-  {
-    label: 'Position',
-    filters: [
-      { id: 'has-live', label: 'Has live opts' },
-      { id: 'no-live', label: 'No live opts' },
-      { id: 'above-cost', label: 'Above avg cost' },
-      { id: 'below-cost', label: 'Below avg cost' },
-    ],
-  },
-];
+/** Deterministic colour from a ticker (used for the letter avatar). */
+function avatarColor(ticker: string): { bg: string; fg: string } {
+  // Stable hash → palette index.
+  let h = 0;
+  for (let i = 0; i < ticker.length; i++) h = (h * 31 + ticker.charCodeAt(i)) | 0;
+  const palette: Array<{ bg: string; fg: string }> = [
+    { bg: '#d2e632', fg: '#0a2828' }, // neon
+    { bg: '#a8d4a0', fg: '#0a2828' }, // positive green
+    { bg: '#6dd1c5', fg: '#0a2828' }, // cool teal
+    { bg: '#a8c4c0', fg: '#0a2828' }, // pale teal
+    { bg: '#e0c060', fg: '#0a2828' }, // warning amber
+    { bg: '#326e64', fg: '#faf5f0' }, // border bright
+    { bg: '#8ab4d4', fg: '#0a2828' }, // soft blue
+  ];
+  return palette[Math.abs(h) % palette.length];
+}
 
-function predicate(card: CardModel, id: FilterId): boolean {
-  const s = card.signals;
-  const row = card.row;
-  if (id.startsWith('sector:')) return row.sector === id.slice(7);
-  switch (id) {
-    case 'below-200d':
-      return !!s && s.price != null && s.ma200 != null && s.ma200 > 0 && s.price < s.ma200;
-    case 'above-200d':
-      return !!s && s.price != null && s.ma200 != null && s.ma200 > 0 && s.price >= s.ma200;
-    case 'stretched':
-      return !!s && s.price != null && s.ma50 != null && s.ma50 > 0 &&
-        ((s.price - s.ma50) / s.ma50) * 100 >= 10;
-    case 'pullback':
-      return !!s && s.price != null && s.ma50 != null && s.ma50 > 0 &&
-        ((s.price - s.ma50) / s.ma50) * 100 <= -7;
-    case 'oversold':
-      return !!s && s.rsi14 != null && s.rsi14 <= 30;
-    case 'overbought':
-      return !!s && s.rsi14 != null && s.rsi14 >= 70;
-    case 'down-5d':
-      return !!s && s.chg_5d_pct != null && s.chg_5d_pct <= -5;
-    case 'up-5d':
-      return !!s && s.chg_5d_pct != null && s.chg_5d_pct >= 5;
-    case 'down-21d':
-      return !!s && s.chg_21d_pct != null && s.chg_21d_pct <= -10;
-    case 'up-21d':
-      return !!s && s.chg_21d_pct != null && s.chg_21d_pct >= 10;
-    case 'big-mover':
-      return card.dayPct != null && Math.abs(card.dayPct) >= 2;
-    case 'earnings-7d':
-      return card.earningsDays != null && card.earningsDays >= 0 && card.earningsDays <= 7;
-    case 'earnings-30d':
-      return card.earningsDays != null && card.earningsDays >= 0 && card.earningsDays <= 30;
-    case 'has-live':
-      return card.live.length > 0;
-    case 'no-live':
-      return card.live.length === 0;
-    case 'above-cost':
-      return row.current_price != null && row.current_price > row.avg_cost;
-    case 'below-cost':
-      return row.current_price != null && row.current_price < row.avg_cost;
+/** Build plain-text signal lines, ranked by actionability. */
+function signalLinesFor(s: TickerSignals | undefined): string[] {
+  if (!s) return [];
+  const out: Array<{ text: string; rank: number }> = [];
+
+  // RSI extreme
+  if (s.rsi14 != null) {
+    if (s.rsi14 >= 70) out.push({ text: `Overbought · RSI ${s.rsi14.toFixed(0)}`, rank: 100 });
+    else if (s.rsi14 <= 30) out.push({ text: `Oversold · RSI ${s.rsi14.toFixed(0)}`, rank: 100 });
   }
+
+  // Below 200d
+  if (s.price != null && s.ma200 != null && s.ma200 > 0 && s.price < s.ma200) {
+    const pct = ((s.price - s.ma200) / s.ma200) * 100;
+    out.push({ text: `Below 200d MA · ${pct.toFixed(1)}%`, rank: 60 });
+  }
+
+  // Stretched / pullback vs 50d
+  if (s.price != null && s.ma50 != null && s.ma50 > 0) {
+    const pct = ((s.price - s.ma50) / s.ma50) * 100;
+    if (pct >= 10) out.push({ text: `Stretched · +${pct.toFixed(1)}% vs 50d`, rank: 70 });
+    else if (pct <= -7) out.push({ text: `Pullback · ${pct.toFixed(1)}% vs 50d`, rank: 70 });
+  }
+
+  // 21d move (monthly)
+  if (s.chg_21d_pct != null && Math.abs(s.chg_21d_pct) >= 10) {
+    const dir = s.chg_21d_pct >= 0 ? 'Up' : 'Down';
+    out.push({
+      text: `${dir} ${Math.abs(s.chg_21d_pct).toFixed(1)}% past month`,
+      rank: 80,
+    });
+  }
+
+  // 5d move (weekly)
+  if (s.chg_5d_pct != null && Math.abs(s.chg_5d_pct) >= 5) {
+    const dir = s.chg_5d_pct >= 0 ? 'Up' : 'Down';
+    out.push({
+      text: `${dir} ${Math.abs(s.chg_5d_pct).toFixed(1)}% past week`,
+      rank: 90,
+    });
+  }
+
+  out.sort((a, b) => b.rank - a.rank);
+  return out.map((x) => x.text);
+}
+
+/** Coarse "X ago" — uses ISO timestamp. */
+function fmtRelative(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '—';
+  const diffMs = Date.now() - t;
+  const s = Math.max(0, Math.floor(diffMs / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
 }
 
 export function StockInsightsStrip({
@@ -165,140 +141,135 @@ export function StockInsightsStrip({
   liveByTicker,
   overlayByTicker,
 }: Props) {
-  const [active, setActive] = useState<Set<FilterId>>(new Set());
+  const [filter, setFilter] = useState<Filter>('all');
+  const [sector, setSector] = useState<string>('__all__');
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // Build per-ticker card models once.
-  const allCards = useMemo<CardModel[]>(
+  const cards = useMemo<CardModel[]>(
     () =>
       rows.map((r) => {
         const s = signalsByTicker.get(r.ticker);
         const live = liveByTicker.get(r.ticker) ?? [];
-        const chips = s ? chipsForSignals(s) : [];
+        const lines = signalLinesFor(s);
         return {
           row: r,
           signals: s,
           live,
-          chips,
           dayPct: dayChange(r),
           earningsDays: r.earnings_date ? daysUntil(r.earnings_date) : null,
           bucket: overlayByTicker.get(r.ticker),
+          signalLines: lines,
+          actionability:
+            lines.length * 100 +
+            Math.abs(s?.chg_21d_pct ?? 0) +
+            Math.abs(s?.chg_5d_pct ?? 0) / 10,
         };
       }),
     [rows, signalsByTicker, liveByTicker, overlayByTicker],
   );
 
-  // Dynamic sector chips — only sectors actually owned.
-  const sectorFilters = useMemo(() => {
+  const sectors = useMemo(() => {
     const set = new Set<string>();
-    for (const c of allCards) set.add(c.row.sector);
-    return Array.from(set)
-      .sort()
-      .map((sec) => ({ id: `sector:${sec}` as FilterId, label: sec }));
-  }, [allCards]);
+    for (const c of cards) set.add(c.row.sector);
+    return Array.from(set).sort();
+  }, [cards]);
 
-  // Active-filter predicate (AND of all active).
-  const matchesAll = (card: CardModel, filters: Set<FilterId>) => {
-    for (const id of filters) if (!predicate(card, id)) return false;
-    return true;
+  const passesToggle = (c: CardModel): boolean => {
+    const s = c.signals;
+    switch (filter) {
+      case 'all':
+        return true;
+      case 'below-200d':
+        return !!s && s.price != null && s.ma200 != null && s.ma200 > 0 && s.price < s.ma200;
+      case 'rsi-extreme':
+        return !!s && s.rsi14 != null && (s.rsi14 >= 70 || s.rsi14 <= 30);
+      case 'big-move':
+        return (
+          (!!s && s.chg_5d_pct != null && Math.abs(s.chg_5d_pct) >= 5) ||
+          (!!s && s.chg_21d_pct != null && Math.abs(s.chg_21d_pct) >= 10) ||
+          (c.dayPct != null && Math.abs(c.dayPct) >= 2)
+        );
+      case 'earnings':
+        return c.earningsDays != null && c.earningsDays >= 0 && c.earningsDays <= 30;
+    }
   };
 
   const visible = useMemo(() => {
-    const matched = allCards.filter((c) => matchesAll(c, active));
-    // Sort: most actionable first (chip count desc), then |21d move|.
-    matched.sort((a, b) => {
-      const ca = a.chips.length;
-      const cb = b.chips.length;
-      if (ca !== cb) return cb - ca;
-      const am = Math.abs(a.signals?.chg_21d_pct ?? 0);
-      const bm = Math.abs(b.signals?.chg_21d_pct ?? 0);
-      return bm - am;
+    const out = cards.filter((c) => {
+      if (!passesToggle(c)) return false;
+      if (sector !== '__all__' && c.row.sector !== sector) return false;
+      return true;
     });
-    return matched;
-  }, [allCards, active]);
+    out.sort((a, b) => b.actionability - a.actionability);
+    return out;
+  }, [cards, filter, sector]);
 
-  // Count = matches if we add THIS chip to the current filter set.
-  const countFor = (id: FilterId): number => {
-    if (active.has(id)) return visible.length;
-    const test = new Set(active);
-    test.add(id);
-    return allCards.filter((c) => matchesAll(c, test)).length;
-  };
-
-  const toggle = (id: FilterId) => {
-    setActive((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
+  // Per-filter counts for the toggle buttons.
+  const countFor = (f: Filter): number => {
+    const tmp = cards.filter((c) => {
+      if (sector !== '__all__' && c.row.sector !== sector) return false;
+      const saved = filter;
+      // Inline duplicate of passesToggle to avoid hook deps.
+      const s = c.signals;
+      switch (f) {
+        case 'all':
+          return true;
+        case 'below-200d':
+          return !!s && s.price != null && s.ma200 != null && s.ma200 > 0 && s.price < s.ma200;
+        case 'rsi-extreme':
+          return !!s && s.rsi14 != null && (s.rsi14 >= 70 || s.rsi14 <= 30);
+        case 'big-move':
+          return (
+            (!!s && s.chg_5d_pct != null && Math.abs(s.chg_5d_pct) >= 5) ||
+            (!!s && s.chg_21d_pct != null && Math.abs(s.chg_21d_pct) >= 10) ||
+            (c.dayPct != null && Math.abs(c.dayPct) >= 2)
+          );
+        case 'earnings':
+          return c.earningsDays != null && c.earningsDays >= 0 && c.earningsDays <= 30;
+      }
+      void saved;
     });
+    return tmp.length;
   };
-
-  const clearAll = () => setActive(new Set());
 
   return (
     <div className="si-wrap">
       <div className="si-hd">
         <div className="si-title">Stock insights</div>
-        <div className="si-count">
-          {visible.length}/{allCards.length}
-          {active.size > 0 && (
-            <button className="si-clear" onClick={clearAll}>
-              Clear ({active.size})
-            </button>
-          )}
+        <div className="si-controls">
+          <div className="np-toggle si-toggle">
+            {FILTERS.map((f) => (
+              <button
+                key={f.id}
+                className={filter === f.id ? 'on' : ''}
+                onClick={() => setFilter(f.id)}
+              >
+                {f.label}
+                {f.id !== 'all' && (
+                  <span className="si-toggle-ct"> {countFor(f.id)}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <select
+            className="si-sector"
+            value={sector}
+            onChange={(e) => setSector(e.target.value)}
+          >
+            <option value="__all__">All sectors</option>
+            {sectors.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
         </div>
-      </div>
-
-      <div className="si-filters">
-        {FILTER_GROUPS.map((g) => (
-          <div key={g.label} className="si-fgroup">
-            <span className="si-fgroup-k">{g.label}</span>
-            {g.filters.map((f) => {
-              const isOn = active.has(f.id);
-              const count = countFor(f.id);
-              const dim = !isOn && count === 0;
-              return (
-                <button
-                  key={f.id}
-                  className={'si-chip' + (isOn ? ' on' : '') + (dim ? ' dim' : '')}
-                  onClick={() => toggle(f.id)}
-                  disabled={dim}
-                >
-                  {f.label}
-                  <span className="si-chip-ct">{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        ))}
-        {sectorFilters.length > 0 && (
-          <div className="si-fgroup">
-            <span className="si-fgroup-k">Sector</span>
-            {sectorFilters.map((f) => {
-              const isOn = active.has(f.id);
-              const count = countFor(f.id);
-              const dim = !isOn && count === 0;
-              return (
-                <button
-                  key={f.id}
-                  className={'si-chip' + (isOn ? ' on' : '') + (dim ? ' dim' : '')}
-                  onClick={() => toggle(f.id)}
-                  disabled={dim}
-                >
-                  {f.label}
-                  <span className="si-chip-ct">{count}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       <div className="si-scroll">
         <div className="si-row">
           {visible.length === 0 ? (
-            <div className="si-empty">No tickers match the active filters.</div>
+            <div className="si-empty">No tickers match the active filter.</div>
           ) : (
             visible.map((c) => (
               <Card
@@ -328,7 +299,11 @@ function Card({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
-  const { row, signals, live, chips, dayPct, earningsDays, bucket } = card;
+  const { row, signals, live, dayPct, earningsDays, bucket, signalLines } = card;
+  const avatar = avatarColor(row.ticker);
+  const overallPL = row.overall_pl;
+  const overallPLpct =
+    row.cost_basis > 0 ? (overallPL / row.cost_basis) * 100 : 0;
 
   return (
     <div
@@ -337,22 +312,21 @@ function Card({
       role="button"
       tabIndex={0}
     >
-      {/* Top row */}
+      {/* Top — avatar + ticker + sector */}
       <div className="si-card-top">
-        <span className="si-card-tk">{row.ticker}</span>
-        {earningsDays != null && earningsDays >= 0 && earningsDays <= 14 && (
-          <span
-            className={
-              'si-card-earn ' + (earningsDays <= 7 ? 'urgent' : 'soon')
-            }
-            title={`Earnings ${row.earnings_date}`}
-          >
-            📅 {earningsDays === 0 ? 'today' : earningsDays + 'd'}
-          </span>
-        )}
+        <div
+          className="si-card-avatar"
+          style={{ background: avatar.bg, color: avatar.fg }}
+        >
+          {row.ticker[0]}
+        </div>
+        <div className="si-card-ident">
+          <div className="si-card-tk">{row.ticker}</div>
+          <div className="si-card-sec">{row.sector}</div>
+        </div>
       </div>
 
-      {/* Price + day move */}
+      {/* Price + day change */}
       <div className="si-card-price">
         {row.current_price != null ? fmtUSD2(row.current_price) : '—'}
       </div>
@@ -363,129 +337,107 @@ function Card({
             (dayPct > 0 ? 'up' : dayPct < 0 ? 'down' : 'flat')
           }
         >
-          {dayPct > 0 ? '▲' : dayPct < 0 ? '▼' : '—'}
-          {Math.abs(dayPct).toFixed(2)}%
+          {dayPct > 0 ? '+' : ''}
+          {dayPct.toFixed(2)}% today
         </div>
       )}
 
-      <div className="si-card-sep" />
-
-      {/* Signal chips (top 2 in compact, all in expanded) */}
-      <div className="si-card-chips">
-        {(isExpanded ? chips : chips.slice(0, 2)).map((c, i) => (
-          <span key={i} className={`si-card-chip ${c.tone}`}>
-            {c.label}
-          </span>
-        ))}
-        {!isExpanded && chips.length === 0 && (
-          <span className="si-card-chip quiet">no signal</span>
-        )}
+      {/* Overall position P&L */}
+      <div className="si-card-pl-row">
+        <span
+          className={
+            'si-card-pl ' +
+            (overallPL > 0 ? 'up' : overallPL < 0 ? 'down' : 'flat')
+          }
+        >
+          {overallPL >= 0
+            ? '+' + fmtUSD(overallPL)
+            : '−' + fmtUSD(Math.abs(overallPL))}
+          {row.cost_basis > 0 && (
+            <span className="si-card-pl-pct">
+              {' '}
+              {overallPLpct >= 0 ? '+' : ''}
+              {overallPLpct.toFixed(2)}%
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="si-card-pos">
+        {row.quantity.toLocaleString()} sh · {fmtUSD2(row.avg_cost)} avg
       </div>
 
-      {/* Expanded extras */}
-      {isExpanded && (
-        <div className="si-card-detail">
-          <div className="si-detail-row">
-            <span className="k">Position</span>
-            <span className="v">
-              {row.quantity.toLocaleString()} sh · {fmtUSD2(row.avg_cost)} avg
-            </span>
-          </div>
-          <div className="si-detail-row">
-            <span className="k">Mkt val</span>
-            <span className="v">
-              {fmtUSD(row.market_value)}
-              <span
-                className={
-                  ' si-detail-pl ' +
-                  (row.pnl_dollar < 0 ? 'down' : row.pnl_dollar > 0 ? 'up' : '')
-                }
-              >
-                {row.pnl_dollar >= 0
-                  ? '+' + fmtUSD(row.pnl_dollar)
-                  : '−' + fmtUSD(Math.abs(row.pnl_dollar))}
-              </span>
-            </span>
-          </div>
-          <div className="si-detail-row">
-            <span className="k">Net cost</span>
-            <span className="v">{fmtUSD2(row.effective_cost)}</span>
-          </div>
-          {signals && (
-            <>
-              {signals.rsi14 != null && (
-                <div className="si-detail-row">
-                  <span className="k">RSI</span>
-                  <span className="v">{signals.rsi14.toFixed(1)}</span>
-                </div>
-              )}
-              {signals.ma50 != null &&
-                signals.ma200 != null && (
-                  <div className="si-detail-row">
-                    <span className="k">MA</span>
-                    <span className="v">
-                      50d {fmtUSD2(signals.ma50)} · 200d {fmtUSD2(signals.ma200)}
-                    </span>
-                  </div>
-                )}
-              {(signals.chg_5d_pct != null || signals.chg_21d_pct != null) && (
-                <div className="si-detail-row">
-                  <span className="k">Δ</span>
-                  <span className="v">
-                    {signals.chg_5d_pct != null && (
-                      <>5d {signals.chg_5d_pct.toFixed(1)}%</>
-                    )}
-                    {signals.chg_5d_pct != null && signals.chg_21d_pct != null && ' · '}
-                    {signals.chg_21d_pct != null && (
-                      <>21d {signals.chg_21d_pct.toFixed(1)}%</>
-                    )}
-                  </span>
-                </div>
-              )}
-            </>
+      {/* Signal lines (plain text) */}
+      {signalLines.length > 0 && (
+        <div className="si-card-signals">
+          {(isExpanded ? signalLines : signalLines.slice(0, 2)).map(
+            (line, i) => (
+              <div key={i} className="si-card-signal">
+                {line}
+              </div>
+            ),
           )}
-          {live.length > 0 && (
-            <div className="si-detail-row">
-              <span className="k">Options</span>
-              <span className="v">
-                {live.length} live
-                {(() => {
-                  const calls = live.filter((l) => l.open.option_type === 'call').length;
-                  const puts = live.filter((l) => l.open.option_type === 'put').length;
-                  return ` (${calls}C / ${puts}P)`;
-                })()}
-              </span>
-            </div>
-          )}
-          <div className="si-detail-row">
-            <span className="k">Sector</span>
-            <span className="v">
-              {row.sector}
-              {bucket && (
-                <span className={'si-detail-bucket st-' + bucket}>
-                  {' · '}
-                  {bucket}
-                </span>
-              )}
-            </span>
-          </div>
-          {row.earnings_date && earningsDays != null && earningsDays >= 0 && (
-            <div className="si-detail-row">
-              <span className="k">Earnings</span>
-              <span className="v">
-                {row.earnings_date}{' '}
-                <span className="si-detail-faint">
-                  ({earningsDays === 0 ? 'today' : earningsDays + 'd'})
-                </span>
-              </span>
-            </div>
-          )}
-          <div className="si-detail-row">
-            <span className="k">% portfolio</span>
-            <span className="v">{fmtCompact(row.pct_portfolio)}%</span>
-          </div>
         </div>
       )}
+
+      {/* Earnings line */}
+      {earningsDays != null && earningsDays >= 0 && earningsDays <= 30 && (
+        <div
+          className={
+            'si-card-earn ' + (earningsDays <= 7 ? 'urgent' : 'soon')
+          }
+        >
+          {earningsDays === 0
+            ? 'Earnings today'
+            : earningsDays === 1
+              ? 'Earnings tomorrow'
+              : `Earnings in ${earningsDays} days`}
+        </div>
+      )}
+
+      {/* Footer — updated */}
+      <div className="si-card-footer">
+        Updated {fmtRelative(row.last_price_update)}
+      </div>
+
+      {/* Expanded detail */}
+      {isExpanded && (
+        <div className="si-card-detail">
+          <Detail k="Mkt value" v={fmtUSD(row.market_value)} />
+          <Detail k="Net cost" v={fmtUSD2(row.effective_cost)} />
+          <Detail k="% portfolio" v={`${fmtCompact(row.pct_portfolio)}%`} />
+          {signals?.rsi14 != null && (
+            <Detail k="RSI(14)" v={signals.rsi14.toFixed(1)} />
+          )}
+          {signals?.ma50 != null && (
+            <Detail k="MA 50d" v={fmtUSD2(signals.ma50)} />
+          )}
+          {signals?.ma200 != null && (
+            <Detail k="MA 200d" v={fmtUSD2(signals.ma200)} />
+          )}
+          {signals?.chg_5d_pct != null && (
+            <Detail k="5d move" v={fmtPct(signals.chg_5d_pct)} />
+          )}
+          {signals?.chg_21d_pct != null && (
+            <Detail k="21d move" v={fmtPct(signals.chg_21d_pct)} />
+          )}
+          {live.length > 0 && (
+            <Detail
+              k="Live options"
+              v={`${live.length} (${live.filter((l) => l.open.option_type === 'call').length}C / ${live.filter((l) => l.open.option_type === 'put').length}P)`}
+            />
+          )}
+          {bucket && <Detail k="Strategy" v={bucket} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Detail({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="si-detail-row">
+      <span className="k">{k}</span>
+      <span className="v">{v}</span>
     </div>
   );
 }

@@ -3814,8 +3814,7 @@
 }
 
 /* ============================================================
-   Stock Insights strip — horizontally-scrolling per-ticker cards
-   with multi-select filter chips. Sits at the top of the page.
+   Stock Insights strip — calmer, plain-text cards w/ avatar
    ============================================================ */
 .np-app .si-wrap {
   background: var(--navi-card);
@@ -3823,12 +3822,14 @@
   padding: 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 .np-app .si-hd {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 .np-app .si-title {
   font-size: 8px;
@@ -3837,237 +3838,222 @@
   text-transform: uppercase;
   color: var(--navi-fg5);
 }
-.np-app .si-count {
-  font-family: var(--navi-font-mono);
-  font-size: 11px;
-  color: var(--navi-fg3);
+.np-app .si-controls {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-.np-app .si-clear {
-  background: transparent;
-  border: 1px solid rgba(50,110,100,.35);
+/* Toggle is .np-toggle.si-toggle — uses existing np-toggle look */
+.np-app .si-toggle button .si-toggle-ct {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  color: var(--navi-fg4);
+  margin-left: 2px;
+}
+.np-app .si-toggle button.on .si-toggle-ct { color: var(--navi-neon); }
+
+/* Sector dropdown */
+.np-app .si-sector {
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
   color: var(--navi-fg2);
   font-family: var(--navi-font-mono);
-  font-size: 10px;
-  padding: 3px 9px;
-  border-radius: 12px;
+  font-size: 11px;
+  padding: 7px 28px 7px 12px;
+  border-radius: 10px;
   cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%23a8c4c0' stroke-width='1.2' fill='none'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
 }
-.np-app .si-clear:hover { color: var(--navi-neon); border-color: var(--navi-neon); }
-
-/* Filter rows */
-.np-app .si-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 16px;
-  align-items: center;
-}
-.np-app .si-fgroup {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.np-app .si-fgroup-k {
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: var(--navi-fg5);
-  margin-right: 4px;
-}
-.np-app .si-chip {
-  background: transparent;
-  border: 1px solid rgba(50,110,100,.3);
-  color: var(--navi-fg3);
-  font-family: var(--navi-font-mono);
-  font-size: 10px;
-  padding: 4px 9px 4px 10px;
-  border-radius: 12px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: color .15s var(--np-ease), border-color .15s var(--np-ease), background .15s var(--np-ease);
-}
-.np-app .si-chip:hover:not(:disabled) {
+.np-app .si-sector:hover {
   color: var(--navi-fg1);
   border-color: var(--navi-border-bright);
 }
-.np-app .si-chip.on {
-  color: var(--navi-neon);
-  background: var(--navi-tint-neon);
-  border-color: var(--navi-neon);
-}
-.np-app .si-chip.dim {
-  opacity: .35;
-  cursor: not-allowed;
-}
-.np-app .si-chip-ct {
-  font-size: 9px;
-  color: var(--navi-fg4);
-  background: rgba(50,110,100,.18);
-  padding: 1px 5px;
-  border-radius: 6px;
-  min-width: 16px;
-  text-align: center;
-}
-.np-app .si-chip.on .si-chip-ct {
-  color: var(--navi-neon);
-  background: rgba(210,230,50,.15);
-}
 
-/* Strip / scroll container */
+/* Scroll strip */
 .np-app .si-scroll {
   overflow-x: auto;
   overflow-y: visible;
   scroll-snap-type: x proximity;
-  /* Hide scrollbar on WebKit; keep usability via cursor scroll / arrows */
   scrollbar-width: thin;
   scrollbar-color: rgba(50,110,100,.4) transparent;
-  padding-bottom: 4px;
+  padding-bottom: 6px;
 }
-.np-app .si-scroll::-webkit-scrollbar {
-  height: 6px;
-}
-.np-app .si-scroll::-webkit-scrollbar-thumb {
-  background: rgba(50,110,100,.4);
-  border-radius: 4px;
-}
-.np-app .si-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
+.np-app .si-scroll::-webkit-scrollbar { height: 6px; }
+.np-app .si-scroll::-webkit-scrollbar-thumb { background: rgba(50,110,100,.4); border-radius: 4px; }
+.np-app .si-scroll::-webkit-scrollbar-track { background: transparent; }
 .np-app .si-row {
   display: flex;
-  gap: 12px;
-  padding: 4px 2px;
-  min-height: 160px;
+  gap: 14px;
+  padding: 2px;
+  min-height: 290px;
 }
 .np-app .si-empty {
   color: var(--navi-fg3);
   font-family: var(--navi-font-mono);
   font-size: 12px;
-  padding: 28px;
+  padding: 36px;
 }
 
 /* Card */
 .np-app .si-card {
-  flex: 0 0 168px;
-  height: 150px;
+  flex: 0 0 224px;
+  min-height: 280px;
   background: rgba(15,51,51,.55);
   border: 1px solid rgba(50,110,100,.3);
-  border-radius: 12px;
-  padding: 12px 14px;
+  border-radius: 14px;
+  padding: 16px 18px 14px;
   cursor: pointer;
   scroll-snap-align: start;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   transition:
     flex-basis .28s var(--np-ease),
-    height .28s var(--np-ease),
     border-color .15s var(--np-ease),
-    background .15s var(--np-ease);
-  position: relative;
+    background .15s var(--np-ease),
+    box-shadow .15s var(--np-ease);
 }
 .np-app .si-card:hover {
   border-color: var(--navi-border-bright);
   background: rgba(15,51,51,.75);
 }
 .np-app .si-card.expanded {
-  flex-basis: 336px;
-  height: 320px;
+  flex-basis: 448px;
   background: rgba(15,51,51,.85);
   border-color: var(--navi-neon);
   box-shadow: 0 8px 28px -16px rgba(210,230,50,.45);
 }
 
+/* Top — avatar + ticker + sector */
 .np-app .si-card-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
+}
+.np-app .si-card-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--navi-font-sans);
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.np-app .si-card-ident {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 .np-app .si-card-tk {
   font-family: var(--navi-font-mono);
-  font-weight: 500;
-  letter-spacing: 0.5px;
-  font-size: 13px;
+  font-weight: 600;
+  font-size: 14px;
   color: var(--navi-fg1);
+  letter-spacing: 0.5px;
 }
-.np-app .si-card-earn {
-  font-family: var(--navi-font-mono);
+.np-app .si-card-sec {
   font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 8px;
-  background: rgba(224,192,96,.12);
-  color: var(--navi-warning);
-  border: 1px solid rgba(224,192,96,.4);
-}
-.np-app .si-card-earn.urgent {
-  background: rgba(232,112,96,.15);
-  color: var(--navi-negative);
-  border-color: rgba(232,112,96,.5);
+  color: var(--navi-fg3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/* Price + day move */
 .np-app .si-card-price {
   font-family: var(--navi-font-sans);
-  font-size: 22px;
+  font-size: 26px;
   font-weight: 600;
   color: var(--navi-fg1);
-  letter-spacing: -.4px;
-  line-height: 1.1;
+  letter-spacing: -.6px;
+  line-height: 1.05;
+  margin-top: 4px;
 }
 .np-app .si-card-day {
   font-family: var(--navi-font-mono);
   font-size: 11px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  align-self: flex-start;
+  font-weight: 500;
 }
-.np-app .si-card-day.up   { color: var(--navi-positive); background: rgba(168,212,160,.12); }
-.np-app .si-card-day.down { color: var(--navi-negative); background: rgba(232,112,96,.12); }
+.np-app .si-card-day.up   { color: var(--navi-neon); }
+.np-app .si-card-day.down { color: var(--navi-negative); }
 .np-app .si-card-day.flat { color: var(--navi-fg3); }
 
-.np-app .si-card-sep {
-  height: 1px;
-  background: rgba(50,110,100,.22);
-  margin: 4px 0;
+/* Overall P&L line */
+.np-app .si-card-pl-row {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(50,110,100,.22);
 }
-.np-app .si-card-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.np-app .si-card-chip {
+.np-app .si-card-pl {
   font-family: var(--navi-font-mono);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 6px;
-  border: 1px solid;
-  white-space: nowrap;
 }
-.np-app .si-card-chip.up    { color: var(--navi-neon);     background: rgba(210,230,50,.10);  border-color: rgba(210,230,50,.4); }
-.np-app .si-card-chip.down  { color: var(--navi-negative); background: rgba(232,112,96,.10);  border-color: rgba(232,112,96,.45); }
-.np-app .si-card-chip.warn  { color: var(--navi-warning);  background: rgba(224,192,96,.10);  border-color: rgba(224,192,96,.45); }
-.np-app .si-card-chip.cool  { color: #6dd1c5;              background: rgba(109,209,197,.10); border-color: rgba(109,209,197,.4); }
-.np-app .si-card-chip.quiet { color: var(--navi-fg4);      border-color: rgba(50,110,100,.25); }
+.np-app .si-card-pl.up   { color: var(--navi-neon); }
+.np-app .si-card-pl.down { color: var(--navi-negative); }
+.np-app .si-card-pl.flat { color: var(--navi-fg2); }
+.np-app .si-card-pl-pct {
+  font-weight: 500;
+  opacity: .85;
+  margin-left: 2px;
+}
+.np-app .si-card-pos {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+}
 
-/* Expanded detail block */
-.np-app .si-card-detail {
-  margin-top: 8px;
+/* Signal lines (plain text, no chips) */
+.np-app .si-card-signals {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  border-top: 1px solid rgba(50,110,100,.22);
+  gap: 3px;
+  margin-top: 4px;
   padding-top: 8px;
-  overflow: hidden;
+  border-top: 1px solid rgba(50,110,100,.22);
+}
+.np-app .si-card-signal {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  color: var(--navi-fg2);
+  line-height: 1.35;
+}
+
+/* Earnings line */
+.np-app .si-card-earn {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+.np-app .si-card-earn.soon   { color: var(--navi-warning); }
+.np-app .si-card-earn.urgent { color: var(--navi-negative); }
+
+/* Footer */
+.np-app .si-card-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: .5px;
+  color: var(--navi-fg5);
+}
+
+/* Expanded detail */
+.np-app .si-card-detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(50,110,100,.22);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
 }
 .np-app .si-detail-row {
   display: flex;
@@ -4088,14 +4074,8 @@
   font-family: var(--navi-font-mono);
   text-align: right;
 }
-.np-app .si-detail-pl.up   { color: var(--navi-neon);     margin-left: 6px; }
-.np-app .si-detail-pl.down { color: var(--navi-negative); margin-left: 6px; }
-.np-app .si-detail-faint { color: var(--navi-fg4); }
-.np-app .si-detail-bucket.st-income { color: var(--navi-neon); }
-.np-app .si-detail-bucket.st-invest { color: #8ab4d4; }
-.np-app .si-detail-bucket.st-yield  { color: var(--navi-positive); }
 
 @media (max-width: 768px) {
-  .np-app .si-card { flex-basis: 80vw; }
-  .np-app .si-card.expanded { flex-basis: 90vw; height: 360px; }
+  .np-app .si-card           { flex-basis: 78vw; }
+  .np-app .si-card.expanded  { flex-basis: 90vw; }
 }
