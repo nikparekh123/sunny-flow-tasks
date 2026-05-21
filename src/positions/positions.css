@@ -3812,3 +3812,290 @@
   }
   .np-app .cal-day { min-height: 180px; }
 }
+
+/* ============================================================
+   Stock Insights strip — horizontally-scrolling per-ticker cards
+   with multi-select filter chips. Sits at the top of the page.
+   ============================================================ */
+.np-app .si-wrap {
+  background: var(--navi-card);
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.np-app .si-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.np-app .si-title {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+}
+.np-app .si-count {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.np-app .si-clear {
+  background: transparent;
+  border: 1px solid rgba(50,110,100,.35);
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  padding: 3px 9px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.np-app .si-clear:hover { color: var(--navi-neon); border-color: var(--navi-neon); }
+
+/* Filter rows */
+.np-app .si-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: center;
+}
+.np-app .si-fgroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.np-app .si-fgroup-k {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+  margin-right: 4px;
+}
+.np-app .si-chip {
+  background: transparent;
+  border: 1px solid rgba(50,110,100,.3);
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  padding: 4px 9px 4px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color .15s var(--np-ease), border-color .15s var(--np-ease), background .15s var(--np-ease);
+}
+.np-app .si-chip:hover:not(:disabled) {
+  color: var(--navi-fg1);
+  border-color: var(--navi-border-bright);
+}
+.np-app .si-chip.on {
+  color: var(--navi-neon);
+  background: var(--navi-tint-neon);
+  border-color: var(--navi-neon);
+}
+.np-app .si-chip.dim {
+  opacity: .35;
+  cursor: not-allowed;
+}
+.np-app .si-chip-ct {
+  font-size: 9px;
+  color: var(--navi-fg4);
+  background: rgba(50,110,100,.18);
+  padding: 1px 5px;
+  border-radius: 6px;
+  min-width: 16px;
+  text-align: center;
+}
+.np-app .si-chip.on .si-chip-ct {
+  color: var(--navi-neon);
+  background: rgba(210,230,50,.15);
+}
+
+/* Strip / scroll container */
+.np-app .si-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-snap-type: x proximity;
+  /* Hide scrollbar on WebKit; keep usability via cursor scroll / arrows */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(50,110,100,.4) transparent;
+  padding-bottom: 4px;
+}
+.np-app .si-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+.np-app .si-scroll::-webkit-scrollbar-thumb {
+  background: rgba(50,110,100,.4);
+  border-radius: 4px;
+}
+.np-app .si-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.np-app .si-row {
+  display: flex;
+  gap: 12px;
+  padding: 4px 2px;
+  min-height: 160px;
+}
+.np-app .si-empty {
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  padding: 28px;
+}
+
+/* Card */
+.np-app .si-card {
+  flex: 0 0 168px;
+  height: 150px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition:
+    flex-basis .28s var(--np-ease),
+    height .28s var(--np-ease),
+    border-color .15s var(--np-ease),
+    background .15s var(--np-ease);
+  position: relative;
+}
+.np-app .si-card:hover {
+  border-color: var(--navi-border-bright);
+  background: rgba(15,51,51,.75);
+}
+.np-app .si-card.expanded {
+  flex-basis: 336px;
+  height: 320px;
+  background: rgba(15,51,51,.85);
+  border-color: var(--navi-neon);
+  box-shadow: 0 8px 28px -16px rgba(210,230,50,.45);
+}
+
+.np-app .si-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.np-app .si-card-tk {
+  font-family: var(--navi-font-mono);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  font-size: 13px;
+  color: var(--navi-fg1);
+}
+.np-app .si-card-earn {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(224,192,96,.12);
+  color: var(--navi-warning);
+  border: 1px solid rgba(224,192,96,.4);
+}
+.np-app .si-card-earn.urgent {
+  background: rgba(232,112,96,.15);
+  color: var(--navi-negative);
+  border-color: rgba(232,112,96,.5);
+}
+
+.np-app .si-card-price {
+  font-family: var(--navi-font-sans);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  letter-spacing: -.4px;
+  line-height: 1.1;
+}
+.np-app .si-card-day {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  align-self: flex-start;
+}
+.np-app .si-card-day.up   { color: var(--navi-positive); background: rgba(168,212,160,.12); }
+.np-app .si-card-day.down { color: var(--navi-negative); background: rgba(232,112,96,.12); }
+.np-app .si-card-day.flat { color: var(--navi-fg3); }
+
+.np-app .si-card-sep {
+  height: 1px;
+  background: rgba(50,110,100,.22);
+  margin: 4px 0;
+}
+.np-app .si-card-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.np-app .si-card-chip {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.np-app .si-card-chip.up    { color: var(--navi-neon);     background: rgba(210,230,50,.10);  border-color: rgba(210,230,50,.4); }
+.np-app .si-card-chip.down  { color: var(--navi-negative); background: rgba(232,112,96,.10);  border-color: rgba(232,112,96,.45); }
+.np-app .si-card-chip.warn  { color: var(--navi-warning);  background: rgba(224,192,96,.10);  border-color: rgba(224,192,96,.45); }
+.np-app .si-card-chip.cool  { color: #6dd1c5;              background: rgba(109,209,197,.10); border-color: rgba(109,209,197,.4); }
+.np-app .si-card-chip.quiet { color: var(--navi-fg4);      border-color: rgba(50,110,100,.25); }
+
+/* Expanded detail block */
+.np-app .si-card-detail {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid rgba(50,110,100,.22);
+  padding-top: 8px;
+  overflow: hidden;
+}
+.np-app .si-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+}
+.np-app .si-detail-row .k {
+  color: var(--navi-fg4);
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  font-size: 8px;
+  font-weight: 600;
+}
+.np-app .si-detail-row .v {
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  text-align: right;
+}
+.np-app .si-detail-pl.up   { color: var(--navi-neon);     margin-left: 6px; }
+.np-app .si-detail-pl.down { color: var(--navi-negative); margin-left: 6px; }
+.np-app .si-detail-faint { color: var(--navi-fg4); }
+.np-app .si-detail-bucket.st-income { color: var(--navi-neon); }
+.np-app .si-detail-bucket.st-invest { color: #8ab4d4; }
+.np-app .si-detail-bucket.st-yield  { color: var(--navi-positive); }
+
+@media (max-width: 768px) {
+  .np-app .si-card { flex-basis: 80vw; }
+  .np-app .si-card.expanded { flex-basis: 90vw; height: 360px; }
+}

@@ -11,6 +11,7 @@ import { PositionInsightModal } from './PositionInsightModal';
 import { TradesLogMatrix } from './TradesLogMatrix';
 import { ExpiryCalendar } from './ExpiryCalendar';
 import { RealizedSummary } from './RealizedSummary';
+import { StockInsightsStrip } from './StockInsightsStrip';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
 import './positions.css';
@@ -158,6 +159,18 @@ export default function PositionsPage() {
           )}
         </div>
 
+        {/* Stock insights strip */}
+        {portfolio.rows.length > 0 && (
+          <div className="np-section">
+            <StockInsightsStrip
+              rows={portfolio.rows}
+              signalsByTicker={signalsByTicker}
+              liveByTicker={liveByTicker}
+              overlayByTicker={overlayByTicker}
+            />
+          </div>
+        )}
+
         {/* Allocation */}
         <div className="np-section">
           <div className="np-section-hd">
@@ -208,14 +221,6 @@ export default function PositionsPage() {
 
         {/* Positions */}
         <div className="np-section">
-          {portfolio.rows.length > 0 && (
-            <RealizedSummary
-              portfolio={portfolio}
-              overlayByTicker={overlayByTicker}
-              realizedByTicker={realizedByTicker}
-              liveByTicker={liveByTicker}
-            />
-          )}
           <div className="np-section-hd">
             <div className="np-section-title">
               {posView === 'table'
@@ -251,7 +256,6 @@ export default function PositionsPage() {
               onUpload={() => setShowUpload(true)}
               loading={isLoading}
               overlayByTicker={overlayByTicker}
-              signalsByTicker={signalsByTicker}
               onTickerClick={(t) => setInsightTicker(t)}
             />
           )}
@@ -278,6 +282,19 @@ export default function PositionsPage() {
             />
           )}
         </div>
+
+        {/* Strategy buckets — relocated from the top. Plain dump for now;
+            redesign later. */}
+        {portfolio.rows.length > 0 && (
+          <div className="np-section">
+            <RealizedSummary
+              portfolio={portfolio}
+              overlayByTicker={overlayByTicker}
+              realizedByTicker={realizedByTicker}
+              liveByTicker={liveByTicker}
+            />
+          </div>
+        )}
       </div>
 
       <CsvUploadModal
