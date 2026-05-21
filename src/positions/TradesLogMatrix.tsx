@@ -278,7 +278,7 @@ export function TradesLogMatrix({
                 return (
                   <th key={i} className={`gl-wk ${zone} ` + (i === 0 ? 'this' : '')}>
                     <div className="gl-wk-l">{i + 1}</div>
-                    {i < LIVE_COLS && <div className="gl-wk-sub">live</div>}
+                    {i < LIVE_COLS && <div className="gl-wk-sub">open</div>}
                   </th>
                 );
               })}
@@ -391,7 +391,7 @@ export function TradesLogMatrix({
                     {r.status === 'closed' && <span className="status-pill closed">closed</span>}
                     <div className="gl-pos-sub">
                       {r.sector}
-                      {live.length > 0 && <span className="gl-live-count"> · {live.length} live</span>}
+                      {live.length > 0 && <span className="gl-live-count"> · {live.length} open</span>}
                     </div>
                   </td>
 
@@ -403,7 +403,7 @@ export function TradesLogMatrix({
                         ? 'closed'
                         : slot.isPartial
                           ? 'partial'
-                          : 'live';
+                          : 'open';
                     return (
                       <td
                         key={i}
@@ -477,7 +477,7 @@ export function TradesLogMatrix({
             <tr className="gl-foot">
               <td className="gl-pos">
                 <b>Total</b>
-                <div className="gl-pos-sub">{totalTradesCount} trades · realized + live</div>
+                <div className="gl-pos-sub">{totalTradesCount} trades · realized + open</div>
               </td>
               {Array.from({ length: WEEK_COUNT }, (_, i) => {
                 const putCost = columnPutCost[i];

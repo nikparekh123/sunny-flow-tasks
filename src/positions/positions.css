@@ -2872,7 +2872,7 @@
   line-height: 1;
   color: var(--navi-fg4);
 }
-.gl-cell-state.live    { color: var(--navi-neon); }
+.gl-cell-state.open    { color: var(--navi-neon); }
 .gl-cell-state.partial { color: var(--navi-warning); }
 .gl-cell-state.closed  { color: var(--navi-fg4); }
 
