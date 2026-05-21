@@ -149,11 +149,13 @@ export function TradesLogMatrix({
     return m;
   }, [tradesByTicker]);
 
-  // Column-wise put cost (col 0) and collected (cols 1+). Single pass over
-  // the same sorted opens we render in the body.
-  const { columnPutCost, columnCollected } = useMemo(() => {
+  // Column-wise put cost (long-put opens) and "slot net" (everything else).
+  // "Slot net" uses the same slotValueForOpen as the cells → realized P&L
+  // for closed pairs, signed cash flow for live opens. So the footer is
+  // literally the sum of the cells above it.
+  const { columnPutCost, columnSlotNet } = useMemo(() => {
     const putCost = Array.from({ length: WEEK_COUNT }, () => 0);
-    const collected = Array.from({ length: WEEK_COUNT }, () => 0);
+    const slotNet = Array.from({ length: WEEK_COUNT }, () => 0);
     sorted.forEach((r) => {
       const opens = (tradesByTicker.get(r.ticker) ?? [])
         .filter((t) => t.action === 'open')
@@ -171,13 +173,15 @@ export function TradesLogMatrix({
         });
       opens.forEach((open, i) => {
         if (i >= WEEK_COUNT) return;
-        const notional = open.contracts * 100 * open.premium;
-        if (isProtectiveTrade(open)) putCost[i] += notional;
-        else if (open.direction === 'short') collected[i] += notional;
+        if (isProtectiveTrade(open)) {
+          putCost[i] += open.contracts * 100 * open.premium;
+        } else {
+          slotNet[i] += slotValueForOpen(open);
+        }
       });
     });
-    return { columnPutCost: putCost, columnCollected: collected };
-  }, [sorted, tradesByTicker, WEEK_COUNT]);
+    return { columnPutCost: putCost, columnSlotNet: slotNet };
+  }, [sorted, tradesByTicker, WEEK_COUNT, slotValueForOpen]);
 
   const grandPutCost = useMemo(
     () => Array.from(putCostByTicker.values()).reduce((s, v) => s + v, 0),
@@ -394,11 +398,11 @@ export function TradesLogMatrix({
             <tr className="gl-foot">
               <td className="gl-pos">
                 <b>Total</b>
-                <div className="gl-pos-sub">{totalTradesCount} trades</div>
+                <div className="gl-pos-sub">{totalTradesCount} trades · realized + live</div>
               </td>
               {Array.from({ length: WEEK_COUNT }, (_, i) => {
                 const putCost = columnPutCost[i];
-                const collected = columnCollected[i];
+                const slotNet = columnSlotNet[i];
                 if (putCost > 0) {
                   // Protective-put column — show cost (neg) and weekly burn.
                   return (
@@ -416,15 +420,19 @@ export function TradesLogMatrix({
                     </td>
                   );
                 }
-                if (collected > 0) {
-                  const pct = grandPutCost > 0 ? (collected / grandPutCost) * 100 : 0;
+                if (slotNet !== 0) {
+                  // Sum of the cells above (realized + live cash flow).
+                  const pct = grandPutCost > 0 ? (slotNet / grandPutCost) * 100 : 0;
+                  const isPos = slotNet >= 0;
                   return (
                     <td key={i} className={'gl-cell sum ' + (i === 0 ? 'this' : '')}>
                       <div className="gl-cell-in">
-                        <div className="gl-cell-amt up">{fmtCompact(collected)}</div>
+                        <div className={'gl-cell-amt ' + (isPos ? 'up' : 'down')}>
+                          {isPos ? fmtCompact(slotNet) : '−' + fmtCompact(Math.abs(slotNet))}
+                        </div>
                         <div className="gl-cell-chips">
                           <span className="gl-cell-state">
-                            {pct.toFixed(0)}%
+                            {isPos ? '' : '−'}{Math.abs(pct).toFixed(0)}%
                           </span>
                         </div>
                       </div>
