@@ -35,8 +35,11 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 interface Props {
   position: PositionComputed;
   liveOpens: LiveOption[];
+  /** All OPEN trades (live + closed) for this ticker — used by the Edit
+   *  tab. Optional so existing callers keep working. */
+  allOpens?: OptionTrade[];
   bucket?: Bucket;
-  initialTab?: 'open' | 'close';
+  initialTab?: 'open' | 'close' | 'edit';
   /** Pre-selected live open for the close tab. */
   initialCloseTarget?: string;
   onClose: () => void;
@@ -53,10 +56,20 @@ interface Props {
     closes_trade_id?: string | null;
     note?: string | null;
   }) => void;
+  /** Update mutable fields on an existing OPEN trade. */
+  onUpdateTrade?: (p: {
+    id: string;
+    contracts: number;
+    strike: number;
+    premium: number;
+    expiry: string;
+    trade_date: string;
+    note?: string | null;
+  }) => void;
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
 }
 
-type Tab = 'open' | 'close';
+type Tab = 'open' | 'close' | 'edit';
 
 interface OpenForm {
   option_type: OptionType;
@@ -96,14 +109,36 @@ const blankClose = (targetId: string): CloseForm => ({
   note: '',
 });
 
+interface EditForm {
+  target_id: string;
+  contracts: string;
+  strike: string;
+  premium: string;
+  expiry: string;
+  date: string;
+  note: string;
+}
+
+const editFormFromTrade = (t: OptionTrade): EditForm => ({
+  target_id: t.id,
+  contracts: String(t.contracts),
+  strike: String(t.strike),
+  premium: String(t.premium),
+  expiry: t.expiry,
+  date: t.trade_date,
+  note: t.note ?? '',
+});
+
 export function PositionDetailModal({
   position,
   liveOpens,
+  allOpens,
   bucket,
   initialTab = 'open',
   initialCloseTarget,
   onClose,
   onAddTrade,
+  onUpdateTrade,
   onSetStatus,
 }: Props) {
   const [tab, setTab] = useState<Tab>(liveOpens.length === 0 ? 'open' : initialTab);
@@ -111,6 +146,30 @@ export function PositionDetailModal({
   const [closeForm, setCloseForm] = useState<CloseForm>(
     blankClose(initialCloseTarget ?? liveOpens[0]?.open.id ?? ''),
   );
+  // Edit tab — list of opens with the currently selected one's form values.
+  const editableOpens = useMemo<OptionTrade[]>(() => {
+    if (!allOpens) return [];
+    // Live first, then closed; oldest within each group.
+    return [...allOpens].sort((a, b) => {
+      const ad = a.trade_date;
+      const bd = b.trade_date;
+      return bd.localeCompare(ad);
+    });
+  }, [allOpens]);
+  const [editForm, setEditForm] = useState<EditForm | null>(() =>
+    editableOpens[0] ? editFormFromTrade(editableOpens[0]) : null,
+  );
+  useEffect(() => {
+    // If the selected edit target disappears (e.g., parent re-renders),
+    // fall back to the first available open.
+    if (
+      editForm &&
+      !editableOpens.some((t) => t.id === editForm.target_id)
+    ) {
+      setEditForm(editableOpens[0] ? editFormFromTrade(editableOpens[0]) : null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editableOpens.length]);
 
   useEffect(() => {
     // When the live opens list changes (or we mount), make sure the close
@@ -183,6 +242,49 @@ export function PositionDetailModal({
     onClose(); // dismiss after submit; the parent toast confirms success/failure
   };
 
+  // ── Edit tab math ──────────────────────────────────────────────
+  const editTarget = useMemo<OptionTrade | null>(
+    () =>
+      editForm
+        ? editableOpens.find((t) => t.id === editForm.target_id) ?? null
+        : null,
+    [editForm, editableOpens],
+  );
+  const canSubmitEdit =
+    !!editForm &&
+    !!editTarget &&
+    !!onUpdateTrade &&
+    parseFloat(editForm.contracts) > 0 &&
+    parseFloat(editForm.strike) > 0 &&
+    parseFloat(editForm.premium) >= 0 &&
+    !!editForm.expiry &&
+    !!editForm.date;
+
+  const editDirty = !!(
+    editForm &&
+    editTarget &&
+    (parseFloat(editForm.contracts) !== editTarget.contracts ||
+      parseFloat(editForm.strike) !== editTarget.strike ||
+      parseFloat(editForm.premium) !== editTarget.premium ||
+      editForm.expiry !== editTarget.expiry ||
+      editForm.date !== editTarget.trade_date ||
+      (editForm.note || null) !== (editTarget.note || null))
+  );
+
+  const submitEdit = () => {
+    if (!canSubmitEdit || !editForm || !onUpdateTrade) return;
+    onUpdateTrade({
+      id: editForm.target_id,
+      contracts: parseInt(editForm.contracts, 10),
+      strike: parseFloat(editForm.strike),
+      premium: parseFloat(editForm.premium),
+      expiry: editForm.expiry,
+      trade_date: editForm.date,
+      note: editForm.note || null,
+    });
+    onClose();
+  };
+
   const submitClose = () => {
     if (!canSubmitClose || !closeTarget) return;
     onAddTrade({
@@ -241,19 +343,42 @@ export function PositionDetailModal({
           >
             Close
           </button>
+          <button
+            className={'pp-tab' + (tab === 'edit' ? ' on' : '') + (editableOpens.length === 0 ? ' disabled' : '')}
+            onClick={() => editableOpens.length > 0 && setTab('edit')}
+            disabled={editableOpens.length === 0 || !onUpdateTrade}
+            title={
+              !onUpdateTrade
+                ? 'Edit not wired'
+                : editableOpens.length === 0
+                  ? 'No trades to edit'
+                  : ''
+            }
+          >
+            Edit<span className="pp-tab-count">{editableOpens.length}</span>
+          </button>
         </div>
 
         {/* SIDECAR */}
         <div className="pp-sidecar">
           <div className="pp-form">
-            {tab === 'open' ? (
+            {tab === 'open' && (
               <OpenFields form={openForm} setForm={setOpenForm} />
-            ) : (
+            )}
+            {tab === 'close' && (
               <CloseFields
                 form={closeForm}
                 setForm={setCloseForm}
                 liveOpens={liveOpens}
                 target={closeTarget}
+              />
+            )}
+            {tab === 'edit' && (
+              <EditFields
+                form={editForm}
+                setForm={setEditForm}
+                opens={editableOpens}
+                target={editTarget}
               />
             )}
           </div>
@@ -305,9 +430,11 @@ export function PositionDetailModal({
 
             <div className="pp-rail-section">
               <div className="pp-rail-lbl">
-                {tab === 'open' ? 'New trade preview' : 'Realized P&L'}
+                {tab === 'open' ? 'New trade preview'
+                  : tab === 'close' ? 'Realized P&L'
+                  : 'Edit preview'}
               </div>
-              {tab === 'open' ? (
+              {tab === 'open' && (
                 <>
                   <div className={'pp-rail-bignum ' + (openSignedTotal > 0 ? 'pos' : openSignedTotal < 0 ? 'neg' : '')}>
                     {openSignedTotal === 0
@@ -320,7 +447,8 @@ export function PositionDetailModal({
                     {openForm.direction === 'short' ? 'premium collected' : 'premium paid'}
                   </div>
                 </>
-              ) : (
+              )}
+              {tab === 'close' && (
                 <>
                   <div className={'pp-rail-bignum ' + (closeRealized > 0 ? 'pos' : closeRealized < 0 ? 'neg' : '')}>
                     {closeRealized === 0
@@ -334,6 +462,28 @@ export function PositionDetailModal({
                   </div>
                 </>
               )}
+              {tab === 'edit' && editTarget && editForm && (() => {
+                const newTotal =
+                  (parseFloat(editForm.contracts) || 0) * 100 *
+                  (parseFloat(editForm.premium) || 0);
+                const isCashIn = editTarget.direction === 'short';
+                const signed = isCashIn ? newTotal : -newTotal;
+                return (
+                  <>
+                    <div className={'pp-rail-bignum ' + (signed > 0 ? 'pos' : signed < 0 ? 'neg' : '')}>
+                      {signed === 0
+                        ? '—'
+                        : signed > 0
+                          ? fmtUSD(signed)
+                          : '−' + fmtUSD(Math.abs(signed))}
+                    </div>
+                    <div className="pp-rail-sub">
+                      {isCashIn ? 'premium collected' : 'premium paid'}
+                      {editDirty && ' · unsaved'}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </aside>
         </div>
@@ -348,13 +498,24 @@ export function PositionDetailModal({
           </button>
           <div className="pp-popup-foot-end">
             <button className="pp-btn pp-btn-text" onClick={onClose}>Cancel</button>
-            {tab === 'open' ? (
+            {tab === 'open' && (
               <button className="pp-btn pp-btn-neon" onClick={submitOpen} disabled={!canSubmitOpen}>
                 ✓ Open position
               </button>
-            ) : (
+            )}
+            {tab === 'close' && (
               <button className="pp-btn pp-btn-neon" onClick={submitClose} disabled={!canSubmitClose}>
                 ✓ Close position
+              </button>
+            )}
+            {tab === 'edit' && (
+              <button
+                className="pp-btn pp-btn-neon"
+                onClick={submitEdit}
+                disabled={!canSubmitEdit || !editDirty}
+                title={!editDirty ? 'No changes' : ''}
+              >
+                ✓ Save changes
               </button>
             )}
           </div>
@@ -574,6 +735,139 @@ function CloseFields({
           />
         </div>
       </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Edit fields — pick an existing OPEN trade, mutate its fields.
+// option_type and direction are deliberately locked (matched closes
+// reference them). Delete + re-create if you really need to change those.
+function EditFields({
+  form, setForm, opens, target,
+}: {
+  form: EditForm | null;
+  setForm: (f: EditForm | null) => void;
+  opens: OptionTrade[];
+  target: OptionTrade | null;
+}) {
+  if (opens.length === 0) {
+    return (
+      <div className="pp-field" style={{ padding: '24px 0', color: 'var(--navi-fg3)' }}>
+        No opens to edit yet.
+      </div>
+    );
+  }
+  const set = <K extends keyof EditForm>(k: K, v: EditForm[K]) => {
+    if (!form) return;
+    setForm({ ...form, [k]: v });
+  };
+  const selectTrade = (id: string) => {
+    const t = opens.find((x) => x.id === id);
+    if (t) setForm(editFormFromTrade(t));
+  };
+
+  return (
+    <>
+      <div className="pp-field">
+        <div className="pp-field-label">Which trade?</div>
+        <div className="pp-close-picker" role="radiogroup">
+          {opens.map((t) => {
+            const isSelected = form?.target_id === t.id;
+            const sign = t.direction === 'short' ? '−' : '+';
+            return (
+              <label
+                key={t.id}
+                className={'pp-close-pick' + (isSelected ? ' on' : '')}
+              >
+                <input
+                  type="radio"
+                  name="edit-target"
+                  value={t.id}
+                  checked={isSelected}
+                  onChange={() => selectTrade(t.id)}
+                  className="pp-close-pick-radio"
+                />
+                <span className="pp-close-pick-dot" aria-hidden />
+                <span className={'pp-mini-glyph ' + (t.direction === 'short' ? 'neg' : 'pos')}>
+                  {t.option_type === 'put' ? 'P' : 'C'}
+                </span>
+                <div className="pp-close-pick-body">
+                  <div className="pp-close-pick-headline">
+                    {sign}{t.contracts} {t.option_type.toUpperCase()} ${t.strike}
+                  </div>
+                  <div className="pp-close-pick-sub">
+                    exp {t.expiry} · opened {t.trade_date} @ ${t.premium}/sh
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      {target && form && (
+        <>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">Contracts</div>
+              <input
+                className="pp-input mono"
+                type="number"
+                min="1"
+                step="1"
+                value={form.contracts}
+                onChange={(e) => set('contracts', e.target.value)}
+              />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">Strike</div>
+              <MoneyInput value={form.strike} onChange={(v) => set('strike', v)} placeholder="0.00" />
+            </div>
+          </div>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">
+                Premium / sh ({target.direction === 'short' ? 'collected' : 'paid'})
+              </div>
+              <MoneyInput value={form.premium} onChange={(v) => set('premium', v)} placeholder="0.00" />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">Expiry</div>
+              <input
+                className="pp-input mono"
+                type="date"
+                value={form.expiry}
+                onChange={(e) => set('expiry', e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">Trade date</div>
+              <input
+                className="pp-input mono"
+                type="date"
+                value={form.date}
+                onChange={(e) => set('date', e.target.value)}
+              />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">Note (optional)</div>
+              <input
+                className="pp-input"
+                value={form.note}
+                onChange={(e) => set('note', e.target.value)}
+                placeholder="adjustment reason, etc."
+              />
+            </div>
+          </div>
+          <div className="pp-field-hint" style={{ marginTop: 8 }}>
+            Side ({target.direction} {target.option_type}) is locked — delete
+            and re-create if you need to flip it.
+          </div>
+        </>
+      )}
     </>
   );
 }

@@ -41,6 +41,7 @@ export default function PositionsPage() {
     replacePositions,
     refreshPrices,
     addTrade,
+    updateTrade,
     setPositionStatus,
     setEarningsDate,
     deletePosition,
@@ -362,16 +363,24 @@ export default function PositionsPage() {
         const pos = portfolio.rows.find((r) => r.ticker === detail.ticker);
         if (!pos) return null;
         const live = liveByTicker.get(detail.ticker) ?? [];
+        const trades = tradesByTicker.get(detail.ticker) ?? [];
         return (
           <PositionDetailModal
             position={pos}
             liveOpens={live}
+            allOpens={trades.filter((t) => t.action === 'open')}
             bucket={overlayByTicker.get(detail.ticker)}
             initialTab={detail.tab}
             onClose={() => setDetail(null)}
             onAddTrade={(p) =>
               addTrade.mutate(p, {
                 onSuccess: () => toast.success(`${p.action === 'open' ? 'Opened' : 'Closed'} · ${p.ticker}`),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+            onUpdateTrade={(p) =>
+              updateTrade.mutate(p, {
+                onSuccess: () => toast.success(`Updated · ${detail.ticker}`),
                 onError: (e) => toast.error((e as Error).message),
               })
             }

@@ -268,6 +268,36 @@ export function usePositions() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['option_trades'] }),
   });
 
+  // Update an existing open trade. Only mutable fields are accepted —
+  // direction and option_type are fixed because matched closes rely on
+  // them. Realized P&L is derived, so any change here re-flows
+  // automatically.
+  const updateTrade = useMutation({
+    mutationFn: async (args: {
+      id: string;
+      contracts: number;
+      strike: number;
+      premium: number;
+      expiry: string;
+      trade_date: string;
+      note?: string | null;
+    }) => {
+      const { error } = await supabase
+        .from('option_trades' as never)
+        .update({
+          contracts: args.contracts,
+          strike: args.strike,
+          premium: args.premium,
+          expiry: args.expiry,
+          trade_date: args.trade_date,
+          note: args.note ?? null,
+        } as never)
+        .eq('id', args.id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['option_trades'] }),
+  });
+
   // ── Position lifecycle ────────────────────────────────────────────
   const setPositionStatus = useMutation({
     mutationFn: async (args: { ticker: string; status: 'open' | 'closed' }) => {
@@ -324,6 +354,7 @@ export function usePositions() {
     refreshPrices,
     addTrade,
     deleteTrade,
+    updateTrade,
     setPositionStatus,
     setEarningsDate,
     deletePosition,
