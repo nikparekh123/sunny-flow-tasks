@@ -159,7 +159,6 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
     }
 
     let activeCost = 0;
-    let burn = 0;
     let weightedWeeks = 0;
     for (const list of tradesByTicker.values()) {
       for (const t of list) {
@@ -180,11 +179,14 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
         const weeksLeft = daysLeft / 7;
         activeCost += cost;
         weightedWeeks += cost * weeksLeft;
-        burn += cost / weeksLeft;
       }
     }
+    // Cost-weighted average weeks to expiry — single horizon used by
+    // BOTH burn rows so the math is internally consistent
+    // (put + stock = total, all divided by the same denominator).
     const avgWeeks = activeCost > 0 ? weightedWeeks / activeCost : 0;
-    return { activeCost, avgWeeks, weeklyBurn: burn };
+    const weeklyBurn = avgWeeks > 0 ? activeCost / avgWeeks : 0;
+    return { activeCost, avgWeeks, weeklyBurn };
   }, [tradesByTicker]);
 
   // Total put cost paid (active + already closed) — for the headline
