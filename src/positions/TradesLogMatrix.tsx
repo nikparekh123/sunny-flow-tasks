@@ -180,18 +180,12 @@ export function TradesLogMatrix({
     };
 
     sorted.forEach((r) => {
-      const opens = (tradesByTicker.get(r.ticker) ?? [])
-        .filter((t) => t.action === 'open')
+      const allOpens = (tradesByTicker.get(r.ticker) ?? []).filter(
+        (t) => t.action === 'open',
+      );
+      const liveOpens = allOpens
+        .filter((t) => !isFullyClosed(t))
         .sort((a, b) => {
-          const aClosed = isFullyClosed(a) ? 1 : 0;
-          const bClosed = isFullyClosed(b) ? 1 : 0;
-          if (aClosed !== bClosed) return aClosed - bClosed;
-          if (aClosed === 1) {
-            const ad = mostRecentCloseDate(a);
-            const bd = mostRecentCloseDate(b);
-            if (ad !== bd) return bd.localeCompare(ad);
-            return b.created_at.localeCompare(a.created_at);
-          }
           const aP = isProtectiveTrade(a) ? 0 : 1;
           const bP = isProtectiveTrade(b) ? 0 : 1;
           if (aP !== bP) return aP - bP;
@@ -203,14 +197,27 @@ export function TradesLogMatrix({
               ? b.trade_date.localeCompare(a.trade_date)
               : b.created_at.localeCompare(a.created_at);
         });
-      opens.forEach((open, i) => {
-        if (i >= WEEK_COUNT) return;
+      const closedOpens = allOpens
+        .filter((t) => isFullyClosed(t))
+        .sort((a, b) => {
+          const ad = mostRecentCloseDate(a);
+          const bd = mostRecentCloseDate(b);
+          if (ad !== bd) return bd.localeCompare(ad);
+          return b.created_at.localeCompare(a.created_at);
+        });
+      const afterLive = [...liveOpens.slice(LIVE_COLS), ...closedOpens];
+      const openAt = (i: number): OptionTrade | undefined =>
+        i < LIVE_COLS ? liveOpens[i] : afterLive[i - LIVE_COLS];
+
+      for (let i = 0; i < WEEK_COUNT; i++) {
+        const open = openAt(i);
+        if (!open) continue;
         if (isProtectiveTrade(open) && !isFullyClosed(open)) {
           putCost[i] += open.contracts * 100 * open.premium;
         } else {
           slotNet[i] += slotValueForOpen(open);
         }
-      });
+      }
     });
     return { columnPutCost: putCost, columnSlotNet: slotNet };
   }, [sorted, tradesByTicker, WEEK_COUNT, slotValueForOpen]);
@@ -321,20 +328,14 @@ export function TradesLogMatrix({
                   .sort()
                   .reverse()[0];
               };
-              const opens = trades
-                .filter((t) => t.action === 'open')
+              // Sort live and closed opens INDEPENDENTLY, then slot them
+              // into reserved zones: live in cols 0..LIVE_COLS-1, closed
+              // strictly starting at col LIVE_COLS. Unused live slots stay
+              // empty — closed opens never backfill into the live zone.
+              const allOpens = trades.filter((t) => t.action === 'open');
+              const liveOpens = allOpens
+                .filter((t) => !isFullyClosed(t))
                 .sort((a, b) => {
-                  const aClosed = isFullyClosed(a) ? 1 : 0;
-                  const bClosed = isFullyClosed(b) ? 1 : 0;
-                  if (aClosed !== bClosed) return aClosed - bClosed; // live first
-                  if (aClosed === 1) {
-                    // Both closed → most-recently-closed first
-                    const ad = mostRecentCloseDate(a);
-                    const bd = mostRecentCloseDate(b);
-                    if (ad !== bd) return bd.localeCompare(ad);
-                    return b.created_at.localeCompare(a.created_at);
-                  }
-                  // Both live → existing protective-put rule, then dates
                   const aP = isProtective(a) ? 0 : 1;
                   const bP = isProtective(b) ? 0 : 1;
                   if (aP !== bP) return aP - bP;
@@ -346,8 +347,22 @@ export function TradesLogMatrix({
                       ? b.trade_date.localeCompare(a.trade_date)
                       : b.created_at.localeCompare(a.created_at);
                 });
+              const closedOpens = allOpens
+                .filter((t) => isFullyClosed(t))
+                .sort((a, b) => {
+                  const ad = mostRecentCloseDate(a);
+                  const bd = mostRecentCloseDate(b);
+                  if (ad !== bd) return bd.localeCompare(ad);
+                  return b.created_at.localeCompare(a.created_at);
+                });
+              // Slot resolver: index < LIVE_COLS → live[i] (or null);
+              // index >= LIVE_COLS → (live overflow then closed) at idx − LIVE_COLS.
+              const liveOverflow = liveOpens.slice(LIVE_COLS);
+              const afterLive = [...liveOverflow, ...closedOpens];
+              const openAt = (idx: number): OptionTrade | undefined =>
+                idx < LIVE_COLS ? liveOpens[idx] : afterLive[idx - LIVE_COLS];
               const slotFor = (idx: number) => {
-                const open = opens[idx];
+                const open = openAt(idx);
                 if (!open) return null;
                 const closes = closesByOpen.get(open.id) ?? [];
                 const closedContracts = closes.reduce((s, c) => s + c.contracts, 0);
