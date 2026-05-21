@@ -35,9 +35,6 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
 interface Props {
   position: PositionComputed;
   liveOpens: LiveOption[];
-  /** All OPEN trades (live + closed) for this ticker — used by the Edit
-   *  tab. Optional so existing callers keep working. */
-  allOpens?: OptionTrade[];
   bucket?: Bucket;
   initialTab?: 'open' | 'close' | 'edit';
   /** Pre-selected live open for the close tab. */
@@ -132,7 +129,6 @@ const editFormFromTrade = (t: OptionTrade): EditForm => ({
 export function PositionDetailModal({
   position,
   liveOpens,
-  allOpens,
   bucket,
   initialTab = 'open',
   initialCloseTarget,
@@ -146,16 +142,14 @@ export function PositionDetailModal({
   const [closeForm, setCloseForm] = useState<CloseForm>(
     blankClose(initialCloseTarget ?? liveOpens[0]?.open.id ?? ''),
   );
-  // Edit tab — list of opens with the currently selected one's form values.
-  const editableOpens = useMemo<OptionTrade[]>(() => {
-    if (!allOpens) return [];
-    // Live first, then closed; oldest within each group.
-    return [...allOpens].sort((a, b) => {
-      const ad = a.trade_date;
-      const bd = b.trade_date;
-      return bd.localeCompare(ad);
-    });
-  }, [allOpens]);
+  // Edit tab — only LIVE opens (not fully closed). Sorted newest first.
+  const editableOpens = useMemo<OptionTrade[]>(
+    () =>
+      liveOpens
+        .map((l) => l.open)
+        .sort((a, b) => b.trade_date.localeCompare(a.trade_date)),
+    [liveOpens],
+  );
   const [editForm, setEditForm] = useState<EditForm | null>(() =>
     editableOpens[0] ? editFormFromTrade(editableOpens[0]) : null,
   );

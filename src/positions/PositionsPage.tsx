@@ -363,12 +363,10 @@ export default function PositionsPage() {
         const pos = portfolio.rows.find((r) => r.ticker === detail.ticker);
         if (!pos) return null;
         const live = liveByTicker.get(detail.ticker) ?? [];
-        const trades = tradesByTicker.get(detail.ticker) ?? [];
         return (
           <PositionDetailModal
             position={pos}
             liveOpens={live}
-            allOpens={trades.filter((t) => t.action === 'open')}
             bucket={overlayByTicker.get(detail.ticker)}
             initialTab={detail.tab}
             onClose={() => setDetail(null)}
