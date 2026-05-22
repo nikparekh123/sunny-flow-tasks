@@ -1289,3 +1289,45 @@
   outline: none;
   min-width: 200px;
 }
+
+/* Stack wrapper around the CalcShell so the calc-switcher tabs row and the
+   calcbox share the same centered column at the same max-width. */
+.hf-calc-stack {
+  width: 100%;
+  max-width: 1480px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Calc switcher — pill chips above the canvas, always visible. One click
+   to swap calcs without opening the palette or any dropdown. */
+.math-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px;
+}
+.math-tab {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .2px;
+  color: var(--navi-fg3);
+  background: rgba(15,51,51,.45);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 100px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: color .12s var(--ease), background .12s var(--ease), border-color .12s var(--ease);
+  white-space: nowrap;
+}
+.math-tab:hover {
+  color: var(--navi-fg1);
+  border-color: rgba(50,110,100,.5);
+}
+.math-tab.on {
+  background: var(--navi-tint-neon);
+  color: var(--navi-neon);
+  border-color: rgba(210,230,50,.4);
+}

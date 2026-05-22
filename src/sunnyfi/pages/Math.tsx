@@ -42,7 +42,6 @@ import {
 } from "../math/data";
 import { useSnapshots, useLiveState, relTime, type Snapshot } from "../math/store";
 import { CALC_MODULES, type CalcModule } from "../math/calcs";
-import { CalcSwitcher } from "../math/CalcSwitcher";
 
 const DASHBOARD_URL = "https://www.sunnyfi.co/dashboard";
 
@@ -236,7 +235,9 @@ export default function MathPage() {
         <>
           {selectedCalc && calc ? (
             <div className="hf-calc-stage">
-              <CalcShell
+              <div className="hf-calc-stack">
+                <CalcTabs current={calc.key} onPick={pickCalc} />
+                <CalcShell
                 crumbs={<>{categoryLabel(calc.category)} <span className="sep">›</span> {calc.name}</>}
                 title={
                   renaming ? (
@@ -247,7 +248,7 @@ export default function MathPage() {
                     />
                   ) : (
                     <>
-                      <CalcSwitcher current={calc.key} onPick={pickCalc} />
+                      {calc.name}
                       <span className="dim">·</span>
                       <span className="snap-name">{snapName}</span>
                     </>
@@ -284,6 +285,7 @@ export default function MathPage() {
                   <CalcEmpty label={`${calc.name.toUpperCase()} · content area`} />
                 )}
               </CalcShell>
+              </div>
             </div>
           ) : (
             <div className="hf-pick-stage">
@@ -846,6 +848,27 @@ function ShareBody({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── CalcTabs ─────────────────────────────────────────────────────
+// Always-visible pill chips above the calc shell, one per calculator.
+// Picking switches calcs in one click — no dropdown, no palette needed.
+function CalcTabs({ current, onPick }: { current: string; onPick: (key: string) => void }) {
+  return (
+    <div className="math-tabs" role="tablist" aria-label="Switch calculator">
+      {CALCS.map((c) => (
+        <button
+          key={c.key}
+          role="tab"
+          aria-selected={c.key === current}
+          className={`math-tab${c.key === current ? " on" : ""}`}
+          onClick={() => onPick(c.key)}
+        >
+          {c.name}
+        </button>
+      ))}
     </div>
   );
 }
