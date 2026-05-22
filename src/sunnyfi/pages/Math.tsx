@@ -287,8 +287,6 @@ export default function MathPage() {
           ) : (
             <div className="hf-pick-stage">
               <PickHero
-                available={CALCS.length}
-                open={selectedCalc ? 1 : 0}
                 popular={popularCalcs().map((c) => ({ key: c.key, name: c.name }))}
                 onPickPopular={pickCalc}
               />

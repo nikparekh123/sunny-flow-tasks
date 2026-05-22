@@ -188,21 +188,17 @@ function Dock({ active, onClick, canCompare, canSave }: DockProps) {
 
 // ── PickHero (resting / empty) ────────────────────────────────────
 export function PickHero({
-  available,
-  open,
   popular,
   onPickPopular,
   onPressCmdK,
 }: {
-  available: number;
-  open: number;
   popular: { key: string; name: string }[];
   onPickPopular: (key: string) => void;
   onPressCmdK?: () => void;
 }) {
   return (
     <div className="hf-pick">
-      <div className="hf-eyebrow">Calculators · {available} available · {open} open</div>
+      <div className="hf-eyebrow">Calculators</div>
       <h1 className="hf-pick-headline">
         Pick a<br />calculator<span className="hf-pick-period">.</span>
       </h1>
