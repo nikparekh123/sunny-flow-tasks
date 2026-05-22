@@ -149,17 +149,27 @@ export function TradesLogMatrix({
     return rows;
   }, [rows, filter, tradesByTicker, shareSellsByTicker]);
 
-  // Sort: active positions first by realized P&L desc, closed positions
-  // sink to the bottom (also sorted by realized inside their group). Keeps
-  // closed tickers out of the way of the live trading rows.
+  // A position is "effectively closed" when either:
+  //   - the DB row is explicitly status='closed', OR
+  //   - exposure is zero: 0 shares AND no live option positions.
+  // The second case catches tickers like IT / MORN where the user sold
+  // all shares and never marked the row closed in the DB — they read as
+  // closed to the user even though `status` still says 'open'.
+  const isEffectivelyClosed = (r: PositionComputed): boolean =>
+    r.status === 'closed' ||
+    (r.quantity === 0 && (r.live_options?.length ?? 0) === 0);
+
+  // Sort: active positions first by realized P&L desc, effectively-closed
+  // positions sink to the bottom (also sorted by realized inside that group).
   const sorted = useMemo(
     () =>
       [...filtered].sort((a, b) => {
-        const aClosed = a.status === 'closed' ? 1 : 0;
-        const bClosed = b.status === 'closed' ? 1 : 0;
+        const aClosed = isEffectivelyClosed(a) ? 1 : 0;
+        const bClosed = isEffectivelyClosed(b) ? 1 : 0;
         if (aClosed !== bClosed) return aClosed - bClosed;
         return (realizedByTicker.get(b.ticker) ?? 0) - (realizedByTicker.get(a.ticker) ?? 0);
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [filtered, realizedByTicker],
   );
 
@@ -421,7 +431,7 @@ export function TradesLogMatrix({
                 open.expiry < today;
 
               return (
-                <tr key={r.ticker} className={r.status === 'closed' ? 'closed-row' : ''}>
+                <tr key={r.ticker} className={isEffectivelyClosed(r) ? 'closed-row' : ''}>
                   <td className="gl-pos">
                     <span
                       className="ticker clickable"
@@ -429,7 +439,7 @@ export function TradesLogMatrix({
                     >
                       {r.ticker}
                     </span>
-                    {r.status === 'closed' && (
+                    {isEffectivelyClosed(r) && (
                       <span className="status-pill closed">closed</span>
                     )}
                     <div className="gl-pos-sub">

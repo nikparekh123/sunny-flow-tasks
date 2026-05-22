@@ -2964,16 +2964,11 @@
 .gl-cell-state.partial { color: var(--navi-warning); }
 .gl-cell-state.closed  { color: var(--navi-fg4); }
 /* Urgent: position is expiring inside a week — needs eyes on it. Warning
-   gold matches the rest of the design system's "watch this" semantic. */
+   gold matches the design system's "watch this" semantic. The pill color
+   alone is the indicator — no cell background or border treatment, since
+   that reads as a column divider when alternating cells differ. */
 .gl-cell-state.urgent   { color: var(--navi-warning); }
 .gl-cell-state.expired  { color: var(--navi-negative); }
-/* Subtle background tint on the whole cell so urgent rows pop in a busy
-   matrix without screaming. */
-.np-app .gl-cell.live-zone.urgent,
-.np-app .gl-cell.closed-zone.overflow-live.urgent {
-  background: rgba(224,192,96,.04);
-  box-shadow: inset 2px 0 0 rgba(224,192,96,.45);
-}
 
 /* ============================================================
    Expiry Calendar — swimlane Gantt
