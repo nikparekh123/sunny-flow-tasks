@@ -16,11 +16,8 @@ interface Tool {
 
 const TOOLS: Tool[] = [
   { key: "tasks",    name: "Tasks",        desc: "Daily workflow",   status: "live", hotkey: "1", href: "https://todos.sunnyfi.co" },
-  { key: "research", name: "Research Hub", desc: "Notes & theses",   status: "live", hotkey: "2", internal: "/research" },
-  { key: "positions", name: "Positions",   desc: "Holdings & P&L",   status: "live", hotkey: "3", href: "https://positions.sunnyfi.co" },
-  { key: "snowball", name: "Snowball",     desc: "DCF & valuation",  status: "live", hotkey: "4", internal: "/snowball" },
-  { key: "strategy", name: "Strategy",     desc: "Buckets & premium", status: "live", hotkey: "5", internal: "/strategy" },
-  { key: "calendar", name: "Calendar",     desc: "Events",           status: "soon", hotkey: "6" },
+  { key: "positions", name: "Positions",   desc: "Holdings & P&L",   status: "live", hotkey: "2", href: "https://positions.sunnyfi.co" },
+  { key: "calendar", name: "Calendar",     desc: "Events",           status: "soon", hotkey: "3" },
 ];
 
 const ICON_STYLE = { fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
