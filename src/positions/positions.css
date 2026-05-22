@@ -1367,10 +1367,11 @@
 .gl-table td.gl-cell.closed-zone:hover {
   background: rgba(30,90,80,.18);
 }
-/* Boundary divider — left border on the FIRST closed col (4th data col
-   = nth-child(5) because the Position cell is nth-child(1)). */
-.gl-table tr > .gl-wk:nth-child(5),
-.gl-table tr > .gl-cell:nth-child(5) {
+/* Boundary divider — left border on the FIRST closed col.
+   Layout: Position(1) · Shares(2) · Open1..4(3..6) · Closed1+(7+).
+   So nth-child(7) is the boundary. */
+.gl-table tr > .gl-wk:nth-child(7),
+.gl-table tr > .gl-cell:nth-child(7) {
   border-left: 1px solid rgba(50,110,100,.4);
 }
 /* "live" sub-caption under the column number, in the header */

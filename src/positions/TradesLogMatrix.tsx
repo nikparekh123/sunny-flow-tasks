@@ -417,14 +417,14 @@ export function TradesLogMatrix({
                           onClick={() => hasShares && onSharesCellClick(r.ticker)}
                           title={
                             hasShares
-                              ? `${fmtQty(r.quantity)} sh · avg ${fmtUSD2(r.avg_cost)} — click to sell shares`
+                              ? `${fmtQty(r.quantity)} shares · avg ${fmtUSD2(r.avg_cost)} — click to sell shares`
                               : 'no shares'
                           }
                         >
                           {hasShares ? (
                             <div className="gl-cell-in">
                               <div className="gl-cell-amt">
-                                {fmtQty(r.quantity)} sh
+                                {fmtCompact(r.quantity).replace('$', '')}
                               </div>
                               <div className="gl-cell-chips">
                                 <span className="gl-cell-state open">
