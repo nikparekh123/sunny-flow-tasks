@@ -101,6 +101,24 @@ export function pcDisplay(state: PCState): { value: string; tone: "neon" | "pos"
   return { value: fmtMoney(c.totalCost), tone: c.totalCost > 0 ? "neg" : "muted" };
 }
 
+/** Upsert by ticker — re-saving HOOD replaces the existing HOOD card. */
+export function pcUpsertKey(state: PCState): string | null {
+  return state.underlying?.trim().toUpperCase() || null;
+}
+
+/** Compare-view ranking: lower annualised cost % is a better hedge, so
+ *  negate before comparing. Highest score = cheapest protection. */
+export function pcRank(state: PCState): { score: number; label: string } | null {
+  const c = computePC(state);
+  if (!isFinite(c.annCostPct)) return null;
+  return { score: -c.annCostPct, label: "lowest cost %" };
+}
+
+export function pcCardLine(state: PCState): string {
+  const c = computePC(state);
+  return `${fmtCount(Number(state.shares))} sh @ strike ${fmtMoney(Number(state.strike))} · ${fmtCount(c.cycles)} cycles`;
+}
+
 export function pcFields(state: PCState): Array<{ label: string; value: string; mono?: boolean }> {
   const c = computePC(state);
   return [

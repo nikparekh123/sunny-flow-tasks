@@ -101,6 +101,25 @@ export function eiDisplay(state: EIState): { value: string; tone: "neon" | "pos"
   return { value: fmtMoney(c.totalIncome), tone: c.totalIncome > 0 ? "pos" : "muted" };
 }
 
+/** Saved snapshots upsert on ticker so re-saving SPY replaces the existing
+ *  SPY card in the Compare view instead of stacking duplicates. */
+export function eiUpsertKey(state: EIState): string | null {
+  return state.underlying?.trim().toUpperCase() || null;
+}
+
+/** Compare-view ranking: prefer the trade with the highest annualised yield.
+ *  Higher score = better trade. */
+export function eiRank(state: EIState): { score: number; label: string } | null {
+  const c = computeEI(state);
+  if (!isFinite(c.annYieldPct)) return null;
+  return { score: c.annYieldPct, label: "ann. yield" };
+}
+
+export function eiCardLine(state: EIState): string {
+  const c = computeEI(state);
+  return `${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · ${fmtCount(c.cycles)} cycles to ${fmtDate(c.horizonDate)}`;
+}
+
 export function eiFields(state: EIState): Array<{ label: string; value: string; mono?: boolean }> {
   const c = computeEI(state);
   return [

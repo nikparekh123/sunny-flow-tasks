@@ -23,6 +23,9 @@ import {
   eiCopy,
   eiDisplay,
   eiFields,
+  eiUpsertKey,
+  eiRank,
+  eiCardLine,
 } from "./ExpectedIncome";
 import {
   PutCostCalc,
@@ -30,6 +33,9 @@ import {
   pcCopy,
   pcDisplay,
   pcFields,
+  pcUpsertKey,
+  pcRank,
+  pcCardLine,
 } from "./PutCost";
 import {
   IncomeVsCostCalc,
@@ -37,6 +43,9 @@ import {
   ivcCopy,
   ivcDisplay,
   ivcFields,
+  ivcUpsertKey,
+  ivcRank,
+  ivcCardLine,
 } from "./IncomeVsCost";
 
 export interface CalcModule<S extends Record<string, unknown> = Record<string, unknown>> {
@@ -48,6 +57,16 @@ export interface CalcModule<S extends Record<string, unknown> = Record<string, u
   display?: (state: S) => { value: string; tone: "neon" | "pos" | "neg" | "muted" };
   /** Input fields surfaced in the History preview grid. */
   payloadFields?: (state: S) => Array<{ label: string; value: string; mono?: boolean }>;
+  /** Identity key for upsert-on-save. Returning a string means "saving this
+   *  calc with the same key replaces the previous snapshot" (e.g. underlying
+   *  ticker). Null means every save creates a new row. */
+  upsertKey?: (state: S) => string | null;
+  /** Ranking metric for the Compare view's Analyze button. Higher score
+   *  always wins — calcs that prefer "lower" (e.g. Put Cost % of notional)
+   *  should negate before returning. label = human-readable y-axis name. */
+  rank?: (state: S) => { score: number; label: string } | null;
+  /** Compact one-line summary for the Compare card mini-header. */
+  cardLine?: (state: S) => string;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,6 +77,10 @@ export const CALC_MODULES: Record<string, CalcModule<any>> = {
     copyText: pctDiffCopy,
     display: pctDiffDisplay,
     payloadFields: pctDiffFields,
+    // Pure-math calc with no concept of ticker → always create new on save,
+    // no meaningful "best" ranking either.
+    upsertKey: () => null,
+    rank: () => null,
   },
   "expected-income": {
     component: ExpectedIncomeCalc,
@@ -65,6 +88,9 @@ export const CALC_MODULES: Record<string, CalcModule<any>> = {
     copyText: eiCopy,
     display: eiDisplay,
     payloadFields: eiFields,
+    upsertKey: eiUpsertKey,
+    rank: eiRank,
+    cardLine: eiCardLine,
   },
   "put-cost": {
     component: PutCostCalc,
@@ -72,6 +98,9 @@ export const CALC_MODULES: Record<string, CalcModule<any>> = {
     copyText: pcCopy,
     display: pcDisplay,
     payloadFields: pcFields,
+    upsertKey: pcUpsertKey,
+    rank: pcRank,
+    cardLine: pcCardLine,
   },
   "income-vs-cost": {
     component: IncomeVsCostCalc,
@@ -79,5 +108,8 @@ export const CALC_MODULES: Record<string, CalcModule<any>> = {
     copyText: ivcCopy,
     display: ivcDisplay,
     payloadFields: ivcFields,
+    upsertKey: ivcUpsertKey,
+    rank: ivcRank,
+    cardLine: ivcCardLine,
   },
 };

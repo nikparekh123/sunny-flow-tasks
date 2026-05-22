@@ -120,6 +120,40 @@ export function useSnapshots() {
     },
   });
 
+  /** Replace an existing snapshot's payload + name + timestamp in place. Used
+   *  by upsert flows where the caller already found the row to overwrite. */
+  const updateMut = useMutation({
+    mutationFn: async (input: {
+      id: string;
+      name: string;
+      purpose?: string;
+      payload: Record<string, unknown>;
+    }): Promise<Snapshot> => {
+      const patch = {
+        name: input.name,
+        purpose: input.purpose ?? null,
+        payload: input.payload,
+        // Bump created_at so the upserted snapshot floats to the top of
+        // History (acts like a "last edited" timestamp for compare/sort).
+        created_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase
+        .from("math_snapshots" as never)
+        .update(patch)
+        .eq("id", input.id)
+        .select("id, calc_key, name, purpose, payload, created_at")
+        .single();
+      if (error) throw error;
+      return rowToSnap(data as DbRow);
+    },
+    onSuccess: (snap) => {
+      qc.setQueryData<Snapshot[]>(SNAPS_KEY, (prev) =>
+        // Move the updated snap to the front so the History list reflects it.
+        [snap, ...(prev ?? []).filter((s) => s.id !== snap.id)],
+      );
+    },
+  });
+
   return {
     snaps: query.data ?? [],
     isLoading: query.isLoading,
@@ -128,6 +162,9 @@ export function useSnapshots() {
     /** Create returns a promise so callers can await the assigned id. */
     create: (input: { calcKey: string; name?: string; purpose?: string; payload?: Record<string, unknown> }) =>
       createMut.mutateAsync(input),
+    /** Replace an existing snapshot's payload (used by upsert-by-ticker save). */
+    update: (input: { id: string; name: string; purpose?: string; payload: Record<string, unknown> }) =>
+      updateMut.mutateAsync(input),
     remove: (id: string) => removeMut.mutate(id),
     rename: (id: string, name: string) => renameMut.mutate({ id, name }),
   };

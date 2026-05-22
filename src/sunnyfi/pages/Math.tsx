@@ -47,15 +47,13 @@ const DASHBOARD_URL = "https://www.sunnyfi.co/dashboard";
 
 // ── Page ───────────────────────────────────────────────────────────
 export default function MathPage() {
-  const { snaps, create, remove } = useSnapshots();
+  const { snaps, create, update, remove } = useSnapshots();
 
   const [selectedCalc, setSelectedCalc] = useState<string | null>(null);
   const [searchOpen, setSearchOpen]     = useState(false);
   const [searchValue, setSearchValue]   = useState("");
   const [modal, setModal]               = useState<"history" | "share" | null>(null);
   const [compareMode, setCompareMode]   = useState(false);
-  const [compareA, setCompareA]         = useState<string | null>(null);
-  const [compareB, setCompareB]         = useState<string | null>(null);
 
   // Current working snapshot (untitled until saved). Going back to resting
   // resets it.
@@ -141,21 +139,39 @@ export default function MathPage() {
 
   const saveSnap = async () => {
     if (!calc) return;
+    const payload = calcModule ? { ...liveState } : {};
+    // Upsert by the calc's identity key (e.g. ticker) — re-saving the same
+    // ticker for the same calc overwrites the existing snapshot rather than
+    // stacking duplicates. Calcs that don't have a meaningful identity key
+    // (e.g. Percentage Difference) always create new rows.
+    const upsertKey = calcModule?.upsertKey?.(liveState) ?? null;
+    const existing = upsertKey
+      ? snaps.find((s) => s.calcKey === calc.key && (calcModule?.upsertKey?.(s.payload) ?? null) === upsertKey)
+      : null;
+
+    // Auto-name uses the ticker when available, otherwise a timestamp.
     const t = new Date();
     const stamp = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+    const autoName = upsertKey
+      ? `${calc.name} · ${upsertKey}`
+      : `Snapshot · ${stamp}`;
     const name =
       snapName === "untitled snapshot"
-        ? `Snapshot · ${stamp}`
+        ? (existing?.name ?? autoName)
         : snapName;
+
     try {
-      const snap = await create({
-        calcKey: calc.key,
-        name,
-        payload: calcModule ? { ...liveState } : {},
-      });
-      setSavedSnapId(snap.id);
-      setSnapName(snap.name);
-      flash(`✓ Saved as "${snap.name}"`);
+      if (existing) {
+        const snap = await update({ id: existing.id, name, payload });
+        setSavedSnapId(snap.id);
+        setSnapName(snap.name);
+        flash(`✓ Updated "${snap.name}"`);
+      } else {
+        const snap = await create({ calcKey: calc.key, name, payload });
+        setSavedSnapId(snap.id);
+        setSnapName(snap.name);
+        flash(`✓ Saved as "${snap.name}"`);
+      }
     } catch (e) {
       flash(`Save failed: ${(e as Error).message}`);
     }
@@ -186,9 +202,6 @@ export default function MathPage() {
     if (k === "compare")  {
       if (!canCompare) return;
       setCompareMode((v) => !v);
-      // Default to two most recent snapshots
-      if (!compareA) setCompareA(snaps[0]?.id ?? null);
-      if (!compareB) setCompareB(snaps[1]?.id ?? null);
       return;
     }
     if (k === "share")    { setModal((m) => m === "share" ? null : "share"); return; }
@@ -221,15 +234,20 @@ export default function MathPage() {
       showShare={!compareMode}
       hideDock={searchOpen}
     >
-      {/* ── Compare mode: full-stage takeover ── */}
+      {/* ── Compare mode: card grid + Analyze ── */}
       {compareMode ? (
-        <CompareStage
+        <CompareGrid
           snaps={snaps}
-          aId={compareA}
-          bId={compareB}
-          onPickA={setCompareA}
-          onPickB={setCompareB}
           onExit={() => setCompareMode(false)}
+          onRestore={(snap) => {
+            setSelectedCalc(snap.calcKey);
+            setLiveState({ ...(CALC_MODULES[snap.calcKey]?.initial ?? {}), ...snap.payload });
+            setSnapName(snap.name);
+            setSavedSnapId(snap.id);
+            setCompareMode(false);
+            flash(`⤺ Loaded "${snap.name}"`);
+          }}
+          onDelete={(id) => remove(id)}
         />
       ) : (
         <>
@@ -648,133 +666,194 @@ function HistoryBody({
   );
 }
 
-// ── Compare stage ────────────────────────────────────────────────
-function CompareStage({
+// ── Compare grid ─────────────────────────────────────────────────
+// Card view across saved snapshots grouped by calculator. Default sort is
+// "newest first"; clicking Analyze sorts each group by the calc's own rank
+// metric and surfaces the #1 with a "BEST" treatment. Click any card to
+// restore that snapshot into the calc.
+function CompareGrid({
   snaps,
-  aId,
-  bId,
-  onPickA,
-  onPickB,
   onExit,
+  onRestore,
+  onDelete,
 }: {
   snaps: Snapshot[];
-  aId: string | null;
-  bId: string | null;
-  onPickA: (id: string | null) => void;
-  onPickB: (id: string | null) => void;
   onExit: () => void;
+  onRestore: (snap: Snapshot) => void;
+  onDelete: (id: string) => void;
 }) {
-  const a = aId ? snaps.find((s) => s.id === aId) ?? null : null;
-  const b = bId ? snaps.find((s) => s.id === bId) ?? null : null;
-  const aCalc = a ? findCalc(a.calcKey) : null;
-  const bCalc = b ? findCalc(b.calcKey) : null;
+  const [analyze, setAnalyze] = useState(false);
+
+  const groups = useMemo(() => {
+    // Group by calc key, preserve catalog order.
+    const byCalc = new Map<string, Snapshot[]>();
+    for (const s of snaps) {
+      const arr = byCalc.get(s.calcKey) ?? [];
+      arr.push(s);
+      byCalc.set(s.calcKey, arr);
+    }
+    return CALCS
+      .map((c) => ({ calc: c, items: byCalc.get(c.key) ?? [] }))
+      .filter((g) => g.items.length > 0);
+  }, [snaps]);
+
+  const totalSnaps = snaps.length;
+  const canAnalyze = totalSnaps >= 2;
+
+  if (totalSnaps === 0) {
+    return (
+      <div className="math-compare-stage">
+        <div className="math-compare-empty">
+          <div style={{ marginBottom: 12, color: "var(--navi-fg2)", fontSize: 16 }}>
+            No saved snapshots yet.
+          </div>
+          <div style={{ color: "var(--navi-fg4)", fontSize: 13, marginBottom: 18 }}>
+            Save a calculation in any calc (✓ Save in the footer) to start comparing.
+          </div>
+          <button className="hf-btn ghost" onClick={onExit}>← Back</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <>
-      <div className="hf-cmp-bar">
-        <div className="left">
-          <span className="hf-eyebrow">Comparing</span>
-          <Chip tone="neon" active>A · {a?.name ?? "pick snapshot"}</Chip>
-          <span className="vs">vs</span>
-          <Chip tone="warn" active>B · {b?.name ?? "pick snapshot"}</Chip>
+    <div className="math-compare-stage">
+      <div className="math-compare-head">
+        <div>
+          <div className="hf-eyebrow">Compare · {totalSnaps} saved</div>
+          <div className="math-compare-title">
+            {analyze ? "Ranked by best trade" : "All saved snapshots"}
+          </div>
         </div>
-        <div className="right">
-          <label className="hf-check"><input type="checkbox" defaultChecked /> Lock A</label>
-          <label className="hf-check"><input type="checkbox" /> Link inputs</label>
-          <button className="hf-btn tinted" disabled>↗ Share comparison</button>
-          <button className="hf-btn danger" onClick={onExit}>✕ Exit compare</button>
+        <div className="math-compare-actions">
+          <button
+            className={`hf-btn ${analyze ? "neon" : "ghost"}`}
+            onClick={() => setAnalyze((v) => !v)}
+            disabled={!canAnalyze}
+            title={canAnalyze ? "Rank cards by each calc's best-trade metric" : "Save at least 2 snapshots to analyze"}
+          >
+            {analyze ? "✓ Analyzing" : "Analyze"}
+          </button>
+          <button className="hf-btn ghost" onClick={onExit}>✕ Exit</button>
         </div>
       </div>
 
-      {a && b ? (
-        <>
-          <div className="hf-cmp-headline">
-            <div className="hf-eyebrow">Result · A → B</div>
-            <div className="hf-cmp-bignum">
-              <span className="a">—</span>
-              <span className="arr">→</span>
-              <span className="b">—</span>
-            </div>
-            <div className="hf-cmp-delta">
-              <span className="hf-eyebrow soft">delta will appear when calculators are wired</span>
-            </div>
-          </div>
-
-          <div className="hf-cmp-grid">
-            <div className="hf-cmp-col">
-              <div className="hf-cmp-colhead a">
-                <div className="hf-eyebrow">A · locked</div>
-                <div className="title">{a.name}</div>
-                <div className="meta">{aCalc?.name ?? a.calcKey} · saved {relTime(a.createdAt)}</div>
-              </div>
-              <CalcShell accent style={{ flex: 1 }}>
-                <CalcEmpty label="Calculator A · content area" />
-              </CalcShell>
-            </div>
-
-            <div className="hf-cmp-diff">
-              <div className="hf-section">Δ Per-input diff</div>
-              <div style={{ color: "var(--navi-fg4)", fontSize: 12, fontFamily: "var(--navi-font-mono)" }}>
-                Diff rows will populate once both calculators expose their inputs.
-              </div>
-            </div>
-
-            <div className="hf-cmp-col">
-              <div className="hf-cmp-colhead b">
-                <div className="hf-eyebrow">B</div>
-                <div className="title">{b.name}</div>
-                <div className="meta">{bCalc?.name ?? b.calcKey} · saved {relTime(b.createdAt)}</div>
-              </div>
-              <CalcShell tint style={{ flex: 1 }}>
-                <CalcEmpty label="Calculator B · content area" />
-              </CalcShell>
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="hf-cmp-grid">
-          <div className="hf-cmp-empty">
-            <div>
-              <div style={{ marginBottom: 12, color: "var(--navi-fg2)", fontFamily: "var(--navi-font-sans)", fontSize: 16 }}>
-                Pick two snapshots to compare.
-              </div>
-              <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
-                <select
-                  value={aId ?? ""}
-                  onChange={(e) => onPickA(e.target.value || null)}
-                  style={selectStyle}
-                >
-                  <option value="">A · pick a snapshot</option>
-                  {snaps.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                <select
-                  value={bId ?? ""}
-                  onChange={(e) => onPickB(e.target.value || null)}
-                  style={selectStyle}
-                >
-                  <option value="">B · pick a snapshot</option>
-                  {snaps.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+      {groups.map((g) => (
+        <CompareGroup
+          key={g.calc.key}
+          calc={g.calc}
+          items={g.items}
+          analyze={analyze}
+          onRestore={onRestore}
+          onDelete={onDelete}
+        />
+      ))}
+    </div>
   );
 }
 
-const selectStyle: React.CSSProperties = {
-  background: "var(--navi-surface)",
-  border: "1px solid rgba(50,110,100,.4)",
-  borderRadius: 8,
-  padding: "10px 14px",
-  color: "var(--navi-fg1)",
-  fontFamily: "var(--navi-font-mono)",
-  fontSize: 13,
-  outline: "none",
-  cursor: "pointer",
-};
+function CompareGroup({
+  calc,
+  items,
+  analyze,
+  onRestore,
+  onDelete,
+}: {
+  calc: CalcMeta;
+  items: Snapshot[];
+  analyze: boolean;
+  onRestore: (snap: Snapshot) => void;
+  onDelete: (id: string) => void;
+}) {
+  const mod = CALC_MODULES[calc.key];
+
+  const ordered = useMemo(() => {
+    // Score each snapshot, then either rank-sort (analyze) or time-sort.
+    const scored = items.map((s) => {
+      const r = mod?.rank?.(s.payload);
+      return { snap: s, score: r?.score, label: r?.label };
+    });
+    if (analyze) {
+      // Highest score first; snapshots with no rank (NaN/null) sink to the
+      // bottom but stay in time order among themselves.
+      return [...scored].sort((a, b) => {
+        const aS = isFiniteScore(a.score);
+        const bS = isFiniteScore(b.score);
+        if (aS && bS) return (b.score as number) - (a.score as number);
+        if (aS) return -1;
+        if (bS) return 1;
+        return b.snap.createdAt - a.snap.createdAt;
+      });
+    }
+    return [...scored].sort((a, b) => b.snap.createdAt - a.snap.createdAt);
+  }, [items, analyze, mod]);
+
+  return (
+    <div className="math-compare-group">
+      <div className="math-compare-group-hd">
+        <span className="hf-section">{calc.name}</span>
+        <span className="math-compare-group-count">{items.length}</span>
+        {analyze && ordered[0]?.label && (
+          <span className="math-compare-group-axis">ranked by {ordered[0].label}</span>
+        )}
+      </div>
+      <div className="math-compare-cards">
+        {ordered.map(({ snap, score }, i) => {
+          const disp = mod?.display ? mod.display(snap.payload) : { value: "—", tone: "muted" as const };
+          const line = mod?.cardLine ? mod.cardLine(snap.payload) : "";
+          const rankNum = analyze && isFiniteScore(score) ? i + 1 : null;
+          const isBest = rankNum === 1;
+          return (
+            <button
+              key={snap.id}
+              className={`math-card ${isBest ? "best" : ""} ${rankNum != null ? "ranked" : ""}`}
+              onClick={() => onRestore(snap)}
+              title="Load this snapshot into the calculator"
+            >
+              {rankNum != null && (
+                <span className={`math-card-rank ${isBest ? "best" : ""}`}>
+                  {isBest ? "BEST" : `#${rankNum}`}
+                </span>
+              )}
+              <span
+                className="math-card-x"
+                role="button"
+                aria-label="Delete snapshot"
+                onClick={(e) => { e.stopPropagation(); onDelete(snap.id); }}
+              >
+                ✕
+              </span>
+              <div className="math-card-hd">
+                <div className="math-card-name">{snap.name}</div>
+                <div className="math-card-time">{relTime(snap.createdAt)}</div>
+              </div>
+              <div className={`math-card-hero ${disp.tone}`}>{disp.value}</div>
+              {analyze && isFiniteScore(score) && (
+                <div className="math-card-metric">
+                  {formatScore(calc.key, score as number)}
+                </div>
+              )}
+              {line && <div className="math-card-line">{line}</div>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function isFiniteScore(n: number | undefined): boolean {
+  return typeof n === "number" && isFinite(n);
+}
+
+function formatScore(calcKey: string, score: number): string {
+  // Put Cost rank negates the cost % so "higher score = cheaper". Flip the
+  // sign back when displaying so the user sees the actual cost percentage.
+  if (calcKey === "put-cost") return `${(-score).toFixed(2)}% cost`;
+  // EI and IvC both rank by a yield %, positive = better.
+  return `${score.toFixed(2)}%`;
+}
+
 
 // ── Share body ───────────────────────────────────────────────────
 function ShareBody({

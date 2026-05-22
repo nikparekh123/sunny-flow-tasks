@@ -177,6 +177,25 @@ export function ivcDisplay(state: IVCState): { value: string; tone: "neon" | "po
   };
 }
 
+/** Upsert by ticker — one card per ticker per calc in the Compare view. */
+export function ivcUpsertKey(state: IVCState): string | null {
+  return state.underlying?.trim().toUpperCase() || null;
+}
+
+/** Compare-view ranking: net annualised yield (net dollars ÷ notional, ann.).
+ *  Apples-to-apples across stocks of different position sizes. Higher = better. */
+export function ivcRank(state: IVCState): { score: number; label: string } | null {
+  const c = computeIVC(state);
+  if (!isFinite(c.netAnnYieldPct)) return null;
+  return { score: c.netAnnYieldPct, label: "net ann. yield" };
+}
+
+export function ivcCardLine(state: IVCState): string {
+  const c = computeIVC(state);
+  const cov = fmtCoverage(c.coverage);
+  return `${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · ${cov} coverage`;
+}
+
 export function ivcFields(state: IVCState): Array<{ label: string; value: string; mono?: boolean }> {
   const c = computeIVC(state);
   return [
