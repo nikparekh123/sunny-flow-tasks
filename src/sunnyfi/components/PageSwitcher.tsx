@@ -24,7 +24,6 @@ export interface PageItem {
  * adding a tile back to /dashboard's TOOLS list should also add it here.
  */
 export const SWITCHER_PAGES: PageItem[] = [
-  { key: "dashboard", label: "Dashboard", href: "https://www.sunnyfi.co/dashboard" },
   { key: "positions", label: "Positions", href: "https://positions.sunnyfi.co" },
   { key: "math",      label: "Math",      href: "https://www.sunnyfi.co/math" },
 ];
