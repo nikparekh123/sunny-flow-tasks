@@ -17,7 +17,6 @@ import {
 
 export interface IVCState extends Record<string, unknown> {
   underlying: string;
-  mode: "held" | "buy";
   shares: string;
   price: string;
 
@@ -37,7 +36,6 @@ export interface IVCState extends Record<string, unknown> {
 
 export const ivcInitial: IVCState = {
   underlying: "SPY",
-  mode: "held",
   shares: "500",
   price: "655.06",
 
@@ -236,7 +234,7 @@ export function IncomeVsCostCalc({
       </p>
 
       {/* Position context */}
-      <div className="cyc-context cols-4">
+      <div className="cyc-context cols-3">
         <CycField label="Underlying">
           <NumInput
             value={state.underlying}
@@ -251,17 +249,12 @@ export function IncomeVsCostCalc({
               setState({
                 ...state,
                 price: price.toFixed(2),
+                // Snap the put strike to the nearest whole dollar — reads as
+                // a realistic strike vs the raw quote (HOOD $73.46 → $74).
+                strike: Math.round(price).toFixed(2),
                 ...(shares ? { shares: String(shares) } : {}),
               })
             }
-          />
-        </CycField>
-        <CycField label="Position mode">
-          <Seg<"held" | "buy">
-            options={[{ id: "held", label: "Held" }, { id: "buy", label: "Planning to buy" }]}
-            value={state.mode}
-            onChange={(v) => set("mode", v)}
-            ariaLabel="Position mode"
           />
         </CycField>
         <CycField label="Shares">
@@ -397,15 +390,15 @@ export function IncomeVsCostCalc({
         </div>
       </div>
 
-      {/* Shared horizon */}
+      {/* Shared cut off */}
       <div className="cyc-section">
         <div className="cyc-horizon-only">
-          <div className="hf-label">Horizon</div>
+          <div className="hf-label">Cut off</div>
           <Seg
             options={PUT_HORIZON_DEFS.map(h => ({ id: h.id, label: h.label }))}
             value={state.horizon}
             onChange={(v) => set("horizon", v)}
-            ariaLabel="Horizon"
+            ariaLabel="Cut off"
           />
           {state.horizon === "custom" && (
             <div className="cyc-cad-date">

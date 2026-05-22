@@ -33,15 +33,19 @@
 }
 .cyc-section.no-rule { border-top: 0; padding-top: 4px; }
 
-/* Position context row */
+/* Position context row.
+   Default: 4-col layout used by Expected Income + Put Cost
+   (Underlying / Shares / Contracts / Price).
+   cols-3 modifier: Income vs Cost (no contracts here — each side has its
+   own contracts inside the panel below). */
 .cyc-context {
   display: grid;
-  grid-template-columns: 1fr 1.5fr .9fr .9fr 1fr;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr;
   gap: 22px;
   align-items: end;
 }
-.cyc-context.cols-4 {
-  grid-template-columns: 1fr 1.5fr 1fr 1fr;
+.cyc-context.cols-3 {
+  grid-template-columns: 1.5fr 1fr 1fr;
   gap: 28px;
 }
 .cyc-field {

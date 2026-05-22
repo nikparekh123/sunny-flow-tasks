@@ -37,14 +37,14 @@ export const CALL_FREQ_DEFS: FreqDef[] = [
   { id: "monthly",       label: "Once a month",   short: "monthly",        calDays: 365 / 12,  perYear: 12  },
 ];
 
-// Puts are rolled at lower cadences than calls — bi-weekly is the densest a
-// protective put strategy realistically runs.
+// Puts are bought, not sold — cadence reflects "how often do I refresh the
+// hedge". Granularities below monthly don't match real protective-put usage.
 export const PUT_FREQ_DEFS: FreqDef[] = [
-  { id: "biweekly",  label: "Bi-weekly", short: "bi-weekly", calDays: 14,        perYear: 26 },
-  { id: "monthly",   label: "Monthly",   short: "monthly",   calDays: 365 / 12,  perYear: 12 },
-  { id: "quarterly", label: "Quarterly", short: "quarterly", calDays: 365 / 4,   perYear: 4  },
-  { id: "halfyear",  label: "6 months",  short: "6 months",  calDays: 365 / 2,   perYear: 2  },
-  { id: "yearly",    label: "Yearly",    short: "yearly",    calDays: 365,       perYear: 1  },
+  { id: "monthly",   label: "Monthly",   short: "monthly",   calDays: 365 / 12, perYear: 12 },
+  { id: "quarterly", label: "Quarterly", short: "quarterly", calDays: 365 / 4,  perYear: 4  },
+  { id: "4month",    label: "4 months",  short: "4-month",   calDays: 365 / 3,  perYear: 3  },
+  { id: "halfyear",  label: "6 months",  short: "6-month",   calDays: 365 / 2,  perYear: 2  },
+  { id: "yearly",    label: "12 months", short: "12-month",  calDays: 365,      perYear: 1  },
 ];
 
 // Combined lookup so cycleStats() resolves any frequency id from any set.

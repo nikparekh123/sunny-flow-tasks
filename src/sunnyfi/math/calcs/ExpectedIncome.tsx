@@ -14,7 +14,6 @@ import {
 
 export interface EIState extends Record<string, unknown> {
   underlying: string;
-  mode: "held" | "buy";
   shares: string;
   contracts: string;
   price: string;
@@ -27,7 +26,6 @@ export interface EIState extends Record<string, unknown> {
 
 export const eiInitial: EIState = {
   underlying: "SPY",
-  mode: "held",
   shares: "500",
   contracts: "5",
   price: "655.06",
@@ -94,7 +92,7 @@ export function computeEI(state: EIState, now: Date = new Date()): Computed {
 // ── Registry helpers ─────────────────────────────────────────────
 export function eiCopy(state: EIState): string {
   const c = computeEI(state);
-  return `${state.underlying} · ${state.mode === "held" ? "Held" : "Planning to buy"} · ${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · premium ${fmtMoney(Number(state.premium))} × ${fmtCount(c.cycles)} cycles to ${fmtDate(c.horizonDate)} = ${fmtMoney(c.totalIncome)} total (${fmtPct(c.annYieldPct)} ann.)`;
+  return `${state.underlying} · ${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · premium ${fmtMoney(Number(state.premium))} × ${fmtCount(c.cycles)} cycles to ${fmtDate(c.horizonDate)} = ${fmtMoney(c.totalIncome)} total (${fmtPct(c.annYieldPct)} ann.)`;
 }
 
 export function eiDisplay(state: EIState): { value: string; tone: "neon" | "pos" | "neg" | "muted" } {
@@ -170,15 +168,6 @@ export function ExpectedIncomeCalc({
           />
         </CycField>
 
-        <CycField label="Position mode">
-          <Seg<"held" | "buy">
-            options={[{ id: "held", label: "Held" }, { id: "buy", label: "Planning to buy" }]}
-            value={state.mode}
-            onChange={(v) => set("mode", v)}
-            ariaLabel="Position mode"
-          />
-        </CycField>
-
         <CycField label="Shares">
           <NumInput value={state.shares} onChange={(v) => set("shares", v)} placeholder="0" ariaLabel="Shares" />
         </CycField>
@@ -249,12 +238,12 @@ export function ExpectedIncomeCalc({
           </div>
 
           <div className="cyc-cad-field">
-            <div className="hf-label">Horizon</div>
+            <div className="hf-label">Cut off</div>
             <Seg
               options={HORIZON_DEFS.map(h => ({ id: h.id, label: h.label }))}
               value={state.horizon}
               onChange={(v) => set("horizon", v)}
-              ariaLabel="Horizon"
+              ariaLabel="Cut off"
             />
             {state.horizon === "custom" && (
               <div className="cyc-cad-date">
@@ -281,7 +270,7 @@ export function ExpectedIncomeCalc({
         <Tile label="Cycles until horizon"    value={fmtCount(c.cycles)}         mono />
         <Tile label="Total income to horizon" value={fmtMoney(c.totalIncome)}    tone={tone} primary />
         <Tile label="Annualised yield"        value={fmtPct(c.annYieldPct)}      tone="neon" sub="vs notional" />
-        <Tile label="Annualised ROI"          value={fmtPct(c.annROIPct)}        tone="neon" sub={state.mode === "buy" ? "on planned cost basis" : "on held position"} />
+        <Tile label="Annualised ROI"          value={fmtPct(c.annROIPct)}        tone="neon" sub="on position cost basis" />
       </div>
 
       <div className="cyc-helper">{helper}</div>

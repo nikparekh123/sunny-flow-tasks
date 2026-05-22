@@ -16,7 +16,6 @@ import {
 
 export interface PCState extends Record<string, unknown> {
   underlying: string;
-  mode: "held" | "buy";
   shares: string;
   contracts: string;
   price: string;
@@ -29,7 +28,6 @@ export interface PCState extends Record<string, unknown> {
 
 export const pcInitial: PCState = {
   underlying: "SPY",
-  mode: "held",
   shares: "500",
   contracts: "5",
   price: "655.06",
@@ -94,7 +92,7 @@ export function computePC(state: PCState, now: Date = new Date()): Computed {
 // ── Registry helpers ─────────────────────────────────────────────
 export function pcCopy(state: PCState): string {
   const c = computePC(state);
-  return `${state.underlying} · ${state.mode === "held" ? "Held" : "Planning to buy"} · ${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · put ${fmtMoney(Number(state.premium))} strike ${fmtMoney(Number(state.strike))} × ${fmtCount(c.cycles)} cycles to ${fmtDate(c.horizonDate)} = ${fmtMoney(c.totalCost)} total (${fmtPct(c.annCostPct)} of notional ann.)`;
+  return `${state.underlying} · ${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · put ${fmtMoney(Number(state.premium))} strike ${fmtMoney(Number(state.strike))} × ${fmtCount(c.cycles)} cycles to ${fmtDate(c.horizonDate)} = ${fmtMoney(c.totalCost)} total (${fmtPct(c.annCostPct)} of notional ann.)`;
 }
 
 export function pcDisplay(state: PCState): { value: string; tone: "neon" | "pos" | "neg" | "muted" } {
@@ -165,18 +163,13 @@ export function PutCostCalc({
               setState({
                 ...state,
                 price: price.toFixed(2),
+                // Snap the strike to the nearest whole dollar so it reads as a
+                // realistic options strike (HOOD $73.46 → strike $74). User
+                // can still adjust after.
+                strike: Math.round(price).toFixed(2),
                 ...(shares ? { shares: String(shares) } : {}),
               })
             }
-          />
-        </CycField>
-
-        <CycField label="Position mode">
-          <Seg<"held" | "buy">
-            options={[{ id: "held", label: "Held" }, { id: "buy", label: "Planning to buy" }]}
-            value={state.mode}
-            onChange={(v) => set("mode", v)}
-            ariaLabel="Position mode"
           />
         </CycField>
 
@@ -236,12 +229,12 @@ export function PutCostCalc({
           </div>
 
           <div className="cyc-cad-field">
-            <div className="hf-label">Horizon</div>
+            <div className="hf-label">Cut off</div>
             <Seg
               options={PUT_HORIZON_DEFS.map(h => ({ id: h.id, label: h.label }))}
               value={state.horizon}
               onChange={(v) => set("horizon", v)}
-              ariaLabel="Horizon"
+              ariaLabel="Cut off"
             />
             {state.horizon === "custom" && (
               <div className="cyc-cad-date">
