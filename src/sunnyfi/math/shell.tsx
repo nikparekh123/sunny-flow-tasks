@@ -211,7 +211,7 @@ export function PickHero({
       </div>
       {popular.length > 0 && (
         <div className="hf-pick-rail">
-          <div className="hf-section">Popular this week</div>
+          <div className="hf-section">Quick links</div>
           <div className="hf-pick-pop">
             {popular.map((p, i) => (
               <span key={p.key} style={{ display: "inline-flex", alignItems: "center", gap: 14 }}>

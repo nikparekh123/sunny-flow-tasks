@@ -46,9 +46,7 @@ export function categoryLabel(c: CalcCategory): string {
   return CATEGORIES[c].label;
 }
 
-export function popularCalcs(limit = 3): CalcMeta[] {
-  // Surface the most-likely-used calcs on the resting hero. Order curated;
-  // hook up to real usage data when we have it.
-  const order = ["expected-income", "put-cost", "pct-diff"];
-  return order.map((k) => CALCS.find((c) => c.key === k)).filter(Boolean).slice(0, limit) as CalcMeta[];
+export function popularCalcs(limit = 5): CalcMeta[] {
+  // Quick-links row on the resting hero — first N live calcs in catalog order.
+  return CALCS.slice(0, limit);
 }
