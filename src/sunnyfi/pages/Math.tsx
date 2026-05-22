@@ -139,7 +139,7 @@ export default function MathPage() {
     setCompareMode(false);
   };
 
-  const saveSnap = () => {
+  const saveSnap = async () => {
     if (!calc) return;
     const t = new Date();
     const stamp = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
@@ -147,14 +147,18 @@ export default function MathPage() {
       snapName === "untitled snapshot"
         ? `Snapshot · ${stamp}`
         : snapName;
-    const snap = create({
-      calcKey: calc.key,
-      name,
-      payload: calcModule ? { ...liveState } : {},
-    });
-    setSavedSnapId(snap.id);
-    setSnapName(snap.name);
-    flash(`✓ Saved as "${snap.name}"`);
+    try {
+      const snap = await create({
+        calcKey: calc.key,
+        name,
+        payload: calcModule ? { ...liveState } : {},
+      });
+      setSavedSnapId(snap.id);
+      setSnapName(snap.name);
+      flash(`✓ Saved as "${snap.name}"`);
+    } catch (e) {
+      flash(`Save failed: ${(e as Error).message}`);
+    }
   };
 
   const resetCalc = () => {
