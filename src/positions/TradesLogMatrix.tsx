@@ -359,14 +359,14 @@ export function TradesLogMatrix({
                       : 'closed-zone';
                 const sub =
                   i === SHARES_COL
-                    ? 'shares'
+                    ? 'shares open'
                     : i < CLOSED_START_COL
-                      ? 'open'
-                      : null;
+                      ? 'options open'
+                      : 'closed';
                 return (
                   <th key={i} className={`gl-wk ${zone}`}>
                     <div className="gl-wk-l">{i + 1}</div>
-                    {sub && <div className="gl-wk-sub">{sub}</div>}
+                    <div className="gl-wk-sub">{sub}</div>
                   </th>
                 );
               })}

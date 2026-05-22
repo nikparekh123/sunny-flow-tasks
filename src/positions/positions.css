@@ -1385,6 +1385,11 @@
   margin-top: 2px;
   opacity: .8;
 }
+/* Closed-zone sub-captions get a muted tone so the header colour
+   roughly mirrors the cell-state pill colour for each zone. */
+.gl-table th.gl-wk.closed-zone .gl-wk-sub {
+  color: var(--navi-fg4);
+}
 .gl-cell.empty .gl-plus {
   font-family: var(--navi-font-mono);
   color: var(--navi-fg5, #1e5a50);
