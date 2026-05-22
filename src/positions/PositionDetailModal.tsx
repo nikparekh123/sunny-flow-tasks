@@ -41,6 +41,10 @@ interface Props {
   initialCloseTarget?: string;
   /** The expired option being resolved (when initialTab='resolve'). */
   resolveTrade?: OptionTrade;
+  /** Close price on the resolveTrade's expiry date — if available,
+   *  the Resolve flow uses it to default the radio (ITM → Exercised,
+   *  OTM → Expired worthless). Null when no snapshot exists. */
+  resolveExpiryClose?: number | null;
   onClose: () => void;
   onAddTrade: (p: {
     ticker: string;
@@ -179,8 +183,29 @@ interface ResolveForm {
   new_open_date: string;
   note: string;
 }
-const blankResolve = (open: OptionTrade | undefined): ResolveForm => ({
-  kind: 'expired',
+/** Decide which resolution kind to default to. ITM → assigned,
+ *  OTM → expired. When we don't have a close snapshot (null), fall
+ *  back to expired (most common case for OTM income premium). */
+function defaultResolveKind(
+  open: OptionTrade | undefined,
+  closeAtExpiry: number | null | undefined,
+): ResolveKind {
+  if (!open || closeAtExpiry == null) return 'expired';
+  // For a SHORT call, ITM = close >= strike → assigned (shares called).
+  // For a SHORT put,  ITM = close <= strike → assigned (shares put to us).
+  // For LONG sides (rare for this user), ITM means they'd be exercising.
+  const isCall = open.option_type === 'call';
+  const itm = isCall
+    ? closeAtExpiry >= open.strike
+    : closeAtExpiry <= open.strike;
+  return itm ? 'assigned' : 'expired';
+}
+
+const blankResolve = (
+  open: OptionTrade | undefined,
+  closeAtExpiry?: number | null,
+): ResolveForm => ({
+  kind: defaultResolveKind(open, closeAtExpiry),
   trade_date: open?.expiry ?? todayIso(),
   close_premium: '',
   new_strike: open ? String(open.strike) : '',
@@ -197,6 +222,7 @@ export function PositionDetailModal({
   initialTab = 'open',
   initialCloseTarget,
   resolveTrade,
+  resolveExpiryClose,
   onClose,
   onAddTrade,
   onUpdateTrade,
@@ -212,11 +238,14 @@ export function PositionDetailModal({
         : initialTab,
   );
   const [sellForm, setSellForm] = useState<SellForm>(blankSell());
-  const [resolveForm, setResolveForm] = useState<ResolveForm>(blankResolve(resolveTrade));
-  // If parent passes a new resolveTrade, reset the form for it.
+  const [resolveForm, setResolveForm] = useState<ResolveForm>(
+    blankResolve(resolveTrade, resolveExpiryClose),
+  );
+  // If parent passes a new resolveTrade (or the close snapshot lands
+  // asynchronously), reset the form with the right default.
   useEffect(() => {
-    setResolveForm(blankResolve(resolveTrade));
-  }, [resolveTrade?.id]);  // eslint-disable-line react-hooks/exhaustive-deps
+    setResolveForm(blankResolve(resolveTrade, resolveExpiryClose));
+  }, [resolveTrade?.id, resolveExpiryClose]);  // eslint-disable-line react-hooks/exhaustive-deps
   const [openForm, setOpenForm] = useState<OpenForm>(blankOpen());
   const [closeForm, setCloseForm] = useState<CloseForm>(
     blankClose(initialCloseTarget ?? liveOpens[0]?.open.id ?? ''),
@@ -598,6 +627,7 @@ export function PositionDetailModal({
                 form={resolveForm}
                 setForm={setResolveForm}
                 open={resolveOpen}
+                closeAtExpiry={resolveExpiryClose ?? null}
               />
             )}
           </div>
@@ -1268,15 +1298,44 @@ function SellSharesFields({
 // ─────────────────────────────────────────────────────────────────────
 // Resolve Expired fields — three modes (expired / rolled / assigned).
 function ResolveFields({
-  form, setForm, open,
+  form, setForm, open, closeAtExpiry,
 }: {
   form: ResolveForm;
   setForm: (f: ResolveForm) => void;
   open: OptionTrade;
+  closeAtExpiry: number | null;
 }) {
   const set = <K extends keyof ResolveForm>(k: K, v: ResolveForm[K]) =>
     setForm({ ...form, [k]: v });
   const isCall = open.option_type === 'call';
+  // ITM hint based on the snapshot close (when we have it).
+  const itmHint = (() => {
+    if (closeAtExpiry == null) {
+      return {
+        text: 'No close snapshot for this expiry — pick manually.',
+        tone: 'muted' as const,
+      };
+    }
+    const itm = isCall
+      ? closeAtExpiry >= open.strike
+      : closeAtExpiry <= open.strike;
+    if (itm) {
+      const dist = isCall
+        ? closeAtExpiry - open.strike
+        : open.strike - closeAtExpiry;
+      return {
+        text: `Close ${fmtUSD2(closeAtExpiry)} vs strike ${fmtUSD2(open.strike)} — ITM by ${fmtUSD2(dist)}, suggesting Exercised`,
+        tone: 'itm' as const,
+      };
+    }
+    const dist = isCall
+      ? open.strike - closeAtExpiry
+      : closeAtExpiry - open.strike;
+    return {
+      text: `Close ${fmtUSD2(closeAtExpiry)} vs strike ${fmtUSD2(open.strike)} — OTM by ${fmtUSD2(dist)}, suggesting Expired worthless`,
+      tone: 'otm' as const,
+    };
+  })();
   return (
     <>
       <div className="pp-field">
@@ -1292,6 +1351,7 @@ function ResolveFields({
           </span>
           <span className="pp-resolve-prem">opened @ ${open.premium}/sh</span>
         </div>
+        <div className={'pp-resolve-hint ' + itmHint.tone}>{itmHint.text}</div>
       </div>
 
       <div className="pp-field">

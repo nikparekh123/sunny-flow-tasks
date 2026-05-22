@@ -45,6 +45,7 @@ export default function PositionsPage() {
     updateTrade,
     sellShares,
     resolveExpired,
+    closePriceAt,
     setPositionStatus,
     setEarningsDate,
     deletePosition,
@@ -386,6 +387,11 @@ export default function PositionsPage() {
             bucket={overlayByTicker.get(detail.ticker)}
             initialTab={detail.tab}
             resolveTrade={detail.resolveTrade}
+            resolveExpiryClose={
+              detail.resolveTrade
+                ? closePriceAt(detail.resolveTrade.ticker, detail.resolveTrade.expiry)
+                : null
+            }
             onClose={() => setDetail(null)}
             onAddTrade={(p) =>
               addTrade.mutate(p, {

@@ -1322,6 +1322,29 @@
   font-size: 11px;
   color: var(--navi-fg3);
 }
+.pp-resolve-hint {
+  margin-top: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid;
+}
+.pp-resolve-hint.muted {
+  color: var(--navi-fg4);
+  background: rgba(50,110,100,.10);
+  border-color: rgba(50,110,100,.30);
+}
+.pp-resolve-hint.itm {
+  color: var(--navi-warning);
+  background: rgba(224,192,96,.08);
+  border-color: rgba(224,192,96,.40);
+}
+.pp-resolve-hint.otm {
+  color: var(--navi-neon);
+  background: rgba(210,230,50,.08);
+  border-color: rgba(210,230,50,.40);
+}
 
 /* Column zones: first N cols are LIVE (faint neon tint), the rest are
    the closed/history zone (faint muted tint). Boundary cell gets a thin

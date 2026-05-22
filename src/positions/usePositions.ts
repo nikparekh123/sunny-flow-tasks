@@ -7,6 +7,7 @@ import {
   realizedPLByTicker,
   type Action,
   type ClosedVia,
+  type DailyClose,
   type Direction,
   type OptionTrade,
   type OptionType,
@@ -66,6 +67,20 @@ export function usePositions() {
         .order('trade_date', { ascending: false });
       if (error) throw error;
       return (data ?? []) as unknown as OptionTrade[];
+    },
+  });
+
+  // Historical close prices per ticker per trading day — populated by
+  // the pg_cron 'capture-daily-close' job 30 min after market close.
+  // Used by the Resolve flow to auto-detect ITM vs OTM at expiry.
+  const { data: dailyCloses = [] } = useQuery({
+    queryKey: ['daily_closes'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('daily_closes' as never)
+        .select('*');
+      if (error) throw error;
+      return (data ?? []) as unknown as DailyClose[];
     },
   });
 
@@ -158,6 +173,17 @@ export function usePositions() {
     }
     return m;
   }, [shareSells]);
+
+  // Lookup: closePriceAt(ticker, isoDate) → close on that day or null.
+  // Falls back to null when the snapshot doesn't exist (e.g., expiries
+  // older than the day we started capturing, or weekend/holiday dates).
+  const closeByTickerDate = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const c of dailyCloses) m.set(`${c.ticker}|${c.date}`, c.close_price);
+    return m;
+  }, [dailyCloses]);
+  const closePriceAt = (ticker: string, isoDate: string): number | null =>
+    closeByTickerDate.get(`${ticker}|${isoDate}`) ?? null;
 
   const signalsByTicker = useMemo(() => {
     const m = new Map<string, TickerSignals>();
@@ -667,6 +693,7 @@ export function usePositions() {
     signalsByTicker,
     shareSells,
     shareSellsByTicker,
+    closePriceAt,
     replacePositions,
     refreshPrices,
     addTrade,

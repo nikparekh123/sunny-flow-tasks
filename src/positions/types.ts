@@ -50,6 +50,14 @@ export interface PositionRow {
 
 export type ShareSellSource = 'manual' | 'assignment';
 
+/** Snapshot of a ticker's close price on a given trading day. */
+export interface DailyClose {
+  ticker: string;
+  date: string;        // ISO YYYY-MM-DD
+  close_price: number;
+  captured_at: string;
+}
+
 /** Audit log of share-sale events (manual + assignment-driven). */
 export interface ShareSell {
   id: string;
