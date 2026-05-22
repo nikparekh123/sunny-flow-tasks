@@ -8,7 +8,7 @@
  */
 import { useMemo, type ReactNode } from "react";
 import {
-  FREQ_DEFS, PUT_FREQ_DEFS, FREQ_BY_ID, HORIZON_DEFS,
+  CALL_FREQ_DEFS, PUT_FREQ_DEFS, FREQ_BY_ID, HORIZON_DEFS,
   cycleStats, resolveHorizon,
   fmtMoney, fmtPct, fmtCount, fmtDate,
   moneynessLabel,
@@ -316,7 +316,7 @@ export function IncomeVsCostCalc({
             <div className="cyc-side-freq">
               <div className="hf-label">Frequency</div>
               <Seg
-                options={FREQ_DEFS.map(f => ({ id: f.id, label: f.label }))}
+                options={CALL_FREQ_DEFS.map(f => ({ id: f.id, label: f.label }))}
                 value={state.callFrequency}
                 onChange={(v) => set("callFrequency", v)}
                 ariaLabel="Call frequency"

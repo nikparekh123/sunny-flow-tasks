@@ -27,9 +27,17 @@ export const FREQ_DEFS: FreqDef[] = [
   { id: "monthly",  label: "Monthly",       short: "monthly",      calDays: 365 / 12,  perYear: 12  },
 ];
 
+// Income vs Cost — call side uses a tighter set of cadences (calls are
+// typically rolled at higher frequency than puts).
+export const CALL_FREQ_DEFS: FreqDef[] = [
+  { id: "daily",         label: "Daily",          short: "daily",          calDays: 365 / 252, perYear: 252 },
+  { id: "thrice-weekly", label: "Thrice a week",  short: "thrice a week",  calDays: 7 / 3,     perYear: 156 },
+  { id: "weekly",        label: "Once a week",    short: "weekly",         calDays: 7,         perYear: 52  },
+  { id: "monthly",       label: "Once a month",   short: "monthly",        calDays: 365 / 12,  perYear: 12  },
+];
+
 // Puts are rolled at lower cadences than calls — bi-weekly is the densest a
-// protective put strategy realistically runs. Reuses biweekly/monthly from
-// FREQ_DEFS (same ids → same calDays) so saved snapshots stay valid.
+// protective put strategy realistically runs.
 export const PUT_FREQ_DEFS: FreqDef[] = [
   { id: "biweekly",  label: "Bi-weekly", short: "bi-weekly", calDays: 14,        perYear: 26 },
   { id: "monthly",   label: "Monthly",   short: "monthly",   calDays: 365 / 12,  perYear: 12 },
@@ -38,9 +46,11 @@ export const PUT_FREQ_DEFS: FreqDef[] = [
   { id: "yearly",    label: "Yearly",    short: "yearly",    calDays: 365,       perYear: 1  },
 ];
 
-// Combined lookup so cycleStats() resolves any frequency id from either set.
+// Combined lookup so cycleStats() resolves any frequency id from any set.
+// Later entries don't overwrite earlier — same-id duplicates (weekly, monthly,
+// biweekly) carry identical calDays/perYear so order is moot.
 export const FREQ_BY_ID: Record<string, FreqDef> = Object.fromEntries(
-  [...FREQ_DEFS, ...PUT_FREQ_DEFS].map(f => [f.id, f]),
+  [...FREQ_DEFS, ...CALL_FREQ_DEFS, ...PUT_FREQ_DEFS].map(f => [f.id, f]),
 );
 
 export interface HorizonDef { id: string; label: string }
