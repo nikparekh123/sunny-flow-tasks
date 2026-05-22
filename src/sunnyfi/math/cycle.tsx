@@ -113,7 +113,11 @@ export function cycleStats(freqId: string, horizonDate: Date | null, now: Date =
     return { cycles: NaN, days: NaN, years: NaN };
   }
   const days = daysBetween(now, horizonDate);
-  const cycles = Math.floor(days / freq.calDays);
+  // ceil semantics — counts events at multiples of freq inside [0, days),
+  // including the t=0 event (the strategy "fires" when you start it).
+  // floor was undercounting whenever cadence ≈ horizon (e.g. quarterly puts
+  // with a quarterly cut-off resolved to 0 cycles → put cost vanished).
+  const cycles = days > 0 ? Math.ceil(days / freq.calDays) : 0;
   const years = days / 365.25;
   return { cycles, days, years };
 }
