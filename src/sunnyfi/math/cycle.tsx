@@ -26,7 +26,22 @@ export const FREQ_DEFS: FreqDef[] = [
   { id: "biweekly", label: "Bi-weekly",     short: "bi-weekly",    calDays: 14,        perYear: 26  },
   { id: "monthly",  label: "Monthly",       short: "monthly",      calDays: 365 / 12,  perYear: 12  },
 ];
-export const FREQ_BY_ID: Record<string, FreqDef> = Object.fromEntries(FREQ_DEFS.map(f => [f.id, f]));
+
+// Puts are rolled at lower cadences than calls — bi-weekly is the densest a
+// protective put strategy realistically runs. Reuses biweekly/monthly from
+// FREQ_DEFS (same ids → same calDays) so saved snapshots stay valid.
+export const PUT_FREQ_DEFS: FreqDef[] = [
+  { id: "biweekly",  label: "Bi-weekly", short: "bi-weekly", calDays: 14,        perYear: 26 },
+  { id: "monthly",   label: "Monthly",   short: "monthly",   calDays: 365 / 12,  perYear: 12 },
+  { id: "quarterly", label: "Quarterly", short: "quarterly", calDays: 365 / 4,   perYear: 4  },
+  { id: "halfyear",  label: "6 months",  short: "6 months",  calDays: 365 / 2,   perYear: 2  },
+  { id: "yearly",    label: "Yearly",    short: "yearly",    calDays: 365,       perYear: 1  },
+];
+
+// Combined lookup so cycleStats() resolves any frequency id from either set.
+export const FREQ_BY_ID: Record<string, FreqDef> = Object.fromEntries(
+  [...FREQ_DEFS, ...PUT_FREQ_DEFS].map(f => [f.id, f]),
+);
 
 export interface HorizonDef { id: string; label: string }
 export const HORIZON_DEFS: HorizonDef[] = [
