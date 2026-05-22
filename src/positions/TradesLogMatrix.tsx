@@ -503,6 +503,10 @@ export function TradesLogMatrix({
                         );
                       }
                       const expired = isOptionExpired(open);
+                      // Expiring today also routes to the Resolve flow — after
+                      // market close on expiry day, ITM/OTM is settled.
+                      const expiringToday = open.expiry === today;
+                      const needsResolve = expired || expiringToday;
                       const signed = slotValueForOpen(open);
                       const state = liveStateLabel(open, today);
                       return (
@@ -513,7 +517,7 @@ export function TradesLogMatrix({
                             (expired ? 'expired' : state.tone === 'urgent' ? 'urgent' : '')
                           }
                           onClick={() => {
-                            if (expired) onResolveCellClick(r.ticker, open);
+                            if (needsResolve) onResolveCellClick(r.ticker, open);
                             else onOpenSlotClick(r.ticker);
                           }}
                           title={
@@ -595,6 +599,8 @@ export function TradesLogMatrix({
                       // but inside the closed zone (visually a bit odd).
                       const open = entry.open;
                       const expired = isOptionExpired(open);
+                      const expiringToday = open.expiry === today;
+                      const needsResolve = expired || expiringToday;
                       const signed = slotValueForOpen(open);
                       const state = liveStateLabel(open, today);
                       return (
@@ -605,7 +611,7 @@ export function TradesLogMatrix({
                             (expired ? 'expired' : state.tone === 'urgent' ? 'urgent' : '')
                           }
                           onClick={() => {
-                            if (expired) onResolveCellClick(r.ticker, open);
+                            if (needsResolve) onResolveCellClick(r.ticker, open);
                             else onOpenSlotClick(r.ticker);
                           }}
                           title={

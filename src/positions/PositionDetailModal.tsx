@@ -462,14 +462,18 @@ export function PositionDetailModal({
   // didn't pass an explicit resolveTrade — that way the Resolve tab is
   // discoverable even when the user opens the modal via the ticker name
   // (rather than clicking the specific expired cell in the trades matrix).
+  //
+  // `expiry <= today` (not <) so options expiring TODAY also qualify —
+  // after market close on expiry day the user already knows ITM/OTM and
+  // should be able to resolve same-day.
   const today = todayIso();
   const firstExpiredOpen = useMemo(
-    () => liveOpens.find((lo) => lo.open.expiry < today)?.open,
+    () => liveOpens.find((lo) => lo.open.expiry <= today)?.open,
     [liveOpens, today],
   );
   const resolveOpen = resolveTrade ?? firstExpiredOpen;
   const expiredCount = useMemo(
-    () => liveOpens.filter((lo) => lo.open.expiry < today).length,
+    () => liveOpens.filter((lo) => lo.open.expiry <= today).length,
     [liveOpens, today],
   );
   const isResolveShortCall =
