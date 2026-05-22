@@ -42,6 +42,7 @@ import {
 } from "../math/data";
 import { useSnapshots, useLiveState, relTime, type Snapshot } from "../math/store";
 import { CALC_MODULES, type CalcModule } from "../math/calcs";
+import { CalcSwitcher } from "../math/CalcSwitcher";
 
 const DASHBOARD_URL = "https://www.sunnyfi.co/dashboard";
 
@@ -246,7 +247,7 @@ export default function MathPage() {
                     />
                   ) : (
                     <>
-                      {calc.name}
+                      <CalcSwitcher current={calc.key} onPick={pickCalc} />
                       <span className="dim">·</span>
                       <span className="snap-name">{snapName}</span>
                     </>
