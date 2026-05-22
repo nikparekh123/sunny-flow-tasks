@@ -344,7 +344,9 @@ export interface PositionComputed extends PositionRow {
   /** Net cash from options activity (premium collected − premium paid)
    *  including live opens. Drives effective_cost. */
   net_options_cash: number;
-  /** unrealized P&L + realized_pl. "Is this position making money?" */
+  /** "Is this position making money?" — unrealized stock + realized options
+   *  + realized stock (from share sells and assignments). All three legs of
+   *  position P&L summed. */
   overall_pl: number;
   /** Per-share effective basis. avg_cost − net_options_cash / quantity.
    *  Lower than avg_cost = options activity has paid down your basis
@@ -382,7 +384,7 @@ export function computeRow(
     realized_pl,
     net_options_cash,
     live_options,
-    overall_pl: pnl_dollar + realized_pl,
+    overall_pl: pnl_dollar + realized_pl + (p.realized_stock_pl ?? 0),
     effective_cost,
   };
 }
