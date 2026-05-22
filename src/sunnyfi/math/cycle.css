@@ -43,7 +43,13 @@
   display: grid;
   grid-template-columns: 1.2fr 1fr 1fr 1fr;
   gap: 22px;
-  align-items: end;
+  /* Align cells at the top so the label row stays in a single straight line
+     across all 4 columns. The Underlying cell has an extra "pull from
+     Sunnyfi" hint below its input — with align-items: end that hint pushed
+     the Underlying label up while the others stayed at the bottom. Top
+     alignment keeps the four labels co-planar; the pull hint just hangs
+     below Underlying on its own column. */
+  align-items: start;
 }
 .cyc-field {
   display: flex;
