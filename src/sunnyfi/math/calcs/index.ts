@@ -3,12 +3,13 @@
  *
  * Each entry maps a calc key (matches CalcMeta.key in data.ts) to a self-
  * contained module: body component, default state, optional copy-as-text
- * formatter, optional display value for the snapshot tag / history.
+ * formatter, snapshot display, and history preview fields.
  *
  * Adding a calculator is purely additive: drop a module next door and add it
  * here. Calcs not present in this map fall back to <CalcEmpty> in the shell.
  */
 import type { ComponentType } from "react";
+
 import {
   PercentageDifferenceCalc,
   pctDiffInitial,
@@ -16,6 +17,27 @@ import {
   pctDiffDisplay,
   pctDiffFields,
 } from "./PercentageDifference";
+import {
+  ExpectedIncomeCalc,
+  eiInitial,
+  eiCopy,
+  eiDisplay,
+  eiFields,
+} from "./ExpectedIncome";
+import {
+  PutCostCalc,
+  pcInitial,
+  pcCopy,
+  pcDisplay,
+  pcFields,
+} from "./PutCost";
+import {
+  IncomeVsCostCalc,
+  ivcInitial,
+  ivcCopy,
+  ivcDisplay,
+  ivcFields,
+} from "./IncomeVsCost";
 
 export interface CalcModule<S extends Record<string, unknown> = Record<string, unknown>> {
   component: ComponentType<{ state: S; setState: (next: S | ((prev: S) => S)) => void }>;
@@ -36,5 +58,26 @@ export const CALC_MODULES: Record<string, CalcModule<any>> = {
     copyText: pctDiffCopy,
     display: pctDiffDisplay,
     payloadFields: pctDiffFields,
+  },
+  "expected-income": {
+    component: ExpectedIncomeCalc,
+    initial: eiInitial,
+    copyText: eiCopy,
+    display: eiDisplay,
+    payloadFields: eiFields,
+  },
+  "put-cost": {
+    component: PutCostCalc,
+    initial: pcInitial,
+    copyText: pcCopy,
+    display: pcDisplay,
+    payloadFields: pcFields,
+  },
+  "income-vs-cost": {
+    component: IncomeVsCostCalc,
+    initial: ivcInitial,
+    copyText: ivcCopy,
+    display: ivcDisplay,
+    payloadFields: ivcFields,
   },
 };

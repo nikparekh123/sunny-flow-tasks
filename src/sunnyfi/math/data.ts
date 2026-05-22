@@ -31,7 +31,10 @@ export const CATEGORIES: Record<CalcCategory, { label: string; comingSoon?: bool
 };
 
 export const CALCS: CalcMeta[] = [
-  { key: "pct-diff", name: "Percentage difference", category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "pct-diff",        name: "Percentage difference", category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "expected-income", name: "Expected income",       category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "put-cost",        name: "Put cost",              category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "income-vs-cost",  name: "Income vs cost",        category: "pre-trade", hint: "Pre-trade planning" },
 ];
 
 export function findCalc(key: string | null): CalcMeta | null {
@@ -43,7 +46,9 @@ export function categoryLabel(c: CalcCategory): string {
   return CATEGORIES[c].label;
 }
 
-export function popularCalcs(_limit = 3): CalcMeta[] {
-  // Only one calculator is live for now; surface it in the popular rail.
-  return CALCS.slice(0, 1);
+export function popularCalcs(limit = 3): CalcMeta[] {
+  // Surface the most-likely-used calcs on the resting hero. Order curated;
+  // hook up to real usage data when we have it.
+  const order = ["expected-income", "put-cost", "pct-diff"];
+  return order.map((k) => CALCS.find((c) => c.key === k)).filter(Boolean).slice(0, limit) as CalcMeta[];
 }
