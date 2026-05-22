@@ -36,9 +36,11 @@ interface Props {
   position: PositionComputed;
   liveOpens: LiveOption[];
   bucket?: Bucket;
-  initialTab?: 'open' | 'close' | 'edit';
+  initialTab?: Tab;
   /** Pre-selected live open for the close tab. */
   initialCloseTarget?: string;
+  /** The expired option being resolved (when initialTab='resolve'). */
+  resolveTrade?: OptionTrade;
   onClose: () => void;
   onAddTrade: (p: {
     ticker: string;
@@ -63,10 +65,35 @@ interface Props {
     trade_date: string;
     note?: string | null;
   }) => void;
+  /** Sell shares manually. */
+  onSellShares?: (p: {
+    ticker: string;
+    quantity: number;
+    price: number;
+    trade_date: string;
+    note?: string | null;
+  }) => void;
+  /** Resolve an expired option (one of three flavors). */
+  onResolveExpired?: (
+    p:
+      | { kind: 'expired'; open: OptionTrade; trade_date: string; note?: string | null }
+      | {
+          kind: 'rolled';
+          open: OptionTrade;
+          close_premium: number;
+          close_date: string;
+          new_strike: number;
+          new_premium: number;
+          new_expiry: string;
+          new_open_date: string;
+          note?: string | null;
+        }
+      | { kind: 'assigned'; open: OptionTrade; trade_date: string; note?: string | null },
+  ) => void;
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
 }
 
-type Tab = 'open' | 'close' | 'edit';
+type Tab = 'open' | 'close' | 'edit' | 'sell-shares' | 'resolve';
 
 interface OpenForm {
   option_type: OptionType;
@@ -126,18 +153,70 @@ const editFormFromTrade = (t: OptionTrade): EditForm => ({
   note: t.note ?? '',
 });
 
+interface SellForm {
+  quantity: string;
+  price: string;
+  date: string;
+  note: string;
+}
+const blankSell = (): SellForm => ({
+  quantity: '',
+  price: '',
+  date: todayIso(),
+  note: '',
+});
+
+type ResolveKind = 'expired' | 'rolled' | 'assigned';
+interface ResolveForm {
+  kind: ResolveKind;
+  // Date the resolution happened (close date for all kinds).
+  trade_date: string;
+  // Rolled-only:
+  close_premium: string;
+  new_strike: string;
+  new_premium: string;
+  new_expiry: string;
+  new_open_date: string;
+  note: string;
+}
+const blankResolve = (open: OptionTrade | undefined): ResolveForm => ({
+  kind: 'expired',
+  trade_date: open?.expiry ?? todayIso(),
+  close_premium: '',
+  new_strike: open ? String(open.strike) : '',
+  new_premium: '',
+  new_expiry: '',
+  new_open_date: todayIso(),
+  note: '',
+});
+
 export function PositionDetailModal({
   position,
   liveOpens,
   bucket,
   initialTab = 'open',
   initialCloseTarget,
+  resolveTrade,
   onClose,
   onAddTrade,
   onUpdateTrade,
+  onSellShares,
+  onResolveExpired,
   onSetStatus,
 }: Props) {
-  const [tab, setTab] = useState<Tab>(liveOpens.length === 0 ? 'open' : initialTab);
+  const [tab, setTab] = useState<Tab>(
+    initialTab === 'resolve' || initialTab === 'sell-shares'
+      ? initialTab
+      : liveOpens.length === 0
+        ? 'open'
+        : initialTab,
+  );
+  const [sellForm, setSellForm] = useState<SellForm>(blankSell());
+  const [resolveForm, setResolveForm] = useState<ResolveForm>(blankResolve(resolveTrade));
+  // If parent passes a new resolveTrade, reset the form for it.
+  useEffect(() => {
+    setResolveForm(blankResolve(resolveTrade));
+  }, [resolveTrade?.id]);  // eslint-disable-line react-hooks/exhaustive-deps
   const [openForm, setOpenForm] = useState<OpenForm>(blankOpen());
   const [closeForm, setCloseForm] = useState<CloseForm>(
     blankClose(initialCloseTarget ?? liveOpens[0]?.open.id ?? ''),
@@ -298,6 +377,110 @@ export function PositionDetailModal({
     onClose();
   };
 
+  // ── Sell Shares math ───────────────────────────────────────────
+  const sellQtyN = parseInt(sellForm.quantity, 10) || 0;
+  const sellPriceN = parseFloat(sellForm.price) || 0;
+  const canSubmitSell =
+    !!onSellShares &&
+    sellQtyN > 0 &&
+    sellQtyN <= position.quantity &&
+    sellPriceN >= 0 &&
+    !!sellForm.date;
+  const sellRealized = (sellPriceN - position.avg_cost) * sellQtyN;
+  const submitSell = () => {
+    if (!canSubmitSell || !onSellShares) return;
+    onSellShares({
+      ticker: position.ticker,
+      quantity: sellQtyN,
+      price: sellPriceN,
+      trade_date: sellForm.date,
+      note: sellForm.note || null,
+    });
+    setSellForm(blankSell());
+    onClose();
+  };
+
+  // ── Resolve Expired math ───────────────────────────────────────
+  // The trade being resolved was supplied via prop. Three paths:
+  //   expired  — close at \$0, premium kept
+  //   rolled   — close at buyback + open new at new strike/expiry
+  //   assigned — short call → sells shares at strike (realized P&L preview)
+  const resolveOpen = resolveTrade;
+  const isResolveShortCall =
+    !!resolveOpen &&
+    resolveOpen.direction === 'short' &&
+    resolveOpen.option_type === 'call';
+  const isResolveShortPut =
+    !!resolveOpen &&
+    resolveOpen.direction === 'short' &&
+    resolveOpen.option_type === 'put';
+  const resolveAssignedSharePnl =
+    resolveOpen && isResolveShortCall
+      ? (resolveOpen.strike - position.avg_cost) * resolveOpen.contracts * 100
+      : 0;
+  const resolveAssignedNewAvg =
+    resolveOpen && isResolveShortPut
+      ? (() => {
+          const newShares = resolveOpen.contracts * 100;
+          const totalShares = position.quantity + newShares;
+          return totalShares > 0
+            ? (position.quantity * position.avg_cost +
+                newShares * resolveOpen.strike) /
+                totalShares
+            : resolveOpen.strike;
+        })()
+      : null;
+  const resolveRolledClosePremiumN = parseFloat(resolveForm.close_premium) || 0;
+  const resolveRolledNewStrikeN = parseFloat(resolveForm.new_strike) || 0;
+  const resolveRolledNewPremiumN = parseFloat(resolveForm.new_premium) || 0;
+
+  const canSubmitResolve = (() => {
+    if (!onResolveExpired || !resolveOpen) return false;
+    if (resolveForm.kind === 'expired') return !!resolveForm.trade_date;
+    if (resolveForm.kind === 'assigned') return !!resolveForm.trade_date;
+    // rolled
+    return (
+      !!resolveForm.trade_date &&
+      resolveRolledClosePremiumN >= 0 &&
+      resolveRolledNewStrikeN > 0 &&
+      resolveRolledNewPremiumN >= 0 &&
+      !!resolveForm.new_expiry &&
+      !!resolveForm.new_open_date
+    );
+  })();
+
+  const submitResolve = () => {
+    if (!canSubmitResolve || !onResolveExpired || !resolveOpen) return;
+    if (resolveForm.kind === 'expired') {
+      onResolveExpired({
+        kind: 'expired',
+        open: resolveOpen,
+        trade_date: resolveForm.trade_date,
+        note: resolveForm.note || null,
+      });
+    } else if (resolveForm.kind === 'assigned') {
+      onResolveExpired({
+        kind: 'assigned',
+        open: resolveOpen,
+        trade_date: resolveForm.trade_date,
+        note: resolveForm.note || null,
+      });
+    } else {
+      onResolveExpired({
+        kind: 'rolled',
+        open: resolveOpen,
+        close_premium: resolveRolledClosePremiumN,
+        close_date: resolveForm.trade_date,
+        new_strike: resolveRolledNewStrikeN,
+        new_premium: resolveRolledNewPremiumN,
+        new_expiry: resolveForm.new_expiry,
+        new_open_date: resolveForm.new_open_date,
+        note: resolveForm.note || null,
+      });
+    }
+    onClose();
+  };
+
   return (
     <div className="pp-stage" onClick={onClose}>
       <div className="pp-popup" role="dialog" onClick={(e) => e.stopPropagation()}>
@@ -351,6 +534,33 @@ export function PositionDetailModal({
           >
             Edit<span className="pp-tab-count">{editableOpens.length}</span>
           </button>
+          <button
+            className={
+              'pp-tab' +
+              (tab === 'sell-shares' ? ' on' : '') +
+              (position.quantity === 0 ? ' disabled' : '')
+            }
+            onClick={() => position.quantity > 0 && setTab('sell-shares')}
+            disabled={position.quantity === 0 || !onSellShares}
+            title={
+              !onSellShares
+                ? 'Sell shares not wired'
+                : position.quantity === 0
+                  ? 'No shares to sell'
+                  : ''
+            }
+          >
+            Sell shares
+          </button>
+          {resolveOpen && (
+            <button
+              className={'pp-tab' + (tab === 'resolve' ? ' on' : '')}
+              onClick={() => setTab('resolve')}
+              disabled={!onResolveExpired}
+            >
+              Resolve
+            </button>
+          )}
         </div>
 
         {/* SIDECAR */}
@@ -373,6 +583,21 @@ export function PositionDetailModal({
                 setForm={setEditForm}
                 opens={editableOpens}
                 target={editTarget}
+              />
+            )}
+            {tab === 'sell-shares' && (
+              <SellSharesFields
+                form={sellForm}
+                setForm={setSellForm}
+                maxQty={position.quantity}
+                avgCost={position.avg_cost}
+              />
+            )}
+            {tab === 'resolve' && resolveOpen && (
+              <ResolveFields
+                form={resolveForm}
+                setForm={setResolveForm}
+                open={resolveOpen}
               />
             )}
           </div>
@@ -426,7 +651,10 @@ export function PositionDetailModal({
               <div className="pp-rail-lbl">
                 {tab === 'open' ? 'New trade preview'
                   : tab === 'close' ? 'Realized P&L'
-                  : 'Edit preview'}
+                  : tab === 'edit' ? 'Edit preview'
+                  : tab === 'sell-shares' ? 'Sale preview'
+                  : tab === 'resolve' ? 'Resolution preview'
+                  : 'Preview'}
               </div>
               {tab === 'open' && (
                 <>
@@ -478,6 +706,78 @@ export function PositionDetailModal({
                   </>
                 );
               })()}
+              {tab === 'sell-shares' && (
+                <>
+                  <div className={'pp-rail-bignum ' + (sellRealized > 0 ? 'pos' : sellRealized < 0 ? 'neg' : '')}>
+                    {sellQtyN === 0
+                      ? '—'
+                      : sellRealized >= 0
+                        ? fmtUSD(sellRealized)
+                        : '−' + fmtUSD(Math.abs(sellRealized))}
+                  </div>
+                  <div className="pp-rail-sub">
+                    {sellQtyN > 0
+                      ? `${sellQtyN} sh × (${fmtUSD2(sellPriceN)} − ${fmtUSD2(position.avg_cost)})`
+                      : 'enter qty + price'}
+                  </div>
+                </>
+              )}
+              {tab === 'resolve' && resolveOpen && (
+                <>
+                  {resolveForm.kind === 'expired' && (
+                    <>
+                      <div className="pp-rail-bignum pos">
+                        {fmtUSD(resolveOpen.contracts * 100 * resolveOpen.premium)}
+                      </div>
+                      <div className="pp-rail-sub">
+                        full premium kept (expired worthless)
+                      </div>
+                    </>
+                  )}
+                  {resolveForm.kind === 'assigned' && isResolveShortCall && (
+                    <>
+                      <div className={'pp-rail-bignum ' + (resolveAssignedSharePnl > 0 ? 'pos' : resolveAssignedSharePnl < 0 ? 'neg' : '')}>
+                        {resolveAssignedSharePnl >= 0
+                          ? fmtUSD(resolveAssignedSharePnl)
+                          : '−' + fmtUSD(Math.abs(resolveAssignedSharePnl))}
+                      </div>
+                      <div className="pp-rail-sub">
+                        stock realized · {resolveOpen.contracts * 100} sh × (${resolveOpen.strike} − {fmtUSD2(position.avg_cost)})
+                      </div>
+                    </>
+                  )}
+                  {resolveForm.kind === 'assigned' && isResolveShortPut && resolveAssignedNewAvg != null && (
+                    <>
+                      <div className="pp-rail-bignum">{fmtUSD2(resolveAssignedNewAvg)}</div>
+                      <div className="pp-rail-sub">
+                        new avg cost after buying {resolveOpen.contracts * 100} sh @ ${resolveOpen.strike}
+                      </div>
+                    </>
+                  )}
+                  {resolveForm.kind === 'rolled' && (
+                    <>
+                      {(() => {
+                        const realized =
+                          resolveOpen.direction === 'short'
+                            ? (resolveOpen.premium - resolveRolledClosePremiumN) * resolveOpen.contracts * 100
+                            : (resolveRolledClosePremiumN - resolveOpen.premium) * resolveOpen.contracts * 100;
+                        return (
+                          <>
+                            <div className={'pp-rail-bignum ' + (realized > 0 ? 'pos' : realized < 0 ? 'neg' : '')}>
+                              {realized >= 0
+                                ? fmtUSD(realized)
+                                : '−' + fmtUSD(Math.abs(realized))}
+                            </div>
+                            <div className="pp-rail-sub">
+                              realized on close · new open follows
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+                </>
+              )}
             </div>
           </aside>
         </div>
@@ -510,6 +810,24 @@ export function PositionDetailModal({
                 title={!editDirty ? 'No changes' : ''}
               >
                 ✓ Save changes
+              </button>
+            )}
+            {tab === 'sell-shares' && (
+              <button
+                className="pp-btn pp-btn-neon"
+                onClick={submitSell}
+                disabled={!canSubmitSell}
+              >
+                ✓ Sell shares
+              </button>
+            )}
+            {tab === 'resolve' && (
+              <button
+                className="pp-btn pp-btn-neon"
+                onClick={submitResolve}
+                disabled={!canSubmitResolve}
+              >
+                ✓ Resolve
               </button>
             )}
           </div>
@@ -885,6 +1203,188 @@ function MoneyInput({
         placeholder={placeholder}
       />
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Sell Shares fields
+function SellSharesFields({
+  form, setForm, maxQty, avgCost,
+}: {
+  form: SellForm;
+  setForm: (f: SellForm) => void;
+  maxQty: number;
+  avgCost: number;
+}) {
+  const set = <K extends keyof SellForm>(k: K, v: SellForm[K]) =>
+    setForm({ ...form, [k]: v });
+  return (
+    <>
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">Quantity</div>
+          <input
+            className="pp-input mono"
+            type="number"
+            min="1"
+            max={maxQty}
+            step="1"
+            value={form.quantity}
+            onChange={(e) => set('quantity', e.target.value)}
+            placeholder={String(maxQty)}
+          />
+          <div className="pp-field-hint">up to {fmtQty(maxQty)} on hand</div>
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">Price / share</div>
+          <MoneyInput value={form.price} onChange={(v) => set('price', v)} placeholder="0.00" />
+          <div className="pp-field-hint">avg basis {fmtUSD2(avgCost)}</div>
+        </div>
+      </div>
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">Date</div>
+          <input
+            className="pp-input mono"
+            type="date"
+            value={form.date}
+            onChange={(e) => set('date', e.target.value)}
+          />
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">Note (optional)</div>
+          <input
+            className="pp-input"
+            value={form.note}
+            onChange={(e) => set('note', e.target.value)}
+            placeholder="reason, broker fill ID, etc."
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Resolve Expired fields — three modes (expired / rolled / assigned).
+function ResolveFields({
+  form, setForm, open,
+}: {
+  form: ResolveForm;
+  setForm: (f: ResolveForm) => void;
+  open: OptionTrade;
+}) {
+  const set = <K extends keyof ResolveForm>(k: K, v: ResolveForm[K]) =>
+    setForm({ ...form, [k]: v });
+  const isCall = open.option_type === 'call';
+  return (
+    <>
+      <div className="pp-field">
+        <div className="pp-field-label">Resolving this expired position</div>
+        <div className="pp-resolve-card">
+          <span className={'pp-mini-glyph ' + (open.direction === 'short' ? 'neg' : 'pos')}>
+            {isCall ? 'C' : 'P'}
+          </span>
+          <span className="pp-resolve-meta">
+            {open.direction === 'short' ? '−' : '+'}
+            {open.contracts} {open.option_type.toUpperCase()} ${open.strike}
+            <span className="pp-resolve-exp"> · exp {open.expiry}</span>
+          </span>
+          <span className="pp-resolve-prem">opened @ ${open.premium}/sh</span>
+        </div>
+      </div>
+
+      <div className="pp-field">
+        <div className="pp-field-label">What happened?</div>
+        <div className="pp-source-seg">
+          {(
+            [
+              ['expired', 'Expired worthless'],
+              ['rolled', 'Rolled'],
+              ['assigned', 'Exercised / Assigned'],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              className={'pp-source-opt' + (form.kind === k ? ' on' : '')}
+              onClick={() => set('kind', k)}
+            >
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">
+            {form.kind === 'rolled' ? 'Close date' : 'Resolution date'}
+          </div>
+          <input
+            className="pp-input mono"
+            type="date"
+            value={form.trade_date}
+            onChange={(e) => set('trade_date', e.target.value)}
+          />
+          <div className="pp-field-hint">defaults to expiry ({open.expiry})</div>
+        </div>
+        {form.kind === 'rolled' && (
+          <div className="pp-field">
+            <div className="pp-field-label">
+              Close premium / sh ({open.direction === 'short' ? 'paid back' : 'collected'})
+            </div>
+            <MoneyInput value={form.close_premium} onChange={(v) => set('close_premium', v)} placeholder="0.00" />
+            <div className="pp-field-hint">opened @ ${open.premium}/sh</div>
+          </div>
+        )}
+      </div>
+
+      {form.kind === 'rolled' && (
+        <>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">New strike</div>
+              <MoneyInput value={form.new_strike} onChange={(v) => set('new_strike', v)} placeholder={String(open.strike)} />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">New premium / sh</div>
+              <MoneyInput value={form.new_premium} onChange={(v) => set('new_premium', v)} placeholder="0.00" />
+            </div>
+          </div>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">New expiry</div>
+              <input
+                className="pp-input mono"
+                type="date"
+                value={form.new_expiry}
+                onChange={(e) => set('new_expiry', e.target.value)}
+              />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">New trade date</div>
+              <input
+                className="pp-input mono"
+                type="date"
+                value={form.new_open_date}
+                onChange={(e) => set('new_open_date', e.target.value)}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="pp-field">
+        <div className="pp-field-label">Note (optional)</div>
+        <input
+          className="pp-input"
+          value={form.note}
+          onChange={(e) => set('note', e.target.value)}
+          placeholder="anything to remember about this resolution"
+        />
+      </div>
+    </>
   );
 }
 

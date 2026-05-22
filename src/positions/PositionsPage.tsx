@@ -38,10 +38,13 @@ export default function PositionsPage() {
     liveByTicker,
     realizedByTicker,
     signalsByTicker,
+    shareSellsByTicker,
     replacePositions,
     refreshPrices,
     addTrade,
     updateTrade,
+    sellShares,
+    resolveExpired,
     setPositionStatus,
     setEarningsDate,
     deletePosition,
@@ -62,7 +65,15 @@ export default function PositionsPage() {
   // Two-layer modal: ticker click opens insight (read), insight's action
   // buttons promote to the write modal in either 'open' or 'close' tab.
   const [insightTicker, setInsightTicker] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ ticker: string; tab: 'open' | 'close' } | null>(null);
+  const [detail, setDetail] = useState<
+    | {
+        ticker: string;
+        tab: 'open' | 'close' | 'edit' | 'sell-shares' | 'resolve';
+        // For 'resolve' tab: the expired option being resolved.
+        resolveTrade?: import('./types').OptionTrade;
+      }
+    | null
+  >(null);
 
   // ?ticker=… deep-link
   useEffect(() => {
@@ -266,13 +277,18 @@ export default function PositionsPage() {
               tradesByTicker={tradesByTicker}
               liveByTicker={liveByTicker}
               realizedByTicker={realizedByTicker}
+              shareSellsByTicker={shareSellsByTicker}
               onTickerClick={(t) => setInsightTicker(t)}
-              // Cell click: if the ticker has live opens, default to Close
-              // tab (most likely the user wants to close); otherwise Open.
-              onCellClick={(t) => {
+              onSharesCellClick={(t) =>
+                setDetail({ ticker: t, tab: 'sell-shares' })
+              }
+              onOpenSlotClick={(t) => {
                 const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
                 setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
               }}
+              onResolveCellClick={(t, open) =>
+                setDetail({ ticker: t, tab: 'resolve', resolveTrade: open })
+              }
             />
           )}
           {posView === 'timeline' && (
@@ -369,6 +385,7 @@ export default function PositionsPage() {
             liveOpens={live}
             bucket={overlayByTicker.get(detail.ticker)}
             initialTab={detail.tab}
+            resolveTrade={detail.resolveTrade}
             onClose={() => setDetail(null)}
             onAddTrade={(p) =>
               addTrade.mutate(p, {
@@ -379,6 +396,25 @@ export default function PositionsPage() {
             onUpdateTrade={(p) =>
               updateTrade.mutate(p, {
                 onSuccess: () => toast.success(`Updated · ${detail.ticker}`),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+            onSellShares={(p) =>
+              sellShares.mutate(p, {
+                onSuccess: (res) => toast.success(`Sold ${p.quantity} ${p.ticker} · realized ${res.realized >= 0 ? '+' : '−'}\$${Math.abs(res.realized).toFixed(0)}`),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+            onResolveExpired={(p) =>
+              resolveExpired.mutate(p, {
+                onSuccess: (res) => {
+                  const msg =
+                    res.kind === 'expired' ? 'Marked expired worthless'
+                      : res.kind === 'rolled' ? 'Rolled'
+                      : res.kind === 'assigned' ? `Assigned · realized ${res.sharePnl >= 0 ? '+' : '−'}\$${Math.abs(res.sharePnl).toFixed(0)}`
+                      : 'Resolved';
+                  toast.success(`${msg} · ${detail.ticker}`);
+                },
                 onError: (e) => toast.error((e as Error).message),
               })
             }

@@ -1281,6 +1281,48 @@
 .gl-cell.this { background: rgba(210,230,50,.03); }
 .gl-cell:hover { background: rgba(210,230,50,.08); }
 
+/* Shares zone — dedicated leftmost column with its own tint */
+.gl-table th.gl-wk.shares-zone,
+.gl-table td.gl-cell.shares-zone {
+  background: rgba(210,230,50,.06);
+}
+.gl-table td.gl-cell.shares-zone:hover {
+  background: rgba(210,230,50,.14);
+}
+/* Share-sell cells inside the closed zone get a subtle warm tint */
+.gl-table td.gl-cell.share-sell {
+  background: rgba(224,192,96,.07);
+}
+.gl-table td.gl-cell.share-sell:hover {
+  background: rgba(224,192,96,.14);
+}
+/* Expired option cell — amber border to call for action */
+.gl-table td.gl-cell.expired {
+  outline: 1px solid var(--navi-warning);
+  outline-offset: -2px;
+}
+.gl-cell-state.expired { color: var(--navi-warning); }
+/* Resolve card in modal */
+.pp-resolve-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 8px;
+}
+.pp-resolve-meta {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  color: var(--navi-fg1);
+}
+.pp-resolve-exp { color: var(--navi-fg3); }
+.pp-resolve-prem {
+  margin-left: auto;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+}
+
 /* Column zones: first N cols are LIVE (faint neon tint), the rest are
    the closed/history zone (faint muted tint). Boundary cell gets a thin
    left border so the eye finds the split. */
