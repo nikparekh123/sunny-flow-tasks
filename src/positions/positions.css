@@ -1956,6 +1956,28 @@
   height: 1.5px;
   background: var(--navi-neon);
 }
+/* Resolve tab — warning gold (urgent), and badge counter for the # of
+   expired option positions still needing resolution. */
+.pp-tab.pp-tab-resolve { color: var(--navi-warning); }
+.pp-tab.pp-tab-resolve.on { color: var(--navi-warning); }
+.pp-tab.pp-tab-resolve.on::after { background: var(--navi-warning); }
+.pp-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 100px;
+  background: var(--navi-tint-warning);
+  color: var(--navi-warning);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
 .pp-tab-count {
   font-family: var(--navi-font-mono);
   font-size: 11px;

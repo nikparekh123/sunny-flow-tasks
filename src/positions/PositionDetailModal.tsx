@@ -457,7 +457,21 @@ export function PositionDetailModal({
   //   expired  — close at \$0, premium kept
   //   rolled   — close at buyback + open new at new strike/expiry
   //   assigned — short call → sells shares at strike (realized P&L preview)
-  const resolveOpen = resolveTrade;
+  //
+  // Fall back to the first expired live open on this ticker if the parent
+  // didn't pass an explicit resolveTrade — that way the Resolve tab is
+  // discoverable even when the user opens the modal via the ticker name
+  // (rather than clicking the specific expired cell in the trades matrix).
+  const today = todayIso();
+  const firstExpiredOpen = useMemo(
+    () => liveOpens.find((lo) => lo.open.expiry < today)?.open,
+    [liveOpens, today],
+  );
+  const resolveOpen = resolveTrade ?? firstExpiredOpen;
+  const expiredCount = useMemo(
+    () => liveOpens.filter((lo) => lo.open.expiry < today).length,
+    [liveOpens, today],
+  );
   const isResolveShortCall =
     !!resolveOpen &&
     resolveOpen.direction === 'short' &&
@@ -598,11 +612,19 @@ export function PositionDetailModal({
           </button>
           {resolveOpen && (
             <button
-              className={'pp-tab' + (tab === 'resolve' ? ' on' : '')}
+              className={'pp-tab pp-tab-resolve' + (tab === 'resolve' ? ' on' : '')}
               onClick={() => setTab('resolve')}
               disabled={!onResolveExpired}
+              title={
+                expiredCount > 1
+                  ? `${expiredCount} expired options need to be resolved`
+                  : 'Resolve the expired option'
+              }
             >
               Resolve
+              {expiredCount > 0 && (
+                <span className="pp-tab-badge">{expiredCount}</span>
+              )}
             </button>
           )}
         </div>
