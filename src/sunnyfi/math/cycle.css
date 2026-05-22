@@ -108,6 +108,34 @@
   animation: navi-pulse 2.5s ease-in-out infinite;
 }
 
+/* Clickable variant — replaces the inert hint when wired to a real pull */
+button.cyc-pull-btn {
+  background: transparent;
+  border: 0;
+  padding: 2px 4px;
+  margin: 4px -4px 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+  letter-spacing: .3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  transition: color .12s var(--ease), background .12s var(--ease);
+}
+button.cyc-pull-btn:hover { color: var(--navi-neon); background: rgba(210,230,50,.06); }
+button.cyc-pull-btn.loading { color: var(--navi-fg2); cursor: progress; }
+button.cyc-pull-btn.ok      { color: var(--navi-positive); }
+button.cyc-pull-btn.err     { color: var(--navi-negative); }
+button.cyc-pull-btn .live-dot { transition: background .15s var(--ease); }
+button.cyc-pull-btn.ok      .live-dot { background: var(--navi-positive); animation: none; }
+button.cyc-pull-btn.err     .live-dot { background: var(--navi-negative); animation: none; }
+button.cyc-pull-btn.loading .live-dot { background: var(--navi-fg2); animation: navi-pulse 0.8s ease-in-out infinite; }
+
 /* Segmented control */
 .cyc-seg {
   display: inline-flex;

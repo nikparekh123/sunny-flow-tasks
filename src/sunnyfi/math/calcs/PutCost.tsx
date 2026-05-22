@@ -11,7 +11,7 @@ import {
   cycleStats, resolveHorizon,
   fmtMoney, fmtPct, fmtCount, fmtDate,
   moneynessLabel,
-  CycField, NumInput, HeroNumInput, Seg, Tile,
+  CycField, NumInput, HeroNumInput, Seg, Tile, PullFromSunnyfi,
 } from "../cycle";
 
 export interface PCState extends Record<string, unknown> {
@@ -159,7 +159,16 @@ export function PutCostCalc({
             ariaLabel="Underlying ticker"
             className="ticker"
           />
-          <div className="cyc-pull"><span className="live-dot" /> pull from Sunnyfi · or type</div>
+          <PullFromSunnyfi
+            ticker={state.underlying}
+            onPull={({ price, shares }) =>
+              setState({
+                ...state,
+                price: price.toFixed(2),
+                ...(shares ? { shares: String(shares) } : {}),
+              })
+            }
+          />
         </CycField>
 
         <CycField label="Position mode">

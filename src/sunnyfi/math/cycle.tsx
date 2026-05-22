@@ -7,8 +7,9 @@
  *
  * Ported from calc-cycle-shared.jsx (handoff bundle).
  */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import "./cycle.css";
+import { pullTickerQuote } from "./quote";
 
 // ── Frequency table ─────────────────────────────────────────────
 export interface FreqDef {
@@ -238,6 +239,52 @@ export function Tile({ label, value, sub, tone, primary, mono }: TileProps) {
       {sub && <div className="cyc-tile-sub">{sub}</div>}
       <div className={`cyc-tile-val${mono ? " mono" : ""}${toneCls}`}>{value}</div>
     </div>
+  );
+}
+
+// ── Pull-from-Sunnyfi row ────────────────────────────────────────
+// Click → looks up the typed ticker in the user's positions, falls back to
+// a live Polygon snapshot via the quote-ticker edge function. Calls back
+// with the price (and shares, if known). Shows status text inline.
+export function PullFromSunnyfi({
+  ticker,
+  onPull,
+}: {
+  ticker: string;
+  onPull: (result: { price: number; shares?: number; source: "positions" | "polygon" }) => void;
+}) {
+  const [status, setStatus] = useState<"idle" | "loading" | "ok" | "err">("idle");
+  const [msg, setMsg] = useState<string>("");
+
+  const onClick = async () => {
+    if (status === "loading") return;
+    if (!ticker.trim()) { setStatus("err"); setMsg("type a ticker first"); return; }
+    setStatus("loading");
+    setMsg("");
+    try {
+      const q = await pullTickerQuote(ticker);
+      onPull({ price: q.price, shares: q.shares, source: q.source });
+      setStatus("ok");
+      setMsg(q.source === "positions" ? "pulled from your positions" : "pulled from Polygon");
+    } catch (e) {
+      setStatus("err");
+      setMsg((e as Error).message);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className={`cyc-pull cyc-pull-btn ${status}`}
+      onClick={onClick}
+      aria-label={`Pull current price for ${ticker || "ticker"}`}
+    >
+      <span className={`live-dot ${status === "loading" ? "loading" : ""}`} />
+      {status === "idle" && <>pull from Sunnyfi · or type</>}
+      {status === "loading" && <>fetching {ticker}…</>}
+      {status === "ok" && <>✓ {msg}</>}
+      {status === "err" && <>!  {msg}</>}
+    </button>
   );
 }
 
