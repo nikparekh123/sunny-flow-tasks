@@ -1,0 +1,96 @@
+/* PageSwitcher — neutral container, themed by parent surface */
+
+.ps-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Trigger — inherits font / color / weight / casing from the brand wordmark
+   so it merges seamlessly with the surrounding "sunnyfi / <name>" text. */
+.ps-trigger {
+  background: transparent;
+  border: 0;
+  padding: 2px 6px;
+  margin: -2px -4px;
+  border-radius: 5px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: inherit;
+  transition: background .12s ease, color .12s ease;
+}
+.ps-trigger:hover {
+  background: rgba(210,230,50,.08);
+  color: var(--navi-neon, #d2e632);
+}
+.ps-trigger .ps-current { line-height: 1; }
+.ps-trigger .ps-chev {
+  opacity: .6;
+  transition: opacity .12s ease, transform .12s ease;
+}
+.ps-trigger:hover .ps-chev { opacity: 1; }
+.ps-wrap.open .ps-trigger .ps-chev { transform: rotate(180deg); }
+
+/* Menu panel — own surface styling, independent of parent's casing */
+.ps-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -4px;
+  z-index: 50;
+  min-width: 200px;
+  background: var(--navi-surface, #0f3333);
+  border: 1px solid rgba(50,110,100,.4);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--navi-font-sans, 'Work Sans', system-ui);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--navi-fg1, #faf5f0);
+  animation: ps-fade-in .14s cubic-bezier(.4,0,.2,1);
+}
+
+@keyframes ps-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.ps-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--navi-fg1, #faf5f0);
+  cursor: pointer;
+  transition: background .1s ease, color .1s ease;
+}
+.ps-item:hover {
+  background: rgba(50,110,100,.2);
+}
+.ps-item.active {
+  background: var(--navi-tint-neon, rgba(210,230,50,.10));
+  color: var(--navi-neon, #d2e632);
+}
+.ps-item-label { line-height: 1; }
+.ps-item-tag {
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--navi-neon-dark, #c8d820);
+  opacity: .85;
+}

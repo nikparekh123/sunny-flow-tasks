@@ -14,6 +14,7 @@ import { RealizedSummary } from './RealizedSummary';
 import { StockInsightsStrip } from './StockInsightsStrip';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
+import { PageSwitcher } from '@/sunnyfi/components/PageSwitcher';
 import './positions.css';
 
 const DASHBOARD_URL = 'https://www.sunnyfi.co/dashboard';
@@ -131,7 +132,7 @@ export default function PositionsPage() {
             Sunnyfi<span className="cursor" />
           </a>
           <span className="np-crumb-sep">/</span>
-          <span className="np-crumb">POSITIONS</span>
+          <span className="np-crumb"><PageSwitcher current="positions" variant="np" /></span>
         </div>
         <div className="np-actions">
           <button
