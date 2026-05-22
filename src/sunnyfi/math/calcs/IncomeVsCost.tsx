@@ -233,8 +233,9 @@ export function IncomeVsCostCalc({
         Net economics of running covered calls and protective puts together. Pick frequencies, pick a horizon, see if the structure pays for itself.
       </p>
 
-      {/* Position context */}
-      <div className="cyc-context cols-3">
+      {/* Position context — shares spans 2 cols so Current price aligns
+          with the same column position as Put Cost / Expected Income. */}
+      <div className="cyc-context">
         <CycField label="Underlying">
           <NumInput
             value={state.underlying}
@@ -257,7 +258,7 @@ export function IncomeVsCostCalc({
             }
           />
         </CycField>
-        <CycField label="Shares">
+        <CycField label="Shares" span={2}>
           <NumInput value={state.shares} onChange={(v) => set("shares", v)} placeholder="0" ariaLabel="Shares" />
         </CycField>
         <CycField label="Current price">
