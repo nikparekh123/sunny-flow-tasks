@@ -43,6 +43,26 @@ export interface PositionRow {
   status: PositionStatus;
   /** Next earnings date as ISO 'YYYY-MM-DD', or null if none scheduled. */
   earnings_date: string | null;
+  /** Running total of realized stock P&L (from share sells + assignments).
+   *  Preserved across CSV upserts. */
+  realized_stock_pl: number;
+}
+
+export type ShareSellSource = 'manual' | 'assignment';
+
+/** Audit log of share-sale events (manual + assignment-driven). */
+export interface ShareSell {
+  id: string;
+  ticker: string;
+  quantity: number;
+  price: number;
+  trade_date: string;
+  source: ShareSellSource;
+  linked_option_close_id: string | null;
+  realized_pl: number;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Days between today (UTC) and an ISO date string. Negative = in the past. */
@@ -155,6 +175,7 @@ export function chipsForSignals(s: TickerSignals): SignalChip[] {
 export type OptionType = 'call' | 'put';
 export type Direction = 'long' | 'short';
 export type Action = 'open' | 'close';
+export type ClosedVia = 'expired_worthless' | 'rolled' | 'assigned' | 'manual';
 
 export interface OptionTrade {
   id: string;
@@ -171,6 +192,13 @@ export interface OptionTrade {
   note: string | null;
   created_at: string;
   updated_at: string;
+  /** Set on action='close' rows — how the close happened. */
+  closed_via?: ClosedVia | null;
+  /** Set on action='open' rows that were created by rolling another open. */
+  rolled_from?: string | null;
+  /** Set on action='close' rows with closed_via='assigned' — snapshots
+   *  the realized stock P&L from this assignment. */
+  share_pnl?: number | null;
 }
 
 /** Signed dollar value of a single trade: contracts × 100 × premium, with

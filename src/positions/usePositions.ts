@@ -6,11 +6,13 @@ import {
   liveOptionsByTicker,
   realizedPLByTicker,
   type Action,
+  type ClosedVia,
   type Direction,
   type OptionTrade,
   type OptionType,
   type PositionRow,
   type Sector,
+  type ShareSell,
   type TickerSignals,
   SECTORS,
 } from './types';
@@ -67,6 +69,20 @@ export function usePositions() {
     },
   });
 
+  // Share-sale audit log (manual sells + assignment-driven sells).
+  // Surfaced in the trades matrix as entries in the closed zone.
+  const { data: shareSells = [] } = useQuery({
+    queryKey: ['share_sells'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('share_sells' as never)
+        .select('*')
+        .order('trade_date', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as unknown as ShareSell[];
+    },
+  });
+
   // Daily technical indicators — populated by the refresh-signals edge
   // function (post-market-close cron). Read-only on the client.
   const { data: signalsRaw = [] } = useQuery({
@@ -110,6 +126,11 @@ export function usePositions() {
         { event: '*', schema: 'public', table: 'option_trades' },
         () => qc.invalidateQueries({ queryKey: ['option_trades'] }),
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'share_sells' },
+        () => qc.invalidateQueries({ queryKey: ['share_sells'] }),
+      )
       .subscribe();
     return () => { supabase.removeChannel(sub); };
   }, [qc, channelId]);
@@ -127,6 +148,16 @@ export function usePositions() {
 
   const liveByTicker = useMemo(() => liveOptionsByTicker(trades), [trades]);
   const realizedByTicker = useMemo(() => realizedPLByTicker(trades), [trades]);
+
+  const shareSellsByTicker = useMemo(() => {
+    const m = new Map<string, ShareSell[]>();
+    for (const s of shareSells) {
+      const arr = m.get(s.ticker) ?? [];
+      arr.push(s);
+      m.set(s.ticker, arr);
+    }
+    return m;
+  }, [shareSells]);
 
   const signalsByTicker = useMemo(() => {
     const m = new Map<string, TickerSignals>();
@@ -324,7 +355,7 @@ export function usePositions() {
   const deletePosition = useMutation({
     mutationFn: async (ticker: string) => {
       const t = ticker.trim().toUpperCase();
-      const tables = ['option_trades', 'positions'] as const;
+      const tables = ['option_trades', 'share_sells', 'positions'] as const;
       for (const table of tables) {
         const { error } = await supabase
           .from(table as never)
@@ -337,8 +368,265 @@ export function usePositions() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['positions'] });
       qc.invalidateQueries({ queryKey: ['option_trades'] });
+      qc.invalidateQueries({ queryKey: ['share_sells'] });
     },
   });
+
+  // ── Manual share sale ────────────────────────────────────────────
+  // Decrements positions.quantity, accumulates realized_stock_pl,
+  // logs an entry in share_sells. avg_cost unchanged (selling doesn't
+  // adjust basis).
+  const sellShares = useMutation({
+    mutationFn: async (args: {
+      ticker: string;
+      quantity: number;
+      price: number;
+      trade_date: string;
+      note?: string | null;
+    }) => {
+      const t = args.ticker.trim().toUpperCase();
+      // 1. Fetch current position state.
+      const { data: posRow, error: readErr } = await supabase
+        .from('positions' as never)
+        .select('quantity, avg_cost, realized_stock_pl')
+        .eq('ticker', t)
+        .single();
+      if (readErr) throw new Error(`positions read: ${readErr.message}`);
+      const pos = posRow as { quantity: number; avg_cost: number; realized_stock_pl: number };
+      if (args.quantity > pos.quantity) {
+        throw new Error(`Can't sell ${args.quantity} sh — only ${pos.quantity} on hand.`);
+      }
+      const realized = (args.price - pos.avg_cost) * args.quantity;
+
+      // 2. Insert share_sells audit row.
+      const { error: insErr } = await supabase
+        .from('share_sells' as never)
+        .insert({
+          ticker: t,
+          quantity: args.quantity,
+          price: args.price,
+          trade_date: args.trade_date,
+          source: 'manual',
+          realized_pl: realized,
+          note: args.note ?? null,
+        } as never);
+      if (insErr) throw new Error(`share_sells insert: ${insErr.message}`);
+
+      // 3. Update position: qty down, realized accumulator up.
+      const { error: updErr } = await supabase
+        .from('positions' as never)
+        .update({
+          quantity: pos.quantity - args.quantity,
+          realized_stock_pl: (pos.realized_stock_pl ?? 0) + realized,
+        } as never)
+        .eq('ticker', t);
+      if (updErr) throw new Error(`positions update: ${updErr.message}`);
+
+      return { ticker: t, realized };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['share_sells'] });
+    },
+  });
+
+  // ── Resolve an expired option open ───────────────────────────────
+  // Three flavors:
+  //   • expired      → log close at $0 with closed_via='expired_worthless'
+  //   • rolled       → log close at buyback premium + new open referencing rolled_from
+  //   • assigned     → log close at $0 with share_pnl snapshot, AND
+  //                    insert share_sells row (short call) OR adjust
+  //                    qty + avg_cost (short put)
+  const resolveExpired = useMutation({
+    mutationFn: async (
+      args:
+        | {
+            kind: 'expired';
+            open: OptionTrade;
+            trade_date: string;
+            note?: string | null;
+          }
+        | {
+            kind: 'rolled';
+            open: OptionTrade;
+            close_premium: number;
+            close_date: string;
+            new_strike: number;
+            new_premium: number;
+            new_expiry: string;
+            new_open_date: string;
+            note?: string | null;
+          }
+        | {
+            kind: 'assigned';
+            open: OptionTrade;
+            trade_date: string;
+            note?: string | null;
+          },
+    ) => {
+      const open = args.open;
+      const ticker = open.ticker;
+
+      if (args.kind === 'expired') {
+        const { error } = await supabase
+          .from('option_trades' as never)
+          .insert({
+            ticker,
+            trade_date: args.trade_date,
+            action: 'close',
+            option_type: open.option_type,
+            direction: open.direction,
+            contracts: open.contracts,
+            strike: open.strike,
+            premium: 0,
+            expiry: open.expiry,
+            closes_trade_id: open.id,
+            closed_via: 'expired_worthless',
+            note: args.note ?? null,
+          } as never);
+        if (error) throw new Error(error.message);
+        return { ticker, kind: 'expired' as const };
+      }
+
+      if (args.kind === 'rolled') {
+        // Close the old open.
+        const { error: closeErr } = await supabase
+          .from('option_trades' as never)
+          .insert({
+            ticker,
+            trade_date: args.close_date,
+            action: 'close',
+            option_type: open.option_type,
+            direction: open.direction,
+            contracts: open.contracts,
+            strike: open.strike,
+            premium: args.close_premium,
+            expiry: open.expiry,
+            closes_trade_id: open.id,
+            closed_via: 'rolled',
+            note: args.note ?? null,
+          } as never);
+        if (closeErr) throw new Error(`close insert: ${closeErr.message}`);
+
+        // Open the new one, same side/type, new expiry+strike+premium.
+        const { error: openErr } = await supabase
+          .from('option_trades' as never)
+          .insert({
+            ticker,
+            trade_date: args.new_open_date,
+            action: 'open',
+            option_type: open.option_type,
+            direction: open.direction,
+            contracts: open.contracts,
+            strike: args.new_strike,
+            premium: args.new_premium,
+            expiry: args.new_expiry,
+            rolled_from: open.id,
+            note: args.note ?? null,
+          } as never);
+        if (openErr) throw new Error(`new open insert: ${openErr.message}`);
+        return { ticker, kind: 'rolled' as const };
+      }
+
+      // kind === 'assigned'
+      // Need current position for avg_cost (short call) / weighted-avg (short put).
+      const { data: posRow, error: readErr } = await supabase
+        .from('positions' as never)
+        .select('quantity, avg_cost, realized_stock_pl')
+        .eq('ticker', ticker)
+        .single();
+      if (readErr) throw new Error(`positions read: ${readErr.message}`);
+      const pos = posRow as { quantity: number; avg_cost: number; realized_stock_pl: number };
+
+      const shareQty = open.contracts * 100;
+      const isShortCall = open.direction === 'short' && open.option_type === 'call';
+      const isShortPut  = open.direction === 'short' && open.option_type === 'put';
+
+      // Compute snapshot share_pnl & insert the close row.
+      const sharePnl = isShortCall
+        ? (open.strike - pos.avg_cost) * shareQty
+        : 0; // short put assignment doesn't realize P&L; just changes basis
+
+      const { data: closeIns, error: closeErr } = await supabase
+        .from('option_trades' as never)
+        .insert({
+          ticker,
+          trade_date: args.trade_date,
+          action: 'close',
+          option_type: open.option_type,
+          direction: open.direction,
+          contracts: open.contracts,
+          strike: open.strike,
+          premium: 0,
+          expiry: open.expiry,
+          closes_trade_id: open.id,
+          closed_via: 'assigned',
+          share_pnl: sharePnl,
+          note: args.note ?? null,
+        } as never)
+        .select('id')
+        .single();
+      if (closeErr) throw new Error(`close insert: ${closeErr.message}`);
+      const closeId = (closeIns as { id: string })?.id ?? null;
+
+      if (isShortCall) {
+        // Shares sold at strike — decrement qty, accumulate realized,
+        // log a share_sells row.
+        if (shareQty > pos.quantity) {
+          throw new Error(
+            `Assignment would sell ${shareQty} sh but only ${pos.quantity} on hand.`,
+          );
+        }
+        const { error: sellErr } = await supabase
+          .from('share_sells' as never)
+          .insert({
+            ticker,
+            quantity: shareQty,
+            price: open.strike,
+            trade_date: args.trade_date,
+            source: 'assignment',
+            linked_option_close_id: closeId,
+            realized_pl: sharePnl,
+            note: args.note ?? null,
+          } as never);
+        if (sellErr) throw new Error(`share_sells insert: ${sellErr.message}`);
+
+        const { error: updErr } = await supabase
+          .from('positions' as never)
+          .update({
+            quantity: pos.quantity - shareQty,
+            realized_stock_pl: (pos.realized_stock_pl ?? 0) + sharePnl,
+          } as never)
+          .eq('ticker', ticker);
+        if (updErr) throw new Error(`positions update: ${updErr.message}`);
+      } else if (isShortPut) {
+        // Shares bought at strike — increment qty, recompute weighted avg.
+        const newQty = pos.quantity + shareQty;
+        const newAvg =
+          newQty > 0
+            ? (pos.quantity * pos.avg_cost + shareQty * open.strike) / newQty
+            : open.strike;
+        const { error: updErr } = await supabase
+          .from('positions' as never)
+          .update({ quantity: newQty, avg_cost: newAvg } as never)
+          .eq('ticker', ticker);
+        if (updErr) throw new Error(`positions update: ${updErr.message}`);
+      }
+      // (Long-option exercise paths intentionally not handled — out of
+      //  scope per current design.)
+
+      return { ticker, kind: 'assigned' as const, sharePnl };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
+      qc.invalidateQueries({ queryKey: ['option_trades'] });
+      qc.invalidateQueries({ queryKey: ['share_sells'] });
+    },
+  });
+  // Reference the unused enum to silence the linter — it's used for the
+  // closed_via field literal values when callers pass them as string
+  // literals.
+  void (null as unknown as ClosedVia);
 
   return {
     positions: rawPositions,
@@ -350,11 +638,15 @@ export function usePositions() {
     liveByTicker,
     realizedByTicker,
     signalsByTicker,
+    shareSells,
+    shareSellsByTicker,
     replacePositions,
     refreshPrices,
     addTrade,
     deleteTrade,
     updateTrade,
+    sellShares,
+    resolveExpired,
     setPositionStatus,
     setEarningsDate,
     deletePosition,
