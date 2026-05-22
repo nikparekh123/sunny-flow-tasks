@@ -1649,6 +1649,19 @@
   opacity: 0.85;
 }
 
+/* Plain-text status (no pill background) — replaces .np-status-chip
+   for a calmer look. Just an arrow + signed amount, colored. */
+.np-status-text {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.np-status-text.up   { color: var(--navi-positive); }
+.np-status-text.down { color: var(--navi-negative); }
+.np-status-text.flat { color: var(--navi-fg3); }
+
 /* ── Put protections manager ─────────────────────────────────────── */
 .pp-manager {
   margin: 12px 0 16px;

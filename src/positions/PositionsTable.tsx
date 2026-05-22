@@ -163,12 +163,6 @@ export function PositionsTable({
                   const earnDays = r.earnings_date ? daysUntil(r.earnings_date) : null;
                   const urgency = earnDays != null ? urgencyOf(earnDays) : null;
                   const rowClass = urgency ? `np-row-earn-${urgency}` : '';
-                  // Day change %: derived from current_price + prev_close.
-                  // Null when we don't have prev_close (refresh hasn't run).
-                  const dayPct =
-                    r.current_price != null && r.prev_close != null && r.prev_close > 0
-                      ? ((r.current_price - r.prev_close) / r.prev_close) * 100
-                      : null;
                 return (
                   <tr key={r.id} data-ticker={r.ticker} className={rowClass}>
                     <td className="ticker">
@@ -178,18 +172,6 @@ export function PositionsTable({
                         </span>
                       ) : (
                         r.ticker
-                      )}
-                      {dayPct != null && (
-                        <span
-                          className={
-                            'np-day-chip ' +
-                            (dayPct > 0 ? 'up' : dayPct < 0 ? 'down' : 'flat')
-                          }
-                          title={`Day change · ${dayPct >= 0 ? '+' : '−'}${Math.abs(dayPct).toFixed(2)}%`}
-                        >
-                          {dayPct > 0 ? '▲' : dayPct < 0 ? '▼' : '—'}
-                          {Math.abs(dayPct).toFixed(2)}%
-                        </span>
                       )}
                       {urgency && earnDays != null && (
                         <span
@@ -203,17 +185,13 @@ export function PositionsTable({
                     <td>
                       <span
                         className={
-                          'np-status-chip ' +
+                          'np-status-text ' +
                           (r.overall_pl > 0 ? 'up' : r.overall_pl < 0 ? 'down' : 'flat')
                         }
                         title={`Overall P&L ${fmtUSD(r.overall_pl)} (unrealized + net realized)`}
                       >
-                        {r.overall_pl > 0 ? '▲' : r.overall_pl < 0 ? '▼' : '—'}
-                        {r.overall_pl !== 0 && (
-                          <span className="np-status-chip-amt">
-                            {fmtUSD(r.overall_pl)}
-                          </span>
-                        )}
+                        {r.overall_pl > 0 ? '▲ ' : r.overall_pl < 0 ? '▼ ' : '— '}
+                        {r.overall_pl !== 0 && fmtUSD(r.overall_pl)}
                       </span>
                     </td>
                     <td className="sector-cell">{r.sector}</td>
