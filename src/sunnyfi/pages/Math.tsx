@@ -40,7 +40,8 @@ import {
   popularCalcs,
   type CalcMeta,
 } from "../math/data";
-import { useSnapshots, relTime, type Snapshot } from "../math/store";
+import { useSnapshots, useLiveState, relTime, type Snapshot } from "../math/store";
+import { CALC_MODULES, type CalcModule } from "../math/calcs";
 
 const DASHBOARD_URL = "https://www.sunnyfi.co/dashboard";
 
@@ -59,9 +60,9 @@ export default function MathPage() {
   // Current working snapshot (untitled until saved). Going back to resting
   // resets it.
   const [snapName, setSnapName]       = useState("untitled snapshot");
-  const [snapDirty, setSnapDirty]     = useState(true);
   const [savedSnapId, setSavedSnapId] = useState<string | null>(null);
   const [renaming, setRenaming]       = useState(false);
+  const [toast, setToast]             = useState<string>("");
 
   // Selected row in History modal.
   const [historySelected, setHistorySelected] = useState<string | null>(null);
@@ -69,27 +70,45 @@ export default function MathPage() {
 
   // ── derived ──
   const calc       = findCalc(selectedCalc);
+  const calcModule = calc ? (CALC_MODULES[calc.key] as CalcModule | undefined) : undefined;
   const route      = compareMode ? "Compare" : calc ? calc.name : "Math";
   const canSave    = !!calc;
   const canCompare = snaps.length >= 2;
+
+  // Per-calc live state (persisted to localStorage). When no calc is selected
+  // we pass null + an empty initial — useLiveState becomes a no-op.
+  const [liveState, setLiveState] = useLiveState<Record<string, unknown>>(
+    calcModule ? (selectedCalc as string) : null,
+    calcModule?.initial ?? {},
+  );
+
+  // Dirty = liveState diverges from the saved snapshot's payload.
+  const snapDirty = useMemo(() => {
+    if (!calcModule || !savedSnapId) return true;
+    const snap = snaps.find((s) => s.id === savedSnapId);
+    if (!snap) return true;
+    return JSON.stringify(liveState) !== JSON.stringify(snap.payload);
+  }, [calcModule, savedSnapId, snaps, liveState]);
+
+  // Brief toast for Reset / Copy / Save confirmations.
+  const flash = (msg: string) => {
+    setToast(msg);
+    window.clearTimeout((window as unknown as { __mathToastT?: number }).__mathToastT);
+    (window as unknown as { __mathToastT?: number }).__mathToastT = window.setTimeout(() => setToast(""), 2400);
+  };
   const dockActive: DockKey | null =
     modal === "history" ? "history" :
     modal === "share"   ? "share"   :
     compareMode         ? "compare" :
     null;
 
-  // Reset working snap when calc changes (or unselects).
+  // Reset working snap when calc changes (or unselects). The live inputs
+  // restore from localStorage inside useLiveState — we only clear the snap
+  // pointer here.
   useEffect(() => {
-    if (!selectedCalc) {
-      setSnapName("untitled snapshot");
-      setSnapDirty(true);
-      setSavedSnapId(null);
-      setRenaming(false);
-    } else {
-      setSnapName("untitled snapshot");
-      setSnapDirty(true);
-      setSavedSnapId(null);
-    }
+    setSnapName("untitled snapshot");
+    setSavedSnapId(null);
+    setRenaming(false);
   }, [selectedCalc]);
 
   // ── global keys: Cmd-K toggles search, Esc cascades ──
@@ -122,13 +141,39 @@ export default function MathPage() {
 
   const saveSnap = () => {
     if (!calc) return;
+    const t = new Date();
+    const stamp = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+    const name =
+      snapName === "untitled snapshot"
+        ? `Snapshot · ${stamp}`
+        : snapName;
     const snap = create({
       calcKey: calc.key,
-      name: snapName === "untitled snapshot" ? `${calc.name} · ${new Date().toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : snapName,
+      name,
+      payload: calcModule ? { ...liveState } : {},
     });
     setSavedSnapId(snap.id);
     setSnapName(snap.name);
-    setSnapDirty(false);
+    flash(`✓ Saved as "${snap.name}"`);
+  };
+
+  const resetCalc = () => {
+    if (!calcModule) return;
+    setLiveState({ ...calcModule.initial });
+    setSavedSnapId(null);
+    setSnapName("untitled snapshot");
+    flash("↻ Reset to defaults");
+  };
+
+  const copyAsText = async () => {
+    if (!calcModule?.copyText) return;
+    const text = calcModule.copyText(liveState);
+    try {
+      await navigator.clipboard.writeText(text);
+      flash(`⧉ Copied: ${text}`);
+    } catch {
+      flash("Couldn't access clipboard — try selecting text manually");
+    }
   };
 
   const handleDock = (k: DockKey) => {
@@ -155,7 +200,6 @@ export default function MathPage() {
       dim={modal !== null}
       dockActive={dockActive}
       onDockClick={handleDock}
-      onSave={saveSnap}
       onShare={() => setModal("share")}
       onBrandClick={() => {
         if (compareMode || selectedCalc || modal || searchOpen) {
@@ -193,7 +237,7 @@ export default function MathPage() {
                   renaming ? (
                     <RenameInput
                       defaultValue={snapName}
-                      onCommit={(v) => { setSnapName(v.trim() || "untitled snapshot"); setRenaming(false); setSnapDirty(true); }}
+                      onCommit={(v) => { setSnapName(v.trim() || "untitled snapshot"); setRenaming(false); }}
                       onCancel={() => setRenaming(false)}
                     />
                   ) : (
@@ -215,8 +259,25 @@ export default function MathPage() {
                     <button className="hf-btn ghost tiny" title="More">⋯</button>
                   </>
                 }
+                footer={
+                  calcModule ? (
+                    <div className="hf-calc-foot-inner">
+                      <button className="hf-btn ghost" onClick={resetCalc}>↻ Reset</button>
+                      <div className="foot-right">
+                        {calcModule.copyText && (
+                          <button className="hf-btn tinted" onClick={copyAsText}>⧉ Copy as text</button>
+                        )}
+                        <button className="hf-btn neon" onClick={saveSnap}>✓ Save calculation</button>
+                      </div>
+                    </div>
+                  ) : null
+                }
               >
-                <CalcEmpty label={`${calc.name.toUpperCase()} · content area`} />
+                {calcModule ? (
+                  <calcModule.component state={liveState} setState={setLiveState} />
+                ) : (
+                  <CalcEmpty label={`${calc.name.toUpperCase()} · content area`} />
+                )}
               </CalcShell>
             </div>
           ) : (
@@ -307,6 +368,8 @@ export default function MathPage() {
           <ShareBody calc={calc} snapName={snapName} savedSnap={savedSnapId ? snaps.find((s) => s.id === savedSnapId) ?? null : null} />
         </Modal>
       )}
+
+      {toast && <div className="pdc-toast">{toast}</div>}
     </SunnyfiShell>
   );
 }

@@ -31,10 +31,8 @@ export interface SunnyfiShellProps {
   dim?: boolean;
   dockActive?: DockKey | null;
   onDockClick?: (key: DockKey) => void;
-  showSave?: boolean;
   showShare?: boolean;
   hideDock?: boolean;
-  onSave?: () => void;
   onShare?: () => void;
   onBrandClick?: () => void;
   canSave?: boolean;
@@ -52,10 +50,8 @@ export function SunnyfiShell({
   dim = false,
   dockActive = null,
   onDockClick,
-  showSave = true,
   showShare = true,
   hideDock = false,
-  onSave,
   onShare,
   onBrandClick,
   canSave = true,
@@ -73,9 +69,7 @@ export function SunnyfiShell({
         searchOpen={searchOpen}
         onSearchClick={onSearchClick}
         onSearchClose={onSearchClose}
-        onSave={onSave}
         onShare={onShare}
-        showSave={showSave}
         showShare={showShare}
         onBrandClick={onBrandClick}
         canSave={canSave}
@@ -93,15 +87,13 @@ interface TopbarProps {
   searchOpen: boolean;
   onSearchClick?: () => void;
   onSearchClose?: () => void;
-  onSave?: () => void;
   onShare?: () => void;
-  showSave: boolean;
   showShare: boolean;
   onBrandClick?: () => void;
   canSave: boolean;
 }
 
-function Topbar({ route, searchOpen, onSearchClick, onSearchClose, onSave, onShare, showSave, showShare, onBrandClick, canSave }: TopbarProps) {
+function Topbar({ route, searchOpen, onSearchClick, onSearchClose, onShare, showShare, onBrandClick, canSave }: TopbarProps) {
   return (
     <div className={`hf-top${searchOpen ? " search-open" : ""}`}>
       <Brand route={route} onClick={onBrandClick} />
@@ -121,11 +113,6 @@ function Topbar({ route, searchOpen, onSearchClick, onSearchClose, onSave, onSha
             {showShare && (
               <button className="hf-icon-btn" title="Share" aria-label="Share" onClick={onShare} disabled={!canSave}>
                 <ShareGlyph />
-              </button>
-            )}
-            {showSave && (
-              <button className="hf-btn neon" onClick={onSave} disabled={!canSave}>
-                ✓ Save
               </button>
             )}
           </>

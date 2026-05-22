@@ -83,6 +83,53 @@ export function useSnapshots() {
   return { snaps, create, remove, rename };
 }
 
+// ── Per-calc live state ────────────────────────────────────────
+// Each calc persists its in-progress inputs at `calc.<key>.live`. Switching
+// calcs or refreshing restores them; only Save promotes to a Snapshot.
+function liveKey(calcKey: string): string {
+  return `calc.${calcKey}.live`;
+}
+
+export function readLiveState<T>(calcKey: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(liveKey(calcKey));
+    if (!raw) return fallback;
+    return { ...fallback, ...JSON.parse(raw) } as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function useLiveState<T extends Record<string, unknown>>(
+  calcKey: string | null,
+  initial: T,
+): [T, (next: T | ((prev: T) => T)) => void] {
+  // Hydrate from localStorage when calcKey changes — avoids stale state leaking
+  // across calculators.
+  const [state, setState] = useState<T>(() =>
+    calcKey ? readLiveState<T>(calcKey, initial) : initial,
+  );
+
+  useEffect(() => {
+    if (!calcKey) return;
+    setState(readLiveState<T>(calcKey, initial));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calcKey]);
+
+  const set = (next: T | ((prev: T) => T)) => {
+    setState((prev) => {
+      const v = typeof next === "function" ? (next as (p: T) => T)(prev) : next;
+      if (calcKey) {
+        try { window.localStorage.setItem(liveKey(calcKey), JSON.stringify(v)); } catch { /* private mode */ }
+      }
+      return v;
+    });
+  };
+
+  return [state, set];
+}
+
 /** Format a relative time string (e.g. "2m ago", "1h ago", "Mon"). */
 export function relTime(ts: number, now: number = Date.now()): string {
   const dMs = now - ts;
