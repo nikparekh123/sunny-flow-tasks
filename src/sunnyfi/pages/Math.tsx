@@ -338,6 +338,14 @@ export default function MathPage() {
             selected={historySelected}
             onSelect={setHistorySelected}
             onDelete={(id) => { remove(id); if (historySelected === id) setHistorySelected(null); }}
+            onRestore={(snap) => {
+              setSelectedCalc(snap.calcKey);
+              setLiveState({ ...(CALC_MODULES[snap.calcKey]?.initial ?? {}), ...snap.payload });
+              setSnapName(snap.name);
+              setSavedSnapId(snap.id);
+              setModal(null);
+              flash(`⤺ Restored "${snap.name}"`);
+            }}
           />
         </Modal>
       )}
@@ -499,6 +507,7 @@ function HistoryBody({
   selected,
   onSelect,
   onDelete,
+  onRestore,
 }: {
   snaps: Snapshot[];
   currentCalcKey: string | null;
@@ -507,6 +516,7 @@ function HistoryBody({
   selected: string | null;
   onSelect: (id: string | null) => void;
   onDelete: (id: string) => void;
+  onRestore: (snap: Snapshot) => void;
 }) {
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
@@ -549,13 +559,15 @@ function HistoryBody({
           <div className="hf-hist-empty">
             <div>No saved calculations yet</div>
             <div style={{ fontSize: 11, color: "var(--navi-fg5)" }}>
-              Open a calculator and hit <kbd>✓ Save</kbd> in the top bar.
+              Open a calculator and hit <kbd>✓ Save calculation</kbd> in the footer.
             </div>
           </div>
         ) : (
           <div className="hf-hist-list">
             {filtered.map((s) => {
               const c = findCalc(s.calcKey);
+              const mod = CALC_MODULES[s.calcKey];
+              const disp = mod?.display ? mod.display(s.payload) : { value: "—", tone: "muted" as const };
               return (
                 <button
                   key={s.id}
@@ -570,7 +582,7 @@ function HistoryBody({
                     </div>
                   </div>
                   <div className="hf-snaprow-side">
-                    <div className="hf-snaprow-val muted">—</div>
+                    <div className={`hf-snaprow-val ${disp.tone}`}>{disp.value}</div>
                     <div className="hf-snaprow-time">{relTime(s.createdAt)}</div>
                   </div>
                 </button>
@@ -583,38 +595,49 @@ function HistoryBody({
       <div className={`hf-history-right ${selectedSnap ? "" : "empty"}`}>
         {!selectedSnap ? (
           <div>Select a snapshot on the left to preview.</div>
-        ) : (
-          <>
-            <div className="hf-preview-head">
-              <div className="hf-eyebrow">Snapshot · {selectedSnap.name}</div>
-              <div className="hf-preview-title">{selectedCalc?.name ?? selectedSnap.calcKey}</div>
-              <div className="hf-preview-meta">
-                saved {relTime(selectedSnap.createdAt)} · by you
+        ) : (() => {
+          const mod  = CALC_MODULES[selectedSnap.calcKey];
+          const disp = mod?.display ? mod.display(selectedSnap.payload) : { value: "—", tone: "muted" as const };
+          const flds = mod?.payloadFields ? mod.payloadFields(selectedSnap.payload) : [];
+          return (
+            <>
+              <div className="hf-preview-head">
+                <div className="hf-eyebrow">Snapshot · {selectedSnap.name}</div>
+                <div className="hf-preview-title">{selectedCalc?.name ?? selectedSnap.calcKey}</div>
+                <div className="hf-preview-meta">
+                  saved {relTime(selectedSnap.createdAt)} · by you · {new Date(selectedSnap.createdAt).toLocaleString()}
+                </div>
               </div>
-            </div>
 
-            <div className="hf-preview-stat">
-              <div className="hf-preview-num muted">—</div>
-              <div className="hf-preview-delta">
-                result · calculator body not wired yet
+              <div className="hf-preview-stat">
+                <div className={`hf-preview-num ${disp.tone === "muted" ? "muted" : ""}`}
+                     style={disp.tone === "pos" ? { color: "var(--navi-positive)" }
+                          : disp.tone === "neg" ? { color: "var(--navi-negative)" }
+                          : undefined}>
+                  {disp.value}
+                </div>
+                <div className="hf-preview-delta">
+                  {selectedCalc?.name ?? "result"} · {categoryLabel(selectedCalc?.category ?? "pre-trade")}
+                </div>
               </div>
-            </div>
 
-            <div className="hf-preview-grid">
-              <Field label="Calculator" value={selectedCalc?.name ?? selectedSnap.calcKey} mono />
-              <Field label="Category"   value={selectedCalc ? categoryLabel(selectedCalc.category) : "—"} mono />
-              <Field label="Created"    value={new Date(selectedSnap.createdAt).toLocaleString()} mono />
-              <Field label="Purpose"    value={selectedSnap.purpose || "—"} mono />
-            </div>
+              {flds.length > 0 && (
+                <div className="hf-preview-grid">
+                  {flds.map((f) => (
+                    <Field key={f.label} label={f.label} value={f.value} mono={f.mono} />
+                  ))}
+                </div>
+              )}
 
-            <div className="hf-preview-actions">
-              <button className="hf-btn neon">⤺ Restore into calc</button>
-              <button className="hf-btn ghost">⇆ Compare with…</button>
-              <button className="hf-btn ghost">↗ Share</button>
-              <button className="hf-btn danger" onClick={() => onDelete(selectedSnap.id)}>✕ Delete</button>
-            </div>
-          </>
-        )}
+              <div className="hf-preview-actions">
+                <button className="hf-btn neon" onClick={() => onRestore(selectedSnap)}>⤺ Restore into calc</button>
+                <button className="hf-btn ghost" disabled>⇆ Compare with…</button>
+                <button className="hf-btn ghost" disabled>↗ Share</button>
+                <button className="hf-btn danger" onClick={() => onDelete(selectedSnap.id)}>✕ Delete</button>
+              </div>
+            </>
+          );
+        })()}
       </div>
     </div>
   );

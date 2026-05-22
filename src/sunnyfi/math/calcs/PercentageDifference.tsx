@@ -83,6 +83,16 @@ export function pctDiffDisplay(state: PctDiffState): { value: string; tone: "neo
   };
 }
 
+export function pctDiffFields(state: PctDiffState): Array<{ label: string; value: string; mono?: boolean }> {
+  const c = computePD(state);
+  return [
+    { label: "From",       value: fmtPlain(state.fromLabel ? `${state.from} · ${state.fromLabel}` : state.from), mono: true },
+    { label: "To",         value: fmtPlain(state.toLabel   ? `${state.to} · ${state.toLabel}`     : state.to),   mono: true },
+    { label: "Absolute",   value: fmtAbs(c.abs),  mono: true },
+    { label: "Multiple",   value: fmtMult(c.mult), mono: true },
+  ];
+}
+
 // ── Body ─────────────────────────────────────────────────────────
 export function PercentageDifferenceCalc({
   state,
