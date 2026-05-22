@@ -87,7 +87,7 @@
 .hf-shell {
   position: relative;
   width: 100%;
-  min-height: 100vh;
+  height: 100vh;
   background: var(--navi-dash-page);
   color: var(--navi-fg1);
   font-family: var(--navi-font-sans);
@@ -263,7 +263,7 @@
   flex: 1;
   position: relative;
   overflow: hidden;
-  min-height: 600px;
+  min-height: 0;
 }
 
 /* Resting / pick-hero */
