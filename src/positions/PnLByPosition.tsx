@@ -219,6 +219,23 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
   const headL = view === 'options' ? optTotalLoss : totalLoss;
   const headN = view === 'options' ? optNet : net;
 
+  // Overall view — split portfolio P&L into realized (closed options + share
+  // sells / assignments) and unrealized (current stock mark vs cost basis),
+  // then bucket each by sign so the 6 cells in the header are honest.
+  const overallSplit = useMemo(() => {
+    let realG = 0, realL = 0, unrealG = 0, unrealL = 0;
+    for (const r of rows) {
+      const realized = (r.realized_pl ?? 0) + (r.realized_stock_pl ?? 0);
+      const unrealized = r.pnl_dollar ?? 0;
+      if (realized > 0) realG += realized; else if (realized < 0) realL += realized;
+      if (unrealized > 0) unrealG += unrealized; else if (unrealized < 0) unrealL += unrealized;
+    }
+    return {
+      realG, realL, realNet: realG + realL,
+      unrealG, unrealL, unrealNet: unrealG + unrealL,
+    };
+  }, [rows]);
+
   // Empty state guard
   const empty =
     view === 'options'
@@ -271,24 +288,41 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
           )}
         </div>
 
-        <div className="pnl-chart-hd">
-          <div className="pnl-chart-stat">
-            <span className="pnl-chart-stat-k">↑ Gains</span>
-            <span className="pnl-chart-stat-v up">{fmtUSD(headG)}</span>
+        {view === 'overall' ? (
+          <div className="pnl-chart-hd split">
+            <PnlSplitBlock
+              label="Realized"
+              gains={overallSplit.realG}
+              losses={overallSplit.realL}
+              net={overallSplit.realNet}
+            />
+            <PnlSplitBlock
+              label="Unrealized"
+              gains={overallSplit.unrealG}
+              losses={overallSplit.unrealL}
+              net={overallSplit.unrealNet}
+            />
           </div>
-          <div className="pnl-chart-stat">
-            <span className="pnl-chart-stat-k">↓ Losses</span>
-            <span className="pnl-chart-stat-v down">
-              {headL < 0 ? '−' + fmtUSD(Math.abs(headL)) : fmtUSD(headL)}
-            </span>
+        ) : (
+          <div className="pnl-chart-hd">
+            <div className="pnl-chart-stat">
+              <span className="pnl-chart-stat-k">↑ Gains</span>
+              <span className="pnl-chart-stat-v up">{fmtUSD(headG)}</span>
+            </div>
+            <div className="pnl-chart-stat">
+              <span className="pnl-chart-stat-k">↓ Losses</span>
+              <span className="pnl-chart-stat-v down">
+                {headL < 0 ? '−' + fmtUSD(Math.abs(headL)) : fmtUSD(headL)}
+              </span>
+            </div>
+            <div className="pnl-chart-stat right">
+              <span className="pnl-chart-stat-k">Net</span>
+              <span className={'pnl-chart-stat-v ' + (headN >= 0 ? 'up' : 'down')}>
+                {headN >= 0 ? fmtUSD(headN) : '−' + fmtUSD(Math.abs(headN))}
+              </span>
+            </div>
           </div>
-          <div className="pnl-chart-stat right">
-            <span className="pnl-chart-stat-k">Net</span>
-            <span className={'pnl-chart-stat-v ' + (headN >= 0 ? 'up' : 'down')}>
-              {headN >= 0 ? fmtUSD(headN) : '−' + fmtUSD(Math.abs(headN))}
-            </span>
-          </div>
-        </div>
+        )}
 
         {empty ? (
           <div className="pnl-empty-area">
@@ -770,6 +804,38 @@ function PutCostCoverage({
           <span className="pnl-burn-dot total" />
           <span className="pnl-burn-k">Total to cover</span>
           <span className="pnl-burn-v">{fmtCompact(totalBurn)}/wk</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Header sub-block: one of {Realized, Unrealized} with 3 stats ─────
+function PnlSplitBlock({
+  label, gains, losses, net,
+}: {
+  label: string;
+  gains: number;
+  losses: number;
+  net: number;
+}) {
+  const lossStr = losses < 0 ? '−' + fmtUSD(Math.abs(losses)) : fmtUSD(losses);
+  const netStr  = net   < 0 ? '−' + fmtUSD(Math.abs(net))    : fmtUSD(net);
+  return (
+    <div className="pnl-split-block">
+      <div className="pnl-split-hd">{label}</div>
+      <div className="pnl-split-row">
+        <div className="pnl-chart-stat">
+          <span className="pnl-chart-stat-k">↑ Gains</span>
+          <span className="pnl-chart-stat-v up">{fmtUSD(gains)}</span>
+        </div>
+        <div className="pnl-chart-stat">
+          <span className="pnl-chart-stat-k">↓ Losses</span>
+          <span className="pnl-chart-stat-v down">{lossStr}</span>
+        </div>
+        <div className="pnl-chart-stat">
+          <span className="pnl-chart-stat-k">Net</span>
+          <span className={'pnl-chart-stat-v ' + (net >= 0 ? 'up' : 'down')}>{netStr}</span>
         </div>
       </div>
     </div>
