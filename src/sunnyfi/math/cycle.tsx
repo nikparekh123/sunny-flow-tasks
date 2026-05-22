@@ -55,10 +55,24 @@ export const FREQ_BY_ID: Record<string, FreqDef> = Object.fromEntries(
 );
 
 export interface HorizonDef { id: string; label: string }
+
+// Calendar-aligned horizons — used by Expected Income (calls roll often,
+// quarter/year boundaries matter for tax + reporting).
 export const HORIZON_DEFS: HorizonDef[] = [
   { id: "month",   label: "End of month" },
   { id: "quarter", label: "End of quarter" },
   { id: "year",    label: "End of year" },
+  { id: "rolling", label: "12mo rolling" },
+  { id: "custom",  label: "Custom date" },
+];
+
+// Rolling-window horizons — used by Put Cost and Income vs Cost. Protective
+// puts are sized to a forward window (next quarter, next half-year) rather
+// than a calendar boundary.
+export const PUT_HORIZON_DEFS: HorizonDef[] = [
+  { id: "3month",  label: "Quarterly" },
+  { id: "4month",  label: "4 months" },
+  { id: "6month",  label: "6 months" },
   { id: "rolling", label: "12mo rolling" },
   { id: "custom",  label: "Custom date" },
 ];
@@ -68,6 +82,10 @@ function endOfMonth(d: Date)    { return new Date(d.getFullYear(), d.getMonth() 
 function endOfQuarter(d: Date)  { const q = Math.floor(d.getMonth() / 3); return new Date(d.getFullYear(), q * 3 + 3, 0); }
 function endOfYear(d: Date)     { return new Date(d.getFullYear(), 11, 31); }
 function plusDays(d: Date, n: number) { const r = new Date(d); r.setDate(r.getDate() + n); return r; }
+function plusMonths(d: Date, n: number) {
+  // Add n months keeping the same day-of-month; JS Date auto-rolls Feb 31 → Mar 3.
+  return new Date(d.getFullYear(), d.getMonth() + n, d.getDate());
+}
 export function daysBetween(a: Date, b: Date): number {
   return Math.max(0, Math.round((b.getTime() - a.getTime()) / 86400000));
 }
@@ -77,6 +95,9 @@ export function resolveHorizon(kind: string, customDate: string, now: Date = new
     case "month":   return endOfMonth(now);
     case "quarter": return endOfQuarter(now);
     case "year":    return endOfYear(now);
+    case "3month":  return plusMonths(now, 3);
+    case "4month":  return plusMonths(now, 4);
+    case "6month":  return plusMonths(now, 6);
     case "rolling": return plusDays(now, 365);
     case "custom":  return customDate ? new Date(customDate + "T00:00:00") : null;
     default:        return null;

@@ -8,7 +8,7 @@
  */
 import { useMemo, type ReactNode } from "react";
 import {
-  CALL_FREQ_DEFS, PUT_FREQ_DEFS, FREQ_BY_ID, HORIZON_DEFS,
+  CALL_FREQ_DEFS, PUT_FREQ_DEFS, FREQ_BY_ID, PUT_HORIZON_DEFS,
   cycleStats, resolveHorizon,
   fmtMoney, fmtPct, fmtCount, fmtDate,
   moneynessLabel,
@@ -51,7 +51,7 @@ export const ivcInitial: IVCState = {
   strike: "640.00",
   putFrequency: "monthly",
 
-  horizon: "year",
+  horizon: "rolling",
   customDate: "",
 };
 
@@ -402,7 +402,7 @@ export function IncomeVsCostCalc({
         <div className="cyc-horizon-only">
           <div className="hf-label">Horizon</div>
           <Seg
-            options={HORIZON_DEFS.map(h => ({ id: h.id, label: h.label }))}
+            options={PUT_HORIZON_DEFS.map(h => ({ id: h.id, label: h.label }))}
             value={state.horizon}
             onChange={(v) => set("horizon", v)}
             ariaLabel="Horizon"

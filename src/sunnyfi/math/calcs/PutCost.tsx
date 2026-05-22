@@ -7,7 +7,7 @@
  */
 import { useMemo, type ReactNode } from "react";
 import {
-  FREQ_DEFS, FREQ_BY_ID, HORIZON_DEFS,
+  FREQ_DEFS, FREQ_BY_ID, PUT_HORIZON_DEFS,
   cycleStats, resolveHorizon,
   fmtMoney, fmtPct, fmtCount, fmtDate,
   moneynessLabel,
@@ -36,7 +36,7 @@ export const pcInitial: PCState = {
   premium: "4.20",
   strike: "640.00",
   frequency: "monthly",
-  horizon: "year",
+  horizon: "rolling",
   customDate: "",
 };
 
@@ -238,7 +238,7 @@ export function PutCostCalc({
           <div className="cyc-cad-field">
             <div className="hf-label">Horizon</div>
             <Seg
-              options={HORIZON_DEFS.map(h => ({ id: h.id, label: h.label }))}
+              options={PUT_HORIZON_DEFS.map(h => ({ id: h.id, label: h.label }))}
               value={state.horizon}
               onChange={(v) => set("horizon", v)}
               ariaLabel="Horizon"
