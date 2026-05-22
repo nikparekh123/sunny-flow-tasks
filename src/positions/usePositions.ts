@@ -176,7 +176,15 @@ export function usePositions() {
     [rawPositions, trades],
   );
 
-  // ── Position mutations (mostly unchanged) ───────────────────────
+  // ── CSV upsert (was destructive DELETE+INSERT). ─────────────────
+  // New behaviour:
+  //   • UPSERT by ticker — existing rows get qty / avg_cost updated.
+  //   • REJECT if any CSV row reduces a ticker's share count (shares
+  //     are sold via the Sell-Shares flow, not by lowering the CSV
+  //     number, so realized_stock_pl gets accumulated properly).
+  //   • Tickers in the DB but not in the CSV are LEFT ALONE.
+  //   • realized_stock_pl is NOT in the upsert payload, so it survives
+  //     each re-upload.
   const replacePositions = useMutation({
     mutationFn: async (rows: PositionInput[]) => {
       const cleaned = rows
@@ -197,23 +205,42 @@ export function usePositions() {
             r.avg_cost >= 0,
         );
 
-      const { error: delError } = await supabase
+      if (cleaned.length === 0) return { upserted: 0, overlaysWritten: 0 };
+
+      // Reduction guard — refuse any row where CSV qty < current qty.
+      const { data: existingRows, error: readErr } = await supabase
         .from('positions' as never)
-        .delete()
-        .gt('quantity', -1);
-      if (delError) throw delError;
+        .select('ticker, quantity');
+      if (readErr) throw readErr;
+      const existingQty = new Map<string, number>();
+      for (const e of (existingRows ?? []) as Array<{ ticker: string; quantity: number }>) {
+        existingQty.set(e.ticker, e.quantity);
+      }
+      const reductions: Array<{ ticker: string; from: number; to: number }> = [];
+      for (const r of cleaned) {
+        const cur = existingQty.get(r.ticker);
+        if (cur != null && r.quantity < cur) {
+          reductions.push({ ticker: r.ticker, from: cur, to: r.quantity });
+        }
+      }
+      if (reductions.length > 0) {
+        const detail = reductions
+          .map((r) => `${r.ticker} (${r.from} → ${r.to})`)
+          .join(', ');
+        throw new Error(
+          `CSV would reduce share count for: ${detail}. Use Sell Shares in-app to record the sale first, then re-upload.`,
+        );
+      }
 
-      if (cleaned.length === 0) return { inserted: 0 };
-
-      // Strip the strategy field — it goes to strategy_overlay separately.
-      const positionsToInsert = cleaned.map(({ strategy: _s, ...rest }) => {
+      // Strip the strategy field — strategy_overlay is updated separately.
+      const positionsToUpsert = cleaned.map(({ strategy: _s, ...rest }) => {
         void _s;
         return rest;
       });
-      const { error: insError } = await supabase
+      const { error: upsertErr } = await supabase
         .from('positions' as never)
-        .insert(positionsToInsert as never);
-      if (insError) throw insError;
+        .upsert(positionsToUpsert as never, { onConflict: 'ticker' });
+      if (upsertErr) throw upsertErr;
 
       const overlayRows = cleaned
         .filter((r) => r.strategy)
@@ -229,7 +256,7 @@ export function usePositions() {
         if (ovError) throw ovError;
       }
 
-      return { inserted: cleaned.length, overlaysWritten: overlayRows.length };
+      return { upserted: cleaned.length, overlaysWritten: overlayRows.length };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['positions'] });
