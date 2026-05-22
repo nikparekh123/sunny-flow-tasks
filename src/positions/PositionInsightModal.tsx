@@ -71,6 +71,7 @@ export function PositionInsightModal({
 }: Props) {
   const [editingEarnings, setEditingEarnings] = useState(false);
   const [draftEarnings, setDraftEarnings] = useState(position.earnings_date ?? '');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -85,48 +86,45 @@ export function PositionInsightModal({
   const isClosed = position.status === 'closed';
   const todayWeek = useMemo(() => mondayOf(new Date()), []);
 
-  // Per-week premium flow. Above-zero = premium collected (cash in),
-  // below-zero = premium paid (cash out). Each direction segmented by
-  // option type (call vs put) so the user reads the split at a glance.
-  const bins = useMemo(() => {
-    const empty = () => ({
-      collected_call: 0, collected_put: 0,
-      paid_call: 0,     paid_put: 0,
-    });
-    const arr = Array.from({ length: WEEK_COUNT }, empty);
+  // Per-week realized P&L from closed pairs. Each close row contributes
+  // its signed P&L to the week the close happened. Open trades and
+  // unmatched closes don't appear here — only the actual exit P&L.
+  const realizedBins = useMemo(() => {
+    const arr = Array.from({ length: WEEK_COUNT }, () => 0);
     const byId = new Map<string, OptionTrade>();
     for (const t of trades) byId.set(t.id, t);
-
     for (const t of trades) {
+      if (t.action !== 'close' || !t.closes_trade_id) continue;
+      const open = byId.get(t.closes_trade_id);
+      if (!open) continue;
       const w = weekIdxOf(t.trade_date, todayWeek);
       if (w < 0 || w >= WEEK_COUNT) continue;
-      const notional = t.contracts * 100 * t.premium;
-      // open short / close long → cash IN
-      // open long  / close short → cash OUT
-      const isCashIn =
-        (t.action === 'open' && t.direction === 'short') ||
-        (t.action === 'close' && t.direction === 'long');
-      if (isCashIn) {
-        if (t.option_type === 'call') arr[w].collected_call += notional;
-        else                          arr[w].collected_put  += notional;
-      } else {
-        if (t.option_type === 'call') arr[w].paid_call += notional;
-        else                          arr[w].paid_put  += notional;
-      }
+      arr[w] += closeRealizedPL(t, open);
     }
     return arr;
   }, [trades, todayWeek]);
 
+  // Keep the "totals" object for the stat cards — still computed from
+  // collected/paid flow, because the stat cards show premium volume.
   const totals = useMemo(() => {
     let collected = 0, paid = 0, callC = 0, callP = 0, putC = 0, putP = 0;
-    for (const b of bins) {
-      collected += b.collected_call + b.collected_put;
-      paid      += b.paid_call + b.paid_put;
-      callC += b.collected_call; callP += b.paid_call;
-      putC  += b.collected_put;  putP  += b.paid_put;
+    const byId = new Map<string, OptionTrade>();
+    for (const t of trades) byId.set(t.id, t);
+    for (const t of trades) {
+      const notional = t.contracts * 100 * t.premium;
+      const isCashIn =
+        (t.action === 'open' && t.direction === 'short') ||
+        (t.action === 'close' && t.direction === 'long');
+      if (isCashIn) {
+        collected += notional;
+        if (t.option_type === 'call') callC += notional; else putC += notional;
+      } else {
+        paid += notional;
+        if (t.option_type === 'call') callP += notional; else putP += notional;
+      }
     }
     return { collected, paid, callC, callP, putC, putP };
-  }, [bins]);
+  }, [trades]);
 
   const earnDays = position.earnings_date ? daysUntil(position.earnings_date) : null;
   const earnUrgency: 'urgent' | 'soon' | 'queued' | null =
@@ -260,9 +258,9 @@ export function PositionInsightModal({
           </div>
         </div>
 
-        {/* Bidirectional chart */}
-        <ChartBidirectional
-          bins={bins}
+        {/* Realized P&L chart — one bar per week, signed */}
+        <ChartRealized
+          bins={realizedBins}
           earningsWeekIdx={position.earnings_date ? weekIdxOf(position.earnings_date, todayWeek) : null}
         />
 
@@ -337,19 +335,36 @@ export function PositionInsightModal({
             >
               {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
             </button>
-            <button
-              className="pi-link danger pi-link-strong"
-              onClick={() => {
-                const counts = `${trades.length} trade${trades.length === 1 ? '' : 's'}`;
-                if (window.confirm(
-                  `Delete ${position.ticker} entirely?\n\nThis removes the position row plus ${counts}.\nAction cannot be undone.`,
-                )) {
-                  onDeletePosition(position.ticker);
-                }
-              }}
-            >
-              🗑 Delete position
-            </button>
+            {!confirmingDelete && (
+              <button
+                className="pi-link danger pi-link-strong"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                🗑 Delete position
+              </button>
+            )}
+            {confirmingDelete && (
+              <div className="pi-confirm-chip">
+                <span className="pi-confirm-q">
+                  Delete <b>{position.ticker}</b> · {trades.length} trade{trades.length === 1 ? '' : 's'}?
+                </span>
+                <button
+                  className="pi-link"
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  ✗ cancel
+                </button>
+                <button
+                  className="pi-link danger pi-link-strong"
+                  onClick={() => {
+                    onDeletePosition(position.ticker);
+                    setConfirmingDelete(false);
+                  }}
+                >
+                  ✓ confirm delete
+                </button>
+              </div>
+            )}
           </div>
           <div className="pi-foot-end">
             <button
@@ -370,69 +385,108 @@ export function PositionInsightModal({
 
 // ─── Chart ────────────────────────────────────────────────────────────
 
-function ChartBidirectional({
+/**
+ * Realized P&L chart — one signed bar per week. The bar represents the
+ * sum of realized P&L from closes that happened in that week (each close
+ * contributes `closeRealizedPL(close, matched_open)`).
+ *
+ *   - Up green bar  = profitable closing week
+ *   - Down coral bar = lossy closing week
+ *   - Empty weeks have no bar at all
+ *
+ * Open trades and unmatched closes don't appear — only the actual exit
+ * P&L registered on closed pairs.
+ */
+function ChartRealized({
   bins, earningsWeekIdx,
 }: {
-  bins: Array<{ collected_call: number; collected_put: number; paid_call: number; paid_put: number }>;
+  bins: number[];                     // signed realized P&L per week
   earningsWeekIdx: number | null;
 }) {
-  const maxAbs = Math.max(
-    1,
-    ...bins.flatMap((b) => [
-      b.collected_call + b.collected_put,
-      b.paid_call + b.paid_put,
-    ]),
-  );
+  const maxAbs = Math.max(1, ...bins.map(Math.abs));
+  const niceMax = roundUpNice(maxAbs);
+  const total = bins.reduce((s, v) => s + v, 0);
 
   const W = 100;
-  const H = 220;
+  const H = 240;
   const midY = H / 2;
-  const half = midY - 8;
+  const half = midY - 12;
   const colCount = bins.length;
   const colW = W / colCount;
-  const barW = colW * 0.55;
+  const barW = colW * 0.7;
+
+  const hasData = bins.some((v) => v !== 0);
 
   return (
     <div className="pi-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="pi-chart-svg">
-        <line x1="0" y1={midY} x2={W} y2={midY} stroke="rgba(30,90,80,0.5)" strokeWidth="0.2" />
-        <line x1="0" y1={midY - half} x2={W} y2={midY - half} stroke="rgba(30,90,80,0.2)" strokeWidth="0.15" strokeDasharray="0.5,0.5" />
-        <line x1="0" y1={midY + half} x2={W} y2={midY + half} stroke="rgba(30,90,80,0.2)" strokeWidth="0.15" strokeDasharray="0.5,0.5" />
+      <div className="pi-chart-canvas">
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="pi-chart-svg">
+          {/* Zero baseline + amplitude guides */}
+          <line x1="0" y1={midY} x2={W} y2={midY} stroke="rgba(30,90,80,0.7)" strokeWidth="0.18" />
+          <line x1="0" y1={midY - half}     x2={W} y2={midY - half}     stroke="rgba(30,90,80,0.25)" strokeWidth="0.12" strokeDasharray="0.4,0.6" />
+          <line x1="0" y1={midY - half / 2} x2={W} y2={midY - half / 2} stroke="rgba(30,90,80,0.15)" strokeWidth="0.1"  strokeDasharray="0.3,0.7" />
+          <line x1="0" y1={midY + half / 2} x2={W} y2={midY + half / 2} stroke="rgba(30,90,80,0.15)" strokeWidth="0.1"  strokeDasharray="0.3,0.7" />
+          <line x1="0" y1={midY + half}     x2={W} y2={midY + half}     stroke="rgba(30,90,80,0.25)" strokeWidth="0.12" strokeDasharray="0.4,0.6" />
 
-        {earningsWeekIdx != null && earningsWeekIdx >= 0 && earningsWeekIdx < colCount && (
-          <line
-            x1={(colCount - earningsWeekIdx - 0.5) * colW}
-            y1="0"
-            x2={(colCount - earningsWeekIdx - 0.5) * colW}
-            y2={H}
-            stroke="var(--navi-neon)"
-            strokeWidth="0.3"
-            strokeDasharray="1,1"
-            opacity="0.7"
-          />
-        )}
+          {/* Earnings vertical neon line */}
+          {earningsWeekIdx != null && earningsWeekIdx >= 0 && earningsWeekIdx < colCount && (
+            <line
+              x1={(colCount - earningsWeekIdx - 0.5) * colW}
+              y1="0"
+              x2={(colCount - earningsWeekIdx - 0.5) * colW}
+              y2={H}
+              stroke="var(--navi-neon)"
+              strokeWidth="0.3"
+              strokeDasharray="1,1"
+              opacity="0.7"
+            />
+          )}
 
-        {bins.map((b, i) => {
-          const x = (colCount - i - 1) * colW + (colW - barW) / 2;
-          // Stack collected upward
-          let yU = midY;
-          const segCallUp = (b.collected_call / maxAbs) * half;
-          const segPutUp  = (b.collected_put  / maxAbs) * half;
-          // Stack paid downward
-          let yD = midY;
-          const segCallDn = (b.paid_call / maxAbs) * half;
-          const segPutDn  = (b.paid_put  / maxAbs) * half;
+          {/* Bars — newest on the right. Positive bars go up green; negative
+              go down coral. Tiny weeks (<1% of niceMax) get a 0.3px stub
+              so the user can still see "something happened" rather than
+              nothing. */}
+          {bins.map((v, i) => {
+            if (v === 0) return null;
+            const x = (colCount - i - 1) * colW + (colW - barW) / 2;
+            const h = Math.max(0.4, (Math.abs(v) / niceMax) * half);
+            if (v > 0) {
+              return (
+                <rect
+                  key={i}
+                  x={x}
+                  y={midY - h}
+                  width={barW}
+                  height={h}
+                  fill="var(--navi-positive)"
+                  rx="0.3"
+                />
+              );
+            }
+            return (
+              <rect
+                key={i}
+                x={x}
+                y={midY}
+                width={barW}
+                height={h}
+                fill="var(--navi-negative)"
+                rx="0.3"
+              />
+            );
+          })}
+        </svg>
 
-          return (
-            <g key={i}>
-              {segCallUp > 0 && <rect x={x} y={yU - segCallUp} width={barW} height={segCallUp} fill="var(--navi-neon)" rx="0.2" />}
-              {segPutUp > 0 && <rect x={x} y={yU - segCallUp - segPutUp} width={barW} height={segPutUp} fill="var(--navi-positive)" rx="0.2" />}
-              {segCallDn > 0 && <rect x={x} y={yD} width={barW} height={segCallDn} fill="rgba(232,112,96,.6)" rx="0.2" />}
-              {segPutDn > 0 && <rect x={x} y={yD + segCallDn} width={barW} height={segPutDn} fill="var(--navi-negative)" rx="0.2" />}
-            </g>
-          );
-        })}
-      </svg>
+        {/* Right-side Y axis scale */}
+        <div className="pi-chart-yaxis">
+          <span className="pi-chart-y-top">+{fmtUSD(niceMax)}</span>
+          <span className="pi-chart-y-mid">+{fmtUSD(niceMax / 2)}</span>
+          <span className="pi-chart-y-zero">$0</span>
+          <span className="pi-chart-y-mid">−{fmtUSD(niceMax / 2)}</span>
+          <span className="pi-chart-y-bot">−{fmtUSD(niceMax)}</span>
+        </div>
+      </div>
+
       <div className="pi-chart-xaxis">
         <span>−12mo</span>
         <span>−9mo</span>
@@ -440,13 +494,34 @@ function ChartBidirectional({
         <span>−3mo</span>
         <span>now</span>
       </div>
+
       <div className="pi-chart-legend">
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-neon)' }} />Call collected
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-positive)' }} />Put collected
+        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-positive)' }} />Profitable close
         <span className="pi-chart-legend-sep">·</span>
-        <span className="pi-chart-legend-dot" style={{ background: 'rgba(232,112,96,.6)' }} />Call paid
-        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-negative)' }} />Put paid
+        <span className="pi-chart-legend-dot" style={{ background: 'var(--navi-negative)' }} />Lossy close
+        <span className="pi-chart-legend-sep">·</span>
+        <span className="pi-chart-total">
+          52w total <b className={total < 0 ? 'neg' : total > 0 ? 'pos' : ''}>
+            {total >= 0 ? '+' : '−'}{fmtUSD(Math.abs(total))}
+          </b>
+        </span>
+        {!hasData && <span className="pi-chart-total muted">no closes yet</span>}
       </div>
     </div>
   );
+}
+
+/** Round a value up to a "nice" round number for axis labels.
+ *  e.g. 4321 → 5000, 87000 → 100000, 14 → 20. */
+function roundUpNice(v: number): number {
+  if (v <= 0) return 1;
+  const exp = Math.floor(Math.log10(v));
+  const base = Math.pow(10, exp);
+  const norm = v / base;
+  let nice: number;
+  if (norm <= 1) nice = 1;
+  else if (norm <= 2) nice = 2;
+  else if (norm <= 5) nice = 5;
+  else nice = 10;
+  return nice * base;
 }

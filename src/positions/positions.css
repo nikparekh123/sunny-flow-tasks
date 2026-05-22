@@ -1280,6 +1280,116 @@
 }
 .gl-cell.this { background: rgba(210,230,50,.03); }
 .gl-cell:hover { background: rgba(210,230,50,.08); }
+
+/* Shares zone — dedicated leftmost column with its own tint */
+.gl-table th.gl-wk.shares-zone,
+.gl-table td.gl-cell.shares-zone {
+  background: rgba(210,230,50,.06);
+}
+.gl-table td.gl-cell.shares-zone:hover {
+  background: rgba(210,230,50,.14);
+}
+/* Share-sell cells inside the closed zone get a subtle warm tint */
+.gl-table td.gl-cell.share-sell {
+  background: rgba(224,192,96,.07);
+}
+.gl-table td.gl-cell.share-sell:hover {
+  background: rgba(224,192,96,.14);
+}
+/* Expired option cell — amber border to call for action */
+.gl-table td.gl-cell.expired {
+  outline: 1px solid var(--navi-warning);
+  outline-offset: -2px;
+}
+.gl-cell-state.expired { color: var(--navi-warning); }
+/* Resolve card in modal */
+.pp-resolve-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 8px;
+}
+.pp-resolve-meta {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  color: var(--navi-fg1);
+}
+.pp-resolve-exp { color: var(--navi-fg3); }
+.pp-resolve-prem {
+  margin-left: auto;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+}
+.pp-resolve-hint {
+  margin-top: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid;
+}
+.pp-resolve-hint.muted {
+  color: var(--navi-fg4);
+  background: rgba(50,110,100,.10);
+  border-color: rgba(50,110,100,.30);
+}
+.pp-resolve-hint.itm {
+  color: var(--navi-warning);
+  background: rgba(224,192,96,.08);
+  border-color: rgba(224,192,96,.40);
+}
+.pp-resolve-hint.otm {
+  color: var(--navi-neon);
+  background: rgba(210,230,50,.08);
+  border-color: rgba(210,230,50,.40);
+}
+
+/* Column zones: first N cols are LIVE (faint neon tint), the rest are
+   the closed/history zone (faint muted tint). Boundary cell gets a thin
+   left border so the eye finds the split. */
+.gl-table th.gl-wk.live-zone,
+.gl-table td.gl-cell.live-zone {
+  background: rgba(210,230,50,.04);
+}
+.gl-table th.gl-wk.live-zone.this,
+.gl-table td.gl-cell.live-zone.this {
+  background: rgba(210,230,50,.08);
+}
+.gl-table td.gl-cell.live-zone:hover {
+  background: rgba(210,230,50,.12);
+}
+.gl-table th.gl-wk.closed-zone,
+.gl-table td.gl-cell.closed-zone {
+  background: rgba(30,90,80,.08);
+}
+.gl-table td.gl-cell.closed-zone:hover {
+  background: rgba(30,90,80,.18);
+}
+/* Boundary divider — left border on the FIRST closed col.
+   Layout: Position(1) · Shares(2) · Open1..4(3..6) · Closed1+(7+).
+   So nth-child(7) is the boundary. */
+.gl-table tr > .gl-wk:nth-child(7),
+.gl-table tr > .gl-cell:nth-child(7) {
+  border-left: 1px solid rgba(50,110,100,.4);
+}
+/* "live" sub-caption under the column number, in the header */
+.gl-table th .gl-wk-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--navi-neon);
+  margin-top: 2px;
+  opacity: .8;
+}
+/* Closed-zone sub-captions get a muted tone so the header colour
+   roughly mirrors the cell-state pill colour for each zone. */
+.gl-table th.gl-wk.closed-zone .gl-wk-sub {
+  color: var(--navi-fg4);
+}
 .gl-cell.empty .gl-plus {
   font-family: var(--navi-font-mono);
   color: var(--navi-fg5, #1e5a50);
@@ -1301,7 +1411,7 @@
 }
 .gl-cell-amt.up   { color: var(--navi-positive, #a8d4a0); }
 .gl-cell-amt.down { color: var(--navi-negative); }
-.gl-cell-chips { display: inline-flex; gap: 3px; }
+.gl-cell-chips { display: inline-flex; gap: 5px; align-items: center; }
 
 .gl-table td.gl-tot {
   text-align: right;
@@ -1538,6 +1648,19 @@
   font-size: 10px;
   opacity: 0.85;
 }
+
+/* Plain-text status (no pill background) — replaces .np-status-chip
+   for a calmer look. Just an arrow + signed amount, colored. */
+.np-status-text {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.np-status-text.up   { color: var(--navi-positive); }
+.np-status-text.down { color: var(--navi-negative); }
+.np-status-text.flat { color: var(--navi-fg3); }
 
 /* ── Put protections manager ─────────────────────────────────────── */
 .pp-manager {
@@ -2472,328 +2595,1571 @@
 .pi-link-strong { font-weight: 500; }
 .pi-link-strong:hover { color: var(--navi-negative); }
 
+
 /* =====================================================================
-   TIMELINE MATRIX — Gantt-style options ledger
+   TIMELINE MATRIX — inherits gl-table from the Trades matrix.
+   Only adds the bar overlay, day tick header, and per-row group/subtotal
+   styling. Filter pills + timeframe selector come straight from the
+   Trades matrix CSS.
    ===================================================================== */
 
-.tl-wrap { display: flex; flex-direction: column; gap: 14px; }
-
-.tl-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.tl-legend {
-  display: flex;
-  gap: 16px;
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 11px;
-  color: var(--navi-fg3);
-}
-.tl-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.tl-swatch {
-  width: 14px;
-  height: 8px;
-  border-radius: 2px;
-  display: inline-block;
-}
-.tl-swatch.short  { background: linear-gradient(90deg, var(--navi-positive), rgba(168,212,160,.5)); }
-.tl-swatch.long   { background: linear-gradient(90deg, var(--navi-negative), rgba(232,112,96,.5)); }
-.tl-swatch.closed { background: var(--navi-dusk); }
-.tl-swatch.shares { background: rgba(70,130,120,.35); }
-
-.tl-scroll {
-  overflow-x: auto;
-  border: 1px solid rgba(30,90,80,.25);
-  border-radius: 12px;
-  background: rgba(15,51,51,.30);
-}
-
-.tl-canvas {
-  display: grid;
-  align-items: stretch;
-  font-family: var(--navi-font-sans);
-  font-size: 12px;
+/* Daily columns are narrow — let them shrink below the 38px min the
+   Trades matrix uses for weekly cells. */
+.tl-table .gl-wk { min-width: 14px; padding: 0; }
+.tl-table .tl-day-th {
   position: relative;
+  height: 32px;
 }
 
-/* Top corner (above ticker col) */
-.tl-corner {
-  background: rgba(10,40,40,.6);
-  border-bottom: 1px solid rgba(30,90,80,.4);
-  position: sticky; left: 0;
-  z-index: 4;
+/* Sticky Position column (left) and Realized column (right) so they stay
+   visible as the user scrolls 60-365 daily columns horizontally. */
+.tl-table thead .gl-pos,
+.tl-table tbody .gl-pos {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: rgba(6,26,16,.96);
+  box-shadow: 2px 0 6px rgba(0,0,0,.25);
 }
-.tl-axis {
-  position: relative;
-  height: 44px;
-  background: rgba(10,40,40,.6);
-  border-bottom: 1px solid rgba(30,90,80,.4);
-  border-left: 1px solid rgba(30,90,80,.2);
-  border-right: 1px solid rgba(30,90,80,.2);
+.tl-table thead .gl-tot,
+.tl-table tbody .gl-tot,
+.tl-table tfoot .gl-tot {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: rgba(6,26,16,.96);
+  box-shadow: -2px 0 6px rgba(0,0,0,.25);
 }
-.tl-month-tick {
-  position: absolute;
-  top: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.8px;
-  color: var(--navi-fg2);
-  text-transform: uppercase;
+.tl-table thead .gl-pos,
+.tl-table thead .gl-tot {
+  z-index: 3;
+}
+.tl-table .tl-day-th.today {
+  background: rgba(210,230,50,.06);
+}
+.tl-table .tl-day-th.month-start {
+  border-left: 1px solid rgba(70,130,120,.35);
 }
 .tl-day-tick {
   position: absolute;
   bottom: 4px;
-  font-size: 9px;
-  color: var(--navi-fg4);
-  font-family: var(--navi-font-mono, monospace);
+  left: 50%;
   transform: translateX(-50%);
-}
-.tl-today-line {
-  position: absolute;
-  top: 0; bottom: -100vh;
-  width: 1px;
-  background: var(--navi-neon);
-  z-index: 1;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  color: var(--navi-fg4);
+  white-space: nowrap;
   pointer-events: none;
-  box-shadow: 0 0 4px rgba(210,230,50,.4);
-}
-.tl-totals-head {
-  background: rgba(10,40,40,.6);
-  border-bottom: 1px solid rgba(30,90,80,.4);
-  border-left: 1px solid rgba(30,90,80,.2);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  color: var(--navi-fg4);
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  position: sticky; right: 0;
-  z-index: 4;
 }
 
-/* Group header row */
-.tl-group-hd-l {
-  background: rgba(20,55,50,.55);
-  border-top: 1px solid rgba(30,90,80,.5);
-  border-bottom: 1px solid rgba(30,90,80,.25);
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  position: sticky; left: 0;
-  z-index: 3;
-}
-.tl-group-hd-c {
-  background: rgba(20,55,50,.55);
-  border-top: 1px solid rgba(30,90,80,.5);
-  border-bottom: 1px solid rgba(30,90,80,.25);
-  border-left: 1px solid rgba(30,90,80,.2);
-  border-right: 1px solid rgba(30,90,80,.2);
-}
-.tl-group-hd-r {
-  background: rgba(20,55,50,.55);
-  border-top: 1px solid rgba(30,90,80,.5);
-  border-bottom: 1px solid rgba(30,90,80,.25);
-  padding: 10px 12px;
-  text-align: right;
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 11px;
-  color: var(--navi-fg3);
-  position: sticky; right: 0;
-  z-index: 3;
-}
-.tl-ticker {
-  font-family: var(--navi-font-sans);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.3px;
-  color: var(--navi-fg1);
-  cursor: pointer;
-}
-.tl-ticker:hover { color: var(--navi-neon); }
-.tl-group-meta {
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 10px;
-  color: var(--navi-fg4);
-  margin-left: 4px;
-}
-
-/* Row layout */
-.tl-row-label {
-  background: rgba(10,40,40,.5);
-  border-bottom: 1px solid rgba(30,90,80,.15);
-  padding: 7px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 11px;
-  color: var(--navi-fg2);
-  position: sticky; left: 0;
-  z-index: 2;
-  cursor: pointer;
-}
-.tl-row-label:hover { background: rgba(15,51,51,.7); color: var(--navi-fg1); }
-.tl-row-glyph {
-  width: 18px; height: 18px;
-  border-radius: 3px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--navi-page);
-  flex-shrink: 0;
-}
-.tl-row-glyph.short  { background: var(--navi-positive); }
-.tl-row-glyph.long   { background: var(--navi-negative); }
-.tl-row-glyph.shares { background: rgba(70,130,120,.6); color: var(--navi-fg1); }
-.tl-row-sub {
-  font-size: 9px;
-  color: var(--navi-fg4);
-  margin-left: auto;
-}
-
-.tl-row-track {
+/* The wide cell that hosts the bars. Same overall row height as the
+   Trades matrix so the two views feel like the same table — just with
+   bars instead of weekly numbers in the cells. */
+.tl-table .tl-track-cell {
+  padding: 0;
   position: relative;
-  height: 32px;
-  border-bottom: 1px solid rgba(30,90,80,.10);
-  border-left: 1px solid rgba(30,90,80,.2);
-  border-right: 1px solid rgba(30,90,80,.2);
-  cursor: pointer;
+  height: 44px;
 }
-/* Faint vertical grid lines every 7 days */
-.tl-row-track::before {
-  content: '';
-  position: absolute; inset: 0;
-  background-image: linear-gradient(to right, rgba(30,90,80,.10) 1px, transparent 1px);
-  background-size: 98px 100%; /* 7 days × 14px */
-  pointer-events: none;
+.tl-table .tl-track {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+/* A "slot" is a horizontal lane within the row that can hold one
+   contract's bar. Multiple contracts on the same ticker stack vertically
+   inside the row. */
+.tl-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
 }
 
-.tl-row-right {
-  background: rgba(10,40,40,.5);
-  border-bottom: 1px solid rgba(30,90,80,.15);
-  padding: 7px 12px;
-  text-align: right;
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 11px;
-  color: var(--navi-fg3);
-  position: sticky; right: 0;
-  z-index: 2;
-}
-.tl-row-live { color: var(--navi-fg2); }
-.tl-row-realized.pos { color: var(--navi-positive); }
-.tl-row-realized.neg { color: var(--navi-negative); }
-
-/* Bars */
+/* The bars */
 .tl-bar {
   position: absolute;
-  top: 6px; bottom: 6px;
-  border-radius: 4px;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 3px;
   display: flex;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 4px;
   font-family: var(--navi-font-mono, monospace);
-  font-size: 10px;
+  font-size: 9px;
   overflow: hidden;
   z-index: 1;
+  cursor: pointer;
 }
-.tl-bar-shares {
-  background: rgba(70,130,120,.20);
-  border: 1px solid rgba(70,130,120,.40);
-  z-index: 0;
-}
-.tl-bar-shares .tl-bar-label {
-  color: var(--navi-fg3);
-  font-size: 10px;
-  white-space: nowrap;
-}
+/* Direction drives the bar color. Calls vs puts are distinguished by
+ * the row glyph (C / P) and the row label. Solid bright fills (no
+ * gradient, no transparency) so the bars read at a glance. */
 .tl-bar-short-put,
 .tl-bar-short-call {
-  background: linear-gradient(180deg, var(--navi-positive) 0%, rgba(168,212,160,.6) 100%);
+  background: var(--navi-positive);
   color: var(--navi-page);
 }
 .tl-bar-long-put,
 .tl-bar-long-call {
-  background: linear-gradient(180deg, var(--navi-negative) 0%, rgba(232,112,96,.6) 100%);
+  background: var(--navi-negative);
   color: var(--navi-page);
 }
-/* Calls are slightly amber-tinged for at-a-glance distinction. */
-.tl-bar-short-call { background: linear-gradient(180deg, #c8d820 0%, rgba(200,216,32,.5) 100%); }
-.tl-bar-long-call  { background: linear-gradient(180deg, #d89a40 0%, rgba(216,154,64,.5) 100%); }
-
 .tl-bar-closed {
   background: rgba(70,90,90,.4);
   border: 1px solid rgba(70,90,90,.6);
   color: var(--navi-fg2);
+  overflow: visible;  /* let the realized label spill past the bar edge if needed */
 }
+/* The future segment is the "still in force" portion: today → expiry.
+   Same solid bright color as the open direction, with a real arrow tip
+   carved out of the right edge using clip-path. */
 .tl-bar-future {
-  background: transparent;
-  border-top: 1px dashed rgba(70,130,120,.5);
-  border-bottom: 1px dashed rgba(70,130,120,.5);
-  display: flex;
-  justify-content: flex-end;
-  color: rgba(70,130,120,.7);
+  cursor: default;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%);
 }
-.tl-bar-arrow { font-size: 14px; line-height: 1; }
-.tl-bar-marker {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--navi-fg1);
-  flex-shrink: 0;
-  color: transparent;
-}
-.tl-bar-marker-open { margin-right: 4px; }
-.tl-bar-marker-close { background: var(--navi-fg2); }
+.tl-bar-future.tl-future-short { background: var(--navi-positive); }
+.tl-bar-future.tl-future-long  { background: var(--navi-negative); }
 .tl-bar-realized {
   font-weight: 600;
   font-size: 10px;
-  margin-left: 4px;
   white-space: nowrap;
-}
-.tl-bar-realized.pos { color: var(--navi-positive); }
-.tl-bar-realized.neg { color: var(--navi-negative); }
-
-/* Subtotal */
-.tl-row-subtotal-l {
-  background: rgba(15,51,51,.4);
-  border-bottom: 2px solid rgba(30,90,80,.5);
-  border-top: 1px solid rgba(30,90,80,.25);
-  padding: 8px 12px;
-  font-family: var(--navi-font-mono, monospace);
-  font-size: 11px;
-  color: var(--navi-fg2);
-  position: sticky; left: 0;
+  /* Float just past the right edge of the gray-ghost bar in a pill, so
+     it's legible even if the gray segment is only a few pixels wide. */
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 1px 6px;
+  border-radius: 100px;
+  background: var(--navi-page);
+  border: 1px solid rgba(30,90,80,.4);
   z-index: 2;
 }
-.tl-row-subtotal-c {
-  background: rgba(15,51,51,.4);
-  border-bottom: 2px solid rgba(30,90,80,.5);
-  border-top: 1px solid rgba(30,90,80,.25);
-  padding: 8px 14px;
+.tl-bar-realized.up   { color: var(--navi-positive); border-color: rgba(168,212,160,.5); }
+.tl-bar-realized.down { color: var(--navi-negative); border-color: rgba(232,112,96,.5); }
+
+/* Today's vertical line — drawn inside each track */
+.tl-today-line {
+  position: absolute;
+  top: -4px; bottom: -4px;
+  width: 1px;
+  background: var(--navi-neon);
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: 0 0 4px rgba(210,230,50,.4);
+}
+
+.tl-table .tl-foot-spacer {
+  padding: 10px 16px;
   font-family: var(--navi-font-mono, monospace);
   font-size: 11px;
   color: var(--navi-fg3);
+}
+
+/* Trades matrix — per-trade cell content (replaces the old dot indicators).
+   Each filled cell now shows the trade amount + an "open" / "close" word
+   and the option type letter, so the user can read what each column is
+   without thinking about dates or hovering. */
+.gl-cell-action {
   display: flex;
   align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.2px;
+  color: var(--navi-fg4);
+  margin-top: 2px;
+  text-transform: lowercase;
 }
-.tl-row-subtotal-r {
+.gl-cell-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: rgba(70,130,120,.3);
+  color: var(--navi-fg2);
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+}
+.gl-cell-realized {
+  font-weight: 500;
+  font-size: 9px;
+}
+.gl-cell-realized.up   { color: var(--navi-positive); }
+.gl-cell-realized.down { color: var(--navi-negative); }
+
+/* Text label inside Timeline bars — "open · 3P $52" or "close" or arrow.
+   Truncates with ellipsis when the bar is narrow. */
+.tl-bar-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 9px;
+  color: var(--navi-page);
+  letter-spacing: 0.2px;
+}
+.tl-bar-closed .tl-bar-text {
+  color: var(--navi-fg2);
+}
+
+/* ── Close-position picker: clear radio-pill semantics ─────────────
+   The previous flat list invited mis-clicks. Each open is now a
+   labeled radio card with a visible filled dot when selected. The
+   active card has a neon border + tint so the user can see at a
+   glance which one will get closed when they hit Save. */
+.pp-close-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pp-close-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(30,90,80,.4);
   background: rgba(15,51,51,.4);
-  border-bottom: 2px solid rgba(30,90,80,.5);
-  border-top: 1px solid rgba(30,90,80,.25);
-  position: sticky; right: 0;
+  cursor: pointer;
+  font-family: var(--navi-font-mono, monospace);
+  transition: all .12s var(--np-ease);
+}
+.pp-close-pick:hover {
+  border-color: rgba(210,230,50,.35);
+  background: rgba(15,51,51,.6);
+}
+.pp-close-pick.on {
+  border-color: var(--navi-neon);
+  background: rgba(210,230,50,.06);
+  box-shadow: 0 0 0 1px rgba(210,230,50,.25) inset;
+}
+.pp-close-pick-radio {
+  /* native input hidden — we render our own dot. Still focusable via tab. */
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.pp-close-pick-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(70,130,120,.5);
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  transition: all .12s var(--np-ease);
+}
+.pp-close-pick.on .pp-close-pick-dot {
+  border-color: var(--navi-neon);
+  background: var(--navi-neon);
+  box-shadow: inset 0 0 0 3px var(--navi-page);
+}
+.pp-close-pick-body { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.pp-close-pick-headline {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+}
+.pp-close-pick-sub {
+  font-size: 11px;
+  color: var(--navi-fg4);
+}
+
+/* Tesla-style chart additions: right-side Y axis scale labels. */
+.pi-chart-canvas {
+  position: relative;
+}
+.pi-chart-yaxis {
+  position: absolute;
+  top: 0; bottom: 0;
+  right: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+}
+.pi-chart-yaxis span {
+  display: block;
+  text-align: right;
+  background: rgba(6,26,16,.7);
+  padding: 0 4px;
+  border-radius: 2px;
+  line-height: 1.4;
+}
+.pi-chart-y-top { color: var(--navi-positive); }
+.pi-chart-y-mid { color: var(--navi-fg4); }
+.pi-chart-y-zero { color: var(--navi-fg3); font-weight: 500; }
+.pi-chart-y-bot { color: var(--navi-negative); }
+
+/* Trades matrix — each cell holds exactly one trade. The per-cell action
+   tag ("op P" / "cl C") sits below the amount in muted mono. No border
+   pill — the cell is just the colored number, like the original weekly
+   matrix. */
+
+.pi-chart-total { color: var(--navi-fg3); font-family: var(--navi-font-mono, monospace); font-size: 11px; }
+.pi-chart-total b { font-weight: 600; color: var(--navi-fg1); }
+.pi-chart-total b.pos { color: var(--navi-positive); }
+.pi-chart-total b.neg { color: var(--navi-negative); }
+.pi-chart-total.muted { color: var(--navi-fg5); font-style: italic; }
+
+/* Inline confirm pill for delete (replaces the window.confirm popup).
+   Sits in the footer where the delete button was; cancel + confirm
+   buttons live in the same pill so the user can dismiss safely. */
+.pi-confirm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-radius: 100px;
+  background: rgba(232,112,96,.10);
+  border: 1px solid rgba(232,112,96,.4);
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 11px;
+}
+.pi-confirm-q { color: var(--navi-fg2); }
+.pi-confirm-q b { color: var(--navi-negative); }
+
+/* Timeline bars are read-only — no pointer cursor, no hover lift. */
+.tl-bar-readonly { cursor: default; }
+
+/* Day-change chip next to ticker — small ▲/▼ with absolute %. Up = teal-
+   green (sized to match the existing .np-earn-chip), Down = coral. */
+.np-day-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.np-day-chip.up   { background: rgba(168,212,160,.14); color: var(--navi-positive); }
+.np-day-chip.down { background: rgba(232,112,96,.14);  color: var(--navi-negative); }
+.np-day-chip.flat { background: rgba(70,130,120,.14);  color: var(--navi-fg3); }
+
+/* Tiny state tag inside a trades-matrix cell (live / partial / closed) */
+.gl-cell-state {
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 8px;
+  letter-spacing: 0.4px;
+  text-transform: lowercase;
+  line-height: 1;
+  color: var(--navi-fg4);
+}
+.gl-cell-state.open    { color: var(--navi-neon); }
+.gl-cell-state.partial { color: var(--navi-warning); }
+.gl-cell-state.closed  { color: var(--navi-fg4); }
+
+/* ============================================================
+   Expiry Calendar — swimlane Gantt
+   Tickers on the left, time on the right; each ticker has two lanes
+   (Put / Call) with markers plotted at the expiry date.
+   ============================================================ */
+.np-app .exp-wrap {
+  background: var(--navi-card);
+  border: 1px solid rgba(50,110,100,.25);
+  border-radius: 14px;
+  padding: 18px;
+}
+.np-app .exp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.np-app .exp-range {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 10px;
+  padding: 3px;
+}
+.np-app .exp-range button {
+  background: transparent;
+  color: var(--navi-fg2);
+  border: 0;
+  padding: 6px 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .exp-range button:hover { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .exp-range button.on    { color: var(--navi-neon); background: var(--navi-tint-neon); }
+
+.np-app .exp-legend {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 14px;
+  font-size: 10px;
+  color: var(--navi-fg3);
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.np-app .exp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.np-app .exp-leg {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 6px;
+  border: 1.5px solid;
+}
+.np-app .exp-leg.put.short  { background: transparent;          border-color: var(--navi-negative); }
+.np-app .exp-leg.put.long   { background: var(--navi-negative); border-color: var(--navi-negative); }
+.np-app .exp-leg.call.short { background: var(--navi-positive); border-color: var(--navi-positive); }
+.np-app .exp-leg.call.long  { background: transparent;          border-color: var(--navi-positive); }
+
+.np-app .exp-empty {
+  padding: 48px;
+  text-align: center;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+
+.np-app .exp-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  row-gap: 4px;
+  align-items: stretch;
+}
+
+/* Header row */
+.np-app .exp-hd-ticker { /* empty top-left corner */ }
+.np-app .exp-hd-axis {
+  position: relative;
+  height: 28px;
+  border-bottom: 1px solid rgba(50,110,100,.25);
+  margin-bottom: 6px;
+}
+.np-app .exp-week {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+}
+.np-app .exp-month {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 10px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  white-space: nowrap;
+}
+.np-app .exp-week-tick {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  height: 6px;
+  background: rgba(50,110,100,.45);
+}
+
+/* Ticker column */
+.np-app .exp-ticker {
+  padding: 8px 12px 8px 0;
+  border-right: 1px solid rgba(50,110,100,.22);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.np-app .exp-ticker-name {
+  background: none;
+  border: 0;
+  color: var(--navi-fg1);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  letter-spacing: -.1px;
+  transition: color .15s var(--np-ease);
+}
+.np-app .exp-ticker-name:hover { color: var(--navi-neon); }
+.np-app .exp-ticker-sub {
+  font-size: 10px;
+  color: var(--navi-fg3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.np-app .exp-ticker-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--navi-font-mono);
+  margin-left: auto;
+}
+.np-app .exp-ticker-counts .put  { color: var(--navi-negative); }
+.np-app .exp-ticker-counts .call { color: var(--navi-positive); }
+
+/* Lanes container (one per ticker row) */
+.np-app .exp-lanes {
+  position: relative;
+  padding: 4px 4px 4px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.np-app .exp-lane {
+  position: relative;
+  height: 28px;
+}
+.np-app .exp-lane-tag {
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: .4px;
+  font-weight: 600;
+  background: var(--navi-surface);
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   z-index: 2;
+}
+.np-app .exp-lane-tag.put  { color: var(--navi-negative); border: 1px solid rgba(232,112,96,.45); }
+.np-app .exp-lane-tag.call { color: var(--navi-positive); border: 1px solid rgba(168,212,160,.45); }
+
+.np-app .exp-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+.np-app .exp-rule.put  { background: rgba(232,112,96,.30); }
+.np-app .exp-rule.call { background: rgba(168,212,160,.30); }
+
+/* Bars — span from trade_date (left edge) to expiry (right edge) */
+.np-app .exp-bar {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 20px;
+  min-width: 8px;
+  border: 1.5px solid;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end; /* label hugs the expiry edge */
+  line-height: 1;
+  transition: transform .12s var(--np-ease), box-shadow .15s var(--np-ease), height .12s var(--np-ease);
+  z-index: 1;
+  text-align: right;
+  box-sizing: border-box;
+}
+/* Short put = outline (cash-secured put, premium collected) */
+.np-app .exp-bar.put.short {
+  background: rgba(232,112,96,.18);
+  border-color: var(--navi-negative);
+  color: var(--navi-negative);
+}
+/* Long put = filled (protective put, premium paid) */
+.np-app .exp-bar.put.long {
+  background: var(--navi-negative);
+  border-color: var(--navi-negative);
+  color: #200808;
+}
+.np-app .exp-bar.call.short {
+  background: var(--navi-positive);
+  border-color: var(--navi-positive);
+  color: #0a1a0a;
+}
+.np-app .exp-bar.call.long {
+  background: rgba(168,212,160,.18);
+  border-color: var(--navi-positive);
+  color: var(--navi-positive);
+}
+.np-app .exp-bar.closed {
+  opacity: .45;
+  filter: grayscale(.4);
+}
+/* When the open is before the visible window, fade the left edge so the
+   bar visually "continues" off-screen. */
+.np-app .exp-bar.extends {
+  border-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  -webkit-mask-image: linear-gradient(90deg, rgba(0,0,0,.35) 0, #000 24px);
+          mask-image: linear-gradient(90deg, rgba(0,0,0,.35) 0, #000 24px);
+}
+.np-app .exp-bar:hover {
+  z-index: 3;
+  height: 22px;
+  box-shadow: 0 6px 18px -8px rgba(0,0,0,.5);
+}
+.np-app .exp-bar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.np-app .exp-bar-strike { letter-spacing: -.2px; }
+.np-app .exp-bar-x { opacity: .75; font-weight: 500; }
+
+/* Today line */
+.np-app .exp-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--navi-neon);
+  pointer-events: none;
+  z-index: 0;
+}
+.np-app .exp-today-line.body {
+  box-shadow: 0 0 6px rgba(210,230,50,.45);
+}
+.np-app .exp-today-label {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 9px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--navi-neon);
+  font-family: var(--navi-font-mono);
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .np-app .exp-grid { grid-template-columns: 100px 1fr; }
+}
+
+/* ============================================================
+   P&L by Position — slots into the AllocationTreemap card shell
+   (.np-treemap-card) so it matches sector / stock / strategy.
+   ============================================================ */
+.np-app .pnl-card {
+  /* Wider side panel to give Put protection more breathing room */
+  grid-template-columns: 1fr 300px;
+}
+
+.np-app .pnl-chart-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 460px;
+}
+
+/* Top view toggles (Overall / Stock / Options + sub-filter) */
+.np-app .pnl-view-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.np-app .pnl-view-toggle {
+  display: inline-flex;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+.np-app .pnl-view-toggle button {
+  background: transparent;
+  border: 0;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .pnl-view-toggle button:hover { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .pnl-view-toggle button.on   { color: var(--navi-neon); background: var(--navi-tint-neon); }
+
+.np-app .pnl-subfilter {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.np-app .pnl-subfilter button {
+  background: transparent;
+  border: 1px solid rgba(50,110,100,.3);
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  padding: 4px 9px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all .15s var(--np-ease);
+}
+.np-app .pnl-subfilter button:hover { color: var(--navi-fg1); border-color: var(--navi-border-bright); }
+.np-app .pnl-subfilter button.on    {
+  color: var(--navi-neon);
+  background: var(--navi-tint-neon);
+  border-color: var(--navi-neon);
+}
+
+.np-app .pnl-empty-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  min-height: 320px;
+}
+.np-app .pnl-chart-hd {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  flex-wrap: nowrap;
+}
+.np-app .pnl-chart-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.np-app .pnl-chart-stat.right {
+  margin-left: auto;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.35);
+  align-items: center;
+}
+.np-app .pnl-chart-stat-k {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+}
+.np-app .pnl-chart-stat.right .pnl-chart-stat-k {
+  color: var(--navi-fg2);
+}
+.np-app .pnl-chart-stat-v {
+  font-family: var(--navi-font-sans);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.4px;
+  line-height: 1;
+}
+.np-app .pnl-chart-stat.right .pnl-chart-stat-v {
+  font-size: 26px;
+  letter-spacing: -.6px;
+}
+.np-app .pnl-chart-stat-v.up   { color: var(--navi-neon); }
+.np-app .pnl-chart-stat-v.down { color: var(--navi-negative); }
+
+.np-app .pnl-svg {
+  width: 100%;
+  height: auto;
+  flex: 1;
+  min-height: 360px;
+}
+
+/* RIGHT panel: Put protection box (boxed feel, distinct from main card) */
+.np-app .pnl-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 460px;
+}
+.np-app .pnl-protection-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: rgba(15,51,51,.40);
+  border: 1px solid rgba(50,110,100,.35);
+  border-radius: 12px;
+  padding: 22px 20px 26px;
+}
+.np-app .pnl-protection-hd {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+  text-align: center;
+}
+.np-app .pnl-protection-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  padding: 24px 0;
+}
+.np-app .pnl-tabs {
+  display: inline-flex;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.np-app .pnl-tabs button {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .pnl-tabs button:hover:not(:disabled) { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .pnl-tabs button.on { color: var(--navi-neon); background: var(--navi-tint-neon); }
+.np-app .pnl-tabs button:disabled { color: var(--navi-fg5); cursor: not-allowed; }
+
+.np-app .pnl-contrib {
+  display: flex;
+  flex-direction: column;
+}
+.np-app .pnl-contrib-row {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(30,90,80,.18);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.np-app .pnl-contrib-row:last-child { border-bottom: none; }
+.np-app .pnl-contrib-row:disabled { cursor: default; }
+.np-app .pnl-contrib-row:hover:not(:disabled) { background: rgba(50,110,100,.10); }
+.np-app .pnl-contrib-val {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 8px;
+}
+.np-app .pnl-contrib-val.up   { color: var(--navi-neon); }
+.np-app .pnl-contrib-val.down { color: var(--navi-negative); }
+.np-app .pnl-contrib-pct {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+}
+
+/* Solar-offset coverage visual */
+.np-app .pnl-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 360px;
+}
+.np-app .pnl-coverage-pct-big {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: var(--navi-font-sans);
+  font-size: 48px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  letter-spacing: -1.5px;
+  line-height: 1;
+}
+.np-app .pnl-coverage-pct-sub {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+  margin-top: 6px;
+}
+.np-app .pnl-coverage-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  height: 240px;
+  width: 100%;
+  align-items: end;
+}
+.np-app .pnl-cov-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  justify-content: flex-end;
+}
+.np-app .pnl-cov-bar-wrap {
+  width: 100%;
+  max-width: 84px;
+  height: 72%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.np-app .pnl-cov-bar {
+  width: 100%;
+  border-radius: 6px 6px 0 0;
+  min-height: 6px;
+  transition: height .35s var(--np-ease);
+}
+.np-app .pnl-cov-bar.gold     { background: var(--navi-warning); }
+.np-app .pnl-cov-bar.blue     { background: var(--navi-neon); }
+.np-app .pnl-cov-bar.realized { background: var(--navi-neon); }
+
+/* Stacked burden bar (put cost + stock loss) */
+.np-app .pnl-cov-stack {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  border-radius: 6px 6px 0 0;
+  overflow: hidden;
+}
+.np-app .pnl-cov-seg {
+  width: 100%;
+  transition: height .35s var(--np-ease);
+}
+.np-app .pnl-cov-seg.loss { background: var(--navi-negative); }
+.np-app .pnl-cov-seg.cost { background: var(--navi-warning); }
+
+/* Mini-labels under each bar (one per category) */
+.np-app .pnl-cov-mini-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+.np-app .pnl-cov-mini {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.np-app .pnl-cov-mini.cost     { color: var(--navi-warning); }
+.np-app .pnl-cov-mini.loss     { color: var(--navi-negative); }
+.np-app .pnl-cov-mini.realized { color: var(--navi-neon); }
+
+/* Weekly burn footer in the protection box */
+.np-app .pnl-burn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(50,110,100,.25);
+}
+.np-app .pnl-burn-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+.np-app .pnl-burn-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.np-app .pnl-burn-dot.cost  { background: var(--navi-warning); }
+.np-app .pnl-burn-dot.total {
+  background: linear-gradient(135deg, var(--navi-warning) 0 50%, var(--navi-negative) 50% 100%);
+}
+.np-app .pnl-burn-k {
+  font-size: 12px;
+  color: var(--navi-fg2);
+}
+.np-app .pnl-burn-v {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+}
+.np-app .pnl-cov-val {
+  font-family: var(--navi-font-mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+}
+.np-app .pnl-cov-label {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.np-app .pnl-cov-label.gold { color: var(--navi-warning); }
+.np-app .pnl-cov-label.blue { color: var(--navi-neon); }
+
+/* Signals column (PositionsTable) — chips only render when actionable */
+.np-app .signals-cell {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+.np-app .np-sig-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 180px;
+}
+.np-app .np-sig-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  border: 1px solid;
+  white-space: nowrap;
+  line-height: 1.3;
+  cursor: help;
+}
+.np-app .np-sig-chip.up {
+  color: var(--navi-positive);
+  background: rgba(168,212,160,.10);
+  border-color: rgba(168,212,160,.45);
+}
+.np-app .np-sig-chip.down {
+  color: var(--navi-negative);
+  background: rgba(232,112,96,.10);
+  border-color: rgba(232,112,96,.45);
+}
+.np-app .np-sig-chip.warn {
+  color: var(--navi-warning);
+  background: rgba(224,192,96,.10);
+  border-color: rgba(224,192,96,.50);
+}
+.np-app .np-sig-chip.cool {
+  color: #6dd1c5;
+  background: rgba(109,209,197,.10);
+  border-color: rgba(109,209,197,.45);
+}
+
+/* Old single-week styles (kept for backward compat, no-ops if unused) */
+.np-app .cal-wrap {
+  background: var(--navi-card);
+  border: 1px solid rgba(50,110,100,.25);
+  border-radius: 14px;
+  padding: 18px;
+}
+.np-app .cal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.np-app .cal-nav {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 10px;
+  padding: 3px;
+}
+.np-app .cal-nav button {
+  background: transparent;
+  color: var(--navi-fg2);
+  border: 0;
+  padding: 6px 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .cal-nav button:hover { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .cal-nav button.on   { color: var(--navi-neon); background: var(--navi-tint-neon); }
+
+.np-app .cal-range {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.np-app .cal-range-week {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+  letter-spacing: -.2px;
+}
+.np-app .cal-range-year {
+  font-size: 11px;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+}
+
+.np-app .cal-summary {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 18px;
+  align-items: center;
+}
+.np-app .cal-sum-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.np-app .cal-sum-k {
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.np-app .cal-sum-v {
+  font-family: var(--navi-font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+}
+.np-app .cal-sum-v.up   { color: var(--navi-positive); }
+.np-app .cal-sum-v.down { color: var(--navi-negative); }
+
+.np-app .cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  align-items: stretch;
+}
+.np-app .cal-day {
+  background: rgba(15,51,51,.45);
+  border: 1px solid rgba(50,110,100,.22);
+  border-radius: 10px;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color .15s var(--np-ease);
+}
+.np-app .cal-day.weekend { background: rgba(15,51,51,.25); }
+.np-app .cal-day.past    { opacity: .55; }
+.np-app .cal-day.today   {
+  border-color: var(--navi-neon);
+  box-shadow: 0 0 0 1px rgba(210,230,50,.25), 0 6px 18px -10px rgba(210,230,50,.5);
+  opacity: 1;
+}
+
+.np-app .cal-day-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid rgba(50,110,100,.18);
+}
+.np-app .cal-dow {
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+}
+.np-app .cal-dom {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+}
+.np-app .cal-day.today .cal-dow { color: var(--navi-neon); }
+.np-app .cal-day.today .cal-dom { color: var(--navi-neon); }
+
+.np-app .cal-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  flex: 1;
+  min-height: 0;
+}
+.np-app .cal-day-empty {
+  margin: auto;
+  color: var(--navi-fg5);
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+
+.np-app .cal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(15,51,51,.7);
+  border: 1px solid rgba(50,110,100,.35);
+  border-left-width: 3px;
+  border-radius: 7px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--navi-fg1);
+  transition: transform .12s var(--np-ease), border-color .15s var(--np-ease), background .15s var(--np-ease);
+  font-family: var(--navi-font-sans);
+}
+.np-app .cal-card:hover {
+  transform: translateY(-1px);
+  background: rgba(15,51,51,.92);
+}
+.np-app .cal-card.short {
+  border-left-color: var(--navi-positive);
+  background: linear-gradient(90deg, rgba(168,212,160,.10), rgba(15,51,51,.7) 40%);
+}
+.np-app .cal-card.short:hover { border-color: var(--navi-positive); }
+.np-app .cal-card.long {
+  border-left-color: var(--navi-negative);
+  background: linear-gradient(90deg, rgba(232,112,96,.10), rgba(15,51,51,.7) 40%);
+}
+.np-app .cal-card.long:hover { border-color: var(--navi-negative); }
+.np-app .cal-card.closed {
+  border-left-color: var(--navi-fg4);
+  background: rgba(15,51,51,.45);
+  color: var(--navi-fg3);
+}
+.np-app .cal-card.closed .cal-card-tk { text-decoration: line-through; opacity: .8; }
+
+.np-app .cal-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.np-app .cal-card-tk {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -.1px;
+  color: inherit;
+}
+.np-app .cal-card-side {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(50,110,100,.25);
+}
+.np-app .cal-card.short .cal-card-side { color: var(--navi-positive); background: rgba(168,212,160,.15); }
+.np-app .cal-card.long  .cal-card-side { color: var(--navi-negative); background: rgba(232,112,96,.15); }
+.np-app .cal-card.closed .cal-card-side { color: var(--navi-fg3); }
+
+.np-app .cal-card-mid {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg2);
+}
+.np-app .cal-card-strike { font-weight: 500; }
+.np-app .cal-card-qty    { color: var(--navi-fg3); }
+
+.np-app .cal-card-prem {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+  letter-spacing: .2px;
+}
+
+@media (max-width: 1024px) {
+  .np-app .cal-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .np-app .cal-day { min-height: 180px; }
+}
+
+/* ============================================================
+   Stock Insights strip — calmer, plain-text cards w/ avatar
+   ============================================================ */
+.np-app .si-wrap {
+  background: var(--navi-card);
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.np-app .si-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.np-app .si-title {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+}
+.np-app .si-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* Toggle is .np-toggle.si-toggle — uses existing np-toggle look */
+.np-app .si-toggle button .si-toggle-ct {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  color: var(--navi-fg4);
+  margin-left: 2px;
+}
+.np-app .si-toggle button.on .si-toggle-ct { color: var(--navi-neon); }
+
+/* Sector dropdown */
+.np-app .si-sector {
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 7px 28px 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%23a8c4c0' stroke-width='1.2' fill='none'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+.np-app .si-sector:hover {
+  color: var(--navi-fg1);
+  border-color: var(--navi-border-bright);
+}
+
+/* Scroll strip */
+.np-app .si-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(50,110,100,.4) transparent;
+  padding-bottom: 6px;
+}
+.np-app .si-scroll::-webkit-scrollbar { height: 6px; }
+.np-app .si-scroll::-webkit-scrollbar-thumb { background: rgba(50,110,100,.4); border-radius: 4px; }
+.np-app .si-scroll::-webkit-scrollbar-track { background: transparent; }
+.np-app .si-row {
+  display: flex;
+  gap: 14px;
+  padding: 2px;
+  min-height: 290px;
+}
+.np-app .si-empty {
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  padding: 36px;
+}
+
+/* Card */
+.np-app .si-card {
+  flex: 0 0 224px;
+  min-height: 280px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 14px;
+  padding: 16px 18px 14px;
+  cursor: pointer;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition:
+    flex-basis .28s var(--np-ease),
+    border-color .15s var(--np-ease),
+    background .15s var(--np-ease),
+    box-shadow .15s var(--np-ease);
+}
+.np-app .si-card:hover {
+  border-color: var(--navi-border-bright);
+  background: rgba(15,51,51,.75);
+}
+.np-app .si-card.expanded {
+  flex-basis: 448px;
+  background: rgba(15,51,51,.85);
+  border-color: var(--navi-neon);
+  box-shadow: 0 8px 28px -16px rgba(210,230,50,.45);
+}
+
+/* Top — avatar + ticker + sector */
+.np-app .si-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.np-app .si-card-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--navi-font-sans);
+  font-weight: 700;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+.np-app .si-card-ident {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.np-app .si-card-tk {
+  font-family: var(--navi-font-mono);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--navi-fg1);
+  letter-spacing: 0.5px;
+}
+.np-app .si-card-sec {
+  font-size: 10px;
+  color: var(--navi-fg3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Price + day move */
+.np-app .si-card-price {
+  font-family: var(--navi-font-sans);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  letter-spacing: -.6px;
+  line-height: 1.05;
+  margin-top: 4px;
+}
+.np-app .si-card-day {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+.np-app .si-card-day.up   { color: var(--navi-neon); }
+.np-app .si-card-day.down { color: var(--navi-negative); }
+.np-app .si-card-day.flat { color: var(--navi-fg3); }
+
+/* Overall P&L line */
+.np-app .si-card-pl-row {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(50,110,100,.22);
+}
+.np-app .si-card-pl {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+.np-app .si-card-pl.up   { color: var(--navi-neon); }
+.np-app .si-card-pl.down { color: var(--navi-negative); }
+.np-app .si-card-pl.flat { color: var(--navi-fg2); }
+.np-app .si-card-pl-pct {
+  font-weight: 500;
+  opacity: .85;
+  margin-left: 2px;
+}
+.np-app .si-card-pos {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+}
+
+/* Signal lines (plain text, no chips) */
+.np-app .si-card-signals {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(50,110,100,.22);
+}
+.np-app .si-card-signal {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  color: var(--navi-fg2);
+  line-height: 1.35;
+}
+
+/* Earnings line */
+.np-app .si-card-earn {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 2px;
+}
+.np-app .si-card-earn.soon   { color: var(--navi-warning); }
+.np-app .si-card-earn.urgent { color: var(--navi-negative); }
+
+/* Footer */
+.np-app .si-card-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: .5px;
+  color: var(--navi-fg5);
+}
+
+/* Expanded detail */
+.np-app .si-card-detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(50,110,100,.22);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+}
+.np-app .si-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+}
+.np-app .si-detail-row .k {
+  color: var(--navi-fg4);
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  font-size: 8px;
+  font-weight: 600;
+}
+.np-app .si-detail-row .v {
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  text-align: right;
+}
+
+@media (max-width: 768px) {
+  .np-app .si-card           { flex-basis: 78vw; }
+  .np-app .si-card.expanded  { flex-basis: 90vw; }
 }

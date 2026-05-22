@@ -185,17 +185,13 @@ export function PositionsTable({
                     <td>
                       <span
                         className={
-                          'np-status-chip ' +
+                          'np-status-text ' +
                           (r.overall_pl > 0 ? 'up' : r.overall_pl < 0 ? 'down' : 'flat')
                         }
                         title={`Overall P&L ${fmtUSD(r.overall_pl)} (unrealized + net realized)`}
                       >
-                        {r.overall_pl > 0 ? '▲' : r.overall_pl < 0 ? '▼' : '—'}
-                        {r.overall_pl !== 0 && (
-                          <span className="np-status-chip-amt">
-                            {fmtUSD(r.overall_pl)}
-                          </span>
-                        )}
+                        {r.overall_pl > 0 ? '▲ ' : r.overall_pl < 0 ? '▼ ' : '— '}
+                        {r.overall_pl !== 0 && fmtUSD(r.overall_pl)}
                       </span>
                     </td>
                     <td className="sector-cell">{r.sector}</td>
@@ -210,7 +206,7 @@ export function PositionsTable({
                             ? 'down'
                             : '')
                       }
-                      title={`avg ${fmtUSD2(r.avg_cost)} − net realized ${fmtUSD(r.net_realized)} / ${fmtQty(r.quantity)} sh`}
+                      title={`avg ${fmtUSD2(r.avg_cost)} − net options cash ${fmtUSD(r.net_options_cash)} / ${fmtQty(r.quantity)} sh`}
                     >
                       {fmtUSD2(r.effective_cost)}
                     </td>

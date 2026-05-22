@@ -36,9 +36,15 @@ interface Props {
   position: PositionComputed;
   liveOpens: LiveOption[];
   bucket?: Bucket;
-  initialTab?: 'open' | 'close';
+  initialTab?: Tab;
   /** Pre-selected live open for the close tab. */
   initialCloseTarget?: string;
+  /** The expired option being resolved (when initialTab='resolve'). */
+  resolveTrade?: OptionTrade;
+  /** Close price on the resolveTrade's expiry date — if available,
+   *  the Resolve flow uses it to default the radio (ITM → Exercised,
+   *  OTM → Expired worthless). Null when no snapshot exists. */
+  resolveExpiryClose?: number | null;
   onClose: () => void;
   onAddTrade: (p: {
     ticker: string;
@@ -53,10 +59,53 @@ interface Props {
     closes_trade_id?: string | null;
     note?: string | null;
   }) => void;
+  /** Update mutable fields on an existing OPEN trade. */
+  onUpdateTrade?: (p: {
+    id: string;
+    contracts: number;
+    strike: number;
+    premium: number;
+    expiry: string;
+    trade_date: string;
+    note?: string | null;
+  }) => void;
+  /** Buy more shares of an existing ticker. */
+  onBuyShares?: (p: {
+    ticker: string;
+    quantity: number;
+    price: number;
+    trade_date: string;
+    note?: string | null;
+  }) => void;
+  /** Sell shares manually. */
+  onSellShares?: (p: {
+    ticker: string;
+    quantity: number;
+    price: number;
+    trade_date: string;
+    note?: string | null;
+  }) => void;
+  /** Resolve an expired option (one of three flavors). */
+  onResolveExpired?: (
+    p:
+      | { kind: 'expired'; open: OptionTrade; trade_date: string; note?: string | null }
+      | {
+          kind: 'rolled';
+          open: OptionTrade;
+          close_premium: number;
+          close_date: string;
+          new_strike: number;
+          new_premium: number;
+          new_expiry: string;
+          new_open_date: string;
+          note?: string | null;
+        }
+      | { kind: 'assigned'; open: OptionTrade; trade_date: string; note?: string | null },
+  ) => void;
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
 }
 
-type Tab = 'open' | 'close';
+type Tab = 'open' | 'close' | 'edit' | 'shares' | 'resolve';
 
 interface OpenForm {
   option_type: OptionType;
@@ -96,21 +145,146 @@ const blankClose = (targetId: string): CloseForm => ({
   note: '',
 });
 
+interface EditForm {
+  target_id: string;
+  contracts: string;
+  strike: string;
+  premium: string;
+  expiry: string;
+  date: string;
+  note: string;
+}
+
+const editFormFromTrade = (t: OptionTrade): EditForm => ({
+  target_id: t.id,
+  contracts: String(t.contracts),
+  strike: String(t.strike),
+  premium: String(t.premium),
+  expiry: t.expiry,
+  date: t.trade_date,
+  note: t.note ?? '',
+});
+
+interface SellForm {
+  quantity: string;
+  price: string;
+  date: string;
+  note: string;
+}
+const blankSell = (): SellForm => ({
+  quantity: '',
+  price: '',
+  date: todayIso(),
+  note: '',
+});
+
+type ResolveKind = 'expired' | 'rolled' | 'assigned';
+interface ResolveForm {
+  kind: ResolveKind;
+  // Date the resolution happened (close date for all kinds).
+  trade_date: string;
+  // Rolled-only:
+  close_premium: string;
+  new_strike: string;
+  new_premium: string;
+  new_expiry: string;
+  new_open_date: string;
+  note: string;
+}
+/** Decide which resolution kind to default to. ITM → assigned,
+ *  OTM → expired. When we don't have a close snapshot (null), fall
+ *  back to expired (most common case for OTM income premium). */
+function defaultResolveKind(
+  open: OptionTrade | undefined,
+  closeAtExpiry: number | null | undefined,
+): ResolveKind {
+  if (!open || closeAtExpiry == null) return 'expired';
+  // For a SHORT call, ITM = close >= strike → assigned (shares called).
+  // For a SHORT put,  ITM = close <= strike → assigned (shares put to us).
+  // For LONG sides (rare for this user), ITM means they'd be exercising.
+  const isCall = open.option_type === 'call';
+  const itm = isCall
+    ? closeAtExpiry >= open.strike
+    : closeAtExpiry <= open.strike;
+  return itm ? 'assigned' : 'expired';
+}
+
+const blankResolve = (
+  open: OptionTrade | undefined,
+  closeAtExpiry?: number | null,
+): ResolveForm => ({
+  kind: defaultResolveKind(open, closeAtExpiry),
+  trade_date: open?.expiry ?? todayIso(),
+  close_premium: '',
+  new_strike: open ? String(open.strike) : '',
+  new_premium: '',
+  new_expiry: '',
+  new_open_date: todayIso(),
+  note: '',
+});
+
 export function PositionDetailModal({
   position,
   liveOpens,
   bucket,
   initialTab = 'open',
   initialCloseTarget,
+  resolveTrade,
+  resolveExpiryClose,
   onClose,
   onAddTrade,
+  onUpdateTrade,
+  onBuyShares,
+  onSellShares,
+  onResolveExpired,
   onSetStatus,
 }: Props) {
-  const [tab, setTab] = useState<Tab>(liveOpens.length === 0 ? 'open' : initialTab);
+  const [tab, setTab] = useState<Tab>(
+    initialTab === 'resolve' || initialTab === 'shares'
+      ? initialTab
+      : liveOpens.length === 0
+        ? 'open'
+        : initialTab,
+  );
+  // Mode toggle inside the Shares tab.
+  const [sharesMode, setSharesMode] = useState<'buy' | 'sell'>(
+    position.quantity > 0 ? 'sell' : 'buy',
+  );
+  const [sellForm, setSellForm] = useState<SellForm>(blankSell());
+  const [resolveForm, setResolveForm] = useState<ResolveForm>(
+    blankResolve(resolveTrade, resolveExpiryClose),
+  );
+  // If parent passes a new resolveTrade (or the close snapshot lands
+  // asynchronously), reset the form with the right default.
+  useEffect(() => {
+    setResolveForm(blankResolve(resolveTrade, resolveExpiryClose));
+  }, [resolveTrade?.id, resolveExpiryClose]);  // eslint-disable-line react-hooks/exhaustive-deps
   const [openForm, setOpenForm] = useState<OpenForm>(blankOpen());
   const [closeForm, setCloseForm] = useState<CloseForm>(
     blankClose(initialCloseTarget ?? liveOpens[0]?.open.id ?? ''),
   );
+  // Edit tab — only LIVE opens (not fully closed). Sorted newest first.
+  const editableOpens = useMemo<OptionTrade[]>(
+    () =>
+      liveOpens
+        .map((l) => l.open)
+        .sort((a, b) => b.trade_date.localeCompare(a.trade_date)),
+    [liveOpens],
+  );
+  const [editForm, setEditForm] = useState<EditForm | null>(() =>
+    editableOpens[0] ? editFormFromTrade(editableOpens[0]) : null,
+  );
+  useEffect(() => {
+    // If the selected edit target disappears (e.g., parent re-renders),
+    // fall back to the first available open.
+    if (
+      editForm &&
+      !editableOpens.some((t) => t.id === editForm.target_id)
+    ) {
+      setEditForm(editableOpens[0] ? editFormFromTrade(editableOpens[0]) : null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editableOpens.length]);
 
   useEffect(() => {
     // When the live opens list changes (or we mount), make sure the close
@@ -180,6 +354,50 @@ export function PositionDetailModal({
       note: openForm.note || null,
     });
     setOpenForm(blankOpen());
+    onClose(); // dismiss after submit; the parent toast confirms success/failure
+  };
+
+  // ── Edit tab math ──────────────────────────────────────────────
+  const editTarget = useMemo<OptionTrade | null>(
+    () =>
+      editForm
+        ? editableOpens.find((t) => t.id === editForm.target_id) ?? null
+        : null,
+    [editForm, editableOpens],
+  );
+  const canSubmitEdit =
+    !!editForm &&
+    !!editTarget &&
+    !!onUpdateTrade &&
+    parseFloat(editForm.contracts) > 0 &&
+    parseFloat(editForm.strike) > 0 &&
+    parseFloat(editForm.premium) >= 0 &&
+    !!editForm.expiry &&
+    !!editForm.date;
+
+  const editDirty = !!(
+    editForm &&
+    editTarget &&
+    (parseFloat(editForm.contracts) !== editTarget.contracts ||
+      parseFloat(editForm.strike) !== editTarget.strike ||
+      parseFloat(editForm.premium) !== editTarget.premium ||
+      editForm.expiry !== editTarget.expiry ||
+      editForm.date !== editTarget.trade_date ||
+      (editForm.note || null) !== (editTarget.note || null))
+  );
+
+  const submitEdit = () => {
+    if (!canSubmitEdit || !editForm || !onUpdateTrade) return;
+    onUpdateTrade({
+      id: editForm.target_id,
+      contracts: parseInt(editForm.contracts, 10),
+      strike: parseFloat(editForm.strike),
+      premium: parseFloat(editForm.premium),
+      expiry: editForm.expiry,
+      trade_date: editForm.date,
+      note: editForm.note || null,
+    });
+    onClose();
   };
 
   const submitClose = () => {
@@ -198,6 +416,121 @@ export function PositionDetailModal({
       note: closeForm.note || null,
     });
     setCloseForm(blankClose(closeForm.target_id));
+    onClose();
+  };
+
+  // ── Shares tab math (handles both Buy and Sell) ────────────────
+  const sharesQtyN = parseInt(sellForm.quantity, 10) || 0;
+  const sharesPriceN = parseFloat(sellForm.price) || 0;
+  // Sell preview
+  const sellRealized = (sharesPriceN - position.avg_cost) * sharesQtyN;
+  // Buy preview — weighted avg cost after the buy
+  const buyNewQty = position.quantity + sharesQtyN;
+  const buyNewAvg =
+    buyNewQty > 0
+      ? (position.quantity * position.avg_cost + sharesQtyN * sharesPriceN) / buyNewQty
+      : sharesPriceN;
+  const canSubmitShares =
+    sharesQtyN > 0 &&
+    sharesPriceN >= 0 &&
+    !!sellForm.date &&
+    (sharesMode === 'buy'
+      ? !!onBuyShares
+      : !!onSellShares && sharesQtyN <= position.quantity);
+  const submitShares = () => {
+    if (!canSubmitShares) return;
+    const payload = {
+      ticker: position.ticker,
+      quantity: sharesQtyN,
+      price: sharesPriceN,
+      trade_date: sellForm.date,
+      note: sellForm.note || null,
+    };
+    if (sharesMode === 'buy' && onBuyShares) onBuyShares(payload);
+    else if (sharesMode === 'sell' && onSellShares) onSellShares(payload);
+    setSellForm(blankSell());
+    onClose();
+  };
+
+  // ── Resolve Expired math ───────────────────────────────────────
+  // The trade being resolved was supplied via prop. Three paths:
+  //   expired  — close at \$0, premium kept
+  //   rolled   — close at buyback + open new at new strike/expiry
+  //   assigned — short call → sells shares at strike (realized P&L preview)
+  const resolveOpen = resolveTrade;
+  const isResolveShortCall =
+    !!resolveOpen &&
+    resolveOpen.direction === 'short' &&
+    resolveOpen.option_type === 'call';
+  const isResolveShortPut =
+    !!resolveOpen &&
+    resolveOpen.direction === 'short' &&
+    resolveOpen.option_type === 'put';
+  const resolveAssignedSharePnl =
+    resolveOpen && isResolveShortCall
+      ? (resolveOpen.strike - position.avg_cost) * resolveOpen.contracts * 100
+      : 0;
+  const resolveAssignedNewAvg =
+    resolveOpen && isResolveShortPut
+      ? (() => {
+          const newShares = resolveOpen.contracts * 100;
+          const totalShares = position.quantity + newShares;
+          return totalShares > 0
+            ? (position.quantity * position.avg_cost +
+                newShares * resolveOpen.strike) /
+                totalShares
+            : resolveOpen.strike;
+        })()
+      : null;
+  const resolveRolledClosePremiumN = parseFloat(resolveForm.close_premium) || 0;
+  const resolveRolledNewStrikeN = parseFloat(resolveForm.new_strike) || 0;
+  const resolveRolledNewPremiumN = parseFloat(resolveForm.new_premium) || 0;
+
+  const canSubmitResolve = (() => {
+    if (!onResolveExpired || !resolveOpen) return false;
+    if (resolveForm.kind === 'expired') return !!resolveForm.trade_date;
+    if (resolveForm.kind === 'assigned') return !!resolveForm.trade_date;
+    // rolled
+    return (
+      !!resolveForm.trade_date &&
+      resolveRolledClosePremiumN >= 0 &&
+      resolveRolledNewStrikeN > 0 &&
+      resolveRolledNewPremiumN >= 0 &&
+      !!resolveForm.new_expiry &&
+      !!resolveForm.new_open_date
+    );
+  })();
+
+  const submitResolve = () => {
+    if (!canSubmitResolve || !onResolveExpired || !resolveOpen) return;
+    if (resolveForm.kind === 'expired') {
+      onResolveExpired({
+        kind: 'expired',
+        open: resolveOpen,
+        trade_date: resolveForm.trade_date,
+        note: resolveForm.note || null,
+      });
+    } else if (resolveForm.kind === 'assigned') {
+      onResolveExpired({
+        kind: 'assigned',
+        open: resolveOpen,
+        trade_date: resolveForm.trade_date,
+        note: resolveForm.note || null,
+      });
+    } else {
+      onResolveExpired({
+        kind: 'rolled',
+        open: resolveOpen,
+        close_premium: resolveRolledClosePremiumN,
+        close_date: resolveForm.trade_date,
+        new_strike: resolveRolledNewStrikeN,
+        new_premium: resolveRolledNewPremiumN,
+        new_expiry: resolveForm.new_expiry,
+        new_open_date: resolveForm.new_open_date,
+        note: resolveForm.note || null,
+      });
+    }
+    onClose();
   };
 
   return (
@@ -239,19 +572,79 @@ export function PositionDetailModal({
           >
             Close
           </button>
+          <button
+            className={'pp-tab' + (tab === 'edit' ? ' on' : '') + (editableOpens.length === 0 ? ' disabled' : '')}
+            onClick={() => editableOpens.length > 0 && setTab('edit')}
+            disabled={editableOpens.length === 0 || !onUpdateTrade}
+            title={
+              !onUpdateTrade
+                ? 'Edit not wired'
+                : editableOpens.length === 0
+                  ? 'No trades to edit'
+                  : ''
+            }
+          >
+            Edit<span className="pp-tab-count">{editableOpens.length}</span>
+          </button>
+          <button
+            className={'pp-tab' + (tab === 'shares' ? ' on' : '')}
+            onClick={() => setTab('shares')}
+            disabled={!onBuyShares && !onSellShares}
+            title={
+              !onBuyShares && !onSellShares ? 'Shares not wired' : ''
+            }
+          >
+            Shares
+          </button>
+          {resolveOpen && (
+            <button
+              className={'pp-tab' + (tab === 'resolve' ? ' on' : '')}
+              onClick={() => setTab('resolve')}
+              disabled={!onResolveExpired}
+            >
+              Resolve
+            </button>
+          )}
         </div>
 
         {/* SIDECAR */}
         <div className="pp-sidecar">
           <div className="pp-form">
-            {tab === 'open' ? (
+            {tab === 'open' && (
               <OpenFields form={openForm} setForm={setOpenForm} />
-            ) : (
+            )}
+            {tab === 'close' && (
               <CloseFields
                 form={closeForm}
                 setForm={setCloseForm}
                 liveOpens={liveOpens}
                 target={closeTarget}
+              />
+            )}
+            {tab === 'edit' && (
+              <EditFields
+                form={editForm}
+                setForm={setEditForm}
+                opens={editableOpens}
+                target={editTarget}
+              />
+            )}
+            {tab === 'shares' && (
+              <SharesFields
+                mode={sharesMode}
+                setMode={setSharesMode}
+                form={sellForm}
+                setForm={setSellForm}
+                currentQty={position.quantity}
+                avgCost={position.avg_cost}
+              />
+            )}
+            {tab === 'resolve' && resolveOpen && (
+              <ResolveFields
+                form={resolveForm}
+                setForm={setResolveForm}
+                open={resolveOpen}
+                closeAtExpiry={resolveExpiryClose ?? null}
               />
             )}
           </div>
@@ -303,9 +696,15 @@ export function PositionDetailModal({
 
             <div className="pp-rail-section">
               <div className="pp-rail-lbl">
-                {tab === 'open' ? 'New trade preview' : 'Realized P&L'}
+                {tab === 'open' ? 'New trade preview'
+                  : tab === 'close' ? 'Realized P&L'
+                  : tab === 'edit' ? 'Edit preview'
+                  : tab === 'shares'
+                    ? sharesMode === 'buy' ? 'Buy preview' : 'Sale preview'
+                  : tab === 'resolve' ? 'Resolution preview'
+                  : 'Preview'}
               </div>
-              {tab === 'open' ? (
+              {tab === 'open' && (
                 <>
                   <div className={'pp-rail-bignum ' + (openSignedTotal > 0 ? 'pos' : openSignedTotal < 0 ? 'neg' : '')}>
                     {openSignedTotal === 0
@@ -318,7 +717,8 @@ export function PositionDetailModal({
                     {openForm.direction === 'short' ? 'premium collected' : 'premium paid'}
                   </div>
                 </>
-              ) : (
+              )}
+              {tab === 'close' && (
                 <>
                   <div className={'pp-rail-bignum ' + (closeRealized > 0 ? 'pos' : closeRealized < 0 ? 'neg' : '')}>
                     {closeRealized === 0
@@ -330,6 +730,112 @@ export function PositionDetailModal({
                   <div className="pp-rail-sub">
                     {closeTarget ? `vs ${closeTarget.open.direction} open @ $${closeTarget.open.premium}/sh` : 'pick a position'}
                   </div>
+                </>
+              )}
+              {tab === 'edit' && editTarget && editForm && (() => {
+                const newTotal =
+                  (parseFloat(editForm.contracts) || 0) * 100 *
+                  (parseFloat(editForm.premium) || 0);
+                const isCashIn = editTarget.direction === 'short';
+                const signed = isCashIn ? newTotal : -newTotal;
+                return (
+                  <>
+                    <div className={'pp-rail-bignum ' + (signed > 0 ? 'pos' : signed < 0 ? 'neg' : '')}>
+                      {signed === 0
+                        ? '—'
+                        : signed > 0
+                          ? fmtUSD(signed)
+                          : '−' + fmtUSD(Math.abs(signed))}
+                    </div>
+                    <div className="pp-rail-sub">
+                      {isCashIn ? 'premium collected' : 'premium paid'}
+                      {editDirty && ' · unsaved'}
+                    </div>
+                  </>
+                );
+              })()}
+              {tab === 'shares' && sharesMode === 'sell' && (
+                <>
+                  <div className={'pp-rail-bignum ' + (sellRealized > 0 ? 'pos' : sellRealized < 0 ? 'neg' : '')}>
+                    {sharesQtyN === 0
+                      ? '—'
+                      : sellRealized >= 0
+                        ? fmtUSD(sellRealized)
+                        : '−' + fmtUSD(Math.abs(sellRealized))}
+                  </div>
+                  <div className="pp-rail-sub">
+                    {sharesQtyN > 0
+                      ? `${sharesQtyN} sh × (${fmtUSD2(sharesPriceN)} − ${fmtUSD2(position.avg_cost)})`
+                      : 'enter qty + price'}
+                  </div>
+                </>
+              )}
+              {tab === 'shares' && sharesMode === 'buy' && (
+                <>
+                  <div className="pp-rail-bignum">
+                    {sharesQtyN === 0 ? '—' : fmtUSD2(buyNewAvg)}
+                  </div>
+                  <div className="pp-rail-sub">
+                    {sharesQtyN > 0
+                      ? `new avg after buying ${sharesQtyN} sh @ ${fmtUSD2(sharesPriceN)}`
+                      : 'enter qty + price'}
+                  </div>
+                </>
+              )}
+              {tab === 'resolve' && resolveOpen && (
+                <>
+                  {resolveForm.kind === 'expired' && (
+                    <>
+                      <div className="pp-rail-bignum pos">
+                        {fmtUSD(resolveOpen.contracts * 100 * resolveOpen.premium)}
+                      </div>
+                      <div className="pp-rail-sub">
+                        full premium kept (expired worthless)
+                      </div>
+                    </>
+                  )}
+                  {resolveForm.kind === 'assigned' && isResolveShortCall && (
+                    <>
+                      <div className={'pp-rail-bignum ' + (resolveAssignedSharePnl > 0 ? 'pos' : resolveAssignedSharePnl < 0 ? 'neg' : '')}>
+                        {resolveAssignedSharePnl >= 0
+                          ? fmtUSD(resolveAssignedSharePnl)
+                          : '−' + fmtUSD(Math.abs(resolveAssignedSharePnl))}
+                      </div>
+                      <div className="pp-rail-sub">
+                        stock realized · {resolveOpen.contracts * 100} sh × (${resolveOpen.strike} − {fmtUSD2(position.avg_cost)})
+                      </div>
+                    </>
+                  )}
+                  {resolveForm.kind === 'assigned' && isResolveShortPut && resolveAssignedNewAvg != null && (
+                    <>
+                      <div className="pp-rail-bignum">{fmtUSD2(resolveAssignedNewAvg)}</div>
+                      <div className="pp-rail-sub">
+                        new avg cost after buying {resolveOpen.contracts * 100} sh @ ${resolveOpen.strike}
+                      </div>
+                    </>
+                  )}
+                  {resolveForm.kind === 'rolled' && (
+                    <>
+                      {(() => {
+                        const realized =
+                          resolveOpen.direction === 'short'
+                            ? (resolveOpen.premium - resolveRolledClosePremiumN) * resolveOpen.contracts * 100
+                            : (resolveRolledClosePremiumN - resolveOpen.premium) * resolveOpen.contracts * 100;
+                        return (
+                          <>
+                            <div className={'pp-rail-bignum ' + (realized > 0 ? 'pos' : realized < 0 ? 'neg' : '')}>
+                              {realized >= 0
+                                ? fmtUSD(realized)
+                                : '−' + fmtUSD(Math.abs(realized))}
+                            </div>
+                            <div className="pp-rail-sub">
+                              realized on close · new open follows
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -346,13 +852,42 @@ export function PositionDetailModal({
           </button>
           <div className="pp-popup-foot-end">
             <button className="pp-btn pp-btn-text" onClick={onClose}>Cancel</button>
-            {tab === 'open' ? (
+            {tab === 'open' && (
               <button className="pp-btn pp-btn-neon" onClick={submitOpen} disabled={!canSubmitOpen}>
                 ✓ Open position
               </button>
-            ) : (
+            )}
+            {tab === 'close' && (
               <button className="pp-btn pp-btn-neon" onClick={submitClose} disabled={!canSubmitClose}>
                 ✓ Close position
+              </button>
+            )}
+            {tab === 'edit' && (
+              <button
+                className="pp-btn pp-btn-neon"
+                onClick={submitEdit}
+                disabled={!canSubmitEdit || !editDirty}
+                title={!editDirty ? 'No changes' : ''}
+              >
+                ✓ Save changes
+              </button>
+            )}
+            {tab === 'shares' && (
+              <button
+                className="pp-btn pp-btn-neon"
+                onClick={submitShares}
+                disabled={!canSubmitShares}
+              >
+                {sharesMode === 'buy' ? '✓ Buy shares' : '✓ Sell shares'}
+              </button>
+            )}
+            {tab === 'resolve' && (
+              <button
+                className="pp-btn pp-btn-neon"
+                onClick={submitResolve}
+                disabled={!canSubmitResolve}
+              >
+                ✓ Resolve
               </button>
             )}
           </div>
@@ -491,22 +1026,36 @@ function CloseFields({
     <>
       <div className="pp-field">
         <div className="pp-field-label">Closing which position?</div>
-        <div className="pp-close-picker">
+        <div className="pp-close-picker" role="radiogroup">
           {liveOpens.map((lo) => {
+            const isSelected = form.target_id === lo.open.id;
             const sign = lo.open.direction === 'short' ? '−' : '+';
-            const label = `${sign}${lo.remaining_contracts} ${lo.open.option_type.toUpperCase()} $${lo.open.strike} exp ${lo.open.expiry} @ $${lo.open.premium}/sh`;
             return (
-              <button
+              <label
                 key={lo.open.id}
-                type="button"
-                className={'pp-close-pick' + (form.target_id === lo.open.id ? ' on' : '')}
-                onClick={() => set('target_id', lo.open.id)}
+                className={'pp-close-pick' + (isSelected ? ' on' : '')}
               >
+                <input
+                  type="radio"
+                  name="close-target"
+                  value={lo.open.id}
+                  checked={isSelected}
+                  onChange={() => set('target_id', lo.open.id)}
+                  className="pp-close-pick-radio"
+                />
+                <span className="pp-close-pick-dot" aria-hidden />
                 <span className={'pp-mini-glyph ' + (lo.open.direction === 'short' ? 'neg' : 'pos')}>
                   {lo.open.option_type === 'put' ? 'P' : 'C'}
                 </span>
-                <span className="pp-close-pick-label">{label}</span>
-              </button>
+                <div className="pp-close-pick-body">
+                  <div className="pp-close-pick-headline">
+                    {sign}{lo.remaining_contracts} {lo.open.option_type.toUpperCase()} ${lo.open.strike}
+                  </div>
+                  <div className="pp-close-pick-sub">
+                    exp {lo.open.expiry} · opened @ ${lo.open.premium}/sh
+                  </div>
+                </div>
+              </label>
             );
           })}
         </div>
@@ -562,6 +1111,139 @@ function CloseFields({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Edit fields — pick an existing OPEN trade, mutate its fields.
+// option_type and direction are deliberately locked (matched closes
+// reference them). Delete + re-create if you really need to change those.
+function EditFields({
+  form, setForm, opens, target,
+}: {
+  form: EditForm | null;
+  setForm: (f: EditForm | null) => void;
+  opens: OptionTrade[];
+  target: OptionTrade | null;
+}) {
+  if (opens.length === 0) {
+    return (
+      <div className="pp-field" style={{ padding: '24px 0', color: 'var(--navi-fg3)' }}>
+        No opens to edit yet.
+      </div>
+    );
+  }
+  const set = <K extends keyof EditForm>(k: K, v: EditForm[K]) => {
+    if (!form) return;
+    setForm({ ...form, [k]: v });
+  };
+  const selectTrade = (id: string) => {
+    const t = opens.find((x) => x.id === id);
+    if (t) setForm(editFormFromTrade(t));
+  };
+
+  return (
+    <>
+      <div className="pp-field">
+        <div className="pp-field-label">Which trade?</div>
+        <div className="pp-close-picker" role="radiogroup">
+          {opens.map((t) => {
+            const isSelected = form?.target_id === t.id;
+            const sign = t.direction === 'short' ? '−' : '+';
+            return (
+              <label
+                key={t.id}
+                className={'pp-close-pick' + (isSelected ? ' on' : '')}
+              >
+                <input
+                  type="radio"
+                  name="edit-target"
+                  value={t.id}
+                  checked={isSelected}
+                  onChange={() => selectTrade(t.id)}
+                  className="pp-close-pick-radio"
+                />
+                <span className="pp-close-pick-dot" aria-hidden />
+                <span className={'pp-mini-glyph ' + (t.direction === 'short' ? 'neg' : 'pos')}>
+                  {t.option_type === 'put' ? 'P' : 'C'}
+                </span>
+                <div className="pp-close-pick-body">
+                  <div className="pp-close-pick-headline">
+                    {sign}{t.contracts} {t.option_type.toUpperCase()} ${t.strike}
+                  </div>
+                  <div className="pp-close-pick-sub">
+                    exp {t.expiry} · opened {t.trade_date} @ ${t.premium}/sh
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
+      {target && form && (
+        <>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">Contracts</div>
+              <input
+                className="pp-input mono"
+                type="number"
+                min="1"
+                step="1"
+                value={form.contracts}
+                onChange={(e) => set('contracts', e.target.value)}
+              />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">Strike</div>
+              <MoneyInput value={form.strike} onChange={(v) => set('strike', v)} placeholder="0.00" />
+            </div>
+          </div>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">
+                Premium / sh ({target.direction === 'short' ? 'collected' : 'paid'})
+              </div>
+              <MoneyInput value={form.premium} onChange={(v) => set('premium', v)} placeholder="0.00" />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">Expiry</div>
+              <input
+                className="pp-input mono"
+                type="date"
+                value={form.expiry}
+                onChange={(e) => set('expiry', e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">Trade date</div>
+              <input
+                className="pp-input mono"
+                type="date"
+                value={form.date}
+                onChange={(e) => set('date', e.target.value)}
+              />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">Note (optional)</div>
+              <input
+                className="pp-input"
+                value={form.note}
+                onChange={(e) => set('note', e.target.value)}
+                placeholder="adjustment reason, etc."
+              />
+            </div>
+          </div>
+          <div className="pp-field-hint" style={{ marginTop: 8 }}>
+            Side ({target.direction} {target.option_type}) is locked — delete
+            and re-create if you need to flip it.
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
 function MoneyInput({
   value, onChange, placeholder,
 }: {
@@ -581,6 +1263,249 @@ function MoneyInput({
         placeholder={placeholder}
       />
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Shares fields — Buy / Sell toggle inside; same qty/price/date inputs.
+function SharesFields({
+  mode, setMode, form, setForm, currentQty, avgCost,
+}: {
+  mode: 'buy' | 'sell';
+  setMode: (m: 'buy' | 'sell') => void;
+  form: SellForm;
+  setForm: (f: SellForm) => void;
+  currentQty: number;
+  avgCost: number;
+}) {
+  const set = <K extends keyof SellForm>(k: K, v: SellForm[K]) =>
+    setForm({ ...form, [k]: v });
+  const sellMax = currentQty;
+  return (
+    <>
+      <div className="pp-field">
+        <div className="pp-field-label">Action</div>
+        <div className="pp-source-seg">
+          <button
+            type="button"
+            className={'pp-source-opt' + (mode === 'buy' ? ' on' : '')}
+            onClick={() => setMode('buy')}
+          >
+            <span className="pp-glyph-tile">+</span>
+            <span>Buy shares</span>
+          </button>
+          <button
+            type="button"
+            className={'pp-source-opt' + (mode === 'sell' ? ' on' : '') + (sellMax === 0 ? ' disabled' : '')}
+            onClick={() => sellMax > 0 && setMode('sell')}
+            disabled={sellMax === 0}
+            title={sellMax === 0 ? 'No shares on hand' : ''}
+          >
+            <span className="pp-glyph-tile">−</span>
+            <span>Sell shares</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">Quantity</div>
+          <input
+            className="pp-input mono"
+            type="number"
+            min="1"
+            max={mode === 'sell' ? sellMax : undefined}
+            step="1"
+            value={form.quantity}
+            onChange={(e) => set('quantity', e.target.value)}
+            placeholder={mode === 'sell' ? String(sellMax) : 'shares to buy'}
+          />
+          <div className="pp-field-hint">
+            {mode === 'sell'
+              ? `up to ${fmtQty(sellMax)} on hand`
+              : `current ${fmtQty(currentQty)} on hand`}
+          </div>
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">Price / share</div>
+          <MoneyInput value={form.price} onChange={(v) => set('price', v)} placeholder="0.00" />
+          <div className="pp-field-hint">avg basis {fmtUSD2(avgCost)}</div>
+        </div>
+      </div>
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">Date</div>
+          <input
+            className="pp-input mono"
+            type="date"
+            value={form.date}
+            onChange={(e) => set('date', e.target.value)}
+          />
+        </div>
+        <div className="pp-field">
+          <div className="pp-field-label">Note (optional)</div>
+          <input
+            className="pp-input"
+            value={form.note}
+            onChange={(e) => set('note', e.target.value)}
+            placeholder="reason, broker fill ID, etc."
+          />
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Resolve Expired fields — three modes (expired / rolled / assigned).
+function ResolveFields({
+  form, setForm, open, closeAtExpiry,
+}: {
+  form: ResolveForm;
+  setForm: (f: ResolveForm) => void;
+  open: OptionTrade;
+  closeAtExpiry: number | null;
+}) {
+  const set = <K extends keyof ResolveForm>(k: K, v: ResolveForm[K]) =>
+    setForm({ ...form, [k]: v });
+  const isCall = open.option_type === 'call';
+  // ITM hint based on the snapshot close (when we have it).
+  const itmHint = (() => {
+    if (closeAtExpiry == null) {
+      return {
+        text: 'No close snapshot for this expiry — pick manually.',
+        tone: 'muted' as const,
+      };
+    }
+    const itm = isCall
+      ? closeAtExpiry >= open.strike
+      : closeAtExpiry <= open.strike;
+    if (itm) {
+      const dist = isCall
+        ? closeAtExpiry - open.strike
+        : open.strike - closeAtExpiry;
+      return {
+        text: `Close ${fmtUSD2(closeAtExpiry)} vs strike ${fmtUSD2(open.strike)} — ITM by ${fmtUSD2(dist)}, suggesting Exercised`,
+        tone: 'itm' as const,
+      };
+    }
+    const dist = isCall
+      ? open.strike - closeAtExpiry
+      : closeAtExpiry - open.strike;
+    return {
+      text: `Close ${fmtUSD2(closeAtExpiry)} vs strike ${fmtUSD2(open.strike)} — OTM by ${fmtUSD2(dist)}, suggesting Expired worthless`,
+      tone: 'otm' as const,
+    };
+  })();
+  return (
+    <>
+      <div className="pp-field">
+        <div className="pp-field-label">Resolving this expired position</div>
+        <div className="pp-resolve-card">
+          <span className={'pp-mini-glyph ' + (open.direction === 'short' ? 'neg' : 'pos')}>
+            {isCall ? 'C' : 'P'}
+          </span>
+          <span className="pp-resolve-meta">
+            {open.direction === 'short' ? '−' : '+'}
+            {open.contracts} {open.option_type.toUpperCase()} ${open.strike}
+            <span className="pp-resolve-exp"> · exp {open.expiry}</span>
+          </span>
+          <span className="pp-resolve-prem">opened @ ${open.premium}/sh</span>
+        </div>
+        <div className={'pp-resolve-hint ' + itmHint.tone}>{itmHint.text}</div>
+      </div>
+
+      <div className="pp-field">
+        <div className="pp-field-label">What happened?</div>
+        <div className="pp-source-seg">
+          {(
+            [
+              ['expired', 'Expired worthless'],
+              ['rolled', 'Rolled'],
+              ['assigned', 'Exercised / Assigned'],
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              className={'pp-source-opt' + (form.kind === k ? ' on' : '')}
+              onClick={() => set('kind', k)}
+            >
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="pp-form-grid cols-2">
+        <div className="pp-field">
+          <div className="pp-field-label">
+            {form.kind === 'rolled' ? 'Close date' : 'Resolution date'}
+          </div>
+          <input
+            className="pp-input mono"
+            type="date"
+            value={form.trade_date}
+            onChange={(e) => set('trade_date', e.target.value)}
+          />
+          <div className="pp-field-hint">defaults to expiry ({open.expiry})</div>
+        </div>
+        {form.kind === 'rolled' && (
+          <div className="pp-field">
+            <div className="pp-field-label">
+              Close premium / sh ({open.direction === 'short' ? 'paid back' : 'collected'})
+            </div>
+            <MoneyInput value={form.close_premium} onChange={(v) => set('close_premium', v)} placeholder="0.00" />
+            <div className="pp-field-hint">opened @ ${open.premium}/sh</div>
+          </div>
+        )}
+      </div>
+
+      {form.kind === 'rolled' && (
+        <>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">New strike</div>
+              <MoneyInput value={form.new_strike} onChange={(v) => set('new_strike', v)} placeholder={String(open.strike)} />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">New premium / sh</div>
+              <MoneyInput value={form.new_premium} onChange={(v) => set('new_premium', v)} placeholder="0.00" />
+            </div>
+          </div>
+          <div className="pp-form-grid cols-2">
+            <div className="pp-field">
+              <div className="pp-field-label">New expiry</div>
+              <input
+                className="pp-input mono"
+                type="date"
+                value={form.new_expiry}
+                onChange={(e) => set('new_expiry', e.target.value)}
+              />
+            </div>
+            <div className="pp-field">
+              <div className="pp-field-label">New trade date</div>
+              <input
+                className="pp-input mono"
+                type="date"
+                value={form.new_open_date}
+                onChange={(e) => set('new_open_date', e.target.value)}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="pp-field">
+        <div className="pp-field-label">Note (optional)</div>
+        <input
+          className="pp-input"
+          value={form.note}
+          onChange={(e) => set('note', e.target.value)}
+          placeholder="anything to remember about this resolution"
+        />
+      </div>
+    </>
   );
 }
 

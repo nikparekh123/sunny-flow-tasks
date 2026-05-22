@@ -43,6 +43,34 @@ export interface PositionRow {
   status: PositionStatus;
   /** Next earnings date as ISO 'YYYY-MM-DD', or null if none scheduled. */
   earnings_date: string | null;
+  /** Running total of realized stock P&L (from share sells + assignments).
+   *  Preserved across CSV upserts. */
+  realized_stock_pl: number;
+}
+
+export type ShareSellSource = 'manual' | 'assignment';
+
+/** Snapshot of a ticker's close price on a given trading day. */
+export interface DailyClose {
+  ticker: string;
+  date: string;        // ISO YYYY-MM-DD
+  close_price: number;
+  captured_at: string;
+}
+
+/** Audit log of share-sale events (manual + assignment-driven). */
+export interface ShareSell {
+  id: string;
+  ticker: string;
+  quantity: number;
+  price: number;
+  trade_date: string;
+  source: ShareSellSource;
+  linked_option_close_id: string | null;
+  realized_pl: number;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Days between today (UTC) and an ISO date string. Negative = in the past. */
@@ -53,11 +81,109 @@ export function daysUntil(iso: string): number {
   return Math.round((target.getTime() - today.getTime()) / 86_400_000);
 }
 
+// ── Ticker signals (technicals) ─────────────────────────────────────
+
+export interface TickerSignals {
+  ticker: string;
+  asof_date: string;
+  price: number | null;
+  ma20: number | null;
+  ma50: number | null;
+  ma200: number | null;
+  rsi14: number | null;
+  chg_5d_pct: number | null;
+  chg_21d_pct: number | null;
+  updated_at: string;
+}
+
+export interface SignalChip {
+  label: string;
+  tone: 'up' | 'down' | 'warn' | 'cool';
+  title: string;
+}
+
+/**
+ * Reduce raw signals → a small list of chips, but ONLY when they're
+ * actionable. The goal is to keep the signals column quiet most of the
+ * time and shout when something matters.
+ *
+ * Rules:
+ *   MA   — below 200d ("downtrend") or >10% above 50d ("stretched")
+ *          or >7% below 50d ("pullback"). Mutually exclusive.
+ *   RSI  — only when ≥70 ("overbought") or ≤30 ("oversold").
+ *   ROC  — 5-day move ≥|5%|, 21-day move ≥|10%|.
+ */
+export function chipsForSignals(s: TickerSignals): SignalChip[] {
+  const chips: SignalChip[] = [];
+
+  // MA chip
+  if (s.price != null && s.ma50 != null && s.ma50 > 0) {
+    const pctVs50 = ((s.price - s.ma50) / s.ma50) * 100;
+    if (s.ma200 != null && s.ma200 > 0 && s.price < s.ma200) {
+      chips.push({
+        label: '↓ 200d',
+        tone: 'down',
+        title: `Price $${s.price.toFixed(2)} is below the 200-day MA ($${s.ma200.toFixed(2)}) — long-term downtrend`,
+      });
+    } else if (pctVs50 >= 10) {
+      chips.push({
+        label: 'stretched',
+        tone: 'warn',
+        title: `Price is ${pctVs50.toFixed(1)}% above 50-day MA — extended; good window to sell calls`,
+      });
+    } else if (pctVs50 <= -7) {
+      chips.push({
+        label: 'pullback',
+        tone: 'cool',
+        title: `Price is ${pctVs50.toFixed(1)}% below 50-day MA — pullback; good window to sell puts`,
+      });
+    }
+  }
+
+  // RSI chip
+  if (s.rsi14 != null) {
+    if (s.rsi14 >= 70) {
+      chips.push({
+        label: `RSI ${s.rsi14.toFixed(0)}`,
+        tone: 'warn',
+        title: `RSI ${s.rsi14.toFixed(1)} — overbought; sell-call window`,
+      });
+    } else if (s.rsi14 <= 30) {
+      chips.push({
+        label: `RSI ${s.rsi14.toFixed(0)}`,
+        tone: 'cool',
+        title: `RSI ${s.rsi14.toFixed(1)} — oversold; sell-put window`,
+      });
+    }
+  }
+
+  // ROC chips
+  if (s.chg_5d_pct != null && Math.abs(s.chg_5d_pct) >= 5) {
+    const sign = s.chg_5d_pct >= 0 ? '+' : '';
+    chips.push({
+      label: `${sign}${s.chg_5d_pct.toFixed(1)}%w`,
+      tone: s.chg_5d_pct >= 0 ? 'up' : 'down',
+      title: `${s.chg_5d_pct >= 0 ? 'Up' : 'Down'} ${Math.abs(s.chg_5d_pct).toFixed(1)}% over the last 5 trading days`,
+    });
+  }
+  if (s.chg_21d_pct != null && Math.abs(s.chg_21d_pct) >= 10) {
+    const sign = s.chg_21d_pct >= 0 ? '+' : '';
+    chips.push({
+      label: `${sign}${s.chg_21d_pct.toFixed(1)}%m`,
+      tone: s.chg_21d_pct >= 0 ? 'up' : 'down',
+      title: `${s.chg_21d_pct >= 0 ? 'Up' : 'Down'} ${Math.abs(s.chg_21d_pct).toFixed(1)}% over the last ~21 trading days`,
+    });
+  }
+
+  return chips;
+}
+
 // ── Option trades ────────────────────────────────────────────────────
 
 export type OptionType = 'call' | 'put';
 export type Direction = 'long' | 'short';
 export type Action = 'open' | 'close';
+export type ClosedVia = 'expired_worthless' | 'rolled' | 'assigned' | 'manual';
 
 export interface OptionTrade {
   id: string;
@@ -74,6 +200,13 @@ export interface OptionTrade {
   note: string | null;
   created_at: string;
   updated_at: string;
+  /** Set on action='close' rows — how the close happened. */
+  closed_via?: ClosedVia | null;
+  /** Set on action='open' rows that were created by rolling another open. */
+  rolled_from?: string | null;
+  /** Set on action='close' rows with closed_via='assigned' — snapshots
+   *  the realized stock P&L from this assignment. */
+  share_pnl?: number | null;
 }
 
 /** Signed dollar value of a single trade: contracts × 100 × premium, with
@@ -142,6 +275,25 @@ export function liveOptionsByTicker(trades: OptionTrade[]): Map<string, LiveOpti
   return out;
 }
 
+/** Net cash from options activity per ticker — sum of every trade's
+ *  signed cash flow (collected = +, paid = −). Includes BOTH live opens
+ *  (their premium effect) AND closed pairs (their realized contribution).
+ *
+ *  Used by effective_cost so the "net cost" reflects premium you've
+ *  already paid for live protective puts, not just realized P&L. */
+export function netOptionsCashByTicker(trades: OptionTrade[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const t of trades) {
+    const isCashIn =
+      (t.action === 'open' && t.direction === 'short') ||
+      (t.action === 'close' && t.direction === 'long');
+    const notional = t.contracts * 100 * t.premium;
+    const signed = isCashIn ? notional : -notional;
+    out.set(t.ticker, (out.get(t.ticker) ?? 0) + signed);
+  }
+  return out;
+}
+
 /** Total realized P&L from all closed pairs per ticker. */
 export function realizedPLByTicker(trades: OptionTrade[]): Map<string, number> {
   const byId = new Map<string, OptionTrade>();
@@ -189,10 +341,15 @@ export interface PositionComputed extends PositionRow {
   realized_pl: number;
   /** Live open option positions (remaining contracts > 0) for this ticker. */
   live_options: LiveOption[];
+  /** Net cash from options activity (premium collected − premium paid)
+   *  including live opens. Drives effective_cost. */
+  net_options_cash: number;
   /** unrealized P&L + realized_pl. "Is this position making money?" */
   overall_pl: number;
-  /** Per-share effective basis. avg_cost − realized_pl / quantity.
-   *  Lower than avg_cost = options activity has paid down the basis. */
+  /** Per-share effective basis. avg_cost − net_options_cash / quantity.
+   *  Lower than avg_cost = options activity has paid down your basis
+   *  (net premium received). Higher than avg_cost = you've paid more in
+   *  premium (e.g. for protective puts) than you've taken back in. */
   effective_cost: number;
 }
 
@@ -200,6 +357,7 @@ export function computeRow(
   p: PositionRow,
   total_market_value: number,
   realized_pl: number,
+  net_options_cash: number,
   live_options: LiveOption[],
 ): PositionComputed {
   const isClosed = p.status === 'closed';
@@ -213,12 +371,16 @@ export function computeRow(
     : 0;
   const pct_portfolio =
     total_market_value === 0 ? 0 : (market_value / total_market_value) * 100;
+  // Effective cost subtracts NET cash from options (not just realized).
+  // Premium paid for live protective puts shows up here as a higher
+  // effective cost; premium collected on live short opens lowers it.
   const effective_cost =
-    p.quantity > 0 ? p.avg_cost - realized_pl / p.quantity : p.avg_cost;
+    p.quantity > 0 ? p.avg_cost - net_options_cash / p.quantity : p.avg_cost;
   return {
     ...p,
     market_value, cost_basis, pnl_dollar, pnl_pct, day_change, pct_portfolio,
     realized_pl,
+    net_options_cash,
     live_options,
     overall_pl: pnl_dollar + realized_pl,
     effective_cost,
@@ -250,13 +412,15 @@ export function computePortfolio(
     0,
   );
   const realizedByTicker = realizedPLByTicker(trades);
+  const netCashByTicker = netOptionsCashByTicker(trades);
   const liveByTicker = liveOptionsByTicker(trades);
   const obligationByTicker = openShortPutObligation(trades);
 
   const rows = positions.map((p) => {
     const realized = realizedByTicker.get(p.ticker) ?? 0;
+    const netCash = netCashByTicker.get(p.ticker) ?? 0;
     const live = liveByTicker.get(p.ticker) ?? [];
-    return computeRow(p, tmv, realized, live);
+    return computeRow(p, tmv, realized, netCash, live);
   });
   const total_cost_basis = rows.reduce((s, r) => s + r.cost_basis, 0);
   const total_pnl = tmv - total_cost_basis;

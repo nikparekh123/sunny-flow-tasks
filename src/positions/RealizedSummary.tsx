@@ -54,34 +54,8 @@ export function RealizedSummary({ portfolio, overlayByTicker, realizedByTicker, 
 
   return (
     <>
-      {/* Strip A — portfolio realized + open obligation */}
-      <div className="np-realized-strip">
-        <div className="np-realized-cell total">
-          <div className="np-realized-label">Net realized</div>
-          <div className={'np-realized-value ' + (portfolio.realized_pl < 0 ? 'down' : 'up')}>
-            {portfolio.realized_pl >= 0 ? fmtUSD(portfolio.realized_pl) : '−' + fmtUSD(Math.abs(portfolio.realized_pl))}
-          </div>
-          <div className="np-realized-sub">closed option pairs</div>
-        </div>
-        <div className="np-realized-cell">
-          <div className="np-realized-label">Open obligation</div>
-          <div className="np-realized-value">
-            {portfolio.open_put_obligation > 0
-              ? fmtUSD(portfolio.open_put_obligation)
-              : <span className="muted">—</span>}
-          </div>
-          <div className="np-realized-sub">short put strikes × contracts</div>
-        </div>
-        <div className="np-realized-cell">
-          <div className="np-realized-label">Live contracts</div>
-          <div className="np-realized-value">
-            {Array.from(liveByTicker.values()).reduce((s, l) => s + l.length, 0)}
-          </div>
-          <div className="np-realized-sub">open positions across portfolio</div>
-        </div>
-      </div>
-
-      {/* Strip B — by strategy bucket */}
+      {/* Strategy bucket cards. KPI strip removed per redesign — those
+          numbers are visible in the Trades matrix and elsewhere now. */}
       <div className="np-strategy-strip">
         {BUCKETS.map((k) => {
           const s = byStrategy[k];

@@ -3,13 +3,15 @@ import { useAuth } from '@/hooks/useAuth';
 import Auth from '@/pages/Auth';
 import { usePositions } from './usePositions';
 import { AllocationTreemap, type AllocView } from './AllocationTreemap';
+import { PnLByPosition } from './PnLByPosition';
 import { PositionsTable } from './PositionsTable';
 import { CsvUploadModal } from './CsvUploadModal';
 import { PositionDetailModal } from './PositionDetailModal';
 import { PositionInsightModal } from './PositionInsightModal';
 import { TradesLogMatrix } from './TradesLogMatrix';
-import { TimelineMatrix } from './TimelineMatrix';
+import { ExpiryCalendar } from './ExpiryCalendar';
 import { RealizedSummary } from './RealizedSummary';
+import { StockInsightsStrip } from './StockInsightsStrip';
 import { fmtUSD, fmtPct } from './types';
 import { toast } from 'sonner';
 import './positions.css';
@@ -35,9 +37,16 @@ export default function PositionsPage() {
     tradesByTicker,
     liveByTicker,
     realizedByTicker,
+    signalsByTicker,
+    shareSellsByTicker,
     replacePositions,
     refreshPrices,
     addTrade,
+    updateTrade,
+    buyShares,
+    sellShares,
+    resolveExpired,
+    closePriceAt,
     setPositionStatus,
     setEarningsDate,
     deletePosition,
@@ -58,7 +67,15 @@ export default function PositionsPage() {
   // Two-layer modal: ticker click opens insight (read), insight's action
   // buttons promote to the write modal in either 'open' or 'close' tab.
   const [insightTicker, setInsightTicker] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ ticker: string; tab: 'open' | 'close' } | null>(null);
+  const [detail, setDetail] = useState<
+    | {
+        ticker: string;
+        tab: 'open' | 'close' | 'edit' | 'shares' | 'resolve';
+        // For 'resolve' tab: the expired option being resolved.
+        resolveTrade?: import('./types').OptionTrade;
+      }
+    | null
+  >(null);
 
   // ?ticker=… deep-link
   useEffect(() => {
@@ -187,32 +204,44 @@ export default function PositionsPage() {
               </button>
             </div>
           </div>
-          <AllocationTreemap
-            rows={portfolio.rows}
-            view={allocView}
-            height={TREEMAP_HEIGHT}
-            maxItems={COMPANION_MAX}
-            overlayByTicker={overlayByTicker}
-          />
+          {allocView === 'pnl' ? (
+            <PnLByPosition
+              rows={portfolio.rows}
+              tradesByTicker={tradesByTicker}
+              onTickerClick={(t) => setInsightTicker(t)}
+            />
+          ) : (
+            <AllocationTreemap
+              rows={portfolio.rows}
+              view={allocView}
+              height={TREEMAP_HEIGHT}
+              maxItems={COMPANION_MAX}
+              overlayByTicker={overlayByTicker}
+            />
+          )}
         </div>
+
+        {/* Stock insights strip — between Allocation and Positions */}
+        {portfolio.rows.length > 0 && (
+          <div className="np-section">
+            <StockInsightsStrip
+              rows={portfolio.rows}
+              signalsByTicker={signalsByTicker}
+              liveByTicker={liveByTicker}
+              overlayByTicker={overlayByTicker}
+            />
+          </div>
+        )}
 
         {/* Positions */}
         <div className="np-section">
-          {portfolio.rows.length > 0 && (
-            <RealizedSummary
-              portfolio={portfolio}
-              overlayByTicker={overlayByTicker}
-              realizedByTicker={realizedByTicker}
-              liveByTicker={liveByTicker}
-            />
-          )}
           <div className="np-section-hd">
             <div className="np-section-title">
               {posView === 'table'
                 ? `Positions · ${portfolio.rows.length}`
                 : posView === 'trades'
                   ? 'Trades'
-                  : 'Timeline'}
+                  : 'Calendar'}
             </div>
             <div className="np-view-toggle">
               <button
@@ -231,7 +260,7 @@ export default function PositionsPage() {
                 className={posView === 'timeline' ? 'on' : ''}
                 onClick={() => setPosView('timeline')}
               >
-                Timeline
+                Calendar
               </button>
             </div>
           </div>
@@ -250,39 +279,59 @@ export default function PositionsPage() {
               tradesByTicker={tradesByTicker}
               liveByTicker={liveByTicker}
               realizedByTicker={realizedByTicker}
+              shareSellsByTicker={shareSellsByTicker}
               onTickerClick={(t) => setInsightTicker(t)}
-              // Cell click: if the ticker has live opens, default to Close
-              // tab (most likely the user wants to close); otherwise Open.
-              onCellClick={(t) => {
+              onSharesCellClick={(t) =>
+                setDetail({ ticker: t, tab: 'shares' })
+              }
+              onOpenSlotClick={(t) => {
                 const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
                 setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
               }}
+              onResolveCellClick={(t, open) =>
+                setDetail({ ticker: t, tab: 'resolve', resolveTrade: open })
+              }
             />
           )}
           {posView === 'timeline' && (
-            <TimelineMatrix
+            <ExpiryCalendar
               rows={portfolio.rows}
               tradesByTicker={tradesByTicker}
-              liveByTicker={liveByTicker}
-              realizedByTicker={realizedByTicker}
               onTickerClick={(t) => setInsightTicker(t)}
-              onBarClick={(t) => {
-                // Clicking a bar opens the write modal for that ticker.
-                // We default to the close tab since clicking a bar usually
-                // means "I want to act on this contract."
-                const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
-                setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
-              }}
             />
           )}
         </div>
+
+        {/* Strategy buckets — relocated from the top. Plain dump for now;
+            redesign later. */}
+        {portfolio.rows.length > 0 && (
+          <div className="np-section">
+            <RealizedSummary
+              portfolio={portfolio}
+              overlayByTicker={overlayByTicker}
+              realizedByTicker={realizedByTicker}
+              liveByTicker={liveByTicker}
+            />
+          </div>
+        )}
       </div>
 
       <CsvUploadModal
         open={showUpload}
         onClose={() => setShowUpload(false)}
         onConfirm={async (rows) => {
-          await replacePositions.mutateAsync(rows);
+          const res = await replacePositions.mutateAsync(rows);
+          if (res.inserted > 0 && res.skipped === 0) {
+            toast.success(`Added ${res.inserted} new ticker${res.inserted === 1 ? '' : 's'}`);
+          } else if (res.inserted > 0 && res.skipped > 0) {
+            toast.success(
+              `Added ${res.inserted} new · skipped ${res.skipped} existing (use Shares tab to change qty)`,
+            );
+          } else if (res.skipped > 0) {
+            toast.info(
+              `All ${res.skipped} ticker${res.skipped === 1 ? '' : 's'} already existed — CSV is for new tickers only`,
+            );
+          }
           refreshPrices.mutate();
         }}
       />
@@ -349,10 +398,50 @@ export default function PositionsPage() {
             liveOpens={live}
             bucket={overlayByTicker.get(detail.ticker)}
             initialTab={detail.tab}
+            resolveTrade={detail.resolveTrade}
+            resolveExpiryClose={
+              detail.resolveTrade
+                ? closePriceAt(detail.resolveTrade.ticker, detail.resolveTrade.expiry)
+                : null
+            }
             onClose={() => setDetail(null)}
             onAddTrade={(p) =>
               addTrade.mutate(p, {
                 onSuccess: () => toast.success(`${p.action === 'open' ? 'Opened' : 'Closed'} · ${p.ticker}`),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+            onUpdateTrade={(p) =>
+              updateTrade.mutate(p, {
+                onSuccess: () => toast.success(`Updated · ${detail.ticker}`),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+            onBuyShares={(p) =>
+              buyShares.mutate(p, {
+                onSuccess: (res) =>
+                  toast.success(
+                    `Bought ${p.quantity} ${p.ticker} · new avg \$${res.newAvg.toFixed(2)}`,
+                  ),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+            onSellShares={(p) =>
+              sellShares.mutate(p, {
+                onSuccess: (res) => toast.success(`Sold ${p.quantity} ${p.ticker} · realized ${res.realized >= 0 ? '+' : '−'}\$${Math.abs(res.realized).toFixed(0)}`),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+            onResolveExpired={(p) =>
+              resolveExpired.mutate(p, {
+                onSuccess: (res) => {
+                  const msg =
+                    res.kind === 'expired' ? 'Marked expired worthless'
+                      : res.kind === 'rolled' ? 'Rolled'
+                      : res.kind === 'assigned' ? `Assigned · realized ${res.sharePnl >= 0 ? '+' : '−'}\$${Math.abs(res.sharePnl).toFixed(0)}`
+                      : 'Resolved';
+                  toast.success(`${msg} · ${detail.ticker}`);
+                },
                 onError: (e) => toast.error((e as Error).message),
               })
             }
