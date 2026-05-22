@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 type Status = "live" | "soon";
 interface Tool {
-  key: "tasks" | "research" | "positions" | "snowball" | "strategy" | "calendar" | "calculators";
+  key: "tasks" | "research" | "positions" | "snowball" | "strategy" | "calendar" | "math";
   name: string;
   desc: string;
   status: Status;
@@ -16,7 +16,7 @@ interface Tool {
 
 const TOOLS: Tool[] = [
   { key: "positions",   name: "Positions",   desc: "Holdings & P&L",       status: "live", hotkey: "1", href: "https://positions.sunnyfi.co" },
-  { key: "calculators", name: "Calculators", desc: "Pre-trade & scenario", status: "live", hotkey: "2", internal: "/calculators" },
+  { key: "math",        name: "Math",        desc: "Calculators & scenarios", status: "live", hotkey: "2", internal: "/math" },
 ];
 
 const ICON_STYLE = { fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -31,7 +31,7 @@ function ToolIcon({ name }: { name: Tool["key"] }) {
     // Strategy icon: three stacked buckets — Income / Investment / Yield allocation.
     strategy: g(<><rect x="3" y="4" width="18" height="4" rx="0.5" /><rect x="3" y="10" width="18" height="4" rx="0.5" /><rect x="3" y="16" width="18" height="4" rx="0.5" /></>),
     calendar: g(<><rect x="3" y="5" width="18" height="16" rx="1" /><path d="M3 10h18M8 3v4M16 3v4" /></>),
-    calculators: g(<><rect x="4" y="3" width="16" height="18" rx="1.5" /><rect x="7" y="6" width="10" height="3" /><path d="M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01" /></>),
+    math: g(<><rect x="4" y="3" width="16" height="18" rx="1.5" /><rect x="7" y="6" width="10" height="3" /><path d="M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01" /></>),
   };
   return <svg width={22} height={22} viewBox="0 0 24 24" aria-hidden>{map[name]}</svg>;
 }
