@@ -45,15 +45,6 @@ function useNow() {
   return now;
 }
 
-function clockAt(date: Date, offsetHours: number) {
-  const utcMs = date.getTime() + date.getTimezoneOffset() * 60_000;
-  const local = new Date(utcMs + offsetHours * 3_600_000);
-  const h = local.getHours().toString().padStart(2, "0");
-  const m = local.getMinutes().toString().padStart(2, "0");
-  const s = local.getSeconds().toString().padStart(2, "0");
-  return { hm: `${h}:${m}`, s };
-}
-
 function greeting(hour: number) {
   if (hour < 5) return "Late night";
   if (hour < 12) return "Morning";
@@ -86,13 +77,6 @@ export default function Dashboard() {
     });
     return () => { cancelled = true; };
   }, []);
-
-  const clocks = [
-    { city: "NYC", tz: "ET",  offset: -4 },
-    { city: "LIS", tz: "WET", offset:  1 },
-    { city: "TUN", tz: "CET", offset:  1 },
-    { city: "BOM", tz: "IST", offset:  5.5 },
-  ];
 
   const onOpen = (t: Tool) => {
     setToast({ msg: t.status === "live" ? `Opening ${t.name}…` : `${t.name} — coming soon`, kind: t.status });
@@ -142,19 +126,6 @@ export default function Dashboard() {
             <span>{formatDate(now)}</span>
             <button className="logout" onClick={onLogout}>log out ↗</button>
           </div>
-        </div>
-
-        <div className="clock-strip">
-          {clocks.map((c) => {
-            const t = clockAt(now, c.offset);
-            return (
-              <div className="clock" key={c.city}>
-                <div className="clock-city">{c.city}</div>
-                <div className="clock-time">{t.hm}<span className="clock-sec">:{t.s}</span></div>
-                <div className="clock-tz">{c.tz}</div>
-              </div>
-            );
-          })}
         </div>
 
         <div className="tools-section">
