@@ -1447,9 +1447,13 @@
   font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
 }
 
-.gl-table tbody tr.closed-row { opacity: 0.78; }
-.gl-table tbody tr.closed-row:hover { opacity: 1; }
+.gl-table tbody tr.closed-row { opacity: 0.42; filter: saturate(.55); }
+.gl-table tbody tr.closed-row:hover { opacity: 1; filter: none; }
 .gl-table tbody tr.closed-row .status-pill { margin-left: 6px; }
+/* Visual break between the active and closed groups. */
+.gl-table tbody tr.closed-row:first-of-type {
+  border-top: 1px dashed rgba(50,110,100,.4);
+}
 
 /* ── Status pill ── */
 .status-pill {

@@ -117,12 +117,17 @@ export function TradesLogMatrix({
     return rows;
   }, [rows, filter, tradesByTicker, shareSellsByTicker]);
 
-  // Sort by realized P&L desc — most-productive tickers float to the top.
+  // Sort: active positions first by realized P&L desc, closed positions
+  // sink to the bottom (also sorted by realized inside their group). Keeps
+  // closed tickers out of the way of the live trading rows.
   const sorted = useMemo(
     () =>
-      [...filtered].sort(
-        (a, b) => (realizedByTicker.get(b.ticker) ?? 0) - (realizedByTicker.get(a.ticker) ?? 0),
-      ),
+      [...filtered].sort((a, b) => {
+        const aClosed = a.status === 'closed' ? 1 : 0;
+        const bClosed = b.status === 'closed' ? 1 : 0;
+        if (aClosed !== bClosed) return aClosed - bClosed;
+        return (realizedByTicker.get(b.ticker) ?? 0) - (realizedByTicker.get(a.ticker) ?? 0);
+      }),
     [filtered, realizedByTicker],
   );
 
