@@ -43,6 +43,7 @@ export default function PositionsPage() {
     refreshPrices,
     addTrade,
     updateTrade,
+    buyShares,
     sellShares,
     resolveExpired,
     closePriceAt,
@@ -69,7 +70,7 @@ export default function PositionsPage() {
   const [detail, setDetail] = useState<
     | {
         ticker: string;
-        tab: 'open' | 'close' | 'edit' | 'sell-shares' | 'resolve';
+        tab: 'open' | 'close' | 'edit' | 'shares' | 'resolve';
         // For 'resolve' tab: the expired option being resolved.
         resolveTrade?: import('./types').OptionTrade;
       }
@@ -281,7 +282,7 @@ export default function PositionsPage() {
               shareSellsByTicker={shareSellsByTicker}
               onTickerClick={(t) => setInsightTicker(t)}
               onSharesCellClick={(t) =>
-                setDetail({ ticker: t, tab: 'sell-shares' })
+                setDetail({ ticker: t, tab: 'shares' })
               }
               onOpenSlotClick={(t) => {
                 const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
@@ -319,7 +320,18 @@ export default function PositionsPage() {
         open={showUpload}
         onClose={() => setShowUpload(false)}
         onConfirm={async (rows) => {
-          await replacePositions.mutateAsync(rows);
+          const res = await replacePositions.mutateAsync(rows);
+          if (res.inserted > 0 && res.skipped === 0) {
+            toast.success(`Added ${res.inserted} new ticker${res.inserted === 1 ? '' : 's'}`);
+          } else if (res.inserted > 0 && res.skipped > 0) {
+            toast.success(
+              `Added ${res.inserted} new · skipped ${res.skipped} existing (use Shares tab to change qty)`,
+            );
+          } else if (res.skipped > 0) {
+            toast.info(
+              `All ${res.skipped} ticker${res.skipped === 1 ? '' : 's'} already existed — CSV is for new tickers only`,
+            );
+          }
           refreshPrices.mutate();
         }}
       />
@@ -402,6 +414,15 @@ export default function PositionsPage() {
             onUpdateTrade={(p) =>
               updateTrade.mutate(p, {
                 onSuccess: () => toast.success(`Updated · ${detail.ticker}`),
+                onError: (e) => toast.error((e as Error).message),
+              })
+            }
+            onBuyShares={(p) =>
+              buyShares.mutate(p, {
+                onSuccess: (res) =>
+                  toast.success(
+                    `Bought ${p.quantity} ${p.ticker} · new avg \$${res.newAvg.toFixed(2)}`,
+                  ),
                 onError: (e) => toast.error((e as Error).message),
               })
             }

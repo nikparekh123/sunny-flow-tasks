@@ -202,15 +202,14 @@ export function usePositions() {
     [rawPositions, trades],
   );
 
-  // ── CSV upsert (was destructive DELETE+INSERT). ─────────────────
-  // New behaviour:
-  //   • UPSERT by ticker — existing rows get qty / avg_cost updated.
-  //   • REJECT if any CSV row reduces a ticker's share count (shares
-  //     are sold via the Sell-Shares flow, not by lowering the CSV
-  //     number, so realized_stock_pl gets accumulated properly).
-  //   • Tickers in the DB but not in the CSV are LEFT ALONE.
-  //   • realized_stock_pl is NOT in the upsert payload, so it survives
-  //     each re-upload.
+  // ── CSV upload — INSERT NEW TICKERS ONLY. ───────────────────────
+  // CSV's role is bootstrapping new positions only (ticker + sector +
+  // strategy + initial qty + avg_cost). Tickers that already exist in
+  // the DB are SILENTLY SKIPPED — to change shares on an existing
+  // position, use the Shares tab in PositionDetailModal (Buy / Sell).
+  //
+  // Result counts let the page show "Added X new · Y already existed"
+  // in the success toast.
   const replacePositions = useMutation({
     mutationFn: async (rows: PositionInput[]) => {
       const cleaned = rows
@@ -231,43 +230,37 @@ export function usePositions() {
             r.avg_cost >= 0,
         );
 
-      if (cleaned.length === 0) return { upserted: 0, overlaysWritten: 0 };
+      if (cleaned.length === 0) {
+        return { inserted: 0, skipped: 0, skippedTickers: [], overlaysWritten: 0 };
+      }
 
-      // Reduction guard — refuse any row where CSV qty < current qty.
+      // Find tickers that already exist — those rows are skipped.
       const { data: existingRows, error: readErr } = await supabase
         .from('positions' as never)
-        .select('ticker, quantity');
+        .select('ticker');
       if (readErr) throw readErr;
-      const existingQty = new Map<string, number>();
-      for (const e of (existingRows ?? []) as Array<{ ticker: string; quantity: number }>) {
-        existingQty.set(e.ticker, e.quantity);
-      }
-      const reductions: Array<{ ticker: string; from: number; to: number }> = [];
-      for (const r of cleaned) {
-        const cur = existingQty.get(r.ticker);
-        if (cur != null && r.quantity < cur) {
-          reductions.push({ ticker: r.ticker, from: cur, to: r.quantity });
-        }
-      }
-      if (reductions.length > 0) {
-        const detail = reductions
-          .map((r) => `${r.ticker} (${r.from} → ${r.to})`)
-          .join(', ');
-        throw new Error(
-          `CSV would reduce share count for: ${detail}. Use Sell Shares in-app to record the sale first, then re-upload.`,
-        );
-      }
+      const existing = new Set<string>(
+        ((existingRows ?? []) as Array<{ ticker: string }>).map((r) => r.ticker),
+      );
+      const newRows = cleaned.filter((r) => !existing.has(r.ticker));
+      const skippedTickers = cleaned
+        .filter((r) => existing.has(r.ticker))
+        .map((r) => r.ticker);
 
-      // Strip the strategy field — strategy_overlay is updated separately.
-      const positionsToUpsert = cleaned.map(({ strategy: _s, ...rest }) => {
+      // Strip the strategy field — strategy_overlay is upserted separately.
+      const positionsToInsert = newRows.map(({ strategy: _s, ...rest }) => {
         void _s;
         return rest;
       });
-      const { error: upsertErr } = await supabase
-        .from('positions' as never)
-        .upsert(positionsToUpsert as never, { onConflict: 'ticker' });
-      if (upsertErr) throw upsertErr;
+      if (positionsToInsert.length > 0) {
+        const { error: insErr } = await supabase
+          .from('positions' as never)
+          .insert(positionsToInsert as never);
+        if (insErr) throw insErr;
+      }
 
+      // Strategy overlay still upserts (so users can refresh a bucket
+      // assignment via CSV without breaking anything else).
       const overlayRows = cleaned
         .filter((r) => r.strategy)
         .map((r) => ({
@@ -282,7 +275,12 @@ export function usePositions() {
         if (ovError) throw ovError;
       }
 
-      return { upserted: cleaned.length, overlaysWritten: overlayRows.length };
+      return {
+        inserted: newRows.length,
+        skipped: skippedTickers.length,
+        skippedTickers,
+        overlaysWritten: overlayRows.length,
+      };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['positions'] });
@@ -422,6 +420,54 @@ export function usePositions() {
       qc.invalidateQueries({ queryKey: ['positions'] });
       qc.invalidateQueries({ queryKey: ['option_trades'] });
       qc.invalidateQueries({ queryKey: ['share_sells'] });
+    },
+  });
+
+  // ── Manual share BUY ─────────────────────────────────────────────
+  // Increments positions.quantity, recomputes weighted-average avg_cost.
+  // No audit row — buys are state extensions, not realized events.
+  // realized_stock_pl is preserved (untouched).
+  const buyShares = useMutation({
+    mutationFn: async (args: {
+      ticker: string;
+      quantity: number;
+      price: number;
+      trade_date: string;
+      note?: string | null;
+    }) => {
+      const t = args.ticker.trim().toUpperCase();
+      // 1. Read current position.
+      const { data: posRow, error: readErr } = await supabase
+        .from('positions' as never)
+        .select('quantity, avg_cost')
+        .eq('ticker', t)
+        .single();
+      if (readErr) throw new Error(`positions read: ${readErr.message}`);
+      const pos = posRow as { quantity: number; avg_cost: number };
+
+      // 2. Compute new weighted-average avg_cost.
+      const newQty = pos.quantity + args.quantity;
+      const newAvg =
+        newQty > 0
+          ? (pos.quantity * pos.avg_cost + args.quantity * args.price) / newQty
+          : args.price;
+
+      // 3. Update.
+      const { error: updErr } = await supabase
+        .from('positions' as never)
+        .update({ quantity: newQty, avg_cost: newAvg } as never)
+        .eq('ticker', t);
+      if (updErr) throw new Error(`positions update: ${updErr.message}`);
+
+      // (Note: trade_date and note are accepted by the signature for
+      //  future audit-log support; not stored today.)
+      void args.trade_date;
+      void args.note;
+
+      return { ticker: t, newQty, newAvg };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['positions'] });
     },
   });
 
@@ -699,6 +745,7 @@ export function usePositions() {
     addTrade,
     deleteTrade,
     updateTrade,
+    buyShares,
     sellShares,
     resolveExpired,
     setPositionStatus,

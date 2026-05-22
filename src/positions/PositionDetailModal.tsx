@@ -69,6 +69,14 @@ interface Props {
     trade_date: string;
     note?: string | null;
   }) => void;
+  /** Buy more shares of an existing ticker. */
+  onBuyShares?: (p: {
+    ticker: string;
+    quantity: number;
+    price: number;
+    trade_date: string;
+    note?: string | null;
+  }) => void;
   /** Sell shares manually. */
   onSellShares?: (p: {
     ticker: string;
@@ -97,7 +105,7 @@ interface Props {
   onSetStatus: (p: { ticker: string; status: 'open' | 'closed' }) => void;
 }
 
-type Tab = 'open' | 'close' | 'edit' | 'sell-shares' | 'resolve';
+type Tab = 'open' | 'close' | 'edit' | 'shares' | 'resolve';
 
 interface OpenForm {
   option_type: OptionType;
@@ -226,16 +234,21 @@ export function PositionDetailModal({
   onClose,
   onAddTrade,
   onUpdateTrade,
+  onBuyShares,
   onSellShares,
   onResolveExpired,
   onSetStatus,
 }: Props) {
   const [tab, setTab] = useState<Tab>(
-    initialTab === 'resolve' || initialTab === 'sell-shares'
+    initialTab === 'resolve' || initialTab === 'shares'
       ? initialTab
       : liveOpens.length === 0
         ? 'open'
         : initialTab,
+  );
+  // Mode toggle inside the Shares tab.
+  const [sharesMode, setSharesMode] = useState<'buy' | 'sell'>(
+    position.quantity > 0 ? 'sell' : 'buy',
   );
   const [sellForm, setSellForm] = useState<SellForm>(blankSell());
   const [resolveForm, setResolveForm] = useState<ResolveForm>(
@@ -406,25 +419,35 @@ export function PositionDetailModal({
     onClose();
   };
 
-  // ── Sell Shares math ───────────────────────────────────────────
-  const sellQtyN = parseInt(sellForm.quantity, 10) || 0;
-  const sellPriceN = parseFloat(sellForm.price) || 0;
-  const canSubmitSell =
-    !!onSellShares &&
-    sellQtyN > 0 &&
-    sellQtyN <= position.quantity &&
-    sellPriceN >= 0 &&
-    !!sellForm.date;
-  const sellRealized = (sellPriceN - position.avg_cost) * sellQtyN;
-  const submitSell = () => {
-    if (!canSubmitSell || !onSellShares) return;
-    onSellShares({
+  // ── Shares tab math (handles both Buy and Sell) ────────────────
+  const sharesQtyN = parseInt(sellForm.quantity, 10) || 0;
+  const sharesPriceN = parseFloat(sellForm.price) || 0;
+  // Sell preview
+  const sellRealized = (sharesPriceN - position.avg_cost) * sharesQtyN;
+  // Buy preview — weighted avg cost after the buy
+  const buyNewQty = position.quantity + sharesQtyN;
+  const buyNewAvg =
+    buyNewQty > 0
+      ? (position.quantity * position.avg_cost + sharesQtyN * sharesPriceN) / buyNewQty
+      : sharesPriceN;
+  const canSubmitShares =
+    sharesQtyN > 0 &&
+    sharesPriceN >= 0 &&
+    !!sellForm.date &&
+    (sharesMode === 'buy'
+      ? !!onBuyShares
+      : !!onSellShares && sharesQtyN <= position.quantity);
+  const submitShares = () => {
+    if (!canSubmitShares) return;
+    const payload = {
       ticker: position.ticker,
-      quantity: sellQtyN,
-      price: sellPriceN,
+      quantity: sharesQtyN,
+      price: sharesPriceN,
       trade_date: sellForm.date,
       note: sellForm.note || null,
-    });
+    };
+    if (sharesMode === 'buy' && onBuyShares) onBuyShares(payload);
+    else if (sharesMode === 'sell' && onSellShares) onSellShares(payload);
     setSellForm(blankSell());
     onClose();
   };
@@ -564,22 +587,14 @@ export function PositionDetailModal({
             Edit<span className="pp-tab-count">{editableOpens.length}</span>
           </button>
           <button
-            className={
-              'pp-tab' +
-              (tab === 'sell-shares' ? ' on' : '') +
-              (position.quantity === 0 ? ' disabled' : '')
-            }
-            onClick={() => position.quantity > 0 && setTab('sell-shares')}
-            disabled={position.quantity === 0 || !onSellShares}
+            className={'pp-tab' + (tab === 'shares' ? ' on' : '')}
+            onClick={() => setTab('shares')}
+            disabled={!onBuyShares && !onSellShares}
             title={
-              !onSellShares
-                ? 'Sell shares not wired'
-                : position.quantity === 0
-                  ? 'No shares to sell'
-                  : ''
+              !onBuyShares && !onSellShares ? 'Shares not wired' : ''
             }
           >
-            Sell shares
+            Shares
           </button>
           {resolveOpen && (
             <button
@@ -614,11 +629,13 @@ export function PositionDetailModal({
                 target={editTarget}
               />
             )}
-            {tab === 'sell-shares' && (
-              <SellSharesFields
+            {tab === 'shares' && (
+              <SharesFields
+                mode={sharesMode}
+                setMode={setSharesMode}
                 form={sellForm}
                 setForm={setSellForm}
-                maxQty={position.quantity}
+                currentQty={position.quantity}
                 avgCost={position.avg_cost}
               />
             )}
@@ -682,7 +699,8 @@ export function PositionDetailModal({
                 {tab === 'open' ? 'New trade preview'
                   : tab === 'close' ? 'Realized P&L'
                   : tab === 'edit' ? 'Edit preview'
-                  : tab === 'sell-shares' ? 'Sale preview'
+                  : tab === 'shares'
+                    ? sharesMode === 'buy' ? 'Buy preview' : 'Sale preview'
                   : tab === 'resolve' ? 'Resolution preview'
                   : 'Preview'}
               </div>
@@ -736,18 +754,30 @@ export function PositionDetailModal({
                   </>
                 );
               })()}
-              {tab === 'sell-shares' && (
+              {tab === 'shares' && sharesMode === 'sell' && (
                 <>
                   <div className={'pp-rail-bignum ' + (sellRealized > 0 ? 'pos' : sellRealized < 0 ? 'neg' : '')}>
-                    {sellQtyN === 0
+                    {sharesQtyN === 0
                       ? '—'
                       : sellRealized >= 0
                         ? fmtUSD(sellRealized)
                         : '−' + fmtUSD(Math.abs(sellRealized))}
                   </div>
                   <div className="pp-rail-sub">
-                    {sellQtyN > 0
-                      ? `${sellQtyN} sh × (${fmtUSD2(sellPriceN)} − ${fmtUSD2(position.avg_cost)})`
+                    {sharesQtyN > 0
+                      ? `${sharesQtyN} sh × (${fmtUSD2(sharesPriceN)} − ${fmtUSD2(position.avg_cost)})`
+                      : 'enter qty + price'}
+                  </div>
+                </>
+              )}
+              {tab === 'shares' && sharesMode === 'buy' && (
+                <>
+                  <div className="pp-rail-bignum">
+                    {sharesQtyN === 0 ? '—' : fmtUSD2(buyNewAvg)}
+                  </div>
+                  <div className="pp-rail-sub">
+                    {sharesQtyN > 0
+                      ? `new avg after buying ${sharesQtyN} sh @ ${fmtUSD2(sharesPriceN)}`
                       : 'enter qty + price'}
                   </div>
                 </>
@@ -842,13 +872,13 @@ export function PositionDetailModal({
                 ✓ Save changes
               </button>
             )}
-            {tab === 'sell-shares' && (
+            {tab === 'shares' && (
               <button
                 className="pp-btn pp-btn-neon"
-                onClick={submitSell}
-                disabled={!canSubmitSell}
+                onClick={submitShares}
+                disabled={!canSubmitShares}
               >
-                ✓ Sell shares
+                {sharesMode === 'buy' ? '✓ Buy shares' : '✓ Sell shares'}
               </button>
             )}
             {tab === 'resolve' && (
@@ -1237,19 +1267,46 @@ function MoneyInput({
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Sell Shares fields
-function SellSharesFields({
-  form, setForm, maxQty, avgCost,
+// Shares fields — Buy / Sell toggle inside; same qty/price/date inputs.
+function SharesFields({
+  mode, setMode, form, setForm, currentQty, avgCost,
 }: {
+  mode: 'buy' | 'sell';
+  setMode: (m: 'buy' | 'sell') => void;
   form: SellForm;
   setForm: (f: SellForm) => void;
-  maxQty: number;
+  currentQty: number;
   avgCost: number;
 }) {
   const set = <K extends keyof SellForm>(k: K, v: SellForm[K]) =>
     setForm({ ...form, [k]: v });
+  const sellMax = currentQty;
   return (
     <>
+      <div className="pp-field">
+        <div className="pp-field-label">Action</div>
+        <div className="pp-source-seg">
+          <button
+            type="button"
+            className={'pp-source-opt' + (mode === 'buy' ? ' on' : '')}
+            onClick={() => setMode('buy')}
+          >
+            <span className="pp-glyph-tile">+</span>
+            <span>Buy shares</span>
+          </button>
+          <button
+            type="button"
+            className={'pp-source-opt' + (mode === 'sell' ? ' on' : '') + (sellMax === 0 ? ' disabled' : '')}
+            onClick={() => sellMax > 0 && setMode('sell')}
+            disabled={sellMax === 0}
+            title={sellMax === 0 ? 'No shares on hand' : ''}
+          >
+            <span className="pp-glyph-tile">−</span>
+            <span>Sell shares</span>
+          </button>
+        </div>
+      </div>
+
       <div className="pp-form-grid cols-2">
         <div className="pp-field">
           <div className="pp-field-label">Quantity</div>
@@ -1257,13 +1314,17 @@ function SellSharesFields({
             className="pp-input mono"
             type="number"
             min="1"
-            max={maxQty}
+            max={mode === 'sell' ? sellMax : undefined}
             step="1"
             value={form.quantity}
             onChange={(e) => set('quantity', e.target.value)}
-            placeholder={String(maxQty)}
+            placeholder={mode === 'sell' ? String(sellMax) : 'shares to buy'}
           />
-          <div className="pp-field-hint">up to {fmtQty(maxQty)} on hand</div>
+          <div className="pp-field-hint">
+            {mode === 'sell'
+              ? `up to ${fmtQty(sellMax)} on hand`
+              : `current ${fmtQty(currentQty)} on hand`}
+          </div>
         </div>
         <div className="pp-field">
           <div className="pp-field-label">Price / share</div>
