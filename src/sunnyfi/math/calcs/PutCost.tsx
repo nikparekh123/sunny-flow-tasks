@@ -7,7 +7,7 @@
  */
 import { useMemo, type ReactNode } from "react";
 import {
-  FREQ_DEFS, FREQ_BY_ID, PUT_HORIZON_DEFS,
+  PUT_FREQ_DEFS, FREQ_BY_ID, PUT_HORIZON_DEFS,
   cycleStats, resolveHorizon,
   fmtMoney, fmtPct, fmtCount, fmtDate,
   moneynessLabel,
@@ -141,7 +141,7 @@ export function PutCostCalc({
 }) {
   const set = <K extends keyof PCState>(k: K, v: PCState[K]) => setState({ ...state, [k]: v });
   const c = useMemo(() => computePC(state), [state]);
-  const freq = FREQ_BY_ID[state.frequency] || FREQ_BY_ID.weekly;
+  const freq = FREQ_BY_ID[state.frequency] || FREQ_BY_ID.monthly;
   const tone: "neg" | "neutral" = isFinite(c.totalCost) && c.totalCost > 0 ? "neg" : "neutral";
   const money = moneynessLabel(state.strike, state.price);
 
@@ -236,7 +236,7 @@ export function PutCostCalc({
           <div className="cyc-cad-field">
             <div className="hf-label">Frequency</div>
             <Seg
-              options={FREQ_DEFS.map(f => ({ id: f.id, label: f.label }))}
+              options={PUT_FREQ_DEFS.map(f => ({ id: f.id, label: f.label }))}
               value={state.frequency}
               onChange={(v) => set("frequency", v)}
               ariaLabel="Cycle frequency"
