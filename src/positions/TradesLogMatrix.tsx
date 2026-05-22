@@ -47,6 +47,38 @@ function readWeeksLS(): Weeks {
 
 const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
+/** Days between today and an ISO YYYY-MM-DD date. Positive = future, 0 = today,
+ *  negative = past. Uses UTC midnight so timezone wobble doesn't shift the bucket. */
+function daysFromToday(iso: string, todayIsoStr: string): number {
+  const a = new Date(todayIsoStr + 'T00:00:00Z').getTime();
+  const b = new Date(iso + 'T00:00:00Z').getTime();
+  return Math.round((b - a) / 86400000);
+}
+
+/** Dynamic state label for a live option open. Replaces the static "open"
+ *  pill with one that surfaces expiry proximity:
+ *    expired        → past expiry        (negative tone)
+ *    today          → expires 0 days     (warning tone — needs action today)
+ *    tomorrow       → expires 1 day      (warning)
+ *    in Nd          → 2..7 days out      (warning)
+ *    open           → > 7 days           (neutral, today's behaviour)
+ *  Returns `tone` as a class suffix and `title` for tooltip with the full date.
+ */
+function liveStateLabel(
+  open: OptionTrade,
+  todayIsoStr: string,
+): { label: string; tone: 'expired' | 'urgent' | 'open'; title: string } {
+  const d = daysFromToday(open.expiry, todayIsoStr);
+  const niceDate = new Date(open.expiry + 'T00:00:00Z').toLocaleDateString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
+  if (d < 0)   return { label: 'expired',  tone: 'expired', title: `expired ${niceDate} (${-d}d ago)` };
+  if (d === 0) return { label: 'today',    tone: 'urgent',  title: `expires today · ${niceDate}` };
+  if (d === 1) return { label: 'tomorrow', tone: 'urgent',  title: `expires tomorrow · ${niceDate}` };
+  if (d <= 7)  return { label: `in ${d}d`, tone: 'urgent',  title: `expires in ${d} days · ${niceDate}` };
+  return { label: 'open', tone: 'open', title: `expires ${niceDate} · ${d}d out` };
+}
+
 type StatusFilter = 'all' | 'active' | 'open' | 'closed';
 
 interface Props {
@@ -462,13 +494,13 @@ export function TradesLogMatrix({
                       }
                       const expired = isOptionExpired(open);
                       const signed = slotValueForOpen(open);
-                      const stateLabel = expired ? 'expired' : 'open';
+                      const state = liveStateLabel(open, today);
                       return (
                         <td
                           key={i}
                           className={
                             'gl-cell live-zone filled ' +
-                            (expired ? 'expired' : '')
+                            (expired ? 'expired' : state.tone === 'urgent' ? 'urgent' : '')
                           }
                           onClick={() => {
                             if (expired) onResolveCellClick(r.ticker, open);
@@ -476,8 +508,7 @@ export function TradesLogMatrix({
                           }}
                           title={
                             `${open.direction} ${open.option_type} ${open.contracts}× $${open.strike} · ` +
-                            `opened ${open.trade_date} · expires ${open.expiry} · ` +
-                            `${stateLabel} · ${fmtUSD(signed)}`
+                            `opened ${open.trade_date} · ${state.title} · ${fmtUSD(signed)}`
                           }
                         >
                           <div className="gl-cell-in">
@@ -499,8 +530,8 @@ export function TradesLogMatrix({
                                   (signed < 0 ? ' neg' : '')
                                 }
                               />
-                              <span className={'gl-cell-state ' + stateLabel}>
-                                {stateLabel}
+                              <span className={'gl-cell-state ' + state.tone}>
+                                {state.label}
                               </span>
                             </div>
                           </div>
@@ -555,13 +586,13 @@ export function TradesLogMatrix({
                       const open = entry.open;
                       const expired = isOptionExpired(open);
                       const signed = slotValueForOpen(open);
-                      const stateLabel = expired ? 'expired' : 'open';
+                      const state = liveStateLabel(open, today);
                       return (
                         <td
                           key={i}
                           className={
                             'gl-cell closed-zone filled overflow-live ' +
-                            (expired ? 'expired' : '')
+                            (expired ? 'expired' : state.tone === 'urgent' ? 'urgent' : '')
                           }
                           onClick={() => {
                             if (expired) onResolveCellClick(r.ticker, open);
@@ -569,7 +600,7 @@ export function TradesLogMatrix({
                           }}
                           title={
                             `${open.direction} ${open.option_type} ${open.contracts}× $${open.strike} · ` +
-                            `opened ${open.trade_date} · ${stateLabel} (overflow)`
+                            `opened ${open.trade_date} · ${state.title} (overflow)`
                           }
                         >
                           <div className="gl-cell-in">
@@ -590,8 +621,8 @@ export function TradesLogMatrix({
                                   (open.option_type === 'put' ? 'p' : 'c')
                                 }
                               />
-                              <span className={'gl-cell-state ' + stateLabel}>
-                                {stateLabel}
+                              <span className={'gl-cell-state ' + state.tone}>
+                                {state.label}
                               </span>
                             </div>
                           </div>
