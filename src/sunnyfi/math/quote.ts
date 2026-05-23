@@ -61,3 +61,46 @@ export async function pullTickerQuote(rawTicker: string): Promise<TickerQuote> {
   }
   return { ticker: payload.ticker ?? ticker, price: payload.price, source: "polygon" };
 }
+
+// ── Option chain ────────────────────────────────────────────────
+export interface OptionContractQuote {
+  expiry: string;   // 'YYYY-MM-DD'
+  strike: number;
+  premium: number;  // per-share
+}
+
+/** Fetch all puts (or calls) at (or near) a target strike across all
+ *  available expiries. Used by the Math Variants sweep when it needs real
+ *  prices per cadence — long-dated puts cost much more than short-dated. */
+export async function pullOptionChain(
+  ticker: string,
+  strike: number,
+  contractType: "put" | "call",
+): Promise<OptionContractQuote[]> {
+  if (!ticker || !isFinite(strike) || strike <= 0) {
+    throw new Error("ticker and strike are required");
+  }
+  const { data, error } = await supabase.functions.invoke("option-chain", {
+    body: { ticker, strike, contract_type: contractType },
+  });
+  if (error) throw new Error(`Option chain failed: ${error.message}`);
+  const payload = data as { contracts?: OptionContractQuote[]; error?: string } | null;
+  if (!payload || payload.error) throw new Error(payload?.error ?? "Chain unavailable");
+  return payload.contracts ?? [];
+}
+
+/** Pick the contract whose expiry is closest to `targetDate` (ISO date). */
+export function nearestExpiry(
+  contracts: OptionContractQuote[],
+  targetDate: string,
+): OptionContractQuote | null {
+  if (contracts.length === 0) return null;
+  const target = new Date(targetDate + "T00:00:00Z").getTime();
+  let best = contracts[0];
+  let bestDist = Math.abs(new Date(best.expiry + "T00:00:00Z").getTime() - target);
+  for (const c of contracts.slice(1)) {
+    const d = Math.abs(new Date(c.expiry + "T00:00:00Z").getTime() - target);
+    if (d < bestDist) { best = c; bestDist = d; }
+  }
+  return best;
+}

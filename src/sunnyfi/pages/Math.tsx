@@ -946,20 +946,35 @@ function ShareBody({
 }
 
 // ── Sweep options per calc ───────────────────────────────────────
-// Each calc declares which dimensions are interesting to fan out. Today
-// we ship frequency sweeps — easy to add strike / contracts later.
+// Each calc declares which dimensions are interesting to fan out. Frequency
+// sweeps on the put side pull real Polygon quotes per cadence's nearest
+// expiry — without that, long-dated puts would be priced at the same
+// premium as short-dated and the cost numbers would all collide.
 function sweepsForCalc(calcKey: string): SweepOption[] {
+  const putValues = PUT_FREQ_DEFS.map((f) => ({ id: f.id, label: f.label, calDays: f.calDays }));
+  const callValues = FREQ_DEFS.map((f) => ({ id: f.id, label: f.label, calDays: f.calDays }));
+
   if (calcKey === "income-vs-cost") {
     return [
       {
         label: "Put frequency",
         stateKey: "putFrequency",
-        values: PUT_FREQ_DEFS.map((f) => ({ id: f.id, label: f.label })),
+        values: putValues,
+        quote: {
+          type: "put",
+          strikeFrom: { strikeKey: "strike" },
+          premiumKey: "putPremium",
+        },
       },
       {
         label: "Call frequency",
         stateKey: "callFrequency",
-        values: FREQ_DEFS.map((f) => ({ id: f.id, label: f.label })),
+        values: callValues,
+        quote: {
+          type: "call",
+          strikeFrom: { spotKey: "price", distanceKey: "callDistance" },
+          premiumKey: "callPremium",
+        },
       },
     ];
   }
@@ -968,7 +983,12 @@ function sweepsForCalc(calcKey: string): SweepOption[] {
       {
         label: "Put frequency",
         stateKey: "frequency",
-        values: PUT_FREQ_DEFS.map((f) => ({ id: f.id, label: f.label })),
+        values: putValues,
+        quote: {
+          type: "put",
+          strikeFrom: { strikeKey: "strike" },
+          premiumKey: "premium",
+        },
       },
     ];
   }
@@ -977,7 +997,12 @@ function sweepsForCalc(calcKey: string): SweepOption[] {
       {
         label: "Call frequency",
         stateKey: "frequency",
-        values: FREQ_DEFS.map((f) => ({ id: f.id, label: f.label })),
+        values: callValues,
+        quote: {
+          type: "call",
+          strikeFrom: { spotKey: "price", distanceKey: "callDistance" },
+          premiumKey: "premium",
+        },
       },
     ];
   }

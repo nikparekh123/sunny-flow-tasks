@@ -12,7 +12,8 @@
  */
 import { useMemo, useState, type ReactNode } from "react";
 import { useVariants, type Snapshot } from "./store";
-import { CALC_MODULES, type CalcModule } from "./calcs";
+import { type CalcModule } from "./calcs";
+import { pullOptionChain, nearestExpiry } from "./quote";
 import { toast } from "sonner";
 
 export interface SweepOption {
@@ -20,8 +21,22 @@ export interface SweepOption {
   label: string;
   /** State-key being varied (for the auto-generated variant name). */
   stateKey: string;
-  /** Possible values to spawn variants for. */
-  values: Array<{ id: string; label: string }>;
+  /** Possible values to spawn variants for. Each value carries the cadence's
+   *  calDays so the sweep can resolve a target expiry per cadence. */
+  values: Array<{ id: string; label: string; calDays?: number }>;
+  /** Optional real-quote config — when present, the sweep pulls live option
+   *  prices for each cadence's nearest expiry and overrides a premium key
+   *  in the variant payload. Without this, premium stays constant (less
+   *  realistic for long-dated puts). */
+  quote?: {
+    /** Side of the option chain to query. */
+    type: "put" | "call";
+    /** Where to read the strike: either a literal state key, or derived from
+     *  spot price + an OTM/ITM distance %. */
+    strikeFrom: { strikeKey: string } | { spotKey: string; distanceKey: string };
+    /** State key to override with the fetched premium. */
+    premiumKey: string;
+  };
 }
 
 export function VariantsStrip<S extends Record<string, unknown>>({
@@ -70,16 +85,52 @@ export function VariantsStrip<S extends Record<string, unknown>>({
 
   const handleSweep = async (opt: SweepOption) => {
     if (!ticker) { toast.error("Enter a ticker first to sweep"); return; }
+
+    // Resolve real option premiums per cadence when the sweep asks for them.
+    // Falls back gracefully to constant-premium if the chain fetch fails.
+    let premiumByCadence: Map<string, number> | null = null;
+    if (opt.quote) {
+      try {
+        const strike = resolveStrike(state, opt.quote.strikeFrom);
+        if (!isFinite(strike) || strike <= 0) {
+          toast.error("Set a strike before sweeping with real quotes");
+          return;
+        }
+        toast.message(`Fetching ${opt.quote.type} chain for ${ticker}…`);
+        const chain = await pullOptionChain(ticker, strike, opt.quote.type);
+        if (chain.length === 0) {
+          toast.warning("No listed contracts near that strike — falling back to constant premium");
+        } else {
+          premiumByCadence = new Map();
+          const today = new Date().toISOString().slice(0, 10);
+          for (const v of opt.values) {
+            const days = v.calDays ?? 30;
+            const target = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+            const match = nearestExpiry(chain, target);
+            if (match) premiumByCadence.set(v.id, match.premium);
+          }
+        }
+      } catch (e) {
+        toast.warning(`Chain fetch failed (${(e as Error).message}); using constant premium`);
+      }
+    }
+
     try {
       // Fire all create calls in parallel — they don't depend on each other.
       await Promise.all(
         opt.values.map((v) => {
-          const payload = { ...state, [opt.stateKey]: v.id };
-          const name = `${ticker} · ${v.label}`;
+          const payload: Record<string, unknown> = { ...state, [opt.stateKey]: v.id };
+          const realPrem = premiumByCadence?.get(v.id);
+          if (opt.quote && typeof realPrem === "number") {
+            payload[opt.quote.premiumKey] = realPrem.toFixed(2);
+          }
+          const tag = realPrem != null ? `${v.label} · $${realPrem.toFixed(2)}` : v.label;
+          const name = `${ticker} · ${tag}`;
           return create({ calcKey, name, payload });
         }),
       );
-      toast.success(`Swept ${opt.label} → ${opt.values.length} variants`);
+      const note = premiumByCadence ? " (real Polygon quotes)" : "";
+      toast.success(`Swept ${opt.label} → ${opt.values.length} variants${note}`);
     } catch (e) {
       toast.error(`Sweep failed: ${(e as Error).message}`);
     }
@@ -217,6 +268,21 @@ function VariantCard<S extends Record<string, unknown>>({
 
 function isFiniteScore(n: number | undefined): boolean {
   return typeof n === "number" && isFinite(n);
+}
+
+/** Pull the strike out of state — either directly, or computed from a spot
+ *  price plus an OTM distance %. Matches the two ways the calcs store strikes
+ *  (Put Cost / IvC put side use a literal strike; EI / IvC call side derive
+ *  from price + callDistance). */
+function resolveStrike(
+  state: Record<string, unknown>,
+  spec: { strikeKey: string } | { spotKey: string; distanceKey: string },
+): number {
+  if ("strikeKey" in spec) return Number(state[spec.strikeKey]);
+  const spot = Number(state[spec.spotKey]);
+  const dist = Number(state[spec.distanceKey]);
+  if (!isFinite(spot) || !isFinite(dist)) return NaN;
+  return spot * (1 + dist / 100);
 }
 
 function formatScore<S extends Record<string, unknown>>(_mod: CalcModule<S>, score: number): string {
