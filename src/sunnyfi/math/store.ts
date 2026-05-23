@@ -309,6 +309,53 @@ export function useVariants(calcKey: string | null, ticker: string | null) {
     },
   });
 
+  /** Replace every variant for the current (calcKey, ticker) pair with a
+   *  fresh set. Used by auto-sweep: when the user changes strike or pulls a
+   *  new ticker, we want one variant per cadence with real Polygon premiums,
+   *  not the previous strike's variants stacked on top. */
+  const replaceAllMut = useMutation({
+    mutationFn: async (input: {
+      calcKey: string;
+      ticker: string;
+      payloads: Array<{ name: string; purpose?: string; payload: Record<string, unknown> }>;
+    }): Promise<Snapshot[]> => {
+      const { data: u } = await supabase.auth.getUser();
+      if (!u.user) throw new Error("Not signed in");
+
+      // 1) Delete the old variants for this (calc, ticker).
+      const { error: delErr } = await supabase
+        .from("math_snapshots" as never)
+        .delete()
+        .eq("user_id", u.user.id)
+        .eq("kind", "variant")
+        .eq("calc_key", input.calcKey)
+        .eq("payload->>underlying", input.ticker.toUpperCase());
+      if (delErr) throw delErr;
+
+      if (input.payloads.length === 0) return [];
+
+      // 2) Bulk insert the new set.
+      const inserts = input.payloads.map((p) => ({
+        user_id:  u.user!.id,
+        calc_key: input.calcKey,
+        kind:     "variant",
+        name:     p.name,
+        purpose:  p.purpose ?? null,
+        payload:  p.payload,
+      }));
+      const { data, error: insErr } = await supabase
+        .from("math_snapshots" as never)
+        .insert(inserts)
+        .select("id, calc_key, kind, name, purpose, payload, created_at");
+      if (insErr) throw insErr;
+      return (data as DbRow[] | null)?.map(rowToSnap) ?? [];
+    },
+    onSuccess: (snaps) => {
+      if (!enabled || snaps.length === 0) return;
+      qc.setQueryData<Snapshot[]>(variantsKey(calcKey!, ticker!), snaps);
+    },
+  });
+
   return {
     variants: query.data ?? [],
     isLoading: query.isLoading,
@@ -316,6 +363,11 @@ export function useVariants(calcKey: string | null, ticker: string | null) {
       createMut.mutateAsync(input),
     remove:  (id: string) => removeMut.mutate(id),
     promote: (variantId: string) => promoteMut.mutateAsync(variantId),
+    /** Atomic-ish replace for a (calc, ticker) pair. */
+    replaceAll: (input: {
+      calcKey: string; ticker: string;
+      payloads: Array<{ name: string; purpose?: string; payload: Record<string, unknown> }>;
+    }) => replaceAllMut.mutateAsync(input),
   };
 }
 

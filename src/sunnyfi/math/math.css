@@ -1705,3 +1705,22 @@
   color: var(--navi-fg4);
   letter-spacing: .3px;
 }
+
+/* Warning state — Polygon didn't return a contract near this cadence's
+   target expiry. Card shows a small ⚠ in the corner and a warmer border so
+   the user knows the price is from a fallback expiry. */
+.vstrip-card.warn {
+  border-color: rgba(224,192,96,.4);
+}
+.vstrip-card.warn:hover {
+  border-color: rgba(224,192,96,.6);
+}
+.vstrip-card-warn {
+  position: absolute;
+  top: 6px;
+  right: 32px;
+  color: var(--navi-warning);
+  font-size: 12px;
+  line-height: 1;
+  cursor: help;
+}
