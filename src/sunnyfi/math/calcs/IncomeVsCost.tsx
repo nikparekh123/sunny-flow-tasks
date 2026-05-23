@@ -43,11 +43,11 @@ const PUT_HORIZONS = [
  *  "Daily" is conditional on the call chain actually listing dailies
  *  (cheap names usually don't); the rest are always shown. */
 const CALL_CADENCES = [
-  { id: "daily",         label: "Daily",       short: "Dly", dte: 1,  perMonth: 21,    requiresShortDated: true },
-  { id: "thrice-weekly", label: "3 ×/wk",      short: "3×wk", dte: 2,  perMonth: 13,    requiresShortDated: true },
-  { id: "weekly",        label: "Weekly",      short: "Wkly", dte: 7,  perMonth: 4.33,  requiresShortDated: false },
-  { id: "biweekly",      label: "Bi-weekly",   short: "Bi",   dte: 14, perMonth: 2.17,  requiresShortDated: false },
-  { id: "monthly",       label: "Monthly",     short: "Mo",   dte: 30, perMonth: 1,     requiresShortDated: false },
+  { id: "daily",         label: "Daily",       short: "Dly",  perUnit: "/day", dte: 1,  perMonth: 21,    requiresShortDated: true },
+  { id: "thrice-weekly", label: "3 ×/wk",      short: "3×wk", perUnit: "/run", dte: 2,  perMonth: 13,    requiresShortDated: true },
+  { id: "weekly",        label: "Weekly",      short: "Wkly", perUnit: "/wk",  dte: 7,  perMonth: 4.33,  requiresShortDated: false },
+  { id: "biweekly",      label: "Bi-weekly",   short: "Bi",   perUnit: "/2wk", dte: 14, perMonth: 2.17,  requiresShortDated: false },
+  { id: "monthly",       label: "Monthly",     short: "Mo",   perUnit: "/mo",  dte: 30, perMonth: 1,     requiresShortDated: false },
 ] as const;
 
 /** Rough IV per ticker for the estimator fallback. Real chains override. */
@@ -125,6 +125,8 @@ export interface IVCVariant {
   callStrike: number;
   putStrike: number;
   callDte: number;
+  /** Per-cycle suffix for income labels, e.g. "/wk", "/mo". */
+  callPerUnit: string;
   rank: number;
   isBest: boolean;
 }
@@ -267,6 +269,7 @@ function computeAllVariants(
         totalIncome, totalCost, net, coverage, netAnnYield,
         notional, callStrike, putStrike,
         callDte: cad.dte,
+        callPerUnit: cad.perUnit,
         rank: 0, isBest: false,
       });
     }
@@ -741,8 +744,8 @@ function SelectedBreakdown({
           <span className="ivc3-recap-formula">
             <b>{fmtCount(Number(state.callContracts) || 0)}c</b> ×{" "}
             <b>{fmtMoney(v.callPrem, { decimals: 2 })}</b> →{" "}
-            <b>{fmtMoney(v.incomePerCycle, { decimals: 0 })}</b>/mo ×{" "}
-            <b>{fmtCount(v.callCycles)} mo</b> ={" "}
+            <b>{fmtMoney(v.incomePerCycle, { decimals: 0 })}</b>{v.callPerUnit} ×{" "}
+            <b>{fmtCount(v.callCycles)}</b> ={" "}
             <b className="pos">+{fmtMoney(v.totalIncome, { decimals: 0 }).replace(/^[+−]?/, "")}</b>
           </span>
           <span className="ivc3-recap-meta">
@@ -805,7 +808,7 @@ function IvcBar({ v }: { v: IVCVariant }) {
               {incomeCycleEdges.map((p, i) => (
                 <span key={i} className="ivc3-cycle-divider" style={{ left: `${p}%` }} />
               ))}
-              <span className="ivc3-bar-perchunk">{fmtMoney(incomePerCycle, { decimals: 0 })}/mo</span>
+              <span className="ivc3-bar-perchunk">{fmtMoney(incomePerCycle, { decimals: 0 })}{v.callPerUnit}</span>
             </div>
           </div>
         </div>
