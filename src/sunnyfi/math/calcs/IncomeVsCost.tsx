@@ -133,23 +133,59 @@ function plusDays(d: Date, n: number): Date {
   const r = new Date(d); r.setDate(r.getDate() + n); return r;
 }
 
-/** Decide whether short-dated call cadences (Daily, 3×wk) should appear.
- *  A cadence is "available" if Polygon lists at least one contract within
- *  a couple weeks of today — proxy for "does this name actually trade
- *  short-dated options?" */
+/** Decide which call cadences to surface based on actual expiry density.
+ *
+ *  Old logic just asked "is there ANY contract within 14 days?" — but for
+ *  AAPL the weekly Friday qualifies, so Daily/3×wk lit up even though AAPL
+ *  doesn't list daily expiries. We need to measure how tightly packed the
+ *  near-dated expiries actually are.
+ *
+ *  Method: look at distinct expiries within the next ~30 calendar days, walk
+ *  consecutive pairs, and use the MEDIAN spacing (resistant to one rogue
+ *  EOM expiry). Then:
+ *     spacing ≤ 1.5 cal days  → Daily exists  (SPY/QQQ/SPX)
+ *     spacing ≤ 3.5 cal days  → 3×wk exists   (some ETFs w/ M-W-F)
+ *     spacing ≤ 8 cal days    → Weekly exists (AAPL, MSFT, most liquid names)
+ *     anything wider          → Monthly-only
+ *
+ *  Cadences whose listed `requiresShortDated` field is false (Weekly, Bi,
+ *  Monthly) always pass through — they're synthesizable from a monthly chain. */
 function callCadencesAvailable(callChain: OptionContractQuote[]): typeof CALL_CADENCES {
   if (callChain.length === 0) {
-    // No chain data yet — show the safe-default set (no Daily / 3×wk).
+    // No chain data yet — show the safe-default set (Weekly+).
     return CALL_CADENCES.filter((c) => !c.requiresShortDated);
   }
   const todayMs = Date.now();
-  const hasShortDated = callChain.some((c) => {
-    const t = new Date(c.expiry + "T00:00:00Z").getTime();
-    return (t - todayMs) / 86400000 <= 14;  // contract within 14 days
+  const horizonMs = todayMs + 30 * 86400000;
+  // Distinct expiries within the next 30 days, sorted.
+  const expiries = Array.from(new Set(
+    callChain
+      .map((c) => new Date(c.expiry + "T00:00:00Z").getTime())
+      .filter((t) => t >= todayMs && t <= horizonMs),
+  )).sort((a, b) => a - b);
+
+  // Median gap between consecutive expiries (calendar days).
+  let medianGapDays = Infinity;
+  if (expiries.length >= 2) {
+    const gaps: number[] = [];
+    for (let i = 1; i < expiries.length; i++) {
+      gaps.push((expiries[i] - expiries[i - 1]) / 86400000);
+    }
+    gaps.sort((a, b) => a - b);
+    medianGapDays = gaps[Math.floor(gaps.length / 2)];
+  } else if (expiries.length === 1) {
+    // Single near expiry: treat gap as the distance to it (rough proxy).
+    medianGapDays = (expiries[0] - todayMs) / 86400000;
+  }
+
+  const hasDaily   = medianGapDays <= 1.5;
+  const hasThriceW = medianGapDays <= 3.5;
+
+  return CALL_CADENCES.filter((c) => {
+    if (c.id === "daily") return hasDaily;
+    if (c.id === "thrice-weekly") return hasThriceW;
+    return true;  // weekly / bi / monthly always allowed
   });
-  return hasShortDated
-    ? CALL_CADENCES
-    : CALL_CADENCES.filter((c) => !c.requiresShortDated);
 }
 
 function computeAllVariants(
