@@ -124,6 +124,7 @@ export interface IVCVariant {
   notional: number;
   callStrike: number;
   putStrike: number;
+  callDte: number;
   rank: number;
   isBest: boolean;
 }
@@ -229,6 +230,7 @@ function computeAllVariants(
         incomePerCycle, costPerCycle,
         totalIncome, totalCost, net, coverage, netAnnYield,
         notional, callStrike, putStrike,
+        callDte: cad.dte,
         rank: 0, isBest: false,
       });
     }
@@ -666,7 +668,7 @@ function SelectedBreakdown({
           <span className="ivc3-recap-meta">
             <span className="auto-tag">{v.callPremSource === "real" ? "real" : "est"}</span>
             {v.callExpiry ? `next exp ${v.callExpiry} · ` : ""}
-            ~{CALL_CYCLE_DTE} DTE · K {fmtMoney(v.callStrike, { decimals: 2 })}
+            ~{v.callDte} DTE · K {fmtMoney(v.callStrike, { decimals: 2 })}
           </span>
         </div>
         <div className="ivc3-recap-row puts">
