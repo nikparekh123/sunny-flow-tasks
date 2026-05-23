@@ -30,16 +30,25 @@ import {
 import "./IncomeVsCost.css";
 
 // ── Constants ────────────────────────────────────────────────────
-/** Horizons drive cycle counts directly: callCycles = months, putCycles = 1. */
-const VARIANT_HORIZONS = [
-  { id: "monthly",   label: "Monthly",   months: 1,  days: 30  },
-  { id: "quarterly", label: "Quarterly", months: 3,  days: 91  },
-  { id: "4mo",       label: "4 months",  months: 4,  days: 122 },
-  { id: "6mo",       label: "6 months",  months: 6,  days: 182 },
-  { id: "12mo",      label: "12 months", months: 12, days: 365 },
+/** Put horizons — each defines the trading window and the put DTE. */
+const PUT_HORIZONS = [
+  { id: "monthly",   label: "Monthly",   short: "1mo",  months: 1,  days: 30  },
+  { id: "quarterly", label: "Quarterly", short: "Qtr",  months: 3,  days: 91  },
+  { id: "4mo",       label: "4 months",  short: "4mo",  months: 4,  days: 122 },
+  { id: "6mo",       label: "6 months",  short: "6mo",  months: 6,  days: 182 },
+  { id: "12mo",      label: "12 months", short: "12mo", months: 12, days: 365 },
 ] as const;
 
-const CALL_CYCLE_DTE = 30; // monthly call cadence (fixed)
+/** Call cadences inside the window — DTE drives the per-roll premium.
+ *  "Daily" is conditional on the call chain actually listing dailies
+ *  (cheap names usually don't); the rest are always shown. */
+const CALL_CADENCES = [
+  { id: "daily",         label: "Daily",       short: "Dly", dte: 1,  perMonth: 21,    requiresShortDated: true },
+  { id: "thrice-weekly", label: "3 ×/wk",      short: "3×wk", dte: 2,  perMonth: 13,    requiresShortDated: true },
+  { id: "weekly",        label: "Weekly",      short: "Wkly", dte: 7,  perMonth: 4.33,  requiresShortDated: false },
+  { id: "biweekly",      label: "Bi-weekly",   short: "Bi",   dte: 14, perMonth: 2.17,  requiresShortDated: false },
+  { id: "monthly",       label: "Monthly",     short: "Mo",   dte: 30, perMonth: 1,     requiresShortDated: false },
+] as const;
 
 /** Rough IV per ticker for the estimator fallback. Real chains override. */
 const IV_HINTS: Record<string, number> = {
@@ -58,7 +67,8 @@ export interface IVCState extends Record<string, unknown> {
   callDistance: string;       // % OTM (above spot, positive)
   putContracts: string;
   putDistance: string;        // % below spot (positive)
-  selectedHorizonId: string;  // "monthly" | "quarterly" | "4mo" | "6mo" | "12mo"
+  /** Composite "{callCadenceId}_{putHorizonId}" e.g. "weekly_quarterly". */
+  selectedVariantId: string;
 }
 
 export const ivcInitial: IVCState = {
@@ -69,7 +79,7 @@ export const ivcInitial: IVCState = {
   callDistance: "1.0",
   putContracts: "5",
   putDistance: "2.0",
-  selectedHorizonId: "quarterly",
+  selectedVariantId: "weekly_quarterly",
 };
 
 // ── Premium estimator (Black-Scholes-ish, used as fallback) ──────
@@ -88,10 +98,13 @@ function estPremium(opts: { spot: number; strike: number; daysToExp: number; iv:
 
 // ── Variant compute ──────────────────────────────────────────────
 export interface IVCVariant {
-  id: string;
-  label: string;
-  months: number;
-  days: number;
+  id: string;                  // "{callCadenceId}_{putHorizonId}"
+  callCadenceId: string;
+  callCadenceLabel: string;    // short, e.g. "Wkly"
+  putHorizonId: string;
+  putHorizonLabel: string;     // short, e.g. "Qtr"
+  months: number;              // put horizon in months
+  days: number;                // put horizon in days
   horizonDate: Date;
   callPrem: number;
   putPrem: number;
@@ -119,6 +132,25 @@ function plusDays(d: Date, n: number): Date {
   const r = new Date(d); r.setDate(r.getDate() + n); return r;
 }
 
+/** Decide whether short-dated call cadences (Daily, 3×wk) should appear.
+ *  A cadence is "available" if Polygon lists at least one contract within
+ *  a couple weeks of today — proxy for "does this name actually trade
+ *  short-dated options?" */
+function callCadencesAvailable(callChain: OptionContractQuote[]): typeof CALL_CADENCES {
+  if (callChain.length === 0) {
+    // No chain data yet — show the safe-default set (no Daily / 3×wk).
+    return CALL_CADENCES.filter((c) => !c.requiresShortDated);
+  }
+  const todayMs = Date.now();
+  const hasShortDated = callChain.some((c) => {
+    const t = new Date(c.expiry + "T00:00:00Z").getTime();
+    return (t - todayMs) / 86400000 <= 14;  // contract within 14 days
+  });
+  return hasShortDated
+    ? CALL_CADENCES
+    : CALL_CADENCES.filter((c) => !c.requiresShortDated);
+}
+
 function computeAllVariants(
   state: IVCState,
   callChain: OptionContractQuote[],
@@ -139,53 +171,73 @@ function computeAllVariants(
   const notional = shares * price;
   const callStrike = price * (1 + (isFinite(callDist) ? callDist : 0) / 100);
   const putStrike  = price * (1 - (isFinite(putDist)  ? putDist  : 0) / 100);
+  const callCadences = callCadencesAvailable(callChain);
 
-  // Single call premium — monthly cadence, ~30 DTE.
-  const callTargetIso = plusDays(now, CALL_CYCLE_DTE).toISOString().slice(0, 10);
-  const callMatch = nearestExpiry(callChain, callTargetIso);
-  const callPrem = callMatch?.premium
-    ?? estPremium({ spot: price, strike: callStrike, daysToExp: CALL_CYCLE_DTE, iv, isCall: true });
+  // Pre-compute one call premium per cadence (depends on DTE, not on horizon).
+  const callPriceByCadence = new Map<string, { premium: number; source: "real" | "estimate"; expiry: string | null }>();
+  for (const cad of callCadences) {
+    const targetIso = plusDays(now, cad.dte).toISOString().slice(0, 10);
+    const match = nearestExpiry(callChain, targetIso);
+    const premium = match?.premium
+      ?? estPremium({ spot: price, strike: callStrike, daysToExp: cad.dte, iv, isCall: true });
+    callPriceByCadence.set(cad.id, {
+      premium,
+      source: match ? "real" : "estimate",
+      expiry: match?.expiry ?? null,
+    });
+  }
 
-  const variants: IVCVariant[] = VARIANT_HORIZONS.map((h) => {
+  const variants: IVCVariant[] = [];
+  for (const h of PUT_HORIZONS) {
     const horizonDate = plusDays(now, h.days);
-    const targetIso = horizonDate.toISOString().slice(0, 10);
-    const putMatch = nearestExpiry(putChain, targetIso);
+    const putTargetIso = horizonDate.toISOString().slice(0, 10);
+    const putMatch = nearestExpiry(putChain, putTargetIso);
     const putPrem = putMatch?.premium
       ?? estPremium({ spot: price, strike: putStrike, daysToExp: h.days, iv, isCall: false });
 
-    const callCycles = h.months;
-    const putCycles = 1;
-    const incomePerCycle = callContracts * callPrem * 100;
-    const costPerCycle = putContracts * putPrem * 100;
-    const totalIncome = incomePerCycle * callCycles;
-    const totalCost = costPerCycle * putCycles;
-    const net = totalIncome - totalCost;
-    const coverage = totalCost > 0 ? totalIncome / totalCost
-      : totalIncome > 0 ? Infinity : NaN;
-    const years = h.days / 365.25;
-    const annualNet = years > 0 ? net / years : NaN;
-    const netAnnYield = notional > 0 && isFinite(annualNet) ? (annualNet / notional) * 100 : NaN;
+    for (const cad of callCadences) {
+      const cp = callPriceByCadence.get(cad.id)!;
+      const callCycles = Math.max(1, Math.round(cad.perMonth * h.months));
+      const putCycles = 1;
+      const incomePerCycle = callContracts * cp.premium * 100;
+      const costPerCycle = putContracts * putPrem * 100;
+      const totalIncome = incomePerCycle * callCycles;
+      const totalCost = costPerCycle * putCycles;
+      const net = totalIncome - totalCost;
+      const coverage = totalCost > 0 ? totalIncome / totalCost
+        : totalIncome > 0 ? Infinity : NaN;
+      const years = h.days / 365.25;
+      const annualNet = years > 0 ? net / years : NaN;
+      const netAnnYield = notional > 0 && isFinite(annualNet) ? (annualNet / notional) * 100 : NaN;
 
-    return {
-      id: h.id, label: h.label, months: h.months, days: h.days,
-      horizonDate,
-      callPrem, putPrem,
-      callPremSource: callMatch ? "real" : "estimate",
-      putPremSource: putMatch ? "real" : "estimate",
-      callExpiry: callMatch?.expiry ?? null,
-      putExpiry: putMatch?.expiry ?? null,
-      callCycles, putCycles,
-      incomePerCycle, costPerCycle,
-      totalIncome, totalCost, net, coverage, netAnnYield,
-      notional, callStrike, putStrike,
-      rank: 0, isBest: false,  // filled in next step
-    };
-  });
+      variants.push({
+        id: `${cad.id}_${h.id}`,
+        callCadenceId: cad.id,
+        callCadenceLabel: cad.short,
+        putHorizonId: h.id,
+        putHorizonLabel: h.short,
+        months: h.months,
+        days: h.days,
+        horizonDate,
+        callPrem: cp.premium,
+        putPrem,
+        callPremSource: cp.source,
+        putPremSource: putMatch ? "real" : "estimate",
+        callExpiry: cp.expiry,
+        putExpiry: putMatch?.expiry ?? null,
+        callCycles, putCycles,
+        incomePerCycle, costPerCycle,
+        totalIncome, totalCost, net, coverage, netAnnYield,
+        notional, callStrike, putStrike,
+        rank: 0, isBest: false,
+      });
+    }
+  }
 
-  // Rank by net dollars.
+  // Rank by net dollars (the user's "best" definition).
   const ranked = [...variants].sort((a, b) => b.net - a.net);
   ranked.forEach((v, i) => { v.rank = i + 1; v.isBest = i === 0; });
-  return variants;  // return in horizon order, callers can re-rank
+  return ranked;  // return RANKED order so #1 lands first in the grid
 }
 
 // ── Registry helpers (used by Compare view) ──────────────────────
@@ -195,13 +247,14 @@ function computeAllVariants(
 function selectedFrom(state: IVCState): IVCVariant | null {
   const vars = computeAllVariants(state, [], []);
   if (vars.length === 0) return null;
-  return vars.find((v) => v.id === state.selectedHorizonId) ?? vars[0];
+  return vars.find((v) => v.id === state.selectedVariantId) ?? vars[0];
 }
 
 export function ivcCopy(state: IVCState): string {
   const sel = selectedFrom(state);
   if (!sel) return `${state.underlying} · incomplete`;
-  return `${state.underlying} · ${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · ${sel.label}: +${fmtMoney(sel.totalIncome, { decimals: 0 })} calls / −${fmtMoney(sel.totalCost, { decimals: 0 })} puts = ${fmtMoney(sel.net, { signed: true, decimals: 0 })} net (${fmtPct(sel.netAnnYield)} ann.) through ${fmtDate(sel.horizonDate)}`;
+  const combo = `${sel.callCadenceLabel} calls × ${sel.putHorizonLabel} puts`;
+  return `${state.underlying} · ${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · ${combo}: +${fmtMoney(sel.totalIncome, { decimals: 0 })} calls / −${fmtMoney(sel.totalCost, { decimals: 0 })} puts = ${fmtMoney(sel.net, { signed: true, decimals: 0 })} net (${fmtPct(sel.netAnnYield)} ann.) through ${fmtDate(sel.horizonDate)}`;
 }
 
 export function ivcDisplay(state: IVCState): { value: string; tone: "neon" | "pos" | "neg" | "muted" } {
@@ -223,10 +276,10 @@ export function ivcFields(state: IVCState): Array<{ label: string; value: string
   }
   return [
     { label: "Underlying",   value: state.underlying || "—", mono: true },
-    { label: "Horizon",      value: `${sel.label} · ${fmtDate(sel.horizonDate)}`, mono: true },
+    { label: "Combo",        value: `${sel.callCadenceLabel} × ${sel.putHorizonLabel}`, mono: true },
+    { label: "Horizon",      value: fmtDate(sel.horizonDate), mono: true },
     { label: "Total income", value: fmtMoney(sel.totalIncome), mono: true },
     { label: "Total cost",   value: fmtMoney(sel.totalCost),   mono: true },
-    { label: "Coverage",     value: !isFinite(sel.coverage) ? "—" : sel.coverage === Infinity ? "∞" : `${sel.coverage.toFixed(2)}x`, mono: true },
     { label: "Ann. yield",   value: fmtPct(sel.netAnnYield), mono: true },
   ];
 }
@@ -245,7 +298,7 @@ export function ivcCardLine(state: IVCState): string {
   const sel = selectedFrom(state);
   if (!sel) return `${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))}`;
   const cov = !isFinite(sel.coverage) ? "—" : sel.coverage === Infinity ? "∞" : `${sel.coverage.toFixed(2)}x`;
-  return `${sel.label} · ${cov} coverage`;
+  return `${sel.callCadenceLabel} × ${sel.putHorizonLabel} · ${cov} coverage`;
 }
 
 // ── Body ─────────────────────────────────────────────────────────
@@ -301,14 +354,9 @@ export function IncomeVsCostCalc({
     () => computeAllVariants(state, callChain, putChain),
     [state, callChain, putChain],
   );
-  // Re-rank for display purposes (cards sorted in horizon order but we still
-  // mark the BEST one regardless of position).
-  const bestId = useMemo(() => {
-    const sorted = [...variants].sort((a, b) => b.net - a.net);
-    return sorted[0]?.id;
-  }, [variants]);
-
-  const selected = variants.find((v) => v.id === state.selectedHorizonId) ?? variants[0];
+  // Variants come pre-ranked (rank=1 is #1 by net). The first one is BEST.
+  const bestId = variants[0]?.id;
+  const selected = variants.find((v) => v.id === state.selectedVariantId) ?? variants[0];
 
   const lastFetchedTxt = lastFetchedAt
     ? `${Math.max(1, Math.round((Date.now() - lastFetchedAt) / 1000))}s ago`
@@ -452,9 +500,9 @@ export function IncomeVsCostCalc({
       <VariantsGrid
         variants={variants}
         ticker={state.underlying}
-        selectedId={state.selectedHorizonId}
+        selectedId={state.selectedVariantId}
         bestId={bestId}
-        onSelect={(id) => set("selectedHorizonId", id)}
+        onSelect={(id) => set("selectedVariantId", id)}
         lastFetchedTxt={lastFetchedTxt}
       />
 
@@ -499,7 +547,6 @@ function VariantsGrid({
           <VariantCard
             key={v.id}
             v={v}
-            ticker={ticker}
             selected={v.id === selectedId}
             isBest={v.id === bestId}
             onClick={() => onSelect(v.id)}
@@ -517,20 +564,20 @@ function VariantsGrid({
 }
 
 function VariantCard({
-  v, ticker, selected, isBest, onClick,
+  v, selected, isBest, onClick,
 }: {
   v: IVCVariant;
-  ticker: string;
   selected: boolean;
   isBest: boolean;
   onClick: () => void;
 }) {
   const tone = v.net >= 0 ? "pos" : "neg";
   const ann = isFinite(v.netAnnYield)
-    ? `${v.netAnnYield >= 0 ? "" : "−"}${Math.abs(v.netAnnYield).toFixed(2)}%`
+    ? `${v.netAnnYield >= 0 ? "" : "−"}${Math.abs(v.netAnnYield).toFixed(1)}%`
     : "—";
-  const cov = !isFinite(v.coverage) ? "—" : v.coverage === Infinity ? "∞" : `${v.coverage.toFixed(2)}x`;
-  // Compute rank within the ranked list (1 = best by net)
+  const cov = !isFinite(v.coverage) ? "—"
+    : v.coverage === Infinity ? "∞"
+    : `${v.coverage.toFixed(2)}x`;
   return (
     <div
       className={`ivc3-card ${selected ? "selected" : ""} ${isBest ? "best" : ""}`}
@@ -538,30 +585,18 @@ function VariantCard({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
-      aria-label={`Variant ${v.label}, net ${fmtMoney(v.net, { signed: true })}`}
+      aria-label={`${v.callCadenceLabel} calls × ${v.putHorizonLabel} puts, net ${fmtMoney(v.net, { signed: true })}`}
     >
       <div className="ivc3-card-head">
-        <span className="ivc3-card-rank">{isBest ? "BEST" : v.label.toUpperCase()}</span>
-        <span className="ivc3-card-horizon">{v.label}</span>
-      </div>
-      <div className="ivc3-card-sub">
-        <span className="ticker">{ticker || "—"}</span>
-        <span className="sep">·</span>
-        to {fmtDate(v.horizonDate).replace(/, \d{4}$/, "")}
+        <span className="ivc3-card-rank">{isBest ? "BEST" : `#${v.rank}`}</span>
+        <span className="ivc3-card-horizon">
+          {v.callCadenceLabel} <span className="muted">×</span> {v.putHorizonLabel}
+        </span>
       </div>
       <div className={`ivc3-card-net ${tone}`}>{fmtMoney(v.net, { signed: true, decimals: 0 })}</div>
-      <div className={`ivc3-card-yield ${v.net < 0 ? "neg" : ""}`}>
-        {ann} <span className="muted">ann.</span>
-      </div>
-      <div className="ivc3-card-meta">
-        <span className="row">
-          <span className="lbl">cover</span>
-          <span className="val">{cov}</span>
-        </span>
-        <span className="row">
-          <span className="lbl">cycles</span>
-          <span className="val">{v.callCycles}c · {v.putCycles}p</span>
-        </span>
+      <div className="ivc3-card-foot">
+        <span className={`ivc3-card-yield ${v.net < 0 ? "neg" : ""}`}>{ann}</span>
+        <span className="ivc3-card-cov">{cov}</span>
       </div>
     </div>
   );
@@ -595,11 +630,11 @@ function SelectedBreakdown({
       <div className="ivc3-selected-head">
         <div className="left">
           <div className="ivc3-selected-eyebrow">
-            Breakdown <span className="neon">· {isBest ? "BEST" : v.label.toUpperCase()}</span>
+            Breakdown <span className="neon">· {isBest ? "BEST" : `#${v.rank}`}</span>
           </div>
           <div className="ivc3-selected-title">
             {state.underlying || "—"}{" "}
-            <span className="muted">· {v.label} · to {fmtDate(v.horizonDate)}</span>
+            <span className="muted">· {v.callCadenceLabel} calls × {v.putHorizonLabel} puts · to {fmtDate(v.horizonDate)}</span>
           </div>
         </div>
         <div className="ivc3-selected-meta">Read-only · derived from the selected variant</div>
@@ -681,21 +716,6 @@ function IvcBar({ v }: { v: IVCVariant }) {
 
   return (
     <div className="ivc3-bar">
-      <div className="ivc3-bar-totals">
-        <div className="side income">
-          <span className="dot" />
-          <span className="lbl">INCOME</span>
-          <span className="cycles">{callCycles} call cycle{callCycles === 1 ? "" : "s"}</span>
-          <span className="val">+{fmtMoney(totalIncome, { decimals: 0 }).replace(/^[+−]?/, "")}</span>
-        </div>
-        <div className="side cost">
-          <span className="dot" />
-          <span className="lbl">COST</span>
-          <span className="cycles">{putCycles} put cycle{putCycles === 1 ? "" : "s"}</span>
-          <span className="val">−{fmtMoney(totalCost, { decimals: 0 }).replace(/^[+−]?/, "")}</span>
-        </div>
-      </div>
-
       <div className="ivc3-bar-stack">
         <div className="ivc3-bar-row income">
           <div className="ivc3-bar-rail">
