@@ -759,7 +759,7 @@
   pointer-events: none;
 }
 
-/* Per-chunk label inside fill — e.g. "$1,200/mo" */
+/* Per-chunk label inside fill — e.g. "$1,200/wk · ~$5,200/mo" */
 .ivc3-bar-perchunk {
   font-family: var(--navi-font-mono);
   font-size: 10px;
@@ -769,6 +769,10 @@
   white-space: nowrap;
   position: relative;
   z-index: 2;
+}
+.ivc3-bar-perchunk-roll {
+  font-weight: 500;
+  opacity: .68;
 }
 
 /* Surplus / shortfall marker — vertical line through bar + flag below */
