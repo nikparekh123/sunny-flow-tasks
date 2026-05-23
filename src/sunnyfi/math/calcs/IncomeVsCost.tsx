@@ -1,220 +1,251 @@
 /**
- * Income vs Cost — combine covered-call income and protective-put cost.
+ * Income vs Cost — v3 layout (variants-first, bar-as-hero).
  *
- * Two-side panel layout (calls left, puts right) with independent contracts,
- * premium, strike, and frequency for each side. A single shared horizon
- * drives both. Five result tiles plus a stacked bar visualisation of
- * income vs cost.
+ * Mental model:
+ *   • Calls roll MONTHLY (one cycle per month of the horizon).
+ *   • One put covers the FULL horizon.
+ *   • A "variant" is just a different horizon — Monthly / Quarterly / 4mo /
+ *     6mo / 12mo. All 5 are auto-generated from the user's inputs.
+ *
+ * Prices:
+ *   • Call premium — fetched once from the call chain at the implied
+ *     call strike, picking the contract nearest 30 DTE.
+ *   • Put premium — varies per variant; fetched once from the put chain,
+ *     then each variant picks the nearest expiry to its DTE.
+ *   • Estimator fallback (Black-Scholes-ish) when the chain returns nothing
+ *     near the target — so non-major tickers don't break.
+ *
+ * No more frequency inputs, no cut-off control. Click a variant card to
+ * select it as the "current view"; the bar + tiles + recap strip below
+ * reflect that variant.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import {
-  FREQ_DEFS, PUT_FREQ_DEFS, FREQ_BY_ID,
-  cycleStats,
   fmtMoney, fmtPct, fmtCount, fmtDate,
-  moneynessLabel,
-  CycField, NumInput, HeroNumInput, Seg, Tile, PullFromSunnyfi,
+  PullFromSunnyfi,
 } from "../cycle";
-import { usePremiumAutofill } from "../usePremiumAutofill";
-import { availableCadenceIds, pullOptionChain, type OptionContractQuote } from "../quote";
+import {
+  pullOptionChain, nearestExpiry, type OptionContractQuote,
+} from "../quote";
+import "./IncomeVsCost.css";
 
+// ── Constants ────────────────────────────────────────────────────
+/** Horizons drive cycle counts directly: callCycles = months, putCycles = 1. */
+const VARIANT_HORIZONS = [
+  { id: "monthly",   label: "Monthly",   months: 1,  days: 30  },
+  { id: "quarterly", label: "Quarterly", months: 3,  days: 91  },
+  { id: "4mo",       label: "4 months",  months: 4,  days: 122 },
+  { id: "6mo",       label: "6 months",  months: 6,  days: 182 },
+  { id: "12mo",      label: "12 months", months: 12, days: 365 },
+] as const;
+
+const CALL_CYCLE_DTE = 30; // monthly call cadence (fixed)
+
+/** Rough IV per ticker for the estimator fallback. Real chains override. */
+const IV_HINTS: Record<string, number> = {
+  SPY: 0.18, QQQ: 0.22, AAPL: 0.25, NVDA: 0.45, TSLA: 0.55,
+  META: 0.32, MSFT: 0.22, AMZN: 0.30, GOOGL: 0.26, AMD: 0.50, COIN: 0.70,
+};
+const IV_DEFAULT = 0.32;
+const ivFor = (ticker: string): number => IV_HINTS[ticker?.toUpperCase()] ?? IV_DEFAULT;
+
+// ── State ────────────────────────────────────────────────────────
 export interface IVCState extends Record<string, unknown> {
   underlying: string;
   shares: string;
   price: string;
-
   callContracts: string;
-  callPremium: string;
-  callDistance: string;
-  callFrequency: string;
-
+  callDistance: string;       // % OTM (above spot, positive)
   putContracts: string;
-  putPremium: string;
-  /** Absolute put strike $. Linked to putDistance — editing either updates
-   *  the other based on the current price. */
-  strike: string;
-  /** Distance % from spot. Positive number; pair with putDistanceDir to
-   *  signal which side (puts most often "below spot" / OTM). */
-  putDistance: string;
-  putDistanceDir: "below" | "above";
-  putFrequency: string;
+  putDistance: string;        // % below spot (positive)
+  selectedHorizonId: string;  // "monthly" | "quarterly" | "4mo" | "6mo" | "12mo"
 }
 
 export const ivcInitial: IVCState = {
   underlying: "SPY",
   shares: "500",
   price: "655.06",
-
   callContracts: "5",
-  callPremium: "2.80",
   callDistance: "1.0",
-  callFrequency: "weekly",
-
   putContracts: "5",
-  putPremium: "4.20",
-  strike: "640.00",
-  putDistance: "2.30",       // (655.06 − 640) / 655.06 ≈ 2.30% below spot
-  putDistanceDir: "below",
-  putFrequency: "monthly",
+  putDistance: "2.0",
+  selectedHorizonId: "quarterly",
 };
 
-interface Computed {
-  callContracts: number;
-  putContracts: number;
-  notional: number;
-  callCovered: number;
-  putCovered: number;
+// ── Premium estimator (Black-Scholes-ish, used as fallback) ──────
+function estPremium(opts: { spot: number; strike: number; daysToExp: number; iv: number; isCall: boolean }): number {
+  const { spot, strike, daysToExp, iv, isCall } = opts;
+  if (!isFinite(spot) || !isFinite(strike) || !isFinite(daysToExp) || daysToExp <= 0 || spot <= 0) return NaN;
+  const T = daysToExp / 365;
+  const sqrtT = Math.sqrt(T);
+  const atmTV = 0.4 * spot * iv * sqrtT;
+  const moneyness = (strike - spot) / spot;
+  const otmAmt = isCall ? Math.max(0, moneyness) : Math.max(0, -moneyness);
+  const skew = Math.exp(-(otmAmt / Math.max(0.01, iv * sqrtT)) * 1.6);
+  const intrinsic = isCall ? Math.max(0, spot - strike) : Math.max(0, strike - spot);
+  return Math.max(0.05, intrinsic + atmTV * skew);
+}
+
+// ── Variant compute ──────────────────────────────────────────────
+export interface IVCVariant {
+  id: string;
+  label: string;
+  months: number;
+  days: number;
+  horizonDate: Date;
+  callPrem: number;
+  putPrem: number;
+  callPremSource: "real" | "estimate";
+  putPremSource: "real" | "estimate";
+  callExpiry: string | null;
+  putExpiry: string | null;
+  callCycles: number;
+  putCycles: number;
   incomePerCycle: number;
-  totalIncome: number;
   costPerCycle: number;
+  totalIncome: number;
   totalCost: number;
   net: number;
   coverage: number;
-  annualNet: number;
-  netAnnYieldPct: number;
-  breakevenCallPrem: number;
-  daysToFundOnePut: number;
-  horizonDate: Date | null;
-  days: number;
-  years: number;
-  callCycles: number;
-  putCycles: number;
-  moneyness: number;
-  impliedCallStrike: number;
+  netAnnYield: number;
+  notional: number;
+  callStrike: number;
+  putStrike: number;
+  rank: number;
+  isBest: boolean;
 }
 
-export function computeIVC(state: IVCState, now: Date = new Date()): Computed {
-  const shares    = Number(state.shares);
-  const price     = Number(state.price);
-  const callPrem  = Number(state.callPremium);
-  const callDist  = Number(state.callDistance);
-  const putPrem   = Number(state.putPremium);
-  const strike    = Number(state.strike);
+function plusDays(d: Date, n: number): Date {
+  const r = new Date(d); r.setDate(r.getDate() + n); return r;
+}
+
+function computeAllVariants(
+  state: IVCState,
+  callChain: OptionContractQuote[],
+  putChain: OptionContractQuote[],
+  now: Date = new Date(),
+): IVCVariant[] {
+  const shares = Number(state.shares);
+  const price = Number(state.price);
   const callContracts = Number(state.callContracts);
-  const putContracts  = Number(state.putContracts);
+  const putContracts = Number(state.putContracts);
+  const callDist = Number(state.callDistance);
+  const putDist = Number(state.putDistance);
 
-  const validShares    = state.shares    !== "" && isFinite(shares)    && shares > 0;
-  const validPrice     = state.price     !== "" && isFinite(price)     && price > 0;
-  const validCallPrem  = state.callPremium  !== "" && isFinite(callPrem) && callPrem >= 0;
-  const validCallDist  = state.callDistance !== "" && isFinite(callDist);
-  const validPutPrem   = state.putPremium   !== "" && isFinite(putPrem)  && putPrem >= 0;
-  const validStrike    = state.strike       !== "" && isFinite(strike)   && strike > 0;
-  const validCallContracts = state.callContracts !== "" && isFinite(callContracts) && callContracts >= 0;
-  const validPutContracts  = state.putContracts  !== "" && isFinite(putContracts)  && putContracts >= 0;
+  if (!isFinite(shares) || shares <= 0 || !isFinite(price) || price <= 0) return [];
+  if (!isFinite(callContracts) || !isFinite(putContracts)) return [];
 
-  const notional = validShares && validPrice ? shares * price : NaN;
-  const callCovered = validCallContracts ? callContracts * 100 : NaN;
-  const putCovered  = validPutContracts  ? putContracts  * 100 : NaN;
-  const impliedCallStrike = validPrice && validCallDist ? price * (1 + callDist / 100) : NaN;
+  const iv = ivFor(state.underlying);
+  const notional = shares * price;
+  const callStrike = price * (1 + (isFinite(callDist) ? callDist : 0) / 100);
+  const putStrike  = price * (1 - (isFinite(putDist)  ? putDist  : 0) / 100);
 
-  // Horizon = one put cycle out. "How does the strategy stack up across one
-  // full hedge period?" — eliminates the separate cut-off control.
-  const putFreqDef = FREQ_BY_ID[state.putFrequency];
-  const horizonDate = putFreqDef
-    ? new Date(now.getTime() + putFreqDef.calDays * 86400000)
-    : null;
-  const callStats = cycleStats(state.callFrequency, horizonDate, now);
-  const putStats  = cycleStats(state.putFrequency,  horizonDate, now);
-  const years = callStats.years;
-  const days  = callStats.days;
+  // Single call premium — monthly cadence, ~30 DTE.
+  const callTargetIso = plusDays(now, CALL_CYCLE_DTE).toISOString().slice(0, 10);
+  const callMatch = nearestExpiry(callChain, callTargetIso);
+  const callPrem = callMatch?.premium
+    ?? estPremium({ spot: price, strike: callStrike, daysToExp: CALL_CYCLE_DTE, iv, isCall: true });
 
-  const incomePerCycle = validCallContracts && validCallPrem ? callContracts * callPrem * 100 : NaN;
-  const totalIncome = isFinite(incomePerCycle) && isFinite(callStats.cycles) ? incomePerCycle * callStats.cycles : NaN;
+  const variants: IVCVariant[] = VARIANT_HORIZONS.map((h) => {
+    const horizonDate = plusDays(now, h.days);
+    const targetIso = horizonDate.toISOString().slice(0, 10);
+    const putMatch = nearestExpiry(putChain, targetIso);
+    const putPrem = putMatch?.premium
+      ?? estPremium({ spot: price, strike: putStrike, daysToExp: h.days, iv, isCall: false });
 
-  const costPerCycle = validPutContracts && validPutPrem ? putContracts * putPrem * 100 : NaN;
-  const totalCost = isFinite(costPerCycle) && isFinite(putStats.cycles) ? costPerCycle * putStats.cycles : NaN;
+    const callCycles = h.months;
+    const putCycles = 1;
+    const incomePerCycle = callContracts * callPrem * 100;
+    const costPerCycle = putContracts * putPrem * 100;
+    const totalIncome = incomePerCycle * callCycles;
+    const totalCost = costPerCycle * putCycles;
+    const net = totalIncome - totalCost;
+    const coverage = totalCost > 0 ? totalIncome / totalCost
+      : totalIncome > 0 ? Infinity : NaN;
+    const years = h.days / 365.25;
+    const annualNet = years > 0 ? net / years : NaN;
+    const netAnnYield = notional > 0 && isFinite(annualNet) ? (annualNet / notional) * 100 : NaN;
 
-  const net = isFinite(totalIncome) && isFinite(totalCost) ? totalIncome - totalCost : NaN;
+    return {
+      id: h.id, label: h.label, months: h.months, days: h.days,
+      horizonDate,
+      callPrem, putPrem,
+      callPremSource: callMatch ? "real" : "estimate",
+      putPremSource: putMatch ? "real" : "estimate",
+      callExpiry: callMatch?.expiry ?? null,
+      putExpiry: putMatch?.expiry ?? null,
+      callCycles, putCycles,
+      incomePerCycle, costPerCycle,
+      totalIncome, totalCost, net, coverage, netAnnYield,
+      notional, callStrike, putStrike,
+      rank: 0, isBest: false,  // filled in next step
+    };
+  });
 
-  let coverage: number;
-  if (isFinite(totalIncome) && isFinite(totalCost) && totalCost > 0) coverage = totalIncome / totalCost;
-  else if (totalCost === 0 && isFinite(totalIncome) && totalIncome > 0) coverage = Infinity;
-  else coverage = NaN;
-
-  let annualNet = NaN;
-  if (isFinite(net) && isFinite(years) && years > 0) annualNet = net / years;
-  const netAnnYieldPct = isFinite(annualNet) && isFinite(notional) && notional > 0 ? (annualNet / notional) * 100 : NaN;
-
-  const breakevenCallPrem =
-    isFinite(totalCost) && validCallContracts && callContracts > 0 && isFinite(callStats.cycles) && callStats.cycles > 0
-      ? totalCost / (callContracts * callStats.cycles * 100)
-      : NaN;
-
-  const callFreq = FREQ_BY_ID[state.callFrequency];
-  const daysToFundOnePut = isFinite(costPerCycle) && isFinite(incomePerCycle) && incomePerCycle > 0 && callFreq
-    ? (costPerCycle / incomePerCycle) * callFreq.calDays
-    : NaN;
-
-  const moneyness = validStrike && validPrice ? ((strike - price) / price) * 100 : NaN;
-
-  return {
-    callContracts, putContracts, notional, callCovered, putCovered,
-    incomePerCycle, totalIncome, costPerCycle, totalCost,
-    net, coverage, annualNet, netAnnYieldPct,
-    breakevenCallPrem, daysToFundOnePut,
-    horizonDate, days, years,
-    callCycles: callStats.cycles, putCycles: putStats.cycles,
-    moneyness, impliedCallStrike,
-  };
+  // Rank by net dollars.
+  const ranked = [...variants].sort((a, b) => b.net - a.net);
+  ranked.forEach((v, i) => { v.rank = i + 1; v.isBest = i === 0; });
+  return variants;  // return in horizon order, callers can re-rank
 }
 
-// ── Registry helpers ─────────────────────────────────────────────
-function fmtCoverage(n: number): string {
-  if (!isFinite(n)) return "—";
-  if (n === Infinity) return "∞";
-  return `${n.toFixed(2)}x`;
-}
-function fmtDays(n: number): string {
-  if (!isFinite(n)) return "—";
-  if (n < 1) return `${(n * 24).toFixed(1)} hrs`;
-  return `${n.toFixed(1)} days`;
+// ── Registry helpers (used by Compare view) ──────────────────────
+// "Display" / "rank" reflect the currently SELECTED horizon of a saved
+// IvC snapshot — that's what the Compare card should show, since the user
+// pinned a specific variant.
+function selectedFrom(state: IVCState): IVCVariant | null {
+  const vars = computeAllVariants(state, [], []);
+  if (vars.length === 0) return null;
+  return vars.find((v) => v.id === state.selectedHorizonId) ?? vars[0];
 }
 
 export function ivcCopy(state: IVCState): string {
-  const c = computeIVC(state);
-  const incomeFmt = isFinite(c.totalIncome) ? `+${fmtMoney(c.totalIncome).replace(/^[+−]?/, "")}` : "—";
-  const costFmt   = isFinite(c.totalCost)   ? `−${fmtMoney(c.totalCost).replace(/^[+−]?/, "")}`   : "—";
-  const netFmt    = fmtMoney(c.net, { signed: true });
-  return `${state.underlying} ${fmtCount(Number(state.shares))}sh: ${incomeFmt} calls / ${costFmt} puts = ${netFmt} net (${fmtCoverage(c.coverage)} coverage, ${fmtPct(c.netAnnYieldPct)} annualised) through ${fmtDate(c.horizonDate)}`;
+  const sel = selectedFrom(state);
+  if (!sel) return `${state.underlying} · incomplete`;
+  return `${state.underlying} · ${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · ${sel.label}: +${fmtMoney(sel.totalIncome, { decimals: 0 })} calls / −${fmtMoney(sel.totalCost, { decimals: 0 })} puts = ${fmtMoney(sel.net, { signed: true, decimals: 0 })} net (${fmtPct(sel.netAnnYield)} ann.) through ${fmtDate(sel.horizonDate)}`;
 }
 
 export function ivcDisplay(state: IVCState): { value: string; tone: "neon" | "pos" | "neg" | "muted" } {
-  const c = computeIVC(state);
-  if (!isFinite(c.net)) return { value: "—", tone: "muted" };
+  const sel = selectedFrom(state);
+  if (!sel || !isFinite(sel.net)) return { value: "—", tone: "muted" };
   return {
-    value: fmtMoney(c.net, { signed: true }),
-    tone: c.net > 0 ? "pos" : c.net < 0 ? "neg" : "neon",
+    value: fmtMoney(sel.net, { signed: true }),
+    tone: sel.net > 0 ? "pos" : sel.net < 0 ? "neg" : "neon",
   };
 }
 
-/** Upsert by ticker — one card per ticker per calc in the Compare view. */
+export function ivcFields(state: IVCState): Array<{ label: string; value: string; mono?: boolean }> {
+  const sel = selectedFrom(state);
+  if (!sel) {
+    return [
+      { label: "Underlying", value: state.underlying || "—", mono: true },
+      { label: "Status",     value: "incomplete inputs", mono: true },
+    ];
+  }
+  return [
+    { label: "Underlying",   value: state.underlying || "—", mono: true },
+    { label: "Horizon",      value: `${sel.label} · ${fmtDate(sel.horizonDate)}`, mono: true },
+    { label: "Total income", value: fmtMoney(sel.totalIncome), mono: true },
+    { label: "Total cost",   value: fmtMoney(sel.totalCost),   mono: true },
+    { label: "Coverage",     value: !isFinite(sel.coverage) ? "—" : sel.coverage === Infinity ? "∞" : `${sel.coverage.toFixed(2)}x`, mono: true },
+    { label: "Ann. yield",   value: fmtPct(sel.netAnnYield), mono: true },
+  ];
+}
+
 export function ivcUpsertKey(state: IVCState): string | null {
   return state.underlying?.trim().toUpperCase() || null;
 }
 
-/** Compare-view ranking: net annualised yield (net dollars ÷ notional, ann.).
- *  Apples-to-apples across stocks of different position sizes. Higher = better. */
 export function ivcRank(state: IVCState): { score: number; label: string } | null {
-  const c = computeIVC(state);
-  if (!isFinite(c.netAnnYieldPct)) return null;
-  return { score: c.netAnnYieldPct, label: "net ann. yield" };
+  const sel = selectedFrom(state);
+  if (!sel || !isFinite(sel.netAnnYield)) return null;
+  return { score: sel.netAnnYield, label: "net ann. yield" };
 }
 
 export function ivcCardLine(state: IVCState): string {
-  const c = computeIVC(state);
-  const cov = fmtCoverage(c.coverage);
-  return `${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))} · ${cov} coverage`;
-}
-
-export function ivcFields(state: IVCState): Array<{ label: string; value: string; mono?: boolean }> {
-  const c = computeIVC(state);
-  return [
-    { label: "Underlying",     value: state.underlying || "—", mono: true },
-    { label: "Shares · Price", value: `${fmtCount(Number(state.shares))} · ${fmtMoney(Number(state.price))}`, mono: true },
-    { label: "Total income",   value: fmtMoney(c.totalIncome), mono: true },
-    { label: "Total cost",     value: fmtMoney(c.totalCost), mono: true },
-    { label: "Coverage",       value: fmtCoverage(c.coverage), mono: true },
-    { label: "Through",        value: fmtDate(c.horizonDate), mono: true },
-  ];
+  const sel = selectedFrom(state);
+  if (!sel) return `${fmtCount(Number(state.shares))} sh × ${fmtMoney(Number(state.price))}`;
+  const cov = !isFinite(sel.coverage) ? "—" : sel.coverage === Infinity ? "∞" : `${sel.coverage.toFixed(2)}x`;
+  return `${sel.label} · ${cov} coverage`;
 }
 
 // ── Body ─────────────────────────────────────────────────────────
@@ -226,210 +257,81 @@ export function IncomeVsCostCalc({
   setState: (next: IVCState | ((prev: IVCState) => IVCState)) => void;
 }) {
   const set = <K extends keyof IVCState>(k: K, v: IVCState[K]) => setState({ ...state, [k]: v });
-  const c = useMemo(() => computeIVC(state), [state]);
-  const callFreq = FREQ_BY_ID[state.callFrequency] || FREQ_BY_ID.weekly;
-  const putFreq  = FREQ_BY_ID[state.putFrequency]  || FREQ_BY_ID.monthly;
 
-  // ── Premium auto-fill ────────────────────────────────────────
-  // Polygon supplies the premium for the user's chosen cadence so they
-  // don't have to look it up. User can override either side by typing
-  // directly — overrides hold until the ticker or strike/distance
-  // changes (since those imply a new option contract).
-  const [callPremManual, setCallPremManual] = useState(false);
-  const [putPremManual, setPutPremManual]   = useState(false);
-  useEffect(() => { setCallPremManual(false); }, [state.underlying, state.callDistance]);
-  useEffect(() => { setPutPremManual(false);  }, [state.underlying, state.strike]);
-
-  // ── Put-strike linked inputs ─────────────────────────────────
-  // Distance % and $ strike are two views of the same thing. Edit either
-  // and the other updates from the current price. When price changes (e.g.
-  // user pulls a new ticker), recompute the field the user *didn't* last
-  // edit so their intent survives.
-  const lastEditedStrike = useRef<"distance" | "strike">("distance");
-
-  const computeStrikeFromDistance = (
-    distStr: string,
-    dir: "below" | "above",
-    priceStr: string,
-  ): string => {
-    const dist = Number(distStr);
-    const price = Number(priceStr);
-    if (!isFinite(dist) || !isFinite(price) || price <= 0) return "";
-    const factor = dir === "below" ? -1 : 1;
-    return (price * (1 + (factor * dist) / 100)).toFixed(2);
-  };
-  const computeDistanceFromStrike = (
-    strikeStr: string,
-    priceStr: string,
-  ): { dist: string; dir: "below" | "above" } => {
-    const strike = Number(strikeStr);
-    const price = Number(priceStr);
-    if (!isFinite(strike) || !isFinite(price) || price <= 0) return { dist: "", dir: "below" };
-    const pct = ((strike - price) / price) * 100;
-    return { dist: Math.abs(pct).toFixed(2), dir: pct >= 0 ? "above" : "below" };
-  };
-
-  const setPutDistance = (v: string) => {
-    lastEditedStrike.current = "distance";
-    setState((p) => ({
-      ...p,
-      putDistance: v,
-      strike: computeStrikeFromDistance(v, p.putDistanceDir, p.price) || p.strike,
-    }));
-  };
-  const togglePutDistanceDir = () => {
-    lastEditedStrike.current = "distance";
-    setState((p) => {
-      const newDir: "below" | "above" = p.putDistanceDir === "below" ? "above" : "below";
-      return {
-        ...p,
-        putDistanceDir: newDir,
-        strike: computeStrikeFromDistance(p.putDistance, newDir, p.price) || p.strike,
-      };
-    });
-  };
-  const setPutStrikeDollars = (v: string) => {
-    lastEditedStrike.current = "strike";
-    setState((p) => {
-      const { dist, dir } = computeDistanceFromStrike(v, p.price);
-      return { ...p, strike: v, putDistance: dist || p.putDistance, putDistanceDir: dir };
-    });
-  };
-
-  // Lightweight chain peek for smart-frequency filtering. Single fetch per
-  // ticker/strike/type triple, debounced so it doesn't run on every keystroke.
-  // The result feeds two filters: putAvailable and callAvailable below.
-  const [putChain, setPutChain] = useState<OptionContractQuote[]>([]);
+  // Auto-fetch chains for both sides. Debounced to avoid hitting Polygon on
+  // every keystroke. One fetch per side, used for all 5 variants.
   const [callChain, setCallChain] = useState<OptionContractQuote[]>([]);
-  useEffect(() => {
-    if (!state.underlying || !isFinite(Number(state.strike)) || Number(state.strike) <= 0) return;
-    const ctrl = new AbortController();
-    const id = window.setTimeout(() => {
-      pullOptionChain(state.underlying, Number(state.strike), "put")
-        .then((c) => { if (!ctrl.signal.aborted) setPutChain(c); })
-        .catch(() => { /* ignore — autofill handles error surfacing */ });
-    }, 500);
-    return () => { ctrl.abort(); window.clearTimeout(id); };
-  }, [state.underlying, state.strike]);
-  useEffect(() => {
-    const implStrike = Number(state.price) * (1 + Number(state.callDistance) / 100);
-    if (!state.underlying || !isFinite(implStrike) || implStrike <= 0) return;
-    const ctrl = new AbortController();
-    const id = window.setTimeout(() => {
-      pullOptionChain(state.underlying, implStrike, "call")
-        .then((c) => { if (!ctrl.signal.aborted) setCallChain(c); })
-        .catch(() => { /* ignore */ });
-    }, 500);
-    return () => { ctrl.abort(); window.clearTimeout(id); };
-  }, [state.underlying, state.price, state.callDistance]);
+  const [putChain, setPutChain]   = useState<OptionContractQuote[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null);
 
-  const callAvailable = useMemo(
-    () => callChain.length === 0
-      ? null  // null = no chain data yet → show all (don't punish first paint)
-      : availableCadenceIds(callChain, FREQ_DEFS),
-    [callChain],
-  );
-  const putAvailable = useMemo(
-    () => putChain.length === 0
-      ? null
-      : availableCadenceIds(putChain, PUT_FREQ_DEFS),
-    [putChain],
-  );
+  const callStrike = useMemo(() => {
+    const p = Number(state.price), d = Number(state.callDistance);
+    return isFinite(p) && p > 0 && isFinite(d) ? p * (1 + d / 100) : NaN;
+  }, [state.price, state.callDistance]);
+  const putStrike = useMemo(() => {
+    const p = Number(state.price), d = Number(state.putDistance);
+    return isFinite(p) && p > 0 && isFinite(d) ? p * (1 - d / 100) : NaN;
+  }, [state.price, state.putDistance]);
 
-  // Auto-fallback: if user's selected cadence isn't available, pick the
-  // closest viable one so the seg doesn't show "no active button".
+  const lastFetchKeyRef = useRef<string>("");
   useEffect(() => {
-    if (callAvailable && !callAvailable.has(state.callFrequency)) {
-      const fallback = FREQ_DEFS.find((f) => callAvailable.has(f.id));
-      if (fallback) setState((p) => ({ ...p, callFrequency: fallback.id }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callAvailable]);
-  useEffect(() => {
-    if (putAvailable && !putAvailable.has(state.putFrequency)) {
-      const fallback = PUT_FREQ_DEFS.find((f) => putAvailable.has(f.id));
-      if (fallback) setState((p) => ({ ...p, putFrequency: fallback.id }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [putAvailable]);
-
-  // When price changes (e.g. ticker pull), keep whichever side the user
-  // last edited and recompute the other one.
-  useEffect(() => {
-    setState((p) => {
-      const price = Number(p.price);
-      if (!isFinite(price) || price <= 0) return p;
-      if (lastEditedStrike.current === "distance") {
-        const ns = computeStrikeFromDistance(p.putDistance, p.putDistanceDir, p.price);
-        return ns && ns !== p.strike ? { ...p, strike: ns } : p;
-      } else {
-        const { dist, dir } = computeDistanceFromStrike(p.strike, p.price);
-        if (!dist) return p;
-        if (dist === p.putDistance && dir === p.putDistanceDir) return p;
-        return { ...p, putDistance: dist, putDistanceDir: dir };
+    if (!state.underlying || !isFinite(callStrike) || !isFinite(putStrike)) return;
+    const key = `${state.underlying}|${callStrike.toFixed(2)}|${putStrike.toFixed(2)}`;
+    if (key === lastFetchKeyRef.current) return;
+    const t = window.setTimeout(async () => {
+      lastFetchKeyRef.current = key;
+      setRefreshing(true);
+      try {
+        const [calls, puts] = await Promise.all([
+          pullOptionChain(state.underlying, callStrike, "call").catch(() => [] as OptionContractQuote[]),
+          pullOptionChain(state.underlying, putStrike,  "put").catch(() => [] as OptionContractQuote[]),
+        ]);
+        setCallChain(calls);
+        setPutChain(puts);
+        setLastFetchedAt(Date.now());
+      } finally {
+        setRefreshing(false);
       }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.price]);
+    }, 700);
+    return () => window.clearTimeout(t);
+  }, [state.underlying, callStrike, putStrike]);
 
-  const callFill = usePremiumAutofill({
-    ticker: state.underlying,
-    strike: isFinite(c.impliedCallStrike) ? c.impliedCallStrike : NaN,
-    cadenceDays: callFreq.calDays,
-    contractType: "call",
-    setPremium: (v) => setState((p) => ({ ...p, callPremium: v })),
-    isOverridden: callPremManual,
-  });
-  const putFill = usePremiumAutofill({
-    ticker: state.underlying,
-    strike: Number(state.strike),
-    cadenceDays: putFreq.calDays,
-    contractType: "put",
-    setPremium: (v) => setState((p) => ({ ...p, putPremium: v })),
-    isOverridden: putPremManual,
-  });
+  const variants = useMemo(
+    () => computeAllVariants(state, callChain, putChain),
+    [state, callChain, putChain],
+  );
+  // Re-rank for display purposes (cards sorted in horizon order but we still
+  // mark the BEST one regardless of position).
+  const bestId = useMemo(() => {
+    const sorted = [...variants].sort((a, b) => b.net - a.net);
+    return sorted[0]?.id;
+  }, [variants]);
 
-  const netTone: "pos" | "neg" | "neutral" = !isFinite(c.net) ? "neutral" : c.net > 0 ? "pos" : c.net < 0 ? "neg" : "neutral";
-  const coverageTone: "pos" | "warn" | "neutral" = !isFinite(c.coverage) ? "neutral" : c.coverage >= 1 ? "pos" : "warn";
-  const money = moneynessLabel(state.strike, state.price);
+  const selected = variants.find((v) => v.id === state.selectedHorizonId) ?? variants[0];
 
-  const helper: ReactNode = (() => {
-    if (!isFinite(c.net) || (c.callCycles === 0 && c.putCycles === 0)) {
-      return <>Fill in shares, price, call &amp; put premiums, frequencies, and a horizon to see net economics.</>;
-    }
-    return (
-      <>
-        To <b>{fmtDate(c.horizonDate)}</b> ({c.days} days):{" "}
-        <b className="pos">+{fmtMoney(c.totalIncome).replace(/^[+−]?/, "")}</b> calls,{" "}
-        <b className="neg">−{fmtMoney(c.totalCost).replace(/^[+−]?/, "")}</b> puts ={" "}
-        <b className={netTone}>{fmtMoney(c.net, { signed: true })}</b> net (
-        <b className={coverageTone}>{fmtCoverage(c.coverage)}</b> coverage,{" "}
-        <b className="neon">{fmtPct(c.netAnnYieldPct)}</b> annualised).
-      </>
-    );
-  })();
-
-  // Stacked bar — scale to max(income, cost)
-  const barMax = Math.max(isFinite(c.totalIncome) ? c.totalIncome : 0, isFinite(c.totalCost) ? c.totalCost : 0) || 1;
-  const incomePct = isFinite(c.totalIncome) ? Math.min(100, (c.totalIncome / barMax) * 100) : 0;
-  const costPct   = isFinite(c.totalCost)   ? Math.min(100, (c.totalCost   / barMax) * 100) : 0;
+  const lastFetchedTxt = lastFetchedAt
+    ? `${Math.max(1, Math.round((Date.now() - lastFetchedAt) / 1000))}s ago`
+    : "—";
 
   return (
-    <div className="cyc">
+    <div className="cyc ivc3">
       <p className="cyc-desc">
-        Net economics of running covered calls and protective puts together. Pick frequencies, pick a horizon, see if the structure pays for itself.
+        Net economics of running monthly covered calls against one protective put per window.
+        Edit inputs below — variants auto-price across 5 horizons. Click any to inspect.
       </p>
 
-      {/* Position context — shares spans 2 cols so Current price aligns
-          with the same column position as Put Cost / Expected Income. */}
-      <div className="cyc-context">
-        <CycField label="Underlying">
-          <NumInput
+      {/* ── Single-row inputs ── */}
+      <div className="ivc3-inputs">
+        <div className="ivc3-in ticker">
+          <div className="hf-label">Underlying</div>
+          <input
+            className="cyc-input ticker"
+            type="text"
             value={state.underlying}
-            onChange={(v) => set("underlying", v.toUpperCase())}
+            onChange={(e) => set("underlying", e.target.value.toUpperCase())}
             placeholder="SPY"
-            ariaLabel="Underlying ticker"
-            className="ticker"
+            aria-label="Underlying ticker"
           />
           <PullFromSunnyfi
             ticker={state.underlying}
@@ -437,246 +339,424 @@ export function IncomeVsCostCalc({
               setState({
                 ...state,
                 price: price.toFixed(2),
-                // Snap the put strike to the nearest whole dollar — reads as
-                // a realistic strike vs the raw quote (HOOD $73.46 → $74).
-                strike: Math.round(price).toFixed(2),
                 ...(shares ? { shares: String(shares) } : {}),
               })
             }
           />
-        </CycField>
-        <CycField label="Shares" span={2}>
-          <NumInput value={state.shares} onChange={(v) => set("shares", v)} placeholder="0" ariaLabel="Shares" />
-        </CycField>
-        <CycField label="Current price">
-          <NumInput value={state.price} onChange={(v) => set("price", v)} placeholder="0.00" prefix="$" ariaLabel="Current price" />
-        </CycField>
-      </div>
+        </div>
 
-      {/* Two-side */}
-      <div className="cyc-section">
-        <div className="cyc-twoside">
-          {/* CALL */}
-          <div className="cyc-side calls">
-            <div className="cyc-side-head">
-              <div className="cyc-side-title">Call side · sell to open</div>
-              <div className="cyc-side-meta">{isFinite(c.callCycles) ? `${fmtCount(c.callCycles)} cycles` : ""}</div>
-            </div>
-            <div className="cyc-side-contracts">
+        <div className="ivc3-in">
+          <div className="hf-label">Shares</div>
+          <input
+            className="cyc-input"
+            type="text" inputMode="numeric"
+            value={state.shares}
+            onChange={(e) => set("shares", e.target.value)}
+            placeholder="0"
+            aria-label="Shares"
+          />
+          <div className="ivc3-in-hint mono">
+            = {fmtMoney((Number(state.shares) || 0) * (Number(state.price) || 0), { decimals: 0 })}
+          </div>
+        </div>
+
+        <div className="ivc3-in">
+          <div className="hf-label">Price · live</div>
+          <div className="cyc-field-row">
+            <span className="cyc-prefix">$</span>
+            <input
+              className="cyc-input"
+              type="text" inputMode="decimal"
+              value={state.price}
+              onChange={(e) => set("price", e.target.value)}
+              placeholder="0.00"
+              aria-label="Current price"
+            />
+          </div>
+          <div className="ivc3-in-hint">
+            <span className={`live-dot ${refreshing ? "" : "pos"}`} />
+            Polygon · {lastFetchedTxt}
+          </div>
+        </div>
+
+        <div className="ivc3-divider" aria-hidden />
+
+        <div className="ivc3-side calls">
+          <span className="ivc3-side-tag">CALL <span className="muted">· sell · monthly</span></span>
+          <div className="ivc3-side-fields">
+            <div className="ivc3-in tight">
               <div className="hf-label">Contracts</div>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={state.callContracts}
-                onChange={(e) => set("callContracts", e.target.value)}
-                placeholder="0"
-                spellCheck={false}
-                aria-label="Call contracts"
-              />
-              <span className="meta">× 100 = {fmtCount(c.callCovered)} sh</span>
-            </div>
-            <div className="cyc-side-hero">
-              <div className="hf-label">
-                Premium per contract
-                <AutofillBadge status={callFill.status} msg={callFill.msg} />
-              </div>
-              <HeroNumInput
-                value={state.callPremium}
-                onChange={(v) => { setCallPremManual(true); set("callPremium", v); }}
-                placeholder="0.00" prefix="$" ariaLabel="Call premium per contract"
-              />
-              <div className="cyc-side-sub">
-                Income / cycle = <span className="accent">{fmtCount(Number(state.callContracts) || 0)} × {fmtMoney(Number(state.callPremium) || 0)} × 100</span> = <span className="accent">{fmtMoney(c.incomePerCycle)}</span>
-              </div>
-            </div>
-            <div className="cyc-side-strike">
-              <div className="hf-label">Strike distance · OTM</div>
-              <div className="cyc-strike-row">
+              <div className="ivc3-field-input">
                 <input
-                  className="cyc-strike-input"
-                  type="text"
-                  inputMode="decimal"
+                  type="text" inputMode="numeric"
+                  value={state.callContracts}
+                  onChange={(e) => set("callContracts", e.target.value)}
+                  placeholder="0" spellCheck={false}
+                  aria-label="Call contracts"
+                />
+              </div>
+              <div className="ivc3-in-hint mono">{fmtCount((Number(state.callContracts) || 0) * 100)} sh</div>
+            </div>
+            <div className="ivc3-in tight">
+              <div className="hf-label">OTM dist</div>
+              <div className="ivc3-field-input">
+                <input
+                  type="text" inputMode="decimal"
                   value={state.callDistance}
                   onChange={(e) => set("callDistance", e.target.value)}
-                  placeholder="0.0"
-                  spellCheck={false}
+                  placeholder="0.0" spellCheck={false}
                   aria-label="Call strike distance OTM"
                 />
-                <span className="cyc-prefix">%</span>
+                <span className="suffix">%</span>
               </div>
-              <div className="cyc-side-sub">
-                {isFinite(c.impliedCallStrike)
-                  ? <>Implied strike <span className="accent">{fmtMoney(c.impliedCallStrike)}</span></>
-                  : <>Set a distance to see implied strike</>}
-              </div>
-            </div>
-            <div className="cyc-side-freq">
-              <div className="hf-label">Frequency</div>
-              <Seg
-                options={FREQ_DEFS
-                  .filter((f) => !callAvailable || callAvailable.has(f.id))
-                  .map(f => ({ id: f.id, label: f.label }))}
-                value={state.callFrequency}
-                onChange={(v) => set("callFrequency", v)}
-                ariaLabel="Call frequency"
-              />
-              <div className="cyc-side-sub">
-                <span className="accent">{callFreq.label}</span> · ~{callFreq.perYear} cycles/year
-              </div>
+              <div className="ivc3-in-hint mono">K ≈ {fmtMoney(callStrike)}</div>
             </div>
           </div>
+        </div>
 
-          {/* PUT */}
-          <div className="cyc-side puts">
-            <div className="cyc-side-head">
-              <div className="cyc-side-title">Put side · buy to open</div>
-              <div className="cyc-side-meta">{isFinite(c.putCycles) ? `${fmtCount(c.putCycles)} cycles` : ""}</div>
-            </div>
-            <div className="cyc-side-contracts">
+        <div className="ivc3-side puts">
+          <span className="ivc3-side-tag">PUT <span className="muted">· buy · spans window</span></span>
+          <div className="ivc3-side-fields">
+            <div className="ivc3-in tight">
               <div className="hf-label">Contracts</div>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={state.putContracts}
-                onChange={(e) => set("putContracts", e.target.value)}
-                placeholder="0"
-                spellCheck={false}
-                aria-label="Put contracts"
-              />
-              <span className="meta">× 100 = {fmtCount(c.putCovered)} sh</span>
+              <div className="ivc3-field-input">
+                <input
+                  type="text" inputMode="numeric"
+                  value={state.putContracts}
+                  onChange={(e) => set("putContracts", e.target.value)}
+                  placeholder="0" spellCheck={false}
+                  aria-label="Put contracts"
+                />
+              </div>
+              <div className="ivc3-in-hint mono">{fmtCount((Number(state.putContracts) || 0) * 100)} sh</div>
             </div>
-            <div className="cyc-side-hero">
-              <div className="hf-label">
-                Premium per contract
-                <AutofillBadge status={putFill.status} msg={putFill.msg} />
+            <div className="ivc3-in tight">
+              <div className="hf-label">Below spot</div>
+              <div className="ivc3-field-input">
+                <input
+                  type="text" inputMode="decimal"
+                  value={state.putDistance}
+                  onChange={(e) => set("putDistance", e.target.value)}
+                  placeholder="0.0" spellCheck={false}
+                  aria-label="Put strike distance"
+                />
+                <span className="suffix">%</span>
               </div>
-              <HeroNumInput
-                value={state.putPremium}
-                onChange={(v) => { setPutPremManual(true); set("putPremium", v); }}
-                placeholder="0.00" prefix="$" ariaLabel="Put premium per contract"
-              />
-              <div className="cyc-side-sub">
-                Cost / cycle = <span className="accent">{fmtCount(Number(state.putContracts) || 0)} × {fmtMoney(Number(state.putPremium) || 0)} × 100</span> = <span className="accent">{fmtMoney(c.costPerCycle)}</span>
-              </div>
-            </div>
-            <div className="cyc-side-strike">
-              <div className="hf-label">Strike</div>
-              <div className="put-strike-twin">
-                <div className="put-strike-cell">
-                  <div className="cyc-strike-row">
-                    <input
-                      className="cyc-strike-input"
-                      type="text"
-                      inputMode="decimal"
-                      value={state.putDistance}
-                      onChange={(e) => setPutDistance(e.target.value)}
-                      placeholder="0.0"
-                      spellCheck={false}
-                      aria-label="Put strike distance percent"
-                    />
-                    <span className="cyc-prefix">%</span>
-                  </div>
-                  <button
-                    type="button"
-                    className={`put-strike-dir ${state.putDistanceDir}`}
-                    onClick={togglePutDistanceDir}
-                    title="Toggle below / above spot"
-                  >
-                    {state.putDistanceDir} spot
-                  </button>
-                </div>
-                <div className="put-strike-cell">
-                  <div className="cyc-strike-row">
-                    <span className="cyc-prefix">$</span>
-                    <input
-                      className="cyc-strike-input"
-                      type="text"
-                      inputMode="decimal"
-                      value={state.strike}
-                      onChange={(e) => setPutStrikeDollars(e.target.value)}
-                      placeholder="0.00"
-                      spellCheck={false}
-                      aria-label="Put strike dollars"
-                    />
-                  </div>
-                  <div className="put-strike-aux">
-                    {money ? money : "—"}
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="cyc-side-freq">
-              <div className="hf-label">Frequency</div>
-              <Seg
-                options={PUT_FREQ_DEFS
-                  .filter((f) => !putAvailable || putAvailable.has(f.id))
-                  .map(f => ({ id: f.id, label: f.label }))}
-                value={state.putFrequency}
-                onChange={(v) => set("putFrequency", v)}
-                ariaLabel="Put frequency"
-              />
-              <div className="cyc-side-sub">
-                <span className="accent">{putFreq.label}</span> · ~{putFreq.perYear} cycles/year
-              </div>
+              <div className="ivc3-in-hint mono">K ≈ {fmtMoney(putStrike)}</div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Results */}
-      <div className="cyc-results">
-        <Tile label="Net to horizon"        value={isFinite(c.net) ? fmtMoney(c.net, { signed: true }) : "—"} tone={netTone} />
-        <Tile label="Coverage ratio"        value={fmtCoverage(c.coverage)} sub="income ÷ cost" tone={coverageTone} primary />
-        <Tile label="Net annualised yield"  value={fmtPct(c.netAnnYieldPct)} tone={netTone === "neg" ? "neg" : "neon"} sub="net ÷ notional, ann." />
-        <Tile label="Breakeven call premium" value={fmtMoney(c.breakevenCallPrem)} mono sub="to fully fund puts" />
-        <Tile label="Days of calls"         value={fmtDays(c.daysToFundOnePut)} mono sub="to fund one put cycle" />
+      {/* ── Variants strip ── */}
+      <VariantsGrid
+        variants={variants}
+        ticker={state.underlying}
+        selectedId={state.selectedHorizonId}
+        bestId={bestId}
+        onSelect={(id) => set("selectedHorizonId", id)}
+        lastFetchedTxt={lastFetchedTxt}
+      />
+
+      {/* ── Selected variant breakdown — bar is hero ── */}
+      {selected && (
+        <SelectedBreakdown variant={selected} state={state} bestId={bestId} />
+      )}
+    </div>
+  );
+}
+
+// ── Variants grid (5 cards) ──────────────────────────────────────
+function VariantsGrid({
+  variants, ticker, selectedId, bestId, onSelect, lastFetchedTxt,
+}: {
+  variants: IVCVariant[];
+  ticker: string;
+  selectedId: string;
+  bestId: string | undefined;
+  onSelect: (id: string) => void;
+  lastFetchedTxt: string;
+}) {
+  return (
+    <div className="ivc3-variants-wrap">
+      <div className="ivc3-variants-head">
+        <div className="left">
+          <div className="ivc3-variants-eyebrow">
+            Variants <span className="dot">·</span>
+            <span className="ticker-tag">{ticker || "—"}</span>
+            <span className="dot">·</span>
+            <span className="count-tag">{variants.length}</span>
+          </div>
+          <div className="ivc3-variants-sub">
+            auto-priced from Polygon · {lastFetchedTxt} · ranked by{" "}
+            <span className="accent">net $ to horizon</span>
+          </div>
+        </div>
       </div>
 
-      <div className="cyc-helper">{helper}</div>
+      <div className="ivc3-variants-grid">
+        {variants.length > 0 ? variants.map((v) => (
+          <VariantCard
+            key={v.id}
+            v={v}
+            ticker={ticker}
+            selected={v.id === selectedId}
+            isBest={v.id === bestId}
+            onClick={() => onSelect(v.id)}
+          />
+        )) : (
+          <div className="ivc3-card empty" style={{ gridColumn: "1 / -1" }}>
+            <div className="ivc3-card-empty-msg">
+              Fill in ticker · shares · contracts on both sides to auto-generate variants from live chain data.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
-      {/* Stacked bar */}
-      <div className="cyc-bar-wrap">
-        <div className="cyc-bar-legend">
-          <span><span className="swatch income" />Income {fmtMoney(c.totalIncome)}</span>
-          <span><span className="swatch cost" />Cost {fmtMoney(c.totalCost)}</span>
-          <span className="spacer" />
-          <span>Net <span className={`net ${netTone}`}>{isFinite(c.net) ? fmtMoney(c.net, { signed: true }) : "—"}</span></span>
+function VariantCard({
+  v, ticker, selected, isBest, onClick,
+}: {
+  v: IVCVariant;
+  ticker: string;
+  selected: boolean;
+  isBest: boolean;
+  onClick: () => void;
+}) {
+  const tone = v.net >= 0 ? "pos" : "neg";
+  const ann = isFinite(v.netAnnYield)
+    ? `${v.netAnnYield >= 0 ? "" : "−"}${Math.abs(v.netAnnYield).toFixed(2)}%`
+    : "—";
+  const cov = !isFinite(v.coverage) ? "—" : v.coverage === Infinity ? "∞" : `${v.coverage.toFixed(2)}x`;
+  // Compute rank within the ranked list (1 = best by net)
+  return (
+    <div
+      className={`ivc3-card ${selected ? "selected" : ""} ${isBest ? "best" : ""}`}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+      aria-label={`Variant ${v.label}, net ${fmtMoney(v.net, { signed: true })}`}
+    >
+      <div className="ivc3-card-head">
+        <span className="ivc3-card-rank">{isBest ? "BEST" : v.label.toUpperCase()}</span>
+        <span className="ivc3-card-horizon">{v.label}</span>
+      </div>
+      <div className="ivc3-card-sub">
+        <span className="ticker">{ticker || "—"}</span>
+        <span className="sep">·</span>
+        to {fmtDate(v.horizonDate).replace(/, \d{4}$/, "")}
+      </div>
+      <div className={`ivc3-card-net ${tone}`}>{fmtMoney(v.net, { signed: true, decimals: 0 })}</div>
+      <div className={`ivc3-card-yield ${v.net < 0 ? "neg" : ""}`}>
+        {ann} <span className="muted">ann.</span>
+      </div>
+      <div className="ivc3-card-meta">
+        <span className="row">
+          <span className="lbl">cover</span>
+          <span className="val">{cov}</span>
+        </span>
+        <span className="row">
+          <span className="lbl">cycles</span>
+          <span className="val">{v.callCycles}c · {v.putCycles}p</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Selected breakdown: bar + tiles + recap ──────────────────────
+function SelectedBreakdown({
+  variant: v, state, bestId,
+}: {
+  variant: IVCVariant;
+  state: IVCState;
+  bestId: string | undefined;
+}) {
+  const netTone = v.net > 0 ? "pos" : v.net < 0 ? "neg" : "neutral";
+  const coverageTone = isFinite(v.coverage) && v.coverage >= 1 ? "pos" : "warn";
+  const cov = !isFinite(v.coverage) ? "—" : v.coverage === Infinity ? "∞" : `${v.coverage.toFixed(2)}x`;
+  const breakeven = useMemo(() => {
+    const cc = Number(state.callContracts);
+    if (!isFinite(cc) || cc <= 0 || v.callCycles <= 0) return NaN;
+    return v.totalCost / (cc * v.callCycles * 100);
+  }, [v, state.callContracts]);
+  const monthsToFundPut = useMemo(() => {
+    if (!isFinite(v.incomePerCycle) || v.incomePerCycle <= 0) return NaN;
+    return v.costPerCycle / v.incomePerCycle;
+  }, [v]);
+
+  const isBest = v.id === bestId;
+
+  return (
+    <div className="ivc3-selected">
+      <div className="ivc3-selected-head">
+        <div className="left">
+          <div className="ivc3-selected-eyebrow">
+            Breakdown <span className="neon">· {isBest ? "BEST" : v.label.toUpperCase()}</span>
+          </div>
+          <div className="ivc3-selected-title">
+            {state.underlying || "—"}{" "}
+            <span className="muted">· {v.label} · to {fmtDate(v.horizonDate)}</span>
+          </div>
         </div>
-        <div className="cyc-bar-track" aria-hidden>
-          <div className="cyc-bar-row">
-            <div className="cyc-bar-seg income" style={{ width: `${incomePct}%` }}>
-              {incomePct > 18 ? fmtMoney(c.totalIncome) : ""}
-            </div>
-            <span className="cyc-bar-row-label">Income</span>
-          </div>
-          <div className="cyc-bar-row">
-            <div className="cyc-bar-seg cost" style={{ width: `${costPct}%` }}>
-              {costPct > 18 ? `−${fmtMoney(c.totalCost).replace(/^[+−]?/, "")}` : ""}
-            </div>
-            <span className="cyc-bar-row-label">Cost</span>
-          </div>
-          {isFinite(c.net) && c.net !== 0 && incomePct > 0 && costPct > 0 && (
-            <div
-              className="cyc-bar-marker"
-              style={{ left: `calc(${Math.min(incomePct, costPct)}% + 4px)` }}
-              data-label={`${c.net > 0 ? "surplus" : "shortfall"} ${fmtMoney(Math.abs(c.net))}`}
-            />
-          )}
+        <div className="ivc3-selected-meta">Read-only · derived from the selected variant</div>
+      </div>
+
+      {/* The hero: stacked bar */}
+      <IvcBar v={v} />
+
+      {/* Supporting tiles */}
+      <div className="cyc-results ivc3-tiles">
+        <Tile label="Net to horizon"     value={fmtMoney(v.net, { signed: true })}              tone={netTone} primary />
+        <Tile label="Coverage ratio"     value={cov}                                            tone={coverageTone} sub="income ÷ cost" />
+        <Tile label="Net ann. yield"     value={fmtPct(v.netAnnYield)}                          tone={netTone === "neg" ? "neg" : "neon"} sub="net ÷ notional" />
+        <Tile label="Breakeven prem"     value={fmtMoney(breakeven)}                            mono sub="per call, to fund puts" />
+        <Tile label="Months to fund put" value={isFinite(monthsToFundPut) ? `${monthsToFundPut.toFixed(1)} mo` : "—"} mono sub="income ÷ put cost" />
+      </div>
+
+      {/* Formula recap */}
+      <div className="ivc3-recap-strip">
+        <div className="ivc3-recap-row calls">
+          <span className="ivc3-recap-pill">CALL</span>
+          <span className="ivc3-recap-formula">
+            <b>{fmtCount(Number(state.callContracts) || 0)}c</b> ×{" "}
+            <b>{fmtMoney(v.callPrem, { decimals: 2 })}</b> →{" "}
+            <b>{fmtMoney(v.incomePerCycle, { decimals: 0 })}</b>/mo ×{" "}
+            <b>{fmtCount(v.callCycles)} mo</b> ={" "}
+            <b className="pos">+{fmtMoney(v.totalIncome, { decimals: 0 }).replace(/^[+−]?/, "")}</b>
+          </span>
+          <span className="ivc3-recap-meta">
+            <span className="auto-tag">{v.callPremSource === "real" ? "real" : "est"}</span>
+            {v.callExpiry ? `next exp ${v.callExpiry} · ` : ""}
+            ~{CALL_CYCLE_DTE} DTE · K {fmtMoney(v.callStrike, { decimals: 2 })}
+          </span>
+        </div>
+        <div className="ivc3-recap-row puts">
+          <span className="ivc3-recap-pill">PUT</span>
+          <span className="ivc3-recap-formula">
+            <b>{fmtCount(Number(state.putContracts) || 0)}c</b> ×{" "}
+            <b>{fmtMoney(v.putPrem, { decimals: 2 })}</b> →{" "}
+            <b>{fmtMoney(v.costPerCycle, { decimals: 0 })}</b>/put ×{" "}
+            <b>{fmtCount(v.putCycles)}</b> ={" "}
+            <b className="neg">−{fmtMoney(v.totalCost, { decimals: 0 }).replace(/^[+−]?/, "")}</b>
+          </span>
+          <span className="ivc3-recap-meta">
+            <span className="auto-tag">{v.putPremSource === "real" ? "real" : "est"}</span>
+            {v.putExpiry ? `exp ${v.putExpiry} · ` : ""}
+            {v.days} DTE · K {fmtMoney(v.putStrike, { decimals: 2 })}
+          </span>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Autofill status badge ───────────────────────────────────────
-// Tiny chip rendered next to the premium label showing whether the value
-// is live from Polygon, being fetched, manually overridden, or unavailable.
-function AutofillBadge({ status, msg }: { status: "idle" | "fetching" | "ok" | "err" | "overridden"; msg: string }) {
-  if (status === "idle") return null;
-  const label =
-    status === "fetching"   ? "fetching…" :
-    status === "ok"         ? `auto · ${msg}` :
-    status === "overridden" ? "manual" :
-                              `auto failed · ${msg}`;
-  return <span className={`ivc-autofill ${status}`} title={msg || label}>{label}</span>;
+// ── The hero bar — stacked income vs cost with per-cycle dividers ─
+function IvcBar({ v }: { v: IVCVariant }) {
+  const { totalIncome, totalCost, net, callCycles, putCycles, months,
+    incomePerCycle, costPerCycle } = v;
+
+  const barMax = Math.max(totalIncome || 0, totalCost || 0, 1);
+  const incomePct = Math.min(100, ((totalIncome || 0) / barMax) * 100);
+  const costPct = Math.min(100, ((totalCost || 0) / barMax) * 100);
+
+  const surplus = net >= 0;
+  const markerPct = Math.min(incomePct, costPct);
+  const markerLabel = surplus
+    ? `surplus +${fmtMoney(Math.abs(net), { decimals: 0 }).replace(/^[+−]?/, "")}`
+    : `shortfall −${fmtMoney(Math.abs(net), { decimals: 0 }).replace(/^[+−]?/, "")}`;
+
+  // Cycle dividers inside each fill (call cycles in income, put cycles in cost)
+  const incomeCycleEdges: number[] = [];
+  for (let i = 1; i < callCycles; i++) incomeCycleEdges.push((i / callCycles) * 100);
+  const costCycleEdges: number[] = [];
+  for (let i = 1; i < putCycles; i++) costCycleEdges.push((i / putCycles) * 100);
+
+  // Month ticks on the scale beneath
+  const monthTicks: Array<{ i: number; pct: number }> = [];
+  for (let i = 1; i <= months; i++) monthTicks.push({ i, pct: (i / months) * 100 });
+
+  return (
+    <div className="ivc3-bar">
+      <div className="ivc3-bar-totals">
+        <div className="side income">
+          <span className="dot" />
+          <span className="lbl">INCOME</span>
+          <span className="cycles">{callCycles} call cycle{callCycles === 1 ? "" : "s"}</span>
+          <span className="val">+{fmtMoney(totalIncome, { decimals: 0 }).replace(/^[+−]?/, "")}</span>
+        </div>
+        <div className="side cost">
+          <span className="dot" />
+          <span className="lbl">COST</span>
+          <span className="cycles">{putCycles} put cycle{putCycles === 1 ? "" : "s"}</span>
+          <span className="val">−{fmtMoney(totalCost, { decimals: 0 }).replace(/^[+−]?/, "")}</span>
+        </div>
+      </div>
+
+      <div className="ivc3-bar-stack">
+        <div className="ivc3-bar-row income">
+          <div className="ivc3-bar-rail">
+            <div className="ivc3-bar-fill income" style={{ width: `${incomePct}%` }}>
+              {incomeCycleEdges.map((p, i) => (
+                <span key={i} className="ivc3-cycle-divider" style={{ left: `${p}%` }} />
+              ))}
+              <span className="ivc3-bar-perchunk">{fmtMoney(incomePerCycle, { decimals: 0 })}/mo</span>
+            </div>
+          </div>
+        </div>
+        <div className="ivc3-bar-row cost">
+          <div className="ivc3-bar-rail">
+            <div className="ivc3-bar-fill cost" style={{ width: `${costPct}%` }}>
+              {costCycleEdges.map((p, i) => (
+                <span key={i} className="ivc3-cycle-divider" style={{ left: `${p}%` }} />
+              ))}
+              <span className="ivc3-bar-perchunk">{fmtMoney(costPerCycle, { decimals: 0 })}/put</span>
+            </div>
+          </div>
+        </div>
+        {isFinite(net) && net !== 0 && incomePct > 0 && costPct > 0 && (
+          <div className={`ivc3-bar-marker ${surplus ? "pos" : "neg"}`} style={{ left: `${markerPct}%` }}>
+            <span className="ivc3-bar-marker-flag">{markerLabel}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="ivc3-bar-scale">
+        <div className="ivc3-bar-scale-rail">
+          {monthTicks.map(({ i, pct }) => (
+            <span key={i} className={`ivc3-month-tick ${i === months ? "last" : ""}`} style={{ left: `${pct}%` }}>
+              <span className="lbl">M{i}</span>
+            </span>
+          ))}
+          <span className="ivc3-month-tick first">
+            <span className="lbl">now</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Local Tile copy (avoids a circular dep with cycle.tsx) ───────
+function Tile({
+  label, value, sub, tone, primary, mono,
+}: {
+  label: string;
+  value: ReactNode;
+  sub?: ReactNode;
+  tone?: "pos" | "neg" | "neon" | "warn" | "neutral";
+  primary?: boolean;
+  mono?: boolean;
+}) {
+  const toneCls = tone && tone !== "neutral" ? ` ${tone}` : "";
+  return (
+    <div className={`cyc-tile ${primary ? "primary" : ""}`}>
+      <div className="cyc-tile-label">{label}</div>
+      {sub && <div className="cyc-tile-sub">{sub}</div>}
+      <div className={`cyc-tile-val${mono ? " mono" : ""}${toneCls}`}>{value}</div>
+    </div>
+  );
 }

@@ -257,7 +257,7 @@ export default function MathPage() {
             <div className="hf-calc-stage">
               <div className="hf-calc-stack">
                 <CalcTabs current={calc.key} onPick={pickCalc} />
-                {calcModule && (
+                {calcModule && sweepsForCalc(calc.key).length > 0 && (
                   <VariantsStrip
                     calcKey={calc.key}
                     calcModule={calcModule}
@@ -954,30 +954,10 @@ function sweepsForCalc(calcKey: string): SweepOption[] {
   const putValues = PUT_FREQ_DEFS.map((f) => ({ id: f.id, label: f.label, calDays: f.calDays }));
   const callValues = FREQ_DEFS.map((f) => ({ id: f.id, label: f.label, calDays: f.calDays }));
 
-  if (calcKey === "income-vs-cost") {
-    return [
-      {
-        label: "Put frequency",
-        stateKey: "putFrequency",
-        values: putValues,
-        quote: {
-          type: "put",
-          strikeFrom: { strikeKey: "strike" },
-          premiumKey: "putPremium",
-        },
-      },
-      {
-        label: "Call frequency",
-        stateKey: "callFrequency",
-        values: callValues,
-        quote: {
-          type: "call",
-          strikeFrom: { spotKey: "price", distanceKey: "callDistance" },
-          premiumKey: "callPremium",
-        },
-      },
-    ];
-  }
+  // Income vs Cost owns its own variant grid (5 horizon variants computed
+  // inline) — the generic VariantsStrip + sweep flow doesn't apply.
+  if (calcKey === "income-vs-cost") return [];
+
   if (calcKey === "put-cost") {
     return [
       {
