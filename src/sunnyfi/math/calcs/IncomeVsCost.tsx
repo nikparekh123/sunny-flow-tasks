@@ -623,21 +623,6 @@ export function IncomeVsCostCalc({
         </div>
       </div>
 
-      {/* Horizon readout — derived from put frequency, no separate input */}
-      <div className="cyc-section">
-        <div className="cyc-cad-readout">
-          Horizon = one put cycle · through{" "}
-          <span className="neon">{fmtDate(c.horizonDate)}</span>
-          {isFinite(c.days) && (
-            <>
-              {" · "}<span className="accent">{c.days}</span> days · {" "}
-              <span className="accent">{fmtCount(c.callCycles)}</span> call cycles ·{" "}
-              <span className="accent">{fmtCount(c.putCycles)}</span> put cycles
-            </>
-          )}
-        </div>
-      </div>
-
       {/* Results */}
       <div className="cyc-results">
         <Tile label="Net to horizon"        value={isFinite(c.net) ? fmtMoney(c.net, { signed: true }) : "—"} tone={netTone} />
