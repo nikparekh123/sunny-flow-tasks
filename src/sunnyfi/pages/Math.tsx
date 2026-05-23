@@ -42,6 +42,8 @@ import {
 } from "../math/data";
 import { useSnapshots, useLiveState, relTime, type Snapshot } from "../math/store";
 import { CALC_MODULES, type CalcModule } from "../math/calcs";
+import { VariantsStrip, type SweepOption } from "../math/VariantsStrip";
+import { FREQ_DEFS, PUT_FREQ_DEFS } from "../math/cycle";
 
 const DASHBOARD_URL = "https://www.sunnyfi.co/dashboard";
 
@@ -303,6 +305,18 @@ export default function MathPage() {
                   <CalcEmpty label={`${calc.name.toUpperCase()} · content area`} />
                 )}
               </CalcShell>
+              {calcModule && (
+                <VariantsStrip
+                  calcKey={calc.key}
+                  calcModule={calcModule}
+                  state={liveState}
+                  onLoad={(next) => {
+                    setLiveState(next);
+                    flash("⤺ Variant loaded");
+                  }}
+                  sweeps={sweepsForCalc(calc.key)}
+                />
+              )}
               </div>
             </div>
           ) : (
@@ -929,6 +943,45 @@ function ShareBody({
       </div>
     </div>
   );
+}
+
+// ── Sweep options per calc ───────────────────────────────────────
+// Each calc declares which dimensions are interesting to fan out. Today
+// we ship frequency sweeps — easy to add strike / contracts later.
+function sweepsForCalc(calcKey: string): SweepOption[] {
+  if (calcKey === "income-vs-cost") {
+    return [
+      {
+        label: "Put frequency",
+        stateKey: "putFrequency",
+        values: PUT_FREQ_DEFS.map((f) => ({ id: f.id, label: f.label })),
+      },
+      {
+        label: "Call frequency",
+        stateKey: "callFrequency",
+        values: FREQ_DEFS.map((f) => ({ id: f.id, label: f.label })),
+      },
+    ];
+  }
+  if (calcKey === "put-cost") {
+    return [
+      {
+        label: "Put frequency",
+        stateKey: "frequency",
+        values: PUT_FREQ_DEFS.map((f) => ({ id: f.id, label: f.label })),
+      },
+    ];
+  }
+  if (calcKey === "expected-income") {
+    return [
+      {
+        label: "Call frequency",
+        stateKey: "frequency",
+        values: FREQ_DEFS.map((f) => ({ id: f.id, label: f.label })),
+      },
+    ];
+  }
+  return [];
 }
 
 // ── CalcTabs ─────────────────────────────────────────────────────

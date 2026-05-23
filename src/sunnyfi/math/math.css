@@ -1518,3 +1518,190 @@
   color: var(--navi-fg4);
   letter-spacing: .3px;
 }
+
+/* =============================================================
+   Variants strip — per-ticker exploration below the calc body
+   ============================================================= */
+.vstrip {
+  background: rgba(15,51,51,.35);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 12px;
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.vstrip-hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.vstrip-eyebrow {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.vstrip-count {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg4);
+  margin-top: 4px;
+}
+.vstrip-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.vstrip-sweep { position: relative; }
+.vstrip-sweep-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  min-width: 220px;
+  background: var(--navi-surface);
+  border: 1px solid rgba(50,110,100,.45);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.5);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vstrip-sweep-opt {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font: inherit;
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  color: var(--navi-fg1);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  text-align: left;
+}
+.vstrip-sweep-opt:hover { background: rgba(50,110,100,.2); }
+.vstrip-sweep-meta {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+}
+
+.vstrip-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.vstrip-card {
+  position: relative;
+  background: var(--navi-surface);
+  border: 1px solid rgba(50,110,100,.35);
+  border-radius: 10px;
+  padding: 14px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  transition:
+    transform .18s var(--ease),
+    background .12s var(--ease),
+    border-color .12s var(--ease),
+    box-shadow .18s var(--ease);
+}
+.vstrip-card:hover {
+  background: rgba(15,51,51,.85);
+  border-color: rgba(50,110,100,.55);
+  transform: translateY(-1px);
+}
+.vstrip-card.best {
+  border-color: rgba(210,230,50,.55);
+  box-shadow: 0 0 0 3px var(--navi-tint-neon), 0 8px 20px rgba(0,0,0,.35);
+  transform: translateY(-4px);
+}
+.vstrip-card-rank {
+  position: absolute;
+  top: -7px;
+  left: 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  padding: 2px 7px;
+  border-radius: 100px;
+  background: var(--navi-surface);
+  border: 1px solid rgba(50,110,100,.5);
+  color: var(--navi-fg3);
+}
+.vstrip-card-rank.best {
+  background: var(--navi-neon);
+  color: var(--navi-dash-page);
+  border-color: rgba(210,230,50,.6);
+}
+.vstrip-card-x {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 100px;
+  color: var(--navi-fg5);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s var(--ease), color .12s var(--ease), background .12s var(--ease);
+}
+.vstrip-card:hover .vstrip-card-x { opacity: 1; }
+.vstrip-card-x:hover {
+  background: rgba(220,80,60,.15);
+  color: var(--navi-negative);
+}
+.vstrip-card-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+  letter-spacing: -.2px;
+  padding-right: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vstrip-card-hero {
+  font-family: var(--navi-font-sans);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: .95;
+  color: var(--navi-fg1);
+}
+.vstrip-card-hero.pos  { color: var(--navi-positive); }
+.vstrip-card-hero.neg  { color: var(--navi-negative); }
+.vstrip-card-hero.neon { color: var(--navi-neon); }
+.vstrip-card-hero.muted{ color: var(--navi-fg4); }
+.vstrip-card-metric {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--navi-neon-dark);
+}
+.vstrip-card.best .vstrip-card-metric { color: var(--navi-neon); font-weight: 600; }
+.vstrip-card-line {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+  letter-spacing: .3px;
+}
