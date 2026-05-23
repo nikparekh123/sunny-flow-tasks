@@ -6,15 +6,16 @@
  * drives both. Five result tiles plus a stacked bar visualisation of
  * income vs cost.
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  FREQ_DEFS, PUT_FREQ_DEFS, FREQ_BY_ID, PUT_HORIZON_DEFS,
-  cycleStats, resolveHorizon,
+  FREQ_DEFS, PUT_FREQ_DEFS, FREQ_BY_ID,
+  cycleStats,
   fmtMoney, fmtPct, fmtCount, fmtDate,
   moneynessLabel,
   CycField, NumInput, HeroNumInput, Seg, Tile, PullFromSunnyfi,
 } from "../cycle";
 import { usePremiumAutofill } from "../usePremiumAutofill";
+import { availableCadenceIds, pullOptionChain, type OptionContractQuote } from "../quote";
 
 export interface IVCState extends Record<string, unknown> {
   underlying: string;
@@ -28,11 +29,14 @@ export interface IVCState extends Record<string, unknown> {
 
   putContracts: string;
   putPremium: string;
+  /** Absolute put strike $. Linked to putDistance — editing either updates
+   *  the other based on the current price. */
   strike: string;
+  /** Distance % from spot. Positive number; pair with putDistanceDir to
+   *  signal which side (puts most often "below spot" / OTM). */
+  putDistance: string;
+  putDistanceDir: "below" | "above";
   putFrequency: string;
-
-  horizon: string;
-  customDate: string;
 }
 
 export const ivcInitial: IVCState = {
@@ -48,10 +52,9 @@ export const ivcInitial: IVCState = {
   putContracts: "5",
   putPremium: "4.20",
   strike: "640.00",
+  putDistance: "2.30",       // (655.06 − 640) / 655.06 ≈ 2.30% below spot
+  putDistanceDir: "below",
   putFrequency: "monthly",
-
-  horizon: "rolling",
-  customDate: "",
 };
 
 interface Computed {
@@ -103,7 +106,12 @@ export function computeIVC(state: IVCState, now: Date = new Date()): Computed {
   const putCovered  = validPutContracts  ? putContracts  * 100 : NaN;
   const impliedCallStrike = validPrice && validCallDist ? price * (1 + callDist / 100) : NaN;
 
-  const horizonDate = resolveHorizon(state.horizon, state.customDate, now);
+  // Horizon = one put cycle out. "How does the strategy stack up across one
+  // full hedge period?" — eliminates the separate cut-off control.
+  const putFreqDef = FREQ_BY_ID[state.putFrequency];
+  const horizonDate = putFreqDef
+    ? new Date(now.getTime() + putFreqDef.calDays * 86400000)
+    : null;
   const callStats = cycleStats(state.callFrequency, horizonDate, now);
   const putStats  = cycleStats(state.putFrequency,  horizonDate, now);
   const years = callStats.years;
@@ -231,6 +239,138 @@ export function IncomeVsCostCalc({
   const [putPremManual, setPutPremManual]   = useState(false);
   useEffect(() => { setCallPremManual(false); }, [state.underlying, state.callDistance]);
   useEffect(() => { setPutPremManual(false);  }, [state.underlying, state.strike]);
+
+  // ── Put-strike linked inputs ─────────────────────────────────
+  // Distance % and $ strike are two views of the same thing. Edit either
+  // and the other updates from the current price. When price changes (e.g.
+  // user pulls a new ticker), recompute the field the user *didn't* last
+  // edit so their intent survives.
+  const lastEditedStrike = useRef<"distance" | "strike">("distance");
+
+  const computeStrikeFromDistance = (
+    distStr: string,
+    dir: "below" | "above",
+    priceStr: string,
+  ): string => {
+    const dist = Number(distStr);
+    const price = Number(priceStr);
+    if (!isFinite(dist) || !isFinite(price) || price <= 0) return "";
+    const factor = dir === "below" ? -1 : 1;
+    return (price * (1 + (factor * dist) / 100)).toFixed(2);
+  };
+  const computeDistanceFromStrike = (
+    strikeStr: string,
+    priceStr: string,
+  ): { dist: string; dir: "below" | "above" } => {
+    const strike = Number(strikeStr);
+    const price = Number(priceStr);
+    if (!isFinite(strike) || !isFinite(price) || price <= 0) return { dist: "", dir: "below" };
+    const pct = ((strike - price) / price) * 100;
+    return { dist: Math.abs(pct).toFixed(2), dir: pct >= 0 ? "above" : "below" };
+  };
+
+  const setPutDistance = (v: string) => {
+    lastEditedStrike.current = "distance";
+    setState((p) => ({
+      ...p,
+      putDistance: v,
+      strike: computeStrikeFromDistance(v, p.putDistanceDir, p.price) || p.strike,
+    }));
+  };
+  const togglePutDistanceDir = () => {
+    lastEditedStrike.current = "distance";
+    setState((p) => {
+      const newDir: "below" | "above" = p.putDistanceDir === "below" ? "above" : "below";
+      return {
+        ...p,
+        putDistanceDir: newDir,
+        strike: computeStrikeFromDistance(p.putDistance, newDir, p.price) || p.strike,
+      };
+    });
+  };
+  const setPutStrikeDollars = (v: string) => {
+    lastEditedStrike.current = "strike";
+    setState((p) => {
+      const { dist, dir } = computeDistanceFromStrike(v, p.price);
+      return { ...p, strike: v, putDistance: dist || p.putDistance, putDistanceDir: dir };
+    });
+  };
+
+  // Lightweight chain peek for smart-frequency filtering. Single fetch per
+  // ticker/strike/type triple, debounced so it doesn't run on every keystroke.
+  // The result feeds two filters: putAvailable and callAvailable below.
+  const [putChain, setPutChain] = useState<OptionContractQuote[]>([]);
+  const [callChain, setCallChain] = useState<OptionContractQuote[]>([]);
+  useEffect(() => {
+    if (!state.underlying || !isFinite(Number(state.strike)) || Number(state.strike) <= 0) return;
+    const ctrl = new AbortController();
+    const id = window.setTimeout(() => {
+      pullOptionChain(state.underlying, Number(state.strike), "put")
+        .then((c) => { if (!ctrl.signal.aborted) setPutChain(c); })
+        .catch(() => { /* ignore — autofill handles error surfacing */ });
+    }, 500);
+    return () => { ctrl.abort(); window.clearTimeout(id); };
+  }, [state.underlying, state.strike]);
+  useEffect(() => {
+    const implStrike = Number(state.price) * (1 + Number(state.callDistance) / 100);
+    if (!state.underlying || !isFinite(implStrike) || implStrike <= 0) return;
+    const ctrl = new AbortController();
+    const id = window.setTimeout(() => {
+      pullOptionChain(state.underlying, implStrike, "call")
+        .then((c) => { if (!ctrl.signal.aborted) setCallChain(c); })
+        .catch(() => { /* ignore */ });
+    }, 500);
+    return () => { ctrl.abort(); window.clearTimeout(id); };
+  }, [state.underlying, state.price, state.callDistance]);
+
+  const callAvailable = useMemo(
+    () => callChain.length === 0
+      ? null  // null = no chain data yet → show all (don't punish first paint)
+      : availableCadenceIds(callChain, FREQ_DEFS),
+    [callChain],
+  );
+  const putAvailable = useMemo(
+    () => putChain.length === 0
+      ? null
+      : availableCadenceIds(putChain, PUT_FREQ_DEFS),
+    [putChain],
+  );
+
+  // Auto-fallback: if user's selected cadence isn't available, pick the
+  // closest viable one so the seg doesn't show "no active button".
+  useEffect(() => {
+    if (callAvailable && !callAvailable.has(state.callFrequency)) {
+      const fallback = FREQ_DEFS.find((f) => callAvailable.has(f.id));
+      if (fallback) setState((p) => ({ ...p, callFrequency: fallback.id }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callAvailable]);
+  useEffect(() => {
+    if (putAvailable && !putAvailable.has(state.putFrequency)) {
+      const fallback = PUT_FREQ_DEFS.find((f) => putAvailable.has(f.id));
+      if (fallback) setState((p) => ({ ...p, putFrequency: fallback.id }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [putAvailable]);
+
+  // When price changes (e.g. ticker pull), keep whichever side the user
+  // last edited and recompute the other one.
+  useEffect(() => {
+    setState((p) => {
+      const price = Number(p.price);
+      if (!isFinite(price) || price <= 0) return p;
+      if (lastEditedStrike.current === "distance") {
+        const ns = computeStrikeFromDistance(p.putDistance, p.putDistanceDir, p.price);
+        return ns && ns !== p.strike ? { ...p, strike: ns } : p;
+      } else {
+        const { dist, dir } = computeDistanceFromStrike(p.strike, p.price);
+        if (!dist) return p;
+        if (dist === p.putDistance && dir === p.putDistanceDir) return p;
+        return { ...p, putDistance: dist, putDistanceDir: dir };
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.price]);
 
   const callFill = usePremiumAutofill({
     ticker: state.underlying,
@@ -373,7 +513,9 @@ export function IncomeVsCostCalc({
             <div className="cyc-side-freq">
               <div className="hf-label">Frequency</div>
               <Seg
-                options={FREQ_DEFS.map(f => ({ id: f.id, label: f.label }))}
+                options={FREQ_DEFS
+                  .filter((f) => !callAvailable || callAvailable.has(f.id))
+                  .map(f => ({ id: f.id, label: f.label }))}
                 value={state.callFrequency}
                 onChange={(v) => set("callFrequency", v)}
                 ariaLabel="Call frequency"
@@ -419,27 +561,56 @@ export function IncomeVsCostCalc({
             </div>
             <div className="cyc-side-strike">
               <div className="hf-label">Strike</div>
-              <div className="cyc-strike-row">
-                <span className="cyc-prefix">$</span>
-                <input
-                  className="cyc-strike-input"
-                  type="text"
-                  inputMode="decimal"
-                  value={state.strike}
-                  onChange={(e) => set("strike", e.target.value)}
-                  placeholder="0.00"
-                  spellCheck={false}
-                  aria-label="Put strike"
-                />
-              </div>
-              <div className="cyc-side-sub">
-                {money ? <span className="accent">{money}</span> : <>Set a strike to see moneyness</>}
+              <div className="put-strike-twin">
+                <div className="put-strike-cell">
+                  <div className="cyc-strike-row">
+                    <input
+                      className="cyc-strike-input"
+                      type="text"
+                      inputMode="decimal"
+                      value={state.putDistance}
+                      onChange={(e) => setPutDistance(e.target.value)}
+                      placeholder="0.0"
+                      spellCheck={false}
+                      aria-label="Put strike distance percent"
+                    />
+                    <span className="cyc-prefix">%</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`put-strike-dir ${state.putDistanceDir}`}
+                    onClick={togglePutDistanceDir}
+                    title="Toggle below / above spot"
+                  >
+                    {state.putDistanceDir} spot
+                  </button>
+                </div>
+                <div className="put-strike-cell">
+                  <div className="cyc-strike-row">
+                    <span className="cyc-prefix">$</span>
+                    <input
+                      className="cyc-strike-input"
+                      type="text"
+                      inputMode="decimal"
+                      value={state.strike}
+                      onChange={(e) => setPutStrikeDollars(e.target.value)}
+                      placeholder="0.00"
+                      spellCheck={false}
+                      aria-label="Put strike dollars"
+                    />
+                  </div>
+                  <div className="put-strike-aux">
+                    {money ? money : "—"}
+                  </div>
+                </div>
               </div>
             </div>
             <div className="cyc-side-freq">
               <div className="hf-label">Frequency</div>
               <Seg
-                options={PUT_FREQ_DEFS.map(f => ({ id: f.id, label: f.label }))}
+                options={PUT_FREQ_DEFS
+                  .filter((f) => !putAvailable || putAvailable.has(f.id))
+                  .map(f => ({ id: f.id, label: f.label }))}
                 value={state.putFrequency}
                 onChange={(v) => set("putFrequency", v)}
                 ariaLabel="Put frequency"
@@ -452,31 +623,18 @@ export function IncomeVsCostCalc({
         </div>
       </div>
 
-      {/* Shared cut off */}
+      {/* Horizon readout — derived from put frequency, no separate input */}
       <div className="cyc-section">
-        <div className="cyc-horizon-only">
-          <div className="hf-label">Cut off</div>
-          <Seg
-            options={PUT_HORIZON_DEFS.map(h => ({ id: h.id, label: h.label }))}
-            value={state.horizon}
-            onChange={(v) => set("horizon", v)}
-            ariaLabel="Cut off"
-          />
-          {state.horizon === "custom" && (
-            <div className="cyc-cad-date">
-              <span>→</span>
-              <input
-                type="date"
-                value={state.customDate}
-                onChange={(e) => set("customDate", e.target.value)}
-                aria-label="Custom horizon date"
-              />
-            </div>
+        <div className="cyc-cad-readout">
+          Horizon = one put cycle · through{" "}
+          <span className="neon">{fmtDate(c.horizonDate)}</span>
+          {isFinite(c.days) && (
+            <>
+              {" · "}<span className="accent">{c.days}</span> days · {" "}
+              <span className="accent">{fmtCount(c.callCycles)}</span> call cycles ·{" "}
+              <span className="accent">{fmtCount(c.putCycles)}</span> put cycles
+            </>
           )}
-          <div className="cyc-cad-readout">
-            Through <span className="neon">{fmtDate(c.horizonDate)}</span>
-            {isFinite(c.days) && <> · <span className="accent">{c.days}</span> days · <span className="accent">{fmtCount(c.callCycles)}</span> call cycles · <span className="accent">{fmtCount(c.putCycles)}</span> put cycles</>}
-          </div>
         </div>
       </div>
 

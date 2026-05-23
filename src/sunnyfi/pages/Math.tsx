@@ -257,6 +257,18 @@ export default function MathPage() {
             <div className="hf-calc-stage">
               <div className="hf-calc-stack">
                 <CalcTabs current={calc.key} onPick={pickCalc} />
+                {calcModule && (
+                  <VariantsStrip
+                    calcKey={calc.key}
+                    calcModule={calcModule}
+                    state={liveState}
+                    onLoad={(next) => {
+                      setLiveState(next);
+                      flash("⤺ Variant loaded");
+                    }}
+                    sweeps={sweepsForCalc(calc.key)}
+                  />
+                )}
                 <CalcShell
                 crumbs={<>{categoryLabel(calc.category)} <span className="sep">›</span> {calc.name}</>}
                 title={
@@ -305,18 +317,6 @@ export default function MathPage() {
                   <CalcEmpty label={`${calc.name.toUpperCase()} · content area`} />
                 )}
               </CalcShell>
-              {calcModule && (
-                <VariantsStrip
-                  calcKey={calc.key}
-                  calcModule={calcModule}
-                  state={liveState}
-                  onLoad={(next) => {
-                    setLiveState(next);
-                    flash("⤺ Variant loaded");
-                  }}
-                  sweeps={sweepsForCalc(calc.key)}
-                />
-              )}
               </div>
             </div>
           ) : (

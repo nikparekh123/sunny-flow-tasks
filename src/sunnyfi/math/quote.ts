@@ -104,3 +104,30 @@ export function nearestExpiry(
   }
   return best;
 }
+
+/** Decide which cadence ids are realistically available given the chain.
+ *  A cadence counts as "available" when there's a listed expiry within
+ *  ±tolerance days of (today + cadence.calDays). Tolerance scales with
+ *  cadence so weekly/monthly aren't punished for being a few days off the
+ *  exact target, but daily / 3×wk only match if there's a genuinely
+ *  short-dated contract.
+ */
+export function availableCadenceIds(
+  contracts: OptionContractQuote[],
+  cadences: Array<{ id: string; calDays: number }>,
+): Set<string> {
+  const out = new Set<string>();
+  if (contracts.length === 0) return out;
+  const todayMs = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z").getTime();
+  const expiryMs = contracts.map((c) =>
+    new Date(c.expiry + "T00:00:00Z").getTime(),
+  );
+  for (const cad of cadences) {
+    const targetMs = todayMs + cad.calDays * 86400000;
+    const tolMs = Math.max(1, cad.calDays * 0.5) * 86400000;
+    for (const ms of expiryMs) {
+      if (Math.abs(ms - targetMs) <= tolMs) { out.add(cad.id); break; }
+    }
+  }
+  return out;
+}

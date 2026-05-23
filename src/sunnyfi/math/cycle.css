@@ -484,6 +484,57 @@ button.cyc-pull-btn.loading .live-dot { background: var(--navi-fg2); animation: 
 }
 .cyc-side-freq .hf-label { color: var(--navi-fg3); }
 
+/* Put-strike twin inputs — % distance (with below/above toggle) +
+   $ strike sit side-by-side, the two views are linked: editing either
+   updates the other from the current price. */
+.put-strike-twin {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+.put-strike-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.put-strike-dir {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid rgba(50,110,100,.4);
+  border-radius: 100px;
+  padding: 2px 10px;
+  font: inherit;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+  letter-spacing: .3px;
+  cursor: pointer;
+  text-transform: lowercase;
+  transition: color .12s var(--ease), background .12s var(--ease), border-color .12s var(--ease);
+}
+.put-strike-dir:hover {
+  color: var(--navi-fg1);
+  border-color: rgba(50,110,100,.6);
+}
+.put-strike-dir.below {
+  background: var(--navi-tint-negative);
+  color: var(--navi-negative);
+  border-color: rgba(220,80,60,.3);
+}
+.put-strike-dir.above {
+  background: var(--navi-tint-positive);
+  color: var(--navi-positive);
+  border-color: rgba(168,212,160,.3);
+}
+.put-strike-aux {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+  letter-spacing: .3px;
+}
+
 /* Autofill badge — small status chip beside the premium label that tells
    the user whether the premium came from Polygon, is being fetched, or has
    been overridden by typing. Inline so it sits next to "Premium per
