@@ -89,31 +89,38 @@ export function VariantsStrip<S extends Record<string, unknown>>({
     [sweeps],
   );
 
-  // Auto-mode rerun: watch ticker + the strike the auto sweep cares about.
-  // Skip the initial render and debounce 600ms so rapid typing doesn't
-  // spawn one API call per keystroke.
-  const watchedStrike = useMemo(() => {
-    if (!autoSweep?.quote) return "";
-    const sf = autoSweep.quote.strikeFrom;
-    if ("strikeKey" in sf) return String(state[sf.strikeKey] ?? "");
-    return `${state[sf.spotKey] ?? ""}|${state[sf.distanceKey] ?? ""}`;
+  // Auto-mode rerun: every input that affects the compute should trigger a
+  // re-sweep, except for the dimension the sweep itself is varying (e.g.
+  // putFrequency for an IvC put-side sweep — that's the axis, not an input).
+  // Serialise the rest of state into a watcher key.
+  const watchedKey = useMemo(() => {
+    if (!autoSweep) return "";
+    // Drop the swept key + any value-list metadata so changes to it don't
+    // re-trigger the sweep (which would otherwise loop the auto-fallback).
+    const filtered: Record<string, unknown> = {};
+    for (const k of Object.keys(state)) {
+      if (k === autoSweep.stateKey) continue;
+      filtered[k] = state[k];
+    }
+    return JSON.stringify(filtered);
   }, [autoSweep, state]);
 
   const [busy, setBusy] = useState(false);
   const lastSweepKey = useRef<string>("");
 
-  // Debounced auto-sweep trigger.
+  // Debounced auto-sweep trigger. Bumped to 900ms now that every keystroke
+  // can re-trigger — the user typically pauses between inputs.
   useEffect(() => {
-    if (!autoSweep || !ticker || !watchedStrike) return;
-    const sweepKey = `${ticker}|${watchedStrike}`;
+    if (!autoSweep || !ticker || !watchedKey) return;
+    const sweepKey = `${ticker}|${watchedKey}`;
     if (sweepKey === lastSweepKey.current) return;
     const t = window.setTimeout(() => {
       lastSweepKey.current = sweepKey;
       void runAutoSweep(autoSweep);
-    }, 600);
+    }, 900);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoSweep, ticker, watchedStrike]);
+  }, [autoSweep, ticker, watchedKey]);
 
   const ranked = useMemo(() => {
     const scored = variants.map((v) => {
