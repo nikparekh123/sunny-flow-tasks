@@ -413,6 +413,174 @@
   .ivc3-variants-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
+/* ──────────────────────────────────────────────────────────
+   MATRIX layout — hero axes, compact cells, heatmap shading
+   Rows = call cadence, cols = put horizon. The row/col headers
+   carry the variant identity, so cells stay compact and the
+   eye can scan rows or columns for hot spots.
+   ────────────────────────────────────────────────────────── */
+.ivc3-matrix {
+  display: grid;
+  grid-template-columns: 84px repeat(var(--cols, 5), minmax(0, 1fr));
+  gap: 6px;
+  align-items: stretch;
+}
+
+.ivc3-matrix-corner { /* top-left empty */ }
+
+.ivc3-matrix-colhead,
+.ivc3-matrix-rowhead {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-family: var(--navi-font-sans);
+  color: var(--navi-fg1);
+  letter-spacing: -.2px;
+  user-select: none;
+}
+.ivc3-matrix-colhead {
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 6px 6px;
+  text-align: center;
+}
+.ivc3-matrix-rowhead {
+  align-items: flex-end;
+  justify-content: center;
+  padding: 6px 8px 6px 0;
+  text-align: right;
+}
+.ivc3-matrix-colhead .hd-label,
+.ivc3-matrix-rowhead .hd-label {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--navi-fg1);
+}
+.ivc3-matrix-colhead .hd-sub,
+.ivc3-matrix-rowhead .hd-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+}
+
+.ivc3-matrix-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 64px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(30,90,80,.55);
+  background: rgba(15,51,51,.5);
+  cursor: pointer;
+  transition: transform .12s var(--ease), border-color .18s var(--ease), background .18s var(--ease), box-shadow .18s var(--ease);
+  overflow: hidden;
+}
+/* Heatmap overlay — color intensity scales with --heat (0..1).
+   We blend a warm tint at the bottom (low net) and a neon tint at the
+   top (high net) so the eye sweeps the matrix and the green hot-spots
+   pop without overwhelming the numbers. */
+.ivc3-matrix-cell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg,
+      rgba(210, 230, 50, calc(var(--heat, 0) * 0.22)),
+      rgba(210, 230, 50, calc(var(--heat, 0) * 0.06)) 60%,
+      transparent);
+}
+.ivc3-matrix-cell.tone-neg::before {
+  background:
+    linear-gradient(135deg,
+      rgba(231, 102, 102, calc((1 - var(--heat, 1)) * 0.18)),
+      transparent 70%);
+}
+.ivc3-matrix-cell:hover {
+  border-color: rgba(168,212,160,.55);
+  transform: translateY(-1px);
+}
+.ivc3-matrix-cell.selected {
+  border-color: var(--navi-neon);
+  box-shadow: 0 0 0 3px rgba(210,230,50,.10), 0 0 14px rgba(210,230,50,.20);
+}
+.ivc3-matrix-cell.best {
+  border-color: rgba(210,230,50,.75);
+}
+.ivc3-matrix-cell.best.selected {
+  box-shadow: 0 0 0 3px rgba(210,230,50,.16), 0 0 18px rgba(210,230,50,.30);
+}
+.ivc3-matrix-cell--missing {
+  border: 1px dashed rgba(50,110,100,.25);
+  background: transparent;
+  cursor: default;
+  min-height: 64px;
+  border-radius: 8px;
+}
+
+.ivc3-matrix-best {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--navi-font-mono);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  color: var(--navi-dash-page);
+  background: var(--navi-neon);
+  padding: 1px 6px;
+  border-radius: 100px;
+  line-height: 1.2;
+}
+
+.ivc3-matrix-net {
+  position: relative;
+  font-family: var(--navi-font-sans);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: -.6px;
+  line-height: 1;
+  color: var(--navi-fg1);
+  white-space: nowrap;
+  margin-top: 6px;
+}
+.ivc3-matrix-cell.tone-neg .ivc3-matrix-net { color: var(--navi-negative); }
+.ivc3-matrix-cell.best .ivc3-matrix-net { color: var(--navi-neon); }
+.ivc3-matrix-yld {
+  position: relative;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--navi-fg4);
+  letter-spacing: .2px;
+}
+.ivc3-matrix-cell.tone-neg .ivc3-matrix-yld { color: var(--navi-negative); opacity: .85; }
+.ivc3-matrix-cell.best .ivc3-matrix-yld { color: var(--navi-neon); }
+
+/* Tighter on narrow viewports — shrink the row header, compact the cell. */
+@media (max-width: 1100px) {
+  .ivc3-matrix { grid-template-columns: 64px repeat(var(--cols, 5), minmax(0, 1fr)); gap: 5px; }
+  .ivc3-matrix-cell { min-height: 56px; padding: 6px 4px; }
+  .ivc3-matrix-net { font-size: 14px; }
+  .ivc3-matrix-colhead .hd-label,
+  .ivc3-matrix-rowhead .hd-label { font-size: 12px; }
+}
+@media (max-width: 780px) {
+  /* Horizontal scroll on small screens so the matrix is never squished. */
+  .ivc3-variants-wrap { overflow-x: auto; }
+  .ivc3-matrix { min-width: 560px; }
+}
+
 /* Empty placeholder */
 .ivc3-card.empty {
   background: transparent;

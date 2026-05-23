@@ -19,7 +19,7 @@
  * select it as the "current view"; the bar + tiles + recap strip below
  * reflect that variant.
  */
-import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import {
   fmtMoney, fmtPct, fmtCount, fmtDate,
   PullFromSunnyfi,
@@ -544,62 +544,106 @@ function VariantsGrid({
         </div>
       </div>
 
-      <div className="ivc3-variants-grid">
-        {variants.length > 0 ? variants.map((v) => (
-          <VariantCard
-            key={v.id}
-            v={v}
-            selected={v.id === selectedId}
-            isBest={v.id === bestId}
-            onClick={() => onSelect(v.id)}
-          />
-        )) : (
-          <div className="ivc3-card empty" style={{ gridColumn: "1 / -1" }}>
-            <div className="ivc3-card-empty-msg">
-              Fill in ticker · shares · contracts on both sides to auto-generate variants from live chain data.
-            </div>
+      {variants.length > 0 ? (
+        <VariantsMatrix
+          variants={variants}
+          selectedId={selectedId}
+          bestId={bestId}
+          onSelect={onSelect}
+        />
+      ) : (
+        <div className="ivc3-card empty">
+          <div className="ivc3-card-empty-msg">
+            Fill in ticker · shares · contracts on both sides to auto-generate variants from live chain data.
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function VariantCard({
-  v, selected, isBest, onClick,
+/** Matrix view: rows = call cadence, cols = put horizon.
+ *  Cell = compact metric tile with heatmap background by net $ rank.
+ *  The axes carry the variant identity, so cells just show the numbers. */
+function VariantsMatrix({
+  variants, selectedId, bestId, onSelect,
 }: {
-  v: IVCVariant;
-  selected: boolean;
-  isBest: boolean;
-  onClick: () => void;
+  variants: IVCVariant[];
+  selectedId: string;
+  bestId: string | undefined;
+  onSelect: (id: string) => void;
 }) {
-  const tone = v.net >= 0 ? "pos" : "neg";
-  const ann = isFinite(v.netAnnYield)
-    ? `${v.netAnnYield >= 0 ? "" : "−"}${Math.abs(v.netAnnYield).toFixed(1)}%`
-    : "—";
-  const cov = !isFinite(v.coverage) ? "—"
-    : v.coverage === Infinity ? "∞"
-    : `${v.coverage.toFixed(2)}x`;
+  // Find which call cadences and put horizons are actually present.
+  const presentCallIds = new Set(variants.map((v) => v.callCadenceId));
+  const presentPutIds = new Set(variants.map((v) => v.putHorizonId));
+  const rows = CALL_CADENCES.filter((c) => presentCallIds.has(c.id));
+  const cols = PUT_HORIZONS.filter((h) => presentPutIds.has(h.id));
+
+  const byKey = new Map(variants.map((v) => [v.id, v]));
+  const nets = variants.map((v) => v.net);
+  const minNet = Math.min(...nets);
+  const maxNet = Math.max(...nets);
+
+  /** Map net → 0..1 along the min..max range. Used for heatmap intensity. */
+  const norm = (n: number) =>
+    maxNet === minNet ? 0.5 : (n - minNet) / (maxNet - minNet);
+
   return (
     <div
-      className={`ivc3-card ${selected ? "selected" : ""} ${isBest ? "best" : ""}`}
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
-      aria-label={`${v.callCadenceLabel} calls × ${v.putHorizonLabel} puts, net ${fmtMoney(v.net, { signed: true })}`}
+      className="ivc3-matrix"
+      style={{ ["--cols" as string]: String(cols.length) }}
     >
-      <div className="ivc3-card-head">
-        <span className="ivc3-card-rank">{isBest ? "BEST" : `#${v.rank}`}</span>
-        <span className="ivc3-card-horizon">
-          {v.callCadenceLabel} <span className="muted">×</span> {v.putHorizonLabel}
-        </span>
-      </div>
-      <div className={`ivc3-card-net ${tone}`}>{fmtMoney(v.net, { signed: true, decimals: 0 })}</div>
-      <div className="ivc3-card-foot">
-        <span className={`ivc3-card-yield ${v.net < 0 ? "neg" : ""}`}>{ann}</span>
-        <span className="ivc3-card-cov">{cov}</span>
-      </div>
+      {/* Top-left corner spacer */}
+      <div className="ivc3-matrix-corner" aria-hidden />
+      {/* Column headers (put horizons) */}
+      {cols.map((h) => (
+        <div key={`ch-${h.id}`} className="ivc3-matrix-colhead">
+          <span className="hd-label">{h.short}</span>
+          <span className="hd-sub">put</span>
+        </div>
+      ))}
+
+      {rows.map((cad) => (
+        <Fragment key={`row-${cad.id}`}>
+          <div className="ivc3-matrix-rowhead">
+            <span className="hd-label">{cad.short}</span>
+            <span className="hd-sub">call</span>
+          </div>
+          {cols.map((h) => {
+            const id = `${cad.id}_${h.id}`;
+            const v = byKey.get(id);
+            if (!v) {
+              return <div key={id} className="ivc3-matrix-cell ivc3-matrix-cell--missing" />;
+            }
+            const t = norm(v.net);
+            const isSelected = id === selectedId;
+            const isBestCell = id === bestId;
+            const tone = v.net >= 0 ? "pos" : "neg";
+            const ann = isFinite(v.netAnnYield)
+              ? `${v.netAnnYield >= 0 ? "" : "−"}${Math.abs(v.netAnnYield).toFixed(1)}%`
+              : "—";
+            return (
+              <div
+                key={id}
+                className={`ivc3-matrix-cell tone-${tone}${isSelected ? " selected" : ""}${isBestCell ? " best" : ""}`}
+                style={{ ["--heat" as string]: t.toFixed(3) }}
+                onClick={() => onSelect(id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(id); }
+                }}
+                aria-label={`${cad.label} calls × ${h.label} puts, net ${fmtMoney(v.net, { signed: true })}`}
+                title={`${cad.label} × ${h.label} · net ${fmtMoney(v.net, { signed: true })} · ${ann}/yr · cov ${isFinite(v.coverage) ? (v.coverage === Infinity ? "∞" : v.coverage.toFixed(2) + "x") : "—"}`}
+              >
+                {isBestCell && <span className="ivc3-matrix-best">BEST</span>}
+                <span className="ivc3-matrix-net">{fmtMoney(v.net, { signed: true, decimals: 0 })}</span>
+                <span className="ivc3-matrix-yld">{ann}</span>
+              </div>
+            );
+          })}
+        </Fragment>
+      ))}
     </div>
   );
 }
