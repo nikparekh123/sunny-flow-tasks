@@ -484,6 +484,43 @@ button.cyc-pull-btn.loading .live-dot { background: var(--navi-fg2); animation: 
 }
 .cyc-side-freq .hf-label { color: var(--navi-fg3); }
 
+/* Autofill badge — small status chip beside the premium label that tells
+   the user whether the premium came from Polygon, is being fetched, or has
+   been overridden by typing. Inline so it sits next to "Premium per
+   contract" without breaking the label baseline. */
+.ivc-autofill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-family: var(--navi-font-mono);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: .4px;
+  text-transform: none;
+  vertical-align: 1px;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ivc-autofill.fetching {
+  background: rgba(30,90,80,.25);
+  color: var(--navi-fg3);
+}
+.ivc-autofill.ok {
+  background: var(--navi-tint-neon);
+  color: var(--navi-neon-dark);
+}
+.ivc-autofill.overridden {
+  background: rgba(168,196,192,.08);
+  color: var(--navi-fg3);
+}
+.ivc-autofill.err {
+  background: var(--navi-tint-warning);
+  color: var(--navi-warning);
+}
+
 .cyc-horizon-only { display: flex; flex-direction: column; gap: 10px; }
 
 /* ── Stacked bar — income vs cost viz ── */

@@ -6,7 +6,7 @@
  * drives both. Five result tiles plus a stacked bar visualisation of
  * income vs cost.
  */
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   FREQ_DEFS, PUT_FREQ_DEFS, FREQ_BY_ID, PUT_HORIZON_DEFS,
   cycleStats, resolveHorizon,
@@ -14,6 +14,7 @@ import {
   moneynessLabel,
   CycField, NumInput, HeroNumInput, Seg, Tile, PullFromSunnyfi,
 } from "../cycle";
+import { usePremiumAutofill } from "../usePremiumAutofill";
 
 export interface IVCState extends Record<string, unknown> {
   underlying: string;
@@ -221,6 +222,33 @@ export function IncomeVsCostCalc({
   const callFreq = FREQ_BY_ID[state.callFrequency] || FREQ_BY_ID.weekly;
   const putFreq  = FREQ_BY_ID[state.putFrequency]  || FREQ_BY_ID.monthly;
 
+  // ── Premium auto-fill ────────────────────────────────────────
+  // Polygon supplies the premium for the user's chosen cadence so they
+  // don't have to look it up. User can override either side by typing
+  // directly — overrides hold until the ticker or strike/distance
+  // changes (since those imply a new option contract).
+  const [callPremManual, setCallPremManual] = useState(false);
+  const [putPremManual, setPutPremManual]   = useState(false);
+  useEffect(() => { setCallPremManual(false); }, [state.underlying, state.callDistance]);
+  useEffect(() => { setPutPremManual(false);  }, [state.underlying, state.strike]);
+
+  const callFill = usePremiumAutofill({
+    ticker: state.underlying,
+    strike: isFinite(c.impliedCallStrike) ? c.impliedCallStrike : NaN,
+    cadenceDays: callFreq.calDays,
+    contractType: "call",
+    setPremium: (v) => setState((p) => ({ ...p, callPremium: v })),
+    isOverridden: callPremManual,
+  });
+  const putFill = usePremiumAutofill({
+    ticker: state.underlying,
+    strike: Number(state.strike),
+    cadenceDays: putFreq.calDays,
+    contractType: "put",
+    setPremium: (v) => setState((p) => ({ ...p, putPremium: v })),
+    isOverridden: putPremManual,
+  });
+
   const netTone: "pos" | "neg" | "neutral" = !isFinite(c.net) ? "neutral" : c.net > 0 ? "pos" : c.net < 0 ? "neg" : "neutral";
   const coverageTone: "pos" | "warn" | "neutral" = !isFinite(c.coverage) ? "neutral" : c.coverage >= 1 ? "pos" : "warn";
   const money = moneynessLabel(state.strike, state.price);
@@ -308,8 +336,15 @@ export function IncomeVsCostCalc({
               <span className="meta">× 100 = {fmtCount(c.callCovered)} sh</span>
             </div>
             <div className="cyc-side-hero">
-              <div className="hf-label">Premium per contract</div>
-              <HeroNumInput value={state.callPremium} onChange={(v) => set("callPremium", v)} placeholder="0.00" prefix="$" ariaLabel="Call premium per contract" />
+              <div className="hf-label">
+                Premium per contract
+                <AutofillBadge status={callFill.status} msg={callFill.msg} />
+              </div>
+              <HeroNumInput
+                value={state.callPremium}
+                onChange={(v) => { setCallPremManual(true); set("callPremium", v); }}
+                placeholder="0.00" prefix="$" ariaLabel="Call premium per contract"
+              />
               <div className="cyc-side-sub">
                 Income / cycle = <span className="accent">{fmtCount(Number(state.callContracts) || 0)} × {fmtMoney(Number(state.callPremium) || 0)} × 100</span> = <span className="accent">{fmtMoney(c.incomePerCycle)}</span>
               </div>
@@ -369,8 +404,15 @@ export function IncomeVsCostCalc({
               <span className="meta">× 100 = {fmtCount(c.putCovered)} sh</span>
             </div>
             <div className="cyc-side-hero">
-              <div className="hf-label">Premium per contract</div>
-              <HeroNumInput value={state.putPremium} onChange={(v) => set("putPremium", v)} placeholder="0.00" prefix="$" ariaLabel="Put premium per contract" />
+              <div className="hf-label">
+                Premium per contract
+                <AutofillBadge status={putFill.status} msg={putFill.msg} />
+              </div>
+              <HeroNumInput
+                value={state.putPremium}
+                onChange={(v) => { setPutPremManual(true); set("putPremium", v); }}
+                placeholder="0.00" prefix="$" ariaLabel="Put premium per contract"
+              />
               <div className="cyc-side-sub">
                 Cost / cycle = <span className="accent">{fmtCount(Number(state.putContracts) || 0)} × {fmtMoney(Number(state.putPremium) || 0)} × 100</span> = <span className="accent">{fmtMoney(c.costPerCycle)}</span>
               </div>
@@ -481,4 +523,17 @@ export function IncomeVsCostCalc({
       </div>
     </div>
   );
+}
+
+// ── Autofill status badge ───────────────────────────────────────
+// Tiny chip rendered next to the premium label showing whether the value
+// is live from Polygon, being fetched, manually overridden, or unavailable.
+function AutofillBadge({ status, msg }: { status: "idle" | "fetching" | "ok" | "err" | "overridden"; msg: string }) {
+  if (status === "idle") return null;
+  const label =
+    status === "fetching"   ? "fetching…" :
+    status === "ok"         ? `auto · ${msg}` :
+    status === "overridden" ? "manual" :
+                              `auto failed · ${msg}`;
+  return <span className={`ivc-autofill ${status}`} title={msg || label}>{label}</span>;
 }
