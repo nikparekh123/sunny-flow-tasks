@@ -1261,6 +1261,72 @@
   gap: 8px;
 }
 
+/* Perspective picker — two compact dropdowns + auto-pick label */
+.ivc3-leader-perspective {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px 2px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+}
+.ivc3-leader-perspective .muted {
+  color: var(--navi-fg5);
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  font-size: 9px;
+  font-weight: 700;
+}
+.ivc3-leader-picker {
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.ivc3-leader-picker .picker-lbl {
+  color: var(--navi-fg5);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .3px;
+}
+.ivc3-leader-picker select {
+  background: rgba(15,51,51,.6);
+  border: 1px solid rgba(30,90,80,.55);
+  border-radius: 6px;
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 22px 3px 8px;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--navi-fg3) 50%),
+    linear-gradient(135deg, var(--navi-fg3) 50%, transparent 50%);
+  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.ivc3-leader-picker select:hover { border-color: var(--navi-neon); }
+.ivc3-leader-picker select:focus { border-color: var(--navi-neon); }
+.ivc3-leader-pivot-summary {
+  margin-left: auto;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+  letter-spacing: .2px;
+}
+.ivc3-leader-pivot-summary b {
+  color: var(--navi-fg1);
+  font-weight: 700;
+}
+.ivc3-leader-auto {
+  color: var(--navi-fg5);
+  font-style: italic;
+  font-weight: 500;
+}
+
 /* Leaderboard card */
 .ivc3-lead-card {
   position: relative;
@@ -1378,6 +1444,41 @@
 }
 .ivc3-lead-card.tone-neg .ivc3-lead-metrics .row:first-child b { color: var(--navi-negative); }
 .ivc3-lead-card.best .ivc3-lead-metrics .row:first-child b { color: var(--navi-neon); }
+
+/* IV chip on every card — small footer line */
+.ivc3-lead-iv {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--navi-fg4);
+  letter-spacing: .3px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(50,110,100,.3);
+}
+.ivc3-lead-iv .muted { color: var(--navi-fg5); font-weight: 400; margin-left: 2px; }
+
+/* n/a card — for tickers that can't run the chosen perspective */
+.ivc3-lead-card.na {
+  background: rgba(15,51,51,.32);
+  border: 1.5px dashed rgba(50,110,100,.55);
+  cursor: default;
+  opacity: .9;
+}
+.ivc3-lead-card.na:hover { transform: none; }
+.ivc3-lead-card.na .ivc3-lead-rank {
+  color: var(--navi-fg5);
+  letter-spacing: 1.4px;
+}
+.ivc3-lead-card.na .ivc3-lead-label { color: var(--navi-fg3); }
+.ivc3-lead-na-reason {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+  letter-spacing: .3px;
+  margin-top: auto;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
 
 /* Tab strip */
 .ivc3-tabs {

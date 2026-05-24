@@ -77,6 +77,11 @@ export interface IVCState extends Record<string, unknown> {
 export interface IVCEntry {
   id: string;                 // stable across renames (used as tab key)
   label: string;              // user-editable display name ("AVGO-tight")
+  /** When true, the label auto-syncs to whatever ticker the user types
+   *  (so "Entry 1" becomes "NVDA" the moment they enter NVDA). Flipped to
+   *  false the first time the user manually renames via the tab double-
+   *  click — at that point their custom label sticks regardless of ticker. */
+  labelIsAuto: boolean;
   underlying: string;
   shares: string;
   price: string;
@@ -98,6 +103,11 @@ export interface IVCBasketState extends Record<string, unknown> {
   activeEntryId: string;
   /** Leaderboard sort metric. */
   sortKey: "net" | "yield" | "cov";
+  /** Leaderboard "perspective" — the variant we rank tickers AT. When the
+   *  pair is null/undefined we auto-pick the variant with the highest
+   *  summed net across all entries (the basket-best lens). */
+  perspectiveCallId?: string;
+  perspectivePutId?: string;
 }
 
 const BASKET_MAX_ENTRIES = 5;
@@ -112,6 +122,7 @@ function makeEntry(label: string, init: Partial<IVCEntry> = {}): IVCEntry {
   return {
     id: newEntryId(),
     label,
+    labelIsAuto: true,
     underlying: "",
     shares: "0",
     price: "0",
@@ -143,15 +154,27 @@ function asIVCState(entry: IVCEntry, basket: IVCBasketState): IVCState {
 function toBasket(payload: unknown): IVCBasketState {
   const p = (payload ?? {}) as Partial<IVCBasketState> & Partial<IVCState>;
   if (Array.isArray(p.entries) && typeof p.basketName === "string") {
-    // already basket-shaped; ensure activeEntryId points at a live entry
+    // already basket-shaped; ensure activeEntryId points at a live entry,
+    // and backfill labelIsAuto for entries persisted before the field existed.
     const activeOk = p.entries.some((e) => e.id === p.activeEntryId);
+    const entries = p.entries.map((e) => ({
+      ...e,
+      labelIsAuto:
+        typeof e.labelIsAuto === "boolean"
+          ? e.labelIsAuto
+          // Heuristic for pre-field entries: a label that equals the
+          // ticker or matches the auto-default counts as still auto.
+          : (e.label === e.underlying || /^Entry \d+$/.test(e.label)),
+    }));
     return {
       basketName: p.basketName,
       callDistance: p.callDistance ?? "1.0",
       putDistance: p.putDistance ?? "2.0",
-      entries: p.entries,
-      activeEntryId: activeOk ? (p.activeEntryId as string) : (p.entries[0]?.id ?? ""),
+      entries,
+      activeEntryId: activeOk ? (p.activeEntryId as string) : (entries[0]?.id ?? ""),
       sortKey: (p.sortKey as IVCBasketState["sortKey"]) ?? "net",
+      perspectiveCallId: p.perspectiveCallId,
+      perspectivePutId: p.perspectivePutId,
     };
   }
   // legacy single-ticker payload → wrap
@@ -533,10 +556,15 @@ export function IncomeVsCostCalc({
     setState({ ...basket, entries: rest, activeEntryId: activeId });
   };
   const renameEntry = (entryId: string, label: string) =>
-    updateEntry(entryId, (e) => ({
-      ...e,
-      label: label.trim() || e.underlying || "Entry",
-    }));
+    updateEntry(entryId, (e) => {
+      const trimmed = label.trim();
+      // Empty rename = "go back to auto" — restore ticker-tracking.
+      if (!trimmed) {
+        return { ...e, label: e.underlying || "Entry", labelIsAuto: true };
+      }
+      // Any non-empty manual label freezes the auto-sync.
+      return { ...e, label: trimmed, labelIsAuto: false };
+    });
   const setActive = (entryId: string) => setState({ ...basket, activeEntryId: entryId });
 
   // Hoisted chain fetching — one debounced fetch per entry, in parallel.
@@ -586,7 +614,11 @@ export function IncomeVsCostCalc({
       <Leaderboard
         basket={basket}
         variantsByEntry={variantsByEntry}
+        chains={chains}
         onSort={(s) => update({ sortKey: s })}
+        onSetPerspective={(callId, putId) =>
+          update({ perspectiveCallId: callId, perspectivePutId: putId })
+        }
         onJump={(entryId, variantId) =>
           setState({
             ...basket,
@@ -744,39 +776,106 @@ function PolicyStrikes({
   );
 }
 
-// ── Leaderboard strip ────────────────────────────────────────────
+// ── Leaderboard strip — variant-pivoted ranking ─────────────────
+/** Rank tickers AT A SPECIFIC variant (the "perspective"). The perspective
+ *  defaults to whichever variant has the highest summed net across all
+ *  entries — i.e. the lens that makes the basket as a whole look best.
+ *  The user can pivot to any other (call cadence × put horizon) combo via
+ *  the two dropdowns. Tickers that can't run the chosen cadence (no daily
+ *  options listed for AAPL, for example) appear as small "n/a" cards
+ *  with the reason, so the ranking stays honest. */
 function Leaderboard({
-  basket, variantsByEntry, onSort, onJump, onAddSlot,
+  basket, variantsByEntry, chains, onSort, onSetPerspective, onJump, onAddSlot,
 }: {
   basket: IVCBasketState;
   variantsByEntry: Map<string, IVCVariant[]>;
+  chains: ChainsState;
   onSort: (s: IVCBasketState["sortKey"]) => void;
+  onSetPerspective: (callId: string, putId: string) => void;
   onJump: (entryId: string, variantId: string) => void;
   onAddSlot: () => void;
 }) {
-  // For each entry, pick its user-selected variant (fallback #1 by net).
-  const rows = basket.entries.map((entry) => {
+  // Auto-pick the variant that maximises summed net across entries — the
+  // "basket-best" lens. User-set perspective wins if present.
+  const autoPivot = useMemo(() => {
+    let best = { call: "weekly", put: "quarterly", score: -Infinity };
+    for (const cad of CALL_CADENCES) {
+      for (const h of PUT_HORIZONS) {
+        const id = `${cad.id}_${h.id}`;
+        let sum = 0;
+        let any = false;
+        for (const entry of basket.entries) {
+          const v = variantsByEntry.get(entry.id)?.find((x) => x.id === id);
+          if (v && isFinite(v.net)) { sum += v.net; any = true; }
+        }
+        if (any && sum > best.score) best = { call: cad.id, put: h.id, score: sum };
+      }
+    }
+    return best;
+  }, [basket.entries, variantsByEntry]);
+
+  const pivotCall = basket.perspectiveCallId ?? autoPivot.call;
+  const pivotPut = basket.perspectivePutId ?? autoPivot.put;
+  const pivotId = `${pivotCall}_${pivotPut}`;
+  const pivotCallLabel = CALL_CADENCES.find((c) => c.id === pivotCall)?.label ?? pivotCall;
+  const pivotPutLabel = PUT_HORIZONS.find((h) => h.id === pivotPut)?.label ?? pivotPut;
+
+  // For each entry, pull the variant at the pivot. If it's missing, figure
+  // out WHY (cadence unavailable for this ticker?) so the n/a card can
+  // explain itself rather than just disappearing.
+  type Row = {
+    entry: IVCEntry;
+    variant: IVCVariant | null;
+    excludeReason: string | null;
+  };
+  const rows: Row[] = basket.entries.map((entry) => {
     const variants = variantsByEntry.get(entry.id) ?? [];
-    const variant =
-      variants.find((x) => x.id === entry.selectedVariantId) ?? variants[0] ?? null;
-    return { entry, variant };
+    const variant = variants.find((v) => v.id === pivotId) ?? null;
+    let excludeReason: string | null = null;
+    if (!variant) {
+      const c = chains[entry.id];
+      if (!entry.underlying || Number(entry.price) <= 0) {
+        excludeReason = "needs ticker + price";
+      } else if (c) {
+        const available = callCadencesAvailable(c.calls).map((x) => x.id);
+        if (!available.includes(pivotCall)) {
+          const cadLabel = CALL_CADENCES.find((x) => x.id === pivotCall)?.label ?? pivotCall;
+          excludeReason = `no ${cadLabel.toLowerCase()} options`;
+        } else {
+          excludeReason = "variant pending";
+        }
+      } else {
+        excludeReason = "loading chain…";
+      }
+    }
+    return { entry, variant, excludeReason };
   });
-  // Score by sortKey (higher = better in all three).
+
+  // Sort: real rows by score, n/a rows after.
   const scoreFor = (v: IVCVariant | null): number => {
     if (!v) return -Infinity;
-    let s = basket.sortKey === "net" ? v.net
+    const s = basket.sortKey === "net" ? v.net
       : basket.sortKey === "yield" ? v.netAnnYield
       : v.coverage;
     return isFinite(s) ? s : -Infinity;
   };
   const ranked = [...rows].sort((a, b) => scoreFor(b.variant) - scoreFor(a.variant));
-  const bestScore = scoreFor(ranked[0]?.variant ?? null);
+  const competing = ranked.filter((r) => r.variant != null);
+  const bestScore = scoreFor(competing[0]?.variant ?? null);
+
+  // Map ticker → rank position for display ("#1" / "#2" / …). n/a cards
+  // get null rank so they don't claim a slot.
+  let nextRank = 1;
+  const ranks = new Map<string, number>();
+  for (const r of ranked) {
+    if (r.variant) ranks.set(r.entry.id, nextRank++);
+  }
 
   return (
     <div className="ivc3-leader">
       <div className="ivc3-leader-head">
         <div className="ivc3-leader-eyebrow">
-          LEADERBOARD <span className="muted">· {rows.length} of {BASKET_MAX_ENTRIES}</span>
+          LEADERBOARD <span className="muted">· {basket.entries.length} of {BASKET_MAX_ENTRIES}</span>
         </div>
         <div className="ivc3-leader-sort">
           <span className="muted">sort by</span>
@@ -792,15 +891,54 @@ function Leaderboard({
           ))}
         </div>
       </div>
+
+      {/* Perspective picker — two compact dropdowns */}
+      <div className="ivc3-leader-perspective">
+        <span className="muted">perspective:</span>
+        <label className="ivc3-leader-picker">
+          <span className="picker-lbl">Calls</span>
+          <select
+            value={pivotCall}
+            onChange={(e) => onSetPerspective(e.target.value, pivotPut)}
+            aria-label="Call cadence perspective"
+          >
+            {CALL_CADENCES.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="ivc3-leader-picker">
+          <span className="picker-lbl">Puts</span>
+          <select
+            value={pivotPut}
+            onChange={(e) => onSetPerspective(pivotCall, e.target.value)}
+            aria-label="Put horizon perspective"
+          >
+            {PUT_HORIZONS.map((h) => (
+              <option key={h.id} value={h.id}>{h.label}</option>
+            ))}
+          </select>
+        </label>
+        <span className="ivc3-leader-pivot-summary">
+          ranking across <b>{pivotCallLabel}</b> calls × <b>{pivotPutLabel}</b> puts
+          {basket.perspectiveCallId == null && (
+            <span className="ivc3-leader-auto"> · auto-picked</span>
+          )}
+        </span>
+      </div>
+
       <div className="ivc3-leader-strip">
-        {ranked.map((r, i) => (
+        {ranked.map((r) => (
           <LeaderboardCard
             key={r.entry.id}
-            rank={i + 1}
+            rank={ranks.get(r.entry.id) ?? null}
             isBest={r.variant != null && scoreFor(r.variant) === bestScore && isFinite(bestScore)}
             entry={r.entry}
             variant={r.variant}
-            onClick={() => r.variant && onJump(r.entry.id, r.variant.id)}
+            excludeReason={r.excludeReason}
+            onClick={() => {
+              if (r.variant) onJump(r.entry.id, r.variant.id);
+            }}
           />
         ))}
         {Array.from({ length: Math.max(0, BASKET_MAX_ENTRIES - ranked.length) }).map((_, i) => (
@@ -819,20 +957,27 @@ function Leaderboard({
 }
 
 function LeaderboardCard({
-  rank, isBest, entry, variant, onClick,
+  rank, isBest, entry, variant, excludeReason, onClick,
 }: {
-  rank: number;
+  rank: number | null;
   isBest: boolean;
   entry: IVCEntry;
   variant: IVCVariant | null;
+  excludeReason: string | null;
   onClick: () => void;
 }) {
+  // The label to show on every card — prefers the live ticker over the
+  // stale display label so the user always sees what they typed.
+  const label = entry.underlying || entry.label || "—";
+  const iv = ivFor(entry.underlying);
+
   if (!variant) {
     return (
-      <button type="button" className="ivc3-lead-card pending" onClick={onClick}>
-        <div className="ivc3-lead-rank">#{rank}</div>
-        <div className="ivc3-lead-label">{entry.label || entry.underlying || "—"}</div>
-        <div className="ivc3-lead-pending">awaiting inputs</div>
+      <button type="button" className="ivc3-lead-card na" onClick={onClick}>
+        <div className="ivc3-lead-rank">n/a</div>
+        <div className="ivc3-lead-label">{label}</div>
+        <div className="ivc3-lead-na-reason">{excludeReason ?? "not available"}</div>
+        <div className="ivc3-lead-iv">IV ~{Math.round(iv * 100)}% <span className="muted">(est)</span></div>
       </button>
     );
   }
@@ -850,12 +995,10 @@ function LeaderboardCard({
       type="button"
       className={`ivc3-lead-card tone-${tone}${isBest ? " best" : ""}`}
       onClick={onClick}
+      title="Click to open this ticker's tab"
     >
-      <div className="ivc3-lead-rank">{isBest ? "⭐ BEST" : `#${rank}`}</div>
-      <div className="ivc3-lead-label">{entry.label}</div>
-      <div className="ivc3-lead-combo">
-        {variant.callCadenceLabel} <span className="muted">×</span> {variant.putHorizonLabel}
-      </div>
+      <div className="ivc3-lead-rank">{isBest ? "⭐ #1" : (rank != null ? `#${rank}` : "—")}</div>
+      <div className="ivc3-lead-label">{label}</div>
       <div className="ivc3-lead-mini">
         <div className="bar inc" style={{ width: `${incPct}%` }} />
         <div className="bar cost" style={{ width: `${100 - incPct}%` }} />
@@ -865,6 +1008,7 @@ function LeaderboardCard({
         <div className="row"><span className="lbl">YIELD</span><b>{ann}/y</b></div>
         <div className="row"><span className="lbl">COV</span><b>{cov}</b></div>
       </div>
+      <div className="ivc3-lead-iv">IV ~{Math.round(iv * 100)}% <span className="muted">(est)</span></div>
     </button>
   );
 }
@@ -983,7 +1127,17 @@ function EntryView({
             className="cyc-input ticker"
             type="text"
             value={entry.underlying}
-            onChange={(e) => set("underlying", e.target.value.toUpperCase())}
+            onChange={(e) => {
+              const u = e.target.value.toUpperCase();
+              // Auto-sync the tab/card label when the user hasn't
+              // manually renamed this entry. Keeps "Entry 1" from
+              // sticking around once they've typed NVDA.
+              onUpdate((cur) => ({
+                ...cur,
+                underlying: u,
+                label: cur.labelIsAuto ? (u || cur.label) : cur.label,
+              }));
+            }}
             placeholder="SPY"
             aria-label="Underlying ticker"
           />
