@@ -506,10 +506,14 @@ export function IncomeVsCostCalc({
   // shape — wrap them into a 1-entry basket transparently.
   const basket = useMemo(() => toBasket(state), [state]);
   const isLegacy = !("entries" in (state ?? {}));
+  // Persist the migrated shape so future renders / saves see the basket
+  // directly. We render with `basket` either way, so there's no flicker —
+  // and crucially, no early return (which would skip later hooks and
+  // trigger React's hook-count mismatch).
   useEffect(() => {
     if (isLegacy) setState(basket);
-  }, [isLegacy, basket, setState]);
-  if (isLegacy) return null;  // brief flicker before the migrated state lands
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLegacy]);
 
   const update = (next: Partial<IVCBasketState>) => setState({ ...basket, ...next });
   const updateEntry = (entryId: string, updater: (e: IVCEntry) => IVCEntry) =>
