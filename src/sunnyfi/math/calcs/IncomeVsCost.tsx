@@ -1093,11 +1093,8 @@ function LeaderboardCard({
 }) {
   const label = displayLabel(entry);
   const baselineIV = ivFor(entry.underlying);
-  // IV elevation flag — live chain IV vs our 1y baseline. >1.25× = visibly
-  // elevated (typical of an imminent catalyst like earnings).
-  const ivRatio = liveIV != null && baselineIV > 0 ? liveIV / baselineIV : null;
-  const ivElevated = ivRatio != null && ivRatio >= 1.25;
-  const ivSubdued = ivRatio != null && ivRatio <= 0.8;
+  void liveIV;  // unused now that the elevation chip is gone — keeping the
+                // prop so re-adding the chip later is a one-line change.
 
   if (!variant) {
     return (
@@ -1196,11 +1193,11 @@ function LeaderboardCard({
 
       {/* Context line — concrete strikes + capital at risk */}
       <div className="ivc3-lead-context">
-        <span>K <b>{fmtMoney(variant.callStrike, { decimals: 0 })}</b> call</span>
+        <span>Call strike <b>{fmtMoney(variant.callStrike, { decimals: 0 })}</b></span>
         <span className="sep">·</span>
-        <span>K <b>{fmtMoney(variant.putStrike, { decimals: 0 })}</b> put</span>
+        <span>Put strike <b>{fmtMoney(variant.putStrike, { decimals: 0 })}</b></span>
         <span className="sep">·</span>
-        <span><b>{fmtMoney(variant.notional, { decimals: 0 })}</b> notional</span>
+        <span>Notional <b>{fmtMoney(variant.notional, { decimals: 0 })}</b></span>
       </div>
 
       <div className="ivc3-lead-mini">
@@ -1216,16 +1213,6 @@ function LeaderboardCard({
       <div className="ivc3-lead-footline">
         Yield <b>{ann}/y</b> · Cov <b>{cov}</b> · IV <b>{Math.round(baselineIV * 100)}%</b>
         <span className="muted"> (1y avg)</span>
-        {ivElevated && (
-          <span className="ivc3-lead-iv-chip elevated" title="Live chain IV is significantly above the 1y baseline — often an earnings catalyst. Real premiums today are higher than what this fair-value ranking assumes.">
-            ↑ live {Math.round((liveIV ?? 0) * 100)}%
-          </span>
-        )}
-        {ivSubdued && (
-          <span className="ivc3-lead-iv-chip subdued" title="Live chain IV is below the 1y baseline — quieter than usual.">
-            ↓ live {Math.round((liveIV ?? 0) * 100)}%
-          </span>
-        )}
       </div>
     </button>
   );

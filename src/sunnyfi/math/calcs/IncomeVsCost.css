@@ -1430,9 +1430,9 @@
 .ivc3-lead-card.best .ivc3-lead-hero { color: var(--navi-neon); }
 .ivc3-lead-hero-sub {
   font-family: var(--navi-font-mono);
-  font-size: 9px;
-  font-weight: 500;
-  color: var(--navi-fg5);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--navi-fg3);
   letter-spacing: .3px;
   text-transform: lowercase;
 }
@@ -1445,15 +1445,15 @@
   gap: 4px 6px;
   font-family: var(--navi-font-mono);
   font-size: 10.5px;
-  color: var(--navi-fg4);
+  color: var(--navi-fg2);
   letter-spacing: .2px;
   line-height: 1.5;
 }
 .ivc3-lead-context b {
-  color: var(--navi-fg2);
+  color: var(--navi-fg1);
   font-weight: 700;
 }
-.ivc3-lead-context .sep { color: var(--navi-fg5); }
+.ivc3-lead-context .sep { color: var(--navi-fg4); }
 
 /* Narrative sentence — the story */
 .ivc3-lead-narrative {
@@ -1503,10 +1503,10 @@
 .ivc3-lead-footline {
   margin-top: auto;
   padding-top: 9px;
-  border-top: 1px dashed rgba(50,110,100,.32);
+  border-top: 1px dashed rgba(50,110,100,.4);
   font-family: var(--navi-font-mono);
   font-size: 10.5px;
-  color: var(--navi-fg4);
+  color: var(--navi-fg2);
   letter-spacing: .2px;
   line-height: 1.55;
 }
@@ -1514,8 +1514,8 @@
   color: var(--navi-fg1);
   font-weight: 700;
 }
-.ivc3-lead-card.tone-neg .ivc3-lead-footline b { color: var(--navi-fg2); }
-.ivc3-lead-footline .muted { color: var(--navi-fg5); }
+.ivc3-lead-card.tone-neg .ivc3-lead-footline b { color: var(--navi-fg1); }
+.ivc3-lead-footline .muted { color: var(--navi-fg4); }
 
 /* Active-tab indicator — small dot next to the rank */
 .ivc3-lead-active-dot {
