@@ -133,6 +133,17 @@ function makeEntry(label: string, init: Partial<IVCEntry> = {}): IVCEntry {
   };
 }
 
+/** What to show in tabs, leaderboard cards, snapshot helpers, etc. When
+ *  the entry is in auto mode the displayed label always prefers the live
+ *  ticker — so typing NVDA into "Entry 1" makes the tab read NVDA on the
+ *  very next render, no on-change state-sync required. Only entries the
+ *  user has explicitly renamed (labelIsAuto === false with a non-empty
+ *  label) keep their custom string regardless of ticker. */
+function displayLabel(entry: IVCEntry): string {
+  if (entry.labelIsAuto === false && entry.label) return entry.label;
+  return entry.underlying || entry.label || "—";
+}
+
 /** Synthesize a legacy IVCState from one entry + the basket's strike policy.
  *  All inner helpers (computeAllVariants, etc.) still consume IVCState. */
 function asIVCState(entry: IVCEntry, basket: IVCBasketState): IVCState {
@@ -267,6 +278,41 @@ export interface IVCVariant {
 
 function plusDays(d: Date, n: number): Date {
   const r = new Date(d); r.setDate(r.getDate() + n); return r;
+}
+
+/** Crude back-solve of implied vol from a near-ATM call premium, using the
+ *  inverse of our estPremium() formula so the math is internally
+ *  consistent. Picks the listed contract nearest 30 DTE within a 10–60 day
+ *  window (anything shorter is too gamma-warped, anything longer not
+ *  representative of "current" IV). Returns null when the chain doesn't
+ *  have anything in that window. Used purely for the elevation chip on
+ *  leaderboard cards — when live IV is well above the 1y baseline we
+ *  flag earnings-style distortions. */
+function backsolveLiveIV(
+  callChain: OptionContractQuote[],
+  spot: number,
+  strike: number,
+  now: Date = new Date(),
+): number | null {
+  if (!callChain.length || !isFinite(spot) || spot <= 0) return null;
+  const today = now.getTime();
+  let best: { c: OptionContractQuote; daysOff: number } | null = null;
+  for (const c of callChain) {
+    const t = new Date(c.expiry + "T00:00:00Z").getTime();
+    const days = (t - today) / 86400000;
+    if (days < 10 || days > 60) continue;
+    const daysOff = Math.abs(days - 30);
+    if (!best || daysOff < best.daysOff) best = { c, daysOff };
+  }
+  if (!best) return null;
+  const days = (new Date(best.c.expiry + "T00:00:00Z").getTime() - today) / 86400000;
+  if (days <= 0) return null;
+  const T = days / 365;
+  const sqrtT = Math.sqrt(T);
+  const intrinsic = Math.max(0, spot - strike);
+  const timeValue = Math.max(0.01, best.c.premium - intrinsic);
+  const iv = timeValue / (0.4 * spot * sqrtT);
+  return isFinite(iv) && iv > 0 ? iv : null;
 }
 
 /** Decide which call cadences to surface based on actual expiry density
@@ -457,8 +503,9 @@ export function ivcCopy(payload: unknown): string {
   const lines = basket.entries
     .map((e) => {
       const v = selectedFrom(asIVCState(e, basket));
-      if (!v) return `  · ${e.label} (${e.underlying || "—"}) · incomplete`;
-      return `  · ${e.label} (${e.underlying}) ${v.callCadenceLabel}×${v.putHorizonLabel}: ${fmtMoney(v.net, { signed: true, decimals: 0 })} (${fmtPct(v.netAnnYield)} ann)`;
+      const lbl = displayLabel(e);
+      if (!v) return `  · ${lbl} (${e.underlying || "—"}) · incomplete`;
+      return `  · ${lbl} (${e.underlying}) ${v.callCadenceLabel}×${v.putHorizonLabel}: ${fmtMoney(v.net, { signed: true, decimals: 0 })} (${fmtPct(v.netAnnYield)} ann)`;
     })
     .join("\n");
   return `${head}\n${lines}`;
@@ -483,7 +530,7 @@ export function ivcFields(payload: unknown): Array<{ label: string; value: strin
     ];
   }
   const bestLine = r.best
-    ? `${r.best.entry.label} · ${r.best.variant.callCadenceLabel}×${r.best.variant.putHorizonLabel}`
+    ? `${displayLabel(r.best.entry)} · ${r.best.variant.callCadenceLabel}×${r.best.variant.putHorizonLabel}`
     : "—";
   return [
     { label: "Basket",       value: basket.basketName, mono: true },
@@ -512,7 +559,7 @@ export function ivcCardLine(payload: unknown): string {
   const r = rollup(basket);
   if (r.entryCount === 0) return "empty basket";
   if (!r.best) return `${r.entryCount} tickers · pending`;
-  return `${r.entryCount} tickers · best ${r.best.entry.label} ${r.best.variant.callCadenceLabel}×${r.best.variant.putHorizonLabel}`;
+  return `${r.entryCount} tickers · best ${displayLabel(r.best.entry)} ${r.best.variant.callCadenceLabel}×${r.best.variant.putHorizonLabel}`;
 }
 
 // ── Body — basket shell ──────────────────────────────────────────
@@ -913,6 +960,37 @@ function Leaderboard({
     if (r.variant) ranks.set(r.entry.id, nextRank++);
   }
 
+  // Live IV per entry — back-solved from each chain's near-ATM call.
+  // Compared to our 1y-baseline (IV_HINTS) in the card to flag elevated
+  // levels (earnings catalyst, etc.).
+  const liveIVByEntry = useMemo(() => {
+    const m = new Map<string, number | null>();
+    for (const e of basket.entries) {
+      const c = chains[e.id];
+      const price = Number(e.price);
+      const cd = Number(basket.callDistance);
+      const callStrike = isFinite(price) && isFinite(cd) ? price * (1 + cd / 100) : NaN;
+      m.set(e.id, c ? backsolveLiveIV(c.calls, price, callStrike) : null);
+    }
+    return m;
+  }, [basket.entries, chains, basket.callDistance]);
+
+  // Cents/share delta against the immediate neighbor in the ranking — gives
+  // each card a "by how much?" frame (e.g. "+$72k over #2", "−$14k vs #1").
+  const deltaForRank = (i: number): number | null => {
+    const me = competing[i]?.variant;
+    if (!me) return null;
+    if (i === 0) {
+      // Top card → delta vs #2
+      const next = competing[1]?.variant;
+      if (!next) return null;
+      return me.net - next.net;
+    }
+    const prev = competing[i - 1]?.variant;
+    if (!prev) return null;
+    return me.net - prev.net;
+  };
+
   return (
     <div className="ivc3-leader">
       <div className="ivc3-leader-head">
@@ -955,23 +1033,30 @@ function Leaderboard({
       </div>
 
       <div className="ivc3-leader-strip">
-        {ranked.map((r) => (
-          <LeaderboardCard
-            key={r.entry.id}
-            rank={ranks.get(r.entry.id) ?? null}
-            isBest={r.variant != null && scoreFor(r.variant) === bestScore && isFinite(bestScore)}
-            isActive={r.entry.id === basket.activeEntryId}
-            entry={r.entry}
-            variant={r.variant}
-            excludeReason={r.excludeReason}
-            pivotCallShort={pivotCallShort}
-            pivotPutShort={pivotPutShort}
-            pivotPutDays={pivotPutDays}
-            onClick={() => {
-              if (r.variant) onJump(r.entry.id, r.variant.id);
-            }}
-          />
-        ))}
+        {ranked.map((r) => {
+          const rankIdx = competing.findIndex((c) => c.entry.id === r.entry.id);
+          const delta = rankIdx >= 0 ? deltaForRank(rankIdx) : null;
+          return (
+            <LeaderboardCard
+              key={r.entry.id}
+              rank={ranks.get(r.entry.id) ?? null}
+              isBest={r.variant != null && scoreFor(r.variant) === bestScore && isFinite(bestScore)}
+              isActive={r.entry.id === basket.activeEntryId}
+              entry={r.entry}
+              variant={r.variant}
+              excludeReason={r.excludeReason}
+              pivotCallShort={pivotCallShort}
+              pivotPutShort={pivotPutShort}
+              pivotPutDays={pivotPutDays}
+              liveIV={liveIVByEntry.get(r.entry.id) ?? null}
+              deltaToNeighbor={delta}
+              isTopRank={rankIdx === 0}
+              onClick={() => {
+                if (r.variant) onJump(r.entry.id, r.variant.id);
+              }}
+            />
+          );
+        })}
         {Array.from({ length: Math.max(0, BASKET_MAX_ENTRIES - ranked.length) }).map((_, i) => (
           <button
             key={`empty-${i}`}
@@ -989,7 +1074,8 @@ function Leaderboard({
 
 function LeaderboardCard({
   rank, isBest, isActive, entry, variant, excludeReason,
-  pivotCallShort, pivotPutShort, pivotPutDays, onClick,
+  pivotCallShort, pivotPutShort, pivotPutDays,
+  liveIV, deltaToNeighbor, isTopRank, onClick,
 }: {
   rank: number | null;
   isBest: boolean;
@@ -1000,11 +1086,18 @@ function LeaderboardCard({
   pivotCallShort: string;
   pivotPutShort: string;
   pivotPutDays: number;
+  liveIV: number | null;
+  deltaToNeighbor: number | null;
+  isTopRank: boolean;
   onClick: () => void;
 }) {
-  // Prefer the live ticker over the stale display label.
-  const label = entry.underlying || entry.label || "—";
-  const iv = ivFor(entry.underlying);
+  const label = displayLabel(entry);
+  const baselineIV = ivFor(entry.underlying);
+  // IV elevation flag — live chain IV vs our 1y baseline. >1.25× = visibly
+  // elevated (typical of an imminent catalyst like earnings).
+  const ivRatio = liveIV != null && baselineIV > 0 ? liveIV / baselineIV : null;
+  const ivElevated = ivRatio != null && ivRatio >= 1.25;
+  const ivSubdued = ivRatio != null && ivRatio <= 0.8;
 
   if (!variant) {
     return (
@@ -1016,7 +1109,10 @@ function LeaderboardCard({
         <div className="ivc3-lead-rank">n/a</div>
         <div className="ivc3-lead-label">{label}</div>
         <div className="ivc3-lead-na-reason">{excludeReason ?? "not available"}</div>
-        <div className="ivc3-lead-iv">IV ~{Math.round(iv * 100)}% <span className="muted">(1y avg)</span></div>
+        <div className="ivc3-lead-footline">
+          IV <b>{Math.round(baselineIV * 100)}%</b>
+          <span className="muted"> (1y avg)</span>
+        </div>
       </button>
     );
   }
@@ -1031,16 +1127,17 @@ function LeaderboardCard({
     : variant.coverage === Infinity ? "∞"
     : `${variant.coverage.toFixed(2)}×`;
 
-  // ── The narrative line ──
-  // Three short sentences chosen by the variant's economics:
-  //  • Per-cycle income (matches the per-cycle unit the user picked)
-  //  • How many cycles to recoup the put
-  //  • If net is negative, an honest "puts outweigh calls" line instead
+  // Cycles needed for cumulative call income to cover the put cost.
   const cyclesToCoverPut =
     variant.incomePerCycle > 0
       ? Math.ceil(variant.totalCost / variant.incomePerCycle)
       : Infinity;
-  const cycleUnit = variant.callPerUnit.replace("/", "");  // "wk" / "mo" / "day" / "2wk" / "run"
+  // Pluralise the cycle unit ("wk" → "wks", but "day" → "days").
+  const cycleUnit = variant.callPerUnit.replace("/", "");
+  const cycleUnitPlural =
+    cycleUnit === "day" ? "days" :
+    cycleUnit === "run" ? "runs" :
+    cycleUnit + "s";
   const horizonWord =
     pivotPutDays >= 350 ? "year" :
     pivotPutDays >= 170 ? "6 months" :
@@ -1054,7 +1151,18 @@ function LeaderboardCard({
   } else if (!isFinite(cyclesToCoverPut)) {
     narrative = `Calls earn ${incomePerCycleTxt} per ${cycleUnit} — no put to fund.`;
   } else {
-    narrative = `Each ${pivotCallShort} call earns ${incomePerCycleTxt}. Recoups the ${pivotPutShort} put in ${cyclesToCoverPut} ${cyclesToCoverPut === 1 ? cycleUnit : (cycleUnit.endsWith("y") ? cycleUnit + "s" : cycleUnit + "s")}.`;
+    narrative = `Each ${pivotCallShort} call earns ${incomePerCycleTxt}. Recoups the ${pivotPutShort} put in ${cyclesToCoverPut} ${cyclesToCoverPut === 1 ? cycleUnit : cycleUnitPlural}.`;
+  }
+
+  // "Beats #2 by $X" / "Behind #1 by $X" — anchors the gap.
+  let deltaLine: string | null = null;
+  if (deltaToNeighbor != null && isFinite(deltaToNeighbor)) {
+    const abs = Math.abs(deltaToNeighbor);
+    if (abs >= 100) {
+      deltaLine = isTopRank
+        ? `Beats #2 by ${fmtMoney(abs, { decimals: 0 })}.`
+        : `Behind #${(rank ?? 2) - 1} by ${fmtMoney(abs, { decimals: 0 })}.`;
+    }
   }
 
   return (
@@ -1069,18 +1177,44 @@ function LeaderboardCard({
         {isActive && <span className="ivc3-lead-active-dot" aria-label="active tab">●</span>}
       </div>
       <div className="ivc3-lead-label">{label}</div>
+
       <div className="ivc3-lead-hero">
         {fmtMoney(variant.net, { signed: true, decimals: 0 })}
         <span className="ivc3-lead-hero-sub">over {horizonWord}</span>
       </div>
+
+      {/* Context line — concrete strikes + capital at risk */}
+      <div className="ivc3-lead-context">
+        <span>K <b>{fmtMoney(variant.callStrike, { decimals: 0 })}</b> call</span>
+        <span className="sep">·</span>
+        <span>K <b>{fmtMoney(variant.putStrike, { decimals: 0 })}</b> put</span>
+        <span className="sep">·</span>
+        <span><b>{fmtMoney(variant.notional, { decimals: 0 })}</b> notional</span>
+      </div>
+
       <div className="ivc3-lead-mini">
         <div className="bar inc" style={{ width: `${incPct}%` }} />
         <div className="bar cost" style={{ width: `${100 - incPct}%` }} />
       </div>
+
       <p className="ivc3-lead-narrative">{narrative}</p>
+      {deltaLine && (
+        <p className={`ivc3-lead-delta ${isTopRank ? "pos" : "neg"}`}>{deltaLine}</p>
+      )}
+
       <div className="ivc3-lead-footline">
-        Yield <b>{ann}/y</b> · Cov <b>{cov}</b> · IV <b>{Math.round(iv * 100)}%</b>
+        Yield <b>{ann}/y</b> · Cov <b>{cov}</b> · IV <b>{Math.round(baselineIV * 100)}%</b>
         <span className="muted"> (1y avg)</span>
+        {ivElevated && (
+          <span className="ivc3-lead-iv-chip elevated" title="Live chain IV is significantly above the 1y baseline — often an earnings catalyst. Real premiums today are higher than what this fair-value ranking assumes.">
+            ↑ live {Math.round((liveIV ?? 0) * 100)}%
+          </span>
+        )}
+        {ivSubdued && (
+          <span className="ivc3-lead-iv-chip subdued" title="Live chain IV is below the 1y baseline — quieter than usual.">
+            ↓ live {Math.round((liveIV ?? 0) * 100)}%
+          </span>
+        )}
       </div>
     </button>
   );
@@ -1101,13 +1235,14 @@ function EntryTabs({
     <div className="ivc3-tabs">
       {basket.entries.map((e) => {
         const isActive = e.id === basket.activeEntryId;
+        const lbl = displayLabel(e);
         if (editingId === e.id) {
           return (
             <input
               key={e.id}
               className="ivc3-tab editing"
               autoFocus
-              defaultValue={e.label}
+              defaultValue={lbl}
               onBlur={(ev) => {
                 onRename(e.id, ev.target.value);
                 setEditingId(null);
@@ -1134,13 +1269,13 @@ function EntryTabs({
             aria-selected={isActive}
             title="Double-click to rename"
           >
-            <span className="ivc3-tab-label">{e.label}</span>
+            <span className="ivc3-tab-label">{lbl}</span>
             {basket.entries.length > 1 && (
               <button
                 type="button"
                 className="ivc3-tab-close"
                 onClick={(ev) => { ev.stopPropagation(); onRemove(e.id); }}
-                aria-label={`Remove ${e.label}`}
+                aria-label={`Remove ${lbl}`}
               >
                 ×
               </button>
@@ -1200,28 +1335,7 @@ function EntryView({
             className="cyc-input ticker"
             type="text"
             value={entry.underlying}
-            onChange={(e) => {
-              const u = e.target.value.toUpperCase();
-              // Auto-sync the tab/card label when the user hasn't
-              // manually renamed this entry. We check labelIsAuto AND
-              // a defensive heuristic — labels that match the auto-
-              // default ("Entry 3") or the previous ticker count as
-              // auto, so the sync still fires for any entry whose
-              // label flag got persisted before this feature existed.
-              onUpdate((cur) => {
-                const looksAuto =
-                  cur.labelIsAuto ||
-                  cur.label === cur.underlying ||
-                  /^Entry \d+$/.test(cur.label) ||
-                  cur.label === "";
-                return {
-                  ...cur,
-                  underlying: u,
-                  label: looksAuto ? (u || cur.label) : cur.label,
-                  labelIsAuto: looksAuto || cur.labelIsAuto,
-                };
-              });
-            }}
+            onChange={(e) => set("underlying", e.target.value.toUpperCase())}
             placeholder="SPY"
             aria-label="Underlying ticker"
           />

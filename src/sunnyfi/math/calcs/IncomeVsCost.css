@@ -1333,7 +1333,7 @@
   font: inherit;
   color: inherit;
   transition: transform .12s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
-  min-height: 200px;
+  min-height: 240px;
   overflow: hidden;
 }
 .ivc3-lead-card:hover {
@@ -1434,6 +1434,24 @@
   text-transform: lowercase;
 }
 
+/* Context line — concrete strikes + capital. Sits between hero and bar. */
+.ivc3-lead-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--navi-font-mono);
+  font-size: 9.5px;
+  color: var(--navi-fg4);
+  letter-spacing: .2px;
+  line-height: 1.4;
+}
+.ivc3-lead-context b {
+  color: var(--navi-fg2);
+  font-weight: 700;
+}
+.ivc3-lead-context .sep { color: var(--navi-fg5); }
+
 /* Narrative sentence — the story */
 .ivc3-lead-narrative {
   margin: 0;
@@ -1442,6 +1460,40 @@
   line-height: 1.45;
   color: var(--navi-fg2);
   letter-spacing: -.1px;
+}
+
+/* Delta vs neighbor — "Beats #2 by $72k" / "Behind #1 by $X" */
+.ivc3-lead-delta {
+  margin: 0;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .2px;
+}
+.ivc3-lead-delta.pos { color: var(--navi-positive); }
+.ivc3-lead-delta.neg { color: var(--navi-fg4); }
+
+/* Inline IV elevation chip in the footline */
+.ivc3-lead-iv-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .4px;
+  vertical-align: 1px;
+}
+.ivc3-lead-iv-chip.elevated {
+  background: rgba(232,112,96,.18);
+  color: var(--navi-negative);
+  border: 1px solid rgba(232,112,96,.4);
+}
+.ivc3-lead-iv-chip.subdued {
+  background: rgba(110,160,200,.18);
+  color: #9bb7d6;
+  border: 1px solid rgba(110,160,200,.35);
 }
 
 /* Single-line footer w/ yield · cov · IV — supplementary metrics */
