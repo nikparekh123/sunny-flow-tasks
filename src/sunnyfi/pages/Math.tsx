@@ -1,13 +1,15 @@
 /**
  * Math — page route.
  *
- * Hosts the runtime state machine for the six hi-fi screens:
+ * Hosts the runtime state machine for the hi-fi screens:
  *   1. Resting        — selectedCalc == null && !searchOpen
  *   2. Palette open   — searchOpen
- *   3. Calc loaded    — selectedCalc set, no modal/compare
+ *   3. Calc loaded    — selectedCalc set, no modal
  *   4. History modal  — modal === "history"
- *   5. Compare mode   — compareMode (full-stage replacement)
- *   6. Share modal    — modal === "share"
+ *   5. Share modal    — modal === "share"
+ *
+ * The legacy Compare page was retired when IvC moved to the basket model —
+ * cross-snapshot comparison now lives inside each calc (or History).
  *
  * Snapshots persist to localStorage via useSnapshots(). The calculator body
  * itself is a CalcEmpty placeholder until per-calc components are wired in
@@ -55,7 +57,6 @@ export default function MathPage() {
   const [searchOpen, setSearchOpen]     = useState(false);
   const [searchValue, setSearchValue]   = useState("");
   const [modal, setModal]               = useState<"history" | "share" | null>(null);
-  const [compareMode, setCompareMode]   = useState(false);
 
   // Current working snapshot (untitled until saved). Going back to resting
   // resets it.
@@ -71,9 +72,8 @@ export default function MathPage() {
   // ── derived ──
   const calc       = findCalc(selectedCalc);
   const calcModule = calc ? (CALC_MODULES[calc.key] as CalcModule | undefined) : undefined;
-  const route      = compareMode ? "Compare" : calc ? calc.name : "Math";
+  const route      = calc ? calc.name : "Math";
   const canSave    = !!calc;
-  const canCompare = snaps.length >= 2;
 
   // Per-calc live state (persisted to localStorage). When no calc is selected
   // we pass null + an empty initial — useLiveState becomes a no-op.
@@ -123,12 +123,11 @@ export default function MathPage() {
       if (e.key === "Escape") {
         if (searchOpen)     { setSearchOpen(false);  return; }
         if (modal)          { setModal(null);        return; }
-        if (compareMode)    { setCompareMode(false); return; }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [searchOpen, modal, compareMode]);
+  }, [searchOpen, modal]);
 
   // ── actions ──
   const pickCalc = (key: string) => {
@@ -136,7 +135,6 @@ export default function MathPage() {
     setSearchOpen(false);
     setSearchValue("");
     setModal(null);
-    setCompareMode(false);
   };
 
   const saveSnap = async () => {
@@ -201,11 +199,6 @@ export default function MathPage() {
   const handleDock = (k: DockKey) => {
     if (k === "snapshot") { saveSnap(); return; }
     if (k === "history")  { setModal((m) => m === "history" ? null : "history"); return; }
-    if (k === "compare")  {
-      if (!canCompare) return;
-      setCompareMode((v) => !v);
-      return;
-    }
     if (k === "share")    { setModal((m) => m === "share" ? null : "share"); return; }
   };
 
@@ -221,10 +214,9 @@ export default function MathPage() {
       onDockClick={handleDock}
       onShare={() => setModal("share")}
       onBrandClick={() => {
-        if (compareMode || selectedCalc || modal || searchOpen) {
+        if (selectedCalc || modal || searchOpen) {
           // First click backs out of the current mode.
           setModal(null);
-          setCompareMode(false);
           setSearchOpen(false);
           setSelectedCalc(null);
         } else {
@@ -232,28 +224,10 @@ export default function MathPage() {
         }
       }}
       canSave={canSave}
-      canCompare={canCompare}
-      showShare={!compareMode}
       hideDock={searchOpen}
     >
-      {/* ── Compare mode: card grid + Analyze ── */}
-      {compareMode ? (
-        <CompareGrid
-          snaps={snaps}
-          onExit={() => setCompareMode(false)}
-          onRestore={(snap) => {
-            setSelectedCalc(snap.calcKey);
-            setLiveState({ ...(CALC_MODULES[snap.calcKey]?.initial ?? {}), ...snap.payload });
-            setSnapName(snap.name);
-            setSavedSnapId(snap.id);
-            setCompareMode(false);
-            flash(`⤺ Loaded "${snap.name}"`);
-          }}
-          onDelete={(id) => remove(id)}
-        />
-      ) : (
-        <>
-          {selectedCalc && calc ? (
+      <>
+        {selectedCalc && calc ? (
             <div className="hf-calc-stage">
               <div className="hf-calc-stack">
                 <CalcTabs current={calc.key} onPick={pickCalc} />
@@ -328,7 +302,6 @@ export default function MathPage() {
             </div>
           )}
         </>
-      )}
 
       {/* ── Palette overlay (search open) ── */}
       {searchOpen && (
@@ -362,7 +335,6 @@ export default function MathPage() {
               <div className="hf-foot-hint">⇧↑↓ to multi-select · esc to close</div>
               <div className="hf-foot-actions">
                 <button className="hf-btn ghost" disabled={!historySelected}>↗ Share selected</button>
-                <button className="hf-btn neon" disabled={!canCompare}>⇆ Compare 2</button>
               </div>
             </div>
           }
@@ -678,194 +650,6 @@ function HistoryBody({
       </div>
     </div>
   );
-}
-
-// ── Compare grid ─────────────────────────────────────────────────
-// Card view across saved snapshots grouped by calculator. Default sort is
-// "newest first"; clicking Analyze sorts each group by the calc's own rank
-// metric and surfaces the #1 with a "BEST" treatment. Click any card to
-// restore that snapshot into the calc.
-function CompareGrid({
-  snaps,
-  onExit,
-  onRestore,
-  onDelete,
-}: {
-  snaps: Snapshot[];
-  onExit: () => void;
-  onRestore: (snap: Snapshot) => void;
-  onDelete: (id: string) => void;
-}) {
-  const [analyze, setAnalyze] = useState(false);
-
-  const groups = useMemo(() => {
-    // Group by calc key, preserve catalog order.
-    const byCalc = new Map<string, Snapshot[]>();
-    for (const s of snaps) {
-      const arr = byCalc.get(s.calcKey) ?? [];
-      arr.push(s);
-      byCalc.set(s.calcKey, arr);
-    }
-    return CALCS
-      .map((c) => ({ calc: c, items: byCalc.get(c.key) ?? [] }))
-      .filter((g) => g.items.length > 0);
-  }, [snaps]);
-
-  const totalSnaps = snaps.length;
-  const canAnalyze = totalSnaps >= 2;
-
-  if (totalSnaps === 0) {
-    return (
-      <div className="math-compare-stage">
-        <div className="math-compare-empty">
-          <div style={{ marginBottom: 12, color: "var(--navi-fg2)", fontSize: 16 }}>
-            No saved snapshots yet.
-          </div>
-          <div style={{ color: "var(--navi-fg4)", fontSize: 13, marginBottom: 18 }}>
-            Save a calculation in any calc (✓ Save in the footer) to start comparing.
-          </div>
-          <button className="hf-btn ghost" onClick={onExit}>← Back</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="math-compare-stage">
-      <div className="math-compare-head">
-        <div>
-          <div className="hf-eyebrow">Compare · {totalSnaps} saved</div>
-          <div className="math-compare-title">
-            {analyze ? "Ranked by best trade" : "All saved snapshots"}
-          </div>
-        </div>
-        <div className="math-compare-actions">
-          <button
-            className={`hf-btn ${analyze ? "neon" : "ghost"}`}
-            onClick={() => setAnalyze((v) => !v)}
-            disabled={!canAnalyze}
-            title={canAnalyze ? "Rank cards by each calc's best-trade metric" : "Save at least 2 snapshots to analyze"}
-          >
-            {analyze ? "✓ Analyzing" : "Analyze"}
-          </button>
-          <button className="hf-btn ghost" onClick={onExit}>✕ Exit</button>
-        </div>
-      </div>
-
-      {groups.map((g) => (
-        <CompareGroup
-          key={g.calc.key}
-          calc={g.calc}
-          items={g.items}
-          analyze={analyze}
-          onRestore={onRestore}
-          onDelete={onDelete}
-        />
-      ))}
-    </div>
-  );
-}
-
-function CompareGroup({
-  calc,
-  items,
-  analyze,
-  onRestore,
-  onDelete,
-}: {
-  calc: CalcMeta;
-  items: Snapshot[];
-  analyze: boolean;
-  onRestore: (snap: Snapshot) => void;
-  onDelete: (id: string) => void;
-}) {
-  const mod = CALC_MODULES[calc.key];
-
-  const ordered = useMemo(() => {
-    // Score each snapshot, then either rank-sort (analyze) or time-sort.
-    const scored = items.map((s) => {
-      const r = mod?.rank?.(s.payload);
-      return { snap: s, score: r?.score, label: r?.label };
-    });
-    if (analyze) {
-      // Highest score first; snapshots with no rank (NaN/null) sink to the
-      // bottom but stay in time order among themselves.
-      return [...scored].sort((a, b) => {
-        const aS = isFiniteScore(a.score);
-        const bS = isFiniteScore(b.score);
-        if (aS && bS) return (b.score as number) - (a.score as number);
-        if (aS) return -1;
-        if (bS) return 1;
-        return b.snap.createdAt - a.snap.createdAt;
-      });
-    }
-    return [...scored].sort((a, b) => b.snap.createdAt - a.snap.createdAt);
-  }, [items, analyze, mod]);
-
-  return (
-    <div className="math-compare-group">
-      <div className="math-compare-group-hd">
-        <span className="hf-section">{calc.name}</span>
-        <span className="math-compare-group-count">{items.length}</span>
-        {analyze && ordered[0]?.label && (
-          <span className="math-compare-group-axis">ranked by {ordered[0].label}</span>
-        )}
-      </div>
-      <div className="math-compare-cards">
-        {ordered.map(({ snap, score }, i) => {
-          const disp = mod?.display ? mod.display(snap.payload) : { value: "—", tone: "muted" as const };
-          const line = mod?.cardLine ? mod.cardLine(snap.payload) : "";
-          const rankNum = analyze && isFiniteScore(score) ? i + 1 : null;
-          const isBest = rankNum === 1;
-          return (
-            <button
-              key={snap.id}
-              className={`math-card ${isBest ? "best" : ""} ${rankNum != null ? "ranked" : ""}`}
-              onClick={() => onRestore(snap)}
-              title="Load this snapshot into the calculator"
-            >
-              {rankNum != null && (
-                <span className={`math-card-rank ${isBest ? "best" : ""}`}>
-                  {isBest ? "BEST" : `#${rankNum}`}
-                </span>
-              )}
-              <span
-                className="math-card-x"
-                role="button"
-                aria-label="Delete snapshot"
-                onClick={(e) => { e.stopPropagation(); onDelete(snap.id); }}
-              >
-                ✕
-              </span>
-              <div className="math-card-hd">
-                <div className="math-card-name">{snap.name}</div>
-                <div className="math-card-time">{relTime(snap.createdAt)}</div>
-              </div>
-              <div className={`math-card-hero ${disp.tone}`}>{disp.value}</div>
-              {analyze && isFiniteScore(score) && (
-                <div className="math-card-metric">
-                  {formatScore(calc.key, score as number)}
-                </div>
-              )}
-              {line && <div className="math-card-line">{line}</div>}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function isFiniteScore(n: number | undefined): boolean {
-  return typeof n === "number" && isFinite(n);
-}
-
-function formatScore(calcKey: string, score: number): string {
-  // Put Cost rank negates the cost % so "higher score = cheaper". Flip the
-  // sign back when displaying so the user sees the actual cost percentage.
-  if (calcKey === "put-cost") return `${(-score).toFixed(2)}% cost`;
-  // EI and IvC both rank by a yield %, positive = better.
-  return `${score.toFixed(2)}%`;
 }
 
 

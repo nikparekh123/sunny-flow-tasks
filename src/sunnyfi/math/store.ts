@@ -16,7 +16,7 @@ export type SnapshotKind = "snapshot" | "variant";
 export interface Snapshot {
   id: string;
   calcKey: string;
-  /** 'snapshot' = canonical per-ticker, lives in Compare. 'variant' = per-ticker
+  /** 'snapshot' = canonical per-ticker, lives in History. 'variant' = per-ticker
    *  exploration card, lives only in the calc's Variants strip. */
   kind: SnapshotKind;
   name: string;
@@ -57,7 +57,7 @@ export function useSnapshots() {
     queryKey: SNAPS_KEY,
     queryFn: async (): Promise<Snapshot[]> => {
       // Snapshots only — variants live in their own per-calc strip and
-      // shouldn't pollute the global Compare / History views.
+      // shouldn't pollute the global History / History views.
       const { data, error } = await supabase
         .from("math_snapshots" as never)
         .select("id, calc_key, kind, name, purpose, payload, created_at")
@@ -185,7 +185,7 @@ export function useSnapshots() {
 // A variant is a per-calc / per-ticker scratchpad row — the user tries 5–7
 // permutations of NVDA-with-puts and each one becomes a card in the Variants
 // strip beneath the calc body. Once they pick the best one, "Promote" turns
-// that variant into a regular snapshot for the global Compare view.
+// that variant into a regular snapshot for the global History view.
 
 const variantsKey = (calcKey: string, ticker: string) =>
   ["math_variants", calcKey, ticker.toUpperCase()] as const;
@@ -262,7 +262,7 @@ export function useVariants(calcKey: string | null, ticker: string | null) {
 
   /** Promote a variant to a snapshot: delete any existing snapshot for this
    *  (calc, ticker), then flip the variant row's kind to 'snapshot'. The
-   *  result shows up in the global Compare view. */
+   *  result shows up in the global History view. */
   const promoteMut = useMutation({
     mutationFn: async (variantId: string): Promise<Snapshot> => {
       // 1) Read the variant to know its calc_key + ticker.
@@ -304,7 +304,7 @@ export function useVariants(calcKey: string | null, ticker: string | null) {
           (prev ?? []).filter((s) => s.id !== promoted.id),
         );
       }
-      // Bump the snapshots query so Compare sees the new snapshot.
+      // Bump the snapshots query so History sees the new snapshot.
       qc.invalidateQueries({ queryKey: SNAPS_KEY });
     },
   });

@@ -37,10 +37,9 @@ export interface SunnyfiShellProps {
   onShare?: () => void;
   onBrandClick?: () => void;
   canSave?: boolean;
-  canCompare?: boolean;
 }
 
-export type DockKey = "snapshot" | "history" | "compare" | "share";
+export type DockKey = "snapshot" | "history" | "share";
 
 export function SunnyfiShell({
   children,
@@ -56,7 +55,6 @@ export function SunnyfiShell({
   onShare,
   onBrandClick,
   canSave = true,
-  canCompare = false,
 }: SunnyfiShellProps) {
   const cls = [
     "hf-shell",
@@ -77,7 +75,7 @@ export function SunnyfiShell({
       />
       <div className="hf-stage">{children}</div>
       {!hideDock && (
-        <Dock active={dockActive} onClick={onDockClick} canCompare={canCompare} canSave={canSave} />
+        <Dock active={dockActive} onClick={onDockClick} canSave={canSave} />
       )}
     </div>
   );
@@ -176,15 +174,13 @@ function ShareGlyph() {
 interface DockProps {
   active: DockKey | null;
   onClick?: (k: DockKey) => void;
-  canCompare: boolean;
   canSave: boolean;
 }
 
-function Dock({ active, onClick, canCompare, canSave }: DockProps) {
+function Dock({ active, onClick, canSave }: DockProps) {
   const items: { id: DockKey; label: string; disabled?: boolean }[] = [
     { id: "snapshot", label: "+ Snapshot", disabled: !canSave },
     { id: "history",  label: "History" },
-    { id: "compare",  label: "Compare",   disabled: !canCompare },
     { id: "share",    label: "↗ Share",   disabled: !canSave },
   ];
   return (
