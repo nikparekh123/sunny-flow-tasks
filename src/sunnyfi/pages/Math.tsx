@@ -99,7 +99,6 @@ export default function MathPage() {
   const dockActive: DockKey | null =
     modal === "history" ? "history" :
     modal === "share"   ? "share"   :
-    compareMode         ? "compare" :
     null;
 
   // Reset working snap when calc changes (or unselects). The live inputs
