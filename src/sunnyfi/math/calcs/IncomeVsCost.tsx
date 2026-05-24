@@ -1127,17 +1127,6 @@ function LeaderboardCard({
     : variant.coverage === Infinity ? "∞"
     : `${variant.coverage.toFixed(2)}×`;
 
-  // Cycles needed for cumulative call income to cover the put cost.
-  const cyclesToCoverPut =
-    variant.incomePerCycle > 0
-      ? Math.ceil(variant.totalCost / variant.incomePerCycle)
-      : Infinity;
-  // Pluralise the cycle unit ("wk" → "wks", but "day" → "days").
-  const cycleUnit = variant.callPerUnit.replace("/", "");
-  const cycleUnitPlural =
-    cycleUnit === "day" ? "days" :
-    cycleUnit === "run" ? "runs" :
-    cycleUnit + "s";
   const horizonWord =
     pivotPutDays >= 350 ? "year" :
     pivotPutDays >= 170 ? "6 months" :
@@ -1145,13 +1134,35 @@ function LeaderboardCard({
     pivotPutDays >= 80  ? "quarter" : "month";
   const incomePerCycleTxt = fmtMoney(variant.incomePerCycle, { decimals: 0 });
 
+  // Time to recoup the put cost, expressed in calendar time (not raw cycle
+  // counts — "Recoups in 78 runs" is meaningless; "~3 weeks" tells a story).
+  // Days per cycle = horizonDays / callCycles (already what computeAllVariants
+  // bakes into callCycles), but easier: 30 / callPerMonth.
+  const daysPerCycle = variant.callPerMonth > 0 ? 30 / variant.callPerMonth : 30;
+  const daysToCover =
+    variant.totalCost > 0 && variant.incomePerCycle > 0
+      ? Math.ceil(variant.totalCost / variant.incomePerCycle) * daysPerCycle
+      : 0;
+  /** Format a day-count as a human phrase ("3 weeks", "5 months", "<1 day"). */
+  const humanDays = (d: number): string => {
+    if (d < 1) return "less than a day";
+    if (d <= 14) return `${Math.round(d)} day${Math.round(d) === 1 ? "" : "s"}`;
+    if (d <= 90) return `~${Math.round(d / 7)} weeks`;
+    return `~${(d / 30).toFixed(1)} months`;
+  };
+
   let narrative: string;
   if (variant.net < 0) {
+    // Net negative: the puts outweigh the calls. Honest framing.
     narrative = `Puts cost ${fmtMoney(variant.totalCost, { decimals: 0 })} but calls only earn ${fmtMoney(variant.totalIncome, { decimals: 0 })} this ${horizonWord}.`;
-  } else if (!isFinite(cyclesToCoverPut)) {
-    narrative = `Calls earn ${incomePerCycleTxt} per ${cycleUnit} — no put to fund.`;
+  } else if (variant.totalCost <= 0) {
+    // No put leg at all — pure call income.
+    narrative = `Calls earn ${incomePerCycleTxt} per ${pivotCallShort} cycle — no put cost.`;
+  } else if (daysToCover < 1) {
+    // First call covers the whole put.
+    narrative = `First ${pivotCallShort} call already covers the ${pivotPutShort} put — rest is profit.`;
   } else {
-    narrative = `Each ${pivotCallShort} call earns ${incomePerCycleTxt}. Recoups the ${pivotPutShort} put in ${cyclesToCoverPut} ${cyclesToCoverPut === 1 ? cycleUnit : cycleUnitPlural}.`;
+    narrative = `Each ${pivotCallShort} call earns ${incomePerCycleTxt}. Calls cover the ${pivotPutShort} put in ${humanDays(daysToCover)}, then it's profit.`;
   }
 
   // "Beats #2 by $X" / "Behind #1 by $X" — anchors the gap.

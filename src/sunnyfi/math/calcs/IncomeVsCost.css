@@ -1323,9 +1323,9 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 7px;
-  padding: 12px 13px 13px;
-  border-radius: 10px;
+  gap: 10px;
+  padding: 16px 16px 16px;
+  border-radius: 12px;
   border: 1.5px solid rgba(30,90,80,.55);
   background: rgba(15,51,51,.55);
   cursor: pointer;
@@ -1333,7 +1333,7 @@
   font: inherit;
   color: inherit;
   transition: transform .12s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
-  min-height: 240px;
+  min-height: 320px;
   overflow: hidden;
 }
 .ivc3-lead-card:hover {
@@ -1377,13 +1377,14 @@
 }
 .ivc3-lead-label {
   font-family: var(--navi-font-sans);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 800;
-  letter-spacing: -.4px;
+  letter-spacing: -.5px;
   color: var(--navi-fg1);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.1;
 }
 .ivc3-lead-combo {
   font-family: var(--navi-font-mono);
@@ -1409,19 +1410,21 @@
 }
 .ivc3-lead-mini .bar.inc { background: rgba(168,212,160,.85); }
 .ivc3-lead-mini .bar.cost { background: rgba(232,112,96,.85); }
-/* Hero net $ on each card — the headline number */
+/* Hero net $ on each card — the headline number. flex-wrap so the
+   "over X" sub doesn't push the number off the card when columns are
+   narrow; it slides under instead. */
 .ivc3-lead-hero {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-family: var(--navi-font-sans);
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 800;
-  letter-spacing: -.7px;
-  line-height: 1;
+  letter-spacing: -.8px;
+  line-height: 1.05;
   color: var(--navi-fg1);
   margin-top: 2px;
-  white-space: nowrap;
 }
 .ivc3-lead-card.tone-neg .ivc3-lead-hero { color: var(--navi-negative); }
 .ivc3-lead-card.best .ivc3-lead-hero { color: var(--navi-neon); }
@@ -1439,12 +1442,12 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px;
+  gap: 4px 6px;
   font-family: var(--navi-font-mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   color: var(--navi-fg4);
   letter-spacing: .2px;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 .ivc3-lead-context b {
   color: var(--navi-fg2);
@@ -1456,8 +1459,8 @@
 .ivc3-lead-narrative {
   margin: 0;
   font-family: var(--navi-font-sans);
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.5;
   color: var(--navi-fg2);
   letter-spacing: -.1px;
 }
@@ -1499,12 +1502,13 @@
 /* Single-line footer w/ yield · cov · IV — supplementary metrics */
 .ivc3-lead-footline {
   margin-top: auto;
-  padding-top: 7px;
+  padding-top: 9px;
   border-top: 1px dashed rgba(50,110,100,.32);
   font-family: var(--navi-font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--navi-fg4);
   letter-spacing: .2px;
+  line-height: 1.55;
 }
 .ivc3-lead-footline b {
   color: var(--navi-fg1);
@@ -1651,13 +1655,13 @@
 }
 
 /* Tighter leaderboard cards on narrow viewports */
-@media (max-width: 1100px) {
-  .ivc3-leader-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
-  .ivc3-lead-card { min-height: 180px; padding: 10px 10px 10px; }
-  .ivc3-lead-label { font-size: 14px; }
-  .ivc3-lead-hero { font-size: 19px; }
+@media (max-width: 1280px) {
+  .ivc3-leader-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .ivc3-lead-card { min-height: 300px; padding: 14px 13px; gap: 9px; }
+  .ivc3-lead-label { font-size: 16px; }
+  .ivc3-lead-hero { font-size: 20px; }
 }
 @media (max-width: 820px) {
   .ivc3-leader-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .ivc3-lead-card { min-height: 170px; }
+  .ivc3-lead-card { min-height: 290px; }
 }
