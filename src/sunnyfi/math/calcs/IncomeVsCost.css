@@ -1261,70 +1261,60 @@
   gap: 8px;
 }
 
-/* Perspective picker — two compact dropdowns + auto-pick label */
-.ivc3-leader-perspective {
+/* Perspective picker — two pill rows, all options visible */
+.ivc3-leader-pills {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 2px 2px;
+}
+.ivc3-leader-pill-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 6px 2px 2px;
+  gap: 5px;
+}
+.ivc3-leader-pill-row .row-lbl {
   font-family: var(--navi-font-mono);
-  font-size: 10px;
-  color: var(--navi-fg4);
-}
-.ivc3-leader-perspective .muted {
-  color: var(--navi-fg5);
-  letter-spacing: .4px;
-  text-transform: uppercase;
   font-size: 9px;
-  font-weight: 700;
-}
-.ivc3-leader-picker {
-  display: inline-flex; align-items: center; gap: 5px;
-}
-.ivc3-leader-picker .picker-lbl {
+  font-weight: 800;
+  letter-spacing: 1.2px;
   color: var(--navi-fg5);
+  width: 36px;
+  text-align: right;
+  margin-right: 4px;
+  text-transform: uppercase;
+}
+.ivc3-leader-pill {
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(30,90,80,.55);
+  border-radius: 100px;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: .3px;
-}
-.ivc3-leader-picker select {
-  background: rgba(15,51,51,.6);
-  border: 1px solid rgba(30,90,80,.55);
-  border-radius: 6px;
-  color: var(--navi-fg1);
-  font-family: var(--navi-font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  padding: 3px 22px 3px 8px;
-  outline: none;
+  padding: 4px 11px;
   cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--navi-fg3) 50%),
-    linear-gradient(135deg, var(--navi-fg3) 50%, transparent 50%);
-  background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
-  background-size: 4px 4px, 4px 4px;
-  background-repeat: no-repeat;
+  transition: all .12s var(--ease);
 }
-.ivc3-leader-picker select:hover { border-color: var(--navi-neon); }
-.ivc3-leader-picker select:focus { border-color: var(--navi-neon); }
-.ivc3-leader-pivot-summary {
-  margin-left: auto;
-  font-family: var(--navi-font-mono);
-  font-size: 10px;
-  color: var(--navi-fg3);
-  letter-spacing: .2px;
-}
-.ivc3-leader-pivot-summary b {
+.ivc3-leader-pill:hover {
   color: var(--navi-fg1);
-  font-weight: 700;
+  border-color: rgba(168,212,160,.55);
+  background: rgba(15,51,51,.75);
+}
+.ivc3-leader-pill.on {
+  background: var(--navi-neon);
+  color: var(--navi-dash-page);
+  border-color: var(--navi-neon);
+  font-weight: 800;
 }
 .ivc3-leader-auto {
-  color: var(--navi-fg5);
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
   font-style: italic;
-  font-weight: 500;
+  color: var(--navi-fg5);
+  letter-spacing: .3px;
 }
 
 /* Leaderboard card */
@@ -1333,8 +1323,8 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
-  padding: 10px 11px 11px;
+  gap: 7px;
+  padding: 12px 13px 13px;
   border-radius: 10px;
   border: 1.5px solid rgba(30,90,80,.55);
   background: rgba(15,51,51,.55);
@@ -1343,7 +1333,7 @@
   font: inherit;
   color: inherit;
   transition: transform .12s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
-  min-height: 132px;
+  min-height: 200px;
   overflow: hidden;
 }
 .ivc3-lead-card:hover {
@@ -1419,31 +1409,74 @@
 }
 .ivc3-lead-mini .bar.inc { background: rgba(168,212,160,.85); }
 .ivc3-lead-mini .bar.cost { background: rgba(232,112,96,.85); }
-.ivc3-lead-metrics {
+/* Hero net $ on each card — the headline number */
+.ivc3-lead-hero {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: auto;
-  font-family: var(--navi-font-mono);
-  font-size: 10px;
-}
-.ivc3-lead-metrics .row {
-  display: flex;
-  justify-content: space-between;
   align-items: baseline;
   gap: 6px;
+  font-family: var(--navi-font-sans);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -.7px;
+  line-height: 1;
+  color: var(--navi-fg1);
+  margin-top: 2px;
+  white-space: nowrap;
 }
-.ivc3-lead-metrics .lbl {
-  color: var(--navi-fg5);
+.ivc3-lead-card.tone-neg .ivc3-lead-hero { color: var(--navi-negative); }
+.ivc3-lead-card.best .ivc3-lead-hero { color: var(--navi-neon); }
+.ivc3-lead-hero-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
   font-weight: 500;
-  letter-spacing: .4px;
+  color: var(--navi-fg5);
+  letter-spacing: .3px;
+  text-transform: lowercase;
 }
-.ivc3-lead-metrics b {
+
+/* Narrative sentence — the story */
+.ivc3-lead-narrative {
+  margin: 0;
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--navi-fg2);
+  letter-spacing: -.1px;
+}
+
+/* Single-line footer w/ yield · cov · IV — supplementary metrics */
+.ivc3-lead-footline {
+  margin-top: auto;
+  padding-top: 7px;
+  border-top: 1px dashed rgba(50,110,100,.32);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+  letter-spacing: .2px;
+}
+.ivc3-lead-footline b {
   color: var(--navi-fg1);
   font-weight: 700;
 }
-.ivc3-lead-card.tone-neg .ivc3-lead-metrics .row:first-child b { color: var(--navi-negative); }
-.ivc3-lead-card.best .ivc3-lead-metrics .row:first-child b { color: var(--navi-neon); }
+.ivc3-lead-card.tone-neg .ivc3-lead-footline b { color: var(--navi-fg2); }
+.ivc3-lead-footline .muted { color: var(--navi-fg5); }
+
+/* Active-tab indicator — small dot next to the rank */
+.ivc3-lead-active-dot {
+  color: var(--navi-neon);
+  font-size: 10px;
+  margin-left: 6px;
+  line-height: 1;
+}
+
+/* Active card on the leaderboard — neon ring (independent of "best") */
+.ivc3-lead-card.active {
+  border-color: var(--navi-neon);
+  box-shadow: 0 0 0 2px rgba(210,230,50,.20), 0 0 18px rgba(210,230,50,.16);
+}
+.ivc3-lead-card.best.active {
+  box-shadow: 0 0 0 2px rgba(210,230,50,.28), 0 0 22px rgba(210,230,50,.28);
+}
 
 /* IV chip on every card — small footer line */
 .ivc3-lead-iv {
@@ -1568,10 +1601,11 @@
 /* Tighter leaderboard cards on narrow viewports */
 @media (max-width: 1100px) {
   .ivc3-leader-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
-  .ivc3-lead-card { min-height: 118px; padding: 8px 9px 9px; }
+  .ivc3-lead-card { min-height: 180px; padding: 10px 10px 10px; }
   .ivc3-lead-label { font-size: 14px; }
+  .ivc3-lead-hero { font-size: 19px; }
 }
 @media (max-width: 820px) {
   .ivc3-leader-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .ivc3-lead-card { min-height: 110px; }
+  .ivc3-lead-card { min-height: 170px; }
 }

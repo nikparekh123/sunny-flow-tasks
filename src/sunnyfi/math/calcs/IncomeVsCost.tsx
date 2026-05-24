@@ -311,7 +311,12 @@ function computeAllVariants(
   callChain: OptionContractQuote[],
   putChain: OptionContractQuote[],
   now: Date = new Date(),
+  opts: { pricingMode?: "live" | "estimator" } = {},
 ): IVCVariant[] {
+  // "estimator" forces all premiums through the Black-Scholes estimator
+  // with our 1y-baseline IV_HINTS — used by the leaderboard so earnings-
+  // elevated chains don't artificially win.
+  const forceEstimator = opts.pricingMode === "estimator";
   const shares = Number(state.shares);
   const price = Number(state.price);
   const callContracts = Number(state.callContracts);
@@ -332,7 +337,7 @@ function computeAllVariants(
   const callPriceByCadence = new Map<string, { premium: number; source: "real" | "estimate"; expiry: string | null }>();
   for (const cad of callCadences) {
     const targetIso = plusDays(now, cad.dte).toISOString().slice(0, 10);
-    const match = nearestExpiry(callChain, targetIso);
+    const match = forceEstimator ? null : nearestExpiry(callChain, targetIso);
     const premium = match?.premium
       ?? estPremium({ spot: price, strike: callStrike, daysToExp: cad.dte, iv, isCall: true });
     callPriceByCadence.set(cad.id, {
@@ -346,7 +351,7 @@ function computeAllVariants(
   for (const h of PUT_HORIZONS) {
     const horizonDate = plusDays(now, h.days);
     const putTargetIso = horizonDate.toISOString().slice(0, 10);
-    const putMatch = nearestExpiry(putChain, putTargetIso);
+    const putMatch = forceEstimator ? null : nearestExpiry(putChain, putTargetIso);
     const putPrem = putMatch?.premium
       ?? estPremium({ spot: price, strike: putStrike, daysToExp: h.days, iv, isCall: false });
 
@@ -581,6 +586,24 @@ export function IncomeVsCostCalc({
     return map;
   }, [basket, chains]);
 
+  // ── "Fair-value" variants for the leaderboard ranking ──
+  // The leaderboard MUST rank apples-to-apples or earnings-elevated names
+  // (AVGO into earnings, etc.) artificially win on inflated chain premiums.
+  // We re-price every premium from the estimator at the ticker's 1y-baseline
+  // IV (IV_HINTS), ignoring live chain prices entirely. The cadence-
+  // availability filter still uses the live call chain so Daily/3×wk
+  // correctly drop out for tickers that don't list them. Per-ticker
+  // breakdown below still uses live prices.
+  const variantsByEntryFair = useMemo(() => {
+    const map = new Map<string, IVCVariant[]>();
+    for (const e of basket.entries) {
+      const s = asIVCState(e, basket);
+      const c = chains[e.id];
+      map.set(e.id, computeAllVariants(s, c?.calls ?? [], c?.puts ?? [], new Date(), { pricingMode: "estimator" }));
+    }
+    return map;
+  }, [basket, chains]);
+
   const activeEntry =
     basket.entries.find((e) => e.id === basket.activeEntryId) ?? basket.entries[0];
   const activeVariants = activeEntry ? variantsByEntry.get(activeEntry.id) ?? [] : [];
@@ -613,9 +636,8 @@ export function IncomeVsCostCalc({
 
       <Leaderboard
         basket={basket}
-        variantsByEntry={variantsByEntry}
+        variantsByEntry={variantsByEntryFair}
         chains={chains}
-        onSort={(s) => update({ sortKey: s })}
         onSetPerspective={(callId, putId) =>
           update({ perspectiveCallId: callId, perspectivePutId: putId })
         }
@@ -776,30 +798,48 @@ function PolicyStrikes({
   );
 }
 
-// ── Leaderboard strip — variant-pivoted ranking ─────────────────
+// ── Leaderboard strip — variant-pivoted, fair-IV ranking ────────
 /** Rank tickers AT A SPECIFIC variant (the "perspective"). The perspective
- *  defaults to whichever variant has the highest summed net across all
- *  entries — i.e. the lens that makes the basket as a whole look best.
- *  The user can pivot to any other (call cadence × put horizon) combo via
- *  the two dropdowns. Tickers that can't run the chosen cadence (no daily
- *  options listed for AAPL, for example) appear as small "n/a" cards
- *  with the reason, so the ranking stays honest. */
+ *  is picked via two pill rows (Calls cadence + Puts horizon). Only
+ *  cadences at least one ticker in the basket can actually run are
+ *  surfaced — no point offering "Daily" when nobody has daily options.
+ *
+ *  Premium values come from the estimator with our 1y-baseline IV map, so
+ *  earnings-elevated names (e.g. AVGO into earnings) don't artificially
+ *  win on inflated live premiums. The per-ticker breakdown below still
+ *  uses live chain prices — only the cross-basket ranking is normalised. */
 function Leaderboard({
-  basket, variantsByEntry, chains, onSort, onSetPerspective, onJump, onAddSlot,
+  basket, variantsByEntry, chains, onSetPerspective, onJump, onAddSlot,
 }: {
   basket: IVCBasketState;
   variantsByEntry: Map<string, IVCVariant[]>;
   chains: ChainsState;
-  onSort: (s: IVCBasketState["sortKey"]) => void;
   onSetPerspective: (callId: string, putId: string) => void;
   onJump: (entryId: string, variantId: string) => void;
   onAddSlot: () => void;
 }) {
+  // ── Which cadences does ANY basket entry actually offer? ──
+  // If nobody has daily expiries, don't even surface the Daily pill.
+  // Weekly / Bi / Monthly are always allowed (synthesizable from any chain).
+  const availableCallCadences = useMemo(() => {
+    const present = new Set<string>();
+    for (const entry of basket.entries) {
+      const c = chains[entry.id];
+      if (!c) continue;
+      for (const cad of callCadencesAvailable(c.calls)) present.add(cad.id);
+    }
+    // Always allow non-short-dated cadences even before chains arrive.
+    for (const cad of CALL_CADENCES) {
+      if (!cad.requiresShortDated) present.add(cad.id);
+    }
+    return CALL_CADENCES.filter((c) => present.has(c.id));
+  }, [basket.entries, chains]);
+
   // Auto-pick the variant that maximises summed net across entries — the
-  // "basket-best" lens. User-set perspective wins if present.
+  // "basket-best" lens. Only considers cadences the basket can run.
   const autoPivot = useMemo(() => {
     let best = { call: "weekly", put: "quarterly", score: -Infinity };
-    for (const cad of CALL_CADENCES) {
+    for (const cad of availableCallCadences) {
       for (const h of PUT_HORIZONS) {
         const id = `${cad.id}_${h.id}`;
         let sum = 0;
@@ -812,17 +852,22 @@ function Leaderboard({
       }
     }
     return best;
-  }, [basket.entries, variantsByEntry]);
+  }, [basket.entries, variantsByEntry, availableCallCadences]);
 
-  const pivotCall = basket.perspectiveCallId ?? autoPivot.call;
+  // Use user-set pivot, fall back to auto — but force it onto an available
+  // cadence if the stored one (e.g. "daily" from an earlier session) is no
+  // longer offered by any ticker in the current basket.
+  let pivotCall = basket.perspectiveCallId ?? autoPivot.call;
+  if (!availableCallCadences.some((c) => c.id === pivotCall)) pivotCall = autoPivot.call;
   const pivotPut = basket.perspectivePutId ?? autoPivot.put;
   const pivotId = `${pivotCall}_${pivotPut}`;
-  const pivotCallLabel = CALL_CADENCES.find((c) => c.id === pivotCall)?.label ?? pivotCall;
-  const pivotPutLabel = PUT_HORIZONS.find((h) => h.id === pivotPut)?.label ?? pivotPut;
+  const pivotCallShort = CALL_CADENCES.find((c) => c.id === pivotCall)?.short ?? pivotCall;
+  const pivotPutShort = PUT_HORIZONS.find((h) => h.id === pivotPut)?.short ?? pivotPut;
+  const pivotPutDays = PUT_HORIZONS.find((h) => h.id === pivotPut)?.days ?? 91;
 
   // For each entry, pull the variant at the pivot. If it's missing, figure
   // out WHY (cadence unavailable for this ticker?) so the n/a card can
-  // explain itself rather than just disappearing.
+  // explain itself rather than silently disappearing.
   type Row = {
     entry: IVCEntry;
     variant: IVCVariant | null;
@@ -840,7 +885,7 @@ function Leaderboard({
         const available = callCadencesAvailable(c.calls).map((x) => x.id);
         if (!available.includes(pivotCall)) {
           const cadLabel = CALL_CADENCES.find((x) => x.id === pivotCall)?.label ?? pivotCall;
-          excludeReason = `no ${cadLabel.toLowerCase()} options`;
+          excludeReason = `no ${cadLabel.toLowerCase()} options listed`;
         } else {
           excludeReason = "variant pending";
         }
@@ -851,20 +896,17 @@ function Leaderboard({
     return { entry, variant, excludeReason };
   });
 
-  // Sort: real rows by score, n/a rows after.
+  // Sort by net (single canonical metric now — the three sorts produced
+  // basically the same order for any realistic basket, and the toggle was
+  // adding noise without insight).
   const scoreFor = (v: IVCVariant | null): number => {
     if (!v) return -Infinity;
-    const s = basket.sortKey === "net" ? v.net
-      : basket.sortKey === "yield" ? v.netAnnYield
-      : v.coverage;
-    return isFinite(s) ? s : -Infinity;
+    return isFinite(v.net) ? v.net : -Infinity;
   };
   const ranked = [...rows].sort((a, b) => scoreFor(b.variant) - scoreFor(a.variant));
   const competing = ranked.filter((r) => r.variant != null);
   const bestScore = scoreFor(competing[0]?.variant ?? null);
 
-  // Map ticker → rank position for display ("#1" / "#2" / …). n/a cards
-  // get null rank so they don't claim a slot.
   let nextRank = 1;
   const ranks = new Map<string, number>();
   for (const r of ranked) {
@@ -875,56 +917,41 @@ function Leaderboard({
     <div className="ivc3-leader">
       <div className="ivc3-leader-head">
         <div className="ivc3-leader-eyebrow">
-          LEADERBOARD <span className="muted">· {basket.entries.length} of {BASKET_MAX_ENTRIES}</span>
+          LEADERBOARD <span className="muted">· {basket.entries.length} of {BASKET_MAX_ENTRIES} · fair-value ranking (1y-baseline IV)</span>
         </div>
-        <div className="ivc3-leader-sort">
-          <span className="muted">sort by</span>
-          {(["net", "yield", "cov"] as const).map((k) => (
+        {basket.perspectiveCallId == null && (
+          <span className="ivc3-leader-auto">⚲ auto-picked perspective</span>
+        )}
+      </div>
+
+      {/* Perspective picker — two pill rows, one click to pivot */}
+      <div className="ivc3-leader-pills">
+        <div className="ivc3-leader-pill-row">
+          <span className="row-lbl">Calls</span>
+          {availableCallCadences.map((c) => (
             <button
-              key={k}
+              key={c.id}
               type="button"
-              className={`ivc3-leader-sortbtn${basket.sortKey === k ? " on" : ""}`}
-              onClick={() => onSort(k)}
+              className={`ivc3-leader-pill${pivotCall === c.id ? " on" : ""}`}
+              onClick={() => onSetPerspective(c.id, pivotPut)}
             >
-              {k === "net" ? "Net $" : k === "yield" ? "Yield %" : "Coverage"}
+              {c.label}
             </button>
           ))}
         </div>
-      </div>
-
-      {/* Perspective picker — two compact dropdowns */}
-      <div className="ivc3-leader-perspective">
-        <span className="muted">perspective:</span>
-        <label className="ivc3-leader-picker">
-          <span className="picker-lbl">Calls</span>
-          <select
-            value={pivotCall}
-            onChange={(e) => onSetPerspective(e.target.value, pivotPut)}
-            aria-label="Call cadence perspective"
-          >
-            {CALL_CADENCES.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="ivc3-leader-picker">
-          <span className="picker-lbl">Puts</span>
-          <select
-            value={pivotPut}
-            onChange={(e) => onSetPerspective(pivotCall, e.target.value)}
-            aria-label="Put horizon perspective"
-          >
-            {PUT_HORIZONS.map((h) => (
-              <option key={h.id} value={h.id}>{h.label}</option>
-            ))}
-          </select>
-        </label>
-        <span className="ivc3-leader-pivot-summary">
-          ranking across <b>{pivotCallLabel}</b> calls × <b>{pivotPutLabel}</b> puts
-          {basket.perspectiveCallId == null && (
-            <span className="ivc3-leader-auto"> · auto-picked</span>
-          )}
-        </span>
+        <div className="ivc3-leader-pill-row">
+          <span className="row-lbl">Puts</span>
+          {PUT_HORIZONS.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              className={`ivc3-leader-pill${pivotPut === h.id ? " on" : ""}`}
+              onClick={() => onSetPerspective(pivotCall, h.id)}
+            >
+              {h.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="ivc3-leader-strip">
@@ -933,9 +960,13 @@ function Leaderboard({
             key={r.entry.id}
             rank={ranks.get(r.entry.id) ?? null}
             isBest={r.variant != null && scoreFor(r.variant) === bestScore && isFinite(bestScore)}
+            isActive={r.entry.id === basket.activeEntryId}
             entry={r.entry}
             variant={r.variant}
             excludeReason={r.excludeReason}
+            pivotCallShort={pivotCallShort}
+            pivotPutShort={pivotPutShort}
+            pivotPutDays={pivotPutDays}
             onClick={() => {
               if (r.variant) onJump(r.entry.id, r.variant.id);
             }}
@@ -957,58 +988,100 @@ function Leaderboard({
 }
 
 function LeaderboardCard({
-  rank, isBest, entry, variant, excludeReason, onClick,
+  rank, isBest, isActive, entry, variant, excludeReason,
+  pivotCallShort, pivotPutShort, pivotPutDays, onClick,
 }: {
   rank: number | null;
   isBest: boolean;
+  isActive: boolean;
   entry: IVCEntry;
   variant: IVCVariant | null;
   excludeReason: string | null;
+  pivotCallShort: string;
+  pivotPutShort: string;
+  pivotPutDays: number;
   onClick: () => void;
 }) {
-  // The label to show on every card — prefers the live ticker over the
-  // stale display label so the user always sees what they typed.
+  // Prefer the live ticker over the stale display label.
   const label = entry.underlying || entry.label || "—";
   const iv = ivFor(entry.underlying);
 
   if (!variant) {
     return (
-      <button type="button" className="ivc3-lead-card na" onClick={onClick}>
+      <button
+        type="button"
+        className={`ivc3-lead-card na${isActive ? " active" : ""}`}
+        onClick={onClick}
+      >
         <div className="ivc3-lead-rank">n/a</div>
         <div className="ivc3-lead-label">{label}</div>
         <div className="ivc3-lead-na-reason">{excludeReason ?? "not available"}</div>
-        <div className="ivc3-lead-iv">IV ~{Math.round(iv * 100)}% <span className="muted">(est)</span></div>
+        <div className="ivc3-lead-iv">IV ~{Math.round(iv * 100)}% <span className="muted">(1y avg)</span></div>
       </button>
     );
   }
+
   const tone = variant.net >= 0 ? "pos" : "neg";
+  const total = (variant.totalIncome || 0) + (variant.totalCost || 0);
+  const incPct = total > 0 ? (variant.totalIncome / total) * 100 : 0;
   const ann = isFinite(variant.netAnnYield)
     ? `${variant.netAnnYield >= 0 ? "" : "−"}${Math.abs(variant.netAnnYield).toFixed(1)}%`
     : "—";
   const cov = !isFinite(variant.coverage) ? "—"
     : variant.coverage === Infinity ? "∞"
-    : `${variant.coverage.toFixed(2)}x`;
-  const total = (variant.totalIncome || 0) + (variant.totalCost || 0);
-  const incPct = total > 0 ? (variant.totalIncome / total) * 100 : 0;
+    : `${variant.coverage.toFixed(2)}×`;
+
+  // ── The narrative line ──
+  // Three short sentences chosen by the variant's economics:
+  //  • Per-cycle income (matches the per-cycle unit the user picked)
+  //  • How many cycles to recoup the put
+  //  • If net is negative, an honest "puts outweigh calls" line instead
+  const cyclesToCoverPut =
+    variant.incomePerCycle > 0
+      ? Math.ceil(variant.totalCost / variant.incomePerCycle)
+      : Infinity;
+  const cycleUnit = variant.callPerUnit.replace("/", "");  // "wk" / "mo" / "day" / "2wk" / "run"
+  const horizonWord =
+    pivotPutDays >= 350 ? "year" :
+    pivotPutDays >= 170 ? "6 months" :
+    pivotPutDays >= 110 ? "4 months" :
+    pivotPutDays >= 80  ? "quarter" : "month";
+  const incomePerCycleTxt = fmtMoney(variant.incomePerCycle, { decimals: 0 });
+
+  let narrative: string;
+  if (variant.net < 0) {
+    narrative = `Puts cost ${fmtMoney(variant.totalCost, { decimals: 0 })} but calls only earn ${fmtMoney(variant.totalIncome, { decimals: 0 })} this ${horizonWord}.`;
+  } else if (!isFinite(cyclesToCoverPut)) {
+    narrative = `Calls earn ${incomePerCycleTxt} per ${cycleUnit} — no put to fund.`;
+  } else {
+    narrative = `Each ${pivotCallShort} call earns ${incomePerCycleTxt}. Recoups the ${pivotPutShort} put in ${cyclesToCoverPut} ${cyclesToCoverPut === 1 ? cycleUnit : (cycleUnit.endsWith("y") ? cycleUnit + "s" : cycleUnit + "s")}.`;
+  }
+
   return (
     <button
       type="button"
-      className={`ivc3-lead-card tone-${tone}${isBest ? " best" : ""}`}
+      className={`ivc3-lead-card tone-${tone}${isBest ? " best" : ""}${isActive ? " active" : ""}`}
       onClick={onClick}
       title="Click to open this ticker's tab"
     >
-      <div className="ivc3-lead-rank">{isBest ? "⭐ #1" : (rank != null ? `#${rank}` : "—")}</div>
+      <div className="ivc3-lead-rank">
+        {isBest ? "⭐ #1" : (rank != null ? `#${rank}` : "—")}
+        {isActive && <span className="ivc3-lead-active-dot" aria-label="active tab">●</span>}
+      </div>
       <div className="ivc3-lead-label">{label}</div>
+      <div className="ivc3-lead-hero">
+        {fmtMoney(variant.net, { signed: true, decimals: 0 })}
+        <span className="ivc3-lead-hero-sub">over {horizonWord}</span>
+      </div>
       <div className="ivc3-lead-mini">
         <div className="bar inc" style={{ width: `${incPct}%` }} />
         <div className="bar cost" style={{ width: `${100 - incPct}%` }} />
       </div>
-      <div className="ivc3-lead-metrics">
-        <div className="row"><span className="lbl">NET</span><b>{fmtMoney(variant.net, { signed: true, decimals: 0 })}</b></div>
-        <div className="row"><span className="lbl">YIELD</span><b>{ann}/y</b></div>
-        <div className="row"><span className="lbl">COV</span><b>{cov}</b></div>
+      <p className="ivc3-lead-narrative">{narrative}</p>
+      <div className="ivc3-lead-footline">
+        Yield <b>{ann}/y</b> · Cov <b>{cov}</b> · IV <b>{Math.round(iv * 100)}%</b>
+        <span className="muted"> (1y avg)</span>
       </div>
-      <div className="ivc3-lead-iv">IV ~{Math.round(iv * 100)}% <span className="muted">(est)</span></div>
     </button>
   );
 }
@@ -1130,13 +1203,24 @@ function EntryView({
             onChange={(e) => {
               const u = e.target.value.toUpperCase();
               // Auto-sync the tab/card label when the user hasn't
-              // manually renamed this entry. Keeps "Entry 1" from
-              // sticking around once they've typed NVDA.
-              onUpdate((cur) => ({
-                ...cur,
-                underlying: u,
-                label: cur.labelIsAuto ? (u || cur.label) : cur.label,
-              }));
+              // manually renamed this entry. We check labelIsAuto AND
+              // a defensive heuristic — labels that match the auto-
+              // default ("Entry 3") or the previous ticker count as
+              // auto, so the sync still fires for any entry whose
+              // label flag got persisted before this feature existed.
+              onUpdate((cur) => {
+                const looksAuto =
+                  cur.labelIsAuto ||
+                  cur.label === cur.underlying ||
+                  /^Entry \d+$/.test(cur.label) ||
+                  cur.label === "";
+                return {
+                  ...cur,
+                  underlying: u,
+                  label: looksAuto ? (u || cur.label) : cur.label,
+                  labelIsAuto: looksAuto || cur.labelIsAuto,
+                };
+              });
             }}
             placeholder="SPY"
             aria-label="Underlying ticker"
