@@ -24,23 +24,20 @@
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (for the delete-then-insert)
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-// Universe lives next to this file so the constituent list isn't 200 lines
-// of embedded code. ~1000 tickers covering the full S&P MidCap 400 +
-// SmallCap 600. Update the JSON, redeploy, no code change needed.
-import universeData from './universe.json' with { type: 'json' };
+// Universe lives in a sibling .ts module — ~1000 tickers covering the
+// full S&P MidCap 400 + SmallCap 600. Edit universe.ts to grow/shrink
+// the list, then redeploy. We use .ts (not .json) because Supabase's
+// Deno runtime doesn't support JSON-import attributes yet.
+import { UNIVERSE, type UniverseEntry } from './universe.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// ── Universe — loaded from universe.json at deploy time ──
-interface UniverseEntry { ticker: string; sector: string; sectorEtf: string; }
-const UNIVERSE: UniverseEntry[] = universeData as UniverseEntry[];
-
 // Distinct sector ETFs we need to pre-fetch (~11) so we can compute each
 // candidate's "is my sector also dumping?" guard.
-const SECTOR_ETFS = Array.from(new Set(UNIVERSE.map((u) => u.sectorEtf)));
+const SECTOR_ETFS = Array.from(new Set(UNIVERSE.map((u: UniverseEntry) => u.sectorEtf)));
 
 // ── Filter thresholds (per BNF/Kotegawa spec) ──
 const DEV_MIN = -15;      // deviation% must be ≥ this (i.e. less negative than −15%)
