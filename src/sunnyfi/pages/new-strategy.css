@@ -160,6 +160,80 @@
   color: var(--navi-neon);
 }
 
+/* Research status — per-row dropdown + row tinting */
+.np-app .bnf-status-cell { padding: 4px 6px; }
+.np-app .bnf-status-select {
+  background: rgba(15, 51, 51, 0.6);
+  border: 1px solid rgba(50, 110, 100, 0.4);
+  border-radius: 100px;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--navi-fg4) 50%),
+    linear-gradient(135deg, var(--navi-fg4) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 10px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  padding-right: 22px;
+}
+.np-app .bnf-status-select.status-skipped {
+  color: var(--navi-fg5);
+  background-color: rgba(15, 51, 51, 0.4);
+  border-color: rgba(50, 110, 100, 0.32);
+}
+.np-app .bnf-status-select.status-considering {
+  color: var(--navi-warning);
+  background-color: rgba(224, 192, 96, 0.12);
+  border-color: rgba(224, 192, 96, 0.4);
+}
+.np-app .bnf-status-select.status-approved {
+  color: var(--navi-neon);
+  background-color: rgba(210, 230, 50, 0.12);
+  border-color: rgba(210, 230, 50, 0.45);
+}
+
+/* Skipped rows go to 50% opacity so they don't visually compete when
+   the user toggles "Hide skipped" off to revisit them. Approved rows
+   get a faint neon left-border to pop. */
+.np-app .bnf-row.status-skipped td { opacity: 0.5; }
+.np-app .bnf-row.status-approved td:first-child {
+  box-shadow: inset 2px 0 0 var(--navi-neon);
+}
+
+/* Hide-skipped filter toggle in the section header */
+.np-app .bnf-filter-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.np-app .bnf-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--navi-fg3);
+  cursor: pointer;
+  user-select: none;
+}
+.np-app .bnf-filter-toggle input { accent-color: var(--navi-neon); cursor: pointer; }
+.np-app .bnf-section-sub-inline {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--navi-fg4);
+  letter-spacing: .2px;
+}
+
 /* Setup Quality summary chip */
 .np-app .bnf-quality {
   font-family: var(--navi-font-mono);

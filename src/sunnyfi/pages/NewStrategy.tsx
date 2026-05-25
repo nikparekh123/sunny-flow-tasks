@@ -56,6 +56,18 @@ interface InsiderSales {
 }
 interface EightK { date: string; items: string[]; url: string; }
 
+// Research status — survives daily re-scans. 'pending' = never reviewed
+// (same as no row at all).
+type ResearchStatus = 'pending' | 'skipped' | 'considering' | 'approved';
+interface ResearchRow { ticker: string; status: ResearchStatus; }
+
+const STATUS_OPTIONS: Array<{ value: ResearchStatus; label: string }> = [
+  { value: 'pending',     label: '— pending' },
+  { value: 'skipped',     label: '✕ skipped' },
+  { value: 'considering', label: '◐ considering' },
+  { value: 'approved',    label: '✓ approved' },
+];
+
 // 8-K items considered "material" — earnings, material agreements,
 // officer changes, other material events. Anything else (regulation FD,
 // exhibits-only filings) flags amber instead of red.
@@ -188,6 +200,28 @@ export default function NewStrategy() {
     },
   });
 
+  // Pull research-status rows — keyed by ticker. We turn it into a Map
+  // for O(1) lookup per candidate row at render time.
+  const { data: researchRows = [] } = useQuery({
+    queryKey: ['bnf_research_status'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('bnf_research_status' as never)
+        .select('ticker, status');
+      if (error) throw error;
+      return (data ?? []) as unknown as ResearchRow[];
+    },
+  });
+  const statusByTicker = useMemo(() => {
+    const m = new Map<string, ResearchStatus>();
+    for (const r of researchRows) m.set(r.ticker, r.status);
+    return m;
+  }, [researchRows]);
+
+  // Hide-skipped filter — on by default per user spec ("when they repeat
+  // tomorrow, we don't like look into them again").
+  const [hideSkipped, setHideSkipped] = useState(true);
+
   // Pull positions (both open and closed in one fetch)
   const { data: positions = [] } = useQuery({
     queryKey: ['bnf_positions'],
@@ -256,6 +290,23 @@ export default function NewStrategy() {
     },
   });
 
+  // ── Research-status mutation: upsert by (user, ticker) ──
+  const setStatusMutation = useMutation({
+    mutationFn: async ({ ticker, status }: { ticker: string; status: ResearchStatus }) => {
+      const { data: userData } = await supabase.auth.getUser();
+      const userId = userData?.user?.id;
+      if (!userId) throw new Error('Not signed in');
+      const { error } = await supabase
+        .from('bnf_research_status' as never)
+        .upsert(
+          { user_id: userId, ticker, status, updated_at: new Date().toISOString() } as never,
+          { onConflict: 'user_id,ticker' },
+        );
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['bnf_research_status'] }),
+  });
+
   // ── Sell mutation: open position → closed ──
   const sellMutation = useMutation({
     mutationFn: async ({ p, reason, exitPrice }: {
@@ -313,6 +364,15 @@ export default function NewStrategy() {
   // ── Derived sets ──
   const openPositions = positions.filter((p) => p.status === 'open');
   const closedPositions = positions.filter((p) => p.status === 'closed');
+
+  // Candidates filtered by the research-status "Hide skipped" toggle —
+  // any row whose ticker is marked 'skipped' drops out by default.
+  const skippedCount = candidates.filter(
+    (c) => statusByTicker.get(c.ticker) === 'skipped',
+  ).length;
+  const visibleCandidates = hideSkipped
+    ? candidates.filter((c) => statusByTicker.get(c.ticker) !== 'skipped')
+    : candidates;
 
   // Map ticker → most recent candidate snapshot so open positions can show
   // a fresh SMA25 without re-running the scanner per row.
@@ -423,11 +483,26 @@ export default function NewStrategy() {
         <section className="np-section">
           <div className="np-section-hd">
             <div className="np-section-title">
-              Today's candidates · {candidates.length}
+              Today's candidates · {visibleCandidates.length}
+              {hideSkipped && skippedCount > 0 && (
+                <span className="bnf-section-sub-inline">
+                  {' '}· {skippedCount} skipped hidden
+                </span>
+              )}
             </div>
             <div className="np-section-sub">
               Sorted by deviation (most dislocated first). Dev ∈ [−15%, −7%], close &gt; SMA200,
               today &gt; −5%, sector ETF still healthy.
+            </div>
+            <div className="bnf-filter-row">
+              <label className="bnf-filter-toggle">
+                <input
+                  type="checkbox"
+                  checked={hideSkipped}
+                  onChange={(e) => setHideSkipped(e.target.checked)}
+                />
+                Hide skipped
+              </label>
             </div>
           </div>
           <div className="np-table-wrap">
@@ -451,23 +526,27 @@ export default function NewStrategy() {
                   <th className="num">P/C</th>
                   <th className="num">OI</th>
                   <th>Setup</th>
+                  <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {candidates.length === 0 ? (
+                {visibleCandidates.length === 0 ? (
                   <tr>
-                    <td colSpan={17} className="bnf-empty">
-                      No candidates yet. Click <b>Refresh scan</b> to run the universe.
+                    <td colSpan={18} className="bnf-empty">
+                      {candidates.length === 0
+                        ? <>No candidates yet. Click <b>Refresh scan</b> to run the universe.</>
+                        : <>All {candidates.length} candidate{candidates.length === 1 ? '' : 's'} are skipped. Toggle "Hide skipped" off to see them.</>}
                     </td>
                   </tr>
-                ) : candidates.map((c) => {
+                ) : visibleCandidates.map((c) => {
                   const tEarn = earningsTone(c.days_since_earnings);
                   const tIns = insiderTone(c.insider_sales);
                   const t8K = eightKTone(c.recent_8ks);
                   const quality = setupQuality(tEarn, tIns, t8K);
+                  const status = statusByTicker.get(c.ticker) ?? 'pending';
                   return (
-                    <tr key={c.id}>
+                    <tr key={c.id} className={`bnf-row status-${status}`}>
                       <td className="ticker">{c.ticker}</td>
                       <td className="bnf-name" title={c.name ?? ''}>{c.name ?? '—'}</td>
                       <td className="sector-cell">{c.sector ?? '—'}</td>
@@ -503,6 +582,24 @@ export default function NewStrategy() {
                       <td className="num">{fmtNum(c.open_interest)}</td>
                       <td className={`bnf-quality tone-${quality}`}>
                         {quality === 'clean' ? 'Clean' : quality === 'review' ? 'Review' : 'Caution'}
+                      </td>
+                      <td className="bnf-status-cell">
+                        <select
+                          className={`bnf-status-select status-${status}`}
+                          value={status}
+                          onChange={(e) =>
+                            setStatusMutation.mutate({
+                              ticker: c.ticker,
+                              status: e.target.value as ResearchStatus,
+                            })
+                          }
+                          disabled={setStatusMutation.isPending}
+                          aria-label="Research status"
+                        >
+                          {STATUS_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
                       </td>
                       <td className="num">
                         <button
