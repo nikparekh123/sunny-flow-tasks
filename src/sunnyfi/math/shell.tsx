@@ -200,13 +200,25 @@ function Dock({ active, onClick, canSave }: DockProps) {
 }
 
 // ── PickHero (resting / empty) ────────────────────────────────────
+// Long-thumbnail layout: each calc gets its own full-width card. Eyebrow
+// shows the category, then name + hint, with a decorative accent strip
+// on the right. Click any card to enter that calc.
+export interface PickCalcThumb {
+  key: string;
+  name: string;
+  hint: string;
+  category: string;
+  /** Card accent — controls the colored accent rail on the right. */
+  accent: "neon" | "pos" | "neg" | "warn";
+}
+
 export function PickHero({
-  popular,
-  onPickPopular,
+  calcs,
+  onPick,
   onPressCmdK,
 }: {
-  popular: { key: string; name: string }[];
-  onPickPopular: (key: string) => void;
+  calcs: PickCalcThumb[];
+  onPick: (key: string) => void;
   onPressCmdK?: () => void;
 }) {
   return (
@@ -216,21 +228,26 @@ export function PickHero({
         Pick a<br />calculator<span className="hf-pick-period">.</span>
       </h1>
       <div className="hf-pick-sub">
-        Press <kbd>⌘K</kbd> · or click the bar above ↑
+        Press <kbd>⌘K</kbd> to search · or pick one below
       </div>
-      {popular.length > 0 && (
-        <div className="hf-pick-rail">
-          <div className="hf-section">Quick links</div>
-          <div className="hf-pick-pop">
-            {popular.map((p, i) => (
-              <span key={p.key} style={{ display: "inline-flex", alignItems: "center", gap: 14 }}>
-                {i > 0 && <span className="pop-sep">·</span>}
-                <button className="pop-item" onClick={() => onPickPopular(p.key)}>{p.name}</button>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      <div className="hf-pick-thumbs">
+        {calcs.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            className={`hf-thumb accent-${c.accent}`}
+            onClick={() => onPick(c.key)}
+          >
+            <div className="hf-thumb-text">
+              <div className="hf-thumb-eyebrow">{c.category}</div>
+              <div className="hf-thumb-name">{c.name}</div>
+              <div className="hf-thumb-hint">{c.hint}</div>
+            </div>
+            <div className="hf-thumb-arrow" aria-hidden>→</div>
+            <div className="hf-thumb-accent" aria-hidden />
+          </button>
+        ))}
+      </div>
       {/* Hidden Cmd-K helper so this prop is meaningful even when not visibly bound */}
       <span style={{ display: "none" }} aria-hidden onClick={onPressCmdK} />
     </div>

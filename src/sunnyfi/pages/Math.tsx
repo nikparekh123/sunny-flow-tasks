@@ -39,7 +39,6 @@ import {
   type CalcCategory,
   findCalc,
   categoryLabel,
-  popularCalcs,
   type CalcMeta,
 } from "../math/data";
 import { useSnapshots, useLiveState, relTime, type Snapshot } from "../math/store";
@@ -295,8 +294,17 @@ export default function MathPage() {
           ) : (
             <div className="hf-pick-stage">
               <PickHero
-                popular={popularCalcs().map((c) => ({ key: c.key, name: c.name }))}
-                onPickPopular={pickCalc}
+                calcs={CALCS.map((c) => ({
+                  key: c.key,
+                  name: c.name,
+                  hint: c.hint,
+                  category: categoryLabel(c.category),
+                  // Color rail per category — green for income/yield calcs,
+                  // red for the stress one, warn for compare-style, neon for
+                  // the planning workhorses.
+                  accent: pickAccent(c.key, c.category),
+                }))}
+                onPick={pickCalc}
               />
             </div>
           )}
@@ -791,4 +799,16 @@ function CalcTabs({ current, onPick }: { current: string; onPick: (key: string) 
       ))}
     </div>
   );
+}
+
+/** Pick the accent color for a calculator's PickHero card. The colors form
+ *  a rough income/cost/risk semantic so users can scan and tell at a
+ *  glance what category they're in. */
+function pickAccent(key: string, category: CalcCategory): "neon" | "pos" | "neg" | "warn" {
+  if (key === "scenario-stress") return "neg";   // stress → red
+  if (key === "income-vs-cost")  return "neon";  // hero pre-trade calc
+  if (key === "expected-income") return "pos";   // income → green
+  if (key === "put-cost")        return "warn";  // cost → amber
+  if (category === "scenario")   return "neg";
+  return "neon";                                  // default planning tools
 }

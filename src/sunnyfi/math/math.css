@@ -297,32 +297,111 @@
   font-family: var(--navi-font-sans);
   margin-top: 6px;
 }
-.hf-pick-rail {
-  margin-top: 16px;
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
-  padding-top: 18px;
-  border-top: 1px solid rgba(30,90,80,.25);
-  width: 100%; max-width: 700px;
+/* Long-thumbnail calculator picker — one row per calculator, wide cards
+   with category eyebrow, name, hint, and a colored accent rail to flag
+   what kind of calc it is. Click anywhere to enter. */
+.hf-pick-thumbs {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(880px, 92vw);
 }
-.hf-pick-pop {
-  display: inline-flex; align-items: center; gap: 14px;
-  flex-wrap: wrap; justify-content: center;
-  font-family: var(--navi-font-sans);
-  font-size: 18px;
-  font-weight: 500;
-  color: var(--navi-fg2);
-}
-.hf-pick-pop .pop-item {
-  color: var(--navi-fg1);
-  border-bottom: 1px dashed rgba(168,196,192,.35);
-  padding-bottom: 1px;
-  cursor: pointer;
-  background: transparent;
-  border-top: 0; border-left: 0; border-right: 0;
+.hf-thumb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px 18px 22px;
+  background: rgba(15,51,51,.45);
+  border: 1.5px solid rgba(30,90,80,.5);
+  border-radius: 14px;
+  color: inherit;
+  text-align: left;
   font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform .14s var(--ease), border-color .18s var(--ease),
+              background .18s var(--ease), box-shadow .18s var(--ease);
 }
-.hf-pick-pop .pop-item:hover { color: var(--navi-neon); border-color: var(--navi-neon); }
-.hf-pick-pop .pop-sep { color: var(--navi-fg5); }
+.hf-thumb:hover {
+  transform: translateY(-2px);
+  background: rgba(15,51,51,.65);
+  border-color: rgba(168,212,160,.55);
+  box-shadow: 0 8px 24px rgba(0,0,0,.32);
+}
+.hf-thumb-text {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+.hf-thumb-eyebrow {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  color: var(--navi-fg4);
+  text-transform: uppercase;
+}
+.hf-thumb-name {
+  font-family: var(--navi-font-sans);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -.6px;
+  color: var(--navi-fg1);
+  line-height: 1.1;
+}
+.hf-thumb-hint {
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--navi-fg3);
+  line-height: 1.4;
+}
+.hf-thumb-arrow {
+  font-family: var(--navi-font-sans);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--navi-fg4);
+  transition: transform .15s var(--ease), color .15s var(--ease);
+  margin-right: 4px;
+}
+.hf-thumb:hover .hf-thumb-arrow {
+  transform: translateX(3px);
+  color: var(--navi-fg1);
+}
+/* Colored accent rail glued to the right edge — semantic per calc. */
+.hf-thumb-accent {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  border-radius: 0 14px 14px 0;
+  opacity: .85;
+  transition: opacity .18s var(--ease), width .18s var(--ease);
+}
+.hf-thumb:hover .hf-thumb-accent { opacity: 1; width: 12px; }
+
+.hf-thumb.accent-neon .hf-thumb-accent { background: var(--navi-neon); }
+.hf-thumb.accent-pos  .hf-thumb-accent { background: var(--navi-positive); }
+.hf-thumb.accent-neg  .hf-thumb-accent { background: var(--navi-negative); }
+.hf-thumb.accent-warn .hf-thumb-accent { background: var(--navi-warning); }
+
+/* Hover state subtly tints the card body to match the accent. */
+.hf-thumb.accent-neon:hover { box-shadow: 0 8px 24px rgba(210,230,50,.18), 0 0 0 1px rgba(210,230,50,.22); border-color: rgba(210,230,50,.55); }
+.hf-thumb.accent-pos:hover  { box-shadow: 0 8px 24px rgba(168,212,160,.16), 0 0 0 1px rgba(168,212,160,.2); border-color: rgba(168,212,160,.55); }
+.hf-thumb.accent-neg:hover  { box-shadow: 0 8px 24px rgba(232,112,96,.18),  0 0 0 1px rgba(232,112,96,.22);  border-color: rgba(232,112,96,.55); }
+.hf-thumb.accent-warn:hover { box-shadow: 0 8px 24px rgba(224,192,96,.18),  0 0 0 1px rgba(224,192,96,.22);  border-color: rgba(224,192,96,.55); }
+
+/* Narrow viewport: keep cards comfortable, slightly less padding */
+@media (max-width: 720px) {
+  .hf-thumb { padding: 14px 16px; }
+  .hf-thumb-name { font-size: 20px; }
+  .hf-thumb-hint { font-size: 12px; }
+}
 
 /* Calculator stage — content-sized, centered both axes; scrolls if content
    ever exceeds the viewport (safe center falls back to flex-start instead
