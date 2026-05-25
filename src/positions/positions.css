@@ -4233,6 +4233,11 @@
    Hover card for P&L bars — portaled to document.body, so
    it floats above any overflow-hidden chart container.
    ────────────────────────────────────────────────────────── */
+/* The hover card is portaled to document.body — OUTSIDE the .np-app
+   wrapper that defines all the --navi-* CSS vars. We have to either
+   re-declare those vars on the card itself or use literal values.
+   Going with literals so the card is dependency-free and obviously
+   renders even if the navi theme changes underneath it. */
 .pnl-hover-card {
   position: fixed;
   z-index: 9999;
@@ -4241,17 +4246,15 @@
   max-width: 320px;
   padding: 12px 13px 11px;
   border-radius: 10px;
-  border: 1.5px solid var(--navi-neon);
+  border: 1.5px solid #d2e632;       /* neon */
   background: linear-gradient(180deg, rgba(28, 44, 12, 0.97), rgba(12, 28, 18, 0.97));
   backdrop-filter: blur(8px);
-  /* Layered neon glow — inner crisp ring, outer soft bloom, then the
-     drop shadow for elevation. Makes the card pop off the chart. */
   box-shadow:
     0 0 0 1px rgba(210, 230, 50, 0.35),
     0 0 24px rgba(210, 230, 50, 0.32),
     0 12px 32px rgba(0, 0, 0, 0.55);
-  color: var(--navi-fg1);
-  font-family: var(--navi-font-sans);
+  color: #faf5f0;                    /* fg1 */
+  font-family: 'Work Sans', system-ui, sans-serif;
   animation: pnl-hc-in .1s ease-out;
 }
 @keyframes pnl-hc-in {
@@ -4270,14 +4273,14 @@
   font-size: 16px;
   font-weight: 800;
   letter-spacing: -.4px;
-  color: var(--navi-fg1);
+  color: #faf5f0;
 }
 .pnl-hc-sector {
-  font-family: var(--navi-font-mono);
+  font-family: 'DM Mono', monospace;
   font-size: 9.5px;
   font-weight: 600;
   letter-spacing: .3px;
-  color: var(--navi-fg4);
+  color: #a8c4c0;
   text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
@@ -4295,13 +4298,13 @@
   line-height: 1.05;
   margin-bottom: 10px;
 }
-.pnl-hc-hero.pos { color: var(--navi-neon); }
-.pnl-hc-hero.neg { color: var(--navi-negative); }
+.pnl-hc-hero.pos { color: #d2e632; }
+.pnl-hc-hero.neg { color: #e87060; }
 .pnl-hc-hero-sub {
-  font-family: var(--navi-font-mono);
+  font-family: 'DM Mono', monospace;
   font-size: 9.5px;
   font-weight: 600;
-  color: var(--navi-fg4);
+  color: #a8c4c0;
   letter-spacing: .3px;
   text-transform: lowercase;
 }
@@ -4321,17 +4324,17 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 10px;
-  font-family: var(--navi-font-mono);
+  font-family: 'DM Mono', monospace;
   font-size: 10.5px;
   line-height: 1.45;
 }
 .pnl-hc-k {
-  color: var(--navi-fg4);
+  color: #a8c4c0;
   letter-spacing: .2px;
 }
 .pnl-hc-v {
-  color: var(--navi-fg1);
+  color: #faf5f0;
   font-weight: 700;
 }
-.pnl-hc-v.pos { color: var(--navi-positive); }
-.pnl-hc-v.neg { color: var(--navi-negative); }
+.pnl-hc-v.pos { color: #a8d4a0; }
+.pnl-hc-v.neg { color: #e87060; }
