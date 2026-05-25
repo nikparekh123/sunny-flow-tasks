@@ -215,8 +215,12 @@ export function StockInsightsStrip({
     () =>
       rows
         // Closed positions don't belong on the live-insights strip —
-        // they're snapshots of the past, not actionable now.
-        .filter((r) => r.status === 'open')
+        // they're snapshots of the past, not actionable now. A position
+        // counts as "closed" when EITHER the status column is 'closed'
+        // OR the share quantity has been sold/assigned down to zero
+        // (some flows zero the quantity but leave status='open' until
+        // explicitly resolved — both should drop off this strip).
+        .filter((r) => r.status === 'open' && r.quantity > 0)
         .map((r) => {
         const s = signalsByTicker.get(r.ticker);
         const live = liveByTicker.get(r.ticker) ?? [];
