@@ -29,6 +29,11 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // the list, then redeploy. We use .ts (not .json) because Supabase's
 // Deno runtime doesn't support JSON-import attributes yet.
 import { UNIVERSE, type UniverseEntry } from './universe.ts';
+import {
+  cikFor, fetchRecentFilings, extract8Ks, fetchInsiderActivity,
+  daysSinceFromTradingDays,
+  type Item8K, type InsiderActivity,
+} from './edgar.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -134,6 +139,24 @@ async function fetchYahooCtx(ticker: string): Promise<YahooCtx> {
   } catch {
     return { daysToEarnings: null, name: null };
   }
+}
+
+/** Bundle the two SEC EDGAR pulls per ticker: one submissions fetch +
+ *  any subsequent Form 4 XML fetches share the same filings list. */
+async function fetchEdgarFlags(ticker: string): Promise<{ insider: InsiderActivity; eightKs: Item8K[] }> {
+  const cik = await cikFor(ticker);
+  if (!cik) {
+    return {
+      insider: { sellers_count: 0, total_sold_usd: 0, details: [] },
+      eightKs: [],
+    };
+  }
+  const filings = await fetchRecentFilings(cik);
+  // 8-K: walk filings in last 14 cal days (≈ 10 trading days)
+  const eightKs = extract8Ks(filings, 14, cik);
+  // Form 4: 14 cal days per spec; insider parsing fetches one XML per filing
+  const insider = await fetchInsiderActivity(cik, filings, 14);
+  return { insider, eightKs };
 }
 
 async function fetchOptionsCtx(ticker: string, spot: number, key: string): Promise<OptionsContext> {
@@ -299,17 +322,26 @@ Deno.serve(async (req) => {
       return true;
     });
 
-    // 4) Survivor enrichment — Polygon options + Yahoo earnings/name in
-    //    parallel per ticker. Both have their own try/catch so a failure
-    //    in either doesn't sink the whole row.
-    const preEnriched = await inChunks(survivors, 8, async (s) => {
-      const [ctx, yahoo] = await Promise.all([
+    // 4) Survivor enrichment — Polygon options + Yahoo (earnings/name) +
+    //    SEC EDGAR (8-K + insider $) in parallel per ticker. Each call
+    //    has its own try/catch so any one failure (rate limit, network,
+    //    missing CIK) leaves nulls on that row but the scan still ships.
+    //
+    //    Chunked at 5 parallel rather than 8 so we don't burst SEC's
+    //    ~10-req/sec ceiling once each ticker fans out into its own
+    //    submissions + Form 4 fetches.
+    const preEnriched = await inChunks(survivors, 5, async (s) => {
+      const [ctx, yahoo, edgar] = await Promise.all([
         fetchOptionsCtx(s.ticker, s.price, key).catch(() => ({
           iv30: null, options_volume: 0, put_call_ratio: null, open_interest: 0,
         })),
         fetchYahooCtx(s.ticker).catch(() => ({ daysToEarnings: null, name: null })),
+        fetchEdgarFlags(s.ticker).catch(() => ({
+          insider: { sellers_count: 0, total_sold_usd: 0, details: [] } as InsiderActivity,
+          eightKs: [] as Item8K[],
+        })),
       ]);
-      return { ...s, ctx, yahoo, sectorEtfDev: sectorDevs.get(s.sectorEtf) ?? null };
+      return { ...s, ctx, yahoo, edgar, sectorEtfDev: sectorDevs.get(s.sectorEtf) ?? null };
     });
 
     // 4b) Earnings-window filter — drop anything within ±3 trading days
@@ -335,6 +367,7 @@ Deno.serve(async (req) => {
         deviation_pct: e.deviation_pct,
         adv20_m: e.adv20_m,
         days_to_earnings: e.yahoo.daysToEarnings,
+        days_since_earnings: daysSinceFromTradingDays(e.yahoo.daysToEarnings),
         today_intraday_pct: e.today_intraday_pct,
         sector_etf: e.sectorEtf,
         sector_etf_dev_pct: e.sectorEtfDev,
@@ -343,6 +376,9 @@ Deno.serve(async (req) => {
         options_volume: e.ctx.options_volume,
         put_call_ratio: e.ctx.put_call_ratio,
         open_interest: e.ctx.open_interest,
+        // Risk flags
+        insider_sales: e.edgar.insider.sellers_count > 0 ? e.edgar.insider : null,
+        recent_8ks: e.edgar.eightKs.length > 0 ? e.edgar.eightKs : null,
       }));
       const { error: insErr } = await admin.from('bnf_candidates').insert(rows);
       if (insErr) {

@@ -42,6 +42,52 @@ interface Candidate {
   put_call_ratio: number | null;
   open_interest: number | null;
   scanned_at: string;
+  // Risk flag columns
+  days_since_earnings: number | null;
+  insider_sales: InsiderSales | null;
+  recent_8ks: EightK[] | null;
+}
+
+interface InsiderDetail { name: string; role: string; date: string; usd: number; }
+interface InsiderSales {
+  sellers_count: number;
+  total_sold_usd: number;
+  details: InsiderDetail[];
+}
+interface EightK { date: string; items: string[]; url: string; }
+
+// 8-K items considered "material" — earnings, material agreements,
+// officer changes, other material events. Anything else (regulation FD,
+// exhibits-only filings) flags amber instead of red.
+const MATERIAL_8K_ITEMS = new Set(['1.01', '2.02', '5.02', '8.01']);
+
+type FlagTone = 'red' | 'amber' | 'none';
+
+function earningsTone(daysSince: number | null): FlagTone {
+  if (daysSince == null) return 'none';
+  if (daysSince <= 7) return 'red';
+  if (daysSince <= 14) return 'amber';
+  return 'none';
+}
+
+function insiderTone(s: InsiderSales | null): FlagTone {
+  if (!s || s.sellers_count === 0) return 'none';
+  const m = s.total_sold_usd / 1_000_000;
+  if (s.sellers_count >= 2 && m >= 3) return 'red';
+  if (s.sellers_count >= 1 && m >= 1) return 'amber';
+  return 'none';
+}
+
+function eightKTone(eightKs: EightK[] | null): FlagTone {
+  if (!eightKs || eightKs.length === 0) return 'none';
+  const hasMaterial = eightKs.some((f) => f.items.some((i) => MATERIAL_8K_ITEMS.has(i)));
+  return hasMaterial ? 'red' : 'amber';
+}
+
+function setupQuality(...tones: FlagTone[]): 'clean' | 'review' | 'caution' {
+  if (tones.some((t) => t === 'red')) return 'caution';
+  if (tones.some((t) => t === 'amber')) return 'review';
+  return 'clean';
 }
 
 interface Position {
@@ -69,6 +115,52 @@ const fmtNum = (n: number | null | undefined) =>
   n == null ? '—' : n.toLocaleString();
 const fmtIV = (n: number | null | undefined) =>
   n == null ? '—' : `${(n * 100).toFixed(0)}%`;
+
+// ── Risk-flag formatters ───────────────────────────────────────────
+function fmtInsider(s: InsiderSales | null): string {
+  if (!s || s.sellers_count === 0) return '—';
+  const m = s.total_sold_usd / 1_000_000;
+  return `${s.sellers_count} / $${m.toFixed(1)}M`;
+}
+
+function insiderTooltip(s: InsiderSales | null): string {
+  if (!s || !s.details || s.details.length === 0) return '';
+  return s.details
+    .slice(0, 8)
+    .map((d) => `${d.name} (${d.role}) · ${d.date} · $${(d.usd / 1_000_000).toFixed(2)}M`)
+    .join('\n');
+}
+
+function eightKTooltip(eightKs: EightK[] | null): string {
+  if (!eightKs || eightKs.length === 0) return '';
+  return eightKs
+    .slice(0, 6)
+    .map((f) => `${f.date} · items ${f.items.join(', ') || '—'}`)
+    .join('\n');
+}
+
+/** Render the 8-K cell as a count plus links to each filing on SEC.gov. */
+function EightKLinks({ items }: { items: EightK[] }) {
+  return (
+    <span className="bnf-8k-cell">
+      <span className="bnf-8k-count">{items.length}</span>
+      <span className="bnf-8k-links">
+        {items.slice(0, 3).map((f, i) => (
+          <a
+            key={i}
+            href={f.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="bnf-8k-link"
+          >
+            ↗
+          </a>
+        ))}
+      </span>
+    </span>
+  );
+}
 
 function daysBetween(fromIso: string, toIso: string): number {
   const a = new Date(fromIso + 'T00:00:00Z').getTime();
@@ -201,6 +293,23 @@ export default function NewStrategy() {
     }
   };
 
+  // ── Refresh-flags handler (re-pulls SEC + earnings only, much faster) ──
+  const [refreshingFlags, setRefreshingFlags] = useState(false);
+  const runRefreshFlags = async () => {
+    setRefreshingFlags(true);
+    setScanErr(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('bnf-refresh-flags');
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      qc.invalidateQueries({ queryKey: ['bnf_candidates'] });
+    } catch (e) {
+      setScanErr((e as Error).message);
+    } finally {
+      setRefreshingFlags(false);
+    }
+  };
+
   // ── Derived sets ──
   const openPositions = positions.filter((p) => p.status === 'open');
   const closedPositions = positions.filter((p) => p.status === 'closed');
@@ -282,6 +391,14 @@ export default function NewStrategy() {
         </div>
         <div className="bnf-top-actions">
           <button
+            className="np-btn"
+            disabled={refreshingFlags || candidates.length === 0}
+            onClick={runRefreshFlags}
+            title="Re-pull SEC EDGAR (8-K + insider) + earnings dates for current candidates without re-running the universe scan."
+          >
+            {refreshingFlags ? 'Refreshing flags…' : '↻ Refresh risk flags'}
+          </button>
+          <button
             className="np-btn neon"
             disabled={scanning}
             onClick={runScan}
@@ -326,46 +443,79 @@ export default function NewStrategy() {
                   <th className="num">SMA200</th>
                   <th className="num">ADV20 $M</th>
                   <th className="num">Earn</th>
+                  <th className="num bnf-flag-th">Days since earn</th>
+                  <th className="num bnf-flag-th">Insider sales (14d)</th>
+                  <th className="num bnf-flag-th">8-K (14d)</th>
                   <th className="num">IV</th>
                   <th className="num">Opt vol</th>
                   <th className="num">P/C</th>
                   <th className="num">OI</th>
+                  <th>Setup</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
                 {candidates.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="bnf-empty">
+                    <td colSpan={17} className="bnf-empty">
                       No candidates yet. Click <b>Refresh scan</b> to run the universe.
                     </td>
                   </tr>
-                ) : candidates.map((c) => (
-                  <tr key={c.id}>
-                    <td className="ticker">{c.ticker}</td>
-                    <td className="bnf-name" title={c.name ?? ''}>{c.name ?? '—'}</td>
-                    <td className="sector-cell">{c.sector ?? '—'}</td>
-                    <td className="num strong">{fmtUSD(c.price)}</td>
-                    <td className="num">{fmtUSD(c.sma25)}</td>
-                    <td className="num down strong">{fmtPct(c.deviation_pct)}</td>
-                    <td className="num">{fmtUSD(c.sma200)}</td>
-                    <td className="num">{c.adv20_m ? `$${c.adv20_m.toFixed(0)}M` : '—'}</td>
-                    <td className="num">{fmtDays(c.days_to_earnings)}</td>
-                    <td className="num">{fmtIV(c.iv30)}</td>
-                    <td className="num">{fmtNum(c.options_volume)}</td>
-                    <td className="num">{c.put_call_ratio != null ? c.put_call_ratio.toFixed(2) : '—'}</td>
-                    <td className="num">{fmtNum(c.open_interest)}</td>
-                    <td className="num">
-                      <button
-                        className="np-btn neon bnf-row-btn"
-                        onClick={() => buyMutation.mutate(c)}
-                        disabled={buyMutation.isPending}
+                ) : candidates.map((c) => {
+                  const tEarn = earningsTone(c.days_since_earnings);
+                  const tIns = insiderTone(c.insider_sales);
+                  const t8K = eightKTone(c.recent_8ks);
+                  const quality = setupQuality(tEarn, tIns, t8K);
+                  return (
+                    <tr key={c.id}>
+                      <td className="ticker">{c.ticker}</td>
+                      <td className="bnf-name" title={c.name ?? ''}>{c.name ?? '—'}</td>
+                      <td className="sector-cell">{c.sector ?? '—'}</td>
+                      <td className="num strong">{fmtUSD(c.price)}</td>
+                      <td className="num">{fmtUSD(c.sma25)}</td>
+                      <td className="num down strong">{fmtPct(c.deviation_pct)}</td>
+                      <td className="num">{fmtUSD(c.sma200)}</td>
+                      <td className="num">{c.adv20_m ? `$${c.adv20_m.toFixed(0)}M` : '—'}</td>
+                      <td className="num">{fmtDays(c.days_to_earnings)}</td>
+
+                      {/* Risk flag cells — color-coded backgrounds per spec */}
+                      <td className={`num bnf-flag tone-${tEarn}`}>
+                        {c.days_since_earnings != null ? `${c.days_since_earnings}d` : '—'}
+                      </td>
+                      <td
+                        className={`num bnf-flag tone-${tIns}`}
+                        title={insiderTooltip(c.insider_sales)}
                       >
-                        Buy
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                        {fmtInsider(c.insider_sales)}
+                      </td>
+                      <td
+                        className={`num bnf-flag tone-${t8K}`}
+                        title={eightKTooltip(c.recent_8ks)}
+                      >
+                        {c.recent_8ks && c.recent_8ks.length > 0
+                          ? <EightKLinks items={c.recent_8ks} />
+                          : '—'}
+                      </td>
+
+                      <td className="num">{fmtIV(c.iv30)}</td>
+                      <td className="num">{fmtNum(c.options_volume)}</td>
+                      <td className="num">{c.put_call_ratio != null ? c.put_call_ratio.toFixed(2) : '—'}</td>
+                      <td className="num">{fmtNum(c.open_interest)}</td>
+                      <td className={`bnf-quality tone-${quality}`}>
+                        {quality === 'clean' ? 'Clean' : quality === 'review' ? 'Review' : 'Caution'}
+                      </td>
+                      <td className="num">
+                        <button
+                          className="np-btn neon bnf-row-btn"
+                          onClick={() => buyMutation.mutate(c)}
+                          disabled={buyMutation.isPending}
+                        >
+                          Buy
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
