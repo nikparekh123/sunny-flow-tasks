@@ -48,6 +48,7 @@ export default function PositionsPage() {
     sellShares,
     resolveExpired,
     closePriceAt,
+    dailyCloses,
     setPositionStatus,
     setEarningsDate,
     deletePosition,
@@ -230,6 +231,10 @@ export default function PositionsPage() {
               signalsByTicker={signalsByTicker}
               liveByTicker={liveByTicker}
               overlayByTicker={overlayByTicker}
+              dailyCloses={dailyCloses}
+              onSetEarnings={(ticker, date) =>
+                setEarningsDate.mutate({ ticker, earnings_date: date })
+              }
             />
           </div>
         )}

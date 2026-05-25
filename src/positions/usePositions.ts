@@ -740,6 +740,7 @@ export function usePositions() {
     shareSells,
     shareSellsByTicker,
     closePriceAt,
+    dailyCloses,
     replacePositions,
     refreshPrices,
     addTrade,
