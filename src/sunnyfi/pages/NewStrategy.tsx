@@ -37,7 +37,6 @@ interface Candidate {
   sector_etf: string | null;
   sector_etf_dev_pct: number | null;
   iv30: number | null;
-  iv_rank: number | null;
   options_volume: number | null;
   put_call_ratio: number | null;
   open_interest: number | null;
@@ -326,7 +325,6 @@ export default function NewStrategy() {
                   <th className="num">ADV20 $M</th>
                   <th className="num">Earn</th>
                   <th className="num">IV</th>
-                  <th className="num">IV rank</th>
                   <th className="num">Opt vol</th>
                   <th className="num">P/C</th>
                   <th className="num">OI</th>
@@ -336,7 +334,7 @@ export default function NewStrategy() {
               <tbody>
                 {candidates.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="bnf-empty">
+                    <td colSpan={13} className="bnf-empty">
                       No candidates yet. Click <b>Refresh scan</b> to run the universe.
                     </td>
                   </tr>
@@ -351,7 +349,6 @@ export default function NewStrategy() {
                     <td className="num">{c.adv20_m ? `$${c.adv20_m.toFixed(0)}M` : '—'}</td>
                     <td className="num">{fmtDays(c.days_to_earnings)}</td>
                     <td className="num">{fmtIV(c.iv30)}</td>
-                    <td className="num">{c.iv_rank != null ? `${c.iv_rank.toFixed(0)}` : '—'}</td>
                     <td className="num">{fmtNum(c.options_volume)}</td>
                     <td className="num">{c.put_call_ratio != null ? c.put_call_ratio.toFixed(2) : '—'}</td>
                     <td className="num">{fmtNum(c.open_interest)}</td>
