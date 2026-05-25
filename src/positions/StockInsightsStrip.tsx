@@ -213,7 +213,11 @@ export function StockInsightsStrip({
 
   const cards = useMemo(
     () =>
-      rows.map((r) => {
+      rows
+        // Closed positions don't belong on the live-insights strip —
+        // they're snapshots of the past, not actionable now.
+        .filter((r) => r.status === 'open')
+        .map((r) => {
         const s = signalsByTicker.get(r.ticker);
         const live = liveByTicker.get(r.ticker) ?? [];
         const tiles = signalTilesFor(s);

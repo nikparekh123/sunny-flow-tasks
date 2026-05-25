@@ -4107,9 +4107,8 @@
   font-weight: 700;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  opacity: 0.82;
 }
-.np-app .si-card.tone-flat .si-card-sec { color: var(--navi-fg3); opacity: 1; }
+.np-app .si-card.tone-flat .si-card-sec { color: var(--navi-fg3); }
 .np-app .si-card-hd-r {
   display: flex;
   flex-direction: column;
@@ -4186,7 +4185,6 @@
 .np-app .si-change-window {
   font-size: 11px;
   font-weight: 600;
-  opacity: 0.75;
   letter-spacing: .3px;
   text-transform: lowercase;
 }
@@ -4211,7 +4209,6 @@
   font-weight: 800;
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  opacity: 0.85;
   margin-bottom: 4px;
 }
 .np-app .si-block-row {
@@ -4227,12 +4224,18 @@
   font-family: var(--navi-font-mono);
   font-size: 12px;
   font-weight: 600;
-  opacity: 0.85;
 }
-.np-app .si-k { font-weight: 600; opacity: 0.9; }
+.np-app .si-k { font-weight: 600; }
 .np-app .si-v { font-weight: 800; letter-spacing: -.2px; }
-.np-app .si-v-pct { font-weight: 700; opacity: 0.9; }
-.np-app .si-sep { opacity: 0.55; margin: 0 1px; }
+.np-app .si-v-pct { font-weight: 700; }
+.np-app .si-sep { margin: 0 1px; }
+/* Flat-card muting uses explicit color tokens instead of opacity — opacity
+   on a colored card creates muddy washed-out text. */
+.np-app .si-card.tone-flat .si-block-hd { color: var(--navi-fg4); }
+.np-app .si-card.tone-flat .si-block-row.muted { color: var(--navi-fg4); }
+.np-app .si-card.tone-flat .si-k { color: var(--navi-fg3); }
+.np-app .si-card.tone-flat .si-sep { color: var(--navi-fg4); }
+.np-app .si-card.tone-flat .si-change-window { color: var(--navi-fg4); }
 
 /* Numbers in YOUR POSITION block — bold dark on UP, bold white on DOWN.
    The tone is implied by the card color, no need for a second-tier hue. */
@@ -4302,7 +4305,7 @@
 }
 .np-app .si-earn-icon { font-size: 14px; }
 .np-app .si-earn-text { font-weight: 800; }
-.np-app .si-earn-date { opacity: 0.75; font-weight: 600; }
+.np-app .si-earn-date { font-weight: 600; }
 
 .np-app .si-earn-add {
   background: rgba(10, 40, 40, 0.12);
@@ -4400,9 +4403,9 @@
   font-size: 10.5px;
   font-weight: 600;
   letter-spacing: .3px;
-  opacity: 0.7;
   text-transform: lowercase;
 }
+.np-app .si-card.tone-flat .si-tile-l { color: var(--navi-fg4); }
 /* Tile values inherit the card's foreground (dark on neon, white on red,
    neon/red tokens on flat). The bg tint of the tile itself does the
    coloring; no need for a second-tier accent on the number. */
@@ -4424,7 +4427,8 @@
 }
 .np-app .si-card.tone-down .si-card-ft { border-top-color: rgba(250, 245, 240, 0.28); }
 .np-app .si-card.tone-flat .si-card-ft { border-top-color: rgba(50, 110, 100, 0.32); }
-.np-app .si-updated { opacity: 0.78; }
+.np-app .si-updated { font-weight: 600; }
+.np-app .si-card.tone-flat .si-updated { color: var(--navi-fg4); }
 .np-app .si-nav { display: flex; align-items: center; gap: 8px; }
 .np-app .si-nav-btn {
   background: rgba(10, 40, 40, 0.16);
@@ -4455,7 +4459,8 @@
   border-color: rgba(50, 110, 100, 0.4);
   color: var(--navi-fg2);
 }
-.np-app .si-nav-pos { font-weight: 700; opacity: 0.85; }
+.np-app .si-nav-pos { font-weight: 700; }
+.np-app .si-card.tone-flat .si-nav-pos { color: var(--navi-fg3); }
 
 /* Focus ring for keyboard nav */
 .np-app .si-scroll:focus-visible {
