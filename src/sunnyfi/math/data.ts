@@ -25,16 +25,17 @@ export interface CalcMeta {
 
 export const CATEGORIES: Record<CalcCategory, { label: string; comingSoon?: boolean }> = {
   "pre-trade":  { label: "Pre-trade planning" },
-  "scenario":   { label: "Scenario & risk",   comingSoon: true },
+  "scenario":   { label: "Scenario & risk" },
   "macro":      { label: "Macro",             comingSoon: true },
   "post-trade": { label: "Post-trade review", comingSoon: true },
 };
 
 export const CALCS: CalcMeta[] = [
-  { key: "pct-diff",        name: "Percentage difference", category: "pre-trade", hint: "Pre-trade planning" },
-  { key: "expected-income", name: "Expected income",       category: "pre-trade", hint: "Pre-trade planning" },
-  { key: "put-cost",        name: "Put cost",              category: "pre-trade", hint: "Pre-trade planning" },
-  { key: "income-vs-cost",  name: "Income vs cost",        category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "pct-diff",         name: "Percentage difference", category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "expected-income",  name: "Expected income",       category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "put-cost",         name: "Put cost",              category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "income-vs-cost",   name: "Income vs cost",        category: "pre-trade", hint: "Pre-trade planning" },
+  { key: "scenario-stress",  name: "Scenario & stress",     category: "scenario",  hint: "Stress your live book against a market move" },
 ];
 
 export function findCalc(key: string | null): CalcMeta | null {

@@ -47,6 +47,13 @@ import {
   ivcRank,
   ivcCardLine,
 } from "./IncomeVsCost";
+import {
+  ScenarioStressCalc,
+  scnInitial,
+  scnCopy,
+  scnDisplay,
+  scnFields,
+} from "./ScenarioStress";
 
 export interface CalcModule<S extends Record<string, unknown> = Record<string, unknown>> {
   component: ComponentType<{ state: S; setState: (next: S | ((prev: S) => S)) => void }>;
@@ -111,5 +118,15 @@ export const CALC_MODULES: Record<string, CalcModule<any>> = {
     upsertKey: ivcUpsertKey,
     rank: ivcRank,
     cardLine: ivcCardLine,
+  },
+  "scenario-stress": {
+    component: ScenarioStressCalc,
+    initial: scnInitial,
+    copyText: scnCopy,
+    display: scnDisplay,
+    payloadFields: scnFields,
+    // Scenarios are ephemeral by design — never upsert, never rank.
+    upsertKey: () => null,
+    rank: () => null,
   },
 };
