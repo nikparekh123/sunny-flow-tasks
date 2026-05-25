@@ -4069,13 +4069,16 @@
   transform: translateY(-2px);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
 }
+/* Colors stick to the navi palette. UP uses our neon yellow-green; text
+   on it is very dark for max contrast. DOWN uses our negative red; text
+   on it is white. Flat uses the dark surface with light text. */
 .np-app .si-card.tone-up {
-  background: #7ed957;        /* vibrant spring green */
+  background: var(--navi-neon);
   color: #0a2828;
 }
 .np-app .si-card.tone-down {
-  background: #f06a55;        /* vibrant coral */
-  color: #0a2828;
+  background: var(--navi-negative);
+  color: #faf5f0;
 }
 .np-app .si-card.tone-flat {
   background: rgba(15, 51, 51, 0.85);
@@ -4104,7 +4107,7 @@
   font-weight: 700;
   letter-spacing: 1.5px;
   text-transform: uppercase;
-  opacity: 0.7;
+  opacity: 0.82;
 }
 .np-app .si-card.tone-flat .si-card-sec { color: var(--navi-fg3); opacity: 1; }
 .np-app .si-card-hd-r {
@@ -4134,6 +4137,21 @@
   background: #0a2828;
   color: #faf5f0;
   border-color: #0a2828;
+}
+/* DOWN card has white text by default; the pills need a white outline
+   instead of the dark one used by the UP/neon card. */
+.np-app .si-card.tone-down .si-tf-pill {
+  background: rgba(250, 245, 240, 0.18);
+  border-color: rgba(250, 245, 240, 0.4);
+  color: #faf5f0;
+}
+.np-app .si-card.tone-down .si-tf-pill:hover {
+  background: rgba(250, 245, 240, 0.32);
+}
+.np-app .si-card.tone-down .si-tf-pill.on {
+  background: #faf5f0;
+  color: var(--navi-negative);
+  border-color: #faf5f0;
 }
 .np-app .si-card.tone-flat .si-tf-pill {
   background: rgba(15, 51, 51, 0.6);
@@ -4168,12 +4186,12 @@
 .np-app .si-change-window {
   font-size: 11px;
   font-weight: 600;
-  opacity: 0.6;
+  opacity: 0.75;
   letter-spacing: .3px;
   text-transform: lowercase;
 }
-.np-app .si-card.tone-up .si-change { color: #0a4014; }
-.np-app .si-card.tone-down .si-change { color: #5a1a14; }
+.np-app .si-card.tone-up .si-change { color: #0a2828; }
+.np-app .si-card.tone-down .si-change { color: #faf5f0; }
 .np-app .si-card.tone-flat .si-change.tone-pos { color: var(--navi-neon); }
 .np-app .si-card.tone-flat .si-change.tone-neg { color: var(--navi-negative); }
 
@@ -4183,8 +4201,9 @@
   flex-direction: column;
   gap: 6px;
   padding-top: 14px;
-  border-top: 1px solid rgba(10, 40, 40, 0.18);
+  border-top: 1px solid rgba(10, 40, 40, 0.22);
 }
+.np-app .si-card.tone-down .si-block { border-top-color: rgba(250, 245, 240, 0.28); }
 .np-app .si-card.tone-flat .si-block { border-top-color: rgba(50, 110, 100, 0.32); }
 .np-app .si-block-hd {
   font-family: var(--navi-font-mono);
@@ -4192,7 +4211,7 @@
   font-weight: 800;
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  opacity: 0.75;
+  opacity: 0.85;
   margin-bottom: 4px;
 }
 .np-app .si-block-row {
@@ -4207,17 +4226,18 @@
 .np-app .si-block-row.muted {
   font-family: var(--navi-font-mono);
   font-size: 12px;
-  opacity: 0.7;
+  font-weight: 600;
+  opacity: 0.85;
 }
-.np-app .si-k { font-weight: 500; opacity: 0.85; }
+.np-app .si-k { font-weight: 600; opacity: 0.9; }
 .np-app .si-v { font-weight: 800; letter-spacing: -.2px; }
-.np-app .si-v-pct { font-weight: 600; opacity: 0.85; }
-.np-app .si-sep { opacity: 0.45; margin: 0 1px; }
+.np-app .si-v-pct { font-weight: 700; opacity: 0.9; }
+.np-app .si-sep { opacity: 0.55; margin: 0 1px; }
 
-.np-app .si-card.tone-up .si-v.pos { color: #0a4014; }
-.np-app .si-card.tone-up .si-v.neg { color: #5a1a14; }
-.np-app .si-card.tone-down .si-v.pos { color: #0a4014; }
-.np-app .si-card.tone-down .si-v.neg { color: #5a1a14; }
+/* Numbers in YOUR POSITION block — bold dark on UP, bold white on DOWN.
+   The tone is implied by the card color, no need for a second-tier hue. */
+.np-app .si-card.tone-up .si-v { color: #0a2828; }
+.np-app .si-card.tone-down .si-v { color: #faf5f0; }
 .np-app .si-card.tone-flat .si-v.pos { color: var(--navi-neon); }
 .np-app .si-card.tone-flat .si-v.neg { color: var(--navi-negative); }
 
@@ -4248,6 +4268,28 @@
   border-color: #0a2828;
 }
 .np-app .si-earn-chip.urgent:hover { background: #0a2828; opacity: 0.92; }
+/* DOWN card variant — chip needs lighter chrome to stay readable on red */
+.np-app .si-card.tone-down .si-earn-chip {
+  background: rgba(250, 245, 240, 0.2);
+  border-color: rgba(250, 245, 240, 0.45);
+  color: #faf5f0;
+}
+.np-app .si-card.tone-down .si-earn-chip:hover {
+  background: rgba(250, 245, 240, 0.34);
+}
+.np-app .si-card.tone-down .si-earn-chip.urgent {
+  background: #faf5f0;
+  color: var(--navi-negative);
+  border-color: #faf5f0;
+}
+.np-app .si-card.tone-down .si-earn-add {
+  background: rgba(250, 245, 240, 0.15);
+  border-color: rgba(250, 245, 240, 0.4);
+  color: #faf5f0;
+}
+.np-app .si-card.tone-down .si-earn-add:hover {
+  background: rgba(250, 245, 240, 0.28);
+}
 .np-app .si-card.tone-flat .si-earn-chip {
   background: rgba(50, 110, 100, 0.2);
   border-color: rgba(50, 110, 100, 0.5);
@@ -4330,13 +4372,21 @@
   flex-direction: column;
   gap: 2px;
   padding: 12px 14px;
-  background: rgba(10, 40, 40, 0.14);
-  border: 1px solid rgba(10, 40, 40, 0.22);
   border-radius: 12px;
 }
+/* UP card → dark inset for the tile so the dark number pops against neon */
+.np-app .si-card.tone-up .si-tile {
+  background: rgba(10, 40, 40, 0.16);
+  border: 1px solid rgba(10, 40, 40, 0.26);
+}
+/* DOWN card → light inset, white text still legible */
+.np-app .si-card.tone-down .si-tile {
+  background: rgba(250, 245, 240, 0.18);
+  border: 1px solid rgba(250, 245, 240, 0.32);
+}
 .np-app .si-card.tone-flat .si-tile {
-  background: rgba(50, 110, 100, 0.16);
-  border-color: rgba(50, 110, 100, 0.32);
+  background: rgba(50, 110, 100, 0.18);
+  border: 1px solid rgba(50, 110, 100, 0.36);
 }
 .np-app .si-tile-v {
   font-family: var(--navi-font-sans);
@@ -4353,12 +4403,9 @@
   opacity: 0.7;
   text-transform: lowercase;
 }
-/* Tile tone — bright color cards use deeper accents, flat card uses
-   the existing positive/negative tokens. */
-.np-app .si-card.tone-up .si-tile.tone-pos .si-tile-v { color: #0a4014; }
-.np-app .si-card.tone-up .si-tile.tone-neg .si-tile-v { color: #5a1a14; }
-.np-app .si-card.tone-down .si-tile.tone-pos .si-tile-v { color: #0a4014; }
-.np-app .si-card.tone-down .si-tile.tone-neg .si-tile-v { color: #5a1a14; }
+/* Tile values inherit the card's foreground (dark on neon, white on red,
+   neon/red tokens on flat). The bg tint of the tile itself does the
+   coloring; no need for a second-tier accent on the number. */
 .np-app .si-card.tone-flat .si-tile.tone-pos .si-tile-v { color: var(--navi-neon); }
 .np-app .si-card.tone-flat .si-tile.tone-neg .si-tile-v { color: var(--navi-negative); }
 
@@ -4366,7 +4413,7 @@
 .np-app .si-card-ft {
   margin-top: auto;
   padding-top: 12px;
-  border-top: 1px solid rgba(10, 40, 40, 0.18);
+  border-top: 1px solid rgba(10, 40, 40, 0.22);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -4375,12 +4422,13 @@
   font-weight: 600;
   letter-spacing: .4px;
 }
+.np-app .si-card.tone-down .si-card-ft { border-top-color: rgba(250, 245, 240, 0.28); }
 .np-app .si-card.tone-flat .si-card-ft { border-top-color: rgba(50, 110, 100, 0.32); }
-.np-app .si-updated { opacity: 0.65; }
+.np-app .si-updated { opacity: 0.78; }
 .np-app .si-nav { display: flex; align-items: center; gap: 8px; }
 .np-app .si-nav-btn {
-  background: rgba(10, 40, 40, 0.15);
-  border: 1px solid rgba(10, 40, 40, 0.3);
+  background: rgba(10, 40, 40, 0.16);
+  border: 1px solid rgba(10, 40, 40, 0.34);
   border-radius: 50%;
   width: 24px; height: 24px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -4394,12 +4442,20 @@
   background: rgba(10, 40, 40, 0.3);
   border-color: rgba(10, 40, 40, 0.55);
 }
+.np-app .si-card.tone-down .si-nav-btn {
+  background: rgba(250, 245, 240, 0.2);
+  border-color: rgba(250, 245, 240, 0.4);
+  color: #faf5f0;
+}
+.np-app .si-card.tone-down .si-nav-btn:hover {
+  background: rgba(250, 245, 240, 0.34);
+}
 .np-app .si-card.tone-flat .si-nav-btn {
   background: rgba(50, 110, 100, 0.18);
   border-color: rgba(50, 110, 100, 0.4);
   color: var(--navi-fg2);
 }
-.np-app .si-nav-pos { font-weight: 700; opacity: 0.75; }
+.np-app .si-nav-pos { font-weight: 700; opacity: 0.85; }
 
 /* Focus ring for keyboard nav */
 .np-app .si-scroll:focus-visible {
