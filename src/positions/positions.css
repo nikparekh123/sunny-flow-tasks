@@ -4054,14 +4054,14 @@
    stacked sections inside a fixed 600px-wide snap target.
    ────────────────────────────────────────────────────────── */
 .np-app .si-card {
-  flex: 0 0 600px;
-  min-height: 480px;
-  border-radius: 18px;
-  padding: 20px 22px 18px;
+  flex: 0 0 640px;
+  min-height: 520px;
+  border-radius: 20px;
+  padding: 26px 28px 22px;
   scroll-snap-align: start;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   overflow: hidden;
   transition: transform .15s var(--np-ease), box-shadow .18s var(--np-ease);
 }
@@ -4088,25 +4088,31 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
 }
-.np-app .si-card-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.np-app .si-card-id { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .np-app .si-card-tk {
   font-family: var(--navi-font-sans);
-  font-size: 28px;
+  font-size: 38px;
   font-weight: 800;
-  letter-spacing: -.8px;
+  letter-spacing: -1.1px;
   line-height: 1;
 }
 .np-app .si-card-sec {
   font-family: var(--navi-font-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 1.4px;
+  letter-spacing: 1.5px;
   text-transform: uppercase;
   opacity: 0.7;
 }
 .np-app .si-card.tone-flat .si-card-sec { color: var(--navi-fg3); opacity: 1; }
+.np-app .si-card-hd-r {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
 
 /* Timeframe pills */
 .np-app .si-tf { display: flex; gap: 4px; }
@@ -4141,26 +4147,26 @@
 }
 
 /* ── NOW block ── */
-.np-app .si-now { display: flex; flex-direction: column; gap: 4px; }
+.np-app .si-now { display: flex; flex-direction: column; gap: 6px; }
 .np-app .si-price {
   font-family: var(--navi-font-sans);
-  font-size: 40px;
+  font-size: 56px;
   font-weight: 800;
-  letter-spacing: -1.2px;
+  letter-spacing: -1.8px;
   line-height: 1;
 }
 .np-app .si-change {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 10px;
   font-family: var(--navi-font-mono);
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 700;
 }
 .np-app .si-change-dollar { font-weight: 800; }
 .np-app .si-change-pct { font-weight: 700; }
 .np-app .si-change-window {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   opacity: 0.6;
   letter-spacing: .3px;
@@ -4171,39 +4177,23 @@
 .np-app .si-card.tone-flat .si-change.tone-pos { color: var(--navi-neon); }
 .np-app .si-card.tone-flat .si-change.tone-neg { color: var(--navi-negative); }
 
-/* Sparkline */
-.np-app .si-spark {
-  width: 100%;
-  height: 56px;
-  display: block;
-  margin-top: 4px;
-}
-.np-app .si-spark-empty {
-  height: 56px;
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--navi-font-mono);
-  font-size: 10px;
-  opacity: 0.5;
-  letter-spacing: .3px;
-}
-
 /* ── Section blocks ── */
 .np-app .si-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-top: 10px;
+  gap: 6px;
+  padding-top: 14px;
   border-top: 1px solid rgba(10, 40, 40, 0.18);
 }
 .np-app .si-card.tone-flat .si-block { border-top-color: rgba(50, 110, 100, 0.32); }
 .np-app .si-block-hd {
   font-family: var(--navi-font-mono);
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: 1.4px;
+  letter-spacing: 1.6px;
   text-transform: uppercase;
-  opacity: 0.7;
-  margin-bottom: 2px;
+  opacity: 0.75;
+  margin-bottom: 4px;
 }
 .np-app .si-block-row {
   display: flex;
@@ -4211,12 +4201,12 @@
   flex-wrap: wrap;
   gap: 6px;
   font-family: var(--navi-font-sans);
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: 16px;
+  line-height: 1.4;
 }
 .np-app .si-block-row.muted {
   font-family: var(--navi-font-mono);
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.7;
 }
 .np-app .si-k { font-weight: 500; opacity: 0.85; }
@@ -4231,21 +4221,50 @@
 .np-app .si-card.tone-flat .si-v.pos { color: var(--navi-neon); }
 .np-app .si-card.tone-flat .si-v.neg { color: var(--navi-negative); }
 
-/* Earnings inline ui */
-.np-app .si-earn {
+/* ── Earnings chip (top-right of header) ── */
+.np-app .si-earn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(10, 40, 40, 0.18);
+  border: 1.5px solid rgba(10, 40, 40, 0.32);
+  border-radius: 100px;
+  color: inherit;
   font-family: var(--navi-font-sans);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all .12s var(--np-ease);
+  white-space: nowrap;
 }
-.np-app .si-earn.urgent { font-weight: 800; }
-.np-app .si-card.tone-up .si-earn { color: #0a2828; }
-.np-app .si-card.tone-down .si-earn.urgent { color: #5a1a14; }
-.np-app .si-card.tone-flat .si-earn.urgent { color: var(--navi-negative); }
-.np-app .si-card.tone-flat .si-earn.soon { color: var(--navi-warning); }
+.np-app .si-earn-chip:hover {
+  background: rgba(10, 40, 40, 0.28);
+  border-color: rgba(10, 40, 40, 0.55);
+}
+.np-app .si-earn-chip.urgent {
+  background: #0a2828;
+  color: #faf5f0;
+  border-color: #0a2828;
+}
+.np-app .si-earn-chip.urgent:hover { background: #0a2828; opacity: 0.92; }
+.np-app .si-card.tone-flat .si-earn-chip {
+  background: rgba(50, 110, 100, 0.2);
+  border-color: rgba(50, 110, 100, 0.5);
+  color: var(--navi-fg1);
+}
+.np-app .si-card.tone-flat .si-earn-chip.urgent {
+  background: var(--navi-negative);
+  color: #faf5f0;
+  border-color: var(--navi-negative);
+}
+.np-app .si-earn-icon { font-size: 14px; }
+.np-app .si-earn-text { font-weight: 800; }
+.np-app .si-earn-date { opacity: 0.75; font-weight: 600; }
+
 .np-app .si-earn-add {
-  align-self: flex-start;
-  background: rgba(10, 40, 40, 0.15);
-  border: 1px dashed rgba(10, 40, 40, 0.35);
+  background: rgba(10, 40, 40, 0.12);
+  border: 1.5px dashed rgba(10, 40, 40, 0.32);
   border-radius: 100px;
   color: inherit;
   font-family: var(--navi-font-sans);
@@ -4254,30 +4273,17 @@
   padding: 5px 12px;
   cursor: pointer;
   transition: all .12s var(--np-ease);
+  white-space: nowrap;
 }
 .np-app .si-earn-add:hover {
-  background: rgba(10, 40, 40, 0.28);
+  background: rgba(10, 40, 40, 0.25);
   border-color: rgba(10, 40, 40, 0.5);
 }
 .np-app .si-card.tone-flat .si-earn-add {
-  background: rgba(50, 110, 100, 0.18);
-  border-color: rgba(50, 110, 100, 0.5);
+  background: rgba(50, 110, 100, 0.15);
+  border-color: rgba(50, 110, 100, 0.45);
   color: var(--navi-fg2);
 }
-.np-app .si-earn-edit {
-  background: transparent;
-  border: none;
-  font-family: var(--navi-font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  color: inherit;
-  opacity: 0.6;
-  cursor: pointer;
-  padding: 0 4px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.np-app .si-earn-edit:hover { opacity: 1; }
 .np-app .si-earn-edit-row {
   display: flex; align-items: center; gap: 6px;
 }
@@ -4312,16 +4318,49 @@
 .np-app .si-earn-btn.save { background: #0a2828; color: #faf5f0; border-color: #0a2828; }
 .np-app .si-earn-btn.cancel:hover { background: rgba(10, 40, 40, 0.32); }
 
-/* Signals */
-.np-app .si-signals {
-  margin: 0;
-  padding: 0 0 0 15px;
-  list-style: disc;
-  font-family: var(--navi-font-sans);
-  font-size: 12.5px;
-  line-height: 1.5;
+/* ── Signal tiles (big number / small label grid) ── */
+.np-app .si-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 4px;
 }
-.np-app .si-signals li { padding-left: 2px; }
+.np-app .si-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  background: rgba(10, 40, 40, 0.14);
+  border: 1px solid rgba(10, 40, 40, 0.22);
+  border-radius: 12px;
+}
+.np-app .si-card.tone-flat .si-tile {
+  background: rgba(50, 110, 100, 0.16);
+  border-color: rgba(50, 110, 100, 0.32);
+}
+.np-app .si-tile-v {
+  font-family: var(--navi-font-sans);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -.7px;
+  line-height: 1.05;
+}
+.np-app .si-tile-l {
+  font-family: var(--navi-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  opacity: 0.7;
+  text-transform: lowercase;
+}
+/* Tile tone — bright color cards use deeper accents, flat card uses
+   the existing positive/negative tokens. */
+.np-app .si-card.tone-up .si-tile.tone-pos .si-tile-v { color: #0a4014; }
+.np-app .si-card.tone-up .si-tile.tone-neg .si-tile-v { color: #5a1a14; }
+.np-app .si-card.tone-down .si-tile.tone-pos .si-tile-v { color: #0a4014; }
+.np-app .si-card.tone-down .si-tile.tone-neg .si-tile-v { color: #5a1a14; }
+.np-app .si-card.tone-flat .si-tile.tone-pos .si-tile-v { color: var(--navi-neon); }
+.np-app .si-card.tone-flat .si-tile.tone-neg .si-tile-v { color: var(--navi-negative); }
 
 /* Footer + carousel nav */
 .np-app .si-card-ft {

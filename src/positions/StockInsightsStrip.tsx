@@ -31,9 +31,9 @@ import type { StrategyBucket } from './usePositions';
  * a chip that flips into an inline <input type="date"> on click. Save
  * calls onSetEarnings, which the page wires to the existing mutation.
  *
- * Sparkline: reads from daily_closes (already cached by the parent hook).
- * The selected timeframe (1D/5D/1M/3M) controls both the headline % and
- * the sparkline window. Falls back to a flat baseline when no history.
+ * Timeframe: pills (1D/5D/1M/3M) toggle the headline % only. The card
+ * background tracks TODAY's day change regardless of the selected window
+ * — that's the "is this stock up or down right now" signal.
  *
  * Beta + IV: small hardcoded subset of the 1y-baseline values from the
  * ScenarioStress / IvC tables. Top names only; sector default beyond.
@@ -72,12 +72,23 @@ function dayChange(row: PositionComputed): number | null {
   return ((row.current_price - row.prev_close) / row.prev_close) * 100;
 }
 
-/** Sentiment classification for the card background. ±0.5% is "flat". */
+/** Sentiment classification for the card background.
+ *
+ *  Today's move wins when it's meaningful (≥ ±0.5%). When the day is flat
+ *  (market closed, no movement, or the stock genuinely hasn't moved) we
+ *  fall through to the user's OVERALL position direction so the card is
+ *  still visibly green/red — that's almost always more informative than
+ *  showing a neutral "nothing happened" panel. Only returns 'flat' when
+ *  both signals are truly zero (a brand-new position with no movement). */
 type Sentiment = 'up' | 'down' | 'flat';
-function sentimentFor(dayPct: number | null): Sentiment {
-  if (dayPct == null) return 'flat';
-  if (dayPct >= 0.5) return 'up';
-  if (dayPct <= -0.5) return 'down';
+function sentimentFor(dayPct: number | null, overallPL: number): Sentiment {
+  if (dayPct != null) {
+    if (dayPct >= 0.5) return 'up';
+    if (dayPct <= -0.5) return 'down';
+  }
+  // Fall back to the user's stake in the name
+  if (overallPL > 0) return 'up';
+  if (overallPL < 0) return 'down';
   return 'flat';
 }
 
@@ -94,35 +105,61 @@ const BETA_HINTS: Record<string, number> = {
 };
 const betaFor = (ticker: string): number | null => BETA_HINTS[ticker.toUpperCase()] ?? null;
 
-/** Plain-text signal lines, ranked by actionability. */
-function signalLinesFor(s: TickerSignals | undefined): string[] {
+/** Each signal renders as a tile: big number / percentage up top, a short
+ *  descriptive label underneath. Ranked by how actionable the signal is —
+ *  RSI extremes and big recent moves first, MA context after. */
+interface SignalTile {
+  value: string;
+  label: string;
+  tone?: 'pos' | 'neg';
+}
+function signalTilesFor(s: TickerSignals | undefined): SignalTile[] {
   if (!s) return [];
-  const out: Array<{ text: string; rank: number }> = [];
+  const out: Array<SignalTile & { rank: number }> = [];
 
+  // RSI extreme — surface the number itself, label says what it means
   if (s.rsi14 != null) {
-    if (s.rsi14 >= 70) out.push({ text: `Overbought · RSI ${s.rsi14.toFixed(0)}`, rank: 100 });
-    else if (s.rsi14 <= 30) out.push({ text: `Oversold · RSI ${s.rsi14.toFixed(0)}`, rank: 100 });
+    if (s.rsi14 >= 70) {
+      out.push({ value: s.rsi14.toFixed(0), label: 'overbought · RSI', tone: 'neg', rank: 100 });
+    } else if (s.rsi14 <= 30) {
+      out.push({ value: s.rsi14.toFixed(0), label: 'oversold · RSI', tone: 'pos', rank: 100 });
+    }
   }
-  if (s.price != null && s.ma200 != null && s.ma200 > 0 && s.price < s.ma200) {
-    const pct = ((s.price - s.ma200) / s.ma200) * 100;
-    out.push({ text: `Below 200d MA · ${pct.toFixed(1)}%`, rank: 60 });
+  // 5-day move — surfaced when ≥ 5%
+  if (s.chg_5d_pct != null && Math.abs(s.chg_5d_pct) >= 5) {
+    out.push({
+      value: `${s.chg_5d_pct >= 0 ? '+' : '−'}${Math.abs(s.chg_5d_pct).toFixed(1)}%`,
+      label: 'past week',
+      tone: s.chg_5d_pct >= 0 ? 'pos' : 'neg',
+      rank: 90,
+    });
   }
+  // 21-day move — surfaced when ≥ 10%
+  if (s.chg_21d_pct != null && Math.abs(s.chg_21d_pct) >= 10) {
+    out.push({
+      value: `${s.chg_21d_pct >= 0 ? '+' : '−'}${Math.abs(s.chg_21d_pct).toFixed(1)}%`,
+      label: 'past month',
+      tone: s.chg_21d_pct >= 0 ? 'pos' : 'neg',
+      rank: 80,
+    });
+  }
+  // Vs 50-day MA — only when stretched or pulled back hard
   if (s.price != null && s.ma50 != null && s.ma50 > 0) {
     const pct = ((s.price - s.ma50) / s.ma50) * 100;
-    if (pct >= 10) out.push({ text: `Stretched · +${pct.toFixed(1)}% vs 50d`, rank: 70 });
-    else if (pct <= -7) out.push({ text: `Pullback · ${pct.toFixed(1)}% vs 50d`, rank: 70 });
+    if (pct >= 10) {
+      out.push({ value: `+${pct.toFixed(1)}%`, label: 'stretched · vs 50d', tone: 'pos', rank: 70 });
+    } else if (pct <= -7) {
+      out.push({ value: `${pct.toFixed(1)}%`, label: 'pullback · vs 50d', tone: 'neg', rank: 70 });
+    }
   }
-  if (s.chg_21d_pct != null && Math.abs(s.chg_21d_pct) >= 10) {
-    const dir = s.chg_21d_pct >= 0 ? 'Up' : 'Down';
-    out.push({ text: `${dir} ${Math.abs(s.chg_21d_pct).toFixed(1)}% past month`, rank: 80 });
-  }
-  if (s.chg_5d_pct != null && Math.abs(s.chg_5d_pct) >= 5) {
-    const dir = s.chg_5d_pct >= 0 ? 'Up' : 'Down';
-    out.push({ text: `${dir} ${Math.abs(s.chg_5d_pct).toFixed(1)}% past week`, rank: 90 });
+  // Vs 200-day MA — always shown when below (long-term downtrend)
+  if (s.price != null && s.ma200 != null && s.ma200 > 0 && s.price < s.ma200) {
+    const pct = ((s.price - s.ma200) / s.ma200) * 100;
+    out.push({ value: `${pct.toFixed(1)}%`, label: 'below 200d MA', tone: 'neg', rank: 60 });
   }
 
   out.sort((a, b) => b.rank - a.rank);
-  return out.map((x) => x.text);
+  return out.map(({ value, label, tone }) => ({ value, label, tone }));
 }
 
 /** Coarse "X ago" — uses ISO timestamp. */
@@ -179,7 +216,7 @@ export function StockInsightsStrip({
       rows.map((r) => {
         const s = signalsByTicker.get(r.ticker);
         const live = liveByTicker.get(r.ticker) ?? [];
-        const lines = signalLinesFor(s);
+        const tiles = signalTilesFor(s);
         return {
           row: r,
           signals: s,
@@ -187,9 +224,9 @@ export function StockInsightsStrip({
           dayPct: dayChange(r),
           earningsDays: r.earnings_date ? daysUntil(r.earnings_date) : null,
           bucket: overlayByTicker.get(r.ticker),
-          signalLines: lines,
+          signalTiles: tiles,
           actionability:
-            lines.length * 100 +
+            tiles.length * 100 +
             Math.abs(s?.chg_21d_pct ?? 0) +
             Math.abs(s?.chg_5d_pct ?? 0) / 10,
         };
@@ -342,7 +379,7 @@ interface CardData {
   dayPct: number | null;
   earningsDays: number | null;
   bucket?: StrategyBucket;
-  signalLines: string[];
+  signalTiles: SignalTile[];
   actionability: number;
 }
 
@@ -357,8 +394,9 @@ function Card({
   onNext: () => void;
   onSetEarnings: (ticker: string, dateIso: string | null) => void;
 }) {
-  const { row, signals, live, dayPct, earningsDays, signalLines } = card;
-  const sentiment = sentimentFor(dayPct);
+  const { row, signals, live, dayPct, earningsDays, signalTiles } = card;
+  const overallPL = row.overall_pl;
+  const sentiment = sentimentFor(dayPct, overallPL);
   const [tf, setTf] = useState<Timeframe>('1D');
   const [editingEarnings, setEditingEarnings] = useState(false);
 
@@ -375,7 +413,6 @@ function Card({
 
   const headlineDollar = useMemo(() => {
     if (headlinePct == null || row.current_price == null) return null;
-    // Anchor price for the delta: prev_close for 1D, else closes[lookback] approx.
     const anchor =
       tf === '1D'
         ? row.prev_close
@@ -384,9 +421,7 @@ function Card({
     return row.current_price - anchor;
   }, [headlinePct, tf, closes, row.current_price, row.prev_close]);
 
-  // Realized options P&L on this position — for the position story.
   const realizedOptions = row.realized_pl ?? 0;
-  const overallPL = row.overall_pl;
   const overallPLpct = row.cost_basis > 0 ? (overallPL / row.cost_basis) * 100 : 0;
   const stockUnrealized = row.pnl_dollar ?? 0;
 
@@ -396,27 +431,40 @@ function Card({
 
   return (
     <article className={`si-card tone-${sentiment}`}>
-      {/* ── IDENTITY + timeframe pills ── */}
+      {/* ── IDENTITY + timeframe pills + earnings chip ── */}
       <header className="si-card-hd">
         <div className="si-card-id">
           <div className="si-card-tk">{row.ticker}</div>
           <div className="si-card-sec">{row.sector}</div>
         </div>
-        <div className="si-tf">
-          {TIMEFRAMES.map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={`si-tf-pill${tf === t ? ' on' : ''}`}
-              onClick={() => setTf(t)}
-            >
-              {t}
-            </button>
-          ))}
+        <div className="si-card-hd-r">
+          <div className="si-tf">
+            {TIMEFRAMES.map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`si-tf-pill${tf === t ? ' on' : ''}`}
+                onClick={() => setTf(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <EarningsChip
+            earningsDate={row.earnings_date}
+            earningsDays={earningsDays}
+            editing={editingEarnings}
+            onEditStart={() => setEditingEarnings(true)}
+            onSave={(d) => {
+              onSetEarnings(row.ticker, d || null);
+              setEditingEarnings(false);
+            }}
+            onCancel={() => setEditingEarnings(false)}
+          />
         </div>
       </header>
 
-      {/* ── NOW: price + change + sparkline ── */}
+      {/* ── NOW: price + change (no sparkline) ── */}
       <section className="si-now">
         <div className="si-price">
           {row.current_price != null ? fmtUSD2(row.current_price) : '—'}
@@ -435,7 +483,6 @@ function Card({
             <span className="si-change-window">over {tf}</span>
           </div>
         )}
-        <Sparkline closes={closes} window={TIMEFRAME_DAYS[tf]} sentiment={sentiment} />
       </section>
 
       {/* ── YOUR POSITION ── */}
@@ -471,71 +518,27 @@ function Card({
               <span>{liveCalls} live calls · {livePuts} live puts</span>
             </>
           )}
+          {beta != null && (
+            <>
+              <span className="si-sep">·</span>
+              <span>β {beta.toFixed(2)} vs SPY</span>
+            </>
+          )}
         </div>
       </section>
 
-      {/* ── COMING UP ── */}
-      <section className="si-block">
-        <div className="si-block-hd">Coming up</div>
-        {row.earnings_date && !editingEarnings ? (
-          <div className="si-block-row">
-            {earningsDays != null && earningsDays >= 0 ? (
-              <span className={'si-earn ' + (earningsDays <= 7 ? 'urgent' : 'soon')}>
-                📅 Earnings in {earningsDays} day{earningsDays === 1 ? '' : 's'}
-                <span className="si-k"> · {fmtEarningsDate(row.earnings_date)}</span>
-              </span>
-            ) : (
-              <span className="si-earn">
-                📅 Last earnings · {fmtEarningsDate(row.earnings_date)}
-              </span>
-            )}
-            <button
-              type="button"
-              className="si-earn-edit"
-              onClick={() => setEditingEarnings(true)}
-              aria-label="Edit earnings date"
-            >
-              edit
-            </button>
-          </div>
-        ) : editingEarnings ? (
-          <EarningsEditor
-            initial={row.earnings_date ?? ''}
-            onSave={(d) => {
-              onSetEarnings(row.ticker, d || null);
-              setEditingEarnings(false);
-            }}
-            onCancel={() => setEditingEarnings(false)}
-          />
-        ) : (
-          <button
-            type="button"
-            className="si-earn-add"
-            onClick={() => setEditingEarnings(true)}
-          >
-            📅 Add earnings date
-          </button>
-        )}
-        {beta != null && (
-          <div className="si-block-row muted">
-            <span>β {beta.toFixed(2)} vs SPY</span>
-            {beta >= 1.5 && <span className="si-sep">·</span>}
-            {beta >= 1.5 && <span>high-beta · stress-sensitive</span>}
-            {beta <= 0.6 && <span className="si-sep">·</span>}
-            {beta <= 0.6 && <span>low-beta · defensive</span>}
-          </div>
-        )}
-      </section>
-
-      {/* ── SIGNALS ── */}
-      {signalLines.length > 0 && (
+      {/* ── SIGNALS as big-number tiles ── */}
+      {signalTiles.length > 0 && (
         <section className="si-block">
           <div className="si-block-hd">Signals</div>
-          <ul className="si-signals">
-            {signalLines.map((line, i) => (
-              <li key={i}>{line}</li>
+          <div className="si-tiles">
+            {signalTiles.map((t, i) => (
+              <div key={i} className={`si-tile${t.tone ? ` tone-${t.tone}` : ''}`}>
+                <div className="si-tile-v">{t.value}</div>
+                <div className="si-tile-l">{t.label}</div>
+              </div>
             ))}
-          </ul>
+          </div>
         </section>
       )}
 
@@ -552,51 +555,68 @@ function Card({
   );
 }
 
-// ──────────────────────────────────────────────────────────────────────
-// Sparkline — mini polyline drawn from daily_closes
-// ──────────────────────────────────────────────────────────────────────
-function Sparkline({
-  closes, window: windowDays, sentiment,
+/** Earnings chip that lives top-right in the card header. Renders one of:
+ *  - countdown badge ("4d · Wed May 29") when earnings_date is set
+ *  - dashed "+ Add earnings" affordance when null
+ *  - inline date input + save/cancel when editing
+ *  Self-contained — no surrounding label, just the chip itself. */
+function EarningsChip({
+  earningsDate, earningsDays, editing, onEditStart, onSave, onCancel,
 }: {
-  closes: DailyClose[];
-  window: number;
-  sentiment: Sentiment;
+  earningsDate: string | null;
+  earningsDays: number | null;
+  editing: boolean;
+  onEditStart: () => void;
+  onSave: (iso: string) => void;
+  onCancel: () => void;
 }) {
-  const slice = useMemo(() => {
-    if (closes.length === 0) return [];
-    // For windowDays=1, just last 2 points (yesterday + a stub for today).
-    const n = Math.max(2, windowDays + 1);
-    return closes.slice(-n);
-  }, [closes, windowDays]);
-
-  if (slice.length < 2) {
-    return <div className="si-spark-empty">— no chart data —</div>;
+  const [draft, setDraft] = useState(earningsDate ?? '');
+  if (editing) {
+    return (
+      <div className="si-earn-edit-row">
+        <input
+          type="date"
+          className="si-earn-input"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoFocus
+        />
+        <button type="button" className="si-earn-btn save" onClick={() => onSave(draft)}>save</button>
+        <button type="button" className="si-earn-btn cancel" onClick={onCancel}>cancel</button>
+      </div>
+    );
   }
-  const W = 560, H = 60, P = 4;
-  const values = slice.map((c) => c.close_price);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = Math.max(0.0001, max - min);
-  const xFor = (i: number) => P + (i / (values.length - 1)) * (W - 2 * P);
-  const yFor = (v: number) => H - P - ((v - min) / range) * (H - 2 * P);
-
-  const points = values.map((v, i) => `${xFor(i).toFixed(2)},${yFor(v).toFixed(2)}`).join(' ');
-  const stroke = sentiment === 'flat' ? '#a8c4c0' : '#0a2828';
-
+  if (earningsDate) {
+    const urgent = earningsDays != null && earningsDays >= 0 && earningsDays <= 7;
+    const soon = earningsDays != null && earningsDays >= 0 && earningsDays <= 30;
+    const cls = urgent ? 'urgent' : soon ? 'soon' : 'past';
+    return (
+      <button
+        type="button"
+        className={`si-earn-chip ${cls}`}
+        onClick={onEditStart}
+        title="Click to edit earnings date"
+      >
+        <span className="si-earn-icon">📅</span>
+        <span className="si-earn-text">
+          {earningsDays != null && earningsDays >= 0
+            ? `${earningsDays}d`
+            : 'past'}
+        </span>
+        <span className="si-earn-date">{fmtEarningsDate(earningsDate)}</span>
+      </button>
+    );
+  }
   return (
-    <svg className="si-spark" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-      <polyline points={points} fill="none" stroke={stroke} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
-      {/* Endpoint dot */}
-      <circle
-        cx={xFor(values.length - 1)}
-        cy={yFor(values[values.length - 1])}
-        r="2.5"
-        fill={stroke}
-      />
-    </svg>
+    <button type="button" className="si-earn-add" onClick={onEditStart}>
+      📅 Add earnings
+    </button>
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// Helpers — close history → returns
+// ──────────────────────────────────────────────────────────────────────
 /** % change from N trading-days ago to today's price. Falls back to null
  *  if the close history doesn't reach back that far. */
 function pctFromCloses(closes: DailyClose[], days: number, todayPrice: number | null): number | null {
@@ -610,30 +630,4 @@ function anchorPrice(closes: DailyClose[], days: number): number | null {
   if (closes.length === 0) return null;
   const idx = Math.max(0, closes.length - 1 - days);
   return closes[idx]?.close_price ?? null;
-}
-
-// ──────────────────────────────────────────────────────────────────────
-// Inline earnings-date editor
-// ──────────────────────────────────────────────────────────────────────
-function EarningsEditor({
-  initial, onSave, onCancel,
-}: {
-  initial: string;
-  onSave: (iso: string) => void;
-  onCancel: () => void;
-}) {
-  const [v, setV] = useState(initial);
-  return (
-    <div className="si-earn-edit-row">
-      <input
-        type="date"
-        className="si-earn-input"
-        value={v}
-        onChange={(e) => setV(e.target.value)}
-        autoFocus
-      />
-      <button type="button" className="si-earn-btn save" onClick={() => onSave(v)}>save</button>
-      <button type="button" className="si-earn-btn cancel" onClick={onCancel}>cancel</button>
-    </div>
-  );
 }
