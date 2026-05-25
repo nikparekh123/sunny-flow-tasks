@@ -4228,3 +4228,105 @@
   .np-app .si-card           { flex-basis: 78vw; }
   .np-app .si-card.expanded  { flex-basis: 90vw; }
 }
+
+/* ──────────────────────────────────────────────────────────
+   Hover card for P&L bars — portaled to document.body, so
+   it floats above any overflow-hidden chart container.
+   ────────────────────────────────────────────────────────── */
+.pnl-hover-card {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  min-width: 230px;
+  max-width: 320px;
+  padding: 12px 13px 11px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(30,90,80,.7);
+  background: rgba(8, 28, 28, 0.96);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(0,0,0,.4);
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+  animation: pnl-hc-in .08s ease-out;
+}
+@keyframes pnl-hc-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.pnl-hc-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.pnl-hc-ticker {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -.4px;
+  color: var(--navi-fg1);
+}
+.pnl-hc-sector {
+  font-family: var(--navi-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  color: var(--navi-fg4);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.pnl-hc-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -.7px;
+  line-height: 1.05;
+  margin-bottom: 10px;
+}
+.pnl-hc-hero.pos { color: var(--navi-neon); }
+.pnl-hc-hero.neg { color: var(--navi-negative); }
+.pnl-hc-hero-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--navi-fg4);
+  letter-spacing: .3px;
+  text-transform: lowercase;
+}
+
+.pnl-hc-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 7px;
+  border-top: 1px dashed rgba(50,110,100,.4);
+}
+.pnl-hc-rows.muted {
+  margin-top: 8px;
+}
+.pnl-hc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.pnl-hc-k {
+  color: var(--navi-fg4);
+  letter-spacing: .2px;
+}
+.pnl-hc-v {
+  color: var(--navi-fg1);
+  font-weight: 700;
+}
+.pnl-hc-v.pos { color: var(--navi-positive); }
+.pnl-hc-v.neg { color: var(--navi-negative); }

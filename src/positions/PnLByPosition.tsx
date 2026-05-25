@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   closeRealizedPL,
   fmtCompact,
@@ -59,6 +60,15 @@ function paletteColor(positive: boolean, rank: number): string {
 export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
   const [view, setView] = useState<View>('overall');
   const [optDir, setOptDir] = useState<OptionDir>('all');
+
+  // Quick lookup so the hover card can show the full row (P&L breakdown,
+  // notional, % of book, effective basis, …) without scanning the array
+  // on every mouse move.
+  const rowsByTicker = useMemo(() => {
+    const m = new Map<string, PositionComputed>();
+    for (const r of rows) m.set(r.ticker, r);
+    return m;
+  }, [rows]);
 
   // ── Per-ticker items for Overall / Stock views ──────────────────
   const itemsOverall = useMemo<Item[]>(
@@ -331,12 +341,18 @@ export function PnLByPosition({ rows, tradesByTicker, onTickerClick }: Props) {
               : 'No positions with P&L yet.'}
           </div>
         ) : view === 'options' ? (
-          <OptionsDailyBars events={closeEvents} tickerRank={tickerRank} />
+          <OptionsDailyBars
+            events={closeEvents}
+            tickerRank={tickerRank}
+            rowsByTicker={rowsByTicker}
+          />
         ) : (
           <PerTickerBars
             items={items}
             maxAbs={maxAbs}
             onTickerClick={onTickerClick}
+            rowsByTicker={rowsByTicker}
+            view={view}
           />
         )}
       </div>
@@ -371,10 +387,14 @@ function PerTickerBars({
   items,
   maxAbs,
   onTickerClick,
+  rowsByTicker,
+  view,
 }: {
   items: Item[];
   maxAbs: number;
   onTickerClick?: (ticker: string) => void;
+  rowsByTicker: Map<string, PositionComputed>;
+  view: 'overall' | 'stock';
 }) {
   const W = 1000;
   const H = 380;
@@ -388,69 +408,96 @@ function PerTickerBars({
   const slotW = items.length > 0 ? barAreaW / items.length : 0;
   const barW = Math.min(48, Math.max(8, slotW * 0.6));
 
+  // Hover card — track ticker + cursor position. Position is in viewport
+  // (clientX/Y) so the card lives in a portal and ignores any container's
+  // overflow:hidden / transform contexts.
+  const [hover, setHover] = useState<{ ticker: string; x: number; y: number } | null>(null);
+
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="xMidYMid meet"
-      className="pnl-svg"
-    >
-      <ChartGrid
-        barAreaW={barAreaW}
-        W={W}
-        PAD_TOP={PAD_TOP}
-        usableH={usableH}
-        zeroY={zeroY}
-        halfH={halfH}
-        maxAbs={maxAbs}
-      />
-      {items.map((it, i) => {
-        const cx = i * slotW + slotW / 2;
-        const barHeight = maxAbs > 0 ? (Math.abs(it.pl) / maxAbs) * halfH : 0;
-        const y = it.pl >= 0 ? zeroY - barHeight : zeroY;
-        const fill = it.pl >= 0 ? 'var(--navi-neon)' : 'var(--navi-negative)';
-        return (
-          <g
-            key={it.ticker}
-            style={{ cursor: onTickerClick ? 'pointer' : 'default' }}
-            onClick={() => onTickerClick?.(it.ticker)}
-          >
-            <title>
-              {it.ticker} · {it.pl >= 0 ? '+' : '−'}
-              {fmtUSD(Math.abs(it.pl))}
-            </title>
-            <rect
-              x={cx - barW / 2}
-              y={y}
-              width={barW}
-              height={Math.max(2, barHeight)}
-              fill={fill}
-              rx="3"
-            />
-            <text
-              x={cx}
-              y={H - 10}
-              textAnchor="middle"
-              fill="var(--navi-fg2)"
-              fontSize="11"
-              fontFamily="var(--navi-font-sans)"
-              fontWeight="500"
+    <>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="xMidYMid meet"
+        className="pnl-svg"
+        onMouseLeave={() => setHover(null)}
+      >
+        <ChartGrid
+          barAreaW={barAreaW}
+          W={W}
+          PAD_TOP={PAD_TOP}
+          usableH={usableH}
+          zeroY={zeroY}
+          halfH={halfH}
+          maxAbs={maxAbs}
+        />
+        {items.map((it, i) => {
+          const cx = i * slotW + slotW / 2;
+          const barHeight = maxAbs > 0 ? (Math.abs(it.pl) / maxAbs) * halfH : 0;
+          const y = it.pl >= 0 ? zeroY - barHeight : zeroY;
+          const fill = it.pl >= 0 ? 'var(--navi-neon)' : 'var(--navi-negative)';
+          return (
+            <g
+              key={it.ticker}
+              style={{ cursor: onTickerClick ? 'pointer' : 'default' }}
+              onClick={() => onTickerClick?.(it.ticker)}
+              onMouseEnter={(e) => setHover({ ticker: it.ticker, x: e.clientX, y: e.clientY })}
+              onMouseMove={(e) => setHover({ ticker: it.ticker, x: e.clientX, y: e.clientY })}
             >
-              {it.ticker}
-            </text>
-          </g>
-        );
-      })}
-    </svg>
+              <rect
+                x={cx - barW / 2}
+                y={y}
+                width={barW}
+                height={Math.max(2, barHeight)}
+                fill={fill}
+                rx="3"
+              />
+              {/* Invisible wider hit area so hover doesn't strobe on thin bars */}
+              <rect
+                x={cx - slotW / 2}
+                y={PAD_TOP}
+                width={slotW}
+                height={usableH}
+                fill="transparent"
+              />
+              <text
+                x={cx}
+                y={H - 10}
+                textAnchor="middle"
+                fill="var(--navi-fg2)"
+                fontSize="11"
+                fontFamily="var(--navi-font-sans)"
+                fontWeight="500"
+              >
+                {it.ticker}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      {hover && rowsByTicker.get(hover.ticker) && (
+        <PositionHoverCard
+          row={rowsByTicker.get(hover.ticker)!}
+          x={hover.x}
+          y={hover.y}
+          view={view}
+        />
+      )}
+    </>
   );
 }
 
 function OptionsDailyBars({
   events,
   tickerRank,
+  rowsByTicker,
 }: {
   events: CloseEvent[];
   tickerRank: Map<string, number>;
+  rowsByTicker: Map<string, PositionComputed>;
 }) {
+  // Daily-bar hover — date + ticker + that day's signed P&L. Carries enough
+  // ID to look up the row for richer details in the card.
+  const [hover, setHover] = useState<{ ticker: string; date: string; value: number; x: number; y: number } | null>(null);
   const W = 1000;
   const H = 380;
   const PAD_TOP = 14;
@@ -514,10 +561,12 @@ function OptionsDailyBars({
   }, [dates]);
 
   return (
+    <>
     <svg
       viewBox={`0 0 ${W} ${H}`}
       preserveAspectRatio="xMidYMid meet"
       className="pnl-svg"
+      onMouseLeave={() => setHover(null)}
     >
       <ChartGrid
         barAreaW={chartW}
@@ -562,11 +611,10 @@ function OptionsDailyBars({
               height={Math.max(1, h)}
               fill={paletteColor(true, tickerRank.get(e.ticker) ?? 99)}
               rx="1"
-            >
-              <title>
-                {e.ticker} · +{fmtUSD(e.value)} · {date}
-              </title>
-            </rect>,
+              onMouseEnter={(ev) => setHover({ ticker: e.ticker, date, value: e.value, x: ev.clientX, y: ev.clientY })}
+              onMouseMove={(ev) => setHover({ ticker: e.ticker, date, value: e.value, x: ev.clientX, y: ev.clientY })}
+              style={{ cursor: 'pointer' }}
+            />,
           );
         });
         neg.forEach((e, i) => {
@@ -580,11 +628,10 @@ function OptionsDailyBars({
               height={Math.max(1, h)}
               fill={paletteColor(false, tickerRank.get(e.ticker) ?? 99)}
               rx="1"
-            >
-              <title>
-                {e.ticker} · −{fmtUSD(Math.abs(e.value))} · {date}
-              </title>
-            </rect>,
+              onMouseEnter={(ev) => setHover({ ticker: e.ticker, date, value: e.value, x: ev.clientX, y: ev.clientY })}
+              onMouseMove={(ev) => setHover({ ticker: e.ticker, date, value: e.value, x: ev.clientX, y: ev.clientY })}
+              style={{ cursor: 'pointer' }}
+            />,
           );
           negY += h;
         });
@@ -615,6 +662,17 @@ function OptionsDailyBars({
         );
       })}
     </svg>
+    {hover && (
+      <DailyEventHoverCard
+        ticker={hover.ticker}
+        date={hover.date}
+        value={hover.value}
+        row={rowsByTicker.get(hover.ticker)}
+        x={hover.x}
+        y={hover.y}
+      />
+    )}
+    </>
   );
 }
 
@@ -838,6 +896,122 @@ function PnlSplitBlock({
           <span className={'pnl-chart-stat-v ' + (net >= 0 ? 'up' : 'down')}>{netStr}</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Hover cards — portaled to document.body so they escape the chart
+// card's overflow:hidden and any transformed ancestors. Position is
+// clamped to keep the card on-screen near the cursor.
+
+function clampedPos(x: number, y: number, w: number, h: number): { left: number; top: number } {
+  const pad = 8;
+  // Default offset: bottom-right of cursor, flip if it would overflow.
+  let left = x + 14;
+  let top = y + 16;
+  if (typeof window !== 'undefined') {
+    if (left + w + pad > window.innerWidth) left = x - w - 14;
+    if (top + h + pad > window.innerHeight) top = y - h - 16;
+    if (left < pad) left = pad;
+    if (top < pad) top = pad;
+  }
+  return { left, top };
+}
+
+/** Per-ticker P&L card — shown on hover in Overall / Stock views.
+ *  Surfaces the full P&L breakdown that the chart's single bar collapses,
+ *  plus position context (shares, market value, % of book, effective basis). */
+function PositionHoverCard({
+  row, x, y, view,
+}: {
+  row: PositionComputed;
+  x: number;
+  y: number;
+  view: 'overall' | 'stock';
+}) {
+  const headlinePL = view === 'stock' ? row.pnl_dollar : row.overall_pl;
+  const tone = headlinePL >= 0 ? 'pos' : 'neg';
+  const sign = headlinePL >= 0 ? '+' : '−';
+  const realized = (row.realized_pl ?? 0) + (row.realized_stock_pl ?? 0);
+  const unrealized = row.pnl_dollar ?? 0;
+  const pos = clampedPos(x, y, 280, 280);
+  return createPortal(
+    <div className="pnl-hover-card" style={{ left: pos.left, top: pos.top }}>
+      <div className="pnl-hc-hd">
+        <span className="pnl-hc-ticker">{row.ticker}</span>
+        <span className="pnl-hc-sector">{row.sector || '—'}</span>
+      </div>
+      <div className={`pnl-hc-hero ${tone}`}>
+        {sign}{fmtUSD(Math.abs(headlinePL))}
+        <span className="pnl-hc-hero-sub">
+          {view === 'stock' ? 'stock P&L (unrealized)' : 'overall P&L'}
+        </span>
+      </div>
+      <div className="pnl-hc-rows">
+        <Row k="Stock unrealized" v={`${unrealized >= 0 ? '+' : '−'}${fmtUSD(Math.abs(unrealized))}`} tone={unrealized >= 0 ? 'pos' : 'neg'} />
+        <Row k="Realized P&L" v={`${realized >= 0 ? '+' : '−'}${fmtUSD(Math.abs(realized))}`} tone={realized >= 0 ? 'pos' : 'neg'} />
+        {row.pnl_pct != null && isFinite(row.pnl_pct) && (
+          <Row k="Stock %" v={`${row.pnl_pct >= 0 ? '+' : ''}${row.pnl_pct.toFixed(2)}%`} tone={row.pnl_pct >= 0 ? 'pos' : 'neg'} />
+        )}
+      </div>
+      <div className="pnl-hc-rows muted">
+        <Row k="Market value" v={fmtUSD(row.market_value)} />
+        <Row k="% of book" v={`${row.pct_portfolio.toFixed(1)}%`} />
+        <Row k="Avg cost" v={`$${row.avg_cost.toFixed(2)}`} />
+        <Row k="Effective cost" v={`$${row.effective_cost.toFixed(2)}`} />
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** Daily-event hover card for the Options view. Stacked-segment hover
+ *  surfaces date + ticker + that day's signed P&L, plus a quick
+ *  position-context block from the row. */
+function DailyEventHoverCard({
+  ticker, date, value, row, x, y,
+}: {
+  ticker: string;
+  date: string;
+  value: number;
+  row: PositionComputed | undefined;
+  x: number;
+  y: number;
+}) {
+  const tone = value >= 0 ? 'pos' : 'neg';
+  const sign = value >= 0 ? '+' : '−';
+  const dateLabel = new Date(date + 'T00:00:00Z').toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC',
+  });
+  const pos = clampedPos(x, y, 240, 200);
+  return createPortal(
+    <div className="pnl-hover-card" style={{ left: pos.left, top: pos.top }}>
+      <div className="pnl-hc-hd">
+        <span className="pnl-hc-ticker">{ticker}</span>
+        <span className="pnl-hc-sector">{dateLabel}</span>
+      </div>
+      <div className={`pnl-hc-hero ${tone}`}>
+        {sign}{fmtUSD(Math.abs(value))}
+        <span className="pnl-hc-hero-sub">realized this day</span>
+      </div>
+      {row && (
+        <div className="pnl-hc-rows muted">
+          <Row k="Position" v={`${row.quantity} sh · ${fmtUSD(row.market_value)}`} />
+          <Row k="% of book" v={`${row.pct_portfolio.toFixed(1)}%`} />
+          <Row k="Realized P&L" v={`${row.realized_pl >= 0 ? '+' : '−'}${fmtUSD(Math.abs(row.realized_pl))}`} tone={row.realized_pl >= 0 ? 'pos' : 'neg'} />
+        </div>
+      )}
+    </div>,
+    document.body,
+  );
+}
+
+function Row({ k, v, tone }: { k: string; v: string; tone?: 'pos' | 'neg' }) {
+  return (
+    <div className="pnl-hc-row">
+      <span className="pnl-hc-k">{k}</span>
+      <span className={`pnl-hc-v ${tone ?? ''}`}>{v}</span>
     </div>
   );
 }
