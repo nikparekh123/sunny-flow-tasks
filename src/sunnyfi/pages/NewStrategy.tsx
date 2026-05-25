@@ -26,6 +26,7 @@ const NEAR_TARGET_PCT = 2;      // within 2% of SMA25 → YELLOW
 interface Candidate {
   id: string;
   ticker: string;
+  name: string | null;
   sector: string | null;
   price: number;
   sma25: number;
@@ -317,6 +318,7 @@ export default function NewStrategy() {
               <thead>
                 <tr>
                   <th>Ticker</th>
+                  <th>Name</th>
                   <th>Sector</th>
                   <th className="num">Price</th>
                   <th className="num">SMA25</th>
@@ -334,13 +336,14 @@ export default function NewStrategy() {
               <tbody>
                 {candidates.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="bnf-empty">
+                    <td colSpan={14} className="bnf-empty">
                       No candidates yet. Click <b>Refresh scan</b> to run the universe.
                     </td>
                   </tr>
                 ) : candidates.map((c) => (
                   <tr key={c.id}>
                     <td className="ticker">{c.ticker}</td>
+                    <td className="bnf-name" title={c.name ?? ''}>{c.name ?? '—'}</td>
                     <td className="sector-cell">{c.sector ?? '—'}</td>
                     <td className="num strong">{fmtUSD(c.price)}</td>
                     <td className="num">{fmtUSD(c.sma25)}</td>

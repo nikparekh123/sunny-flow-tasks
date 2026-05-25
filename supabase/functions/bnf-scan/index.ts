@@ -87,42 +87,52 @@ interface OptionsContext {
   open_interest: number;
 }
 
-/** Best-effort next-earnings lookup via Yahoo's public quoteSummary
- *  endpoint. No API key required; rate limits are forgiving but we still
- *  chunk callers to be polite. Returns trading-day count to next earnings
- *  (positive = future, negative = past), or null when nothing is
- *  scheduled or Yahoo doesn't return data for the ticker.
- *
- *  We use TRADING days (≈ calendar days × 5/7) because the BNF spec
- *  measures earnings windows in market sessions. */
-async function fetchDaysToEarnings(ticker: string): Promise<number | null> {
+/** Best-effort metadata lookup via Yahoo's public quoteSummary endpoint.
+ *  No API key required; we set a browser-style User-Agent because Yahoo
+ *  blocks the default Deno UA. Returns:
+ *    - daysToEarnings — trading days to next earnings (positive = future,
+ *      negative = past, null = unknown). Calendar days × 5/7 since the
+ *      BNF spec measures windows in market sessions.
+ *    - name — short company name (e.g. "Five Below, Inc.").
+ *  Both modules come in one HTTP round-trip. */
+interface YahooCtx {
+  daysToEarnings: number | null;
+  name: string | null;
+}
+async function fetchYahooCtx(ticker: string): Promise<YahooCtx> {
   try {
-    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=calendarEvents`;
+    const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=calendarEvents,price`;
     const res = await fetch(url, {
-      // Yahoo blocks default fetch UA; spoof a browser one
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BNFScanner/1.0)' },
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { daysToEarnings: null, name: null };
     const j = await res.json() as {
       quoteSummary?: {
         result?: Array<{
           calendarEvents?: {
             earnings?: { earningsDate?: Array<{ raw?: number }> };
           };
+          price?: {
+            shortName?: string;
+            longName?: string;
+          };
         }>;
       };
     };
-    const rawEarnings = j?.quoteSummary?.result?.[0]?.calendarEvents?.earnings?.earningsDate;
-    if (!rawEarnings || rawEarnings.length === 0) return null;
-    // Yahoo returns 1–2 entries (estimated range). Take the first.
-    const raw = rawEarnings[0]?.raw;
-    if (typeof raw !== 'number') return null;
-    const earningsMs = raw * 1000;
-    const calDays = (earningsMs - Date.now()) / 86400000;
-    // Convert calendar days → trading days. 5/7 is the rough factor.
-    return Math.round(calDays * 5 / 7);
+    const node = j?.quoteSummary?.result?.[0];
+
+    let daysToEarnings: number | null = null;
+    const raw = node?.calendarEvents?.earnings?.earningsDate?.[0]?.raw;
+    if (typeof raw === 'number') {
+      const calDays = (raw * 1000 - Date.now()) / 86400000;
+      daysToEarnings = Math.round(calDays * 5 / 7);
+    }
+
+    const name = node?.price?.shortName ?? node?.price?.longName ?? null;
+
+    return { daysToEarnings, name };
   } catch {
-    return null;
+    return { daysToEarnings: null, name: null };
   }
 }
 
@@ -289,17 +299,17 @@ Deno.serve(async (req) => {
       return true;
     });
 
-    // 4) Survivor enrichment — options context + earnings calendar in
+    // 4) Survivor enrichment — Polygon options + Yahoo earnings/name in
     //    parallel per ticker. Both have their own try/catch so a failure
     //    in either doesn't sink the whole row.
     const preEnriched = await inChunks(survivors, 8, async (s) => {
-      const [ctx, daysToEarnings] = await Promise.all([
+      const [ctx, yahoo] = await Promise.all([
         fetchOptionsCtx(s.ticker, s.price, key).catch(() => ({
           iv30: null, options_volume: 0, put_call_ratio: null, open_interest: 0,
         })),
-        fetchDaysToEarnings(s.ticker).catch(() => null),
+        fetchYahooCtx(s.ticker).catch(() => ({ daysToEarnings: null, name: null })),
       ]);
-      return { ...s, ctx, daysToEarnings, sectorEtfDev: sectorDevs.get(s.sectorEtf) ?? null };
+      return { ...s, ctx, yahoo, sectorEtfDev: sectorDevs.get(s.sectorEtf) ?? null };
     });
 
     // 4b) Earnings-window filter — drop anything within ±3 trading days
@@ -307,7 +317,8 @@ Deno.serve(async (req) => {
     //     (Yahoo didn't return data or call failed) passes through.
     const EARNINGS_WINDOW_DAYS = 3;
     const enriched = preEnriched.filter((e) =>
-      e.daysToEarnings == null || Math.abs(e.daysToEarnings) > EARNINGS_WINDOW_DAYS,
+      e.yahoo.daysToEarnings == null ||
+      Math.abs(e.yahoo.daysToEarnings) > EARNINGS_WINDOW_DAYS,
     );
 
     // 5) Replace previous scan for this user. Insert all rows in one batch.
@@ -316,13 +327,14 @@ Deno.serve(async (req) => {
       const rows = enriched.map((e) => ({
         user_id: userId,
         ticker: e.ticker,
+        name: e.yahoo.name,
         sector: e.sector,
         price: e.price,
         sma25: e.sma25,
         sma200: e.sma200,
         deviation_pct: e.deviation_pct,
         adv20_m: e.adv20_m,
-        days_to_earnings: e.daysToEarnings,
+        days_to_earnings: e.yahoo.daysToEarnings,
         today_intraday_pct: e.today_intraday_pct,
         sector_etf: e.sectorEtf,
         sector_etf_dev_pct: e.sectorEtfDev,

@@ -101,6 +101,18 @@
 }
 .np-app .bnf-candidates-table th { font-size: 9.5px; }
 
+/* Company-name cell — truncate long names ("ACME Manufacturing Holdings,
+   Inc.") so they don't push every other column off-screen. Hover the cell
+   for the full string via title attribute. */
+.np-app .bnf-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--navi-fg2);
+  font-weight: 500;
+}
+
 .np-app .np-crumb-sub {
   font-family: var(--navi-font-mono);
   font-size: 11px;
