@@ -428,12 +428,16 @@ export function ScenarioStressCalc({
   setState: (next: ScnState | ((prev: ScnState) => ScnState)) => void;
 }) {
   const { portfolio, isLoading } = usePositions();
+  // computePortfolio returns a PortfolioTotals object — the actual array
+  // of per-ticker rows lives at `.rows`. Bare `portfolio.filter()` was the
+  // crash report.
+  const rows = portfolio?.rows ?? [];
 
   // Map portfolio rows to the lightweight shape computeScenario expects,
   // plus a quick lookup for per-position live options.
   const raw: RawPosition[] = useMemo(
     () =>
-      (portfolio ?? [])
+      rows
         .filter((p) => p.status === "open")
         .map((p) => ({
           ticker: p.ticker,
@@ -441,13 +445,13 @@ export function ScenarioStressCalc({
           quantity: p.quantity,
           current_price: p.current_price,
         })),
-    [portfolio],
+    [rows],
   );
   const liveByTicker = useMemo(() => {
     const m = new Map<string, LiveOption[]>();
-    for (const p of portfolio ?? []) m.set(p.ticker, p.live_options);
+    for (const p of rows) m.set(p.ticker, p.live_options);
     return m;
-  }, [portfolio]);
+  }, [rows]);
 
   const result = useMemo(() => computeScenario(raw, liveByTicker, state), [raw, liveByTicker, state]);
 
