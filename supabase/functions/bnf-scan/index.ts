@@ -1,9 +1,10 @@
 /**
  * bnf-scan — daily BNF/Kotegawa mean-reversion scanner.
  *
- * Reads an embedded universe (~150 liquid US mid/small caps), pulls Polygon
- * day aggregates for each, computes SMA25 / SMA200 / 20-day ADV / today's
- * intraday move, and filters per the strategy:
+ * Reads a sibling universe.json (~1000 tickers covering the full S&P
+ * MidCap 400 + SmallCap 600), pulls Polygon day aggregates for each,
+ * computes SMA25 / SMA200 / 20-day ADV / today's intraday move, and
+ * filters per the strategy:
  *
  *   • Deviation from SMA25 ∈ [-15%, -7%]      (dislocated but not collapsing)
  *   • Close > SMA200                          (still in long-term uptrend)
@@ -23,179 +24,22 @@
  *   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (for the delete-then-insert)
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+// Universe lives next to this file so the constituent list isn't 200 lines
+// of embedded code. ~1000 tickers covering the full S&P MidCap 400 +
+// SmallCap 600. Update the JSON, redeploy, no code change needed.
+import universeData from './universe.json' with { type: 'json' };
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// ── Universe (embedded; keep in sync with src/sunnyfi/new-strategy/universe.json) ──
+// ── Universe — loaded from universe.json at deploy time ──
 interface UniverseEntry { ticker: string; sector: string; sectorEtf: string; }
-const UNIVERSE: UniverseEntry[] = [
-  { ticker: 'AAOI', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'AGYS', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'ALRM', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'AMBA', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'AMKR', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'APPF', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'APPN', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'AVAV', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'AXON', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'BAND', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'BLBD', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'BLD',  sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'BLKB', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'BMI',  sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'BOOT', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'BRBR', sector: 'Consumer Staples', sectorEtf: 'XLP' },
-  { ticker: 'BRZE', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'BTU',  sector: 'Energy', sectorEtf: 'XLE' },
-  { ticker: 'CALX', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'CARG', sector: 'Communication Services', sectorEtf: 'XLC' },
-  { ticker: 'CART', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'CELH', sector: 'Consumer Staples', sectorEtf: 'XLP' },
-  { ticker: 'CFLT', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'CHEF', sector: 'Consumer Staples', sectorEtf: 'XLP' },
-  { ticker: 'CHWY', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'CIEN', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'CLF',  sector: 'Materials', sectorEtf: 'XLB' },
-  { ticker: 'CNX',  sector: 'Energy', sectorEtf: 'XLE' },
-  { ticker: 'CRDO', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'CRSP', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'CRWV', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'CWAN', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'CXM',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'CYBR', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'DAVA', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'DBX',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'DECK', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'DOCN', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'DSGX', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'DUOL', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'DV',   sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'DXC',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'ELF',  sector: 'Consumer Staples', sectorEtf: 'XLP' },
-  { ticker: 'ENSG', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'ENTG', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'ESTC', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'EXLS', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'EXP',  sector: 'Materials', sectorEtf: 'XLB' },
-  { ticker: 'FFIV', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'FIVE', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'FLNC', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'FOUR', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'FROG', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'FRSH', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'FSLR', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'FTNT', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'FUTU', sector: 'Financials', sectorEtf: 'XLF' },
-  { ticker: 'GEN',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'GH',   sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'GLOB', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'GME',  sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'GNRC', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'GRMN', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'HALO', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'HCAT', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'HRB',  sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'HUBG', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'IBP',  sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'ICUI', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'IDCC', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'INSM', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'IOSP', sector: 'Materials', sectorEtf: 'XLB' },
-  { ticker: 'IPGP', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'IRDM', sector: 'Communication Services', sectorEtf: 'XLC' },
-  { ticker: 'IRWD', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'JBLU', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'JBT',  sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'JJSF', sector: 'Consumer Staples', sectorEtf: 'XLP' },
-  { ticker: 'KNSL', sector: 'Financials', sectorEtf: 'XLF' },
-  { ticker: 'KTOS', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'LITE', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'LSCC', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'MANH', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'MATX', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'MEDP', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'MGNI', sector: 'Communication Services', sectorEtf: 'XLC' },
-  { ticker: 'MIRM', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'MMS',  sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'MNDY', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'MOH',  sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'MTCH', sector: 'Communication Services', sectorEtf: 'XLC' },
-  { ticker: 'MTH',  sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'MUSA', sector: 'Consumer Staples', sectorEtf: 'XLP' },
-  { ticker: 'NSIT', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'NTNX', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'NVST', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'ONON', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'OPCH', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'OSPN', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PATH', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PAYC', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PCTY', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PD',   sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PI',   sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PLNT', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'POWL', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'PRGS', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PRO',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PSTG', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PTC',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'PTON', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'QLYS', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'QTWO', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'RARE', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'RDFN', sector: 'Real Estate', sectorEtf: 'XLRE' },
-  { ticker: 'REZI', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'RGEN', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'RH',   sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'RNG',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'ROAD', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'ROIV', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'ROKU', sector: 'Communication Services', sectorEtf: 'XLC' },
-  { ticker: 'RPD',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'RUM',  sector: 'Communication Services', sectorEtf: 'XLC' },
-  { ticker: 'RUN',  sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'SAIA', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'SAVE', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'SBLK', sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'SBSW', sector: 'Materials', sectorEtf: 'XLB' },
-  { ticker: 'SEDG', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'SEM',  sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'SHC',  sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'SHO',  sector: 'Real Estate', sectorEtf: 'XLRE' },
-  { ticker: 'SHOO', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'SITM', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'SKX',  sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'SMCI', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'SMTC', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'SNAP', sector: 'Communication Services', sectorEtf: 'XLC' },
-  { ticker: 'SOFI', sector: 'Financials', sectorEtf: 'XLF' },
-  { ticker: 'SPSC', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'SPT',  sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'STNG', sector: 'Energy', sectorEtf: 'XLE' },
-  { ticker: 'TGTX', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'TMDX', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'TNDM', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'TPH',  sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'TRMB', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'TRUP', sector: 'Financials', sectorEtf: 'XLF' },
-  { ticker: 'TWLO', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'TWST', sector: 'Healthcare', sectorEtf: 'XLV' },
-  { ticker: 'U',    sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'UI',   sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'UPST', sector: 'Financials', sectorEtf: 'XLF' },
-  { ticker: 'VC',   sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'VFC',  sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'WING', sector: 'Consumer Discretionary', sectorEtf: 'XLY' },
-  { ticker: 'WK',   sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'WSC',  sector: 'Industrials', sectorEtf: 'XLI' },
-  { ticker: 'Z',    sector: 'Communication Services', sectorEtf: 'XLC' },
-  { ticker: 'ZETA', sector: 'Technology', sectorEtf: 'XLK' },
-  { ticker: 'ZS',   sector: 'Technology', sectorEtf: 'XLK' },
-];
+const UNIVERSE: UniverseEntry[] = universeData as UniverseEntry[];
 
+// Distinct sector ETFs we need to pre-fetch (~11) so we can compute each
+// candidate's "is my sector also dumping?" guard.
 const SECTOR_ETFS = Array.from(new Set(UNIVERSE.map((u) => u.sectorEtf)));
 
 // ── Filter thresholds (per BNF/Kotegawa spec) ──
@@ -391,7 +235,10 @@ Deno.serve(async (req) => {
 
     // 2) Per-ticker aggregates + filters. Chunked at 8 parallel requests
     // to be polite to Polygon's rate limits.
-    const tickerResults = await inChunks(UNIVERSE, 8, (u) =>
+    // Concurrency bumped for the ~1000-ticker universe: 20 parallel keeps
+    // the scan under ~45s on a paid Polygon plan while staying well below
+    // their rate limits. At 8 we were timing out near the universe size.
+    const tickerResults = await inChunks(UNIVERSE, 20, (u) =>
       processOneTicker(u, key, fromIso, toIso).catch(() => null),
     );
 
@@ -407,7 +254,7 @@ Deno.serve(async (req) => {
     });
 
     // 4) Options context for survivors only (much smaller set).
-    const enriched = await inChunks(survivors, 4, async (s) => {
+    const enriched = await inChunks(survivors, 8, async (s) => {
       const ctx = await fetchOptionsCtx(s.ticker, s.price, key).catch(() => ({
         iv30: null, options_volume: 0, put_call_ratio: null, open_interest: 0,
       }));
