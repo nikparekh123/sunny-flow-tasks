@@ -4109,58 +4109,34 @@
   text-transform: uppercase;
 }
 .np-app .si-card.tone-flat .si-card-sec { color: var(--navi-fg3); }
-.np-app .si-card-hd-r {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-}
 
-/* Timeframe pills */
-.np-app .si-tf { display: flex; gap: 4px; }
-.np-app .si-tf-pill {
-  background: rgba(10, 40, 40, 0.18);
-  border: 1px solid rgba(10, 40, 40, 0.28);
-  border-radius: 100px;
-  color: #0a2828;
+/* Inline timeframe switcher — plain text below the price/change line.
+   Active timeframe is bold + underlined; inactive sits at lower opacity. */
+.np-app .si-tf-row {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+  align-items: baseline;
+}
+.np-app .si-tf-link {
+  background: transparent;
+  border: none;
+  padding: 0;
   font-family: var(--navi-font-mono);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: .3px;
-  padding: 3px 10px;
+  letter-spacing: .4px;
+  color: inherit;
+  opacity: 0.55;
   cursor: pointer;
-  transition: all .12s var(--np-ease);
+  transition: opacity .12s var(--np-ease);
 }
-.np-app .si-tf-pill:hover { background: rgba(10, 40, 40, 0.3); }
-.np-app .si-tf-pill.on {
-  background: #0a2828;
-  color: #faf5f0;
-  border-color: #0a2828;
-}
-/* DOWN card has white text by default; the pills need a white outline
-   instead of the dark one used by the UP/neon card. */
-.np-app .si-card.tone-down .si-tf-pill {
-  background: rgba(250, 245, 240, 0.18);
-  border-color: rgba(250, 245, 240, 0.4);
-  color: #faf5f0;
-}
-.np-app .si-card.tone-down .si-tf-pill:hover {
-  background: rgba(250, 245, 240, 0.32);
-}
-.np-app .si-card.tone-down .si-tf-pill.on {
-  background: #faf5f0;
-  color: var(--navi-negative);
-  border-color: #faf5f0;
-}
-.np-app .si-card.tone-flat .si-tf-pill {
-  background: rgba(15, 51, 51, 0.6);
-  border-color: rgba(50, 110, 100, 0.4);
-  color: var(--navi-fg2);
-}
-.np-app .si-card.tone-flat .si-tf-pill.on {
-  background: var(--navi-neon);
-  color: var(--navi-dash-page);
-  border-color: var(--navi-neon);
+.np-app .si-tf-link:hover { opacity: 0.85; }
+.np-app .si-tf-link.on {
+  opacity: 1;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 2px;
 }
 
 /* ── NOW block ── */
@@ -4244,91 +4220,49 @@
 .np-app .si-card.tone-flat .si-v.pos { color: var(--navi-neon); }
 .np-app .si-card.tone-flat .si-v.neg { color: var(--navi-negative); }
 
-/* ── Earnings chip (top-right of header) ── */
-.np-app .si-earn-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(10, 40, 40, 0.18);
-  border: 1.5px solid rgba(10, 40, 40, 0.32);
-  border-radius: 100px;
-  color: inherit;
-  font-family: var(--navi-font-sans);
-  font-size: 12px;
+/* ── Earnings (top-right of header) — plain text, no pill ── */
+.np-app .si-earn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  text-align: right;
+  min-width: 0;
+}
+.np-app .si-earn-lbl {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
   font-weight: 700;
-  padding: 5px 12px;
-  cursor: pointer;
-  transition: all .12s var(--np-ease);
-  white-space: nowrap;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
 }
-.np-app .si-earn-chip:hover {
-  background: rgba(10, 40, 40, 0.28);
-  border-color: rgba(10, 40, 40, 0.55);
-}
-.np-app .si-earn-chip.urgent {
-  background: #0a2828;
-  color: #faf5f0;
-  border-color: #0a2828;
-}
-.np-app .si-earn-chip.urgent:hover { background: #0a2828; opacity: 0.92; }
-/* DOWN card variant — chip needs lighter chrome to stay readable on red */
-.np-app .si-card.tone-down .si-earn-chip {
-  background: rgba(250, 245, 240, 0.2);
-  border-color: rgba(250, 245, 240, 0.45);
-  color: #faf5f0;
-}
-.np-app .si-card.tone-down .si-earn-chip:hover {
-  background: rgba(250, 245, 240, 0.34);
-}
-.np-app .si-card.tone-down .si-earn-chip.urgent {
-  background: #faf5f0;
-  color: var(--navi-negative);
-  border-color: #faf5f0;
-}
-.np-app .si-card.tone-down .si-earn-add {
-  background: rgba(250, 245, 240, 0.15);
-  border-color: rgba(250, 245, 240, 0.4);
-  color: #faf5f0;
-}
-.np-app .si-card.tone-down .si-earn-add:hover {
-  background: rgba(250, 245, 240, 0.28);
-}
-.np-app .si-card.tone-flat .si-earn-chip {
-  background: rgba(50, 110, 100, 0.2);
-  border-color: rgba(50, 110, 100, 0.5);
-  color: var(--navi-fg1);
-}
-.np-app .si-card.tone-flat .si-earn-chip.urgent {
-  background: var(--navi-negative);
-  color: #faf5f0;
-  border-color: var(--navi-negative);
-}
-.np-app .si-earn-icon { font-size: 14px; }
-.np-app .si-earn-text { font-weight: 800; }
-.np-app .si-earn-date { font-weight: 600; }
+.np-app .si-card.tone-flat .si-earn-lbl { color: var(--navi-fg3); }
 
-.np-app .si-earn-add {
-  background: rgba(10, 40, 40, 0.12);
-  border: 1.5px dashed rgba(10, 40, 40, 0.32);
-  border-radius: 100px;
-  color: inherit;
+.np-app .si-earn-val {
+  background: transparent;
+  border: none;
+  padding: 0;
   font-family: var(--navi-font-sans);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 5px 12px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.2px;
+  color: inherit;
   cursor: pointer;
-  transition: all .12s var(--np-ease);
-  white-space: nowrap;
+  text-align: right;
+  line-height: 1.2;
 }
-.np-app .si-earn-add:hover {
-  background: rgba(10, 40, 40, 0.25);
-  border-color: rgba(10, 40, 40, 0.5);
+.np-app .si-earn-val:hover { text-decoration: underline; text-underline-offset: 3px; }
+.np-app .si-earn-val.urgent { font-weight: 800; }
+.np-app .si-earn-val.add {
+  font-weight: 600;
+  font-style: italic;
+  opacity: 0.85;
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
 }
-.np-app .si-card.tone-flat .si-earn-add {
-  background: rgba(50, 110, 100, 0.15);
-  border-color: rgba(50, 110, 100, 0.45);
-  color: var(--navi-fg2);
-}
+.np-app .si-card.tone-flat .si-earn-val.add { color: var(--navi-fg3); }
+
 .np-app .si-earn-edit-row {
   display: flex; align-items: center; gap: 6px;
 }

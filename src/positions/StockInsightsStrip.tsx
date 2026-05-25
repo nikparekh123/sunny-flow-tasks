@@ -435,40 +435,26 @@ function Card({
 
   return (
     <article className={`si-card tone-${sentiment}`}>
-      {/* ── IDENTITY + timeframe pills + earnings chip ── */}
+      {/* ── IDENTITY (left) + earnings (top-right, plain text) ── */}
       <header className="si-card-hd">
         <div className="si-card-id">
           <div className="si-card-tk">{row.ticker}</div>
           <div className="si-card-sec">{row.sector}</div>
         </div>
-        <div className="si-card-hd-r">
-          <div className="si-tf">
-            {TIMEFRAMES.map((t) => (
-              <button
-                key={t}
-                type="button"
-                className={`si-tf-pill${tf === t ? ' on' : ''}`}
-                onClick={() => setTf(t)}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <EarningsChip
-            earningsDate={row.earnings_date}
-            earningsDays={earningsDays}
-            editing={editingEarnings}
-            onEditStart={() => setEditingEarnings(true)}
-            onSave={(d) => {
-              onSetEarnings(row.ticker, d || null);
-              setEditingEarnings(false);
-            }}
-            onCancel={() => setEditingEarnings(false)}
-          />
-        </div>
+        <Earnings
+          earningsDate={row.earnings_date}
+          earningsDays={earningsDays}
+          editing={editingEarnings}
+          onEditStart={() => setEditingEarnings(true)}
+          onSave={(d) => {
+            onSetEarnings(row.ticker, d || null);
+            setEditingEarnings(false);
+          }}
+          onCancel={() => setEditingEarnings(false)}
+        />
       </header>
 
-      {/* ── NOW: price + change (no sparkline) ── */}
+      {/* ── NOW: price + change + inline timeframe switcher ── */}
       <section className="si-now">
         <div className="si-price">
           {row.current_price != null ? fmtUSD2(row.current_price) : '—'}
@@ -487,6 +473,20 @@ function Card({
             <span className="si-change-window">over {tf}</span>
           </div>
         )}
+        {/* Plain-text timeframe switcher — active one bold + underlined,
+            inactive ones muted. No pills, no borders. */}
+        <div className="si-tf-row">
+          {TIMEFRAMES.map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={`si-tf-link${tf === t ? ' on' : ''}`}
+              onClick={() => setTf(t)}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
       </section>
 
       {/* ── YOUR POSITION ── */}
@@ -559,12 +559,11 @@ function Card({
   );
 }
 
-/** Earnings chip that lives top-right in the card header. Renders one of:
- *  - countdown badge ("4d · Wed May 29") when earnings_date is set
- *  - dashed "+ Add earnings" affordance when null
- *  - inline date input + save/cancel when editing
- *  Self-contained — no surrounding label, just the chip itself. */
-function EarningsChip({
+/** Plain-text earnings display for the card header. No pill, no chip —
+ *  just two lines (eyebrow + value) that match the right-side feel of
+ *  the sector eyebrow on the left. Click anywhere on the value to open
+ *  the inline date editor. */
+function Earnings({
   earningsDate, earningsDays, editing, onEditStart, onSave, onCancel,
 }: {
   earningsDate: string | null;
@@ -577,44 +576,49 @@ function EarningsChip({
   const [draft, setDraft] = useState(earningsDate ?? '');
   if (editing) {
     return (
-      <div className="si-earn-edit-row">
-        <input
-          type="date"
-          className="si-earn-input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          autoFocus
-        />
-        <button type="button" className="si-earn-btn save" onClick={() => onSave(draft)}>save</button>
-        <button type="button" className="si-earn-btn cancel" onClick={onCancel}>cancel</button>
+      <div className="si-earn">
+        <div className="si-earn-lbl">EARNINGS</div>
+        <div className="si-earn-edit-row">
+          <input
+            type="date"
+            className="si-earn-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            autoFocus
+          />
+          <button type="button" className="si-earn-btn save" onClick={() => onSave(draft)}>save</button>
+          <button type="button" className="si-earn-btn cancel" onClick={onCancel}>cancel</button>
+        </div>
       </div>
     );
   }
   if (earningsDate) {
     const urgent = earningsDays != null && earningsDays >= 0 && earningsDays <= 7;
-    const soon = earningsDays != null && earningsDays >= 0 && earningsDays <= 30;
-    const cls = urgent ? 'urgent' : soon ? 'soon' : 'past';
+    const countdown =
+      earningsDays != null && earningsDays >= 0
+        ? `in ${earningsDays}d`
+        : 'past';
     return (
-      <button
-        type="button"
-        className={`si-earn-chip ${cls}`}
-        onClick={onEditStart}
-        title="Click to edit earnings date"
-      >
-        <span className="si-earn-icon">📅</span>
-        <span className="si-earn-text">
-          {earningsDays != null && earningsDays >= 0
-            ? `${earningsDays}d`
-            : 'past'}
-        </span>
-        <span className="si-earn-date">{fmtEarningsDate(earningsDate)}</span>
-      </button>
+      <div className="si-earn">
+        <div className="si-earn-lbl">EARNINGS</div>
+        <button
+          type="button"
+          className={`si-earn-val${urgent ? ' urgent' : ''}`}
+          onClick={onEditStart}
+          title="Click to edit earnings date"
+        >
+          {countdown} · {fmtEarningsDate(earningsDate)}
+        </button>
+      </div>
     );
   }
   return (
-    <button type="button" className="si-earn-add" onClick={onEditStart}>
-      📅 Add earnings
-    </button>
+    <div className="si-earn">
+      <div className="si-earn-lbl">EARNINGS</div>
+      <button type="button" className="si-earn-val add" onClick={onEditStart}>
+        + add date
+      </button>
+    </div>
   );
 }
 
