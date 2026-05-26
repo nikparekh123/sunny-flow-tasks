@@ -265,3 +265,59 @@
   color: var(--navi-fg4);
   letter-spacing: .2px;
 }
+
+/* ──────────────────────────────────────────────────────────
+   ETF universe — teal accent + small E/ETF universe badges
+   ────────────────────────────────────────────────────────── */
+/* ETF section header gets a left-edge teal stripe so the eye can tell
+   an ETF table apart from an equity table at a glance. */
+.np-app .bnf-etf-section .np-section-hd {
+  border-left: 3px solid #6dd1c5;
+  padding-left: 12px;
+}
+.np-app .bnf-etf-table thead {
+  background: rgba(109, 209, 197, 0.08);
+}
+.np-app .bnf-etf-table th { color: #9ed8d0; }
+
+/* Tiny universe pill — shown next to tickers in open + closed tables,
+   plus inline in the closed-trades summary header. */
+.np-app .bnf-univ-badge {
+  display: inline-block;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  vertical-align: 1px;
+  text-transform: uppercase;
+}
+.np-app .bnf-univ-badge.equity {
+  background: rgba(168, 196, 192, 0.16);
+  color: var(--navi-fg2);
+  border: 1px solid rgba(168, 196, 192, 0.32);
+}
+.np-app .bnf-univ-badge.etf {
+  background: rgba(109, 209, 197, 0.18);
+  color: #6dd1c5;
+  border: 1px solid rgba(109, 209, 197, 0.4);
+}
+
+/* Per-universe stat blocks inside the closed-trades toggle header */
+.np-app .bnf-closed-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+}
+.np-app .bnf-closed-univ {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.np-app .bnf-closed-univ.combined {
+  padding-left: 12px;
+  border-left: 1px solid rgba(50, 110, 100, 0.4);
+  color: var(--navi-fg2);
+}

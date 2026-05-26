@@ -29,6 +29,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // the list, then redeploy. We use .ts (not .json) because Supabase's
 // Deno runtime doesn't support JSON-import attributes yet.
 import { UNIVERSE, type UniverseEntry } from './universe.ts';
+import { ETF_UNIVERSE } from './etf-universe.ts';
 import {
   cikFor, fetchRecentFilings, extract8Ks, fetchInsiderActivity,
   daysSinceFromTradingDays,
@@ -256,22 +257,222 @@ async function inChunks<T, U>(items: T[], size: number, fn: (item: T) => Promise
   return out;
 }
 
+// ──────────────────────────────────────────────────────────────────
+// Universe scan implementations — equity (existing) and ETF (new).
+// Both share Polygon + the SMA/dev compute. ETF scan skips earnings /
+// insider / 8-K (not applicable), skips ADV (all ETFs liquid), and
+// replaces the sector-breadth guard with a single SPY broad-market
+// check (the candidate IS a sector ETF).
+// ──────────────────────────────────────────────────────────────────
+
+interface ScanResult { scanned: number; with_data: number; candidates: number; }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type Admin = ReturnType<typeof createClient>;
+
+async function runEquityScan(admin: Admin, key: string, userId: string, fromIso: string, toIso: string): Promise<ScanResult> {
+  // 1) Sector ETF deviations — single pass, ~11 ETFs.
+  const sectorDevs = new Map<string, number | null>();
+  await Promise.all(SECTOR_ETFS.map(async (etf) => {
+    const aggs = await fetchAggs(etf, key, fromIso, toIso);
+    if (aggs.length < 25) { sectorDevs.set(etf, null); return; }
+    const closes = aggs.map((a) => a.c);
+    const s = sma(closes, 25);
+    const last = aggs[aggs.length - 1].c;
+    sectorDevs.set(etf, s ? ((last - s) / s) * 100 : null);
+  }));
+
+  // 2) Per-ticker aggregates + filters. 20 parallel keeps the 1000-ticker
+  // scan under ~45s on a paid Polygon plan and well below rate limits.
+  const tickerResults = await inChunks(UNIVERSE, 20, (u) =>
+    processOneTicker(u, key, fromIso, toIso).catch(() => null),
+  );
+
+  // 3) Apply BNF filters.
+  const survivors = tickerResults.filter((r): r is TickerResult => {
+    if (!r) return false;
+    if (r.deviation_pct < DEV_MIN || r.deviation_pct > DEV_MAX) return false;
+    if (r.price <= r.sma200) return false;
+    if (r.today_intraday_pct < TODAY_INTRADAY_FLOOR) return false;
+    const sectorDev = sectorDevs.get(r.sectorEtf);
+    if (sectorDev != null && sectorDev < SECTOR_DEV_FLOOR) return false;
+    return true;
+  });
+
+  // 4) Survivor enrichment — Polygon options + Yahoo (earnings/name) +
+  //    SEC EDGAR (8-K + insider $) in parallel per ticker. Chunked at 5
+  //    so we don't burst SEC's ~10-req/sec ceiling.
+  const preEnriched = await inChunks(survivors, 5, async (s) => {
+    const [ctx, yahoo, edgar] = await Promise.all([
+      fetchOptionsCtx(s.ticker, s.price, key).catch(() => ({
+        iv30: null, options_volume: 0, put_call_ratio: null, open_interest: 0,
+      })),
+      fetchYahooCtx(s.ticker).catch(() => ({ daysToEarnings: null, name: null })),
+      fetchEdgarFlags(s.ticker).catch(() => ({
+        insider: { sellers_count: 0, total_sold_usd: 0, details: [] } as InsiderActivity,
+        eightKs: [] as Item8K[],
+      })),
+    ]);
+    return { ...s, ctx, yahoo, edgar, sectorEtfDev: sectorDevs.get(s.sectorEtf) ?? null };
+  });
+
+  // 4b) Earnings-window filter (soft on missing data).
+  const EARNINGS_WINDOW_DAYS = 3;
+  const enriched = preEnriched.filter((e) =>
+    e.yahoo.daysToEarnings == null ||
+    Math.abs(e.yahoo.daysToEarnings) > EARNINGS_WINDOW_DAYS,
+  );
+
+  // 5) Replace previous EQUITY rows for this user.
+  await admin.from('bnf_candidates').delete()
+    .eq('user_id', userId).eq('universe', 'EQUITY');
+  if (enriched.length > 0) {
+    const rows = enriched.map((e) => ({
+      user_id: userId,
+      universe: 'EQUITY',
+      ticker: e.ticker,
+      name: e.yahoo.name,
+      sector: e.sector,
+      category: null,
+      price: e.price,
+      sma25: e.sma25,
+      sma200: e.sma200,
+      deviation_pct: e.deviation_pct,
+      adv20_m: e.adv20_m,
+      days_to_earnings: e.yahoo.daysToEarnings,
+      days_since_earnings: daysSinceFromTradingDays(e.yahoo.daysToEarnings),
+      today_intraday_pct: e.today_intraday_pct,
+      sector_etf: e.sectorEtf,
+      sector_etf_dev_pct: e.sectorEtfDev,
+      iv30: e.ctx.iv30,
+      iv_rank: null,
+      options_volume: e.ctx.options_volume,
+      put_call_ratio: e.ctx.put_call_ratio,
+      open_interest: e.ctx.open_interest,
+      insider_sales: e.edgar.insider.sellers_count > 0 ? e.edgar.insider : null,
+      recent_8ks: e.edgar.eightKs.length > 0 ? e.edgar.eightKs : null,
+    }));
+    const { error: insErr } = await admin.from('bnf_candidates').insert(rows);
+    if (insErr) throw new Error(`Equity insert failed: ${insErr.message}`);
+  }
+
+  return {
+    scanned: UNIVERSE.length,
+    with_data: tickerResults.filter(Boolean).length,
+    candidates: enriched.length,
+  };
+}
+
+/** ETF scan path — simpler signal pipeline:
+ *  - SPY broad-market guard (skip when SPY < −5% vs its own SMA25)
+ *  - Per-ETF SMA25/200/dev/intraday/signal-day vol ratio
+ *  - Options snapshot per survivor (optional, fail-soft)
+ *  - No earnings / no EDGAR / no ADV / no sector breadth */
+async function runEtfScan(admin: Admin, key: string, userId: string, fromIso: string, toIso: string): Promise<ScanResult> {
+  // 1) SPY broad-market guard.
+  const spyAggs = await fetchAggs('SPY', key, fromIso, toIso);
+  let spyOk = true;
+  if (spyAggs.length >= 25) {
+    const closes = spyAggs.map((a) => a.c);
+    const spySma = sma(closes, 25);
+    const spyLast = spyAggs[spyAggs.length - 1].c;
+    if (spySma) {
+      const spyDev = ((spyLast - spySma) / spySma) * 100;
+      if (spyDev < SECTOR_DEV_FLOOR) spyOk = false;
+    }
+  }
+
+  // 2) Per-ETF aggregates + filters. ~30 ETFs, chunked 10 parallel.
+  const etfResults = await inChunks(ETF_UNIVERSE, 10, async (etf) => {
+    try {
+      const aggs = await fetchAggs(etf.ticker, key, fromIso, toIso);
+      if (aggs.length < 200) return null;
+      const closes = aggs.map((a) => a.c);
+      const sma25 = sma(closes, 25);
+      const sma200 = sma(closes, 200);
+      const last = aggs[aggs.length - 1];
+      if (!sma25 || !sma200 || !last) return null;
+      const deviation_pct = ((last.c - sma25) / sma25) * 100;
+      const today_intraday_pct = last.o > 0 ? ((last.c - last.o) / last.o) * 100 : 0;
+      // Signal-day volume ratio = today's volume / 20-day avg volume.
+      const vol20 = aggs.slice(-21, -1).reduce((s, b) => s + (b.v ?? 0), 0) / 20;
+      const signal_day_vol_ratio = vol20 > 0 ? (last.v ?? 0) / vol20 : null;
+      return {
+        etf, price: last.c, sma25, sma200, deviation_pct,
+        today_intraday_pct, signal_day_vol_ratio,
+      };
+    } catch { return null; }
+  });
+
+  // 3) Apply ETF-specific filters.
+  const survivors = etfResults.filter((r): r is NonNullable<typeof r> => {
+    if (!r) return false;
+    if (!spyOk) return false;                                       // broad-market guard
+    if (r.deviation_pct < DEV_MIN || r.deviation_pct > DEV_MAX) return false;
+    if (r.price <= r.sma200) return false;
+    if (r.today_intraday_pct < TODAY_INTRADAY_FLOOR) return false;
+    return true;
+  });
+
+  // 4) Options snapshot per survivor — optional, fail-soft.
+  const enriched = await inChunks(survivors, 6, async (s) => {
+    const ctx = await fetchOptionsCtx(s.etf.ticker, s.price, key).catch(() => ({
+      iv30: null, options_volume: 0, put_call_ratio: null, open_interest: 0,
+    }));
+    return { ...s, ctx };
+  });
+
+  // 5) Replace previous ETF rows for this user.
+  await admin.from('bnf_candidates').delete()
+    .eq('user_id', userId).eq('universe', 'ETF');
+  if (enriched.length > 0) {
+    const rows = enriched.map((e) => ({
+      user_id: userId,
+      universe: 'ETF',
+      ticker: e.etf.ticker,
+      name: e.etf.name,
+      sector: null,
+      category: e.etf.category,
+      price: e.price,
+      sma25: e.sma25,
+      sma200: e.sma200,
+      deviation_pct: e.deviation_pct,
+      adv20_m: null,                       // not applied to ETFs
+      days_to_earnings: null,              // n/a
+      days_since_earnings: null,
+      today_intraday_pct: e.today_intraday_pct,
+      sector_etf: null,
+      sector_etf_dev_pct: null,
+      signal_day_vol_ratio: e.signal_day_vol_ratio,
+      iv30: e.ctx.iv30,
+      iv_rank: null,
+      options_volume: e.ctx.options_volume,
+      put_call_ratio: e.ctx.put_call_ratio,
+      open_interest: e.ctx.open_interest,
+      insider_sales: null,
+      recent_8ks: null,
+    }));
+    const { error: insErr } = await admin.from('bnf_candidates').insert(rows);
+    if (insErr) throw new Error(`ETF insert failed: ${insErr.message}`);
+  }
+
+  return {
+    scanned: ETF_UNIVERSE.length,
+    with_data: etfResults.filter(Boolean).length,
+    candidates: enriched.length,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
   try {
     const key = Deno.env.get('POLYGON_API_KEY');
-    if (!key) {
-      return jsonErr('POLYGON_API_KEY is not set as a Supabase secret', 500);
-    }
+    if (!key) return jsonErr('POLYGON_API_KEY is not set as a Supabase secret', 500);
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
-    if (!supabaseUrl || !serviceKey) {
-      return jsonErr('Supabase service env not configured', 500);
-    }
+    if (!supabaseUrl || !serviceKey) return jsonErr('Supabase service env not configured', 500);
 
-    // We need the calling user's id to scope the candidate writes. Pass
-    // through the caller's JWT via Authorization header → supabase.auth.
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return jsonErr('Missing Authorization header', 401);
     const userClient = createClient(supabaseUrl, serviceKey, {
@@ -281,117 +482,45 @@ Deno.serve(async (req) => {
     if (userErr || !userData?.user) return jsonErr('Unauthorized', 401);
     const userId = userData.user.id;
 
-    // Service-role client for writes (bypasses RLS for the upsert).
     const admin = createClient(supabaseUrl, serviceKey);
 
-    // Date window: 280 trading-days-ish back, today.
+    // Universe mode dispatch — accepts {universe: 'equity'|'etf'|'both'},
+    // defaults to 'both' so a bare invocation hits the same surface as
+    // the original. Empty body is fine.
+    let mode: 'equity' | 'etf' | 'both' = 'both';
+    try {
+      const body = await req.json() as { universe?: string };
+      if (body?.universe === 'equity' || body?.universe === 'etf' || body?.universe === 'both') {
+        mode = body.universe;
+      }
+    } catch { /* no body / bad JSON = default to 'both' */ }
+
+    // Date window — same for both universes.
     const toDate = new Date();
     const fromDate = new Date(toDate);
     fromDate.setDate(fromDate.getDate() - 400);
     const fromIso = fromDate.toISOString().slice(0, 10);
     const toIso = toDate.toISOString().slice(0, 10);
 
-    // 1) Sector ETF deviations — single pass, ~11 ETFs.
-    const sectorDevs = new Map<string, number | null>();
-    await Promise.all(SECTOR_ETFS.map(async (etf) => {
-      const aggs = await fetchAggs(etf, key, fromIso, toIso);
-      if (aggs.length < 25) { sectorDevs.set(etf, null); return; }
-      const closes = aggs.map((a) => a.c);
-      const s = sma(closes, 25);
-      const last = aggs[aggs.length - 1].c;
-      sectorDevs.set(etf, s ? ((last - s) / s) * 100 : null);
-    }));
+    // Run scans. We run sequentially (rather than parallel) so a long
+    // equity scan doesn't compete with ETF Polygon calls for rate budget.
+    // If one throws, the other still ran — we still return partial results.
+    let equityResult: ScanResult | { error: string } | null = null;
+    let etfResult: ScanResult | { error: string } | null = null;
 
-    // 2) Per-ticker aggregates + filters. Chunked at 8 parallel requests
-    // to be polite to Polygon's rate limits.
-    // Concurrency bumped for the ~1000-ticker universe: 20 parallel keeps
-    // the scan under ~45s on a paid Polygon plan while staying well below
-    // their rate limits. At 8 we were timing out near the universe size.
-    const tickerResults = await inChunks(UNIVERSE, 20, (u) =>
-      processOneTicker(u, key, fromIso, toIso).catch(() => null),
-    );
-
-    // 3) Apply BNF filters.
-    const survivors = tickerResults.filter((r): r is TickerResult => {
-      if (!r) return false;
-      if (r.deviation_pct < DEV_MIN || r.deviation_pct > DEV_MAX) return false;
-      if (r.price <= r.sma200) return false;
-      if (r.today_intraday_pct < TODAY_INTRADAY_FLOOR) return false;
-      const sectorDev = sectorDevs.get(r.sectorEtf);
-      if (sectorDev != null && sectorDev < SECTOR_DEV_FLOOR) return false;
-      return true;
-    });
-
-    // 4) Survivor enrichment — Polygon options + Yahoo (earnings/name) +
-    //    SEC EDGAR (8-K + insider $) in parallel per ticker. Each call
-    //    has its own try/catch so any one failure (rate limit, network,
-    //    missing CIK) leaves nulls on that row but the scan still ships.
-    //
-    //    Chunked at 5 parallel rather than 8 so we don't burst SEC's
-    //    ~10-req/sec ceiling once each ticker fans out into its own
-    //    submissions + Form 4 fetches.
-    const preEnriched = await inChunks(survivors, 5, async (s) => {
-      const [ctx, yahoo, edgar] = await Promise.all([
-        fetchOptionsCtx(s.ticker, s.price, key).catch(() => ({
-          iv30: null, options_volume: 0, put_call_ratio: null, open_interest: 0,
-        })),
-        fetchYahooCtx(s.ticker).catch(() => ({ daysToEarnings: null, name: null })),
-        fetchEdgarFlags(s.ticker).catch(() => ({
-          insider: { sellers_count: 0, total_sold_usd: 0, details: [] } as InsiderActivity,
-          eightKs: [] as Item8K[],
-        })),
-      ]);
-      return { ...s, ctx, yahoo, edgar, sectorEtfDev: sectorDevs.get(s.sectorEtf) ?? null };
-    });
-
-    // 4b) Earnings-window filter — drop anything within ±3 trading days
-    //     of a known earnings event. Soft filter: null daysToEarnings
-    //     (Yahoo didn't return data or call failed) passes through.
-    const EARNINGS_WINDOW_DAYS = 3;
-    const enriched = preEnriched.filter((e) =>
-      e.yahoo.daysToEarnings == null ||
-      Math.abs(e.yahoo.daysToEarnings) > EARNINGS_WINDOW_DAYS,
-    );
-
-    // 5) Replace previous scan for this user. Insert all rows in one batch.
-    await admin.from('bnf_candidates').delete().eq('user_id', userId);
-    if (enriched.length > 0) {
-      const rows = enriched.map((e) => ({
-        user_id: userId,
-        ticker: e.ticker,
-        name: e.yahoo.name,
-        sector: e.sector,
-        price: e.price,
-        sma25: e.sma25,
-        sma200: e.sma200,
-        deviation_pct: e.deviation_pct,
-        adv20_m: e.adv20_m,
-        days_to_earnings: e.yahoo.daysToEarnings,
-        days_since_earnings: daysSinceFromTradingDays(e.yahoo.daysToEarnings),
-        today_intraday_pct: e.today_intraday_pct,
-        sector_etf: e.sectorEtf,
-        sector_etf_dev_pct: e.sectorEtfDev,
-        iv30: e.ctx.iv30,
-        iv_rank: null,                 // v1: needs 252d IV history
-        options_volume: e.ctx.options_volume,
-        put_call_ratio: e.ctx.put_call_ratio,
-        open_interest: e.ctx.open_interest,
-        // Risk flags
-        insider_sales: e.edgar.insider.sellers_count > 0 ? e.edgar.insider : null,
-        recent_8ks: e.edgar.eightKs.length > 0 ? e.edgar.eightKs : null,
-      }));
-      const { error: insErr } = await admin.from('bnf_candidates').insert(rows);
-      if (insErr) {
-        return jsonErr(`Insert failed: ${insErr.message}`, 500);
-      }
+    if (mode === 'equity' || mode === 'both') {
+      try {
+        equityResult = await runEquityScan(admin, key, userId, fromIso, toIso);
+      } catch (e) { equityResult = { error: (e as Error).message }; }
+    }
+    if (mode === 'etf' || mode === 'both') {
+      try {
+        etfResult = await runEtfScan(admin, key, userId, fromIso, toIso);
+      } catch (e) { etfResult = { error: (e as Error).message }; }
     }
 
     return new Response(
-      JSON.stringify({
-        scanned: UNIVERSE.length,
-        with_data: tickerResults.filter(Boolean).length,
-        candidates: enriched.length,
-      }),
+      JSON.stringify({ mode, equity: equityResult, etf: etfResult }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (e) {

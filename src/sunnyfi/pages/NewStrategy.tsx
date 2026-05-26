@@ -19,12 +19,18 @@ import '@/positions/positions.css';
 import './new-strategy.css';
 
 const DASHBOARD_URL = 'https://www.sunnyfi.co/dashboard';
-const STALE_DAYS = 10;
+const STALE_DAYS_EQUITY = 10;
+const STALE_DAYS_ETF = 7;
+const staleFor = (universe: Universe) => universe === 'ETF' ? STALE_DAYS_ETF : STALE_DAYS_EQUITY;
+type Universe = 'EQUITY' | 'ETF';
 const NEAR_TARGET_PCT = 2;      // within 2% of SMA25 → YELLOW
 
 // ── Types matching the bnf_candidates / bnf_positions DB schema ──
 interface Candidate {
   id: string;
+  universe: Universe;
+  category: 'Sector' | 'Industry' | 'Style' | null;
+  signal_day_vol_ratio: number | null;
   ticker: string;
   name: string | null;
   sector: string | null;
@@ -104,6 +110,7 @@ function setupQuality(...tones: FlagTone[]): 'clean' | 'review' | 'caution' {
 
 interface Position {
   id: string;
+  universe: Universe;
   ticker: string;
   status: 'open' | 'closed';
   entry_date: string;
@@ -274,6 +281,7 @@ export default function NewStrategy() {
         .from('bnf_positions' as never)
         .insert({
           user_id: userId,
+          universe: c.universe,
           ticker: c.ticker,
           status: 'open',
           entry_price: c.price,
@@ -328,12 +336,16 @@ export default function NewStrategy() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['bnf_positions'] }),
   });
 
-  // ── Refresh-scan handler ──
-  const runScan = async () => {
+  // ── Refresh-scan handler — accepts a universe mode ──
+  const [scanMode, setScanMode] = useState<'equity' | 'etf' | 'both' | null>(null);
+  const runScan = async (universe: 'equity' | 'etf' | 'both') => {
     setScanning(true);
+    setScanMode(universe);
     setScanErr(null);
     try {
-      const { data, error } = await supabase.functions.invoke('bnf-scan');
+      const { data, error } = await supabase.functions.invoke('bnf-scan', {
+        body: { universe },
+      });
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
       qc.invalidateQueries({ queryKey: ['bnf_candidates'] });
@@ -341,6 +353,7 @@ export default function NewStrategy() {
       setScanErr((e as Error).message);
     } finally {
       setScanning(false);
+      setScanMode(null);
     }
   };
 
@@ -361,18 +374,26 @@ export default function NewStrategy() {
     }
   };
 
-  // ── Derived sets ──
+  // ── Derived sets, per universe ──
+  // Candidate rows are split by universe; positions same. Closed trades
+  // stay merged because the closed-trades section shows both.
+  const equityCandidates = candidates.filter((c) => c.universe === 'EQUITY');
+  const etfCandidates = candidates.filter((c) => c.universe === 'ETF');
   const openPositions = positions.filter((p) => p.status === 'open');
   const closedPositions = positions.filter((p) => p.status === 'closed');
 
-  // Candidates filtered by the research-status "Hide skipped" toggle —
-  // any row whose ticker is marked 'skipped' drops out by default.
+  // Hide-skipped filter applies to BOTH universes — research status is
+  // ticker-keyed, not universe-keyed.
   const skippedCount = candidates.filter(
     (c) => statusByTicker.get(c.ticker) === 'skipped',
   ).length;
-  const visibleCandidates = hideSkipped
-    ? candidates.filter((c) => statusByTicker.get(c.ticker) !== 'skipped')
-    : candidates;
+  const filterSkipped = (rows: Candidate[]) => hideSkipped
+    ? rows.filter((c) => statusByTicker.get(c.ticker) !== 'skipped')
+    : rows;
+  const visibleEquityCandidates = filterSkipped(equityCandidates);
+  const visibleEtfCandidates = filterSkipped(etfCandidates);
+  // Kept for backward-compat with the existing section title/empty-state.
+  const visibleCandidates = filterSkipped(candidates);
 
   // Map ticker → most recent candidate snapshot so open positions can show
   // a fresh SMA25 without re-running the scanner per row.
@@ -383,14 +404,6 @@ export default function NewStrategy() {
   }, [candidates]);
 
   // Open positions with derived status (GREEN/YELLOW/GREY/RED)
-  interface OpenView extends Position {
-    currentPrice: number | null;
-    sma25: number | null;
-    distToSMA25Pct: number | null;
-    unrealizedPct: number | null;
-    daysHeld: number;
-    status: 'green' | 'yellow' | 'grey' | 'red';
-  }
   const openWithDerived: OpenView[] = openPositions.map((p) => {
     const quote = quotes[p.ticker];
     const currentPrice = quote?.price ?? null;
@@ -411,31 +424,44 @@ export default function NewStrategy() {
       if (currentPrice >= sma25) status = 'green';
       else if (Math.abs(distToSMA25Pct ?? 99) <= NEAR_TARGET_PCT) status = 'yellow';
     }
-    if (daysHeld > STALE_DAYS && status !== 'green') status = 'red';
+    // STALE threshold is universe-aware: ETFs mean-revert faster than
+    // single names, so they go red at 7d vs 10d for equities.
+    if (daysHeld > staleFor(p.universe) && status !== 'green') status = 'red';
     return { ...p, currentPrice, sma25, distToSMA25Pct, unrealizedPct, daysHeld, status };
   });
+  const equityOpenView = openWithDerived.filter((o) => o.universe === 'EQUITY');
+  const etfOpenView = openWithDerived.filter((o) => o.universe === 'ETF');
 
   const greenCount = openWithDerived.filter((o) => o.status === 'green').length;
 
   // Closed-trade summary
-  const closedStats = useMemo(() => {
-    if (closedPositions.length === 0) return null;
-    let wins = 0;
-    let sumReturn = 0;
-    let sumDays = 0;
-    for (const p of closedPositions) {
+  /** Aggregate stats for a single universe slice of closed positions.
+   *  Returns null when the slice is empty so the UI can hide that block. */
+  const statsFor = (rows: Position[]) => {
+    if (rows.length === 0) return null;
+    let wins = 0, sumReturn = 0, sumDays = 0;
+    for (const p of rows) {
       const r = p.realized_pct ?? 0;
       if (r > 0) wins++;
       sumReturn += r;
       if (p.exit_date) sumDays += daysBetween(p.entry_date, p.exit_date);
     }
     return {
-      total: closedPositions.length,
-      winRate: (wins / closedPositions.length) * 100,
-      avgReturn: sumReturn / closedPositions.length,
-      avgDays: sumDays / closedPositions.length,
+      total: rows.length,
+      winRate: (wins / rows.length) * 100,
+      avgReturn: sumReturn / rows.length,
+      avgDays: sumDays / rows.length,
     };
-  }, [closedPositions]);
+  };
+  const closedStats = useMemo(() => statsFor(closedPositions), [closedPositions]);
+  const closedEquityStats = useMemo(
+    () => statsFor(closedPositions.filter((p) => p.universe === 'EQUITY')),
+    [closedPositions],
+  );
+  const closedEtfStats = useMemo(
+    () => statsFor(closedPositions.filter((p) => p.universe === 'ETF')),
+    [closedPositions],
+  );
 
   // ── render ──
   return (
@@ -459,11 +485,28 @@ export default function NewStrategy() {
             {refreshingFlags ? 'Refreshing flags…' : '↻ Refresh risk flags'}
           </button>
           <button
+            className="np-btn"
+            disabled={scanning}
+            onClick={() => runScan('etf')}
+            title="Scan only the ~30 sector & industry ETFs (fast)."
+          >
+            {scanning && scanMode === 'etf' ? 'Scanning…' : '↻ Refresh ETF scan'}
+          </button>
+          <button
+            className="np-btn"
+            disabled={scanning}
+            onClick={() => runScan('equity')}
+            title="Scan only the ~1000-name equity universe."
+          >
+            {scanning && scanMode === 'equity' ? 'Scanning…' : '↻ Refresh equity scan'}
+          </button>
+          <button
             className="np-btn neon"
             disabled={scanning}
-            onClick={runScan}
+            onClick={() => runScan('both')}
+            title="Run both universes."
           >
-            {scanning ? 'Scanning…' : '↻ Refresh scan'}
+            {scanning && scanMode === 'both' ? 'Scanning…' : '↻ Refresh all'}
           </button>
         </div>
       </header>
@@ -479,11 +522,11 @@ export default function NewStrategy() {
           </div>
         )}
 
-        {/* ────── TODAY'S CANDIDATES ────── */}
+        {/* ────── TODAY'S EQUITY CANDIDATES ────── */}
         <section className="np-section">
           <div className="np-section-hd">
             <div className="np-section-title">
-              Today's candidates · {visibleCandidates.length}
+              Today's equity candidates · {visibleEquityCandidates.length}
               {hideSkipped && skippedCount > 0 && (
                 <span className="bnf-section-sub-inline">
                   {' '}· {skippedCount} skipped hidden
@@ -531,15 +574,15 @@ export default function NewStrategy() {
                 </tr>
               </thead>
               <tbody>
-                {visibleCandidates.length === 0 ? (
+                {visibleEquityCandidates.length === 0 ? (
                   <tr>
                     <td colSpan={18} className="bnf-empty">
-                      {candidates.length === 0
-                        ? <>No candidates yet. Click <b>Refresh scan</b> to run the universe.</>
-                        : <>All {candidates.length} candidate{candidates.length === 1 ? '' : 's'} are skipped. Toggle "Hide skipped" off to see them.</>}
+                      {equityCandidates.length === 0
+                        ? <>No equity candidates yet. Click <b>Refresh equity scan</b>.</>
+                        : <>All {equityCandidates.length} equity candidate{equityCandidates.length === 1 ? '' : 's'} are skipped. Toggle "Hide skipped" off to see them.</>}
                     </td>
                   </tr>
-                ) : visibleCandidates.map((c) => {
+                ) : visibleEquityCandidates.map((c) => {
                   const tEarn = earningsTone(c.days_since_earnings);
                   const tIns = insiderTone(c.insider_sales);
                   const t8K = eightKTone(c.recent_8ks);
@@ -618,67 +661,100 @@ export default function NewStrategy() {
           </div>
         </section>
 
-        {/* ────── OPEN POSITIONS ────── */}
-        <section className="np-section">
+        <OpenPositionsTable
+          title="Open equity positions"
+          rows={equityOpenView}
+          universe="EQUITY"
+          stale={STALE_DAYS_EQUITY}
+          onSell={(p, reason, exitPrice) =>
+            sellMutation.mutate({ p, reason, exitPrice })
+          }
+          sellPending={sellMutation.isPending}
+        />
+
+        {/* ────── TODAY'S ETF CANDIDATES ────── */}
+        <section className="np-section bnf-etf-section">
           <div className="np-section-hd">
             <div className="np-section-title">
-              Open positions · {openWithDerived.length}
+              Today's ETF candidates · {visibleEtfCandidates.length}
             </div>
             <div className="np-section-sub">
-              Status follows distance to SMA25. Sell when ▲ green (target hit) or when stale (&gt;{STALE_DAYS}d).
+              Sector + industry + style ETFs. Same SMA logic; SPY broad-market guard replaces
+              the sector breadth filter. No earnings / insider / 8-K risk to display.
             </div>
           </div>
           <div className="np-table-wrap">
-            <table className="np-table">
+            <table className="np-table bnf-etf-table">
               <thead>
                 <tr>
-                  <th>Status</th>
                   <th>Ticker</th>
-                  <th className="num">Entry</th>
-                  <th className="num">Entry $</th>
-                  <th className="num">Entry dev</th>
-                  <th className="num">Now $</th>
+                  <th>ETF Name</th>
+                  <th>Category</th>
+                  <th className="num">Price</th>
                   <th className="num">SMA25</th>
-                  <th className="num">To SMA25</th>
-                  <th className="num">UPnL %</th>
-                  <th className="num">Days</th>
+                  <th className="num">Dev %</th>
+                  <th className="num">SMA200</th>
+                  <th className="num">IV</th>
+                  <th className="num">Opt vol</th>
+                  <th className="num">P/C</th>
+                  <th className="num">Vol vs 20d</th>
+                  <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {openWithDerived.length === 0 ? (
-                  <tr><td colSpan={11} className="bnf-empty">No open positions. Buy a candidate above to start one.</td></tr>
-                ) : openWithDerived.map((p) => {
-                  const exitPrice = p.currentPrice ?? p.entry_price;
-                  const reason =
-                    p.status === 'green' ? 'target_hit'
-                    : p.status === 'red' ? 'stale'
-                    : 'manual';
+                {visibleEtfCandidates.length === 0 ? (
+                  <tr><td colSpan={13} className="bnf-empty">
+                    {etfCandidates.length === 0
+                      ? <>No ETF candidates yet. Click <b>Refresh ETF scan</b>.</>
+                      : <>All ETF candidates are skipped. Toggle "Hide skipped" off to see them.</>}
+                  </td></tr>
+                ) : visibleEtfCandidates.map((c) => {
+                  const status = statusByTicker.get(c.ticker) ?? 'pending';
                   return (
-                    <tr key={p.id}>
-                      <td><StatusDot tone={p.status} /></td>
-                      <td className="ticker">{p.ticker}</td>
-                      <td className="num">{p.entry_date}</td>
-                      <td className="num">{fmtUSD(p.entry_price)}</td>
-                      <td className="num down">{fmtPct(p.entry_deviation_pct)}</td>
-                      <td className="num strong">{fmtUSD(p.currentPrice)}</td>
-                      <td className="num">{fmtUSD(p.sma25)}</td>
-                      <td className={'num ' + (
-                        p.distToSMA25Pct != null && p.distToSMA25Pct < 0 ? 'up' : ''
-                      )}>{fmtPct(p.distToSMA25Pct)}</td>
-                      <td className={'num strong ' + (
-                        (p.unrealizedPct ?? 0) >= 0 ? 'up' : 'down'
-                      )}>{fmtPct(p.unrealizedPct, 2)}</td>
-                      <td className={'num ' + (p.daysHeld > STALE_DAYS ? 'down' : '')}>
-                        {p.daysHeld}d
+                    <tr key={c.id} className={`bnf-row status-${status}`}>
+                      <td className="ticker">
+                        <span className="bnf-univ-badge etf">ETF</span> {c.ticker}
+                      </td>
+                      <td className="bnf-name" title={c.name ?? ''}>{c.name ?? '—'}</td>
+                      <td className="sector-cell">{c.category ?? '—'}</td>
+                      <td className="num strong">{fmtUSD(c.price)}</td>
+                      <td className="num">{fmtUSD(c.sma25)}</td>
+                      <td className="num down strong">{fmtPct(c.deviation_pct)}</td>
+                      <td className="num">{fmtUSD(c.sma200)}</td>
+                      <td className="num">{fmtIV(c.iv30)}</td>
+                      <td className="num">{fmtNum(c.options_volume)}</td>
+                      <td className="num">{c.put_call_ratio != null ? c.put_call_ratio.toFixed(2) : '—'}</td>
+                      <td className="num">
+                        {c.signal_day_vol_ratio != null
+                          ? `${c.signal_day_vol_ratio.toFixed(2)}x`
+                          : '—'}
+                      </td>
+                      <td className="bnf-status-cell">
+                        <select
+                          className={`bnf-status-select status-${status}`}
+                          value={status}
+                          onChange={(e) =>
+                            setStatusMutation.mutate({
+                              ticker: c.ticker,
+                              status: e.target.value as ResearchStatus,
+                            })
+                          }
+                          disabled={setStatusMutation.isPending}
+                          aria-label="Research status"
+                        >
+                          {STATUS_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
                       </td>
                       <td className="num">
                         <button
-                          className="np-btn bnf-row-btn"
-                          onClick={() => sellMutation.mutate({ p, reason, exitPrice })}
-                          disabled={sellMutation.isPending}
+                          className="np-btn neon bnf-row-btn"
+                          onClick={() => buyMutation.mutate(c)}
+                          disabled={buyMutation.isPending}
                         >
-                          Sell
+                          Buy
                         </button>
                       </td>
                     </tr>
@@ -688,6 +764,17 @@ export default function NewStrategy() {
             </table>
           </div>
         </section>
+
+        <OpenPositionsTable
+          title="Open ETF positions"
+          rows={etfOpenView}
+          universe="ETF"
+          stale={STALE_DAYS_ETF}
+          onSell={(p, reason, exitPrice) =>
+            sellMutation.mutate({ p, reason, exitPrice })
+          }
+          sellPending={sellMutation.isPending}
+        />
 
         {/* ────── CLOSED TRADES (collapsible) ────── */}
         {closedPositions.length > 0 && (
@@ -699,11 +786,25 @@ export default function NewStrategy() {
               {closedOpen ? '▾' : '▸'} Closed trades · {closedPositions.length}
               {closedStats && (
                 <span className="bnf-closed-stats">
-                  win rate <b>{closedStats.winRate.toFixed(0)}%</b>
-                  {' · '}
-                  avg <b className={closedStats.avgReturn >= 0 ? 'up' : 'down'}>{fmtPct(closedStats.avgReturn, 1)}</b>
-                  {' · '}
-                  avg hold <b>{closedStats.avgDays.toFixed(1)}d</b>
+                  {closedEquityStats && (
+                    <span className="bnf-closed-univ">
+                      <b className="bnf-univ-badge equity">E</b> {closedEquityStats.total}
+                      {' · '}win <b>{closedEquityStats.winRate.toFixed(0)}%</b>
+                      {' · '}avg <b className={closedEquityStats.avgReturn >= 0 ? 'up' : 'down'}>{fmtPct(closedEquityStats.avgReturn, 1)}</b>
+                    </span>
+                  )}
+                  {closedEtfStats && (
+                    <span className="bnf-closed-univ">
+                      <b className="bnf-univ-badge etf">ETF</b> {closedEtfStats.total}
+                      {' · '}win <b>{closedEtfStats.winRate.toFixed(0)}%</b>
+                      {' · '}avg <b className={closedEtfStats.avgReturn >= 0 ? 'up' : 'down'}>{fmtPct(closedEtfStats.avgReturn, 1)}</b>
+                    </span>
+                  )}
+                  <span className="bnf-closed-univ combined">
+                    all · win <b>{closedStats.winRate.toFixed(0)}%</b>
+                    {' · '}avg <b className={closedStats.avgReturn >= 0 ? 'up' : 'down'}>{fmtPct(closedStats.avgReturn, 1)}</b>
+                    {' · '}{closedStats.avgDays.toFixed(1)}d
+                  </span>
                 </span>
               )}
             </button>
@@ -712,6 +813,7 @@ export default function NewStrategy() {
                 <table className="np-table">
                   <thead>
                     <tr>
+                      <th>Univ</th>
                       <th>Ticker</th>
                       <th className="num">Entry</th>
                       <th className="num">Exit</th>
@@ -727,6 +829,11 @@ export default function NewStrategy() {
                       const hold = p.exit_date ? daysBetween(p.entry_date, p.exit_date) : 0;
                       return (
                         <tr key={p.id}>
+                          <td>
+                            <span className={`bnf-univ-badge ${p.universe === 'ETF' ? 'etf' : 'equity'}`}>
+                              {p.universe === 'ETF' ? 'ETF' : 'E'}
+                            </span>
+                          </td>
                           <td className="ticker">{p.ticker}</td>
                           <td className="num">{p.entry_date}</td>
                           <td className="num">{p.exit_date}</td>
@@ -748,6 +855,109 @@ export default function NewStrategy() {
         )}
       </main>
     </div>
+  );
+}
+
+// Open-positions derived view — one row per open position with computed
+// status indicator, current price, distance to SMA25, etc. Hoisted to
+// module scope so the OpenPositionsTable helper can type its rows prop.
+interface OpenView extends Position {
+  currentPrice: number | null;
+  sma25: number | null;
+  distToSMA25Pct: number | null;
+  unrealizedPct: number | null;
+  daysHeld: number;
+  status: 'green' | 'yellow' | 'grey' | 'red';
+}
+
+/** Reusable open-positions section. Rendered twice on the page — once
+ *  for EQUITY and once for ETF — with different rows + stale thresholds. */
+function OpenPositionsTable({
+  title, rows, universe, stale, onSell, sellPending,
+}: {
+  title: string;
+  rows: OpenView[];
+  universe: Universe;
+  stale: number;
+  onSell: (p: OpenView, reason: string, exitPrice: number) => void;
+  sellPending: boolean;
+}) {
+  const sectionClass = 'np-section' + (universe === 'ETF' ? ' bnf-etf-section' : '');
+  return (
+    <section className={sectionClass}>
+      <div className="np-section-hd">
+        <div className="np-section-title">{title} · {rows.length}</div>
+        <div className="np-section-sub">
+          Status follows distance to SMA25. Sell when ▲ green (target hit) or when stale (&gt;{stale}d).
+        </div>
+      </div>
+      <div className="np-table-wrap">
+        <table className="np-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Ticker</th>
+              <th className="num">Entry</th>
+              <th className="num">Entry $</th>
+              <th className="num">Entry dev</th>
+              <th className="num">Now $</th>
+              <th className="num">SMA25</th>
+              <th className="num">To SMA25</th>
+              <th className="num">UPnL %</th>
+              <th className="num">Days</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr><td colSpan={11} className="bnf-empty">
+                No {universe === 'ETF' ? 'ETF ' : ''}open positions. Buy a candidate above to start one.
+              </td></tr>
+            ) : rows.map((p) => {
+              const exitPrice = p.currentPrice ?? p.entry_price;
+              const reason =
+                p.status === 'green' ? 'target_hit'
+                : p.status === 'red'   ? 'stale'
+                : 'manual';
+              return (
+                <tr key={p.id}>
+                  <td><StatusDot tone={p.status} /></td>
+                  <td className="ticker">
+                    <span className={`bnf-univ-badge ${universe === 'ETF' ? 'etf' : 'equity'}`}>
+                      {universe === 'ETF' ? 'ETF' : 'E'}
+                    </span>
+                    {' '}{p.ticker}
+                  </td>
+                  <td className="num">{p.entry_date}</td>
+                  <td className="num">{fmtUSD(p.entry_price)}</td>
+                  <td className="num down">{fmtPct(p.entry_deviation_pct)}</td>
+                  <td className="num strong">{fmtUSD(p.currentPrice)}</td>
+                  <td className="num">{fmtUSD(p.sma25)}</td>
+                  <td className={'num ' + (
+                    p.distToSMA25Pct != null && p.distToSMA25Pct < 0 ? 'up' : ''
+                  )}>{fmtPct(p.distToSMA25Pct)}</td>
+                  <td className={'num strong ' + (
+                    (p.unrealizedPct ?? 0) >= 0 ? 'up' : 'down'
+                  )}>{fmtPct(p.unrealizedPct, 2)}</td>
+                  <td className={'num ' + (p.daysHeld > stale ? 'down' : '')}>
+                    {p.daysHeld}d
+                  </td>
+                  <td className="num">
+                    <button
+                      className="np-btn bnf-row-btn"
+                      onClick={() => onSell(p, reason, exitPrice)}
+                      disabled={sellPending}
+                    >
+                      Sell
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 
