@@ -62,6 +62,29 @@ interface InsiderSales {
 }
 interface EightK { date: string; items: string[]; url: string; }
 
+// Scan progress — populated by the bnf-scan edge function in real time
+// and streamed to the client via Supabase Realtime.
+type ScanStage =
+  | 'starting'
+  | 'equity_pricing' | 'equity_enriching'
+  | 'etf_pricing'   | 'etf_enriching'
+  | 'writing' | 'done' | 'error';
+
+interface ScanStatusRow {
+  scan_id: string;
+  mode: 'equity' | 'etf' | 'both';
+  stage: ScanStage;
+  equity_scanned: number;
+  equity_total: number;
+  equity_candidates: number;
+  etf_scanned: number;
+  etf_total: number;
+  etf_candidates: number;
+  message: string | null;
+  started_at: string;
+  updated_at: string;
+}
+
 // Research status — survives daily re-scans. 'pending' = never reviewed
 // (same as no row at all).
 type ResearchStatus = 'pending' | 'skipped' | 'considering' | 'approved';
@@ -206,6 +229,46 @@ export default function NewStrategy() {
       return (data ?? []) as unknown as Candidate[];
     },
   });
+
+  // ── Live scan progress via Supabase Realtime ──
+  // Initial fetch (so a refresh mid-scan still shows progress) + a
+  // subscription that pushes UPDATE / INSERT events.
+  const [scanStatus, setScanStatus] = useState<ScanStatusRow | null>(null);
+  const [showStatus, setShowStatus] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('bnf_scan_status' as never)
+        .select('*')
+        .maybeSingle();
+      if (!cancelled && data) {
+        setScanStatus(data as unknown as ScanStatusRow);
+        if ((data as { stage: ScanStage }).stage !== 'done') setShowStatus(true);
+      }
+    })();
+    const channel = supabase
+      .channel('bnf-scan-status')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bnf_scan_status' },
+        (payload) => {
+          const row = payload.new as unknown as ScanStatusRow;
+          setScanStatus(row);
+          setShowStatus(true);
+          // Auto-dismiss 5s after success (per spec). Errors stick until
+          // the user clicks ✕.
+          if (row.stage === 'done') {
+            window.setTimeout(() => setShowStatus(false), 5000);
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   // Pull research-status rows — keyed by ticker. We turn it into a Map
   // for O(1) lookup per candidate row at render time.
@@ -514,6 +577,14 @@ export default function NewStrategy() {
       <main className="np-main">
         {scanErr && (
           <div className="bnf-banner err">Scan failed: {scanErr}</div>
+        )}
+
+        {/* Live scan progress banner — fades 5s after success, sticks on error */}
+        {showStatus && scanStatus && (
+          <ScanProgressBanner
+            status={scanStatus}
+            onDismiss={() => setShowStatus(false)}
+          />
         )}
 
         {greenCount > 0 && (
@@ -958,6 +1029,102 @@ function OpenPositionsTable({
         </table>
       </div>
     </section>
+  );
+}
+
+// ── Scan progress banner ────────────────────────────────────────
+/** Shows under the refresh buttons while a scan is in flight. Pulls
+ *  live updates from bnf_scan_status via Supabase Realtime. Fades
+ *  5s after stage='done', sticks on stage='error'. */
+function ScanProgressBanner({
+  status, onDismiss,
+}: {
+  status: ScanStatusRow;
+  onDismiss: () => void;
+}) {
+  const STAGE_LABEL: Record<ScanStage, string> = {
+    starting:          'starting up',
+    equity_pricing:    'scanning equities',
+    equity_enriching:  'enriching equity survivors',
+    etf_pricing:       'scanning ETFs',
+    etf_enriching:     'enriching ETF survivors',
+    writing:           'writing results',
+    done:              'done',
+    error:             'failed',
+  };
+  // Rough weighting of total progress so the bar feels honest:
+  //   equity pricing 60% · equity enrichment 15% · ETF pricing 5% · ETF enrichment 5% · writing 5%
+  let pct = 0;
+  if (status.stage === 'equity_pricing') {
+    pct = (status.equity_total > 0
+      ? (status.equity_scanned / status.equity_total) * 60
+      : 0);
+  } else if (status.stage === 'equity_enriching') pct = 75;
+  else if (status.stage === 'etf_pricing') {
+    pct = 80 + (status.etf_total > 0 ? (status.etf_scanned / status.etf_total) * 5 : 0);
+  } else if (status.stage === 'etf_enriching') pct = 90;
+  else if (status.stage === 'writing') pct = 95;
+  else if (status.stage === 'done') pct = 100;
+  pct = Math.max(0, Math.min(100, pct));
+
+  const elapsed = Math.max(
+    0,
+    Math.round((new Date(status.updated_at).getTime() - new Date(status.started_at).getTime()) / 1000),
+  );
+
+  const tone = status.stage === 'error'
+    ? 'err'
+    : status.stage === 'done' ? 'ok' : 'live';
+
+  return (
+    <div className={`bnf-progress ${tone}`}>
+      <div className="bnf-progress-head">
+        <span className="bnf-progress-icon">
+          {tone === 'err' ? '✕' : tone === 'ok' ? '✓' : '↻'}
+        </span>
+        <span className="bnf-progress-title">
+          {tone === 'err' ? 'Scan failed'
+            : tone === 'ok' ? 'Scan complete'
+            : 'Scanning…'}
+          <span className="bnf-progress-stage"> · {STAGE_LABEL[status.stage]}</span>
+        </span>
+        <span className="bnf-progress-elapsed">{elapsed}s elapsed</span>
+        <button
+          type="button"
+          className="bnf-progress-close"
+          onClick={onDismiss}
+          aria-label="Dismiss"
+        >×</button>
+      </div>
+      {status.message && (
+        <div className="bnf-progress-msg">{status.message}</div>
+      )}
+      <div className="bnf-progress-rows">
+        {(status.mode === 'equity' || status.mode === 'both') && (
+          <div className="bnf-progress-row">
+            <span className="bnf-progress-lbl">Equity</span>
+            <span className="bnf-progress-counters">
+              {status.equity_scanned} / {status.equity_total || '—'} scanned
+              {' · '}
+              <b>{status.equity_candidates}</b> candidate{status.equity_candidates === 1 ? '' : 's'}
+            </span>
+          </div>
+        )}
+        {(status.mode === 'etf' || status.mode === 'both') && (
+          <div className="bnf-progress-row">
+            <span className="bnf-progress-lbl">ETF</span>
+            <span className="bnf-progress-counters">
+              {status.etf_scanned} / {status.etf_total || '—'} scanned
+              {' · '}
+              <b>{status.etf_candidates}</b> candidate{status.etf_candidates === 1 ? '' : 's'}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="bnf-progress-bar">
+        <div className={`bnf-progress-fill ${tone}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
   );
 }
 

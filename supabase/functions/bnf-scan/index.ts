@@ -270,7 +270,43 @@ interface ScanResult { scanned: number; with_data: number; candidates: number; }
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Admin = ReturnType<typeof createClient>;
 
-async function runEquityScan(admin: Admin, key: string, userId: string, fromIso: string, toIso: string): Promise<ScanResult> {
+// ── Progress writer ─────────────────────────────────────────────
+// Upserts the user's bnf_scan_status row with whatever fields are
+// supplied. Best-effort: a status write failing should NEVER kill the
+// scan, so we log + swallow. Caller is responsible for the cadence
+// (~every 50 tickers in the equity loop, once per phase elsewhere).
+type Progress = Partial<{
+  stage: string;
+  equity_scanned: number; equity_total: number; equity_candidates: number;
+  etf_scanned: number;    etf_total: number;    etf_candidates: number;
+  message: string | null;
+}>;
+function makeProgressWriter(admin: Admin, userId: string, scanId: string, mode: string) {
+  // Track everything seen so each upsert has the full snapshot — handy
+  // when Realtime delivers individual row UPDATE events.
+  const state: Progress & { scan_id: string; mode: string } = { scan_id: scanId, mode };
+  return async (patch: Progress): Promise<void> => {
+    Object.assign(state, patch);
+    try {
+      await admin.from('bnf_scan_status').upsert({
+        user_id: userId,
+        ...state,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    } catch (e) {
+      // Don't crash the scan because progress writes failed.
+      console.error('progress write failed:', (e as Error).message);
+    }
+  };
+}
+type ProgressFn = ReturnType<typeof makeProgressWriter>;
+
+async function runEquityScan(
+  admin: Admin, key: string, userId: string, fromIso: string, toIso: string,
+  progress?: ProgressFn,
+): Promise<ScanResult> {
+  await progress?.({ stage: 'equity_pricing', equity_total: UNIVERSE.length, equity_scanned: 0 });
+
   // 1) Sector ETF deviations — single pass, ~11 ETFs.
   const sectorDevs = new Map<string, number | null>();
   await Promise.all(SECTOR_ETFS.map(async (etf) => {
@@ -284,9 +320,19 @@ async function runEquityScan(admin: Admin, key: string, userId: string, fromIso:
 
   // 2) Per-ticker aggregates + filters. 20 parallel keeps the 1000-ticker
   // scan under ~45s on a paid Polygon plan and well below rate limits.
-  const tickerResults = await inChunks(UNIVERSE, 20, (u) =>
-    processOneTicker(u, key, fromIso, toIso).catch(() => null),
-  );
+  // Manual chunking instead of inChunks() so we can report progress
+  // every batch (~50 tickers' worth) without spamming the status table.
+  const tickerResults: Array<TickerResult | null> = [];
+  const CHUNK = 20;
+  for (let i = 0; i < UNIVERSE.length; i += CHUNK) {
+    const slice = UNIVERSE.slice(i, i + CHUNK);
+    const results = await Promise.all(
+      slice.map((u) => processOneTicker(u, key, fromIso, toIso).catch(() => null)),
+    );
+    tickerResults.push(...results);
+    // Update progress every batch.
+    await progress?.({ equity_scanned: tickerResults.length });
+  }
 
   // 3) Apply BNF filters.
   const survivors = tickerResults.filter((r): r is TickerResult => {
@@ -298,6 +344,7 @@ async function runEquityScan(admin: Admin, key: string, userId: string, fromIso:
     if (sectorDev != null && sectorDev < SECTOR_DEV_FLOOR) return false;
     return true;
   });
+  await progress?.({ stage: 'equity_enriching', equity_candidates: survivors.length });
 
   // 4) Survivor enrichment — Polygon options + Yahoo (earnings/name) +
   //    SEC EDGAR (8-K + insider $) in parallel per ticker. Chunked at 5
@@ -356,6 +403,7 @@ async function runEquityScan(admin: Admin, key: string, userId: string, fromIso:
     if (insErr) throw new Error(`Equity insert failed: ${insErr.message}`);
   }
 
+  await progress?.({ equity_candidates: enriched.length });
   return {
     scanned: UNIVERSE.length,
     with_data: tickerResults.filter(Boolean).length,
@@ -368,7 +416,11 @@ async function runEquityScan(admin: Admin, key: string, userId: string, fromIso:
  *  - Per-ETF SMA25/200/dev/intraday/signal-day vol ratio
  *  - Options snapshot per survivor (optional, fail-soft)
  *  - No earnings / no EDGAR / no ADV / no sector breadth */
-async function runEtfScan(admin: Admin, key: string, userId: string, fromIso: string, toIso: string): Promise<ScanResult> {
+async function runEtfScan(
+  admin: Admin, key: string, userId: string, fromIso: string, toIso: string,
+  progress?: ProgressFn,
+): Promise<ScanResult> {
+  await progress?.({ stage: 'etf_pricing', etf_total: ETF_UNIVERSE.length, etf_scanned: 0 });
   // 1) SPY broad-market guard.
   const spyAggs = await fetchAggs('SPY', key, fromIso, toIso);
   let spyOk = true;
@@ -404,6 +456,8 @@ async function runEtfScan(admin: Admin, key: string, userId: string, fromIso: st
     } catch { return null; }
   });
 
+  await progress?.({ etf_scanned: etfResults.length });
+
   // 3) Apply ETF-specific filters.
   const survivors = etfResults.filter((r): r is NonNullable<typeof r> => {
     if (!r) return false;
@@ -413,6 +467,7 @@ async function runEtfScan(admin: Admin, key: string, userId: string, fromIso: st
     if (r.today_intraday_pct < TODAY_INTRADAY_FLOOR) return false;
     return true;
   });
+  await progress?.({ stage: 'etf_enriching', etf_candidates: survivors.length });
 
   // 4) Options snapshot per survivor — optional, fail-soft.
   const enriched = await inChunks(survivors, 6, async (s) => {
@@ -456,6 +511,7 @@ async function runEtfScan(admin: Admin, key: string, userId: string, fromIso: st
     if (insErr) throw new Error(`ETF insert failed: ${insErr.message}`);
   }
 
+  await progress?.({ etf_candidates: enriched.length });
   return {
     scanned: ETF_UNIVERSE.length,
     with_data: etfResults.filter(Boolean).length,
@@ -502,28 +558,59 @@ Deno.serve(async (req) => {
     const fromIso = fromDate.toISOString().slice(0, 10);
     const toIso = toDate.toISOString().slice(0, 10);
 
+    // Progress writer — upserts bnf_scan_status under the calling user.
+    const scanId = crypto.randomUUID();
+    const progress = makeProgressWriter(admin, userId, scanId, mode);
+    await progress({
+      stage: 'starting',
+      equity_scanned: 0, equity_total: 0, equity_candidates: 0,
+      etf_scanned: 0,    etf_total: 0,    etf_candidates: 0,
+      message: null,
+    });
+
     // Run scans IN PARALLEL when both are requested — sequential was tipping
     // past the edge timeout once the equity universe grew to 1000 names.
     // Each branch has its own try/catch so one throwing doesn't sink the
     // other; the response surfaces partial results.
     const equityP = (mode === 'equity' || mode === 'both')
-      ? runEquityScan(admin, key, userId, fromIso, toIso)
+      ? runEquityScan(admin, key, userId, fromIso, toIso, progress)
           .then((r) => r as ScanResult | { error: string })
-          .catch((e) => ({ error: (e as Error).message }))
+          .catch((e) => {
+            console.error('equity scan failed:', e);
+            return { error: (e as Error).message };
+          })
       : Promise.resolve(null);
     const etfP = (mode === 'etf' || mode === 'both')
-      ? runEtfScan(admin, key, userId, fromIso, toIso)
+      ? runEtfScan(admin, key, userId, fromIso, toIso, progress)
           .then((r) => r as ScanResult | { error: string })
-          .catch((e) => ({ error: (e as Error).message }))
+          .catch((e) => {
+            console.error('etf scan failed:', e);
+            return { error: (e as Error).message };
+          })
       : Promise.resolve(null);
 
     const [equityResult, etfResult] = await Promise.all([equityP, etfP]);
 
+    // Determine final stage: error if BOTH ran and both errored, done otherwise.
+    const equityErr = equityResult && 'error' in equityResult;
+    const etfErr = etfResult && 'error' in etfResult;
+    const anyError = equityErr || etfErr;
+    const allError = (equityResult ? equityErr : true) && (etfResult ? etfErr : true);
+    await progress({
+      stage: allError ? 'error' : 'done',
+      message: anyError
+        ? [equityErr ? `equity: ${(equityResult as { error: string }).error}` : null,
+           etfErr ? `etf: ${(etfResult as { error: string }).error}` : null]
+          .filter(Boolean).join(' · ')
+        : null,
+    });
+
     return new Response(
-      JSON.stringify({ mode, equity: equityResult, etf: etfResult }),
+      JSON.stringify({ mode, scan_id: scanId, equity: equityResult, etf: etfResult }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (e) {
+    console.error('bnf-scan dispatcher failed:', e);
     return jsonErr((e as Error).message, 500);
   }
 });

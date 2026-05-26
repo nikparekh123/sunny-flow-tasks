@@ -25,6 +25,138 @@
   border: 1px solid rgba(232, 112, 96, .4);
 }
 
+/* ──────────────────────────────────────────────────────────
+   Scan progress banner — live updates via Realtime
+   ────────────────────────────────────────────────────────── */
+.np-app .bnf-progress {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(15, 51, 51, 0.55);
+  border: 1px solid rgba(50, 110, 100, 0.5);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  color: var(--navi-fg2);
+  transition: opacity .3s var(--np-ease);
+}
+.np-app .bnf-progress.live {
+  border-color: rgba(210, 230, 50, 0.45);
+  background: rgba(210, 230, 50, 0.06);
+}
+.np-app .bnf-progress.ok {
+  border-color: rgba(168, 212, 160, 0.45);
+  background: rgba(168, 212, 160, 0.08);
+}
+.np-app .bnf-progress.err {
+  border-color: rgba(232, 112, 96, 0.5);
+  background: rgba(232, 112, 96, 0.12);
+  color: var(--navi-negative);
+}
+
+.np-app .bnf-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.np-app .bnf-progress-icon {
+  font-size: 14px;
+  font-weight: 800;
+  width: 18px;
+  text-align: center;
+}
+.np-app .bnf-progress.live .bnf-progress-icon { color: var(--navi-neon); animation: spin 1.4s linear infinite; display: inline-block; }
+.np-app .bnf-progress.ok .bnf-progress-icon { color: var(--navi-positive); }
+.np-app .bnf-progress.err .bnf-progress-icon { color: var(--navi-negative); }
+@keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+.np-app .bnf-progress-title {
+  font-family: var(--navi-font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navi-fg1);
+  letter-spacing: -.2px;
+}
+.np-app .bnf-progress.err .bnf-progress-title { color: var(--navi-negative); }
+.np-app .bnf-progress-stage {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--navi-fg3);
+  text-transform: lowercase;
+  letter-spacing: .2px;
+}
+.np-app .bnf-progress-elapsed {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--navi-fg4);
+  letter-spacing: .3px;
+}
+.np-app .bnf-progress-close {
+  background: transparent;
+  border: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navi-fg5);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.np-app .bnf-progress-close:hover { color: var(--navi-fg1); }
+
+.np-app .bnf-progress-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.np-app .bnf-progress-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11.5px;
+}
+.np-app .bnf-progress-lbl {
+  font-weight: 700;
+  letter-spacing: .4px;
+  color: var(--navi-fg4);
+  width: 48px;
+  text-transform: uppercase;
+}
+.np-app .bnf-progress-counters {
+  color: var(--navi-fg2);
+}
+.np-app .bnf-progress-counters b {
+  color: var(--navi-fg1);
+  font-weight: 800;
+}
+
+.np-app .bnf-progress-msg {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(232, 112, 96, 0.12);
+  border-left: 3px solid var(--navi-negative);
+  border-radius: 4px;
+  font-size: 11.5px;
+  color: var(--navi-negative);
+}
+
+.np-app .bnf-progress-bar {
+  margin-top: 10px;
+  height: 6px;
+  background: rgba(30, 90, 80, 0.32);
+  border-radius: 100px;
+  overflow: hidden;
+}
+.np-app .bnf-progress-fill {
+  height: 100%;
+  border-radius: 100px;
+  transition: width .35s var(--np-ease);
+}
+.np-app .bnf-progress-fill.live { background: var(--navi-neon); }
+.np-app .bnf-progress-fill.ok { background: var(--navi-positive); }
+.np-app .bnf-progress-fill.err { background: var(--navi-negative); }
+
 .np-app .np-section-sub {
   font-family: var(--navi-font-mono);
   font-size: 10.5px;
