@@ -405,60 +405,81 @@ export default function NewStrategy() {
   });
 
   // ── Refresh-scan handler ──
-  // The equity universe (~1000 tickers) can't fit in a single Supabase
-  // edge function invocation (~150s timeout), so we batch it on the
-  // CLIENT — N sequential calls of EQUITY_BATCH_SIZE tickers each. The
-  // edge function tracks cumulative progress in bnf_scan_status, which
-  // we already subscribe to via Realtime, so the banner shows total
-  // scanned across batches without extra wiring.
-  //
-  // ETF scan is small enough (~30 names) to run in a single call.
-  const EQUITY_UNIVERSE_SIZE = 999;
-  const EQUITY_BATCH_SIZE = 200;
+  // The scan now reads from a pre-populated cache (bnf_universe_data),
+  // so it's a single fast invocation. No more batching needed.
   const [scanMode, setScanMode] = useState<'equity' | 'etf' | 'both' | null>(null);
-
-  const runEtfOnly = async () => {
-    const { data, error } = await supabase.functions.invoke('bnf-scan', {
-      body: { universe: 'etf' },
-    });
-    if (error) throw new Error(error.message);
-    if (data?.error) throw new Error(data.error);
-  };
-
-  const runEquityBatched = async () => {
-    for (let from = 0; from < EQUITY_UNIVERSE_SIZE; from += EQUITY_BATCH_SIZE) {
-      const to = Math.min(from + EQUITY_BATCH_SIZE, EQUITY_UNIVERSE_SIZE);
-      const { data, error } = await supabase.functions.invoke('bnf-scan', {
-        body: { universe: 'equity', from_idx: from, to_idx: to },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
-      // Don't bust the candidate cache between batches — the Realtime
-      // status subscription is what shows progress. We invalidate once
-      // at the end so the candidates table render is one big update.
-    }
-  };
-
   const runScan = async (universe: 'equity' | 'etf' | 'both') => {
     setScanning(true);
     setScanMode(universe);
     setScanErr(null);
     try {
-      if (universe === 'etf') {
-        await runEtfOnly();
-      } else if (universe === 'equity') {
-        await runEquityBatched();
-      } else {
-        // 'both' — run ETF first (fast, ~30s), then batched equity.
-        await runEtfOnly();
-        await runEquityBatched();
-      }
+      const { data, error } = await supabase.functions.invoke('bnf-scan', {
+        body: { universe },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
       qc.invalidateQueries({ queryKey: ['bnf_candidates'] });
     } catch (e) {
       setScanErr((e as Error).message);
     } finally {
       setScanning(false);
       setScanMode(null);
+    }
+  };
+
+  // ── Universe cache refresh ──
+  // The scan reads from bnf_universe_data which is populated by:
+  //   • bnf-cache-update    — daily incremental (nightly cron + button)
+  //   • bnf-cache-backfill  — multi-day load (first run, gap fills)
+  // Both write progress to the same status row so the banner shows
+  // cache activity the same way it shows scan activity.
+  const [refreshingCache, setRefreshingCache] = useState(false);
+  const runCacheUpdate = async () => {
+    setRefreshingCache(true);
+    setScanErr(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('bnf-cache-update');
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+    } catch (e) {
+      setScanErr(`Cache update failed: ${(e as Error).message}`);
+    } finally {
+      setRefreshingCache(false);
+    }
+  };
+
+  /** Initial cache backfill — 260 calendar days back, in 5 batches of
+   *  ~52 dates each so each invocation finishes well under the timeout.
+   *  Only needed once; the nightly cron keeps the cache fresh after. */
+  const [backfilling, setBackfilling] = useState(false);
+  const runCacheBackfill = async () => {
+    setBackfilling(true);
+    setScanErr(null);
+    try {
+      // Compute date windows on the client and call sequentially.
+      const today = new Date();
+      const end = new Date(today);
+      end.setUTCDate(end.getUTCDate() - 1);
+      const totalDaysBack = 260;
+      const BATCH_DAYS = 52;
+      for (let offset = 0; offset < totalDaysBack; offset += BATCH_DAYS) {
+        const batchEnd = new Date(end);
+        batchEnd.setUTCDate(batchEnd.getUTCDate() - offset);
+        const batchStart = new Date(batchEnd);
+        batchStart.setUTCDate(batchStart.getUTCDate() - (BATCH_DAYS - 1));
+        const { data, error } = await supabase.functions.invoke('bnf-cache-backfill', {
+          body: {
+            from_date: batchStart.toISOString().slice(0, 10),
+            to_date: batchEnd.toISOString().slice(0, 10),
+          },
+        });
+        if (error) throw new Error(error.message);
+        if (data?.error) throw new Error(data.error);
+      }
+    } catch (e) {
+      setScanErr(`Cache backfill failed: ${(e as Error).message}`);
+    } finally {
+      setBackfilling(false);
     }
   };
 
@@ -581,6 +602,22 @@ export default function NewStrategy() {
           <span className="np-crumb-sub"> · BNF mean-reversion</span>
         </div>
         <div className="bnf-top-actions">
+          <button
+            className="np-btn"
+            disabled={backfilling || refreshingCache || scanning}
+            onClick={runCacheBackfill}
+            title="One-time + manual: load 260 trading days of OHLCV into the cache. Takes ~3–5 minutes."
+          >
+            {backfilling ? 'Backfilling cache…' : '⤓ Backfill cache'}
+          </button>
+          <button
+            className="np-btn"
+            disabled={refreshingCache || backfilling || scanning}
+            onClick={runCacheUpdate}
+            title="Daily incremental: pull yesterday's grouped snapshot into the cache. Fast (~10s)."
+          >
+            {refreshingCache ? 'Updating cache…' : '↻ Refresh cache'}
+          </button>
           <button
             className="np-btn"
             disabled={refreshingFlags || candidates.length === 0}
