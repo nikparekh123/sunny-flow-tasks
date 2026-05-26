@@ -434,6 +434,12 @@ export function usePositions() {
       price: number;
       trade_date: string;
       note?: string | null;
+      /** Optional explicit avg-cost override. When provided, this becomes
+       *  the new avg_cost instead of the weighted-average computation.
+       *  Useful when broker reporting (FIFO splits, wash-sale corrections,
+       *  cost-basis adjustments) leaves the user with an avg that doesn't
+       *  match what naive weighted-average would yield. */
+      overrideAvgCost?: number;
     }) => {
       const t = args.ticker.trim().toUpperCase();
       // 1. Read current position.
@@ -445,12 +451,15 @@ export function usePositions() {
       if (readErr) throw new Error(`positions read: ${readErr.message}`);
       const pos = posRow as { quantity: number; avg_cost: number };
 
-      // 2. Compute new weighted-average avg_cost.
+      // 2. Compute new avg_cost — override wins when supplied; otherwise
+      //    standard weighted-average from old qty/avg + new qty/price.
       const newQty = pos.quantity + args.quantity;
       const newAvg =
-        newQty > 0
-          ? (pos.quantity * pos.avg_cost + args.quantity * args.price) / newQty
-          : args.price;
+        args.overrideAvgCost != null && isFinite(args.overrideAvgCost) && args.overrideAvgCost >= 0
+          ? args.overrideAvgCost
+          : (newQty > 0
+              ? (pos.quantity * pos.avg_cost + args.quantity * args.price) / newQty
+              : args.price);
 
       // 3. Update.
       const { error: updErr } = await supabase
@@ -459,8 +468,6 @@ export function usePositions() {
         .eq('ticker', t);
       if (updErr) throw new Error(`positions update: ${updErr.message}`);
 
-      // (Note: trade_date and note are accepted by the signature for
-      //  future audit-log support; not stored today.)
       void args.trade_date;
       void args.note;
 

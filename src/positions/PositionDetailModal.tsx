@@ -69,11 +69,14 @@ interface Props {
     trade_date: string;
     note?: string | null;
   }) => void;
-  /** Buy more shares of an existing ticker. */
+  /** Buy more shares of an existing ticker. overrideAvgCost lets the
+   *  caller skip the weighted-average computation when broker reporting
+   *  has already given them the post-buy avg directly. */
   onBuyShares?: (p: {
     ticker: string;
     quantity: number;
     price: number;
+    overrideAvgCost?: number;
     trade_date: string;
     note?: string | null;
   }) => void;
@@ -420,19 +423,33 @@ export function PositionDetailModal({
   };
 
   // ── Shares tab math (handles both Buy and Sell) ────────────────
+  // Avg-cost override: when the user has the actual post-trade avg from
+  // their broker (FIFO splits, wash-sale adjustments, etc.), letting them
+  // enter it directly is more accurate than re-deriving from per-share
+  // price. Optional — defaults off, computed weighted avg shown otherwise.
+  const [overrideAvg, setOverrideAvg] = useState(false);
+  const [overrideAvgInput, setOverrideAvgInput] = useState('');
+  const overrideAvgN = parseFloat(overrideAvgInput) || 0;
+
   const sharesQtyN = parseInt(sellForm.quantity, 10) || 0;
   const sharesPriceN = parseFloat(sellForm.price) || 0;
   // Sell preview
   const sellRealized = (sharesPriceN - position.avg_cost) * sharesQtyN;
-  // Buy preview — weighted avg cost after the buy
+  // Buy preview — weighted avg cost after the buy, OR the override.
   const buyNewQty = position.quantity + sharesQtyN;
-  const buyNewAvg =
+  const computedAvg =
     buyNewQty > 0
       ? (position.quantity * position.avg_cost + sharesQtyN * sharesPriceN) / buyNewQty
       : sharesPriceN;
+  const buyNewAvg = overrideAvg && overrideAvgN > 0 ? overrideAvgN : computedAvg;
+
+  // When override is on, the per-share price field becomes optional —
+  // we only require the override-avg to be set. Otherwise the original
+  // qty + price guard applies.
+  const sharesPriceOk = overrideAvg ? overrideAvgN > 0 : sharesPriceN >= 0;
   const canSubmitShares =
     sharesQtyN > 0 &&
-    sharesPriceN >= 0 &&
+    sharesPriceOk &&
     !!sellForm.date &&
     (sharesMode === 'buy'
       ? !!onBuyShares
@@ -446,9 +463,15 @@ export function PositionDetailModal({
       trade_date: sellForm.date,
       note: sellForm.note || null,
     };
-    if (sharesMode === 'buy' && onBuyShares) onBuyShares(payload);
-    else if (sharesMode === 'sell' && onSellShares) onSellShares(payload);
+    if (sharesMode === 'buy' && onBuyShares) {
+      onBuyShares({
+        ...payload,
+        ...(overrideAvg && overrideAvgN > 0 ? { overrideAvgCost: overrideAvgN } : {}),
+      });
+    } else if (sharesMode === 'sell' && onSellShares) onSellShares(payload);
     setSellForm(blankSell());
+    setOverrideAvg(false);
+    setOverrideAvgInput('');
     onClose();
   };
 
@@ -656,14 +679,45 @@ export function PositionDetailModal({
               />
             )}
             {tab === 'shares' && (
-              <SharesFields
-                mode={sharesMode}
-                setMode={setSharesMode}
-                form={sellForm}
-                setForm={setSellForm}
-                currentQty={position.quantity}
-                avgCost={position.avg_cost}
-              />
+              <>
+                <SharesFields
+                  mode={sharesMode}
+                  setMode={setSharesMode}
+                  form={sellForm}
+                  setForm={setSellForm}
+                  currentQty={position.quantity}
+                  avgCost={position.avg_cost}
+                />
+                {sharesMode === 'buy' && (
+                  <div className="pp-override-row">
+                    <label className="pp-override-toggle">
+                      <input
+                        type="checkbox"
+                        checked={overrideAvg}
+                        onChange={(e) => setOverrideAvg(e.target.checked)}
+                      />
+                      Set average cost manually
+                      <span className="pp-override-hint">
+                        {' '}— useful for FIFO / wash-sale adjustments that don't match weighted avg
+                      </span>
+                    </label>
+                    {overrideAvg && (
+                      <div className="pp-override-input-row">
+                        <span className="pp-override-input-lbl">New avg $</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="pp-override-input"
+                          value={overrideAvgInput}
+                          onChange={(e) => setOverrideAvgInput(e.target.value)}
+                          placeholder={position.avg_cost.toFixed(2)}
+                          autoFocus
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
             {tab === 'resolve' && resolveOpen && (
               <ResolveFields
@@ -803,7 +857,9 @@ export function PositionDetailModal({
                   </div>
                   <div className="pp-rail-sub">
                     {sharesQtyN > 0
-                      ? `new avg after buying ${sharesQtyN} sh @ ${fmtUSD2(sharesPriceN)}`
+                      ? (overrideAvg && overrideAvgN > 0
+                          ? `manual avg · ${sharesQtyN} sh added → ${buyNewQty} total`
+                          : `new avg after buying ${sharesQtyN} sh @ ${fmtUSD2(sharesPriceN)}`)
                       : 'enter qty + price'}
                   </div>
                 </>

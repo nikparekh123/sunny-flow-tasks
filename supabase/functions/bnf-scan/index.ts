@@ -502,22 +502,22 @@ Deno.serve(async (req) => {
     const fromIso = fromDate.toISOString().slice(0, 10);
     const toIso = toDate.toISOString().slice(0, 10);
 
-    // Run scans. We run sequentially (rather than parallel) so a long
-    // equity scan doesn't compete with ETF Polygon calls for rate budget.
-    // If one throws, the other still ran — we still return partial results.
-    let equityResult: ScanResult | { error: string } | null = null;
-    let etfResult: ScanResult | { error: string } | null = null;
+    // Run scans IN PARALLEL when both are requested — sequential was tipping
+    // past the edge timeout once the equity universe grew to 1000 names.
+    // Each branch has its own try/catch so one throwing doesn't sink the
+    // other; the response surfaces partial results.
+    const equityP = (mode === 'equity' || mode === 'both')
+      ? runEquityScan(admin, key, userId, fromIso, toIso)
+          .then((r) => r as ScanResult | { error: string })
+          .catch((e) => ({ error: (e as Error).message }))
+      : Promise.resolve(null);
+    const etfP = (mode === 'etf' || mode === 'both')
+      ? runEtfScan(admin, key, userId, fromIso, toIso)
+          .then((r) => r as ScanResult | { error: string })
+          .catch((e) => ({ error: (e as Error).message }))
+      : Promise.resolve(null);
 
-    if (mode === 'equity' || mode === 'both') {
-      try {
-        equityResult = await runEquityScan(admin, key, userId, fromIso, toIso);
-      } catch (e) { equityResult = { error: (e as Error).message }; }
-    }
-    if (mode === 'etf' || mode === 'both') {
-      try {
-        etfResult = await runEtfScan(admin, key, userId, fromIso, toIso);
-      } catch (e) { etfResult = { error: (e as Error).message }; }
-    }
+    const [equityResult, etfResult] = await Promise.all([equityP, etfP]);
 
     return new Response(
       JSON.stringify({ mode, equity: equityResult, etf: etfResult }),
