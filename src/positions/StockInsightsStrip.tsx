@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import {
   daysUntil,
   fmtCompact,
@@ -198,6 +200,23 @@ export function StockInsightsStrip({
   const [filter, setFilter] = useState<Filter>('all');
   const [sector, setSector] = useState<string>('__all__');
 
+  // Strip-local refresh: invoke the refresh-prices edge function and then
+  // bust the positions cache so the cards re-render. Avoids relying on
+  // Supabase realtime alone (which only fires when the positions table is
+  // added to the supabase_realtime publication).
+  const qc = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshPricesNow = async () => {
+    setRefreshing(true);
+    try {
+      await supabase.functions.invoke('refresh-prices', { body: {} });
+    } catch { /* silent — toast is on the page-level refresh button */ }
+    finally {
+      await qc.invalidateQueries({ queryKey: ['positions'] });
+      setRefreshing(false);
+    }
+  };
+
   // closes_by_ticker — sorted ascending by date once, used by each card's
   // sparkline. Single pass over the rows pays for every card render.
   const closesByTicker = useMemo(() => {
@@ -328,6 +347,15 @@ export function StockInsightsStrip({
       <div className="si-hd">
         <div className="si-title">Stock insights</div>
         <div className="si-controls">
+          <button
+            type="button"
+            className="si-refresh"
+            onClick={refreshPricesNow}
+            disabled={refreshing}
+            title="Pull fresh prices from Polygon and update the cards"
+          >
+            {refreshing ? '↻ Refreshing…' : '↻ Refresh prices'}
+          </button>
           <div className="np-toggle si-toggle">
             {FILTERS.map((f) => (
               <button
