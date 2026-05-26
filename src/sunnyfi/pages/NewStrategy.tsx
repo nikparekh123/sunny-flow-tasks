@@ -64,22 +64,27 @@ interface EightK { date: string; items: string[]; url: string; }
 
 // Scan progress — populated by the bnf-scan edge function in real time
 // and streamed to the client via Supabase Realtime.
-type ScanStage =
-  | 'starting'
-  | 'equity_pricing' | 'equity_enriching'
-  | 'etf_pricing'   | 'etf_enriching'
-  | 'writing' | 'done' | 'error';
+//
+// `stage` is the overall lifecycle marker (starting / done / error).
+// `equity_stage` and `etf_stage` track each universe's phase
+// independently so the parallel scans don't clobber each other's label.
+type OverallStage = 'starting' | 'done' | 'error';
+type UniverseStage = 'idle' | 'pricing' | 'enriching' | 'done';
 
 interface ScanStatusRow {
   scan_id: string;
   mode: 'equity' | 'etf' | 'both';
-  stage: ScanStage;
+  stage: OverallStage;
+  equity_stage: UniverseStage;
+  etf_stage: UniverseStage;
   equity_scanned: number;
   equity_total: number;
   equity_candidates: number;
+  equity_rate_limited: number;
   etf_scanned: number;
   etf_total: number;
   etf_candidates: number;
+  etf_rate_limited: number;
   message: string | null;
   started_at: string;
   updated_at: string;
@@ -244,7 +249,7 @@ export default function NewStrategy() {
         .maybeSingle();
       if (!cancelled && data) {
         setScanStatus(data as unknown as ScanStatusRow);
-        if ((data as { stage: ScanStage }).stage !== 'done') setShowStatus(true);
+        if ((data as { stage: OverallStage }).stage !== 'done') setShowStatus(true);
       }
     })();
     const channel = supabase
@@ -1042,29 +1047,30 @@ function ScanProgressBanner({
   status: ScanStatusRow;
   onDismiss: () => void;
 }) {
-  const STAGE_LABEL: Record<ScanStage, string> = {
-    starting:          'starting up',
-    equity_pricing:    'scanning equities',
-    equity_enriching:  'enriching equity survivors',
-    etf_pricing:       'scanning ETFs',
-    etf_enriching:     'enriching ETF survivors',
-    writing:           'writing results',
-    done:              'done',
-    error:             'failed',
+  const UNIVERSE_STAGE_LABEL: Record<UniverseStage, string> = {
+    idle:       'idle',
+    pricing:    'scanning prices',
+    enriching:  'enriching survivors',
+    done:       'done',
   };
-  // Rough weighting of total progress so the bar feels honest:
-  //   equity pricing 60% · equity enrichment 15% · ETF pricing 5% · ETF enrichment 5% · writing 5%
-  let pct = 0;
-  if (status.stage === 'equity_pricing') {
-    pct = (status.equity_total > 0
-      ? (status.equity_scanned / status.equity_total) * 60
-      : 0);
-  } else if (status.stage === 'equity_enriching') pct = 75;
-  else if (status.stage === 'etf_pricing') {
-    pct = 80 + (status.etf_total > 0 ? (status.etf_scanned / status.etf_total) * 5 : 0);
-  } else if (status.stage === 'etf_enriching') pct = 90;
-  else if (status.stage === 'writing') pct = 95;
-  else if (status.stage === 'done') pct = 100;
+
+  // Progress percentage. Each universe contributes proportionally to its
+  // stage progress; we average them when both are active. Pricing is 80%
+  // of a universe's work, enrichment the last 20%.
+  const universePct = (stage: UniverseStage, scanned: number, total: number) => {
+    if (stage === 'idle') return 0;
+    if (stage === 'done') return 100;
+    if (stage === 'enriching') return 90;
+    // pricing
+    return total > 0 ? (scanned / total) * 80 : 0;
+  };
+  const isEquity = status.mode === 'equity' || status.mode === 'both';
+  const isEtf = status.mode === 'etf' || status.mode === 'both';
+  const equityPctRaw = isEquity ? universePct(status.equity_stage, status.equity_scanned, status.equity_total) : 0;
+  const etfPctRaw    = isEtf    ? universePct(status.etf_stage, status.etf_scanned, status.etf_total) : 0;
+  const universesActive = (isEquity ? 1 : 0) + (isEtf ? 1 : 0);
+  let pct = universesActive > 0 ? (equityPctRaw + etfPctRaw) / universesActive : 0;
+  if (status.stage === 'done') pct = 100;
   pct = Math.max(0, Math.min(100, pct));
 
   const elapsed = Math.max(
@@ -1086,7 +1092,6 @@ function ScanProgressBanner({
           {tone === 'err' ? 'Scan failed'
             : tone === 'ok' ? 'Scan complete'
             : 'Scanning…'}
-          <span className="bnf-progress-stage"> · {STAGE_LABEL[status.stage]}</span>
         </span>
         <span className="bnf-progress-elapsed">{elapsed}s elapsed</span>
         <button
@@ -1100,23 +1105,41 @@ function ScanProgressBanner({
         <div className="bnf-progress-msg">{status.message}</div>
       )}
       <div className="bnf-progress-rows">
-        {(status.mode === 'equity' || status.mode === 'both') && (
+        {isEquity && (
           <div className="bnf-progress-row">
             <span className="bnf-progress-lbl">Equity</span>
             <span className="bnf-progress-counters">
+              <span className={`bnf-progress-univstage stage-${status.equity_stage}`}>
+                {UNIVERSE_STAGE_LABEL[status.equity_stage]}
+              </span>
+              {' · '}
               {status.equity_scanned} / {status.equity_total || '—'} scanned
               {' · '}
               <b>{status.equity_candidates}</b> candidate{status.equity_candidates === 1 ? '' : 's'}
+              {status.equity_rate_limited > 0 && (
+                <span className="bnf-progress-throttle">
+                  {' · '}⚠ {status.equity_rate_limited} rate-limited
+                </span>
+              )}
             </span>
           </div>
         )}
-        {(status.mode === 'etf' || status.mode === 'both') && (
+        {isEtf && (
           <div className="bnf-progress-row">
             <span className="bnf-progress-lbl">ETF</span>
             <span className="bnf-progress-counters">
+              <span className={`bnf-progress-univstage stage-${status.etf_stage}`}>
+                {UNIVERSE_STAGE_LABEL[status.etf_stage]}
+              </span>
+              {' · '}
               {status.etf_scanned} / {status.etf_total || '—'} scanned
               {' · '}
               <b>{status.etf_candidates}</b> candidate{status.etf_candidates === 1 ? '' : 's'}
+              {status.etf_rate_limited > 0 && (
+                <span className="bnf-progress-throttle">
+                  {' · '}⚠ {status.etf_rate_limited} rate-limited
+                </span>
+              )}
             </span>
           </div>
         )}

@@ -56,12 +56,31 @@ const MIN_PRICE = 10;
 interface Agg { c: number; o: number; v: number; }
 interface AggsResp { results?: Array<{ c: number; o: number; v: number; }>; }
 
-async function fetchAggs(ticker: string, key: string, fromIso: string, toIso: string): Promise<Agg[]> {
+/** Outcome of one aggregates fetch. Separating "no data" from "rate
+ *  limited" lets the scan retry the rate-limited ones and report the
+ *  count to the user so they know what happened. */
+interface AggsResult { bars: Agg[]; rateLimited: boolean; }
+
+async function fetchAggs(ticker: string, key: string, fromIso: string, toIso: string): Promise<AggsResult> {
   const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${fromIso}/${toIso}?adjusted=true&sort=asc&limit=300&apiKey=${key}`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const j: AggsResp = await res.json();
-  return (j.results ?? []).map((b) => ({ c: b.c, o: b.o, v: b.v }));
+  try {
+    const res = await fetch(url);
+    if (res.status === 429) return { bars: [], rateLimited: true };
+    if (!res.ok) return { bars: [], rateLimited: false };
+    const j: AggsResp = await res.json();
+    return {
+      bars: (j.results ?? []).map((b) => ({ c: b.c, o: b.o, v: b.v })),
+      rateLimited: false,
+    };
+  } catch {
+    return { bars: [], rateLimited: false };
+  }
+}
+
+/** Shim for call sites that just want the bars array. Loses the
+ *  rate-limit info; only use where we don't track that. */
+async function fetchAggsBars(ticker: string, key: string, fromIso: string, toIso: string): Promise<Agg[]> {
+  return (await fetchAggs(ticker, key, fromIso, toIso)).bars;
 }
 
 function sma(closes: number[], n: number): number | null {
@@ -220,29 +239,37 @@ interface TickerResult {
   today_intraday_pct: number;
 }
 
-async function processOneTicker(u: UniverseEntry, key: string, fromIso: string, toIso: string): Promise<TickerResult | null> {
-  const aggs = await fetchAggs(u.ticker, key, fromIso, toIso);
-  if (aggs.length < 200) return null;            // need full 200d history
+interface ProcessOutcome {
+  result: TickerResult | null;
+  rateLimited: boolean;
+}
+
+async function processOneTicker(u: UniverseEntry, key: string, fromIso: string, toIso: string): Promise<ProcessOutcome> {
+  const { bars: aggs, rateLimited } = await fetchAggs(u.ticker, key, fromIso, toIso);
+  if (rateLimited || aggs.length < 200) return { result: null, rateLimited };
   const closes = aggs.map((a) => a.c);
   const sma25 = sma(closes, 25);
   const sma200 = sma(closes, 200);
   const adv = adv20Millions(aggs);
   const last = aggs[aggs.length - 1];
-  if (!sma25 || !sma200 || !adv || !last) return null;
-  if (last.c < MIN_PRICE) return null;
-  if (adv < MIN_ADV_M) return null;
+  if (!sma25 || !sma200 || !adv || !last) return { result: null, rateLimited: false };
+  if (last.c < MIN_PRICE) return { result: null, rateLimited: false };
+  if (adv < MIN_ADV_M) return { result: null, rateLimited: false };
   const deviation_pct = ((last.c - sma25) / sma25) * 100;
   const today_intraday_pct = last.o > 0 ? ((last.c - last.o) / last.o) * 100 : 0;
   return {
-    ticker: u.ticker,
-    sector: u.sector,
-    sectorEtf: u.sectorEtf,
-    price: last.c,
-    sma25,
-    sma200,
-    deviation_pct,
-    adv20_m: adv,
-    today_intraday_pct,
+    result: {
+      ticker: u.ticker,
+      sector: u.sector,
+      sectorEtf: u.sectorEtf,
+      price: last.c,
+      sma25,
+      sma200,
+      deviation_pct,
+      adv20_m: adv,
+      today_intraday_pct,
+    },
+    rateLimited: false,
   };
 }
 
@@ -276,9 +303,13 @@ type Admin = ReturnType<typeof createClient>;
 // scan, so we log + swallow. Caller is responsible for the cadence
 // (~every 50 tickers in the equity loop, once per phase elsewhere).
 type Progress = Partial<{
-  stage: string;
+  stage: string;                  // overall: starting | running | done | error
+  equity_stage: string;           // per-universe: idle | pricing | enriching | done
+  etf_stage: string;
   equity_scanned: number; equity_total: number; equity_candidates: number;
   etf_scanned: number;    etf_total: number;    etf_candidates: number;
+  equity_rate_limited: number;
+  etf_rate_limited: number;
   message: string | null;
 }>;
 function makeProgressWriter(admin: Admin, userId: string, scanId: string, mode: string) {
@@ -305,12 +336,15 @@ async function runEquityScan(
   admin: Admin, key: string, userId: string, fromIso: string, toIso: string,
   progress?: ProgressFn,
 ): Promise<ScanResult> {
-  await progress?.({ stage: 'equity_pricing', equity_total: UNIVERSE.length, equity_scanned: 0 });
+  await progress?.({
+    equity_stage: 'pricing', equity_total: UNIVERSE.length,
+    equity_scanned: 0, equity_rate_limited: 0,
+  });
 
   // 1) Sector ETF deviations — single pass, ~11 ETFs.
   const sectorDevs = new Map<string, number | null>();
   await Promise.all(SECTOR_ETFS.map(async (etf) => {
-    const aggs = await fetchAggs(etf, key, fromIso, toIso);
+    const aggs = await fetchAggsBars(etf, key, fromIso, toIso);
     if (aggs.length < 25) { sectorDevs.set(etf, null); return; }
     const closes = aggs.map((a) => a.c);
     const s = sma(closes, 25);
@@ -318,20 +352,32 @@ async function runEquityScan(
     sectorDevs.set(etf, s ? ((last - s) / s) * 100 : null);
   }));
 
-  // 2) Per-ticker aggregates + filters. 20 parallel keeps the 1000-ticker
-  // scan under ~45s on a paid Polygon plan and well below rate limits.
-  // Manual chunking instead of inChunks() so we can report progress
-  // every batch (~50 tickers' worth) without spamming the status table.
+  // 2) Per-ticker aggregates + filters. CHUNK is set conservatively to
+  // align with Polygon's Starter-tier rate cap (~100 req/min). Higher
+  // values trigger 429s and the scan stalls. We track + report 429s so
+  // the user sees if Polygon is the bottleneck.
   const tickerResults: Array<TickerResult | null> = [];
-  const CHUNK = 20;
+  let rateLimited = 0;
+  const CHUNK = 6;
   for (let i = 0; i < UNIVERSE.length; i += CHUNK) {
     const slice = UNIVERSE.slice(i, i + CHUNK);
-    const results = await Promise.all(
-      slice.map((u) => processOneTicker(u, key, fromIso, toIso).catch(() => null)),
+    const outcomes = await Promise.all(
+      slice.map((u) =>
+        processOneTicker(u, key, fromIso, toIso)
+          .catch(() => ({ result: null, rateLimited: false }) as ProcessOutcome),
+      ),
     );
-    tickerResults.push(...results);
-    // Update progress every batch.
-    await progress?.({ equity_scanned: tickerResults.length });
+    for (const o of outcomes) {
+      tickerResults.push(o.result);
+      if (o.rateLimited) rateLimited++;
+    }
+    await progress?.({
+      equity_scanned: tickerResults.length,
+      equity_rate_limited: rateLimited,
+    });
+  }
+  if (rateLimited > 0) {
+    console.error(`equity scan: ${rateLimited} tickers rate-limited by Polygon (HTTP 429)`);
   }
 
   // 3) Apply BNF filters.
@@ -344,7 +390,7 @@ async function runEquityScan(
     if (sectorDev != null && sectorDev < SECTOR_DEV_FLOOR) return false;
     return true;
   });
-  await progress?.({ stage: 'equity_enriching', equity_candidates: survivors.length });
+  await progress?.({ equity_stage: 'enriching', equity_candidates: survivors.length });
 
   // 4) Survivor enrichment — Polygon options + Yahoo (earnings/name) +
   //    SEC EDGAR (8-K + insider $) in parallel per ticker. Chunked at 5
@@ -403,7 +449,7 @@ async function runEquityScan(
     if (insErr) throw new Error(`Equity insert failed: ${insErr.message}`);
   }
 
-  await progress?.({ equity_candidates: enriched.length });
+  await progress?.({ equity_stage: 'done', equity_candidates: enriched.length });
   return {
     scanned: UNIVERSE.length,
     with_data: tickerResults.filter(Boolean).length,
@@ -420,9 +466,9 @@ async function runEtfScan(
   admin: Admin, key: string, userId: string, fromIso: string, toIso: string,
   progress?: ProgressFn,
 ): Promise<ScanResult> {
-  await progress?.({ stage: 'etf_pricing', etf_total: ETF_UNIVERSE.length, etf_scanned: 0 });
+  await progress?.({ etf_stage: 'pricing', etf_total: ETF_UNIVERSE.length, etf_scanned: 0 });
   // 1) SPY broad-market guard.
-  const spyAggs = await fetchAggs('SPY', key, fromIso, toIso);
+  const spyAggs = await fetchAggsBars('SPY', key, fromIso, toIso);
   let spyOk = true;
   if (spyAggs.length >= 25) {
     const closes = spyAggs.map((a) => a.c);
@@ -434,10 +480,11 @@ async function runEtfScan(
     }
   }
 
-  // 2) Per-ETF aggregates + filters. ~30 ETFs, chunked 10 parallel.
-  const etfResults = await inChunks(ETF_UNIVERSE, 10, async (etf) => {
+  // 2) Per-ETF aggregates + filters. ~30 ETFs, chunked 6 parallel to be
+  // friendly to Polygon Starter tier (same reason equity uses 6).
+  const etfResults = await inChunks(ETF_UNIVERSE, 6, async (etf) => {
     try {
-      const aggs = await fetchAggs(etf.ticker, key, fromIso, toIso);
+      const aggs = await fetchAggsBars(etf.ticker, key, fromIso, toIso);
       if (aggs.length < 200) return null;
       const closes = aggs.map((a) => a.c);
       const sma25 = sma(closes, 25);
@@ -456,7 +503,7 @@ async function runEtfScan(
     } catch { return null; }
   });
 
-  await progress?.({ etf_scanned: etfResults.length });
+  await progress?.({ etf_scanned: etfResults.length, etf_stage: 'pricing' });
 
   // 3) Apply ETF-specific filters.
   const survivors = etfResults.filter((r): r is NonNullable<typeof r> => {
@@ -467,7 +514,7 @@ async function runEtfScan(
     if (r.today_intraday_pct < TODAY_INTRADAY_FLOOR) return false;
     return true;
   });
-  await progress?.({ stage: 'etf_enriching', etf_candidates: survivors.length });
+  await progress?.({ etf_stage: 'enriching', etf_candidates: survivors.length });
 
   // 4) Options snapshot per survivor — optional, fail-soft.
   const enriched = await inChunks(survivors, 6, async (s) => {
@@ -511,7 +558,7 @@ async function runEtfScan(
     if (insErr) throw new Error(`ETF insert failed: ${insErr.message}`);
   }
 
-  await progress?.({ etf_candidates: enriched.length });
+  await progress?.({ etf_stage: 'done', etf_candidates: enriched.length });
   return {
     scanned: ETF_UNIVERSE.length,
     with_data: etfResults.filter(Boolean).length,
@@ -563,8 +610,9 @@ Deno.serve(async (req) => {
     const progress = makeProgressWriter(admin, userId, scanId, mode);
     await progress({
       stage: 'starting',
-      equity_scanned: 0, equity_total: 0, equity_candidates: 0,
-      etf_scanned: 0,    etf_total: 0,    etf_candidates: 0,
+      equity_stage: 'idle', etf_stage: 'idle',
+      equity_scanned: 0, equity_total: 0, equity_candidates: 0, equity_rate_limited: 0,
+      etf_scanned: 0,    etf_total: 0,    etf_candidates: 0,    etf_rate_limited: 0,
       message: null,
     });
 
