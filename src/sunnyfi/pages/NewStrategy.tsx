@@ -404,18 +404,55 @@ export default function NewStrategy() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['bnf_positions'] }),
   });
 
-  // ── Refresh-scan handler — accepts a universe mode ──
+  // ── Refresh-scan handler ──
+  // The equity universe (~1000 tickers) can't fit in a single Supabase
+  // edge function invocation (~150s timeout), so we batch it on the
+  // CLIENT — N sequential calls of EQUITY_BATCH_SIZE tickers each. The
+  // edge function tracks cumulative progress in bnf_scan_status, which
+  // we already subscribe to via Realtime, so the banner shows total
+  // scanned across batches without extra wiring.
+  //
+  // ETF scan is small enough (~30 names) to run in a single call.
+  const EQUITY_UNIVERSE_SIZE = 999;
+  const EQUITY_BATCH_SIZE = 200;
   const [scanMode, setScanMode] = useState<'equity' | 'etf' | 'both' | null>(null);
+
+  const runEtfOnly = async () => {
+    const { data, error } = await supabase.functions.invoke('bnf-scan', {
+      body: { universe: 'etf' },
+    });
+    if (error) throw new Error(error.message);
+    if (data?.error) throw new Error(data.error);
+  };
+
+  const runEquityBatched = async () => {
+    for (let from = 0; from < EQUITY_UNIVERSE_SIZE; from += EQUITY_BATCH_SIZE) {
+      const to = Math.min(from + EQUITY_BATCH_SIZE, EQUITY_UNIVERSE_SIZE);
+      const { data, error } = await supabase.functions.invoke('bnf-scan', {
+        body: { universe: 'equity', from_idx: from, to_idx: to },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      // Don't bust the candidate cache between batches — the Realtime
+      // status subscription is what shows progress. We invalidate once
+      // at the end so the candidates table render is one big update.
+    }
+  };
+
   const runScan = async (universe: 'equity' | 'etf' | 'both') => {
     setScanning(true);
     setScanMode(universe);
     setScanErr(null);
     try {
-      const { data, error } = await supabase.functions.invoke('bnf-scan', {
-        body: { universe },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
+      if (universe === 'etf') {
+        await runEtfOnly();
+      } else if (universe === 'equity') {
+        await runEquityBatched();
+      } else {
+        // 'both' — run ETF first (fast, ~30s), then batched equity.
+        await runEtfOnly();
+        await runEquityBatched();
+      }
       qc.invalidateQueries({ queryKey: ['bnf_candidates'] });
     } catch (e) {
       setScanErr((e as Error).message);

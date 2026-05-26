@@ -335,11 +335,27 @@ type ProgressFn = ReturnType<typeof makeProgressWriter>;
 async function runEquityScan(
   admin: Admin, key: string, userId: string, fromIso: string, toIso: string,
   progress?: ProgressFn,
+  fromIdx: number = 0, toIdx: number = UNIVERSE.length,
 ): Promise<ScanResult> {
-  await progress?.({
-    equity_stage: 'pricing', equity_total: UNIVERSE.length,
-    equity_scanned: 0, equity_rate_limited: 0,
-  });
+  // Clamp + derive the slice we're responsible for in this batch.
+  fromIdx = Math.max(0, Math.min(UNIVERSE.length, fromIdx));
+  toIdx   = Math.max(fromIdx, Math.min(UNIVERSE.length, toIdx));
+  const slice = UNIVERSE.slice(fromIdx, toIdx);
+  const isFirstBatch = fromIdx === 0;
+  const isLastBatch  = toIdx >= UNIVERSE.length;
+
+  // Wipe prior candidates ONLY on the first batch — subsequent batches
+  // append. Reset the status counters too so the banner starts fresh.
+  if (isFirstBatch) {
+    await admin.from('bnf_candidates').delete()
+      .eq('user_id', userId).eq('universe', 'EQUITY');
+    await progress?.({
+      equity_stage: 'pricing', equity_total: UNIVERSE.length,
+      equity_scanned: 0, equity_candidates: 0, equity_rate_limited: 0,
+    });
+  } else {
+    await progress?.({ equity_stage: 'pricing' });
+  }
 
   // 1) Sector ETF deviations — single pass, ~11 ETFs.
   const sectorDevs = new Map<string, number | null>();
@@ -352,32 +368,41 @@ async function runEquityScan(
     sectorDevs.set(etf, s ? ((last - s) / s) * 100 : null);
   }));
 
-  // 2) Per-ticker aggregates + filters. CHUNK is set conservatively to
-  // align with Polygon's Starter-tier rate cap (~100 req/min). Higher
-  // values trigger 429s and the scan stalls. We track + report 429s so
-  // the user sees if Polygon is the bottleneck.
+  // 2) Per-ticker aggregates + filters on the slice only.
   const tickerResults: Array<TickerResult | null> = [];
-  let rateLimited = 0;
+  let rateLimitedInBatch = 0;
   const CHUNK = 6;
-  for (let i = 0; i < UNIVERSE.length; i += CHUNK) {
-    const slice = UNIVERSE.slice(i, i + CHUNK);
+  for (let i = 0; i < slice.length; i += CHUNK) {
+    const subSlice = slice.slice(i, i + CHUNK);
     const outcomes = await Promise.all(
-      slice.map((u) =>
+      subSlice.map((u) =>
         processOneTicker(u, key, fromIso, toIso)
           .catch(() => ({ result: null, rateLimited: false }) as ProcessOutcome),
       ),
     );
     for (const o of outcomes) {
       tickerResults.push(o.result);
-      if (o.rateLimited) rateLimited++;
+      if (o.rateLimited) rateLimitedInBatch++;
     }
+    // Cumulative count across batches: previous batches contributed
+    // fromIdx tickers already.
     await progress?.({
-      equity_scanned: tickerResults.length,
-      equity_rate_limited: rateLimited,
+      equity_scanned: fromIdx + tickerResults.length,
     });
   }
-  if (rateLimited > 0) {
-    console.error(`equity scan: ${rateLimited} tickers rate-limited by Polygon (HTTP 429)`);
+  if (rateLimitedInBatch > 0) {
+    console.error(`equity batch [${fromIdx}-${toIdx}]: ${rateLimitedInBatch} rate-limited`);
+  }
+  // For rate-limited count we need to ADD to the existing tally. Read the
+  // current value via a fresh select since the in-process progress state
+  // doesn't carry batches that ran in previous invocations.
+  if (rateLimitedInBatch > 0) {
+    const { data: cur } = await admin.from('bnf_scan_status')
+      .select('equity_rate_limited')
+      .eq('user_id', userId)
+      .maybeSingle();
+    const prior = (cur as { equity_rate_limited?: number } | null)?.equity_rate_limited ?? 0;
+    await progress?.({ equity_rate_limited: prior + rateLimitedInBatch });
   }
 
   // 3) Apply BNF filters.
@@ -416,9 +441,8 @@ async function runEquityScan(
     Math.abs(e.yahoo.daysToEarnings) > EARNINGS_WINDOW_DAYS,
   );
 
-  // 5) Replace previous EQUITY rows for this user.
-  await admin.from('bnf_candidates').delete()
-    .eq('user_id', userId).eq('universe', 'EQUITY');
+  // 5) Insert this batch's survivors. We already wiped on the first
+  // batch above; subsequent batches just append.
   if (enriched.length > 0) {
     const rows = enriched.map((e) => ({
       user_id: userId,
@@ -449,9 +473,22 @@ async function runEquityScan(
     if (insErr) throw new Error(`Equity insert failed: ${insErr.message}`);
   }
 
-  await progress?.({ equity_stage: 'done', equity_candidates: enriched.length });
+  // Accumulate the candidate count across batches (read existing total
+  // and add this batch's). Only mark stage 'done' when this is the
+  // final batch — otherwise the banner stays in 'enriching'.
+  const { data: cur } = await admin.from('bnf_scan_status')
+    .select('equity_candidates')
+    .eq('user_id', userId)
+    .maybeSingle();
+  const priorCandidates = (cur as { equity_candidates?: number } | null)?.equity_candidates ?? 0;
+  const totalSoFar = (isFirstBatch ? 0 : priorCandidates) + enriched.length;
+  await progress?.({
+    equity_stage: isLastBatch ? 'done' : 'enriching',
+    equity_candidates: totalSoFar,
+  });
+
   return {
-    scanned: UNIVERSE.length,
+    scanned: slice.length,
     with_data: tickerResults.filter(Boolean).length,
     candidates: enriched.length,
   };
@@ -591,12 +628,24 @@ Deno.serve(async (req) => {
     // defaults to 'both' so a bare invocation hits the same surface as
     // the original. Empty body is fine.
     let mode: 'equity' | 'etf' | 'both' = 'both';
+    let fromIdx: number | undefined;
+    let toIdx: number | undefined;
     try {
-      const body = await req.json() as { universe?: string };
+      const body = await req.json() as { universe?: string; from_idx?: number; to_idx?: number };
       if (body?.universe === 'equity' || body?.universe === 'etf' || body?.universe === 'both') {
         mode = body.universe;
       }
+      if (typeof body?.from_idx === 'number') fromIdx = body.from_idx;
+      if (typeof body?.to_idx === 'number') toIdx = body.to_idx;
     } catch { /* no body / bad JSON = default to 'both' */ }
+
+    // Whether this is a batched mid-scan call. If from_idx is set and we're
+    // NOT covering the whole universe, treat as batched — don't write the
+    // 'starting' overall stage (which would reset counters) and don't mark
+    // 'done' overall until the final batch.
+    const isBatchedCall = typeof fromIdx === 'number';
+    const totalUniverse = mode === 'etf' ? 30 /* ETF size, immaterial */ : UNIVERSE.length;
+    const isFinalBatch = !isBatchedCall || (toIdx ?? totalUniverse) >= totalUniverse;
 
     // Date window — same for both universes.
     const toDate = new Date();
@@ -606,22 +655,28 @@ Deno.serve(async (req) => {
     const toIso = toDate.toISOString().slice(0, 10);
 
     // Progress writer — upserts bnf_scan_status under the calling user.
+    // For a fresh (non-batched) call OR the first batch (from_idx=0), we
+    // reset the overall stage to 'starting'. Subsequent batches don't
+    // touch the overall stage / counters — runEquityScan handles its own
+    // per-batch progress writes.
     const scanId = crypto.randomUUID();
     const progress = makeProgressWriter(admin, userId, scanId, mode);
-    await progress({
-      stage: 'starting',
-      equity_stage: 'idle', etf_stage: 'idle',
-      equity_scanned: 0, equity_total: 0, equity_candidates: 0, equity_rate_limited: 0,
-      etf_scanned: 0,    etf_total: 0,    etf_candidates: 0,    etf_rate_limited: 0,
-      message: null,
-    });
+    if (!isBatchedCall || fromIdx === 0) {
+      await progress({
+        stage: 'starting',
+        equity_stage: 'idle', etf_stage: 'idle',
+        equity_scanned: 0, equity_total: 0, equity_candidates: 0, equity_rate_limited: 0,
+        etf_scanned: 0,    etf_total: 0,    etf_candidates: 0,    etf_rate_limited: 0,
+        message: null,
+      });
+    }
 
     // Run scans IN PARALLEL when both are requested — sequential was tipping
     // past the edge timeout once the equity universe grew to 1000 names.
     // Each branch has its own try/catch so one throwing doesn't sink the
     // other; the response surfaces partial results.
     const equityP = (mode === 'equity' || mode === 'both')
-      ? runEquityScan(admin, key, userId, fromIso, toIso, progress)
+      ? runEquityScan(admin, key, userId, fromIso, toIso, progress, fromIdx, toIdx)
           .then((r) => r as ScanResult | { error: string })
           .catch((e) => {
             console.error('equity scan failed:', e);
@@ -644,14 +699,19 @@ Deno.serve(async (req) => {
     const etfErr = etfResult && 'error' in etfResult;
     const anyError = equityErr || etfErr;
     const allError = (equityResult ? equityErr : true) && (etfResult ? etfErr : true);
-    await progress({
-      stage: allError ? 'error' : 'done',
-      message: anyError
-        ? [equityErr ? `equity: ${(equityResult as { error: string }).error}` : null,
-           etfErr ? `etf: ${(etfResult as { error: string }).error}` : null]
-          .filter(Boolean).join(' · ')
-        : null,
-    });
+    // Only mark overall 'done' on the FINAL batch — intermediate batches
+    // leave stage='starting' so the banner keeps showing the in-flight UI
+    // through all 5 client-orchestrated calls.
+    if (isFinalBatch || anyError) {
+      await progress({
+        stage: allError ? 'error' : (isFinalBatch ? 'done' : 'starting'),
+        message: anyError
+          ? [equityErr ? `equity: ${(equityResult as { error: string }).error}` : null,
+             etfErr ? `etf: ${(etfResult as { error: string }).error}` : null]
+            .filter(Boolean).join(' · ')
+          : null,
+      });
+    }
 
     return new Response(
       JSON.stringify({ mode, scan_id: scanId, equity: equityResult, etf: etfResult }),
