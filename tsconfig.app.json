@@ -30,6 +30,8 @@
     "useDefineForClassFields": true
   },
   "include": [
-    "src"
+    "src",
+    "supabase/functions/bnf-scan/universe.ts",
+    "supabase/functions/bnf-scan/etf-universe.ts"
   ]
 }

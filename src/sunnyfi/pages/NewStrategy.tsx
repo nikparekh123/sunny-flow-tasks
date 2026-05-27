@@ -15,6 +15,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { BNF_UNIVERSE, type UniverseMember } from '@/sunnyfi/data/bnfUniverse';
 import '@/positions/positions.css';
 import './new-strategy.css';
 
@@ -52,7 +53,49 @@ interface Candidate {
   days_since_earnings: number | null;
   insider_sales: InsiderSales | null;
   recent_8ks: EightK[] | null;
+  // Near-miss flag: true when one or more soft thresholds were within
+  // BORDERLINE_SLACK (0.5%) of failing. Drives the yellow chip.
+  borderline: boolean | null;
+  borderline_reasons: string[] | null;
 }
+
+// Human-readable text per borderline reason code (matches bnf-scan tags).
+const BORDERLINE_LABELS: Record<string, string> = {
+  'dev-low':       'Deviation just past −15%',
+  'dev-high':      'Deviation just past −7%',
+  'intraday-near': 'Today\'s intraday just past −5%',
+  'sector-near':   'Sector ETF just past −5%',
+  'spy-near':      'SPY just past −5%',
+};
+function borderlineTooltip(reasons: string[] | null): string {
+  if (!reasons || reasons.length === 0) return 'Near a filter threshold';
+  return reasons.map((r) => BORDERLINE_LABELS[r] ?? r).join(' · ');
+}
+
+// One row of the bnf_universe_latest view — latest cached bar + derived
+// SMA/dev per ticker. Used for the unified universe table where every
+// ticker is rendered, not just the BNF survivors.
+interface UniverseLatestRow {
+  ticker: string;
+  latest_date: string;
+  latest_close: number;
+  latest_open: number | null;
+  latest_volume: number | null;
+  sma25: number | null;
+  sma200: number | null;
+  deviation_pct: number | null;
+  today_intraday_pct: number | null;
+  adv20_m: number | null;
+  bars_count: number;
+}
+
+// Highlight tier for a unified universe row. Drives the row's color
+// treatment: 'match' = full neon green, 'borderline' = yellow chip,
+// 'none' = grayed out / passive.
+type RowTier = 'match' | 'borderline' | 'none';
+
+// Universe filter dropdown options.
+type UniverseFilter = 'all' | 'matches' | 'near-miss' | 'watchlist' | 'equity' | 'etf';
 
 interface InsiderDetail { name: string; role: string; date: string; usd: number; }
 interface InsiderSales {
@@ -233,6 +276,22 @@ export default function NewStrategy() {
       if (error) throw error;
       return (data ?? []) as unknown as Candidate[];
     },
+  });
+
+  // Pull latest-price snapshot for the FULL universe (~1030 rows) from
+  // the bnf_universe_latest SQL view. Drives the unified universe table
+  // where every ticker is visible, gray by default and colored when the
+  // BNF setup criteria are hit.
+  const { data: universeLatest = [] } = useQuery({
+    queryKey: ['bnf_universe_latest'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('bnf_universe_latest' as never)
+        .select('*');
+      if (error) throw error;
+      return (data ?? []) as unknown as UniverseLatestRow[];
+    },
+    staleTime: 5 * 60 * 1000,    // 5 minutes — refreshes after a cache update invalidates
   });
 
   // ── Live scan progress via Supabase Realtime ──
@@ -419,6 +478,7 @@ export default function NewStrategy() {
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
       qc.invalidateQueries({ queryKey: ['bnf_candidates'] });
+      qc.invalidateQueries({ queryKey: ['bnf_universe_latest'] });
     } catch (e) {
       setScanErr((e as Error).message);
     } finally {
@@ -441,6 +501,9 @@ export default function NewStrategy() {
       const { data, error } = await supabase.functions.invoke('bnf-cache-update');
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
+      // Cache update may shift latest_close / deviation_pct in the view —
+      // refetch so the unified universe table reflects the new prices.
+      qc.invalidateQueries({ queryKey: ['bnf_universe_latest'] });
     } catch (e) {
       setScanErr(`Cache update failed: ${(e as Error).message}`);
     } finally {
@@ -505,6 +568,99 @@ export default function NewStrategy() {
   // stay merged because the closed-trades section shows both.
   const equityCandidates = candidates.filter((c) => c.universe === 'EQUITY');
   const etfCandidates = candidates.filter((c) => c.universe === 'ETF');
+
+  // Candidate lookup by ticker — used to merge BNF-survivor metadata
+  // (risk flags, options, name) into the unified universe row.
+  const candidateByTicker = useMemo(() => {
+    const m = new Map<string, Candidate>();
+    for (const c of candidates) m.set(c.ticker, c);
+    return m;
+  }, [candidates]);
+
+  // Latest-bar lookup by ticker — view returns one row per ticker.
+  const latestByTicker = useMemo(() => {
+    const m = new Map<string, UniverseLatestRow>();
+    for (const r of universeLatest) m.set(r.ticker, r);
+    return m;
+  }, [universeLatest]);
+
+  // ── Unified universe rows ──
+  // Each row carries metadata (from BNF_UNIVERSE) + latest-price snapshot
+  // (from the view) + optional BNF candidate match (from bnf_candidates).
+  // The tier drives the row's color treatment.
+  interface UniverseRow {
+    member: UniverseMember;
+    latest: UniverseLatestRow | null;
+    candidate: Candidate | null;
+    tier: RowTier;
+    researchStatus: ResearchStatus;
+  }
+  const universeRows: UniverseRow[] = useMemo(() => BNF_UNIVERSE.map((member) => {
+    const latest = latestByTicker.get(member.ticker) ?? null;
+    const candidate = candidateByTicker.get(member.ticker) ?? null;
+    let tier: RowTier = 'none';
+    if (candidate) tier = candidate.borderline ? 'borderline' : 'match';
+    return {
+      member,
+      latest,
+      candidate,
+      tier,
+      researchStatus: statusByTicker.get(member.ticker) ?? 'pending',
+    };
+  }), [latestByTicker, candidateByTicker, statusByTicker]);
+
+  // Sort: matches first (by deviation, most-dislocated first), then
+  // borderline (same ordering), then everyone else alphabetical. Within
+  // a tier we want today's most-actionable names on top.
+  const sortedUniverseRows: UniverseRow[] = useMemo(() => {
+    const tierWeight: Record<RowTier, number> = { match: 0, borderline: 1, none: 2 };
+    return [...universeRows].sort((a, b) => {
+      const t = tierWeight[a.tier] - tierWeight[b.tier];
+      if (t !== 0) return t;
+      // Within matches / borderline, sort by deviation (most-negative first).
+      if (a.tier !== 'none') {
+        const ad = a.candidate?.deviation_pct ?? a.latest?.deviation_pct ?? 0;
+        const bd = b.candidate?.deviation_pct ?? b.latest?.deviation_pct ?? 0;
+        return ad - bd;
+      }
+      // Otherwise alphabetical so the long tail is browsable.
+      return a.member.ticker.localeCompare(b.member.ticker);
+    });
+  }, [universeRows]);
+
+  // ── Universe filter dropdown ──
+  const [universeFilter, setUniverseFilter] = useState<UniverseFilter>('all');
+  const filteredUniverseRows = useMemo(() => {
+    return sortedUniverseRows.filter((r) => {
+      switch (universeFilter) {
+        case 'matches':    return r.tier === 'match';
+        case 'near-miss':  return r.tier === 'borderline';
+        case 'watchlist':  return r.researchStatus === 'considering' || r.researchStatus === 'approved';
+        case 'equity':     return r.member.universe === 'EQUITY';
+        case 'etf':        return r.member.universe === 'ETF';
+        case 'all':
+        default:           return true;
+      }
+    });
+  }, [sortedUniverseRows, universeFilter]);
+
+  // Counts for the filter chip + dashboard surface.
+  const matchCount = universeRows.filter((r) => r.tier === 'match').length;
+  const borderlineCount = universeRows.filter((r) => r.tier === 'borderline').length;
+  const watchlistCount = universeRows.filter(
+    (r) => r.researchStatus === 'considering' || r.researchStatus === 'approved',
+  ).length;
+
+  // Most recent latest_date across the universe — fed to the "last
+  // updated" pill in the header so the user can see at a glance how
+  // fresh the data is.
+  const latestUniverseDate = useMemo(() => {
+    let max = '';
+    for (const r of universeLatest) {
+      if (r.latest_date > max) max = r.latest_date;
+    }
+    return max || null;
+  }, [universeLatest]);
   const openPositions = positions.filter((p) => p.status === 'open');
   const closedPositions = positions.filter((p) => p.status === 'closed');
 
@@ -672,22 +828,47 @@ export default function NewStrategy() {
           </div>
         )}
 
-        {/* ────── TODAY'S EQUITY CANDIDATES ────── */}
+        {/* ────── UNIFIED UNIVERSE TABLE ──────
+            All ~1030 tickers (S&P 400 + 600 + ~30 ETFs) always visible.
+            Gray = not in BNF setup today. Neon = match. Yellow = near miss.
+            Re-running the scan only repaints the colors — every ticker
+            keeps its row + latest price + dev%. */}
         <section className="np-section">
           <div className="np-section-hd">
             <div className="np-section-title">
-              Today's equity candidates · {visibleEquityCandidates.length}
-              {hideSkipped && skippedCount > 0 && (
+              Universe · {filteredUniverseRows.length.toLocaleString()} of {universeRows.length.toLocaleString()}
+              {' '}<span className="bnf-tier-chip match">{matchCount} match</span>
+              {' '}<span className="bnf-tier-chip borderline">{borderlineCount} near miss</span>
+              {watchlistCount > 0 && (
+                <> <span className="bnf-tier-chip watch">{watchlistCount} on watch</span></>
+              )}
+              {latestUniverseDate && (
                 <span className="bnf-section-sub-inline">
-                  {' '}· {skippedCount} skipped hidden
+                  {' '}· last close {latestUniverseDate}
                 </span>
               )}
             </div>
             <div className="np-section-sub">
-              Sorted by deviation (most dislocated first). Dev ∈ [−15%, −7%], close &gt; SMA200,
-              today &gt; −5%, sector ETF still healthy.
+              Every ticker we track. BNF strategy match = dev ∈ [−15%, −7%], close &gt; SMA200,
+              today &gt; −5%, sector ETF healthy. Near miss = within 0.5% of any threshold.
             </div>
             <div className="bnf-filter-row">
+              <label className="bnf-filter-toggle bnf-filter-select">
+                Show:
+                <select
+                  className="bnf-filter-dropdown"
+                  value={universeFilter}
+                  onChange={(e) => setUniverseFilter(e.target.value as UniverseFilter)}
+                  aria-label="Universe filter"
+                >
+                  <option value="all">All tickers</option>
+                  <option value="matches">BNF matches only</option>
+                  <option value="near-miss">Near miss only</option>
+                  <option value="watchlist">Watchlist (considering + approved)</option>
+                  <option value="equity">Equities only</option>
+                  <option value="etf">ETFs only</option>
+                </select>
+              </label>
               <label className="bnf-filter-toggle">
                 <input
                   type="checkbox"
@@ -699,82 +880,99 @@ export default function NewStrategy() {
             </div>
           </div>
           <div className="np-table-wrap">
-            <table className="np-table bnf-candidates-table">
+            <table className="np-table bnf-candidates-table bnf-universe-table">
               <thead>
                 <tr>
                   <th>Ticker</th>
-                  <th>Name</th>
-                  <th>Sector</th>
+                  <th>Name / sector</th>
                   <th className="num">Price</th>
                   <th className="num">SMA25</th>
                   <th className="num">Dev %</th>
                   <th className="num">SMA200</th>
                   <th className="num">ADV20 $M</th>
-                  <th className="num">Earn</th>
+                  <th className="num">Today</th>
                   <th className="num bnf-flag-th">Days since earn</th>
-                  <th className="num bnf-flag-th">Insider sales (14d)</th>
+                  <th className="num bnf-flag-th">Insider (14d)</th>
                   <th className="num bnf-flag-th">8-K (14d)</th>
-                  <th className="num">IV</th>
-                  <th className="num">Opt vol</th>
-                  <th className="num">P/C</th>
-                  <th className="num">OI</th>
                   <th>Setup</th>
                   <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {visibleEquityCandidates.length === 0 ? (
-                  <tr>
-                    <td colSpan={18} className="bnf-empty">
-                      {equityCandidates.length === 0
-                        ? <>No equity candidates yet. Click <b>Refresh equity scan</b>.</>
-                        : <>All {equityCandidates.length} equity candidate{equityCandidates.length === 1 ? '' : 's'} are skipped. Toggle "Hide skipped" off to see them.</>}
-                    </td>
-                  </tr>
-                ) : visibleEquityCandidates.map((c) => {
-                  const tEarn = earningsTone(c.days_since_earnings);
-                  const tIns = insiderTone(c.insider_sales);
-                  const t8K = eightKTone(c.recent_8ks);
-                  const quality = setupQuality(tEarn, tIns, t8K);
-                  const status = statusByTicker.get(c.ticker) ?? 'pending';
+                {filteredUniverseRows.length === 0 ? (
+                  <tr><td colSpan={14} className="bnf-empty">
+                    {universeRows.length === 0
+                      ? <>Universe cache is empty. Click <b>Backfill cache</b> to load history, then <b>Refresh all</b>.</>
+                      : <>No tickers match this filter.</>}
+                  </td></tr>
+                ) : filteredUniverseRows
+                    .filter((r) => !hideSkipped || r.researchStatus !== 'skipped')
+                    .map((r) => {
+                  const { member, latest, candidate, tier, researchStatus: status } = r;
+                  // Risk-flag tones — only meaningful when this ticker is a BNF
+                  // match (the candidate row carries EDGAR data). Otherwise neutral.
+                  const tEarn = candidate ? earningsTone(candidate.days_since_earnings) : 'none';
+                  const tIns  = candidate ? insiderTone(candidate.insider_sales) : 'none';
+                  const t8K   = candidate ? eightKTone(candidate.recent_8ks) : 'none';
+                  const quality = candidate ? setupQuality(tEarn, tIns, t8K) : null;
+                  const price = candidate?.price ?? latest?.latest_close ?? null;
+                  const sma25 = candidate?.sma25 ?? latest?.sma25 ?? null;
+                  const sma200 = candidate?.sma200 ?? latest?.sma200 ?? null;
+                  const dev = candidate?.deviation_pct ?? latest?.deviation_pct ?? null;
+                  const adv = candidate?.adv20_m ?? latest?.adv20_m ?? null;
+                  const intraday = candidate?.today_intraday_pct ?? latest?.today_intraday_pct ?? null;
                   return (
-                    <tr key={c.id} className={`bnf-row status-${status}`}>
-                      <td className="ticker">{c.ticker}</td>
-                      <td className="bnf-name" title={c.name ?? ''}>{c.name ?? '—'}</td>
-                      <td className="sector-cell">{c.sector ?? '—'}</td>
-                      <td className="num strong">{fmtUSD(c.price)}</td>
-                      <td className="num">{fmtUSD(c.sma25)}</td>
-                      <td className="num down strong">{fmtPct(c.deviation_pct)}</td>
-                      <td className="num">{fmtUSD(c.sma200)}</td>
-                      <td className="num">{c.adv20_m ? `$${c.adv20_m.toFixed(0)}M` : '—'}</td>
-                      <td className="num">{fmtDays(c.days_to_earnings)}</td>
+                    <tr
+                      key={`${member.universe}:${member.ticker}`}
+                      className={`bnf-row tier-${tier} status-${status}${tier === 'borderline' ? ' borderline' : ''}`}
+                    >
+                      <td className="ticker">
+                        {member.universe === 'ETF' && <span className="bnf-univ-badge etf">ETF</span>}
+                        {member.universe === 'ETF' ? ' ' : ''}{member.ticker}
+                        {tier === 'borderline' && candidate && (
+                          <span
+                            className="bnf-borderline-chip"
+                            title={borderlineTooltip(candidate.borderline_reasons)}
+                          >
+                            near miss
+                          </span>
+                        )}
+                      </td>
+                      <td className="bnf-name" title={candidate?.name ?? member.name ?? ''}>
+                        {candidate?.name ?? member.name ?? '—'}
+                        {member.sector && (
+                          <span className="bnf-row-sector"> · {member.sector}</span>
+                        )}
+                        {member.category && (
+                          <span className="bnf-row-sector"> · {member.category}</span>
+                        )}
+                      </td>
+                      <td className="num strong">{price != null ? fmtUSD(price) : '—'}</td>
+                      <td className="num">{sma25 != null ? fmtUSD(sma25) : '—'}</td>
+                      <td className={`num strong ${dev != null && dev < 0 ? 'down' : ''}`}>
+                        {dev != null ? fmtPct(dev) : '—'}
+                      </td>
+                      <td className="num">{sma200 != null ? fmtUSD(sma200) : '—'}</td>
+                      <td className="num">{adv != null ? `$${adv.toFixed(0)}M` : '—'}</td>
+                      <td className={`num ${intraday != null && intraday < 0 ? 'down' : ''}`}>
+                        {intraday != null ? fmtPct(intraday) : '—'}
+                      </td>
 
-                      {/* Risk flag cells — color-coded backgrounds per spec */}
+                      {/* Risk-flag cells — only colored when this ticker is a BNF match. */}
                       <td className={`num bnf-flag tone-${tEarn}`}>
-                        {c.days_since_earnings != null ? `${c.days_since_earnings}d` : '—'}
+                        {candidate?.days_since_earnings != null ? `${candidate.days_since_earnings}d` : '—'}
                       </td>
-                      <td
-                        className={`num bnf-flag tone-${tIns}`}
-                        title={insiderTooltip(c.insider_sales)}
-                      >
-                        {fmtInsider(c.insider_sales)}
+                      <td className={`num bnf-flag tone-${tIns}`} title={candidate ? insiderTooltip(candidate.insider_sales) : ''}>
+                        {candidate ? fmtInsider(candidate.insider_sales) : '—'}
                       </td>
-                      <td
-                        className={`num bnf-flag tone-${t8K}`}
-                        title={eightKTooltip(c.recent_8ks)}
-                      >
-                        {c.recent_8ks && c.recent_8ks.length > 0
-                          ? <EightKLinks items={c.recent_8ks} />
+                      <td className={`num bnf-flag tone-${t8K}`} title={candidate ? eightKTooltip(candidate.recent_8ks) : ''}>
+                        {candidate?.recent_8ks && candidate.recent_8ks.length > 0
+                          ? <EightKLinks items={candidate.recent_8ks} />
                           : '—'}
                       </td>
-
-                      <td className="num">{fmtIV(c.iv30)}</td>
-                      <td className="num">{fmtNum(c.options_volume)}</td>
-                      <td className="num">{c.put_call_ratio != null ? c.put_call_ratio.toFixed(2) : '—'}</td>
-                      <td className="num">{fmtNum(c.open_interest)}</td>
-                      <td className={`bnf-quality tone-${quality}`}>
-                        {quality === 'clean' ? 'Clean' : quality === 'review' ? 'Review' : 'Caution'}
+                      <td className={quality ? `bnf-quality tone-${quality}` : 'bnf-quality tone-none'}>
+                        {quality === 'clean' ? 'Clean' : quality === 'review' ? 'Review' : quality === 'caution' ? 'Caution' : '—'}
                       </td>
                       <td className="bnf-status-cell">
                         <select
@@ -782,7 +980,7 @@ export default function NewStrategy() {
                           value={status}
                           onChange={(e) =>
                             setStatusMutation.mutate({
-                              ticker: c.ticker,
+                              ticker: member.ticker,
                               status: e.target.value as ResearchStatus,
                             })
                           }
@@ -795,13 +993,15 @@ export default function NewStrategy() {
                         </select>
                       </td>
                       <td className="num">
-                        <button
-                          className="np-btn neon bnf-row-btn"
-                          onClick={() => buyMutation.mutate(c)}
-                          disabled={buyMutation.isPending}
-                        >
-                          Buy
-                        </button>
+                        {candidate ? (
+                          <button
+                            className="np-btn neon bnf-row-btn"
+                            onClick={() => buyMutation.mutate(candidate)}
+                            disabled={buyMutation.isPending}
+                          >
+                            Buy
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   );
@@ -821,99 +1021,6 @@ export default function NewStrategy() {
           }
           sellPending={sellMutation.isPending}
         />
-
-        {/* ────── TODAY'S ETF CANDIDATES ────── */}
-        <section className="np-section bnf-etf-section">
-          <div className="np-section-hd">
-            <div className="np-section-title">
-              Today's ETF candidates · {visibleEtfCandidates.length}
-            </div>
-            <div className="np-section-sub">
-              Sector + industry + style ETFs. Same SMA logic; SPY broad-market guard replaces
-              the sector breadth filter. No earnings / insider / 8-K risk to display.
-            </div>
-          </div>
-          <div className="np-table-wrap">
-            <table className="np-table bnf-etf-table">
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>ETF Name</th>
-                  <th>Category</th>
-                  <th className="num">Price</th>
-                  <th className="num">SMA25</th>
-                  <th className="num">Dev %</th>
-                  <th className="num">SMA200</th>
-                  <th className="num">IV</th>
-                  <th className="num">Opt vol</th>
-                  <th className="num">P/C</th>
-                  <th className="num">Vol vs 20d</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleEtfCandidates.length === 0 ? (
-                  <tr><td colSpan={13} className="bnf-empty">
-                    {etfCandidates.length === 0
-                      ? <>No ETF candidates yet. Click <b>Refresh ETF scan</b>.</>
-                      : <>All ETF candidates are skipped. Toggle "Hide skipped" off to see them.</>}
-                  </td></tr>
-                ) : visibleEtfCandidates.map((c) => {
-                  const status = statusByTicker.get(c.ticker) ?? 'pending';
-                  return (
-                    <tr key={c.id} className={`bnf-row status-${status}`}>
-                      <td className="ticker">
-                        <span className="bnf-univ-badge etf">ETF</span> {c.ticker}
-                      </td>
-                      <td className="bnf-name" title={c.name ?? ''}>{c.name ?? '—'}</td>
-                      <td className="sector-cell">{c.category ?? '—'}</td>
-                      <td className="num strong">{fmtUSD(c.price)}</td>
-                      <td className="num">{fmtUSD(c.sma25)}</td>
-                      <td className="num down strong">{fmtPct(c.deviation_pct)}</td>
-                      <td className="num">{fmtUSD(c.sma200)}</td>
-                      <td className="num">{fmtIV(c.iv30)}</td>
-                      <td className="num">{fmtNum(c.options_volume)}</td>
-                      <td className="num">{c.put_call_ratio != null ? c.put_call_ratio.toFixed(2) : '—'}</td>
-                      <td className="num">
-                        {c.signal_day_vol_ratio != null
-                          ? `${c.signal_day_vol_ratio.toFixed(2)}x`
-                          : '—'}
-                      </td>
-                      <td className="bnf-status-cell">
-                        <select
-                          className={`bnf-status-select status-${status}`}
-                          value={status}
-                          onChange={(e) =>
-                            setStatusMutation.mutate({
-                              ticker: c.ticker,
-                              status: e.target.value as ResearchStatus,
-                            })
-                          }
-                          disabled={setStatusMutation.isPending}
-                          aria-label="Research status"
-                        >
-                          {STATUS_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="num">
-                        <button
-                          className="np-btn neon bnf-row-btn"
-                          onClick={() => buyMutation.mutate(c)}
-                          disabled={buyMutation.isPending}
-                        >
-                          Buy
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
 
         <OpenPositionsTable
           title="Open ETF positions"

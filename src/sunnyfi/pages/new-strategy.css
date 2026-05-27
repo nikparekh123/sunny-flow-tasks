@@ -466,6 +466,126 @@
   border: 1px solid rgba(109, 209, 197, 0.4);
 }
 
+/* Borderline / near-miss chip — yellow tag rendered next to the ticker
+ * when one or more soft filters were within 0.5% of failing. Tooltip on
+ * hover names which threshold(s). The .bnf-row.borderline class also
+ * tints the row's left edge so the eye catches them in a long table. */
+.np-app .bnf-borderline-chip {
+  display: inline-block;
+  margin-left: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  vertical-align: 1px;
+  background: rgba(245, 196, 88, 0.18);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.42);
+  cursor: help;
+}
+.np-app .bnf-row.borderline td:first-child {
+  box-shadow: inset 3px 0 0 #f5c458;
+}
+
+/* ────────── Unified universe table ──────────
+ * Renders every ticker the scanner tracks (~1030 rows). Gray by default
+ * (`tier-none`); rows that match the BNF setup today get full-color
+ * treatment (`tier-match`); near-miss rows get a yellow accent
+ * (`tier-borderline`). Re-running the scan just repaints these tiers —
+ * the row itself never disappears, so the user always sees the full
+ * universe and can confirm the scan finished. */
+
+.np-app .bnf-universe-table .bnf-row.tier-none td {
+  color: var(--navi-fg3, #6b7a76);
+  opacity: 0.62;
+}
+.np-app .bnf-universe-table .bnf-row.tier-none td.ticker {
+  /* Ticker still legible even when the row is grayed out. */
+  color: var(--navi-fg2);
+  opacity: 0.92;
+}
+.np-app .bnf-universe-table .bnf-row.tier-none .bnf-flag,
+.np-app .bnf-universe-table .bnf-row.tier-none .bnf-quality {
+  background: transparent !important;
+  color: var(--navi-fg3, #6b7a76);
+}
+.np-app .bnf-universe-table .bnf-row.tier-match td {
+  /* Full color for today's BNF survivors — same look as the old
+   * 'Today's candidates' table. */
+  color: var(--navi-fg1);
+  opacity: 1;
+}
+.np-app .bnf-universe-table .bnf-row.tier-match td:first-child {
+  box-shadow: inset 3px 0 0 var(--navi-neon, #6dd1c5);
+}
+.np-app .bnf-universe-table .bnf-row.tier-borderline td {
+  /* Same readable text as matches; the yellow chip + left edge do the
+   * "borderline" signalling so colors stay differentiated. */
+  color: var(--navi-fg1);
+  opacity: 0.95;
+}
+
+/* Inline secondary info on the name cell (sector / category) — quiet so
+ * it doesn't compete with the ticker. */
+.np-app .bnf-row-sector {
+  color: var(--navi-fg3, #6b7a76);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+/* Tier-count chips in the section header — three pills, each colored
+ * per tier so the user can scan today's totals at a glance. */
+.np-app .bnf-tier-chip {
+  display: inline-block;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 6px;
+  letter-spacing: .4px;
+}
+.np-app .bnf-tier-chip.match {
+  background: rgba(109, 209, 197, 0.18);
+  color: #6dd1c5;
+  border: 1px solid rgba(109, 209, 197, 0.42);
+}
+.np-app .bnf-tier-chip.borderline {
+  background: rgba(245, 196, 88, 0.18);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.42);
+}
+.np-app .bnf-tier-chip.watch {
+  background: rgba(168, 196, 240, 0.18);
+  color: #a8c4f0;
+  border: 1px solid rgba(168, 196, 240, 0.42);
+}
+
+/* Filter dropdown styling — match existing filter-toggle look. */
+.np-app .bnf-filter-select {
+  gap: 8px;
+}
+.np-app .bnf-filter-dropdown {
+  background: var(--navi-bg2, #0f1614);
+  color: var(--navi-fg1);
+  border: 1px solid rgba(168, 196, 192, 0.24);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+}
+
+/* "Tone-none" cells in the universe table — non-candidate rows have no
+ * EDGAR/setup data, so render an empty muted dash. */
+.np-app .bnf-flag.tone-none,
+.np-app .bnf-quality.tone-none {
+  background: transparent;
+  color: var(--navi-fg3, #6b7a76);
+}
+
 /* Per-universe stat blocks inside the closed-trades toggle header */
 .np-app .bnf-closed-stats {
   display: inline-flex;

@@ -53,6 +53,55 @@ const SECTOR_DEV_FLOOR = -5;
 const MIN_ADV_M = 20;     // $20M 20-day avg dollar volume
 const MIN_PRICE = 10;
 
+// Near-miss slack: a candidate that fails one of the soft thresholds by
+// ≤ this amount is still admitted, tagged borderline, and shown in the
+// UI with a yellow chip. Prevents PARR/MTDR-style flicker when a sector
+// ETF or intraday move sits right on a boundary.
+const BORDERLINE_SLACK = 0.5;
+
+/** Evaluate the BNF filter set with slack. Returns the verdict and, for
+ *  borderline cases, the list of soft thresholds it just barely missed.
+ *  - 'pass'       — all hard + soft thresholds OK
+ *  - 'borderline' — within BORDERLINE_SLACK of one or more soft thresholds
+ *  - 'fail'       — outside slack on at least one hard reject
+ *  Hard rejects (no slack): price < MIN_PRICE, ADV < MIN_ADV_M,
+ *  close ≤ SMA200. These are structural — slacking them would let in
+ *  candidates the strategy explicitly excludes.
+ *  Soft thresholds (with slack): deviation range, today intraday floor,
+ *  sector ETF dev floor. These are the ones that flicker. */
+function evalFilters(args: {
+  deviation_pct: number;
+  today_intraday_pct: number;
+  sector_dev: number | null;
+}): { verdict: 'pass' | 'borderline' | 'fail'; reasons: string[] } {
+  const reasons: string[] = [];
+  const { deviation_pct: dev, today_intraday_pct: intraday, sector_dev: sec } = args;
+
+  // Deviation must sit in [-15.5, -6.5] to even be considered. Outside
+  // that wider band the trade thesis no longer applies.
+  if (dev < DEV_MIN - BORDERLINE_SLACK || dev > DEV_MAX + BORDERLINE_SLACK) {
+    return { verdict: 'fail', reasons: [] };
+  }
+  if (dev < DEV_MIN) reasons.push('dev-low');         // -15.5 < dev < -15
+  else if (dev > DEV_MAX) reasons.push('dev-high');   // -7 < dev < -6.5
+
+  // Today's intraday: hard fail if more than slack below the floor.
+  if (intraday < TODAY_INTRADAY_FLOOR - BORDERLINE_SLACK) {
+    return { verdict: 'fail', reasons: [] };
+  }
+  if (intraday < TODAY_INTRADAY_FLOOR) reasons.push('intraday-near');
+
+  // Sector ETF dev (null = unknown, treated as pass).
+  if (sec != null) {
+    if (sec < SECTOR_DEV_FLOOR - BORDERLINE_SLACK) {
+      return { verdict: 'fail', reasons: [] };
+    }
+    if (sec < SECTOR_DEV_FLOOR) reasons.push('sector-near');
+  }
+
+  return { verdict: reasons.length === 0 ? 'pass' : 'borderline', reasons };
+}
+
 interface Agg { c: number; o: number; v: number; }
 
 /** Aggregates now come from the bnf_universe_data CACHE, not from
@@ -392,16 +441,23 @@ async function runEquityScan(
     console.error(`equity scan: ${missing} / ${UNIVERSE.length} tickers had <200 days of cached data (run cache backfill)`);
   }
 
-  // 3) Apply BNF filters.
-  const survivors = tickerResults.filter((r): r is TickerResult => {
-    if (!r) return false;
-    if (r.deviation_pct < DEV_MIN || r.deviation_pct > DEV_MAX) return false;
-    if (r.price <= r.sma200) return false;
-    if (r.today_intraday_pct < TODAY_INTRADAY_FLOOR) return false;
-    const sectorDev = sectorDevs.get(r.sectorEtf);
-    if (sectorDev != null && sectorDev < SECTOR_DEV_FLOOR) return false;
-    return true;
-  });
+  // 3) Apply BNF filters (with near-miss slack on soft thresholds).
+  // Hard structural rejects (no slack): SMA200 trend, price/ADV floors.
+  // Soft filter results carry borderline flags into the row insert below.
+  type SurvivorMeta = TickerResult & { borderline: boolean; borderline_reasons: string[] };
+  const survivors: SurvivorMeta[] = [];
+  for (const r of tickerResults) {
+    if (!r) continue;
+    if (r.price <= r.sma200) continue;          // hard: must be in uptrend
+    const sectorDev = sectorDevs.get(r.sectorEtf) ?? null;
+    const { verdict, reasons } = evalFilters({
+      deviation_pct: r.deviation_pct,
+      today_intraday_pct: r.today_intraday_pct,
+      sector_dev: sectorDev,
+    });
+    if (verdict === 'fail') continue;
+    survivors.push({ ...r, borderline: verdict === 'borderline', borderline_reasons: reasons });
+  }
   await progress?.({ equity_stage: 'enriching', equity_candidates: survivors.length });
 
   // 4) Survivor enrichment — Polygon options + Yahoo (earnings/name) +
@@ -456,6 +512,8 @@ async function runEquityScan(
       open_interest: e.ctx.open_interest,
       insider_sales: e.edgar.insider.sellers_count > 0 ? e.edgar.insider : null,
       recent_8ks: e.edgar.eightKs.length > 0 ? e.edgar.eightKs : null,
+      borderline: e.borderline,
+      borderline_reasons: e.borderline_reasons.length > 0 ? e.borderline_reasons : null,
     }));
     const { error: insErr } = await admin.from('bnf_candidates').insert(rows);
     if (insErr) throw new Error(`Equity insert failed: ${insErr.message}`);
@@ -479,18 +537,26 @@ async function runEtfScan(
   progress?: ProgressFn,
 ): Promise<ScanResult> {
   await progress?.({ etf_stage: 'pricing', etf_total: ETF_UNIVERSE.length, etf_scanned: 0 });
-  // 1) SPY broad-market guard.
+  // 1) SPY broad-market guard — track its dev so we can apply the slack
+  // at the per-candidate level (rather than killing the entire scan when
+  // SPY sits at, say, -5.1%).
   const spyAggs = await fetchAggsBars(admin, 'SPY', fromIso, toIso);
-  let spyOk = true;
+  let spyDev: number | null = null;
   if (spyAggs.length >= 25) {
     const closes = spyAggs.map((a) => a.c);
     const spySma = sma(closes, 25);
     const spyLast = spyAggs[spyAggs.length - 1].c;
-    if (spySma) {
-      const spyDev = ((spyLast - spySma) / spySma) * 100;
-      if (spyDev < SECTOR_DEV_FLOOR) spyOk = false;
-    }
+    if (spySma) spyDev = ((spyLast - spySma) / spySma) * 100;
   }
+  // Hard fail if SPY is more than slack below the floor — at that point
+  // it's not a "near miss," it's a real broad-market sell-off.
+  if (spyDev != null && spyDev < SECTOR_DEV_FLOOR - BORDERLINE_SLACK) {
+    await admin.from('bnf_candidates').delete()
+      .eq('user_id', userId).eq('universe', 'ETF');
+    await progress?.({ etf_stage: 'done', etf_candidates: 0 });
+    return { scanned: ETF_UNIVERSE.length, with_data: 0, candidates: 0 };
+  }
+  const spyBorderline = spyDev != null && spyDev < SECTOR_DEV_FLOOR;
 
   // 2) Per-ETF aggregates from the cache. Bulk-read once, iterate locally.
   const etfAggsByTicker = await fetchAggsBulk(
@@ -519,15 +585,28 @@ async function runEtfScan(
 
   await progress?.({ etf_scanned: etfResults.length, etf_stage: 'pricing' });
 
-  // 3) Apply ETF-specific filters.
-  const survivors = etfResults.filter((r): r is NonNullable<typeof r> => {
-    if (!r) return false;
-    if (!spyOk) return false;                                       // broad-market guard
-    if (r.deviation_pct < DEV_MIN || r.deviation_pct > DEV_MAX) return false;
-    if (r.price <= r.sma200) return false;
-    if (r.today_intraday_pct < TODAY_INTRADAY_FLOOR) return false;
-    return true;
-  });
+  // 3) Apply ETF-specific filters with the same near-miss slack as equity.
+  type EtfSurvivor = NonNullable<typeof etfResults[number]> & {
+    borderline: boolean; borderline_reasons: string[];
+  };
+  const survivors: EtfSurvivor[] = [];
+  for (const r of etfResults) {
+    if (!r) continue;
+    if (r.price <= r.sma200) continue;          // hard: must be in uptrend
+    const { verdict, reasons } = evalFilters({
+      deviation_pct: r.deviation_pct,
+      today_intraday_pct: r.today_intraday_pct,
+      sector_dev: null,                          // not applicable to ETFs
+    });
+    if (verdict === 'fail') continue;
+    const allReasons = [...reasons];
+    if (spyBorderline) allReasons.push('spy-near');
+    survivors.push({
+      ...r,
+      borderline: verdict === 'borderline' || spyBorderline,
+      borderline_reasons: allReasons,
+    });
+  }
   await progress?.({ etf_stage: 'enriching', etf_candidates: survivors.length });
 
   // 4) Options snapshot per survivor — optional, fail-soft.
@@ -567,6 +646,8 @@ async function runEtfScan(
       open_interest: e.ctx.open_interest,
       insider_sales: null,
       recent_8ks: null,
+      borderline: e.borderline,
+      borderline_reasons: e.borderline_reasons.length > 0 ? e.borderline_reasons : null,
     }));
     const { error: insErr } = await admin.from('bnf_candidates').insert(rows);
     if (insErr) throw new Error(`ETF insert failed: ${insErr.message}`);

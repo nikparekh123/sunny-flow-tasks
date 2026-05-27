@@ -17,6 +17,7 @@ interface Tool {
 const TOOLS: Tool[] = [
   { key: "positions",   name: "Positions",   desc: "Holdings & P&L",       status: "live", hotkey: "1", href: "https://positions.sunnyfi.co" },
   { key: "math",        name: "Math",        desc: "Calculators & scenarios", status: "live", hotkey: "2", internal: "/math" },
+  { key: "strategy",    name: "Strategy",    desc: "BNF mean-reversion",   status: "live", hotkey: "3", internal: "/new-strategy" },
 ];
 
 const ICON_STYLE = { fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
@@ -61,12 +62,22 @@ function formatDate(d: Date) {
 
 interface ToastState { msg: string; kind: "live" | "soon" }
 
+// Compact summary surfaced on the Strategy tile so the user can see at a
+// glance how many BNF candidates are live today without leaving the dash.
+// Pulled once on mount — fast enough that we don't bother memoizing.
+interface BnfStats {
+  matches: number;
+  borderline: number;
+  lastCloseDate: string | null;
+}
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const now = useNow();
   const [toast, setToast] = useState<ToastState | null>(null);
   const [fading, setFading] = useState(false);
   const [name, setName] = useState<string>("there");
+  const [bnfStats, setBnfStats] = useState<BnfStats | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +86,40 @@ export default function Dashboard() {
       const n = await getDisplayName(data.user);
       if (!cancelled) setName(n);
     });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Fetch BNF candidate counts + cache freshness for the Strategy tile.
+  // Failures are silent — the tile just shows its default description.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [{ data: cands }, { data: latest }] = await Promise.all([
+          supabase
+            .from('bnf_candidates' as never)
+            .select('borderline')
+            .returns<{ borderline: boolean | null }[]>(),
+          supabase
+            .from('bnf_universe_latest' as never)
+            .select('latest_date')
+            .order('latest_date', { ascending: false })
+            .limit(1)
+            .returns<{ latest_date: string }[]>(),
+        ]);
+        if (cancelled) return;
+        const rows = cands ?? [];
+        const matches = rows.filter((r) => !r.borderline).length;
+        const borderline = rows.filter((r) => r.borderline).length;
+        setBnfStats({
+          matches,
+          borderline,
+          lastCloseDate: latest?.[0]?.latest_date ?? null,
+        });
+      } catch {
+        /* swallow — keep tile in default state */
+      }
+    })();
     return () => { cancelled = true; };
   }, []);
 
@@ -133,23 +178,36 @@ export default function Dashboard() {
             <span className="label">Tools · {TOOLS.length}</span>
           </div>
           <div className="tools-grid">
-            {TOOLS.map((t) => (
-              <button
-                key={t.key}
-                className={"tool-card " + t.status}
-                disabled={t.status === "soon"}
-                onClick={() => onOpen(t)}
-              >
-                <div className="tool-icon"><ToolIcon name={t.key} /></div>
-                <div className="tool-mid">
-                  <div className="tool-name">{t.name}</div>
-                  <div className="tool-desc">{t.desc}</div>
-                </div>
-                <div className="tool-foot">
-                  <span className="tool-status">{t.status === "live" ? "Live" : "Soon"}</span>
-                </div>
-              </button>
-            ))}
+            {TOOLS.map((t) => {
+              // The Strategy tile gets live counts when available, replacing
+              // the static "BNF mean-reversion" tagline. Counts come from
+              // bnf_candidates + bnf_universe_latest fetched on mount.
+              const desc = t.key === 'strategy' && bnfStats
+                ? `${bnfStats.matches} match · ${bnfStats.borderline} near miss`
+                : t.desc;
+              return (
+                <button
+                  key={t.key}
+                  className={"tool-card " + t.status}
+                  disabled={t.status === "soon"}
+                  onClick={() => onOpen(t)}
+                >
+                  <div className="tool-icon"><ToolIcon name={t.key} /></div>
+                  <div className="tool-mid">
+                    <div className="tool-name">{t.name}</div>
+                    <div className="tool-desc">{desc}</div>
+                    {t.key === 'strategy' && bnfStats?.lastCloseDate && (
+                      <div className="tool-desc" style={{ marginTop: 2, opacity: 0.7 }}>
+                        cache · {bnfStats.lastCloseDate}
+                      </div>
+                    )}
+                  </div>
+                  <div className="tool-foot">
+                    <span className="tool-status">{t.status === "live" ? "Live" : "Soon"}</span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
