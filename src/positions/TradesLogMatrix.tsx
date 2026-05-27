@@ -385,20 +385,10 @@ export function TradesLogMatrix({
   return (
     <div className="gl-wrap">
       <div className="gl-toolbar">
-        <div className="np-status-filter">
-          <button className={filter === 'all' ? 'on' : ''} onClick={() => setFilter('all')}>
-            All <span className="ct">{counts.all}</span>
-          </button>
-          <button className={filter === 'active' ? 'on' : ''} onClick={() => setFilter('active')}>
-            Has trades <span className="ct">{counts.active}</span>
-          </button>
-          <button className={filter === 'open' ? 'on' : ''} onClick={() => setFilter('open')}>
-            Open <span className="ct">{counts.open}</span>
-          </button>
-          <button className={filter === 'closed' ? 'on' : ''} onClick={() => setFilter('closed')}>
-            Closed <span className="ct">{counts.closed}</span>
-          </button>
-        </div>
+        {/* Status filter (All / Has trades / Open / Closed) removed —
+            wasn't used in practice. The matrix always renders the full
+            set; the `filter` state stays as 'all' so the downstream
+            filterSet memo logic still works. */}
         <div className="gl-timeframe">
           {WEEK_OPTIONS.map((w) => (
             <button

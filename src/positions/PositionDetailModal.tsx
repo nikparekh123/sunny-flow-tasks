@@ -1278,56 +1278,56 @@ function OpenFields({
 
   return (
     <>
-      <div className="pp-form-grid cols-2">
-        <div className="pp-field">
-          <div className="pp-field-label">Option type</div>
-          <div className="pp-source-seg">
-            {(['call', 'put'] as OptionType[]).map((k) => (
+      {/* Conversational action picker — replaces the original "Option
+          type + Direction" pair with one row of four explicit choices:
+          "Sell calls", "Buy calls", "Sell puts", "Buy puts". Reads as
+          intent rather than as two coupled enums; harder to misclick a
+          short for a long. The underlying form still stores option_type
+          and direction independently. */}
+      <div className="pp-field">
+        <div className="pp-field-label">What do you want to do?</div>
+        <div className="pp-action-grid">
+          {(
+            [
+              { lbl: 'Sell calls', dir: 'short', opt: 'call', tone: 'sold'   },
+              { lbl: 'Buy calls',  dir: 'long',  opt: 'call', tone: 'bought' },
+              { lbl: 'Sell puts',  dir: 'short', opt: 'put',  tone: 'sold'   },
+              { lbl: 'Buy puts',   dir: 'long',  opt: 'put',  tone: 'bought' },
+            ] as const
+          ).map((a) => {
+            const on = form.option_type === a.opt && form.direction === a.dir;
+            return (
               <button
-                key={k}
+                key={a.lbl}
                 type="button"
-                className={'pp-source-opt' + (form.option_type === k ? ' on' : '')}
-                onClick={() => set('option_type', k)}
+                className={`pp-action-btn tone-${a.tone}` + (on ? ' on' : '')}
+                onClick={() => {
+                  // Update both fields in one batch so the rail preview
+                  // doesn't flash a transient combo while typing.
+                  setForm({ ...form, option_type: a.opt, direction: a.dir });
+                }}
               >
-                <span className="pp-glyph-tile">{k === 'call' ? 'C' : 'P'}</span>
-                <span>{k === 'call' ? 'Call' : 'Put'}</span>
+                <span className={`pp-action-glyph tone-${a.tone}`}>
+                  {a.opt === 'call' ? 'C' : 'P'}
+                </span>
+                <span className="pp-action-lbl">{a.lbl}</span>
               </button>
-            ))}
-          </div>
-        </div>
-        <div className="pp-field">
-          <div className="pp-field-label">Direction</div>
-          <div className="pp-source-seg">
-            <button
-              type="button"
-              className={'pp-source-opt' + (form.direction === 'short' ? ' on' : '')}
-              onClick={() => set('direction', 'short')}
-            >
-              <span className="pp-glyph-tile">−</span>
-              <span>Short</span>
-            </button>
-            <button
-              type="button"
-              className={'pp-source-opt' + (form.direction === 'long' ? ' on' : '')}
-              onClick={() => set('direction', 'long')}
-            >
-              <span className="pp-glyph-tile">+</span>
-              <span>Long</span>
-            </button>
-          </div>
+            );
+          })}
         </div>
       </div>
 
       <div className="pp-form-grid cols-2">
         <div className="pp-field">
-          <div className="pp-field-label">
-            Strike
+          <div className="pp-field-label-row">
+            <span className="pp-field-label">Strike</span>
             {spot != null && spot > 0 && (
-              <span className="pp-field-meta">
-                {' '}· spot {fmtUSD2(spot)}
+              <span className="pp-spot-chip">
+                <span className="pp-spot-chip-lbl">SPOT</span>
+                <span className="pp-spot-chip-val">{fmtUSD2(spot)}</span>
                 {strikePctFromSpot != null && (
-                  <span className={`pp-strike-diff tone-${strikeTone}`}>
-                    {' '}{strikePctFromSpot >= 0 ? '+' : ''}{strikePctFromSpot.toFixed(1)}%
+                  <span className={`pp-spot-chip-diff tone-${strikeTone}`}>
+                    {strikePctFromSpot >= 0 ? '+' : ''}{strikePctFromSpot.toFixed(1)}%
                   </span>
                 )}
               </span>

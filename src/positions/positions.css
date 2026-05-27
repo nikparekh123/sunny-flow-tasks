@@ -2021,24 +2021,113 @@
   font-family: var(--navi-font-mono);
 }
 
-/* Inline meta info appended to a field label — e.g. "Strike · spot $611
- * +2.1%". Kept understated so it doesn't compete with the field title;
- * the percentage badge inside (.pp-strike-diff) is the only colored bit. */
-.pp-field-meta {
-  font-size: 9px;
-  font-weight: 400;
-  letter-spacing: .6px;
-  text-transform: none;
-  color: var(--navi-fg4);
-  font-family: var(--navi-font-mono);
+/* Field-label row — label on the left, optional meta chip on the right.
+ * Used by Strike's spot/% chip so both the label and the chip get
+ * proper sizing (no more crammed 9px monospace). */
+.pp-field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
 }
-.pp-strike-diff {
-  font-weight: 700;
+.pp-field-label-row .pp-field-label {
+  margin-bottom: 0;
+}
+
+/* Spot price chip — sits beside the Strike label. Three pieces:
+ *   • "SPOT" mini-label (low-emphasis)
+ *   • Spot dollar value (mono, normal weight)
+ *   • Signed % from spot (bold, color-toned for OTM/ITM)
+ * Bigger and better-spaced than the old single-line meta string. */
+.pp-spot-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(15, 51, 51, 0.6);
+  border: 1px solid rgba(168, 196, 192, 0.22);
+  border-radius: 4px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  line-height: 1.1;
+}
+.pp-spot-chip-lbl {
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  color: var(--navi-fg4);
+  font-weight: 600;
+}
+.pp-spot-chip-val {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+.pp-spot-chip-diff {
+  font-weight: 800;
+  padding-left: 4px;
+  border-left: 1px solid rgba(168, 196, 192, 0.18);
   margin-left: 2px;
 }
-.pp-strike-diff.tone-otm { color: var(--navi-neon, #6dd1c5); }
-.pp-strike-diff.tone-itm { color: #f08770; }
-.pp-strike-diff.tone-neutral { color: var(--navi-fg3); }
+.pp-spot-chip-diff.tone-otm { color: var(--navi-neon, #6dd1c5); }
+.pp-spot-chip-diff.tone-itm { color: #f08770; }
+.pp-spot-chip-diff.tone-neutral { color: var(--navi-fg3); }
+
+/* ─────────────────── Action picker (Open form) ────────────────────
+ * 2×2 grid of "Sell calls / Buy calls / Sell puts / Buy puts" buttons
+ * replacing the old (Option type, Direction) two-segment combo.
+ * "Sold" tone = neon green accent (premium collected).
+ * "Bought" tone = amber accent (premium paid). */
+.pp-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.pp-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(15, 51, 51, 0.4);
+  border: 1px solid rgba(168, 196, 192, 0.22);
+  border-radius: 6px;
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--navi-fg2);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s var(--navi-ease),
+              background .15s var(--navi-ease);
+}
+.pp-action-btn:hover { border-color: rgba(168, 196, 192, 0.42); }
+.pp-action-btn.on {
+  color: var(--navi-fg1);
+  background: rgba(210, 230, 50, 0.05);
+  border-color: var(--navi-neon, #d2e632);
+  box-shadow: 0 0 0 1px var(--navi-neon, #d2e632) inset;
+}
+.pp-action-glyph {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--navi-font-mono);
+  font-weight: 800;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.pp-action-glyph.tone-sold {
+  background: rgba(109, 209, 197, 0.18);
+  color: var(--navi-neon, #6dd1c5);
+  border: 1px solid rgba(109, 209, 197, 0.42);
+}
+.pp-action-glyph.tone-bought {
+  background: rgba(245, 196, 88, 0.16);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.4);
+}
+.pp-action-lbl {
+  letter-spacing: -0.1px;
+}
 
 /* ─────────────────── Confirm dialog (overlay-on-modal) ───────────────
  * Sits on top of the position modal with its own backdrop. Renders the
