@@ -1387,38 +1387,17 @@ function CloseFields({
     <>
       <div className="pp-field">
         <div className="pp-field-label">Closing which position?</div>
-        <div className="pp-close-picker" role="radiogroup">
-          {liveOpens.map((lo) => {
-            const isSelected = form.target_id === lo.open.id;
-            const sign = lo.open.direction === 'short' ? '−' : '+';
-            return (
-              <label
-                key={lo.open.id}
-                className={'pp-close-pick' + (isSelected ? ' on' : '')}
-              >
-                <input
-                  type="radio"
-                  name="close-target"
-                  value={lo.open.id}
-                  checked={isSelected}
-                  onChange={() => set('target_id', lo.open.id)}
-                  className="pp-close-pick-radio"
-                />
-                <span className="pp-close-pick-dot" aria-hidden />
-                <span className={'pp-mini-glyph ' + (lo.open.direction === 'short' ? 'neg' : 'pos')}>
-                  {lo.open.option_type === 'put' ? 'P' : 'C'}
-                </span>
-                <div className="pp-close-pick-body">
-                  <div className="pp-close-pick-headline">
-                    {sign}{lo.remaining_contracts} {lo.open.option_type.toUpperCase()} ${lo.open.strike}
-                  </div>
-                  <div className="pp-close-pick-sub">
-                    exp {lo.open.expiry} · opened @ ${lo.open.premium}/sh
-                  </div>
-                </div>
-              </label>
-            );
-          })}
+        <div className="pp-leg-picker" role="radiogroup">
+          {liveOpens.map((lo) => (
+            <LegPickerCard
+              key={lo.open.id}
+              trade={lo.open}
+              contracts={lo.remaining_contracts}
+              isSelected={form.target_id === lo.open.id}
+              onSelect={() => set('target_id', lo.open.id)}
+              radioName="close-target"
+            />
+          ))}
         </div>
       </div>
 
@@ -1504,38 +1483,17 @@ function EditFields({
     <>
       <div className="pp-field">
         <div className="pp-field-label">Which trade?</div>
-        <div className="pp-close-picker" role="radiogroup">
-          {opens.map((t) => {
-            const isSelected = form?.target_id === t.id;
-            const sign = t.direction === 'short' ? '−' : '+';
-            return (
-              <label
-                key={t.id}
-                className={'pp-close-pick' + (isSelected ? ' on' : '')}
-              >
-                <input
-                  type="radio"
-                  name="edit-target"
-                  value={t.id}
-                  checked={isSelected}
-                  onChange={() => selectTrade(t.id)}
-                  className="pp-close-pick-radio"
-                />
-                <span className="pp-close-pick-dot" aria-hidden />
-                <span className={'pp-mini-glyph ' + (t.direction === 'short' ? 'neg' : 'pos')}>
-                  {t.option_type === 'put' ? 'P' : 'C'}
-                </span>
-                <div className="pp-close-pick-body">
-                  <div className="pp-close-pick-headline">
-                    {sign}{t.contracts} {t.option_type.toUpperCase()} ${t.strike}
-                  </div>
-                  <div className="pp-close-pick-sub">
-                    exp {t.expiry} · opened {t.trade_date} @ ${t.premium}/sh
-                  </div>
-                </div>
-              </label>
-            );
-          })}
+        <div className="pp-leg-picker" role="radiogroup">
+          {opens.map((t) => (
+            <LegPickerCard
+              key={t.id}
+              trade={t}
+              contracts={t.contracts}
+              isSelected={form?.target_id === t.id}
+              onSelect={() => selectTrade(t.id)}
+              radioName="edit-target"
+            />
+          ))}
         </div>
       </div>
 
@@ -1602,6 +1560,73 @@ function EditFields({
         </>
       )}
     </>
+  );
+}
+
+/** Human label for a leg given its direction + type — used in the
+ *  picker card title chip and the Live-legs rail cards.
+ *
+ *   short call → "CALLS SOLD"    (premium collected, capped upside)
+ *   short put  → "PUTS SOLD"     (premium collected, assignment risk)
+ *   long  call → "CALLS BOUGHT"  (premium paid, levered upside)
+ *   long  put  → "PUTS BOUGHT"   (premium paid, downside protection)
+ *
+ *  Plural form reads naturally on cards that represent 1+ contracts.
+ *  Singular still works grammatically ("1 contract · CALLS SOLD"). */
+function legActionLabel(direction: Direction, optionType: OptionType): string {
+  const kind = optionType === 'call' ? 'CALLS' : 'PUTS';
+  const verb = direction === 'short' ? 'SOLD' : 'BOUGHT';
+  return `${kind} ${verb}`;
+}
+
+/** Direction tone — drives the left-edge accent on cards. Short legs
+ *  generated premium (green); long legs cost premium (amber). Distinct
+ *  from ITM/OTM tone which we keep on a separate badge. */
+function legDirTone(direction: Direction): 'sold' | 'bought' {
+  return direction === 'short' ? 'sold' : 'bought';
+}
+
+/** Picker card body — used in CloseFields + EditFields. One card per
+ *  selectable leg. Side accent reflects direction; title chip names the
+ *  action class; the hero is the strike + contract count so the user
+ *  can spot the leg at a glance. */
+function LegPickerCard({
+  trade, contracts, isSelected, onSelect, radioName,
+}: {
+  trade: OptionTrade;
+  contracts: number;                    // remaining (close) or original (edit)
+  isSelected: boolean;
+  onSelect: () => void;
+  radioName: string;
+}) {
+  const tone = legDirTone(trade.direction);
+  const title = legActionLabel(trade.direction, trade.option_type);
+  return (
+    <label className={`pp-leg-card pp-leg-card-${tone}` + (isSelected ? ' on' : '')}>
+      <input
+        type="radio"
+        name={radioName}
+        value={trade.id}
+        checked={isSelected}
+        onChange={onSelect}
+        className="pp-leg-card-radio"
+      />
+      <span className="pp-leg-card-dot" aria-hidden />
+      <span className={`pp-leg-card-glyph tone-${tone}`}>
+        {trade.option_type === 'put' ? 'P' : 'C'}
+      </span>
+      <div className="pp-leg-card-body">
+        <div className="pp-leg-card-row1">
+          <span className="pp-leg-card-strike">{fmtUSD2(trade.strike)}</span>
+          <span className={`pp-leg-card-title tone-${tone}`}>{title}</span>
+        </div>
+        <div className="pp-leg-card-row2">
+          {contracts} {contracts === 1 ? 'contract' : 'contracts'}
+          {' '}· @ ${trade.premium}/sh
+          {' '}· exp {trade.expiry}
+        </div>
+      </div>
+    </label>
   );
 }
 
