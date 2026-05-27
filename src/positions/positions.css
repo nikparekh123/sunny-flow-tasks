@@ -2021,6 +2021,25 @@
   font-family: var(--navi-font-mono);
 }
 
+/* Inline meta info appended to a field label — e.g. "Strike · spot $611
+ * +2.1%". Kept understated so it doesn't compete with the field title;
+ * the percentage badge inside (.pp-strike-diff) is the only colored bit. */
+.pp-field-meta {
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: .6px;
+  text-transform: none;
+  color: var(--navi-fg4);
+  font-family: var(--navi-font-mono);
+}
+.pp-strike-diff {
+  font-weight: 700;
+  margin-left: 2px;
+}
+.pp-strike-diff.tone-otm { color: var(--navi-neon, #6dd1c5); }
+.pp-strike-diff.tone-itm { color: #f08770; }
+.pp-strike-diff.tone-neutral { color: var(--navi-fg3); }
+
 .pp-input {
   font-family: var(--navi-font-sans);
   font-size: 14px;

@@ -660,7 +660,11 @@ export function PositionDetailModal({
         <div className="pp-sidecar">
           <div className="pp-form">
             {tab === 'open' && (
-              <OpenFields form={openForm} setForm={setOpenForm} />
+              <OpenFields
+                form={openForm}
+                setForm={setOpenForm}
+                spot={position.quantity > 0 ? position.market_value / position.quantity : null}
+              />
             )}
             {tab === 'close' && (
               <CloseFields
@@ -982,13 +986,42 @@ export function PositionDetailModal({
 // ───────────────────────── Sub-components
 
 function OpenFields({
-  form, setForm,
+  form, setForm, spot,
 }: {
   form: OpenForm;
   setForm: (f: OpenForm) => void;
+  spot: number | null;
 }) {
   const set = <K extends keyof OpenForm>(k: K, v: OpenForm[K]) =>
     setForm({ ...form, [k]: v });
+
+  // Strike-vs-spot annotation. Shows the percentage gap between the
+  // entered strike and the live spot price so the user can see at a
+  // glance how OTM/ITM the contract is being sold. Direction-aware:
+  //   • Short call OR long put → wants strike > spot (OTM is positive)
+  //   • Short put  OR long call → wants strike < spot (OTM is negative)
+  // We always render the signed % from spot; the tone (otm/itm) flags
+  // whether that's "favorable" given the position type + direction.
+  const strikeN = parseFloat(form.strike);
+  const strikePctFromSpot = (spot && spot > 0 && strikeN > 0)
+    ? ((strikeN - spot) / spot) * 100
+    : null;
+  const isCallish = form.option_type === 'call';
+  const isShort   = form.direction === 'short';
+  // "Favorable OTM" rules-of-thumb for visual tone:
+  //   short call → strike above spot       (positive %)
+  //   short put  → strike below spot       (negative %)
+  //   long call  → strike below spot       (already ITM-leaning long)
+  //   long put   → strike above spot       (already ITM-leaning long)
+  const favorableSign =
+    (isShort && isCallish)  ? +1 :
+    (isShort && !isCallish) ? -1 :
+    (!isShort && isCallish) ? -1 :
+                              +1;
+  const strikeTone =
+    strikePctFromSpot == null ? 'neutral'
+    : Math.sign(strikePctFromSpot) === favorableSign ? 'otm'
+    : 'itm';
 
   return (
     <>
@@ -1034,7 +1067,19 @@ function OpenFields({
 
       <div className="pp-form-grid cols-2">
         <div className="pp-field">
-          <div className="pp-field-label">Strike</div>
+          <div className="pp-field-label">
+            Strike
+            {spot != null && spot > 0 && (
+              <span className="pp-field-meta">
+                {' '}· spot {fmtUSD2(spot)}
+                {strikePctFromSpot != null && (
+                  <span className={`pp-strike-diff tone-${strikeTone}`}>
+                    {' '}{strikePctFromSpot >= 0 ? '+' : ''}{strikePctFromSpot.toFixed(1)}%
+                  </span>
+                )}
+              </span>
+            )}
+          </div>
           <MoneyInput value={form.strike} onChange={(v) => set('strike', v)} placeholder="0.00" />
         </div>
         <div className="pp-field">
