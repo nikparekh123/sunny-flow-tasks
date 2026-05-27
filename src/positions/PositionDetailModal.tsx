@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import {
   closeRealizedPL,
   fmtUSD,
@@ -962,66 +964,14 @@ export function PositionDetailModal({
           </div>
 
           <aside className="pp-rail">
-            <div className="pp-rail-section">
-              <div className="pp-rail-lbl">Position</div>
-              <div className="pp-rail-row">
-                <span className="k">Shares</span>
-                <span className="v">{fmtQty(position.quantity)}</span>
-              </div>
-              <div className="pp-rail-row">
-                <span className="k">Avg basis</span>
-                <span className="v">{fmtUSD2(position.avg_cost)}</span>
-              </div>
-              <div className="pp-rail-row">
-                <span className="k">Mkt value</span>
-                <span className="v">{fmtUSD(position.market_value)}</span>
-              </div>
-            </div>
-
-            <div className="pp-rail-divider" />
-
-            {/* §4 — Risk card. Hidden when no flags fire so the rail
-                stays calm; appears with a count hero + dot-list when
-                anything needs attention. */}
-            {(() => {
-              const spotPrice = position.quantity > 0
-                ? position.market_value / position.quantity
-                : null;
-              const flags = computeRiskFlags(liveOpens, spotPrice);
-              if (flags.length === 0) return null;
-              return (
-                <>
-                  <RiskCard flags={flags} />
-                  <div className="pp-rail-divider" />
-                </>
-              );
-            })()}
-
-            <div className="pp-rail-section">
-              <div className="pp-rail-lbl">Live positions · {liveOpens.length}</div>
-              {liveOpens.length === 0 ? (
-                <div className="pp-rail-sub">none open</div>
-              ) : (
-                <div className="pp-rail-livestack">
-                  {liveOpens.map((lo) => (
-                    <LiveLegCard
-                      key={lo.open.id}
-                      leg={lo}
-                      spot={position.quantity > 0 ? position.market_value / position.quantity : null}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* §5 — Activity card. Pure summary from the live legs we
-                already have in props; no extra fetch. */}
-            {liveOpens.length > 0 && (
-              <>
-                <div className="pp-rail-divider" />
-                <ActivityCard liveOpens={liveOpens} netOptionsCash={position.net_options_cash} />
-              </>
-            )}
+            {/* One graph-first card up top — Weekly income | Cost toggle.
+                Replaces the old POSITION + Risk + Live legs + Activity
+                stack which had outgrown the modal height. */}
+            <RailGraphCard
+              ticker={position.ticker}
+              avgCost={position.avg_cost}
+              effectiveCost={position.effective_cost}
+            />
 
             <div className="pp-rail-divider" />
 
@@ -1578,6 +1528,215 @@ function EditFields({
           </div>
         </>
       )}
+    </>
+  );
+}
+
+// ─────────────────── RailGraphCard ──────────────────────────────
+// Single rail card with a [Weekly income] / [Cost] toggle. Graph-first;
+// numbers are the only supporting text.
+//
+//   Weekly income view: 12-week bar chart of premium collected from
+//   sold legs (calls + puts) on this ticker. Premium counts on the
+//   trade_date of each short-open; closes that returned premium are
+//   netted out from the week they closed in. Hero = last 7-day total.
+//
+//   Cost view: avg cost vs effective cost as two side-by-side bars
+//   (taller = higher dollars). Hero = % reduction (positive = options
+//   activity has paid down the basis; negative = you've paid more in
+//   premium than you've taken back).
+//
+// Data source: option_trades filtered to this ticker. One query;
+// cached by ticker so re-opening the modal is instant.
+
+type GraphView = 'income' | 'cost';
+
+function RailGraphCard({
+  ticker, avgCost, effectiveCost,
+}: {
+  ticker: string;
+  avgCost: number;
+  effectiveCost: number;
+}) {
+  const [view, setView] = useState<GraphView>('income');
+
+  // Per-ticker trade pull. Same option_trades table the rest of the
+  // module uses; cached separately from the global trades list so this
+  // modal doesn't have to wait for the (much bigger) full pull.
+  const { data: trades = [] } = useQuery({
+    queryKey: ['option_trades_for_ticker', ticker],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('option_trades' as never)
+        .select('*')
+        .eq('ticker', ticker)
+        .order('trade_date', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as unknown as OptionTrade[];
+    },
+  });
+
+  return (
+    <div className="pp-railcard">
+      {/* Toggle strip — pill style like the example */}
+      <div className="pp-railcard-toggle" role="tablist">
+        <button
+          role="tab"
+          className={'pp-railcard-toggle-btn' + (view === 'income' ? ' on' : '')}
+          onClick={() => setView('income')}
+        >
+          Weekly income
+        </button>
+        <button
+          role="tab"
+          className={'pp-railcard-toggle-btn' + (view === 'cost' ? ' on' : '')}
+          onClick={() => setView('cost')}
+        >
+          Cost
+        </button>
+      </div>
+
+      {view === 'income'
+        ? <WeeklyIncomeView trades={trades} />
+        : <CostView avgCost={avgCost} effectiveCost={effectiveCost} />}
+    </div>
+  );
+}
+
+/** 12 weeks of premium income. Premium collected = short opens; closing
+ *  costs (buying back the short) net against the close week. */
+function WeeklyIncomeView({ trades }: { trades: OptionTrade[] }) {
+  const WEEKS = 12;
+  // Buckets: an array of {weekStartIso, premium} for the last WEEKS
+  // weeks (oldest first). "Week" = 7-day window aligned to today.
+  const buckets = useMemo(() => {
+    const today = new Date();
+    // Anchor to the start of today (UTC) so bucket math doesn't drift
+    // by hours of the day the user opens the modal.
+    today.setUTCHours(0, 0, 0, 0);
+    const out: Array<{ start: Date; label: string; dollars: number }> = [];
+    for (let i = WEEKS - 1; i >= 0; i--) {
+      const start = new Date(today);
+      start.setUTCDate(start.getUTCDate() - (i + 1) * 7 + 1);
+      const label = `${start.getUTCMonth() + 1}/${start.getUTCDate()}`;
+      out.push({ start, label, dollars: 0 });
+    }
+    // Bucket a trade into a week. Short opens add premium; closes net
+    // against the week the close happened.
+    for (const t of trades) {
+      const dt = new Date(t.trade_date + 'T00:00:00Z');
+      const diffDays = Math.floor((today.getTime() - dt.getTime()) / 86400000);
+      const weekIdx = WEEKS - 1 - Math.floor(diffDays / 7);
+      if (weekIdx < 0 || weekIdx >= WEEKS) continue;
+      const dollars = t.contracts * 100 * t.premium;
+      if (t.action === 'open' && t.direction === 'short') {
+        out[weekIdx].dollars += dollars;             // premium IN
+      } else if (t.action === 'close' && t.direction === 'short') {
+        out[weekIdx].dollars -= dollars;             // bought back, premium OUT
+      }
+      // (Long opens/closes are excluded — they're costs, not income.)
+    }
+    return out;
+  }, [trades]);
+
+  const lastWeek = buckets[buckets.length - 1]?.dollars ?? 0;
+  const total = buckets.reduce((s, b) => s + b.dollars, 0);
+  const avg = total / WEEKS;
+  const max = Math.max(1, ...buckets.map((b) => Math.abs(b.dollars)));
+
+  return (
+    <>
+      <div className="pp-railcard-hero">
+        <div className="pp-railcard-lbl">Last 7 days</div>
+        <div className={'pp-railcard-num ' + (lastWeek > 0 ? 'pos' : lastWeek < 0 ? 'neg' : '')}>
+          {lastWeek === 0 ? '$0'
+            : lastWeek > 0 ? fmtUSD(lastWeek)
+            : '−' + fmtUSD(Math.abs(lastWeek))}
+        </div>
+      </div>
+
+      {/* 12-week bar chart — CSS heights, no chart lib needed.
+          Positive = neon, negative = red. Min 2px so empty weeks still
+          draw a baseline tick. */}
+      <div className="pp-railcard-bars">
+        {buckets.map((b, i) => {
+          const heightPct = Math.max(2, (Math.abs(b.dollars) / max) * 100);
+          const tone = b.dollars > 0 ? 'pos' : b.dollars < 0 ? 'neg' : 'zero';
+          return (
+            <div key={i} className="pp-railcard-bar-col" title={`${b.label}: ${b.dollars >= 0 ? fmtUSD(b.dollars) : '−' + fmtUSD(Math.abs(b.dollars))}`}>
+              <div className={`pp-railcard-bar tone-${tone}`} style={{ height: `${heightPct}%` }} />
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="pp-railcard-rows">
+        <div className="pp-railcard-row">
+          <span className="k">12-wk total</span>
+          <span className={'v ' + (total > 0 ? 'pos' : total < 0 ? 'neg' : '')}>
+            {total >= 0 ? fmtUSD(total) : '−' + fmtUSD(Math.abs(total))}
+          </span>
+        </div>
+        <div className="pp-railcard-row">
+          <span className="k">Avg / week</span>
+          <span className="v">{avg >= 0 ? fmtUSD(avg) : '−' + fmtUSD(Math.abs(avg))}</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** Avg cost vs effective cost as two bars. Effective cost = avg cost
+ *  minus net options cash per share (already computed upstream). */
+function CostView({
+  avgCost, effectiveCost,
+}: {
+  avgCost: number; effectiveCost: number;
+}) {
+  // Percentage reduction — positive means options activity has paid
+  // down the basis; negative means premium outlays raised it.
+  const reductionPct = avgCost > 0
+    ? ((avgCost - effectiveCost) / avgCost) * 100
+    : 0;
+  const reductionTone = reductionPct > 0 ? 'pos' : reductionPct < 0 ? 'neg' : '';
+  // Bars: tallest equals max value so the comparison is honest.
+  const maxVal = Math.max(avgCost, effectiveCost) || 1;
+  const avgHeight = (avgCost / maxVal) * 100;
+  const effHeight = (effectiveCost / maxVal) * 100;
+
+  return (
+    <>
+      <div className="pp-railcard-hero">
+        <div className="pp-railcard-lbl">Net vs avg</div>
+        <div className={'pp-railcard-num ' + reductionTone}>
+          {reductionPct > 0 ? '−' : reductionPct < 0 ? '+' : ''}{Math.abs(reductionPct).toFixed(1)}%
+        </div>
+      </div>
+
+      {/* Two side-by-side vertical bars. Heights scaled to max($avg, $eff). */}
+      <div className="pp-railcard-costbars">
+        <div className="pp-railcard-costcol">
+          <div className="pp-railcard-costbar tone-avg" style={{ height: `${avgHeight}%` }}>
+            <span className="pp-railcard-costbar-val">{fmtUSD2(avgCost)}</span>
+          </div>
+          <div className="pp-railcard-costcol-lbl">AVG</div>
+        </div>
+        <div className="pp-railcard-costcol">
+          <div className={`pp-railcard-costbar tone-eff ${reductionTone}`} style={{ height: `${effHeight}%` }}>
+            <span className="pp-railcard-costbar-val">{fmtUSD2(effectiveCost)}</span>
+          </div>
+          <div className="pp-railcard-costcol-lbl">NET</div>
+        </div>
+      </div>
+
+      <div className="pp-railcard-rows">
+        <div className="pp-railcard-row">
+          <span className="k">Premium impact / sh</span>
+          <span className={'v ' + reductionTone}>
+            {reductionPct > 0 ? '−' : '+'}{fmtUSD2(Math.abs(avgCost - effectiveCost))}
+          </span>
+        </div>
+      </div>
     </>
   );
 }

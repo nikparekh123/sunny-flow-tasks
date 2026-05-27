@@ -2224,6 +2224,184 @@
   background: rgba(240, 135, 112, 0.28);
 }
 
+/* ─────────────────── Rail graph card ────────────────────────────────
+ * Single visual-first card with [Weekly income] / [Cost] toggle.
+ * Replaces the old POSITION + Risk + Live legs + Activity stack so the
+ * modal stays the original height. Big number + graph + minimal rows. */
+.pp-railcard {
+  border: 1px solid rgba(168, 196, 192, 0.18);
+  border-radius: 6px;
+  padding: 12px;
+  background: rgba(15, 51, 51, 0.4);
+}
+
+.pp-railcard-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  background: rgba(4, 16, 14, 0.55);
+  border-radius: 999px;
+  margin-bottom: 14px;
+}
+.pp-railcard-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .4px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all .15s var(--navi-ease);
+}
+.pp-railcard-toggle-btn:hover { color: var(--navi-fg1); }
+.pp-railcard-toggle-btn.on {
+  background: var(--navi-neon, #d2e632);
+  color: #04100e;
+}
+
+.pp-railcard-hero {
+  text-align: center;
+  margin: 6px 0 12px;
+}
+.pp-railcard-lbl {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-bottom: 4px;
+}
+.pp-railcard-num {
+  font-family: var(--navi-font-mono);
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--navi-fg1);
+  letter-spacing: -0.6px;
+}
+.pp-railcard-num.pos { color: var(--navi-neon, #6dd1c5); }
+.pp-railcard-num.neg { color: #f08770; }
+
+/* Weekly bar chart — 12 columns, CSS heights. No chart lib. */
+.pp-railcard-bars {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  align-items: end;
+  gap: 3px;
+  height: 70px;
+  padding: 4px 0 6px;
+  border-bottom: 1px dashed rgba(168, 196, 192, 0.18);
+  margin-bottom: 10px;
+}
+.pp-railcard-bar-col {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+}
+.pp-railcard-bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px;
+  transition: opacity .15s var(--navi-ease);
+}
+.pp-railcard-bar.tone-pos  { background: var(--navi-neon, #6dd1c5); }
+.pp-railcard-bar.tone-neg  { background: #f08770; }
+.pp-railcard-bar.tone-zero { background: rgba(168, 196, 192, 0.2); }
+.pp-railcard-bar-col:hover .pp-railcard-bar { opacity: 0.78; }
+
+/* Cost view — two big bars side by side, label below each. */
+.pp-railcard-costbars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: end;
+  height: 130px;
+  padding: 4px 6px 8px;
+  border-bottom: 1px dashed rgba(168, 196, 192, 0.18);
+  margin-bottom: 10px;
+}
+.pp-railcard-costcol {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  align-items: stretch;
+  justify-content: flex-end;
+}
+.pp-railcard-costbar {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px 4px 0;
+  border-radius: 4px 4px 0 0;
+  border-top: 2px solid;
+  min-height: 28px;
+}
+.pp-railcard-costbar.tone-avg {
+  background: rgba(245, 196, 88, 0.18);
+  border-top-color: #f5c458;
+}
+.pp-railcard-costbar.tone-eff {
+  background: rgba(168, 196, 192, 0.18);
+  border-top-color: rgba(168, 196, 192, 0.5);
+}
+.pp-railcard-costbar.tone-eff.pos {
+  background: rgba(109, 209, 197, 0.18);
+  border-top-color: var(--navi-neon, #6dd1c5);
+}
+.pp-railcard-costbar.tone-eff.neg {
+  background: rgba(240, 135, 112, 0.18);
+  border-top-color: #f08770;
+}
+.pp-railcard-costbar-val {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--navi-fg1);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+}
+.pp-railcard-costcol-lbl {
+  text-align: center;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  color: var(--navi-fg3);
+  margin-top: 6px;
+}
+
+/* Footer rows beneath the graph — same shape across both views. */
+.pp-railcard-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pp-railcard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+}
+.pp-railcard-row .k {
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+}
+.pp-railcard-row .v {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+.pp-railcard-row .v.pos { color: var(--navi-neon, #6dd1c5); }
+.pp-railcard-row .v.neg { color: #f08770; }
+
 /* ─────────────────── Leg picker cards ──────────────────────────────
  * Replaces the bare-radio "+3 PUT $240" rows in CloseFields and
  * EditFields. Each option shows up as a small card with a left edge
