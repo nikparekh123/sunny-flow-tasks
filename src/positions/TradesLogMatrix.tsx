@@ -198,16 +198,37 @@ export function TradesLogMatrix({
     };
   }, [tradesByTicker]);
 
-  const putCostByTicker = useMemo(() => {
+  // Denominator for the "% of $X" footer: sum of premium PAID on options
+  // that are STILL OPEN (calls + puts, long-direction only — long means
+  // we wrote the cheque). Excludes:
+  //   • short legs (we received premium on those, not paid)
+  //   • opens that have been fully closed (the capital is no longer at risk)
+  // Per-row equivalent feeds the right-column "X% of $Y" line, so users
+  // can read realized P&L as a fraction of currently-outlaid premium.
+  const openPaidByTicker = useMemo(() => {
     const m = new Map<string, number>();
     for (const [ticker, list] of tradesByTicker) {
-      let cost = 0;
+      // Build a per-open closed-contracts tally so we can detect which
+      // opens are still live. An open is "still open" when the contracts
+      // its closes account for is less than the original contract count.
+      const closedQtyByOpen = new Map<string, number>();
       for (const t of list) {
-        if (t.action === 'open' && t.option_type === 'put' && t.direction === 'long') {
-          cost += t.contracts * 100 * t.premium;
+        if (t.action === 'close' && t.closes_trade_id) {
+          closedQtyByOpen.set(
+            t.closes_trade_id,
+            (closedQtyByOpen.get(t.closes_trade_id) ?? 0) + t.contracts,
+          );
         }
       }
-      m.set(ticker, cost);
+      let paid = 0;
+      for (const t of list) {
+        if (t.action !== 'open' || t.direction !== 'long') continue;
+        const closedQty = closedQtyByOpen.get(t.id) ?? 0;
+        const stillOpenQty = t.contracts - closedQty;
+        if (stillOpenQty <= 0) continue;          // fully closed — skip
+        paid += stillOpenQty * 100 * t.premium;
+      }
+      m.set(ticker, paid);
     }
     return m;
   }, [tradesByTicker]);
@@ -335,9 +356,9 @@ export function TradesLogMatrix({
     return { columnTotals: totals, columnSubLabels: subs };
   }, [sorted, tradesByTicker, shareSellsByTicker, WEEK_COUNT, slotValueForOpen]);
 
-  const grandPutCost = useMemo(
-    () => Array.from(putCostByTicker.values()).reduce((s, v) => s + v, 0),
-    [putCostByTicker],
+  const grandOpenPaid = useMemo(
+    () => Array.from(openPaidByTicker.values()).reduce((s, v) => s + v, 0),
+    [openPaidByTicker],
   );
   const grandOptionRealized = useMemo(
     () => sorted.reduce((s, r) => s + (realizedByTicker.get(r.ticker) ?? 0), 0),
@@ -717,13 +738,13 @@ export function TradesLogMatrix({
                       )}
                     </div>
                     {(() => {
-                      const putCost = putCostByTicker.get(r.ticker) ?? 0;
-                      if (putCost <= 0) return null;
-                      const pct = (realized / putCost) * 100;
+                      const openPaid = openPaidByTicker.get(r.ticker) ?? 0;
+                      if (openPaid <= 0) return null;
+                      const pct = (realized / openPaid) * 100;
                       return (
                         <div className="gl-tot-sub">
                           {pct >= 0 ? '+' : ''}
-                          {pct.toFixed(0)}% of {fmtCompact(putCost)}
+                          {pct.toFixed(0)}% of {fmtCompact(openPaid)}
                         </div>
                       );
                     })()}
@@ -797,10 +818,10 @@ export function TradesLogMatrix({
                     ? fmtUSD(grandRealized)
                     : '−' + fmtUSD(Math.abs(grandRealized))}
                 </div>
-                {grandPutCost > 0 && (
+                {grandOpenPaid > 0 && (
                   <div className="gl-tot-sub">
-                    {((grandRealized / grandPutCost) * 100).toFixed(0)}% of{' '}
-                    {fmtCompact(grandPutCost)}
+                    {((grandRealized / grandOpenPaid) * 100).toFixed(0)}% of{' '}
+                    {fmtCompact(grandOpenPaid)}
                   </div>
                 )}
               </td>
