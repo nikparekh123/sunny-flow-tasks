@@ -199,6 +199,83 @@
   min-height: 200px;
 }
 
+/* ─────────────────── TODAY card ─────────────────── */
+
+.dash2-today-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dash2-today-row {
+  position: relative;
+  padding: 12px 14px 12px 18px;
+  border-radius: 6px;
+  background: rgba(4, 16, 14, 0.55);
+  border: 1px solid rgba(168, 196, 192, 0.16);
+}
+.dash2-today-row::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 6px 0 0 6px;
+}
+.dash2-today-row.tone-alert::before  { background: var(--dash-neg); }
+.dash2-today-row.tone-income::before { background: var(--dash-pos); }
+.dash2-today-row.tone-warn::before   { background: var(--dash-warn); }
+.dash2-today-row.tone-info::before   { background: rgba(168, 196, 240, 0.7); }
+
+.dash2-today-row-headline {
+  font-family: var(--navi-font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.25;
+}
+.dash2-today-row.tone-alert  .dash2-today-row-headline { color: var(--dash-neg); }
+.dash2-today-row.tone-income .dash2-today-row-headline { color: var(--dash-pos); }
+.dash2-today-row.tone-warn   .dash2-today-row-headline { color: var(--dash-warn); }
+
+.dash2-today-row-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3, #8a9b96);
+  margin-top: 4px;
+  letter-spacing: .2px;
+}
+
+/* Calm / empty state — big "0" with a quiet message. Keeps the card
+   visually balanced so it doesn't collapse into a blank rectangle. */
+.dash2-today-clear {
+  text-align: center;
+  padding: 24px 0;
+}
+.dash2-today-clear-num {
+  font-family: var(--navi-font-mono);
+  font-size: 64px;
+  font-weight: 800;
+  color: var(--dash-pos);
+  line-height: 1;
+  letter-spacing: -2px;
+}
+.dash2-today-clear-lbl {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-top: 8px;
+}
+.dash2-today-clear-sub {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  color: var(--navi-fg4, #56655f);
+  margin-top: 14px;
+}
+
 /* ─────────────────── TOOLS RAIL (footer) ─────────────────── */
 
 .dash2-toolsrail {

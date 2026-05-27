@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { signOut, getDisplayName } from "@/sunnyfi/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
+import { TodayCard } from "@/sunnyfi/dashboard/TodayCard";
 import "./dashboard.css";
 
 // ─────────────────────── Tools rail (footer) ─────────────────────
@@ -240,7 +241,7 @@ export default function Dashboard() {
           Each <Placeholder> is replaced in a subsequent PR. The grid
           spans are fixed here so the layout never shifts as cards land. */}
       <main className="dash2-grid">
-        <Placeholder span={4} title="TODAY"             label="PR-2" />
+        <TodayCard />
         <Placeholder span={8} title="PORTFOLIO PULSE"   label="PR-3" />
         <Placeholder span={8} title="THIS WEEK"         label="PR-4" />
         <Placeholder span={4} title="MACRO"             label="PR-5" />
