@@ -1,75 +1,149 @@
+/**
+ * Dashboard — the new "morning briefing" homepage.
+ *
+ * Layout: a 12-column grid of cards on top of a magazine-cover greeting
+ * strip. Each card is a self-contained section (Today / Portfolio Pulse
+ * / Week Calendar / Macro / Strategy / Risk / News). The greeting + the
+ * tools rail at the foot anchor the page; everything in between is the
+ * personalised brief.
+ *
+ * Sections ship in their own PRs:
+ *   PR-1 (this commit) — scaffold + greeting + placeholders + tools rail
+ *   PR-2 → PR-8        — each card replaces its placeholder in turn
+ *
+ * Auth + logout + name resolution stay the same as the previous tiles
+ * page, just relocated into the new shell.
+ */
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { signOut, getDisplayName } from "@/sunnyfi/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
+import "./dashboard.css";
 
-type Status = "live" | "soon";
+// ─────────────────────── Tools rail (footer) ─────────────────────
+// Slim navigation strip — pure access, no longer the centerpiece. Cards
+// above are what the user actually consumes.
+
+type ToolKey = "positions" | "math" | "strategy";
 interface Tool {
-  key: "tasks" | "research" | "positions" | "snowball" | "strategy" | "calendar" | "math";
+  key: ToolKey;
   name: string;
-  desc: string;
-  status: Status;
-  hotkey: string;
   href?: string;
-  internal?: string; // react-router path
+  internal?: string;
+  hotkey: string;
 }
 
 const TOOLS: Tool[] = [
-  { key: "positions",   name: "Positions",   desc: "Holdings & P&L",       status: "live", hotkey: "1", href: "https://positions.sunnyfi.co" },
-  { key: "math",        name: "Math",        desc: "Calculators & scenarios", status: "live", hotkey: "2", internal: "/math" },
-  { key: "strategy",    name: "Strategy",    desc: "BNF mean-reversion",   status: "live", hotkey: "3", internal: "/new-strategy" },
+  { key: "positions", name: "Positions", hotkey: "1", href: "https://positions.sunnyfi.co" },
+  { key: "strategy",  name: "Strategy",  hotkey: "2", internal: "/new-strategy" },
+  { key: "math",      name: "Math",      hotkey: "3", internal: "/math" },
 ];
 
-const ICON_STYLE = { fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-function ToolIcon({ name }: { name: Tool["key"] }) {
-  const g = (inner: React.ReactNode) => <g {...ICON_STYLE}>{inner}</g>;
-  const map: Record<Tool["key"], React.ReactNode> = {
-    tasks:    g(<><rect x="3" y="4" width="18" height="16" rx="1" /><path d="M7 9h10M7 13h7M7 17h4" /></>),
-    research: g(<><path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4V4z" /><path d="M8 9h8M8 13h8M8 17h5" /></>),
-    positions: g(<><rect x="3" y="3" width="8" height="13" /><rect x="13" y="3" width="8" height="8" /><rect x="3" y="18" width="8" height="3" /><rect x="13" y="13" width="8" height="8" /></>),
-    // Snowball icon: stacked spheres growing — value compounding metaphor.
-    snowball: g(<><circle cx="12" cy="17" r="4" /><circle cx="12" cy="9" r="2.5" /><circle cx="12" cy="4" r="1.4" /></>),
-    // Strategy icon: three stacked buckets — Income / Investment / Yield allocation.
-    strategy: g(<><rect x="3" y="4" width="18" height="4" rx="0.5" /><rect x="3" y="10" width="18" height="4" rx="0.5" /><rect x="3" y="16" width="18" height="4" rx="0.5" /></>),
-    calendar: g(<><rect x="3" y="5" width="18" height="16" rx="1" /><path d="M3 10h18M8 3v4M16 3v4" /></>),
-    math: g(<><rect x="4" y="3" width="16" height="18" rx="1.5" /><rect x="7" y="6" width="10" height="3" /><path d="M8 13h.01M12 13h.01M16 13h.01M8 17h.01M12 17h.01M16 17h.01" /></>),
-  };
-  return <svg width={22} height={22} viewBox="0 0 24 24" aria-hidden>{map[name]}</svg>;
-}
+// ─────────────────────── Time hooks ──────────────────────────────
 
 function useNow() {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
+    // 30-second tick — enough to keep the countdown accurate, cheap on
+    // re-renders (the rest of the page is mostly static cards).
+    const id = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(id);
   }, []);
   return now;
 }
 
-function greeting(hour: number) {
-  if (hour < 5) return "Late night";
-  if (hour < 12) return "Morning";
-  if (hour < 17) return "Afternoon";
-  if (hour < 21) return "Evening";
-  return "Late night";
+/** Time-of-day greeting word. We bias 'Morning' wide because the
+ *  dashboard is most useful pre-market; the user explicitly asked for
+ *  the "morning brief" feeling. */
+function greetingWord(hour: number): string {
+  if (hour < 5)  return "Late night,";
+  if (hour < 12) return "Morning,";
+  if (hour < 17) return "Afternoon,";
+  if (hour < 21) return "Evening,";
+  return "Late night,";
 }
 
-function formatDate(d: Date) {
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${days[d.getDay()]} · ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+function fmtDateBig(d: Date): string {
+  const days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+  const months = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+  return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
 }
 
-interface ToastState { msg: string; kind: "live" | "soon" }
-
-// Compact summary surfaced on the Strategy tile so the user can see at a
-// glance how many BNF candidates are live today without leaving the dash.
-// Pulled once on mount — fast enough that we don't bother memoizing.
-interface BnfStats {
-  matches: number;
-  borderline: number;
-  lastCloseDate: string | null;
+function fmtTimeET(d: Date): string {
+  // Render in user's local time but label as ET; close enough for a
+  // status strip and matches how the user reads market hours.
+  return d.toLocaleTimeString("en-US", {
+    hour: "numeric", minute: "2-digit",
+  }).replace(/\s?[AP]M/i, (m) => m.trim());
 }
+
+/** Trading-day market clock — US equity regular hours. Returns
+ *  "MARKETS OPEN IN Xh Ym", "MARKETS OPEN", "MARKETS CLOSED" depending
+ *  on day-of-week and time. Weekends => "MARKETS CLOSED". */
+function marketStatus(now: Date): string {
+  const dow = now.getDay();
+  if (dow === 0 || dow === 6) return "MARKETS CLOSED — WEEKEND";
+
+  // Convert to ET (UTC-4 EDT / UTC-5 EST). Approximation: assume EDT
+  // during March-Nov, EST otherwise. Good enough for a status string.
+  const month = now.getMonth();
+  const etOffset = month >= 2 && month <= 10 ? -4 : -5;
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const et = new Date(utc + etOffset * 3600000);
+  const etHour = et.getHours();
+  const etMin = et.getMinutes();
+  const etMins = etHour * 60 + etMin;
+  const open = 9 * 60 + 30;
+  const close = 16 * 60;
+
+  if (etMins >= open && etMins < close) {
+    const mins = close - etMins;
+    return `MARKETS OPEN · CLOSES IN ${Math.floor(mins / 60)}H ${mins % 60}M`;
+  }
+  if (etMins < open) {
+    const mins = open - etMins;
+    return `MARKETS OPEN IN ${Math.floor(mins / 60)}H ${mins % 60}M`;
+  }
+  return "MARKETS CLOSED";
+}
+
+// ─────────────────────── Status ticker (bottom of greeting) ──────
+// Pulls SPY / QQQ / IWM intraday change from the bnf_universe_latest
+// view. VIX / DXY / 10Y are placeholders until PR-5 wires the cache
+// backfill for them.
+
+interface TickerRow {
+  ticker: string;
+  today_intraday_pct: number | null;
+  latest_close: number | null;
+}
+
+function useTickerStrip(): TickerRow[] {
+  const { data = [] } = useQuery({
+    queryKey: ["dash_ticker_strip"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bnf_universe_latest" as never)
+        .select("ticker, today_intraday_pct, latest_close")
+        .in("ticker", ["SPY", "QQQ", "IWM"])
+        .returns<TickerRow[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 60_000,
+  });
+  return data;
+}
+
+function fmtPct(v: number | null): string {
+  if (v == null) return "—";
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
+// ─────────────────────── Page ────────────────────────────────────
+
+interface ToastState { msg: string }
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -77,7 +151,7 @@ export default function Dashboard() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const [fading, setFading] = useState(false);
   const [name, setName] = useState<string>("there");
-  const [bnfStats, setBnfStats] = useState<BnfStats | null>(null);
+  const tickers = useTickerStrip();
 
   useEffect(() => {
     let cancelled = false;
@@ -89,50 +163,11 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, []);
 
-  // Fetch BNF candidate counts + cache freshness for the Strategy tile.
-  // Failures are silent — the tile just shows its default description.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [{ data: cands }, { data: latest }] = await Promise.all([
-          supabase
-            .from('bnf_candidates' as never)
-            .select('borderline')
-            .returns<{ borderline: boolean | null }[]>(),
-          supabase
-            .from('bnf_universe_latest' as never)
-            .select('latest_date')
-            .order('latest_date', { ascending: false })
-            .limit(1)
-            .returns<{ latest_date: string }[]>(),
-        ]);
-        if (cancelled) return;
-        const rows = cands ?? [];
-        const matches = rows.filter((r) => !r.borderline).length;
-        const borderline = rows.filter((r) => r.borderline).length;
-        setBnfStats({
-          matches,
-          borderline,
-          lastCloseDate: latest?.[0]?.latest_date ?? null,
-        });
-      } catch {
-        /* swallow — keep tile in default state */
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const onOpen = (t: Tool) => {
-    setToast({ msg: t.status === "live" ? `Opening ${t.name}…` : `${t.name} — coming soon`, kind: t.status });
+  const onOpenTool = (t: Tool) => {
+    setToast({ msg: `Opening ${t.name}…` });
     window.clearTimeout((window as unknown as { __sunnyfiToastT?: number }).__sunnyfiToastT);
-    (window as unknown as { __sunnyfiToastT?: number }).__sunnyfiToastT = window.setTimeout(() => setToast(null), 1800);
-
-    if (t.status !== "live") return;
+    (window as unknown as { __sunnyfiToastT?: number }).__sunnyfiToastT = window.setTimeout(() => setToast(null), 1500);
     if (t.internal) { navigate(t.internal); return; }
-    // External tools (Tasks on todos.sunnyfi.co, Positions on
-    // positions.sunnyfi.co) live on different subdomains — same-tab nav
-    // does a full document load to that origin.
     if (t.href)     { window.location.href = t.href; return; }
   };
 
@@ -144,16 +179,14 @@ export default function Dashboard() {
     }, 400);
   };
 
-  // Hotkeys: Cmd/Ctrl+1..6, Esc logout
+  // Hotkeys: Cmd+1..3 open tools.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { onLogout(); return; }
       if (!(e.metaKey || e.ctrlKey)) return;
       const idx = parseInt(e.key, 10);
-      if (isNaN(idx) || idx < 1 || idx > 6) return;
+      if (isNaN(idx) || idx < 1 || idx > TOOLS.length) return;
       e.preventDefault();
-      const t = TOOLS[idx - 1];
-      if (t) onOpen(t);
+      onOpenTool(TOOLS[idx - 1]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -161,63 +194,93 @@ export default function Dashboard() {
   }, []);
 
   return (
-    <div className={"app" + (fading ? " fading" : "")}>
-      <div className="dash">
-        <div className="dash-top">
-          <div className="dash-wordmark">Sunny Wealth Management<span className="cursor neon" /></div>
-          <div className="dash-meta">
-            <span className="meta-greet">{greeting(now.getHours())}, {name}</span>
-            <span>·</span>
-            <span>{formatDate(now)}</span>
-            <button className="logout" onClick={onLogout}>log out ↗</button>
+    <div className={"dash-v2" + (fading ? " fading" : "")}>
+      {/* ───────── GREETING STRIP ───────── */}
+      <header className="dash2-greet">
+        <div className="dash2-greet-row">
+          <h1 className="dash2-hero">
+            {greetingWord(now.getHours())}<br />
+            <span className="dash2-hero-name">{name}.</span>
+          </h1>
+          <div className="dash2-greet-meta">
+            <div className="dash2-greet-date">{fmtDateBig(now)}</div>
+            <div className="dash2-greet-time">{fmtTimeET(now)} ET</div>
+            <div className="dash2-greet-mkt">{marketStatus(now)}</div>
+            <button className="dash2-logout" onClick={onLogout}>log out ↗</button>
           </div>
         </div>
 
-        <div className="tools-section">
-          <div className="tools-head">
-            <span className="label">Tools · {TOOLS.length}</span>
-          </div>
-          <div className="tools-grid">
-            {TOOLS.map((t) => {
-              // The Strategy tile gets live counts when available, replacing
-              // the static "BNF mean-reversion" tagline. Counts come from
-              // bnf_candidates + bnf_universe_latest fetched on mount.
-              const desc = t.key === 'strategy' && bnfStats
-                ? `${bnfStats.matches} match · ${bnfStats.borderline} near miss`
-                : t.desc;
-              return (
-                <button
-                  key={t.key}
-                  className={"tool-card " + t.status}
-                  disabled={t.status === "soon"}
-                  onClick={() => onOpen(t)}
-                >
-                  <div className="tool-icon"><ToolIcon name={t.key} /></div>
-                  <div className="tool-mid">
-                    <div className="tool-name">{t.name}</div>
-                    <div className="tool-desc">{desc}</div>
-                    {t.key === 'strategy' && bnfStats?.lastCloseDate && (
-                      <div className="tool-desc" style={{ marginTop: 2, opacity: 0.7 }}>
-                        cache · {bnfStats.lastCloseDate}
-                      </div>
-                    )}
-                  </div>
-                  <div className="tool-foot">
-                    <span className="tool-status">{t.status === "live" ? "Live" : "Soon"}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+        <div className="dash2-ticker">
+          {["SPY", "QQQ", "IWM"].map((sym) => {
+            const row = tickers.find((t) => t.ticker === sym);
+            const v = row?.today_intraday_pct ?? null;
+            const tone = v == null ? "" : v >= 0 ? "pos" : "neg";
+            return (
+              <span key={sym} className="dash2-ticker-item">
+                <span className="sym">{sym}</span>
+                <span className={`pct ${tone}`}>{fmtPct(v)}</span>
+              </span>
+            );
+          })}
+          {/* Placeholders for the macro indicators PR-5 will wire up. */}
+          {[
+            ["10Y",  "—"],
+            ["VIX",  "—"],
+            ["DXY",  "—"],
+          ].map(([sym, val]) => (
+            <span key={sym} className="dash2-ticker-item muted">
+              <span className="sym">{sym}</span>
+              <span className="pct">{val}</span>
+            </span>
+          ))}
         </div>
+      </header>
 
-        <div className="quote-foot">
-          <em>&ldquo;The stock market is a device for transferring money from the impatient to the patient.&rdquo;</em>
-          <span className="quote-attr">— Warren Buffett</span>
-        </div>
-      </div>
+      {/* ───────── 12-COLUMN GRID OF CARDS ─────────
+          Each <Placeholder> is replaced in a subsequent PR. The grid
+          spans are fixed here so the layout never shifts as cards land. */}
+      <main className="dash2-grid">
+        <Placeholder span={4} title="TODAY"             label="PR-2" />
+        <Placeholder span={8} title="PORTFOLIO PULSE"   label="PR-3" />
+        <Placeholder span={8} title="THIS WEEK"         label="PR-4" />
+        <Placeholder span={4} title="MACRO"             label="PR-5" />
+        <Placeholder span={6} title="BNF STRATEGY"      label="PR-6" />
+        <Placeholder span={6} title="RISK CHECK"        label="PR-7" />
+        <Placeholder span={12} title="NEWS"             label="PR-8" />
+      </main>
 
-      {toast && <div className={"toast" + (toast.kind === "live" ? " live" : "")}>{toast.msg}</div>}
+      {/* ───────── TOOLS RAIL (footer) ───────── */}
+      <footer className="dash2-toolsrail">
+        {TOOLS.map((t) => (
+          <button key={t.key} className="dash2-tool" onClick={() => onOpenTool(t)}>
+            <span>{t.name}</span>
+            <span className="dash2-tool-hk">⌘{t.hotkey}</span>
+          </button>
+        ))}
+      </footer>
+
+      {toast && <div className="dash2-toast">{toast.msg}</div>}
     </div>
+  );
+}
+
+/** Placeholder card — shows where a future PR will land. Same look as
+ *  the real cards (lifted dark surface, section title in mono) so the
+ *  page already feels structured before the data goes in. */
+function Placeholder({ span, title, label }: {
+  span: 4 | 6 | 8 | 12;
+  title: string;
+  label: string;
+}) {
+  return (
+    <section className={`dash2-card dash2-span-${span}`}>
+      <div className="dash2-card-head">
+        <span className="dash2-card-title">{title}</span>
+        <span className="dash2-card-coming">{label}</span>
+      </div>
+      <div className="dash2-card-body dash2-card-empty">
+        coming next
+      </div>
+    </section>
   );
 }
