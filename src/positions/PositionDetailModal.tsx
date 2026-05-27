@@ -980,29 +980,48 @@ export function PositionDetailModal({
 
             <div className="pp-rail-divider" />
 
+            {/* §4 — Risk card. Hidden when no flags fire so the rail
+                stays calm; appears with a count hero + dot-list when
+                anything needs attention. */}
+            {(() => {
+              const spotPrice = position.quantity > 0
+                ? position.market_value / position.quantity
+                : null;
+              const flags = computeRiskFlags(liveOpens, spotPrice);
+              if (flags.length === 0) return null;
+              return (
+                <>
+                  <RiskCard flags={flags} />
+                  <div className="pp-rail-divider" />
+                </>
+              );
+            })()}
+
             <div className="pp-rail-section">
               <div className="pp-rail-lbl">Live positions · {liveOpens.length}</div>
               {liveOpens.length === 0 ? (
                 <div className="pp-rail-sub">none open</div>
               ) : (
-                <div className="pp-rail-livelist">
-                  {liveOpens.slice(0, 4).map((lo) => (
-                    <div key={lo.open.id} className="pp-rail-live-row">
-                      <span className={'pp-mini-glyph ' + (lo.open.direction === 'short' ? 'neg' : 'pos')}>
-                        {lo.open.option_type === 'put' ? 'P' : 'C'}
-                      </span>
-                      <span className="pp-rail-live-meta">
-                        {lo.open.direction === 'short' ? '−' : '+'}{lo.remaining_contracts} @ ${lo.open.strike}
-                      </span>
-                      <span className="pp-rail-live-exp">{lo.open.expiry}</span>
-                    </div>
+                <div className="pp-rail-livestack">
+                  {liveOpens.map((lo) => (
+                    <LiveLegCard
+                      key={lo.open.id}
+                      leg={lo}
+                      spot={position.quantity > 0 ? position.market_value / position.quantity : null}
+                    />
                   ))}
-                  {liveOpens.length > 4 && (
-                    <div className="pp-rail-sub">+ {liveOpens.length - 4} more</div>
-                  )}
                 </div>
               )}
             </div>
+
+            {/* §5 — Activity card. Pure summary from the live legs we
+                already have in props; no extra fetch. */}
+            {liveOpens.length > 0 && (
+              <>
+                <div className="pp-rail-divider" />
+                <ActivityCard liveOpens={liveOpens} netOptionsCash={position.net_options_cash} />
+              </>
+            )}
 
             <div className="pp-rail-divider" />
 
@@ -1627,6 +1646,271 @@ function LegPickerCard({
         </div>
       </div>
     </label>
+  );
+}
+
+/** Right-rail card — one per live leg. Same visual idiom as the picker
+ *  (left edge tone, P/C glyph, title chip, strike hero) but richer:
+ *  it adds %-from-spot, a days-to-expiry chip with color thresholds,
+ *  break-even, premium per share, and contract count.
+ *
+ *  Calculations:
+ *   • % from spot — (strike − spot) / spot. Tone: OTM-favourable green,
+ *     ITM-leaning red. The favourable side is direction-aware (short
+ *     calls want strike > spot, short puts want strike < spot, etc.).
+ *   • Break-even — short call: strike + premium · short put: strike −
+ *     premium · long call: strike + premium · long put: strike − premium.
+ *   • Days to expiry — calendar days between today and expiry.
+ *     <7d → red, <30d → amber, otherwise neutral.  */
+function LiveLegCard({
+  leg, spot,
+}: {
+  leg: LiveOption;
+  spot: number | null;
+}) {
+  const o = leg.open;
+  const tone = legDirTone(o.direction);
+  const title = legActionLabel(o.direction, o.option_type);
+  const isCall = o.option_type === 'call';
+  const isShort = o.direction === 'short';
+
+  // % from spot — sign + color
+  const pctFromSpot = (spot && spot > 0) ? ((o.strike - spot) / spot) * 100 : null;
+  const favorableSign =
+    (isShort && isCall)   ? +1 :
+    (isShort && !isCall)  ? -1 :
+    (!isShort && isCall)  ? -1 :
+                            +1;
+  const spotTone =
+    pctFromSpot == null ? 'neutral'
+    : Math.sign(pctFromSpot) === favorableSign ? 'otm'
+    : 'itm';
+
+  // Break-even — direction × type matrix
+  const breakEven =
+    isCall ? o.strike + o.premium
+           : o.strike - o.premium;
+
+  // Days to expiry — calendar days; color thresholds bucket the chip.
+  const today = new Date();
+  const exp = new Date(o.expiry + 'T00:00:00Z');
+  const dte = Math.max(0, Math.round((exp.getTime() - today.getTime()) / 86400000));
+  const dteTone = dte < 7 ? 'urgent' : dte < 30 ? 'soon' : 'normal';
+
+  return (
+    <div className={`pp-livecard pp-livecard-${tone}`}>
+      <div className="pp-livecard-head">
+        <span className={`pp-leg-card-glyph tone-${tone}`}>
+          {isCall ? 'C' : 'P'}
+        </span>
+        <span className={`pp-leg-card-title tone-${tone}`}>{title}</span>
+      </div>
+      <div className="pp-livecard-hero">
+        <div className="pp-livecard-strike">{fmtUSD2(o.strike)}</div>
+        {pctFromSpot != null && (
+          <div className={`pp-livecard-spotdiff tone-${spotTone}`}>
+            {pctFromSpot >= 0 ? '+' : ''}{pctFromSpot.toFixed(1)}% from spot
+          </div>
+        )}
+      </div>
+      <div className="pp-livecard-rows">
+        <div className="pp-livecard-row">
+          <span className="k">Premium</span>
+          <span className="v">{fmtUSD2(o.premium)} / sh</span>
+        </div>
+        <div className="pp-livecard-row">
+          <span className="k">Break-even</span>
+          <span className="v">{fmtUSD2(breakEven)}</span>
+        </div>
+        <div className="pp-livecard-row">
+          <span className="k">Days to exp</span>
+          <span className={`v pp-livecard-dtechip tone-${dteTone}`}>{dte}d</span>
+        </div>
+        <div className="pp-livecard-row">
+          <span className="k">Contracts</span>
+          <span className="v">{leg.remaining_contracts}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────── §4 — Risk flags ─────────────────────────────
+// Surfaces the most common "you should look at this" conditions across
+// the live legs. Three categories today, room to add more without
+// touching the card layout:
+//   • Assignment risk — short leg, ITM, <14d to expiry
+//   • Expiring soon — any leg with <7d to expiry (regardless of ITM)
+//   • Stale — leg whose expiry has already passed (needs Resolve)
+//
+// Each flag has a tone (red = urgent, amber = soon, blue = info) which
+// drives the colored dot in the card list.
+
+type RiskTone = 'urgent' | 'soon' | 'info';
+interface RiskFlag {
+  tone: RiskTone;
+  label: string;      // top line — "Assignment risk", "Expiring soon"
+  detail: string;     // sub line — "$625 call · ITM · 4d"
+}
+
+function computeRiskFlags(legs: LiveOption[], spot: number | null): RiskFlag[] {
+  const out: RiskFlag[] = [];
+  const today = new Date();
+
+  for (const leg of legs) {
+    const o = leg.open;
+    const expDate = new Date(o.expiry + 'T00:00:00Z');
+    const dte = Math.round((expDate.getTime() - today.getTime()) / 86400000);
+    const desc = `${o.contracts} ${o.direction} ${o.option_type} · ${fmtUSD2(o.strike)}`;
+
+    // Stale: expired, still un-resolved.
+    if (dte < 0) {
+      out.push({
+        tone: 'urgent',
+        label: 'Expired — needs Resolve',
+        detail: `${desc} · ${Math.abs(dte)}d past`,
+      });
+      continue;     // skip the other checks for stale legs
+    }
+
+    // Assignment risk: short leg, ITM, near expiry.
+    if (o.direction === 'short' && spot != null && dte <= 14) {
+      const itm = (o.option_type === 'call' && spot >= o.strike)
+               || (o.option_type === 'put'  && spot <= o.strike);
+      if (itm) {
+        out.push({
+          tone: 'urgent',
+          label: 'Assignment risk',
+          detail: `${desc} · ITM · ${dte}d to exp`,
+        });
+        continue;
+      }
+    }
+
+    // Expiring soon: any leg <7d, not already flagged as assignment risk.
+    if (dte <= 7) {
+      out.push({
+        tone: 'soon',
+        label: 'Expiring this week',
+        detail: `${desc} · ${dte}d to exp`,
+      });
+    }
+  }
+
+  return out;
+}
+
+function RiskCard({ flags }: { flags: RiskFlag[] }) {
+  // Hero number is the flag count; tone of the hero matches the most
+  // urgent flag in the list (red beats amber beats blue) so the eye
+  // catches "something needs action" before reading the list.
+  const heroTone = flags.some((f) => f.tone === 'urgent') ? 'urgent'
+                 : flags.some((f) => f.tone === 'soon')    ? 'soon'
+                 : 'info';
+  return (
+    <div className={`pp-rail-section pp-riskcard tone-${heroTone}`}>
+      <div className="pp-rail-lbl">Risk check</div>
+      <div className={`pp-riskcard-hero tone-${heroTone}`}>{flags.length}</div>
+      <div className="pp-riskcard-sub">
+        {flags.length === 1 ? 'active flag' : 'active flags'}
+      </div>
+      <ul className="pp-riskcard-list">
+        {flags.map((f, i) => (
+          <li key={i} className={`pp-riskcard-item tone-${f.tone}`}>
+            <span className="pp-riskcard-dot" aria-hidden />
+            <div className="pp-riskcard-text">
+              <div className="pp-riskcard-label">{f.label}</div>
+              <div className="pp-riskcard-detail">{f.detail}</div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ─────────────────── §5 — Activity card ──────────────────────────
+// Right-rail card surfacing "how active is this position?" — driven by
+// the live-leg roster + the position's net options cash. We don't
+// receive the full trade history in props, so the hero metric is
+// "active since" (the earliest live leg's open date). Sparkline of
+// cumulative realized is parked for a later pass when we wire the full
+// trade history through.
+
+function ActivityCard({
+  liveOpens, netOptionsCash,
+}: {
+  liveOpens: LiveOption[];
+  netOptionsCash: number;
+}) {
+  // Earliest open date across all live legs (proxy for "active since"
+  // when we don't have the closed-trade history). Sorted ascending so
+  // the first entry is the oldest.
+  const sortedByDate = [...liveOpens].sort(
+    (a, b) => a.open.trade_date.localeCompare(b.open.trade_date),
+  );
+  const earliest = sortedByDate[0]?.open.trade_date;
+  const today = new Date();
+  const earliestDate = earliest ? new Date(earliest + 'T00:00:00Z') : null;
+  const daysActive = earliestDate
+    ? Math.max(0, Math.round((today.getTime() - earliestDate.getTime()) / 86400000))
+    : 0;
+
+  // Pick the right unit for the hero: days for <60, months for <365,
+  // years above that. Keeps the number short + scannable.
+  let heroValue: string;
+  let heroUnit: string;
+  if (daysActive < 60) {
+    heroValue = String(daysActive);
+    heroUnit = daysActive === 1 ? 'day' : 'days';
+  } else if (daysActive < 365) {
+    heroValue = String(Math.round(daysActive / 30));
+    heroUnit = 'months';
+  } else {
+    const years = daysActive / 365;
+    heroValue = years.toFixed(1);
+    heroUnit = 'years';
+  }
+
+  // Soonest + latest expiry across live legs.
+  const sortedByExpiry = [...liveOpens].sort(
+    (a, b) => a.open.expiry.localeCompare(b.open.expiry),
+  );
+  const soonestExp = sortedByExpiry[0]?.open.expiry;
+  const latestExp = sortedByExpiry[sortedByExpiry.length - 1]?.open.expiry;
+  const dteFor = (iso: string | undefined) =>
+    iso ? Math.max(0, Math.round((new Date(iso + 'T00:00:00Z').getTime() - today.getTime()) / 86400000)) : 0;
+
+  return (
+    <div className="pp-rail-section pp-activitycard">
+      <div className="pp-rail-lbl">Active since</div>
+      <div className="pp-activitycard-hero">
+        {heroValue}<span className="pp-activitycard-unit">{heroUnit}</span>
+      </div>
+      <div className="pp-activitycard-sub">
+        {earliest ? fmtDateHuman(earliest) : 'no live legs'}
+      </div>
+      <div className="pp-activitycard-rows">
+        <div className="pp-activitycard-row">
+          <span className="k">Live legs</span>
+          <span className="v">{liveOpens.length}</span>
+        </div>
+        <div className="pp-activitycard-row">
+          <span className="k">Soonest exp</span>
+          <span className="v">{dteFor(soonestExp)}d</span>
+        </div>
+        <div className="pp-activitycard-row">
+          <span className="k">Latest exp</span>
+          <span className="v">{dteFor(latestExp)}d</span>
+        </div>
+        <div className="pp-activitycard-row">
+          <span className="k">Net option cash</span>
+          <span className={`v ${netOptionsCash >= 0 ? 'pos' : 'neg'}`}>
+            {netOptionsCash >= 0 ? fmtUSD(netOptionsCash) : '−' + fmtUSD(Math.abs(netOptionsCash))}
+          </span>
+        </div>
+      </div>
+    </div>
   );
 }
 

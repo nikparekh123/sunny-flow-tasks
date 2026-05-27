@@ -2254,6 +2254,247 @@
   letter-spacing: .2px;
 }
 
+/* ─────────────────── §3 — Live legs rail cards ────────────────────
+ * One vertically-stacked card per live leg in the right rail. Same
+ * visual language as the picker cards (left edge tone, glyph + title
+ * chip) but a tall hero (strike + spot diff) and a 4-row data block. */
+.pp-rail-livestack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pp-livecard {
+  position: relative;
+  padding: 12px 14px 14px;
+  border: 1px solid rgba(168, 196, 192, 0.18);
+  border-radius: 6px;
+  background: rgba(15, 51, 51, 0.4);
+}
+.pp-livecard::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 6px 0 0 6px;
+}
+.pp-livecard-sold::before   { background: var(--navi-neon, #6dd1c5); }
+.pp-livecard-bought::before { background: #f5c458; }
+
+.pp-livecard-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.pp-livecard-hero {
+  text-align: left;
+  padding: 4px 0 10px;
+  border-bottom: 1px dashed rgba(168, 196, 192, 0.18);
+  margin-bottom: 10px;
+}
+.pp-livecard-strike {
+  font-family: var(--navi-font-mono);
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--navi-fg1);
+  letter-spacing: -0.4px;
+  line-height: 1.1;
+}
+.pp-livecard-spotdiff {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  letter-spacing: .6px;
+  margin-top: 4px;
+  font-weight: 700;
+}
+.pp-livecard-spotdiff.tone-otm { color: var(--navi-neon, #6dd1c5); }
+.pp-livecard-spotdiff.tone-itm { color: #f08770; }
+.pp-livecard-spotdiff.tone-neutral { color: var(--navi-fg3); }
+
+.pp-livecard-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pp-livecard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+}
+.pp-livecard-row .k {
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+}
+.pp-livecard-row .v {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+
+/* Days-to-expiry chip — neutral / amber / red based on closeness.
+ * Renders inline with the data-row value column. */
+.pp-livecard-dtechip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .4px;
+}
+.pp-livecard-dtechip.tone-normal {
+  background: rgba(168, 196, 192, 0.12);
+  color: var(--navi-fg2);
+  border: 1px solid rgba(168, 196, 192, 0.24);
+}
+.pp-livecard-dtechip.tone-soon {
+  background: rgba(245, 196, 88, 0.16);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.4);
+}
+.pp-livecard-dtechip.tone-urgent {
+  background: rgba(240, 135, 112, 0.22);
+  color: #f08770;
+  border: 1px solid rgba(240, 135, 112, 0.55);
+}
+
+/* ─────────────────── §4 — Risk card ───────────────────────────────
+ * Conditionally rendered in the rail above Live positions. Hero number
+ * is the flag count; tinted border matches the most-urgent flag. */
+.pp-riskcard {
+  border: 1px solid rgba(168, 196, 192, 0.18);
+  border-radius: 6px;
+  padding: 14px 14px 12px;
+  background: rgba(15, 51, 51, 0.4);
+}
+.pp-riskcard.tone-urgent { border-color: rgba(240, 135, 112, 0.55); }
+.pp-riskcard.tone-soon   { border-color: rgba(245, 196, 88, 0.42); }
+.pp-riskcard.tone-info   { border-color: rgba(109, 209, 197, 0.42); }
+
+.pp-riskcard-hero {
+  font-family: var(--navi-font-mono);
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+  margin: 6px 0 2px;
+  letter-spacing: -1px;
+}
+.pp-riskcard-hero.tone-urgent { color: #f08770; }
+.pp-riskcard-hero.tone-soon   { color: #f5c458; }
+.pp-riskcard-hero.tone-info   { color: var(--navi-neon, #6dd1c5); }
+
+.pp-riskcard-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-bottom: 12px;
+}
+
+.pp-riskcard-list {
+  list-style: none;
+  margin: 0;
+  padding: 10px 0 0;
+  border-top: 1px dashed rgba(168, 196, 192, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pp-riskcard-item {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  align-items: start;
+  gap: 10px;
+}
+.pp-riskcard-dot {
+  width: 8px; height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+}
+.pp-riskcard-item.tone-urgent .pp-riskcard-dot { background: #f08770; }
+.pp-riskcard-item.tone-soon   .pp-riskcard-dot { background: #f5c458; }
+.pp-riskcard-item.tone-info   .pp-riskcard-dot { background: var(--navi-neon, #6dd1c5); }
+
+.pp-riskcard-text { min-width: 0; }
+.pp-riskcard-label {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  line-height: 1.25;
+}
+.pp-riskcard-detail {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+  margin-top: 2px;
+  letter-spacing: .2px;
+}
+
+/* ─────────────────── §5 — Activity card ───────────────────────────
+ * Right-rail summary of how long this position has been active + a
+ * short-list of structural facts (live legs, earliest/latest expiry,
+ * net option cash). Hero number auto-units (days → months → years). */
+.pp-activitycard {
+  border: 1px solid rgba(168, 196, 192, 0.18);
+  border-radius: 6px;
+  padding: 14px 14px 12px;
+  background: rgba(15, 51, 51, 0.4);
+}
+.pp-activitycard-hero {
+  font-family: var(--navi-font-mono);
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+  margin: 6px 0 2px;
+  color: var(--navi-fg1);
+  letter-spacing: -1px;
+}
+.pp-activitycard-unit {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .4px;
+  color: var(--navi-fg3);
+  margin-left: 8px;
+  text-transform: uppercase;
+}
+.pp-activitycard-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-bottom: 12px;
+}
+.pp-activitycard-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(168, 196, 192, 0.18);
+}
+.pp-activitycard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+}
+.pp-activitycard-row .k {
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+}
+.pp-activitycard-row .v {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+.pp-activitycard-row .v.pos { color: var(--navi-neon, #6dd1c5); }
+.pp-activitycard-row .v.neg { color: #f08770; }
+
 .pp-input {
   font-family: var(--navi-font-sans);
   font-size: 14px;
