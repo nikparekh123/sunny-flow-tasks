@@ -1578,19 +1578,23 @@ function RailGraphCard({
 
   return (
     <div className="pp-railcard">
-      {/* Toggle strip — pill style like the example */}
+      {/* Toggle strip — pill style matching the dashboard's segmented
+          control. Labels kept short so they never wrap in the narrow
+          rail; tooltip carries the full meaning. */}
       <div className="pp-railcard-toggle" role="tablist">
         <button
           role="tab"
           className={'pp-railcard-toggle-btn' + (view === 'income' ? ' on' : '')}
           onClick={() => setView('income')}
+          title="Premium collected per week"
         >
-          Weekly income
+          Income
         </button>
         <button
           role="tab"
           className={'pp-railcard-toggle-btn' + (view === 'cost' ? ' on' : '')}
           onClick={() => setView('cost')}
+          title="Avg vs net cost per share"
         >
           Cost
         </button>

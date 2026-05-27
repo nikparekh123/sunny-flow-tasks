@@ -2227,34 +2227,48 @@
 /* ─────────────────── Rail graph card ────────────────────────────────
  * Single visual-first card with [Weekly income] / [Cost] toggle.
  * Replaces the old POSITION + Risk + Live legs + Activity stack so the
- * modal stays the original height. Big number + graph + minimal rows. */
+ * modal stays the original height. Big number + graph + minimal rows.
+ *
+ * Background is lifted slightly above the modal floor so the card reads
+ * as a distinct surface (without breaking the dark theme — see the
+ * inset highlight on the top edge). Padding is generous so the content
+ * has air to breathe. */
 .pp-railcard {
-  border: 1px solid rgba(168, 196, 192, 0.18);
-  border-radius: 6px;
-  padding: 12px;
-  background: rgba(15, 51, 51, 0.4);
+  border: 1.5px solid rgba(168, 196, 192, 0.22);
+  border-radius: 8px;
+  padding: 18px 16px 16px;
+  background:
+    linear-gradient(180deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.02) 100%),
+    rgba(20, 60, 56, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 8px rgba(0, 0, 0, 0.18);
 }
 
 .pp-railcard-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 3px;
+  gap: 2px;
+  padding: 2px;
   background: rgba(4, 16, 14, 0.55);
   border-radius: 999px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 .pp-railcard-toggle-btn {
   background: transparent;
   border: none;
   color: var(--navi-fg3);
   font-family: var(--navi-font-sans);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: .4px;
-  padding: 6px 10px;
+  letter-spacing: .2px;
+  padding: 4px 8px;
   border-radius: 999px;
   cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.4;
   transition: all .15s var(--navi-ease);
 }
 .pp-railcard-toggle-btn:hover { color: var(--navi-fg1); }
