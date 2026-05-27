@@ -298,15 +298,29 @@ export function PositionDetailModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveOpens.length]);
 
+  // Confirm-dialog state. When set, an overlay covers the modal with a
+  // human-readable summary of the action about to fire — the ticker is
+  // rendered LARGE in neon so the user catches mismatches like
+  // "I meant META but the modal is on WDAY" before clicking through.
+  // Each request* helper below builds one of these and stashes it here;
+  // the dialog's confirm button invokes `action`, which runs the real
+  // submit* and closes the parent modal.
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      // While the confirm dialog is up, let it handle Esc so we don't
+      // dismiss the whole modal underneath. Cleared by the dialog itself.
+      if (confirm) return;
+      if (e.key === 'Escape') onClose();
+    };
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
-  }, [onClose]);
+  }, [onClose, confirm]);
 
   const isClosed = position.status === 'closed';
 
@@ -572,6 +586,220 @@ export function PositionDetailModal({
       });
     }
     onClose();
+  };
+
+  // ── Confirm-step builders ────────────────────────────────────────
+  // Each request* assembles a human-readable summary from the current
+  // form, stashes it in `confirm` state, and lets the user review the
+  // ticker + numbers before the underlying submit* fires. The dialog's
+  // Confirm button calls back into the submit* declared above.
+  const optWord = (t: OptionType) => (t === 'call' ? 'call' : 'put');
+  const plural = (n: number, base: string) => `${base}${n === 1 ? '' : 's'}`;
+
+  const requestOpen = () => {
+    if (!canSubmitOpen) return;
+    const contracts = parseInt(openForm.contracts, 10);
+    const premium = parseFloat(openForm.premium);
+    const strike = parseFloat(openForm.strike);
+    const total = contracts * 100 * premium;
+    const isShort = openForm.direction === 'short';
+    const verb = isShort ? 'Selling' : 'Buying';
+    const moneyLabel = isShort ? 'Premium collected' : 'Premium paid';
+    setConfirm({
+      ticker: position.ticker,
+      title: 'Confirm open',
+      heading: `${verb} ${contracts} ${openForm.direction} ${plural(contracts, optWord(openForm.option_type))}`,
+      lines: [
+        { label: 'Strike', value: fmtUSD2(strike) },
+        { label: 'Expiry', value: fmtDateHuman(openForm.expiry) },
+        { label: 'Premium', value: `${fmtUSD2(premium)} / sh` },
+        { label: moneyLabel, value: fmtUSD(total), tone: isShort ? 'positive' : 'negative' },
+      ],
+      confirmLabel: 'Open position',
+      action: () => { setConfirm(null); submitOpen(); },
+    });
+  };
+
+  const requestClose = () => {
+    if (!canSubmitClose || !closeTarget) return;
+    const o = closeTarget.open;
+    setConfirm({
+      ticker: position.ticker,
+      title: 'Confirm close',
+      heading: `Closing ${closeContractsN} ${o.direction} ${plural(closeContractsN, optWord(o.option_type))}`,
+      lines: [
+        { label: 'Strike', value: fmtUSD2(o.strike) },
+        { label: 'Expiry', value: fmtDateHuman(o.expiry) },
+        { label: 'Buyback', value: `${fmtUSD2(closePremiumN)} / sh` },
+        {
+          label: 'Realized P&L',
+          value: closeRealized >= 0 ? `+${fmtUSD(closeRealized)}` : `−${fmtUSD(Math.abs(closeRealized))}`,
+          tone: closeRealized >= 0 ? 'positive' : 'negative',
+        },
+      ],
+      confirmLabel: 'Close position',
+      action: () => { setConfirm(null); submitClose(); },
+    });
+  };
+
+  const requestEdit = () => {
+    if (!canSubmitEdit || !editTarget || !editForm) return;
+    // Show only changed fields — keeps the diff scannable when the user
+    // only nudged the premium, etc.
+    const lines: ConfirmLine[] = [];
+    const newContracts = parseInt(editForm.contracts, 10);
+    const newStrike = parseFloat(editForm.strike);
+    const newPremium = parseFloat(editForm.premium);
+    if (newContracts !== editTarget.contracts) {
+      lines.push({ label: 'Contracts', value: `${editTarget.contracts} → ${newContracts}` });
+    }
+    if (newStrike !== editTarget.strike) {
+      lines.push({ label: 'Strike', value: `${fmtUSD2(editTarget.strike)} → ${fmtUSD2(newStrike)}` });
+    }
+    if (newPremium !== editTarget.premium) {
+      lines.push({ label: 'Premium', value: `${fmtUSD2(editTarget.premium)} → ${fmtUSD2(newPremium)}` });
+    }
+    if (editForm.expiry !== editTarget.expiry) {
+      lines.push({ label: 'Expiry', value: `${fmtDateHuman(editTarget.expiry)} → ${fmtDateHuman(editForm.expiry)}` });
+    }
+    if (editForm.date !== editTarget.trade_date) {
+      lines.push({ label: 'Trade date', value: `${fmtDateHuman(editTarget.trade_date)} → ${fmtDateHuman(editForm.date)}` });
+    }
+    setConfirm({
+      ticker: position.ticker,
+      title: 'Confirm edit',
+      heading: `Editing ${editTarget.direction} ${optWord(editTarget.option_type)} · strike ${fmtUSD2(editTarget.strike)} exp ${fmtDateHuman(editTarget.expiry)}`,
+      lines: lines.length > 0 ? lines : [{ label: 'No field changes', value: '—' }],
+      confirmLabel: 'Save changes',
+      action: () => { setConfirm(null); submitEdit(); },
+    });
+  };
+
+  const requestShares = () => {
+    if (!canSubmitShares) return;
+    if (sharesMode === 'buy') {
+      const cost = sharesQtyN * sharesPriceN;
+      setConfirm({
+        ticker: position.ticker,
+        title: 'Confirm buy shares',
+        heading: `Buying ${sharesQtyN.toLocaleString()} ${plural(sharesQtyN, 'share')} of ${position.ticker}`,
+        lines: [
+          { label: 'Price', value: `${fmtUSD2(sharesPriceN)} / sh` },
+          { label: 'Cost', value: fmtUSD(cost), tone: 'negative' },
+          { label: 'New avg basis', value: fmtUSD2(buyNewAvg) },
+          { label: 'New share count', value: buyNewQty.toLocaleString() },
+          ...(overrideAvg && overrideAvgN > 0
+            ? [{ label: 'Avg cost override', value: fmtUSD2(overrideAvgN), tone: 'emphasis' as const }]
+            : []),
+        ],
+        confirmLabel: 'Buy shares',
+        action: () => { setConfirm(null); submitShares(); },
+      });
+    } else {
+      const proceeds = sharesQtyN * sharesPriceN;
+      setConfirm({
+        ticker: position.ticker,
+        title: 'Confirm sell shares',
+        heading: `Selling ${sharesQtyN.toLocaleString()} ${plural(sharesQtyN, 'share')} of ${position.ticker}`,
+        lines: [
+          { label: 'Price', value: `${fmtUSD2(sharesPriceN)} / sh` },
+          { label: 'Proceeds', value: fmtUSD(proceeds), tone: 'positive' },
+          {
+            label: 'Realized P&L',
+            value: sellRealized >= 0 ? `+${fmtUSD(sellRealized)}` : `−${fmtUSD(Math.abs(sellRealized))}`,
+            tone: sellRealized >= 0 ? 'positive' : 'negative',
+          },
+          { label: 'Remaining shares', value: (position.quantity - sharesQtyN).toLocaleString() },
+        ],
+        confirmLabel: 'Sell shares',
+        action: () => { setConfirm(null); submitShares(); },
+      });
+    }
+  };
+
+  const requestResolve = () => {
+    if (!canSubmitResolve || !resolveOpen) return;
+    const o = resolveOpen;
+    const optDesc = `${o.contracts} ${o.direction} ${plural(o.contracts, optWord(o.option_type))} · strike ${fmtUSD2(o.strike)} exp ${fmtDateHuman(o.expiry)}`;
+
+    if (resolveForm.kind === 'expired') {
+      const premKept = o.contracts * 100 * o.premium;
+      const signed = o.direction === 'short' ? premKept : -premKept;
+      setConfirm({
+        ticker: position.ticker,
+        title: 'Confirm expire worthless',
+        heading: `Expiring worthless: ${optDesc}`,
+        lines: [
+          { label: 'Trade date', value: fmtDateHuman(resolveForm.trade_date) },
+          {
+            label: o.direction === 'short' ? 'Premium kept' : 'Premium lost',
+            value: signed >= 0 ? `+${fmtUSD(signed)}` : `−${fmtUSD(Math.abs(signed))}`,
+            tone: signed >= 0 ? 'positive' : 'negative',
+          },
+        ],
+        confirmLabel: 'Mark expired',
+        action: () => { setConfirm(null); submitResolve(); },
+      });
+    } else if (resolveForm.kind === 'assigned') {
+      const lines: ConfirmLine[] = [{ label: 'Trade date', value: fmtDateHuman(resolveForm.trade_date) }];
+      if (isResolveShortCall) {
+        lines.push({ label: 'Shares delivered', value: (o.contracts * 100).toLocaleString() });
+        lines.push({ label: 'Sold at', value: `${fmtUSD2(o.strike)} / sh` });
+        lines.push({
+          label: 'Realized P&L on shares',
+          value: resolveAssignedSharePnl >= 0 ? `+${fmtUSD(resolveAssignedSharePnl)}` : `−${fmtUSD(Math.abs(resolveAssignedSharePnl))}`,
+          tone: resolveAssignedSharePnl >= 0 ? 'positive' : 'negative',
+        });
+      } else if (isResolveShortPut) {
+        lines.push({ label: 'Shares put to you', value: (o.contracts * 100).toLocaleString() });
+        lines.push({ label: 'Bought at', value: `${fmtUSD2(o.strike)} / sh` });
+        if (resolveAssignedNewAvg != null) {
+          lines.push({ label: 'New avg basis', value: fmtUSD2(resolveAssignedNewAvg) });
+        }
+      }
+      setConfirm({
+        ticker: position.ticker,
+        title: 'Confirm assignment',
+        heading: `Assigning: ${optDesc}`,
+        lines,
+        confirmLabel: 'Mark assigned',
+        action: () => { setConfirm(null); submitResolve(); },
+      });
+    } else {
+      // rolled
+      setConfirm({
+        ticker: position.ticker,
+        title: 'Confirm roll',
+        heading: `Rolling: ${optDesc}`,
+        lines: [
+          { label: 'Close at', value: `${fmtUSD2(resolveRolledClosePremiumN)} / sh` },
+          { label: 'New strike', value: fmtUSD2(resolveRolledNewStrikeN) },
+          { label: 'New premium', value: `${fmtUSD2(resolveRolledNewPremiumN)} / sh` },
+          { label: 'New expiry', value: fmtDateHuman(resolveForm.new_expiry) },
+        ],
+        confirmLabel: 'Confirm roll',
+        action: () => { setConfirm(null); submitResolve(); },
+      });
+    }
+  };
+
+  const requestMarkClosed = () => {
+    setConfirm({
+      ticker: position.ticker,
+      title: isClosed ? 'Confirm reopen' : 'Confirm mark closed',
+      heading: isClosed
+        ? `Reopening ${position.ticker} position`
+        : `Marking ${position.ticker} position fully closed`,
+      lines: isClosed
+        ? [{ label: 'Effect', value: 'Position returns to open status (manual override).' }]
+        : [{ label: 'Effect', value: 'Position is flagged closed. Manual override — does not adjust trades.', tone: 'emphasis' }],
+      confirmLabel: isClosed ? 'Reopen position' : 'Mark closed',
+      tone: isClosed ? 'neutral' : 'danger',
+      action: () => {
+        setConfirm(null);
+        onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' });
+      },
+    });
   };
 
   return (
@@ -932,26 +1160,26 @@ export function PositionDetailModal({
         <div className="pp-popup-foot">
           <button
             className="pi-link danger"
-            onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
+            onClick={requestMarkClosed}
           >
             {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
           </button>
           <div className="pp-popup-foot-end">
             <button className="pp-btn pp-btn-text" onClick={onClose}>Cancel</button>
             {tab === 'open' && (
-              <button className="pp-btn pp-btn-neon" onClick={submitOpen} disabled={!canSubmitOpen}>
+              <button className="pp-btn pp-btn-neon" onClick={requestOpen} disabled={!canSubmitOpen}>
                 ✓ Open position
               </button>
             )}
             {tab === 'close' && (
-              <button className="pp-btn pp-btn-neon" onClick={submitClose} disabled={!canSubmitClose}>
+              <button className="pp-btn pp-btn-neon" onClick={requestClose} disabled={!canSubmitClose}>
                 ✓ Close position
               </button>
             )}
             {tab === 'edit' && (
               <button
                 className="pp-btn pp-btn-neon"
-                onClick={submitEdit}
+                onClick={requestEdit}
                 disabled={!canSubmitEdit || !editDirty}
                 title={!editDirty ? 'No changes' : ''}
               >
@@ -961,7 +1189,7 @@ export function PositionDetailModal({
             {tab === 'shares' && (
               <button
                 className="pp-btn pp-btn-neon"
-                onClick={submitShares}
+                onClick={requestShares}
                 disabled={!canSubmitShares}
               >
                 {sharesMode === 'buy' ? '✓ Buy shares' : '✓ Sell shares'}
@@ -970,7 +1198,7 @@ export function PositionDetailModal({
             {tab === 'resolve' && (
               <button
                 className="pp-btn pp-btn-neon"
-                onClick={submitResolve}
+                onClick={requestResolve}
                 disabled={!canSubmitResolve}
               >
                 ✓ Resolve
@@ -979,6 +1207,12 @@ export function PositionDetailModal({
           </div>
         </div>
       </div>
+      {/* Confirm overlay — sits on top of the modal stage with its own
+          backdrop. Clicking outside or pressing Esc cancels (handled in
+          the dialog itself); Enter commits. */}
+      {confirm && (
+        <ConfirmDialog state={confirm} onCancel={() => setConfirm(null)} />
+      )}
     </div>
   );
 }
@@ -1638,3 +1872,100 @@ function ResolveFields({
 
 // Silence unused import warnings in case any are tree-shaken.
 void {} as unknown as OptionTrade;
+
+// ─────────────────── Confirm dialog (shared by all submit actions)
+//
+// One overlay component reused by Open / Close / Edit / Shares / Resolve
+// / Mark-closed. Each request* helper in the modal builds a ConfirmState
+// describing the action in plain English; this dialog renders it on top
+// of the modal so the user can verify the ticker + numbers before
+// committing. The big neon ticker is the specific guardrail against
+// "I meant META but I was on WDAY" mistakes.
+
+interface ConfirmLine {
+  label: string;
+  value: React.ReactNode;
+  /** Tone informs color: positive (green), negative (red), emphasis
+   *  (bright), normal (default). Used sparingly on totals / P&L. */
+  tone?: 'normal' | 'positive' | 'negative' | 'emphasis';
+}
+
+interface ConfirmState {
+  ticker: string;
+  title: string;             // small caps header — "Confirm open" etc.
+  heading: string;           // plain-English sentence — "Selling 10 short calls"
+  lines: ConfirmLine[];
+  confirmLabel: string;      // text for the Confirm button
+  /** Neutral by default; danger uses red accent (only used by mark-closed). */
+  tone?: 'neutral' | 'danger';
+  /** What to do when the user clicks Confirm. */
+  action: () => void;
+}
+
+function ConfirmDialog({
+  state, onCancel,
+}: {
+  state: ConfirmState;
+  onCancel: () => void;
+}) {
+  // Esc cancels, Enter confirms. The handler stops propagation so the
+  // outer modal's Esc handler doesn't also fire and close everything.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCancel();
+      } else if (e.key === 'Enter') {
+        e.stopPropagation();
+        state.action();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);   // capture phase
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [onCancel, state]);
+
+  return (
+    <div className="pp-confirm-stage" onClick={onCancel}>
+      <div
+        className={'pp-confirm-card' + (state.tone === 'danger' ? ' danger' : '')}
+        role="alertdialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="pp-confirm-title">{state.title}</div>
+        <div className="pp-confirm-ticker">{state.ticker}</div>
+        <div className="pp-confirm-heading">{state.heading}</div>
+        <ul className="pp-confirm-lines">
+          {state.lines.map((l, i) => (
+            <li key={i} className={`pp-confirm-line tone-${l.tone ?? 'normal'}`}>
+              <span className="k">{l.label}</span>
+              <span className="v">{l.value}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="pp-confirm-foot">
+          <button className="pp-btn pp-btn-text" onClick={onCancel}>Cancel</button>
+          <button
+            className={'pp-btn pp-btn-neon' + (state.tone === 'danger' ? ' danger' : '')}
+            onClick={() => state.action()}
+            autoFocus
+          >
+            ✓ {state.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Format an ISO date (YYYY-MM-DD) as "May 29, 2026". Returns '—' for
+ *  empty input so the confirm dialog stays readable when a date field
+ *  hasn't been touched. */
+function fmtDateHuman(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso + 'T00:00:00Z');
+  if (Number.isNaN(d.getTime())) return iso;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+}

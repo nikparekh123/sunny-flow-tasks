@@ -2040,6 +2040,101 @@
 .pp-strike-diff.tone-itm { color: #f08770; }
 .pp-strike-diff.tone-neutral { color: var(--navi-fg3); }
 
+/* ─────────────────── Confirm dialog (overlay-on-modal) ───────────────
+ * Sits on top of the position modal with its own backdrop. Renders the
+ * ticker LARGE and bright so the user spots ticker mismatches before
+ * committing (the specific guardrail against e.g. typing META data into
+ * a WDAY-open modal). Two buttons: Cancel + neon Confirm. */
+.pp-confirm-stage {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 16, 14, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;             /* above the position modal (which sits ~9000) */
+  backdrop-filter: blur(2px);
+}
+.pp-confirm-card {
+  background: var(--navi-bg2, #0d1814);
+  border: 1px solid rgba(168, 196, 192, 0.32);
+  border-radius: 8px;
+  width: min(520px, 92vw);
+  padding: 24px 28px 22px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  font-family: var(--navi-font-sans);
+  color: var(--navi-fg1);
+}
+.pp-confirm-card.danger {
+  border-color: rgba(240, 135, 112, 0.55);
+}
+.pp-confirm-title {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.pp-confirm-ticker {
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: -.5px;
+  color: var(--navi-neon, #6dd1c5);
+  margin: 8px 0 2px;
+  line-height: 1.1;
+}
+.pp-confirm-card.danger .pp-confirm-ticker {
+  color: #f08770;
+}
+.pp-confirm-heading {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  color: var(--navi-fg2);
+  margin-bottom: 18px;
+  line-height: 1.45;
+}
+.pp-confirm-lines {
+  list-style: none;
+  margin: 0 0 22px;
+  padding: 14px 0 0;
+  border-top: 1px solid rgba(168, 196, 192, 0.16);
+}
+.pp-confirm-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 0;
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+.pp-confirm-line .k {
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+}
+.pp-confirm-line .v {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+.pp-confirm-line.tone-positive .v { color: var(--navi-neon, #6dd1c5); }
+.pp-confirm-line.tone-negative .v { color: #f08770; }
+.pp-confirm-line.tone-emphasis .v { color: #f5c458; }
+.pp-confirm-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 6px;
+}
+.pp-btn.pp-btn-neon.danger {
+  background: rgba(240, 135, 112, 0.18);
+  border-color: rgba(240, 135, 112, 0.55);
+  color: #f08770;
+}
+.pp-btn.pp-btn-neon.danger:hover {
+  background: rgba(240, 135, 112, 0.28);
+}
+
 .pp-input {
   font-family: var(--navi-font-sans);
   font-size: 14px;
