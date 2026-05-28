@@ -27,7 +27,7 @@ import { Section, Spark, AnimatedBar } from "@/sunnyfi/dashboard/atoms";
 import { MoneyCount, PctCount, useEntered } from "@/sunnyfi/lib/animation";
 import { useNow, fmtBrandDate } from "@/sunnyfi/dashboard/time";
 import {
-  fmtUSD, fmtPct, chipsForSignals, closeRealizedPL,
+  fmtUSD, fmtUSD2, fmtPct, chipsForSignals, closeRealizedPL,
   type PositionComputed, type LiveOption, type OptionTrade,
   type TickerSignals, type ShareSell,
 } from "./types";
@@ -130,7 +130,15 @@ function PositionsHero({ portfolio, liveByTicker }: {
   for (const legs of liveByTicker.values()) {
     for (const lo of legs) (lo.open.option_type === "call" ? (calls += 1) : (puts += 1));
   }
-  const isUp = portfolio.total_pnl >= 0;
+  const unrealized = portfolio.total_pnl;
+  // Realized = closed-option pairs + realized stock P&L across every position.
+  const realized = portfolio.rows.reduce(
+    (s, r) => s + (r.realized_pl ?? 0) + (r.realized_stock_pl ?? 0),
+    0,
+  );
+  const totalGain = unrealized + realized;
+  const sign = (v: number) => (v >= 0 ? "+" : "-");
+  const tone = (v: number) => (v >= 0 ? "pos" : "neg");
   return (
     <div>
       <Section right="updated now · live">Portfolio</Section>
@@ -142,12 +150,27 @@ function PositionsHero({ portfolio, liveByTicker }: {
           </div>
         </div>
         <div className="side">
-          <div className="label">UNREALIZED</div>
-          <div className={"unr-amt " + (isUp ? "pos" : "neg")}>
-            <MoneyCount value={Math.round(portfolio.total_pnl)} sign={isUp ? "+" : "-"} delay={200} />
+          <div className="label">TOTAL P&amp;L · REALIZED + UNREALIZED</div>
+          <div className={"unr-amt " + tone(totalGain)}>
+            <MoneyCount value={Math.round(totalGain)} sign={sign(totalGain)} delay={150} />
           </div>
-          <div className={"unr-pct " + (isUp ? "pos" : "neg")}>
-            <PctCount value={Math.abs(portfolio.total_pnl_pct)} sign={isUp ? "+" : "-"} delay={300} />
+          <div className="hero-sub">
+            <div>
+              <div className="label">UNREALIZED</div>
+              <div className={"hero-sub-amt " + tone(unrealized)}>
+                <MoneyCount value={Math.round(unrealized)} sign={sign(unrealized)} delay={250} />
+              </div>
+              <div className={"hero-sub-pct " + tone(unrealized)}>
+                <PctCount value={Math.abs(portfolio.total_pnl_pct)} sign={sign(unrealized)} delay={300} />
+              </div>
+            </div>
+            <div>
+              <div className="label">REALIZED</div>
+              <div className={"hero-sub-amt " + tone(realized)}>
+                <MoneyCount value={Math.round(realized)} sign={sign(realized)} delay={350} />
+              </div>
+              <div className="hero-sub-pct" style={{ color: "var(--fg3)" }}>booked</div>
+            </div>
           </div>
           <div className="live">
             <span className="live-dot" /> {open.length} positions · {calls} calls · {puts} puts
@@ -530,14 +553,14 @@ function PositionsLedger(props: PositionsV2BodyProps) {
       {view === "positions" && (
         <>
           <div className="ledger-head">
-            {["POSITION", "SECTOR", "PRICE · 1D", "SIZE", "UNREALIZED", "REALIZED", "5D", "SIGNALS"].map((h) => (
+            {["POSITION", "SECTOR", "PRICE · 1D", "QTY · AVG", "NET COST", "UNREALIZED", "REALIZED", "SIGNALS"].map((h) => (
               <span key={h} className="label" style={{ fontSize: 9 }}>{h}</span>
             ))}
           </div>
           {groups.map((g, gi) => {
             const meta = g.key === "unassigned" ? { name: "UNASSIGNED", dot: "var(--fg3)" } : BUCKET_META[g.key as Bucket];
             const mv = g.rows.reduce((s, r) => s + r.market_value, 0);
-            const real = g.rows.reduce((s, r) => s + (realizedByTicker.get(r.ticker) ?? 0), 0);
+            const real = g.rows.reduce((s, r) => s + (realizedByTicker.get(r.ticker) ?? 0) + (r.realized_stock_pl ?? 0), 0);
             return (
               <div key={g.key}>
                 <div className="ledger-group">
@@ -545,11 +568,16 @@ function PositionsLedger(props: PositionsV2BodyProps) {
                   <span className="g-meta">{g.rows.length} position{g.rows.length === 1 ? "" : "s"}</span>
                   <span className="g-right">{fmtUSD(mv)} MV · <b>{real >= 0 ? "+" : "−"}{fmtUSD(Math.abs(real))}</b> realized</span>
                 </div>
-                {g.rows.map((r, i) => {
+                {g.rows.map((r) => {
                   const sig = signalsByTicker.get(r.ticker);
                   const chips = sig ? chipsForSignals(sig).slice(0, 2) : [];
                   const ch1d = sig?.chg_5d_pct ?? null; // closest available daily proxy
-                  const real1 = realizedByTicker.get(r.ticker) ?? 0;
+                  // Realized = closed options + realized stock (full per-ticker realized).
+                  const real1 = (realizedByTicker.get(r.ticker) ?? 0) + (r.realized_stock_pl ?? 0);
+                  // Net cost = avg cost − realized P&L per share. Below avg = realized
+                  // gains have paid the basis down; above = realized losses raised it.
+                  const netCost = r.quantity > 0 ? r.avg_cost - real1 / r.quantity : r.avg_cost;
+                  const netTone = netCost < r.avg_cost ? "pos" : netCost > r.avg_cost ? "neg" : "";
                   return (
                     <div key={r.ticker} className="ledger-row" onClick={() => onTickerClick(r.ticker)} style={{ cursor: "pointer" }}>
                       <span className="t">{r.ticker}</span>
@@ -557,10 +585,10 @@ function PositionsLedger(props: PositionsV2BodyProps) {
                       <span className="price">{r.current_price != null ? fmtUSD(r.current_price) : "—"}
                         {ch1d != null && <span className={"ch " + (ch1d >= 0 ? "pos" : "neg")}>{ch1d >= 0 ? "+" : ""}{ch1d.toFixed(1)}%</span>}
                       </span>
-                      <span className="size">{r.quantity.toLocaleString()} sh</span>
+                      <span className="size">{r.quantity.toLocaleString()} sh<span className="sub2"> @ {fmtUSD2(r.avg_cost)}</span></span>
+                      <span className={"netcost " + netTone}>{fmtUSD2(netCost)}</span>
                       <span className={"unr " + (r.pnl_dollar >= 0 ? "pos" : "neg")}>{r.pnl_dollar >= 0 ? "+" : "−"}{fmtUSD(Math.abs(r.pnl_dollar))}</span>
                       <span className="real">{real1 === 0 ? "—" : (real1 >= 0 ? "+" : "−") + fmtUSD(Math.abs(real1))}</span>
-                      <Spark w={64} h={18} kind={r.pnl_dollar >= 0 ? "pos" : "neg"} dense delay={500 + gi * 200 + i * 60} />
                       <span className="sigs">
                         {chips.map((c) => <span key={c.label} className={"chip " + (c.tone === "warn" ? "warn" : c.tone === "down" ? "neg" : c.tone === "up" ? "pos" : "")}>{c.label}</span>)}
                       </span>

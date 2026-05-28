@@ -109,15 +109,21 @@ export function PositionInsightModal({
   // Keep the "totals" object for the stat cards — still computed from
   // collected/paid flow, because the stat cards show premium volume.
   const totals = useMemo(() => {
+    // True trailing-52-week window (the label says 52wk — honour it).
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - WEEK_COUNT * 7);
+    const cutoffIso = cutoff.toISOString().slice(0, 10);
+    // Premium VOLUME = opening trades only. Selling premium (short open) is
+    // "collected"; buying premium (long open, e.g. a protective put) is "paid".
+    // Closes (buy-backs / sell-backs) are NOT counted here — they net into
+    // realized P&L, not premium volume — which is what made META read $65k
+    // instead of the premium you actually sold.
     let collected = 0, paid = 0, callC = 0, callP = 0, putC = 0, putP = 0;
-    const byId = new Map<string, OptionTrade>();
-    for (const t of trades) byId.set(t.id, t);
     for (const t of trades) {
+      if (t.action !== 'open') continue;
+      if (t.trade_date < cutoffIso) continue;
       const notional = t.contracts * 100 * t.premium;
-      const isCashIn =
-        (t.action === 'open' && t.direction === 'short') ||
-        (t.action === 'close' && t.direction === 'long');
-      if (isCashIn) {
+      if (t.direction === 'short') {
         collected += notional;
         if (t.option_type === 'call') callC += notional; else putC += notional;
       } else {

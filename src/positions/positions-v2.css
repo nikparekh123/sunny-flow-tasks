@@ -25,6 +25,10 @@
 .dash .pos-hero .side .label { margin-bottom: 6px; }
 .dash .pos-hero .side .unr-amt { font-family: var(--mono); font-size: 40px; font-weight: 700; letter-spacing: -.02em; }
 .dash .pos-hero .side .unr-pct { font-family: var(--mono); font-size: 14px; margin-top: 4px; }
+.dash .pos-hero .side .hero-sub { display: flex; gap: 44px; margin-top: 24px; padding-top: 20px; border-top: var(--hair); }
+.dash .pos-hero .side .hero-sub .label { margin-bottom: 6px; }
+.dash .pos-hero .side .hero-sub-amt { font-family: var(--mono); font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+.dash .pos-hero .side .hero-sub-pct { font-family: var(--mono); font-size: 12px; margin-top: 3px; letter-spacing: 1px; text-transform: uppercase; }
 .dash .pos-hero .side .live { font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg3); margin-top: 10px; display: flex; align-items: center; gap: 8px; }
 
 /* ====== TREEMAP ====== */
@@ -83,14 +87,18 @@
 /* ====== POSITIONS LEDGER ====== */
 .dash .ledger-filters { display: flex; align-items: center; gap: 8px; padding: 14px 0; border-bottom: var(--hair); flex-wrap: wrap; }
 .dash .ledger-filters .label { margin-right: 6px; }
-.dash .ledger-head { display: grid; grid-template-columns: 86px 90px 130px 100px 130px 110px 78px 1fr; gap: 14px; padding: 14px 0 12px; border-bottom: var(--hair-strong); }
-.dash .ledger-row { display: grid; grid-template-columns: 86px 90px 130px 100px 130px 110px 78px 1fr; gap: 14px; padding: 14px 14px; margin: 0 -14px; border-bottom: var(--hair); border-radius: 6px; align-items: center; transition: background .12s var(--ease); }
+.dash .ledger-head { display: grid; grid-template-columns: 80px 84px 124px 132px 96px 120px 110px 1fr; gap: 14px; padding: 14px 0 12px; border-bottom: var(--hair-strong); }
+.dash .ledger-row { display: grid; grid-template-columns: 80px 84px 124px 132px 96px 120px 110px 1fr; gap: 14px; padding: 14px 14px; margin: 0 -14px; border-bottom: var(--hair); border-radius: 6px; align-items: center; transition: background .12s var(--ease); }
 .dash .ledger-row:hover { background: rgba(15,51,51,.30); }
 .dash .ledger-row .t { font-family: var(--sans); font-size: 16px; font-weight: 700; letter-spacing: -.01em; color: var(--fg1); }
 .dash .ledger-row .sec { font-family: var(--mono); font-size: 11px; color: var(--fg3); letter-spacing: 1.1px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dash .ledger-row .price { font-family: var(--mono); font-size: 13px; color: var(--fg1); }
 .dash .ledger-row .price .ch { font-size: 11px; margin-left: 6px; }
-.dash .ledger-row .size { font-family: var(--mono); font-size: 12px; color: var(--fg2); }
+.dash .ledger-row .size { font-family: var(--mono); font-size: 12px; color: var(--fg2); white-space: nowrap; }
+.dash .ledger-row .size .sub2 { color: var(--fg3); }
+.dash .ledger-row .netcost { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--fg1); }
+.dash .ledger-row .netcost.pos { color: var(--positive); }
+.dash .ledger-row .netcost.neg { color: var(--negative); }
 .dash .ledger-row .unr { font-family: var(--mono); font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
 .dash .ledger-row .real { font-family: var(--mono); font-size: 13px; color: var(--fg2); }
 .dash .ledger-row .sigs { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -225,6 +233,10 @@
 .dash .tm-cell .amt.pos { color: var(--positive); }
 .dash .tm-cell .amt.neg { color: var(--negative); }
 .dash .tm-cell .amt.neut { color: var(--fg1); }
+/* Open-leg premium: collected = neon, paid = amber. Neither is a gain/loss
+   colour — an open position isn't a profit or a loss, just a position. */
+.dash .tm-cell .amt.tone-sold { color: var(--neon); }
+.dash .tm-cell .amt.tone-bgt { color: var(--warning); }
 .dash .tm-cell .chips { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 4px; }
 .dash .tm-cell .glyph-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--neon); }
 .dash .tm-cell .glyph-dot.put { background: var(--warning); }

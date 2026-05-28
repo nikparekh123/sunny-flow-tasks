@@ -384,7 +384,9 @@ export default function PositionsPage() {
         if (!pos) return null;
         const trades = tradesByTicker.get(insightTicker) ?? [];
         const live = liveByTicker.get(insightTicker) ?? [];
-        const realized = realizedByTicker.get(insightTicker) ?? 0;
+        // Realized = closed-option pairs + realized stock P&L (sells/assignments),
+        // so the modal's "Realized P&L" matches the full per-ticker realized.
+        const realized = (realizedByTicker.get(insightTicker) ?? 0) + (pos.realized_stock_pl ?? 0);
         return (
           <PositionInsightModal
             position={pos}
