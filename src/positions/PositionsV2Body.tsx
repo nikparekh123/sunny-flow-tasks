@@ -346,50 +346,67 @@ function PnLWaterfall({ data, onTickerClick }: {
 }
 
 // ─────────────────── §02 Put protection ──────────────────────────
-function ProtectionBlock({ rows, tradesByTicker }: {
+// "How much of the put bill have the calls paid for?"
+//   • Put cost   = total premium PAID on long puts (gross, all-time)
+//   • Call income= realized P&L from CLOSED call pairs
+//   • Net cost   = put cost − call income (what's still out of pocket)
+//   • Coverage % = call income ÷ put cost (how far the calls have
+//                  covered the protection)
+function ProtectionBlock({ tradesByTicker }: {
   rows: PositionComputed[]; tradesByTicker: Map<string, OptionTrade[]>;
 }) {
   const entered = useEntered(300);
-  const { coveredPct, protectedDollars } = useMemo(() => {
-    // Protected notional = sum of long-put strike × remaining contracts × 100.
-    let protectedNotional = 0;
+  const { coveredPct, putCost, callIncome, netCost } = useMemo(() => {
+    let putCost = 0;
+    let callIncome = 0;
     for (const [, list] of tradesByTicker) {
-      const closedQty = new Map<string, number>();
-      for (const t of list) if (t.action === "close" && t.closes_trade_id) closedQty.set(t.closes_trade_id, (closedQty.get(t.closes_trade_id) ?? 0) + t.contracts);
+      // Match closes to their opens so we can realize call P&L.
+      const byId = new Map<string, OptionTrade>();
+      for (const t of list) byId.set(t.id, t);
       for (const t of list) {
+        // Put cost — premium paid to OPEN long puts (the protection bill).
         if (t.action === "open" && t.option_type === "put" && t.direction === "long") {
-          const rem = t.contracts - (closedQty.get(t.id) ?? 0);
-          if (rem > 0) protectedNotional += rem * 100 * t.strike;
+          putCost += t.contracts * 100 * t.premium;
+        }
+        // Call income — realized P&L on closed CALL pairs.
+        if (t.action === "close" && t.closes_trade_id) {
+          const open = byId.get(t.closes_trade_id);
+          if (open && open.option_type === "call") {
+            callIncome += closeRealizedPL(t, open);
+          }
         }
       }
     }
-    const equity = rows.reduce((s, r) => s + r.market_value, 0) || 1;
-    return { coveredPct: Math.min(100, (protectedNotional / equity) * 100), protectedDollars: protectedNotional };
-  }, [rows, tradesByTicker]);
+    const netCost = putCost - callIncome;
+    const coveredPct = putCost > 0 ? Math.max(0, Math.min(100, (callIncome / putCost) * 100)) : 0;
+    return { coveredPct, putCost, callIncome, netCost };
+  }, [tradesByTicker]);
+
+  const covered = netCost <= 0;     // calls have fully paid for the puts
 
   return (
     <div>
-      <Section n="02" right="long puts vs equity">Put protection</Section>
+      <Section n="02" right="call income vs put cost">Put protection</Section>
       <div className="protection">
         <div>
           <div className="prot-bar-wrap">
             <div className="prot-bar-fill" style={{ width: entered ? `${coveredPct}%` : "0%" }} />
-            <div className="prot-line" style={{ left: "50%" }}><div className="prot-line-label">target · 50%</div></div>
+            <div className="prot-line" style={{ left: "100%" }}><div className="prot-line-label">break-even · 100%</div></div>
           </div>
           <div className="prot-meta">
             <span className="label">0%</span>
-            <span className="label">{coveredPct.toFixed(0)}% covered</span>
-            <span className="label">50%</span>
-            <span className="label">75%</span>
+            <span className="label">{coveredPct.toFixed(0)}% of put cost covered by calls</span>
             <span className="label">100%</span>
           </div>
         </div>
         <div className="prot-right">
-          <div className="label">PROTECTED</div>
-          <div className="hero num-mono" style={{ fontSize: 36, fontWeight: 700, marginTop: 4, color: "var(--neon)" }}>
-            <MoneyCount value={Math.round(protectedDollars)} delay={250} />
+          <div className="label">{covered ? "SURPLUS" : "NET COST"}</div>
+          <div className="hero num-mono" style={{ fontSize: 36, fontWeight: 700, marginTop: 4, color: covered ? "var(--positive)" : "var(--negative)" }}>
+            <MoneyCount value={Math.round(Math.abs(netCost))} sign={covered ? "+" : "-"} delay={250} />
           </div>
-          <div className="label" style={{ marginTop: 6, color: "var(--warning)" }}>notional downside hedged</div>
+          <div className="label" style={{ marginTop: 6 }}>
+            {fmtUSD(callIncome)} calls · {fmtUSD(putCost)} puts
+          </div>
         </div>
       </div>
     </div>
