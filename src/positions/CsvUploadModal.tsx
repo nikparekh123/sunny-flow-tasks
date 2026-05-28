@@ -176,8 +176,9 @@ export function CsvUploadModal({ open, onClose, onConfirm }: Props) {
   const handleConfirm = async () => {
     setStage('saving');
     try {
+      // The caller reports the accurate added/skipped counts — don't duplicate
+      // with a misleading "replaced" toast (the import never deletes/overwrites).
       await onConfirm(parsed.rows);
-      toast.success(`Replaced ${parsed.rows.length} positions.`);
       onClose();
     } catch (e) {
       toast.error(`Import failed: ${(e as Error).message}`);
@@ -239,7 +240,7 @@ export function CsvUploadModal({ open, onClose, onConfirm }: Props) {
                 }}
               >
                 <div className="hd">Pick a .csv file</div>
-                <div className="sub">Full overwrite of current positions</div>
+                <div className="sub">Adds new tickers · keeps existing ones · never deletes</div>
                 <button className="np-btn neon" onClick={triggerPick}>
                   ↑ Choose file
                 </button>
@@ -337,7 +338,7 @@ NKE,Consumer Discretionary,200,90.00,invest,closed`}</pre>
                     ✓ {parsed.rows.length} rows ready
                   </div>
                   <div className="np-modal-sub">
-                    file: {filename} · will replace all current positions
+                    file: {filename} · adds new tickers, skips ones you already hold
                   </div>
                 </div>
                 <span className="np-pill">
@@ -404,7 +405,7 @@ NKE,Consumer Discretionary,200,90.00,invest,closed`}</pre>
                   ↑ Different file
                 </button>
                 <button className="np-btn neon" onClick={handleConfirm}>
-                  ✓ Replace positions
+                  ✓ Import new positions
                 </button>
               </div>
             </div>
