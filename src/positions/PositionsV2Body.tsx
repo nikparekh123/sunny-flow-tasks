@@ -556,21 +556,31 @@ function FocusInsight({ rows, signalsByTicker, liveByTicker, onTickerClick }: {
       .sort((a, b) => b.severity - a.severity);
   }, [rows, signalsByTicker]);
 
+  const [idx, setIdx] = useState(0);
   if (ranked.length === 0) return null;
-  const focus = ranked[0];
-  const queue = ranked.slice(1, 5);
+  // Clamp the focus index in case the ranked list shrank (a position
+  // closed) since the last render.
+  const focusIdx = Math.min(idx, ranked.length - 1);
+  const focus = ranked[focusIdx];
+  // Queue = the next four names after the current focus, wrapping so
+  // you can always keep stepping forward.
+  const queue = Array.from({ length: Math.min(4, ranked.length - 1) }, (_, i) =>
+    ranked[(focusIdx + 1 + i) % ranked.length],
+  );
   const fr = focus.r;
   const sig = signalsByTicker.get(fr.ticker);
   const live = liveByTicker.get(fr.ticker)?.length ?? 0;
 
+  const step = (d: number) => setIdx(((focusIdx + d) % ranked.length + ranked.length) % ranked.length);
+
   return (
     <div>
-      <Section n="05" right={`focus · 1 of ${ranked.length}`}>Stock insights · focus</Section>
+      <Section n="05" right={`focus · ${focusIdx + 1} of ${ranked.length}`}>Stock insights · focus</Section>
       <div className="focus">
         <div className="card">
           <div className="header">
             <div>
-              <div className="name">{fr.ticker}</div>
+              <div className="name" onClick={() => onTickerClick(fr.ticker)} style={{ cursor: "pointer" }} title="Open position">{fr.ticker}</div>
               <div className="sector">{fr.sector}</div>
             </div>
             {fr.earnings_date && <div className="earn">EARNINGS<br />{fr.earnings_date}</div>}
@@ -604,13 +614,21 @@ function FocusInsight({ rows, signalsByTicker, liveByTicker, onTickerClick }: {
         </div>
         <div className="queue">
           <div className="label" style={{ marginBottom: 12 }}>UP NEXT · by severity</div>
-          {queue.map((q) => (
-            <div key={q.r.ticker} className="q-row" onClick={() => onTickerClick(q.r.ticker)}>
-              <span className="t">{q.r.ticker}</span>
-              <span className="meta">{q.r.pnl_dollar >= 0 ? "+" : "−"}{fmtUSD(Math.abs(q.r.pnl_dollar))}</span>
-              {q.chips[0] && <span className={"chip " + (q.chips[0].tone === "warn" ? "warn" : "neg")}>{q.chips[0].label}</span>}
-            </div>
-          ))}
+          {queue.map((q) => {
+            const qIdx = ranked.indexOf(q);
+            return (
+              <div key={q.r.ticker} className="q-row" onClick={() => setIdx(qIdx)} title="Click to focus">
+                <span className="t">{q.r.ticker}</span>
+                <span className="meta">{q.r.pnl_dollar >= 0 ? "+" : "−"}{fmtUSD(Math.abs(q.r.pnl_dollar))}</span>
+                {q.chips[0] && <span className={"chip " + (q.chips[0].tone === "warn" ? "warn" : "neg")}>{q.chips[0].label}</span>}
+              </div>
+            );
+          })}
+          <div className="nav">
+            <span onClick={() => step(-1)}>← prev</span>
+            <span style={{ color: "var(--neon)" }}>{focusIdx + 1} / {ranked.length}</span>
+            <span onClick={() => step(1)}>next →</span>
+          </div>
         </div>
       </div>
     </div>
