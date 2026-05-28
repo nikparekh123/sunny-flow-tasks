@@ -27,11 +27,11 @@ import { Section, Spark, AnimatedBar } from "@/sunnyfi/dashboard/atoms";
 import { MoneyCount, PctCount, useEntered } from "@/sunnyfi/lib/animation";
 import { useNow, fmtBrandDate } from "@/sunnyfi/dashboard/time";
 import {
-  fmtUSD, fmtPct, chipsForSignals,
+  fmtUSD, fmtPct, chipsForSignals, closeRealizedPL,
   type PositionComputed, type LiveOption, type OptionTrade,
   type TickerSignals, type ShareSell,
 } from "./types";
-import { TradesLogMatrix } from "./TradesLogMatrix";
+import { TradesMatrixV2 } from "./TradesMatrixV2";
 import "@/sunnyfi/pages/dashboard.css";
 import "./positions-v2.css";
 
@@ -506,10 +506,9 @@ function PositionsLedger(props: PositionsV2BodyProps) {
       }>Positions ledger</Section>
 
       {view === "trades" && (
-        <TradesLogMatrix
+        <TradesMatrixV2
           rows={portfolio.rows}
           tradesByTicker={props.tradesByTicker}
-          liveByTicker={props.liveByTicker}
           realizedByTicker={props.realizedByTicker}
           shareSellsByTicker={props.shareSellsByTicker}
           onTickerClick={onTickerClick}
