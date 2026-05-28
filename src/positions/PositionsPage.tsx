@@ -139,10 +139,20 @@ export default function PositionsPage() {
           portfolio={portfolio}
           liveByTicker={liveByTicker}
           overlayByTicker={overlayByTicker}
+          signalsByTicker={signalsByTicker}
+          realizedByTicker={realizedByTicker}
+          tradesByTicker={tradesByTicker}
+          shareSellsByTicker={shareSellsByTicker}
           onUpload={() => setShowUpload(true)}
           onRefresh={handleRefresh}
           refreshing={refreshPrices.isPending}
           onTickerClick={(t) => setInsightTicker(t)}
+          onSharesCellClick={(t) => setDetail({ ticker: t, tab: 'shares' })}
+          onOpenSlotClick={(t) => {
+            const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
+            setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
+          }}
+          onResolveCellClick={(t, open) => setDetail({ ticker: t, tab: 'resolve', resolveTrade: open })}
           onDashboard={() => { window.location.href = DASHBOARD_URL; }}
           onStrategy={() => { window.location.href = 'https://www.sunnyfi.co/new-strategy'; }}
         />
