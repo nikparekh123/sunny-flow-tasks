@@ -1,0 +1,605 @@
+/* BNF / NewStrategy page-specific styles. Layered on top of positions.css. */
+
+.np-app .bnf-top-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.np-app .bnf-banner {
+  margin: 16px 0;
+  padding: 12px 18px;
+  border-radius: 10px;
+  font-family: var(--navi-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -.1px;
+}
+.np-app .bnf-banner.ready {
+  background: var(--navi-neon);
+  color: #0a2828;
+}
+.np-app .bnf-banner.err {
+  background: rgba(232, 112, 96, .18);
+  color: var(--navi-negative);
+  border: 1px solid rgba(232, 112, 96, .4);
+}
+
+/* ──────────────────────────────────────────────────────────
+   Scan progress banner — live updates via Realtime
+   ────────────────────────────────────────────────────────── */
+.np-app .bnf-progress {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(15, 51, 51, 0.55);
+  border: 1px solid rgba(50, 110, 100, 0.5);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  color: var(--navi-fg2);
+  transition: opacity .3s var(--np-ease);
+}
+.np-app .bnf-progress.live {
+  border-color: rgba(210, 230, 50, 0.45);
+  background: rgba(210, 230, 50, 0.06);
+}
+.np-app .bnf-progress.ok {
+  border-color: rgba(168, 212, 160, 0.45);
+  background: rgba(168, 212, 160, 0.08);
+}
+.np-app .bnf-progress.err {
+  border-color: rgba(232, 112, 96, 0.5);
+  background: rgba(232, 112, 96, 0.12);
+  color: var(--navi-negative);
+}
+
+.np-app .bnf-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.np-app .bnf-progress-icon {
+  font-size: 14px;
+  font-weight: 800;
+  width: 18px;
+  text-align: center;
+}
+.np-app .bnf-progress.live .bnf-progress-icon { color: var(--navi-neon); animation: spin 1.4s linear infinite; display: inline-block; }
+.np-app .bnf-progress.ok .bnf-progress-icon { color: var(--navi-positive); }
+.np-app .bnf-progress.err .bnf-progress-icon { color: var(--navi-negative); }
+@keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+.np-app .bnf-progress-title {
+  font-family: var(--navi-font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navi-fg1);
+  letter-spacing: -.2px;
+}
+.np-app .bnf-progress.err .bnf-progress-title { color: var(--navi-negative); }
+.np-app .bnf-progress-stage {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--navi-fg3);
+  text-transform: lowercase;
+  letter-spacing: .2px;
+}
+.np-app .bnf-progress-elapsed {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--navi-fg4);
+  letter-spacing: .3px;
+}
+.np-app .bnf-progress-close {
+  background: transparent;
+  border: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navi-fg5);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.np-app .bnf-progress-close:hover { color: var(--navi-fg1); }
+
+.np-app .bnf-progress-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.np-app .bnf-progress-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11.5px;
+}
+.np-app .bnf-progress-lbl {
+  font-weight: 700;
+  letter-spacing: .4px;
+  color: var(--navi-fg4);
+  width: 48px;
+  text-transform: uppercase;
+}
+.np-app .bnf-progress-counters {
+  color: var(--navi-fg2);
+}
+.np-app .bnf-progress-counters b {
+  color: var(--navi-fg1);
+  font-weight: 800;
+}
+
+/* Per-universe sub-stage pill */
+.np-app .bnf-progress-univstage {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 100px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  vertical-align: 1px;
+  border: 1px solid currentColor;
+  opacity: 0.65;
+}
+.np-app .bnf-progress-univstage.stage-pricing,
+.np-app .bnf-progress-univstage.stage-enriching {
+  color: var(--navi-neon);
+  background: rgba(210, 230, 50, 0.08);
+  opacity: 1;
+}
+.np-app .bnf-progress-univstage.stage-done {
+  color: var(--navi-positive);
+  background: rgba(168, 212, 160, 0.08);
+}
+
+/* Throttle warning — appears when Polygon 429s tickers */
+.np-app .bnf-progress-throttle {
+  color: var(--navi-warning);
+  font-weight: 700;
+}
+
+.np-app .bnf-progress-msg {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(232, 112, 96, 0.12);
+  border-left: 3px solid var(--navi-negative);
+  border-radius: 4px;
+  font-size: 11.5px;
+  color: var(--navi-negative);
+}
+
+.np-app .bnf-progress-bar {
+  margin-top: 10px;
+  height: 6px;
+  background: rgba(30, 90, 80, 0.32);
+  border-radius: 100px;
+  overflow: hidden;
+}
+.np-app .bnf-progress-fill {
+  height: 100%;
+  border-radius: 100px;
+  transition: width .35s var(--np-ease);
+}
+.np-app .bnf-progress-fill.live { background: var(--navi-neon); }
+.np-app .bnf-progress-fill.ok { background: var(--navi-positive); }
+.np-app .bnf-progress-fill.err { background: var(--navi-negative); }
+
+.np-app .np-section-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 10.5px;
+  color: var(--navi-fg4);
+  letter-spacing: .2px;
+  margin-top: 2px;
+}
+
+.np-app .bnf-row-btn {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  border-radius: 100px;
+}
+
+.np-app .bnf-empty {
+  text-align: center;
+  color: var(--navi-fg4);
+  font-style: italic;
+  padding: 24px;
+}
+
+/* Status dot — colored circle in front of each open-position row. */
+.np-app .bnf-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.np-app .bnf-dot.green  { background: var(--navi-neon);     box-shadow: 0 0 8px rgba(210,230,50,.55); }
+.np-app .bnf-dot.yellow { background: var(--navi-warning);  box-shadow: 0 0 6px rgba(224,192,96,.45); }
+.np-app .bnf-dot.grey   { background: var(--navi-fg5); }
+.np-app .bnf-dot.red    { background: var(--navi-negative); box-shadow: 0 0 8px rgba(232,112,96,.45); }
+
+/* Closed-trade collapsible header — looks like a row, not a button. */
+.np-app .bnf-closed-toggle {
+  background: rgba(15,51,51,.42);
+  border: 1px solid rgba(30,90,80,.4);
+  border-radius: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--navi-font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navi-fg1);
+  letter-spacing: -.2px;
+  cursor: pointer;
+  text-align: left;
+}
+.np-app .bnf-closed-toggle:hover { background: rgba(15,51,51,.6); }
+.np-app .bnf-closed-stats {
+  margin-left: auto;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--navi-fg3);
+  letter-spacing: .2px;
+}
+.np-app .bnf-closed-stats b { color: var(--navi-fg1); font-weight: 800; }
+.np-app .bnf-closed-stats b.up { color: var(--navi-neon); }
+.np-app .bnf-closed-stats b.down { color: var(--navi-negative); }
+
+/* The candidates table has a LOT of columns. Tighten cell padding so it
+   doesn't overflow the page on standard laptop widths. */
+.np-app .bnf-candidates-table th,
+.np-app .bnf-candidates-table td {
+  padding: 7px 8px;
+  font-size: 11.5px;
+}
+.np-app .bnf-candidates-table th { font-size: 9.5px; }
+
+/* Company-name cell — truncate long names ("ACME Manufacturing Holdings,
+   Inc.") so they don't push every other column off-screen. Hover the cell
+   for the full string via title attribute. */
+.np-app .bnf-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--navi-fg2);
+  font-weight: 500;
+}
+
+/* ──────────────────────────────────────────────────────────
+   RISK FLAG cells — colored backgrounds per spec
+   ────────────────────────────────────────────────────────── */
+.np-app .bnf-flag-th { white-space: nowrap; }
+.np-app .bnf-flag {
+  font-weight: 600;
+  font-family: var(--navi-font-mono);
+  cursor: help;
+}
+.np-app .bnf-flag.tone-red {
+  background: rgba(232, 112, 96, 0.22);
+  color: #ffd5cd;
+}
+.np-app .bnf-flag.tone-amber {
+  background: rgba(224, 192, 96, 0.22);
+  color: #f5e7c1;
+}
+.np-app .bnf-flag.tone-none {
+  color: var(--navi-fg3);
+}
+
+/* 8-K cell — count + small ↗ links to each filing on SEC.gov */
+.np-app .bnf-8k-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.np-app .bnf-8k-count {
+  font-weight: 700;
+}
+.np-app .bnf-8k-links {
+  display: inline-flex;
+  gap: 2px;
+}
+.np-app .bnf-8k-link {
+  color: var(--navi-fg2);
+  text-decoration: none;
+  font-size: 11px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  transition: background .12s var(--np-ease);
+}
+.np-app .bnf-8k-link:hover {
+  background: rgba(168, 212, 160, 0.18);
+  color: var(--navi-neon);
+}
+
+/* Research status — per-row dropdown + row tinting */
+.np-app .bnf-status-cell { padding: 4px 6px; }
+.np-app .bnf-status-select {
+  background: rgba(15, 51, 51, 0.6);
+  border: 1px solid rgba(50, 110, 100, 0.4);
+  border-radius: 100px;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--navi-fg4) 50%),
+    linear-gradient(135deg, var(--navi-fg4) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 10px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  padding-right: 22px;
+}
+.np-app .bnf-status-select.status-skipped {
+  color: var(--navi-fg5);
+  background-color: rgba(15, 51, 51, 0.4);
+  border-color: rgba(50, 110, 100, 0.32);
+}
+.np-app .bnf-status-select.status-considering {
+  color: var(--navi-warning);
+  background-color: rgba(224, 192, 96, 0.12);
+  border-color: rgba(224, 192, 96, 0.4);
+}
+.np-app .bnf-status-select.status-approved {
+  color: var(--navi-neon);
+  background-color: rgba(210, 230, 50, 0.12);
+  border-color: rgba(210, 230, 50, 0.45);
+}
+
+/* Skipped rows go to 50% opacity so they don't visually compete when
+   the user toggles "Hide skipped" off to revisit them. Approved rows
+   get a faint neon left-border to pop. */
+.np-app .bnf-row.status-skipped td { opacity: 0.5; }
+.np-app .bnf-row.status-approved td:first-child {
+  box-shadow: inset 2px 0 0 var(--navi-neon);
+}
+
+/* Hide-skipped filter toggle in the section header */
+.np-app .bnf-filter-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.np-app .bnf-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--navi-fg3);
+  cursor: pointer;
+  user-select: none;
+}
+.np-app .bnf-filter-toggle input { accent-color: var(--navi-neon); cursor: pointer; }
+.np-app .bnf-section-sub-inline {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--navi-fg4);
+  letter-spacing: .2px;
+}
+
+/* Setup Quality summary chip */
+.np-app .bnf-quality {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  text-align: center;
+  border-radius: 4px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+.np-app .bnf-quality.tone-clean {
+  background: rgba(168, 212, 160, 0.22);
+  color: #c8e8c0;
+}
+.np-app .bnf-quality.tone-review {
+  background: rgba(224, 192, 96, 0.22);
+  color: #f5e7c1;
+}
+.np-app .bnf-quality.tone-caution {
+  background: rgba(232, 112, 96, 0.25);
+  color: #ffd5cd;
+}
+
+.np-app .np-crumb-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg4);
+  letter-spacing: .2px;
+}
+
+/* ──────────────────────────────────────────────────────────
+   ETF universe — teal accent + small E/ETF universe badges
+   ────────────────────────────────────────────────────────── */
+/* ETF section header gets a left-edge teal stripe so the eye can tell
+   an ETF table apart from an equity table at a glance. */
+.np-app .bnf-etf-section .np-section-hd {
+  border-left: 3px solid #6dd1c5;
+  padding-left: 12px;
+}
+.np-app .bnf-etf-table thead {
+  background: rgba(109, 209, 197, 0.08);
+}
+.np-app .bnf-etf-table th { color: #9ed8d0; }
+
+/* Tiny universe pill — shown next to tickers in open + closed tables,
+   plus inline in the closed-trades summary header. */
+.np-app .bnf-univ-badge {
+  display: inline-block;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  vertical-align: 1px;
+  text-transform: uppercase;
+}
+.np-app .bnf-univ-badge.equity {
+  background: rgba(168, 196, 192, 0.16);
+  color: var(--navi-fg2);
+  border: 1px solid rgba(168, 196, 192, 0.32);
+}
+.np-app .bnf-univ-badge.etf {
+  background: rgba(109, 209, 197, 0.18);
+  color: #6dd1c5;
+  border: 1px solid rgba(109, 209, 197, 0.4);
+}
+
+/* Borderline / near-miss chip — yellow tag rendered next to the ticker
+ * when one or more soft filters were within 0.5% of failing. Tooltip on
+ * hover names which threshold(s). The .bnf-row.borderline class also
+ * tints the row's left edge so the eye catches them in a long table. */
+.np-app .bnf-borderline-chip {
+  display: inline-block;
+  margin-left: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  vertical-align: 1px;
+  background: rgba(245, 196, 88, 0.18);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.42);
+  cursor: help;
+}
+.np-app .bnf-row.borderline td:first-child {
+  box-shadow: inset 3px 0 0 #f5c458;
+}
+
+/* ────────── Unified universe table ──────────
+ * Renders every ticker the scanner tracks (~1030 rows). Gray by default
+ * (`tier-none`); rows that match the BNF setup today get full-color
+ * treatment (`tier-match`); near-miss rows get a yellow accent
+ * (`tier-borderline`). Re-running the scan just repaints these tiers —
+ * the row itself never disappears, so the user always sees the full
+ * universe and can confirm the scan finished. */
+
+.np-app .bnf-universe-table .bnf-row.tier-none td {
+  color: var(--navi-fg3, #6b7a76);
+  opacity: 0.62;
+}
+.np-app .bnf-universe-table .bnf-row.tier-none td.ticker {
+  /* Ticker still legible even when the row is grayed out. */
+  color: var(--navi-fg2);
+  opacity: 0.92;
+}
+.np-app .bnf-universe-table .bnf-row.tier-none .bnf-flag,
+.np-app .bnf-universe-table .bnf-row.tier-none .bnf-quality {
+  background: transparent !important;
+  color: var(--navi-fg3, #6b7a76);
+}
+.np-app .bnf-universe-table .bnf-row.tier-match td {
+  /* Full color for today's BNF survivors — same look as the old
+   * 'Today's candidates' table. */
+  color: var(--navi-fg1);
+  opacity: 1;
+}
+.np-app .bnf-universe-table .bnf-row.tier-match td:first-child {
+  box-shadow: inset 3px 0 0 var(--navi-neon, #6dd1c5);
+}
+.np-app .bnf-universe-table .bnf-row.tier-borderline td {
+  /* Same readable text as matches; the yellow chip + left edge do the
+   * "borderline" signalling so colors stay differentiated. */
+  color: var(--navi-fg1);
+  opacity: 0.95;
+}
+
+/* Inline secondary info on the name cell (sector / category) — quiet so
+ * it doesn't compete with the ticker. */
+.np-app .bnf-row-sector {
+  color: var(--navi-fg3, #6b7a76);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+/* Tier-count chips in the section header — three pills, each colored
+ * per tier so the user can scan today's totals at a glance. */
+.np-app .bnf-tier-chip {
+  display: inline-block;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: 6px;
+  letter-spacing: .4px;
+}
+.np-app .bnf-tier-chip.match {
+  background: rgba(109, 209, 197, 0.18);
+  color: #6dd1c5;
+  border: 1px solid rgba(109, 209, 197, 0.42);
+}
+.np-app .bnf-tier-chip.borderline {
+  background: rgba(245, 196, 88, 0.18);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.42);
+}
+.np-app .bnf-tier-chip.watch {
+  background: rgba(168, 196, 240, 0.18);
+  color: #a8c4f0;
+  border: 1px solid rgba(168, 196, 240, 0.42);
+}
+
+/* Filter dropdown styling — match existing filter-toggle look. */
+.np-app .bnf-filter-select {
+  gap: 8px;
+}
+.np-app .bnf-filter-dropdown {
+  background: var(--navi-bg2, #0f1614);
+  color: var(--navi-fg1);
+  border: 1px solid rgba(168, 196, 192, 0.24);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+}
+
+/* "Tone-none" cells in the universe table — non-candidate rows have no
+ * EDGAR/setup data, so render an empty muted dash. */
+.np-app .bnf-flag.tone-none,
+.np-app .bnf-quality.tone-none {
+  background: transparent;
+  color: var(--navi-fg3, #6b7a76);
+}
+
+/* Per-universe stat blocks inside the closed-trades toggle header */
+.np-app .bnf-closed-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+}
+.np-app .bnf-closed-univ {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.np-app .bnf-closed-univ.combined {
+  padding-left: 12px;
+  border-left: 1px solid rgba(50, 110, 100, 0.4);
+  color: var(--navi-fg2);
+}

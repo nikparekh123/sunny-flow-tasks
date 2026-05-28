@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sunnyfi · New Strategy — design handoff</title>
+<!-- The two production stylesheets, copied verbatim. positions.css carries the
+     shared "Navi" shell (.np-app, .np-top, .np-btn, .np-section, .np-table …);
+     new-strategy.css carries the page-specific bnf-* classes. -->
+<link rel="stylesheet" href="positions.css" />
+<link rel="stylesheet" href="new-strategy.css" />
+<style>html,body{margin:0;background:#061a10;}</style>
+</head>
+<body>
+<div class="np-app">
+
+  <!-- ░░░ TOP BAR ░░░ -->
+  <header class="np-top">
+    <div class="np-brand-row">
+      <a class="np-brand" href="#">Sunnyfi<span class="cursor"></span></a>
+      <span class="np-crumb-sep">/</span>
+      <span class="np-crumb">NEW STRATEGY</span>
+      <span class="np-crumb-sub"> · BNF mean-reversion</span>
+    </div>
+    <div class="bnf-top-actions">
+      <button class="np-btn">⤓ Backfill cache</button>
+      <button class="np-btn">↻ Refresh cache</button>
+      <button class="np-btn">↻ Refresh risk flags</button>
+      <button class="np-btn">↻ Refresh ETF scan</button>
+      <button class="np-btn">↻ Refresh equity scan</button>
+      <button class="np-btn neon">↻ Refresh all</button>
+    </div>
+  </header>
+
+  <main class="np-main">
+
+    <!-- "ready" banner -->
+    <div class="bnf-banner ready">▶ 2 positions ready to sell — price reached SMA25</div>
+
+    <!-- ░░░ § UNIVERSE TABLE ░░░ -->
+    <section class="np-section">
+      <div class="np-section-hd">
+        <div class="np-section-title">
+          Universe · 1,030 of 1,030
+          <span class="bnf-tier-chip match">7 match</span>
+          <span class="bnf-tier-chip borderline">12 near miss</span>
+          <span class="bnf-tier-chip watch">3 on watch</span>
+          <span class="bnf-section-sub-inline"> · last close 2026-05-27</span>
+        </div>
+        <div class="np-section-sub">
+          Every ticker we track. BNF strategy match = dev ∈ [−15%, −7%], close &gt; SMA200,
+          today &gt; −5%, sector ETF healthy. Near miss = within 0.5% of any threshold.
+        </div>
+        <div class="bnf-filter-row">
+          <label class="bnf-filter-toggle bnf-filter-select">
+            Show:
+            <select class="bnf-filter-dropdown" aria-label="Universe filter">
+              <option>All tickers</option>
+              <option>BNF matches only</option>
+              <option>Near miss only</option>
+              <option>Watchlist (considering + approved)</option>
+              <option>Equities only</option>
+              <option>ETFs only</option>
+            </select>
+          </label>
+          <label class="bnf-filter-toggle">
+            <input type="checkbox" checked /> Hide skipped
+          </label>
+        </div>
+      </div>
+
+      <div class="np-table-wrap">
+        <table class="np-table bnf-candidates-table bnf-universe-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Name / sector</th>
+              <th class="num">Price</th>
+              <th class="num">SMA25</th>
+              <th class="num">Dev %</th>
+              <th class="num">SMA200</th>
+              <th class="num">ADV20 $M</th>
+              <th class="num">Today</th>
+              <th class="num bnf-flag-th">Days since earn</th>
+              <th class="num bnf-flag-th">Insider (14d)</th>
+              <th class="num bnf-flag-th">8-K (14d)</th>
+              <th>Setup</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- A clean BNF match -->
+            <tr class="bnf-row tier-match status-considering">
+              <td class="ticker">PHM</td>
+              <td class="bnf-name">PulteGroup Inc<span class="bnf-row-sector"> · Consumer Discretionary</span></td>
+              <td class="num strong">$98.40</td>
+              <td class="num">$106.20</td>
+              <td class="num strong down">−9.8%</td>
+              <td class="num">$92.10</td>
+              <td class="num">$210M</td>
+              <td class="num down">−1.2%</td>
+              <td class="num bnf-flag tone-clean">34d</td>
+              <td class="num bnf-flag tone-clean">none</td>
+              <td class="num bnf-flag tone-clean">—</td>
+              <td class="bnf-quality tone-clean">Clean</td>
+              <td class="bnf-status-cell">
+                <select class="bnf-status-select status-considering">
+                  <option>— pending</option><option>✕ skipped</option>
+                  <option selected>◐ considering</option><option>✓ approved</option>
+                </select>
+              </td>
+              <td class="num"><button class="np-btn neon bnf-row-btn">Buy</button></td>
+            </tr>
+
+            <!-- A match with a caution flag -->
+            <tr class="bnf-row tier-match status-pending">
+              <td class="ticker">MOS</td>
+              <td class="bnf-name">Mosaic Co<span class="bnf-row-sector"> · Materials</span></td>
+              <td class="num strong">$27.85</td>
+              <td class="num">$30.40</td>
+              <td class="num strong down">−8.4%</td>
+              <td class="num">$26.10</td>
+              <td class="num">$155M</td>
+              <td class="num down">−3.1%</td>
+              <td class="num bnf-flag tone-caution">4d</td>
+              <td class="num bnf-flag tone-review">2 sales</td>
+              <td class="num bnf-flag tone-caution">
+                <span class="bnf-8k-cell"><span class="bnf-8k-count">1</span>
+                  <span class="bnf-8k-links"><a class="bnf-8k-link" href="#">8-K</a></span></span>
+              </td>
+              <td class="bnf-quality tone-caution">Caution</td>
+              <td class="bnf-status-cell">
+                <select class="bnf-status-select status-pending">
+                  <option selected>— pending</option><option>✕ skipped</option>
+                  <option>◐ considering</option><option>✓ approved</option>
+                </select>
+              </td>
+              <td class="num"><button class="np-btn neon bnf-row-btn">Buy</button></td>
+            </tr>
+
+            <!-- A near-miss (borderline) -->
+            <tr class="bnf-row tier-borderline status-pending borderline">
+              <td class="ticker">DHI<span class="bnf-borderline-chip" title="dev −6.7% (need ≤ −7%)">near miss</span></td>
+              <td class="bnf-name">D.R. Horton Inc<span class="bnf-row-sector"> · Consumer Discretionary</span></td>
+              <td class="num strong">$132.10</td>
+              <td class="num">$141.60</td>
+              <td class="num strong down">−6.7%</td>
+              <td class="num">$128.40</td>
+              <td class="num">$310M</td>
+              <td class="num down">−0.8%</td>
+              <td class="num bnf-flag tone-clean">28d</td>
+              <td class="num bnf-flag tone-clean">none</td>
+              <td class="num bnf-flag tone-clean">—</td>
+              <td class="bnf-quality tone-clean">Clean</td>
+              <td class="bnf-status-cell">
+                <select class="bnf-status-select status-pending">
+                  <option selected>— pending</option><option>✕ skipped</option>
+                  <option>◐ considering</option><option>✓ approved</option>
+                </select>
+              </td>
+              <td class="num"><button class="np-btn neon bnf-row-btn">Buy</button></td>
+            </tr>
+
+            <!-- An ETF match -->
+            <tr class="bnf-row tier-match status-approved">
+              <td class="ticker"><span class="bnf-univ-badge etf">ETF</span> XHB</td>
+              <td class="bnf-name">SPDR S&amp;P Homebuilders ETF<span class="bnf-row-sector"> · Homebuilders</span></td>
+              <td class="num strong">$104.20</td>
+              <td class="num">$112.80</td>
+              <td class="num strong down">−7.6%</td>
+              <td class="num">$99.50</td>
+              <td class="num">$95M</td>
+              <td class="num down">−0.4%</td>
+              <td class="num bnf-flag tone-none">—</td>
+              <td class="num bnf-flag tone-none">—</td>
+              <td class="num bnf-flag tone-none">—</td>
+              <td class="bnf-quality tone-none">—</td>
+              <td class="bnf-status-cell">
+                <select class="bnf-status-select status-approved">
+                  <option>— pending</option><option>✕ skipped</option>
+                  <option>◐ considering</option><option selected>✓ approved</option>
+                </select>
+              </td>
+              <td class="num"><button class="np-btn neon bnf-row-btn">Buy</button></td>
+            </tr>
+
+            <!-- A neutral (not-in-setup) ticker -->
+            <tr class="bnf-row tier-none status-pending">
+              <td class="ticker">AAPL</td>
+              <td class="bnf-name">Apple Inc<span class="bnf-row-sector"> · Technology</span></td>
+              <td class="num strong">$214.30</td>
+              <td class="num">$210.10</td>
+              <td class="num strong">+2.0%</td>
+              <td class="num">$198.70</td>
+              <td class="num">$8,400M</td>
+              <td class="num">+0.6%</td>
+              <td class="num bnf-flag tone-none">—</td>
+              <td class="num bnf-flag tone-none">—</td>
+              <td class="num bnf-flag tone-none">—</td>
+              <td class="bnf-quality tone-none">—</td>
+              <td class="bnf-status-cell">
+                <select class="bnf-status-select status-pending">
+                  <option selected>— pending</option><option>✕ skipped</option>
+                  <option>◐ considering</option><option>✓ approved</option>
+                </select>
+              </td>
+              <td class="num"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ░░░ § OPEN EQUITY POSITIONS ░░░ -->
+    <section class="np-section">
+      <div class="np-section-hd">
+        <div class="np-section-title">Open equity positions · 2</div>
+        <div class="np-section-sub">Status follows distance to SMA25. Sell when ▲ green (target hit) or when stale (&gt;45d).</div>
+      </div>
+      <div class="np-table-wrap">
+        <table class="np-table">
+          <thead>
+            <tr>
+              <th>Status</th><th>Ticker</th><th class="num">Entry</th><th class="num">Entry $</th>
+              <th class="num">Entry dev</th><th class="num">Now $</th><th class="num">SMA25</th>
+              <th class="num">To SMA25</th><th class="num">UPnL %</th><th class="num">Days</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="bnf-dot green" title="Target hit — ready to sell"></span></td>
+              <td class="ticker"><span class="bnf-univ-badge equity">E</span> LEN</td>
+              <td class="num">2026-04-18</td>
+              <td class="num">$128.40</td>
+              <td class="num down">−9.1%</td>
+              <td class="num strong">$140.80</td>
+              <td class="num">$139.90</td>
+              <td class="num up">−0.6%</td>
+              <td class="num strong up">+9.66%</td>
+              <td class="num">12d</td>
+              <td class="num"><button class="np-btn neon bnf-row-btn">Sell</button></td>
+            </tr>
+            <tr>
+              <td><span class="bnf-dot yellow" title="Approaching SMA25"></span></td>
+              <td class="ticker"><span class="bnf-univ-badge equity">E</span> NUE</td>
+              <td class="num">2026-05-02</td>
+              <td class="num">$152.10</td>
+              <td class="num down">−8.3%</td>
+              <td class="num strong">$159.20</td>
+              <td class="num">$164.50</td>
+              <td class="num">+3.3%</td>
+              <td class="num strong up">+4.67%</td>
+              <td class="num">9d</td>
+              <td class="num"><button class="np-btn bnf-row-btn">Sell</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ░░░ § OPEN ETF POSITIONS ░░░ -->
+    <section class="np-section bnf-etf-section">
+      <div class="np-section-hd">
+        <div class="np-section-title">Open ETF positions · 1</div>
+        <div class="np-section-sub">Status follows distance to SMA25. Sell when ▲ green (target hit) or when stale (&gt;60d).</div>
+      </div>
+      <div class="np-table-wrap">
+        <table class="np-table">
+          <thead>
+            <tr>
+              <th>Status</th><th>Ticker</th><th class="num">Entry</th><th class="num">Entry $</th>
+              <th class="num">Entry dev</th><th class="num">Now $</th><th class="num">SMA25</th>
+              <th class="num">To SMA25</th><th class="num">UPnL %</th><th class="num">Days</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="bnf-dot grey" title="Holding"></span></td>
+              <td class="ticker"><span class="bnf-univ-badge etf">ETF</span> XLE</td>
+              <td class="num">2026-05-12</td>
+              <td class="num">$88.10</td>
+              <td class="num down">−7.9%</td>
+              <td class="num strong">$90.40</td>
+              <td class="num">$94.20</td>
+              <td class="num">+4.2%</td>
+              <td class="num strong up">+2.61%</td>
+              <td class="num">4d</td>
+              <td class="num"><button class="np-btn bnf-row-btn">Sell</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ░░░ § CLOSED TRADES (collapsible — shown expanded) ░░░ -->
+    <section class="np-section">
+      <button class="bnf-closed-toggle">
+        ▾ Closed trades · 18
+        <span class="bnf-closed-stats">
+          <span class="bnf-closed-univ"><b class="bnf-univ-badge equity">E</b> 13 · win <b>69%</b> · avg <b class="up">+5.2%</b></span>
+          <span class="bnf-closed-univ"><b class="bnf-univ-badge etf">ETF</b> 5 · win <b>80%</b> · avg <b class="up">+3.8%</b></span>
+          <span class="bnf-closed-univ combined">all · win <b>72%</b> · avg <b class="up">+4.9%</b> · 11.3d</span>
+        </span>
+      </button>
+      <div class="np-table-wrap">
+        <table class="np-table">
+          <thead>
+            <tr>
+              <th>Univ</th><th>Ticker</th><th class="num">Entry</th><th class="num">Exit</th>
+              <th class="num">Entry $</th><th class="num">Exit $</th><th class="num">Return %</th>
+              <th class="num">Hold</th><th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="bnf-univ-badge equity">E</span></td>
+              <td class="ticker">KBH</td>
+              <td class="num">2026-03-20</td><td class="num">2026-04-02</td>
+              <td class="num">$58.20</td><td class="num">$63.40</td>
+              <td class="num strong up">+8.93%</td><td class="num">13d</td><td>target_hit</td>
+            </tr>
+            <tr>
+              <td><span class="bnf-univ-badge etf">ETF</span></td>
+              <td class="ticker">XHB</td>
+              <td class="num">2026-03-11</td><td class="num">2026-03-28</td>
+              <td class="num">$96.10</td><td class="num">$101.80</td>
+              <td class="num strong up">+5.93%</td><td class="num">17d</td><td>target_hit</td>
+            </tr>
+            <tr>
+              <td><span class="bnf-univ-badge equity">E</span></td>
+              <td class="ticker">CCL</td>
+              <td class="num">2026-02-28</td><td class="num">2026-03-25</td>
+              <td class="num">$14.80</td><td class="num">$14.10</td>
+              <td class="num strong down">−4.73%</td><td class="num">25d</td><td>stale</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+</body>
+</html>
