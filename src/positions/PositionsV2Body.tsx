@@ -69,6 +69,29 @@ const BUCKET_META: Record<Bucket, { name: string; dot: string }> = {
   yield:  { name: "YIELD", dot: "var(--warning)" },
 };
 
+/** Abbreviate long GICS sector names so the ledger's sector column
+ *  fits on one line. Falls back to the raw value for anything we
+ *  don't have a short form for. */
+function shortSector(s: string | null | undefined): string {
+  if (!s) return "—";
+  const map: Record<string, string> = {
+    "Communication Services": "Comm Svcs",
+    "Consumer Discretionary": "Cons Disc",
+    "Consumer Staples": "Staples",
+    "Information Technology": "Tech",
+    "Technology": "Tech",
+    "Financials": "Financials",
+    "Industrials": "Industrials",
+    "Health Care": "Health Care",
+    "Healthcare": "Health Care",
+    "Real Estate": "Real Estate",
+    "Materials": "Materials",
+    "Energy": "Energy",
+    "Utilities": "Utilities",
+  };
+  return map[s] ?? s;
+}
+
 // ─────────────────── Brand bar ───────────────────────────────────
 function PositionsBrandBar({
   dateLabel, onDashboard, onStrategy, onRefresh, refreshing, onUpload,
@@ -458,13 +481,10 @@ function PositionsLedger(props: PositionsV2BodyProps) {
   return (
     <div>
       <Section n="04" right={
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 14 }}>
-          <span className="view-toggle">
-            {views.map(([k, l]) => (
-              <button key={k} className={"vt" + (view === k ? " on" : "")} onClick={() => setView(k)}>{l}</button>
-            ))}
-          </span>
-          <span style={{ color: "var(--fg4)" }}>{portfolio.rows.length} positions</span>
+        <span className="view-toggle">
+          {views.map(([k, l]) => (
+            <button key={k} className={"vt" + (view === k ? " on" : "")} onClick={() => setView(k)}>{l}</button>
+          ))}
         </span>
       }>Positions ledger</Section>
 
@@ -503,12 +523,11 @@ function PositionsLedger(props: PositionsV2BodyProps) {
                   const sig = signalsByTicker.get(r.ticker);
                   const chips = sig ? chipsForSignals(sig).slice(0, 2) : [];
                   const ch1d = sig?.chg_5d_pct ?? null; // closest available daily proxy
-                  const live = liveByTicker.get(r.ticker)?.length ?? 0;
                   const real1 = realizedByTicker.get(r.ticker) ?? 0;
                   return (
                     <div key={r.ticker} className="ledger-row" onClick={() => onTickerClick(r.ticker)} style={{ cursor: "pointer" }}>
-                      <span className="t">{r.ticker}{live > 0 && <span style={{ fontSize: 10, color: "var(--neon)", marginLeft: 6 }}>·{live}</span>}</span>
-                      <span className="sec">{r.sector}</span>
+                      <span className="t">{r.ticker}</span>
+                      <span className="sec" title={r.sector}>{shortSector(r.sector)}</span>
                       <span className="price">{r.current_price != null ? fmtUSD(r.current_price) : "—"}
                         {ch1d != null && <span className={"ch " + (ch1d >= 0 ? "pos" : "neg")}>{ch1d >= 0 ? "+" : ""}{ch1d.toFixed(1)}%</span>}
                       </span>
