@@ -185,25 +185,23 @@
 
 /* Grouped header: a CALLS / PUTS / ASSIGNED caption row over per-leg sub cells. */
 .dash .tm-table thead th.grp-h { text-align: left; padding: 14px 10px 8px; font-family: var(--mono); font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; font-weight: 700; border-bottom: 1px solid rgba(50,110,100,.18); white-space: nowrap; }
-.dash .tm-table thead th.grp-h.call   { color: var(--neon); }
-.dash .tm-table thead th.grp-h.put    { color: var(--warning); }
+.dash .tm-table thead th.grp-h.sold   { color: var(--neon); }
+.dash .tm-table thead th.grp-h.paid   { color: var(--warning); }
 .dash .tm-table thead th.grp-h.assign { color: var(--fg2); }
 .dash .tm-table thead th.col.sub2 { padding-top: 6px; padding-bottom: 12px; }
-.dash .tm-table thead th.col.call .sub { color: var(--neon); opacity: .65; }
-.dash .tm-table thead th.col.put  .sub { color: var(--warning); opacity: .65; }
+.dash .tm-table thead th.col.sold .sub { color: var(--neon); opacity: .65; }
+.dash .tm-table thead th.col.paid .sub { color: var(--warning); opacity: .65; }
 /* Two-row header can't be sticky cleanly — pin off for the grouped layout. */
 .dash .tm-table.grouped thead th { position: static; }
 
-/* Type-tinted cell zones. */
-.dash .tm-cell.zone-call { background: rgba(210,230,50,.045); }
-.dash .tm-cell.zone-put  { background: rgba(224,192,96,.05); }
-.dash .tm-cell.zone-call.filled:hover,
-.dash .tm-cell.zone-put.filled:hover { background: rgba(15,51,51,.45); cursor: pointer; }
+/* Group-tinted cell zones: collected (sold) = neon wash, paid (bought) = amber. */
+.dash .tm-cell.zone-sold { background: rgba(210,230,50,.045); }
+.dash .tm-cell.zone-paid { background: rgba(224,192,96,.05); }
+.dash .tm-cell.zone-sold.filled:hover,
+.dash .tm-cell.zone-paid.filled:hover { background: rgba(15,51,51,.45); cursor: pointer; }
 
-/* Sold / bought chip inside a cell. */
-.dash .tm-cell .dirchip { font-family: var(--mono); font-size: 8px; letter-spacing: .8px; text-transform: uppercase; padding: 1px 5px; border-radius: 3px; }
-.dash .tm-cell .dirchip.sold { color: var(--neon); background: rgba(210,230,50,.14); }
-.dash .tm-cell .dirchip.bgt  { color: var(--warning); background: rgba(224,192,96,.16); }
+/* Call / Put tag inside a cell (direction is the group, type is the chip). */
+.dash .tm-cell .typechip { font-family: var(--mono); font-size: 8px; letter-spacing: .8px; text-transform: uppercase; padding: 1px 5px; border-radius: 3px; color: var(--fg2); background: rgba(168,196,192,.12); }
 .dash .tm-scroll { overflow-x: auto; }
 .dash .tm-table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: var(--mono); margin-top: 8px; }
 .dash .tm-table thead th { position: sticky; top: 0; z-index: 2; background: var(--page); text-align: left; padding: 14px 10px 12px; font-family: var(--mono); font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase; font-weight: 600; color: var(--fg3); border-bottom: var(--hair-strong); white-space: nowrap; }
