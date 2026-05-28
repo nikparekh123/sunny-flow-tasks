@@ -12,28 +12,27 @@ import {
 import { AnimatedNumber } from "@/sunnyfi/lib/animation";
 
 /**
- * Trades matrix — editorial (tm-*) reskin of TradesLogMatrix.
+ * Trades matrix — editorial (tm-*) view, split into OPEN and CLOSED.
  *
- * Renders inside the `.dash` design world (positions-v2.css). Same data
- * decomposition as the legacy gl-* matrix, but a fixed-column layout:
+ *   Open   — live legs only, grouped by type: Position | Shares | Calls | Puts
+ *            | Net premium. Each call/put block grows to fit the busiest
+ *            ticker, so 5+ legs never overflow. Direction (sold vs bought) is
+ *            shown by tone + a chip.
+ *   Closed — realized history within the timeframe window: Position | Calls |
+ *            Puts | Assigned | Realized. The timeframe pills are a lookback
+ *            window on this view only.
  *
- *   Position | shares (1) | options open (2-5) | closed (6-8) | Realized
- *
- * The timeframe pills (12w/26w/52w/104w) act as a lookback window on the
- * CLOSED zone — live opens always show, closed entries only appear if their
- * close date falls inside the window. The Realized total always reflects the
- * full per-ticker realized P&L regardless of window.
- *
- * Click routing (preserved from the legacy matrix):
- *   • shares cell        → onSharesCellClick(ticker)        — sell shares
- *   • empty options slot → onOpenSlotClick(ticker)          — log new open
- *   • live  options slot → onOpenSlotClick(ticker)          — close / edit
- *   • expired option     → onResolveCellClick(ticker, open) — resolve flow
- *   • closed cells       — info only (no-op)
+ * Click routing (open view):
+ *   • shares cell        → onSharesCellClick(ticker)
+ *   • empty option slot  → onOpenSlotClick(ticker)        (log a new open)
+ *   • live  option slot  → onOpenSlotClick(ticker)        (close / edit)
+ *   • expired option     → onResolveCellClick(ticker, open)
+ *   • ticker             → onTickerClick(ticker)
+ *   Closed cells are info-only.
  */
 
-const OPTIONS_OPEN_COLS = 4; // live option slots (cols 2-5)
-const CLOSED_COLS = 3; // closed slots (cols 6-8)
+const GROUP_CAP = 5; // max columns per call/put group (realistically ≤ 3)
+const ASSIGN_CAP = 2;
 
 const WEEK_OPTIONS = [12, 26, 52, 104] as const;
 type Weeks = (typeof WEEK_OPTIONS)[number];
@@ -64,7 +63,7 @@ function liveStateLabel(
   });
   if (d < 0) return { label: "expired", tone: "expired", title: `expired ${niceDate} (${-d}d ago)` };
   if (d === 0) return { label: "today", tone: "urgent", title: `expires today · ${niceDate}` };
-  if (d === 1) return { label: "tomorrow", tone: "urgent", title: `expires tomorrow · ${niceDate}` };
+  if (d === 1) return { label: "tmrw", tone: "urgent", title: `expires tomorrow · ${niceDate}` };
   if (d <= 7) return { label: `in ${d}d`, tone: "urgent", title: `expires in ${d} days · ${niceDate}` };
   return { label: "open", tone: "open", title: `expires ${niceDate} · ${d}d out` };
 }
@@ -80,10 +79,27 @@ interface Props {
   onResolveCellClick: (ticker: string, open: OptionTrade) => void;
 }
 
-type ClosedEntry =
-  | { kind: "live-overflow"; open: OptionTrade; sortDate: string }
-  | { kind: "option-closed"; open: OptionTrade; closes: OptionTrade[]; sortDate: string }
-  | { kind: "share-sell"; sell: ShareSell; sortDate: string };
+interface ClosedLeg {
+  open: OptionTrade;
+  closes: OptionTrade[];
+  realized: number;
+  sortDate: string;
+}
+
+interface Decomposed {
+  liveCalls: OptionTrade[];
+  livePuts: OptionTrade[];
+  closedCalls: ClosedLeg[];
+  closedPuts: ClosedLeg[];
+  assigned: ShareSell[];
+  netPremium: number;
+  hasShares: boolean;
+}
+
+type View = "open" | "closed";
+
+const amtCls = (v: number) => (v < 0 ? "neg" : v > 0 ? "pos" : "neut");
+const amtStr = (v: number) => (v >= 0 ? fmtCompact(v) : "−" + fmtCompact(Math.abs(v)));
 
 export function TradesMatrixV2({
   rows,
@@ -95,6 +111,7 @@ export function TradesMatrixV2({
   onOpenSlotClick,
   onResolveCellClick,
 }: Props) {
+  const [view, setView] = useState<View>("open");
   const [weeks, setWeeksState] = useState<Weeks>(() => readWeeksLS());
   const setWeeks = (w: Weeks) => {
     setWeeksState(w);
@@ -157,65 +174,70 @@ export function TradesMatrixV2({
   const isEffectivelyClosed = (r: PositionComputed): boolean =>
     r.status === "closed" || (r.quantity === 0 && (r.live_options?.length ?? 0) === 0);
 
-  function decomposeRow(r: PositionComputed): { liveOpens: OptionTrade[]; closedEntries: ClosedEntry[] } {
-    const trades = tradesByTicker.get(r.ticker) ?? [];
-    const sells = shareSellsByTicker.get(r.ticker) ?? [];
+  const decompose = useMemo(() => {
+    return (r: PositionComputed): Decomposed => {
+      const trades = tradesByTicker.get(r.ticker) ?? [];
+      const sells = shareSellsByTicker.get(r.ticker) ?? [];
 
-    const closesByOpen = new Map<string, OptionTrade[]>();
-    for (const t of trades) {
-      if (t.action !== "close" || !t.closes_trade_id) continue;
-      const arr = closesByOpen.get(t.closes_trade_id) ?? [];
-      arr.push(t);
-      closesByOpen.set(t.closes_trade_id, arr);
-    }
-    const isFullyClosed = (open: OptionTrade): boolean =>
-      (closesByOpen.get(open.id) ?? []).reduce((s, c) => s + c.contracts, 0) >= open.contracts;
-    const mostRecentCloseDate = (open: OptionTrade): string => {
-      const closes = closesByOpen.get(open.id) ?? [];
-      if (closes.length === 0) return "";
-      return closes.map((c) => c.trade_date).sort().reverse()[0];
+      const closesByOpen = new Map<string, OptionTrade[]>();
+      for (const t of trades) {
+        if (t.action !== "close" || !t.closes_trade_id) continue;
+        const arr = closesByOpen.get(t.closes_trade_id) ?? [];
+        arr.push(t);
+        closesByOpen.set(t.closes_trade_id, arr);
+      }
+      const isFullyClosed = (open: OptionTrade): boolean =>
+        (closesByOpen.get(open.id) ?? []).reduce((s, c) => s + c.contracts, 0) >= open.contracts;
+      const mostRecentCloseDate = (open: OptionTrade): string => {
+        const cs = closesByOpen.get(open.id) ?? [];
+        return cs.length ? cs.map((c) => c.trade_date).sort().reverse()[0] : open.trade_date;
+      };
+
+      const allOpens = trades.filter((t) => t.action === "open");
+      const byExpiry = (a: OptionTrade, b: OptionTrade) => a.expiry.localeCompare(b.expiry);
+
+      const live = allOpens.filter((t) => !isFullyClosed(t)).sort(byExpiry);
+      const liveCalls = live.filter((t) => t.option_type === "call");
+      const livePuts = live
+        .filter((t) => t.option_type === "put")
+        .sort((a, b) => {
+          const ap = isProtective(a) ? 0 : 1;
+          const bp = isProtective(b) ? 0 : 1;
+          return ap !== bp ? ap - bp : byExpiry(a, b);
+        });
+
+      const closedOpens = allOpens.filter(isFullyClosed);
+      const toLeg = (open: OptionTrade): ClosedLeg => {
+        const closes = closesByOpen.get(open.id) ?? [];
+        return {
+          open,
+          closes,
+          realized: closes.reduce((s, c) => s + closeRealizedPL(c, open), 0),
+          sortDate: mostRecentCloseDate(open),
+        };
+      };
+      const inWindow = (d: string) => d >= windowStart;
+      const closedCalls = closedOpens
+        .filter((t) => t.option_type === "call")
+        .map(toLeg)
+        .filter((l) => inWindow(l.sortDate))
+        .sort((a, b) => b.sortDate.localeCompare(a.sortDate));
+      const closedPuts = closedOpens
+        .filter((t) => t.option_type === "put")
+        .map(toLeg)
+        .filter((l) => inWindow(l.sortDate))
+        .sort((a, b) => b.sortDate.localeCompare(a.sortDate));
+      const assigned = sells
+        .filter((s) => inWindow(s.trade_date))
+        .sort((a, b) => b.trade_date.localeCompare(a.trade_date));
+
+      const netPremium = live.reduce((s, t) => s + slotValueForOpen(t), 0);
+
+      return { liveCalls, livePuts, closedCalls, closedPuts, assigned, netPremium, hasShares: r.quantity > 0 };
     };
+  }, [tradesByTicker, shareSellsByTicker, windowStart, slotValueForOpen]);
 
-    const allOpens = trades.filter((t) => t.action === "open");
-    const liveOpens = allOpens
-      .filter((t) => !isFullyClosed(t))
-      .sort((a, b) => {
-        const aP = isProtective(a) ? 0 : 1;
-        const bP = isProtective(b) ? 0 : 1;
-        if (aP !== bP) return aP - bP;
-        return aP === 0
-          ? a.trade_date !== b.trade_date
-            ? a.trade_date.localeCompare(b.trade_date)
-            : a.created_at.localeCompare(b.created_at)
-          : b.trade_date !== a.trade_date
-            ? b.trade_date.localeCompare(a.trade_date)
-            : b.created_at.localeCompare(a.created_at);
-      });
-    const closedOpens = allOpens.filter((t) => isFullyClosed(t));
-
-    const liveOverflow: ClosedEntry[] = liveOpens
-      .slice(OPTIONS_OPEN_COLS)
-      .map((open) => ({ kind: "live-overflow" as const, open, sortDate: open.trade_date }));
-    const closedOptionEntries: ClosedEntry[] = closedOpens.map((open) => ({
-      kind: "option-closed" as const,
-      open,
-      closes: closesByOpen.get(open.id) ?? [],
-      sortDate: mostRecentCloseDate(open) || open.trade_date,
-    }));
-    const shareSellEntries: ClosedEntry[] = sells.map((sell) => ({
-      kind: "share-sell" as const,
-      sell,
-      sortDate: sell.trade_date,
-    }));
-
-    const merged = [...liveOverflow, ...closedOptionEntries, ...shareSellEntries]
-      .filter((e) => e.kind === "live-overflow" || e.sortDate >= windowStart)
-      .sort((a, b) => b.sortDate.localeCompare(a.sortDate));
-
-    return { liveOpens: liveOpens.slice(0, OPTIONS_OPEN_COLS), closedEntries: merged.slice(0, CLOSED_COLS) };
-  }
-
-  // Sort: active first (by realized desc), effectively-closed sink to bottom.
+  // Sort rows: active first by realized desc, effectively-closed sink to bottom.
   const sorted = useMemo(
     () =>
       [...rows].sort((a, b) => {
@@ -228,315 +250,294 @@ export function TradesMatrixV2({
     [rows, realizedByTicker],
   );
 
-  // Footer column totals.
-  const { sharesBasis, liveCols, closedCols } = useMemo(() => {
-    let sharesBasis = 0;
-    const liveCols = Array.from({ length: OPTIONS_OPEN_COLS }, () => 0);
-    const closedCols = Array.from({ length: CLOSED_COLS }, () => 0);
-    for (const r of sorted) {
-      sharesBasis += r.quantity * r.avg_cost;
-      const { liveOpens, closedEntries } = decomposeRow(r);
-      liveOpens.forEach((open, s) => {
-        if (s >= OPTIONS_OPEN_COLS) return;
-        liveCols[s] += isProtective(open) ? -(open.contracts * 100 * open.premium) : slotValueForOpen(open);
-      });
-      closedEntries.forEach((e, s) => {
-        if (s >= CLOSED_COLS) return;
-        if (e.kind === "option-closed") closedCols[s] += e.closes.reduce((acc, c) => acc + closeRealizedPL(c, e.open), 0);
-        else if (e.kind === "live-overflow") closedCols[s] += slotValueForOpen(e.open);
-        else closedCols[s] += e.sell.realized_pl;
-      });
-    }
-    return { sharesBasis, liveCols, closedCols };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sorted, tradesByTicker, shareSellsByTicker, weeks, slotValueForOpen]);
+  // Per-view rows (drop tickers with nothing to show) + dynamic group widths.
+  const { viewRows, callCols, putCols, assignCols } = useMemo(() => {
+    const decomposed = sorted.map((r) => [r, decompose(r)] as const);
+    let maxCall = 1;
+    let maxPut = 1;
+    let maxAssign = 0;
+    const kept = decomposed.filter(([, d]) => {
+      if (view === "open") {
+        maxCall = Math.max(maxCall, d.liveCalls.length);
+        maxPut = Math.max(maxPut, d.livePuts.length);
+        return d.liveCalls.length + d.livePuts.length + (d.hasShares ? 1 : 0) > 0;
+      }
+      maxCall = Math.max(maxCall, d.closedCalls.length);
+      maxPut = Math.max(maxPut, d.closedPuts.length);
+      maxAssign = Math.max(maxAssign, d.assigned.length);
+      return d.closedCalls.length + d.closedPuts.length + d.assigned.length > 0;
+    });
+    return {
+      viewRows: kept,
+      callCols: Math.min(GROUP_CAP, maxCall),
+      putCols: Math.min(GROUP_CAP, maxPut),
+      assignCols: Math.min(ASSIGN_CAP, Math.max(view === "closed" ? 1 : 0, maxAssign)),
+    };
+  }, [sorted, decompose, view]);
 
-  const grandOpenPaid = useMemo(() => Array.from(openPaidByTicker.values()).reduce((s, v) => s + v, 0), [openPaidByTicker]);
+  const tickerCount = viewRows.length;
+  const legCount = useMemo(
+    () =>
+      viewRows.reduce(
+        (s, [, d]) =>
+          s +
+          (view === "open"
+            ? d.liveCalls.length + d.livePuts.length
+            : d.closedCalls.length + d.closedPuts.length + d.assigned.length),
+        0,
+      ),
+    [viewRows, view],
+  );
   const grandRealized = useMemo(
     () => sorted.reduce((s, r) => s + (realizedByTicker.get(r.ticker) ?? 0) + (r.realized_stock_pl ?? 0), 0),
     [sorted, realizedByTicker],
   );
-  const tickerCount = sorted.filter((r) => (tradesByTicker.get(r.ticker)?.length ?? 0) > 0 || (shareSellsByTicker.get(r.ticker)?.length ?? 0) > 0).length;
-  const tradeCount = useMemo(
-    () =>
-      sorted.reduce(
-        (s, r) => s + (tradesByTicker.get(r.ticker)?.length ?? 0) + (shareSellsByTicker.get(r.ticker)?.length ?? 0),
-        0,
-      ),
-    [sorted, tradesByTicker, shareSellsByTicker],
-  );
+  const grandOpenPaid = useMemo(() => Array.from(openPaidByTicker.values()).reduce((s, v) => s + v, 0), [openPaidByTicker]);
 
-  const dotClass = (open: OptionTrade, neg: boolean): string =>
-    "glyph-dot" + (open.option_type === "put" ? " put" : "") + (neg ? " neg" : "");
+  // ── Cell renderers ─────────────────────────────────────────────
+  function liveCell(key: string, ticker: string, leg: OptionTrade | undefined, zone: "call" | "put") {
+    if (!leg) {
+      return (
+        <td key={key} className={`tm-cell zone-${zone} empty`} onClick={() => onOpenSlotClick(ticker)} title="tap to open a new position">
+          <span className="plus">+</span>
+        </td>
+      );
+    }
+    const expired = leg.expiry < today;
+    const needsResolve = expired || leg.expiry === today;
+    const signed = slotValueForOpen(leg);
+    const st = liveStateLabel(leg, today);
+    const sold = leg.direction === "short";
+    return (
+      <td
+        key={key}
+        className={`tm-cell zone-${zone} filled` + (expired ? " expired" : st.tone === "urgent" ? " urgent" : "")}
+        onClick={() => (needsResolve ? onResolveCellClick(ticker, leg) : onOpenSlotClick(ticker))}
+        title={`${leg.direction} ${leg.option_type} ${leg.contracts}× $${leg.strike} · opened ${leg.trade_date} · ${st.title} · ${fmtUSD(signed)}`}
+      >
+        <div className={"amt " + amtCls(signed)}>{amtStr(signed)}</div>
+        <div className="chips">
+          <span className={"dirchip " + (sold ? "sold" : "bgt")}>{sold ? "sold" : "bgt"}</span>
+          <span className={"state " + st.tone}>{st.label}</span>
+        </div>
+      </td>
+    );
+  }
 
-  const amtCls = (v: number) => (v < 0 ? "neg" : v > 0 ? "pos" : "neut");
-  const amtStr = (v: number) => (v >= 0 ? fmtCompact(v) : "−" + fmtCompact(Math.abs(v)));
+  function closedCell(key: string, leg: ClosedLeg | undefined, zone: "call" | "put") {
+    if (!leg) {
+      return (
+        <td key={key} className={`tm-cell zone-${zone} empty`}>
+          <span className="em-dash">—</span>
+        </td>
+      );
+    }
+    const sold = leg.open.direction === "short";
+    return (
+      <td
+        key={key}
+        className={`tm-cell zone-${zone} filled`}
+        title={`${leg.open.direction} ${leg.open.option_type} ${leg.open.contracts}× $${leg.open.strike} · opened ${leg.open.trade_date} · closed ${leg.sortDate} · ${fmtUSD(leg.realized)}`}
+      >
+        <div className={"amt " + amtCls(leg.realized)}>{amtStr(leg.realized)}</div>
+        <div className="chips">
+          <span className={"dirchip " + (sold ? "sold" : "bgt")}>{sold ? "sold" : "bgt"}</span>
+          <span className="state closed">closed</span>
+        </div>
+      </td>
+    );
+  }
+
+  function assignedCell(key: string, sell: ShareSell | undefined) {
+    if (!sell) {
+      return (
+        <td key={key} className="tm-cell zone-closed empty">
+          <span className="em-dash">—</span>
+        </td>
+      );
+    }
+    const v = sell.realized_pl;
+    return (
+      <td
+        key={key}
+        className="tm-cell zone-closed filled share-sell"
+        title={`Sold ${fmtQty(sell.quantity)} sh @ ${fmtUSD2(sell.price)} · ${sell.trade_date} · ${sell.source === "assignment" ? "assignment" : "manual"} · realized ${fmtUSD(v)}`}
+      >
+        <div className={"amt " + amtCls(v)}>{amtStr(v)}</div>
+        <div className="chips">
+          <span className="glyph-dot share" />
+          <span className="state closed">{sell.source === "assignment" ? "assigned" : "sold"}</span>
+        </div>
+      </td>
+    );
+  }
+
+  const range = (n: number) => Array.from({ length: n }, (_, i) => i);
 
   return (
     <div className="tm-wrap">
       <div className="tm-tools">
         <span className="label">
-          {tickerCount} tickers · {tradeCount} trades · {weeks}w
+          {tickerCount} tickers · {legCount} {view === "open" ? "open legs" : "closed"}
+          {view === "closed" ? ` · ${weeks}w` : ""}
         </span>
-        <div className="tf">
-          {WEEK_OPTIONS.map((w) => (
-            <span
-              key={w}
-              className={"pill" + (weeks === w ? "" : " muted")}
-              onClick={() => setWeeks(w)}
-              style={{ cursor: "pointer" }}
-            >
-              {w}w
+        <div className="tm-tools-right">
+          <div className="tf tm-viewtoggle">
+            <span className={"pill" + (view === "open" ? "" : " muted")} onClick={() => setView("open")} style={{ cursor: "pointer" }}>
+              Open
             </span>
-          ))}
+            <span className={"pill" + (view === "closed" ? "" : " muted")} onClick={() => setView("closed")} style={{ cursor: "pointer" }}>
+              Closed
+            </span>
+          </div>
+          {view === "closed" && (
+            <div className="tf">
+              {WEEK_OPTIONS.map((w) => (
+                <span key={w} className={"pill" + (weeks === w ? "" : " muted")} onClick={() => setWeeks(w)} style={{ cursor: "pointer" }}>
+                  {w}w
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="tm-scroll">
-        <table className="tm-table">
-          <thead>
-            <tr>
-              <th className="pos">Position</th>
-              <th className="col shares">
-                <span className="idx">1</span>
-                <span className="sub">shares open</span>
-              </th>
-              {Array.from({ length: OPTIONS_OPEN_COLS }, (_, i) => (
-                <th key={`l${i}`} className="col live">
-                  <span className="idx">{i + 2}</span>
-                  <span className="sub">options open</span>
+        <table className="tm-table grouped">
+          {view === "open" ? (
+            <thead>
+              <tr>
+                <th className="pos" rowSpan={2}>Position</th>
+                <th className="col shares" rowSpan={2}>
+                  <span className="idx">SH</span>
+                  <span className="sub">shares open</span>
                 </th>
-              ))}
-              {Array.from({ length: CLOSED_COLS }, (_, i) => (
-                <th key={`c${i}`} className="col closed">
-                  <span className="idx">{i + 2 + OPTIONS_OPEN_COLS}</span>
-                  <span className="sub">closed</span>
-                </th>
-              ))}
-              <th className="tot">Realized</th>
-            </tr>
-          </thead>
+                <th className="grp-h call" colSpan={callCols}>Calls · sold</th>
+                <th className="grp-h put" colSpan={putCols}>Puts · hedge</th>
+                <th className="tot" rowSpan={2}>Net premium</th>
+              </tr>
+              <tr>
+                {range(callCols).map((i) => (
+                  <th key={`hc${i}`} className="col call sub2">
+                    <span className="sub">leg {i + 1}</span>
+                  </th>
+                ))}
+                {range(putCols).map((i) => (
+                  <th key={`hp${i}`} className="col put sub2">
+                    <span className="sub">leg {i + 1}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+          ) : (
+            <thead>
+              <tr>
+                <th className="pos" rowSpan={2}>Position</th>
+                <th className="grp-h call" colSpan={callCols}>Calls closed</th>
+                <th className="grp-h put" colSpan={putCols}>Puts closed</th>
+                <th className="grp-h assign" colSpan={assignCols}>Assigned</th>
+                <th className="tot" rowSpan={2}>Realized</th>
+              </tr>
+              <tr>
+                {range(callCols).map((i) => (
+                  <th key={`hcc${i}`} className="col call sub2"><span className="sub">leg {i + 1}</span></th>
+                ))}
+                {range(putCols).map((i) => (
+                  <th key={`hpc${i}`} className="col put sub2"><span className="sub">leg {i + 1}</span></th>
+                ))}
+                {range(assignCols).map((i) => (
+                  <th key={`ha${i}`} className="col closed sub2"><span className="sub">sale {i + 1}</span></th>
+                ))}
+              </tr>
+            </thead>
+          )}
+
           <tbody>
-            {sorted.map((r) => {
-              const { liveOpens, closedEntries } = decomposeRow(r);
+            {viewRows.map(([r, d]) => {
               const realized = (realizedByTicker.get(r.ticker) ?? 0) + (r.realized_stock_pl ?? 0);
               const openPaid = openPaidByTicker.get(r.ticker) ?? 0;
-              const hasShares = r.quantity > 0;
+              const liveCount = d.liveCalls.length + d.livePuts.length;
               return (
                 <tr key={r.ticker} className={isEffectivelyClosed(r) ? "tm-row-closed" : ""}>
                   <td>
                     <div className="tm-pos">
-                      <span className="t" onClick={() => onTickerClick(r.ticker)}>
-                        {r.ticker}
-                      </span>
+                      <span className="t" onClick={() => onTickerClick(r.ticker)}>{r.ticker}</span>
                       <span className="sub">
                         {r.sector}
-                        {liveOpens.length > 0 ? (
-                          <>
-                            {" · "}
-                            <span className="live">{liveOpens.length} open</span>
-                          </>
+                        {view === "open" && liveCount > 0 ? (
+                          <> · <span className="live">{liveCount} open</span></>
                         ) : null}
                       </span>
                     </div>
                   </td>
 
-                  {/* shares */}
-                  {hasShares ? (
-                    <td
-                      className="tm-cell zone-shares filled"
-                      onClick={() => onSharesCellClick(r.ticker)}
-                      title={`${fmtQty(r.quantity)} shares · avg ${fmtUSD2(r.avg_cost)} — click to sell shares`}
-                    >
-                      <div className="amt neut">{fmtQty(r.quantity)}</div>
-                      <div className="chips">
-                        <span className="state open">@ {fmtUSD2(r.avg_cost)}</span>
-                      </div>
-                    </td>
+                  {view === "open" ? (
+                    <>
+                      {d.hasShares ? (
+                        <td
+                          className="tm-cell zone-shares filled"
+                          onClick={() => onSharesCellClick(r.ticker)}
+                          title={`${fmtQty(r.quantity)} shares · avg ${fmtUSD2(r.avg_cost)} — click to sell shares`}
+                        >
+                          <div className="amt neut">{fmtQty(r.quantity)}</div>
+                          <div className="chips"><span className="state open">@ {fmtUSD2(r.avg_cost)}</span></div>
+                        </td>
+                      ) : (
+                        <td className="tm-cell zone-shares empty"><span className="em-dash">—</span></td>
+                      )}
+                      {range(callCols).map((i) => liveCell(`c${i}`, r.ticker, d.liveCalls[i], "call"))}
+                      {range(putCols).map((i) => liveCell(`p${i}`, r.ticker, d.livePuts[i], "put"))}
+                      <td className="tm-tot">
+                        <div className={"amt " + amtCls(d.netPremium)}>{d.netPremium === 0 ? <span style={{ color: "var(--fg5)" }}>—</span> : amtStr(d.netPremium)}</div>
+                        <div className="sub">net open</div>
+                      </td>
+                    </>
                   ) : (
-                    <td className="tm-cell zone-shares empty">
-                      <span className="em-dash">—</span>
-                    </td>
+                    <>
+                      {range(callCols).map((i) => closedCell(`cc${i}`, d.closedCalls[i], "call"))}
+                      {range(putCols).map((i) => closedCell(`pc${i}`, d.closedPuts[i], "put"))}
+                      {range(assignCols).map((i) => assignedCell(`a${i}`, d.assigned[i]))}
+                      <td className="tm-tot">
+                        <div className={"amt " + (realized < 0 ? "neg" : realized > 0 ? "pos" : "")}>
+                          {realized === 0 ? <span style={{ color: "var(--fg5)" }}>—</span> : amtStr(realized)}
+                        </div>
+                        {openPaid > 0 && (
+                          <div className="sub">{realized >= 0 ? "+" : ""}{((realized / openPaid) * 100).toFixed(0)}% of {fmtCompact(openPaid)}</div>
+                        )}
+                      </td>
+                    </>
                   )}
-
-                  {/* live option slots */}
-                  {Array.from({ length: OPTIONS_OPEN_COLS }, (_, s) => {
-                    const open = liveOpens[s];
-                    if (!open) {
-                      return (
-                        <td
-                          key={`l${s}`}
-                          className="tm-cell zone-live empty"
-                          onClick={() => onOpenSlotClick(r.ticker)}
-                          title="tap to open a new position"
-                        >
-                          <span className="plus">+</span>
-                        </td>
-                      );
-                    }
-                    const expired = open.expiry < today;
-                    const needsResolve = expired || open.expiry === today;
-                    const signed = slotValueForOpen(open);
-                    const st = liveStateLabel(open, today);
-                    return (
-                      <td
-                        key={`l${s}`}
-                        className={"tm-cell zone-live filled" + (expired ? " expired" : st.tone === "urgent" ? " urgent" : "")}
-                        onClick={() => (needsResolve ? onResolveCellClick(r.ticker, open) : onOpenSlotClick(r.ticker))}
-                        title={`${open.direction} ${open.option_type} ${open.contracts}× $${open.strike} · opened ${open.trade_date} · ${st.title} · ${fmtUSD(signed)}`}
-                      >
-                        <div className={"amt " + amtCls(signed)}>{amtStr(signed)}</div>
-                        <div className="chips">
-                          <span className={dotClass(open, signed < 0)} />
-                          <span className={"state " + st.tone}>{st.label}</span>
-                        </div>
-                      </td>
-                    );
-                  })}
-
-                  {/* closed slots */}
-                  {Array.from({ length: CLOSED_COLS }, (_, s) => {
-                    const e = closedEntries[s];
-                    if (!e) {
-                      return (
-                        <td key={`c${s}`} className="tm-cell zone-closed empty">
-                          <span className="em-dash">—</span>
-                        </td>
-                      );
-                    }
-                    if (e.kind === "share-sell") {
-                      const v = e.sell.realized_pl;
-                      return (
-                        <td
-                          key={`c${s}`}
-                          className="tm-cell zone-closed filled share-sell"
-                          title={`Sold ${fmtQty(e.sell.quantity)} sh @ ${fmtUSD2(e.sell.price)} · ${e.sell.trade_date} · ${e.sell.source === "assignment" ? "assignment" : "manual"} · realized ${fmtUSD(v)}`}
-                        >
-                          <div className={"amt " + amtCls(v)}>{amtStr(v)}</div>
-                          <div className="chips">
-                            <span className="glyph-dot share" />
-                            <span className="state closed">{e.sell.source === "assignment" ? "assigned" : "sold"}</span>
-                          </div>
-                        </td>
-                      );
-                    }
-                    if (e.kind === "live-overflow") {
-                      const open = e.open;
-                      const expired = open.expiry < today;
-                      const needsResolve = expired || open.expiry === today;
-                      const signed = slotValueForOpen(open);
-                      const st = liveStateLabel(open, today);
-                      return (
-                        <td
-                          key={`c${s}`}
-                          className={"tm-cell zone-closed filled" + (expired ? " expired" : st.tone === "urgent" ? " urgent" : "")}
-                          onClick={() => (needsResolve ? onResolveCellClick(r.ticker, open) : onOpenSlotClick(r.ticker))}
-                          title={`${open.direction} ${open.option_type} ${open.contracts}× $${open.strike} · opened ${open.trade_date} · ${st.title} (overflow)`}
-                        >
-                          <div className={"amt " + amtCls(signed)}>{amtStr(signed)}</div>
-                          <div className="chips">
-                            <span className={dotClass(open, false)} />
-                            <span className={"state " + st.tone}>{st.label}</span>
-                          </div>
-                        </td>
-                      );
-                    }
-                    // option-closed
-                    const open = e.open;
-                    const closedQty = e.closes.reduce((s2, c) => s2 + c.contracts, 0);
-                    const fully = closedQty >= open.contracts;
-                    const partial = e.closes.length > 0 && !fully;
-                    const v = e.closes.reduce((s2, c) => s2 + closeRealizedPL(c, open), 0);
-                    const stateLabel = fully ? "closed" : partial ? "partial" : "open";
-                    return (
-                      <td
-                        key={`c${s}`}
-                        className="tm-cell zone-closed filled"
-                        title={`${open.direction} ${open.option_type} ${open.contracts}× $${open.strike} · opened ${open.trade_date} · ${stateLabel} · ${fmtUSD(v)}`}
-                      >
-                        <div className={"amt " + amtCls(v)}>{amtStr(v)}</div>
-                        <div className="chips">
-                          <span className={dotClass(open, v < 0)} />
-                          <span className={"state closed"}>{stateLabel}</span>
-                        </div>
-                      </td>
-                    );
-                  })}
-
-                  <td className="tm-tot">
-                    <div className={"amt " + (realized < 0 ? "neg" : realized > 0 ? "pos" : "")}>
-                      {realized === 0 ? <span style={{ color: "var(--fg5)" }}>—</span> : amtStr(realized)}
-                    </div>
-                    {openPaid > 0 && (
-                      <div className="sub">
-                        {realized >= 0 ? "+" : ""}
-                        {((realized / openPaid) * 100).toFixed(0)}% of {fmtCompact(openPaid)}
-                      </div>
-                    )}
-                  </td>
                 </tr>
               );
             })}
-            {sorted.length === 0 && (
+            {viewRows.length === 0 && (
               <tr>
-                <td colSpan={2 + OPTIONS_OPEN_COLS + CLOSED_COLS + 1} style={{ textAlign: "center", padding: 32, color: "var(--fg3)" }}>
-                  No positions yet
+                <td colSpan={2 + callCols + putCols + assignCols + 1} style={{ textAlign: "center", padding: 32, color: "var(--fg3)" }}>
+                  {view === "open" ? "No open legs" : "No closed trades in this window"}
                 </td>
               </tr>
             )}
           </tbody>
-          <tfoot>
-            <tr>
-              <td>
-                <div className="tm-foot-l">
-                  <div className="t">Total</div>
-                  <div className="sub">{tradeCount} trades · realized + open</div>
-                </div>
-              </td>
-              <td className="tm-cell zone-shares filled">
-                <div className="amt neut">{fmtCompact(sharesBasis)}</div>
-                <div className="chips">
-                  <span className="state">cost basis</span>
-                </div>
-              </td>
-              {liveCols.map((v, i) =>
-                v === 0 ? (
-                  <td key={`fl${i}`} className="tm-cell zone-live empty">
-                    <span className="em-dash">—</span>
-                  </td>
-                ) : (
-                  <td key={`fl${i}`} className="tm-cell zone-live filled">
-                    <div className={"amt " + amtCls(v)}>{amtStr(v)}</div>
-                  </td>
-                ),
-              )}
-              {closedCols.map((v, i) =>
-                v === 0 ? (
-                  <td key={`fc${i}`} className="tm-cell zone-closed empty">
-                    <span className="em-dash">—</span>
-                  </td>
-                ) : (
-                  <td key={`fc${i}`} className="tm-cell zone-closed filled">
-                    <div className={"amt " + amtCls(v)}>{amtStr(v)}</div>
-                  </td>
-                ),
-              )}
-              <td className="tm-tot tm-foot-tot">
-                <div className={"amt " + (grandRealized < 0 ? "neg" : "pos")}>
-                  <AnimatedNumber
-                    value={grandRealized}
-                    duration={1400}
-                    format={(n) => (n >= 0 ? fmtUSD(n) : "−" + fmtUSD(Math.abs(n)))}
-                  />
-                </div>
-                {grandOpenPaid > 0 && (
-                  <div className="sub">
-                    {((grandRealized / grandOpenPaid) * 100).toFixed(0)}% of {fmtCompact(grandOpenPaid)}
+
+          {view === "closed" && (
+            <tfoot>
+              <tr>
+                <td>
+                  <div className="tm-foot-l">
+                    <div className="t">Total</div>
+                    <div className="sub">{legCount} closed · realized</div>
                   </div>
-                )}
-              </td>
-            </tr>
-          </tfoot>
+                </td>
+                <td colSpan={callCols + putCols + assignCols} />
+                <td className="tm-tot tm-foot-tot">
+                  <div className={"amt " + (grandRealized < 0 ? "neg" : "pos")}>
+                    <AnimatedNumber value={grandRealized} duration={1400} format={(n) => (n >= 0 ? fmtUSD(n) : "−" + fmtUSD(Math.abs(n)))} />
+                  </div>
+                  {grandOpenPaid > 0 && <div className="sub">{((grandRealized / grandOpenPaid) * 100).toFixed(0)}% of {fmtCompact(grandOpenPaid)}</div>}
+                </td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
