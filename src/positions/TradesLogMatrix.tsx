@@ -10,6 +10,7 @@ import {
   type PositionComputed,
   type ShareSell,
 } from './types';
+import { AnimatedNumber } from '@/sunnyfi/lib/animation';
 
 /**
  * Unified trades matrix.
@@ -804,9 +805,14 @@ export function TradesLogMatrix({
                         : '')
                   }
                 >
-                  {grandRealized >= 0
-                    ? fmtUSD(grandRealized)
-                    : '−' + fmtUSD(Math.abs(grandRealized))}
+                  {/* Hero matrix total — animates in on mount so the
+                      "all-time realized" number reads as alive when
+                      you open the trades view. */}
+                  <AnimatedNumber
+                    value={grandRealized}
+                    duration={1400}
+                    format={(n) => (n >= 0 ? fmtUSD(n) : '−' + fmtUSD(Math.abs(n)))}
+                  />
                 </div>
                 {grandOpenPaid > 0 && (
                   <div className="gl-tot-sub">

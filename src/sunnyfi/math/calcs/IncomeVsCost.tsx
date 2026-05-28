@@ -27,6 +27,7 @@ import {
 import {
   pullOptionChain, nearestExpiry, type OptionContractQuote,
 } from "../quote";
+import { AnimatedNumber } from "@/sunnyfi/lib/animation";
 import "./IncomeVsCost.css";
 
 // ── Constants ────────────────────────────────────────────────────
@@ -1621,11 +1622,24 @@ function SelectedBreakdown({
       {/* The hero: stacked bar */}
       <IvcBar v={v} />
 
-      {/* Supporting tiles */}
+      {/* Supporting tiles — the two "primary" outputs (Net to horizon
+          and Net ann. yield) get the count-up animation so they feel
+          alive when the variant changes. The mono / utility tiles stay
+          static — animating every cell would feel jittery. */}
       <div className="cyc-results ivc3-tiles">
-        <Tile label="Net to horizon"     value={fmtMoney(v.net, { signed: true })}              tone={netTone} primary />
+        <Tile
+          label="Net to horizon"
+          value={<AnimatedNumber value={v.net} format={(n) => fmtMoney(n, { signed: true })} duration={1400} />}
+          tone={netTone}
+          primary
+        />
         <Tile label="Coverage ratio"     value={cov}                                            tone={coverageTone} sub="income ÷ cost" />
-        <Tile label="Net ann. yield"     value={fmtPct(v.netAnnYield)}                          tone={netTone === "neg" ? "neg" : "neon"} sub="net ÷ notional" />
+        <Tile
+          label="Net ann. yield"
+          value={<AnimatedNumber value={v.netAnnYield} format={fmtPct} delay={200} />}
+          tone={netTone === "neg" ? "neg" : "neon"}
+          sub="net ÷ notional"
+        />
         <Tile label="Breakeven prem"     value={fmtMoney(breakeven)}                            mono sub="per call, to fund puts" />
         <Tile label="Months to fund put" value={isFinite(monthsToFundPut) ? `${monthsToFundPut.toFixed(1)} mo` : "—"} mono sub="income ÷ put cost" />
       </div>

@@ -1,6 +1,7 @@
 import type { PortfolioCalc } from '../calc';
 import { fmt$, fmtK } from '../calc';
 import { TOTAL_CAPITAL } from '../types';
+import { AnimatedNumber, PctCount } from '@/sunnyfi/lib/animation';
 import type { WeekBucket } from './weeklyHistory';
 
 interface Props {
@@ -39,12 +40,14 @@ export function Banner({ portfolio, cadence, weeklyHistory }: Props) {
 
       <div className="banner-mid">
         <div className="hero-block">
-          <div className="hero">{fmt$(portfolio.collected)}</div>
+          <div className="hero">
+            <AnimatedNumber value={portfolio.collected} format={fmt$} duration={1400} />
+          </div>
           <div className="hero-row">
-            <span>of {fmtK(portfolio.target)} target</span>
+            <span>of <AnimatedNumber value={portfolio.target} format={fmtK} delay={200} /> target</span>
             <span className={'wow ' + (wow >= 0 ? '' : 'neg')}>
               <span className="arrow">{wow >= 0 ? '↑' : '↓'}</span>
-              <span className="v">{Math.abs(wow).toFixed(1)}%</span> vs last wk
+              <span className="v"><PctCount value={Math.abs(wow)} decimals={1} delay={300} /></span> vs last wk
             </span>
           </div>
         </div>
@@ -82,27 +85,31 @@ export function Banner({ portfolio, cadence, weeklyHistory }: Props) {
       <div className="banner-bottom">
         <div className="stat">
           <div className="k">This week</div>
-          <div className="v neon">{fmt$(thisWeek.premium)}</div>
+          <div className="v neon">
+            <AnimatedNumber value={thisWeek.premium} format={fmt$} delay={400} />
+          </div>
           <div className="sub">premium collected</div>
         </div>
         <div className="stat">
           <div className="k">Share P&amp;L</div>
           <div className={'v ' + (portfolio.sharePL >= 0 ? 'pos' : 'neg')}>
-            {fmtKSigned(portfolio.sharePL)}
+            <AnimatedNumber value={portfolio.sharePL} format={fmtKSigned} delay={480} />
           </div>
-          <div className="sub">+{fmtK(portfolio.realizedGains || 0)} realized</div>
+          <div className="sub">+<AnimatedNumber value={portfolio.realizedGains || 0} format={fmtK} delay={560} /> realized</div>
         </div>
         <div className="stat">
           <div className="k">Total profit</div>
           <div className={'v ' + (portfolio.total >= 0 ? 'pos' : 'neg')}>
-            {fmtKSigned(portfolio.total)}
+            <AnimatedNumber value={portfolio.total} format={fmtKSigned} delay={560} />
           </div>
           <div className="sub">premium + shares</div>
         </div>
         <div className="stat">
           <div className="k">Capital deployed</div>
-          <div className="v">{fmtK(portfolio.cost)}</div>
-          <div className="sub">{fmtK(cashAvailable)} dry powder</div>
+          <div className="v">
+            <AnimatedNumber value={portfolio.cost} format={fmtK} delay={640} />
+          </div>
+          <div className="sub"><AnimatedNumber value={cashAvailable} format={fmtK} delay={720} /> dry powder</div>
         </div>
       </div>
     </div>
