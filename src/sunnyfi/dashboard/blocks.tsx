@@ -509,28 +509,42 @@ function usePulseCloses() {
   });
 }
 
-/** Build a portfolio value series from close prices and today's qty. */
+/** Build a portfolio value series from close prices and today's qty.
+ *
+ *  daily_closes is captured going forward and has gaps — not every held
+ *  ticker has a row on every past date. Summing only the tickers present on
+ *  each date understates older dates (missing names count as $0), which
+ *  manufactures a fake upward ramp. So we CARRY FORWARD: for any date a
+ *  ticker has no close, use its most recent prior close (or its earliest
+ *  close / current price before that), so every holding always contributes a
+ *  real price and the series reflects pure mark-to-market on current shares. */
 function valueSeries(positions: PulsePosition[], closes: PulseDailyClose[]): {
   series: number[];
   dates: string[];
 } {
-  const byTicker = new Map<string, Map<string, number>>();
+  const byTicker = new Map<string, { date: string; close: number }[]>();
   const dateSet = new Set<string>();
   for (const c of closes) {
-    if (!byTicker.has(c.ticker)) byTicker.set(c.ticker, new Map());
-    byTicker.get(c.ticker)!.set(c.date, c.close_price);
+    if (!byTicker.has(c.ticker)) byTicker.set(c.ticker, []);
+    byTicker.get(c.ticker)!.push({ date: c.date, close: c.close_price });
     dateSet.add(c.date);
   }
+  for (const arr of byTicker.values()) arr.sort((a, b) => a.date.localeCompare(b.date));
   const dates = [...dateSet].sort().slice(-SPARK_TRADING_DAYS);
-  const series = dates.map((d) => {
-    let v = 0;
-    for (const p of positions) {
-      const tCloses = byTicker.get(p.ticker);
-      const close = tCloses?.get(d);
-      if (close != null) v += close * p.quantity;
-    }
-    return v;
+  // Per-position resolver: carried-forward close on/before a date.
+  const resolvers = positions.map((p) => {
+    const arr = byTicker.get(p.ticker);
+    const fallback = p.current_price ?? p.avg_cost ?? 0;
+    const get = (!arr || arr.length === 0)
+      ? () => fallback
+      : (d: string) => {
+          let val = arr[0].close;            // earliest, for dates before first close
+          for (const e of arr) { if (e.date <= d) val = e.close; else break; }
+          return val;
+        };
+    return { qty: p.quantity, get };
   });
+  const series = dates.map((d) => resolvers.reduce((v, r) => v + r.get(d) * r.qty, 0));
   return { series, dates };
 }
 
