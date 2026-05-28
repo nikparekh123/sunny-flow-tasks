@@ -144,6 +144,7 @@ export default function PositionsPage() {
           realizedByTicker={realizedByTicker}
           tradesByTicker={tradesByTicker}
           shareSellsByTicker={shareSellsByTicker}
+          dailyCloses={dailyCloses}
           onUpload={() => setShowUpload(true)}
           onRefresh={handleRefresh}
           refreshing={refreshPrices.isPending}

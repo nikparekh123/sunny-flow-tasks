@@ -21,7 +21,7 @@
  * TradesLogMatrix / ExpiryCalendar components (styled by positions.css
  * via the .np-app ancestor) so we keep their full live behaviour.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TickerStrip } from "@/sunnyfi/dashboard/blocks";
 import { Section, Spark, AnimatedBar } from "@/sunnyfi/dashboard/atoms";
 import { MoneyCount, PctCount, useEntered } from "@/sunnyfi/lib/animation";
@@ -29,9 +29,10 @@ import { useNow, fmtBrandDate } from "@/sunnyfi/dashboard/time";
 import {
   fmtUSD, fmtUSD2, fmtPct, chipsForSignals, closeRealizedPL,
   type PositionComputed, type LiveOption, type OptionTrade,
-  type TickerSignals, type ShareSell,
+  type TickerSignals, type ShareSell, type DailyClose,
 } from "./types";
 import { TradesMatrixV2 } from "./TradesMatrixV2";
+import { mountBand, type BandPosition, type BandOption } from "./positionBand";
 import "@/sunnyfi/pages/dashboard.css";
 import "./positions-v2.css";
 
@@ -52,6 +53,7 @@ export interface PositionsV2BodyProps {
   realizedByTicker: Map<string, number>;
   tradesByTicker: Map<string, OptionTrade[]>;
   shareSellsByTicker: Map<string, ShareSell[]>;
+  dailyCloses: DailyClose[];
   onUpload: () => void;
   onRefresh: () => void;
   refreshing: boolean;
@@ -607,13 +609,74 @@ function PositionsLedger(props: PositionsV2BodyProps) {
   );
 }
 
+// Map a live position + its option legs + daily closes into the Position
+// Lens band data. Lots are empty until PL-B (share-lot recording); the
+// expected-move band + real OI arrive in PL-C.
+function positionToBand(r: PositionComputed, trades: OptionTrade[], dailyCloses: DailyClose[]): BandPosition {
+  const current = r.current_price ?? r.avg_cost;
+  const series = dailyCloses
+    .filter((c) => c.ticker === r.ticker)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const prices = series.map((c) => c.close_price);
+  let lo: number, hi: number;
+  if (prices.length >= 2) {
+    lo = Math.min(...prices, current); hi = Math.max(...prices, current);
+    const pad = (hi - lo) * 0.06 || current * 0.05;
+    lo = Math.max(0, lo - pad); hi = hi + pad;
+  } else {
+    lo = current * 0.75; hi = current * 1.25;
+  }
+  const at = (back: number) => (series.length > back ? series[series.length - 1 - back].close_price : current);
+  const weekly: { price: number; date: string }[] = [];
+  for (let i = series.length - 1; i >= 0; i -= 5) weekly.unshift({ price: series[i].close_price, date: series[i].date });
+
+  const closesByOpen = new Map<string, OptionTrade[]>();
+  for (const t of trades) {
+    if (t.action === "close" && t.closes_trade_id) {
+      const arr = closesByOpen.get(t.closes_trade_id) ?? []; arr.push(t); closesByOpen.set(t.closes_trade_id, arr);
+    }
+  }
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const dte = (expiry: string) => Math.round((new Date(expiry + "T00:00:00Z").getTime() - today.getTime()) / 86400000);
+  const calls: BandOption[] = []; const puts: BandOption[] = [];
+  for (const t of trades) {
+    if (t.action !== "open") continue;
+    const cls = closesByOpen.get(t.id) ?? [];
+    const remaining = t.contracts - cls.reduce((s, c) => s + c.contracts, 0);
+    const active = remaining > 0;
+    const side: "sold" | "bought" = t.direction === "short" ? "sold" : "bought";
+    const lastClose = cls.length ? cls.map((c) => c.trade_date).sort().reverse()[0] : undefined;
+    const o: BandOption = {
+      strike: t.strike, qty: active ? remaining : t.contracts, prem: t.premium, side,
+      status: active ? "active" : "expired",
+      ...(side === "sold" ? { sold: t.trade_date } : { bought: t.trade_date }),
+      ...(active ? { expires: t.expiry, dte: dte(t.expiry) } : { closed: lastClose }),
+    };
+    (t.option_type === "call" ? calls : puts).push(o);
+  }
+
+  return {
+    t: r.ticker, name: r.ticker, sector: r.sector ?? "",
+    range: [Math.round(lo), Math.round(hi)], current,
+    dayAgo: r.prev_close ?? at(1), weekAgo: at(5), monthAgo: at(21),
+    avgCost: r.avg_cost, totalShares: r.quantity, breakeven: r.effective_cost ?? r.avg_cost,
+    earningsDate: r.earnings_date ?? null, expectedMovePct: null,
+    lots: [], calls, puts, closes: weekly,
+    unrealizedPct: r.pnl_pct,
+  };
+}
+
 // ─────────────────── §05 Focus insight ───────────────────────────
-function FocusInsight({ rows, signalsByTicker, liveByTicker, onTickerClick }: {
+function FocusInsight({ rows, signalsByTicker, liveByTicker, tradesByTicker, dailyCloses, onTickerClick }: {
   rows: PositionComputed[];
   signalsByTicker: Map<string, TickerSignals>;
   liveByTicker: Map<string, LiveOption[]>;
+  tradesByTicker: Map<string, OptionTrade[]>;
+  dailyCloses: DailyClose[];
   onTickerClick: (t: string) => void;
 }) {
+  const [xray, setXray] = useState(false);
+  const bandRef = useRef<HTMLDivElement>(null);
   // Rank by "severity": biggest absolute unrealized loss first, then
   // anything with signal chips. Focus = the most pressing name.
   const ranked = useMemo(() => {
@@ -629,6 +692,18 @@ function FocusInsight({ rows, signalsByTicker, liveByTicker, onTickerClick }: {
   }, [rows, signalsByTicker]);
 
   const [idx, setIdx] = useState(0);
+  // Focus row (null when the list is empty) — computed before the early
+  // return so the X-ray mount effect obeys the rules of hooks.
+  const focusRow = ranked.length ? ranked[Math.min(idx, ranked.length - 1)].r : null;
+  const focusTicker = focusRow?.ticker ?? null;
+  // Mount / remount the Position Lens band when X-ray is on or the focus
+  // ticker changes; cleanup() removes the tooltip + clears the node.
+  useEffect(() => {
+    if (!xray || !bandRef.current || !focusRow) return;
+    const data = positionToBand(focusRow, tradesByTicker.get(focusRow.ticker) ?? [], dailyCloses);
+    return mountBand(bandRef.current, data);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xray, focusTicker]);
   if (ranked.length === 0) return null;
   // Clamp the focus index in case the ranked list shrank (a position
   // closed) since the last render.
@@ -648,7 +723,7 @@ function FocusInsight({ rows, signalsByTicker, liveByTicker, onTickerClick }: {
   return (
     <div>
       <Section n="05" right={`focus · ${focusIdx + 1} of ${ranked.length}`}>Stock insights · focus</Section>
-      <div className="focus">
+      <div className={"focus" + (xray ? " xray-open" : "")}>
         <div className="card">
           <div className="header">
             <div>
@@ -683,6 +758,11 @@ function FocusInsight({ rows, signalsByTicker, liveByTicker, onTickerClick }: {
               {focus.chips.map((c) => <span key={c.label} className={"chip " + (c.tone === "warn" ? "warn" : c.tone === "down" ? "neg" : c.tone === "up" ? "pos" : "")}>{c.label}</span>)}
             </div>
           )}
+          {/* Position Lens — inline X-ray of this position's price band */}
+          <button className={"xray-btn" + (xray ? " on" : "")} onClick={() => setXray((v) => !v)}>
+            ⊹ {xray ? "Hide X-ray" : "X-ray position"}
+          </button>
+          {xray && <div className="xray-band" ref={bandRef} />}
         </div>
         <div className="queue">
           <div className="label" style={{ marginBottom: 12 }}>UP NEXT · by severity</div>
@@ -793,7 +873,7 @@ export function PositionsV2Body(props: PositionsV2BodyProps) {
         <div className="row" style={{ marginTop: 72 }}><ProtectionBlock rows={portfolio.rows} tradesByTicker={tradesByTicker} /></div>
         <div className="row" style={{ marginTop: 72 }}><StrategyBuckets rows={portfolio.rows} overlayByTicker={overlayByTicker} realizedByTicker={realizedByTicker} liveByTicker={liveByTicker} /></div>
         <div className="row" style={{ marginTop: 72 }}><PositionsLedger {...props} /></div>
-        <div className="row" style={{ marginTop: 72 }}><FocusInsight rows={portfolio.rows} signalsByTicker={signalsByTicker} liveByTicker={liveByTicker} onTickerClick={onTickerClick} /></div>
+        <div className="row" style={{ marginTop: 72 }}><FocusInsight rows={portfolio.rows} signalsByTicker={signalsByTicker} liveByTicker={liveByTicker} tradesByTicker={props.tradesByTicker} dailyCloses={props.dailyCloses} onTickerClick={onTickerClick} /></div>
         <div className="row" style={{ marginTop: 72 }}><RealizedBlock rows={portfolio.rows} realizedByTicker={realizedByTicker} tradesByTicker={tradesByTicker} /></div>
         <div className="row" style={{ marginTop: 64 }}>
           <div className="tools-rail"><span className="build">Sunnyfi · positions</span></div>

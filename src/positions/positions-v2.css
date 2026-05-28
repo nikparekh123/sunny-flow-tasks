@@ -117,6 +117,12 @@
 
 /* ====== STOCK INSIGHT FOCUS ====== */
 .dash .focus { display: grid; grid-template-columns: 2.2fr 1fr; gap: 40px; align-items: stretch; }
+/* Position Lens X-ray: full-width band when open, queue drops below. */
+.dash .focus.xray-open { grid-template-columns: 1fr; }
+.dash .xray-btn { margin-top: 16px; font-family: var(--mono); font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; padding: 8px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--bright); background: transparent; color: var(--fg2); transition: all .15s var(--ease); }
+.dash .xray-btn:hover { color: var(--fg1); border-color: var(--fg2); }
+.dash .xray-btn.on { color: var(--neon); border-color: var(--neon); background: var(--tint-neon); }
+.dash .xray-band { margin-top: 18px; padding-top: 18px; border-top: var(--hair); }
 .dash .focus .card { border: 1.5px solid rgba(210,230,50,.32); background: linear-gradient(165deg, rgba(210,230,50,.06), transparent 55%); border-radius: 12px; padding: 28px 32px 24px; position: relative; overflow: hidden; }
 .dash .focus .card .header { display: flex; justify-content: space-between; align-items: flex-start; }
 .dash .focus .card .name { font-family: var(--sans); font-weight: 800; font-size: 56px; letter-spacing: -.04em; line-height: .9; color: var(--fg1); }
