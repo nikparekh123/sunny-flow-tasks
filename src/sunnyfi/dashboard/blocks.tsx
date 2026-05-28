@@ -40,8 +40,6 @@ export function BrandBar({ dateLabel }: { dateLabel?: string }) {
       </div>
       <div className="actions">
         {dateLabel && <span className="label">{dateLabel}</span>}
-        <span className="pill muted">⌘ K · Search</span>
-        <span className="pill muted">Account</span>
       </div>
     </div>
   );
@@ -919,8 +917,10 @@ interface MacroCloseRow {
   close: number;
 }
 
+// Six live tickers from the bnf_universe_data cache. 10Y / VIX / DXY
+// dropped from the visible list until they're in the cache — empty
+// placeholder rows added more noise than they earned.
 const MACRO_TICKERS = ["SPY", "QQQ", "IWM", "KWEB", "SMH", "ARKK"] as const;
-const MACRO_PLACEHOLDERS = ["10Y", "VIX", "DXY"] as const;
 
 function useMacroLatest() {
   return useQuery({
@@ -1045,23 +1045,6 @@ export function MacroBlock({ n = "04", compact = false }: { n?: string; compact?
           </div>
         );
       })}
-      {/* Muted placeholders — not in our cache yet. Kept so the macro
-          section reads complete; will switch to live once we backfill. */}
-      {MACRO_PLACEHOLDERS.map((t, i) => (
-        <div
-          key={t}
-          className="macro-row"
-          style={{
-            opacity: 0.45,
-            ...(compact ? { gridTemplateColumns: "56px 1fr 78px 64px", gap: 14, padding: "10px 0" } : {}),
-          }}
-        >
-          <span className="ticker-name" style={compact ? { fontSize: 14 } : undefined}>{t}</span>
-          <span className="note" style={compact ? { fontSize: 12 } : undefined}>not yet wired</span>
-          <Spark w={compact ? 78 : 90} h={compact ? 18 : 22} kind="muted" dense delay={500 + (MACRO_TICKERS.length + i) * 60} />
-          <span className="change fg3" style={compact ? { fontSize: 12 } : undefined}>—</span>
-        </div>
-      ))}
     </div>
   );
 }
@@ -1092,7 +1075,9 @@ function useBNFCandidates() {
   });
 }
 
-export function BNFBlock({ n = "05", compact = false }: { n?: string; compact?: boolean }) {
+export function BNFBlock({
+  n = "05", compact = false, onOpenScanner,
+}: { n?: string; compact?: boolean; onOpenScanner?: () => void }) {
   const { data: picks = [] } = useBNFCandidates();
 
   // Short sector labels for the compact card.
@@ -1154,7 +1139,9 @@ export function BNFBlock({ n = "05", compact = false }: { n?: string; compact?: 
         </div>
       )}
       <div style={{ marginTop: 14 }}>
-        <span className="pill">→ Open scanner</span>
+        <span className="pill" onClick={onOpenScanner} role={onOpenScanner ? "button" : undefined}>
+          → Open scanner
+        </span>
       </div>
     </div>
   );

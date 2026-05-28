@@ -134,16 +134,22 @@ export function HairRow({
   );
 }
 
-/** Section header. `n` is the small "§ NN" prefix (e.g. "§ 01"). `right`
- *  is the small muted text on the right edge ("4 picks", "updated 06:42"). */
-export function Section({ n, children, right }: {
+/** Section header. `n` was originally a "§ NN" numbering prefix from
+ *  the design handoff — dropped because the symbol read as noise. The
+ *  prop is kept on the type to avoid touching all the callers, but is
+ *  no longer rendered.
+ *
+ *  `right` is the small muted text on the right edge ("4 picks",
+ *  "reviewed 2d ago", "Week of Jun 23"). */
+export function Section({ children, right }: {
+  /** @deprecated number prefix from original design; no-op now. */
   n?: string;
   children?: React.ReactNode;
   right?: React.ReactNode;
 }) {
   return (
     <div className="section">
-      <span>{n && <span className="n">§ {n}</span>}{children}</span>
+      <span>{children}</span>
       {right && <span className="right">{right}</span>}
     </div>
   );

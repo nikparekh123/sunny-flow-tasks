@@ -105,7 +105,7 @@ export function CockpitLayout({
                 <CalendarBlock n="02" highlight={todayHighlight} compact />
               </div>
               <div style={{ marginTop: 56 }}>
-                <BNFBlock n="03" compact />
+                <BNFBlock n="03" compact onOpenScanner={onStrategy} />
               </div>
             </div>
 
