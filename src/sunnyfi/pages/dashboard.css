@@ -1,356 +1,278 @@
-/* ─────────────────── Dashboard v2 — "morning brief" ───────────────
- * Bold, busy-but-beautiful homepage. Magazine-cover greeting at top,
- * 12-col grid of cards, slim tools rail at the bottom.
- *
- * Aesthetic rules carried across every card:
- *   • Hero type 72–88px white, tight leading (only in greeting)
- *   • Section titles 11px mono, 2px letter-spacing, top-left of card
- *   • Card surface lifted dark — never white, never flat
- *   • Neon green = good, #f08770 = bad, #f5c458 = soon/warn
- *   • No prose paragraphs; numbers + chips + bars do the work
- */
+/* ============================================================
+   Sunnyfi · Morning brief — dashboard
+   Ported from the Claude design handoff (Navi design system).
+   Original spec: /Users/niketparekh/Downloads/handoff 4/dashboard.css
+   ============================================================ */
 
-.dash-v2 {
-  --dash-pad-x: 48px;
-  --dash-card-bg-top:   rgba(255, 255, 255, 0.05);
-  --dash-card-bg-base:  rgba(20, 60, 56, 0.55);
-  --dash-card-border:   rgba(168, 196, 192, 0.22);
-  --dash-card-radius:   10px;
-  --dash-neon:          var(--navi-neon, #d2e632);
-  --dash-pos:           #6dd1c5;
-  --dash-neg:           #f08770;
-  --dash-warn:          #f5c458;
+:root {
+  /* ── Surface scale (low → high) ──────────────────────────── */
+  --page:        #061a10;
+  --page-2:      #0a2828;
+  --surface:     #0f3333;
+  --card:        rgba(15,51,51,.55);
+  --elevated:    #1e5a50;
+  --dusk:        #325050;
 
+  /* ── Foreground scale (bone → black) ─────────────────────── */
+  --fg1:         #faf5f0;
+  --fg2:         #a8c4c0;
+  --fg3:         #468278;
+  --fg4:         #325050;
+  --fg5:         #1e5a50;
+
+  /* ── Status colors ──────────────────────────────────────── */
+  --neon:        #d2e632;     /* primary accent — yellow-green */
+  --neon-dark:   #c8d820;
+  --positive:    #a8d4a0;     /* gains */
+  --negative:    #e87060;     /* losses */
+  --warning:     #e0c060;     /* warnings / "soon" */
+  --bright:      #326e64;     /* hairline highlight */
+
+  --tint-neon:     rgba(210,230,50,.10);
+  --tint-positive: rgba(168,212,160,.12);
+  --tint-negative: rgba(232,112,96,.10);
+  --tint-warning:  rgba(224,192,96,.14);
+  --tint-muted:    rgba(30,90,80,.20);
+
+  --hair:        1px solid rgba(50,110,100,.22);
+  --hair-strong: 1px solid rgba(50,110,100,.45);
+  --wall:        1.5px solid #326e64;
+
+  --sans: 'Work Sans', system-ui, -apple-system, sans-serif;
+  --mono: 'DM Mono', 'SF Mono', Menlo, monospace;
+  --ease: cubic-bezier(.4,0,.2,1);
+}
+
+@keyframes pulse  { 0%,100%{opacity:1} 50%{opacity:.3} }
+@keyframes blink  { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes todayGlow {
+  0%, 100% { box-shadow: inset 0 0 0 1.5px transparent; }
+  50%      { box-shadow: inset 0 0 0 1.5px rgba(210,230,50,.18); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* The dashboard scopes its own typography / background so it doesn't
+   leak Work Sans into the rest of the app. Wrap with `.dash`. */
+.dash * { box-sizing: border-box; }
+
+.dash {
+  width: 100%;
   min-height: 100vh;
-  background: #04100e;
-  color: var(--navi-fg1, #e6f1ec);
-  font-family: var(--navi-font-sans);
-  padding: 28px var(--dash-pad-x) 36px;
-  transition: opacity 0.35s ease-out;
-}
-.dash-v2.fading { opacity: 0; }
-
-/* ─────────────────── GREETING STRIP ─────────────────── */
-
-.dash2-greet {
-  margin-bottom: 28px;
+  background: var(--page);
+  color: var(--fg1);
+  font-family: var(--sans);
+  font-feature-settings: normal;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
 }
 
-.dash2-greet-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 24px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid rgba(168, 196, 192, 0.12);
+.dash-inner {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 36px 56px 64px;
 }
 
-.dash2-hero {
-  font-family: var(--navi-font-sans);
-  font-size: 84px;
-  font-weight: 800;
-  line-height: 0.95;
-  letter-spacing: -2.5px;
-  color: #fff;
-  margin: 0;
-  text-transform: uppercase;
-}
-.dash2-hero-name {
-  color: var(--dash-neon);
-  font-weight: 800;
-}
+/* ─────────────────── Typography ─────────────────── */
 
-.dash2-greet-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  font-family: var(--navi-font-mono);
-  font-size: 12px;
-  color: var(--navi-fg3, #8a9b96);
-  letter-spacing: 1.4px;
-  padding-top: 12px;
-}
-.dash2-greet-date {
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 2.4px;
-}
-.dash2-greet-time {
-  color: var(--navi-fg2, #c0d0cb);
-}
-.dash2-greet-mkt {
-  color: var(--dash-warn);
-  margin-top: 4px;
-}
-.dash2-logout {
-  margin-top: 12px;
-  background: transparent;
-  border: 1px solid rgba(168, 196, 192, 0.32);
-  color: var(--navi-fg3);
-  font-family: var(--navi-font-mono);
-  font-size: 10px;
-  letter-spacing: 1.4px;
-  padding: 4px 10px;
-  border-radius: 4px;
+.dash .display { font-family: var(--sans); font-weight: 800; letter-spacing: -.045em; line-height: .9; }
+.dash .hero    { font-family: var(--sans); font-weight: 800; letter-spacing: -.035em; line-height: 1; }
+.dash .num-mono { font-family: var(--mono); font-feature-settings: "tnum","zero"; }
+.dash .num-sans { font-family: var(--sans); font-feature-settings: "tnum","zero"; }
+.dash .label { font-family: var(--mono); font-size: 9px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg3); font-weight: 500; }
+.dash .label.bright { color: var(--fg2); }
+.dash .section { font-family: var(--mono); font-size: 9px; letter-spacing: 2.2px; text-transform: uppercase; color: var(--fg3); font-weight: 600; margin-bottom: 16px; display: flex; align-items: baseline; justify-content: space-between; }
+.dash .section .n { color: var(--fg5); margin-right: 6px; }
+.dash .section .right { color: var(--fg4); font-weight: 500; letter-spacing: 1.2px; }
+
+.dash .neon { color: var(--neon); }
+.dash .pos { color: var(--positive); }
+.dash .neg { color: var(--negative); }
+.dash .warn { color: var(--warning); }
+.dash .fg2 { color: var(--fg2); }
+.dash .fg3 { color: var(--fg3); }
+.dash .fg4 { color: var(--fg4); }
+
+/* ─────────────────── Brand bar ─────────────────── */
+
+.dash .brandbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 22px; border-bottom: var(--hair); margin-bottom: 40px; }
+.dash .brandbar .mark { font-family: var(--sans); font-size: 12px; font-weight: 500; letter-spacing: 3px; text-transform: uppercase; display: flex; align-items: center; gap: 14px; }
+.dash .brandbar .mark .logo { color: var(--neon); display: inline-flex; align-items: center; gap: 8px; }
+.dash .brandbar .mark .slash { color: var(--fg5); font-weight: 300; }
+.dash .brandbar .mark .route { color: var(--fg2); }
+.dash .brandbar .actions { display: flex; align-items: center; gap: 14px; }
+
+.dash .cursor { display: inline-block; width: .45ch; height: .9em; background: var(--neon); vertical-align: -.08em; margin-left: 3px; animation: blink 1s steps(1) infinite; }
+.dash .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 8px rgba(210,230,50,.45); animation: pulse 2.5s var(--ease) infinite; }
+
+/* ─────────────────── Pills / chips ─────────────────── */
+
+.dash .pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(210,230,50,.30); background: var(--tint-neon); color: var(--neon); border-radius: 100px; padding: 5px 12px; font-size: 10px; font-family: var(--mono); letter-spacing: 1.2px; text-transform: uppercase; transition: background .15s var(--ease), border-color .15s var(--ease), transform .15s var(--ease); cursor: pointer; }
+.dash .pill:hover { background: rgba(210,230,50,.18); border-color: rgba(210,230,50,.55); transform: translateY(-1px); }
+.dash .pill:active { transform: translateY(0); }
+.dash .pill.muted { border-color: rgba(50,110,100,.4); background: var(--tint-muted); color: var(--fg2); }
+.dash .pill.muted:hover { background: rgba(50,110,100,.35); color: var(--fg1); }
+.dash .pill.warn { border-color: rgba(224,192,96,.35); background: var(--tint-warning); color: var(--warning); }
+
+.dash .chip { display: inline-flex; align-items: center; border: 1px solid var(--bright); background: transparent; color: var(--fg2); padding: 3px 8px; font-size: 9px; font-family: var(--mono); letter-spacing: 1.2px; text-transform: uppercase; border-radius: 4px; }
+.dash .chip.neon { border-color: rgba(210,230,50,.45); color: var(--neon); background: var(--tint-neon); }
+.dash .chip.warn { border-color: rgba(224,192,96,.35); color: var(--warning); background: var(--tint-warning); }
+.dash .chip.neg  { border-color: rgba(232,112,96,.35); color: var(--negative); background: var(--tint-negative); }
+.dash .chip.pos  { border-color: rgba(168,212,160,.35); color: var(--positive); background: var(--tint-positive); }
+
+/* ─────────────────── Sparklines ─────────────────── */
+
+.dash .spark { display: block; }
+.dash .spark path { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.dash .spark path.pos { stroke: var(--positive); }
+.dash .spark path.neg { stroke: var(--negative); }
+.dash .spark path.neon { stroke: var(--neon); }
+.dash .spark path.muted { stroke: var(--fg3); }
+.dash .spark.area .fill-neon { fill: url(#sparkNeonGrad); }
+
+/* ─────────────────── HairRow ─────────────────── */
+
+.dash .hairrow { display: grid; grid-template-columns: 130px 1fr auto; gap: 18px; align-items: baseline; padding: 16px 0; border-bottom: var(--hair); }
+.dash .hairrow.last { border-bottom: none; }
+.dash .hairrow .row-content { font-size: 15px; color: var(--fg1); }
+.dash .hairrow .row-right { font-family: var(--mono); font-size: 14px; }
+
+/* ─────────────────── Ticker strip ─────────────────── */
+
+.dash .ticker { border-top: var(--hair); border-bottom: var(--hair); padding: 16px 0; display: grid; grid-template-columns: repeat(6, 1fr); position: relative; }
+.dash .ticker.compact { padding: 12px 0; }
+.dash .ticker > .tick { padding-left: 22px; border-left: 1px solid rgba(50,110,100,.22); }
+.dash .ticker > .tick:first-child { padding-left: 0; border-left: none; }
+.dash .tick .head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.dash .tick .head .label { font-size: 9px; }
+.dash .tick .price { font-family: var(--mono); font-size: 18px; font-weight: 500; color: var(--fg1); }
+.dash .tick.compact .price { font-size: 16px; }
+.dash .tick .change { font-family: var(--mono); font-size: 11px; margin-top: 3px; }
+
+/* ─────────────────── Winners / Losers bars ─────────────────── */
+
+.dash .bar-row { display: grid; grid-template-columns: 70px 1fr 86px; gap: 14px; align-items: center; padding: 8px 0; }
+.dash .bar { height: 14px; transition: opacity .15s var(--ease); }
+.dash .bar.pos { background: var(--positive); }
+.dash .bar.neg { background: var(--negative); }
+.dash .bar-row:hover .bar { opacity: .85; }
+
+/* ─────────────────── BNF tile ─────────────────── */
+
+.dash .bnf-tile {
+  border: 1px solid rgba(210,230,50,.18);
+  background: linear-gradient(180deg, rgba(210,230,50,.04), transparent 60%);
+  border-radius: 10px;
+  padding: 14px 16px;
+  transition: border-color .18s var(--ease), background .18s var(--ease), transform .18s var(--ease);
   cursor: pointer;
-  transition: all .15s var(--navi-ease);
 }
-.dash2-logout:hover {
-  border-color: var(--dash-neon);
-  color: var(--dash-neon);
-}
+.dash .bnf-tile:hover { border-color: rgba(210,230,50,.55); background: var(--tint-neon); transform: translateY(-1px); }
+.dash .bnf-tile .head { display: flex; justify-content: space-between; align-items: baseline; }
+.dash .bnf-tile .ticker-name { font-family: var(--sans); font-weight: 700; letter-spacing: -.02em; color: var(--fg1); }
 
-/* Status ticker line beneath the greeting — SPY / QQQ / IWM live,
- * 10Y / VIX / DXY placeholder until PR-5 wires them. */
-.dash2-ticker {
-  display: flex;
-  gap: 28px;
-  margin-top: 14px;
-  font-family: var(--navi-font-mono);
-  font-size: 12px;
-  letter-spacing: .6px;
-}
-.dash2-ticker-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.dash2-ticker-item .sym {
-  color: var(--navi-fg3);
-  font-size: 10px;
-  letter-spacing: 1.8px;
-  text-transform: uppercase;
-}
-.dash2-ticker-item .pct {
-  color: var(--navi-fg1);
-  font-weight: 700;
-}
-.dash2-ticker-item .pct.pos { color: var(--dash-pos); }
-.dash2-ticker-item .pct.neg { color: var(--dash-neg); }
-.dash2-ticker-item.muted .pct { color: var(--navi-fg4, #56655f); }
+/* ─────────────────── Calendar ─────────────────── */
 
-/* ─────────────────── 12-COL CARD GRID ─────────────────── */
-
-.dash2-grid {
+.dash .cal {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap: 18px;
+  grid-template-columns: repeat(5, 1fr);
+  border: var(--wall);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(15,51,51,.30);
 }
-.dash2-span-4  { grid-column: span 4; }
-.dash2-span-6  { grid-column: span 6; }
-.dash2-span-8  { grid-column: span 8; }
-.dash2-span-12 { grid-column: span 12; }
-
-/* Card surface — lifted, never white. Matches the rail graph card. */
-.dash2-card {
-  border: 1.5px solid var(--dash-card-border);
-  border-radius: var(--dash-card-radius);
-  background:
-    linear-gradient(180deg,
-      var(--dash-card-bg-top) 0%,
-      rgba(255, 255, 255, 0.02) 100%),
-    var(--dash-card-bg-base);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 1px 10px rgba(0, 0, 0, 0.22);
-  padding: 18px 20px 20px;
-  min-height: 280px;
-  display: flex;
-  flex-direction: column;
-}
-
-.dash2-card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 14px;
-}
-.dash2-card-title {
-  font-family: var(--navi-font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  color: #fff;
-  text-transform: uppercase;
-}
-.dash2-card-coming {
-  font-family: var(--navi-font-mono);
-  font-size: 9px;
-  letter-spacing: 1.4px;
-  color: var(--navi-fg4, #56655f);
-  padding: 2px 8px;
-  border: 1px dashed rgba(168, 196, 192, 0.28);
-  border-radius: 999px;
-}
-
-.dash2-card-body { flex: 1; min-width: 0; }
-
-.dash2-card-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--navi-fg4, #56655f);
-  font-family: var(--navi-font-mono);
-  font-size: 12px;
-  letter-spacing: 1.4px;
-  text-transform: uppercase;
-  min-height: 200px;
-}
-
-/* ─────────────────── TODAY card ─────────────────── */
-
-.dash2-today-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.dash2-today-row {
+.dash .cal-cell {
   position: relative;
-  padding: 12px 14px 12px 18px;
-  border-radius: 6px;
-  background: rgba(4, 16, 14, 0.55);
-  border: 1px solid rgba(168, 196, 192, 0.16);
+  padding: 18px 16px 20px;
+  border-right: 1px solid var(--bright);
+  min-height: 240px;
+  transition: background .18s var(--ease);
 }
-.dash2-today-row::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 3px;
-  border-radius: 6px 0 0 6px;
+.dash .cal-cell:last-child { border-right: none; }
+.dash .cal-cell:hover { background: rgba(15,51,51,.55); }
+.dash .cal-cell.today {
+  background: rgba(224,192,96,.10);
+  animation: todayGlow 4.5s var(--ease) infinite;
 }
-.dash2-today-row.tone-alert::before  { background: var(--dash-neg); }
-.dash2-today-row.tone-income::before { background: var(--dash-pos); }
-.dash2-today-row.tone-warn::before   { background: var(--dash-warn); }
-.dash2-today-row.tone-info::before   { background: rgba(168, 196, 240, 0.7); }
-
-.dash2-today-row-headline {
-  font-family: var(--navi-font-sans);
-  font-size: 14px;
-  font-weight: 700;
-  color: #fff;
-  line-height: 1.25;
+.dash .cal-cell.today.neon-highlight {
+  background: rgba(210,230,50,.07);
+  animation: todayGlow 4.5s var(--ease) infinite;
 }
-.dash2-today-row.tone-alert  .dash2-today-row-headline { color: var(--dash-neg); }
-.dash2-today-row.tone-income .dash2-today-row-headline { color: var(--dash-pos); }
-.dash2-today-row.tone-warn   .dash2-today-row-headline { color: var(--dash-warn); }
-
-.dash2-today-row-sub {
-  font-family: var(--navi-font-mono);
-  font-size: 11px;
-  color: var(--navi-fg3, #8a9b96);
-  margin-top: 4px;
-  letter-spacing: .2px;
-}
-
-/* Calm / empty state — big "0" with a quiet message. Keeps the card
-   visually balanced so it doesn't collapse into a blank rectangle. */
-.dash2-today-clear {
-  text-align: center;
-  padding: 24px 0;
-}
-.dash2-today-clear-num {
-  font-family: var(--navi-font-mono);
-  font-size: 64px;
-  font-weight: 800;
-  color: var(--dash-pos);
-  line-height: 1;
-  letter-spacing: -2px;
-}
-.dash2-today-clear-lbl {
-  font-family: var(--navi-font-mono);
-  font-size: 10px;
-  letter-spacing: 1.6px;
-  text-transform: uppercase;
-  color: var(--navi-fg3);
-  margin-top: 8px;
-}
-.dash2-today-clear-sub {
-  font-family: var(--navi-font-sans);
-  font-size: 12px;
-  color: var(--navi-fg4, #56655f);
-  margin-top: 14px;
-}
-
-/* ─────────────────── TOOLS RAIL (footer) ─────────────────── */
-
-.dash2-toolsrail {
-  display: flex;
-  gap: 10px;
-  margin-top: 28px;
-  padding-top: 20px;
-  border-top: 1px solid rgba(168, 196, 192, 0.12);
-}
-.dash2-tool {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
+.dash .cal-cell.today.no-highlight {
   background: transparent;
-  border: 1px solid var(--dash-card-border);
-  border-radius: 6px;
-  color: var(--navi-fg2);
-  font-family: var(--navi-font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: .2px;
-  cursor: pointer;
-  transition: all .15s var(--navi-ease);
+  animation: none;
 }
-.dash2-tool:hover {
-  border-color: var(--dash-neon);
-  color: var(--dash-neon);
-}
-.dash2-tool-hk {
-  font-family: var(--navi-font-mono);
-  font-size: 10px;
-  color: var(--navi-fg4);
-  padding: 1px 6px;
-  border: 1px solid rgba(168, 196, 192, 0.22);
-  border-radius: 3px;
-}
-.dash2-tool:hover .dash2-tool-hk {
-  border-color: var(--dash-neon);
-  color: var(--dash-neon);
-}
+.dash .cal-cell .day-label { font-family: var(--mono); font-size: 10px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--fg3); margin-bottom: 14px; font-weight: 600; }
+.dash .cal-cell.today .day-label { color: var(--warning); }
+.dash .cal-cell.today.neon-highlight .day-label { color: var(--neon); }
+.dash .cal-event { font-family: var(--mono); font-size: 11px; color: var(--fg2); padding: 4px 0; display: flex; align-items: baseline; gap: 6px; }
+.dash .cal-event::before { content: "·"; color: var(--fg4); }
+.dash .cal-event.mine { color: var(--neon); }
+.dash .cal-event.mine::before { color: var(--neon); }
+.dash .cal-cell .focus-tag { position: absolute; bottom: 14px; left: 16px; font-family: var(--mono); font-size: 8px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--warning); }
+.dash .cal-cell.today.neon-highlight .focus-tag { color: var(--neon); }
 
-/* ─────────────────── Toast ─────────────────── */
+/* ─────────────────── Macro row ─────────────────── */
 
-.dash2-toast {
-  position: fixed;
-  bottom: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(20, 60, 56, 0.96);
-  border: 1px solid rgba(109, 209, 197, 0.42);
-  color: var(--dash-pos);
-  font-family: var(--navi-font-mono);
-  font-size: 12px;
-  letter-spacing: 1px;
-  padding: 8px 16px;
-  border-radius: 4px;
-  z-index: 100;
-  pointer-events: none;
-}
+.dash .macro-row { display: grid; grid-template-columns: 70px 1fr 90px 72px; gap: 18px; align-items: center; padding: 14px 0; border-bottom: var(--hair); transition: background .12s var(--ease); }
+.dash .macro-row:last-child { border-bottom: none; }
+.dash .macro-row:hover { background: rgba(15,51,51,.25); }
+.dash .macro-row .ticker-name { font-family: var(--mono); font-size: 15px; font-weight: 500; color: var(--fg1); }
+.dash .macro-row .note { font-size: 13px; color: var(--fg2); }
+.dash .macro-row .change { font-family: var(--mono); font-size: 13px; text-align: right; }
 
-/* ─────────────────── Responsive ─────────────────── */
+/* ─────────────────── News band ─────────────────── */
 
-@media (max-width: 1100px) {
-  .dash-v2 { padding: 24px 24px 32px; }
-  .dash2-hero { font-size: 60px; }
-  /* Collapse the 12-col grid into 6 — paired cards stack side-by-side. */
-  .dash2-grid { grid-template-columns: repeat(6, 1fr); }
-  .dash2-span-4, .dash2-span-6, .dash2-span-8 { grid-column: span 6; }
+.dash .news-band { display: flex; gap: 24px; overflow: hidden; padding: 12px 0; }
+.dash .news-card { flex: 0 0 240px; border-left: 1px solid var(--bright); padding-left: 14px; cursor: pointer; transition: border-color .18s var(--ease), padding-left .2s var(--ease); }
+.dash .news-card:hover { border-left-color: var(--neon); padding-left: 18px; }
+.dash .news-card .head { display: flex; justify-content: space-between; align-items: baseline; }
+.dash .news-card .head .ticker-tag { color: var(--neon); font-family: var(--mono); font-size: 9px; letter-spacing: 1.4px; text-transform: uppercase; font-weight: 600; }
+.dash .news-card .head .time { font-family: var(--mono); font-size: 9px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg4); }
+.dash .news-card .headline { font-size: 13px; margin-top: 8px; line-height: 1.4; color: var(--fg2); transition: color .12s var(--ease); }
+.dash .news-card:hover .headline { color: var(--fg1); }
+
+/* ─────────────────── Tools rail (footer) ─────────────────── */
+
+.dash .tools-rail { padding-top: 18px; border-top: var(--hair-strong); display: flex; gap: 36px; font-family: var(--mono); font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; }
+.dash .tools-rail a { color: var(--fg2); text-decoration: none; transition: color .15s var(--ease), letter-spacing .2s var(--ease); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.dash .tools-rail a:hover { color: var(--neon); letter-spacing: 1.9px; }
+.dash .tools-rail .build { margin-left: auto; color: var(--fg4); }
+
+/* ─────────────────── Section row spacing ─────────────────── */
+
+.dash .row { margin-top: 64px; }
+.dash .row.first { margin-top: 0; }
+.dash .row.tight { margin-top: 36px; }
+
+/* ─────────────────── Hero blocks ─────────────────── */
+
+.dash .greeting {
+  line-height: .9;
+  transition: font-size .3s var(--ease), color .25s var(--ease);
 }
-@media (max-width: 700px) {
-  .dash2-hero { font-size: 44px; letter-spacing: -1.5px; }
-  .dash2-greet-row { flex-direction: column; }
-  .dash2-greet-meta { align-items: flex-start; }
-  .dash2-grid { grid-template-columns: 1fr; gap: 14px; }
-  .dash2-span-4, .dash2-span-6, .dash2-span-8, .dash2-span-12 { grid-column: span 1; }
+.dash .greeting .accent { color: var(--neon); transition: color .25s var(--ease); }
+.dash .greeting.bone .accent { color: var(--fg1); }
+
+.dash .markets-clock { font-family: var(--sans); font-weight: 300; color: var(--fg2); }
+.dash .markets-clock .time { font-family: var(--mono); font-weight: 600; color: var(--neon); }
+
+.dash .portfolio-num {
+  font-family: var(--sans); font-feature-settings: "tnum","zero";
+  font-weight: 800; letter-spacing: -.045em; line-height: .85;
+  transition: font-size .3s var(--ease), color .25s var(--ease);
 }
+.dash .portfolio-num.neon { color: var(--neon); }
+.dash .portfolio-num.bone { color: var(--fg1); }
+
+/* ─────────────────── Call vs Put bar ─────────────────── */
+
+.dash .income-mix-bar { flex: 1; display: flex; height: 22px; align-self: flex-end; margin-bottom: 8px; }
+.dash .income-mix-bar .calls { background: var(--neon); }
+.dash .income-mix-bar .puts { background: var(--tint-neon); border-left: 1.5px solid var(--page); }
+
+/* ─────────────────── Column labels (cockpit) ─────────────────── */
+
+.dash .col-label { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: var(--neon); margin-bottom: 28px; }
