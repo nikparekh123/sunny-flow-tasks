@@ -22,6 +22,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { Spark, AnimatedBar, HairRow, Section } from "./atoms";
 import { MoneyCount, PctCount, useEntered } from "./animation";
 import { macroEventsOn } from "./macroCalendar";
+import {
+  buildRiskScenarios, loadLastReviewed, saveLastReviewed,
+  type RiskPositionInput, type RiskOptionInput,
+} from "./riskMath";
+import { useState } from "react";
 
 // ─────────────────── Brand bar ───────────────────────────────────
 
@@ -1155,22 +1160,158 @@ export function BNFBlock({ n = "05", compact = false }: { n?: string; compact?: 
   );
 }
 
-// ─────────────────── § 06 Risk check ─────────────────────────────
+// ─────────────────── § 06 Risk check (live) ──────────────────────
+//
+// Constant-beta shock math from riskMath.ts — fast, approximate, good
+// enough for "is this a big number?" governance. Three scenarios:
+// SPY −5% / top-holding −10% / VIX +50%.
+//
+// Cadence: weekly review. localStorage tracks the last "Mark
+// reviewed" click; if older than 7 days the section header lights up
+// "DUE" in amber. Numbers refresh live every load regardless.
+
+interface RiskPositionRow {
+  ticker: string;
+  quantity: number;
+  current_price: number | null;
+  avg_cost: number;
+  status: string;
+}
+interface RiskTradeRow {
+  id: string;
+  ticker: string;
+  action: "open" | "close";
+  option_type: "call" | "put";
+  direction: "short" | "long";
+  contracts: number;
+  strike: number;
+  premium: number;
+  closes_trade_id: string | null;
+}
+
+function useRiskPositions() {
+  return useQuery({
+    queryKey: ["dash_risk_positions"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("positions" as never)
+        .select("ticker, quantity, current_price, avg_cost, status")
+        .returns<RiskPositionRow[]>();
+      if (error) throw error;
+      return (data ?? []).filter((p) => p.status === "open" && p.quantity > 0);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function useRiskTrades() {
+  return useQuery({
+    queryKey: ["dash_risk_trades"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("option_trades" as never)
+        .select("id, ticker, action, option_type, direction, contracts, strike, premium, closes_trade_id")
+        .returns<RiskTradeRow[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function fmtReviewedAgo(d: Date | null): { phrase: string; overdue: boolean } {
+  if (!d) return { phrase: "never reviewed", overdue: true };
+  const ageMs = Date.now() - d.getTime();
+  const days = Math.floor(ageMs / 86_400_000);
+  const overdue = days >= 7;
+  if (days === 0) return { phrase: "reviewed today", overdue };
+  if (days === 1) return { phrase: "reviewed yesterday", overdue };
+  return { phrase: `reviewed ${days}d ago`, overdue };
+}
 
 export function RiskBlock({ n = "06", compact = false }: { n?: string; compact?: boolean }) {
-  const numNeg = (v: number, delay: number) => (
-    <span className="num-mono neg" style={{ fontSize: compact ? 18 : 22, fontWeight: 600 }}>
-      <MoneyCount value={v} sign="-" delay={delay} />
-    </span>
+  const { data: positionsRaw = [] } = useRiskPositions();
+  const { data: rawTrades = [] } = useRiskTrades();
+  const [reviewedAt, setReviewedAt] = useState<Date | null>(loadLastReviewed());
+
+  // Derive live opens (for delta-equivalent options exposure).
+  const liveOpts = useMemo<RiskOptionInput[]>(() => {
+    const closedQty = new Map<string, number>();
+    for (const t of rawTrades) {
+      if (t.action === "close" && t.closes_trade_id) {
+        closedQty.set(t.closes_trade_id, (closedQty.get(t.closes_trade_id) ?? 0) + t.contracts);
+      }
+    }
+    return rawTrades
+      .filter((t) => t.action === "open")
+      .map((t) => ({ ...t, contracts: t.contracts - (closedQty.get(t.id) ?? 0) }))
+      .filter((t) => t.contracts > 0)
+      .map((t) => ({
+        ticker: t.ticker,
+        option_type: t.option_type,
+        direction: t.direction,
+        contracts: t.contracts,
+        strike: t.strike,
+        premium: t.premium,
+      }));
+  }, [rawTrades]);
+
+  const positions: RiskPositionInput[] = positionsRaw.map((p) => ({
+    ticker: p.ticker,
+    quantity: p.quantity,
+    current_price: p.current_price,
+    avg_cost: p.avg_cost,
+  }));
+
+  const scenarios = useMemo(
+    () => buildRiskScenarios(positions, liveOpts),
+    [positions, liveOpts],
   );
+
+  const reviewLabel = fmtReviewedAgo(reviewedAt);
+  const onMarkReviewed = () => {
+    const now = new Date();
+    saveLastReviewed(now);
+    setReviewedAt(now);
+  };
+
   return (
     <div>
-      <Section n={n} right={<>Last run <span className="num-mono fg2">Mon 09:14</span> · due Mon</>}>
+      <Section
+        n={n}
+        right={
+          <>
+            <span className={reviewLabel.overdue ? "warn" : "fg2"}>{reviewLabel.phrase}</span>
+            {reviewLabel.overdue && <span className="chip warn" style={{ marginLeft: 8 }}>DUE</span>}
+          </>
+        }
+      >
         Risk check
       </Section>
-      <HairRow label="SPY −5%"   right={numNeg(94200, 300)}>shock to portfolio · constant beta</HairRow>
-      <HairRow label="NVDA −10%" right={numNeg(28400, 380)}>single-name shock</HairRow>
-      <HairRow label="VIX +50%"  right={numNeg(12800, 460)} last>vol regime shift · vega exposure</HairRow>
+      {scenarios.map((s, i) => {
+        const last = i === scenarios.length - 1;
+        return (
+          <HairRow
+            key={s.label}
+            label={s.label}
+            last={last}
+            right={
+              <span className={"num-mono " + (s.dollars < 0 ? "neg" : "pos")} style={{ fontSize: compact ? 18 : 22, fontWeight: 600 }}>
+                <MoneyCount
+                  value={Math.round(Math.abs(s.dollars))}
+                  sign={s.dollars < 0 ? "-" : "+"}
+                  delay={300 + i * 80}
+                />
+              </span>
+            }
+          >
+            {s.detail}
+          </HairRow>
+        );
+      })}
+      <div style={{ marginTop: 14 }}>
+        <span className="pill" onClick={onMarkReviewed}>✓ Mark reviewed</span>
+      </div>
     </div>
   );
 }
