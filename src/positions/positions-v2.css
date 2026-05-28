@@ -90,6 +90,9 @@
 .dash .ledger-head { display: grid; grid-template-columns: 80px 84px 124px 132px 96px 120px 110px 1fr; gap: 14px; padding: 14px 0 12px; border-bottom: var(--hair-strong); }
 .dash .ledger-row { display: grid; grid-template-columns: 80px 84px 124px 132px 96px 120px 110px 1fr; gap: 14px; padding: 14px 14px; margin: 0 -14px; border-bottom: var(--hair); border-radius: 6px; align-items: center; transition: background .12s var(--ease); }
 .dash .ledger-row:hover { background: rgba(15,51,51,.30); }
+/* Effectively-closed (0 shares, no live options) — dimmed as inactive. */
+.dash .ledger-row.dim { opacity: .42; }
+.dash .ledger-row.dim:hover { opacity: .7; }
 .dash .ledger-row .t { font-family: var(--sans); font-size: 16px; font-weight: 700; letter-spacing: -.01em; color: var(--fg1); }
 .dash .ledger-row .sec { font-family: var(--mono); font-size: 11px; color: var(--fg3); letter-spacing: 1.1px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dash .ledger-row .price { font-family: var(--mono); font-size: 13px; color: var(--fg1); }

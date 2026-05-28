@@ -578,8 +578,11 @@ function PositionsLedger(props: PositionsV2BodyProps) {
                   // gains have paid the basis down; above = realized losses raised it.
                   const netCost = r.quantity > 0 ? r.avg_cost - real1 / r.quantity : r.avg_cost;
                   const netTone = netCost < r.avg_cost ? "pos" : netCost > r.avg_cost ? "neg" : "";
+                  // Effectively closed: no shares left and no live options. Dim it
+                  // so it reads as inactive without dropping out of the ledger.
+                  const dim = r.quantity === 0 && (r.live_options?.length ?? 0) === 0;
                   return (
-                    <div key={r.ticker} className="ledger-row" onClick={() => onTickerClick(r.ticker)} style={{ cursor: "pointer" }}>
+                    <div key={r.ticker} className={"ledger-row" + (dim ? " dim" : "")} onClick={() => onTickerClick(r.ticker)} style={{ cursor: "pointer" }}>
                       <span className="t">{r.ticker}</span>
                       <span className="sec" title={r.sector}>{shortSector(r.sector)}</span>
                       <span className="price">{r.current_price != null ? fmtUSD(r.current_price) : "—"}
