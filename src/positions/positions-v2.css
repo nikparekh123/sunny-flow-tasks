@@ -353,6 +353,11 @@
   border-radius: 4px;
   box-shadow: 0 20px 60px rgba(0,0,0,.5);
   padding: 0;
+  /* When the modal is taller than the window it scrolls (overflow-y:auto).
+     On platforms with classic (non-overlay) scrollbars that bar sits at the
+     right edge and overlaps the rail card, reading as "cut off on the right".
+     Reserve the gutter so the scrollbar never overlaps content. */
+  scrollbar-gutter: stable;
 }
 .np-app .pp-popup-head {
   padding: 40px 44px 28px;
