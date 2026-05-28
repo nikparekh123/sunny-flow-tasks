@@ -12,11 +12,18 @@ import { useEntered } from "./animation";
 
 type SparkKind = "pos" | "neg" | "neon" | "muted" | "muted-down";
 
-/** SVG sparkline. Two pre-baked point series (dense for macro rows, looser
- *  for portfolio hero) — replace with real data series in the data-wiring
- *  pass. The stroke draws in via dasharray + dashoffset over 1.4s. */
+/** SVG sparkline.
+ *
+ *  Without `series` it falls back to one of two pre-baked point sets:
+ *    • `dense` = looks like a busy intraday tape (used by macro rows)
+ *    • otherwise = a smoother portfolio-style curve
+ *
+ *  With `series` (an array of real numbers) it auto-scales the y-axis
+ *  to [min, max] of the data and draws a line through every point.
+ *
+ *  The stroke animates in via dasharray + dashoffset over 1.4s. */
 export function Spark({
-  w = 120, h = 32, kind = "pos", dense = false, area = false, delay = 0,
+  w = 120, h = 32, kind = "pos", dense = false, area = false, delay = 0, series,
 }: {
   w?: number;
   h?: number;
@@ -24,13 +31,27 @@ export function Spark({
   dense?: boolean;
   area?: boolean;
   delay?: number;
+  series?: number[];
 }) {
-  const points = dense
-    ? [0.5, 0.4, 0.55, 0.35, 0.45, 0.3, 0.5, 0.42, 0.3, 0.45, 0.25, 0.35, 0.4, 0.25, 0.2, 0.3, 0.15, 0.22, 0.28, 0.18]
-    : [0.62, 0.55, 0.68, 0.48, 0.42, 0.52, 0.45, 0.38, 0.42, 0.28, 0.32, 0.22];
-  // Invert when the line should slope down (e.g. negative tickers).
   const inv = kind === "neg" || kind === "muted-down";
-  const data = inv ? points.map((p) => 1 - p * 0.8) : points;
+
+  // Build the y values in [0..1] space. With a real series we
+  // normalise to min/max so the line uses the full height; without, we
+  // fall back to the pre-baked curves so the block looks alive while
+  // data is still loading.
+  let data: number[];
+  if (series && series.length >= 2) {
+    const min = Math.min(...series);
+    const max = Math.max(...series);
+    const range = max - min || 1;
+    data = series.map((v) => 1 - (v - min) / range);     // higher value → lower y
+  } else {
+    const fallback = dense
+      ? [0.5, 0.4, 0.55, 0.35, 0.45, 0.3, 0.5, 0.42, 0.3, 0.45, 0.25, 0.35, 0.4, 0.25, 0.2, 0.3, 0.15, 0.22, 0.28, 0.18]
+      : [0.62, 0.55, 0.68, 0.48, 0.42, 0.52, 0.45, 0.38, 0.42, 0.28, 0.32, 0.22];
+    data = inv ? fallback.map((p) => 1 - p * 0.8) : fallback;
+  }
+
   const path = data.map((y, i) => {
     const x = (i / (data.length - 1)) * w;
     return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${(y * (h - 4) + 2).toFixed(1)}`;

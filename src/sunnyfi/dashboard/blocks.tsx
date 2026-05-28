@@ -403,35 +403,137 @@ export function AttentionBlock({ n = "01" }: { n?: string }) {
   );
 }
 
-// ─────────────────── § 02 Portfolio (full + compact) ─────────────
+// ─────────────────── § 02 Portfolio (live) ───────────────────────
+//
+// Hero value = Σ qty × current_price across open positions.
+// Week delta = portfolio value today − value 5 trading days ago,
+//              derived from daily_closes × today's qty.
+// Sparkline  = full portfolio value series over the trading days we
+//              have in daily_closes (cap ~60 days).
+
+interface PulsePosition {
+  ticker: string;
+  quantity: number;
+  current_price: number | null;
+  avg_cost: number;
+  status: string;
+}
+interface PulseDailyClose {
+  ticker: string;
+  date: string;
+  close_price: number;
+}
+
+const SPARK_TRADING_DAYS = 60;
+const WEEK_TRADING_DAYS = 5;
+
+function usePulsePositions() {
+  return useQuery({
+    queryKey: ["dash_pulse_positions"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("positions" as never)
+        .select("ticker, quantity, current_price, avg_cost, status")
+        .returns<PulsePosition[]>();
+      if (error) throw error;
+      return (data ?? []).filter((p) => p.status === "open" && p.quantity > 0);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function usePulseCloses() {
+  return useQuery({
+    queryKey: ["dash_pulse_closes"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("daily_closes" as never)
+        .select("ticker, date, close_price")
+        .order("date", { ascending: true })
+        .returns<PulseDailyClose[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/** Build a portfolio value series from close prices and today's qty. */
+function valueSeries(positions: PulsePosition[], closes: PulseDailyClose[]): {
+  series: number[];
+  dates: string[];
+} {
+  const byTicker = new Map<string, Map<string, number>>();
+  const dateSet = new Set<string>();
+  for (const c of closes) {
+    if (!byTicker.has(c.ticker)) byTicker.set(c.ticker, new Map());
+    byTicker.get(c.ticker)!.set(c.date, c.close_price);
+    dateSet.add(c.date);
+  }
+  const dates = [...dateSet].sort().slice(-SPARK_TRADING_DAYS);
+  const series = dates.map((d) => {
+    let v = 0;
+    for (const p of positions) {
+      const tCloses = byTicker.get(p.ticker);
+      const close = tCloses?.get(d);
+      if (close != null) v += close * p.quantity;
+    }
+    return v;
+  });
+  return { series, dates };
+}
+
+function fmtCompactUSD(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `${v < 0 ? "−" : ""}$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000)     return `${v < 0 ? "−" : ""}$${(abs / 1_000).toFixed(0)}k`;
+  return `${v < 0 ? "−" : ""}$${Math.round(abs).toLocaleString()}`;
+}
 
 export function PortfolioBlock({
   heroSize = 184, bone = false, area = true, n = "02",
 }: {
   heroSize?: number; bone?: boolean; area?: boolean; n?: string;
 }) {
+  const { data: positions = [] } = usePulsePositions();
+  const { data: closes = [] } = usePulseCloses();
+
+  const totalValue = useMemo(
+    () => positions.reduce((s, p) => s + (p.current_price ?? p.avg_cost) * p.quantity, 0),
+    [positions],
+  );
+  const { series } = useMemo(() => valueSeries(positions, closes), [positions, closes]);
+  const weekDelta = series.length > WEEK_TRADING_DAYS
+    ? series[series.length - 1] - series[series.length - 1 - WEEK_TRADING_DAYS]
+    : 0;
+  const weekPct = series.length > WEEK_TRADING_DAYS && series[series.length - 1 - WEEK_TRADING_DAYS] > 0
+    ? (weekDelta / series[series.length - 1 - WEEK_TRADING_DAYS]) * 100
+    : 0;
+  const oldest = series[0] ?? 0;
+  const newest = series[series.length - 1] ?? totalValue;
+
   return (
     <div>
-      <Section n={n} right="updated 06:42">Portfolio</Section>
+      <Section n={n} right="live">Portfolio</Section>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 36 }}>
         <div className={"portfolio-num " + (bone ? "bone" : "neon")} style={{ fontSize: heroSize }}>
-          <MoneyCount value={642830} duration={1400} />
+          <MoneyCount value={Math.round(totalValue)} duration={1400} />
         </div>
         <div style={{ paddingBottom: heroSize * 0.13 }}>
           <div className="label">This week</div>
-          <div className="hero num-mono pos" style={{ fontSize: 48, fontWeight: 700, marginTop: 4 }}>
-            <MoneyCount value={4820} sign="+" delay={200} duration={1100} />
+          <div className={"hero num-mono " + (weekDelta >= 0 ? "pos" : "neg")} style={{ fontSize: 48, fontWeight: 700, marginTop: 4 }}>
+            <MoneyCount value={Math.round(weekDelta)} sign={weekDelta >= 0 ? "+" : "-"} delay={200} duration={1100} />
           </div>
-          <div className="num-mono pos" style={{ fontSize: 14, marginTop: 4 }}>
-            <PctCount value={0.76} sign="+" delay={300} /> · 5 sessions
+          <div className={"num-mono " + (weekDelta >= 0 ? "pos" : "neg")} style={{ fontSize: 14, marginTop: 4 }}>
+            <PctCount value={Math.abs(weekPct)} sign={weekDelta >= 0 ? "+" : "-"} delay={300} /> · 5 sessions
           </div>
         </div>
       </div>
       <div style={{ marginTop: 28 }}>
-        <Spark w={820} h={56} kind="neon" area={area} delay={300} />
+        <Spark w={820} h={56} kind={weekDelta >= 0 ? "neon" : "neg"} area={area} delay={300} series={series} />
         <div style={{ display: "flex", justifyContent: "space-between", maxWidth: 820, marginTop: 8 }}>
-          <span className="label">12 weeks ago · $607,180</span>
-          <span className="label">today · $642,830</span>
+          <span className="label">{series.length} sessions ago · {fmtCompactUSD(oldest)}</span>
+          <span className="label">today · {fmtCompactUSD(newest)}</span>
         </div>
       </div>
     </div>
@@ -443,25 +545,42 @@ export function PortfolioBlockCompact({
 }: {
   heroSize?: number; bone?: boolean; area?: boolean; n?: string;
 }) {
+  const { data: positions = [] } = usePulsePositions();
+  const { data: closes = [] } = usePulseCloses();
+
+  const totalValue = useMemo(
+    () => positions.reduce((s, p) => s + (p.current_price ?? p.avg_cost) * p.quantity, 0),
+    [positions],
+  );
+  const { series } = useMemo(() => valueSeries(positions, closes), [positions, closes]);
+  const weekDelta = series.length > WEEK_TRADING_DAYS
+    ? series[series.length - 1] - series[series.length - 1 - WEEK_TRADING_DAYS]
+    : 0;
+  const weekPct = series.length > WEEK_TRADING_DAYS && series[series.length - 1 - WEEK_TRADING_DAYS] > 0
+    ? (weekDelta / series[series.length - 1 - WEEK_TRADING_DAYS]) * 100
+    : 0;
+  const oldest = series[0] ?? 0;
+  const newest = series[series.length - 1] ?? totalValue;
+
   return (
     <div>
       <Section n={n}>Portfolio</Section>
       <div className={"portfolio-num " + (bone ? "bone" : "neon")} style={{ fontSize: heroSize }}>
-        <MoneyCount value={642830} duration={1400} />
+        <MoneyCount value={Math.round(totalValue)} duration={1400} />
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 18, marginTop: 14 }}>
-        <span className="hero num-mono pos" style={{ fontSize: 32, fontWeight: 700 }}>
-          <MoneyCount value={4820} sign="+" delay={200} />
+        <span className={"hero num-mono " + (weekDelta >= 0 ? "pos" : "neg")} style={{ fontSize: 32, fontWeight: 700 }}>
+          <MoneyCount value={Math.round(weekDelta)} sign={weekDelta >= 0 ? "+" : "-"} delay={200} />
         </span>
-        <span className="num-mono pos" style={{ fontSize: 13 }}>
-          <PctCount value={0.76} sign="+" delay={300} /> · 1 week
+        <span className={"num-mono " + (weekDelta >= 0 ? "pos" : "neg")} style={{ fontSize: 13 }}>
+          <PctCount value={Math.abs(weekPct)} sign={weekDelta >= 0 ? "+" : "-"} delay={300} /> · 1 week
         </span>
       </div>
       <div style={{ marginTop: 22 }}>
-        <Spark w={540} h={42} kind="neon" area={area} delay={300} />
+        <Spark w={540} h={42} kind={weekDelta >= 0 ? "neon" : "neg"} area={area} delay={300} series={series} />
         <div style={{ display: "flex", justifyContent: "space-between", maxWidth: 540, marginTop: 6 }}>
-          <span className="label">12w · $607k</span>
-          <span className="label">today · $642k</span>
+          <span className="label">{series.length}d · {fmtCompactUSD(oldest)}</span>
+          <span className="label">today · {fmtCompactUSD(newest)}</span>
         </div>
       </div>
     </div>
@@ -470,42 +589,77 @@ export function PortfolioBlockCompact({
 
 // ─────────────────── Winners / Losers ────────────────────────────
 
+/** Top 3 weekly winners + top 3 weekly losers, derived from 5-day
+ *  close deltas × today's quantity. Bar widths normalise to the
+ *  biggest move so the magnitude reads at a glance. */
 export function WinnersLosers() {
-  const winners: Array<[string, number, number]> = [
-    ["NVDA", 2140, 0.95],
-    ["META", 880, 0.40],
-    ["AAPL", 620, 0.28],
-  ];
-  const losers: Array<[string, number, number]> = [
-    ["TSLA", 640, 0.50],
-    ["CRM",  180, 0.15],
-    ["SMCI", 120, 0.10],
-  ];
+  const { data: positions = [] } = usePulsePositions();
+  const { data: closes = [] } = usePulseCloses();
+
+  const { winners, losers } = useMemo(() => {
+    const byTicker = new Map<string, Map<string, number>>();
+    const dateSet = new Set<string>();
+    for (const c of closes) {
+      if (!byTicker.has(c.ticker)) byTicker.set(c.ticker, new Map());
+      byTicker.get(c.ticker)!.set(c.date, c.close_price);
+      dateSet.add(c.date);
+    }
+    const dates = [...dateSet].sort();
+    if (dates.length < WEEK_TRADING_DAYS + 1) return { winners: [], losers: [] };
+
+    const today = dates[dates.length - 1];
+    const wkAgo = dates[dates.length - 1 - WEEK_TRADING_DAYS];
+
+    const moves: Array<{ ticker: string; delta: number }> = [];
+    for (const p of positions) {
+      const tCloses = byTicker.get(p.ticker);
+      if (!tCloses) continue;
+      const todayP = tCloses.get(today);
+      const oldP = tCloses.get(wkAgo);
+      if (todayP == null || oldP == null) continue;
+      const delta = (todayP - oldP) * p.quantity;
+      if (Math.abs(delta) < 50) continue;                  // skip flat
+      moves.push({ ticker: p.ticker, delta });
+    }
+    moves.sort((a, b) => b.delta - a.delta);
+    const maxAbs = Math.max(1, ...moves.map((m) => Math.abs(m.delta)));
+    const decorate = (m: { ticker: string; delta: number }) =>
+      [m.ticker, Math.round(Math.abs(m.delta)), Math.abs(m.delta) / maxAbs] as [string, number, number];
+    return {
+      winners: moves.filter((m) => m.delta > 0).slice(0, 3).map(decorate),
+      losers:  moves.filter((m) => m.delta < 0).slice(-3).reverse().map(decorate),
+    };
+  }, [positions, closes]);
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 64 }}>
       <div>
         <Section>Winners · this week</Section>
-        {winners.map(([t, v, w], i) => (
-          <div key={t} className="bar-row">
-            <span className="num-mono" style={{ fontSize: 14, fontWeight: 500 }}>{t}</span>
-            <AnimatedBar targetPct={w} kind="pos" delay={300 + i * 90} />
-            <span className="num-mono pos" style={{ fontSize: 14, fontWeight: 500, textAlign: "right" }}>
-              <MoneyCount value={v} sign="+" delay={300 + i * 90} />
-            </span>
-          </div>
-        ))}
+        {winners.length === 0
+          ? <div style={{ padding: "12px 0", color: "var(--fg3)", fontSize: 13 }}>—</div>
+          : winners.map(([t, v, w], i) => (
+              <div key={t} className="bar-row">
+                <span className="num-mono" style={{ fontSize: 14, fontWeight: 500 }}>{t}</span>
+                <AnimatedBar targetPct={w} kind="pos" delay={300 + i * 90} />
+                <span className="num-mono pos" style={{ fontSize: 14, fontWeight: 500, textAlign: "right" }}>
+                  <MoneyCount value={v} sign="+" delay={300 + i * 90} />
+                </span>
+              </div>
+            ))}
       </div>
       <div>
         <Section>Losers · this week</Section>
-        {losers.map(([t, v, w], i) => (
-          <div key={t} className="bar-row">
-            <span className="num-mono" style={{ fontSize: 14, fontWeight: 500 }}>{t}</span>
-            <AnimatedBar targetPct={w} kind="neg" delay={400 + i * 90} />
-            <span className="num-mono neg" style={{ fontSize: 14, fontWeight: 500, textAlign: "right" }}>
-              <MoneyCount value={v} sign="-" delay={400 + i * 90} />
-            </span>
-          </div>
-        ))}
+        {losers.length === 0
+          ? <div style={{ padding: "12px 0", color: "var(--fg3)", fontSize: 13 }}>—</div>
+          : losers.map(([t, v, w], i) => (
+              <div key={t} className="bar-row">
+                <span className="num-mono" style={{ fontSize: 14, fontWeight: 500 }}>{t}</span>
+                <AnimatedBar targetPct={w} kind="neg" delay={400 + i * 90} />
+                <span className="num-mono neg" style={{ fontSize: 14, fontWeight: 500, textAlign: "right" }}>
+                  <MoneyCount value={v} sign="-" delay={400 + i * 90} />
+                </span>
+              </div>
+            ))}
       </div>
     </div>
   );
@@ -513,9 +667,58 @@ export function WinnersLosers() {
 
 // ─────────────────── Income mix (call vs put) ────────────────────
 
+/** Call vs put income for the last 7 days. Sums short-open premium
+ *  by option type, net of any buybacks in the same window. */
+
+interface IncomeTrade {
+  ticker: string;
+  trade_date: string;
+  action: "open" | "close";
+  option_type: "call" | "put";
+  direction: "short" | "long";
+  contracts: number;
+  premium: number;
+}
+
+function useIncomeTrades() {
+  return useQuery({
+    queryKey: ["dash_income_trades"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("option_trades" as never)
+        .select("ticker, trade_date, action, option_type, direction, contracts, premium")
+        .returns<IncomeTrade[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function IncomeMix({ compact = false }: { compact?: boolean }) {
+  const { data: trades = [] } = useIncomeTrades();
   const entered = useEntered(300);
-  const callsPct = entered ? 73 : 0;
+
+  const { call, put } = useMemo(() => {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    let callIn = 0, putIn = 0;
+    for (const t of trades) {
+      if (t.direction !== "short") continue;
+      const dt = new Date(t.trade_date + "T00:00:00Z");
+      const days = Math.floor((today.getTime() - dt.getTime()) / 86_400_000);
+      if (days < 0 || days > 7) continue;
+      const dollars = t.contracts * 100 * t.premium;
+      if (t.action === "open")  (t.option_type === "call" ? (callIn += dollars) : (putIn += dollars));
+      if (t.action === "close") (t.option_type === "call" ? (callIn -= dollars) : (putIn -= dollars));
+    }
+    return { call: Math.max(0, callIn), put: Math.max(0, putIn) };
+  }, [trades]);
+
+  const total = call + put;
+  const callPctTarget = total > 0 ? (call / total) * 100 : 50;
+  const callsPct = entered ? callPctTarget : 0;
+
   return (
     <div>
       <Section>Income mix · this week</Section>
@@ -523,7 +726,7 @@ export function IncomeMix({ compact = false }: { compact?: boolean }) {
         <div>
           <div className="label">Calls sold</div>
           <div className="hero num-mono neon" style={{ fontSize: compact ? 28 : 44, fontWeight: 700, marginTop: 4 }}>
-            <MoneyCount value={3120} delay={150} duration={1200} />
+            <MoneyCount value={Math.round(call)} delay={150} duration={1200} />
           </div>
         </div>
         <div className="income-mix-bar">
@@ -539,7 +742,7 @@ export function IncomeMix({ compact = false }: { compact?: boolean }) {
         <div style={{ textAlign: "right" }}>
           <div className="label">Puts sold</div>
           <div className="hero num-mono fg2" style={{ fontSize: compact ? 28 : 44, fontWeight: 700, marginTop: 4 }}>
-            <MoneyCount value={1160} delay={250} duration={1200} />
+            <MoneyCount value={Math.round(put)} delay={250} duration={1200} />
           </div>
         </div>
       </div>
