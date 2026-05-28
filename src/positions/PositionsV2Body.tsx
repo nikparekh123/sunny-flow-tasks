@@ -32,7 +32,6 @@ import {
   type TickerSignals, type ShareSell,
 } from "./types";
 import { TradesLogMatrix } from "./TradesLogMatrix";
-import { ExpiryCalendar } from "./ExpiryCalendar";
 import "@/sunnyfi/pages/dashboard.css";
 import "./positions-v2.css";
 
@@ -437,12 +436,12 @@ function StrategyBuckets({ rows, overlayByTicker, realizedByTicker, liveByTicker
 }
 
 // ─────────────────── §04 Positions ledger ────────────────────────
-type LedgerView = "positions" | "trades" | "calendar";
+type LedgerView = "positions" | "trades";
 
 function PositionsLedger(props: PositionsV2BodyProps) {
   const { portfolio, overlayByTicker, signalsByTicker, realizedByTicker, liveByTicker, onTickerClick } = props;
   const [view, setView] = useState<LedgerView>("positions");
-  const views: Array<[LedgerView, string]> = [["positions", "Positions"], ["trades", "Trades"], ["calendar", "Calendar"]];
+  const views: Array<[LedgerView, string]> = [["positions", "Positions"], ["trades", "Trades"]];
 
   const groups = useMemo(() => {
     const order: Bucket[] = ["income", "invest", "yield"];
@@ -481,9 +480,6 @@ function PositionsLedger(props: PositionsV2BodyProps) {
           onOpenSlotClick={props.onOpenSlotClick}
           onResolveCellClick={props.onResolveCellClick}
         />
-      )}
-      {view === "calendar" && (
-        <ExpiryCalendar rows={portfolio.rows} tradesByTicker={props.tradesByTicker} onTickerClick={onTickerClick} />
       )}
       {view === "positions" && (
         <>
