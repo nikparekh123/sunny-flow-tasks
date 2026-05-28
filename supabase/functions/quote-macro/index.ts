@@ -83,8 +83,25 @@ Deno.serve(async (req) => {
 
   const polygonKey = Deno.env.get("POLYGON_API_KEY") ?? "";
 
+  // Optional: extra plain equity/ETF tickers (e.g. SPY, QQQ, IWM) fetched
+  // live from Yahoo so the dashboard's index quotes reflect today, not the
+  // nightly cache. The Yahoo symbol is the ticker itself for stocks/ETFs.
+  let extra: string[] = [];
+  try {
+    const body = await req.json();
+    if (Array.isArray(body?.tickers)) {
+      extra = body.tickers
+        .filter((t: unknown): t is string => typeof t === "string")
+        .map((t: string) => t.trim().toUpperCase())
+        .filter((t: string) => /^[A-Z][A-Z0-9.\-]{0,9}$/.test(t))
+        .slice(0, 40);
+    }
+  } catch {
+    /* no body — macro-only call */
+  }
+
   const labels = Object.keys(SYMBOLS) as Label[];
-  const quotes = await Promise.all(
+  const macro = await Promise.all(
     labels.map(async (label) => {
       const { polygon, yahoo } = SYMBOLS[label];
       let q: Quote | null = polygonKey ? await fromPolygon(polygon, polygonKey) : null;
@@ -92,8 +109,14 @@ Deno.serve(async (req) => {
       return [label, q ?? { price: null, changePct: null, source: null }] as const;
     }),
   );
+  const tickerQuotes = await Promise.all(
+    extra.map(async (t) => {
+      const q = await fromYahoo(t);
+      return [t, q ?? { price: null, changePct: null, source: null }] as const;
+    }),
+  );
 
-  const items = Object.fromEntries(quotes) as Record<Label, Quote>;
+  const items = Object.fromEntries([...macro, ...tickerQuotes]) as Record<string, Quote>;
   return new Response(JSON.stringify({ items, timestamp: new Date().toISOString() }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });

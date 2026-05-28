@@ -153,16 +153,19 @@ function useTickerData() {
 type MacroLabel = "10Y" | "VIX" | "DXY";
 interface MacroQuote { price: number | null; changePct: number | null; source: string | null }
 
-/** Live 10Y / VIX / DXY via the quote-macro edge function (Polygon indices →
- *  Yahoo fallback). Refetched every few minutes; failures degrade to the
- *  muted "—" placeholders. */
+/** Live quotes via the quote-macro edge function: 10Y / VIX / DXY (Polygon
+ *  indices → Yahoo) plus SPY / QQQ / IWM (live Yahoo) so the index % change
+ *  reflects today, not the nightly cache close. Failures degrade to the
+ *  muted "—" placeholder / cache fallback. */
 function useMacroData() {
   return useQuery({
     queryKey: ["dash_macro_strip"],
     queryFn: async () => {
-      const { data, error } = await supabase.functions.invoke("quote-macro", { body: {} });
+      const { data, error } = await supabase.functions.invoke("quote-macro", {
+        body: { tickers: ["SPY", "QQQ", "IWM"] },
+      });
       if (error) throw error;
-      return (data as { items?: Record<MacroLabel, MacroQuote> } | null)?.items ?? null;
+      return (data as { items?: Record<string, MacroQuote> } | null)?.items ?? null;
     },
     staleTime: 5 * 60_000,
     refetchInterval: 5 * 60_000,
@@ -198,16 +201,16 @@ export function TickerStrip({ compact = false }: { compact?: boolean }) {
     muted?: boolean;
   }> = [];
   for (const sym of ["SPY", "QQQ", "IWM"] as const) {
+    const q = macro?.[sym];
     const r = byTicker.get(sym);
-    if (r) {
+    if (q && q.price != null) {
+      // Live Yahoo quote — accurate today % + price.
+      const ch = fmtChangePct(q.changePct);
+      rows.push({ ticker: sym, price: q.price.toFixed(2), change: ch.txt, tone: ch.tone, live: sym === "SPY" });
+    } else if (r) {
+      // Cache fallback (nightly close) when the live quote is unavailable.
       const ch = fmtChangePct(r.today_intraday_pct);
-      rows.push({
-        ticker: sym,
-        price: r.latest_close.toFixed(2),
-        change: ch.txt,
-        tone: ch.tone,
-        live: sym === "SPY",
-      });
+      rows.push({ ticker: sym, price: r.latest_close.toFixed(2), change: ch.txt, tone: ch.tone, live: sym === "SPY" });
     } else {
       rows.push({ ticker: sym, price: "—", change: "—", tone: "pos", live: false, muted: true });
     }
@@ -551,12 +554,17 @@ export function PortfolioBlock({
     [positions],
   );
   const { series } = useMemo(() => valueSeries(positions, closes), [positions, closes]);
-  const weekDelta = series.length > WEEK_TRADING_DAYS
-    ? series[series.length - 1] - series[series.length - 1 - WEEK_TRADING_DAYS]
-    : 0;
-  const weekPct = series.length > WEEK_TRADING_DAYS && series[series.length - 1 - WEEK_TRADING_DAYS] > 0
-    ? (weekDelta / series[series.length - 1 - WEEK_TRADING_DAYS]) * 100
-    : 0;
+  // Change over the trailing week — but when we have fewer than a full week
+  // of history, fall back to the full available range instead of zeroing out
+  // (otherwise a brand-new account with 4–5 days of data reads +$0).
+  const { weekDelta, weekPct } = useMemo(() => {
+    if (series.length < 2) return { weekDelta: 0, weekPct: 0 };
+    const lastIdx = series.length - 1;
+    const baseIdx = Math.max(0, lastIdx - WEEK_TRADING_DAYS);
+    const base = series[baseIdx] ?? 0;
+    const delta = series[lastIdx] - base;
+    return { weekDelta: delta, weekPct: base > 0 ? (delta / base) * 100 : 0 };
+  }, [series]);
   const oldest = series[0] ?? 0;
   const newest = series[series.length - 1] ?? totalValue;
 
@@ -601,12 +609,17 @@ export function PortfolioBlockCompact({
     [positions],
   );
   const { series } = useMemo(() => valueSeries(positions, closes), [positions, closes]);
-  const weekDelta = series.length > WEEK_TRADING_DAYS
-    ? series[series.length - 1] - series[series.length - 1 - WEEK_TRADING_DAYS]
-    : 0;
-  const weekPct = series.length > WEEK_TRADING_DAYS && series[series.length - 1 - WEEK_TRADING_DAYS] > 0
-    ? (weekDelta / series[series.length - 1 - WEEK_TRADING_DAYS]) * 100
-    : 0;
+  // Change over the trailing week — but when we have fewer than a full week
+  // of history, fall back to the full available range instead of zeroing out
+  // (otherwise a brand-new account with 4–5 days of data reads +$0).
+  const { weekDelta, weekPct } = useMemo(() => {
+    if (series.length < 2) return { weekDelta: 0, weekPct: 0 };
+    const lastIdx = series.length - 1;
+    const baseIdx = Math.max(0, lastIdx - WEEK_TRADING_DAYS);
+    const base = series[baseIdx] ?? 0;
+    const delta = series[lastIdx] - base;
+    return { weekDelta: delta, weekPct: base > 0 ? (delta / base) * 100 : 0 };
+  }, [series]);
   const oldest = series[0] ?? 0;
   const newest = series[series.length - 1] ?? totalValue;
 
@@ -1005,6 +1018,25 @@ function useMacroSparks() {
   });
 }
 
+/** Live today-% for the macro tickers via the quote-macro edge function
+ *  (Yahoo). The cache's today_intraday_pct goes stale between nightly
+ *  updates, so the % change is pulled live; SMA25 deviation still comes
+ *  from the cache (needs history). */
+function useMacroLiveQuotes() {
+  return useQuery({
+    queryKey: ["dash_macro_live"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("quote-macro", {
+        body: { tickers: MACRO_TICKERS },
+      });
+      if (error) throw error;
+      return (data as { items?: Record<string, { changePct: number | null; price: number | null }> } | null)?.items ?? null;
+    },
+    staleTime: 2 * 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
 /** Canned phrase per macro row. Drives the human-readable "note"
  *  column based on intraday % + 25-day deviation from SMA25. */
 function macroInsight(ticker: string, intraday: number | null, deviation: number | null): string {
@@ -1061,6 +1093,7 @@ export function MacroBlock({ n = "04", compact = false }: { n?: string; compact?
   }, [sparkRows]);
 
   const latestByTicker = new Map(latest.map((r) => [r.ticker, r]));
+  const { data: live = null } = useMacroLiveQuotes();
 
   return (
     <div>
@@ -1068,8 +1101,11 @@ export function MacroBlock({ n = "04", compact = false }: { n?: string; compact?
       {MACRO_TICKERS.map((t, i) => {
         const r = latestByTicker.get(t);
         const series = closesByTicker.get(t);
-        const ch = fmtSignedPct(r?.today_intraday_pct ?? null);
-        const note = macroInsight(t, r?.today_intraday_pct ?? null, r?.deviation_pct ?? null);
+        // Prefer the live % change (Yahoo) over the cache's stale intraday.
+        const liveChg = live?.[t]?.changePct ?? null;
+        const todayPct = liveChg != null ? liveChg : (r?.today_intraday_pct ?? null);
+        const ch = fmtSignedPct(todayPct);
+        const note = macroInsight(t, todayPct, r?.deviation_pct ?? null);
         return (
           <div
             key={t}
