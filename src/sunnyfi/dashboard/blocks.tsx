@@ -150,6 +150,32 @@ function useTickerData() {
   });
 }
 
+type MacroLabel = "10Y" | "VIX" | "DXY";
+interface MacroQuote { price: number | null; changePct: number | null; source: string | null }
+
+/** Live 10Y / VIX / DXY via the quote-macro edge function (Polygon indices →
+ *  Yahoo fallback). Refetched every few minutes; failures degrade to the
+ *  muted "—" placeholders. */
+function useMacroData() {
+  return useQuery({
+    queryKey: ["dash_macro_strip"],
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("quote-macro", { body: {} });
+      if (error) throw error;
+      return (data as { items?: Record<MacroLabel, MacroQuote> } | null)?.items ?? null;
+    },
+    staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+  });
+}
+
+/** Format a macro index value for the strip. 10Y reads as a yield (4.32%),
+ *  VIX / DXY as plain two-decimal levels. */
+function fmtMacroPrice(label: MacroLabel, v: number | null): string {
+  if (v == null || !Number.isFinite(v)) return "—";
+  return label === "10Y" ? `${v.toFixed(2)}%` : v.toFixed(2);
+}
+
 function fmtChangePct(v: number | null): { txt: string; tone: "pos" | "neg" } {
   if (v == null || !Number.isFinite(v)) return { txt: "—", tone: "pos" };
   const sign = v >= 0 ? "+" : "−";
@@ -158,6 +184,7 @@ function fmtChangePct(v: number | null): { txt: string; tone: "pos" | "neg" } {
 
 export function TickerStrip({ compact = false }: { compact?: boolean }) {
   const { data: live = [] } = useTickerData();
+  const { data: macro = null } = useMacroData();
   const byTicker = new Map(live.map((r) => [r.ticker, r]));
 
   // Live rows first. 10Y / VIX / DXY remain placeholders until the cache
@@ -186,7 +213,13 @@ export function TickerStrip({ compact = false }: { compact?: boolean }) {
     }
   }
   for (const sym of ["10Y", "VIX", "DXY"] as const) {
-    rows.push({ ticker: sym, price: "—", change: "—", tone: "pos", live: false, muted: true });
+    const q = macro?.[sym];
+    if (q && q.price != null) {
+      const ch = fmtChangePct(q.changePct);
+      rows.push({ ticker: sym, price: fmtMacroPrice(sym, q.price), change: ch.txt, tone: ch.tone, live: false });
+    } else {
+      rows.push({ ticker: sym, price: "—", change: "—", tone: "pos", live: false, muted: true });
+    }
   }
 
   return (
