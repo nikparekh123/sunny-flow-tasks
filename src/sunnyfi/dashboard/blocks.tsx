@@ -750,10 +750,42 @@ export function IncomeMix({ compact = false }: { compact?: boolean }) {
   );
 }
 
-// ─────────────────── § 03 Calendar ───────────────────────────────
+// ─────────────────── § 03 Calendar (live) ────────────────────────
 
 type EventKind = "mine" | "plain" | "warn";
-type CalDay = [string, string, Array<[string, EventKind]>, boolean?];
+
+interface CalEvent {
+  kind: EventKind;
+  text: string;
+}
+
+interface CalDay {
+  iso: string;
+  dayLabel: string;
+  dayNum: string;
+  events: CalEvent[];
+  today: boolean;
+}
+
+/** Compute Mon–Fri ISO dates for the week containing `from`. */
+function workWeek(from: Date): string[] {
+  const d = new Date(from);
+  d.setHours(0, 0, 0, 0);
+  // Shift to the week's Monday (getDay: Sun=0 .. Sat=6).
+  const dow = d.getDay();
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  d.setDate(d.getDate() + mondayOffset);
+  const out: string[] = [];
+  for (let i = 0; i < 5; i++) {
+    const dd = new Date(d);
+    dd.setDate(d.getDate() + i);
+    out.push(dd.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export function CalendarBlock({
   n = "03", highlight = "neon", compact = false,
@@ -762,45 +794,96 @@ export function CalendarBlock({
   highlight?: "amber" | "neon" | "off";
   compact?: boolean;
 }) {
-  const days: CalDay[] = [
-    ["MON", "23", [["FOMC", "warn"]]],
-    ["TUE", "24", [["MSFT exp", "mine"], ["AAPL exp", "mine"]]],
-    ["WED", "25", [["CRM earn", "plain"]]],
-    ["THU", "26", [["NVDA earn", "plain"], ["PCE", "warn"]]],
-    ["FRI", "27", [["NVDA 880c exp", "mine"], ["settle $4.2k", "mine"]], true],
-  ];
+  // Same data sources Attention block uses — the React Query cache makes
+  // these effectively free here.
+  const { data: rawTrades = [] } = useAttentionTrades();
+  const { data: positions = [] } = useAttentionPositions();
+
+  const today = todayIso();
+  const days: CalDay[] = useMemo(() => {
+    const weekDates = workWeek(new Date());
+    const lives = liveOpensFrom(rawTrades);
+
+    // Bucket events into per-day arrays.
+    return weekDates.map((iso) => {
+      const dt = new Date(iso + "T00:00:00Z");
+      const events: CalEvent[] = [];
+
+      // 1) My option expiries on this date
+      const expiries = lives.filter((t) => t.expiry === iso);
+      // Group by ticker so we don't spam a row per leg.
+      const expByTicker = new Map<string, number>();
+      for (const t of expiries) {
+        expByTicker.set(t.ticker, (expByTicker.get(t.ticker) ?? 0) + t.contracts);
+      }
+      for (const [tk] of expByTicker) {
+        events.push({ kind: "mine", text: `${tk} exp` });
+      }
+
+      // 2) Held-position earnings on this date
+      const earningsToday = positions.filter((p) => p.earnings_date === iso);
+      for (const p of earningsToday) {
+        events.push({ kind: "plain", text: `${p.ticker} earn` });
+      }
+
+      // 3) Macro events on this date
+      for (const me of macroEventsOn(iso)) {
+        events.push({ kind: "warn", text: me.kind });
+      }
+
+      return {
+        iso,
+        dayLabel: DAY_NAMES[dt.getUTCDay()],
+        dayNum: String(dt.getUTCDate()),
+        events,
+        today: iso === today,
+      };
+    });
+  }, [rawTrades, positions, today]);
+
+  const weekLabel = days.length > 0 ? (() => {
+    const d = new Date(days[0].iso + "T00:00:00Z");
+    return `Week of ${MONTH_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}`;
+  })() : "";
+
   const highlightClass = highlight === "neon" ? " neon-highlight"
     : highlight === "off" ? " no-highlight"
     : "";
+
   return (
     <div>
-      <Section n={n} right="Week of Jun 23">Week ahead</Section>
+      <Section n={n} right={weekLabel}>Week ahead</Section>
       <div className="cal">
-        {days.map(([day, d, events, today], i) => (
+        {days.map((d) => (
           <div
-            key={i}
-            className={"cal-cell" + (today ? " today" + highlightClass : "")}
+            key={d.iso}
+            className={"cal-cell" + (d.today ? " today" + highlightClass : "")}
             style={compact ? { minHeight: 140, padding: 10 } : undefined}
           >
             <div className="day-label" style={compact ? { marginBottom: 8 } : undefined}>
-              {day} {d}{today && !compact && " · TODAY"}
+              {d.dayLabel} {d.dayNum}{d.today && !compact && " · TODAY"}
             </div>
-            {events.map(([txt, kind], j) => (
-              kind === "warn" ? (
+            {d.events.length === 0 && (
+              <div className="cal-event" style={compact ? { fontSize: 10, opacity: 0.4 } : { opacity: 0.4 }}>
+                quiet
+              </div>
+            )}
+            {d.events.map((e, j) => (
+              e.kind === "warn" ? (
                 <div key={j} style={{ marginBottom: 6 }}>
-                  <span className="chip warn" style={compact ? { fontSize: 8 } : undefined}>{txt}</span>
+                  <span className="chip warn" style={compact ? { fontSize: 8 } : undefined}>{e.text}</span>
                 </div>
               ) : (
                 <div
                   key={j}
-                  className={"cal-event" + (kind === "mine" ? " mine" : "")}
+                  className={"cal-event" + (e.kind === "mine" ? " mine" : "")}
                   style={compact ? { fontSize: 10 } : undefined}
                 >
-                  {txt}
+                  {e.text}
                 </div>
               )
             ))}
-            {today && !compact && <div className="focus-tag">↑ FOCUS</div>}
+            {d.today && !compact && <div className="focus-tag">↑ FOCUS</div>}
           </div>
         ))}
       </div>
@@ -808,62 +891,263 @@ export function CalendarBlock({
   );
 }
 
-// ─────────────────── § 04 Macro zoom ─────────────────────────────
+// ─────────────────── § 04 Macro zoom (live) ──────────────────────
+//
+// Six live ETF rows pulled from bnf_universe_data (SPY/QQQ/IWM cover
+// broad indices; KWEB/SMH/ARKK proxy China, semis, innovation —
+// preserves the "around the world" feel). 10Y / VIX / DXY render as
+// muted placeholders until those instruments land in the cache.
+//
+// Each row's "note" is auto-generated from intraday % + 25-day
+// deviation — quick canned phrases driven by simple thresholds, not
+// model-generated commentary.
+
+interface MacroLatestRow {
+  ticker: string;
+  latest_close: number;
+  today_intraday_pct: number | null;
+  deviation_pct: number | null;
+}
+interface MacroCloseRow {
+  ticker: string;
+  date: string;
+  close: number;
+}
+
+const MACRO_TICKERS = ["SPY", "QQQ", "IWM", "KWEB", "SMH", "ARKK"] as const;
+const MACRO_PLACEHOLDERS = ["10Y", "VIX", "DXY"] as const;
+
+function useMacroLatest() {
+  return useQuery({
+    queryKey: ["dash_macro_latest"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bnf_universe_latest" as never)
+        .select("ticker, latest_close, today_intraday_pct, deviation_pct")
+        .in("ticker", MACRO_TICKERS as unknown as string[])
+        .returns<MacroLatestRow[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function useMacroSparks() {
+  return useQuery({
+    queryKey: ["dash_macro_sparks"],
+    queryFn: async () => {
+      // 30 trading days of closes per macro ticker — enough to draw a
+      // smooth sparkline at the row's small height.
+      const cutoff = new Date();
+      cutoff.setUTCDate(cutoff.getUTCDate() - 45);
+      const { data, error } = await supabase
+        .from("bnf_universe_data" as never)
+        .select("ticker, date, close")
+        .in("ticker", MACRO_TICKERS as unknown as string[])
+        .gte("date", cutoff.toISOString().slice(0, 10))
+        .order("date", { ascending: true })
+        .returns<MacroCloseRow[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/** Canned phrase per macro row. Drives the human-readable "note"
+ *  column based on intraday % + 25-day deviation from SMA25. */
+function macroInsight(ticker: string, intraday: number | null, deviation: number | null): string {
+  const intr = intraday ?? 0;
+  const dev = deviation ?? 0;
+
+  const intraPart =
+    intr >  1.0 ? "strong bid" :
+    intr >  0.3 ? "risk-on" :
+    intr > -0.3 ? "quiet, no extremes" :
+    intr > -1.0 ? "soft tape" :
+                  "selling pressure";
+
+  // Deviation gives the "stretched" cue
+  const devPart =
+    dev >  5  ? "stretched +" + dev.toFixed(0) + "% from SMA25" :
+    dev <  -5 ? "oversold " + dev.toFixed(0) + "% from SMA25" :
+    "";
+
+  // Ticker-specific flavour beats the generic phrase
+  const flavour: Record<string, string> = {
+    SPY:  "broad market",
+    QQQ:  "tech leadership",
+    IWM:  "small caps",
+    KWEB: "China internet",
+    SMH:  "semis leading",
+    ARKK: "innovation, vol-sensitive",
+  };
+  const f = flavour[ticker];
+
+  if (devPart) return `${f ?? intraPart} · ${devPart}`;
+  return `${f ?? "—"} · ${intraPart}`;
+}
+
+function fmtSignedPct(v: number | null): { txt: string; tone: "pos" | "neg" } {
+  if (v == null || !Number.isFinite(v)) return { txt: "—", tone: "pos" };
+  return { txt: `${v >= 0 ? "+" : "−"}${Math.abs(v).toFixed(2)}%`, tone: v >= 0 ? "pos" : "neg" };
+}
 
 export function MacroBlock({ n = "04", compact = false }: { n?: string; compact?: boolean }) {
-  const rows: Array<[string, string, string, "pos" | "neg"]> = [
-    ["SPY", "low fear · opt premium cheap", "+0.44%", "pos"],
-    ["QQQ", "tech bid · NVDA leads",        "+0.61%", "pos"],
-    ["IWM", "small caps lagging",           "−0.18%", "neg"],
-    ["10Y", "yields easing into FOMC",      "−0.03",  "neg"],
-    ["VIX", "calm, complacent",             "−2.10%", "pos"],
-    ["DXY", "dollar firm into Asia close",  "+0.12%", "pos"],
-    ["EWJ", "BoJ steady, JP up 0.3%",       "+0.30%", "pos"],
-    ["FXI", "China stim hopes lifting names", "+1.10%", "pos"],
-  ];
+  const { data: latest = [] } = useMacroLatest();
+  const { data: sparkRows = [] } = useMacroSparks();
+
+  // Build per-ticker close series for the sparkline.
+  const closesByTicker = useMemo(() => {
+    const m = new Map<string, number[]>();
+    const sorted = [...sparkRows].sort((a, b) => a.date.localeCompare(b.date));
+    for (const r of sorted) {
+      const arr = m.get(r.ticker) ?? [];
+      arr.push(r.close);
+      m.set(r.ticker, arr);
+    }
+    return m;
+  }, [sparkRows]);
+
+  const latestByTicker = new Map(latest.map((r) => [r.ticker, r]));
+
   return (
     <div>
       <Section n={n}>Macro zoom</Section>
-      {rows.map(([t, note, c, k], i) => (
+      {MACRO_TICKERS.map((t, i) => {
+        const r = latestByTicker.get(t);
+        const series = closesByTicker.get(t);
+        const ch = fmtSignedPct(r?.today_intraday_pct ?? null);
+        const note = macroInsight(t, r?.today_intraday_pct ?? null, r?.deviation_pct ?? null);
+        return (
+          <div
+            key={t}
+            className="macro-row"
+            style={compact ? { gridTemplateColumns: "56px 1fr 78px 64px", gap: 14, padding: "10px 0" } : undefined}
+          >
+            <span className="ticker-name" style={compact ? { fontSize: 14 } : undefined}>{t}</span>
+            <span className="note" style={compact ? { fontSize: 12 } : undefined}>{note}</span>
+            <Spark
+              w={compact ? 78 : 90}
+              h={compact ? 18 : 22}
+              kind={ch.tone === "pos" ? "muted" : "muted-down"}
+              dense
+              delay={500 + i * 60}
+              series={series}
+            />
+            <span className={"change " + ch.tone} style={compact ? { fontSize: 12 } : undefined}>{ch.txt}</span>
+          </div>
+        );
+      })}
+      {/* Muted placeholders — not in our cache yet. Kept so the macro
+          section reads complete; will switch to live once we backfill. */}
+      {MACRO_PLACEHOLDERS.map((t, i) => (
         <div
           key={t}
           className="macro-row"
-          style={compact ? { gridTemplateColumns: "56px 1fr 78px 64px", gap: 14, padding: "10px 0" } : undefined}
+          style={{
+            opacity: 0.45,
+            ...(compact ? { gridTemplateColumns: "56px 1fr 78px 64px", gap: 14, padding: "10px 0" } : {}),
+          }}
         >
           <span className="ticker-name" style={compact ? { fontSize: 14 } : undefined}>{t}</span>
-          <span className="note" style={compact ? { fontSize: 12 } : undefined}>{note}</span>
-          <Spark w={compact ? 78 : 90} h={compact ? 18 : 22} kind={k === "pos" ? "muted" : "muted-down"} dense delay={500 + i * 60} />
-          <span className={"change " + k} style={compact ? { fontSize: 12 } : undefined}>{c}</span>
+          <span className="note" style={compact ? { fontSize: 12 } : undefined}>not yet wired</span>
+          <Spark w={compact ? 78 : 90} h={compact ? 18 : 22} kind="muted" dense delay={500 + (MACRO_TICKERS.length + i) * 60} />
+          <span className="change fg3" style={compact ? { fontSize: 12 } : undefined}>—</span>
         </div>
       ))}
     </div>
   );
 }
 
-// ─────────────────── § 05 BNF Strategy ───────────────────────────
+// ─────────────────── § 05 BNF Strategy (live) ────────────────────
+
+interface BNFRow {
+  ticker: string;
+  sector: string | null;
+  deviation_pct: number | null;
+  borderline: boolean | null;
+}
+
+function useBNFCandidates() {
+  return useQuery({
+    queryKey: ["dash_bnf"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bnf_candidates" as never)
+        .select("ticker, sector, deviation_pct, borderline")
+        .order("deviation_pct", { ascending: true })
+        .limit(4)
+        .returns<BNFRow[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
 
 export function BNFBlock({ n = "05", compact = false }: { n?: string; compact?: boolean }) {
-  type Pick = [string, string, string, "neon" | "warn"];
-  const picks: Pick[] = [
-    ["AVGO", compact ? "−2.1σ · Tech"   : "Tech · −2.1σ",      "watch", "warn"],
-    ["XOM",  compact ? "−1.9σ · Energy" : "Energy · −1.9σ",    "ready", "neon"],
-    ["JPM",  compact ? "−1.8σ · Fin"    : "Financial · −1.8σ", "watch", "warn"],
-    ["LMT",  compact ? "−1.7σ · Def"    : "Defense · −1.7σ",   "ready", "neon"],
-  ];
+  const { data: picks = [] } = useBNFCandidates();
+
+  // Short sector labels for the compact card.
+  const shortSector = (s: string | null): string => {
+    if (!s) return "—";
+    if (s.startsWith("Communication")) return "Comm";
+    if (s.startsWith("Consumer Discretionary")) return "Cons Disc";
+    if (s.startsWith("Consumer Staples")) return "Staples";
+    if (s.startsWith("Information")) return "Tech";
+    if (s.startsWith("Technology")) return "Tech";
+    if (s.startsWith("Financial")) return "Fin";
+    if (s.startsWith("Industrial")) return "Indus";
+    if (s.startsWith("Health")) return "Health";
+    if (s.startsWith("Real Estate")) return "REIT";
+    if (s.startsWith("Materials")) return "Materials";
+    if (s.startsWith("Energy")) return "Energy";
+    if (s.startsWith("Utilities")) return "Util";
+    return s;
+  };
+
   return (
     <div>
-      <Section n={n} right={compact ? "4 picks" : "4 picks · mean-reversion"}>BNF · today</Section>
-      <div style={compact ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } : undefined}>
-        {picks.map(([t, meta, st, col]) => (
-          <div key={t} className="bnf-tile" style={compact ? undefined : { marginBottom: 10 }}>
-            <div className="head">
-              <span className="ticker-name hero num-mono" style={{ fontSize: compact ? 22 : 26, fontWeight: 700 }}>{t}</span>
-              <span className={"chip " + col} style={compact ? { fontSize: 8 } : undefined}>{st}</span>
-            </div>
-            <div className="label" style={{ marginTop: 6 }}>{meta}</div>
-          </div>
-        ))}
-      </div>
+      <Section
+        n={n}
+        right={compact ? `${picks.length} picks` : `${picks.length} picks · mean-reversion`}
+      >
+        BNF · today
+      </Section>
+      {picks.length === 0 ? (
+        <div style={{ padding: "20px 0", color: "var(--fg3)", fontSize: 13 }}>
+          No candidates today. Run the scanner from the Strategy page.
+        </div>
+      ) : (
+        <div style={compact ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } : undefined}>
+          {picks.map((p) => {
+            const dev = p.deviation_pct;
+            const devLabel = dev != null
+              ? `${dev >= 0 ? "+" : "−"}${Math.abs(dev).toFixed(1)}%`
+              : "—";
+            const status = p.borderline ? "near miss" : "ready";
+            const chipClass = p.borderline ? "warn" : "neon";
+            const meta = compact
+              ? `${devLabel} · ${shortSector(p.sector)}`
+              : `${shortSector(p.sector)} · ${devLabel} from SMA25`;
+            return (
+              <div key={p.ticker} className="bnf-tile" style={compact ? undefined : { marginBottom: 10 }}>
+                <div className="head">
+                  <span className="ticker-name hero num-mono" style={{ fontSize: compact ? 22 : 26, fontWeight: 700 }}>
+                    {p.ticker}
+                  </span>
+                  <span className={"chip " + chipClass} style={compact ? { fontSize: 8 } : undefined}>
+                    {status}
+                  </span>
+                </div>
+                <div className="label" style={{ marginTop: 6 }}>{meta}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div style={{ marginTop: 14 }}>
         <span className="pill">→ Open scanner</span>
       </div>
