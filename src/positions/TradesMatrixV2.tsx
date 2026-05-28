@@ -31,7 +31,7 @@ import { AnimatedNumber } from "@/sunnyfi/lib/animation";
  *   Closed cells are info-only.
  */
 
-const GROUP_CAP = 5; // max columns per call/put group (realistically ≤ 3)
+const GROUP_CAP = 8; // max columns per call/put group
 const ASSIGN_CAP = 2;
 
 const WEEK_OPTIONS = [12, 26, 52, 104] as const;
@@ -216,26 +216,24 @@ export function TradesMatrixV2({
           sortDate: mostRecentCloseDate(open),
         };
       };
-      const inWindow = (d: string) => d >= windowStart;
+      // All-time closed history, sorted most-recent first. Timeframe windowing
+      // happens at render so the column count stays stable across pill clicks
+      // (otherwise each click reflows the table and clicks feel dropped).
       const closedCalls = closedOpens
         .filter((t) => t.option_type === "call")
         .map(toLeg)
-        .filter((l) => inWindow(l.sortDate))
         .sort((a, b) => b.sortDate.localeCompare(a.sortDate));
       const closedPuts = closedOpens
         .filter((t) => t.option_type === "put")
         .map(toLeg)
-        .filter((l) => inWindow(l.sortDate))
         .sort((a, b) => b.sortDate.localeCompare(a.sortDate));
-      const assigned = sells
-        .filter((s) => inWindow(s.trade_date))
-        .sort((a, b) => b.trade_date.localeCompare(a.trade_date));
+      const assigned = [...sells].sort((a, b) => b.trade_date.localeCompare(a.trade_date));
 
       const netPremium = live.reduce((s, t) => s + slotValueForOpen(t), 0);
 
       return { liveCalls, livePuts, closedCalls, closedPuts, assigned, netPremium, hasShares: r.quantity > 0 };
     };
-  }, [tradesByTicker, shareSellsByTicker, windowStart, slotValueForOpen]);
+  }, [tradesByTicker, shareSellsByTicker, slotValueForOpen]);
 
   // Sort rows: active first by realized desc, effectively-closed sink to bottom.
   const sorted = useMemo(
@@ -250,43 +248,54 @@ export function TradesMatrixV2({
     [rows, realizedByTicker],
   );
 
-  // Per-view rows (drop tickers with nothing to show) + dynamic group widths.
+  // Per-view rows + display arrays. Column widths come from ALL-TIME counts so
+  // they don't change when the timeframe pills move the window — only which
+  // cells are filled changes. (Variable column counts made the table reflow on
+  // every pill click, which read as jerky / dropped clicks.)
   const { viewRows, callCols, putCols, assignCols } = useMemo(() => {
-    const decomposed = sorted.map((r) => [r, decompose(r)] as const);
+    const inWindow = (date: string) => date >= windowStart;
     let maxCall = 1;
     let maxPut = 1;
     let maxAssign = 0;
-    const kept = decomposed.filter(([, d]) => {
+    const kept: Array<{
+      r: PositionComputed;
+      calls: OptionTrade[] | ClosedLeg[];
+      puts: OptionTrade[] | ClosedLeg[];
+      assigned: ShareSell[];
+      netPremium: number;
+      hasShares: boolean;
+    }> = [];
+    for (const r of sorted) {
+      const d = decompose(r);
       if (view === "open") {
         maxCall = Math.max(maxCall, d.liveCalls.length);
         maxPut = Math.max(maxPut, d.livePuts.length);
-        return d.liveCalls.length + d.livePuts.length + (d.hasShares ? 1 : 0) > 0;
+        if (d.liveCalls.length + d.livePuts.length + (d.hasShares ? 1 : 0) > 0)
+          kept.push({ r, calls: d.liveCalls, puts: d.livePuts, assigned: [], netPremium: d.netPremium, hasShares: d.hasShares });
+      } else {
+        // Widths from all-time history (stable); cells filtered to the window.
+        maxCall = Math.max(maxCall, d.closedCalls.length);
+        maxPut = Math.max(maxPut, d.closedPuts.length);
+        maxAssign = Math.max(maxAssign, d.assigned.length);
+        const calls = d.closedCalls.filter((l) => inWindow(l.sortDate));
+        const puts = d.closedPuts.filter((l) => inWindow(l.sortDate));
+        const assigned = d.assigned.filter((s) => inWindow(s.trade_date));
+        if (calls.length + puts.length + assigned.length > 0)
+          kept.push({ r, calls, puts, assigned, netPremium: 0, hasShares: d.hasShares });
       }
-      maxCall = Math.max(maxCall, d.closedCalls.length);
-      maxPut = Math.max(maxPut, d.closedPuts.length);
-      maxAssign = Math.max(maxAssign, d.assigned.length);
-      return d.closedCalls.length + d.closedPuts.length + d.assigned.length > 0;
-    });
+    }
     return {
       viewRows: kept,
       callCols: Math.min(GROUP_CAP, maxCall),
       putCols: Math.min(GROUP_CAP, maxPut),
       assignCols: Math.min(ASSIGN_CAP, Math.max(view === "closed" ? 1 : 0, maxAssign)),
     };
-  }, [sorted, decompose, view]);
+  }, [sorted, decompose, view, windowStart]);
 
   const tickerCount = viewRows.length;
   const legCount = useMemo(
-    () =>
-      viewRows.reduce(
-        (s, [, d]) =>
-          s +
-          (view === "open"
-            ? d.liveCalls.length + d.livePuts.length
-            : d.closedCalls.length + d.closedPuts.length + d.assigned.length),
-        0,
-      ),
-    [viewRows, view],
+    () => viewRows.reduce((s, e) => s + e.calls.length + e.puts.length + e.assigned.length, 0),
+    [viewRows],
   );
   const grandRealized = useMemo(
     () => sorted.reduce((s, r) => s + (realizedByTicker.get(r.ticker) ?? 0) + (r.realized_stock_pl ?? 0), 0),
@@ -412,8 +421,8 @@ export function TradesMatrixV2({
                   <span className="idx">SH</span>
                   <span className="sub">shares open</span>
                 </th>
-                <th className="grp-h call" colSpan={callCols}>Calls · sold</th>
-                <th className="grp-h put" colSpan={putCols}>Puts · hedge</th>
+                <th className="grp-h call" colSpan={callCols}>Calls</th>
+                <th className="grp-h put" colSpan={putCols}>Puts</th>
                 <th className="tot" rowSpan={2}>Net premium</th>
               </tr>
               <tr>
@@ -453,10 +462,11 @@ export function TradesMatrixV2({
           )}
 
           <tbody>
-            {viewRows.map(([r, d]) => {
+            {viewRows.map((e) => {
+              const r = e.r;
               const realized = (realizedByTicker.get(r.ticker) ?? 0) + (r.realized_stock_pl ?? 0);
               const openPaid = openPaidByTicker.get(r.ticker) ?? 0;
-              const liveCount = d.liveCalls.length + d.livePuts.length;
+              const liveCount = e.calls.length + e.puts.length;
               return (
                 <tr key={r.ticker} className={isEffectivelyClosed(r) ? "tm-row-closed" : ""}>
                   <td>
@@ -473,7 +483,7 @@ export function TradesMatrixV2({
 
                   {view === "open" ? (
                     <>
-                      {d.hasShares ? (
+                      {e.hasShares ? (
                         <td
                           className="tm-cell zone-shares filled"
                           onClick={() => onSharesCellClick(r.ticker)}
@@ -485,18 +495,18 @@ export function TradesMatrixV2({
                       ) : (
                         <td className="tm-cell zone-shares empty"><span className="em-dash">—</span></td>
                       )}
-                      {range(callCols).map((i) => liveCell(`c${i}`, r.ticker, d.liveCalls[i], "call"))}
-                      {range(putCols).map((i) => liveCell(`p${i}`, r.ticker, d.livePuts[i], "put"))}
+                      {range(callCols).map((i) => liveCell(`c${i}`, r.ticker, (e.calls as OptionTrade[])[i], "call"))}
+                      {range(putCols).map((i) => liveCell(`p${i}`, r.ticker, (e.puts as OptionTrade[])[i], "put"))}
                       <td className="tm-tot">
-                        <div className={"amt " + amtCls(d.netPremium)}>{d.netPremium === 0 ? <span style={{ color: "var(--fg5)" }}>—</span> : amtStr(d.netPremium)}</div>
+                        <div className={"amt " + amtCls(e.netPremium)}>{e.netPremium === 0 ? <span style={{ color: "var(--fg5)" }}>—</span> : amtStr(e.netPremium)}</div>
                         <div className="sub">net open</div>
                       </td>
                     </>
                   ) : (
                     <>
-                      {range(callCols).map((i) => closedCell(`cc${i}`, d.closedCalls[i], "call"))}
-                      {range(putCols).map((i) => closedCell(`pc${i}`, d.closedPuts[i], "put"))}
-                      {range(assignCols).map((i) => assignedCell(`a${i}`, d.assigned[i]))}
+                      {range(callCols).map((i) => closedCell(`cc${i}`, (e.calls as ClosedLeg[])[i], "call"))}
+                      {range(putCols).map((i) => closedCell(`pc${i}`, (e.puts as ClosedLeg[])[i], "put"))}
+                      {range(assignCols).map((i) => assignedCell(`a${i}`, e.assigned[i]))}
                       <td className="tm-tot">
                         <div className={"amt " + (realized < 0 ? "neg" : realized > 0 ? "pos" : "")}>
                           {realized === 0 ? <span style={{ color: "var(--fg5)" }}>—</span> : amtStr(realized)}
