@@ -149,9 +149,11 @@ export default function PositionsPage() {
           refreshing={refreshPrices.isPending}
           onTickerClick={(t) => setInsightTicker(t)}
           onSharesCellClick={(t) => setDetail({ ticker: t, tab: 'shares' })}
-          onOpenSlotClick={(t) => {
+          onOpenSlotClick={(t, mode) => {
             const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
-            setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
+            // An explicit "+" add-slot always opens the Open tab; clicking an
+            // existing live leg defaults to Close (edit/close that leg).
+            setDetail({ ticker: t, tab: mode ?? (hasLive ? 'close' : 'open') });
           }}
           onResolveCellClick={(t, open) => setDetail({ ticker: t, tab: 'resolve', resolveTrade: open })}
           onDashboard={() => { window.location.href = DASHBOARD_URL; }}

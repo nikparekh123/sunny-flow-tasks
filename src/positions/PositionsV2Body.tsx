@@ -57,7 +57,7 @@ export interface PositionsV2BodyProps {
   refreshing: boolean;
   onTickerClick: (ticker: string) => void;
   onSharesCellClick: (ticker: string) => void;
-  onOpenSlotClick: (ticker: string) => void;
+  onOpenSlotClick: (ticker: string, mode?: 'open' | 'close') => void;
   onResolveCellClick: (ticker: string, open: OptionTrade) => void;
   onDashboard: () => void;
   onStrategy: () => void;

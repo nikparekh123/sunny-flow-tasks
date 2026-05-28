@@ -75,7 +75,7 @@ interface Props {
   shareSellsByTicker: Map<string, ShareSell[]>;
   onTickerClick: (ticker: string) => void;
   onSharesCellClick: (ticker: string) => void;
-  onOpenSlotClick: (ticker: string) => void;
+  onOpenSlotClick: (ticker: string, mode?: "open" | "close") => void;
   onResolveCellClick: (ticker: string, open: OptionTrade) => void;
 }
 
@@ -284,10 +284,14 @@ export function TradesMatrixV2({
           kept.push({ r, calls, puts, assigned, netPremium: 0, hasShares: d.hasShares });
       }
     }
+    // Open view reserves one extra empty "+" slot per group so every ticker —
+    // even one that already fills its columns (e.g. META) — always has an
+    // obvious "add a leg" cell. Closed view shows exact history widths.
+    const pad = view === "open" ? 1 : 0;
     return {
       viewRows: kept,
-      callCols: Math.min(GROUP_CAP, maxCall),
-      putCols: Math.min(GROUP_CAP, maxPut),
+      callCols: Math.min(GROUP_CAP, maxCall + pad),
+      putCols: Math.min(GROUP_CAP, maxPut + pad),
       assignCols: Math.min(ASSIGN_CAP, Math.max(view === "closed" ? 1 : 0, maxAssign)),
     };
   }, [sorted, decompose, view, windowStart]);
@@ -307,7 +311,7 @@ export function TradesMatrixV2({
   function liveCell(key: string, ticker: string, leg: OptionTrade | undefined, zone: "call" | "put") {
     if (!leg) {
       return (
-        <td key={key} className={`tm-cell zone-${zone} empty`} onClick={() => onOpenSlotClick(ticker)} title="tap to open a new position">
+        <td key={key} className={`tm-cell zone-${zone} empty`} onClick={() => onOpenSlotClick(ticker, "open")} title={`Add a ${zone} leg`}>
           <span className="plus">+</span>
         </td>
       );
