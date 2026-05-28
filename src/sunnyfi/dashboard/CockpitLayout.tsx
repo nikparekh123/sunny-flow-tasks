@@ -33,8 +33,11 @@ import {
   PortfolioBlockCompact, IncomeMix, MacroBlock, RiskBlock,
   NewsBand, ToolsRail,
 } from "./blocks";
+import { useNow, marketClock, fmtBrandDate } from "./time";
 
 export interface CockpitProps {
+  /** Display name for the greeting hero ("Good morning, X."). */
+  name?: string;
   heroSize?: number;
   bone?: boolean;
   areaFill?: boolean;
@@ -47,6 +50,7 @@ export interface CockpitProps {
 }
 
 export function CockpitLayout({
+  name = "Niket",
   heroSize = 120,
   bone = false,
   areaFill = true,
@@ -55,19 +59,29 @@ export function CockpitLayout({
   formalGreeting = true,
   onPositions, onStrategy, onMath,
 }: CockpitProps) {
+  const now = useNow(60_000);
+  const dateLabel = fmtBrandDate(now);
+  const clock = marketClock(now);
+
   return (
     <div className="dash">
       <div className="dash-inner">
 
-        <BrandBar />
+        <BrandBar dateLabel={dateLabel} />
 
         {/* Hero band — greeting + markets clock in one tight row */}
         <div className="row first">
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
-            <Greeting size={Math.min(96, heroSize * 0.6)} bone={bone} formal={formalGreeting} />
+            <Greeting
+              size={Math.min(96, heroSize * 0.6)}
+              bone={bone}
+              formal={formalGreeting}
+              name={name}
+              hour={now.getHours()}
+            />
             <div style={{ textAlign: "right", paddingBottom: 10 }}>
-              <MarketsClock size={22} />
-              <div className="label" style={{ marginTop: 8 }}>FRI · JUN 27 · 06:42 AM PT</div>
+              <MarketsClock size={22} phrase={clock.phrase} live={clock.live} />
+              <div className="label" style={{ marginTop: 8 }}>{dateLabel}</div>
             </div>
           </div>
         </div>

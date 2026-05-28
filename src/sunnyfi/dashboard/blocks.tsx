@@ -16,12 +16,14 @@
  *   • Numbers use MoneyCount / PctCount for the count-up animation.
  *   • Section headers use <Section n="01">...</Section>.
  */
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Spark, AnimatedBar, HairRow, Section } from "./atoms";
 import { MoneyCount, PctCount, useEntered } from "./animation";
 
 // ─────────────────── Brand bar ───────────────────────────────────
 
-export function BrandBar() {
+export function BrandBar({ dateLabel }: { dateLabel?: string }) {
   return (
     <div className="brandbar">
       <div className="mark">
@@ -30,7 +32,7 @@ export function BrandBar() {
         <span className="route">Morning brief<span className="cursor" /></span>
       </div>
       <div className="actions">
-        <span className="label">FRI · JUN 27 · 06:42 AM PT</span>
+        {dateLabel && <span className="label">{dateLabel}</span>}
         <span className="pill muted">⌘ K · Search</span>
         <span className="pill muted">Account</span>
       </div>
@@ -40,63 +42,146 @@ export function BrandBar() {
 
 // ─────────────────── Greeting ────────────────────────────────────
 
+/** "Good morning, Niket." vs "MORNING, NIKET". Greeting word respects
+ *  time of day (Morning / Afternoon / Evening / Late night). */
+function greetingWord(hour: number): string {
+  if (hour < 5)  return "late";
+  if (hour < 12) return "morning";
+  if (hour < 17) return "afternoon";
+  if (hour < 21) return "evening";
+  return "late";
+}
+
 export function Greeting({
-  size = 128, bone = false, formal = false,
+  size = 128, bone = false, formal = false, name = "Niket", hour,
 }: {
-  size?: number; bone?: boolean; formal?: boolean;
+  size?: number; bone?: boolean; formal?: boolean; name?: string; hour?: number;
 }) {
+  const word = greetingWord(hour ?? new Date().getHours());
   if (formal) {
     // Formal greeting has its own floor so it stays legible when the
     // hero is dialled small (e.g. cockpit layout).
     const formalSize = Math.max(56, size * 0.72);
+    // First-letter cap for the formal variant.
+    const wordCap = word.charAt(0).toUpperCase() + word.slice(1);
+    const prefix = word === "late" ? "Up late," : `Good ${wordCap.toLowerCase()},`;
     return (
       <div
         className={"greeting display " + (bone ? "bone" : "")}
         style={{ fontSize: formalSize, lineHeight: 0.95, fontWeight: 300, letterSpacing: "-.025em" }}
       >
-        Good morning<span className="accent">,</span> Niket<span className="accent">.</span>
+        {prefix.replace(",", "")}<span className="accent">,</span> {name}<span className="accent">.</span>
       </div>
     );
   }
+  const shout = word === "late" ? "LATE NIGHT" : word.toUpperCase();
   return (
     <div className={"greeting display " + (bone ? "bone" : "")} style={{ fontSize: size }}>
-      MORNING<span className="accent">,</span><br />NIKET<span className="accent">.</span>
+      {shout}<span className="accent">,</span><br />{name.toUpperCase()}<span className="accent">.</span>
     </div>
   );
 }
 
 // ─────────────────── Markets clock ───────────────────────────────
 
-export function MarketsClock({ size = 28 }: { size?: number }) {
+/** "Markets open in 2h 48m" / "closes in 4h 12m" / "closed". When
+ *  `phrase` is supplied we split on the time-string at the end and
+ *  render it in the neon mono `<span class="time">`. */
+export function MarketsClock({
+  size = 28, phrase = "Markets open in 2h 48m", live = false,
+}: {
+  size?: number; phrase?: string; live?: boolean;
+}) {
+  // Pull the trailing "Xh Ym" / "Ym" out so we can style the time strong.
+  const m = phrase.match(/^(.*?)(\d+h(?:\s\d+m)?|\d+m)$/);
+  const [pre, t] = m ? [m[1], m[2]] : [phrase, ""];
   return (
     <div className="markets-clock" style={{ fontSize: size }}>
-      <span className="live-dot" style={{ marginRight: 10 }} />
-      Markets open in <span className="time">2h 48m</span>
+      {live && <span className="live-dot" style={{ marginRight: 10 }} />}
+      {pre}
+      {t && <span className="time">{t}</span>}
     </div>
   );
 }
 
 // ─────────────────── Ticker strip ────────────────────────────────
 
+/** TickerStrip pulls SPY / QQQ / IWM from bnf_universe_latest (the same
+ *  view the BNF page uses). 10Y / VIX / DXY are not in our cache yet —
+ *  rendered as muted placeholders until a later pass extends the macro
+ *  backfill. The live-dot decorates SPY only — it's our headline. */
+
+interface TickerLatestRow {
+  ticker: string;
+  latest_close: number;
+  today_intraday_pct: number | null;
+}
+
+function useTickerData() {
+  return useQuery({
+    queryKey: ["dash_ticker_strip"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("bnf_universe_latest" as never)
+        .select("ticker, latest_close, today_intraday_pct")
+        .in("ticker", ["SPY", "QQQ", "IWM"])
+        .returns<TickerLatestRow[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 60_000,
+  });
+}
+
+function fmtChangePct(v: number | null): { txt: string; tone: "pos" | "neg" } {
+  if (v == null || !Number.isFinite(v)) return { txt: "—", tone: "pos" };
+  const sign = v >= 0 ? "+" : "−";
+  return { txt: `${sign}${Math.abs(v).toFixed(2)}%`, tone: v >= 0 ? "pos" : "neg" };
+}
+
 export function TickerStrip({ compact = false }: { compact?: boolean }) {
-  const data: Array<[string, string, string, "pos" | "neg", boolean]> = [
-    ["SPY", "655.06", "+0.44%", "pos", true],
-    ["QQQ", "495.20", "+0.61%", "pos", false],
-    ["IWM", "228.14", "−0.18%", "neg", false],
-    ["10Y", "4.21",   "−0.03",  "neg", false],
-    ["VIX", "13.20",  "−2.10%", "pos", false],
-    ["DXY", "103.42", "+0.12%", "pos", false],
-  ];
+  const { data: live = [] } = useTickerData();
+  const byTicker = new Map(live.map((r) => [r.ticker, r]));
+
+  // Live rows first. 10Y / VIX / DXY remain placeholders until the cache
+  // gets those instruments in a future pass — render as muted "—".
+  const rows: Array<{
+    ticker: string;
+    price: string;
+    change: string;
+    tone: "pos" | "neg";
+    live: boolean;
+    muted?: boolean;
+  }> = [];
+  for (const sym of ["SPY", "QQQ", "IWM"] as const) {
+    const r = byTicker.get(sym);
+    if (r) {
+      const ch = fmtChangePct(r.today_intraday_pct);
+      rows.push({
+        ticker: sym,
+        price: r.latest_close.toFixed(2),
+        change: ch.txt,
+        tone: ch.tone,
+        live: sym === "SPY",
+      });
+    } else {
+      rows.push({ ticker: sym, price: "—", change: "—", tone: "pos", live: false, muted: true });
+    }
+  }
+  for (const sym of ["10Y", "VIX", "DXY"] as const) {
+    rows.push({ ticker: sym, price: "—", change: "—", tone: "pos", live: false, muted: true });
+  }
+
   return (
     <div className={"ticker" + (compact ? " compact" : "")}>
-      {data.map(([t, p, c, k, live]) => (
-        <div key={t} className={"tick" + (compact ? " compact" : "")}>
+      {rows.map((r) => (
+        <div key={r.ticker} className={"tick" + (compact ? " compact" : "")} style={r.muted ? { opacity: 0.55 } : undefined}>
           <div className="head">
-            {live && <span className="live-dot" />}
-            <span className="label">{t}</span>
+            {r.live && <span className="live-dot" />}
+            <span className="label">{r.ticker}</span>
           </div>
-          <div className="price">{p}</div>
-          <div className={"change " + k}>{c}</div>
+          <div className="price">{r.price}</div>
+          <div className={"change " + r.tone}>{r.change}</div>
         </div>
       ))}
     </div>

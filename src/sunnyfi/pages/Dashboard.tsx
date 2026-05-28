@@ -9,14 +9,28 @@
  * Subsequent commits (CD-4 … CD-9) replace the blocks' hardcoded sample
  * data with live queries. The visual lands first so the shape is fixed.
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { signOut } from "@/sunnyfi/lib/auth";
+import { signOut, getDisplayName } from "@/sunnyfi/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
 import { CockpitLayout } from "@/sunnyfi/dashboard/CockpitLayout";
 import "./dashboard.css";
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [name, setName] = useState<string>("there");
+
+  // Auth-resolved display name for the greeting hero. Falls back to
+  // "there" if the user metadata doesn't have a name field set.
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (cancelled || !data.user) return;
+      const n = await getDisplayName(data.user);
+      if (!cancelled) setName(n);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Esc → log out, ⌘1..3 → tool nav. Same shortcuts the old dashboard
   // exposed; the ToolsRail handlers do the same routes.
@@ -40,6 +54,7 @@ export default function Dashboard() {
 
   return (
     <CockpitLayout
+      name={name}
       formalGreeting={true}
       heroSize={120}
       todayHighlight="neon"
