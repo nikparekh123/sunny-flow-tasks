@@ -360,13 +360,23 @@ function ProtectionBlock({ tradesByTicker }: {
     let putCost = 0;
     let callIncome = 0;
     for (const [, list] of tradesByTicker) {
-      // Match closes to their opens so we can realize call P&L.
+      // Index opens by id and tally closed contracts per open, so we count
+      // only premium that's STILL outlaid — a put that's been bought back is
+      // no longer a protection cost. This matches the Trades view's
+      // "premium on still-open long legs" denominator.
       const byId = new Map<string, OptionTrade>();
-      for (const t of list) byId.set(t.id, t);
+      const closedQtyByOpen = new Map<string, number>();
       for (const t of list) {
-        // Put cost — premium paid to OPEN long puts (the protection bill).
+        byId.set(t.id, t);
+        if (t.action === "close" && t.closes_trade_id) {
+          closedQtyByOpen.set(t.closes_trade_id, (closedQtyByOpen.get(t.closes_trade_id) ?? 0) + t.contracts);
+        }
+      }
+      for (const t of list) {
+        // Put cost — premium paid on the still-open portion of long puts.
         if (t.action === "open" && t.option_type === "put" && t.direction === "long") {
-          putCost += t.contracts * 100 * t.premium;
+          const stillOpen = t.contracts - (closedQtyByOpen.get(t.id) ?? 0);
+          if (stillOpen > 0) putCost += stillOpen * 100 * t.premium;
         }
         // Call income — realized P&L on closed CALL pairs.
         if (t.action === "close" && t.closes_trade_id) {
