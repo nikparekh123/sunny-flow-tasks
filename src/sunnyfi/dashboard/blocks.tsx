@@ -16,10 +16,12 @@
  *   • Numbers use MoneyCount / PctCount for the count-up animation.
  *   • Section headers use <Section n="01">...</Section>.
  */
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Spark, AnimatedBar, HairRow, Section } from "./atoms";
 import { MoneyCount, PctCount, useEntered } from "./animation";
+import { macroEventsOn } from "./macroCalendar";
 
 // ─────────────────── Brand bar ───────────────────────────────────
 
@@ -188,35 +190,215 @@ export function TickerStrip({ compact = false }: { compact?: boolean }) {
   );
 }
 
-// ─────────────────── § 01 Attention ──────────────────────────────
+// ─────────────────── § 01 Attention (live) ───────────────────────
+
+interface AttentionTrade {
+  id: string;
+  ticker: string;
+  action: "open" | "close";
+  option_type: "call" | "put";
+  direction: "short" | "long";
+  contracts: number;
+  strike: number;
+  premium: number;
+  expiry: string;
+  closes_trade_id: string | null;
+}
+
+interface AttentionPosition {
+  ticker: string;
+  quantity: number;
+  current_price: number | null;
+  earnings_date: string | null;
+}
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+function useAttentionTrades() {
+  return useQuery({
+    queryKey: ["dash_attention_trades"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("option_trades" as never)
+        .select("id, ticker, action, option_type, direction, contracts, strike, premium, expiry, closes_trade_id")
+        .returns<AttentionTrade[]>();
+      if (error) throw error;
+      return data ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+function useAttentionPositions() {
+  return useQuery({
+    queryKey: ["dash_attention_positions"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("positions" as never)
+        .select("ticker, quantity, current_price, earnings_date")
+        .returns<AttentionPosition[]>();
+      if (error) throw error;
+      return (data ?? []).filter((p) => p.quantity > 0);
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Roll up closed-by-open quantities so we can detect "still live"
+ *  positions among the raw trade log. Mirrors the helper used in the
+ *  TradesLogMatrix denominator math. */
+function liveOpensFrom(trades: AttentionTrade[]): AttentionTrade[] {
+  const closedQty = new Map<string, number>();
+  for (const t of trades) {
+    if (t.action === "close" && t.closes_trade_id) {
+      closedQty.set(t.closes_trade_id, (closedQty.get(t.closes_trade_id) ?? 0) + t.contracts);
+    }
+  }
+  return trades
+    .filter((t) => t.action === "open")
+    .map((t) => ({ ...t, contracts: t.contracts - (closedQty.get(t.id) ?? 0) }))
+    .filter((t) => t.contracts > 0);
+}
+
+/** ITM detection given direction + type + spot. */
+function isITM(t: AttentionTrade, spot: number): boolean {
+  if (t.option_type === "call") return spot >= t.strike;
+  return spot <= t.strike;
+}
 
 export function AttentionBlock({ n = "01" }: { n?: string }) {
+  const { data: rawTrades = [] } = useAttentionTrades();
+  const { data: positions = [] } = useAttentionPositions();
+
+  const rows = useMemo(() => {
+    const today = todayIso();
+    const lives = liveOpensFrom(rawTrades);
+    const expiringToday = lives.filter((t) => t.expiry === today);
+
+    // Spot lookup from the positions table for ITM/OTM chips.
+    const spotByTicker = new Map<string, number>();
+    for (const p of positions) {
+      if (p.current_price != null) spotByTicker.set(p.ticker, p.current_price);
+    }
+
+    // ── Row 1: expiring today (if any) ────────────────────────
+    const r1 = expiringToday.length > 0 ? (() => {
+      const lead = expiringToday[0];
+      const more = expiringToday.length - 1;
+      const spot = spotByTicker.get(lead.ticker);
+      const itm = spot != null ? isITM(lead, spot) : null;
+      const shortPremIfOTM = expiringToday
+        .filter((t) => t.direction === "short")
+        .reduce((s, t) => s + t.contracts * 100 * t.premium, 0);
+      const right = itm === false
+        ? <span className="pos">+${shortPremIfOTM.toLocaleString()} kept</span>
+        : itm === true
+          ? <span className="neg">ITM · assignment risk</span>
+          : <span className="fg3">—</span>;
+      return {
+        label: "EXPIRES TODAY",
+        right,
+        content: (
+          <>
+            <span className="num-mono" style={{ fontWeight: 500 }}>
+              {lead.ticker} {lead.strike}{lead.option_type === "call" ? "c" : "p"}
+            </span>
+            <span className="fg4"> · </span>
+            {lead.contracts} contract{lead.contracts === 1 ? "" : "s"}
+            {more > 0 && <><span className="fg4"> · </span>+{more} more</>}
+            {itm != null && (
+              <span className={"chip " + (itm ? "warn" : "pos")} style={{ marginLeft: 8 }}>
+                {itm ? "ITM" : "OTM"}
+              </span>
+            )}
+          </>
+        ),
+      };
+    })() : null;
+
+    // ── Row 2: short premium settling (this week) ─────────────
+    // Sum short-open premium for legs expiring in next 7 days; that's
+    // the cash that lands if everything ends OTM.
+    const weekEnd = new Date();
+    weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
+    const weekEndIso = weekEnd.toISOString().slice(0, 10);
+    const expiringThisWeek = lives.filter((t) => t.expiry >= today && t.expiry <= weekEndIso);
+    const settlingShort = expiringThisWeek.filter((t) => t.direction === "short");
+    const settling$ = settlingShort.reduce((s, t) => s + t.contracts * 100 * t.premium, 0);
+    const settlingContracts = settlingShort.reduce((s, t) => s + t.contracts, 0);
+    const r2 = settling$ > 0 ? {
+      label: "SETTLING",
+      right: (
+        <span className="num-sans pos" style={{ fontSize: 18, fontWeight: 600 }}>
+          <MoneyCount value={settling$} sign="+" delay={400} />
+        </span>
+      ),
+      content: (
+        <>Premium clears if held to expiry · {settlingContracts} contract{settlingContracts === 1 ? "" : "s"} this week</>
+      ),
+    } : null;
+
+    // ── Row 3: earnings in held positions (next 5 days) ───────
+    const fiveDays = new Date();
+    fiveDays.setUTCDate(fiveDays.getUTCDate() + 5);
+    const fiveIso = fiveDays.toISOString().slice(0, 10);
+    const earningsSoon = positions
+      .filter((p) => p.earnings_date && p.earnings_date >= today && p.earnings_date <= fiveIso)
+      .sort((a, b) => (a.earnings_date ?? "").localeCompare(b.earnings_date ?? ""));
+    const r3 = earningsSoon.length > 0 ? (() => {
+      const lead = earningsSoon[0];
+      const days = Math.ceil(
+        (new Date(lead.earnings_date! + "T00:00:00Z").getTime() -
+         new Date(today + "T00:00:00Z").getTime()) / 86_400_000,
+      );
+      const label = days === 0 ? "EARNINGS · TODAY"
+        : days === 1 ? "EARNINGS · TMW"
+        : `EARNINGS · ${days}d`;
+      return {
+        label,
+        right: <span className="warn">vol event</span>,
+        content: (
+          <>
+            <span className="num-mono" style={{ fontWeight: 500 }}>{lead.ticker}</span>
+            {" · holding "}{lead.quantity.toLocaleString()} sh
+            {earningsSoon.length > 1 && <> · +{earningsSoon.length - 1} more</>}
+          </>
+        ),
+      };
+    })() : null;
+
+    // ── Row 4: macro events today ─────────────────────────────
+    const macroToday = macroEventsOn(today);
+    const r4 = macroToday.length > 0 ? (() => {
+      const lead = macroToday[0];
+      return {
+        label: "MACRO · TODAY",
+        right: <span className={"chip " + (lead.tone === "warn" ? "warn" : "")}>{lead.tone === "warn" ? "VOL EVENT" : "INFO"}</span>,
+        content: (
+          <>{lead.label} <span className="num-mono">{lead.timeET}</span>{macroToday.length > 1 && <> · +{macroToday.length - 1} more</>}</>
+        ),
+      };
+    })() : null;
+
+    return [r1, r2, r3, r4].filter((x): x is NonNullable<typeof x> => x != null);
+  }, [rawTrades, positions]);
+
   return (
     <div>
-      <Section n={n} right="4 items">On your radar today</Section>
-      <HairRow label="EXPIRES TODAY" right={<span className="pos">$0 risk</span>}>
-        <span className="num-mono" style={{ fontWeight: 500 }}>NVDA 880c</span>
-        <span className="fg4"> · </span>
-        3 contracts
-        <span className="fg4"> · </span>
-        <span className="chip pos" style={{ marginLeft: 4 }}>OTM</span>
-      </HairRow>
-      <HairRow
-        label="SETTLING"
-        right={
-          <span className="num-sans pos" style={{ fontSize: 18, fontWeight: 600 }}>
-            <MoneyCount value={4280} sign="+" delay={400} />
-          </span>
-        }
-      >
-        Premium collected this week · 7 contracts cleared
-      </HairRow>
-      <HairRow label="EARNINGS · TMW" right={<span className="warn">9% IV crush</span>}>
-        <span className="num-mono" style={{ fontWeight: 500 }}>CRM</span> after close · holding 220 sh
-      </HairRow>
-      <HairRow label="MACRO · TODAY" right={<span className="chip warn">VOL EVENT</span>} last>
-        FOMC minutes <span className="num-mono">14:00 ET</span> · positions sized down ahead
-      </HairRow>
+      <Section n={n} right={`${rows.length} item${rows.length === 1 ? "" : "s"}`}>
+        On your radar today
+      </Section>
+      {rows.length === 0 ? (
+        <div style={{ padding: "32px 0", color: "var(--fg3)", fontSize: 14 }}>
+          Nothing urgent — markets are quiet on your book today.
+        </div>
+      ) : (
+        rows.map((r, i) => (
+          <HairRow key={i} label={r.label} right={r.right} last={i === rows.length - 1}>
+            {r.content}
+          </HairRow>
+        ))
+      )}
     </div>
   );
 }
