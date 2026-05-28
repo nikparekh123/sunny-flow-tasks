@@ -1316,29 +1316,111 @@ export function RiskBlock({ n = "06", compact = false }: { n?: string; compact?:
   );
 }
 
-// ─────────────────── § 07 News band ──────────────────────────────
+// ─────────────────── § 07 News band (live) ───────────────────────
+//
+// Calls the dashboard-news edge function with the user's held tickers.
+// Yahoo Finance is the source; brittle by design but free. Cached for
+// 15 min per session via React Query.
+
+interface NewsApiItem {
+  ticker: string;
+  headline: string;
+  url: string | null;
+  publisher: string | null;
+  ts: number | null;
+}
+
+function useNewsForHeldTickers() {
+  // Reuse the lightweight positions query so this band doesn't duplicate
+  // the fetch — React Query dedupes by key.
+  const { data: positions = [] } = useQuery({
+    queryKey: ["dash_news_held"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("positions" as never)
+        .select("ticker, status, quantity")
+        .returns<Array<{ ticker: string; status: string; quantity: number }>>();
+      if (error) throw error;
+      return (data ?? []).filter((p) => p.status === "open" && p.quantity > 0);
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  // Distinct held tickers, capped at 10 (edge function also caps).
+  const tickers = useMemo(
+    () => Array.from(new Set(positions.map((p) => p.ticker))).slice(0, 10),
+    [positions],
+  );
+
+  return useQuery({
+    queryKey: ["dash_news", tickers.join(",")],
+    enabled: tickers.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase.functions.invoke("dashboard-news", {
+        body: { tickers },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error as string);
+      return (data?.items ?? []) as NewsApiItem[];
+    },
+    staleTime: 15 * 60 * 1000,
+  });
+}
+
+/** "5h ago" / "23m ago" / "2d ago" — concise relative time. */
+function fmtRelTime(ts: number | null): string {
+  if (ts == null) return "—";
+  const ageMs = Date.now() - ts * 1000;
+  const mins = Math.floor(ageMs / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
 
 export function NewsBand({ n = "07" }: { n?: string }) {
-  const items: Array<[string, string, string]> = [
-    ["NVDA", "06:14", "Blackwell ramps ahead of schedule — Bloomberg"],
-    ["CRM",  "05:48", "Q2 revenue beat, guidance light — WSJ"],
-    ["META", "05:22", "VR division cut 12% — Reuters"],
-    ["AAPL", "04:50", "iPhone 17 sourcing leaks — Nikkei"],
-    ["TSLA", "04:12", "China deliveries flat MoM — CnEVPost"],
-  ];
+  const { data: items = [], isLoading } = useNewsForHeldTickers();
+
+  // Sort newest-first.
+  const sorted = useMemo(
+    () => [...items].sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0)),
+    [items],
+  );
+
   return (
     <div>
-      <Section n={n} right="06:14 AM · 5 held tickers">Tape · headlines</Section>
+      <Section
+        n={n}
+        right={isLoading ? "loading…" : `${sorted.length} held ticker${sorted.length === 1 ? "" : "s"}`}
+      >
+        Tape · headlines
+      </Section>
       <div className="news-band">
-        {items.map(([t, time, h]) => (
-          <div key={t} className="news-card">
-            <div className="head">
-              <span className="ticker-tag">{t}</span>
-              <span className="time">{time}</span>
-            </div>
-            <div className="headline">{h}</div>
+        {sorted.length === 0 ? (
+          <div style={{ color: "var(--fg3)", fontSize: 13, padding: "8px 0" }}>
+            {isLoading ? "Pulling headlines…" : "No recent news for your held tickers."}
           </div>
-        ))}
+        ) : sorted.map((it) => {
+          const card = (
+            <div className="news-card" key={it.ticker}>
+              <div className="head">
+                <span className="ticker-tag">{it.ticker}</span>
+                <span className="time">{fmtRelTime(it.ts)}</span>
+              </div>
+              <div className="headline">
+                {it.headline}
+                {it.publisher && <span className="fg4"> — {it.publisher}</span>}
+              </div>
+            </div>
+          );
+          return it.url ? (
+            <a key={it.ticker} href={it.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>
+              {card}
+            </a>
+          ) : card;
+        })}
       </div>
     </div>
   );
