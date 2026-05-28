@@ -9,6 +9,8 @@ import {
   type OptionTrade,
   type PositionComputed,
 } from './types';
+import { MoneyCount } from '@/sunnyfi/lib/animation';
+import './positions-v2.css';
 
 /**
  * Position insight (read) modal — Tesla-style P&L dashboard for one ticker.
@@ -160,16 +162,19 @@ export function PositionInsightModal({
       });
   }, [trades]);
 
+  // Glyph class per trade — c-sold / c-bought / p-sold / p-bought.
+  const glyphCls = (optType: 'call' | 'put', dir: 'short' | 'long') =>
+    'glyph ' + (optType === 'call' ? 'c' : 'p') + '-' + (dir === 'short' ? 'sold' : 'bought');
+
   return (
-    <div className="pi-stage" onClick={onClose}>
-      <div className="pi-modal" role="dialog" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className="pi-head">
-          <div className="pi-head-left">
-            <h2 className="pi-ticker">{position.ticker}</h2>
-            <div className="pi-sub">
-              {bucket && <span>{BUCKET_LABEL[bucket]}</span>}
-              {bucket && <span className="dot">·</span>}
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-shell" role="dialog" onClick={(e) => e.stopPropagation()}>
+        {/* Head */}
+        <div className="mod-head">
+          <div>
+            <div className="name">{position.ticker}</div>
+            <div className="sub">
+              {bucket && <><span style={{ color: 'var(--neon)' }}>{BUCKET_LABEL[bucket]}</span><span className="dot">·</span></>}
               <span>{position.sector}</span>
               {!isClosed && (
                 <>
@@ -177,205 +182,141 @@ export function PositionInsightModal({
                   <span>{fmtQty(position.quantity)} sh @ {fmtUSD2(position.avg_cost)}</span>
                 </>
               )}
-              {isClosed && <span className="pi-pill-closed">closed</span>}
+              {isClosed && <><span className="dot">·</span><span style={{ color: 'var(--warning)' }}>closed</span></>}
             </div>
           </div>
-          <button className="pi-icon-btn" onClick={onClose}>✕ Close</button>
+          <button className="x-btn" onClick={onClose}>✕ Close</button>
         </div>
 
         {/* Earnings strip */}
-        <div className="pi-earn-strip">
+        <div className="mod-earn">
           {editingEarnings ? (
-            <div className="pi-earn-edit">
-              <input
-                type="date"
-                className="pp-input mono"
-                value={draftEarnings}
-                onChange={(e) => setDraftEarnings(e.target.value)}
-                autoFocus
-              />
-              <button className="pi-link" onClick={saveEarnings}>save</button>
-              <button className="pi-link muted" onClick={() => { setDraftEarnings(position.earnings_date ?? ''); setEditingEarnings(false); }}>
-                cancel
-              </button>
+            <>
+              <input type="date" value={draftEarnings} onChange={(e) => setDraftEarnings(e.target.value)} autoFocus />
+              <button className="edit" onClick={saveEarnings}>save</button>
+              <button className="edit" onClick={() => { setDraftEarnings(position.earnings_date ?? ''); setEditingEarnings(false); }}>cancel</button>
               {position.earnings_date && (
-                <button
-                  className="pi-link danger"
-                  onClick={() => { setDraftEarnings(''); onSetEarningsDate({ ticker: position.ticker, earnings_date: null }); setEditingEarnings(false); }}
-                >
-                  clear
-                </button>
+                <button className="edit" onClick={() => { setDraftEarnings(''); onSetEarningsDate({ ticker: position.ticker, earnings_date: null }); setEditingEarnings(false); }}>clear</button>
               )}
-            </div>
+            </>
           ) : position.earnings_date ? (
-            <div className={'pi-earn ' + (earnUrgency ?? '')}>
-              <span className="pi-earn-icon">📅</span>
-              <span className="pi-earn-main">
+            <>
+              <span className="main">
                 Earnings{' '}
-                {earnDays === 0 ? <b>today</b>
-                  : earnDays === 1 ? <b>tomorrow</b>
-                  : earnDays != null && earnDays > 0 ? <>in <b>{earnDays} days</b></>
-                  : <>{Math.abs(earnDays ?? 0)} days ago</>}
+                {earnDays === 0 ? 'today'
+                  : earnDays === 1 ? 'tomorrow'
+                  : earnDays != null && earnDays > 0 ? `in ${earnDays} days`
+                  : `${Math.abs(earnDays ?? 0)} days ago`}
               </span>
-              <span className="pi-earn-date">· {position.earnings_date}</span>
-              <button className="pi-link" onClick={() => setEditingEarnings(true)}>edit</button>
-            </div>
+              <span className="date">· {position.earnings_date}</span>
+              <button className="edit" onClick={() => setEditingEarnings(true)}>edit</button>
+            </>
           ) : (
-            <button className="pi-link pi-add-earn" onClick={() => setEditingEarnings(true)}>
-              + Add earnings date
-            </button>
+            <button className="edit" style={{ marginLeft: 0 }} onClick={() => setEditingEarnings(true)}>+ Add earnings date</button>
           )}
         </div>
 
-        {/* Three big stat numbers */}
-        <div className="pi-stats">
-          <div className="pi-stat">
-            <div className="pi-stat-l">↑ Premium collected · 52wk</div>
-            <div className="pi-stat-v pos">{fmtUSD(totals.collected)}</div>
-            <div className="pi-stat-sub">
+        {/* Three big stats */}
+        <div className="mod-stats">
+          <div className="mod-stat">
+            <div className="l">↑ Premium collected · 52wk</div>
+            <div className="v pos"><MoneyCount value={Math.round(totals.collected)} delay={150} /></div>
+            <div className="sub">
               {totals.callC > 0 && `C ${fmtUSD(totals.callC)}`}
               {totals.callC > 0 && totals.putC > 0 && ' · '}
               {totals.putC > 0 && `P ${fmtUSD(totals.putC)}`}
               {totals.collected === 0 && '—'}
             </div>
           </div>
-          <div className="pi-stat">
-            <div className="pi-stat-l">↓ Premium paid · 52wk</div>
-            <div className="pi-stat-v neg">−{fmtUSD(totals.paid)}</div>
-            <div className="pi-stat-sub">
+          <div className="mod-stat">
+            <div className="l">↓ Premium paid · 52wk</div>
+            <div className="v neg"><MoneyCount value={Math.round(totals.paid)} sign="-" delay={250} /></div>
+            <div className="sub">
               {totals.callP > 0 && `C ${fmtUSD(totals.callP)}`}
               {totals.callP > 0 && totals.putP > 0 && ' · '}
               {totals.putP > 0 && `P ${fmtUSD(totals.putP)}`}
               {totals.paid === 0 && '—'}
             </div>
           </div>
-          <div className="pi-stat">
-            <div className="pi-stat-l">Realized P&amp;L</div>
-            <div className={'pi-stat-v ' + (realizedTotal < 0 ? 'neg' : realizedTotal > 0 ? 'pos' : '')}>
-              {realizedTotal >= 0 ? fmtUSD(realizedTotal) : '−' + fmtUSD(Math.abs(realizedTotal))}
+          <div className="mod-stat">
+            <div className="l">Realized P&amp;L</div>
+            <div className={'v ' + (realizedTotal < 0 ? 'neg' : realizedTotal > 0 ? 'pos' : '')}>
+              <MoneyCount value={Math.round(Math.abs(realizedTotal))} sign={realizedTotal < 0 ? '-' : '+'} delay={350} />
             </div>
-            <div className="pi-stat-sub">from closed pairs</div>
+            <div className="sub">from closed pairs</div>
           </div>
         </div>
 
-        {/* Realized P&L chart — one bar per week, signed */}
-        <ChartRealized
-          bins={realizedBins}
-          earningsWeekIdx={position.earnings_date ? weekIdxOf(position.earnings_date, todayWeek) : null}
-        />
-
-        {/* Live positions list */}
-        <div className="pi-activity">
-          <div className="pi-section-l">Live positions · {liveOpens.length}</div>
+        {/* Live positions */}
+        <div className="mod-activity">
+          <div className="l">Live positions <span className="meta">· {liveOpens.length} open</span></div>
           {liveOpens.length === 0 ? (
-            <div className="pi-activity-empty">No live option positions on {position.ticker}.</div>
+            <div className="empty">No live option positions on {position.ticker}.</div>
           ) : (
-            <div className="pi-activity-list">
-              {liveOpens.map((lo) => {
-                const sign = lo.open.direction === 'short' ? '−' : '+';
-                const cls = lo.open.direction === 'short' ? 'neg' : 'pos';
-                return (
-                  <div key={lo.open.id} className="pi-activity-row">
-                    <span className={'pi-mini-glyph ' + cls}>
-                      {lo.open.option_type === 'put' ? 'P' : 'C'}
-                    </span>
-                    <span className="pi-activity-date">{lo.open.trade_date}</span>
-                    <span className={'pi-activity-amt ' + cls}>
-                      {sign}{lo.remaining_contracts} @ ${lo.open.strike}
-                    </span>
-                    <span className="pi-activity-label">
-                      exp {lo.open.expiry} · ${lo.open.premium}/sh
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            liveOpens.map((lo) => {
+              const sign = lo.open.direction === 'short' ? '−' : '+';
+              const cls = lo.open.direction === 'short' ? 'pos' : 'neg';
+              return (
+                <div key={lo.open.id} className="act-row">
+                  <span className={glyphCls(lo.open.option_type, lo.open.direction)}>{lo.open.option_type === 'put' ? 'P' : 'C'}</span>
+                  <span className="date">{lo.open.trade_date}</span>
+                  <span className={'amt ' + cls}>{sign}{lo.remaining_contracts} @ ${lo.open.strike}</span>
+                  <span className="albl">{lo.open.direction} {lo.open.option_type} · exp {lo.open.expiry}</span>
+                  <span />
+                </div>
+              );
+            })
           )}
         </div>
 
         {/* Recent activity */}
-        <div className="pi-activity">
-          <div className="pi-section-l">Recent activity</div>
+        <div className="mod-activity">
+          <div className="l">Recent activity</div>
           {feed.length === 0 ? (
-            <div className="pi-activity-empty">No trades yet — open a position to start.</div>
+            <div className="empty">No trades yet — open a position to start.</div>
           ) : (
-            <div className="pi-activity-list">
-              {feed.map(({ t, realized, cashFlow }) => {
-                const cls = cashFlow > 0 ? 'pos' : 'neg';
-                return (
-                  <div key={t.id} className="pi-activity-row">
-                    <span className={'pi-mini-glyph ' + cls}>
-                      {t.option_type === 'put' ? 'P' : 'C'}
-                    </span>
-                    <span className="pi-activity-date">{t.trade_date}</span>
-                    <span className={'pi-activity-amt ' + cls}>
-                      {cashFlow >= 0 ? fmtUSD(cashFlow) : '−' + fmtUSD(Math.abs(cashFlow))}
-                    </span>
-                    <span className="pi-activity-label">
-                      {t.action} {t.direction} {t.option_type} {t.contracts}× ${t.strike}
-                      {t.action === 'close' && realized !== 0 && (
-                        <span className={'pi-realized ' + (realized > 0 ? 'pos' : 'neg')}>
-                          {' '}· {realized >= 0 ? '+' : '−'}{fmtUSD(Math.abs(realized))} realized
-                        </span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+            feed.map(({ t, realized, cashFlow }) => {
+              const cls = cashFlow > 0 ? 'pos' : 'neg';
+              return (
+                <div key={t.id} className="act-row">
+                  <span className={glyphCls(t.option_type, t.direction)}>{t.option_type === 'put' ? 'P' : 'C'}</span>
+                  <span className="date">{t.trade_date}</span>
+                  <span className={'amt ' + cls}>{cashFlow >= 0 ? fmtUSD(cashFlow) : '−' + fmtUSD(Math.abs(cashFlow))}</span>
+                  <span className="albl">
+                    {t.action} {t.direction} {t.option_type} {t.contracts}× ${t.strike}
+                    {t.action === 'close' && realized !== 0 && (
+                      <span className={'realized ' + (realized > 0 ? 'pos' : 'neg')}>
+                        {' '}· {realized >= 0 ? '+' : '−'}{fmtUSD(Math.abs(realized))}
+                      </span>
+                    )}
+                  </span>
+                  <span />
+                </div>
+              );
+            })
           )}
         </div>
 
         {/* Footer */}
-        <div className="pi-foot">
-          <div className="pi-foot-start">
-            <button
-              className="pi-link danger"
-              onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}
-            >
+        <div className="mod-foot">
+          <div className="left">
+            <button className="danger-link" onClick={() => onSetStatus({ ticker: position.ticker, status: isClosed ? 'open' : 'closed' })}>
               {isClosed ? '↻ Reopen position' : '✕ Mark position closed'}
             </button>
             {!confirmingDelete && (
-              <button
-                className="pi-link danger pi-link-strong"
-                onClick={() => setConfirmingDelete(true)}
-              >
-                🗑 Delete position
-              </button>
+              <button className="danger-link strong" onClick={() => setConfirmingDelete(true)}>🗑 Delete position</button>
             )}
             {confirmingDelete && (
-              <div className="pi-confirm-chip">
-                <span className="pi-confirm-q">
-                  Delete <b>{position.ticker}</b> · {trades.length} trade{trades.length === 1 ? '' : 's'}?
-                </span>
-                <button
-                  className="pi-link"
-                  onClick={() => setConfirmingDelete(false)}
-                >
-                  ✗ cancel
-                </button>
-                <button
-                  className="pi-link danger pi-link-strong"
-                  onClick={() => {
-                    onDeletePosition(position.ticker);
-                    setConfirmingDelete(false);
-                  }}
-                >
-                  ✓ confirm delete
-                </button>
-              </div>
+              <span className="mod-confirm">
+                <span>Delete <b>{position.ticker}</b> · {trades.length} trade{trades.length === 1 ? '' : 's'}?</span>
+                <button className="danger-link" onClick={() => setConfirmingDelete(false)}>✗ cancel</button>
+                <button className="danger-link strong" onClick={() => { onDeletePosition(position.ticker); setConfirmingDelete(false); }}>✓ confirm</button>
+              </span>
             )}
           </div>
-          <div className="pi-foot-end">
-            <button
-              className="pp-btn pp-btn-text"
-              onClick={onCloseTrade}
-              disabled={liveOpens.length === 0}
-              title={liveOpens.length === 0 ? 'No live positions to close' : ''}
-            >
-              − Close position
-            </button>
-            <button className="pp-btn pp-btn-neon" onClick={onOpenTrade}>+ Open position</button>
+          <div className="right">
+            <button className="mbtn text" onClick={onCloseTrade} disabled={liveOpens.length === 0} title={liveOpens.length === 0 ? 'No live positions to close' : ''}>− Close position</button>
+            <button className="mbtn neon" onClick={onOpenTrade}>+ Open position</button>
           </div>
         </div>
       </div>

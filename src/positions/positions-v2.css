@@ -224,3 +224,115 @@
 .dash .tm-foot-l .t { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--fg1); }
 .dash .tm-foot-l .sub { font-family: var(--mono); font-size: 10px; color: var(--fg3); letter-spacing: 1.1px; text-transform: uppercase; margin-top: 4px; }
 .dash .tm-foot-tot .amt { font-size: 22px !important; }
+
+/* ============================================================
+   MODALS — editorial reskin (baseline from the design handoff)
+   The existing modal components keep their React logic; only the
+   markup classes + this CSS change. Scoped under .np-app because
+   that's the modals' DOM ancestor (the v2 body's .dash is a sibling).
+   Bare design tokens are aliased to the --navi-* values already
+   defined on .np-app so the ported rules resolve.
+   ============================================================ */
+.np-app {
+  --page: var(--navi-dash-page);
+  --page-2: var(--navi-page);
+  --surface: var(--navi-surface);
+  --card: var(--navi-card);
+  --elevated: var(--navi-elevated);
+  --dusk: var(--navi-dusk);
+  --fg1: var(--navi-fg1);
+  --fg2: var(--navi-fg2);
+  --fg3: var(--navi-fg3);
+  --fg4: var(--navi-fg4);
+  --fg5: var(--navi-fg5);
+  --neon: var(--navi-neon);
+  --neon-dark: var(--navi-neon-dark);
+  --positive: var(--navi-positive);
+  --negative: var(--navi-negative);
+  --warning: var(--navi-warning);
+  --bright: var(--navi-border-bright);
+  --tint-neon: var(--navi-tint-neon);
+  --tint-positive: var(--navi-tint-positive);
+  --tint-negative: var(--navi-tint-negative);
+  --tint-warning: var(--navi-tint-warning);
+  --tint-muted: var(--navi-tint-muted);
+  --hair: 1px solid rgba(50,110,100,.22);
+  --hair-strong: 1px solid rgba(50,110,100,.45);
+  --sans: var(--navi-font-sans);
+  --mono: var(--navi-font-mono);
+  --ease: var(--np-ease);
+}
+
+/* Backdrop + shell */
+.np-app .modal-backdrop { position: fixed; inset: 0; background: rgba(6,26,16,.82); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 1000; display: flex; align-items: flex-start; justify-content: center; padding: 64px 32px; overflow-y: auto; }
+.np-app .modal-shell { background: var(--page); border: var(--hair-strong); border-radius: 4px; width: 100%; max-width: 980px; display: flex; flex-direction: column; }
+.np-app .modal-shell.detail { max-width: 1080px; }
+.np-app .modal-shell::-webkit-scrollbar { width: 8px; }
+.np-app .modal-shell::-webkit-scrollbar-thumb { background: var(--dusk); border-radius: 8px; }
+
+/* Head */
+.np-app .mod-head { display: flex; align-items: flex-end; justify-content: space-between; padding: 40px 44px 28px; border-bottom: var(--hair); }
+.np-app .mod-head .name { font-family: var(--sans); font-size: 72px; font-weight: 800; letter-spacing: -.045em; line-height: .85; color: var(--neon); font-feature-settings: "tnum","zero"; }
+.np-app .mod-head .name.bone { color: var(--fg1); }
+.np-app .mod-head .sub { font-family: var(--mono); font-size: 11px; color: var(--fg2); margin-top: 14px; letter-spacing: 1.4px; text-transform: uppercase; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.np-app .mod-head .sub .dot { color: var(--fg5); }
+.np-app .mod-head .x-btn { border: none; background: transparent; color: var(--fg3); font-family: var(--mono); font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; padding: 0; cursor: pointer; transition: color .15s var(--ease); align-self: flex-start; margin-top: 6px; }
+.np-app .mod-head .x-btn:hover { color: var(--negative); }
+
+/* Earn strip */
+.np-app .mod-earn { padding: 18px 44px; border-bottom: var(--hair); display: flex; align-items: center; gap: 16px; }
+.np-app .mod-earn .main { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--warning); letter-spacing: .8px; }
+.np-app .mod-earn .date { font-family: var(--mono); font-size: 12px; color: var(--fg2); letter-spacing: 1px; }
+.np-app .mod-earn .edit { margin-left: auto; font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg3); background: transparent; border: none; cursor: pointer; transition: color .15s var(--ease); padding: 0; }
+.np-app .mod-earn .edit:hover { color: var(--neon); }
+.np-app .mod-earn input { background: rgba(15,51,51,.6); border: 1px solid var(--bright); border-radius: 4px; color: var(--fg1); font-family: var(--mono); font-size: 12px; padding: 6px 8px; }
+
+/* Stats */
+.np-app .mod-stats { display: grid; grid-template-columns: repeat(3, 1fr); padding: 32px 0 28px; margin: 0 44px; border-bottom: var(--hair); }
+.np-app .mod-stat { padding: 0 22px; border-left: var(--hair); }
+.np-app .mod-stat:first-child { padding-left: 0; border-left: none; }
+.np-app .mod-stat .l { font-family: var(--mono); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--fg3); font-weight: 600; }
+.np-app .mod-stat .v { font-family: var(--mono); font-size: 38px; font-weight: 700; letter-spacing: -.025em; margin-top: 14px; line-height: 1; }
+.np-app .mod-stat .v.pos { color: var(--positive); }
+.np-app .mod-stat .v.neg { color: var(--negative); }
+.np-app .mod-stat .sub { font-family: var(--mono); font-size: 11px; color: var(--fg3); margin-top: 10px; letter-spacing: .8px; }
+
+/* Activity */
+.np-app .mod-activity { padding: 32px 44px 0; }
+.np-app .mod-activity .l { font-family: var(--mono); font-size: 9px; letter-spacing: 2.2px; text-transform: uppercase; color: var(--fg3); font-weight: 600; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: baseline; }
+.np-app .mod-activity .l .meta { color: var(--fg4); font-weight: 500; letter-spacing: 1.2px; }
+.np-app .mod-activity .empty { font-family: var(--mono); font-size: 12px; color: var(--fg3); padding: 8px 0 4px; }
+.np-app .act-row { display: grid; grid-template-columns: 26px 110px 110px 1fr auto; gap: 16px; align-items: center; padding: 13px 12px; margin: 0 -12px; border-bottom: var(--hair); border-radius: 4px; transition: background .12s var(--ease); }
+.np-app .act-row:hover { background: rgba(15,51,51,.30); }
+.np-app .act-row:last-child { border-bottom: none; }
+.np-app .act-row .glyph { width: 22px; height: 22px; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; font-weight: 700; }
+.np-app .act-row .glyph.c-sold   { background: var(--tint-neon); color: var(--neon); }
+.np-app .act-row .glyph.c-bought { background: var(--tint-warning); color: var(--warning); }
+.np-app .act-row .glyph.p-sold   { background: var(--tint-positive); color: var(--positive); }
+.np-app .act-row .glyph.p-bought { background: var(--tint-negative); color: var(--negative); }
+.np-app .act-row .date { font-family: var(--mono); font-size: 11px; color: var(--fg3); letter-spacing: 1.1px; }
+.np-app .act-row .amt  { font-family: var(--mono); font-size: 14px; font-weight: 500; letter-spacing: -.01em; }
+.np-app .act-row .amt.pos { color: var(--positive); }
+.np-app .act-row .amt.neg { color: var(--negative); }
+.np-app .act-row .albl { font-family: var(--mono); font-size: 12px; color: var(--fg2); letter-spacing: .6px; text-transform: uppercase; }
+.np-app .act-row .realized { margin-left: 10px; font-weight: 700; font-size: 13px; }
+.np-app .act-row .realized.pos { color: var(--positive); }
+.np-app .act-row .realized.neg { color: var(--negative); }
+
+/* Foot */
+.np-app .mod-foot { margin-top: 36px; padding: 24px 44px 30px; border-top: var(--hair); display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.np-app .mod-foot .left { display: flex; gap: 22px; align-items: center; flex-wrap: wrap; }
+.np-app .mod-foot .right { display: flex; gap: 12px; }
+.np-app .danger-link { background: transparent; border: none; cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg3); transition: color .15s var(--ease); padding: 0; }
+.np-app .danger-link:hover { color: var(--negative); }
+.np-app .danger-link.strong { color: var(--negative); opacity: .85; }
+.np-app .danger-link.strong:hover { opacity: 1; }
+.np-app .mod-confirm { font-family: var(--mono); font-size: 11px; color: var(--fg2); display: inline-flex; gap: 12px; align-items: center; }
+
+/* Buttons */
+.np-app .mbtn { font-family: var(--mono); font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; padding: 11px 20px; border-radius: 4px; cursor: pointer; border: 1px solid transparent; transition: background .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease); }
+.np-app .mbtn.text { background: transparent; color: var(--fg2); border-color: var(--bright); }
+.np-app .mbtn.text:hover { color: var(--fg1); border-color: var(--fg2); }
+.np-app .mbtn.text:disabled { opacity: .4; cursor: not-allowed; }
+.np-app .mbtn.neon { background: var(--neon); color: var(--page); border-color: var(--neon); font-weight: 600; }
+.np-app .mbtn.neon:hover { background: var(--neon-dark); border-color: var(--neon-dark); }
