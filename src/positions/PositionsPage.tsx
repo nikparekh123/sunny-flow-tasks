@@ -126,11 +126,12 @@ export default function PositionsPage() {
 
   const isDown = portfolio.total_pnl < 0;
 
-  // ?v2=1 opt-in to the redesigned (Navi editorial) body. The modal
+  // The redesigned (Navi editorial) body is now the DEFAULT. The old
+  // layout is still reachable via ?v1=1 as a safety fallback. The modal
   // stack stays shared inside .np-app either way — the new body renders
-  // its own .dash shell nested within. Flag flips to default in PP-7.
-  const useV2 = typeof window !== 'undefined'
-    && new URLSearchParams(window.location.search).get('v2') === '1';
+  // its own .dash shell nested within.
+  const useV2 = typeof window === 'undefined'
+    || new URLSearchParams(window.location.search).get('v1') !== '1';
 
   return (
     <div className="np-app">
