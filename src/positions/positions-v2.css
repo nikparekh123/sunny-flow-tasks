@@ -374,9 +374,15 @@
 .np-app .pp-icon-btn { color: var(--fg3); font-family: var(--mono); font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; }
 .np-app .pp-icon-btn:hover { color: var(--negative); }
 .np-app .pp-tab-row { padding: 20px 44px 0; border-bottom: var(--hair); }
-.np-app .pp-sidecar { padding: 0; }
-.np-app .pp-form { padding: 32px 36px 32px 44px; }
-.np-app .pp-rail { padding: 32px 44px 32px 36px; border-left: var(--hair); }
+/* Inset the body 44px on both sides so it lines up with the head / tabs /
+   footer, and the rail card gets the same right margin as everything else —
+   rather than relying on the rail's own inner padding (which left it hugging
+   the right edge). Outer paddings move onto the sidecar; the form/rail keep
+   only the inner gutter + vertical padding. Rail widened so the card reads as
+   a real panel, not a thin strip jammed against the edge. */
+.np-app .pp-sidecar { padding: 0 44px; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; }
+.np-app .pp-form { padding: 32px 24px 32px 0; }
+.np-app .pp-rail { padding: 32px 0 32px 24px; border-left: var(--hair); }
 .np-app .pp-popup-foot { padding: 24px 44px 30px; border-top: var(--hair); margin-top: 8px; }
 /* Footer buttons → editorial mbtn look */
 .np-app .pp-btn { font-family: var(--mono); font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; padding: 11px 20px; border-radius: 4px; border: 1px solid transparent; }
