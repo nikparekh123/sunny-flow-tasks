@@ -31,7 +31,7 @@ import {
   BrandBar, Greeting, MarketsClock, TickerStrip,
   AttentionBlock, CalendarBlock, BNFBlock,
   PortfolioBlockCompact, IncomeMix, MacroBlock, RiskBlock,
-  NewsBand, ToolsRail,
+  NewsBand,
 } from "./blocks";
 import { useNow, marketClock, fmtBrandDate } from "./time";
 
@@ -67,7 +67,12 @@ export function CockpitLayout({
     <div className="dash">
       <div className="dash-inner">
 
-        <BrandBar dateLabel={dateLabel} />
+        <BrandBar
+          dateLabel={dateLabel}
+          onPositions={onPositions}
+          onStrategy={onStrategy}
+          onMath={onMath}
+        />
 
         {/* Hero band — greeting + markets clock in one tight row */}
         <div className="row first">
@@ -131,14 +136,6 @@ export function CockpitLayout({
             <NewsBand n="07" />
           </div>
         )}
-
-        <div className="row" style={{ marginTop: 56 }}>
-          <ToolsRail
-            onPositions={onPositions}
-            onStrategy={onStrategy}
-            onMath={onMath}
-          />
-        </div>
 
       </div>
     </div>

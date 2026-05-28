@@ -104,6 +104,31 @@
 .dash .brandbar .mark .route { color: var(--fg2); }
 .dash .brandbar .actions { display: flex; align-items: center; gap: 14px; }
 
+/* Nav inside the brand bar — sits centred between the SUNNYFI mark
+ * and the date label. Pure-text links with the same animated
+ * letter-spacing reveal the old footer ToolsRail had. */
+.dash .brandbar-nav {
+  display: flex;
+  gap: 28px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+.dash .brandbar-nav-link {
+  color: var(--fg2);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .15s var(--ease), letter-spacing .2s var(--ease);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dash .brandbar-nav-link:hover {
+  color: var(--neon);
+  letter-spacing: 1.9px;
+}
+
 .dash .cursor { display: inline-block; width: .45ch; height: .9em; background: var(--neon); vertical-align: -.08em; margin-left: 3px; animation: blink 1s steps(1) infinite; }
 .dash .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 8px rgba(210,230,50,.45); animation: pulse 2.5s var(--ease) infinite; }
 

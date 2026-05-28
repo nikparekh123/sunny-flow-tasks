@@ -30,7 +30,14 @@ import { useState } from "react";
 
 // ─────────────────── Brand bar ───────────────────────────────────
 
-export function BrandBar({ dateLabel }: { dateLabel?: string }) {
+export function BrandBar({
+  dateLabel, onPositions, onStrategy, onMath,
+}: {
+  dateLabel?: string;
+  onPositions?: () => void;
+  onStrategy?: () => void;
+  onMath?: () => void;
+}) {
   return (
     <div className="brandbar">
       <div className="mark">
@@ -38,6 +45,11 @@ export function BrandBar({ dateLabel }: { dateLabel?: string }) {
         <span className="slash">/</span>
         <span className="route">Morning brief<span className="cursor" /></span>
       </div>
+      <nav className="brandbar-nav">
+        <a className="brandbar-nav-link" onClick={onPositions}>→ Positions</a>
+        <a className="brandbar-nav-link" onClick={onStrategy}>→ Strategy</a>
+        <a className="brandbar-nav-link" onClick={onMath}>→ Math</a>
+      </nav>
       <div className="actions">
         {dateLabel && <span className="label">{dateLabel}</span>}
       </div>
