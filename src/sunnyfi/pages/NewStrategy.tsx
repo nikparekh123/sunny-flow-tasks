@@ -17,8 +17,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { BNF_UNIVERSE, type UniverseMember } from '@/sunnyfi/data/bnfUniverse';
 import { CountUp } from '@/sunnyfi/lib/animation';
-import '@/positions/positions.css';
+import { Section } from '@/sunnyfi/dashboard/atoms';
+import { TickerStrip } from '@/sunnyfi/dashboard/blocks';
+import '@/sunnyfi/pages/dashboard.css';
 import './new-strategy.css';
+import './new-strategy-v2.css';
 
 const DASHBOARD_URL = 'https://www.sunnyfi.co/dashboard';
 const STALE_DAYS_EQUITY = 10;
@@ -589,13 +592,8 @@ export default function NewStrategy() {
   // Each row carries metadata (from BNF_UNIVERSE) + latest-price snapshot
   // (from the view) + optional BNF candidate match (from bnf_candidates).
   // The tier drives the row's color treatment.
-  interface UniverseRow {
-    member: UniverseMember;
-    latest: UniverseLatestRow | null;
-    candidate: Candidate | null;
-    tier: RowTier;
-    researchStatus: ResearchStatus;
-  }
+  // UniverseRow is module-scoped (defined near the bottom) so the new
+  // presentation helpers (UniRow, TriageRail) can share the type.
   const universeRows: UniverseRow[] = useMemo(() => BNF_UNIVERSE.map((member) => {
     const latest = latestByTicker.get(member.ticker) ?? null;
     const candidate = candidateByTicker.get(member.ticker) ?? null;
@@ -747,141 +745,154 @@ export default function NewStrategy() {
   );
 
   // ── render ──
+  // Root carries `dash` (design tokens/atoms) + `np-app` so the legacy
+  // ScanProgressBanner (.np-app .bnf-progress …) stays styled. positions.css
+  // isn't imported here, so np-app only activates the bnf-* rules from
+  // new-strategy.css — no token conflict with .dash.
   return (
-    <div className="np-app">
-      <header className="np-top">
-        <div className="np-brand-row">
-          <a className="np-brand" href={DASHBOARD_URL} title="Back to dashboard">
-            Sunnyfi<span className="cursor" />
-          </a>
-          <span className="np-crumb-sep">/</span>
-          <span className="np-crumb">NEW STRATEGY</span>
-          <span className="np-crumb-sub"> · BNF mean-reversion</span>
+    <div className="dash np-app">
+      <div className="dash-inner">
+        {/* Brand bar — same shell as Dashboard / Positions */}
+        <div className="row first">
+          <div className="brandbar">
+            <div className="mark">
+              <a className="logo" href={DASHBOARD_URL} style={{ textDecoration: 'none', cursor: 'pointer' }}>◆ SUNNYFI</a>
+              <span className="slash">/</span>
+              <span className="route">New Strategy<span className="cursor" /></span>
+              <nav className="top-nav">
+                <a className="nav-link" href="https://positions.sunnyfi.co">Positions</a>
+                <a className="nav-link on">New Strategy</a>
+              </nav>
+            </div>
+            <div className="actions ns-actions">
+              <span className={'pill muted' + (backfilling || refreshingCache || scanning ? ' busy' : '')}
+                onClick={() => !(backfilling || refreshingCache || scanning) && runCacheBackfill()}
+                title="One-time: load 260 trading days of OHLCV into the cache (~3–5 min).">
+                {backfilling ? 'Backfilling…' : '⤓ Backfill'}
+              </span>
+              <span className={'pill muted' + (refreshingCache || backfilling || scanning ? ' busy' : '')}
+                onClick={() => !(refreshingCache || backfilling || scanning) && runCacheUpdate()}
+                title="Daily incremental cache update (~10s).">
+                {refreshingCache ? 'Updating…' : '↻ Refresh cache'}
+              </span>
+              <span className={'pill muted' + (refreshingFlags || candidates.length === 0 ? ' busy' : '')}
+                onClick={() => !(refreshingFlags || candidates.length === 0) && runRefreshFlags()}
+                title="Re-pull SEC EDGAR + earnings for current candidates.">
+                {refreshingFlags ? 'Flags…' : '↻ Risk flags'}
+              </span>
+              <span className={'pill muted' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('etf')} title="Scan the ~30 sector/industry ETFs.">
+                {scanning && scanMode === 'etf' ? 'Scanning…' : '↻ ETF scan'}
+              </span>
+              <span className={'pill muted' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('equity')} title="Scan the ~1000-name equity universe.">
+                {scanning && scanMode === 'equity' ? 'Scanning…' : '↻ Equity scan'}
+              </span>
+              <span className={'pill refresh-all' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('both')} title="Run both universes.">
+                {scanning && scanMode === 'both' ? 'Scanning…' : '↻ Refresh all'}
+              </span>
+            </div>
+          </div>
         </div>
-        <div className="bnf-top-actions">
-          <button
-            className="np-btn"
-            disabled={backfilling || refreshingCache || scanning}
-            onClick={runCacheBackfill}
-            title="One-time + manual: load 260 trading days of OHLCV into the cache. Takes ~3–5 minutes."
-          >
-            {backfilling ? 'Backfilling cache…' : '⤓ Backfill cache'}
-          </button>
-          <button
-            className="np-btn"
-            disabled={refreshingCache || backfilling || scanning}
-            onClick={runCacheUpdate}
-            title="Daily incremental: pull yesterday's grouped snapshot into the cache. Fast (~10s)."
-          >
-            {refreshingCache ? 'Updating cache…' : '↻ Refresh cache'}
-          </button>
-          <button
-            className="np-btn"
-            disabled={refreshingFlags || candidates.length === 0}
-            onClick={runRefreshFlags}
-            title="Re-pull SEC EDGAR (8-K + insider) + earnings dates for current candidates without re-running the universe scan."
-          >
-            {refreshingFlags ? 'Refreshing flags…' : '↻ Refresh risk flags'}
-          </button>
-          <button
-            className="np-btn"
-            disabled={scanning}
-            onClick={() => runScan('etf')}
-            title="Scan only the ~30 sector & industry ETFs (fast)."
-          >
-            {scanning && scanMode === 'etf' ? 'Scanning…' : '↻ Refresh ETF scan'}
-          </button>
-          <button
-            className="np-btn"
-            disabled={scanning}
-            onClick={() => runScan('equity')}
-            title="Scan only the ~1000-name equity universe."
-          >
-            {scanning && scanMode === 'equity' ? 'Scanning…' : '↻ Refresh equity scan'}
-          </button>
-          <button
-            className="np-btn neon"
-            disabled={scanning}
-            onClick={() => runScan('both')}
-            title="Run both universes."
-          >
-            {scanning && scanMode === 'both' ? 'Scanning…' : '↻ Refresh all'}
-          </button>
-        </div>
-      </header>
 
-      <main className="np-main">
+        {/* Market context strip */}
+        <div className="row tight" style={{ marginTop: 28 }}>
+          <TickerStrip compact />
+        </div>
+
+        {/* Banners */}
         {scanErr && (
-          <div className="bnf-banner err">Scan failed: {scanErr}</div>
+          <div className="row tight" style={{ marginTop: 18 }}>
+            <div className="ns-banner err">Scan failed: {scanErr}</div>
+          </div>
         )}
-
-        {/* Live scan progress banner — fades 5s after success, sticks on error */}
         {showStatus && scanStatus && (
-          <ScanProgressBanner
-            status={scanStatus}
-            onDismiss={() => setShowStatus(false)}
-          />
+          <div className="row tight" style={{ marginTop: 12 }}>
+            <ScanProgressBanner status={scanStatus} onDismiss={() => setShowStatus(false)} />
+          </div>
         )}
-
         {greenCount > 0 && (
-          <div className="bnf-banner ready">
-            ▶ {greenCount} position{greenCount === 1 ? '' : 's'} ready to sell — price reached SMA25
+          <div className="row tight" style={{ marginTop: 12 }}>
+            <div className="ns-banner ready">▶ {greenCount} position{greenCount === 1 ? '' : 's'} ready to sell — price reached SMA25</div>
           </div>
         )}
 
-        {/* ────── UNIFIED UNIVERSE TABLE ──────
-            All ~1030 tickers (S&P 400 + 600 + ~30 ETFs) always visible.
-            Gray = not in BNF setup today. Neon = match. Yellow = near miss.
-            Re-running the scan only repaints the colors — every ticker
-            keeps its row + latest price + dev%. */}
-        <section className="np-section">
-          <div className="np-section-hd">
-            <div className="np-section-title">
-              Universe · <CountUp value={filteredUniverseRows.length} duration={1200} /> of <CountUp value={universeRows.length} duration={1200} delay={100} />
-              {' '}<span className="bnf-tier-chip match"><CountUp value={matchCount} delay={300} /> match</span>
-              {' '}<span className="bnf-tier-chip borderline"><CountUp value={borderlineCount} delay={400} /> near miss</span>
-              {watchlistCount > 0 && (
-                <> <span className="bnf-tier-chip watch"><CountUp value={watchlistCount} delay={500} /> on watch</span></>
-              )}
-              {latestUniverseDate && (
-                <span className="bnf-section-sub-inline">
-                  {' '}· last close {latestUniverseDate}
-                </span>
-              )}
+        {/* § 00 — Today's scan hero + dev-band scatter */}
+        <div className="row" style={{ marginTop: 56 }}>
+          <Section n="00" right={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><span className="live-dot" />{latestUniverseDate ? `last close ${latestUniverseDate}` : 'scan'}</span>}>Today's scan · BNF mean-reversion</Section>
+          <div className="scan-hero">
+            <div className="col"><div className="label">BNF match</div><div className="big neon"><CountUp value={matchCount} delay={50} /></div><div className="cap">dev ∈ [−15%, −7%] · close &gt; SMA200 · today &gt; −5%</div></div>
+            <div className="col"><div className="label">Near miss</div><div className="big warn"><CountUp value={borderlineCount} delay={150} /></div><div className="cap">within 0.5% of any threshold</div></div>
+            <div className="col"><div className="label">On watch</div><div className="big fg2"><CountUp value={watchlistCount} delay={250} /></div><div className="cap">considering or approved · not yet bought</div></div>
+            <div className="col meta">
+              <div><div className="label">Universe scanned</div><div className="scan-cnt"><CountUp value={universeRows.length} duration={1400} /> <span className="of">/ {universeRows.length}</span></div></div>
+              <div><div className="stamp">S&amp;P 400 + 600 · <b>~30 sector ETFs</b></div>{latestUniverseDate && <div className="stamp" style={{ marginTop: 6 }}>Last close <b>{latestUniverseDate}</b></div>}</div>
             </div>
-            <div className="np-section-sub">
-              Every ticker we track. BNF strategy match = dev ∈ [−15%, −7%], close &gt; SMA200,
-              today &gt; −5%, sector ETF healthy. Near miss = within 0.5% of any threshold.
+          </div>
+          <ScanBand rows={sortedUniverseRows} />
+        </div>
+
+        {/* § 01 — Triage queue */}
+        <div className="row" style={{ marginTop: 64 }}>
+          <TriageRail
+            rows={sortedUniverseRows}
+            onStatus={(t, s) => setStatusMutation.mutate({ ticker: t, status: s })}
+            onBuy={(c) => buyMutation.mutate(c)}
+            buyPending={buyMutation.isPending}
+          />
+        </div>
+
+        {/* § 02 — Pipeline */}
+        <div className="row" style={{ marginTop: 72 }}>
+          <Section n="02" right={<span style={{ color: 'var(--fg3)' }}>Approved → buy</span>}>Pipeline</Section>
+          <div className="pipeline">
+            {(() => {
+              const consideringN = universeRows.filter((r) => r.researchStatus === 'considering').length;
+              const approvedN = universeRows.filter((r) => r.researchStatus === 'approved').length;
+              const boughtN = openPositions.length;
+              const pendingN = matchCount + borderlineCount - consideringN - approvedN;
+              const stage = (cls: string, label: string, v: number, sub: string, delay: number) => (
+                <div className={'stage ' + cls}><span className="l">{label}</span><span className="v"><CountUp value={Math.max(0, v)} delay={delay} /></span><span className="sub">{sub}</span></div>
+              );
+              return (<>
+                {stage('pending', 'Pending', pendingN, 'untouched', 0)}
+                <div className="sep" />
+                {stage('considering', 'Considering', consideringN, 'in research', 120)}
+                <div className="sep" />
+                {stage('approved', 'Approved', approvedN, 'ready to buy', 240)}
+                <div className="sep" />
+                {stage('bought', 'Bought', boughtN, 'in positions', 360)}
+              </>);
+            })()}
+          </div>
+        </div>
+
+        {/* § 03 — Universe firehose */}
+        <section className="np-section uni-section">
+          <Section right={
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+              <span className="meta">{filteredUniverseRows.length} of {universeRows.length} shown</span>
+              <span className={'pill muted' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('both')} style={{ cursor: 'pointer' }}>↻ Rescan</span>
+            </span>
+          }>Universe</Section>
+          <div className="uni-tools">
+            <div className="group">
+              <select className="sel" value={universeFilter} onChange={(e) => setUniverseFilter(e.target.value as UniverseFilter)} aria-label="Universe filter">
+                <option value="all">All tickers</option>
+                <option value="matches">BNF matches only</option>
+                <option value="near-miss">Near miss only</option>
+                <option value="watchlist">Watchlist (considering + approved)</option>
+                <option value="equity">Equities only</option>
+                <option value="etf">ETFs only</option>
+              </select>
             </div>
-            <div className="bnf-filter-row">
-              <label className="bnf-filter-toggle bnf-filter-select">
-                Show:
-                <select
-                  className="bnf-filter-dropdown"
-                  value={universeFilter}
-                  onChange={(e) => setUniverseFilter(e.target.value as UniverseFilter)}
-                  aria-label="Universe filter"
-                >
-                  <option value="all">All tickers</option>
-                  <option value="matches">BNF matches only</option>
-                  <option value="near-miss">Near miss only</option>
-                  <option value="watchlist">Watchlist (considering + approved)</option>
-                  <option value="equity">Equities only</option>
-                  <option value="etf">ETFs only</option>
-                </select>
-              </label>
-              <label className="bnf-filter-toggle">
-                <input
-                  type="checkbox"
-                  checked={hideSkipped}
-                  onChange={(e) => setHideSkipped(e.target.checked)}
-                />
+            <div className="group">
+              <label className="toggle">
+                <input type="checkbox" checked={hideSkipped} onChange={(e) => setHideSkipped(e.target.checked)} />
                 Hide skipped
               </label>
             </div>
           </div>
-          <div className="np-table-wrap">
-            <table className="np-table bnf-candidates-table bnf-universe-table">
+          <div className="uni-table-wrap">
+            <table className="uni-table">
               <thead>
                 <tr>
                   <th>Ticker</th>
@@ -889,229 +900,74 @@ export default function NewStrategy() {
                   <th className="num">Price</th>
                   <th className="num">SMA25</th>
                   <th className="num">Dev %</th>
-                  <th className="num">SMA200</th>
-                  <th className="num">ADV20 $M</th>
                   <th className="num">Today</th>
-                  <th className="num bnf-flag-th">Days since earn</th>
-                  <th className="num bnf-flag-th">Insider (14d)</th>
-                  <th className="num bnf-flag-th">8-K (14d)</th>
+                  <th className="num">ADV $M</th>
+                  <th className="ctr">Risk</th>
                   <th>Setup</th>
                   <th>Status</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredUniverseRows.length === 0 ? (
-                  <tr><td colSpan={14} className="bnf-empty">
+                {filteredUniverseRows.filter((r) => !hideSkipped || r.researchStatus !== 'skipped').length === 0 ? (
+                  <tr><td colSpan={11} className="uni-empty">
                     {universeRows.length === 0
-                      ? <>Universe cache is empty. Click <b>Backfill cache</b> to load history, then <b>Refresh all</b>.</>
+                      ? <>Universe cache is empty. Click <b>Backfill</b> to load history, then <b>Refresh all</b>.</>
                       : <>No tickers match this filter.</>}
                   </td></tr>
                 ) : filteredUniverseRows
                     .filter((r) => !hideSkipped || r.researchStatus !== 'skipped')
-                    .map((r) => {
-                  const { member, latest, candidate, tier, researchStatus: status } = r;
-                  // Risk-flag tones — only meaningful when this ticker is a BNF
-                  // match (the candidate row carries EDGAR data). Otherwise neutral.
-                  const tEarn = candidate ? earningsTone(candidate.days_since_earnings) : 'none';
-                  const tIns  = candidate ? insiderTone(candidate.insider_sales) : 'none';
-                  const t8K   = candidate ? eightKTone(candidate.recent_8ks) : 'none';
-                  const quality = candidate ? setupQuality(tEarn, tIns, t8K) : null;
-                  const price = candidate?.price ?? latest?.latest_close ?? null;
-                  const sma25 = candidate?.sma25 ?? latest?.sma25 ?? null;
-                  const sma200 = candidate?.sma200 ?? latest?.sma200 ?? null;
-                  const dev = candidate?.deviation_pct ?? latest?.deviation_pct ?? null;
-                  const adv = candidate?.adv20_m ?? latest?.adv20_m ?? null;
-                  const intraday = candidate?.today_intraday_pct ?? latest?.today_intraday_pct ?? null;
-                  return (
-                    <tr
-                      key={`${member.universe}:${member.ticker}`}
-                      className={`bnf-row tier-${tier} status-${status}${tier === 'borderline' ? ' borderline' : ''}`}
-                    >
-                      <td className="ticker">
-                        {member.universe === 'ETF' && <span className="bnf-univ-badge etf">ETF</span>}
-                        {member.universe === 'ETF' ? ' ' : ''}{member.ticker}
-                        {tier === 'borderline' && candidate && (
-                          <span
-                            className="bnf-borderline-chip"
-                            title={borderlineTooltip(candidate.borderline_reasons)}
-                          >
-                            near miss
-                          </span>
-                        )}
-                      </td>
-                      <td className="bnf-name" title={candidate?.name ?? member.name ?? ''}>
-                        {candidate?.name ?? member.name ?? '—'}
-                        {member.sector && (
-                          <span className="bnf-row-sector"> · {member.sector}</span>
-                        )}
-                        {member.category && (
-                          <span className="bnf-row-sector"> · {member.category}</span>
-                        )}
-                      </td>
-                      <td className="num strong">{price != null ? fmtUSD(price) : '—'}</td>
-                      <td className="num">{sma25 != null ? fmtUSD(sma25) : '—'}</td>
-                      <td className={`num strong ${dev != null && dev < 0 ? 'down' : ''}`}>
-                        {dev != null ? fmtPct(dev) : '—'}
-                      </td>
-                      <td className="num">{sma200 != null ? fmtUSD(sma200) : '—'}</td>
-                      <td className="num">{adv != null ? `$${adv.toFixed(0)}M` : '—'}</td>
-                      <td className={`num ${intraday != null && intraday < 0 ? 'down' : ''}`}>
-                        {intraday != null ? fmtPct(intraday) : '—'}
-                      </td>
-
-                      {/* Risk-flag cells — only colored when this ticker is a BNF match. */}
-                      <td className={`num bnf-flag tone-${tEarn}`}>
-                        {candidate?.days_since_earnings != null ? `${candidate.days_since_earnings}d` : '—'}
-                      </td>
-                      <td className={`num bnf-flag tone-${tIns}`} title={candidate ? insiderTooltip(candidate.insider_sales) : ''}>
-                        {candidate ? fmtInsider(candidate.insider_sales) : '—'}
-                      </td>
-                      <td className={`num bnf-flag tone-${t8K}`} title={candidate ? eightKTooltip(candidate.recent_8ks) : ''}>
-                        {candidate?.recent_8ks && candidate.recent_8ks.length > 0
-                          ? <EightKLinks items={candidate.recent_8ks} />
-                          : '—'}
-                      </td>
-                      <td className={quality ? `bnf-quality tone-${quality}` : 'bnf-quality tone-none'}>
-                        {quality === 'clean' ? 'Clean' : quality === 'review' ? 'Review' : quality === 'caution' ? 'Caution' : '—'}
-                      </td>
-                      <td className="bnf-status-cell">
-                        <select
-                          className={`bnf-status-select status-${status}`}
-                          value={status}
-                          onChange={(e) =>
-                            setStatusMutation.mutate({
-                              ticker: member.ticker,
-                              status: e.target.value as ResearchStatus,
-                            })
-                          }
-                          disabled={setStatusMutation.isPending}
-                          aria-label="Research status"
-                        >
-                          {STATUS_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>{o.label}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="num">
-                        {candidate ? (
-                          <button
-                            className="np-btn neon bnf-row-btn"
-                            onClick={() => buyMutation.mutate(candidate)}
-                            disabled={buyMutation.isPending}
-                          >
-                            Buy
-                          </button>
-                        ) : null}
-                      </td>
-                    </tr>
-                  );
-                })}
+                    .map((r) => (
+                      <UniRow
+                        key={`${r.member.universe}:${r.member.ticker}`}
+                        row={r}
+                        onTicker={() => setStatusMutation.mutate({ ticker: r.member.ticker, status: r.researchStatus })}
+                        onStatus={(s) => setStatusMutation.mutate({ ticker: r.member.ticker, status: s })}
+                        onBuy={() => r.candidate && buyMutation.mutate(r.candidate)}
+                        busy={setStatusMutation.isPending || buyMutation.isPending}
+                      />
+                    ))}
               </tbody>
             </table>
           </div>
         </section>
 
-        <OpenPositionsTable
-          title="Open equity positions"
-          rows={equityOpenView}
-          universe="EQUITY"
-          stale={STALE_DAYS_EQUITY}
-          onSell={(p, reason, exitPrice) =>
-            sellMutation.mutate({ p, reason, exitPrice })
-          }
-          sellPending={sellMutation.isPending}
-        />
+        {/* § 04 / 05 — open positions */}
+        <div className="row" style={{ marginTop: 72 }}>
+          <OpenPositionsV2
+            title="Open equity positions"
+            rows={equityOpenView}
+            universe="EQUITY"
+            stale={STALE_DAYS_EQUITY}
+            onSell={(p, reason, exitPrice) => sellMutation.mutate({ p, reason, exitPrice })}
+            sellPending={sellMutation.isPending}
+          />
+        </div>
+        <div className="row" style={{ marginTop: 56 }}>
+          <OpenPositionsV2
+            title="Open ETF positions"
+            rows={etfOpenView}
+            universe="ETF"
+            stale={STALE_DAYS_ETF}
+            onSell={(p, reason, exitPrice) => sellMutation.mutate({ p, reason, exitPrice })}
+            sellPending={sellMutation.isPending}
+          />
+        </div>
 
-        <OpenPositionsTable
-          title="Open ETF positions"
-          rows={etfOpenView}
-          universe="ETF"
-          stale={STALE_DAYS_ETF}
-          onSell={(p, reason, exitPrice) =>
-            sellMutation.mutate({ p, reason, exitPrice })
-          }
-          sellPending={sellMutation.isPending}
-        />
-
-        {/* ────── CLOSED TRADES (collapsible) ────── */}
+        {/* § 06 — closed trades */}
         {closedPositions.length > 0 && (
-          <section className="np-section">
-            <button
-              className="bnf-closed-toggle"
-              onClick={() => setClosedOpen((v) => !v)}
-            >
-              {closedOpen ? '▾' : '▸'} Closed trades · {closedPositions.length}
-              {closedStats && (
-                <span className="bnf-closed-stats">
-                  {closedEquityStats && (
-                    <span className="bnf-closed-univ">
-                      <b className="bnf-univ-badge equity">E</b> {closedEquityStats.total}
-                      {' · '}win <b>{closedEquityStats.winRate.toFixed(0)}%</b>
-                      {' · '}avg <b className={closedEquityStats.avgReturn >= 0 ? 'up' : 'down'}>{fmtPct(closedEquityStats.avgReturn, 1)}</b>
-                    </span>
-                  )}
-                  {closedEtfStats && (
-                    <span className="bnf-closed-univ">
-                      <b className="bnf-univ-badge etf">ETF</b> {closedEtfStats.total}
-                      {' · '}win <b>{closedEtfStats.winRate.toFixed(0)}%</b>
-                      {' · '}avg <b className={closedEtfStats.avgReturn >= 0 ? 'up' : 'down'}>{fmtPct(closedEtfStats.avgReturn, 1)}</b>
-                    </span>
-                  )}
-                  <span className="bnf-closed-univ combined">
-                    all · win <b>{closedStats.winRate.toFixed(0)}%</b>
-                    {' · '}avg <b className={closedStats.avgReturn >= 0 ? 'up' : 'down'}>{fmtPct(closedStats.avgReturn, 1)}</b>
-                    {' · '}{closedStats.avgDays.toFixed(1)}d
-                  </span>
-                </span>
-              )}
-            </button>
-            {closedOpen && (
-              <div className="np-table-wrap">
-                <table className="np-table">
-                  <thead>
-                    <tr>
-                      <th>Univ</th>
-                      <th>Ticker</th>
-                      <th className="num">Entry</th>
-                      <th className="num">Exit</th>
-                      <th className="num">Entry $</th>
-                      <th className="num">Exit $</th>
-                      <th className="num">Return %</th>
-                      <th className="num">Hold</th>
-                      <th>Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {closedPositions.map((p) => {
-                      const hold = p.exit_date ? daysBetween(p.entry_date, p.exit_date) : 0;
-                      return (
-                        <tr key={p.id}>
-                          <td>
-                            <span className={`bnf-univ-badge ${p.universe === 'ETF' ? 'etf' : 'equity'}`}>
-                              {p.universe === 'ETF' ? 'ETF' : 'E'}
-                            </span>
-                          </td>
-                          <td className="ticker">{p.ticker}</td>
-                          <td className="num">{p.entry_date}</td>
-                          <td className="num">{p.exit_date}</td>
-                          <td className="num">{fmtUSD(p.entry_price)}</td>
-                          <td className="num">{fmtUSD(p.exit_price)}</td>
-                          <td className={'num strong ' + ((p.realized_pct ?? 0) >= 0 ? 'up' : 'down')}>
-                            {fmtPct(p.realized_pct, 2)}
-                          </td>
-                          <td className="num">{hold}d</td>
-                          <td>{p.exit_reason}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+          <div className="row" style={{ marginTop: 72 }}>
+            <ClosedV2
+              rows={closedPositions}
+              stats={closedStats}
+              eq={closedEquityStats}
+              etf={closedEtfStats}
+              open={closedOpen}
+              onToggle={() => setClosedOpen((v) => !v)}
+            />
+          </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
@@ -1130,9 +986,253 @@ interface OpenView extends Position {
 
 /** Reusable open-positions section. Rendered twice on the page — once
  *  for EQUITY and once for ETF — with different rows + stale thresholds. */
-function OpenPositionsTable({
-  title, rows, universe, stale, onSell, sellPending,
-}: {
+// ── Module-scoped row type, shared by the new presentation helpers ──
+interface UniverseRow {
+  member: UniverseMember;
+  latest: UniverseLatestRow | null;
+  candidate: Candidate | null;
+  tier: RowTier;
+  researchStatus: ResearchStatus;
+}
+
+// Effective per-row values — a fresh candidate snapshot beats the cache.
+function rowVals(r: UniverseRow) {
+  const c = r.candidate, l = r.latest;
+  return {
+    price: c?.price ?? l?.latest_close ?? null,
+    sma25: c?.sma25 ?? l?.sma25 ?? null,
+    dev: c?.deviation_pct ?? l?.deviation_pct ?? null,
+    adv: c?.adv20_m ?? l?.adv20_m ?? null,
+    today: c?.today_intraday_pct ?? l?.today_intraday_pct ?? null,
+  };
+}
+// FlagTone (red/amber/none) → risk-dot class. A candidate with no concern
+// reads green ('clean'); a non-candidate / no-data flag is grey ('none').
+const dotCls = (t: FlagTone, isCand: boolean) =>
+  t === 'red' ? 'caution' : t === 'amber' ? 'review' : isCand ? 'clean' : 'none';
+const verdictLabel = (v: string | null) => (!v || v === 'none' ? '—' : v.charAt(0).toUpperCase() + v.slice(1));
+const STATUS_CYCLE: Record<ResearchStatus, ResearchStatus> = {
+  pending: 'considering', considering: 'approved', approved: 'pending', skipped: 'pending',
+};
+// Dev band: position a marker on the −15%…+5% axis.
+const devBandPct = (v: number) => Math.max(2, Math.min(98, ((v - -15) / (5 - -15)) * 100));
+
+// ── § 00 — dev% scatter band ──
+function ScanBand({ rows }: { rows: UniverseRow[] }) {
+  const min = -16, max = 5;
+  const pct = (v: number) => ((v - min) / (max - min)) * 100;
+  const ticks = [-15, -10, -7, -5, 0, 5];
+  const dots = rows
+    .map((r) => ({ x: rowVals(r).dev, tier: r.tier }))
+    .filter((d): d is { x: number; tier: RowTier } => d.x != null && d.x >= min && d.x <= max);
+  return (
+    <div className="scan-band">
+      <div className="axis">
+        <div className="band-zone" style={{ left: pct(-15) + '%', right: (100 - pct(-7)) + '%' }} />
+        <div className="axis-line" />
+        {ticks.map((v) => (
+          <div key={'t' + v}>
+            <div className={'axis-tick' + (v === 0 ? ' zero' : '') + (v === -7 ? ' threshold' : '')} style={{ left: pct(v) + '%' }} />
+            <div className={'axis-label' + (v === 0 ? ' zero' : '') + (v === -7 ? ' threshold' : '')} style={{ left: pct(v) + '%' }}>
+              {v === -7 ? '−7% threshold' : v === 0 ? '0%' : v > 0 ? `+${v}%` : `${v}%`}
+            </div>
+          </div>
+        ))}
+        {dots.map((d, i) => (
+          <div key={i} className={'dot ' + (d.tier === 'match' ? 'match' : d.tier === 'borderline' ? 'borderline' : 'muted')} style={{ left: pct(d.x) + '%' }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── § 01 — triage card ──
+function TriageCard({ row, onStatus, onBuy, buyPending }: {
+  row: UniverseRow;
+  onStatus: (t: string, s: ResearchStatus) => void;
+  onBuy: (c: Candidate) => void;
+  buyPending: boolean;
+}) {
+  const { member, candidate, tier, researchStatus: status } = row;
+  const v = rowVals(row);
+  const tones = { earn: candidate ? earningsTone(candidate.days_since_earnings) : 'none' as FlagTone,
+    ins: candidate ? insiderTone(candidate.insider_sales) : 'none' as FlagTone,
+    k: candidate ? eightKTone(candidate.recent_8ks) : 'none' as FlagTone };
+  const quality = candidate ? setupQuality(tones.earn, tones.ins, tones.k) : null;
+  const cls = ['tcard', tier === 'match' ? 'match' : '', tier === 'borderline' ? 'borderline' : '',
+    status === 'approved' ? 'approved' : '',
+    tier === 'match' && (status === 'considering' || status === 'pending') ? 'breath' : ''].filter(Boolean).join(' ');
+  const todayTone = (v.today ?? 0) < 0 ? 'neg' : 'pos';
+  const markCls = tier === 'match' ? 'neon' : tier === 'borderline' ? 'warn' : '';
+  const flagTile = (label: string, tone: FlagTone, val: string) => {
+    const cl = tone === 'red' ? 'caution' : tone === 'amber' ? 'review' : (candidate ? 'clean' : 'none');
+    return <div className={'flag ' + cl}><span className="fl">{label}</span><span className="fv">{val}</span></div>;
+  };
+  return (
+    <div className={cls}>
+      <div className="head">
+        <div className="id">
+          {member.universe === 'ETF' && <span className="badge etf">ETF</span>}
+          <span className="t">{member.ticker}</span>
+        </div>
+        <span className={'verdict ' + (quality ?? 'none')}>{verdictLabel(quality)}</span>
+      </div>
+      <div className="name">{candidate?.name ?? member.name ?? '—'}</div>
+      <div className="sector">{member.sector ?? member.category ?? ''}</div>
+      <div className="price-block">
+        <span className="price">{v.price != null ? fmtUSD(v.price) : '—'}</span>
+        <div className="price-sub">
+          <span className={'today ' + todayTone}>Today {v.today != null ? fmtPct(v.today) : '—'}</span>
+          <span style={{ color: 'var(--fg5)' }}>·</span>
+          <span>ADV {v.adv != null ? `$${v.adv.toFixed(0)}M` : '—'}</span>
+        </div>
+      </div>
+      <div className="dev-wrap">
+        <div className="dev-row">
+          <span className="l">Dev from SMA25</span>
+          <span className={'v ' + (v.dev != null && v.dev < 0 ? (tier === 'match' ? 'neon' : '') : 'up')}>{v.dev != null ? fmtPct(v.dev) : '—'}</span>
+        </div>
+        <div className="dev-band">
+          <div className="zone" style={{ left: devBandPct(-15) + '%', right: (100 - devBandPct(-7)) + '%' }} />
+          {v.dev != null && <div className={'marker ' + markCls} style={{ left: devBandPct(v.dev) + '%' }} />}
+        </div>
+        <div className="dev-axis"><span>−15%</span><span className="neon">−7%</span><span>0</span><span>+5%</span></div>
+      </div>
+      <div className="flags">
+        {flagTile('Earnings', tones.earn, candidate?.days_since_earnings != null ? `${candidate.days_since_earnings}d` : '—')}
+        {flagTile('Insider 14d', tones.ins, candidate ? fmtInsider(candidate.insider_sales) : '—')}
+        {flagTile('8-K 14d', tones.k, candidate?.recent_8ks?.length ? String(candidate.recent_8ks.length) : '—')}
+      </div>
+      <div className="seg">
+        {STATUS_OPTIONS.map((o) => (
+          <button key={o.value} className={status === o.value ? 'on ' + o.value : ''} onClick={() => onStatus(member.ticker, o.value)}>
+            {o.value === 'pending' ? '— pending' : o.value === 'skipped' ? '✕ skipped' : o.value === 'considering' ? '◐ consider' : '✓ approved'}
+          </button>
+        ))}
+      </div>
+      <div className="actions">
+        <div className="left">
+          {status === 'approved' ? <span className="neon">Ready to buy</span>
+            : tier === 'match' ? <span>BNF match · {(v.dev ?? 0) <= -10 ? 'deep dip' : 'classic'}</span>
+            : tier === 'borderline' ? <span>near miss</span> : <span>watching</span>}
+        </div>
+        {candidate && (
+          <button className={'btn-buy' + (status === 'approved' ? ' neon' : '')} disabled={buyPending} onClick={() => onBuy(candidate)}>Buy →</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── § 01 — triage rail (tabs + grid) ──
+function TriageRail({ rows, onStatus, onBuy, buyPending }: {
+  rows: UniverseRow[];
+  onStatus: (t: string, s: ResearchStatus) => void;
+  onBuy: (c: Candidate) => void;
+  buyPending: boolean;
+}) {
+  const [tab, setTab] = useState<'match' | 'borderline' | 'watch' | 'approved'>('match');
+  const counts = {
+    match: rows.filter((r) => r.tier === 'match' && r.researchStatus !== 'skipped').length,
+    borderline: rows.filter((r) => r.tier === 'borderline').length,
+    watch: rows.filter((r) => r.researchStatus === 'considering' || r.researchStatus === 'approved').length,
+    approved: rows.filter((r) => r.researchStatus === 'approved').length,
+  };
+  const shown = rows.filter((r) => {
+    const s = r.researchStatus;
+    if (tab === 'match') return r.tier === 'match' && s !== 'skipped';
+    if (tab === 'borderline') return r.tier === 'borderline';
+    if (tab === 'watch') return s === 'considering' || s === 'approved';
+    return s === 'approved';
+  }).slice(0, 6);
+  return (
+    <div>
+      <Section n="01" right={<span style={{ color: 'var(--fg3)' }}>Triage queue · highest signal first</span>}>Today's decisions</Section>
+      <div className="triage-tabs">
+        {([['match', 'Matches'], ['borderline', 'Near miss'], ['watch', 'On watch'], ['approved', 'Approved']] as const).map(([k, label]) => (
+          <button key={k} className={'tri-tab' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>
+            {label} <span className="count">{counts[k]}</span>
+          </button>
+        ))}
+      </div>
+      {shown.length === 0 ? (
+        <div className="triage-empty">Nothing in this lane right now.</div>
+      ) : (
+        <div className="triage-grid">
+          {shown.map((r) => (
+            <TriageCard key={`${r.member.universe}:${r.member.ticker}`} row={r} onStatus={onStatus} onBuy={onBuy} buyPending={buyPending} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── § 03 — universe row ──
+function UniRow({ row, onTicker, onStatus, onBuy, busy }: {
+  row: UniverseRow;
+  onTicker: () => void;
+  onStatus: (s: ResearchStatus) => void;
+  onBuy: () => void;
+  busy: boolean;
+}) {
+  const { member, candidate, tier, researchStatus: status } = row;
+  const v = rowVals(row);
+  const tEarn = candidate ? earningsTone(candidate.days_since_earnings) : 'none';
+  const tIns = candidate ? insiderTone(candidate.insider_sales) : 'none';
+  const t8K = candidate ? eightKTone(candidate.recent_8ks) : 'none';
+  const quality = candidate ? setupQuality(tEarn, tIns, t8K) : null;
+  const rowCls = [
+    tier === 'match' ? (status !== 'skipped' ? 'match breath' : 'match') : '',
+    tier === 'borderline' ? 'borderline' : '',
+    status === 'skipped' ? 'skipped' : '',
+  ].filter(Boolean).join(' ');
+  const devCls = tier === 'match' ? 'neon' : tier === 'borderline' ? 'warn' : (v.dev != null && v.dev > 0 ? 'up' : '');
+  const todayCls = v.today != null && v.today < 0 ? 'down' : v.today != null && v.today > 0 ? 'up' : '';
+  return (
+    <tr className={rowCls}>
+      <td>
+        <span className="tk">
+          <span className={'b ' + (member.universe === 'ETF' ? 'etf' : 'eq')}>{member.universe === 'ETF' ? 'ETF' : 'EQ'}</span>
+          <span className="t" onClick={onTicker}>{member.ticker}</span>
+        </span>
+      </td>
+      <td><span className="nm">{candidate?.name ?? member.name ?? '—'}{member.sector && <span className="sec">{member.sector}</span>}</span></td>
+      <td className="num"><span className="px">{v.price != null ? fmtUSD(v.price) : '—'}</span></td>
+      <td className="num muted">{v.sma25 != null ? fmtUSD(v.sma25) : '—'}</td>
+      <td className="num">
+        <span className={'dev ' + devCls}>{v.dev != null ? fmtPct(v.dev) : '—'}</span>
+        {v.dev != null && (
+          <div className="devbar-wrap">
+            <div className="devbar-zone" style={{ left: devBandPct(-15) + '%', right: (100 - devBandPct(-7)) + '%' }} />
+            <div className={'devbar-mk ' + devCls} style={{ left: devBandPct(v.dev) + '%' }} />
+          </div>
+        )}
+      </td>
+      <td className={'num ' + todayCls}>{v.today != null ? fmtPct(v.today) : '—'}</td>
+      <td className="num muted">{v.adv != null ? `$${v.adv.toFixed(0)}` : '—'}</td>
+      <td className="ctr">
+        <span className="risk">
+          <span className={'dot ' + dotCls(tEarn, !!candidate)} title={'Earnings: ' + (candidate?.days_since_earnings != null ? `${candidate.days_since_earnings}d` : '—')} />
+          <span className={'dot ' + dotCls(tIns, !!candidate)} title={candidate ? insiderTooltip(candidate.insider_sales) || 'Insider: none' : 'Insider: —'} />
+          <span className={'dot ' + dotCls(t8K, !!candidate)} title={candidate ? eightKTooltip(candidate.recent_8ks) || '8-K: none' : '8-K: —'} />
+        </span>
+      </td>
+      <td><span className={'verdict ' + (quality ?? 'none')}>{verdictLabel(quality)}</span></td>
+      <td>
+        <button className={'stat ' + status} onClick={() => onStatus(STATUS_CYCLE[status])} disabled={busy} title="Cycle status">
+          {status === 'pending' ? '— pending' : status === 'skipped' ? '✕ skipped' : status === 'considering' ? '◐ consider' : '✓ approved'}
+        </button>
+      </td>
+      <td className="num">
+        {candidate ? <button className={'ico-btn' + (status === 'approved' ? ' neon' : '')} disabled={busy} onClick={onBuy}>Buy</button> : null}
+      </td>
+    </tr>
+  );
+}
+
+// ── § 04 / 05 — open positions table ──
+function OpenPositionsV2({ title, rows, universe, stale, onSell, sellPending }: {
   title: string;
   rows: OpenView[];
   universe: Universe;
@@ -1140,82 +1240,93 @@ function OpenPositionsTable({
   onSell: (p: OpenView, reason: string, exitPrice: number) => void;
   sellPending: boolean;
 }) {
-  const sectionClass = 'np-section' + (universe === 'ETF' ? ' bnf-etf-section' : '');
   return (
-    <section className={sectionClass}>
-      <div className="np-section-hd">
-        <div className="np-section-title">{title} · {rows.length}</div>
-        <div className="np-section-sub">
-          Status follows distance to SMA25. Sell when ▲ green (target hit) or when stale (&gt;{stale}d).
-        </div>
+    <div>
+      <Section n={universe === 'ETF' ? '05' : '04'} right={<span style={{ color: 'var(--fg3)' }}>Sell when ▲ green (target hit) or stale &gt;{stale}d</span>}>
+        {title} · {rows.length}
+      </Section>
+      <table className="openpos-table">
+        <thead>
+          <tr>
+            <th className="ctr">Status</th><th>Ticker</th><th className="num">Entry</th><th className="num">Entry $</th>
+            <th className="num">Entry dev</th><th className="num">Now $</th><th className="num">SMA25</th>
+            <th className="num">To SMA25</th><th className="num">UPnL %</th><th className="num">Days</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={11} className="openpos-empty">No {universe === 'ETF' ? 'ETF ' : ''}open positions. Buy a candidate above to start one.</td></tr>
+          ) : rows.map((p) => {
+            const exitPrice = p.currentPrice ?? p.entry_price;
+            const reason = p.status === 'green' ? 'target_hit' : p.status === 'red' ? 'stale' : 'manual';
+            return (
+              <tr key={p.id}>
+                <td className="ctr"><span className={'dot-status ' + p.status} /></td>
+                <td><span className="t">{p.ticker}</span><span className="uni-tag">{universe === 'ETF' ? 'ETF' : 'EQ'}</span></td>
+                <td className="num">{p.entry_date}</td>
+                <td className="num">{fmtUSD(p.entry_price)}</td>
+                <td className="num down">{fmtPct(p.entry_deviation_pct)}</td>
+                <td className="num strong">{fmtUSD(p.currentPrice)}</td>
+                <td className="num">{fmtUSD(p.sma25)}</td>
+                <td className={'num ' + (p.distToSMA25Pct != null && p.distToSMA25Pct < 0 ? 'up' : '')}>{fmtPct(p.distToSMA25Pct)}</td>
+                <td className={'num strong ' + ((p.unrealizedPct ?? 0) >= 0 ? 'up' : 'down')}>{fmtPct(p.unrealizedPct, 2)}</td>
+                <td className={'num ' + (p.daysHeld > stale ? 'down' : '')}>{p.daysHeld}d</td>
+                <td className="num"><button className={'ico-btn' + (p.status === 'green' ? ' neon' : '')} onClick={() => onSell(p, reason, exitPrice)} disabled={sellPending}>Sell</button></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── § 06 — closed trades ──
+type ClosedStat = { total: number; winRate: number; avgReturn: number; avgDays: number } | null;
+function ClosedV2({ rows, stats, eq, etf, open, onToggle }: {
+  rows: Position[];
+  stats: ClosedStat; eq: ClosedStat; etf: ClosedStat;
+  open: boolean; onToggle: () => void;
+}) {
+  return (
+    <div>
+      <Section n="06">Closed trades</Section>
+      <div className="closed-bar" onClick={onToggle}>
+        <span className="caret">{open ? '▾' : '▸'}</span>
+        <span className="title">{rows.length} trades</span>
+        {eq && <span className="stat"><span className="b-eq">EQ</span> {eq.total} · win <b>{eq.winRate.toFixed(0)}%</b> · avg <b className={eq.avgReturn >= 0 ? 'pos' : 'neg'}>{fmtPct(eq.avgReturn, 1)}</b></span>}
+        {etf && <span className="stat"><span className="b-etf">ETF</span> {etf.total} · win <b>{etf.winRate.toFixed(0)}%</b> · avg <b className={etf.avgReturn >= 0 ? 'pos' : 'neg'}>{fmtPct(etf.avgReturn, 1)}</b></span>}
+        {stats && <span className="stat combined">all · win <b>{stats.winRate.toFixed(0)}%</b> · avg <b className={stats.avgReturn >= 0 ? 'pos' : 'neg'}>{fmtPct(stats.avgReturn, 1)}</b> · {stats.avgDays.toFixed(1)}d</span>}
       </div>
-      <div className="np-table-wrap">
-        <table className="np-table">
+      {open && (
+        <table className="openpos-table">
           <thead>
             <tr>
-              <th>Status</th>
-              <th>Ticker</th>
-              <th className="num">Entry</th>
-              <th className="num">Entry $</th>
-              <th className="num">Entry dev</th>
-              <th className="num">Now $</th>
-              <th className="num">SMA25</th>
-              <th className="num">To SMA25</th>
-              <th className="num">UPnL %</th>
-              <th className="num">Days</th>
-              <th></th>
+              <th className="ctr">Univ</th><th>Ticker</th><th className="num">Entry</th><th className="num">Exit</th>
+              <th className="num">Entry $</th><th className="num">Exit $</th><th className="num">Return %</th><th className="num">Hold</th><th>Reason</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={11} className="bnf-empty">
-                No {universe === 'ETF' ? 'ETF ' : ''}open positions. Buy a candidate above to start one.
-              </td></tr>
-            ) : rows.map((p) => {
-              const exitPrice = p.currentPrice ?? p.entry_price;
-              const reason =
-                p.status === 'green' ? 'target_hit'
-                : p.status === 'red'   ? 'stale'
-                : 'manual';
+            {rows.map((p) => {
+              const hold = p.exit_date ? daysBetween(p.entry_date, p.exit_date) : 0;
               return (
                 <tr key={p.id}>
-                  <td><StatusDot tone={p.status} /></td>
-                  <td className="ticker">
-                    <span className={`bnf-univ-badge ${universe === 'ETF' ? 'etf' : 'equity'}`}>
-                      {universe === 'ETF' ? 'ETF' : 'E'}
-                    </span>
-                    {' '}{p.ticker}
-                  </td>
+                  <td className="ctr"><span className={'uni-badge' + (p.universe === 'ETF' ? ' etf' : '')}>{p.universe === 'ETF' ? 'ETF' : 'EQ'}</span></td>
+                  <td><span className="t">{p.ticker}</span></td>
                   <td className="num">{p.entry_date}</td>
+                  <td className="num">{p.exit_date}</td>
                   <td className="num">{fmtUSD(p.entry_price)}</td>
-                  <td className="num down">{fmtPct(p.entry_deviation_pct)}</td>
-                  <td className="num strong">{fmtUSD(p.currentPrice)}</td>
-                  <td className="num">{fmtUSD(p.sma25)}</td>
-                  <td className={'num ' + (
-                    p.distToSMA25Pct != null && p.distToSMA25Pct < 0 ? 'up' : ''
-                  )}>{fmtPct(p.distToSMA25Pct)}</td>
-                  <td className={'num strong ' + (
-                    (p.unrealizedPct ?? 0) >= 0 ? 'up' : 'down'
-                  )}>{fmtPct(p.unrealizedPct, 2)}</td>
-                  <td className={'num ' + (p.daysHeld > stale ? 'down' : '')}>
-                    {p.daysHeld}d
-                  </td>
-                  <td className="num">
-                    <button
-                      className="np-btn bnf-row-btn"
-                      onClick={() => onSell(p, reason, exitPrice)}
-                      disabled={sellPending}
-                    >
-                      Sell
-                    </button>
-                  </td>
+                  <td className="num">{fmtUSD(p.exit_price)}</td>
+                  <td className={'num strong ' + ((p.realized_pct ?? 0) >= 0 ? 'up' : 'down')}>{fmtPct(p.realized_pct, 2)}</td>
+                  <td className="num">{hold}d</td>
+                  <td>{p.exit_reason}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
-      </div>
-    </section>
+      )}
+    </div>
   );
 }
 
