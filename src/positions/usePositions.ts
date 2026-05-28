@@ -357,6 +357,8 @@ export function usePositions() {
   const updateTrade = useMutation({
     mutationFn: async (args: {
       id: string;
+      option_type?: 'call' | 'put';
+      direction?: 'long' | 'short';
       contracts: number;
       strike: number;
       premium: number;
@@ -364,16 +366,22 @@ export function usePositions() {
       trade_date: string;
       note?: string | null;
     }) => {
+      const patch: Record<string, unknown> = {
+        contracts: args.contracts,
+        strike: args.strike,
+        premium: args.premium,
+        expiry: args.expiry,
+        trade_date: args.trade_date,
+        note: args.note ?? null,
+      };
+      // Allow correcting a mis-entered leg type/direction. Applied to the open
+      // row only; any matched closes inherit the open's type/direction at
+      // read-time via closeRealizedPL, so realized stays consistent.
+      if (args.option_type) patch.option_type = args.option_type;
+      if (args.direction) patch.direction = args.direction;
       const { error } = await supabase
         .from('option_trades' as never)
-        .update({
-          contracts: args.contracts,
-          strike: args.strike,
-          premium: args.premium,
-          expiry: args.expiry,
-          trade_date: args.trade_date,
-          note: args.note ?? null,
-        } as never)
+        .update(patch as never)
         .eq('id', args.id);
       if (error) throw error;
     },

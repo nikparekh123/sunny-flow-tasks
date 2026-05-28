@@ -64,6 +64,8 @@ interface Props {
   /** Update mutable fields on an existing OPEN trade. */
   onUpdateTrade?: (p: {
     id: string;
+    option_type: OptionType;
+    direction: Direction;
     contracts: number;
     strike: number;
     premium: number;
@@ -152,6 +154,8 @@ const blankClose = (targetId: string): CloseForm => ({
 
 interface EditForm {
   target_id: string;
+  option_type: OptionType;
+  direction: Direction;
   contracts: string;
   strike: string;
   premium: string;
@@ -162,6 +166,8 @@ interface EditForm {
 
 const editFormFromTrade = (t: OptionTrade): EditForm => ({
   target_id: t.id,
+  option_type: t.option_type,
+  direction: t.direction,
   contracts: String(t.contracts),
   strike: String(t.strike),
   premium: String(t.premium),
@@ -397,7 +403,9 @@ export function PositionDetailModal({
   const editDirty = !!(
     editForm &&
     editTarget &&
-    (parseFloat(editForm.contracts) !== editTarget.contracts ||
+    (editForm.option_type !== editTarget.option_type ||
+      editForm.direction !== editTarget.direction ||
+      parseFloat(editForm.contracts) !== editTarget.contracts ||
       parseFloat(editForm.strike) !== editTarget.strike ||
       parseFloat(editForm.premium) !== editTarget.premium ||
       editForm.expiry !== editTarget.expiry ||
@@ -409,6 +417,8 @@ export function PositionDetailModal({
     if (!canSubmitEdit || !editForm || !onUpdateTrade) return;
     onUpdateTrade({
       id: editForm.target_id,
+      option_type: editForm.option_type,
+      direction: editForm.direction,
       contracts: parseInt(editForm.contracts, 10),
       strike: parseFloat(editForm.strike),
       premium: parseFloat(editForm.premium),
@@ -1468,6 +1478,35 @@ function EditFields({
 
       {target && form && (
         <>
+          {/* Fix a mis-entered leg type/direction (e.g. logged "sold put"
+              but meant "sold call"). Same picker as the Open tab. */}
+          <div className="pp-field">
+            <div className="pp-field-label">This trade is a…</div>
+            <div className="pp-action-grid">
+              {(
+                [
+                  { lbl: 'Sell calls', dir: 'short', opt: 'call', tone: 'sold'   },
+                  { lbl: 'Buy calls',  dir: 'long',  opt: 'call', tone: 'bought' },
+                  { lbl: 'Sell puts',  dir: 'short', opt: 'put',  tone: 'sold'   },
+                  { lbl: 'Buy puts',   dir: 'long',  opt: 'put',  tone: 'bought' },
+                ] as const
+              ).map((a) => {
+                const on = form.option_type === a.opt && form.direction === a.dir;
+                return (
+                  <button
+                    key={a.lbl}
+                    type="button"
+                    className={`pp-action-btn tone-${a.tone}` + (on ? ' on' : '')}
+                    onClick={() => setForm({ ...form, option_type: a.opt, direction: a.dir })}
+                  >
+                    <span className={`pp-action-glyph tone-${a.tone}`}>{a.opt === 'call' ? 'C' : 'P'}</span>
+                    <span className="pp-action-lbl">{a.lbl}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="pp-form-grid cols-2">
             <div className="pp-field">
               <div className="pp-field-label">Contracts</div>
