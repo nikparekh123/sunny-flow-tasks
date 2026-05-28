@@ -11,6 +11,7 @@ import {
   fmtMoney, fmtPct, fmtCount, fmtDate,
   CycField, NumInput, HeroNumInput, Seg, Tile, PullFromSunnyfi,
 } from "../cycle";
+import { AnimatedNumber, CountUp } from "@/sunnyfi/lib/animation";
 
 export interface EIState extends Record<string, unknown> {
   underlying: string;
@@ -283,13 +284,36 @@ export function ExpectedIncomeCalc({
         </div>
       </div>
 
-      {/* Results */}
+      {/* Results — animated count-up on the five output tiles */}
       <div className="cyc-results">
-        <Tile label="Income per cycle"        value={fmtMoney(c.incomePerCycle)} tone={tone} />
-        <Tile label="Cycles until horizon"    value={fmtCount(c.cycles)}         mono />
-        <Tile label="Total income to horizon" value={fmtMoney(c.totalIncome)}    tone={tone} primary />
-        <Tile label="Annualised yield"        value={fmtPct(c.annYieldPct)}      tone="neon" sub="vs notional" />
-        <Tile label="Annualised ROI"          value={fmtPct(c.annROIPct)}        tone="neon" sub="on position cost basis" />
+        <Tile
+          label="Income per cycle"
+          value={<AnimatedNumber value={c.incomePerCycle} format={fmtMoney} delay={0} />}
+          tone={tone}
+        />
+        <Tile
+          label="Cycles until horizon"
+          value={isFinite(c.cycles) ? <CountUp value={c.cycles} delay={100} /> : fmtCount(c.cycles)}
+          mono
+        />
+        <Tile
+          label="Total income to horizon"
+          value={<AnimatedNumber value={c.totalIncome} format={fmtMoney} duration={1400} delay={200} />}
+          tone={tone}
+          primary
+        />
+        <Tile
+          label="Annualised yield"
+          value={<AnimatedNumber value={c.annYieldPct} format={(n) => fmtPct(n)} delay={300} />}
+          tone="neon"
+          sub="vs notional"
+        />
+        <Tile
+          label="Annualised ROI"
+          value={<AnimatedNumber value={c.annROIPct} format={(n) => fmtPct(n)} delay={400} />}
+          tone="neon"
+          sub="on position cost basis"
+        />
       </div>
 
       <div className="cyc-helper">{helper}</div>

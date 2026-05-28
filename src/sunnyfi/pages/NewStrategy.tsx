@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { BNF_UNIVERSE, type UniverseMember } from '@/sunnyfi/data/bnfUniverse';
+import { CountUp } from '@/sunnyfi/lib/animation';
 import '@/positions/positions.css';
 import './new-strategy.css';
 
@@ -836,11 +837,11 @@ export default function NewStrategy() {
         <section className="np-section">
           <div className="np-section-hd">
             <div className="np-section-title">
-              Universe · {filteredUniverseRows.length.toLocaleString()} of {universeRows.length.toLocaleString()}
-              {' '}<span className="bnf-tier-chip match">{matchCount} match</span>
-              {' '}<span className="bnf-tier-chip borderline">{borderlineCount} near miss</span>
+              Universe · <CountUp value={filteredUniverseRows.length} duration={1200} /> of <CountUp value={universeRows.length} duration={1200} delay={100} />
+              {' '}<span className="bnf-tier-chip match"><CountUp value={matchCount} delay={300} /> match</span>
+              {' '}<span className="bnf-tier-chip borderline"><CountUp value={borderlineCount} delay={400} /> near miss</span>
               {watchlistCount > 0 && (
-                <> <span className="bnf-tier-chip watch">{watchlistCount} on watch</span></>
+                <> <span className="bnf-tier-chip watch"><CountUp value={watchlistCount} delay={500} /> on watch</span></>
               )}
               {latestUniverseDate && (
                 <span className="bnf-section-sub-inline">

@@ -13,6 +13,7 @@ import { ExpiryCalendar } from './ExpiryCalendar';
 import { RealizedSummary } from './RealizedSummary';
 import { StockInsightsStrip } from './StockInsightsStrip';
 import { fmtUSD, fmtPct } from './types';
+import { AnimatedNumber } from '@/sunnyfi/lib/animation';
 import { toast } from 'sonner';
 import { PageSwitcher } from '@/sunnyfi/components/PageSwitcher';
 import './positions.css';
@@ -156,20 +157,20 @@ export default function PositionsPage() {
           <div className="np-hero-value">
             {portfolio.rows.length === 0
               ? '$0'
-              : fmtUSD(portfolio.total_market_value)}
+              : <AnimatedNumber value={portfolio.total_market_value} format={fmtUSD} duration={1400} />}
           </div>
           {portfolio.rows.length > 0 && (
             <div className={'np-hero-pl' + (isDown ? '' : ' up')}>
               <div>
                 <span className="np-hero-pl-amt">
-                  {fmtUSD(portfolio.total_pnl)}
+                  <AnimatedNumber value={portfolio.total_pnl} format={fmtUSD} delay={200} />
                 </span>
                 <span className="np-hero-pl-label" style={{ marginLeft: 10 }}>
                   unrealized
                 </span>
               </div>
               <span className="np-hero-pl-pct">
-                {fmtPct(portfolio.total_pnl_pct)}
+                <AnimatedNumber value={portfolio.total_pnl_pct} format={fmtPct} delay={300} />
               </span>
             </div>
           )}

@@ -13,6 +13,7 @@ import {
   moneynessLabel,
   CycField, NumInput, HeroNumInput, Seg, Tile, PullFromSunnyfi,
 } from "../cycle";
+import { AnimatedNumber, CountUp } from "@/sunnyfi/lib/animation";
 
 export interface PCState extends Record<string, unknown> {
   underlying: string;
@@ -275,13 +276,35 @@ export function PutCostCalc({
 
       {/* Results */}
       <div className="cyc-results">
-        <Tile label="Cost per cycle"          value={fmtMoney(c.costPerCycle)} tone={tone} />
-        <Tile label="Cycles until horizon"    value={fmtCount(c.cycles)}       mono />
-        <Tile label="Total cost to horizon"   value={fmtMoney(c.totalCost)}    tone={tone} primary />
-        <Tile label="Annualised cost"         value={fmtPct(c.annCostPct)}     tone="warn" sub="% of notional" />
+        <Tile
+          label="Cost per cycle"
+          value={<AnimatedNumber value={c.costPerCycle} format={fmtMoney} delay={0} />}
+          tone={tone}
+        />
+        <Tile
+          label="Cycles until horizon"
+          value={isFinite(c.cycles) ? <CountUp value={c.cycles} delay={100} /> : fmtCount(c.cycles)}
+          mono
+        />
+        <Tile
+          label="Total cost to horizon"
+          value={<AnimatedNumber value={c.totalCost} format={fmtMoney} duration={1400} delay={200} />}
+          tone={tone}
+          primary
+        />
+        <Tile
+          label="Annualised cost"
+          value={<AnimatedNumber value={c.annCostPct} format={(n) => fmtPct(n)} delay={300} />}
+          tone="warn"
+          sub="% of notional"
+        />
         <Tile
           label="Coverage"
-          value={fmtPct(c.coveragePct, { decimals: 1 })}
+          value={
+            isFinite(c.coveragePct)
+              ? <AnimatedNumber value={c.coveragePct} format={(n) => fmtPct(n, { decimals: 1 })} delay={400} />
+              : fmtPct(c.coveragePct, { decimals: 1 })
+          }
           tone={isFinite(c.coveragePct) && c.coveragePct >= 100 ? "pos" : "neutral"}
           sub={isFinite(c.coveredShares) ? `${fmtCount(c.coveredShares)} / ${fmtCount(Number(state.shares) || 0)} shares` : "of position"}
         />

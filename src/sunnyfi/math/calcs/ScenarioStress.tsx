@@ -26,6 +26,7 @@ import { useMemo, type ReactNode } from "react";
 import { fmtMoney, fmtPct } from "../cycle";
 import { usePositions } from "../../../positions/usePositions";
 import type { LiveOption, Sector } from "../../../positions/types";
+import { AnimatedNumber } from "@/sunnyfi/lib/animation";
 import "./ScenarioStress.css";
 
 // ── Factor profile per ticker ────────────────────────────────────
@@ -626,17 +627,21 @@ function HeadlineTiles({ result }: { result: ScenarioResult }) {
     <div className="scn-headline">
       <div className="scn-headline-tile">
         <div className="scn-headline-lbl">Book today</div>
-        <div className="scn-headline-val">{fmtMoney(t.bookTodayTotal, { decimals: 0 })}</div>
+        <div className="scn-headline-val">
+          <AnimatedNumber value={t.bookTodayTotal} format={(n) => fmtMoney(n, { decimals: 0 })} duration={1400} />
+        </div>
       </div>
       <div className="scn-headline-arrow">→</div>
       <div className="scn-headline-tile">
         <div className="scn-headline-lbl">In scenario</div>
-        <div className={`scn-headline-val ${tone}`}>{fmtMoney(t.bookScenarioTotal, { decimals: 0 })}</div>
+        <div className={`scn-headline-val ${tone}`}>
+          <AnimatedNumber value={t.bookScenarioTotal} format={(n) => fmtMoney(n, { decimals: 0 })} duration={1400} delay={200} />
+        </div>
       </div>
       <div className="scn-headline-tile delta">
         <div className="scn-headline-lbl">Change</div>
         <div className={`scn-headline-val ${tone}`}>
-          {fmtMoney(t.netDelta, { signed: true, decimals: 0 })}
+          <AnimatedNumber value={t.netDelta} format={(n) => fmtMoney(n, { signed: true, decimals: 0 })} duration={1400} delay={400} />
           <span className="scn-headline-pct"> · {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%</span>
         </div>
       </div>

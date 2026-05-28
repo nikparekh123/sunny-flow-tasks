@@ -13,6 +13,7 @@
  *   tone  = pos | neg | neutral (white for zero/no-change)
  */
 import { useMemo, type ReactNode } from "react";
+import { AnimatedNumber } from "@/sunnyfi/lib/animation";
 
 export interface PctDiffState extends Record<string, unknown> {
   from: string;
@@ -173,9 +174,22 @@ export function PercentageDifferenceCalc({
       </div>
 
       <div className="pdc-results">
-        <Tile label="Absolute difference"    value={fmtAbs(computed.abs)}  tone={computed.tone} />
-        <Tile label="Percentage difference"  value={fmtPct(computed.pct)}  tone={computed.tone} primary />
-        <Tile label="Multiple"               value={fmtMult(computed.mult)} tone="neutral" />
+        <Tile
+          label="Absolute difference"
+          value={<AnimatedNumber value={computed.abs} format={fmtAbs} delay={0} />}
+          tone={computed.tone}
+        />
+        <Tile
+          label="Percentage difference"
+          value={<AnimatedNumber value={computed.pct} format={fmtPct} duration={1400} delay={150} />}
+          tone={computed.tone}
+          primary
+        />
+        <Tile
+          label="Multiple"
+          value={<AnimatedNumber value={computed.mult} format={fmtMult} delay={300} />}
+          tone="neutral"
+        />
       </div>
 
       <div className="pdc-helper">{helper}</div>
