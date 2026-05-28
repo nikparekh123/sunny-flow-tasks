@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sunnyfi · Position insight modal — current layout</title>
+<link rel="stylesheet" href="positions.css" />
+<style>
+  html, body { margin: 0; background: #061a10; min-height: 100vh; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     STATIC SNAPSHOT — Position insight modal (PositionInsightModal.tsx)
+
+     The READ-ONLY first layer. Clicking a ticker anywhere opens this:
+     a quick "what's going on with this name" overview. Its action
+     buttons (Open / Close position) promote to the WRITE modal
+     (see Modal-PositionDetail.html).
+
+     Structure:
+       • Head      — ticker + bucket/sector/shares sub-line
+       • Earn strip— earnings date with inline edit
+       • Stats     — premium collected / paid / realized (3 tiles)
+       • Live      — live option legs list
+       • Activity  — recent trade history list
+       • Foot      — Mark closed / Delete · Close / Open position
+
+     Class names (.pi-*) match positions.css verbatim. Sample data.
+     The .pi-stage is position:fixed so it fills the viewport.
+     ============================================================ -->
+
+<div class="np-app">
+  <div class="pi-stage">
+    <div class="pi-modal" role="dialog">
+
+      <!-- HEAD -->
+      <div class="pi-head">
+        <div class="pi-head-left">
+          <h2 class="pi-ticker">META</h2>
+          <div class="pi-sub">
+            <span>Income</span>
+            <span class="dot">·</span>
+            <span>Communication Services</span>
+            <span class="dot">·</span>
+            <span>2,000 sh @ $611.91</span>
+          </div>
+        </div>
+        <button class="pi-icon-btn">✕ Close</button>
+      </div>
+
+      <!-- EARNINGS STRIP -->
+      <div class="pi-earn-strip">
+        <div class="pi-earn soon">
+          <span class="pi-earn-icon">📅</span>
+          <span class="pi-earn-main">Earnings in 6 days</span>
+          <span class="pi-earn-date">· 2026-06-02</span>
+          <button class="pi-link">edit</button>
+        </div>
+      </div>
+
+      <!-- STATS -->
+      <div class="pi-stats">
+        <div class="pi-stat">
+          <div class="pi-stat-l">↑ Premium collected · 52wk</div>
+          <div class="pi-stat-v pos">$18,420</div>
+          <div class="pi-stat-sub">42 short legs</div>
+        </div>
+        <div class="pi-stat">
+          <div class="pi-stat-l">↓ Premium paid · 52wk</div>
+          <div class="pi-stat-v neg">−$9,180</div>
+          <div class="pi-stat-sub">protective puts</div>
+        </div>
+        <div class="pi-stat">
+          <div class="pi-stat-l">Realized P&amp;L</div>
+          <div class="pi-stat-v pos">$24,541</div>
+          <div class="pi-stat-sub">from closed pairs</div>
+        </div>
+      </div>
+
+      <!-- LIVE POSITIONS -->
+      <div class="pi-activity">
+        <div class="pi-section-l">Live positions · 3</div>
+        <div class="pi-activity-list">
+          <div class="pi-activity-row">
+            <span class="pi-mini-glyph neg">P</span>
+            <span class="pi-activity-date">2026-05-08</span>
+            <span class="pi-activity-amt neg">+10 @ $590</span>
+            <span class="pi-activity-label">long put · exp 2026-06-05</span>
+          </div>
+          <div class="pi-activity-row">
+            <span class="pi-mini-glyph pos">C</span>
+            <span class="pi-activity-date">2026-05-12</span>
+            <span class="pi-activity-amt pos">−10 @ $625</span>
+            <span class="pi-activity-label">short call · exp 2026-05-29</span>
+          </div>
+          <div class="pi-activity-row">
+            <span class="pi-mini-glyph neg">P</span>
+            <span class="pi-activity-date">2026-05-19</span>
+            <span class="pi-activity-amt neg">+15 @ $650</span>
+            <span class="pi-activity-label">long put · exp 2026-07-17</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- RECENT ACTIVITY -->
+      <div class="pi-activity">
+        <div class="pi-section-l">Recent activity</div>
+        <div class="pi-activity-list">
+          <div class="pi-activity-row">
+            <span class="pi-mini-glyph pos">C</span>
+            <span class="pi-activity-date">2026-05-22</span>
+            <span class="pi-activity-amt pos">−5 @ $630</span>
+            <span class="pi-activity-label">closed short call <span class="pi-realized pos">+$945</span></span>
+          </div>
+          <div class="pi-activity-row">
+            <span class="pi-mini-glyph pos">C</span>
+            <span class="pi-activity-date">2026-05-15</span>
+            <span class="pi-activity-amt pos">−10 @ $620</span>
+            <span class="pi-activity-label">closed short call <span class="pi-realized pos">+$24,000</span></span>
+          </div>
+          <div class="pi-activity-row">
+            <span class="pi-mini-glyph neg">P</span>
+            <span class="pi-activity-date">2026-05-01</span>
+            <span class="pi-activity-amt neg">+10 @ $600</span>
+            <span class="pi-activity-label">opened long put</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- FOOT -->
+      <div class="pi-foot">
+        <div class="pi-foot-start">
+          <button class="pi-link danger">✕ Mark position closed</button>
+          <button class="pi-link danger pi-link-strong">🗑 Delete position</button>
+        </div>
+        <div class="pi-foot-end">
+          <button class="pp-btn pp-btn-text">− Close position</button>
+          <button class="pp-btn pp-btn-neon">+ Open position</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

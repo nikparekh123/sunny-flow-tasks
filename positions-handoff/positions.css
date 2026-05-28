@@ -1,0 +1,5347 @@
+/* ============================================================
+   Positions — Navi dark theme
+   Ported from design_handoff_positions/positions.css.
+   All rules scoped under .np-app so they do not bleed into the
+   tasks app or sunnyfi app.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
+
+.np-app {
+  --navi-page:          #0a2828;
+  --navi-dash-page:     #061a10;
+  --navi-surface:       #0f3333;
+  --navi-card:          rgba(15,51,51,.55);
+  --navi-card-2:        rgba(15,51,51,.75);
+  --navi-elevated:      #1e5a50;
+  --navi-dusk:          #325050;
+
+  --navi-fg1:           #faf5f0;
+  --navi-fg2:           #a8c4c0;
+  --navi-fg3:           #468278;
+  --navi-fg4:           #325050;
+  --navi-fg5:           #1e5a50;
+
+  --navi-neon:          #d2e632;
+  --navi-neon-dark:     #c8d820;
+  --navi-positive:      #a8d4a0;
+  --navi-negative:      #e87060;
+  --navi-warning:       #e0c060;
+  --navi-border-bright: #326e64;
+
+  --navi-tint-neon:      rgba(210,230,50,.10);
+  --navi-tint-positive:  rgba(168,212,160,.12);
+  --navi-tint-negative:  rgba(220,80,60,.10);
+  --navi-tint-warning:   rgba(224,192,96,.08);
+  --navi-tint-muted:     rgba(30,90,80,.20);
+
+  --navi-font-sans: 'Work Sans', system-ui, sans-serif;
+  --navi-font-mono: 'DM Mono', 'SF Mono', Menlo, monospace;
+
+  --np-ease: cubic-bezier(.4,0,.2,1);
+
+  background: var(--navi-dash-page);
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+.np-app * { box-sizing: border-box; }
+.np-app button { font-family: inherit; }
+
+/* ============== TOP BAR ============== */
+.np-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 32px;
+  border-bottom: 1px solid rgba(30,90,80,.25);
+  background: var(--navi-dash-page);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+.np-brand {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  letter-spacing: 2.8px;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--navi-neon);
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  gap: 3px;
+}
+.np-brand .cursor {
+  display: inline-block;
+  width: 0.5ch;
+  height: 0.9em;
+  background: var(--navi-neon);
+  vertical-align: -0.05em;
+  animation: navi-blink 1s steps(1) infinite;
+}
+
+.np-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Breadcrumb style: "SUNNYFI▎ / POSITIONS". The brand stays neon and
+   clickable; the crumb is muted. Uses the same letter-spacing/uppercase
+   so the eye reads them as one unit. */
+.np-app .np-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.np-app .np-crumb-sep {
+  color: var(--navi-fg4);
+  font-size: 14px;
+  font-weight: 300;
+}
+.np-app .np-crumb {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  letter-spacing: 2.8px;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--navi-fg2);
+}
+
+/* ============== STAGE ============== */
+.np-stage {
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 36px 32px 80px;
+}
+
+/* ============== HERO ============== */
+.np-hero {
+  text-align: center;
+  padding: 48px 0 40px;
+  position: relative;
+}
+.np-hero-label {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg4);
+  margin-bottom: 18px;
+}
+.np-hero-value {
+  font-family: var(--navi-font-sans);
+  font-size: clamp(80px, 12vw, 132px);
+  font-weight: 800;
+  letter-spacing: -6px;
+  line-height: 0.95;
+  color: var(--navi-neon);
+  font-variant-numeric: tabular-nums;
+}
+.np-hero-pl {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 24px;
+  margin-top: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+}
+.np-hero-pl-amt {
+  font-family: var(--navi-font-mono);
+  font-size: 32px;
+  font-weight: 500;
+  letter-spacing: -1px;
+  color: var(--navi-negative);
+}
+.np-hero-pl.up .np-hero-pl-amt { color: var(--navi-positive); }
+.np-hero-pl-pct {
+  font-family: var(--navi-font-mono);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--navi-negative);
+}
+.np-hero-pl.up .np-hero-pl-pct { color: var(--navi-positive); }
+.np-hero-pl-label {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--navi-fg4);
+}
+
+/* ============== SECTION ============== */
+.np-section { margin-top: 56px; }
+.np-section-hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(30,90,80,.25);
+}
+.np-section-title {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.np-section-meta {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg4);
+}
+
+/* ============== TOGGLE PILLS ============== */
+.np-toggle {
+  display: inline-flex;
+  background: rgba(15,51,51,.6);
+  border-radius: 100px;
+  padding: 3px;
+  gap: 2px;
+}
+.np-toggle button {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  color: var(--navi-fg4);
+  padding: 7px 18px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all .15s var(--np-ease);
+}
+.np-toggle button:hover { color: var(--navi-fg2); }
+.np-toggle button.on {
+  background: var(--navi-tint-neon);
+  color: var(--navi-neon);
+}
+
+/* ============== TREEMAP CARD ============== */
+.np-treemap-card {
+  background: var(--navi-card);
+  border-radius: 12px;
+  padding: 24px;
+  display: grid;
+  grid-template-columns: 1fr 240px;
+  gap: 28px;
+  align-items: stretch;
+}
+.np-treemap-svg-wrap {
+  min-height: 420px;
+  display: flex;
+  align-items: stretch;
+}
+.np-treemap-svg-wrap svg { width: 100%; height: auto; }
+.np-treemap-list { display: flex; flex-direction: column; gap: 0; }
+.np-treemap-list-hd {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+  margin-bottom: 10px;
+}
+.np-treemap-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(30,90,80,.18);
+  gap: 10px;
+}
+.np-treemap-row:last-child { border-bottom: none; }
+.np-treemap-row .lbl {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--navi-fg2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.np-treemap-row.sector .lbl {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.np-treemap-row .pct {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  color: var(--navi-fg3);
+}
+.np-treemap-row .swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  vertical-align: middle;
+  border-radius: 1px;
+}
+
+/* ============== BUTTONS ============== */
+.np-btn {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity .15s var(--np-ease);
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+.np-btn:hover { opacity: 0.75; }
+.np-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.np-btn.ghost { background: transparent; color: var(--navi-fg2); }
+.np-btn.tinted { background: rgba(15,51,51,.7); color: var(--navi-fg2); }
+.np-btn.neon { background: var(--navi-tint-neon); color: var(--navi-neon); }
+.np-btn.danger { background: var(--navi-tint-negative); color: var(--navi-negative); }
+
+/* ============== TABLE ============== */
+.np-table-wrap {
+  background: var(--navi-card);
+  border-radius: 12px;
+  padding: 8px 0;
+  overflow-x: auto;
+}
+.np-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.np-table th, .np-table td {
+  padding: 10px 16px;
+  text-align: right;
+  white-space: nowrap;
+}
+.np-table th:first-child, .np-table td:first-child,
+.np-table th:nth-child(2), .np-table td:nth-child(2) {
+  text-align: left;
+}
+.np-table th {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  border-bottom: 1px solid rgba(30,90,80,.3);
+  padding-top: 14px;
+  padding-bottom: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+.np-table th:hover { color: var(--navi-fg2); }
+.np-table th .sort {
+  display: inline-block;
+  margin-left: 4px;
+  color: var(--navi-neon);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+}
+.np-table tbody tr {
+  border-bottom: 1px solid rgba(30,90,80,.12);
+  transition: background .12s;
+}
+.np-table tbody tr:hover { background: rgba(210,230,50,0.04); }
+.np-table tbody tr:last-child { border-bottom: none; }
+.np-table .ticker {
+  font-family: var(--navi-font-mono);
+  font-weight: 500;
+  color: var(--navi-fg1);
+  letter-spacing: 0.5px;
+}
+.np-table .sector-cell {
+  color: var(--navi-fg3);
+  font-size: 12px;
+}
+.np-table .num {
+  font-family: var(--navi-font-mono);
+  font-weight: 400;
+  color: var(--navi-fg2);
+}
+.np-table .num.strong { color: var(--navi-fg1); font-weight: 500; }
+.np-table .num.down { color: var(--navi-negative); }
+.np-table .num.up { color: var(--navi-positive); }
+.np-table .pct-bar {
+  display: inline-block;
+  height: 4px;
+  background: var(--navi-fg5);
+  vertical-align: middle;
+  margin-right: 8px;
+  border-radius: 2px;
+  min-width: 4px;
+}
+
+/* ============== STATUS PILL ============== */
+.np-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  padding: 4px 10px;
+  background: rgba(15,51,51,.5);
+  border-radius: 100px;
+}
+.np-pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--navi-neon);
+  animation: navi-pulse 2.5s var(--np-ease) infinite;
+}
+
+/* ============== MODAL ============== */
+.np-modal-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(6,26,16,0.75);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  animation: navi-fade-up .25s var(--np-ease);
+}
+.np-modal {
+  background: var(--navi-surface);
+  border: 1px solid var(--navi-border-bright);
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 880px;
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+}
+.np-modal-hd {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 16px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid rgba(30,90,80,.3);
+}
+.np-modal-title {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--navi-fg1);
+}
+.np-modal-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+  margin-top: 4px;
+}
+.np-drop {
+  border: 1.5px dashed var(--navi-border-bright);
+  border-radius: 10px;
+  padding: 48px 24px;
+  text-align: center;
+}
+.np-drop.over { background: var(--navi-tint-neon); border-color: var(--navi-neon); }
+.np-drop .hd {
+  font-size: 18px;
+  color: var(--navi-fg1);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.np-drop .sub {
+  font-size: 12px;
+  color: var(--navi-fg3);
+  margin-bottom: 20px;
+}
+.np-modal-error {
+  background: var(--navi-tint-negative);
+  border-left: 3px solid var(--navi-negative);
+  padding: 12px 14px;
+  border-radius: 4px;
+  margin-bottom: 14px;
+}
+.np-modal-error .hd {
+  color: var(--navi-negative);
+  font-weight: 600;
+  font-size: 14px;
+}
+.np-modal-error .sub {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+  margin-top: 2px;
+}
+.np-error-list {
+  background: rgba(15,51,51,.5);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.np-error-list .row {
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(30,90,80,.18);
+  display: grid;
+  grid-template-columns: 70px 110px 1fr;
+  gap: 10px;
+}
+.np-error-list .row:last-child { border-bottom: none; }
+.np-error-list .row .r { color: var(--navi-negative); }
+.np-error-list .row .f { color: var(--navi-fg2); }
+.np-error-list .row .m { color: var(--navi-fg3); }
+
+/* ============== KEYFRAMES ============== */
+@keyframes navi-pulse   { 0%,100%{opacity:1} 50%{opacity:.3} }
+@keyframes navi-blink   { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+@keyframes navi-fade-up { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+/* ============== EMPTY ============== */
+.np-empty {
+  padding: 64px 32px;
+  text-align: center;
+  border: 1px dashed var(--navi-elevated);
+  border-radius: 10px;
+}
+.np-empty p {
+  font-size: 14px;
+  color: var(--navi-fg2);
+  margin-bottom: 16px;
+}
+
+/* responsive */
+@media (max-width: 900px) {
+  .np-hero-value { font-size: 88px; letter-spacing: -3px; }
+  .np-treemap-card { grid-template-columns: 1fr; }
+  .np-treemap-svg-wrap { min-height: 320px; }
+}
+
+/* ─── Strategy badge column ─────────────────────────────────────────── */
+.np-strategy-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 100px;
+  border: 1px solid currentColor;
+  cursor: pointer;
+  text-decoration: none;
+}
+.np-strategy-badge.income { color: var(--navi-neon, #d2e632); background: rgba(210,230,50,.08); }
+.np-strategy-badge.invest { color: #8ab4d4; background: rgba(138,180,212,.08); }
+.np-strategy-badge.yield  { color: var(--navi-positive, #a8d4a0); background: rgba(168,212,160,.10); }
+.np-strategy-badge.none {
+  color: var(--navi-fg4, #2d5a52);
+  border-style: dashed;
+  cursor: default;
+  background: transparent;
+}
+
+/* ─── Watching section ──────────────────────────────────────────────── */
+.np-watching-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.np-watching-card {
+  background: rgba(70, 130, 120, 0.05);
+  border: 1px solid rgba(70, 130, 120, 0.18);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.np-watching-card .row {
+  display: flex; justify-content: space-between; align-items: baseline;
+}
+.np-watching-card .ticker {
+  font-family: var(--navi-font-mono);
+  font-weight: 600;
+}
+.np-watching-card .px { font-family: var(--navi-font-mono); }
+.np-watching-card .name {
+  font-size: 11px; color: var(--navi-fg3, #468278);
+}
+.np-watching-card .remove {
+  background: transparent; border: none;
+  font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--navi-fg3, #468278); cursor: pointer; align-self: flex-start;
+}
+
+/* ─── ?ticker= deep-link highlight flash ────────────────────────────── */
+.np-table tbody tr.highlight {
+  background: rgba(210, 230, 50, 0.10);
+  transition: background 0.8s ease-out;
+}
+
+/* ─── Shared modal scaffolding (used by AddWatchModal) ──────────────── */
+.strat-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(6, 26, 16, 0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.strat-modal {
+  background: var(--navi-bg-card, #0a2218);
+  border: 1px solid rgba(70, 130, 120, 0.25);
+  border-radius: 12px;
+  padding: 24px;
+  width: 420px;
+  max-width: 90vw;
+}
+.strat-modal h2 {
+  font-size: 13px; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--navi-fg2, #a8d4c8); margin: 0 0 16px;
+}
+.strat-field { margin-bottom: 14px; }
+.strat-field label {
+  display: block;
+  font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--navi-fg3, #468278); margin-bottom: 4px;
+}
+.strat-field input {
+  width: 100%;
+  background: rgba(70, 130, 120, 0.08);
+  border: 1px solid rgba(70, 130, 120, 0.25);
+  border-radius: 6px;
+  color: var(--navi-fg1, #cfeae0);
+  padding: 8px 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+.strat-modal-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+  margin-top: 20px;
+}
+
+/* ===== Grouped positions table (by strategy bucket) ===== */
+.np-table .np-group-hd td {
+  padding: 14px 14px 8px;
+  border-top: 1px solid rgba(50,110,100,0.25);
+  background: rgba(15,51,51,0.45);
+  border-bottom: 1px solid rgba(50,110,100,0.25);
+}
+.np-table tbody tr.np-group-hd:hover { background: rgba(15,51,51,0.45); }
+
+.np-table .np-group-hd:first-child td { border-top: none; }
+
+.np-table .np-group-dot {
+  display: inline-block;
+  width: 8px; height: 8px; border-radius: 2px;
+  margin-right: 10px;
+  vertical-align: 0.05em;
+  box-shadow: 0 0 8px currentColor;
+}
+.np-table .np-group-name {
+  font-size: 13px; font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--navi-fg1);
+}
+.np-table .np-group-count {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+  margin-left: 8px;
+}
+
+.np-table .np-group-foot td {
+  background: rgba(15,51,51,0.5);
+  border-top: 1.5px solid rgba(50,110,100,0.4);
+  font-weight: 600;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.np-table tbody tr.np-group-foot:hover { background: rgba(15,51,51,0.5); }
+
+.np-table .np-group-foot b {
+  font-size: 11px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  font-weight: 600;
+}
+
+/* Per-bucket accent strip on the header row */
+.np-table .np-group-hd.np-group-income     td:first-child { box-shadow: inset 3px 0 0 #d2e632; }
+.np-table .np-group-hd.np-group-invest     td:first-child { box-shadow: inset 3px 0 0 #8ab4d4; }
+.np-table .np-group-hd.np-group-yield      td:first-child { box-shadow: inset 3px 0 0 #a8d4a0; }
+.np-table .np-group-hd.np-group-unassigned td:first-child { box-shadow: inset 3px 0 0 #e0c060; }
+
+/* ============================================================
+   Positions v2 styles — modals, gains log, put protection, source chips
+   Ported from design_handoff_v2/positions.css
+   ============================================================ */
+
+.np-input {
+  font-family: var(--navi-font-sans);
+  font-size: 14px;
+  padding: 10px 14px;
+  background: rgba(15,51,51,.6);
+  border: 1px solid rgba(30,90,80,.3);
+  color: var(--navi-fg1);
+  outline: none;
+  border-radius: 8px;
+  width: 100%;
+}
+.np-input:focus { border-color: var(--navi-border-bright, #326e64); }
+
+/* ── View toggle (Table / Gains log) ── */
+.np-view-toggle {
+  display: inline-flex;
+  background: rgba(15,51,51,.6);
+  border-radius: 100px;
+  padding: 3px;
+  gap: 2px;
+}
+.np-view-toggle button {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  color: var(--navi-fg4);
+  padding: 7px 16px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all .15s var(--navi-ease, cubic-bezier(.4,0,.2,1));
+}
+.np-view-toggle button:hover { color: var(--navi-fg2); }
+.np-view-toggle button.on {
+  background: var(--navi-tint-neon, rgba(210,230,50,.10));
+  color: var(--navi-neon);
+}
+
+/* ── Status filter strip ── */
+.np-status-filter {
+  display: inline-flex;
+  gap: 2px;
+  background: rgba(15,51,51,.6);
+  padding: 3px;
+  border-radius: 100px;
+}
+.np-status-filter button {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  color: var(--navi-fg3);
+  padding: 6px 14px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all .15s var(--navi-ease, cubic-bezier(.4,0,.2,1));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.np-status-filter button:hover { color: var(--navi-fg2); }
+.np-status-filter button.on {
+  background: var(--navi-tint-neon, rgba(210,230,50,.10));
+  color: var(--navi-neon);
+}
+.np-status-filter button .ct {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* ── Source chips (S / C / P) ── */
+.rchip {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 5px 1px 4px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.rchip .rchip-k { font-weight: 700; font-size: 9px; opacity: 0.6; }
+.rk-s { background: rgba(168,212,160,.10); color: var(--navi-positive, #a8d4a0); }
+.rk-c { background: rgba(210,230,50,.10);  color: var(--navi-neon); }
+.rk-p { background: rgba(224,192,96,.10);  color: var(--navi-warning, #e0c060); }
+.rchip.neg { color: var(--navi-negative); }
+.rchip-static { margin-right: 6px; padding: 2px 6px; font-size: 10px; }
+
+/* Dots used in matrix cells */
+.gl-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--navi-fg5, #1e5a50);
+  display: inline-block;
+}
+.gl-dot.rk-s { background: var(--navi-positive, #a8d4a0); }
+.gl-dot.rk-c { background: var(--navi-neon); }
+.gl-dot.rk-p { background: var(--navi-warning, #e0c060); }
+.gl-dot.neg  { background: var(--navi-negative); }
+
+/* ── Add-gain button (top bar) ── */
+.np-btn.add-gain {
+  background: rgba(210,230,50,.06);
+  color: var(--navi-neon);
+  border: 1px solid rgba(210,230,50,.3);
+}
+.np-btn.add-gain:hover { background: rgba(210,230,50,.12); opacity: 1; }
+
+/* ── Modal shell ── */
+.np-modal-back {
+  position: fixed; inset: 0;
+  background: rgba(6,26,16,0.75);
+  z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  padding: 32px;
+  animation: navi-fade-up-pp .25s var(--navi-ease, cubic-bezier(.4,0,.2,1));
+}
+@keyframes navi-fade-up-pp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.np-modal {
+  background: var(--navi-surface, #0f3333);
+  border: 1px solid var(--navi-border-bright, #326e64);
+  border-radius: 12px;
+  padding: 28px 32px;
+  max-width: 880px;
+  width: 100%;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+.np-modal-hd {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding-bottom: 16px; margin-bottom: 18px;
+  border-bottom: 1px solid rgba(30,90,80,.3);
+}
+.np-modal-title {
+  font-size: 22px; font-weight: 500;
+  letter-spacing: -0.5px; color: var(--navi-fg1);
+}
+.np-modal-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 11px; color: var(--navi-fg3);
+  margin-top: 4px;
+}
+
+/* ── Quick-add / Cell-editor grid ── */
+.qa-modal { max-width: 640px; }
+.qa-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 18px;
+  margin-bottom: 14px;
+}
+.qa-field { display: flex; flex-direction: column; gap: 6px; }
+.qa-field.full { grid-column: 1 / -1; }
+.qa-field label {
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.qa-amount { font-family: var(--navi-font-mono); font-size: 18px; font-weight: 500; }
+.qa-source {
+  display: inline-flex; gap: 4px;
+  background: rgba(15,51,51,.6);
+  padding: 4px;
+  border-radius: 8px;
+  width: 100%;
+}
+.qa-source-btn {
+  flex: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  transition: all .12s var(--navi-ease, cubic-bezier(.4,0,.2,1));
+}
+.qa-source-btn:hover { color: var(--navi-fg2); }
+.qa-source-btn.on {
+  background: rgba(15,51,51,.95);
+  color: var(--navi-fg1);
+  border-color: rgba(30,90,80,.45);
+}
+.qa-source-btn.on.stock { border-color: rgba(168,212,160,.4); }
+.qa-source-btn.on.call  { border-color: rgba(210,230,50,.4); }
+.qa-source-btn.on.put   { border-color: rgba(224,192,96,.4); }
+.qa-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-top: 14px;
+  border-top: 1px solid rgba(30,90,80,.3);
+  margin-top: 4px;
+  gap: 12px;
+}
+.qa-preview {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--navi-fg2); flex-wrap: wrap;
+}
+.qa-actions { display: inline-flex; gap: 8px; }
+
+/* ── Position Detail modal ── */
+.pd-modal {
+  max-width: 880px; width: 100%;
+  max-height: 92vh; overflow-y: auto;
+}
+.pd-hd {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  padding-bottom: 16px; margin-bottom: 18px;
+  border-bottom: 1px solid rgba(30,90,80,.3);
+}
+.pd-ticker {
+  font-family: var(--navi-font-mono);
+  font-size: 28px; font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--navi-fg1);
+  display: flex; align-items: center;
+}
+.pd-meta {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px;
+  font-size: 12px; color: var(--navi-fg3);
+}
+.pd-meta-dot { color: var(--navi-fg5, #1e5a50); }
+
+.pd-stats {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: rgba(30,90,80,.25);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 18px;
+}
+.pd-stat {
+  background: var(--navi-card, rgba(15,51,51,.55));
+  padding: 12px 14px 10px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.pd-stat.pd-stat-net { background: rgba(15,51,51,.85); }
+.pd-stat-l {
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.pd-stat-v {
+  font-family: var(--navi-font-mono);
+  font-size: 18px; font-weight: 500;
+  letter-spacing: -0.3px;
+  color: var(--navi-fg1);
+  line-height: 1.1;
+}
+.pd-stat-v.up   { color: var(--navi-positive, #a8d4a0); }
+.pd-stat-v.down { color: var(--navi-negative); }
+.pd-stat-sub {
+  display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px; color: var(--navi-fg3);
+}
+.pd-stat-sub.up   { color: var(--navi-positive, #a8d4a0); }
+.pd-stat-sub.down { color: var(--navi-negative); }
+
+.pd-spark {
+  background: var(--navi-card, rgba(15,51,51,.55));
+  border-radius: 10px;
+  padding: 12px 16px 8px;
+  margin-bottom: 18px;
+}
+.pd-spark-hd {
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-bottom: 10px;
+}
+.pd-spark-bars {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 4px;
+  align-items: end;
+  height: 70px;
+}
+.pd-spark-col {
+  display: flex; flex-direction: column;
+  align-items: stretch; justify-content: flex-end;
+  gap: 4px;
+}
+.pd-spark-bar { border-radius: 2px; width: 100%; min-height: 2px; }
+.pd-spark-bar.up   { background: rgba(168,212,160,.7); }
+.pd-spark-bar.down { background: rgba(232,112,96,.7); }
+.pd-spark-bar.empty { background: rgba(30,90,80,.25); height: 2px !important; }
+.pd-spark-x {
+  font-family: var(--navi-font-mono);
+  font-size: 8px;
+  text-align: center;
+  color: var(--navi-fg5, #1e5a50);
+}
+.pd-spark-x.this { color: var(--navi-neon); }
+
+.pd-filter {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pd-history { display: flex; flex-direction: column; gap: 14px; }
+.pd-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--navi-fg4);
+  font-style: italic;
+}
+.pd-week-group { display: flex; flex-direction: column; }
+.pd-week-hd {
+  display: grid; grid-template-columns: 90px 1fr auto;
+  align-items: baseline;
+  padding: 6px 10px;
+  background: rgba(15,51,51,.5);
+  border-radius: 6px 6px 0 0;
+  border-bottom: 1px solid rgba(30,90,80,.3);
+  gap: 12px;
+}
+.pd-week-l {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--navi-fg2);
+}
+.pd-week-d { font-family: var(--navi-font-mono); font-size: 11px; color: var(--navi-fg4); }
+.pd-week-tot { font-family: var(--navi-font-mono); font-size: 13px; font-weight: 500; }
+.pd-week-tot.up   { color: var(--navi-positive, #a8d4a0); }
+.pd-week-tot.down { color: var(--navi-negative); }
+.pd-entry {
+  display: grid;
+  grid-template-columns: 24px 100px auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  background: rgba(15,51,51,.25);
+  border-bottom: 1px solid rgba(30,90,80,.12);
+}
+.pd-entry:last-child { border-radius: 0 0 6px 6px; border-bottom: none; }
+.pd-entry-date { font-family: var(--navi-font-mono); font-size: 11px; color: var(--navi-fg3); }
+.pd-entry-amt  { font-family: var(--navi-font-mono); font-size: 14px; font-weight: 500; }
+.pd-entry-amt.up   { color: var(--navi-positive, #a8d4a0); }
+.pd-entry-amt.down { color: var(--navi-negative); }
+.pd-entry-note { font-size: 12px; color: var(--navi-fg3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pd-entry-del {
+  font-size: 10px !important; padding: 4px 10px !important;
+  color: var(--navi-fg4) !important;
+}
+.pd-entry-del:hover { color: var(--navi-negative) !important; }
+
+.pd-add-inline {
+  margin-top: 16px;
+  padding: 16px;
+  background: rgba(210,230,50,.04);
+  border: 1px solid rgba(210,230,50,.25);
+  border-radius: 8px;
+}
+.pd-add-hd {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--navi-neon);
+  margin-bottom: 12px;
+}
+
+/* ── Put protection panel ── */
+.pp-panel {
+  background: var(--navi-card, rgba(15,51,51,.55));
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border-left: 3px solid var(--navi-elevated, #1e5a50);
+}
+.pp-panel.pp-active { border-left-color: rgba(232,112,96,.5); }
+.pp-panel.pp-warn   { border-left-color: var(--navi-warning, #e0c060); }
+.pp-panel.pp-expired{ border-left-color: var(--navi-fg5, #1e5a50); opacity: 0.78; }
+.pp-panel.pp-empty {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.pp-panel.pp-editing { border-left-color: var(--navi-neon); }
+.pp-hd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.pp-hd-label {
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.pp-hd-sub { font-size: 11px; color: var(--navi-fg4); font-style: italic; }
+.pp-hd-status {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 100px;
+  background: rgba(168,212,160,.10);
+  color: var(--navi-positive, #a8d4a0);
+}
+.pp-hd-status.down { background: rgba(220,80,60,.12); color: var(--navi-negative); }
+.pp-hd-status.warn { background: rgba(224,192,96,.10); color: var(--navi-warning, #e0c060); }
+
+.pp-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 10px;
+}
+.pp-stat { display: flex; flex-direction: column; gap: 3px; }
+.pp-stat-l {
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--navi-fg4);
+}
+.pp-stat-v {
+  font-family: var(--navi-font-mono);
+  font-size: 16px; font-weight: 500;
+  color: var(--navi-fg1);
+  letter-spacing: -0.2px;
+}
+.pp-stat-v.down { color: var(--navi-negative); }
+.pp-stat-v.warn { color: var(--navi-warning, #e0c060); }
+.pp-stat-unit { font-size: 11px; color: var(--navi-fg4); margin-left: 3px; font-weight: 400; }
+.pp-stat-sub-line {
+  font-size: 9px; color: var(--navi-fg5, #1e5a50);
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+.pp-progress { margin: 10px 0 12px; }
+.pp-progress-bar {
+  height: 6px;
+  background: rgba(30,90,80,.35);
+  border-radius: 100px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.pp-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(232,112,96,.7), rgba(232,112,96,.4));
+}
+.pp-progress-l {
+  display: flex; justify-content: space-between;
+  font-family: var(--navi-font-mono);
+  font-size: 11px; color: var(--navi-fg2);
+}
+.pp-progress-l .k {
+  font-family: var(--navi-font-sans);
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--navi-fg4);
+  margin-right: 4px;
+}
+
+.pp-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px; }
+.pp-form-hint {
+  font-family: var(--navi-font-mono);
+  font-size: 11px; color: var(--navi-fg4);
+  min-height: 14px;
+}
+.pp-form-preview {
+  display: inline-flex; align-items: baseline; gap: 8px;
+  padding: 8px 12px;
+  background: rgba(210,230,50,.05);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  color: var(--navi-fg1);
+}
+.pp-form-preview .k {
+  font-family: var(--navi-font-sans);
+  font-size: 9px; font-weight: 600;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--navi-fg4);
+}
+.pp-form-preview .v {
+  font-size: 14px; font-weight: 500;
+  color: var(--navi-neon);
+}
+.pp-form-preview .sep { color: var(--navi-fg5, #1e5a50); margin: 0 4px; }
+.pp-form-preview .k-lbl { color: var(--navi-fg3); margin-left: -4px; }
+.pp-actions { display: flex; align-items: center; gap: 8px; }
+.pp-clear { color: var(--navi-negative) !important; }
+.pp-clear:hover { opacity: 0.7; }
+
+/* ── Gains Log matrix ── */
+.gl-wrap {
+  background: var(--navi-card, rgba(15,51,51,.55));
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+}
+.gl-toolbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(30,90,80,.25);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.gl-toolbar .np-table-legend { font-style: italic; }
+.gl-scroll { overflow-x: auto; max-width: 100%; }
+.gl-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  min-width: 1100px;
+}
+.gl-table th, .gl-table td {
+  padding: 0;
+  border-bottom: 1px solid rgba(30,90,80,.12);
+  vertical-align: top;
+}
+.gl-table thead th {
+  background: rgba(15,51,51,.5);
+  padding: 10px 6px;
+  font-family: var(--navi-font-sans);
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--navi-fg3);
+  text-align: center;
+  border-bottom: 1px solid rgba(30,90,80,.3);
+  position: sticky; top: 0; z-index: 2;
+}
+.gl-table thead th.gl-pos {
+  text-align: left;
+  padding: 10px 16px;
+  position: sticky; left: 0; z-index: 3;
+  background: rgba(15,51,51,.85);
+}
+.gl-table th.gl-wk { min-width: 78px; }
+.gl-table th.gl-wk.this {
+  color: var(--navi-neon);
+  background: rgba(210,230,50,.06);
+}
+.gl-table th .gl-wk-l {
+  font-size: 9px; font-weight: 600;
+  color: var(--navi-fg2);
+}
+.gl-table th.gl-wk.this .gl-wk-l { color: var(--navi-neon); }
+.gl-table th .gl-wk-d {
+  font-family: var(--navi-font-mono);
+  font-size: 9px; color: var(--navi-fg4);
+  margin-top: 2px; letter-spacing: 0; text-transform: none;
+}
+.gl-table th.gl-tot { min-width: 130px; text-align: right; padding-right: 16px; }
+
+.gl-table td.gl-pos {
+  padding: 10px 16px;
+  position: sticky; left: 0; z-index: 1;
+  background: rgba(15,51,51,.75);
+  text-align: left;
+  min-width: 140px;
+  border-right: 1px solid rgba(30,90,80,.25);
+}
+.gl-table td.gl-pos .ticker {
+  font-family: var(--navi-font-mono);
+  font-weight: 500;
+  color: var(--navi-fg1);
+  letter-spacing: 0.5px;
+  font-size: 13px;
+}
+.gl-table td.gl-pos .ticker.clickable {
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(168,196,192,.2);
+  transition: border-color .12s var(--navi-ease, cubic-bezier(.4,0,.2,1));
+}
+.gl-table td.gl-pos .ticker.clickable:hover {
+  border-bottom-color: var(--navi-neon);
+  color: var(--navi-neon);
+}
+.gl-table td.gl-pos .gl-pos-sub {
+  font-size: 10px; color: var(--navi-fg4);
+  margin-top: 2px;
+  font-family: var(--navi-font-sans);
+}
+.gl-table tbody tr:hover td.gl-pos { background: rgba(15,51,51,.95); }
+
+.gl-cell {
+  position: relative;
+  cursor: pointer;
+  text-align: center;
+  transition: background .12s var(--navi-ease, cubic-bezier(.4,0,.2,1));
+  height: 56px;
+}
+.gl-cell.this { background: rgba(210,230,50,.03); }
+.gl-cell:hover { background: rgba(210,230,50,.08); }
+
+/* Shares zone — dedicated leftmost column with its own tint */
+.gl-table th.gl-wk.shares-zone,
+.gl-table td.gl-cell.shares-zone {
+  background: rgba(210,230,50,.06);
+}
+.gl-table td.gl-cell.shares-zone:hover {
+  background: rgba(210,230,50,.14);
+}
+/* Share-sell cells inside the closed zone get a subtle warm tint */
+.gl-table td.gl-cell.share-sell {
+  background: rgba(224,192,96,.07);
+}
+.gl-table td.gl-cell.share-sell:hover {
+  background: rgba(224,192,96,.14);
+}
+/* Expired option cell — amber border to call for action */
+.gl-table td.gl-cell.expired {
+  outline: 1px solid var(--navi-warning);
+  outline-offset: -2px;
+}
+.gl-cell-state.expired { color: var(--navi-warning); }
+/* Resolve card in modal */
+.pp-resolve-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 8px;
+}
+.pp-resolve-meta {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  color: var(--navi-fg1);
+}
+.pp-resolve-exp { color: var(--navi-fg3); }
+.pp-resolve-prem {
+  margin-left: auto;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+}
+.pp-resolve-hint {
+  margin-top: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid;
+}
+.pp-resolve-hint.muted {
+  color: var(--navi-fg4);
+  background: rgba(50,110,100,.10);
+  border-color: rgba(50,110,100,.30);
+}
+.pp-resolve-hint.itm {
+  color: var(--navi-warning);
+  background: rgba(224,192,96,.08);
+  border-color: rgba(224,192,96,.40);
+}
+.pp-resolve-hint.otm {
+  color: var(--navi-neon);
+  background: rgba(210,230,50,.08);
+  border-color: rgba(210,230,50,.40);
+}
+
+/* Column zones: first N cols are LIVE (faint neon tint), the rest are
+   the closed/history zone (faint muted tint). Boundary cell gets a thin
+   left border so the eye finds the split. */
+.gl-table th.gl-wk.live-zone,
+.gl-table td.gl-cell.live-zone {
+  background: rgba(210,230,50,.04);
+}
+.gl-table th.gl-wk.live-zone.this,
+.gl-table td.gl-cell.live-zone.this {
+  background: rgba(210,230,50,.08);
+}
+.gl-table td.gl-cell.live-zone:hover {
+  background: rgba(210,230,50,.12);
+}
+.gl-table th.gl-wk.closed-zone,
+.gl-table td.gl-cell.closed-zone {
+  background: rgba(30,90,80,.08);
+}
+.gl-table td.gl-cell.closed-zone:hover {
+  background: rgba(30,90,80,.18);
+}
+/* Boundary divider — left border on the FIRST closed col.
+   Layout: Position(1) · Shares(2) · Open1..4(3..6) · Closed1+(7+).
+   So nth-child(7) is the boundary. */
+.gl-table tr > .gl-wk:nth-child(7),
+.gl-table tr > .gl-cell:nth-child(7) {
+  border-left: 1px solid rgba(50,110,100,.4);
+}
+/* "live" sub-caption under the column number, in the header */
+.gl-table th .gl-wk-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--navi-neon);
+  margin-top: 2px;
+  opacity: .8;
+}
+/* Closed-zone sub-captions get a muted tone so the header colour
+   roughly mirrors the cell-state pill colour for each zone. */
+.gl-table th.gl-wk.closed-zone .gl-wk-sub {
+  color: var(--navi-fg4);
+}
+.gl-cell.empty .gl-plus {
+  font-family: var(--navi-font-mono);
+  color: var(--navi-fg5, #1e5a50);
+  font-size: 14px; font-weight: 400;
+  opacity: 0;
+  transition: opacity .12s var(--navi-ease, cubic-bezier(.4,0,.2,1));
+}
+.gl-cell.empty:hover .gl-plus { opacity: 1; color: var(--navi-fg3); }
+
+.gl-cell-in {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  height: 100%;
+  padding: 6px 4px; gap: 4px;
+}
+.gl-cell-amt {
+  font-family: var(--navi-font-mono);
+  font-weight: 500; font-size: 13px; line-height: 1;
+}
+.gl-cell-amt.up   { color: var(--navi-positive, #a8d4a0); }
+.gl-cell-amt.down { color: var(--navi-negative); }
+.gl-cell-chips { display: inline-flex; gap: 5px; align-items: center; }
+
+.gl-table td.gl-tot {
+  text-align: right;
+  padding: 10px 16px;
+  background: rgba(15,51,51,.4);
+  min-width: 130px;
+  border-left: 1px solid rgba(30,90,80,.25);
+}
+.gl-tot-amt {
+  font-family: var(--navi-font-mono);
+  font-weight: 500; font-size: 13px;
+  margin-bottom: 4px;
+}
+.gl-tot-amt.up   { color: var(--navi-positive, #a8d4a0); }
+.gl-tot-amt.down { color: var(--navi-negative); }
+.gl-tot-chips {
+  display: inline-flex; flex-wrap: wrap; gap: 4px;
+  justify-content: flex-end;
+}
+
+.gl-table tfoot td {
+  background: rgba(15,51,51,.85);
+  border-top: 1px solid var(--navi-elevated, #1e5a50);
+  border-bottom: none;
+}
+.gl-table tfoot td.gl-pos {
+  background: rgba(15,51,51,.95);
+  font-family: var(--navi-font-sans);
+  font-size: 11px; font-weight: 600;
+  color: var(--navi-fg1);
+}
+.gl-table tfoot td.gl-pos b {
+  font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+}
+
+.gl-table tbody tr.closed-row { opacity: 0.42; filter: saturate(.55); }
+.gl-table tbody tr.closed-row:hover { opacity: 1; filter: none; }
+.gl-table tbody tr.closed-row .status-pill { margin-left: 6px; }
+/* Visual break between the active and closed groups. */
+.gl-table tbody tr.closed-row:first-of-type {
+  border-top: 1px dashed rgba(50,110,100,.4);
+}
+
+/* ── Status pill ── */
+.status-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 100px;
+  font-family: var(--navi-font-sans);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  vertical-align: 2px;
+}
+.status-pill.closed {
+  background: rgba(30,90,80,.20);
+  color: var(--navi-fg3);
+  border: 1px solid rgba(30,90,80,.4);
+}
+
+/* ── Table legend (S / C / P) ── */
+.np-table-legend {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--navi-font-sans);
+  font-size: 10px; color: var(--navi-fg4);
+  letter-spacing: 0.5px;
+}
+
+/* Make ticker cells clickable in PositionsTable */
+.np-table .ticker.clickable {
+  cursor: pointer;
+  border-bottom: 1px dashed rgba(168,196,192,.2);
+  transition: border-color .12s var(--navi-ease, cubic-bezier(.4,0,.2,1));
+}
+.np-table .ticker.clickable:hover {
+  border-bottom-color: var(--navi-neon);
+  color: var(--navi-neon);
+}
+
+.muted { color: var(--navi-fg5, #1e5a50); font-family: var(--navi-font-mono); }
+
+@media (max-width: 900px) {
+  .pd-stats { grid-template-columns: repeat(2, 1fr); }
+  .pp-stats { grid-template-columns: repeat(2, 1fr); }
+  .pp-form  { grid-template-columns: 1fr; }
+}
+
+/* ============================================================
+   Positions v2 Phase 3 — Realized summary strips
+   ============================================================ */
+.np-realized-strip {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr 1.2fr;
+  gap: 1px;
+  background: rgba(30,90,80,.25);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.np-realized-cell {
+  background: var(--navi-card, rgba(15,51,51,.55));
+  padding: 14px 18px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.np-realized-cell.total { background: rgba(15,51,51,.85); }
+.np-realized-label {
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: var(--navi-fg3);
+  display: inline-flex; align-items: center;
+}
+.np-realized-protect {
+  color: var(--navi-fg5, #1e5a50);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  margin-left: 6px;
+}
+.np-realized-value {
+  font-family: var(--navi-font-mono);
+  font-size: 22px; font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--navi-fg1);
+  line-height: 1.05;
+}
+.np-realized-value.up   { color: var(--navi-positive, #a8d4a0); }
+.np-realized-value.down { color: var(--navi-negative); }
+.np-realized-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+  margin-top: 4px;
+  letter-spacing: 0;
+}
+.np-realized-sub .dim { color: var(--navi-fg5, #1e5a50); }
+
+.np-strategy-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.np-strat-cell {
+  background: var(--navi-card, rgba(15,51,51,.55));
+  border-radius: 10px;
+  padding: 14px 16px 12px;
+  border-top: 2px solid;
+}
+.np-strat-cell.st-income { border-top-color: #326e64; }
+.np-strat-cell.st-invest { border-top-color: var(--navi-neon); }
+.np-strat-cell.st-yield  { border-top-color: var(--navi-warning, #e0c060); }
+.np-strat-hd {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.np-strat-badge {
+  font-size: 10px; font-weight: 500;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  border: 1px solid;
+}
+.np-strat-badge.st-income { background: rgba(50,110,100,.15);  color: #a8c4c0;             border-color: rgba(50,110,100,.5); }
+.np-strat-badge.st-invest { background: rgba(210,230,50,.08);  color: var(--navi-neon);    border-color: rgba(210,230,50,.35); }
+.np-strat-badge.st-yield  { background: rgba(224,192,96,.10);  color: var(--navi-warning, #e0c060); border-color: rgba(224,192,96,.35); }
+.np-strat-blurb {
+  font-size: 10px;
+  color: var(--navi-fg4);
+  font-style: italic;
+}
+.np-strat-value {
+  font-family: var(--navi-font-mono);
+  font-size: 24px; font-weight: 500;
+  letter-spacing: -0.5px;
+  color: var(--navi-fg1);
+  line-height: 1.05;
+  margin-bottom: 8px;
+}
+.np-strat-value.up   { color: var(--navi-positive, #a8d4a0); }
+.np-strat-value.down { color: var(--navi-negative); }
+.np-strat-detail {
+  display: flex; flex-wrap: wrap; gap: 12px 16px;
+  border-top: 1px dashed rgba(30,90,80,.3);
+  padding-top: 8px;
+}
+.np-strat-detail-item {
+  font-family: var(--navi-font-mono);
+  font-size: 11px; color: var(--navi-fg2);
+  display: inline-flex; align-items: baseline; gap: 6px;
+}
+.np-strat-detail-item .k {
+  font-family: var(--navi-font-sans);
+  font-size: 8px; font-weight: 600;
+  letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--navi-fg4);
+}
+
+@media (max-width: 900px) {
+  .np-realized-strip { grid-template-columns: 1fr 1fr; }
+  .np-strategy-strip { grid-template-columns: 1fr; }
+}
+
+/* ============================================================
+   Positions v3 — overall P&L status chip in positions table
+   ============================================================ */
+.np-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 100px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.np-status-chip.up {
+  background: rgba(168,212,160,.12);
+  color: var(--navi-positive, #a8d4a0);
+  border-color: rgba(168,212,160,.35);
+}
+.np-status-chip.down {
+  background: rgba(232,112,96,.12);
+  color: var(--navi-negative);
+  border-color: rgba(232,112,96,.35);
+}
+.np-status-chip.flat {
+  background: rgba(30,90,80,.20);
+  color: var(--navi-fg3);
+  border-color: rgba(30,90,80,.4);
+}
+.np-status-chip-amt {
+  font-weight: 500;
+  font-size: 10px;
+  opacity: 0.85;
+}
+
+/* Plain-text status (no pill background) — replaces .np-status-chip
+   for a calmer look. Just an arrow + signed amount, colored. */
+.np-status-text {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+.np-status-text.up   { color: var(--navi-positive); }
+.np-status-text.down { color: var(--navi-negative); }
+.np-status-text.flat { color: var(--navi-fg3); }
+
+/* ── Put protections manager ─────────────────────────────────────── */
+.pp-manager {
+  margin: 12px 0 16px;
+  border: 1px solid var(--navi-elevated, #1a3530);
+  border-radius: 8px;
+  background: rgba(20, 40, 38, 0.35);
+  overflow: hidden;
+}
+.pp-manager-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--navi-elevated, #1a3530);
+  background: rgba(10, 30, 28, 0.4);
+}
+.pp-manager-l {
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--navi-fg3, #a8c4c0);
+}
+.pp-manager-ct {
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 11px;
+  color: var(--navi-fg4, #6e8a86);
+}
+.pp-manager-list {
+  display: flex;
+  flex-direction: column;
+}
+.pp-manager-row {
+  display: grid;
+  grid-template-columns: 88px 1fr 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+  border-top: 1px solid rgba(26, 53, 48, 0.5);
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 12px;
+}
+.pp-manager-row:first-child { border-top: none; }
+.pp-manager-row.expired { opacity: 0.55; }
+.pp-manager-row .ticker.clickable {
+  cursor: pointer;
+  color: var(--navi-fg1, #faf5f0);
+  font-weight: 500;
+}
+.pp-manager-row .ticker.clickable:hover { color: #d2e632; }
+.pp-manager-cost { color: #c4523c; }
+.pp-manager-exp { color: var(--navi-fg4, #6e8a86); font-size: 11px; }
+.pp-manager-clear {
+  font-size: 11px;
+  padding: 4px 10px;
+  color: var(--navi-fg3, #a8c4c0);
+}
+.pp-manager-clear:hover { color: #c4523c; border-color: #c4523c; }
+
+/* ── Put protection confirm chip ─────────────────────────────────── */
+.pp-confirm {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d2e632;
+  border-radius: 6px;
+  background: rgba(210, 230, 50, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pp-confirm-q {
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 12px;
+  color: var(--navi-fg1, #faf5f0);
+}
+.pp-confirm-q b { color: #d2e632; }
+.pp-confirm-actions { display: flex; gap: 6px; }
+
+/* ── Earnings countdown chip + row highlight ─────────────────────
+   Quiet 'queued' for 8–30 days out, warm 'soon' for 3–7 days,
+   urgent for ≤2 days where the whole row also gets a left-border
+   accent + subtle tint so the eye catches it scanning the table. */
+.np-earn-chip {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 100px;
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.np-earn-chip.queued {
+  background: rgba(70, 130, 120, 0.18);
+  color: var(--navi-fg2, #a8c4c0);
+}
+.np-earn-chip.soon {
+  background: rgba(224, 192, 96, 0.18);
+  color: var(--navi-warning, #e0c060);
+}
+.np-earn-chip.urgent {
+  background: rgba(232, 112, 96, 0.20);
+  color: var(--navi-negative, #e87060);
+  font-weight: 600;
+}
+
+/* Row-level treatment when the position has earnings ≤2 days out. */
+.np-table tbody tr.np-row-earn-urgent td:first-child {
+  box-shadow: inset 3px 0 0 var(--navi-negative, #e87060);
+}
+.np-table tbody tr.np-row-earn-urgent {
+  background: rgba(232, 112, 96, 0.05);
+}
+.np-table tbody tr.np-row-earn-urgent:hover {
+  background: rgba(232, 112, 96, 0.10);
+}
+
+/* Slightly softer accent for the 3-7d "soon" tier — opt-in via the
+   class so the table reads calmer when nothing is urgent. */
+.np-table tbody tr.np-row-earn-soon td:first-child {
+  box-shadow: inset 3px 0 0 rgba(224, 192, 96, 0.6);
+}
+
+/* ── Earnings date field inside the Position Detail modal header ── */
+.pd-earnings-field {
+  margin-top: 8px;
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.pd-meta-l {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--navi-fg4, #325050);
+}
+.pd-earnings-input {
+  width: 160px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.pd-earnings-clear {
+  background: transparent;
+  border: none;
+  color: var(--navi-fg4, #325050);
+  font-family: var(--navi-font-mono, 'DM Mono', monospace);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  transition: color 0.15s;
+}
+.pd-earnings-clear:hover { color: var(--navi-negative, #e87060); }
+
+/* "current −$78k" muted sub-line under the put cost item — shows the
+   mark-to-market value from the live Polygon quote when one is available. */
+.np-strat-detail-sub {
+  display: block;
+  font-size: 10px;
+  color: var(--navi-fg4, #325050);
+  margin-top: 2px;
+  margin-left: 0;
+  letter-spacing: 0.2px;
+}
+
+/* =====================================================================
+   POSITION DETAIL MODAL — Variant B (Sidecar)
+   Ported from design_handoff_position_popup. All tokens reference the
+   Navi system (--navi-*) so the modal stays cohesive with the page.
+   ===================================================================== */
+
+.pp-stage {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 30% 0%, rgba(50,110,100,.15), transparent 70%),
+    rgba(6, 26, 16, 0.78);
+  padding: 32px;
+  box-sizing: border-box;
+  font-family: var(--navi-font-sans);
+  color: var(--navi-fg1);
+  font-size: 13px;
+  line-height: 1.6;
+  animation: pp-fade .15s var(--np-ease);
+}
+@keyframes pp-fade { from { opacity: 0 } to { opacity: 1 } }
+
+.pp-popup {
+  width: 100%;
+  max-width: 920px;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  background:
+    radial-gradient(ellipse at top right, rgba(50,110,100,.18), transparent 60%),
+    var(--navi-page, #0a2828);
+  border: 1.5px solid rgba(50,110,100,.5);
+  border-radius: 12px;
+  padding: 28px 32px;
+  color: var(--navi-fg1);
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
+
+/* ── Head ──────────────────────────────────────────────────────────── */
+.pp-popup-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.pp-head-info { min-width: 0; }
+.pp-popup-ticker {
+  font-family: var(--navi-font-sans);
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  line-height: 1;
+  color: var(--navi-fg1);
+  margin: 0 0 10px;
+  text-transform: none;
+}
+.pp-popup-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  color: var(--navi-fg3);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pp-popup-sub .dot { color: var(--navi-fg5); }
+.pp-pill-closed {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: var(--navi-tint-negative);
+  color: var(--navi-negative);
+  font-family: var(--navi-font-mono);
+  margin-left: 4px;
+}
+.pp-popup-head-actions { display: flex; align-items: center; gap: 4px; }
+.pp-icon-btn {
+  background: none;
+  border: none;
+  color: var(--navi-fg2);
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pp-icon-btn:hover { color: var(--navi-fg1); }
+
+/* ── Tabs ─────────────────────────────────────────────────────────── */
+.pp-tab-row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid rgba(30,90,80,.25);
+  margin-top: 22px;
+}
+.pp-tab {
+  font-family: var(--navi-font-sans);
+  font-size: 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--navi-fg4);
+  padding: 0 4px 12px;
+  margin-right: 24px;
+  position: relative;
+  font-weight: 500;
+}
+.pp-tab.on { color: var(--navi-fg1); }
+.pp-tab.on::after {
+  content: '';
+  position: absolute;
+  bottom: -1px; left: 0; right: 0;
+  height: 1.5px;
+  background: var(--navi-neon);
+}
+/* Resolve tab — warning gold (urgent), and badge counter for the # of
+   expired option positions still needing resolution. */
+.pp-tab.pp-tab-resolve { color: var(--navi-warning); }
+.pp-tab.pp-tab-resolve.on { color: var(--navi-warning); }
+.pp-tab.pp-tab-resolve.on::after { background: var(--navi-warning); }
+.pp-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 100px;
+  background: var(--navi-tint-warning);
+  color: var(--navi-warning);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+.pp-tab-count {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg4);
+  margin-left: 6px;
+}
+.pp-tab.on .pp-tab-count { color: var(--navi-neon); }
+
+/* ── Sidecar grid ─────────────────────────────────────────────────── */
+.pp-sidecar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 268px;
+  gap: 28px;
+  margin-top: 22px;
+}
+@media (max-width: 720px) {
+  .pp-sidecar { grid-template-columns: 1fr; }
+}
+
+/* ── Form ─────────────────────────────────────────────────────────── */
+.pp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.pp-form-grid { display: grid; gap: 16px 14px; }
+.pp-form-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.pp-field { display: flex; flex-direction: column; min-width: 0; }
+.pp-field-label {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-bottom: 8px;
+}
+.pp-field-hint {
+  font-size: 10px;
+  color: var(--navi-fg4);
+  margin-top: 6px;
+  font-family: var(--navi-font-mono);
+}
+
+/* Field-label row — label on the left, optional meta chip on the right.
+ * Used by Strike's spot/% chip so both the label and the chip get
+ * proper sizing (no more crammed 9px monospace). */
+.pp-field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.pp-field-label-row .pp-field-label {
+  margin-bottom: 0;
+}
+
+/* Spot price chip — sits beside the Strike label. Three pieces:
+ *   • "SPOT" mini-label (low-emphasis)
+ *   • Spot dollar value (mono, normal weight)
+ *   • Signed % from spot (bold, color-toned for OTM/ITM)
+ * Bigger and better-spaced than the old single-line meta string. */
+.pp-spot-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(15, 51, 51, 0.6);
+  border: 1px solid rgba(168, 196, 192, 0.22);
+  border-radius: 4px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  line-height: 1.1;
+}
+.pp-spot-chip-lbl {
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  color: var(--navi-fg4);
+  font-weight: 600;
+}
+.pp-spot-chip-val {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+.pp-spot-chip-diff {
+  font-weight: 800;
+  padding-left: 4px;
+  border-left: 1px solid rgba(168, 196, 192, 0.18);
+  margin-left: 2px;
+}
+.pp-spot-chip-diff.tone-otm { color: var(--navi-neon, #6dd1c5); }
+.pp-spot-chip-diff.tone-itm { color: #f08770; }
+.pp-spot-chip-diff.tone-neutral { color: var(--navi-fg3); }
+
+/* ─────────────────── Action picker (Open form) ────────────────────
+ * 2×2 grid of "Sell calls / Buy calls / Sell puts / Buy puts" buttons
+ * replacing the old (Option type, Direction) two-segment combo.
+ * "Sold" tone = neon green accent (premium collected).
+ * "Bought" tone = amber accent (premium paid). */
+.pp-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.pp-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(15, 51, 51, 0.4);
+  border: 1px solid rgba(168, 196, 192, 0.22);
+  border-radius: 6px;
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--navi-fg2);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s var(--navi-ease),
+              background .15s var(--navi-ease);
+}
+.pp-action-btn:hover { border-color: rgba(168, 196, 192, 0.42); }
+.pp-action-btn.on {
+  color: var(--navi-fg1);
+  background: rgba(210, 230, 50, 0.05);
+  border-color: var(--navi-neon, #d2e632);
+  box-shadow: 0 0 0 1px var(--navi-neon, #d2e632) inset;
+}
+.pp-action-glyph {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--navi-font-mono);
+  font-weight: 800;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.pp-action-glyph.tone-sold {
+  background: rgba(109, 209, 197, 0.18);
+  color: var(--navi-neon, #6dd1c5);
+  border: 1px solid rgba(109, 209, 197, 0.42);
+}
+.pp-action-glyph.tone-bought {
+  background: rgba(245, 196, 88, 0.16);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.4);
+}
+.pp-action-lbl {
+  letter-spacing: -0.1px;
+}
+
+/* ─────────────────── Confirm dialog (overlay-on-modal) ───────────────
+ * Sits on top of the position modal with its own backdrop. Renders the
+ * ticker LARGE and bright so the user spots ticker mismatches before
+ * committing (the specific guardrail against e.g. typing META data into
+ * a WDAY-open modal). Two buttons: Cancel + neon Confirm. */
+.pp-confirm-stage {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 16, 14, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;             /* above the position modal (which sits ~9000) */
+  backdrop-filter: blur(2px);
+}
+.pp-confirm-card {
+  background: var(--navi-bg2, #0d1814);
+  border: 1px solid rgba(168, 196, 192, 0.32);
+  border-radius: 8px;
+  width: min(520px, 92vw);
+  padding: 24px 28px 22px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  font-family: var(--navi-font-sans);
+  color: var(--navi-fg1);
+}
+.pp-confirm-card.danger {
+  border-color: rgba(240, 135, 112, 0.55);
+}
+.pp-confirm-title {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.pp-confirm-ticker {
+  font-size: 44px;
+  font-weight: 800;
+  letter-spacing: -.5px;
+  color: var(--navi-neon, #6dd1c5);
+  margin: 8px 0 2px;
+  line-height: 1.1;
+}
+.pp-confirm-card.danger .pp-confirm-ticker {
+  color: #f08770;
+}
+.pp-confirm-heading {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  color: var(--navi-fg2);
+  margin-bottom: 18px;
+  line-height: 1.45;
+}
+.pp-confirm-lines {
+  list-style: none;
+  margin: 0 0 22px;
+  padding: 14px 0 0;
+  border-top: 1px solid rgba(168, 196, 192, 0.16);
+}
+.pp-confirm-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 6px 0;
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+.pp-confirm-line .k {
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+}
+.pp-confirm-line .v {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+.pp-confirm-line.tone-positive .v { color: var(--navi-neon, #6dd1c5); }
+.pp-confirm-line.tone-negative .v { color: #f08770; }
+.pp-confirm-line.tone-emphasis .v { color: #f5c458; }
+.pp-confirm-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding-top: 6px;
+}
+.pp-btn.pp-btn-neon.danger {
+  background: rgba(240, 135, 112, 0.18);
+  border-color: rgba(240, 135, 112, 0.55);
+  color: #f08770;
+}
+.pp-btn.pp-btn-neon.danger:hover {
+  background: rgba(240, 135, 112, 0.28);
+}
+
+/* ─────────────────── Rail graph card ────────────────────────────────
+ * Single visual-first card with [Weekly income] / [Cost] toggle.
+ * Replaces the old POSITION + Risk + Live legs + Activity stack so the
+ * modal stays the original height. Big number + graph + minimal rows.
+ *
+ * Background is lifted slightly above the modal floor so the card reads
+ * as a distinct surface (without breaking the dark theme — see the
+ * inset highlight on the top edge). Padding is generous so the content
+ * has air to breathe. */
+.pp-railcard {
+  border: 1.5px solid rgba(168, 196, 192, 0.22);
+  border-radius: 8px;
+  padding: 18px 16px 16px;
+  background:
+    linear-gradient(180deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.02) 100%),
+    rgba(20, 60, 56, 0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 8px rgba(0, 0, 0, 0.18);
+}
+
+.pp-railcard-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(4, 16, 14, 0.55);
+  border-radius: 999px;
+  margin-bottom: 12px;
+}
+.pp-railcard-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.4;
+  transition: all .15s var(--navi-ease);
+}
+.pp-railcard-toggle-btn:hover { color: var(--navi-fg1); }
+.pp-railcard-toggle-btn.on {
+  background: var(--navi-neon, #d2e632);
+  color: #04100e;
+}
+
+.pp-railcard-hero {
+  text-align: center;
+  margin: 6px 0 12px;
+}
+.pp-railcard-lbl {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-bottom: 4px;
+}
+.pp-railcard-num {
+  font-family: var(--navi-font-mono);
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--navi-fg1);
+  letter-spacing: -0.6px;
+}
+.pp-railcard-num.pos { color: var(--navi-neon, #6dd1c5); }
+.pp-railcard-num.neg { color: #f08770; }
+
+/* Weekly bar chart — 12 columns, CSS heights. No chart lib. */
+.pp-railcard-bars {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  align-items: end;
+  gap: 3px;
+  height: 70px;
+  padding: 4px 0 6px;
+  border-bottom: 1px dashed rgba(168, 196, 192, 0.18);
+  margin-bottom: 10px;
+}
+.pp-railcard-bar-col {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 100%;
+}
+.pp-railcard-bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 2px;
+  transition: opacity .15s var(--navi-ease);
+}
+.pp-railcard-bar.tone-pos  { background: var(--navi-neon, #6dd1c5); }
+.pp-railcard-bar.tone-neg  { background: #f08770; }
+.pp-railcard-bar.tone-zero { background: rgba(168, 196, 192, 0.2); }
+.pp-railcard-bar-col:hover .pp-railcard-bar { opacity: 0.78; }
+
+/* Cost view — two big bars side by side, label below each. */
+.pp-railcard-costbars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: end;
+  height: 130px;
+  padding: 4px 6px 8px;
+  border-bottom: 1px dashed rgba(168, 196, 192, 0.18);
+  margin-bottom: 10px;
+}
+.pp-railcard-costcol {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  align-items: stretch;
+  justify-content: flex-end;
+}
+.pp-railcard-costbar {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px 4px 0;
+  border-radius: 4px 4px 0 0;
+  border-top: 2px solid;
+  min-height: 28px;
+}
+.pp-railcard-costbar.tone-avg {
+  background: rgba(245, 196, 88, 0.18);
+  border-top-color: #f5c458;
+}
+.pp-railcard-costbar.tone-eff {
+  background: rgba(168, 196, 192, 0.18);
+  border-top-color: rgba(168, 196, 192, 0.5);
+}
+.pp-railcard-costbar.tone-eff.pos {
+  background: rgba(109, 209, 197, 0.18);
+  border-top-color: var(--navi-neon, #6dd1c5);
+}
+.pp-railcard-costbar.tone-eff.neg {
+  background: rgba(240, 135, 112, 0.18);
+  border-top-color: #f08770;
+}
+.pp-railcard-costbar-val {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--navi-fg1);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+}
+.pp-railcard-costcol-lbl {
+  text-align: center;
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  color: var(--navi-fg3);
+  margin-top: 6px;
+}
+
+/* Footer rows beneath the graph — same shape across both views. */
+.pp-railcard-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pp-railcard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+}
+.pp-railcard-row .k {
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+}
+.pp-railcard-row .v {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+.pp-railcard-row .v.pos { color: var(--navi-neon, #6dd1c5); }
+.pp-railcard-row .v.neg { color: #f08770; }
+
+/* ─────────────────── Leg picker cards ──────────────────────────────
+ * Replaces the bare-radio "+3 PUT $240" rows in CloseFields and
+ * EditFields. Each option shows up as a small card with a left edge
+ * accent (green = sold/short, amber = bought/long), the strike as the
+ * hero, and a title chip ("CALLS SOLD", "PUTS BOUGHT") in the corner so
+ * the user can spot direction class at a glance. */
+.pp-leg-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pp-leg-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px 28px 1fr;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px 12px 14px;
+  border: 1px solid rgba(168, 196, 192, 0.22);
+  border-radius: 6px;
+  background: rgba(15, 51, 51, 0.4);
+  cursor: pointer;
+  transition: border-color .15s var(--navi-ease),
+              background .15s var(--navi-ease);
+}
+.pp-leg-card:hover { border-color: rgba(168, 196, 192, 0.42); }
+.pp-leg-card.on   {
+  border-color: var(--navi-neon, #d2e632);
+  background: rgba(210, 230, 50, 0.04);
+  box-shadow: 0 0 0 1px var(--navi-neon, #d2e632) inset;
+}
+/* Direction accent stripe — runs the full height of the card on its
+ * left edge. Sold = neon green, bought = amber. */
+.pp-leg-card::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 6px 0 0 6px;
+}
+.pp-leg-card-sold::before    { background: var(--navi-neon, #6dd1c5); }
+.pp-leg-card-bought::before  { background: #f5c458; }
+.pp-leg-card-radio {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.pp-leg-card-dot {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(168, 196, 192, 0.5);
+  background: transparent;
+  transition: all .15s var(--navi-ease);
+}
+.pp-leg-card.on .pp-leg-card-dot {
+  border-color: var(--navi-neon, #d2e632);
+  background: var(--navi-neon, #d2e632);
+  box-shadow: 0 0 0 4px rgba(210, 230, 50, .14);
+}
+.pp-leg-card-glyph {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--navi-font-mono);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+.pp-leg-card-glyph.tone-sold {
+  background: rgba(109, 209, 197, 0.18);
+  color: var(--navi-neon, #6dd1c5);
+  border: 1px solid rgba(109, 209, 197, 0.42);
+}
+.pp-leg-card-glyph.tone-bought {
+  background: rgba(245, 196, 88, 0.16);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.4);
+}
+.pp-leg-card-body { min-width: 0; }
+.pp-leg-card-row1 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pp-leg-card-strike {
+  font-family: var(--navi-font-mono);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--navi-fg1);
+  letter-spacing: -0.2px;
+}
+.pp-leg-card-title {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.pp-leg-card-title.tone-sold {
+  background: rgba(109, 209, 197, 0.18);
+  color: var(--navi-neon, #6dd1c5);
+  border: 1px solid rgba(109, 209, 197, 0.42);
+}
+.pp-leg-card-title.tone-bought {
+  background: rgba(245, 196, 88, 0.16);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.4);
+}
+.pp-leg-card-row2 {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+  margin-top: 4px;
+  letter-spacing: .2px;
+}
+
+/* ─────────────────── §3 — Live legs rail cards ────────────────────
+ * One vertically-stacked card per live leg in the right rail. Same
+ * visual language as the picker cards (left edge tone, glyph + title
+ * chip) but a tall hero (strike + spot diff) and a 4-row data block. */
+.pp-rail-livestack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pp-livecard {
+  position: relative;
+  padding: 12px 14px 14px;
+  border: 1px solid rgba(168, 196, 192, 0.18);
+  border-radius: 6px;
+  background: rgba(15, 51, 51, 0.4);
+}
+.pp-livecard::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  border-radius: 6px 0 0 6px;
+}
+.pp-livecard-sold::before   { background: var(--navi-neon, #6dd1c5); }
+.pp-livecard-bought::before { background: #f5c458; }
+
+.pp-livecard-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.pp-livecard-hero {
+  text-align: left;
+  padding: 4px 0 10px;
+  border-bottom: 1px dashed rgba(168, 196, 192, 0.18);
+  margin-bottom: 10px;
+}
+.pp-livecard-strike {
+  font-family: var(--navi-font-mono);
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--navi-fg1);
+  letter-spacing: -0.4px;
+  line-height: 1.1;
+}
+.pp-livecard-spotdiff {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  letter-spacing: .6px;
+  margin-top: 4px;
+  font-weight: 700;
+}
+.pp-livecard-spotdiff.tone-otm { color: var(--navi-neon, #6dd1c5); }
+.pp-livecard-spotdiff.tone-itm { color: #f08770; }
+.pp-livecard-spotdiff.tone-neutral { color: var(--navi-fg3); }
+
+.pp-livecard-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.pp-livecard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+}
+.pp-livecard-row .k {
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+}
+.pp-livecard-row .v {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+
+/* Days-to-expiry chip — neutral / amber / red based on closeness.
+ * Renders inline with the data-row value column. */
+.pp-livecard-dtechip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .4px;
+}
+.pp-livecard-dtechip.tone-normal {
+  background: rgba(168, 196, 192, 0.12);
+  color: var(--navi-fg2);
+  border: 1px solid rgba(168, 196, 192, 0.24);
+}
+.pp-livecard-dtechip.tone-soon {
+  background: rgba(245, 196, 88, 0.16);
+  color: #f5c458;
+  border: 1px solid rgba(245, 196, 88, 0.4);
+}
+.pp-livecard-dtechip.tone-urgent {
+  background: rgba(240, 135, 112, 0.22);
+  color: #f08770;
+  border: 1px solid rgba(240, 135, 112, 0.55);
+}
+
+/* ─────────────────── §4 — Risk card ───────────────────────────────
+ * Conditionally rendered in the rail above Live positions. Hero number
+ * is the flag count; tinted border matches the most-urgent flag. */
+.pp-riskcard {
+  border: 1px solid rgba(168, 196, 192, 0.18);
+  border-radius: 6px;
+  padding: 14px 14px 12px;
+  background: rgba(15, 51, 51, 0.4);
+}
+.pp-riskcard.tone-urgent { border-color: rgba(240, 135, 112, 0.55); }
+.pp-riskcard.tone-soon   { border-color: rgba(245, 196, 88, 0.42); }
+.pp-riskcard.tone-info   { border-color: rgba(109, 209, 197, 0.42); }
+
+.pp-riskcard-hero {
+  font-family: var(--navi-font-mono);
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+  margin: 6px 0 2px;
+  letter-spacing: -1px;
+}
+.pp-riskcard-hero.tone-urgent { color: #f08770; }
+.pp-riskcard-hero.tone-soon   { color: #f5c458; }
+.pp-riskcard-hero.tone-info   { color: var(--navi-neon, #6dd1c5); }
+
+.pp-riskcard-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-bottom: 12px;
+}
+
+.pp-riskcard-list {
+  list-style: none;
+  margin: 0;
+  padding: 10px 0 0;
+  border-top: 1px dashed rgba(168, 196, 192, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pp-riskcard-item {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  align-items: start;
+  gap: 10px;
+}
+.pp-riskcard-dot {
+  width: 8px; height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+}
+.pp-riskcard-item.tone-urgent .pp-riskcard-dot { background: #f08770; }
+.pp-riskcard-item.tone-soon   .pp-riskcard-dot { background: #f5c458; }
+.pp-riskcard-item.tone-info   .pp-riskcard-dot { background: var(--navi-neon, #6dd1c5); }
+
+.pp-riskcard-text { min-width: 0; }
+.pp-riskcard-label {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  line-height: 1.25;
+}
+.pp-riskcard-detail {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+  margin-top: 2px;
+  letter-spacing: .2px;
+}
+
+/* ─────────────────── §5 — Activity card ───────────────────────────
+ * Right-rail summary of how long this position has been active + a
+ * short-list of structural facts (live legs, earliest/latest expiry,
+ * net option cash). Hero number auto-units (days → months → years). */
+.pp-activitycard {
+  border: 1px solid rgba(168, 196, 192, 0.18);
+  border-radius: 6px;
+  padding: 14px 14px 12px;
+  background: rgba(15, 51, 51, 0.4);
+}
+.pp-activitycard-hero {
+  font-family: var(--navi-font-mono);
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+  margin: 6px 0 2px;
+  color: var(--navi-fg1);
+  letter-spacing: -1px;
+}
+.pp-activitycard-unit {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .4px;
+  color: var(--navi-fg3);
+  margin-left: 8px;
+  text-transform: uppercase;
+}
+.pp-activitycard-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  margin-bottom: 12px;
+}
+.pp-activitycard-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(168, 196, 192, 0.18);
+}
+.pp-activitycard-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+}
+.pp-activitycard-row .k {
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+}
+.pp-activitycard-row .v {
+  color: var(--navi-fg1);
+  font-weight: 600;
+}
+.pp-activitycard-row .v.pos { color: var(--navi-neon, #6dd1c5); }
+.pp-activitycard-row .v.neg { color: #f08770; }
+
+.pp-input {
+  font-family: var(--navi-font-sans);
+  font-size: 14px;
+  padding: 11px 14px;
+  background: rgba(15,51,51,.6);
+  border: 1px solid transparent;
+  color: var(--navi-fg1);
+  outline: none;
+  border-radius: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color .15s var(--np-ease);
+}
+.pp-input.mono { font-family: var(--navi-font-mono); }
+.pp-input::placeholder { color: var(--navi-fg5); }
+.pp-input:focus { border-color: rgba(210,230,50,.35); }
+.pp-input[type="number"]::-webkit-outer-spin-button,
+.pp-input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+.pp-input[type="number"] { -moz-appearance: textfield; }
+
+.pp-input-prefix {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.pp-pfx {
+  position: absolute;
+  left: 14px;
+  color: var(--navi-fg4);
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  pointer-events: none;
+  z-index: 1;
+}
+.pp-input-prefix .pp-input { padding-left: 28px; }
+
+.pp-calc-tile {
+  font-family: var(--navi-font-mono);
+  font-size: 18px;
+  letter-spacing: -.5px;
+  padding: 11px 14px;
+  background: rgba(210,230,50,.06);
+  border: 1px dashed rgba(210,230,50,.25);
+  color: var(--navi-fg1);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  box-sizing: border-box;
+  font-weight: 500;
+}
+.pp-calc-tile .formula {
+  font-size: 9px;
+  color: var(--navi-fg4);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 500;
+  font-family: var(--navi-font-sans);
+}
+.pp-calc-tile.neg .num { color: var(--navi-negative); }
+.pp-calc-tile.pos .num { color: var(--navi-positive); }
+
+/* ── Source segmented ─────────────────────────────────────────────── */
+.pp-source-seg {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(15,51,51,.5);
+  padding: 4px;
+  border-radius: 10px;
+  align-self: flex-start;
+}
+.pp-source-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 7px;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all .15s var(--np-ease);
+}
+.pp-source-opt:hover { color: var(--navi-fg2); }
+.pp-source-opt.on {
+  background: rgba(15,51,51,.95);
+  color: var(--navi-fg1);
+  box-shadow: 0 0 0 1px rgba(210,230,50,.25);
+}
+.pp-glyph-tile {
+  width: 22px; height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(50,110,100,.25);
+  border-radius: 4px;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+}
+.pp-source-opt.on .pp-glyph-tile {
+  background: var(--navi-neon);
+  color: var(--navi-page);
+}
+
+/* ── Rail ─────────────────────────────────────────────────────────── */
+.pp-rail {
+  background: rgba(15,51,51,.4);
+  border: 1px solid rgba(30,90,80,.25);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  align-self: start;
+}
+.pp-rail-section { display: flex; flex-direction: column; }
+.pp-rail-lbl {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg4);
+  margin-bottom: 10px;
+}
+.pp-rail-bignum {
+  font-family: var(--navi-font-mono);
+  font-size: 26px;
+  letter-spacing: -1px;
+  color: var(--navi-fg1);
+  font-weight: 500;
+  line-height: 1;
+}
+.pp-rail-bignum.pos { color: var(--navi-positive); }
+.pp-rail-bignum.neg { color: var(--navi-negative); }
+.pp-rail-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+  margin-top: 6px;
+}
+.pp-rail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  padding: 3px 0;
+}
+.pp-rail-row .k { color: var(--navi-fg3); }
+.pp-rail-row .v { color: var(--navi-fg1); }
+.pp-rail-divider { height: 1px; background: rgba(30,90,80,.2); }
+
+.pp-preview-row {
+  background: rgba(15,51,51,.6);
+  border-left: 2px solid rgba(210,230,50,.5);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+}
+.pp-preview-row.neg { border-left-color: var(--navi-negative); }
+.pp-preview-row.pos { border-left-color: var(--navi-positive); }
+.pp-preview-date { color: var(--navi-fg2); }
+.pp-preview-amt { font-weight: 500; }
+.pp-preview-amt.neg { color: var(--navi-negative); }
+.pp-preview-amt.pos { color: var(--navi-positive); }
+.pp-preview-empty { color: var(--navi-fg5); font-style: italic; }
+.pp-preview-meta { color: var(--navi-fg3); margin-left: auto; }
+.pp-mini-glyph {
+  width: 18px; height: 18px;
+  border-radius: 3px;
+  background: rgba(50,110,100,.3);
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.pp-mini-glyph.neon { background: var(--navi-neon); color: var(--navi-page); }
+
+.pp-rail-links { display: flex; flex-direction: column; gap: 10px; }
+.pp-rail-link {
+  background: none;
+  border: none;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pp-rail-link:hover { color: var(--navi-neon); }
+.pp-rail-link.danger { color: var(--navi-fg4); }
+.pp-rail-link.danger:hover { color: var(--navi-negative); }
+
+/* ── Foot ─────────────────────────────────────────────────────────── */
+.pp-popup-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(30,90,80,.18);
+}
+.pp-popup-foot-end { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+.pp-btn {
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0;
+  transition: all .15s var(--np-ease);
+}
+.pp-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pp-btn-neon { background: rgba(210,230,50,.12); color: var(--navi-neon); }
+.pp-btn-neon:hover:not(:disabled) { background: rgba(210,230,50,.18); }
+.pp-btn-text { background: none; color: var(--navi-fg2); padding: 10px 12px; }
+.pp-btn-text:hover { color: var(--navi-fg1); }
+
+/* =====================================================================
+   POSITION INSIGHT MODAL — Tesla-style P&L dashboard (read view)
+   ===================================================================== */
+
+.pi-stage {
+  position: fixed; inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 30% 0%, rgba(50,110,100,.15), transparent 70%),
+    rgba(6, 26, 16, 0.85);
+  padding: 32px;
+  box-sizing: border-box;
+  font-family: var(--navi-font-sans);
+  color: var(--navi-fg1);
+  animation: pp-fade .15s var(--np-ease);
+}
+
+.pi-modal {
+  width: 100%;
+  max-width: 980px;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  background:
+    radial-gradient(ellipse at top right, rgba(50,110,100,.16), transparent 60%),
+    var(--navi-page);
+  border: 1.5px solid rgba(50,110,100,.5);
+  border-radius: 14px;
+  padding: 28px 32px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.5);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* Head */
+.pi-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 24px;
+}
+.pi-head-left { min-width: 0; }
+.pi-ticker {
+  font-family: var(--navi-font-sans);
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -1.2px;
+  line-height: 1;
+  color: var(--navi-fg1);
+  margin: 0 0 12px;
+}
+.pi-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  color: var(--navi-fg3);
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.pi-sub .dot { color: var(--navi-fg5); }
+.pi-pill-closed {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: var(--navi-tint-negative);
+  color: var(--navi-negative);
+  font-family: var(--navi-font-mono);
+}
+.pi-icon-btn {
+  background: none; border: none;
+  color: var(--navi-fg2);
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.pi-icon-btn:hover { color: var(--navi-fg1); }
+
+/* Earnings strip */
+.pi-earn-strip {
+  padding: 14px 18px;
+  background: rgba(15,51,51,.4);
+  border: 1px solid rgba(30,90,80,.25);
+  border-radius: 10px;
+  display: flex; align-items: center;
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+.pi-earn {
+  display: flex; gap: 8px; align-items: center; flex: 1;
+}
+.pi-earn-icon { font-size: 14px; }
+.pi-earn-main { color: var(--navi-fg2); }
+.pi-earn-main b { color: var(--navi-fg1); font-weight: 600; }
+.pi-earn-date { color: var(--navi-fg4); font-size: 11px; }
+.pi-earn.urgent .pi-earn-main b { color: var(--navi-negative); }
+.pi-earn.soon .pi-earn-main b { color: var(--navi-warning); }
+.pi-earn.queued .pi-earn-main b { color: var(--navi-fg2); }
+.pi-earn-edit { display: flex; gap: 10px; align-items: center; flex: 1; }
+.pi-earn-edit .pp-input { max-width: 180px; }
+.pi-add-earn {
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  color: var(--navi-neon);
+}
+.pi-link {
+  background: none; border: none;
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  color: var(--navi-fg2);
+  cursor: pointer;
+  padding: 2px 6px;
+  margin-left: auto;
+}
+.pi-link:hover { color: var(--navi-neon); }
+.pi-link.muted { color: var(--navi-fg4); margin-left: 0; }
+.pi-link.muted:hover { color: var(--navi-fg2); }
+.pi-link.danger { color: var(--navi-fg4); margin-left: 0; }
+.pi-link.danger:hover { color: var(--navi-negative); }
+
+/* Stats */
+.pi-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 720px) { .pi-stats { grid-template-columns: 1fr; } }
+.pi-stat {
+  padding: 18px 20px;
+  background: rgba(15,51,51,.4);
+  border: 1px solid rgba(30,90,80,.25);
+  border-radius: 10px;
+}
+.pi-stat-l {
+  font-family: var(--navi-font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--navi-fg3);
+  margin-bottom: 8px;
+}
+.pi-stat-v {
+  font-family: var(--navi-font-mono);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: -1px;
+  color: var(--navi-fg1);
+  line-height: 1;
+}
+.pi-stat-v.pos { color: var(--navi-positive); }
+.pi-stat-v.neg { color: var(--navi-negative); }
+.pi-stat-sub {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg4);
+  margin-top: 8px;
+}
+
+/* Chart */
+.pi-chart {
+  padding: 18px 20px;
+  background: rgba(15,51,51,.4);
+  border: 1px solid rgba(30,90,80,.25);
+  border-radius: 10px;
+}
+.pi-chart-svg {
+  width: 100%;
+  height: 220px;
+  display: block;
+}
+.pi-chart-xaxis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg4);
+}
+.pi-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+}
+.pi-chart-legend-dot {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 2px;
+  margin-right: 2px;
+  margin-left: 6px;
+}
+.pi-chart-legend-dot:first-child { margin-left: 0; }
+.pi-chart-legend-sep { color: var(--navi-fg5); margin: 0 4px; }
+
+/* Breakdown */
+.pi-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+@media (max-width: 720px) { .pi-breakdown { grid-template-columns: 1fr; } }
+.pi-bd-card {
+  padding: 18px 20px;
+  background: rgba(15,51,51,.4);
+  border: 1px solid rgba(30,90,80,.25);
+  border-radius: 10px;
+}
+.pi-section-l {
+  font-family: var(--navi-font-sans);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg4);
+  margin-bottom: 14px;
+}
+.pi-bd-empty {
+  font-family: var(--navi-font-mono);
+  font-size: 16px;
+  color: var(--navi-fg5);
+}
+.pi-bd-rows { display: flex; flex-direction: column; gap: 8px; }
+.pi-bd-row {
+  display: grid;
+  grid-template-columns: 24px 44px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+.pi-bd-pct { color: var(--navi-fg2); font-weight: 500; }
+.pi-bd-label { color: var(--navi-fg3); }
+.pi-bd-amt.pos { color: var(--navi-positive); }
+.pi-bd-amt.neg { color: var(--navi-negative); }
+
+/* Mini glyph (reused from popup but scoped to pi-) */
+.pi-modal .pi-mini-glyph {
+  width: 22px; height: 22px;
+  border-radius: 4px;
+  background: rgba(50,110,100,.3);
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  font-weight: 500;
+}
+.pi-modal .pi-mini-glyph.pos {
+  background: var(--navi-tint-positive);
+  color: var(--navi-positive);
+}
+.pi-modal .pi-mini-glyph.neg {
+  background: var(--navi-tint-negative);
+  color: var(--navi-negative);
+}
+
+/* Activity */
+.pi-activity {
+  padding: 18px 20px;
+  background: rgba(15,51,51,.4);
+  border: 1px solid rgba(30,90,80,.25);
+  border-radius: 10px;
+}
+.pi-activity-empty {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  color: var(--navi-fg5);
+  padding: 12px 0;
+}
+.pi-activity-list { display: flex; flex-direction: column; gap: 8px; }
+.pi-activity-row {
+  display: grid;
+  grid-template-columns: 24px 92px auto 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(30,90,80,.12);
+}
+.pi-activity-row:last-child { border-bottom: none; }
+.pi-activity-date {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  color: var(--navi-fg3);
+}
+.pi-activity-amt {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  font-weight: 500;
+}
+.pi-activity-amt.pos { color: var(--navi-positive); }
+.pi-activity-amt.neg { color: var(--navi-negative); }
+.pi-activity-label {
+  font-family: var(--navi-font-sans);
+  font-size: 12px;
+  color: var(--navi-fg3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Footer */
+.pi-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(30,90,80,.18);
+}
+.pi-foot-end { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+
+/* ── Matrix timeframe selector (12w / 26w / 52w / 104w) ──────────── */
+.gl-timeframe {
+  display: inline-flex;
+  background: rgba(15,51,51,.5);
+  border-radius: 100px;
+  padding: 3px;
+  gap: 2px;
+  margin-left: auto;
+}
+.gl-timeframe button {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  background: none;
+  border: none;
+  color: var(--navi-fg4);
+  padding: 5px 12px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all .15s var(--np-ease);
+  letter-spacing: 0.4px;
+}
+.gl-timeframe button:hover { color: var(--navi-fg2); }
+.gl-timeframe button.on {
+  background: var(--navi-tint-neon);
+  color: var(--navi-neon);
+}
+
+/* Ensure the matrix columns keep a minimum width so 52+ weeks doesn't
+   crush them into unreadable slivers. The .gl-scroll wrapper already
+   provides horizontal overflow. */
+.gl-table .gl-wk { min-width: 38px; }
+.gl-table .gl-cell { min-width: 38px; }
+
+/* Footer: group "Mark closed" + "Delete position" on the left. */
+.pi-foot-start {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+.pi-link-strong { font-weight: 500; }
+.pi-link-strong:hover { color: var(--navi-negative); }
+
+
+/* =====================================================================
+   TIMELINE MATRIX — inherits gl-table from the Trades matrix.
+   Only adds the bar overlay, day tick header, and per-row group/subtotal
+   styling. Filter pills + timeframe selector come straight from the
+   Trades matrix CSS.
+   ===================================================================== */
+
+/* Daily columns are narrow — let them shrink below the 38px min the
+   Trades matrix uses for weekly cells. */
+.tl-table .gl-wk { min-width: 14px; padding: 0; }
+.tl-table .tl-day-th {
+  position: relative;
+  height: 32px;
+}
+
+/* Sticky Position column (left) and Realized column (right) so they stay
+   visible as the user scrolls 60-365 daily columns horizontally. */
+.tl-table thead .gl-pos,
+.tl-table tbody .gl-pos {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: rgba(6,26,16,.96);
+  box-shadow: 2px 0 6px rgba(0,0,0,.25);
+}
+.tl-table thead .gl-tot,
+.tl-table tbody .gl-tot,
+.tl-table tfoot .gl-tot {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: rgba(6,26,16,.96);
+  box-shadow: -2px 0 6px rgba(0,0,0,.25);
+}
+.tl-table thead .gl-pos,
+.tl-table thead .gl-tot {
+  z-index: 3;
+}
+.tl-table .tl-day-th.today {
+  background: rgba(210,230,50,.06);
+}
+.tl-table .tl-day-th.month-start {
+  border-left: 1px solid rgba(70,130,120,.35);
+}
+.tl-day-tick {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  color: var(--navi-fg4);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The wide cell that hosts the bars. Same overall row height as the
+   Trades matrix so the two views feel like the same table — just with
+   bars instead of weekly numbers in the cells. */
+.tl-table .tl-track-cell {
+  padding: 0;
+  position: relative;
+  height: 44px;
+}
+.tl-table .tl-track {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+/* A "slot" is a horizontal lane within the row that can hold one
+   contract's bar. Multiple contracts on the same ticker stack vertically
+   inside the row. */
+.tl-slot {
+  position: absolute;
+  left: 0;
+  right: 0;
+}
+
+/* The bars */
+.tl-bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  overflow: hidden;
+  z-index: 1;
+  cursor: pointer;
+}
+/* Direction drives the bar color. Calls vs puts are distinguished by
+ * the row glyph (C / P) and the row label. Solid bright fills (no
+ * gradient, no transparency) so the bars read at a glance. */
+.tl-bar-short-put,
+.tl-bar-short-call {
+  background: var(--navi-positive);
+  color: var(--navi-page);
+}
+.tl-bar-long-put,
+.tl-bar-long-call {
+  background: var(--navi-negative);
+  color: var(--navi-page);
+}
+.tl-bar-closed {
+  background: rgba(70,90,90,.4);
+  border: 1px solid rgba(70,90,90,.6);
+  color: var(--navi-fg2);
+  overflow: visible;  /* let the realized label spill past the bar edge if needed */
+}
+/* The future segment is the "still in force" portion: today → expiry.
+   Same solid bright color as the open direction, with a real arrow tip
+   carved out of the right edge using clip-path. */
+.tl-bar-future {
+  cursor: default;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%);
+}
+.tl-bar-future.tl-future-short { background: var(--navi-positive); }
+.tl-bar-future.tl-future-long  { background: var(--navi-negative); }
+.tl-bar-realized {
+  font-weight: 600;
+  font-size: 10px;
+  white-space: nowrap;
+  /* Float just past the right edge of the gray-ghost bar in a pill, so
+     it's legible even if the gray segment is only a few pixels wide. */
+  position: absolute;
+  left: calc(100% + 4px);
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 1px 6px;
+  border-radius: 100px;
+  background: var(--navi-page);
+  border: 1px solid rgba(30,90,80,.4);
+  z-index: 2;
+}
+.tl-bar-realized.up   { color: var(--navi-positive); border-color: rgba(168,212,160,.5); }
+.tl-bar-realized.down { color: var(--navi-negative); border-color: rgba(232,112,96,.5); }
+
+/* Today's vertical line — drawn inside each track */
+.tl-today-line {
+  position: absolute;
+  top: -4px; bottom: -4px;
+  width: 1px;
+  background: var(--navi-neon);
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: 0 0 4px rgba(210,230,50,.4);
+}
+
+.tl-table .tl-foot-spacer {
+  padding: 10px 16px;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 11px;
+  color: var(--navi-fg3);
+}
+
+/* Trades matrix — per-trade cell content (replaces the old dot indicators).
+   Each filled cell now shows the trade amount + an "open" / "close" word
+   and the option type letter, so the user can read what each column is
+   without thinking about dates or hovering. */
+.gl-cell-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.2px;
+  color: var(--navi-fg4);
+  margin-top: 2px;
+  text-transform: lowercase;
+}
+.gl-cell-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: rgba(70,130,120,.3);
+  color: var(--navi-fg2);
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1;
+}
+.gl-cell-realized {
+  font-weight: 500;
+  font-size: 9px;
+}
+.gl-cell-realized.up   { color: var(--navi-positive); }
+.gl-cell-realized.down { color: var(--navi-negative); }
+
+/* Text label inside Timeline bars — "open · 3P $52" or "close" or arrow.
+   Truncates with ellipsis when the bar is narrow. */
+.tl-bar-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  font-size: 9px;
+  color: var(--navi-page);
+  letter-spacing: 0.2px;
+}
+.tl-bar-closed .tl-bar-text {
+  color: var(--navi-fg2);
+}
+
+/* ── Close-position picker: clear radio-pill semantics ─────────────
+   The previous flat list invited mis-clicks. Each open is now a
+   labeled radio card with a visible filled dot when selected. The
+   active card has a neon border + tint so the user can see at a
+   glance which one will get closed when they hit Save. */
+.pp-close-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pp-close-pick {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(30,90,80,.4);
+  background: rgba(15,51,51,.4);
+  cursor: pointer;
+  font-family: var(--navi-font-mono, monospace);
+  transition: all .12s var(--np-ease);
+}
+.pp-close-pick:hover {
+  border-color: rgba(210,230,50,.35);
+  background: rgba(15,51,51,.6);
+}
+.pp-close-pick.on {
+  border-color: var(--navi-neon);
+  background: rgba(210,230,50,.06);
+  box-shadow: 0 0 0 1px rgba(210,230,50,.25) inset;
+}
+.pp-close-pick-radio {
+  /* native input hidden — we render our own dot. Still focusable via tab. */
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+.pp-close-pick-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(70,130,120,.5);
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  transition: all .12s var(--np-ease);
+}
+.pp-close-pick.on .pp-close-pick-dot {
+  border-color: var(--navi-neon);
+  background: var(--navi-neon);
+  box-shadow: inset 0 0 0 3px var(--navi-page);
+}
+.pp-close-pick-body { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.pp-close-pick-headline {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+}
+.pp-close-pick-sub {
+  font-size: 11px;
+  color: var(--navi-fg4);
+}
+
+/* Tesla-style chart additions: right-side Y axis scale labels. */
+.pi-chart-canvas {
+  position: relative;
+}
+.pi-chart-yaxis {
+  position: absolute;
+  top: 0; bottom: 0;
+  right: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+}
+.pi-chart-yaxis span {
+  display: block;
+  text-align: right;
+  background: rgba(6,26,16,.7);
+  padding: 0 4px;
+  border-radius: 2px;
+  line-height: 1.4;
+}
+.pi-chart-y-top { color: var(--navi-positive); }
+.pi-chart-y-mid { color: var(--navi-fg4); }
+.pi-chart-y-zero { color: var(--navi-fg3); font-weight: 500; }
+.pi-chart-y-bot { color: var(--navi-negative); }
+
+/* Trades matrix — each cell holds exactly one trade. The per-cell action
+   tag ("op P" / "cl C") sits below the amount in muted mono. No border
+   pill — the cell is just the colored number, like the original weekly
+   matrix. */
+
+.pi-chart-total { color: var(--navi-fg3); font-family: var(--navi-font-mono, monospace); font-size: 11px; }
+.pi-chart-total b { font-weight: 600; color: var(--navi-fg1); }
+.pi-chart-total b.pos { color: var(--navi-positive); }
+.pi-chart-total b.neg { color: var(--navi-negative); }
+.pi-chart-total.muted { color: var(--navi-fg5); font-style: italic; }
+
+/* Inline confirm pill for delete (replaces the window.confirm popup).
+   Sits in the footer where the delete button was; cancel + confirm
+   buttons live in the same pill so the user can dismiss safely. */
+.pi-confirm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  border-radius: 100px;
+  background: rgba(232,112,96,.10);
+  border: 1px solid rgba(232,112,96,.4);
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 11px;
+}
+.pi-confirm-q { color: var(--navi-fg2); }
+.pi-confirm-q b { color: var(--navi-negative); }
+
+/* Timeline bars are read-only — no pointer cursor, no hover lift. */
+.tl-bar-readonly { cursor: default; }
+
+/* Day-change chip next to ticker — small ▲/▼ with absolute %. Up = teal-
+   green (sized to match the existing .np-earn-chip), Down = coral. */
+.np-day-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.np-day-chip.up   { background: rgba(168,212,160,.14); color: var(--navi-positive); }
+.np-day-chip.down { background: rgba(232,112,96,.14);  color: var(--navi-negative); }
+.np-day-chip.flat { background: rgba(70,130,120,.14);  color: var(--navi-fg3); }
+
+/* Tiny state tag inside a trades-matrix cell (live / partial / closed) */
+.gl-cell-state {
+  font-family: var(--navi-font-mono, monospace);
+  font-size: 8px;
+  letter-spacing: 0.4px;
+  text-transform: lowercase;
+  line-height: 1;
+  color: var(--navi-fg4);
+}
+.gl-cell-state.open    { color: var(--navi-neon); }
+.gl-cell-state.partial { color: var(--navi-warning); }
+.gl-cell-state.closed  { color: var(--navi-fg4); }
+/* Urgent: position is expiring inside a week — needs eyes on it. Warning
+   gold matches the design system's "watch this" semantic. The pill color
+   alone is the indicator — no cell background or border treatment, since
+   that reads as a column divider when alternating cells differ. */
+.gl-cell-state.urgent   { color: var(--navi-warning); }
+.gl-cell-state.expired  { color: var(--navi-negative); }
+
+/* ============================================================
+   Expiry Calendar — swimlane Gantt
+   Tickers on the left, time on the right; each ticker has two lanes
+   (Put / Call) with markers plotted at the expiry date.
+   ============================================================ */
+.np-app .exp-wrap {
+  background: var(--navi-card);
+  border: 1px solid rgba(50,110,100,.25);
+  border-radius: 14px;
+  padding: 18px;
+}
+.np-app .exp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.np-app .exp-range {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 10px;
+  padding: 3px;
+}
+.np-app .exp-range button {
+  background: transparent;
+  color: var(--navi-fg2);
+  border: 0;
+  padding: 6px 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .exp-range button:hover { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .exp-range button.on    { color: var(--navi-neon); background: var(--navi-tint-neon); }
+
+.np-app .exp-legend {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 14px;
+  font-size: 10px;
+  color: var(--navi-fg3);
+  letter-spacing: .3px;
+  text-transform: uppercase;
+}
+.np-app .exp-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.np-app .exp-leg {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 6px;
+  border: 1.5px solid;
+}
+.np-app .exp-leg.put.short  { background: transparent;          border-color: var(--navi-negative); }
+.np-app .exp-leg.put.long   { background: var(--navi-negative); border-color: var(--navi-negative); }
+.np-app .exp-leg.call.short { background: var(--navi-positive); border-color: var(--navi-positive); }
+.np-app .exp-leg.call.long  { background: transparent;          border-color: var(--navi-positive); }
+
+.np-app .exp-empty {
+  padding: 48px;
+  text-align: center;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+
+.np-app .exp-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  row-gap: 4px;
+  align-items: stretch;
+}
+
+/* Header row */
+.np-app .exp-hd-ticker { /* empty top-left corner */ }
+.np-app .exp-hd-axis {
+  position: relative;
+  height: 28px;
+  border-bottom: 1px solid rgba(50,110,100,.25);
+  margin-bottom: 6px;
+}
+.np-app .exp-week {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+}
+.np-app .exp-month {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 10px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  white-space: nowrap;
+}
+.np-app .exp-week-tick {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  height: 6px;
+  background: rgba(50,110,100,.45);
+}
+
+/* Ticker column */
+.np-app .exp-ticker {
+  padding: 8px 12px 8px 0;
+  border-right: 1px solid rgba(50,110,100,.22);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+.np-app .exp-ticker-name {
+  background: none;
+  border: 0;
+  color: var(--navi-fg1);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  letter-spacing: -.1px;
+  transition: color .15s var(--np-ease);
+}
+.np-app .exp-ticker-name:hover { color: var(--navi-neon); }
+.np-app .exp-ticker-sub {
+  font-size: 10px;
+  color: var(--navi-fg3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.np-app .exp-ticker-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--navi-font-mono);
+  margin-left: auto;
+}
+.np-app .exp-ticker-counts .put  { color: var(--navi-negative); }
+.np-app .exp-ticker-counts .call { color: var(--navi-positive); }
+
+/* Lanes container (one per ticker row) */
+.np-app .exp-lanes {
+  position: relative;
+  padding: 4px 4px 4px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.np-app .exp-lane {
+  position: relative;
+  height: 28px;
+}
+.np-app .exp-lane-tag {
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: .4px;
+  font-weight: 600;
+  background: var(--navi-surface);
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+.np-app .exp-lane-tag.put  { color: var(--navi-negative); border: 1px solid rgba(232,112,96,.45); }
+.np-app .exp-lane-tag.call { color: var(--navi-positive); border: 1px solid rgba(168,212,160,.45); }
+
+.np-app .exp-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+.np-app .exp-rule.put  { background: rgba(232,112,96,.30); }
+.np-app .exp-rule.call { background: rgba(168,212,160,.30); }
+
+/* Bars — span from trade_date (left edge) to expiry (right edge) */
+.np-app .exp-bar {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 20px;
+  min-width: 8px;
+  border: 1.5px solid;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end; /* label hugs the expiry edge */
+  line-height: 1;
+  transition: transform .12s var(--np-ease), box-shadow .15s var(--np-ease), height .12s var(--np-ease);
+  z-index: 1;
+  text-align: right;
+  box-sizing: border-box;
+}
+/* Short put = outline (cash-secured put, premium collected) */
+.np-app .exp-bar.put.short {
+  background: rgba(232,112,96,.18);
+  border-color: var(--navi-negative);
+  color: var(--navi-negative);
+}
+/* Long put = filled (protective put, premium paid) */
+.np-app .exp-bar.put.long {
+  background: var(--navi-negative);
+  border-color: var(--navi-negative);
+  color: #200808;
+}
+.np-app .exp-bar.call.short {
+  background: var(--navi-positive);
+  border-color: var(--navi-positive);
+  color: #0a1a0a;
+}
+.np-app .exp-bar.call.long {
+  background: rgba(168,212,160,.18);
+  border-color: var(--navi-positive);
+  color: var(--navi-positive);
+}
+.np-app .exp-bar.closed {
+  opacity: .45;
+  filter: grayscale(.4);
+}
+/* When the open is before the visible window, fade the left edge so the
+   bar visually "continues" off-screen. */
+.np-app .exp-bar.extends {
+  border-left: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  -webkit-mask-image: linear-gradient(90deg, rgba(0,0,0,.35) 0, #000 24px);
+          mask-image: linear-gradient(90deg, rgba(0,0,0,.35) 0, #000 24px);
+}
+.np-app .exp-bar:hover {
+  z-index: 3;
+  height: 22px;
+  box-shadow: 0 6px 18px -8px rgba(0,0,0,.5);
+}
+.np-app .exp-bar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+.np-app .exp-bar-strike { letter-spacing: -.2px; }
+.np-app .exp-bar-x { opacity: .75; font-weight: 500; }
+
+/* Today line */
+.np-app .exp-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--navi-neon);
+  pointer-events: none;
+  z-index: 0;
+}
+.np-app .exp-today-line.body {
+  box-shadow: 0 0 6px rgba(210,230,50,.45);
+}
+.np-app .exp-today-label {
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  font-size: 9px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--navi-neon);
+  font-family: var(--navi-font-mono);
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .np-app .exp-grid { grid-template-columns: 100px 1fr; }
+}
+
+/* ============================================================
+   P&L by Position — slots into the AllocationTreemap card shell
+   (.np-treemap-card) so it matches sector / stock / strategy.
+   ============================================================ */
+.np-app .pnl-card {
+  /* Wider side panel to give Put protection more breathing room */
+  grid-template-columns: 1fr 300px;
+}
+
+.np-app .pnl-chart-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 460px;
+}
+
+/* Top view toggles (Overall / Stock / Options + sub-filter) */
+.np-app .pnl-view-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.np-app .pnl-view-toggle {
+  display: inline-flex;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+.np-app .pnl-view-toggle button {
+  background: transparent;
+  border: 0;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .pnl-view-toggle button:hover { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .pnl-view-toggle button.on   { color: var(--navi-neon); background: var(--navi-tint-neon); }
+
+.np-app .pnl-subfilter {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.np-app .pnl-subfilter button {
+  background: transparent;
+  border: 1px solid rgba(50,110,100,.3);
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  padding: 4px 9px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all .15s var(--np-ease);
+}
+.np-app .pnl-subfilter button:hover { color: var(--navi-fg1); border-color: var(--navi-border-bright); }
+.np-app .pnl-subfilter button.on    {
+  color: var(--navi-neon);
+  background: var(--navi-tint-neon);
+  border-color: var(--navi-neon);
+}
+
+.np-app .pnl-empty-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  min-height: 320px;
+}
+.np-app .pnl-chart-hd {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  flex-wrap: nowrap;
+}
+.np-app .pnl-chart-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.np-app .pnl-chart-stat.right {
+  margin-left: auto;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.35);
+  align-items: center;
+}
+.np-app .pnl-chart-stat-k {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+}
+.np-app .pnl-chart-stat.right .pnl-chart-stat-k {
+  color: var(--navi-fg2);
+}
+.np-app .pnl-chart-stat-v {
+  font-family: var(--navi-font-sans);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.4px;
+  line-height: 1;
+}
+.np-app .pnl-chart-stat.right .pnl-chart-stat-v {
+  font-size: 26px;
+  letter-spacing: -.6px;
+}
+.np-app .pnl-chart-stat-v.up   { color: var(--navi-neon); }
+.np-app .pnl-chart-stat-v.down { color: var(--navi-negative); }
+
+/* Split header — Realized | Unrealized side-by-side blocks for Overall view */
+.np-app .pnl-chart-hd.split {
+  align-items: stretch;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.np-app .pnl-split-block {
+  flex: 1 1 0;
+  min-width: 280px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(15,51,51,.45);
+  border: 1px solid rgba(50,110,100,.3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.np-app .pnl-split-hd {
+  font-family: var(--navi-font-sans);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.np-app .pnl-split-row {
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.np-app .pnl-split-row .pnl-chart-stat-v { font-size: 18px; }
+
+.np-app .pnl-svg {
+  width: 100%;
+  height: auto;
+  flex: 1;
+  min-height: 360px;
+}
+
+/* RIGHT panel: Put protection box (boxed feel, distinct from main card) */
+.np-app .pnl-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 460px;
+}
+.np-app .pnl-protection-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: rgba(15,51,51,.40);
+  border: 1px solid rgba(50,110,100,.35);
+  border-radius: 12px;
+  padding: 22px 20px 26px;
+}
+.np-app .pnl-protection-hd {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+  text-align: center;
+}
+.np-app .pnl-protection-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  padding: 24px 0;
+}
+.np-app .pnl-tabs {
+  display: inline-flex;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.np-app .pnl-tabs button {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .pnl-tabs button:hover:not(:disabled) { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .pnl-tabs button.on { color: var(--navi-neon); background: var(--navi-tint-neon); }
+.np-app .pnl-tabs button:disabled { color: var(--navi-fg5); cursor: not-allowed; }
+
+.np-app .pnl-contrib {
+  display: flex;
+  flex-direction: column;
+}
+.np-app .pnl-contrib-row {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(30,90,80,.18);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.np-app .pnl-contrib-row:last-child { border-bottom: none; }
+.np-app .pnl-contrib-row:disabled { cursor: default; }
+.np-app .pnl-contrib-row:hover:not(:disabled) { background: rgba(50,110,100,.10); }
+.np-app .pnl-contrib-val {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  margin-right: 8px;
+}
+.np-app .pnl-contrib-val.up   { color: var(--navi-neon); }
+.np-app .pnl-contrib-val.down { color: var(--navi-negative); }
+.np-app .pnl-contrib-pct {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg3);
+}
+
+/* Solar-offset coverage visual */
+.np-app .pnl-coverage {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 360px;
+}
+.np-app .pnl-coverage-pct-big {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: var(--navi-font-sans);
+  font-size: 48px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  letter-spacing: -1.5px;
+  line-height: 1;
+}
+.np-app .pnl-coverage-pct-sub {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+  margin-top: 6px;
+}
+.np-app .pnl-coverage-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  height: 240px;
+  width: 100%;
+  align-items: end;
+}
+.np-app .pnl-cov-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  justify-content: flex-end;
+}
+.np-app .pnl-cov-bar-wrap {
+  width: 100%;
+  max-width: 84px;
+  height: 72%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.np-app .pnl-cov-bar {
+  width: 100%;
+  border-radius: 6px 6px 0 0;
+  min-height: 6px;
+  transition: height .35s var(--np-ease);
+}
+.np-app .pnl-cov-bar.gold     { background: var(--navi-warning); }
+.np-app .pnl-cov-bar.blue     { background: var(--navi-neon); }
+.np-app .pnl-cov-bar.realized { background: var(--navi-neon); }
+
+/* Stacked burden bar (put cost + stock loss) */
+.np-app .pnl-cov-stack {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  border-radius: 6px 6px 0 0;
+  overflow: hidden;
+}
+.np-app .pnl-cov-seg {
+  width: 100%;
+  transition: height .35s var(--np-ease);
+}
+.np-app .pnl-cov-seg.loss { background: var(--navi-negative); }
+.np-app .pnl-cov-seg.cost { background: var(--navi-warning); }
+
+/* Mini-labels under each bar (one per category) */
+.np-app .pnl-cov-mini-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+}
+.np-app .pnl-cov-mini {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.np-app .pnl-cov-mini.cost     { color: var(--navi-warning); }
+.np-app .pnl-cov-mini.loss     { color: var(--navi-negative); }
+.np-app .pnl-cov-mini.realized { color: var(--navi-neon); }
+
+/* Weekly burn footer in the protection box */
+.np-app .pnl-burn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(50,110,100,.25);
+}
+.np-app .pnl-burn-row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+.np-app .pnl-burn-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.np-app .pnl-burn-dot.cost  { background: var(--navi-warning); }
+.np-app .pnl-burn-dot.total {
+  background: linear-gradient(135deg, var(--navi-warning) 0 50%, var(--navi-negative) 50% 100%);
+}
+.np-app .pnl-burn-k {
+  font-size: 12px;
+  color: var(--navi-fg2);
+}
+.np-app .pnl-burn-v {
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+}
+.np-app .pnl-cov-val {
+  font-family: var(--navi-font-mono);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+}
+.np-app .pnl-cov-label {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.np-app .pnl-cov-label.gold { color: var(--navi-warning); }
+.np-app .pnl-cov-label.blue { color: var(--navi-neon); }
+
+/* Signals column (PositionsTable) — chips only render when actionable */
+.np-app .signals-cell {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+.np-app .np-sig-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 180px;
+}
+.np-app .np-sig-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 8px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  border: 1px solid;
+  white-space: nowrap;
+  line-height: 1.3;
+  cursor: help;
+}
+.np-app .np-sig-chip.up {
+  color: var(--navi-positive);
+  background: rgba(168,212,160,.10);
+  border-color: rgba(168,212,160,.45);
+}
+.np-app .np-sig-chip.down {
+  color: var(--navi-negative);
+  background: rgba(232,112,96,.10);
+  border-color: rgba(232,112,96,.45);
+}
+.np-app .np-sig-chip.warn {
+  color: var(--navi-warning);
+  background: rgba(224,192,96,.10);
+  border-color: rgba(224,192,96,.50);
+}
+.np-app .np-sig-chip.cool {
+  color: #6dd1c5;
+  background: rgba(109,209,197,.10);
+  border-color: rgba(109,209,197,.45);
+}
+
+/* Old single-week styles (kept for backward compat, no-ops if unused) */
+.np-app .cal-wrap {
+  background: var(--navi-card);
+  border: 1px solid rgba(50,110,100,.25);
+  border-radius: 14px;
+  padding: 18px;
+}
+.np-app .cal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.np-app .cal-nav {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  border-radius: 10px;
+  padding: 3px;
+}
+.np-app .cal-nav button {
+  background: transparent;
+  color: var(--navi-fg2);
+  border: 0;
+  padding: 6px 12px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background .15s var(--np-ease), color .15s var(--np-ease);
+}
+.np-app .cal-nav button:hover { color: var(--navi-fg1); background: rgba(50,110,100,.18); }
+.np-app .cal-nav button.on   { color: var(--navi-neon); background: var(--navi-tint-neon); }
+
+.np-app .cal-range {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.np-app .cal-range-week {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+  letter-spacing: -.2px;
+}
+.np-app .cal-range-year {
+  font-size: 11px;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+}
+
+.np-app .cal-summary {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 18px;
+  align-items: center;
+}
+.np-app .cal-sum-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.np-app .cal-sum-k {
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+}
+.np-app .cal-sum-v {
+  font-family: var(--navi-font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--navi-fg1);
+}
+.np-app .cal-sum-v.up   { color: var(--navi-positive); }
+.np-app .cal-sum-v.down { color: var(--navi-negative); }
+
+.np-app .cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  align-items: stretch;
+}
+.np-app .cal-day {
+  background: rgba(15,51,51,.45);
+  border: 1px solid rgba(50,110,100,.22);
+  border-radius: 10px;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: border-color .15s var(--np-ease);
+}
+.np-app .cal-day.weekend { background: rgba(15,51,51,.25); }
+.np-app .cal-day.past    { opacity: .55; }
+.np-app .cal-day.today   {
+  border-color: var(--navi-neon);
+  box-shadow: 0 0 0 1px rgba(210,230,50,.25), 0 6px 18px -10px rgba(210,230,50,.5);
+  opacity: 1;
+}
+
+.np-app .cal-day-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid rgba(50,110,100,.18);
+}
+.np-app .cal-dow {
+  font-size: 10px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+}
+.np-app .cal-dom {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--navi-fg1);
+  font-family: var(--navi-font-sans);
+}
+.np-app .cal-day.today .cal-dow { color: var(--navi-neon); }
+.np-app .cal-day.today .cal-dom { color: var(--navi-neon); }
+
+.np-app .cal-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  flex: 1;
+  min-height: 0;
+}
+.np-app .cal-day-empty {
+  margin: auto;
+  color: var(--navi-fg5);
+  font-family: var(--navi-font-mono);
+  font-size: 13px;
+}
+
+.np-app .cal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(15,51,51,.7);
+  border: 1px solid rgba(50,110,100,.35);
+  border-left-width: 3px;
+  border-radius: 7px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--navi-fg1);
+  transition: transform .12s var(--np-ease), border-color .15s var(--np-ease), background .15s var(--np-ease);
+  font-family: var(--navi-font-sans);
+}
+.np-app .cal-card:hover {
+  transform: translateY(-1px);
+  background: rgba(15,51,51,.92);
+}
+.np-app .cal-card.short {
+  border-left-color: var(--navi-positive);
+  background: linear-gradient(90deg, rgba(168,212,160,.10), rgba(15,51,51,.7) 40%);
+}
+.np-app .cal-card.short:hover { border-color: var(--navi-positive); }
+.np-app .cal-card.long {
+  border-left-color: var(--navi-negative);
+  background: linear-gradient(90deg, rgba(232,112,96,.10), rgba(15,51,51,.7) 40%);
+}
+.np-app .cal-card.long:hover { border-color: var(--navi-negative); }
+.np-app .cal-card.closed {
+  border-left-color: var(--navi-fg4);
+  background: rgba(15,51,51,.45);
+  color: var(--navi-fg3);
+}
+.np-app .cal-card.closed .cal-card-tk { text-decoration: line-through; opacity: .8; }
+
+.np-app .cal-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.np-app .cal-card-tk {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -.1px;
+  color: inherit;
+}
+.np-app .cal-card-side {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(50,110,100,.25);
+}
+.np-app .cal-card.short .cal-card-side { color: var(--navi-positive); background: rgba(168,212,160,.15); }
+.np-app .cal-card.long  .cal-card-side { color: var(--navi-negative); background: rgba(232,112,96,.15); }
+.np-app .cal-card.closed .cal-card-side { color: var(--navi-fg3); }
+
+.np-app .cal-card-mid {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  color: var(--navi-fg2);
+}
+.np-app .cal-card-strike { font-weight: 500; }
+.np-app .cal-card-qty    { color: var(--navi-fg3); }
+
+.np-app .cal-card-prem {
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  color: var(--navi-fg3);
+  letter-spacing: .2px;
+}
+
+@media (max-width: 1024px) {
+  .np-app .cal-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .np-app .cal-day { min-height: 180px; }
+}
+
+/* ============================================================
+   Stock Insights strip — calmer, plain-text cards w/ avatar
+   ============================================================ */
+.np-app .si-wrap {
+  background: var(--navi-card);
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.np-app .si-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.np-app .si-title {
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--navi-fg5);
+}
+.np-app .si-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.np-app .si-refresh {
+  background: rgba(15, 51, 51, 0.55);
+  border: 1px solid rgba(50, 110, 100, 0.5);
+  border-radius: 100px;
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all .12s var(--np-ease);
+}
+.np-app .si-refresh:hover {
+  background: rgba(210, 230, 50, 0.08);
+  border-color: var(--navi-neon);
+  color: var(--navi-neon);
+}
+.np-app .si-refresh:disabled { opacity: 0.6; cursor: wait; }
+
+/* Toggle is .np-toggle.si-toggle — uses existing np-toggle look */
+.np-app .si-toggle button .si-toggle-ct {
+  font-family: var(--navi-font-mono);
+  font-size: 9px;
+  color: var(--navi-fg4);
+  margin-left: 2px;
+}
+.np-app .si-toggle button.on .si-toggle-ct { color: var(--navi-neon); }
+
+/* Sector dropdown */
+.np-app .si-sector {
+  background: rgba(15,51,51,.55);
+  border: 1px solid rgba(50,110,100,.3);
+  color: var(--navi-fg2);
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  padding: 7px 28px 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%23a8c4c0' stroke-width='1.2' fill='none'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+.np-app .si-sector:hover {
+  color: var(--navi-fg1);
+  border-color: var(--navi-border-bright);
+}
+
+/* Scroll strip */
+.np-app .si-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(50,110,100,.4) transparent;
+  padding-bottom: 6px;
+}
+.np-app .si-scroll::-webkit-scrollbar { height: 6px; }
+.np-app .si-scroll::-webkit-scrollbar-thumb { background: rgba(50,110,100,.4); border-radius: 4px; }
+.np-app .si-scroll::-webkit-scrollbar-track { background: transparent; }
+.np-app .si-row {
+  display: flex;
+  gap: 16px;
+  padding: 2px;
+  min-height: 480px;
+}
+.np-app .si-empty {
+  color: var(--navi-fg3);
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  padding: 36px;
+}
+
+/* ──────────────────────────────────────────────────────────
+   Vibrant per-ticker card. Background is the sentiment color
+   (green when up, red when down, dark when flat); text is
+   near-black on color and light on dark. Layout is five
+   stacked sections inside a fixed 600px-wide snap target.
+   ────────────────────────────────────────────────────────── */
+.np-app .si-card {
+  flex: 0 0 640px;
+  min-height: 520px;
+  border-radius: 20px;
+  padding: 26px 28px 22px;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow: hidden;
+  transition: transform .15s var(--np-ease), box-shadow .18s var(--np-ease);
+}
+.np-app .si-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+/* Colors stick to the navi palette. UP uses our neon yellow-green; text
+   on it is very dark for max contrast. DOWN uses our negative red; text
+   on it is white. Flat uses the dark surface with light text. */
+.np-app .si-card.tone-up {
+  background: var(--navi-neon);
+  color: #0a2828;
+}
+.np-app .si-card.tone-down {
+  background: var(--navi-negative);
+  color: #faf5f0;
+}
+.np-app .si-card.tone-flat {
+  background: rgba(15, 51, 51, 0.85);
+  color: var(--navi-fg1);
+  border: 1px solid rgba(50, 110, 100, 0.4);
+}
+
+/* ── Identity row ── */
+.np-app .si-card-hd {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.np-app .si-card-id { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.np-app .si-card-tk {
+  font-family: var(--navi-font-sans);
+  font-size: 38px;
+  font-weight: 800;
+  letter-spacing: -1.1px;
+  line-height: 1;
+}
+.np-app .si-card-sec {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.np-app .si-card.tone-flat .si-card-sec { color: var(--navi-fg3); }
+
+/* Inline timeframe switcher — plain text below the price/change line.
+   Active timeframe is bold + underlined; inactive sits at lower opacity. */
+.np-app .si-tf-row {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+  align-items: baseline;
+}
+.np-app .si-tf-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity .12s var(--np-ease);
+}
+.np-app .si-tf-link:hover { opacity: 0.85; }
+.np-app .si-tf-link.on {
+  opacity: 1;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 2px;
+}
+
+/* ── NOW block ── */
+.np-app .si-now { display: flex; flex-direction: column; gap: 6px; }
+.np-app .si-price {
+  font-family: var(--navi-font-sans);
+  font-size: 56px;
+  font-weight: 800;
+  letter-spacing: -1.8px;
+  line-height: 1;
+}
+.np-app .si-change {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--navi-font-mono);
+  font-size: 18px;
+  font-weight: 700;
+}
+.np-app .si-change-dollar { font-weight: 800; }
+.np-app .si-change-pct { font-weight: 700; }
+.np-app .si-change-window {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  text-transform: lowercase;
+}
+.np-app .si-card.tone-up .si-change { color: #0a2828; }
+.np-app .si-card.tone-down .si-change { color: #faf5f0; }
+.np-app .si-card.tone-flat .si-change.tone-pos { color: var(--navi-neon); }
+.np-app .si-card.tone-flat .si-change.tone-neg { color: var(--navi-negative); }
+
+/* ── Section blocks ── */
+.np-app .si-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(10, 40, 40, 0.22);
+}
+.np-app .si-card.tone-down .si-block { border-top-color: rgba(250, 245, 240, 0.28); }
+.np-app .si-card.tone-flat .si-block { border-top-color: rgba(50, 110, 100, 0.32); }
+.np-app .si-block-hd {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.np-app .si-block-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--navi-font-sans);
+  font-size: 16px;
+  line-height: 1.4;
+}
+.np-app .si-block-row.muted {
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.np-app .si-k { font-weight: 600; }
+.np-app .si-v { font-weight: 800; letter-spacing: -.2px; }
+.np-app .si-v-pct { font-weight: 700; }
+.np-app .si-sep { margin: 0 1px; }
+/* Flat-card muting uses explicit color tokens instead of opacity — opacity
+   on a colored card creates muddy washed-out text. */
+.np-app .si-card.tone-flat .si-block-hd { color: var(--navi-fg4); }
+.np-app .si-card.tone-flat .si-block-row.muted { color: var(--navi-fg4); }
+.np-app .si-card.tone-flat .si-k { color: var(--navi-fg3); }
+.np-app .si-card.tone-flat .si-sep { color: var(--navi-fg4); }
+.np-app .si-card.tone-flat .si-change-window { color: var(--navi-fg4); }
+
+/* Numbers in YOUR POSITION block — bold dark on UP, bold white on DOWN.
+   The tone is implied by the card color, no need for a second-tier hue. */
+.np-app .si-card.tone-up .si-v { color: #0a2828; }
+.np-app .si-card.tone-down .si-v { color: #faf5f0; }
+.np-app .si-card.tone-flat .si-v.pos { color: var(--navi-neon); }
+.np-app .si-card.tone-flat .si-v.neg { color: var(--navi-negative); }
+
+/* ── Earnings (top-right of header) — plain text, no pill ── */
+.np-app .si-earn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  text-align: right;
+  min-width: 0;
+}
+.np-app .si-earn-lbl {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.np-app .si-card.tone-flat .si-earn-lbl { color: var(--navi-fg3); }
+
+.np-app .si-earn-val {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: var(--navi-font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -.2px;
+  color: inherit;
+  cursor: pointer;
+  text-align: right;
+  line-height: 1.2;
+}
+.np-app .si-earn-val:hover { text-decoration: underline; text-underline-offset: 3px; }
+.np-app .si-earn-val.urgent { font-weight: 800; }
+.np-app .si-earn-val.add {
+  font-weight: 600;
+  font-style: italic;
+  opacity: 0.85;
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}
+.np-app .si-card.tone-flat .si-earn-val.add { color: var(--navi-fg3); }
+
+.np-app .si-earn-edit-row {
+  display: flex; align-items: center; gap: 6px;
+}
+.np-app .si-earn-input {
+  background: rgba(10, 40, 40, 0.15);
+  border: 1px solid rgba(10, 40, 40, 0.4);
+  border-radius: 6px;
+  font-family: var(--navi-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+  color: inherit;
+  outline: none;
+}
+.np-app .si-card.tone-flat .si-earn-input {
+  background: rgba(15, 51, 51, 0.6);
+  border-color: rgba(50, 110, 100, 0.5);
+  color: var(--navi-fg1);
+}
+.np-app .si-earn-btn {
+  background: rgba(10, 40, 40, 0.18);
+  border: 1px solid rgba(10, 40, 40, 0.35);
+  border-radius: 100px;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  color: inherit;
+  transition: all .12s var(--np-ease);
+}
+.np-app .si-earn-btn.save { background: #0a2828; color: #faf5f0; border-color: #0a2828; }
+.np-app .si-earn-btn.cancel:hover { background: rgba(10, 40, 40, 0.32); }
+
+/* ── Signal tiles (big number / small label grid) ── */
+.np-app .si-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+.np-app .si-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 12px;
+}
+/* UP card → dark inset for the tile so the dark number pops against neon */
+.np-app .si-card.tone-up .si-tile {
+  background: rgba(10, 40, 40, 0.16);
+  border: 1px solid rgba(10, 40, 40, 0.26);
+}
+/* DOWN card → light inset, white text still legible */
+.np-app .si-card.tone-down .si-tile {
+  background: rgba(250, 245, 240, 0.18);
+  border: 1px solid rgba(250, 245, 240, 0.32);
+}
+.np-app .si-card.tone-flat .si-tile {
+  background: rgba(50, 110, 100, 0.18);
+  border: 1px solid rgba(50, 110, 100, 0.36);
+}
+.np-app .si-tile-v {
+  font-family: var(--navi-font-sans);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -.7px;
+  line-height: 1.05;
+}
+.np-app .si-tile-l {
+  font-family: var(--navi-font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .3px;
+  text-transform: lowercase;
+}
+.np-app .si-card.tone-flat .si-tile-l { color: var(--navi-fg4); }
+/* Tile values inherit the card's foreground (dark on neon, white on red,
+   neon/red tokens on flat). The bg tint of the tile itself does the
+   coloring; no need for a second-tier accent on the number. */
+.np-app .si-card.tone-flat .si-tile.tone-pos .si-tile-v { color: var(--navi-neon); }
+.np-app .si-card.tone-flat .si-tile.tone-neg .si-tile-v { color: var(--navi-negative); }
+
+/* Footer + carousel nav */
+.np-app .si-card-ft {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid rgba(10, 40, 40, 0.22);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--navi-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .4px;
+}
+.np-app .si-card.tone-down .si-card-ft { border-top-color: rgba(250, 245, 240, 0.28); }
+.np-app .si-card.tone-flat .si-card-ft { border-top-color: rgba(50, 110, 100, 0.32); }
+.np-app .si-updated { font-weight: 600; }
+.np-app .si-card.tone-flat .si-updated { color: var(--navi-fg4); }
+.np-app .si-nav { display: flex; align-items: center; gap: 8px; }
+.np-app .si-nav-btn {
+  background: rgba(10, 40, 40, 0.16);
+  border: 1px solid rgba(10, 40, 40, 0.34);
+  border-radius: 50%;
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  transition: all .12s var(--np-ease);
+}
+.np-app .si-nav-btn:hover {
+  background: rgba(10, 40, 40, 0.3);
+  border-color: rgba(10, 40, 40, 0.55);
+}
+.np-app .si-card.tone-down .si-nav-btn {
+  background: rgba(250, 245, 240, 0.2);
+  border-color: rgba(250, 245, 240, 0.4);
+  color: #faf5f0;
+}
+.np-app .si-card.tone-down .si-nav-btn:hover {
+  background: rgba(250, 245, 240, 0.34);
+}
+.np-app .si-card.tone-flat .si-nav-btn {
+  background: rgba(50, 110, 100, 0.18);
+  border-color: rgba(50, 110, 100, 0.4);
+  color: var(--navi-fg2);
+}
+.np-app .si-nav-pos { font-weight: 700; }
+.np-app .si-card.tone-flat .si-nav-pos { color: var(--navi-fg3); }
+
+/* Focus ring for keyboard nav */
+.np-app .si-scroll:focus-visible {
+  outline: 2px solid var(--navi-neon);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+@media (max-width: 768px) {
+  .np-app .si-card { flex-basis: 88vw; }
+}
+
+/* ──────────────────────────────────────────────────────────
+   Hover card for P&L bars — portaled to document.body, so
+   it floats above any overflow-hidden chart container.
+   ────────────────────────────────────────────────────────── */
+/* Portaled to document.body, so all colors are hard-coded literals
+   (the --navi-* vars are scoped to .np-app and don't reach here). */
+.pnl-hover-card {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  min-width: 230px;
+  max-width: 320px;
+  padding: 12px 13px 11px;
+  border-radius: 10px;
+  border: none;
+  background: #d2e632;               /* solid neon */
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  color: #0a2828;                    /* near-black for readable contrast on neon */
+  font-family: 'Work Sans', system-ui, sans-serif;
+  animation: pnl-hc-in .1s ease-out;
+}
+@keyframes pnl-hc-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.pnl-hc-hd {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.pnl-hc-ticker {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -.4px;
+  color: #0a2828;
+}
+.pnl-hc-sector {
+  font-family: 'DM Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .3px;
+  color: rgba(10, 40, 40, 0.65);
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.pnl-hc-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -.7px;
+  line-height: 1.05;
+  margin-bottom: 10px;
+}
+.pnl-hc-hero.pos { color: #0a2828; }
+.pnl-hc-hero.neg { color: #7d2418; }
+.pnl-hc-hero-sub {
+  font-family: 'DM Mono', monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: rgba(10, 40, 40, 0.65);
+  letter-spacing: .3px;
+  text-transform: lowercase;
+}
+
+.pnl-hc-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 7px;
+  border-top: 1px dashed rgba(10, 40, 40, 0.35);
+}
+.pnl-hc-rows.muted {
+  margin-top: 8px;
+}
+.pnl-hc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-family: 'DM Mono', monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.pnl-hc-k {
+  color: rgba(10, 40, 40, 0.7);
+  letter-spacing: .2px;
+}
+.pnl-hc-v {
+  color: #0a2828;
+  font-weight: 700;
+}
+.pnl-hc-v.pos { color: #1f5a2e; }
+.pnl-hc-v.neg { color: #7d2418; }
+
+/* ──────────────────────────────────────────────────────────
+   Buy-shares: manual avg-cost override row
+   Lives inside the Shares tab when the user picks Buy mode.
+   ────────────────────────────────────────────────────────── */
+.np-app .pp-override-row {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(50, 110, 100, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.np-app .pp-override-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--navi-font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--navi-fg2);
+  cursor: pointer;
+  user-select: none;
+}
+.np-app .pp-override-toggle input { accent-color: var(--navi-neon); cursor: pointer; }
+.np-app .pp-override-hint {
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--navi-fg4);
+}
+.np-app .pp-override-input-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(210, 230, 50, 0.06);
+  border: 1px solid rgba(210, 230, 50, 0.32);
+  border-radius: 8px;
+}
+.np-app .pp-override-input-lbl {
+  font-family: var(--navi-font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  color: var(--navi-fg3);
+  text-transform: uppercase;
+}
+.np-app .pp-override-input {
+  background: rgba(15, 51, 51, 0.55);
+  border: 1px solid rgba(50, 110, 100, 0.45);
+  border-radius: 6px;
+  font-family: var(--navi-font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navi-neon);
+  padding: 6px 10px;
+  width: 110px;
+  outline: none;
+}
+.np-app .pp-override-input:focus { border-color: var(--navi-neon); }

@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sunnyfi · Position detail modal — current layout</title>
+<link rel="stylesheet" href="positions.css" />
+<style>
+  html, body { margin: 0; background: #061a10; min-height: 100vh; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     STATIC SNAPSHOT — Position detail (write) modal
+     (PositionDetailModal.tsx)
+
+     The WRITE layer — log/edit trades. Five tabs:
+       Open · Close · Edit · Shares · Resolve
+
+     Shown here on the OPEN tab to surface the most recent design work:
+       • Conversational action picker ("Sell calls / Buy calls /
+         Sell puts / Buy puts") replacing the old type+direction combo
+       • Spot chip on the Strike field (SPOT $X · ±% from spot)
+       • Right rail = the two-view graph card (Income | Cost toggle)
+
+     The CLOSE + EDIT tabs use leg-picker CARDS (green=sold / amber=
+     bought, strike hero, "CALLS SOLD"/"PUTS BOUGHT" title chip) — not
+     shown here but styled via .pp-leg-card-* in positions.css.
+     Every state-changing action also fires a confirm dialog
+     (.pp-confirm-*) with the ticker in big neon — also in the CSS.
+
+     Class names (.pp-*) match positions.css verbatim. Sample data.
+     ============================================================ -->
+
+<div class="np-app">
+  <div class="pp-stage">
+    <div class="pp-popup" role="dialog">
+
+      <!-- HEAD -->
+      <div class="pp-popup-head">
+        <div class="pp-head-info">
+          <h2 class="pp-popup-ticker">META</h2>
+          <div class="pp-popup-sub">
+            <span>Income</span><span class="dot">·</span>
+            <span>Communication Services</span><span class="dot">·</span>
+            <span>2,000 sh @ $611.91</span>
+          </div>
+        </div>
+        <button class="pp-icon-btn">✕ Close</button>
+      </div>
+
+      <!-- TABS -->
+      <div class="pp-tab-row">
+        <button class="pp-tab on">Open<span class="pp-tab-count">3</span></button>
+        <button class="pp-tab">Close</button>
+        <button class="pp-tab">Edit<span class="pp-tab-count">3</span></button>
+        <button class="pp-tab">Shares</button>
+        <button class="pp-tab pp-tab-resolve">Resolve<span class="pp-tab-badge">1</span></button>
+      </div>
+
+      <!-- SIDECAR: form (left) + rail (right) -->
+      <div class="pp-sidecar">
+
+        <!-- ░░░ FORM ░░░ -->
+        <div class="pp-form">
+
+          <!-- Conversational action picker -->
+          <div class="pp-field">
+            <div class="pp-field-label">What do you want to do?</div>
+            <div class="pp-action-grid">
+              <button class="pp-action-btn tone-sold on">
+                <span class="pp-action-glyph tone-sold">C</span>
+                <span class="pp-action-lbl">Sell calls</span>
+              </button>
+              <button class="pp-action-btn tone-bought">
+                <span class="pp-action-glyph tone-bought">C</span>
+                <span class="pp-action-lbl">Buy calls</span>
+              </button>
+              <button class="pp-action-btn tone-sold">
+                <span class="pp-action-glyph tone-sold">P</span>
+                <span class="pp-action-lbl">Sell puts</span>
+              </button>
+              <button class="pp-action-btn tone-bought">
+                <span class="pp-action-glyph tone-bought">P</span>
+                <span class="pp-action-lbl">Buy puts</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Strike (with spot chip) + Contracts -->
+          <div class="pp-form-grid cols-2">
+            <div class="pp-field">
+              <div class="pp-field-label-row">
+                <span class="pp-field-label">Strike</span>
+                <span class="pp-spot-chip">
+                  <span class="pp-spot-chip-lbl">SPOT</span>
+                  <span class="pp-spot-chip-val">$635.26</span>
+                  <span class="pp-spot-chip-diff tone-otm">+2.0%</span>
+                </span>
+              </div>
+              <div class="pp-input-prefix">
+                <span class="pp-pfx">$</span>
+                <input class="pp-input mono" type="text" value="648.00" />
+              </div>
+            </div>
+            <div class="pp-field">
+              <div class="pp-field-label">Contracts</div>
+              <input class="pp-input mono" type="text" value="10" />
+            </div>
+          </div>
+
+          <!-- Expiry + Premium -->
+          <div class="pp-form-grid cols-2">
+            <div class="pp-field">
+              <div class="pp-field-label">Expiry</div>
+              <input class="pp-input mono" type="text" value="05/29/2026" />
+            </div>
+            <div class="pp-field">
+              <div class="pp-field-label">Premium collected / sh</div>
+              <div class="pp-input-prefix">
+                <span class="pp-pfx">$</span>
+                <input class="pp-input mono" type="text" value="3.40" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Date + Note -->
+          <div class="pp-form-grid cols-2">
+            <div class="pp-field">
+              <div class="pp-field-label">Date</div>
+              <input class="pp-input mono" type="text" value="05/27/2026" />
+            </div>
+            <div class="pp-field">
+              <div class="pp-field-label">Note (optional)</div>
+              <input class="pp-input" type="text" placeholder="thesis, source, etc." />
+            </div>
+          </div>
+        </div>
+
+        <!-- ░░░ RAIL — two-view graph card ░░░ -->
+        <aside class="pp-rail">
+          <div class="pp-railcard">
+            <div class="pp-railcard-toggle">
+              <button class="pp-railcard-toggle-btn on">Income</button>
+              <button class="pp-railcard-toggle-btn">Cost</button>
+            </div>
+
+            <div class="pp-railcard-hero">
+              <div class="pp-railcard-lbl">Last 7 days</div>
+              <div class="pp-railcard-num pos">$342</div>
+            </div>
+
+            <!-- 12-week premium bars -->
+            <div class="pp-railcard-bars">
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:30%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:55%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:20%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-neg" style="height:40%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:70%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:45%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:60%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-zero" style="height:2%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:35%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:80%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:50%"></div></div>
+              <div class="pp-railcard-bar-col"><div class="pp-railcard-bar tone-pos" style="height:100%"></div></div>
+            </div>
+
+            <div class="pp-railcard-rows">
+              <div class="pp-railcard-row"><span class="k">12-wk total</span><span class="v pos">$4,128</span></div>
+              <div class="pp-railcard-row"><span class="k">Avg / week</span><span class="v">$344</span></div>
+            </div>
+          </div>
+
+          <div class="pp-rail-divider"></div>
+
+          <!-- Tab-aware preview block (Open tab → new trade preview) -->
+          <div class="pp-rail-section">
+            <div class="pp-rail-lbl">New trade preview</div>
+            <div class="pp-rail-bignum pos">$3,400</div>
+            <div class="pp-rail-sub">premium collected</div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- FOOT -->
+      <div class="pp-popup-foot">
+        <button class="pi-link danger">✕ Mark position closed</button>
+        <div class="pp-popup-foot-end">
+          <button class="pp-btn pp-btn-text">Cancel</button>
+          <button class="pp-btn pp-btn-neon">✓ Open position</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

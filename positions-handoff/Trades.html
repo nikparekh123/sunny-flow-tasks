@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sunnyfi · Trades matrix — current layout</title>
+<link rel="stylesheet" href="positions.css" />
+<style>
+  html, body { margin: 0; background: #061a10; }
+  .wrap { padding: 28px 56px; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     STATIC SNAPSHOT — Trades matrix (TradesLogMatrix.tsx)
+
+     The "Trades" view of the Positions page. A wide matrix: one row
+     per ticker, columns split into three zones —
+       • Shares open   (1 col)
+       • Options open   (cols 1–4, live legs)
+       • Closed         (cols 5–12, closed pairs / share sells)
+     Right-most column is the per-ticker Realized total. The footer
+     row sums each column + the grand realized (animated count-up
+     in the live app). Timeframe pills (12w/26w/52w/104w) set the
+     column count.
+
+     Class names (.gl-*) match positions.css verbatim. Sample data.
+     ============================================================ -->
+
+<div class="np-app">
+<div class="wrap">
+
+  <div class="gl-wrap">
+    <div class="gl-toolbar">
+      <!-- (The All/Open/Closed status filter was removed earlier; only
+           the timeframe pills remain.) -->
+      <div class="gl-timeframe">
+        <button class="on">12w</button>
+        <button>26w</button>
+        <button>52w</button>
+        <button>104w</button>
+      </div>
+    </div>
+
+    <div class="gl-scroll">
+      <table class="gl-table">
+        <thead>
+          <tr>
+            <th class="gl-pos">Position</th>
+            <th class="gl-wk shares-zone"><div class="gl-wk-l">1</div><div class="gl-wk-sub">shares open</div></th>
+            <th class="gl-wk live-zone"><div class="gl-wk-l">2</div><div class="gl-wk-sub">options open</div></th>
+            <th class="gl-wk live-zone"><div class="gl-wk-l">3</div><div class="gl-wk-sub">options open</div></th>
+            <th class="gl-wk live-zone"><div class="gl-wk-l">4</div><div class="gl-wk-sub">options open</div></th>
+            <th class="gl-wk live-zone"><div class="gl-wk-l">5</div><div class="gl-wk-sub">options open</div></th>
+            <th class="gl-wk closed-zone"><div class="gl-wk-l">6</div><div class="gl-wk-sub">closed</div></th>
+            <th class="gl-wk closed-zone"><div class="gl-wk-l">7</div><div class="gl-wk-sub">closed</div></th>
+            <th class="gl-wk closed-zone"><div class="gl-wk-l">8</div><div class="gl-wk-sub">closed</div></th>
+            <th class="gl-tot">Realized</th>
+          </tr>
+        </thead>
+        <tbody>
+
+          <!-- META — shares + 2 open + closed -->
+          <tr>
+            <td class="gl-pos">
+              <span class="ticker clickable">META</span>
+              <div class="gl-pos-sub">Comm Svcs<span class="gl-live-count"> · 2 open</span></div>
+            </td>
+            <td class="gl-cell shares-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt">2,000</div>
+                <div class="gl-cell-chips"><span class="gl-cell-state open">@ $611.91</span></div></div>
+            </td>
+            <td class="gl-cell live-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt down">−$11k</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-c neg"></span><span class="gl-cell-state open">open</span></div></div>
+            </td>
+            <td class="gl-cell live-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt up">$828</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-p"></span><span class="gl-cell-state">in 2d</span></div></div>
+            </td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell closed-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt up">$945</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-c"></span><span class="gl-cell-state closed">closed</span></div></div>
+            </td>
+            <td class="gl-cell closed-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt up">$24k</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-c"></span><span class="gl-cell-state closed">closed</span></div></div>
+            </td>
+            <td class="gl-cell closed-zone empty"><span class="muted">—</span></td>
+            <td class="gl-tot">
+              <div class="gl-tot-amt up">$24,541</div>
+              <div class="gl-tot-sub">+77% of $32k</div>
+            </td>
+          </tr>
+
+          <!-- NVDA — investment, mostly closed wins -->
+          <tr>
+            <td class="gl-pos">
+              <span class="ticker clickable">NVDA</span>
+              <div class="gl-pos-sub">Technology<span class="gl-live-count"> · 1 open</span></div>
+            </td>
+            <td class="gl-cell shares-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt">300</div>
+                <div class="gl-cell-chips"><span class="gl-cell-state open">@ $612.40</span></div></div>
+            </td>
+            <td class="gl-cell live-zone filled urgent">
+              <div class="gl-cell-in"><div class="gl-cell-amt up">$1.6k</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-c"></span><span class="gl-cell-state urgent">in 1d</span></div></div>
+            </td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell closed-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt up">$2.7k</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-c"></span><span class="gl-cell-state closed">closed</span></div></div>
+            </td>
+            <td class="gl-cell closed-zone empty"><span class="muted">—</span></td>
+            <td class="gl-cell closed-zone empty"><span class="muted">—</span></td>
+            <td class="gl-tot">
+              <div class="gl-tot-amt up">$4,330</div>
+              <div class="gl-tot-sub">+24% of $18k</div>
+            </td>
+          </tr>
+
+          <!-- NKE — a loser, expired + assigned -->
+          <tr>
+            <td class="gl-pos">
+              <span class="ticker clickable">NKE</span>
+              <div class="gl-pos-sub">Cons Disc<span class="gl-live-count"> · 1 open</span></div>
+            </td>
+            <td class="gl-cell shares-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt">1,000</div>
+                <div class="gl-cell-chips"><span class="gl-cell-state open">@ $48.90</span></div></div>
+            </td>
+            <td class="gl-cell live-zone filled expired">
+              <div class="gl-cell-in"><div class="gl-cell-amt down">−$2.8k</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-p neg"></span><span class="gl-cell-state urgent">expired</span></div></div>
+            </td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell closed-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt up">$205</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-c"></span><span class="gl-cell-state closed">closed</span></div></div>
+            </td>
+            <td class="gl-cell closed-zone filled share-sell">
+              <div class="gl-cell-in"><div class="gl-cell-amt down">−$4.8k</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-s"></span><span class="gl-cell-state closed">assigned</span></div></div>
+            </td>
+            <td class="gl-cell closed-zone empty"><span class="muted">—</span></td>
+            <td class="gl-tot">
+              <div class="gl-tot-amt down">−$4,560</div>
+              <div class="gl-tot-sub">−161% of $2.8k</div>
+            </td>
+          </tr>
+
+          <!-- IT — fully closed row (greyed) -->
+          <tr class="closed-row">
+            <td class="gl-pos">
+              <span class="ticker clickable">IT</span>
+              <span class="status-pill closed">closed</span>
+              <div class="gl-pos-sub">Technology</div>
+            </td>
+            <td class="gl-cell shares-zone empty"><span class="muted">—</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell live-zone empty"><span class="gl-plus">+</span></td>
+            <td class="gl-cell closed-zone filled">
+              <div class="gl-cell-in"><div class="gl-cell-amt down">−$31</div>
+                <div class="gl-cell-chips"><span class="gl-dot rk-c neg"></span><span class="gl-cell-state closed">sold</span></div></div>
+            </td>
+            <td class="gl-cell closed-zone empty"><span class="muted">—</span></td>
+            <td class="gl-cell closed-zone empty"><span class="muted">—</span></td>
+            <td class="gl-tot">
+              <div class="gl-tot-amt down">−$31</div>
+            </td>
+          </tr>
+
+        </tbody>
+        <tfoot>
+          <tr class="gl-foot">
+            <td class="gl-pos"><b>Total</b><div class="gl-pos-sub">59 trades · realized + open</div></td>
+            <td class="gl-cell sum shares-zone">
+              <div class="gl-cell-in"><div class="gl-cell-amt">$2.35M</div>
+                <div class="gl-cell-chips"><span class="gl-cell-state">cost basis</span></div></div>
+            </td>
+            <td class="gl-cell sum live-zone"><div class="gl-cell-in"><div class="gl-cell-amt down">−$149k</div></div></td>
+            <td class="gl-cell sum live-zone"><div class="gl-cell-in"><div class="gl-cell-amt up">$2.8k</div></div></td>
+            <td class="gl-cell sum live-zone"><span class="muted">—</span></td>
+            <td class="gl-cell sum live-zone"><span class="muted">—</span></td>
+            <td class="gl-cell sum closed-zone"><div class="gl-cell-in"><div class="gl-cell-amt up">$3.9k</div></div></td>
+            <td class="gl-cell sum closed-zone"><div class="gl-cell-in"><div class="gl-cell-amt up">$22k</div></div></td>
+            <td class="gl-cell sum closed-zone"><span class="muted">—</span></td>
+            <td class="gl-tot">
+              <div class="gl-tot-amt up">$8,146</div>
+              <div class="gl-tot-sub">4% of $231k</div>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+
+</div>
+</div>
+
+</body>
+</html>

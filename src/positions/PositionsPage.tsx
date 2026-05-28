@@ -12,6 +12,7 @@ import { TradesLogMatrix } from './TradesLogMatrix';
 import { ExpiryCalendar } from './ExpiryCalendar';
 import { RealizedSummary } from './RealizedSummary';
 import { StockInsightsStrip } from './StockInsightsStrip';
+import { PositionsV2Body } from './PositionsV2Body';
 import { fmtUSD, fmtPct } from './types';
 import { AnimatedNumber } from '@/sunnyfi/lib/animation';
 import { toast } from 'sonner';
@@ -125,8 +126,28 @@ export default function PositionsPage() {
 
   const isDown = portfolio.total_pnl < 0;
 
+  // ?v2=1 opt-in to the redesigned (Navi editorial) body. The modal
+  // stack stays shared inside .np-app either way — the new body renders
+  // its own .dash shell nested within. Flag flips to default in PP-7.
+  const useV2 = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('v2') === '1';
+
   return (
     <div className="np-app">
+      {useV2 ? (
+        <PositionsV2Body
+          portfolio={portfolio}
+          liveByTicker={liveByTicker}
+          overlayByTicker={overlayByTicker}
+          onUpload={() => setShowUpload(true)}
+          onRefresh={handleRefresh}
+          refreshing={refreshPrices.isPending}
+          onTickerClick={(t) => setInsightTicker(t)}
+          onDashboard={() => { window.location.href = DASHBOARD_URL; }}
+          onStrategy={() => { window.location.href = 'https://www.sunnyfi.co/new-strategy'; }}
+        />
+      ) : (
+      <>
       {/* Top bar */}
       <header className="np-top">
         <div className="np-brand-row">
@@ -322,6 +343,8 @@ export default function PositionsPage() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       <CsvUploadModal
         open={showUpload}

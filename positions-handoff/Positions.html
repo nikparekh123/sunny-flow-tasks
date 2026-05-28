@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sunnyfi · Positions — current layout</title>
+<!-- The real stylesheet, copied verbatim from the app. It scopes
+     everything under .np-app and self-imports Work Sans + DM Mono. -->
+<link rel="stylesheet" href="positions.css" />
+<style>
+  /* Page chrome only — not part of the app. Gives the snapshot a body
+     background so the .np-app card surfaces read correctly. */
+  html, body { margin: 0; background: #061a10; }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     STATIC SNAPSHOT of the Positions page.
+
+     This is a hand-built representation of the live React page
+     (src/positions/PositionsPage.tsx) with sample data, using the
+     real class names from positions.css so it renders with the
+     production styling. Interactive bits (sorting, modals, the
+     allocation treemap canvas, charts) are represented as static
+     stand-ins — the goal is to give a designer the LAYOUT + visual
+     language to rework, not a working app.
+
+     Sections, in order:
+       1. Top bar (brand + actions)
+       2. Hero (portfolio value + unrealized P&L)
+       3. Allocation (view toggle + treemap placeholder)
+       4. Stock insights strip (horizontally-scrolling cards)
+       5. Positions table (grouped by strategy bucket)
+       6. Realized summary (strategy buckets)
+     ============================================================ -->
+
+<div class="np-app">
+
+  <!-- ============== 1. TOP BAR ============== -->
+  <header class="np-top">
+    <div class="np-brand-row">
+      <a class="np-brand">Sunnyfi<span class="cursor"></span></a>
+      <span class="np-crumb-sep">/</span>
+      <span class="np-crumb">POSITIONS</span>
+    </div>
+    <div class="np-actions">
+      <button class="np-btn ghost">↻ Refresh</button>
+      <button class="np-btn neon">↑ Upload positions</button>
+    </div>
+  </header>
+
+  <div class="np-stage">
+
+    <!-- ============== 2. HERO ============== -->
+    <div class="np-hero">
+      <div class="np-hero-label">Total portfolio value</div>
+      <div class="np-hero-value">$2,354,820</div>
+      <div class="np-hero-pl up">
+        <div>
+          <span class="np-hero-pl-amt">$184,300</span>
+          <span class="np-hero-pl-label" style="margin-left:10px">unrealized</span>
+        </div>
+        <span class="np-hero-pl-pct">+8.49%</span>
+      </div>
+    </div>
+
+    <!-- ============== 3. ALLOCATION ============== -->
+    <div class="np-section">
+      <div class="np-section-hd">
+        <div class="np-section-title">Allocation</div>
+        <div class="np-toggle">
+          <button>By stock</button>
+          <button class="on">By sector</button>
+          <button>By strategy</button>
+          <button>P&amp;L by position</button>
+        </div>
+      </div>
+      <!-- The live page renders an SVG/canvas treemap here
+           (AllocationTreemap.tsx). Static placeholder tiles below
+           approximate the visual weight + proportions. -->
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;grid-template-rows:repeat(2,1fr);gap:8px;height:600px">
+        <div style="grid-row:span 2;background:rgba(210,230,50,.14);border:1px solid #326e64;border-radius:10px;display:flex;flex-direction:column;justify-content:flex-end;padding:20px">
+          <div style="font-family:var(--navi-font-mono);font-size:22px;color:#faf5f0;font-weight:600">Technology</div>
+          <div style="font-family:var(--navi-font-mono);color:#a8c4c0">$842k · 35.8%</div>
+        </div>
+        <div style="background:rgba(138,180,212,.14);border:1px solid #326e64;border-radius:10px;display:flex;flex-direction:column;justify-content:flex-end;padding:16px">
+          <div style="font-family:var(--navi-font-mono);font-size:16px;color:#faf5f0">Comm Svcs</div>
+          <div style="font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0">$498k</div>
+        </div>
+        <div style="background:rgba(168,212,160,.14);border:1px solid #326e64;border-radius:10px;display:flex;flex-direction:column;justify-content:flex-end;padding:16px">
+          <div style="font-family:var(--navi-font-mono);font-size:16px;color:#faf5f0">Financials</div>
+          <div style="font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0">$391k</div>
+        </div>
+        <div style="background:rgba(224,192,96,.12);border:1px solid #326e64;border-radius:10px;display:flex;flex-direction:column;justify-content:flex-end;padding:16px">
+          <div style="font-family:var(--navi-font-mono);font-size:15px;color:#faf5f0">Cons Disc</div>
+          <div style="font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0">$312k</div>
+        </div>
+        <div style="background:rgba(30,90,80,.3);border:1px solid #326e64;border-radius:10px;display:flex;flex-direction:column;justify-content:flex-end;padding:16px">
+          <div style="font-family:var(--navi-font-mono);font-size:15px;color:#faf5f0">Energy</div>
+          <div style="font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0">$211k</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============== 4. STOCK INSIGHTS STRIP ============== -->
+    <div class="np-section">
+      <div class="np-section-hd">
+        <div class="np-section-title">Stock insights</div>
+      </div>
+      <!-- Live page = StockInsightsStrip.tsx, a snap-scroll carousel of
+           big vibrant cards. Three sample cards shown. -->
+      <div style="display:flex;gap:16px;overflow-x:auto;padding-bottom:8px">
+        <!-- card: up -->
+        <div style="flex:0 0 340px;background:linear-gradient(160deg,rgba(168,212,160,.22),rgba(15,51,51,.6));border:1px solid #326e64;border-radius:16px;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <div style="font-family:var(--navi-font-sans);font-size:30px;font-weight:800;color:#faf5f0">NVDA</div>
+            <div style="font-family:var(--navi-font-mono);font-size:13px;color:#a8c4c0">earnings in 12d</div>
+          </div>
+          <div style="font-family:var(--navi-font-sans);font-size:52px;font-weight:800;color:#a8d4a0;letter-spacing:-2px;margin-top:12px">+4.2%</div>
+          <div style="font-family:var(--navi-font-mono);font-size:13px;color:#a8c4c0;margin-top:4px">$880.40 · today</div>
+          <div style="display:flex;gap:18px;margin-top:20px;font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0">
+            <span>β 1.74</span><span>IV 48%</span><span>+$34k pos</span>
+          </div>
+        </div>
+        <!-- card: down -->
+        <div style="flex:0 0 340px;background:linear-gradient(160deg,rgba(220,80,60,.22),rgba(15,51,51,.6));border:1px solid #326e64;border-radius:16px;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <div style="font-family:var(--navi-font-sans);font-size:30px;font-weight:800;color:#faf5f0">TSLA</div>
+            <div style="font-family:var(--navi-font-mono);font-size:13px;color:#a8c4c0">earnings in 4d</div>
+          </div>
+          <div style="font-family:var(--navi-font-sans);font-size:52px;font-weight:800;color:#e87060;letter-spacing:-2px;margin-top:12px">−2.8%</div>
+          <div style="font-family:var(--navi-font-mono);font-size:13px;color:#a8c4c0;margin-top:4px">$248.10 · today</div>
+          <div style="display:flex;gap:18px;margin-top:20px;font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0">
+            <span>β 2.31</span><span>IV 62%</span><span>−$12k pos</span>
+          </div>
+        </div>
+        <!-- card: flat -->
+        <div style="flex:0 0 340px;background:linear-gradient(160deg,rgba(168,196,192,.14),rgba(15,51,51,.6));border:1px solid #326e64;border-radius:16px;padding:24px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <div style="font-family:var(--navi-font-sans);font-size:30px;font-weight:800;color:#faf5f0">META</div>
+            <div style="font-family:var(--navi-font-mono);font-size:13px;color:#a8c4c0">earnings in 28d</div>
+          </div>
+          <div style="font-family:var(--navi-font-sans);font-size:52px;font-weight:800;color:#a8c4c0;letter-spacing:-2px;margin-top:12px">+0.3%</div>
+          <div style="font-family:var(--navi-font-mono);font-size:13px;color:#a8c4c0;margin-top:4px">$611.91 · today</div>
+          <div style="display:flex;gap:18px;margin-top:20px;font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0">
+            <span>β 1.21</span><span>IV 31%</span><span>+$8k pos</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============== 5. POSITIONS TABLE ============== -->
+    <div class="np-section">
+      <div class="np-section-hd">
+        <div class="np-section-title">Positions · 8</div>
+        <div class="np-view-toggle">
+          <button class="on">Positions</button>
+          <button>Trades</button>
+          <button>Calendar</button>
+        </div>
+      </div>
+      <div class="np-table-wrap">
+        <table class="np-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Status</th>
+              <th>Sector</th>
+              <th>Qty</th>
+              <th>Avg cost</th>
+              <th>Net cost</th>
+              <th>Price</th>
+              <th>Mkt value</th>
+              <th>P&amp;L $</th>
+              <th>P&amp;L %</th>
+              <th>% port</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Group: Income -->
+            <tr class="np-group-hd np-group-income">
+              <td colspan="11">
+                <span class="np-group-dot" style="background:#d2e632"></span>
+                <span class="np-group-name">Income</span>
+                <span class="np-group-count">· 3 positions</span>
+              </td>
+            </tr>
+            <tr data-ticker="META">
+              <td class="ticker"><span class="ticker clickable">META</span></td>
+              <td><span class="np-status-text up">▲ $12,400</span></td>
+              <td class="sector-cell">Comm Svcs</td>
+              <td class="num">2,000</td>
+              <td class="num">$611.91</td>
+              <td class="num up">$598.40</td>
+              <td class="num">$641.20</td>
+              <td class="num strong">$1,282,400</td>
+              <td class="num up">$58,580</td>
+              <td class="num up">+4.79%</td>
+              <td class="num"><span class="pct-bar" style="width:36px;background:#326e64"></span>54.5%</td>
+            </tr>
+            <tr data-ticker="INTU">
+              <td class="ticker"><span class="ticker clickable">INTU</span>
+                <span class="np-earn-chip soon">▶ 5d</span></td>
+              <td><span class="np-status-text up">▲ $24,541</span></td>
+              <td class="sector-cell">Technology</td>
+              <td class="num">400</td>
+              <td class="num">$381.16</td>
+              <td class="num up">$352.10</td>
+              <td class="num">$642.30</td>
+              <td class="num strong">$256,920</td>
+              <td class="num up">$104,456</td>
+              <td class="num up">+68.5%</td>
+              <td class="num"><span class="pct-bar" style="width:11px;background:#326e64"></span>10.9%</td>
+            </tr>
+            <tr data-ticker="NKE">
+              <td class="ticker"><span class="ticker clickable">NKE</span></td>
+              <td><span class="np-status-text down">▼ $4,560</span></td>
+              <td class="sector-cell">Cons Disc</td>
+              <td class="num">1,000</td>
+              <td class="num">$48.90</td>
+              <td class="num down">$51.20</td>
+              <td class="num">$46.10</td>
+              <td class="num strong">$46,100</td>
+              <td class="num down">$2,800</td>
+              <td class="num down">−5.73%</td>
+              <td class="num"><span class="pct-bar" style="width:2px;background:#326e64"></span>2.0%</td>
+            </tr>
+            <tr class="np-group-foot np-group-income">
+              <td colspan="7"><b>Income subtotal</b></td>
+              <td class="num strong">$1,585,420</td>
+              <td class="num up">$160,236</td>
+              <td class="num up">+11.2%</td>
+              <td class="num">67.4%</td>
+            </tr>
+
+            <!-- Group: Investment -->
+            <tr class="np-group-hd np-group-invest">
+              <td colspan="11">
+                <span class="np-group-dot" style="background:#8ab4d4"></span>
+                <span class="np-group-name">Investment</span>
+                <span class="np-group-count">· 2 positions</span>
+              </td>
+            </tr>
+            <tr data-ticker="NVDA">
+              <td class="ticker"><span class="ticker clickable">NVDA</span>
+                <span class="np-earn-chip queued">▶ 12d</span></td>
+              <td><span class="np-status-text up">▲ $34,200</span></td>
+              <td class="sector-cell">Technology</td>
+              <td class="num">300</td>
+              <td class="num">$612.40</td>
+              <td class="num">$612.40</td>
+              <td class="num">$880.40</td>
+              <td class="num strong">$264,120</td>
+              <td class="num up">$80,400</td>
+              <td class="num up">+43.8%</td>
+              <td class="num"><span class="pct-bar" style="width:11px;background:#326e64"></span>11.2%</td>
+            </tr>
+            <tr data-ticker="ADBE">
+              <td class="ticker"><span class="ticker clickable">ADBE</span></td>
+              <td><span class="np-status-text down">▼ $5,000</span></td>
+              <td class="sector-cell">Technology</td>
+              <td class="num">300</td>
+              <td class="num">$282.11</td>
+              <td class="num down">$298.40</td>
+              <td class="num">$238.24</td>
+              <td class="num strong">$71,472</td>
+              <td class="num down">$13,161</td>
+              <td class="num down">−15.5%</td>
+              <td class="num"><span class="pct-bar" style="width:3px;background:#326e64"></span>3.0%</td>
+            </tr>
+            <tr class="np-group-foot np-group-invest">
+              <td colspan="7"><b>Investment subtotal</b></td>
+              <td class="num strong">$335,592</td>
+              <td class="num up">$67,239</td>
+              <td class="num up">+25.1%</td>
+              <td class="num">14.2%</td>
+            </tr>
+
+            <!-- Group: Yield -->
+            <tr class="np-group-hd np-group-yield">
+              <td colspan="11">
+                <span class="np-group-dot" style="background:#a8d4a0"></span>
+                <span class="np-group-name">Yield</span>
+                <span class="np-group-count">· 1 position</span>
+              </td>
+            </tr>
+            <tr data-ticker="HOOD">
+              <td class="ticker"><span class="ticker clickable">HOOD</span></td>
+              <td><span class="np-status-text up">▲ $620</span></td>
+              <td class="sector-cell">Financials</td>
+              <td class="num">1,000</td>
+              <td class="num">$76.43</td>
+              <td class="num up">$71.10</td>
+              <td class="num">$78.90</td>
+              <td class="num strong">$78,900</td>
+              <td class="num up">$2,470</td>
+              <td class="num up">+3.23%</td>
+              <td class="num"><span class="pct-bar" style="width:3px;background:#326e64"></span>3.4%</td>
+            </tr>
+            <tr class="np-group-foot np-group-yield">
+              <td colspan="7"><b>Yield subtotal</b></td>
+              <td class="num strong">$78,900</td>
+              <td class="num up">$2,470</td>
+              <td class="num up">+3.2%</td>
+              <td class="num">3.4%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ============== 6. REALIZED SUMMARY (strategy buckets) ============== -->
+    <div class="np-section">
+      <div class="np-section-hd">
+        <div class="np-section-title">Realized · strategy buckets</div>
+      </div>
+      <!-- Live page = RealizedSummary.tsx. Three bucket stat blocks. -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+        <div style="background:rgba(15,51,51,.55);border:1px solid #326e64;border-radius:12px;padding:20px">
+          <div style="font-family:var(--navi-font-mono);font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:#468278">Income · premium</div>
+          <div style="font-family:var(--navi-font-mono);font-size:34px;font-weight:700;color:#d2e632;margin-top:8px">$38,125</div>
+          <div style="font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0;margin-top:6px">59 closed trades · 71% win</div>
+        </div>
+        <div style="background:rgba(15,51,51,.55);border:1px solid #326e64;border-radius:12px;padding:20px">
+          <div style="font-family:var(--navi-font-mono);font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:#468278">Investment · realized</div>
+          <div style="font-family:var(--navi-font-mono);font-size:34px;font-weight:700;color:#a8d4a0;margin-top:8px">+$12,690</div>
+          <div style="font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0;margin-top:6px">share sales + assignments</div>
+        </div>
+        <div style="background:rgba(15,51,51,.55);border:1px solid #326e64;border-radius:12px;padding:20px">
+          <div style="font-family:var(--navi-font-mono);font-size:10px;letter-spacing:1.6px;text-transform:uppercase;color:#468278">Protective puts · cost</div>
+          <div style="font-family:var(--navi-font-mono);font-size:34px;font-weight:700;color:#e87060;margin-top:8px">−$153,942</div>
+          <div style="font-family:var(--navi-font-mono);font-size:12px;color:#a8c4c0;margin-top:6px">25% portfolio covered</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
