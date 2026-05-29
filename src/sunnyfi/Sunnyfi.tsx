@@ -111,6 +111,18 @@ function PageFallback() {
 }
 
 export default function Sunnyfi() {
+  // Warm the route chunks shortly after first paint so in-app navigation is
+  // instant — no full-screen "chunk…" fallback flash between pages.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void import('./pages/Dashboard');
+      void import('./pages/Income');
+      void import('./pages/NewStrategy');
+      void import('./pages/Math');
+    }, 1200);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <ErrorBoundary>
     <RouteWipe />

@@ -24,6 +24,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { Section } from "./atoms";
 import { BrandBar, ToolsRail } from "./blocks";
 import { MoneyCount } from "./animation";
+// Co-locate the income styles with the components so the compact IncomeWeekly
+// card is styled wherever it renders (dashboard included), not just on /income.
+import "@/sunnyfi/pages/income-v2.css";
 
 /* ============================================================
    LIVE DATA

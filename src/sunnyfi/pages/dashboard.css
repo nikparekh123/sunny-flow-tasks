@@ -72,7 +72,9 @@
 .dash-inner {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 36px 56px 64px;
+  /* No top padding: the sticky brand bar rests flush at the top so it doesn't
+   * jump when it sticks (its own 18px padding gives breathing room). */
+  padding: 0 56px 64px;
 }
 
 /* ─────────────────── Typography ─────────────────── */
@@ -143,12 +145,10 @@
 }
 .dash .page-toolbar .toolbar-date { margin-right: auto; }
 
-/* ── Page transition: neon wipe sweeps across the top + content fades in on
- *    arrival. Opacity-only (no translate) so the sticky header never shifts —
- *    it stays frozen in place. Respects reduced-motion. ── */
-@keyframes naviPageIn { from { opacity: 0; } to { opacity: 1; } }
-.dash .dash-inner { animation: naviPageIn .4s var(--ease) both; }
-
+/* ── Page transition: a neon bar sweeps across the very top on each in-app
+ *    route change. The page content itself does NOT fade/slide — that kept
+ *    re-animating the header on every navigation. The header stays frozen;
+ *    the wipe is the only motion cue. Respects reduced-motion. ── */
 .page-wipe {
   position: fixed; top: 0; left: 0; right: 0; height: 2px; transform-origin: left;
   z-index: 9999; background: var(--neon); box-shadow: 0 0 16px rgba(210, 230, 50, .6);
@@ -160,7 +160,6 @@
   100% { transform: scaleX(1); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dash .dash-inner { animation: none; }
   .page-wipe { display: none; }
 }
 
