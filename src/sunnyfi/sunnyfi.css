@@ -105,7 +105,11 @@ html, body, #root {
   padding: 0;
   min-height: 100vh;
 }
-body {
+/* `html body` (specificity 0,0,2) so the Sunnyfi dark background always wins
+ * over the tasks-app `body { background: var(--owl-page) }` (0,0,1) in
+ * index.css — Tailwind flattens that out of @layer base in the prod bundle,
+ * so otherwise it's pure source-order and can flip the page light. */
+html body {
   background: var(--navi-dash-page);
   color: var(--navi-fg1);
   font-family: var(--navi-font-sans);

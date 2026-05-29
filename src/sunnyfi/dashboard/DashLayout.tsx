@@ -12,6 +12,7 @@
  */
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { BrandBar } from "./blocks";
+import { useNow, fmtBrandDate } from "./time";
 import "@/sunnyfi/pages/dashboard.css";
 
 type Active = "positions" | "income" | "strategy" | "math";
@@ -26,6 +27,7 @@ const ROUTE_META: Record<string, { label: string; active?: Active }> = {
 export function DashLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const dateLabel = fmtBrandDate(useNow(60_000));
   const meta = ROUTE_META[pathname] ?? { label: "Morning brief" };
   return (
     <div className="dash">
@@ -33,6 +35,7 @@ export function DashLayout() {
         <BrandBar
           routeLabel={meta.label}
           active={meta.active}
+          dateLabel={dateLabel}
           onLogo={() => navigate("/dashboard")}
           onPositions={() => navigate("/positions")}
           onIncome={() => navigate("/income")}
