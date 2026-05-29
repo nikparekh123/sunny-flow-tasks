@@ -66,6 +66,18 @@ function TasksApp() {
 const App = () => {
   const which = detectApp();
 
+  // Positions has moved into the main app at sunnyfi.co/positions. Bounce the
+  // legacy positions.sunnyfi.co subdomain there so there's one origin/shell.
+  // (The ?app=positions local-dev override still renders PositionsPage directly.)
+  if (
+    which === 'positions' &&
+    typeof window !== 'undefined' &&
+    window.location.hostname.startsWith('positions.')
+  ) {
+    window.location.replace('https://www.sunnyfi.co/positions' + window.location.search);
+    return null;
+  }
+
   let content: React.ReactNode;
   if (which === 'positions') {
     content = (

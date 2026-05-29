@@ -455,7 +455,7 @@ export function IncomeScreen() {
           routeLabel="Income"
           active="income"
           onLogo={() => navigate("/dashboard")}
-          onPositions={() => { window.location.href = "https://positions.sunnyfi.co"; }}
+          onPositions={() => navigate("/positions")}
           onStrategy={() => navigate("/new-strategy")}
           onMath={() => navigate("/math")}
           onIncome={() => navigate("/income")}

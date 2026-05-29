@@ -102,6 +102,7 @@ const Strategy     = lazy(() => import('./pages/Strategy'));
 const NewStrategy  = lazy(() => import('./pages/NewStrategy'));
 const MathPage     = lazy(() => import('./pages/Math'));
 const Income       = lazy(() => import('./pages/Income'));
+const Positions    = lazy(() => import('../positions/PositionsPage'));
 
 function PageFallback() {
   return (
@@ -131,6 +132,7 @@ export default function Sunnyfi() {
       void import('./pages/Income');
       void import('./pages/NewStrategy');
       void import('./pages/Math');
+      void import('../positions/PositionsPage');
     }, 1200);
     return () => clearTimeout(t);
   }, []);
@@ -215,6 +217,10 @@ export default function Sunnyfi() {
             </RequireAuth>
           }
         />
+        {/* Positions now lives in-app at /positions (self-gates auth, like it
+            did on the positions.sunnyfi.co subdomain). Same origin = same
+            shell, stylesheets and zoom context as every other page. */}
+        <Route path="/positions" element={<Positions />} />
       </Routes>
     </Suspense>
     </ErrorBoundary>

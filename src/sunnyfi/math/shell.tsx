@@ -96,10 +96,10 @@ function Topbar({ route, searchOpen, onSearchClick, onSearchClose, onShare, show
     <div className={`hf-top${searchOpen ? " search-open" : ""}`}>
       <Brand route={route} onClick={onBrandClick} />
       <nav className="hf-nav" aria-label="Pages">
-        <a className="hf-nav-link" href="https://positions.sunnyfi.co">Positions</a>
-        <a className="hf-nav-link" href="https://www.sunnyfi.co/income">Income</a>
-        <a className="hf-nav-link" href="https://www.sunnyfi.co/new-strategy">Strategy</a>
-        <a className="hf-nav-link on" href="https://www.sunnyfi.co/math">Math</a>
+        <a className="hf-nav-link" href="/positions">Positions</a>
+        <a className="hf-nav-link" href="/income">Income</a>
+        <a className="hf-nav-link" href="/new-strategy">Strategy</a>
+        <a className="hf-nav-link on" href="/math">Math</a>
       </nav>
       <div className="hf-actions">
         {searchOpen ? (

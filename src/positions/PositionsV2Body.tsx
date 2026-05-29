@@ -22,6 +22,7 @@
  * via the .np-app ancestor) so we keep their full live behaviour.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { TickerStrip, BrandBar } from "@/sunnyfi/dashboard/blocks";
 import { Section, Spark, AnimatedBar } from "@/sunnyfi/dashboard/atoms";
 import { MoneyCount, PctCount, useEntered } from "@/sunnyfi/lib/animation";
@@ -96,24 +97,24 @@ function shortSector(s: string | null | undefined): string {
 
 // ─────────────────── Brand bar ───────────────────────────────────
 function PositionsBrandBar({
-  dateLabel, onDashboard, onStrategy, onRefresh, refreshing, onUpload,
+  dateLabel, onRefresh, refreshing, onUpload,
 }: {
-  dateLabel: string; onDashboard: () => void; onStrategy: () => void;
+  dateLabel: string;
   onRefresh: () => void; refreshing: boolean; onUpload: () => void;
 }) {
-  // Positions is a separate app (positions.sunnyfi.co); sibling pages live on
-  // www.sunnyfi.co, so those nav links are cross-domain full loads.
-  const SUNNYFI = "https://www.sunnyfi.co";
+  // Positions now lives in-app at /positions, so every nav link is a plain
+  // in-app route change (same shell, no cross-domain reload).
+  const navigate = useNavigate();
   return (
     <>
       <BrandBar
         routeLabel="Positions"
         active="positions"
-        onLogo={onDashboard}
-        onPositions={() => {}}
-        onIncome={() => { window.location.href = `${SUNNYFI}/income`; }}
-        onStrategy={onStrategy}
-        onMath={() => { window.location.href = `${SUNNYFI}/math`; }}
+        onLogo={() => navigate("/dashboard")}
+        onPositions={() => navigate("/positions")}
+        onIncome={() => navigate("/income")}
+        onStrategy={() => navigate("/new-strategy")}
+        onMath={() => navigate("/math")}
       />
       <div className="page-toolbar">
         <span className="label toolbar-date">{dateLabel}</span>
@@ -846,12 +847,12 @@ function RealizedBlock({ rows, realizedByTicker, tradesByTicker }: {
 
 // ─────────────────── Page assembly ───────────────────────────────
 export function PositionsV2Body(props: PositionsV2BodyProps) {
-  const { portfolio, liveByTicker, overlayByTicker, signalsByTicker, realizedByTicker, tradesByTicker, onUpload, onRefresh, refreshing, onTickerClick, onDashboard, onStrategy } = props;
+  const { portfolio, liveByTicker, overlayByTicker, signalsByTicker, realizedByTicker, tradesByTicker, onUpload, onRefresh, refreshing, onTickerClick } = props;
   const now = useNow(60_000);
   const dateLabel = fmtBrandDate(now);
 
   const brand = (
-    <PositionsBrandBar dateLabel={dateLabel} onDashboard={onDashboard} onStrategy={onStrategy} onRefresh={onRefresh} refreshing={refreshing} onUpload={onUpload} />
+    <PositionsBrandBar dateLabel={dateLabel} onRefresh={onRefresh} refreshing={refreshing} onUpload={onUpload} />
   );
 
   if (portfolio.rows.length === 0) {

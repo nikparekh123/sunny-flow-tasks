@@ -60,7 +60,7 @@ export default function Dashboard() {
       todayHighlight="neon"
       areaFill={true}
       showNews={true}
-      onPositions={() => { window.location.href = "https://positions.sunnyfi.co"; }}
+      onPositions={() => navigate("/positions")}
       onStrategy={() => navigate("/new-strategy")}
       onMath={() => navigate("/math")}
       onIncome={() => navigate("/income")}

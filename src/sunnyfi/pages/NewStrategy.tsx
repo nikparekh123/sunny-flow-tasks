@@ -760,7 +760,7 @@ export default function NewStrategy() {
             routeLabel="New Strategy"
             active="strategy"
             onLogo={() => navigate('/dashboard')}
-            onPositions={() => { window.location.href = 'https://positions.sunnyfi.co'; }}
+            onPositions={() => navigate('/positions')}
             onIncome={() => navigate('/income')}
             onStrategy={() => navigate('/new-strategy')}
             onMath={() => navigate('/math')}
