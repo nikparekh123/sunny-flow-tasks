@@ -32,6 +32,18 @@ function RouteWipe() {
 }
 
 /**
+ * Reset scroll to the top on every route change. React Router preserves the
+ * scroll offset across navigations by default — so landing on a new page while
+ * scrolled down (then reflowing as data loads) made the header appear to jump.
+ * Starting every page at the top keeps the frozen header cohesive.
+ */
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+  return null;
+}
+
+/**
  * Surfaces unhandled render errors instead of blank-screening — invaluable
  * when a route's render throws and there's no other diagnostic.
  */
@@ -125,6 +137,7 @@ export default function Sunnyfi() {
 
   return (
     <ErrorBoundary>
+    <ScrollToTop />
     <RouteWipe />
     <Suspense fallback={<PageFallback />}>
       <Routes>
