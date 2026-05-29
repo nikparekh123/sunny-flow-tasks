@@ -12,6 +12,7 @@ import { lazy, Suspense, Component, useState, useEffect, useRef, type ReactNode,
 import { Routes, Route, useLocation } from 'react-router-dom';
 import './sunnyfi.css';
 import RequireAuth from './components/RequireAuth';
+import { DashLayout } from './dashboard/DashLayout';
 
 /**
  * Neon-wipe page transition. On each route change we remount a thin neon bar
@@ -145,14 +146,18 @@ export default function Sunnyfi() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/auth/callback" element={<AuthCallback />} />
-        <Route
-          path="/dashboard"
-          element={
-            <RequireAuth>
-              <Dashboard />
-            </RequireAuth>
-          }
-        />
+        {/* Persistent shell: BrandBar mounts once; only the page content under
+            the Outlet swaps on navigation, so the header never reloads across
+            these three editorial pages. */}
+        <Route element={<RequireAuth><DashLayout /></RequireAuth>}>
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/income" element={<Income />} />
+          <Route path="/new-strategy" element={<NewStrategy />} />
+        </Route>
+        {/* Positions self-gates auth + carries its own .np-app modal shell, so
+            it renders its own (identical, same-origin) header rather than the
+            shared layout. */}
+        <Route path="/positions" element={<Positions />} />
         <Route
           path="/research"
           element={
@@ -194,14 +199,6 @@ export default function Sunnyfi() {
           }
         />
         <Route
-          path="/new-strategy"
-          element={
-            <RequireAuth>
-              <NewStrategy />
-            </RequireAuth>
-          }
-        />
-        <Route
           path="/math"
           element={
             <RequireAuth>
@@ -209,18 +206,6 @@ export default function Sunnyfi() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/income"
-          element={
-            <RequireAuth>
-              <Income />
-            </RequireAuth>
-          }
-        />
-        {/* Positions now lives in-app at /positions (self-gates auth, like it
-            did on the positions.sunnyfi.co subdomain). Same origin = same
-            shell, stylesheets and zoom context as every other page. */}
-        <Route path="/positions" element={<Positions />} />
       </Routes>
     </Suspense>
     </ErrorBoundary>

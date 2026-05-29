@@ -18,8 +18,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { BNF_UNIVERSE, type UniverseMember } from '@/sunnyfi/data/bnfUniverse';
 import { CountUp } from '@/sunnyfi/lib/animation';
 import { Section } from '@/sunnyfi/dashboard/atoms';
-import { TickerStrip, BrandBar } from '@/sunnyfi/dashboard/blocks';
-import { useNavigate } from 'react-router-dom';
+import { TickerStrip } from '@/sunnyfi/dashboard/blocks';
 import '@/sunnyfi/pages/dashboard.css';
 import './new-strategy.css';
 import './new-strategy-v2.css';
@@ -744,29 +743,16 @@ export default function NewStrategy() {
     [closedPositions],
   );
 
-  const navigate = useNavigate();
-
   // ── render ──
   // Root carries `dash` (design tokens/atoms) + `np-app` so the legacy
   // ScanProgressBanner (.np-app .bnf-progress …) stays styled. positions.css
   // isn't imported here, so np-app only activates the bnf-* rules from
   // new-strategy.css — no token conflict with .dash.
   return (
-    <div className="dash np-app">
-      <div className="dash-inner">
-        {/* Brand bar — shared component (same on every page) */}
-        <div className="row first">
-          <BrandBar
-            routeLabel="New Strategy"
-            active="strategy"
-            onLogo={() => navigate('/dashboard')}
-            onPositions={() => navigate('/positions')}
-            onIncome={() => navigate('/income')}
-            onStrategy={() => navigate('/new-strategy')}
-            onMath={() => navigate('/math')}
-          />
-          {/* Page-specific actions live in a toolbar row beneath the header */}
-          <div className="page-toolbar ns-actions">
+    <div className="np-app">
+      {/* Page action toolbar — the header is the shared DashLayout BrandBar */}
+      <div className="row first">
+        <div className="page-toolbar ns-actions">
             <span className={'pill muted' + (backfilling || refreshingCache || scanning ? ' busy' : '')}
               onClick={() => !(backfilling || refreshingCache || scanning) && runCacheBackfill()}
               title="One-time: load 260 trading days of OHLCV into the cache (~3–5 min).">
@@ -969,7 +955,6 @@ export default function NewStrategy() {
           </div>
         )}
       </div>
-    </div>
   );
 }
 

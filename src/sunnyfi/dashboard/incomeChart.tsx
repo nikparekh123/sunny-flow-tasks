@@ -22,7 +22,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Section } from "./atoms";
-import { BrandBar, ToolsRail } from "./blocks";
+import { ToolsRail } from "./blocks";
 import { MoneyCount } from "./animation";
 // Co-locate the income styles with the components so the compact IncomeWeekly
 // card is styled wherever it renders (dashboard included), not just on /income.
@@ -422,7 +422,6 @@ const PERIOD_BTNS: [Period, string][] = [
 const UNIT_WORD: Record<Period, string> = { day: "days", week: "weeks", month: "months", quarter: "quarters", year: "year" };
 
 export function IncomeScreen() {
-  const navigate = useNavigate();
   const { data: trades = [] } = useIncomeTradesAll();
   const { data: sells = [] } = useShareSellsAll();
   const [period, setPeriod] = useState<Period>("week");
@@ -449,19 +448,8 @@ export function IncomeScreen() {
   ];
 
   return (
-    <div className="dash">
-      <div className="dash-inner">
-        <BrandBar
-          routeLabel="Income"
-          active="income"
-          onLogo={() => navigate("/dashboard")}
-          onPositions={() => navigate("/positions")}
-          onStrategy={() => navigate("/new-strategy")}
-          onMath={() => navigate("/math")}
-          onIncome={() => navigate("/income")}
-        />
-
-        {/* TITLE + PERIOD SWITCHER */}
+    <>
+      {/* TITLE + PERIOD SWITCHER */}
         <div className="inc-titlerow">
           <div className="inc-title">
             <h1>Income</h1>
@@ -567,8 +555,7 @@ export function IncomeScreen() {
         <div className="row" style={{ marginTop: 56 }}>
           <ToolsRail />
         </div>
-      </div>
-    </div>
+    </>
   );
 }
 
