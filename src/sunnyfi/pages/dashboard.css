@@ -100,7 +100,9 @@
 /* 3-column grid (1fr · auto · 1fr) keeps the nav dead-centred regardless of
  * the route-label or date-label width, so the header doesn't shift between
  * pages. */
-.dash .brandbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding-bottom: 22px; border-bottom: var(--hair); margin-bottom: 40px; }
+/* Sticky so the header stays frozen at the top while the page scrolls. The
+ * page bg + top padding keep content from peeking above it. */
+.dash .brandbar { position: sticky; top: 0; z-index: 50; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 18px 0 22px; border-bottom: var(--hair); margin-bottom: 40px; background: var(--page); }
 .dash .brandbar .mark { justify-self: start; font-family: var(--sans); font-size: 12px; font-weight: 500; letter-spacing: 3px; text-transform: uppercase; display: flex; align-items: center; gap: 14px; }
 .dash .brandbar .mark .logo { color: var(--neon); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: opacity .15s var(--ease); }
 .dash .brandbar .mark .logo:hover { opacity: .72; }
@@ -141,10 +143,11 @@
 }
 .dash .page-toolbar .toolbar-date { margin-right: auto; }
 
-/* ── Page transition: neon wipe sweeps across the top + content fades up
- *    on arrival. Respects reduced-motion. ── */
-@keyframes naviPageIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-.dash .dash-inner { animation: naviPageIn .45s var(--ease) both; }
+/* ── Page transition: neon wipe sweeps across the top + content fades in on
+ *    arrival. Opacity-only (no translate) so the sticky header never shifts —
+ *    it stays frozen in place. Respects reduced-motion. ── */
+@keyframes naviPageIn { from { opacity: 0; } to { opacity: 1; } }
+.dash .dash-inner { animation: naviPageIn .4s var(--ease) both; }
 
 .page-wipe {
   position: fixed; top: 0; left: 0; right: 0; height: 2px; transform-origin: left;
