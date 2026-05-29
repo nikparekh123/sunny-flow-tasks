@@ -939,8 +939,11 @@ button:focus-visible { outline: 1.5px solid var(--navi-neon); outline-offset: 2p
   line-height: 1.5;
 }
 
-/* ── Dashboard (dark green) ── */
-.dash {
+/* ── Legacy research dashboard (dark green). Renamed from `.dash` → `.sf-dash`
+   so it stops colliding with the Navi design-system shell `.dash` (which the
+   live Positions/Income/etc. pages use). No component renders this — dead
+   styles kept for reference. THIS COLLISION turned the app background olive. ── */
+.sf-dash {
   height: 100vh; width: 100%;
   background: var(--dark-green);
   color: var(--dark-text);
@@ -1089,7 +1092,7 @@ button:focus-visible { outline: 1.5px solid var(--navi-neon); outline-offset: 2p
   .clock-strip  { grid-template-columns: repeat(4, 1fr); gap: 10px; }
   .clock-time   { font-size: 18px; }
   .landing      { padding: 28px 32px; }
-  .dash         { padding: 20px 24px 14px; }
+  .sf-dash      { padding: 20px 24px 14px; }
 }
 @media (max-width: 600px) {
   .tools-grid      { grid-template-columns: repeat(2, 1fr); }
