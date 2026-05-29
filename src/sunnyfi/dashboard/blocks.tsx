@@ -31,10 +31,11 @@ import { useState } from "react";
 // ─────────────────── Brand bar ───────────────────────────────────
 
 export function BrandBar({
-  dateLabel, routeLabel = "Morning brief", onPositions, onStrategy, onMath, onIncome,
+  dateLabel, routeLabel = "Morning brief", onLogo, onPositions, onStrategy, onMath, onIncome,
 }: {
   dateLabel?: string;
   routeLabel?: string;
+  onLogo?: () => void;
   onPositions?: () => void;
   onStrategy?: () => void;
   onMath?: () => void;
@@ -43,15 +44,15 @@ export function BrandBar({
   return (
     <div className="brandbar">
       <div className="mark">
-        <span className="logo">◆ SUNNYFI</span>
+        <span className="logo" onClick={onLogo} role="link" tabIndex={0}>◆ SUNNYFI</span>
         <span className="slash">/</span>
         <span className="route">{routeLabel}<span className="cursor" /></span>
       </div>
       <nav className="brandbar-nav">
-        <a className="brandbar-nav-link" onClick={onPositions}>→ Positions</a>
-        {onIncome && <a className="brandbar-nav-link" onClick={onIncome}>→ Income</a>}
-        <a className="brandbar-nav-link" onClick={onStrategy}>→ Strategy</a>
-        <a className="brandbar-nav-link" onClick={onMath}>→ Math</a>
+        <a className="brandbar-nav-link" onClick={onPositions}>Positions</a>
+        {onIncome && <a className="brandbar-nav-link" onClick={onIncome}>Income</a>}
+        <a className="brandbar-nav-link" onClick={onStrategy}>Strategy</a>
+        <a className="brandbar-nav-link" onClick={onMath}>Math</a>
       </nav>
       <div className="actions">
         {dateLabel && <span className="label">{dateLabel}</span>}

@@ -97,12 +97,17 @@
 
 /* ─────────────────── Brand bar ─────────────────── */
 
-.dash .brandbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 22px; border-bottom: var(--hair); margin-bottom: 40px; }
-.dash .brandbar .mark { font-family: var(--sans); font-size: 12px; font-weight: 500; letter-spacing: 3px; text-transform: uppercase; display: flex; align-items: center; gap: 14px; }
-.dash .brandbar .mark .logo { color: var(--neon); display: inline-flex; align-items: center; gap: 8px; }
+/* 3-column grid (1fr · auto · 1fr) keeps the nav dead-centred regardless of
+ * the route-label or date-label width, so the header doesn't shift between
+ * pages. */
+.dash .brandbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding-bottom: 22px; border-bottom: var(--hair); margin-bottom: 40px; }
+.dash .brandbar .mark { justify-self: start; font-family: var(--sans); font-size: 12px; font-weight: 500; letter-spacing: 3px; text-transform: uppercase; display: flex; align-items: center; gap: 14px; }
+.dash .brandbar .mark .logo { color: var(--neon); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; transition: opacity .15s var(--ease); }
+.dash .brandbar .mark .logo:hover { opacity: .72; }
 .dash .brandbar .mark .slash { color: var(--fg5); font-weight: 300; }
 .dash .brandbar .mark .route { color: var(--fg2); }
-.dash .brandbar .actions { display: flex; align-items: center; gap: 14px; }
+.dash .brandbar-nav { justify-self: center; }
+.dash .brandbar .actions { justify-self: end; display: flex; align-items: center; gap: 14px; }
 
 /* Nav inside the brand bar — sits centred between the SUNNYFI mark
  * and the date label. Pure-text links with the same animated
@@ -119,14 +124,12 @@
   color: var(--fg2);
   text-decoration: none;
   cursor: pointer;
-  transition: color .15s var(--ease), letter-spacing .2s var(--ease);
+  transition: color .15s var(--ease);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
 }
 .dash .brandbar-nav-link:hover {
   color: var(--neon);
-  letter-spacing: 1.9px;
 }
 
 .dash .cursor { display: inline-block; width: .45ch; height: .9em; background: var(--neon); vertical-align: -.08em; margin-left: 3px; animation: blink 1s steps(1) infinite; }

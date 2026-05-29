@@ -450,9 +450,11 @@ export function IncomeScreen() {
       <div className="dash-inner">
         <BrandBar
           routeLabel="Income"
+          onLogo={() => navigate("/dashboard")}
           onPositions={() => { window.location.href = "https://positions.sunnyfi.co"; }}
           onStrategy={() => navigate("/new-strategy")}
           onMath={() => navigate("/math")}
+          onIncome={() => navigate("/income")}
         />
 
         {/* TITLE + PERIOD SWITCHER */}

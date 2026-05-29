@@ -64,6 +64,7 @@ export default function Dashboard() {
       onStrategy={() => navigate("/new-strategy")}
       onMath={() => navigate("/math")}
       onIncome={() => navigate("/income")}
+      onLogo={() => navigate("/dashboard")}
     />
   );
 }

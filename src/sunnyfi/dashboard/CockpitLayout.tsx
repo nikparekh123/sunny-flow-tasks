@@ -49,6 +49,7 @@ export interface CockpitProps {
   onStrategy?: () => void;
   onMath?: () => void;
   onIncome?: () => void;
+  onLogo?: () => void;
 }
 
 export function CockpitLayout({
@@ -59,7 +60,7 @@ export function CockpitLayout({
   todayHighlight = "neon",
   showNews = true,
   formalGreeting = true,
-  onPositions, onStrategy, onMath, onIncome,
+  onPositions, onStrategy, onMath, onIncome, onLogo,
 }: CockpitProps) {
   const now = useNow(60_000);
   const dateLabel = fmtBrandDate(now);
@@ -71,6 +72,7 @@ export function CockpitLayout({
 
         <BrandBar
           dateLabel={dateLabel}
+          onLogo={onLogo}
           onPositions={onPositions}
           onStrategy={onStrategy}
           onMath={onMath}
