@@ -30,7 +30,7 @@
 import {
   BrandBar, Greeting, MarketsClock, TickerStrip,
   AttentionBlock, CalendarBlock, BNFBlock,
-  PortfolioBlockCompact, IncomeMix, MacroBlock, RiskBlock,
+  PortfolioBlockCompact, IncomeMix, IncomeHistoryBlock, MacroBlock, RiskBlock,
   NewsBand,
 } from "./blocks";
 import { useNow, marketClock, fmtBrandDate } from "./time";
@@ -121,10 +121,13 @@ export function CockpitLayout({
                 <IncomeMix compact />
               </div>
               <div style={{ marginTop: 48 }}>
-                <MacroBlock n="05" compact />
+                <IncomeHistoryBlock n="05" />
               </div>
               <div style={{ marginTop: 48 }}>
-                <RiskBlock n="06" compact />
+                <MacroBlock n="06" compact />
+              </div>
+              <div style={{ marginTop: 48 }}>
+                <RiskBlock n="07" compact />
               </div>
             </div>
 

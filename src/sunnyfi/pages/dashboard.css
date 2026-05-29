@@ -298,6 +298,32 @@
 .dash .income-mix-bar .calls { background: var(--neon); }
 .dash .income-mix-bar .puts { background: var(--tint-neon); border-left: 1.5px solid var(--page); }
 
+/* ─────────── Calls-sold income history (Daily/Weekly/Monthly) ─────────── */
+.dash .income-hist-toggle { display: inline-flex; gap: 4px; }
+.dash .ih-pill {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--fg3); background: transparent; border: var(--hair); border-radius: 100px;
+  padding: 3px 10px; cursor: pointer; transition: color .15s var(--ease), background .15s var(--ease), border-color .15s var(--ease);
+}
+.dash .ih-pill:hover { color: var(--neon); border-color: rgba(210,230,50,.45); }
+.dash .ih-pill.on { color: var(--page); background: var(--neon); border-color: var(--neon); font-weight: 600; }
+
+.dash .income-hist-chart { display: flex; align-items: flex-end; gap: 6px; height: 132px; }
+.dash .ih-col {
+  flex: 1 1 0; min-width: 0; height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+}
+.dash .ih-bar {
+  width: 100%; max-width: 30px; background: var(--neon); border-radius: 2px 2px 0 0;
+  transition: height .9s var(--ease); will-change: height;
+}
+.dash .ih-bar.proj { background: var(--tint-neon); border: 1px dashed var(--neon); }
+.dash .ih-x {
+  font-family: var(--mono); font-size: 8px; letter-spacing: .4px; color: var(--fg3);
+  margin-top: 6px; white-space: nowrap;
+}
+.dash .ih-x.proj { color: var(--neon); }
+
 /* ─────────────────── Column labels (cockpit) ─────────────────── */
 
 .dash .col-label { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: 2.5px; text-transform: uppercase; color: var(--neon); margin-bottom: 28px; }
