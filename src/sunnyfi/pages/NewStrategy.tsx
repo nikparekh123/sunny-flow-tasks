@@ -18,12 +18,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { BNF_UNIVERSE, type UniverseMember } from '@/sunnyfi/data/bnfUniverse';
 import { CountUp } from '@/sunnyfi/lib/animation';
 import { Section } from '@/sunnyfi/dashboard/atoms';
-import { TickerStrip } from '@/sunnyfi/dashboard/blocks';
+import { TickerStrip, BrandBar } from '@/sunnyfi/dashboard/blocks';
+import { useNavigate } from 'react-router-dom';
 import '@/sunnyfi/pages/dashboard.css';
 import './new-strategy.css';
 import './new-strategy-v2.css';
 
-const DASHBOARD_URL = 'https://www.sunnyfi.co/dashboard';
 const STALE_DAYS_EQUITY = 10;
 const STALE_DAYS_ETF = 7;
 const staleFor = (universe: Universe) => universe === 'ETF' ? STALE_DAYS_ETF : STALE_DAYS_EQUITY;
@@ -744,6 +744,8 @@ export default function NewStrategy() {
     [closedPositions],
   );
 
+  const navigate = useNavigate();
+
   // ── render ──
   // Root carries `dash` (design tokens/atoms) + `np-app` so the legacy
   // ScanProgressBanner (.np-app .bnf-progress …) stays styled. positions.css
@@ -752,44 +754,43 @@ export default function NewStrategy() {
   return (
     <div className="dash np-app">
       <div className="dash-inner">
-        {/* Brand bar — same shell as Dashboard / Positions */}
+        {/* Brand bar — shared component (same on every page) */}
         <div className="row first">
-          <div className="brandbar">
-            <div className="mark">
-              <a className="logo" href={DASHBOARD_URL} style={{ textDecoration: 'none', cursor: 'pointer' }}>◆ SUNNYFI</a>
-              <span className="slash">/</span>
-              <span className="route">New Strategy<span className="cursor" /></span>
-              <nav className="top-nav">
-                <a className="nav-link" href="https://positions.sunnyfi.co">Positions</a>
-                <a className="nav-link on">New Strategy</a>
-              </nav>
-            </div>
-            <div className="actions ns-actions">
-              <span className={'pill muted' + (backfilling || refreshingCache || scanning ? ' busy' : '')}
-                onClick={() => !(backfilling || refreshingCache || scanning) && runCacheBackfill()}
-                title="One-time: load 260 trading days of OHLCV into the cache (~3–5 min).">
-                {backfilling ? 'Backfilling…' : '⤓ Backfill'}
-              </span>
-              <span className={'pill muted' + (refreshingCache || backfilling || scanning ? ' busy' : '')}
-                onClick={() => !(refreshingCache || backfilling || scanning) && runCacheUpdate()}
-                title="Daily incremental cache update (~10s).">
-                {refreshingCache ? 'Updating…' : '↻ Refresh cache'}
-              </span>
-              <span className={'pill muted' + (refreshingFlags || candidates.length === 0 ? ' busy' : '')}
-                onClick={() => !(refreshingFlags || candidates.length === 0) && runRefreshFlags()}
-                title="Re-pull SEC EDGAR + earnings for current candidates.">
-                {refreshingFlags ? 'Flags…' : '↻ Risk flags'}
-              </span>
-              <span className={'pill muted' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('etf')} title="Scan the ~30 sector/industry ETFs.">
-                {scanning && scanMode === 'etf' ? 'Scanning…' : '↻ ETF scan'}
-              </span>
-              <span className={'pill muted' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('equity')} title="Scan the ~1000-name equity universe.">
-                {scanning && scanMode === 'equity' ? 'Scanning…' : '↻ Equity scan'}
-              </span>
-              <span className={'pill refresh-all' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('both')} title="Run both universes.">
-                {scanning && scanMode === 'both' ? 'Scanning…' : '↻ Refresh all'}
-              </span>
-            </div>
+          <BrandBar
+            routeLabel="New Strategy"
+            active="strategy"
+            onLogo={() => navigate('/dashboard')}
+            onPositions={() => { window.location.href = 'https://positions.sunnyfi.co'; }}
+            onIncome={() => navigate('/income')}
+            onStrategy={() => navigate('/new-strategy')}
+            onMath={() => navigate('/math')}
+          />
+          {/* Page-specific actions live in a toolbar row beneath the header */}
+          <div className="page-toolbar ns-actions">
+            <span className={'pill muted' + (backfilling || refreshingCache || scanning ? ' busy' : '')}
+              onClick={() => !(backfilling || refreshingCache || scanning) && runCacheBackfill()}
+              title="One-time: load 260 trading days of OHLCV into the cache (~3–5 min).">
+              {backfilling ? 'Backfilling…' : '⤓ Backfill'}
+            </span>
+            <span className={'pill muted' + (refreshingCache || backfilling || scanning ? ' busy' : '')}
+              onClick={() => !(refreshingCache || backfilling || scanning) && runCacheUpdate()}
+              title="Daily incremental cache update (~10s).">
+              {refreshingCache ? 'Updating…' : '↻ Refresh cache'}
+            </span>
+            <span className={'pill muted' + (refreshingFlags || candidates.length === 0 ? ' busy' : '')}
+              onClick={() => !(refreshingFlags || candidates.length === 0) && runRefreshFlags()}
+              title="Re-pull SEC EDGAR + earnings for current candidates.">
+              {refreshingFlags ? 'Flags…' : '↻ Risk flags'}
+            </span>
+            <span className={'pill muted' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('etf')} title="Scan the ~30 sector/industry ETFs.">
+              {scanning && scanMode === 'etf' ? 'Scanning…' : '↻ ETF scan'}
+            </span>
+            <span className={'pill muted' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('equity')} title="Scan the ~1000-name equity universe.">
+              {scanning && scanMode === 'equity' ? 'Scanning…' : '↻ Equity scan'}
+            </span>
+            <span className={'pill refresh-all' + (scanning ? ' busy' : '')} onClick={() => !scanning && runScan('both')} title="Run both universes.">
+              {scanning && scanMode === 'both' ? 'Scanning…' : '↻ Refresh all'}
+            </span>
           </div>
         </div>
 

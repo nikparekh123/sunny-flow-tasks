@@ -30,17 +30,24 @@ import { useState } from "react";
 
 // ─────────────────── Brand bar ───────────────────────────────────
 
+/** Shared header used on every page (dashboard, income, positions, new
+ *  strategy). 3-column grid keeps the nav centred; the current page is passed
+ *  via `active` for the highlight. Page-specific action buttons do NOT live
+ *  here — they go in a `.page-toolbar` row beneath the bar. */
 export function BrandBar({
-  dateLabel, routeLabel = "Morning brief", onLogo, onPositions, onStrategy, onMath, onIncome,
+  dateLabel, routeLabel = "Morning brief", active,
+  onLogo, onPositions, onStrategy, onMath, onIncome,
 }: {
   dateLabel?: string;
   routeLabel?: string;
+  active?: "positions" | "income" | "strategy" | "math";
   onLogo?: () => void;
   onPositions?: () => void;
   onStrategy?: () => void;
   onMath?: () => void;
   onIncome?: () => void;
 }) {
+  const link = (key: typeof active) => "brandbar-nav-link" + (active === key ? " on" : "");
   return (
     <div className="brandbar">
       <div className="mark">
@@ -49,10 +56,10 @@ export function BrandBar({
         <span className="route">{routeLabel}<span className="cursor" /></span>
       </div>
       <nav className="brandbar-nav">
-        <a className="brandbar-nav-link" onClick={onPositions}>Positions</a>
-        {onIncome && <a className="brandbar-nav-link" onClick={onIncome}>Income</a>}
-        <a className="brandbar-nav-link" onClick={onStrategy}>Strategy</a>
-        <a className="brandbar-nav-link" onClick={onMath}>Math</a>
+        <a className={link("positions")} onClick={onPositions}>Positions</a>
+        <a className={link("income")} onClick={onIncome}>Income</a>
+        <a className={link("strategy")} onClick={onStrategy}>Strategy</a>
+        <a className={link("math")} onClick={onMath}>Math</a>
       </nav>
       <div className="actions">
         {dateLabel && <span className="label">{dateLabel}</span>}

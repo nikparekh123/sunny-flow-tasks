@@ -8,10 +8,28 @@
  * tiny inline fallback during the chunk fetch (usually <100ms on a warm
  * cache).
  */
-import { lazy, Suspense, Component, type ReactNode, type ErrorInfo } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { lazy, Suspense, Component, useState, useEffect, useRef, type ReactNode, type ErrorInfo } from 'react';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import './sunnyfi.css';
 import RequireAuth from './components/RequireAuth';
+
+/**
+ * Neon-wipe page transition. On each route change we remount a thin neon bar
+ * (keyed by a counter) so its CSS animation replays — it sweeps across the top
+ * while the destination page fades up (.dash-inner animation in dashboard.css).
+ * First render is skipped so a fresh load doesn't wipe.
+ */
+function RouteWipe() {
+  const loc = useLocation();
+  const [tick, setTick] = useState(0);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    setTick((t) => t + 1);
+  }, [loc.pathname]);
+  if (tick === 0) return null;
+  return <span key={tick} className="page-wipe" aria-hidden="true" />;
+}
 
 /**
  * Surfaces unhandled render errors instead of blank-screening — invaluable
@@ -95,6 +113,7 @@ function PageFallback() {
 export default function Sunnyfi() {
   return (
     <ErrorBoundary>
+    <RouteWipe />
     <Suspense fallback={<PageFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />

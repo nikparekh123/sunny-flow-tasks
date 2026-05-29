@@ -131,6 +131,35 @@
 .dash .brandbar-nav-link:hover {
   color: var(--neon);
 }
+.dash .brandbar-nav-link.on { color: var(--neon); }
+
+/* ── Page toolbar: a thin strip under the brand bar that holds page-specific
+ *    action buttons (refresh, scan, upload…) so the header stays clean. ── */
+.dash .page-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px 0 0; margin-top: -8px;
+}
+.dash .page-toolbar .toolbar-date { margin-right: auto; }
+
+/* ── Page transition: neon wipe sweeps across the top + content fades up
+ *    on arrival. Respects reduced-motion. ── */
+@keyframes naviPageIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.dash .dash-inner { animation: naviPageIn .45s var(--ease) both; }
+
+.page-wipe {
+  position: fixed; top: 0; left: 0; right: 0; height: 2px; transform-origin: left;
+  z-index: 9999; background: var(--neon); box-shadow: 0 0 16px rgba(210, 230, 50, .6);
+  pointer-events: none; animation: naviWipe .55s var(--ease) forwards;
+}
+@keyframes naviWipe {
+  0%   { transform: scaleX(0); opacity: 1; }
+  55%  { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash .dash-inner { animation: none; }
+  .page-wipe { display: none; }
+}
 
 .dash .cursor { display: inline-block; width: .45ch; height: .9em; background: var(--neon); vertical-align: -.08em; margin-left: 3px; animation: blink 1s steps(1) infinite; }
 .dash .live-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 8px rgba(210,230,50,.45); animation: pulse 2.5s var(--ease) infinite; }

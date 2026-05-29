@@ -22,7 +22,7 @@
  * via the .np-app ancestor) so we keep their full live behaviour.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { TickerStrip } from "@/sunnyfi/dashboard/blocks";
+import { TickerStrip, BrandBar } from "@/sunnyfi/dashboard/blocks";
 import { Section, Spark, AnimatedBar } from "@/sunnyfi/dashboard/atoms";
 import { MoneyCount, PctCount, useEntered } from "@/sunnyfi/lib/animation";
 import { useNow, fmtBrandDate } from "@/sunnyfi/dashboard/time";
@@ -101,25 +101,28 @@ function PositionsBrandBar({
   dateLabel: string; onDashboard: () => void; onStrategy: () => void;
   onRefresh: () => void; refreshing: boolean; onUpload: () => void;
 }) {
+  // Positions is a separate app (positions.sunnyfi.co); sibling pages live on
+  // www.sunnyfi.co, so those nav links are cross-domain full loads.
+  const SUNNYFI = "https://www.sunnyfi.co";
   return (
-    <div className="brandbar">
-      <div className="mark">
-        <a className="logo" onClick={onDashboard} style={{ cursor: "pointer", textDecoration: "none" }}>◆ SUNNYFI</a>
-        <span className="slash">/</span>
-        <span className="route">Positions<span className="cursor" /></span>
-        <nav className="top-nav">
-          <a className="nav-link on">Positions</a>
-          <a className="nav-link" onClick={onStrategy} style={{ cursor: "pointer" }}>New Strategy</a>
-        </nav>
-      </div>
-      <div className="actions">
-        <span className="label">{dateLabel}</span>
+    <>
+      <BrandBar
+        routeLabel="Positions"
+        active="positions"
+        onLogo={onDashboard}
+        onPositions={() => {}}
+        onIncome={() => { window.location.href = `${SUNNYFI}/income`; }}
+        onStrategy={onStrategy}
+        onMath={() => { window.location.href = `${SUNNYFI}/math`; }}
+      />
+      <div className="page-toolbar">
+        <span className="label toolbar-date">{dateLabel}</span>
         <span className="pill muted" onClick={onRefresh} style={{ cursor: "pointer" }}>
           ↻ {refreshing ? "Refreshing…" : "Refresh prices"}
         </span>
         <span className="pill" onClick={onUpload} style={{ cursor: "pointer" }}>↑ Upload positions</span>
       </div>
-    </div>
+    </>
   );
 }
 
