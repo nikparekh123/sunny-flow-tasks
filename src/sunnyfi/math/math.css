@@ -111,9 +111,29 @@
   padding: 18px 32px;
   border-bottom: 1px solid rgba(30,90,80,.25);
   background: var(--navi-dash-page);
-  z-index: 6;
-  position: relative;
+  z-index: 50;
+  position: sticky;
+  top: 0;
 }
+
+/* Centered page nav — mirrors the .dash brand bar on every other page. */
+.hf-nav {
+  justify-self: center;
+  display: inline-flex;
+  gap: 28px;
+  font-family: var(--navi-font-mono);
+  font-size: 11px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+}
+.hf-nav-link {
+  color: var(--navi-fg2);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .15s ease;
+}
+.hf-nav-link:hover, .hf-nav-link.on { color: var(--navi-neon); }
+.hf-top.search-open .hf-nav { display: none; }
 .hf-brand {
   font-family: var(--navi-font-sans);
   font-size: 13px;

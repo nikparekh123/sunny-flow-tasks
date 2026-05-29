@@ -20,7 +20,6 @@ import {
   type CSSProperties,
   type ChangeEvent,
 } from "react";
-import { PageSwitcher } from "../components/PageSwitcher";
 
 // ── Shell ──────────────────────────────────────────────────────────
 export interface SunnyfiShellProps {
@@ -96,7 +95,12 @@ function Topbar({ route, searchOpen, onSearchClick, onSearchClose, onShare, show
   return (
     <div className={`hf-top${searchOpen ? " search-open" : ""}`}>
       <Brand route={route} onClick={onBrandClick} />
-      <span className="hf-top-spacer" aria-hidden />
+      <nav className="hf-nav" aria-label="Pages">
+        <a className="hf-nav-link" href="https://positions.sunnyfi.co">Positions</a>
+        <a className="hf-nav-link" href="https://www.sunnyfi.co/income">Income</a>
+        <a className="hf-nav-link" href="https://www.sunnyfi.co/new-strategy">Strategy</a>
+        <a className="hf-nav-link on" href="https://www.sunnyfi.co/math">Math</a>
+      </nav>
       <div className="hf-actions">
         {searchOpen ? (
           <button className="hf-search-close" onClick={onSearchClose} aria-label="Close search">
@@ -121,7 +125,7 @@ function Topbar({ route, searchOpen, onSearchClick, onSearchClose, onShare, show
   );
 }
 
-export function Brand({ onClick }: { route?: string; onClick?: () => void }) {
+export function Brand({ route = "Math", onClick }: { route?: string; onClick?: () => void }) {
   return (
     <div className="hf-brand">
       <button
@@ -141,12 +145,10 @@ export function Brand({ onClick }: { route?: string; onClick?: () => void }) {
         }}
         title="Back to dashboard"
       >
-        <span className="brand-mark">sunnyfi<span className="hf-cursor" /></span>
+        <span className="brand-mark">◆ SUNNYFI</span>
       </button>
       <span className="brand-slash">/</span>
-      <span className="brand-route">
-        <PageSwitcher current="math" variant="hf" />
-      </span>
+      <span className="brand-route">{route}<span className="hf-cursor" /></span>
     </div>
   );
 }
