@@ -110,6 +110,7 @@ function PositionsBrandBar({
       <BrandBar
         routeLabel="Positions"
         active="positions"
+        dateLabel={dateLabel}
         onLogo={() => navigate("/dashboard")}
         onPositions={() => navigate("/positions")}
         onIncome={() => navigate("/income")}
@@ -117,7 +118,7 @@ function PositionsBrandBar({
         onMath={() => navigate("/math")}
       />
       <div className="page-toolbar">
-        <span className="label toolbar-date">{dateLabel}</span>
+        <span style={{ marginRight: "auto" }} />
         <span className="pill muted" onClick={onRefresh} style={{ cursor: "pointer" }}>
           ↻ {refreshing ? "Refreshing…" : "Refresh prices"}
         </span>

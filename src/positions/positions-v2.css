@@ -22,6 +22,10 @@
 .dash .pos-hero { display: grid; grid-template-columns: 1fr auto; gap: 64px; align-items: end; }
 .dash .pos-hero .total { font-family: var(--sans); font-weight: 800; letter-spacing: -.045em; line-height: .85; color: var(--neon); font-feature-settings: "tnum","zero"; }
 .dash .pos-hero .total.bone { color: var(--fg1); }
+/* Neutralize the leaked research `.side { background: var(--navi-surface) }`
+   from sunnyfi.css (class-name collision). This P&L card is meant to be
+   transparent with just a top-border divider — not a grey-teal panel. */
+.dash .pos-hero .side { background: transparent; border-left: none; overflow: visible; }
 .dash .pos-hero .side .label { margin-bottom: 6px; }
 .dash .pos-hero .side .unr-amt { font-family: var(--mono); font-size: 40px; font-weight: 700; letter-spacing: -.02em; }
 .dash .pos-hero .side .unr-pct { font-family: var(--mono); font-size: 14px; margin-top: 4px; }
