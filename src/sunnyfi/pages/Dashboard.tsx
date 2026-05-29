@@ -63,6 +63,7 @@ export default function Dashboard() {
       onPositions={() => { window.location.href = "https://positions.sunnyfi.co"; }}
       onStrategy={() => navigate("/new-strategy")}
       onMath={() => navigate("/math")}
+      onIncome={() => navigate("/income")}
     />
   );
 }

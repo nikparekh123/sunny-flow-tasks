@@ -30,9 +30,10 @@
 import {
   BrandBar, Greeting, MarketsClock, TickerStrip,
   AttentionBlock, CalendarBlock, BNFBlock,
-  PortfolioBlockCompact, IncomeMix, IncomeHistoryBlock, MacroBlock, RiskBlock,
+  PortfolioBlockCompact, MacroBlock, RiskBlock,
   NewsBand,
 } from "./blocks";
+import { IncomeWeekly } from "./incomeChart";
 import { useNow, marketClock, fmtBrandDate } from "./time";
 
 export interface CockpitProps {
@@ -47,6 +48,7 @@ export interface CockpitProps {
   onPositions?: () => void;
   onStrategy?: () => void;
   onMath?: () => void;
+  onIncome?: () => void;
 }
 
 export function CockpitLayout({
@@ -57,7 +59,7 @@ export function CockpitLayout({
   todayHighlight = "neon",
   showNews = true,
   formalGreeting = true,
-  onPositions, onStrategy, onMath,
+  onPositions, onStrategy, onMath, onIncome,
 }: CockpitProps) {
   const now = useNow(60_000);
   const dateLabel = fmtBrandDate(now);
@@ -72,6 +74,7 @@ export function CockpitLayout({
           onPositions={onPositions}
           onStrategy={onStrategy}
           onMath={onMath}
+          onIncome={onIncome}
         />
 
         {/* Hero band — greeting + markets clock in one tight row */}
@@ -118,16 +121,13 @@ export function CockpitLayout({
             <div>
               <PortfolioBlockCompact heroSize={heroSize * 0.7} bone={bone} area={areaFill} n="04" />
               <div style={{ marginTop: 40 }}>
-                <IncomeMix compact />
+                <IncomeWeekly compact />
               </div>
               <div style={{ marginTop: 48 }}>
-                <IncomeHistoryBlock n="05" />
+                <MacroBlock n="05" compact />
               </div>
               <div style={{ marginTop: 48 }}>
-                <MacroBlock n="06" compact />
-              </div>
-              <div style={{ marginTop: 48 }}>
-                <RiskBlock n="07" compact />
+                <RiskBlock n="06" compact />
               </div>
             </div>
 

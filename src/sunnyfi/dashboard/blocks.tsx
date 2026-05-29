@@ -31,22 +31,25 @@ import { useState } from "react";
 // ─────────────────── Brand bar ───────────────────────────────────
 
 export function BrandBar({
-  dateLabel, onPositions, onStrategy, onMath,
+  dateLabel, routeLabel = "Morning brief", onPositions, onStrategy, onMath, onIncome,
 }: {
   dateLabel?: string;
+  routeLabel?: string;
   onPositions?: () => void;
   onStrategy?: () => void;
   onMath?: () => void;
+  onIncome?: () => void;
 }) {
   return (
     <div className="brandbar">
       <div className="mark">
         <span className="logo">◆ SUNNYFI</span>
         <span className="slash">/</span>
-        <span className="route">Morning brief<span className="cursor" /></span>
+        <span className="route">{routeLabel}<span className="cursor" /></span>
       </div>
       <nav className="brandbar-nav">
         <a className="brandbar-nav-link" onClick={onPositions}>→ Positions</a>
+        {onIncome && <a className="brandbar-nav-link" onClick={onIncome}>→ Income</a>}
         <a className="brandbar-nav-link" onClick={onStrategy}>→ Strategy</a>
         <a className="brandbar-nav-link" onClick={onMath}>→ Math</a>
       </nav>
@@ -821,188 +824,6 @@ export function IncomeMix({ compact = false }: { compact?: boolean }) {
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─────────────── Calls-sold income history (live) ────────────────
-
-type IncomeGran = "daily" | "weekly" | "monthly";
-
-interface IncomeBucket {
-  key: string;      // stable sort/react key
-  label: string;    // x-axis label
-  dollars: number;  // net calls-sold premium in this bucket
-  proj?: boolean;   // true for the projected (ghost) bar
-}
-
-const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/** YYYY-MM-DD of the Monday of the week containing `iso` (UTC). */
-function weekMonday(iso: string): string {
-  const d = new Date(iso + "T00:00:00Z");
-  const dow = d.getUTCDay();                 // Sun=0 .. Sat=6
-  d.setUTCDate(d.getUTCDate() + (dow === 0 ? -6 : 1 - dow));
-  return d.toISOString().slice(0, 10);
-}
-
-/** Net short-call premium ($) booked per trade_date: open adds, close subtracts. */
-function callPremiumByDate(trades: IncomeTrade[]): Map<string, number> {
-  const m = new Map<string, number>();
-  for (const t of trades) {
-    if (t.direction !== "short" || t.option_type !== "call") continue;
-    const d = t.contracts * 100 * t.premium * (t.action === "open" ? 1 : -1);
-    m.set(t.trade_date, (m.get(t.trade_date) ?? 0) + d);
-  }
-  return m;
-}
-
-/** Bucket net calls-sold premium for a granularity (most-recent window). */
-function callIncomeByBucket(trades: IncomeTrade[], gran: IncomeGran): IncomeBucket[] {
-  const byDate = callPremiumByDate(trades);
-  const now = new Date();
-  now.setUTCHours(0, 0, 0, 0);
-  const mmdd = (d: Date) =>
-    `${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
-
-  if (gran === "daily") {
-    const out: IncomeBucket[] = [];
-    for (let i = 13; i >= 0; i--) {
-      const d = new Date(now);
-      d.setUTCDate(d.getUTCDate() - i);
-      const iso = d.toISOString().slice(0, 10);
-      out.push({ key: iso, label: mmdd(d), dollars: Math.max(0, byDate.get(iso) ?? 0) });
-    }
-    return out;
-  }
-
-  if (gran === "weekly") {
-    const wk = new Map<string, number>();
-    for (const [iso, v] of byDate) {
-      const k = weekMonday(iso);
-      wk.set(k, (wk.get(k) ?? 0) + v);
-    }
-    const monday = new Date(now);
-    const dow = monday.getUTCDay();
-    monday.setUTCDate(monday.getUTCDate() + (dow === 0 ? -6 : 1 - dow));
-    const out: IncomeBucket[] = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(monday);
-      d.setUTCDate(d.getUTCDate() - i * 7);
-      const iso = d.toISOString().slice(0, 10);
-      out.push({ key: iso, label: mmdd(d), dollars: Math.max(0, wk.get(iso) ?? 0) });
-    }
-    return out;
-  }
-
-  // monthly — last 6 complete months + the current (in-progress) month
-  const mo = new Map<string, number>();   // "YYYY-MM"
-  for (const [iso, v] of byDate) {
-    const k = iso.slice(0, 7);
-    mo.set(k, (mo.get(k) ?? 0) + v);
-  }
-  const out: IncomeBucket[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    const k = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    out.push({ key: k, label: MONTH_ABBR[d.getUTCMonth()], dollars: Math.max(0, mo.get(k) ?? 0) });
-  }
-  return out;
-}
-
-/** Projected next-month income = mean of the last 3 *complete* calendar months. */
-function projectNextMonth(monthly: IncomeBucket[]): number {
-  const complete = monthly.slice(0, -1);   // drop the in-progress current month
-  const last3 = complete.slice(-3);
-  if (!last3.length) return 0;
-  return last3.reduce((s, b) => s + b.dollars, 0) / last3.length;
-}
-
-const INCOME_GRANS: { id: IncomeGran; label: string; window: string }[] = [
-  { id: "daily",   label: "Daily",   window: "14 days" },
-  { id: "weekly",  label: "Weekly",  window: "12 weeks" },
-  { id: "monthly", label: "Monthly", window: "7 months" },
-];
-
-export function IncomeHistoryBlock({ n = "07" }: { n?: string }) {
-  const { data: trades = [] } = useIncomeTrades();
-  const [gran, setGran] = useState<IncomeGran>("weekly");
-  const entered = useEntered(250);
-
-  const buckets = useMemo(() => callIncomeByBucket(trades, gran), [trades, gran]);
-  const proj = useMemo(
-    () => (gran === "monthly" ? projectNextMonth(callIncomeByBucket(trades, "monthly")) : 0),
-    [trades, gran],
-  );
-
-  const bars: IncomeBucket[] =
-    gran === "monthly" && proj > 0
-      ? [...buckets, { key: "proj", label: "next", dollars: proj, proj: true }]
-      : buckets;
-
-  const windowTotal = buckets.reduce((s, b) => s + b.dollars, 0);
-  const max = Math.max(1, ...bars.map((b) => b.dollars));
-  const hasAny = trades.some((t) => t.direction === "short" && t.option_type === "call");
-  const windowLabel = INCOME_GRANS.find((g) => g.id === gran)!.window;
-
-  return (
-    <div>
-      <Section
-        n={n}
-        right={
-          <span className="income-hist-toggle">
-            {INCOME_GRANS.map((g) => (
-              <button
-                key={g.id}
-                className={"ih-pill" + (g.id === gran ? " on" : "")}
-                onClick={() => setGran(g.id)}
-              >
-                {g.label}
-              </button>
-            ))}
-          </span>
-        }
-      >
-        Calls sold · history
-      </Section>
-
-      {!hasAny ? (
-        <div className="label" style={{ color: "var(--fg3)" }}>No call premium yet</div>
-      ) : (
-        <>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
-            <div className="hero num-mono neon" style={{ fontSize: 36, fontWeight: 700 }}>
-              <MoneyCount value={Math.round(windowTotal)} delay={120} duration={1100} />
-            </div>
-            <span className="label">collected · {windowLabel}</span>
-            {gran === "monthly" && proj > 0 && (
-              <span className="num-mono" style={{ fontSize: 13, color: "var(--fg2)", marginLeft: "auto" }}>
-                next month ≈{" "}
-                <span style={{ color: "var(--neon)" }}>${Math.round(proj).toLocaleString()}</span>
-              </span>
-            )}
-          </div>
-
-          <div className="income-hist-chart" style={{ marginTop: 18 }}>
-            {bars.map((b, i) => (
-              <div
-                className="ih-col"
-                key={b.key}
-                title={`${b.proj ? "Projected " : ""}${b.label}: $${Math.round(b.dollars).toLocaleString()}`}
-              >
-                <div
-                  className={"ih-bar" + (b.proj ? " proj" : "")}
-                  style={{
-                    height: entered ? `${Math.max(2, (b.dollars / max) * 100)}%` : "0%",
-                    transitionDelay: `${i * 26}ms`,
-                  }}
-                />
-                <div className={"ih-x" + (b.proj ? " proj" : "")}>{b.label}</div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   );
 }

@@ -71,6 +71,7 @@ const Snowball     = lazy(() => import('./pages/Snowball'));
 const Strategy     = lazy(() => import('./pages/Strategy'));
 const NewStrategy  = lazy(() => import('./pages/NewStrategy'));
 const MathPage     = lazy(() => import('./pages/Math'));
+const Income       = lazy(() => import('./pages/Income'));
 
 function PageFallback() {
   return (
@@ -159,6 +160,14 @@ export default function Sunnyfi() {
           element={
             <RequireAuth>
               <MathPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/income"
+          element={
+            <RequireAuth>
+              <Income />
             </RequireAuth>
           }
         />
