@@ -126,20 +126,54 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
   const now = new Date().toISOString();
-  try {
-    const supabaseUrl    = Deno.env.get('SUPABASE_URL')!;
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const polygonKey     = Deno.env.get('POLYGON_API_KEY');
-    if (!polygonKey) {
-      return new Response(
-        JSON.stringify({ error: 'POLYGON_API_KEY is not set as a Supabase secret' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
-    }
+  const supabaseUrl    = Deno.env.get('SUPABASE_URL')!;
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const polygonKey     = Deno.env.get('POLYGON_API_KEY');
 
-    const admin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+  if (!polygonKey) {
+    return new Response(
+      JSON.stringify({ error: 'POLYGON_API_KEY is not set as a Supabase secret' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    );
+  }
+
+  const admin = createClient(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  // Heuristic: pg_cron POSTs via pg_net which doesn't forward an
+  // `Authorization` header beyond service-role; browser/curl traffic
+  // does. Not perfect but good enough to colour-code rows in /health.
+  const invokedBy = req.headers.get('user-agent')?.includes('pg_net') ? 'cron' : 'manual';
+
+  // Log the run upfront so /health can see "still running" if we ever
+  // hang. The id lets the completion update target this exact row.
+  let runId: string | null = null;
+  try {
+    const { data: runRow, error: insErr } = await admin
+      .from('mp_refresh_runs' as never)
+      .insert({ started_at: now, status: 'running', invoked_by: invokedBy } as never)
+      .select('id')
+      .single();
+    if (!insErr && runRow) runId = (runRow as { id: string }).id;
+  } catch { /* logging is best-effort; never block the actual refresh */ }
+
+  /** Finalize the log row with status + counts. Best-effort — never
+   *  throws (we don't want a logging glitch to fail the whole run). */
+  const finishRun = async (
+    status: 'ok' | 'error',
+    extra: Record<string, unknown>,
+  ) => {
+    if (!runId) return;
+    try {
+      await admin
+        .from('mp_refresh_runs' as never)
+        .update({ finished_at: new Date().toISOString(), status, ...extra } as never)
+        .eq('id', runId);
+    } catch { /* swallow */ }
+  };
+
+  try {
 
     // ─── 1. Read open option legs with remaining contracts > 0 ──
     const { data: tradeRows, error: tradesErr } = await admin
@@ -284,18 +318,34 @@ Deno.serve(async (req) => {
       }
     }
 
+    const summary = {
+      ok: true,
+      legs: { total: openLegs.length, updated: legResults.length, failed: legFailures.length, failures: legFailures.slice(0, 10) },
+      tickers: { total: allTickers.length, updated: stockResults.filter((r) => r.spot != null).length },
+      timestamp: now,
+    };
+    // A run with zero successful upserts is functionally a failure even
+    // if no exception was thrown — surface it that way on /health so the
+    // staleness traffic-light catches "Polygon returned 403 on every leg".
+    const allFailed = openLegs.length > 0 && legResults.length === 0;
+    await finishRun(allFailed ? 'error' : 'ok', {
+      legs_total: openLegs.length,
+      legs_updated: legResults.length,
+      legs_failed: legFailures.length,
+      tickers_total: allTickers.length,
+      tickers_updated: stockResults.filter((r) => r.spot != null).length,
+      failures: legFailures.slice(0, 10),
+      error_text: allFailed ? 'every leg failed (check failures[].reason)' : null,
+    });
     return new Response(
-      JSON.stringify({
-        ok: true,
-        legs: { total: openLegs.length, updated: legResults.length, failed: legFailures.length, failures: legFailures.slice(0, 10) },
-        tickers: { total: allTickers.length, updated: stockResults.filter((r) => r.spot != null).length },
-        timestamp: now,
-      }),
+      JSON.stringify(summary),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (err) {
+    const msg = (err as Error).message || 'Server error';
+    await finishRun('error', { error_text: msg });
     return new Response(
-      JSON.stringify({ error: (err as Error).message || 'Server error', timestamp: now }),
+      JSON.stringify({ error: msg, timestamp: now }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   }

@@ -104,6 +104,7 @@ const NewStrategy  = lazy(() => import('./pages/NewStrategy'));
 const MathPage     = lazy(() => import('./pages/Math'));
 const Income       = lazy(() => import('./pages/Income'));
 const Portfolio    = lazy(() => import('./pages/Portfolio'));
+const Health       = lazy(() => import('./pages/Health'));
 const Positions    = lazy(() => import('../positions/PositionsPage'));
 
 function PageFallback() {
@@ -156,6 +157,9 @@ export default function Sunnyfi() {
           <Route path="/income" element={<Income />} />
           <Route path="/portfolio" element={<Portfolio />} />
           <Route path="/new-strategy" element={<NewStrategy />} />
+          {/* /health is a hidden diagnostic route — no nav link, type
+              the URL to access. Surfaces mp-refresh pipeline status. */}
+          <Route path="/health" element={<Health />} />
         </Route>
         {/* Positions self-gates auth + carries its own .np-app modal shell, so
             it renders its own (identical, same-origin) header rather than the
