@@ -116,6 +116,7 @@ function PositionsBrandBar({
         active="positions"
         dateLabel={dateLabel}
         onLogo={() => navigate("/dashboard")}
+        onPortfolio={() => navigate("/portfolio")}
         onPositions={() => navigate("/positions")}
         onIncome={() => navigate("/income")}
         onStrategy={() => navigate("/new-strategy")}
