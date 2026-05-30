@@ -59,17 +59,30 @@
 .portfolio-page .mp-controls .label { font-family: var(--mono); font-size: 9px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg3); font-weight: 600; margin-right: 2px; }
 /* Per the canonical Navi design (docs/design-system/css/dashboard.css):
    single outer pill capsule; only the ACTIVE button gets the filled
-   neon pill. Inactive buttons are just text — no per-button border. */
-.portfolio-page .view-toggle { display: inline-flex; border: 1px solid var(--bright); border-radius: 100px; padding: 4px; gap: 2px; background: var(--tint-muted); }
-.portfolio-page .view-toggle .vt {
+   neon pill. Inactive buttons are just text — no per-button border.
+
+   Selector is `.dash .portfolio-page …` (3 classes, specificity 0,0,3,0)
+   to outweigh `.dash .view-toggle .vt` in positions-v2.css (0,0,3,0
+   for the `.vt` rule too — but ours sorts later in the cascade because
+   it includes `.portfolio-page` in the chain, and we ensure portfolio
+   ALWAYS wins regardless of which CSS chunk loads first). Without this,
+   the Positions chunk pre-warm 1.2s after page load would inject its
+   `.dash .view-toggle .vt { border: 1px solid var(--bright) }` rule
+   and the toggle would flash from "canonical (no borders)" to
+   "per-button borders" right in front of you. */
+.dash .portfolio-page .view-toggle {
+  display: inline-flex; border: 1px solid var(--bright); border-radius: 100px;
+  padding: 4px; gap: 2px; background: var(--tint-muted);
+}
+.dash .portfolio-page .view-toggle .vt {
   font-family: var(--mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
   color: var(--fg2); background: transparent;
   border: none; border-radius: 100px;
   cursor: pointer; padding: 6px 14px;
   transition: all .15s var(--ease); white-space: nowrap;
 }
-.portfolio-page .view-toggle .vt:hover { color: var(--fg1); }
-.portfolio-page .view-toggle .vt.on { background: var(--neon); color: #0a1f12; font-weight: 500; }
+.dash .portfolio-page .view-toggle .vt:hover { color: var(--fg1); }
+.dash .portfolio-page .view-toggle .vt.on { background: var(--neon); color: #0a1f12; font-weight: 500; }
 
 .portfolio-page .fchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--bright); background: transparent; color: var(--fg2); padding: 6px 11px; font-size: 10px; font-family: var(--mono); letter-spacing: 1px; text-transform: uppercase; border-radius: 100px; cursor: pointer; transition: all .15s var(--ease); white-space: nowrap; }
 .portfolio-page .fchip:hover { border-color: var(--fg3); color: var(--fg1); }
