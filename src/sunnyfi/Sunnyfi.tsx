@@ -103,6 +103,7 @@ const Strategy     = lazy(() => import('./pages/Strategy'));
 const NewStrategy  = lazy(() => import('./pages/NewStrategy'));
 const MathPage     = lazy(() => import('./pages/Math'));
 const Income       = lazy(() => import('./pages/Income'));
+const Portfolio    = lazy(() => import('./pages/Portfolio'));
 const Positions    = lazy(() => import('../positions/PositionsPage'));
 
 function PageFallback() {
@@ -131,6 +132,7 @@ export default function Sunnyfi() {
     const t = setTimeout(() => {
       void import('./pages/Dashboard');
       void import('./pages/Income');
+      void import('./pages/Portfolio');
       void import('./pages/NewStrategy');
       void import('./pages/Math');
       void import('../positions/PositionsPage');
@@ -152,6 +154,7 @@ export default function Sunnyfi() {
         <Route element={<RequireAuth><DashLayout /></RequireAuth>}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/income" element={<Income />} />
+          <Route path="/portfolio" element={<Portfolio />} />
           <Route path="/new-strategy" element={<NewStrategy />} />
         </Route>
         {/* Positions self-gates auth + carries its own .np-app modal shell, so

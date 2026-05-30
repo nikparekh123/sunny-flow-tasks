@@ -38,12 +38,13 @@ import { useState } from "react";
  *  here — they go in a `.page-toolbar` row beneath the bar. */
 export function BrandBar({
   dateLabel, routeLabel = "Morning brief", active,
-  onLogo, onPositions, onStrategy, onMath, onIncome,
+  onLogo, onPortfolio, onPositions, onStrategy, onMath, onIncome,
 }: {
   dateLabel?: string;
   routeLabel?: string;
-  active?: "positions" | "income" | "strategy" | "math";
+  active?: "positions" | "income" | "strategy" | "math" | "portfolio";
   onLogo?: () => void;
+  onPortfolio?: () => void;
   onPositions?: () => void;
   onStrategy?: () => void;
   onMath?: () => void;
@@ -58,6 +59,7 @@ export function BrandBar({
         <span className="route">{routeLabel}<span className="cursor" /></span>
       </div>
       <nav className="brandbar-nav">
+        <a className={link("portfolio")} onClick={onPortfolio}>Portfolio</a>
         <a className={link("positions")} onClick={onPositions}>Positions</a>
         <a className={link("income")} onClick={onIncome}>Income</a>
         <a className={link("strategy")} onClick={onStrategy}>Strategy</a>
