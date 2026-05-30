@@ -393,3 +393,37 @@ Migration strategy: **one metric at a time.** Pick #3 (Unrealized P&L, the `port
 - Removed/inlined math → from `PortfolioBlock`, `PositionsHero`, `ProtectionBlock`, `IncomeMix`, `IncomeScreen`, `PositionInsightModal`.
 
 Iterate this doc until we agree the definitions are right. **Then** we extract.
+
+---
+
+## A13–A17 · Greeks atoms (PD-3)
+
+Extends the original 12 atoms with the position-level Greek
+aggregations the Portfolio master page needs. Pure compute, same
+`AtomFilter` shape as A1–A12. Source: `option_greeks` (per-share
+Δ/Γ/Θ/V from PD-1) joined with `option_trades` (remaining contracts)
+and `positions` (shares for Δ contribution).
+
+Position-level convention: per-share × remaining_contracts × 100 ×
+side_sign (short = −1, long = +1). Stock contributes only to Δ
+(qty = Δ); 0 elsewhere.
+
+| Atom | Function | Notes |
+|---|---|---|
+| A13 | `portfolioDelta(positions, trades, greeks, f?)` | Σ leg Δ + Σ shares. Ticker filter narrows both; optionType/direction narrow legs only. |
+| A14 | `portfolioGamma(trades, greeks, f?)` | Σ leg Γ. |
+| A15 | `portfolioTheta(trades, greeks, f?)` | Σ leg Θ per day. |
+| A16 | `portfolioVega(trades, greeks, f?)` | Σ leg V per 1% IV. |
+| A17 | `betaWeightedDelta(positions, trades, greeks, quotes, f?)` | Per-ticker total Δ × ticker β, summed. Missing β defaults to 1.0. |
+
+Code: `src/positions/metrics/greeksAtoms.ts` (pure) +
+`usePortfolioGreeks.ts` (React hook reading from the same `mp_*`
+React Query keys `useMasterPositions` populates).
+
+Tests: 10 cases in `greeksAtoms.test.ts` — short-side sign flip,
+partial closes, ticker/optionType filters, missing-greeks graceful
+fallback, β-weighting math.
+
+Missing Greeks contribute 0 — the page renders before `mp-refresh`
+has ever populated `option_greeks`. When Greeks land via the 15-min
+cron, the numbers populate automatically.
