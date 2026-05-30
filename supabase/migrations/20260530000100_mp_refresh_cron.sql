@@ -2,53 +2,56 @@
    mp-refresh cron — Portfolio master data every 15 min during
    US market hours.
 
-   Prereqs (one-time setup in Supabase dashboard → Database →
-   Extensions): pg_cron, pg_net.
+   Matches the pattern of `20260520154339_hourly_market_refresh.sql`:
+   reads the service-role key from `vault.decrypted_secrets` (created
+   once via `vault.create_secret(...)` per environment) instead of
+   hard-coding it into the cron body. Idempotent — drops any prior
+   version of the job before scheduling.
 
-   Schedule: every 15 minutes from 13:30 UTC to 20:00 UTC, Mon–Fri.
-   That's 9:30 AM – 4:00 PM ET during EDT (most of the year). During
-   EST (Nov–Mar) the same UTC window covers 8:30 AM – 3:00 PM ET, so
-   we get the first 30 minutes of pre-market and skip the last hour
-   of regular trading — acceptable trade-off vs maintaining two
-   schedules. (Polygon's 15-min delay anyway means data outside
-   market hours is stale.)
-
-   Same activation pattern as bnf-cache-nightly: the schedule body
-   is commented out so the operator can substitute the project ref
-   and service-role key once per environment.
+   Schedule: every 15 minutes from 13:00 UTC to 19:59 UTC, Mon–Fri.
+   That covers 9:30 AM – 3:45 PM ET during EDT (most of the year). In
+   EST (Nov–Mar) the same window covers 8:30 AM – 2:45 PM ET — early
+   start, no last hour. Trade-off vs maintaining two schedules. (The
+   15-min Polygon delay means data outside market hours is stale
+   anyway, so the off-hour overlap is harmless.)
    ============================================================ */
 
-DO $$
-DECLARE
-  job_id integer;
-BEGIN
-  SELECT jobid INTO job_id FROM cron.job WHERE jobname = 'mp-refresh-15min';
-  IF job_id IS NOT NULL THEN
-    PERFORM cron.unschedule(job_id);
-  END IF;
-EXCEPTION WHEN OTHERS THEN
-  RAISE NOTICE 'pg_cron not available; skipping unschedule step';
-END
-$$;
+create extension if not exists pg_cron with schema extensions;
+create extension if not exists pg_net  with schema extensions;
 
--- Replace <PROJECT-REF> and <SERVICE-ROLE-KEY> with your values:
---
---   SELECT cron.schedule(
---     'mp-refresh-15min',
---     '*/15 13-19 * * 1-5',  -- every 15 min, 13:00–19:59 UTC, Mon–Fri
---                            -- (covers 9:30 AM – 3:45 PM ET in EDT;
---                            --  the first interval at 13:00 fires
---                            --  ~30 min before open which is fine)
---     $cron$
---     SELECT net.http_post(
---       url := 'https://<PROJECT-REF>.functions.supabase.co/mp-refresh',
---       headers := jsonb_build_object(
---         'Authorization', 'Bearer <SERVICE-ROLE-KEY>',
---         'Content-Type', 'application/json'
---       ),
---       body := '{}'::jsonb
---     );
---     $cron$
---   );
+do $$
+declare
+  proj_url text := 'https://ziwoutsnuywjnsyfbzsp.supabase.co';
+  svc_key  text;
+begin
+  select decrypted_secret into svc_key
+  from vault.decrypted_secrets
+  where name = 'service_role_key'
+  limit 1;
 
-SELECT 1;
+  if svc_key is null then
+    raise notice
+      'Skipped scheduling mp-refresh-15min: vault secret "service_role_key" is not set. '
+      'Create it via vault.create_secret(...) and re-run this migration.';
+    return;
+  end if;
+
+  if exists (select 1 from cron.job where jobname = 'mp-refresh-15min') then
+    perform cron.unschedule('mp-refresh-15min');
+  end if;
+
+  perform cron.schedule(
+    'mp-refresh-15min',
+    '*/15 13-19 * * 1-5',
+    format($f$
+      select net.http_post(
+        url     := %L,
+        headers := jsonb_build_object(
+          'Content-Type',  'application/json',
+          'Authorization', 'Bearer ' || %L
+        ),
+        body    := '{}'::jsonb
+      );
+    $f$, proj_url || '/functions/v1/mp-refresh', svc_key)
+  );
+end $$;
