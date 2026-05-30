@@ -8,12 +8,14 @@
   background: var(--page);
   color: var(--fg1);
   font-family: var(--sans);
-  padding: 22px 10px 40px;
+  /* Mirrors the handoff design exactly: 1480px max-width, 40px L/R
+     padding (from Master Positions.html's wrapper override). Content
+     area = 1400px; column grid below was tuned to fit inside that
+     without horizontal scroll. */
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 30px 40px 40px;
   line-height: 1.4;
-  /* No max-width — the parent .dash-inner.dash-wide already provides
-     the full-width canvas the master table needs. Tight horizontal
-     padding here so the table fits without scroll on standard
-     laptop screens (≥1440px viewport). */
 }
 .portfolio-page * { box-sizing: border-box; }
 
@@ -22,9 +24,14 @@
 .portfolio-page .mp-head .title-wrap { display: flex; flex-direction: column; gap: 8px; }
 .portfolio-page .mp-eyebrow { font-family: var(--mono); font-size: 9px; letter-spacing: 2.4px; text-transform: uppercase; color: var(--fg3); font-weight: 600; display: flex; align-items: center; gap: 10px; }
 .portfolio-page .mp-eyebrow .n { color: var(--fg5); }
-.portfolio-page .mp-title { font-family: var(--sans); font-weight: 800; letter-spacing: -.035em; font-size: 38px; line-height: .95; color: var(--fg1); white-space: nowrap; }
-.portfolio-page .mp-title .sub { color: var(--fg3); font-weight: 300; }
-.portfolio-page .mp-head .title-wrap { flex-shrink: 0; }
+.portfolio-page .mp-title {
+  font-family: var(--sans); font-weight: 800; letter-spacing: -.035em;
+  font-size: 38px; line-height: .95; color: var(--fg1);
+  white-space: nowrap;       /* keep "Portfolio / positions & greeks" on ONE line */
+  overflow: visible;         /* defensive: don't truncate if the parent narrows */
+}
+.portfolio-page .mp-title .sub { color: var(--fg3); font-weight: 300; display: inline; }
+.portfolio-page .mp-head .title-wrap { flex-shrink: 0; min-width: 0; }
 .portfolio-page .mp-head .right { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; }
 
 .portfolio-page .live-status { display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg2); white-space: nowrap; }

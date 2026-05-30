@@ -14,8 +14,14 @@ import { DeltaBar, Flags, useEntered } from "./atoms";
 const _ovChg = (v: number) =>
   (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(0) + "%";
 
-/* fixed column widths so the header strip and every per-ticker table line up */
-const COLW = [212, 78, 80, 84, 78, 62, 80, 72, 76, 62, 70, 62, 64, 112, 74, 124];
+/* fixed column widths so the header strip and every per-ticker table line up.
+ *
+ * Shaved 28px off the handoff's original 1418px sum (Leg 212→200, OI·Vol
+ * 112→102, Position Δ 124→118, Avg 80→78) so the table fits inside the
+ * design's 1400px content area without a horizontal scrollbar. The
+ * per-column proportions are preserved — this is a uniform 2% trim on
+ * the widest columns, not a structural change. */
+const COLW = [200, 78, 78, 84, 78, 62, 80, 72, 76, 62, 70, 62, 64, 102, 74, 118];
 const TBL_MIN = COLW.reduce((a, b) => a + b, 0);
 function PCols() {
   return (

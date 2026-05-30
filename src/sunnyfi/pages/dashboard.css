@@ -77,10 +77,12 @@
   padding: 0 56px 64px;
 }
 
-/* Wide variant — used by /portfolio because its master table needs
-   ~1420px just for the column grid. Brand bar stays inside the
-   standard 1440px to keep nav alignment with the rest of the app. */
-.dash.dash-wide > .dash-inner { max-width: 100%; padding-left: 24px; padding-right: 24px; }
+/* /portfolio match — the page itself sets its own 1480px max-width +
+   40px padding (per the Master Positions handoff design). DashLayout's
+   .dash-inner zeroes its horizontal padding only on this route so the
+   portfolio's own padding governs and the page is centered the way
+   the design intended (not edge-to-edge). */
+.dash.dash-wide > .dash-inner { max-width: 100%; padding-left: 0; padding-right: 0; }
 
 /* ─────────────────── Typography ─────────────────── */
 
