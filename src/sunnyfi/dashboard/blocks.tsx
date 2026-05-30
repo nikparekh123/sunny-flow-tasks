@@ -25,6 +25,24 @@ import { macroEventsOn } from "./macroCalendar";
 import { historicalPortfolioValue } from "@/positions/metrics/atoms";
 import { usePortfolioGreeks } from "@/positions/metrics/usePortfolioGreeks";
 import type { DailyClose, PositionRow } from "@/positions/types";
+
+/** Shared query — reads ticker_quotes for live spot (per ticker).
+ *  Reuses the `mp_quotes` query key that useMasterPositions and
+ *  usePortfolioGreeks populate, so opening /portfolio primes this
+ *  for the dashboard for free (and vice versa). */
+function useMpQuotes() {
+  return useQuery({
+    queryKey: ["mp_quotes"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("ticker_quotes" as never)
+        .select("ticker, spot");
+      if (error) throw error;
+      return (data ?? []) as unknown as Array<{ ticker: string; spot: number | null }>;
+    },
+    staleTime: 30_000,
+  });
+}
 import {
   buildRiskScenarios, loadLastReviewed, saveLastReviewed,
   type RiskPositionInput, type RiskOptionInput,
@@ -582,10 +600,21 @@ export function PortfolioBlock({
 }) {
   const { data: positions = [] } = usePulsePositions();
   const { data: closes = [] } = usePulseCloses();
-
+  // HC-2: spot from ticker_quotes (refreshed by mp-refresh) instead of
+  // positions.current_price (refreshed by the older refresh-prices fn).
+  // Falls back through current_price → avg_cost so the block still
+  // renders before mp-refresh has populated quotes for the first time.
+  const { data: quotes = [] } = useMpQuotes();
+  const spotByT = useMemo(
+    () => new Map(quotes.map((q) => [q.ticker.toUpperCase(), q.spot] as const)),
+    [quotes],
+  );
   const totalValue = useMemo(
-    () => positions.reduce((s, p) => s + (p.current_price ?? p.avg_cost) * p.quantity, 0),
-    [positions],
+    () => positions.reduce((s, p) => {
+      const spot = spotByT.get(p.ticker.toUpperCase()) ?? p.current_price ?? p.avg_cost;
+      return s + (spot ?? p.avg_cost) * p.quantity;
+    }, 0),
+    [positions, spotByT],
   );
   // valueSeries now bundles the weekly Δ math (single A12-derived SOT).
   const { series, weekDelta, weekPct } = useMemo(
@@ -642,10 +671,18 @@ export function PortfolioBlockCompact({
 }) {
   const { data: positions = [] } = usePulsePositions();
   const { data: closes = [] } = usePulseCloses();
-
+  // HC-2: same spot-from-quotes wiring as PortfolioBlock above.
+  const { data: quotes = [] } = useMpQuotes();
+  const spotByT = useMemo(
+    () => new Map(quotes.map((q) => [q.ticker.toUpperCase(), q.spot] as const)),
+    [quotes],
+  );
   const totalValue = useMemo(
-    () => positions.reduce((s, p) => s + (p.current_price ?? p.avg_cost) * p.quantity, 0),
-    [positions],
+    () => positions.reduce((s, p) => {
+      const spot = spotByT.get(p.ticker.toUpperCase()) ?? p.current_price ?? p.avg_cost;
+      return s + (spot ?? p.avg_cost) * p.quantity;
+    }, 0),
+    [positions, spotByT],
   );
   // Same single-source-of-truth bundle as PortfolioBlock above.
   const { series, weekDelta, weekPct } = useMemo(
