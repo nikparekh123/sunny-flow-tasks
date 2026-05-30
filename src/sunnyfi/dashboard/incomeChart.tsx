@@ -24,6 +24,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Section } from "./atoms";
 import { ToolsRail } from "./blocks";
 import { MoneyCount } from "./animation";
+import { computeIncome } from "@/positions/metrics/income";
+import type { OptionTrade } from "@/positions/types";
 // Co-locate the income styles with the components so the compact IncomeWeekly
 // card is styled wherever it renders (dashboard included), not just on /income.
 import "@/sunnyfi/pages/income-v2.css";
@@ -32,6 +34,7 @@ import "@/sunnyfi/pages/income-v2.css";
    LIVE DATA
    ============================================================ */
 interface IncTrade {
+  ticker: string;
   trade_date: string;
   action: "open" | "close";
   option_type: "call" | "put";
@@ -50,7 +53,7 @@ function useIncomeTradesAll() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("option_trades" as never)
-        .select("trade_date, action, option_type, direction, contracts, premium")
+        .select("ticker, trade_date, action, option_type, direction, contracts, premium")
         .returns<IncTrade[]>();
       if (error) throw error;
       return data ?? [];
@@ -576,10 +579,19 @@ export function IncomeWeekly({ compact = false }: { compact?: boolean }) {
   const cols = [...series.actual.slice(-6), ...series.proj.slice(0, 2)];
   const scaleUp = niceMax(Math.max(...cols.map((c) => c.calls + c.puts + c.shares), 0));
   const scaleDown = niceMax(Math.max(...cols.map((c) => c.debit), 0));
-  const cur = series.actual[series.actual.length - 1] ?? { calls: 0, puts: 0, shares: 0, debit: 0, label: "", proj: false };
-  // Canonical Income = A4 − A6 (options short-side only). See income.ts.
-  const collected = cur.calls + cur.puts;
-  const net = collected - cur.debit;
+
+  // Headline numbers come from the canonical SOT: computeIncome (A4 − A6)
+  // windowed to this week (Monday-anchored). The chart bars still use
+  // buildSeries for visualization; this is the number people compare to.
+  const headline = useMemo(() => {
+    const now = new Date();
+    now.setUTCHours(0, 0, 0, 0);
+    const start = weekMondayDate(now).toISOString().slice(0, 10);
+    return computeIncome(trades as unknown as OptionTrade[], { window: { start } });
+  }, [trades]);
+  const collected = headline.collected;
+  const net = headline.net;
+  const debit = headline.debit;
 
   return (
     <div>
@@ -592,7 +604,7 @@ export function IncomeWeekly({ compact = false }: { compact?: boolean }) {
           </div>
           <div className="mini-stat">
             <div className="k">Bought back</div>
-            <div className="v neg" style={{ fontSize: compact ? 18 : 22 }}><MoneyCount value={cur.debit} sign="-" delay={250} /></div>
+            <div className="v neg" style={{ fontSize: compact ? 18 : 22 }}><MoneyCount value={debit} sign="-" delay={250} /></div>
           </div>
           <div className="mini-stat">
             <div className="k">Net kept</div>

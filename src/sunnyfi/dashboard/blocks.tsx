@@ -22,6 +22,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { Spark, AnimatedBar, HairRow, Section } from "./atoms";
 import { MoneyCount, PctCount, useEntered } from "./animation";
 import { macroEventsOn } from "./macroCalendar";
+import { historicalPortfolioValue } from "@/positions/metrics/atoms";
+import type { DailyClose, PositionRow } from "@/positions/types";
 import {
   buildRiskScenarios, loadLastReviewed, saveLastReviewed,
   type RiskPositionInput, type RiskOptionInput,
@@ -522,40 +524,28 @@ function usePulseCloses() {
 
 /** Build a portfolio value series from close prices and today's qty.
  *
- *  daily_closes is captured going forward and has gaps — not every held
- *  ticker has a row on every past date. Summing only the tickers present on
- *  each date understates older dates (missing names count as $0), which
- *  manufactures a fake upward ramp. So we CARRY FORWARD: for any date a
- *  ticker has no close, use its most recent prior close (or its earliest
- *  close / current price before that), so every holding always contributes a
- *  real price and the series reflects pure mark-to-market on current shares. */
+ *  Carry-forward semantics: for any date a ticker has no close, use its most
+ *  recent prior close (or earliest close / current price before that). This
+ *  is the **A12** atom (`historicalPortfolioValue`) applied to each date in
+ *  the recent trading window — single source of truth for back-projected
+ *  portfolio NAV.
+ *
+ *  PulsePosition / PulseDailyClose are structural subsets of PositionRow /
+ *  DailyClose with the exact fields A12 needs (ticker, qty, current_price,
+ *  avg_cost, status — and ticker, date, close_price), so we cast at the
+ *  call site rather than fattening the dashboard types. */
 function valueSeries(positions: PulsePosition[], closes: PulseDailyClose[]): {
   series: number[];
   dates: string[];
 } {
-  const byTicker = new Map<string, { date: string; close: number }[]>();
   const dateSet = new Set<string>();
-  for (const c of closes) {
-    if (!byTicker.has(c.ticker)) byTicker.set(c.ticker, []);
-    byTicker.get(c.ticker)!.push({ date: c.date, close: c.close_price });
-    dateSet.add(c.date);
-  }
-  for (const arr of byTicker.values()) arr.sort((a, b) => a.date.localeCompare(b.date));
+  for (const c of closes) dateSet.add(c.date);
   const dates = [...dateSet].sort().slice(-SPARK_TRADING_DAYS);
-  // Per-position resolver: carried-forward close on/before a date.
-  const resolvers = positions.map((p) => {
-    const arr = byTicker.get(p.ticker);
-    const fallback = p.current_price ?? p.avg_cost ?? 0;
-    const get = (!arr || arr.length === 0)
-      ? () => fallback
-      : (d: string) => {
-          let val = arr[0].close;            // earliest, for dates before first close
-          for (const e of arr) { if (e.date <= d) val = e.close; else break; }
-          return val;
-        };
-    return { qty: p.quantity, get };
-  });
-  const series = dates.map((d) => resolvers.reduce((v, r) => v + r.get(d) * r.qty, 0));
+  const valueAt = historicalPortfolioValue(
+    positions as unknown as PositionRow[],
+    closes as unknown as DailyClose[],
+  );
+  const series = dates.map((d) => valueAt(d));
   return { series, dates };
 }
 
