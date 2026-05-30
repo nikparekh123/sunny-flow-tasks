@@ -120,10 +120,18 @@ export type Period = "day" | "week" | "month" | "quarter" | "year";
 
 export interface IncomeRow {
   label: string;
+  /** Short-call open premium ($, A4 contribution). */
   calls: number;
+  /** Short-put open premium ($, A4 contribution). */
   puts: number;
+  /** Realized share P&L bucketed by sale date (not income — info only). */
   shares: number;
+  /** Short-side close debits ($, A6). */
   debit: number;
+  /** Long-side open premium ($, A5 — what we paid for protection). */
+  paid: number;
+  /** Long-side close credits ($, A7 — cash back from closing longs). */
+  closeCredit: number;
   proj: boolean;
 }
 export interface IncomeSeries {
@@ -276,18 +284,23 @@ export function buildSeries(period: Period, trades: IncTrade[], sells: IncSell[]
   const now = nowEasternMidnight();
   const buckets = cfg.buckets(now);
   const idx = new Map<string, IncomeRow>();
-  for (const b of buckets) idx.set(b.key, { label: b.label, calls: 0, puts: 0, shares: 0, debit: 0, proj: false });
+  for (const b of buckets) idx.set(b.key, { label: b.label, calls: 0, puts: 0, shares: 0, debit: 0, paid: 0, closeCredit: 0, proj: false });
 
   for (const t of trades) {
-    if (t.direction !== "short") continue;
     const row = idx.get(cfg.keyOf(t.trade_date));
     if (!row) continue;
     const dollars = t.contracts * 100 * t.premium;
-    if (t.action === "open") {
-      if (t.option_type === "call") row.calls += dollars;
-      else row.puts += dollars;
+    if (t.direction === "short") {
+      if (t.action === "open") {
+        if (t.option_type === "call") row.calls += dollars;
+        else row.puts += dollars;
+      } else {
+        row.debit += dollars; // short close = buy-to-close = bought back
+      }
     } else {
-      row.debit += dollars; // short close = buy-to-close = bought back
+      // Long side — A5 / A7. Protection panel reads these.
+      if (t.action === "open") row.paid += dollars;
+      else row.closeCredit += dollars;
     }
   }
   for (const s of sells) {
@@ -306,7 +319,9 @@ export function buildSeries(period: Period, trades: IncTrade[], sells: IncSell[]
   const sharesP = weightedTrend(actual.map((d) => d.shares), cfg.steps);
   const debitP = weightedTrend(actual.map((d) => d.debit), cfg.steps);
   const proj: IncomeRow[] = cfg.projLabels(now, cfg.steps).map((label, i) => ({
-    label, calls: callsP[i], puts: putsP[i], shares: sharesP[i], debit: debitP[i], proj: true,
+    // Projected long-side flows: held constant at $0 (we don't forecast
+    // protection buying — it's lumpy hedging activity, not a regular drip).
+    label, calls: callsP[i], puts: putsP[i], shares: sharesP[i], debit: debitP[i], paid: 0, closeCredit: 0, proj: true,
   }));
 
   return { actual, proj, unit: period, currentLabel: cfg.currentLabel(now), steps: cfg.steps };
@@ -448,7 +463,7 @@ export function IncomeScreen() {
   const [period, setPeriod] = useState<Period>("week");
 
   const series = useMemo(() => buildSeries(period, trades, sells), [period, trades, sells]);
-  const cur = series.actual[series.actual.length - 1] ?? { calls: 0, puts: 0, shares: 0, debit: 0, label: "", proj: false };
+  const cur = series.actual[series.actual.length - 1] ?? { calls: 0, puts: 0, shares: 0, debit: 0, paid: 0, closeCredit: 0, label: "", proj: false };
 
   // Canonical Income = A4 − A6 (options short-side only). Share-realized
   // is NOT income — it's booked to Realized P&L (A3 + A8). See
@@ -526,6 +541,21 @@ export function IncomeScreen() {
           <span className="val">{fmtUSD(net)}</span>
           <span className="meta">{callPct}% from calls</span>
         </div>
+
+        {/* PROTECTION (A5 − A7) — long-leg side of the book.
+            Distinct from Income; this is "what we spent on insurance net of
+            what we got back closing it". */}
+        {(cur.paid > 0 || cur.closeCredit > 0) && (
+          <div className="inc-netline" style={{ marginTop: 12, opacity: 0.92 }}>
+            <span className="lbl">Protection cost this {series.unit}:</span>
+            <span className="val" style={{ color: (cur.paid - cur.closeCredit) > 0 ? "var(--warning)" : "var(--neon)" }}>
+              {(cur.paid - cur.closeCredit) >= 0 ? "−" : "+"}{fmtUSD(Math.abs(cur.paid - cur.closeCredit))}
+            </span>
+            <span className="meta">
+              {fmtUSD(cur.paid)} paid · {fmtUSD(cur.closeCredit)} credit on close
+            </span>
+          </div>
+        )}
 
         {/* LOWER: breakdown + projection */}
         <div className="inc-lower">

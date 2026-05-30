@@ -537,6 +537,14 @@ function usePulseCloses() {
 function valueSeries(positions: PulsePosition[], closes: PulseDailyClose[]): {
   series: number[];
   dates: string[];
+  /** Δ over the trailing trading week using A12 at two specific dates.
+   *  When the available history is shorter than a full week we fall back
+   *  to the full range so a brand-new account reads its real growth
+   *  instead of $0. Same fallback the old WEEK_TRADING_DAYS indexing
+   *  used; lifting the math up here so PortfolioBlock / Compact don't
+   *  each re-implement it. */
+  weekDelta: number;
+  weekPct: number;
 } {
   const dateSet = new Set<string>();
   for (const c of closes) dateSet.add(c.date);
@@ -546,7 +554,15 @@ function valueSeries(positions: PulsePosition[], closes: PulseDailyClose[]): {
     closes as unknown as DailyClose[],
   );
   const series = dates.map((d) => valueAt(d));
-  return { series, dates };
+  let weekDelta = 0, weekPct = 0;
+  if (dates.length >= 2) {
+    const today = dates[dates.length - 1];
+    const baseDate = dates[Math.max(0, dates.length - 1 - WEEK_TRADING_DAYS)];
+    const base = valueAt(baseDate);
+    weekDelta = valueAt(today) - base;
+    weekPct = base > 0 ? (weekDelta / base) * 100 : 0;
+  }
+  return { series, dates, weekDelta, weekPct };
 }
 
 function fmtCompactUSD(v: number): string {
@@ -568,18 +584,11 @@ export function PortfolioBlock({
     () => positions.reduce((s, p) => s + (p.current_price ?? p.avg_cost) * p.quantity, 0),
     [positions],
   );
-  const { series } = useMemo(() => valueSeries(positions, closes), [positions, closes]);
-  // Change over the trailing week — but when we have fewer than a full week
-  // of history, fall back to the full available range instead of zeroing out
-  // (otherwise a brand-new account with 4–5 days of data reads +$0).
-  const { weekDelta, weekPct } = useMemo(() => {
-    if (series.length < 2) return { weekDelta: 0, weekPct: 0 };
-    const lastIdx = series.length - 1;
-    const baseIdx = Math.max(0, lastIdx - WEEK_TRADING_DAYS);
-    const base = series[baseIdx] ?? 0;
-    const delta = series[lastIdx] - base;
-    return { weekDelta: delta, weekPct: base > 0 ? (delta / base) * 100 : 0 };
-  }, [series]);
+  // valueSeries now bundles the weekly Δ math (single A12-derived SOT).
+  const { series, weekDelta, weekPct } = useMemo(
+    () => valueSeries(positions, closes),
+    [positions, closes],
+  );
   const oldest = series[0] ?? 0;
   const newest = series[series.length - 1] ?? totalValue;
 
@@ -623,18 +632,11 @@ export function PortfolioBlockCompact({
     () => positions.reduce((s, p) => s + (p.current_price ?? p.avg_cost) * p.quantity, 0),
     [positions],
   );
-  const { series } = useMemo(() => valueSeries(positions, closes), [positions, closes]);
-  // Change over the trailing week — but when we have fewer than a full week
-  // of history, fall back to the full available range instead of zeroing out
-  // (otherwise a brand-new account with 4–5 days of data reads +$0).
-  const { weekDelta, weekPct } = useMemo(() => {
-    if (series.length < 2) return { weekDelta: 0, weekPct: 0 };
-    const lastIdx = series.length - 1;
-    const baseIdx = Math.max(0, lastIdx - WEEK_TRADING_DAYS);
-    const base = series[baseIdx] ?? 0;
-    const delta = series[lastIdx] - base;
-    return { weekDelta: delta, weekPct: base > 0 ? (delta / base) * 100 : 0 };
-  }, [series]);
+  // Same single-source-of-truth bundle as PortfolioBlock above.
+  const { series, weekDelta, weekPct } = useMemo(
+    () => valueSeries(positions, closes),
+    [positions, closes],
+  );
   const oldest = series[0] ?? 0;
   const newest = series[series.length - 1] ?? totalValue;
 

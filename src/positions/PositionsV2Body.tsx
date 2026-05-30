@@ -36,6 +36,7 @@ import { TradesMatrixV2 } from "./TradesMatrixV2";
 import { mountBand, type BandPosition, type BandOption } from "./positionBand";
 import { useUnrealizedPL } from "./metrics/useUnrealizedPL";
 import { useRealizedPL } from "./metrics/useRealizedPL";
+import { useLiveLegs } from "./metrics/useLiveLegs";
 import "@/sunnyfi/pages/dashboard.css";
 import "./positions-v2.css";
 
@@ -132,14 +133,13 @@ function PositionsBrandBar({
 }
 
 // ─────────────────── §00 Hero ────────────────────────────────────
-function PositionsHero({ portfolio, liveByTicker }: {
-  portfolio: PortfolioLike; liveByTicker: Map<string, LiveOption[]>;
-}) {
+function PositionsHero({ portfolio }: { portfolio: PortfolioLike }) {
   const open = portfolio.rows.filter((r) => r.status !== "closed" && r.quantity > 0);
-  let calls = 0, puts = 0;
-  for (const legs of liveByTicker.values()) {
-    for (const lo of legs) (lo.open.option_type === "call" ? (calls += 1) : (puts += 1));
-  }
+  // SOT: A11 split by option_type via useLiveLegs (was inline loop over
+  // liveByTicker counting legs by hand). Same numbers, one definition.
+  const live = useLiveLegs();
+  const calls = live.calls;
+  const puts = live.puts;
   // SOT: A1 − A2 via the atom hook. Don't read total_pnl from props.
   const unr = useUnrealizedPL();
   const unrealized = unr.total;
@@ -884,7 +884,7 @@ export function PositionsV2Body(props: PositionsV2BodyProps) {
       <div className="dash-inner">
         <div className="row first">{brand}</div>
         <div className="row tight" style={{ marginTop: 28 }}><TickerStrip compact /></div>
-        <div className="row" style={{ marginTop: 56 }}><PositionsHero portfolio={portfolio} liveByTicker={liveByTicker} /></div>
+        <div className="row" style={{ marginTop: 56 }}><PositionsHero portfolio={portfolio} /></div>
         <div className="row" style={{ marginTop: 84 }}><AllocationBlock rows={portfolio.rows} overlayByTicker={overlayByTicker} onTickerClick={onTickerClick} /></div>
         <div className="row" style={{ marginTop: 72 }}><ProtectionBlock rows={portfolio.rows} tradesByTicker={tradesByTicker} /></div>
         <div className="row" style={{ marginTop: 72 }}><StrategyBuckets rows={portfolio.rows} overlayByTicker={overlayByTicker} realizedByTicker={realizedByTicker} liveByTicker={liveByTicker} /></div>
