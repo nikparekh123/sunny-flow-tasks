@@ -239,17 +239,22 @@
 .dash .tm-table thead th.col.closed { color: var(--fg3); }
 .dash .tm-table thead th.tot { width: 108px; text-align: right; padding-right: 4px; color: var(--fg1); }
 .dash .tm-table tbody td { padding: 0; border-bottom: var(--hair); vertical-align: middle; }
+/* Uniform body-row height — every cell vertical-aligns to the same band
+   regardless of internal padding. Without this, .tm-cell's explicit
+   `height: 44px` + 5px padding made slot tds ~54px outer while .tm-pos
+   stayed 44px, so the centered title sat above the slot amounts. */
+.dash .tm-table tbody tr { height: 48px; }
 /* Vertically center the title + sub stack so the Position column sits
    on the same baseline as the slot-cell amounts ($500, $11k, etc.)
    which are already middle-aligned via `vertical-align: middle` on td.
    Without `justify-content: center` the flex column defaults to flex-
    start and the row reads top-aligned vs. centered. */
-.dash .tm-pos { padding: 0 8px 0 4px !important; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; min-height: 44px; }
+.dash .tm-pos { padding: 0 8px 0 4px !important; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
 .dash .tm-pos .t { font-family: var(--sans); font-size: 14px; font-weight: 700; letter-spacing: -.01em; color: var(--fg1); cursor: pointer; transition: color .15s var(--ease); line-height: 1.15; }
 .dash .tm-pos .t:hover { color: var(--neon); }
 .dash .tm-pos .sub { font-family: var(--mono); font-size: 9px; color: var(--fg3); letter-spacing: .9px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
 .dash .tm-pos .sub .live { color: var(--neon); }
-.dash .tm-cell { height: 44px; padding: 5px !important; text-align: center; border-left: 1px solid rgba(50,110,100,.10); position: relative; transition: background .15s var(--ease); }
+.dash .tm-cell { padding: 4px 5px !important; text-align: center; border-left: 1px solid rgba(50,110,100,.10); position: relative; transition: background .15s var(--ease); vertical-align: middle; }
 .dash .tm-cell.zone-shares { background: rgba(168,196,192,.04); }
 .dash .tm-cell.zone-live   { background: rgba(210,230,50,.04); }
 .dash .tm-cell.zone-closed { background: transparent; }
