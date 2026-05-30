@@ -57,10 +57,19 @@
 /* ====== controls row ====== */
 .portfolio-page .mp-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 20px 0 14px; }
 .portfolio-page .mp-controls .label { font-family: var(--mono); font-size: 9px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg3); font-weight: 600; margin-right: 2px; }
-.portfolio-page .view-toggle { display: inline-flex; border: 1px solid var(--bright); border-radius: 100px; padding: 3px; gap: 2px; background: var(--tint-muted); }
-.portfolio-page .view-toggle .vt { font-family: var(--mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--fg2); background: transparent; border: none; cursor: pointer; padding: 6px 14px; border-radius: 100px; transition: all .15s var(--ease); white-space: nowrap; }
-.portfolio-page .view-toggle .vt:hover { color: var(--fg1); }
-.portfolio-page .view-toggle .vt.on { background: var(--neon); color: #0a1f12; font-weight: 500; }
+/* Per the handoff design, the segmented control draws the outer pill
+   capsule AND a hairline border around EACH option pill inside it.
+   The "on" state fills with neon and brightens the border. */
+.portfolio-page .view-toggle { display: inline-flex; border: 1px solid var(--bright); border-radius: 100px; padding: 4px; gap: 6px; background: var(--tint-muted); }
+.portfolio-page .view-toggle .vt {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--fg2); background: transparent;
+  border: 1px solid var(--bright); border-radius: 100px;
+  cursor: pointer; padding: 6px 14px;
+  transition: all .15s var(--ease); white-space: nowrap;
+}
+.portfolio-page .view-toggle .vt:hover { color: var(--fg1); border-color: var(--fg3); }
+.portfolio-page .view-toggle .vt.on { background: var(--neon); color: #0a1f12; font-weight: 500; border-color: var(--neon); }
 
 .portfolio-page .fchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--bright); background: transparent; color: var(--fg2); padding: 6px 11px; font-size: 10px; font-family: var(--mono); letter-spacing: 1px; text-transform: uppercase; border-radius: 100px; cursor: pointer; transition: all .15s var(--ease); white-space: nowrap; }
 .portfolio-page .fchip:hover { border-color: var(--fg3); color: var(--fg1); }
