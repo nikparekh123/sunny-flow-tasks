@@ -12,9 +12,14 @@
 .health-page * { box-sizing: border-box; }
 
 .health-page .hp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.health-page .hp-head > div:first-child { flex-shrink: 0; min-width: 0; }
 .health-page .hp-eyebrow { font-family: var(--mono); font-size: 9px; letter-spacing: 2.2px; text-transform: uppercase; color: var(--fg3); font-weight: 600; margin-bottom: 8px; }
-.health-page .hp-title { font-family: var(--sans); font-weight: 800; letter-spacing: -.035em; font-size: 38px; line-height: .95; color: var(--fg1); white-space: nowrap; }
-.health-page .hp-title .sub { color: var(--fg3); font-weight: 300; }
+/* Title + sub stay on ONE line ("Health / portfolio data pipeline").
+   Same pattern as the Portfolio page: nowrap + explicit inline on
+   the sub + flex-shrink:0 on the parent so the flex layout never
+   compresses the title into a second row. */
+.health-page .hp-title { font-family: var(--sans); font-weight: 800; letter-spacing: -.035em; font-size: 38px; line-height: .95; color: var(--fg1); white-space: nowrap; overflow: visible; }
+.health-page .hp-title .sub { color: var(--fg3); font-weight: 300; display: inline; }
 .health-page .hp-actions { display: flex; gap: 12px; align-items: center; }
 .health-page .hp-btn {
   font-family: var(--mono); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
