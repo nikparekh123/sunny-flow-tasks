@@ -13,6 +13,7 @@ import { ExpiryCalendar } from './ExpiryCalendar';
 import { RealizedSummary } from './RealizedSummary';
 import { StockInsightsStrip } from './StockInsightsStrip';
 import { PositionsV2Body } from './PositionsV2Body';
+import { useUnrealizedPL } from './metrics/useUnrealizedPL';
 import { fmtUSD, fmtPct } from './types';
 import { AnimatedNumber } from '@/sunnyfi/lib/animation';
 import { toast } from 'sonner';
@@ -124,7 +125,11 @@ export default function PositionsPage() {
     }
   };
 
-  const isDown = portfolio.total_pnl < 0;
+  // SOT: read unrealized P&L from the atom hook (A1 − A2), not from
+  // portfolio.total_pnl, so this page reads the same number as the rest
+  // of the app.
+  const unrealized = useUnrealizedPL();
+  const isDown = unrealized.total < 0;
 
   // The redesigned (Navi editorial) body is now the DEFAULT. The old
   // layout is still reachable via ?v1=1 as a safety fallback. The modal
@@ -198,14 +203,14 @@ export default function PositionsPage() {
             <div className={'np-hero-pl' + (isDown ? '' : ' up')}>
               <div>
                 <span className="np-hero-pl-amt">
-                  <AnimatedNumber value={portfolio.total_pnl} format={fmtUSD} delay={200} />
+                  <AnimatedNumber value={unrealized.total} format={fmtUSD} delay={200} />
                 </span>
                 <span className="np-hero-pl-label" style={{ marginLeft: 10 }}>
                   unrealized
                 </span>
               </div>
               <span className="np-hero-pl-pct">
-                <AnimatedNumber value={portfolio.total_pnl_pct} format={fmtPct} delay={300} />
+                <AnimatedNumber value={unrealized.totalPct} format={fmtPct} delay={300} />
               </span>
             </div>
           )}

@@ -122,9 +122,10 @@ describe("A1 equityMarketValue", () => {
     expect(equityMarketValue(positions, { ticker: "MSFT" })).toBe(20_000);
   });
 
-  it("treats missing current_price as 0", () => {
-    const positions = [pos({ current_price: null as unknown as number })];
-    expect(equityMarketValue(positions)).toBe(0);
+  it("falls back to avg_cost when current_price is null (stale-price safety)", () => {
+    // qty 100, avg_cost 150 → 15,000 (so unrealized = MV − cost = 0)
+    const positions = [pos({ current_price: null, quantity: 100, avg_cost: 150 })];
+    expect(equityMarketValue(positions)).toBe(15_000);
   });
 });
 

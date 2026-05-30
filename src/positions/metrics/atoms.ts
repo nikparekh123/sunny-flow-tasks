@@ -134,13 +134,18 @@ function remainingByOpenId(trades: OptionTrade[]): Map<string, number> {
 // A1 — Equity Market Value
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Σ (qty × current_price) over OPEN positions. Closed rows contribute $0. */
+/** Σ (qty × current_price) over OPEN positions. Closed rows contribute $0.
+ *
+ *  **Stale-price fallback:** if `current_price` is null we fall back to
+ *  `avg_cost` (so a stale-priced position contributes $0 to unrealized P&L
+ *  rather than reading as a full loss of its cost basis). This matches the
+ *  legacy `computePortfolio` behavior the page already depended on. */
 export function equityMarketValue(positions: PositionRow[], f?: AtomFilter): number {
   let sum = 0;
   for (const p of positions) {
     if (p.status === "closed" || p.quantity <= 0) continue;
     if (!passesPositionFilter(p, f)) continue;
-    const px = p.current_price ?? 0;
+    const px = p.current_price ?? p.avg_cost;
     sum += p.quantity * px;
   }
   return sum;
