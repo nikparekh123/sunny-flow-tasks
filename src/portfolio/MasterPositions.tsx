@@ -9,7 +9,7 @@
  * any of the rendered shapes here.
  */
 import { useState } from "react";
-import { CLOSED, fmtMoney, fmtGreek, signCls, type Company } from "./data";
+import { fmtMoney, fmtGreek, signCls, type Company } from "./data";
 import { LiveStatus } from "./atoms";
 import { TableView, CardsView, CockpitView } from "./views";
 import { FocusMenu, FocusStage, FocusToast } from "./focus";
@@ -72,10 +72,10 @@ export function MasterPositions({
   // SOT: live data from option_greeks + ticker_quotes + the existing
   // positions/trades/share_sells tables, joined into the Company shape
   // the views consume.
-  const { companies, portfolio, isLoading, freshness, refresh, refreshing } =
+  const { companies, closed: closedCompanies, portfolio, isLoading, freshness, refresh, refreshing } =
     useMasterPositions();
 
-  let data: Company[] = closed ? [...companies, ...CLOSED] : [...companies];
+  let data: Company[] = closed ? [...companies, ...closedCompanies] : [...companies];
   if (risk) data = data.filter((c) => !c.closed && c.flags.some((f) => f.tone === "neg" || f.tone === "warn"));
   if (smart) {
     data = [...data].sort((a, b) =>
@@ -147,7 +147,7 @@ export function MasterPositions({
           ⚠ Needs attention <span className="c">{riskCount}</span>
         </button>
         <button className={"fchip closed" + (closed ? " on" : "")} onClick={() => setClosed(!closed)}>
-          {closed ? "✓ " : ""}Show closed <span className="c">{CLOSED.length}</span>
+          {closed ? "✓ " : ""}Show closed <span className="c">{closedCompanies.length}</span>
         </button>
         <span className="spacer" />
         <span className={"sort-toggle" + (smart ? " on" : "")} onClick={() => setSmart(!smart)}>

@@ -32,7 +32,12 @@ const QUOTE_STALE_MS = 30_000; // spot ticks faster than Greeks
 interface OverlayRow { ticker: string; bucket: "income" | "invest" | "yield" }
 
 export interface UseMasterPositionsResult {
+  /** Open positions (real status='open' with shares or live legs). */
   companies: Company[];
+  /** Closed positions — real status='closed' + "effectively closed"
+   *  (status='open' with qty=0 and no live legs). Both surface their
+   *  lifetime realized P&L. */
+  closed: Company[];
   portfolio: PortfolioRollup;
   isLoading: boolean;
   isFetching: boolean;
@@ -137,7 +142,7 @@ export function useMasterPositions(): UseMasterPositionsResult {
     const strategyByT = new Map<string, "income" | "invest" | "yield">();
     for (const o of overlayQ.data ?? []) strategyByT.set(o.ticker.toUpperCase(), o.bucket);
 
-    const companies = buildCompanies({
+    const { open: companies, closed } = buildCompanies({
       positions:  positionsQ.data ?? [],
       trades:     tradesQ.data ?? [],
       greeks:     greeksQ.data ?? [],
@@ -166,7 +171,7 @@ export function useMasterPositions(): UseMasterPositionsResult {
       quotesQ.isFetching || sellsQ.isFetching || overlayQ.isFetching;
 
     return {
-      companies, portfolio,
+      companies, closed, portfolio,
       isLoading, isFetching, freshness,
       refresh: () => refreshMut.mutate(),
       refreshing: refreshMut.isPending,

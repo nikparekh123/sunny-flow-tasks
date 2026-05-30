@@ -144,7 +144,15 @@ export interface BuildSources {
   strategyByT: Map<string, "income" | "invest" | "yield">;
 }
 
-export function buildCompanies(src: BuildSources): Company[] {
+/** What buildCompanies returns — open companies AND a separate closed
+ *  list (real status='closed' + "effectively closed" status='open' with
+ *  qty=0 and no live legs). Pages render them in different surfaces. */
+export interface BuildResult {
+  open: Company[];
+  closed: Company[];
+}
+
+export function buildCompanies(src: BuildSources): BuildResult {
   const today = new Date();
   const greekById = new Map(src.greeks.map((g) => [g.option_trade_id, g]));
   const quoteByT = new Map(src.quotes.map((q) => [q.ticker.toUpperCase(), q]));
@@ -305,7 +313,48 @@ export function buildCompanies(src: BuildSources): Company[] {
     });
   }
 
-  return companies;
+  // ─── Closed list ────────────────────────────────────────────
+  // Two sources:
+  //   (a) real DB rows with status='closed' (the user explicitly
+  //       reclassified them after exiting)
+  //   (b) "effectively closed" — status='open' rows with qty=0 AND no
+  //       live option legs (sold the shares, didn't reclassify yet —
+  //       the same set we filter out of the open list above).
+  // Both surface their lifetime realized P&L so the user can still see
+  // what the position made/lost overall.
+  const closedList: Company[] = [];
+  const closedTickers = new Set<string>();
+  for (const p of src.positions) {
+    const t = p.ticker.toUpperCase();
+    const effectivelyClosed =
+      p.status === "closed" ||
+      (p.status === "open" && p.quantity === 0 && !legsByT.has(t));
+    if (!effectivelyClosed) continue;
+    if (closedTickers.has(t)) continue;
+    closedTickers.add(t);
+
+    const realized =
+      (realizedSharesByT.get(t) ?? 0) + (realizedOptByT.get(t) ?? 0);
+    closedList.push({
+      t,
+      name: p.name ?? t,
+      sector: p.sector ?? "—",
+      strat: STRAT_LABEL[src.strategyByT.get(t) ?? "income"] ?? "Income",
+      spot: quoteByT.get(t)?.spot ?? p.current_price ?? p.avg_cost ?? 0,
+      day: quoteByT.get(t)?.day_change_pct ?? 0,
+      beta: quoteByT.get(t)?.beta ?? 1,
+      event: { kind: "none", label: p.status === "closed" ? "Closed" : "Exited", date: "—", days: 999 },
+      legs: [],
+      agg: { delta: 0, gamma: 0, theta: 0, vega: 0, unreal: 0, real: realized, net: realized, mv: 0 },
+      flags: [],
+      sev: 0,
+      optLegs: 0,
+      closed: true,
+    });
+  }
+  closedList.sort((a, b) => Math.abs(b.agg.real) - Math.abs(a.agg.real));
+
+  return { open: companies, closed: closedList };
 }
 
 /** Portfolio rollup — sum the per-ticker aggregates. */
