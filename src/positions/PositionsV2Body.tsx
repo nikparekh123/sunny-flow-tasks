@@ -37,6 +37,7 @@ import { mountBand, type BandPosition, type BandOption } from "./positionBand";
 import { useUnrealizedPL } from "./metrics/useUnrealizedPL";
 import { useRealizedPL } from "./metrics/useRealizedPL";
 import { useLiveLegs } from "./metrics/useLiveLegs";
+import { usePortfolioGreeks } from "./metrics/usePortfolioGreeks";
 import "@/sunnyfi/pages/dashboard.css";
 import "./positions-v2.css";
 
@@ -186,8 +187,31 @@ function PositionsHero({ portfolio }: { portfolio: PortfolioLike }) {
           <div className="live">
             <span className="live-dot" /> {open.length} positions · {calls} calls · {puts} puts
           </div>
+          <PositionsHeroGreeks />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Portfolio Greeks line — same numbers as /portfolio's GreeksBar and
+ *  /dashboard's PortfolioBlock (HC-1, HC-2). Single SOT via the atom
+ *  hook. Renders quietly until mp-refresh has populated the underlying
+ *  tables; once data lands, the line appears with values. */
+function PositionsHeroGreeks() {
+  const g = usePortfolioGreeks();
+  // Suppress entirely if the hook hasn't seen any Greeks yet —
+  // showing "Δ +0 · Θ +0/d" with zeros is misleading before mp-refresh.
+  const noData = g.delta === 0 && g.gamma === 0 && g.theta === 0 && g.vega === 0;
+  if (g.isLoading || noData) return null;
+  const fmt = (v: number) => (v >= 0 ? "+" : "−") + Math.abs(Math.round(v)).toLocaleString();
+  const cls = (v: number) => (v >= 0 ? "pos" : "neg");
+  return (
+    <div className="hero-greeks" style={{ display: "flex", gap: 22, marginTop: 12, fontFamily: "var(--mono)", fontSize: 12, letterSpacing: ".4px", color: "var(--fg3)" }}>
+      <span><span style={{ marginRight: 5 }}>Δ</span><span className={cls(g.delta)}>{fmt(g.delta)}</span></span>
+      <span><span style={{ marginRight: 5 }}>β·Δ</span><span className={cls(g.betaWeightedDelta)}>{fmt(g.betaWeightedDelta)}</span></span>
+      <span><span style={{ marginRight: 5 }}>Θ/d</span><span className={cls(g.theta)}>{fmt(g.theta)}</span></span>
+      <span><span style={{ marginRight: 5 }}>V/1%</span><span className={cls(g.vega)}>{fmt(g.vega)}</span></span>
     </div>
   );
 }
