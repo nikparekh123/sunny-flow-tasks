@@ -37,6 +37,18 @@
 .portfolio-page .live-status { display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg2); white-space: nowrap; }
 .portfolio-page .live-status .delay { color: var(--warning); border: 1px solid rgba(224,192,96,.32); background: var(--tint-warning); border-radius: 4px; padding: 2px 6px; font-size: 8px; letter-spacing: 1.4px; }
 
+/* Header refresh button — sits next to LiveStatus, matches its visual
+   weight (small mono caps, hairline border) instead of competing. */
+.portfolio-page .mp-refresh-hdr {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 1.4px; text-transform: uppercase;
+  color: var(--fg2); background: transparent;
+  border: 1px solid var(--bright); border-radius: 100px;
+  padding: 4px 11px; cursor: pointer;
+  transition: color .15s var(--ease), border-color .15s var(--ease), background .15s var(--ease);
+}
+.portfolio-page .mp-refresh-hdr:hover { color: var(--neon); border-color: rgba(210,230,50,.5); background: var(--tint-neon); }
+.portfolio-page .mp-refresh-hdr:disabled { opacity: .55; cursor: wait; }
+
 /* ====== portfolio greeks bar ====== */
 .portfolio-page .greeks-bar {
   display: grid; grid-template-columns: 1.5fr repeat(4, 1fr) 1.3fr;

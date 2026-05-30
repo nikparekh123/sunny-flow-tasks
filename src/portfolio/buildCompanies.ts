@@ -167,10 +167,12 @@ export function buildCompanies(src: BuildSources): Company[] {
     realizedOptByT.set(c.ticker, (realizedOptByT.get(c.ticker) ?? 0) + $);
   }
 
-  // One Company per OPEN position (closed positions are filtered into
-  // the page's `CLOSED` array elsewhere — TODO: expose a `closed`
-  // companion list when the Show Closed filter needs DB data instead of
-  // the sample CLOSED array).
+  // One Company per OPEN position. "Open" here means status='open' AND
+  // (quantity > 0 OR has live option legs). A status='open' row with
+  // qty=0 and no live legs is effectively closed (the user sold the
+  // shares but hasn't updated status yet) — surfacing it would clutter
+  // the table with empty rows like "IT · spot $162 · everything else 0".
+  // Filter happens below after we know which tickers have live legs.
   const companies: Company[] = [];
   const openPositions = src.positions.filter((p) => p.status === "open");
 
@@ -185,8 +187,13 @@ export function buildCompanies(src: BuildSources): Company[] {
   }
   // Also include tickers that have legs but no underlying position
   // (you might hold options on something you don't own outright).
+  // FILTER: a status='open' position with qty=0 AND no live legs is
+  // effectively closed — skip it so the table doesn't show ghost rows
+  // for tickers the user has fully exited but hasn't reclassified.
   const allTickers = new Set([
-    ...openPositions.map((p) => p.ticker.toUpperCase()),
+    ...openPositions
+      .filter((p) => p.quantity > 0 || legsByT.has(p.ticker.toUpperCase()))
+      .map((p) => p.ticker.toUpperCase()),
     ...Array.from(legsByT.keys()),
   ]);
 

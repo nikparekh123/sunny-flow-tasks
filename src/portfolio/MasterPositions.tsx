@@ -116,7 +116,17 @@ export function MasterPositions({
           <div className="mp-title">Portfolio<span className="sub"> / positions &amp; greeks</span></div>
         </div>
         <div className="right">
-          <LiveStatus time={time} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              className="mp-refresh-hdr"
+              onClick={refresh}
+              disabled={refreshing}
+              title="Re-pull live Greeks + quotes from Polygon (massive.com). Runs automatically every 15 min during market hours; this is the manual trigger."
+            >
+              ↻ {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+            <LiveStatus time={time} />
+          </div>
           <div style={{ fontFamily: "var(--mono)", fontSize: 10, letterSpacing: "1px", color: "var(--fg4)", textTransform: "uppercase" }}>
             Fri · May 29 · open positions only
           </div>
@@ -140,14 +150,6 @@ export function MasterPositions({
           {closed ? "✓ " : ""}Show closed <span className="c">{CLOSED.length}</span>
         </button>
         <span className="spacer" />
-        <button
-          className="fchip"
-          onClick={refresh}
-          disabled={refreshing}
-          title="Re-pull live Greeks + quotes from Polygon (massive.com). Runs automatically every 15 min during market hours; this is the manual trigger."
-        >
-          ↻ {refreshing ? "Refreshing…" : "Refresh"}
-        </button>
         <span className={"sort-toggle" + (smart ? " on" : "")} onClick={() => setSmart(!smart)}>
           <span className="sw" /> Smart sort · attention first
         </span>

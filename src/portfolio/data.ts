@@ -93,15 +93,22 @@ export const fmtK = (v: number): string => {
   const s = v < 0 ? "−" : "+";
   const a = Math.abs(v);
   if (a >= 1000) return s + "$" + (a / 1000).toFixed(a >= 10000 ? 0 : 1) + "k";
-  return s + "$" + a;
+  // For sub-$1k values, show whole dollars (no decimals) — was leaking
+  // float noise like "$437.99999999999995" when the source was a derived
+  // P&L computation that drifted off a clean integer.
+  return s + "$" + Math.round(a).toLocaleString("en-US");
 };
 export const fmtPct = (v: number): string =>
   (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%";
 export const fmtNum = (v: number, d = 0): string =>
   (v > 0 ? "+" : v < 0 ? "−" : "") +
   Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+/** Greeks display — always rounded to whole-number shares-equivalent.
+ *  Polygon returns per-share Δ to 4-6 decimals; once multiplied by
+ *  contracts × 100, we end up with values like 808.049 that aren't
+ *  meaningfully precise — round at the display boundary. */
 export const fmtGreek = (v: number): string =>
-  (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toLocaleString("en-US");
+  (v > 0 ? "+" : v < 0 ? "−" : "") + Math.round(Math.abs(v)).toLocaleString("en-US");
 export const signCls = (v: number): "pos" | "neg" | "fg3" =>
   v > 0 ? "pos" : v < 0 ? "neg" : "fg3";
 
