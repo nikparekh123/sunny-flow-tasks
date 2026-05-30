@@ -239,7 +239,12 @@
 .dash .tm-table thead th.col.closed { color: var(--fg3); }
 .dash .tm-table thead th.tot { width: 108px; text-align: right; padding-right: 4px; color: var(--fg1); }
 .dash .tm-table tbody td { padding: 0; border-bottom: var(--hair); vertical-align: middle; }
-.dash .tm-pos { padding: 9px 4px !important; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* Vertically center the title + sub stack so the Position column sits
+   on the same baseline as the slot-cell amounts ($500, $11k, etc.)
+   which are already middle-aligned via `vertical-align: middle` on td.
+   Without `justify-content: center` the flex column defaults to flex-
+   start and the row reads top-aligned vs. centered. */
+.dash .tm-pos { padding: 0 8px 0 4px !important; display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; min-height: 44px; }
 .dash .tm-pos .t { font-family: var(--sans); font-size: 14px; font-weight: 700; letter-spacing: -.01em; color: var(--fg1); cursor: pointer; transition: color .15s var(--ease); line-height: 1.15; }
 .dash .tm-pos .t:hover { color: var(--neon); }
 .dash .tm-pos .sub { font-family: var(--mono); font-size: 9px; color: var(--fg3); letter-spacing: .9px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
@@ -274,7 +279,10 @@
 .dash .tm-cell.empty .plus { font-family: var(--mono); font-size: 18px; color: var(--fg5); opacity: 0; transition: opacity .15s var(--ease), color .15s var(--ease); cursor: pointer; }
 .dash .tm-cell.empty:hover .plus { opacity: 1; color: var(--neon); }
 .dash .tm-cell .em-dash { font-family: var(--mono); color: var(--fg5); font-size: 11px; }
-.dash .tm-tot { text-align: right; padding: 8px 4px !important; border-left: var(--hair-strong); }
+/* Net premium column — also vertical-middle (td default) but we tighten
+   the inner stack so the dollar value and "NET PAID" caption sit
+   closer together and read as one unit aligned with the row. */
+.dash .tm-tot { text-align: right; padding: 0 4px !important; border-left: var(--hair-strong); vertical-align: middle; }
 .dash .tm-tot .amt { font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: -.015em; }
 .dash .tm-tot .amt.pos { color: var(--positive); }
 .dash .tm-tot .amt.neg { color: var(--negative); }
