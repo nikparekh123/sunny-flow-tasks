@@ -199,11 +199,11 @@
 .dash .tm-viewtoggle .pill:not(.muted) { background: var(--neon); color: var(--page); font-weight: 600; }
 
 /* Grouped header: a CALLS / PUTS / ASSIGNED caption row over per-leg sub cells. */
-.dash .tm-table thead th.grp-h { text-align: left; padding: 14px 10px 8px; font-family: var(--mono); font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; font-weight: 700; border-bottom: 1px solid rgba(50,110,100,.18); white-space: nowrap; }
+.dash .tm-table thead th.grp-h { text-align: left; padding: 10px 8px 6px; font-family: var(--mono); font-size: 9px; letter-spacing: 1.4px; text-transform: uppercase; font-weight: 700; border-bottom: 1px solid rgba(50,110,100,.18); white-space: nowrap; }
 .dash .tm-table thead th.grp-h.sold   { color: var(--neon); }
 .dash .tm-table thead th.grp-h.paid   { color: var(--warning); }
 .dash .tm-table thead th.grp-h.assign { color: var(--fg2); }
-.dash .tm-table thead th.col.sub2 { padding-top: 6px; padding-bottom: 12px; }
+.dash .tm-table thead th.col.sub2 { padding-top: 4px; padding-bottom: 8px; }
 .dash .tm-table thead th.col.sold .sub { color: var(--neon); opacity: .65; }
 .dash .tm-table thead th.col.paid .sub { color: var(--warning); opacity: .65; }
 /* Two-row header can't be sticky cleanly — pin off for the grouped layout. */
@@ -217,32 +217,34 @@
 
 /* Call / Put tag inside a cell (direction is the group, type is the chip). */
 .dash .tm-cell .typechip { font-family: var(--mono); font-size: 8px; letter-spacing: .8px; text-transform: uppercase; padding: 1px 5px; border-radius: 3px; color: var(--fg2); background: rgba(168,196,192,.12); }
-/* ====== TM table — values mirror the hi-fi handoff
-   (positions-hifi-extras.css), scoped under .dash so they don't leak
-   to the legacy positions stylesheet. Two additions on top:
-     1. .tm-pos .sub gets white-space:nowrap + ellipsis so a long sector
-        name doesn't wrap into two lines and offset the row.
+/* ====== TM table — hi-fi visual language (colors, hairlines, hover,
+   typography family) but tightened to the ledger-density we want:
+   ~52-row, smaller fonts, smaller paddings. Architecture untouched
+   (Open/Closed toggle + Collected/Paid grouping live in the React
+   component, not here).
+   Additions on top of the design language:
+     1. .tm-pos .sub gets white-space:nowrap + ellipsis so long sector
+        names don't wrap into two lines.
      2. The TradesMatrixV2 component pairs this with abbrSector() so
-        "Communication Services" reads as "COMM SVCS" — the Position
-        column lines up across rows even under tight widths. */
+        "Communication Services" reads as "COMM SVCS". */
 .dash .tm-scroll { overflow-x: auto; }
-.dash .tm-table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: var(--mono); margin-top: 8px; }
-.dash .tm-table thead th { position: sticky; top: 0; z-index: 2; background: var(--page); text-align: left; padding: 14px 10px 12px; font-family: var(--mono); font-size: 9px; letter-spacing: 1.6px; text-transform: uppercase; font-weight: 600; color: var(--fg3); border-bottom: var(--hair-strong); white-space: nowrap; }
-.dash .tm-table thead th.pos { width: 160px; padding-left: 4px; }
-.dash .tm-table thead th.col { width: 96px; text-align: center; }
-.dash .tm-table thead th.col .idx { display: block; color: var(--fg1); font-size: 13px; font-weight: 600; letter-spacing: 0; margin-bottom: 3px; }
-.dash .tm-table thead th.col .sub { display: block; font-size: 8px; color: var(--fg4); letter-spacing: 1.2px; }
+.dash .tm-table { width: 100%; border-collapse: separate; border-spacing: 0; font-family: var(--mono); margin-top: 6px; }
+.dash .tm-table thead th { position: sticky; top: 0; z-index: 2; background: var(--page); text-align: left; padding: 10px 8px 8px; font-family: var(--mono); font-size: 9px; letter-spacing: 1.4px; text-transform: uppercase; font-weight: 600; color: var(--fg3); border-bottom: var(--hair-strong); white-space: nowrap; }
+.dash .tm-table thead th.pos { width: 140px; padding-left: 4px; }
+.dash .tm-table thead th.col { width: 78px; text-align: center; }
+.dash .tm-table thead th.col .idx { display: block; color: var(--fg1); font-size: 11px; font-weight: 600; letter-spacing: 0; margin-bottom: 2px; }
+.dash .tm-table thead th.col .sub { display: block; font-size: 7.5px; color: var(--fg4); letter-spacing: 1px; }
 .dash .tm-table thead th.col.shares { color: var(--fg2); }
 .dash .tm-table thead th.col.live   { color: var(--neon); }
 .dash .tm-table thead th.col.closed { color: var(--fg3); }
-.dash .tm-table thead th.tot { width: 130px; text-align: right; padding-right: 4px; color: var(--fg1); }
+.dash .tm-table thead th.tot { width: 108px; text-align: right; padding-right: 4px; color: var(--fg1); }
 .dash .tm-table tbody td { padding: 0; border-bottom: var(--hair); vertical-align: middle; }
-.dash .tm-pos { padding: 16px 4px 16px 4px !important; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.dash .tm-pos .t { font-family: var(--sans); font-size: 17px; font-weight: 700; letter-spacing: -.01em; color: var(--fg1); cursor: pointer; transition: color .15s var(--ease); }
+.dash .tm-pos { padding: 9px 4px !important; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dash .tm-pos .t { font-family: var(--sans); font-size: 14px; font-weight: 700; letter-spacing: -.01em; color: var(--fg1); cursor: pointer; transition: color .15s var(--ease); line-height: 1.15; }
 .dash .tm-pos .t:hover { color: var(--neon); }
-.dash .tm-pos .sub { font-family: var(--mono); font-size: 10px; color: var(--fg3); letter-spacing: 1.1px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash .tm-pos .sub { font-family: var(--mono); font-size: 9px; color: var(--fg3); letter-spacing: .9px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
 .dash .tm-pos .sub .live { color: var(--neon); }
-.dash .tm-cell { height: 64px; padding: 8px !important; text-align: center; border-left: 1px solid rgba(50,110,100,.10); position: relative; transition: background .15s var(--ease); }
+.dash .tm-cell { height: 44px; padding: 5px !important; text-align: center; border-left: 1px solid rgba(50,110,100,.10); position: relative; transition: background .15s var(--ease); }
 .dash .tm-cell.zone-shares { background: rgba(168,196,192,.04); }
 .dash .tm-cell.zone-live   { background: rgba(210,230,50,.04); }
 .dash .tm-cell.zone-closed { background: transparent; }
@@ -250,7 +252,7 @@
 .dash .tm-cell.urgent { box-shadow: inset 0 0 0 1.5px rgba(224,192,96,.4); }
 .dash .tm-cell.expired { box-shadow: inset 0 0 0 1.5px rgba(232,112,96,.4); }
 .dash .tm-cell.share-sell { background: rgba(232,112,96,.06); }
-.dash .tm-cell .amt { font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
+.dash .tm-cell .amt { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: -.01em; line-height: 1.05; }
 .dash .tm-cell .amt.pos { color: var(--positive); }
 .dash .tm-cell .amt.neg { color: var(--negative); }
 .dash .tm-cell .amt.neut { color: var(--fg1); }
@@ -258,12 +260,12 @@
    colour — an open position isn't a profit or a loss, just a position. */
 .dash .tm-cell .amt.tone-sold { color: var(--neon); }
 .dash .tm-cell .amt.tone-bgt { color: var(--warning); }
-.dash .tm-cell .chips { display: flex; align-items: center; justify-content: center; gap: 4px; margin-top: 4px; }
+.dash .tm-cell .chips { display: flex; align-items: center; justify-content: center; gap: 3px; margin-top: 2px; }
 .dash .tm-cell .glyph-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--neon); }
 .dash .tm-cell .glyph-dot.put { background: var(--warning); }
 .dash .tm-cell .glyph-dot.share { background: var(--fg2); }
 .dash .tm-cell .glyph-dot.neg { background: var(--negative); }
-.dash .tm-cell .state { font-family: var(--mono); font-size: 8px; letter-spacing: 1px; text-transform: uppercase; color: var(--fg3); }
+.dash .tm-cell .state { font-family: var(--mono); font-size: 7.5px; letter-spacing: .9px; text-transform: uppercase; color: var(--fg3); }
 .dash .tm-cell .state.open    { color: var(--fg2); }
 .dash .tm-cell .state.closed  { color: var(--fg3); }
 .dash .tm-cell .state.urgent  { color: var(--warning); }
@@ -272,18 +274,18 @@
 .dash .tm-cell.empty .plus { font-family: var(--mono); font-size: 18px; color: var(--fg5); opacity: 0; transition: opacity .15s var(--ease), color .15s var(--ease); cursor: pointer; }
 .dash .tm-cell.empty:hover .plus { opacity: 1; color: var(--neon); }
 .dash .tm-cell .em-dash { font-family: var(--mono); color: var(--fg5); font-size: 11px; }
-.dash .tm-tot { text-align: right; padding: 12px 4px !important; border-left: var(--hair-strong); }
-.dash .tm-tot .amt { font-family: var(--mono); font-size: 17px; font-weight: 700; letter-spacing: -.015em; }
+.dash .tm-tot { text-align: right; padding: 8px 4px !important; border-left: var(--hair-strong); }
+.dash .tm-tot .amt { font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: -.015em; }
 .dash .tm-tot .amt.pos { color: var(--positive); }
 .dash .tm-tot .amt.neg { color: var(--negative); }
-.dash .tm-tot .sub { font-family: var(--mono); font-size: 9px; color: var(--fg3); letter-spacing: 1.1px; text-transform: uppercase; margin-top: 4px; }
+.dash .tm-tot .sub { font-family: var(--mono); font-size: 8.5px; color: var(--fg3); letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
 .dash .tm-row-closed .tm-pos .t { color: var(--fg3); }
 .dash .tm-row-closed .tm-pos .sub { color: var(--fg4); }
 .dash .tm-row-closed .tm-cell { opacity: .65; }
-.dash .tm-table tfoot tr td { background: rgba(15,51,51,.4); border-top: var(--hair-strong); border-bottom: none; padding-top: 18px !important; padding-bottom: 18px !important; }
-.dash .tm-foot-l .t { font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: var(--fg1); }
-.dash .tm-foot-l .sub { font-family: var(--mono); font-size: 10px; color: var(--fg3); letter-spacing: 1.1px; text-transform: uppercase; margin-top: 4px; }
-.dash .tm-foot-tot .amt { font-size: 22px !important; }
+.dash .tm-table tfoot tr td { background: rgba(15,51,51,.4); border-top: var(--hair-strong); border-bottom: none; padding-top: 12px !important; padding-bottom: 12px !important; }
+.dash .tm-foot-l .t { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase; color: var(--fg1); }
+.dash .tm-foot-l .sub { font-family: var(--mono); font-size: 9px; color: var(--fg3); letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+.dash .tm-foot-tot .amt { font-size: 17px !important; }
 
 /* ============================================================
    MODALS — editorial reskin (baseline from the design handoff)
