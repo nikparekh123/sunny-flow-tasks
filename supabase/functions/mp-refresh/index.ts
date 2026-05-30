@@ -181,12 +181,18 @@ Deno.serve(async (req) => {
     // Sequential fetch — Polygon's options-snapshot rate limits are gentler
     // than burst; a parallel storm on 50+ contracts trips throttling. If
     // we ever need throughput, switch to a small concurrency pool.
+    //
+    // Auth via the `Authorization: Bearer <key>` HEADER, not the
+    // `?apiKey=` query param the older functions use. Massive.com (which
+    // proxies Polygon) accepts only the header form and returns 403 for
+    // query-param auth; Polygon itself accepts both. So Bearer is the
+    // strict superset that works against either backend.
+    const authHeaders = { Authorization: `Bearer ${polygonKey}` };
     for (const leg of openLegs) {
       const occ = occSymbol(leg.ticker.toUpperCase(), leg.expiry, leg.option_type, leg.strike);
-      const url = new URL(`https://api.polygon.io/v3/snapshot/options/${leg.ticker.toUpperCase()}/${occ}`);
-      url.searchParams.set('apiKey', polygonKey);
+      const url = `https://api.polygon.io/v3/snapshot/options/${leg.ticker.toUpperCase()}/${occ}`;
       try {
-        const resp = await fetch(url.toString());
+        const resp = await fetch(url, { headers: authHeaders });
         if (!resp.ok) {
           legFailures.push({ id: leg.id, ticker: leg.ticker, occ, reason: `HTTP ${resp.status}` });
           continue;
@@ -218,8 +224,8 @@ Deno.serve(async (req) => {
     if (allTickers.length > 0) {
       const sUrl = new URL('https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers');
       sUrl.searchParams.set('tickers', allTickers.join(','));
-      sUrl.searchParams.set('apiKey', polygonKey);
-      const sResp = await fetch(sUrl.toString());
+      // Bearer header (see above); no apiKey query param.
+      const sResp = await fetch(sUrl.toString(), { headers: authHeaders });
       if (sResp.ok) {
         const sData = (await sResp.json()) as PolyStockResp;
         const items = sData.tickers ?? sData.results ?? [];
