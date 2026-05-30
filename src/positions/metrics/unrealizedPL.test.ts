@@ -1,18 +1,24 @@
 /**
- * Parity test: the atom-based unrealized P&L must agree with the legacy
- * `computePortfolio.total_pnl` on representative fixtures. This is what
- * lets us swap the source-of-truth without changing any displayed number.
- *
- * Once every page reads from `useUnrealizedPL`, `computePortfolio.total_pnl`
- * can be deleted — this test will be the last thing referencing it.
+ * Regression net for unrealized P&L. The legacy `computePortfolio.total_pnl`
+ * field has been deleted (M9) — these tests now reproduce the canonical
+ * per-row formula (`market_value − cost_basis`, with stale-price fallback to
+ * avg_cost) inline so the atom calc can't drift silently.
  */
 import { describe, expect, it } from "vitest";
-import {
-  computePortfolio,
-  type OptionTrade,
-  type PositionRow,
-} from "../types";
+import type { PositionRow } from "../types";
 import { computeUnrealizedPL } from "./unrealizedPL";
+
+/** Inline canonical: Σ qty × (current_price ?? avg_cost) − Σ qty × avg_cost
+ *  over open positions with qty > 0. */
+function expectedUnrealized(positions: PositionRow[]): number {
+  let mv = 0, cb = 0;
+  for (const p of positions) {
+    if (p.status === "closed" || p.quantity <= 0) continue;
+    mv += p.quantity * (p.current_price ?? p.avg_cost);
+    cb += p.quantity * p.avg_cost;
+  }
+  return mv - cb;
+}
 
 let _seq = 0;
 const pos = (over: Partial<PositionRow> = {}): PositionRow => ({
@@ -31,30 +37,31 @@ const pos = (over: Partial<PositionRow> = {}): PositionRow => ({
   ...over,
 });
 
-describe("useUnrealizedPL parity with computePortfolio", () => {
-  it("matches on a typical multi-position fixture", () => {
+describe("computeUnrealizedPL — canonical regression net", () => {
+  it("matches inline canonical on a typical multi-position fixture", () => {
     const positions: PositionRow[] = [
       pos({ ticker: "AAPL", quantity: 100, avg_cost: 150, current_price: 200 }),
       pos({ ticker: "MSFT", quantity: 50, avg_cost: 300, current_price: 400 }),
       pos({ ticker: "NVDA", quantity: 30, avg_cost: 500, current_price: 480 }),
     ];
-    const legacy = computePortfolio(positions, [] as OptionTrade[]);
     const atom = computeUnrealizedPL(positions);
-    expect(atom.total).toBeCloseTo(legacy.total_pnl, 6);
-    expect(atom.totalPct).toBeCloseTo(legacy.total_pnl_pct, 6);
+    expect(atom.total).toBeCloseTo(expectedUnrealized(positions), 6);
+    // Sanity: 5,000 + 5,000 + (-600) = 9,400
+    expect(atom.total).toBe(9_400);
   });
 
-  it("matches when a position has a null current_price (stale-price fallback)", () => {
+  it("falls back to avg_cost when current_price is null", () => {
     const positions: PositionRow[] = [
       pos({ ticker: "AAPL", quantity: 100, avg_cost: 150, current_price: 200 }),
       pos({ ticker: "STALE", quantity: 50, avg_cost: 100, current_price: null }),
     ];
-    const legacy = computePortfolio(positions, [] as OptionTrade[]);
     const atom = computeUnrealizedPL(positions);
-    expect(atom.total).toBeCloseTo(legacy.total_pnl, 6);
+    expect(atom.total).toBeCloseTo(expectedUnrealized(positions), 6);
+    // Stale contributes $0 unrealized, AAPL contributes 5,000.
+    expect(atom.total).toBe(5_000);
   });
 
-  it("excludes closed positions in both", () => {
+  it("excludes closed positions", () => {
     const positions: PositionRow[] = [
       pos({ ticker: "AAPL", quantity: 100, avg_cost: 150, current_price: 200 }),
       pos({
@@ -65,9 +72,8 @@ describe("useUnrealizedPL parity with computePortfolio", () => {
         status: "closed",
       }),
     ];
-    const legacy = computePortfolio(positions, [] as OptionTrade[]);
     const atom = computeUnrealizedPL(positions);
-    expect(atom.total).toBeCloseTo(legacy.total_pnl, 6);
+    expect(atom.total).toBeCloseTo(expectedUnrealized(positions), 6);
     // Sanity: only AAPL contributes.
     expect(atom.total).toBe(5_000);
   });

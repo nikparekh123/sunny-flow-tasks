@@ -387,17 +387,19 @@ function IncomeChart({ series, showProj = true }: { series: IncomeSeries; showPr
               <span className="v">{fmtUSD(a.puts)}</span>
             </div>
             <div className="tip-row">
-              <span className="k"><span className="dot" style={{ background: "var(--inc-shares)" }} />Shares</span>
-              <span className="v">{fmtUSD(a.shares)}</span>
-            </div>
-            <div className="tip-row">
               <span className="k"><span className="dot" style={{ background: "var(--inc-debit)" }} />Bought back</span>
               <span className="v neg">−{fmtUSD(a.debit)}</span>
             </div>
             <div className="tip-net">
               <span className="k">Net kept</span>
-              <span className="v">{fmtUSD(a.calls + a.puts + a.shares - a.debit)}</span>
+              <span className="v">{fmtUSD(a.calls + a.puts - a.debit)}</span>
             </div>
+            {a.shares > 0 && (
+              <div className="tip-row" style={{ opacity: 0.55, marginTop: 6 }}>
+                <span className="k"><span className="dot" style={{ background: "var(--inc-shares)" }} />Shares realized (info)</span>
+                <span className="v">{fmtUSD(a.shares)}</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -429,14 +431,18 @@ export function IncomeScreen() {
   const series = useMemo(() => buildSeries(period, trades, sells), [period, trades, sells]);
   const cur = series.actual[series.actual.length - 1] ?? { calls: 0, puts: 0, shares: 0, debit: 0, label: "", proj: false };
 
-  const collected = cur.calls + cur.puts + cur.shares;
+  // Canonical Income = A4 − A6 (options short-side only). Share-realized
+  // is NOT income — it's booked to Realized P&L (A3 + A8). See
+  // `src/positions/metrics/income.ts` (computeIncome) for the SOT.
+  const collected = cur.calls + cur.puts;
   const net = collected - cur.debit;
   const callPct = collected > 0 ? Math.round((cur.calls / collected) * 100) : 0;
-  const putPct = collected > 0 ? Math.round((cur.puts / collected) * 100) : 0;
-  const sharePct = collected > 0 ? Math.max(0, 100 - callPct - putPct) : 0;
+  const putPct = collected > 0 ? Math.max(0, 100 - callPct) : 0;
 
-  const projNet = series.proj.reduce((s, p) => s + p.calls + p.puts + p.shares - p.debit, 0);
-  const trailNetAvg = series.actual.slice(-series.steps).reduce((s, p) => s + p.calls + p.puts + p.shares - p.debit, 0) / series.steps;
+  // Projections + trailing average use the canonical Income lanes only
+  // (calls + puts − debit). Share-realized is excluded from Income.
+  const projNet = series.proj.reduce((s, p) => s + p.calls + p.puts - p.debit, 0);
+  const trailNetAvg = series.actual.slice(-series.steps).reduce((s, p) => s + p.calls + p.puts - p.debit, 0) / series.steps;
   const projNetAvg = projNet / Math.max(1, series.proj.length);
   const paceDelta = trailNetAvg ? Math.round(((projNetAvg - trailNetAvg) / trailNetAvg) * 100) : 0;
 
@@ -444,7 +450,6 @@ export function IncomeScreen() {
   const brkRows: [string, string, number, number, string][] = [
     ["calls", "Calls sold", callPct, cur.calls, "var(--inc-calls)"],
     ["puts", "Puts sold", putPct, cur.puts, "var(--inc-puts)"],
-    ["shares", "Shares · realized gains", sharePct, cur.shares, "var(--inc-shares)"],
   ];
 
   return (
@@ -467,7 +472,7 @@ export function IncomeScreen() {
           <div className="inc-stat collected">
             <div className="cap"><span className="arrow neon">↑</span><span className="lbl">Collected</span></div>
             <div className="big"><MoneyCount value={collected} duration={1300} /></div>
-            <div className="sub">{callPct}% calls · {putPct}% puts · {sharePct}% shares</div>
+            <div className="sub">{callPct}% calls · {putPct}% puts</div>
           </div>
           <div className="inc-stat debit">
             <div className="cap"><span className="arrow neg">↓</span><span className="lbl">Bought back</span></div>
@@ -572,7 +577,8 @@ export function IncomeWeekly({ compact = false }: { compact?: boolean }) {
   const scaleUp = niceMax(Math.max(...cols.map((c) => c.calls + c.puts + c.shares), 0));
   const scaleDown = niceMax(Math.max(...cols.map((c) => c.debit), 0));
   const cur = series.actual[series.actual.length - 1] ?? { calls: 0, puts: 0, shares: 0, debit: 0, label: "", proj: false };
-  const collected = cur.calls + cur.puts + cur.shares;
+  // Canonical Income = A4 − A6 (options short-side only). See income.ts.
+  const collected = cur.calls + cur.puts;
   const net = collected - cur.debit;
 
   return (

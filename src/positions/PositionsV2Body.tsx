@@ -35,6 +35,7 @@ import {
 import { TradesMatrixV2 } from "./TradesMatrixV2";
 import { mountBand, type BandPosition, type BandOption } from "./positionBand";
 import { useUnrealizedPL } from "./metrics/useUnrealizedPL";
+import { useRealizedPL } from "./metrics/useRealizedPL";
 import "@/sunnyfi/pages/dashboard.css";
 import "./positions-v2.css";
 
@@ -142,11 +143,9 @@ function PositionsHero({ portfolio, liveByTicker }: {
   // SOT: A1 − A2 via the atom hook. Don't read total_pnl from props.
   const unr = useUnrealizedPL();
   const unrealized = unr.total;
-  // Realized = closed-option pairs + realized stock P&L across every position.
-  const realized = portfolio.rows.reduce(
-    (s, r) => s + (r.realized_pl ?? 0) + (r.realized_stock_pl ?? 0),
-    0,
-  );
+  // SOT: A3 + A8 via the atom hook. Replaces the row-sum that used to
+  // happen here (Σ row.realized_pl + Σ row.realized_stock_pl).
+  const realized = useRealizedPL().total;
   const totalGain = unrealized + realized;
   const sign = (v: number) => (v >= 0 ? "+" : "-");
   const tone = (v: number) => (v >= 0 ? "pos" : "neg");
@@ -233,10 +232,18 @@ function AllocationBlock({ rows, overlayByTicker, onTickerClick }: {
     }));
   }, [view, rows, overlayByTicker, total]);
 
-  // P&L waterfall data (sorted by pnl desc).
+  // P&L waterfall data — bars now read from the atom layer
+  // (useUnrealizedPL.byTicker, i.e. A1 − A2 per ticker). The full
+  // PositionComputed row stays around so the rich hover tooltip
+  // (sector, MV, avg cost, etc.) keeps working — only the headline
+  // `pnl_dollar` is overridden by the canonical per-ticker value.
+  const unrealized = useUnrealizedPL();
   const pnlData = useMemo(
-    () => [...rows].filter((r) => Math.abs(r.pnl_dollar) > 1).sort((a, b) => b.pnl_dollar - a.pnl_dollar),
-    [rows],
+    () => rows
+      .map((r) => ({ ...r, pnl_dollar: unrealized.byTicker.get(r.ticker) ?? 0 }))
+      .filter((r) => Math.abs(r.pnl_dollar) > 1)
+      .sort((a, b) => b.pnl_dollar - a.pnl_dollar),
+    [rows, unrealized.byTicker],
   );
 
   return (

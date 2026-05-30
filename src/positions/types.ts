@@ -393,8 +393,6 @@ export interface PortfolioTotals {
   rows: PositionComputed[];
   total_market_value: number;
   total_cost_basis: number;
-  total_pnl: number;
-  total_pnl_pct: number;
   total_day_change: number;
   last_price_update: string | null;
   /** Σ realized P&L across all positions. */
@@ -403,6 +401,9 @@ export interface PortfolioTotals {
   open_put_obligation: number;
   open_count: number;
   closed_count: number;
+  // Note: unrealized P&L (total_pnl / total_pnl_pct) is intentionally
+  // NOT on this interface. Callers should read `useUnrealizedPL()` —
+  // the canonical SOT (A1 − A2). See `src/positions/metrics/`.
 }
 
 export function computePortfolio(
@@ -425,9 +426,6 @@ export function computePortfolio(
     return computeRow(p, tmv, realized, netCash, live);
   });
   const total_cost_basis = rows.reduce((s, r) => s + r.cost_basis, 0);
-  const total_pnl = tmv - total_cost_basis;
-  const total_pnl_pct =
-    total_cost_basis === 0 ? 0 : (total_pnl / total_cost_basis) * 100;
   const total_day_change = rows.reduce((s, r) => s + r.day_change, 0);
   const last_price_update =
     positions.reduce<string | null>((acc, p) => {
@@ -441,8 +439,6 @@ export function computePortfolio(
     rows,
     total_market_value: tmv,
     total_cost_basis,
-    total_pnl,
-    total_pnl_pct,
     total_day_change,
     last_price_update,
     realized_pl,
