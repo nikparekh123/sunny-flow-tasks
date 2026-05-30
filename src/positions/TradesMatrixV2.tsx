@@ -101,6 +101,29 @@ interface Decomposed {
 type View = "open" | "closed";
 type Group = "sold" | "paid";
 
+/** Compact sector labels so the Position column reads cleanly even on names
+ *  like "Communication Services" or "Consumer Discretionary". Anything not
+ *  in the table is returned uppercased as-is. */
+const SECTOR_ABBR: Record<string, string> = {
+  "Communication Services": "COMM SVCS",
+  "Consumer Discretionary": "CONS DISC",
+  "Consumer Staples": "CONS STAPLE",
+  "Financials": "FINANCIALS",
+  "Healthcare": "HEALTHCARE",
+  "Industrials": "INDUSTRIALS",
+  "Information Technology": "TECHNOLOGY",
+  "Materials": "MATERIALS",
+  "Real Estate": "REAL ESTATE",
+  "Technology": "TECHNOLOGY",
+  "Utilities": "UTILITIES",
+  "Energy": "ENERGY",
+  "Other": "OTHER",
+};
+function abbrSector(s: string | null | undefined): string {
+  if (!s) return "—";
+  return SECTOR_ABBR[s] ?? s.toUpperCase();
+}
+
 const amtCls = (v: number) => (v < 0 ? "neg" : v > 0 ? "pos" : "neut");
 const amtStr = (v: number) => (v >= 0 ? fmtCompact(v) : "−" + fmtCompact(Math.abs(v)));
 const typeTag = (t: OptionTrade) => (t.option_type === "call" ? "call" : "put");
@@ -460,7 +483,7 @@ export function TradesMatrixV2({
                     <div className="tm-pos">
                       <span className="t" onClick={() => onTickerClick(r.ticker)}>{r.ticker}</span>
                       <span className="sub">
-                        {r.sector}
+                        {abbrSector(r.sector)}
                         {view === "open" && liveCount > 0 ? (
                           <> · <span className="live">{liveCount} open</span></>
                         ) : null}

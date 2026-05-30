@@ -148,6 +148,23 @@ function weekMondayDate(d: Date): Date {
   return x;
 }
 
+/** Today in America/New_York, returned as a Date whose UTC y/m/d match the
+ *  current ET calendar at midnight. We use this as `now` everywhere on the
+ *  Income page so "Friday May 29" doesn't tick over to Saturday just because
+ *  it's past 8pm Pacific (= 11pm ET = Sat 03:00 UTC). The Period helpers
+ *  read the UTC fields off this anchor, which is correct because the anchor
+ *  IS the ET wall date expressed in UTC slots. */
+function nowEasternMidnight(): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const y = Number(parts.find((p) => p.type === "year")!.value);
+  const m = Number(parts.find((p) => p.type === "month")!.value);
+  const d = Number(parts.find((p) => p.type === "day")!.value);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
 interface PeriodCfg {
   steps: number;
   buckets(now: Date): { key: string; label: string }[]; // oldest → newest
@@ -256,8 +273,7 @@ const PERIODS: Record<Period, PeriodCfg> = {
 /** Bucket live trades + share sells for a period and project forward. */
 export function buildSeries(period: Period, trades: IncTrade[], sells: IncSell[]): IncomeSeries {
   const cfg = PERIODS[period];
-  const now = new Date();
-  now.setUTCHours(0, 0, 0, 0);
+  const now = nowEasternMidnight();
   const buckets = cfg.buckets(now);
   const idx = new Map<string, IncomeRow>();
   for (const b of buckets) idx.set(b.key, { label: b.label, calls: 0, puts: 0, shares: 0, debit: 0, proj: false });
@@ -584,9 +600,7 @@ export function IncomeWeekly({ compact = false }: { compact?: boolean }) {
   // windowed to this week (Monday-anchored). The chart bars still use
   // buildSeries for visualization; this is the number people compare to.
   const headline = useMemo(() => {
-    const now = new Date();
-    now.setUTCHours(0, 0, 0, 0);
-    const start = weekMondayDate(now).toISOString().slice(0, 10);
+    const start = weekMondayDate(nowEasternMidnight()).toISOString().slice(0, 10);
     return computeIncome(trades as unknown as OptionTrade[], { window: { start } });
   }, [trades]);
   const collected = headline.collected;
