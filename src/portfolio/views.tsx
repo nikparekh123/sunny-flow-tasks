@@ -25,6 +25,48 @@ function PCols() {
   );
 }
 
+/* The shared header strip uses CSS grid (mirroring COLW) instead of an
+   empty-body <table>, because some browsers refuse to honor a <colgroup>
+   on a table with no <tbody> rows — that's the alignment bug seen
+   in early PD-0 testing. Per-ticker tables below stay as real tables
+   (they have real rows, so colgroup works there). */
+const stripCols = COLW.map((w) => w + "px").join(" ");
+
+function StripBand() {
+  return (
+    <div className="strip-band" style={{ gridTemplateColumns: stripCols }}>
+      <div className="zh-spacer" />
+      <div className="zh-basic" style={{ gridColumn: "span 7" }}>Basics &amp; P&amp;L</div>
+      <div className="zh-greek" style={{ gridColumn: "span 4" }}>Greeks · position</div>
+      <div className="zh-opt"   style={{ gridColumn: "span 3" }}>Options</div>
+      <div className="zh-pos" />
+    </div>
+  );
+}
+
+function StripCols() {
+  return (
+    <div className="strip-cols" style={{ gridTemplateColumns: stripCols }}>
+      <div className="l">Leg</div>
+      <div className="ze-basic">Qty</div>
+      <div>Avg</div>
+      <div>Net cost</div>
+      <div>Last</div>
+      <div>1D</div>
+      <div>Unreal</div>
+      <div className="zr-basic">Real</div>
+      <div className="ze-greek">Delta</div>
+      <div>Gamma</div>
+      <div>Theta</div>
+      <div className="zr-greek">Vega</div>
+      <div className="ze-opt">IV</div>
+      <div>OI · Vol</div>
+      <div className="zr-opt">Expiry</div>
+      <div className="ze-pos">Position Δ</div>
+    </div>
+  );
+}
+
 /* Open-interest / volume cell with daily change + 4-day hover popover */
 function OICell({ leg }: { leg: Leg }) {
   const [tip, setTip] = useState<{ left: number; top: number } | null>(null);
@@ -100,37 +142,13 @@ export function TableView({
       <div className="tbl-scroll">
         <div className="tbl-stack" style={{ minWidth: TBL_MIN }}>
 
-          {/* shared header strip */}
-          <table className="ptable strip">
-            <PCols />
-            <thead>
-              <tr className="band">
-                <th></th>
-                <th className="zh-basic" colSpan={7}>Basics &amp; P&amp;L</th>
-                <th className="zh-greek" colSpan={4}>Greeks · position</th>
-                <th className="zh-opt" colSpan={3}>Options</th>
-                <th className="zh-pos"></th>
-              </tr>
-              <tr className="cols">
-                <th className="l">Leg</th>
-                <th className="z-basic ze-basic">Qty</th>
-                <th className="z-basic">Avg</th>
-                <th className="z-basic">Net cost</th>
-                <th className="z-basic">Last</th>
-                <th className="z-basic">1D</th>
-                <th className="z-basic">Unreal</th>
-                <th className="z-basic zr-basic">Real</th>
-                <th className="z-greek ze-greek">Delta</th>
-                <th className="z-greek">Gamma</th>
-                <th className="z-greek">Theta</th>
-                <th className="z-greek zr-greek">Vega</th>
-                <th className="z-opt ze-opt">IV</th>
-                <th className="z-opt">OI · Vol</th>
-                <th className="z-opt zr-opt">Expiry</th>
-                <th className="z-pos ze-pos">Position Δ</th>
-              </tr>
-            </thead>
-          </table>
+          {/* Shared header strip — div-grid, NOT an empty <table>, so its
+              column widths line up to the pixel with the per-ticker tables
+              below (see StripBand / StripCols above). */}
+          <div className="ptable-strip">
+            <StripBand />
+            <StripCols />
+          </div>
 
           {data.map((c) => {
             const attn = c.flags.some((f) => f.tone === "neg");

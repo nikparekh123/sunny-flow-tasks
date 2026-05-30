@@ -91,7 +91,25 @@
 .portfolio-page .tbl-scroll { overflow-x: auto; padding-bottom: 4px; }
 .portfolio-page .tbl-stack { display: flex; flex-direction: column; gap: 12px; }
 .portfolio-page .ptable { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--mono); }
-.portfolio-page .ptable.strip { border: 1px solid var(--bright); border-radius: 8px; overflow: hidden; }
+
+/* Shared header strip — a 2-row CSS grid that mirrors the per-ticker
+   table's column widths exactly. Replaces an empty-body <table> that
+   didn't always honor its <colgroup> across browsers. */
+.portfolio-page .ptable-strip { border: 1px solid var(--bright); border-radius: 8px; overflow: hidden; background: var(--page-2); font-family: var(--mono); }
+.portfolio-page .strip-band,
+.portfolio-page .strip-cols { display: grid; }
+.portfolio-page .strip-band > div {
+  font-size: 8px; letter-spacing: 1.8px; text-transform: uppercase; color: var(--fg4); font-weight: 600;
+  padding: 9px 6px 5px; text-align: left; border-bottom: 1px solid rgba(50,110,100,.18);
+  white-space: nowrap;
+}
+.portfolio-page .strip-band .zh-basic, .portfolio-page .strip-band .zh-greek, .portfolio-page .strip-band .zh-opt { color: var(--fg4); }
+.portfolio-page .strip-cols > div {
+  font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: var(--fg3); font-weight: 500;
+  padding: 8px 6px 11px; text-align: right; border-bottom: var(--hair-strong); white-space: nowrap;
+}
+.portfolio-page .strip-cols > div.l { text-align: left; padding-left: 16px; }
+.portfolio-page .strip-cols .ze-basic, .portfolio-page .strip-cols .ze-greek, .portfolio-page .strip-cols .ze-opt, .portfolio-page .strip-cols .ze-pos { border-left: 1px solid rgba(50,110,100,.32); }
 
 .portfolio-page .ptbl-card { border: 1px solid var(--bright); border-radius: 10px; overflow: hidden; background: rgba(15,51,51,.32); transition: border-color .16s var(--ease); }
 .portfolio-page .ptbl-card.attn { border-color: rgba(232,112,96,.4); }
