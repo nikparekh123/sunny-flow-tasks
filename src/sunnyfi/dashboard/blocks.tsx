@@ -23,6 +23,7 @@ import { Spark, AnimatedBar, HairRow, Section } from "./atoms";
 import { MoneyCount, PctCount, useEntered } from "./animation";
 import { macroEventsOn } from "./macroCalendar";
 import { historicalPortfolioValue } from "@/positions/metrics/atoms";
+import { usePortfolioGreeks } from "@/positions/metrics/usePortfolioGreeks";
 import type { DailyClose, PositionRow } from "@/positions/types";
 import {
   buildRiskScenarios, loadLastReviewed, saveLastReviewed,
@@ -593,6 +594,9 @@ export function PortfolioBlock({
   );
   const oldest = series[0] ?? 0;
   const newest = series[series.length - 1] ?? totalValue;
+  // Portfolio Greeks via the canonical hook (PD-3). Same numbers as the
+  // /portfolio page's GreeksBar — single SOT, no duplicate math.
+  const greeks = usePortfolioGreeks();
 
   return (
     <div>
@@ -616,6 +620,15 @@ export function PortfolioBlock({
         <div style={{ display: "flex", justifyContent: "space-between", maxWidth: 820, marginTop: 8 }}>
           <span className="label">{series.length} sessions ago · {fmtCompactUSD(oldest)}</span>
           <span className="label">today · {fmtCompactUSD(newest)}</span>
+        </div>
+        {/* Portfolio Greeks line — same numbers as /portfolio's GreeksBar.
+            Renders as zeros until mp-refresh has populated option_greeks +
+            ticker_quotes; once data lands, populates automatically. */}
+        <div className="num-mono" style={{ display: "flex", gap: 24, marginTop: 14, fontSize: 12, color: "var(--fg3)", letterSpacing: ".5px" }}>
+          <span><span className="label" style={{ marginRight: 6 }}>Δ</span><span className={greeks.delta >= 0 ? "pos" : "neg"}>{(greeks.delta >= 0 ? "+" : "−") + Math.abs(Math.round(greeks.delta)).toLocaleString()}</span></span>
+          <span><span className="label" style={{ marginRight: 6 }}>β·Δ</span><span className={greeks.betaWeightedDelta >= 0 ? "pos" : "neg"}>{(greeks.betaWeightedDelta >= 0 ? "+" : "−") + Math.abs(Math.round(greeks.betaWeightedDelta)).toLocaleString()}</span></span>
+          <span><span className="label" style={{ marginRight: 6 }}>Θ/d</span><span className={greeks.theta >= 0 ? "pos" : "neg"}>{(greeks.theta >= 0 ? "+" : "−") + Math.abs(Math.round(greeks.theta)).toLocaleString()}</span></span>
+          <span><span className="label" style={{ marginRight: 6 }}>V/1%</span><span className={greeks.vega >= 0 ? "pos" : "neg"}>{(greeks.vega >= 0 ? "+" : "−") + Math.abs(Math.round(greeks.vega)).toLocaleString()}</span></span>
         </div>
       </div>
     </div>
