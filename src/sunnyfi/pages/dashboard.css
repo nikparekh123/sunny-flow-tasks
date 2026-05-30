@@ -77,6 +77,11 @@
   padding: 0 56px 64px;
 }
 
+/* Wide variant — used by /portfolio because its master table needs
+   ~1420px just for the column grid. Brand bar stays inside the
+   standard 1440px to keep nav alignment with the rest of the app. */
+.dash.dash-wide > .dash-inner { max-width: 100%; padding-left: 24px; padding-right: 24px; }
+
 /* ─────────────────── Typography ─────────────────── */
 
 .dash .display { font-family: var(--sans); font-weight: 800; letter-spacing: -.045em; line-height: .9; }

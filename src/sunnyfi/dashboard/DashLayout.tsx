@@ -30,8 +30,12 @@ export function DashLayout() {
   const navigate = useNavigate();
   const dateLabel = fmtBrandDate(useNow(60_000));
   const meta = ROUTE_META[pathname] ?? { label: "Morning brief" };
+  // Portfolio's master table needs ~1420px just for its column grid; the
+  // standard 1440px max-width with 56px L/R padding squeezes it. Apply a
+  // wider shell on /portfolio so the table fits without horizontal scroll.
+  const wide = pathname === "/portfolio";
   return (
-    <div className="dash">
+    <div className={"dash" + (wide ? " dash-wide" : "")}>
       <div className="dash-inner">
         <BrandBar
           routeLabel={meta.label}
