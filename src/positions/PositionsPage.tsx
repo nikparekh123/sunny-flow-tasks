@@ -15,6 +15,7 @@ import { StockInsightsStrip } from './StockInsightsStrip';
 import { PositionsV2Body } from './PositionsV2Body';
 import { useUnrealizedPL } from './metrics/useUnrealizedPL';
 import { useLiveLegs } from './metrics/useLiveLegs';
+import { useMasterQuotes } from './metrics/useEnrichedRows';
 import { fmtUSD, fmtPct } from './types';
 import { AnimatedNumber } from '@/sunnyfi/lib/animation';
 import { toast } from 'sonner';
@@ -36,7 +37,7 @@ function readLS<T extends string>(key: string, allowed: readonly T[], fallback: 
 export default function PositionsPage() {
   const { user, loading } = useAuth();
   const {
-    portfolio,
+    portfolio: rawPortfolio,
     isLoading,
     overlayByTicker,
     tradesByTicker,
@@ -57,6 +58,16 @@ export default function PositionsPage() {
     setEarningsDate,
     deletePosition,
   } = usePositions();
+  // HC-3: decorate the legacy portfolio rows with master spot from
+  // ticker_quotes so every downstream consumer (ledger, modals,
+  // insights strip, scenario calc) reads the same price as /portfolio
+  // and /dashboard. The override happens at the source — no JSX
+  // changes anywhere downstream.
+  const { decorate } = useMasterQuotes();
+  const portfolio = useMemo(
+    () => ({ ...rawPortfolio, rows: decorate(rawPortfolio.rows) }),
+    [rawPortfolio, decorate],
+  );
   const [allocView, setAllocView] = useState<AllocView>(() =>
     readLS<AllocView>(LS_ALLOC, ['sector', 'stock', 'strategy', 'pnl'] as const, 'sector'),
   );
