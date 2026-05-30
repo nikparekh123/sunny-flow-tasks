@@ -14,6 +14,7 @@ import { RealizedSummary } from './RealizedSummary';
 import { StockInsightsStrip } from './StockInsightsStrip';
 import { PositionsV2Body } from './PositionsV2Body';
 import { useUnrealizedPL } from './metrics/useUnrealizedPL';
+import { useLiveLegs } from './metrics/useLiveLegs';
 import { fmtUSD, fmtPct } from './types';
 import { AnimatedNumber } from '@/sunnyfi/lib/animation';
 import { toast } from 'sonner';
@@ -130,6 +131,10 @@ export default function PositionsPage() {
   // of the app.
   const unrealized = useUnrealizedPL();
   const isDown = unrealized.total < 0;
+  // SOT: per-ticker live-leg count via useLiveLegs (A11) — used by
+  // both V2 and V1 layouts to decide whether the detail modal opens
+  // on the Close tab vs the Open tab.
+  const { byTicker: liveCountByTicker } = useLiveLegs();
 
   // The redesigned (Navi editorial) body is now the DEFAULT. The old
   // layout is still reachable via ?v1=1 as a safety fallback. The modal
@@ -156,7 +161,7 @@ export default function PositionsPage() {
           onTickerClick={(t) => setInsightTicker(t)}
           onSharesCellClick={(t) => setDetail({ ticker: t, tab: 'shares' })}
           onOpenSlotClick={(t, mode) => {
-            const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
+            const hasLive = (liveCountByTicker.get(t) ?? 0) > 0;
             // An explicit "+" add-slot always opens the Open tab; clicking an
             // existing live leg defaults to Close (edit/close that leg).
             setDetail({ ticker: t, tab: mode ?? (hasLive ? 'close' : 'open') });
@@ -332,7 +337,7 @@ export default function PositionsPage() {
                 setDetail({ ticker: t, tab: 'shares' })
               }
               onOpenSlotClick={(t) => {
-                const hasLive = (liveByTicker.get(t)?.length ?? 0) > 0;
+                const hasLive = (liveCountByTicker.get(t) ?? 0) > 0;
                 setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
               }}
               onResolveCellClick={(t, open) =>

@@ -465,13 +465,15 @@ function ProtectionBlock({ tradesByTicker }: {
 }
 
 // ─────────────────── §03 Strategy buckets ────────────────────────
-function StrategyBuckets({ rows, overlayByTicker, realizedByTicker, liveByTicker }: {
+function StrategyBuckets({ rows, overlayByTicker, realizedByTicker }: {
   rows: PositionComputed[];
   overlayByTicker: Map<string, Bucket>;
   realizedByTicker: Map<string, number>;
-  liveByTicker: Map<string, LiveOption[]>;
 }) {
   const entered = useEntered(300);
+  // SOT: live-leg counts per ticker via useLiveLegs (A11). Replaces the
+  // inline `liveByTicker.get(r.ticker)?.length ?? 0` count.
+  const { byTicker: liveByTickerCount } = useLiveLegs();
   const buckets = useMemo(() => {
     const order: Bucket[] = ["income", "invest", "yield"];
     const acc: Record<Bucket, { mv: number; pnl: number; cost: number; count: number; live: number }> = {
@@ -486,11 +488,11 @@ function StrategyBuckets({ rows, overlayByTicker, realizedByTicker, liveByTicker
       acc[b].pnl += (realizedByTicker.get(r.ticker) ?? 0) + (r.realized_stock_pl ?? 0);
       acc[b].cost += r.cost_basis;
       acc[b].count += 1;
-      acc[b].live += liveByTicker.get(r.ticker)?.length ?? 0;
+      acc[b].live += liveByTickerCount.get(r.ticker) ?? 0;
     }
     const max = Math.max(1, ...order.map((b) => acc[b].mv));
     return order.map((b) => ({ key: b, ...acc[b], max }));
-  }, [rows, overlayByTicker, realizedByTicker, liveByTicker]);
+  }, [rows, overlayByTicker, realizedByTicker, liveByTickerCount]);
 
   return (
     <div>
@@ -532,6 +534,10 @@ type LedgerView = "positions" | "trades";
 function PositionsLedger(props: PositionsV2BodyProps) {
   const { portfolio, overlayByTicker, signalsByTicker, realizedByTicker, liveByTicker, onTickerClick } = props;
   const [view, setView] = useState<LedgerView>("positions");
+  // Outstanding short premium per ticker — A9 split by useLiveLegs.
+  // Shown in the OUT column so each row reads "you've collected $X you
+  // still owe the option holder on this name".
+  const { shortPremByTicker } = useLiveLegs();
   const views: Array<[LedgerView, string]> = [["positions", "Positions"], ["trades", "Trades"]];
 
   const groups = useMemo(() => {
@@ -571,7 +577,7 @@ function PositionsLedger(props: PositionsV2BodyProps) {
       {view === "positions" && (
         <>
           <div className="ledger-head">
-            {["POSITION", "SECTOR", "PRICE · 1D", "QTY · AVG", "NET COST", "UNREALIZED", "REALIZED", "SIGNALS"].map((h) => (
+            {["POSITION", "SECTOR", "PRICE · 1D", "QTY · AVG", "NET COST", "UNREALIZED", "REALIZED", "PREM OUT", "SIGNALS"].map((h) => (
               <span key={h} className="label" style={{ fontSize: 9 }}>{h}</span>
             ))}
           </div>
@@ -610,6 +616,11 @@ function PositionsLedger(props: PositionsV2BodyProps) {
                       <span className={"netcost " + netTone}>{fmtUSD2(netCost)}</span>
                       <span className={"unr " + (r.pnl_dollar >= 0 ? "pos" : "neg")}>{r.pnl_dollar >= 0 ? "+" : "−"}{fmtUSD(Math.abs(r.pnl_dollar))}</span>
                       <span className="real">{real1 === 0 ? "—" : (real1 >= 0 ? "+" : "−") + fmtUSD(Math.abs(real1))}</span>
+                      <span className="premout" title="Outstanding short-side premium — what you've collected and still owe (A9)">{
+                        (shortPremByTicker.get(r.ticker) ?? 0) > 0
+                          ? fmtUSD(shortPremByTicker.get(r.ticker) ?? 0)
+                          : <span className="em">—</span>
+                      }</span>
                       <span className="sigs">
                         {chips.map((c) => <span key={c.label} className={"chip " + (c.tone === "warn" ? "warn" : c.tone === "down" ? "neg" : c.tone === "up" ? "pos" : "")}>{c.label}</span>)}
                       </span>
@@ -683,14 +694,15 @@ function positionToBand(r: PositionComputed, trades: OptionTrade[], dailyCloses:
 }
 
 // ─────────────────── §05 Focus insight ───────────────────────────
-function FocusInsight({ rows, signalsByTicker, liveByTicker, tradesByTicker, dailyCloses, onTickerClick }: {
+function FocusInsight({ rows, signalsByTicker, tradesByTicker, dailyCloses, onTickerClick }: {
   rows: PositionComputed[];
   signalsByTicker: Map<string, TickerSignals>;
-  liveByTicker: Map<string, LiveOption[]>;
   tradesByTicker: Map<string, OptionTrade[]>;
   dailyCloses: DailyClose[];
   onTickerClick: (t: string) => void;
 }) {
+  // SOT: live-leg count per ticker via useLiveLegs (A11).
+  const { byTicker: liveCountByTicker } = useLiveLegs();
   const [xray, setXray] = useState(false);
   const bandRef = useRef<HTMLDivElement>(null);
   // Rank by "severity": biggest absolute unrealized loss first, then
@@ -732,7 +744,7 @@ function FocusInsight({ rows, signalsByTicker, liveByTicker, tradesByTicker, dai
   );
   const fr = focus.r;
   const sig = signalsByTicker.get(fr.ticker);
-  const live = liveByTicker.get(fr.ticker)?.length ?? 0;
+  const live = liveCountByTicker.get(fr.ticker) ?? 0;
 
   const step = (d: number) => setIdx(((focusIdx + d) % ranked.length + ranked.length) % ranked.length);
 
@@ -887,9 +899,9 @@ export function PositionsV2Body(props: PositionsV2BodyProps) {
         <div className="row" style={{ marginTop: 56 }}><PositionsHero portfolio={portfolio} /></div>
         <div className="row" style={{ marginTop: 84 }}><AllocationBlock rows={portfolio.rows} overlayByTicker={overlayByTicker} onTickerClick={onTickerClick} /></div>
         <div className="row" style={{ marginTop: 72 }}><ProtectionBlock rows={portfolio.rows} tradesByTicker={tradesByTicker} /></div>
-        <div className="row" style={{ marginTop: 72 }}><StrategyBuckets rows={portfolio.rows} overlayByTicker={overlayByTicker} realizedByTicker={realizedByTicker} liveByTicker={liveByTicker} /></div>
+        <div className="row" style={{ marginTop: 72 }}><StrategyBuckets rows={portfolio.rows} overlayByTicker={overlayByTicker} realizedByTicker={realizedByTicker} /></div>
         <div className="row" style={{ marginTop: 72 }}><PositionsLedger {...props} /></div>
-        <div className="row" style={{ marginTop: 72 }}><FocusInsight rows={portfolio.rows} signalsByTicker={signalsByTicker} liveByTicker={liveByTicker} tradesByTicker={props.tradesByTicker} dailyCloses={props.dailyCloses} onTickerClick={onTickerClick} /></div>
+        <div className="row" style={{ marginTop: 72 }}><FocusInsight rows={portfolio.rows} signalsByTicker={signalsByTicker} tradesByTicker={props.tradesByTicker} dailyCloses={props.dailyCloses} onTickerClick={onTickerClick} /></div>
         <div className="row" style={{ marginTop: 72 }}><RealizedBlock rows={portfolio.rows} realizedByTicker={realizedByTicker} tradesByTicker={tradesByTicker} /></div>
         <div className="row" style={{ marginTop: 64 }}>
           <div className="tools-rail"><span className="build">Sunnyfi · positions</span></div>
