@@ -9,19 +9,21 @@
  * any of the rendered shapes here.
  */
 import { useState } from "react";
-import { MODEL, CLOSED, PORTFOLIO, BETA_DELTA, fmtMoney, fmtGreek, signCls, type Company } from "./data";
+import { CLOSED, fmtMoney, fmtGreek, signCls, type Company } from "./data";
 import { LiveStatus } from "./atoms";
 import { TableView, CardsView, CockpitView } from "./views";
 import { FocusMenu, FocusStage, FocusToast } from "./focus";
+import { useMasterPositions } from "./useMasterPositions";
+import type { PortfolioRollup } from "./buildCompanies";
 import "./portfolio.css";
 
-function GreeksBar() {
+function GreeksBar({ p }: { p: PortfolioRollup }) {
   const cells = [
-    { k: "Net delta · position", v: PORTFOLIO.delta, cls: "neon", sub: "share-equivalent · net long", lead: true, g: "◆" },
-    { k: "Beta-weighted delta", v: BETA_DELTA, sub: "SPY-equivalent exposure", g: "β", cls: "" },
-    { k: "Net theta · per day", v: PORTFOLIO.theta, cls: signCls(PORTFOLIO.theta), sub: "decay collected daily", g: "Θ" },
-    { k: "Net vega · per 1% IV", v: PORTFOLIO.vega, cls: signCls(PORTFOLIO.vega), sub: PORTFOLIO.vega < 0 ? "short volatility" : "long volatility", g: "V" },
-    { k: "Net gamma", v: PORTFOLIO.gamma, cls: signCls(PORTFOLIO.gamma), sub: "Δ change per $1 move", g: "Γ" },
+    { k: "Net delta · position", v: p.delta, cls: "neon", sub: "share-equivalent · " + (p.delta >= 0 ? "net long" : "net short"), lead: true, g: "◆" },
+    { k: "Beta-weighted delta", v: p.betaWeightedDelta, sub: "SPY-equivalent exposure", g: "β", cls: "" },
+    { k: "Net theta · per day", v: p.theta, cls: signCls(p.theta), sub: "decay collected daily", g: "Θ" },
+    { k: "Net vega · per 1% IV", v: p.vega, cls: signCls(p.vega), sub: p.vega < 0 ? "short volatility" : "long volatility", g: "V" },
+    { k: "Net gamma", v: p.gamma, cls: signCls(p.gamma), sub: "Δ change per $1 move", g: "Γ" },
   ];
   return (
     <div className="greeks-bar">
@@ -34,9 +36,9 @@ function GreeksBar() {
       ))}
       <div className="cell">
         <div className="gk-lbl"><span className="glyph">$</span>Open P&amp;L</div>
-        <div className={"gk-val " + signCls(PORTFOLIO.net)}>{fmtMoney(PORTFOLIO.unreal, true)}</div>
+        <div className={"gk-val " + signCls(p.net)}>{fmtMoney(p.unreal, true)}</div>
         <div className="gk-sub">
-          {PORTFOLIO.companies} companies · {PORTFOLIO.legs} legs · {PORTFOLIO.opts} options
+          {p.companies} companies · {p.legs} legs · {p.opts} options
         </div>
       </div>
     </div>
@@ -45,12 +47,19 @@ function GreeksBar() {
 
 type ViewKey = "table" | "cards" | "cockpit";
 
+/** Format the freshness timestamp as "HH:MM PT" (ET → PT shifted, since
+ *  the brand bar elsewhere shows PT). Empty if no data yet. */
+function fmtFreshness(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  // toLocaleTimeString respects the browser's tz; show just the clock.
+  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
 export function MasterPositions({
   defaultView = "table",
-  time = "06:42",
 }: {
   defaultView?: ViewKey;
-  time?: string;
 }) {
   const [view, setView] = useState<ViewKey>(defaultView);
   const [smart, setSmart] = useState(false);
@@ -60,7 +69,13 @@ export function MasterPositions({
   const [focusT, setFocusT] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  let data: Company[] = closed ? [...MODEL, ...CLOSED] : [...MODEL];
+  // SOT: live data from option_greeks + ticker_quotes + the existing
+  // positions/trades/share_sells tables, joined into the Company shape
+  // the views consume.
+  const { companies, portfolio, isLoading, freshness, refresh, refreshing } =
+    useMasterPositions();
+
+  let data: Company[] = closed ? [...companies, ...CLOSED] : [...companies];
   if (risk) data = data.filter((c) => !c.closed && c.flags.some((f) => f.tone === "neg" || f.tone === "warn"));
   if (smart) {
     data = [...data].sort((a, b) =>
@@ -82,9 +97,10 @@ export function MasterPositions({
     setTimeout(() => setToast(null), 1700);
   };
 
-  const riskCount = MODEL.filter((c) =>
+  const riskCount = companies.filter((c) =>
     c.flags.some((f) => f.tone === "neg" || f.tone === "warn")
   ).length;
+  const time = fmtFreshness(freshness);
 
   const views: Array<[ViewKey, string]> = [
     ["table", "Table"], ["cards", "Cards"], ["cockpit", "Δ Cockpit"],
@@ -107,7 +123,7 @@ export function MasterPositions({
         </div>
       </div>
 
-      <GreeksBar />
+      <GreeksBar p={portfolio} />
 
       <div className="mp-controls">
         <span className="view-toggle">
@@ -124,10 +140,29 @@ export function MasterPositions({
           {closed ? "✓ " : ""}Show closed <span className="c">{CLOSED.length}</span>
         </button>
         <span className="spacer" />
+        <button
+          className="fchip"
+          onClick={refresh}
+          disabled={refreshing}
+          title="Re-pull live Greeks + quotes from Polygon (massive.com). Runs automatically every 15 min during market hours; this is the manual trigger."
+        >
+          ↻ {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
         <span className={"sort-toggle" + (smart ? " on" : "")} onClick={() => setSmart(!smart)}>
           <span className="sw" /> Smart sort · attention first
         </span>
       </div>
+
+      {isLoading && companies.length === 0 && (
+        <div style={{ padding: "60px 0", textAlign: "center", color: "var(--fg3)", fontFamily: "var(--mono)", fontSize: 12, letterSpacing: "1.2px", textTransform: "uppercase" }}>
+          Loading positions…
+        </div>
+      )}
+      {!isLoading && companies.length === 0 && (
+        <div style={{ padding: "60px 0", textAlign: "center", color: "var(--fg3)", fontFamily: "var(--mono)", fontSize: 12, letterSpacing: "1.2px", textTransform: "uppercase" }}>
+          No open positions
+        </div>
+      )}
 
       {view === "table" && <TableView data={data} onFocusMenu={openMenu} />}
       {view === "cards" && <CardsView data={data} />}
