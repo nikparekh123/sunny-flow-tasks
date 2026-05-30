@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Navi · example</title>
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+</head>
+<body class="navi">
+<div class="dash"><div class="dash-inner">
+
+  <!-- brand bar -->
+  <div class="brandbar">
+    <div class="mark">
+      <span class="logo">SUNNYFI<span class="cursor"></span></span>
+      <span class="slash">/</span>
+      <span class="route">Positions</span>
+      <span class="top-nav">
+        <a class="nav-link">Dashboard</a>
+        <a class="nav-link on">Positions</a>
+        <a class="nav-link">Scan</a>
+      </span>
+    </div>
+    <div class="actions">
+      <span class="live-status" style="font-family:var(--mono);font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--fg2);display:inline-flex;align-items:center;gap:9px"><span class="live-dot"></span> Live · 09:41 ET</span>
+    </div>
+  </div>
+
+  <!-- hero + greeks -->
+  <div class="row first">
+    <div class="section"><span><span class="n">01</span>Portfolio</span><span class="right">12 positions · 3 strategies</span></div>
+    <div class="greeks-bar">
+      <div class="cell lead">
+        <div class="gk-lbl">Portfolio value</div>
+        <div class="gk-val neon">$604,472</div>
+        <div class="gk-sub">+$8,210 today · +1.38%</div>
+      </div>
+      <div class="cell"><div class="gk-lbl"><span class="glyph">Δ</span> Net delta</div><div class="gk-val neg">−63.30</div><div class="gk-sub">−9.6% exposure</div></div>
+      <div class="cell"><div class="gk-lbl"><span class="glyph">Θ</span> Theta</div><div class="gk-val pos">+1,240</div><div class="gk-sub">/ day</div></div>
+      <div class="cell"><div class="gk-lbl"><span class="glyph">Γ</span> Gamma</div><div class="gk-val">−4.1</div><div class="gk-sub">per $1</div></div>
+      <div class="cell"><div class="gk-lbl">ν Vega</div><div class="gk-val">−820</div><div class="gk-sub">per 1% IV</div></div>
+      <div class="cell"><div class="gk-lbl">YTD premium</div><div class="gk-val neon">$56,064</div><div class="gk-sub">68% of target</div></div>
+    </div>
+  </div>
+
+  <!-- ticker -->
+  <div class="row">
+    <div class="section"><span><span class="n">02</span>Markets</span><span class="right">15-min delayed</span></div>
+    <div class="ticker">
+      <div class="tick"><div class="head"><span class="label">SPY</span><span class="live-dot"></span></div><div class="price">655.06</div><div class="change pos">+0.44%</div></div>
+      <div class="tick"><div class="head"><span class="label">QQQ</span></div><div class="price">486.21</div><div class="change pos">+0.61%</div></div>
+      <div class="tick"><div class="head"><span class="label">IWM</span></div><div class="price">228.40</div><div class="change neg">−0.32%</div></div>
+      <div class="tick"><div class="head"><span class="label">VIX</span></div><div class="price">14.82</div><div class="change neg">−3.1%</div></div>
+      <div class="tick"><div class="head"><span class="label">10Y</span></div><div class="price">4.21</div><div class="change warn">+2bp</div></div>
+      <div class="tick"><div class="head"><span class="label">DXY</span></div><div class="price">103.4</div><div class="change fg3">flat</div></div>
+    </div>
+  </div>
+
+  <!-- position cards -->
+  <div class="row">
+    <div class="section"><span><span class="n">03</span>Open positions</span><span class="right">→ View all</span></div>
+    <div class="card-grid">
+
+      <div class="pcard">
+        <div class="pc-head">
+          <div class="pc-id"><div class="t">NVDA</div><div class="nm">NVIDIA Corp <span class="pc-strat Income">Income</span></div></div>
+          <div class="pc-px"><div class="v">$184.22</div><div class="ch pos">+1.2%</div><div class="pc-ev">Earns 14d</div></div>
+        </div>
+        <div class="pc-greeks">
+          <div class="pc-gk"><div class="k">Δ</div><div class="v">+62</div></div>
+          <div class="pc-gk"><div class="k">Θ</div><div class="v pos">+58</div></div>
+          <div class="pc-gk"><div class="k">IV</div><div class="v warn">42%</div></div>
+          <div class="pc-gk"><div class="k">DTE</div><div class="v">14</div></div>
+        </div>
+        <div class="pc-foot">
+          <div class="net"><div class="k">Open P&amp;L</div><div class="v pos">+$2,327</div></div>
+          <div class="posd-wrap"><div class="k">Position Δ</div><div class="v">+62</div></div>
+        </div>
+      </div>
+
+      <div class="pcard">
+        <div class="pc-head">
+          <div class="pc-id"><div class="t">AAPL</div><div class="nm">Apple Inc <span class="pc-strat Income">Income</span></div></div>
+          <div class="pc-px"><div class="v">$229.10</div><div class="ch pos">+0.8%</div><div class="pc-ev far">Earns 38d</div></div>
+        </div>
+        <div class="pc-greeks">
+          <div class="pc-gk"><div class="k">Δ</div><div class="v">+58</div></div>
+          <div class="pc-gk"><div class="k">Θ</div><div class="v pos">+42</div></div>
+          <div class="pc-gk"><div class="k">IV</div><div class="v">22%</div></div>
+          <div class="pc-gk"><div class="k">DTE</div><div class="v">16</div></div>
+        </div>
+        <div class="pc-foot">
+          <div class="net"><div class="k">Open P&amp;L</div><div class="v pos">+$3,180</div></div>
+          <div class="posd-wrap"><div class="k">Position Δ</div><div class="v">+58</div></div>
+        </div>
+      </div>
+
+      <div class="pcard attn">
+        <div class="pc-head">
+          <div class="pc-id"><div class="t">TSLA</div><div class="nm">Tesla Inc <span class="pc-strat Yield">Yield</span></div></div>
+          <div class="pc-px"><div class="v">$248.60</div><div class="ch neg">−2.1%</div><div class="pc-ev">Earns 6d</div></div>
+        </div>
+        <div class="pc-greeks">
+          <div class="pc-gk"><div class="k">Δ</div><div class="v neg">−84</div></div>
+          <div class="pc-gk"><div class="k">Θ</div><div class="v pos">+71</div></div>
+          <div class="pc-gk"><div class="k">IV</div><div class="v warn">61%</div></div>
+          <div class="pc-gk"><div class="k">DTE</div><div class="v neg">6</div></div>
+        </div>
+        <div class="pc-foot">
+          <div class="net"><div class="k">Open P&amp;L</div><div class="v neg">−$1,980</div></div>
+          <div class="posd-wrap"><div class="k">Position Δ</div><div class="v">−84</div></div>
+        </div>
+      </div>
+
+      <div class="pcard">
+        <div class="pc-head">
+          <div class="pc-id"><div class="t">JPM</div><div class="nm">JPMorgan <span class="pc-strat Investment">Investment</span></div></div>
+          <div class="pc-px"><div class="v">$262.40</div><div class="ch pos">+0.4%</div><div class="pc-ev far">Earns 41d</div></div>
+        </div>
+        <div class="pc-greeks">
+          <div class="pc-gk"><div class="k">Δ</div><div class="v">+120</div></div>
+          <div class="pc-gk"><div class="k">Θ</div><div class="v pos">+18</div></div>
+          <div class="pc-gk"><div class="k">IV</div><div class="v">19%</div></div>
+          <div class="pc-gk"><div class="k">DTE</div><div class="v">—</div></div>
+        </div>
+        <div class="pc-foot">
+          <div class="net"><div class="k">Open P&amp;L</div><div class="v pos">+$5,640</div></div>
+          <div class="posd-wrap"><div class="k">Position Δ</div><div class="v">+120</div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- tools rail -->
+  <div class="tools-rail" style="margin-top:56px">
+    <a>↑ Replace CSV</a>
+    <a>→ New strategy</a>
+    <a>→ Position lens</a>
+    <span class="build">Navi v2 · example</span>
+  </div>
+
+</div></div>
+</body>
+</html>

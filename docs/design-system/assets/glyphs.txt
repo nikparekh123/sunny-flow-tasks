@@ -1,0 +1,28 @@
+Navi glyph vocabulary — copy-paste these; do not substitute with emoji or icon-font replacements.
+
+ARROWS (use in button labels, row affordances, movement)
+  ↑   up        e.g. "↑ Replace CSV", "↑ elevated"
+  ↓   down      e.g. "↓ collecting"
+  →   forward   e.g. "→ View positions", "→ Download template"
+  ←   back
+
+STATUS
+  ✓   confirm   e.g. "✓ Confirm roll"
+  ✕   close     e.g. "✕ Close position"
+  ⚠   warning   e.g. "⚠ SPY crossed below EMA21 — $673"
+
+SEPARATORS
+  ·   middle dot — ticker metadata chains: "SPY · $655.06 · +0.44%"
+  —   em dash   — cause → effect: "IV elevated — 38th percentile"
+  –   en dash   — ranges: "$637–$673", "15–25%"
+  −   minus     — signed numbers: "−63.30", "−$91,740" (NOT hyphen)
+
+GREEKS (use literal Greek letters, DM Mono)
+  Δ   delta
+  Θ   theta
+  Γ   gamma
+  ν   vega    (often written "vega" in copy — Greek letter is acceptable)
+  ρ   rho
+  σ   sigma / vol
+
+Forbidden: emoji (😀 🚀 💰 etc), decorative Unicode (★ ✦), SF Symbols replicas.

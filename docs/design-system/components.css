@@ -1,0 +1,12 @@
+/* ============================================================
+   NAVI DESIGN SYSTEM · components.css
+   Umbrella import of every component module.
+   Load AFTER tokens.css:
+     <link rel="stylesheet" href="tokens.css">
+     <link rel="stylesheet" href="components.css">
+   ============================================================ */
+
+@import url('css/dashboard.css');
+@import url('css/positions.css');
+@import url('css/strategy.css');
+@import url('css/band.css');
