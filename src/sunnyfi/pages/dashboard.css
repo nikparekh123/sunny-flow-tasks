@@ -84,6 +84,20 @@
    the design intended (not edge-to-edge). */
 .dash.dash-wide > .dash-inner { max-width: 100%; padding-left: 0; padding-right: 0; }
 
+/* …but the brand bar still needs to read like every other page (centered
+   at 1440px with 56px L/R breathing room), or "SUNNYFI / PORTFOLIO" +
+   nav + date label end up smeared across the full viewport. Re-constrain
+   it here. box-sizing: border-box (from tokens.css *) means max-width
+   includes the padding, so the visible nav band stays identical to
+   /dashboard, /income, etc. */
+.dash.dash-wide > .dash-inner > .brandbar {
+  max-width: 1440px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 56px;
+  padding-right: 56px;
+}
+
 /* ─────────────────── Typography ─────────────────── */
 
 .dash .display { font-family: var(--sans); font-weight: 800; letter-spacing: -.045em; line-height: .9; }
