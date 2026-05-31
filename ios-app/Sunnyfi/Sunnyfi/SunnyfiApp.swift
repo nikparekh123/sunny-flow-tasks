@@ -33,7 +33,7 @@ private struct RootView: View {
             SignInView(auth: auth)
 
         case .signedIn:
-            ContentView()
+            TabRootView(auth: auth)
         }
     }
 }
