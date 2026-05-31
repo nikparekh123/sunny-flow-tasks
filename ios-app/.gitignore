@@ -1,0 +1,17 @@
+# Xcode user data — workspace state, breakpoints, schemes per user
+**/xcuserdata/
+**/*.xcuserstate
+
+# Build output
+build/
+DerivedData/
+
+# Secrets — committed Secrets.example.swift, real Secrets.swift stays local
+Sunnyfi/Sunnyfi/Secrets.swift
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# macOS junk
+.DS_Store
