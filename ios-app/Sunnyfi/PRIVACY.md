@@ -2,7 +2,7 @@
 
 **Last updated: June 5, 2026**
 
-Sunnyfi is an internal portfolio and options-trading application used by Sunny Wealth Management employees and authorized testers. This document explains what data the app collects, how it's stored, and how to delete it.
+Sunnyfi is an internal portfolio and options-trading application used by Sunny Wealth Management employees and authorized testers. It is **not** a multi-tenant product: the entire SWM team signs in to a single shared account and views the same book of trades, positions, and lots. This document explains what data the app collects, how it's stored, and how to delete it.
 
 ## What we collect
 
@@ -24,14 +24,14 @@ We do **not** collect:
 
 ## How we use it
 
-- Trade and position data is shown only to the signed-in user. Other users cannot see your positions; Sunny WM administrators can see aggregate data for support and debugging.
+- Trade and position data is the firm's shared book and is visible to anyone signed in to the shared SWM team account. Sunny WM administrators can see all data for support and debugging.
 - Crash reports are reviewed by the engineering team to fix bugs. They contain stack traces, device model, OS version, and app build — not portfolio contents.
 - Push notification tokens are used only to send notifications you opt into via iOS settings; we do not share them with third parties.
 
 ## How we store it
 
-- All user data is stored in Supabase databases hosted in the United States.
-- Database access is gated by Row-Level Security policies that match `auth.uid()` against the row's `user_id` column. You cannot read or modify another user's data.
+- All data is stored in Supabase databases hosted in the United States.
+- Sign-in is gated by Supabase Auth on the shared SWM team account. Row-Level Security is enabled on every table; only authenticated clients can read or modify rows.
 - Crash data is stored by Sentry per their [Privacy & Security](https://sentry.io/privacy/) terms.
 - Data is encrypted in transit (HTTPS/TLS) and at rest.
 
@@ -44,10 +44,10 @@ We do **not** collect:
 ## Your rights
 
 You can:
-- **Export your data** — request a copy of your trade and position rows by emailing the address below.
-- **Delete your account** — sign out from the app's You tab and email the address below to request full deletion. We will delete your auth record and all rows scoped to your `user_id` within 7 days.
+- **Export firm data** — request a copy of the firm's trade and position rows by emailing the address below. Because the data is shared, export requests are coordinated with SWM administration.
+- **Stop using the app** — sign out from the You tab and uninstall. Your APNs push token and Face ID state are cleared from the device. Firm data remains in Supabase for the rest of the team.
 - **Opt out of notifications** — toggle them off in iOS Settings → Sunnyfi → Notifications.
-- **Opt out of crash reporting** — not currently exposed in-app; email us if you want it disabled for your account.
+- **Opt out of crash reporting** — not currently exposed in-app; email us if you want it disabled.
 
 ## Children
 
