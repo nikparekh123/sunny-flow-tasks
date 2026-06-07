@@ -51,14 +51,15 @@ CREATE TABLE IF NOT EXISTS public.macro_events (
 CREATE INDEX IF NOT EXISTS idx_macro_events_date
   ON public.macro_events (event_date);
 
--- Hot path for the Home card query: "next N events from today"
-CREATE INDEX IF NOT EXISTS idx_macro_events_upcoming
-  ON public.macro_events (event_date, event_time)
-  WHERE event_date >= CURRENT_DATE;
+-- Hot path for the Home card query: "next N events from today".
+-- Can't use a partial index with WHERE event_date >= CURRENT_DATE because
+-- CURRENT_DATE is STABLE, not IMMUTABLE. The full date+time index is fine —
+-- Postgres scans only the relevant range when the query filters by date.
+CREATE INDEX IF NOT EXISTS idx_macro_events_date_time
+  ON public.macro_events (event_date, event_time);
 
-CREATE INDEX IF NOT EXISTS idx_macro_events_importance_upcoming
-  ON public.macro_events (event_date)
-  WHERE importance >= 3 AND event_date >= CURRENT_DATE;
+CREATE INDEX IF NOT EXISTS idx_macro_events_importance_date
+  ON public.macro_events (importance, event_date);
 
 -- updated_at trigger
 CREATE OR REPLACE FUNCTION public.macro_events_set_updated_at()
