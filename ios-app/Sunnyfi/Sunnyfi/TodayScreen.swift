@@ -495,14 +495,13 @@ struct TodaySheet: View {
                     }
                 }
 
-                // Hero — big editorial number per spec. Larger than
-                // the original 54pt to match the visual weight in the
-                // handoff screenshots; auto-shrinks if a long value
-                // like "+1,234d" wouldn't fit.
+                // Hero — slightly smaller than before per user. 56pt
+                // hits a clean middle ground (spec is 54pt; we'd been
+                // at 68 to match earlier-screenshot visual weight).
                 HStack(alignment: .lastTextBaseline, spacing: 12) {
                     Text(item.num)
-                        .font(.system(size: 68, weight: .semibold, design: .monospaced))
-                        .tracking(-2.4)            // -.035em × 68 ≈ -2.4
+                        .font(.system(size: 56, weight: .semibold, design: .monospaced))
+                        .tracking(-2.0)            // -.035em × 56 ≈ -2.0
                         .foregroundStyle(toneColor(item.tone))
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
