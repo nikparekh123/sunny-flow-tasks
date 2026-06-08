@@ -24,6 +24,7 @@
 //  state-change transitions remain.
 //
 
+import Combine
 import SwiftUI
 
 // ───────────────────────────────────────────────────────────────
