@@ -27,15 +27,43 @@ final class PortfolioStore {
     var isRefreshing: Bool = false
     var error: String?
 
+    // Raw rows kept around so Trades / Performance / event-card derivers
+    // don't need to re-fetch. Set inside fetchAll() before the join.
+    var allTrades: [OptionTradeRow] = []
+    var allShareSells: [ShareSellRow] = []
+    var allGreeks: [OptionGreeksRow] = []
+    var dailyCloses: [DailyCloseRow] = []
+    var allShareLots: [ShareLotRow] = []
+    /// History from the daily-theta-snapshot cron. Sorted oldest → newest.
+    /// Powers the Hedge tab's Δ-vs-yesterday, sparkline, and prior-week strip.
+    var dailyTheta: [DailyThetaSnapshotRow] = []
+    /// Active rows from the health-monitor cron. Drives the global
+    /// "something is broken" banner.
+    var activeAlerts: [SystemAlertRow] = []
+    /// True if the last fetchAll() returned CancellationError on every
+    /// child task — signals a transient view-lifecycle race so load()
+    /// retries once on a detached task. Internal to the store.
+    private(set) var lastRunWasAllCancelled: Bool = false
+
     private let client = SupabaseService.client
 
     // MARK: - Public API
 
-    /// Initial load — runs all 6 queries in parallel, then joins.
+    /// Initial load — runs all 10 queries in parallel, then joins.
+    /// If every fetch was cancelled (almost always a view-lifecycle
+    /// race, never a real failure), we retry once on a detached task
+    /// to escape whatever cancelled us.
     func load() async {
         isLoading = true
         defer { isLoading = false }
         await fetchAll()
+        if lastRunWasAllCancelled {
+            // Unstructured detached task — survives view re-renders
+            // and scene-phase blips. Bounded by the app's lifetime.
+            _ = await Task.detached { @MainActor [weak self] in
+                await self?.fetchAll()
+            }.value
+        }
     }
 
     /// Pull-to-refresh — invokes the mp-refresh edge function, then re-fetches.
@@ -57,58 +85,146 @@ final class PortfolioStore {
 
     // MARK: - Fetch + join
 
-    private func fetchAll() async {
-        // Sequential for now — keeps cancellation behaviour simple and lets
-        // us see exactly which query fails first. Six round-trips × ~100ms
-        // is fine for the smoke test; we'll parallelize in Phase 4.
+    func fetchAll() async {
+        // All 10 queries fire in parallel. Each is wrapped in its own
+        // Result so a single table failing doesn't take the whole load
+        // down — we surface partial-data state via `self.error`.
         let c = client
+
+        async let pTask  = Self.tryFetch { try await c.from("positions")
+            .select("ticker, name, sector, quantity, avg_cost, current_price, prev_close, status, earnings_date, realized_stock_pl")
+            .execute().value as [PositionRow] }
+        async let tTask  = Self.tryFetch { try await c.from("option_trades")
+            .select("id, ticker, trade_date, action, option_type, direction, contracts, strike, premium, expiry, closes_trade_id, source, ibkr_trade_id, last_synced_at, voided_at")
+            .is("voided_at", value: nil)
+            .execute().value as [OptionTradeRow] }
+        async let gTask  = Self.tryFetch { try await c.from("option_greeks_latest")
+            .select("option_trade_id, delta, gamma, theta, vega, iv, open_interest, volume, last_mark, captured_at")
+            .execute().value as [OptionGreeksRow] }
+        async let qTask  = Self.tryFetch { try await c.from("ticker_quotes_latest")
+            .select("ticker, spot, day_change_pct, beta, captured_at")
+            .execute().value as [TickerQuoteRow] }
+        async let sTask  = Self.tryFetch { try await c.from("share_sells")
+            .select("ticker, realized_pl, trade_date")
+            .execute().value as [ShareSellRow] }
+        async let oTask  = Self.tryFetch { try await c.from("strategy_overlay")
+            .select("ticker, bucket")
+            .execute().value as [StrategyOverlayRow] }
+        async let dcTask = Self.tryFetch { try await c.from("daily_closes")
+            .select("ticker, date, close_price")
+            .order("date", ascending: false)
+            .limit(2000)
+            .execute().value as [DailyCloseRow] }
+        async let slTask = Self.tryFetch { try await c.from("share_lots")
+            .select("id, ticker, acquired_date, fifo_order, qty_original, qty_remaining, cost_per_share, source, linked_assignment_id, ibkr_trade_id, last_synced_at, voided_at")
+            .is("voided_at", value: nil)
+            .gt("qty_remaining", value: 0)
+            .order("acquired_date", ascending: true)
+            .order("fifo_order", ascending: true)
+            .execute().value as [ShareLotRow] }
+        // Last 60 daily theta snapshots — plenty for a 14-day sparkline
+        // plus 4 weeks of prior-week aggregation, with headroom for
+        // gaps (holidays, missed cron runs).
+        async let dtsTask = Self.tryFetch { try await c.from("daily_theta_snapshot")
+            .select("snapshot_date, total_burn, long_put_count, per_ticker")
+            .order("snapshot_date", ascending: false)
+            .limit(60)
+            .execute().value as [DailyThetaSnapshotRow] }
+        // Active alerts from the health-monitor cron — drives the global banner.
+        async let alertsTask = Self.tryFetch { try await c.from("system_alerts")
+            .select("id, code, severity, title, detail, created_at, resolved_at")
+            .is("resolved_at", value: nil)
+            .order("created_at", ascending: false)
+            .execute().value as [SystemAlertRow] }
+
+        let p   = await pTask
+        let t   = await tTask
+        let g   = await gTask
+        let q   = await qTask
+        let s   = await sTask
+        let o   = await oTask
+        let dc  = await dcTask
+        let sl  = await slTask
+        let dts = await dtsTask
+        let alerts = await alertsTask
+
+        // Collect any errors so the UI can surface the failed-table list.
         var errs: [String] = []
+        func unwrap<T>(_ r: Result<T, Error>, _ label: String, default fallback: T) -> T {
+            switch r {
+            case .success(let v): return v
+            case .failure(let e):
+                errs.append("\(label): \(e.localizedDescription)")
+                return fallback
+            }
+        }
+        let positions = unwrap(p,   "positions",            default: [])
+        let trades    = unwrap(t,   "option_trades",        default: [])
+        let greeks    = unwrap(g,   "option_greeks_latest", default: [])
+        let quotes    = unwrap(q,   "ticker_quotes_latest", default: [])
+        let sells     = unwrap(s,   "share_sells",          default: [])
+        let overlay   = unwrap(o,   "strategy_overlay",     default: [])
+        let closes    = unwrap(dc,  "daily_closes",         default: [])
+        let lots      = unwrap(sl,  "share_lots",           default: [])
+        let theta     = unwrap(dts, "daily_theta_snapshot", default: [])
+        let liveAlerts = unwrap(alerts, "system_alerts",    default: [])
 
-        let p: [PositionRow] = await Self.fetch("positions", into: &errs) {
-            try await c.from("positions")
-                .select("ticker, name, sector, quantity, avg_cost, current_price, prev_close, status, earnings_date, realized_stock_pl")
-                .execute().value
-        }
-        let t: [OptionTradeRow] = await Self.fetch("option_trades", into: &errs) {
-            try await c.from("option_trades")
-                .select("id, ticker, trade_date, action, option_type, direction, contracts, strike, premium, expiry, closes_trade_id")
-                .execute().value
-        }
-        let g: [OptionGreeksRow] = await Self.fetch("option_greeks", into: &errs) {
-            try await c.from("option_greeks")
-                .select("option_trade_id, delta, gamma, theta, vega, iv, open_interest, volume, last_mark, captured_at")
-                .execute().value
-        }
-        let q: [TickerQuoteRow] = await Self.fetch("ticker_quotes", into: &errs) {
-            try await c.from("ticker_quotes")
-                .select("ticker, spot, day_change_pct, beta, captured_at")
-                .execute().value
-        }
-        let s: [ShareSellRow] = await Self.fetch("share_sells", into: &errs) {
-            try await c.from("share_sells")
-                .select("ticker, realized_pl, trade_date")
-                .execute().value
-        }
-        let o: [StrategyOverlayRow] = await Self.fetch("strategy_overlay", into: &errs) {
-            try await c.from("strategy_overlay")
-                .select("ticker, bucket")
-                .execute().value
+        // Filter cancellations — they're internal SwiftUI lifecycle
+        // mechanics, never something the user can act on. If those
+        // are the *only* errors we'd otherwise show, hide them; the
+        // retry in load() picks up the real data.
+        let cancellations = errs.filter {  $0.contains("CancellationError") }.count
+        let actionable    = errs.filter { !$0.contains("CancellationError") }
+        self.error = actionable.isEmpty ? nil : actionable.joined(separator: "\n\n")
+        // Stash whether THIS run was a total cancellation cascade so
+        // load() can decide to retry.
+        let allCancelled = (cancellations == errs.count) && cancellations > 0
+        self.lastRunWasAllCancelled = allCancelled
+
+        // Don't wipe existing good data when this fetch was a total
+        // cancellation cascade — load()'s detached retry will land
+        // real data on the next call. Without this guard, a transient
+        // view-lifecycle blip flashed the UI to "$0 / no sync yet"
+        // for a few seconds (the user's repeated complaint).
+        if allCancelled && !self.companies.isEmpty {
+            return
         }
 
-        if !errs.isEmpty {
-            self.error = errs.joined(separator: "\n\n")
-        } else {
-            self.error = nil
+        // Stronger guard for non-cancellation errors: if the critical
+        // tables (positions, option_trades, greeks, quotes) ALL came
+        // back empty AND we hit at least one error, the fetch is
+        // effectively useless — keep what we had. This covers transient
+        // network failures where everything 5xx'd or timed out.
+        let fetchedAnyCritical =
+            !positions.isEmpty || !trades.isEmpty
+            || !greeks.isEmpty || !quotes.isEmpty
+        if !fetchedAnyCritical && !errs.isEmpty && !self.companies.isEmpty {
+            return
         }
+
+        self.allTrades = trades
+        self.allShareSells = sells
+        self.allGreeks = greeks
+        self.dailyCloses = closes
+        self.allShareLots = lots
+        // Server returns newest → oldest; flip so [0] is the earliest
+        // and the sparkline/history utilities can walk forward.
+        self.dailyTheta = theta.reversed()
+        self.activeAlerts = liveAlerts
 
         let built = Self.buildCompanies(
-            positions: p, trades: t, greeks: g,
-            quotes: q, shareSells: s, overlay: o
+            positions: positions, trades: trades, greeks: greeks,
+            quotes: quotes, shareSells: sells, overlay: overlay
         )
         self.companies = built.open
         self.closedCompanies = built.closed
         self.portfolio = Self.buildPortfolio(built.open)
-        self.freshness = Self.latestCapture(greeks: g, quotes: q)
+        // Only overwrite the freshness timestamp when we actually
+        // received fresh greeks/quotes — otherwise we'd reset it to
+        // nil ("no sync yet") on a partial-data fetch.
+        if let newFreshness = Self.latestCapture(greeks: greeks, quotes: quotes) {
+            self.freshness = newFreshness
+        }
     }
 
     // MARK: - Per-query helper
@@ -131,6 +247,20 @@ final class PortfolioStore {
             print("[PortfolioStore] \(line)")
             errs.append(line)
             return []
+        }
+    }
+
+    /// Concurrent-safe variant: returns `Result` so we can run many
+    /// fetches in parallel via `async let` and collect errors afterwards
+    /// without sharing a mutable `inout errs` across tasks (which
+    /// the old `fetch(...)` couldn't do safely under Swift concurrency).
+    private static func tryFetch<T: Sendable>(
+        _ body: @Sendable () async throws -> T
+    ) async -> Result<T, Error> {
+        do {
+            return .success(try await body())
+        } catch {
+            return .failure(error)
         }
     }
 
@@ -200,15 +330,28 @@ final class PortfolioStore {
                 ))
             }
 
-            // Option legs — apply contract × 100 multiplier + sign by direction
+            // Sum of contracts already closed per open id (for partial-close support).
+            var closedByOpenId: [String: Double] = [:]
+            for tr in trades where tr.action == "close" {
+                if let oid = tr.closes_trade_id {
+                    closedByOpenId[oid, default: 0] += tr.contracts
+                }
+            }
+
+            // Option legs — apply contract × 100 multiplier + sign by direction.
+            // Effective contracts = open.contracts − already-closed; if 0, skip.
             for trade in openLegsByTicker[ticker] ?? [] {
+                let closedSoFar = closedByOpenId[trade.id] ?? 0
+                let active = max(0, trade.contracts - closedSoFar)
+                if active <= 0 { continue }
+
                 let g = greeksByTradeID[trade.id]
                 let side: LegSide = trade.direction == "long" ? .long : .short
                 let sign: Double = side == .short ? -1 : 1
-                let multiplier = trade.contracts * 100 * sign
+                let multiplier = active * 100 * sign
                 let mark = g?.last_mark ?? trade.premium
-                let qty = trade.contracts * sign
-                let unreal = (mark - trade.premium) * trade.contracts * 100 * (side == .long ? 1 : -1)
+                let qty = active * sign
+                let unreal = (mark - trade.premium) * active * 100 * (side == .long ? 1 : -1)
 
                 legs.append(Leg(
                     kind: trade.option_type == "call" ? .call : .put,
@@ -239,7 +382,15 @@ final class PortfolioStore {
                 agg.vega   += l.vega
                 agg.unreal += l.unreal
                 agg.real   += l.real
-                if l.kind == .stock { agg.mv += l.qty * l.last }
+                // Market value of the leg, signed so short legs subtract
+                // (they're liabilities — money owed to close).
+                // • Stock: qty × spot
+                // • Option: qty × mark × 100 (qty is already signed by
+                //   direction, so short call/put automatically goes negative)
+                switch l.kind {
+                case .stock:        agg.mv += l.qty * l.last
+                case .call, .put:   agg.mv += l.qty * l.last * 100
+                }
             }
             agg.real += realizedByTicker[ticker] ?? 0
 
