@@ -16,7 +16,9 @@ enum AppTab: String, CaseIterable, Hashable {
 
     var label: String {
         switch self {
-        case .home:        return "Home"
+        // Home tab is now the "Today" landing — ranked digest of the
+        // N things that matter today. See design_handoff_today_homepage.
+        case .home:        return "Today"
         case .trades:      return "Trades"
         case .hedge:       return "Hedge"
         // 5-tab layout — "Performance" shortens to "Perf" so the
@@ -28,7 +30,7 @@ enum AppTab: String, CaseIterable, Hashable {
 
     var symbol: String {
         switch self {
-        case .home:        return "house.fill"
+        case .home:        return "sun.max.fill"
         case .trades:      return "chart.line.uptrend.xyaxis"
         // Shield = "protect the book". Hedge tab is the awareness
         // surface — not transactional like Trades.
@@ -45,9 +47,10 @@ struct TabRootView: View {
     let prefs: NotificationPrefs
     @State private var store = PortfolioStore()
     @State private var reach = Reachability()
-    // Home + Hedge are being rebuilt — landing the user on Trades
-    // in the interim so they don't see an empty/unfinished Home.
-    @State private var tab: AppTab = .trades
+    // Today landing rebuilt per design_handoff_today_homepage — the
+    // app now opens to it. Hedge is still rebuilding (hidden in the
+    // tab bar) but the Home/Today tab is live.
+    @State private var tab: AppTab = .home
     /// Ticker for the top-level TickerTradesSheet — driven by push
     /// deep-link taps (AppNavigator) or any in-app trigger that
     /// wants to surface the per-ticker modal from anywhere.
@@ -107,7 +110,7 @@ struct TabRootView: View {
                 OfflineBanner(isOnline: reach.isOnline, lastFreshness: store.freshness)
                 Group {
                     switch tab {
-                    case .home:        HomeScreen(store: store, auth: auth)
+                    case .home:        TodayScreen(store: store)
                     case .trades:      TradesScreen(store: store, auth: auth)
                     case .hedge:       HedgeScreen(store: store, auth: auth)
                     case .performance: PerformanceScreen(store: store, auth: auth)
@@ -204,12 +207,11 @@ private struct TickerWrapper: Identifiable {
 private struct DockedTabBar: View {
     @Binding var active: AppTab
 
-    /// Tabs we actually render. Home + Hedge are temporarily
-    /// suppressed while they get rebuilt — leaving the enum cases
-    /// intact so push deep-links / push notifications targeting
-    /// those screens keep compiling, just not visible in the bar.
+    /// Tabs we actually render. Hedge is still rebuilding so it's
+    /// suppressed (enum case kept for push deep-links). Home is now
+    /// the live Today landing tab — visible and default.
     private var visibleTabs: [AppTab] {
-        AppTab.allCases.filter { $0 != .home && $0 != .hedge }
+        AppTab.allCases.filter { $0 != .hedge }
     }
 
     var body: some View {

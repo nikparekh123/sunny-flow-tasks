@@ -46,6 +46,12 @@ final class PortfolioStore {
     /// Active rows from the health-monitor cron. Drives the global
     /// "something is broken" banner.
     var activeAlerts: [SystemAlertRow] = []
+    /// Upcoming + recent macro events (FOMC, CPI, holidays) — drives
+    /// the Today screen's Events bucket.
+    var allMacroEvents: [MacroEventRow] = []
+    /// Upcoming earnings for positions + sector peers — drives the
+    /// Today screen's Earnings bucket.
+    var allEarningsEvents: [EarningsEventRow] = []
     /// True if the last fetchAll() returned CancellationError on every
     /// child task — signals a transient view-lifecycle race so load()
     /// retries once on a detached task. Internal to the store.
@@ -145,6 +151,22 @@ final class PortfolioStore {
             .is("resolved_at", value: nil)
             .order("created_at", ascending: false)
             .execute().value as [SystemAlertRow] }
+        // Macro events for the Today screen — drives the Events bucket.
+        // Pull a generous window so v1 ranking has options to pick from
+        // (next 90 days). The query is cheap (few dozen rows).
+        async let meTask = Self.tryFetch { try await c.from("macro_events")
+            .select("id, event_date, event_time, country, name, category, importance, forecast, previous, actual, is_holiday, early_close, summary")
+            .gte("event_date", value: Self.isoDateToday())
+            .lte("event_date", value: Self.isoDate(daysFromNow: 90))
+            .order("event_date", ascending: true)
+            .execute().value as [MacroEventRow] }
+        // Earnings events for the Today screen — drives the Earnings bucket.
+        async let eeTask = Self.tryFetch { try await c.from("earnings_events")
+            .select("id, ticker, company_name, report_date, report_time, eps_forecast, revenue_forecast, market_cap, scope_tag, peer_of_tickers, sector_etf")
+            .gte("report_date", value: Self.isoDateToday())
+            .lte("report_date", value: Self.isoDate(daysFromNow: 60))
+            .order("report_date", ascending: true)
+            .execute().value as [EarningsEventRow] }
 
         let p   = await pTask
         let t   = await tTask
@@ -156,6 +178,8 @@ final class PortfolioStore {
         let sl  = await slTask
         let dts = await dtsTask
         let alerts = await alertsTask
+        let me  = await meTask
+        let ee  = await eeTask
 
         // Collect any errors so the UI can surface the failed-table list.
         var errs: [String] = []
@@ -177,6 +201,8 @@ final class PortfolioStore {
         let lots      = unwrap(sl,  "share_lots",           default: [])
         let theta     = unwrap(dts, "daily_theta_snapshot", default: [])
         let liveAlerts = unwrap(alerts, "system_alerts",    default: [])
+        let macroEvents = unwrap(me, "macro_events",        default: [])
+        let earningsEvents = unwrap(ee, "earnings_events",  default: [])
 
         // Filter cancellations — they're internal SwiftUI lifecycle
         // mechanics, never something the user can act on. If those
@@ -220,6 +246,8 @@ final class PortfolioStore {
         // and the sparkline/history utilities can walk forward.
         self.dailyTheta = theta.reversed()
         self.activeAlerts = liveAlerts
+        self.allMacroEvents = macroEvents
+        self.allEarningsEvents = earningsEvents
 
         let built = Self.buildCompanies(
             positions: positions, trades: trades, greeks: greeks,
@@ -464,6 +492,25 @@ final class PortfolioStore {
         let now = Calendar.current.startOfDay(for: Date())
         let comps = Calendar.current.dateComponents([.day], from: now, to: target)
         return comps.day
+    }
+
+    /// "YYYY-MM-DD" for today in America/New_York. Used to bound
+    /// macro_events / earnings_events fetches to upcoming-only.
+    static func isoDateToday() -> String {
+        let df = DateFormatter()
+        df.timeZone = TimeZone(identifier: "America/New_York")
+        df.dateFormat = "yyyy-MM-dd"
+        return df.string(from: Date())
+    }
+
+    /// "YYYY-MM-DD" for N calendar days from now in America/New_York.
+    static func isoDate(daysFromNow: Int) -> String {
+        let df = DateFormatter()
+        df.timeZone = TimeZone(identifier: "America/New_York")
+        df.dateFormat = "yyyy-MM-dd"
+        let d = Calendar(identifier: .gregorian)
+            .date(byAdding: .day, value: daysFromNow, to: Date()) ?? Date()
+        return df.string(from: d)
     }
 
     private static func latestCapture(greeks: [OptionGreeksRow], quotes: [TickerQuoteRow]) -> Date? {
