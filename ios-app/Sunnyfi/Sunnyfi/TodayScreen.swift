@@ -201,8 +201,8 @@ private struct Headline: View {
             // (per user — the editorial weight comes from the serif
             // itself, not weight contrast).
             Text("\(count) things that matter today")
-                .font(.system(size: 30, weight: .light, design: .serif))
-                .tracking(-0.6)
+                .font(.system(size: 35, weight: .light, design: .serif))
+                .tracking(-0.7)
                 .foregroundStyle(Color.theme.fg1)
                 .lineSpacing(2)
                 .multilineTextAlignment(.leading)
@@ -371,8 +371,8 @@ private struct TodayRow: View {
                 HStack(alignment: .center, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(numRendered)
-                            .font(.system(size: 30, weight: .semibold, design: .monospaced))
-                            .tracking(-0.9)
+                            .font(.system(size: 32, weight: .semibold, design: .monospaced))
+                            .tracking(-1.0)
                             .foregroundStyle(toneColor(item.tone))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
@@ -387,20 +387,20 @@ private struct TodayRow: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 9) {
                             Text(String(format: "%02d", idx))
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                .foregroundStyle(Color.theme.neon)
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.theme.fg1)   // brighter — deep near-black green for high contrast
                             Text(item.category.uppercased())
                                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                                 .tracking(1.6)
                                 .foregroundStyle(Color.theme.fg3)
                         }
                         Text(item.name)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(Color.theme.fg1)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
                         Text(item.sub)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 14, design: .monospaced))
                             .foregroundStyle(Color.theme.fg3)
                             .lineLimit(1)
                     }
