@@ -150,14 +150,27 @@ private struct MarketsOpenChip: View {
         return mins >= 9*60 + 30 && mins < 16*60
     }
 
+    @State private var pulse = false
+
     var body: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(isOpen ? Color.theme.lime : Color.theme.fg4)
-                .frame(width: 6, height: 6)
+            // Live-dot: lime fill + soft halo that breathes every 2.5s
+            // (spec: --tint-lime ring · pulse 2.5s var(--ease) infinite).
+            ZStack {
+                Circle()
+                    .fill(Color.theme.lime.opacity(0.30))
+                    .frame(width: 12, height: 12)
+                    .scaleEffect(pulse ? 1.0 : 0.5)
+                    .opacity(pulse ? 0 : 0.6)
+                    .animation(.easeInOut(duration: 2.5).repeatForever(autoreverses: false), value: pulse)
+                Circle()
+                    .fill(isOpen ? Color.theme.lime : Color.theme.fg4)
+                    .frame(width: 6, height: 6)
+            }
+            .onAppear { if isOpen { pulse = true } }
             Text(isOpen ? "Markets open" : "Markets closed")
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .tracking(1.5)
+                .tracking(0.4)
                 .textCase(.uppercase)
                 .foregroundStyle(Color.theme.fg3)
         }
@@ -185,24 +198,28 @@ private struct Headline: View {
                 .tracking(1.6)
                 .foregroundStyle(Color.theme.fg3)
 
-            HStack(spacing: 6) {
+            // Single concatenated Text so "{N} things that matter today"
+            // flows as one sentence — wraps as one block, just with the
+            // leading number bolder + tighter (matches the spec's <h1>
+            // with inline <span class="hero-n">).
+            (
                 Text("\(count)")
                     .font(.system(size: 30, weight: .heavy))
                     .tracking(-1.35)
-                    .foregroundStyle(Color.theme.fg1)
+                +
                 Text(" things that matter today")
                     .font(.system(size: 30, weight: .light))
                     .tracking(-0.6)
-                    .foregroundStyle(Color.theme.fg1)
-            }
-            .lineLimit(2)
-            .minimumScaleFactor(0.85)
+            )
+            .foregroundStyle(Color.theme.fg1)
+            .lineSpacing(2)
+            .multilineTextAlignment(.leading)
 
             Rectangle()
                 .fill(Color.theme.neon)
                 .frame(width: 38, height: 3)
                 .clipShape(RoundedRectangle(cornerRadius: 2))
-                .padding(.top, 6)
+                .padding(.top, 15)
         }
     }
 }
@@ -269,14 +286,16 @@ private struct PinCard: View {
                                 .fontWeight(.bold) +
                             Text(p.tail)
                         )
-                        .font(.system(size: 18, weight: .semibold))
-                        .lineSpacing(2)
+                        .font(.system(size: 19, weight: .semibold))
+                        .tracking(-0.38)            // -.02em × 19
+                        .lineSpacing(6)              // line-height 1.32 × 19 ≈ 25 → ~6pt spacing
                         .multilineTextAlignment(.leading)
                         .foregroundStyle(Color.theme.fg1)
                     } else {
                         Text(item.line)
-                            .font(.system(size: 18, weight: .semibold))
-                            .lineSpacing(2)
+                            .font(.system(size: 19, weight: .semibold))
+                            .tracking(-0.38)
+                            .lineSpacing(6)
                             .multilineTextAlignment(.leading)
                             .foregroundStyle(Color.theme.fg1)
                     }
@@ -287,13 +306,13 @@ private struct PinCard: View {
 
                 Button(action: onUnpin) {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Color.theme.fg4)
-                        .frame(width: 30, height: 30)
+                        .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
-                .padding(.trailing, 4)
-                .padding(.bottom, 4)
+                .padding(.trailing, 7)
+                .padding(.bottom, 6)
             }
             .frame(width: 270, height: 154, alignment: .topLeading)
             .background(
@@ -304,7 +323,9 @@ private struct PinCard: View {
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(Color.theme.borderBright, lineWidth: 1)
             )
-            .shadow(color: Color.black.opacity(0.06), radius: 10, x: 0, y: 4)
+            // Matches spec --shadow-card: tight contact shadow + softer drop
+            .shadow(color: Color.black.opacity(0.05), radius: 1, x: 0, y: 1)
+            .shadow(color: Color.black.opacity(0.06), radius: 8, x: 0, y: 6)
         }
         .buttonStyle(.plain)
     }
@@ -396,6 +417,7 @@ private struct TodayRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.vertical, 21)
+                .padding(.trailing, 30)        // clears the absolute pin
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -456,12 +478,13 @@ struct TodaySheet: View {
                                     .font(.system(size: 11, weight: .semibold))
                                 Text(isPinned ? "Tracking" : "Track")
                                     .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                    .tracking(0.4)
                             }
                             .foregroundStyle(isPinned ? Color.white : Color.theme.neon)
                             .padding(.horizontal, 13)
-                            .padding(.vertical, 11)
+                            .frame(minHeight: 38)         // spec min-height
                             .background(
-                                Capsule().fill(isPinned ? Color.theme.neon : Color.theme.neon.opacity(0.10))
+                                Capsule().fill(isPinned ? Color.theme.neon : Color.theme.neon.opacity(0.09))
                             )
                             .overlay(
                                 Capsule().stroke(Color.theme.neon.opacity(isPinned ? 1 : 0.32), lineWidth: 1)
