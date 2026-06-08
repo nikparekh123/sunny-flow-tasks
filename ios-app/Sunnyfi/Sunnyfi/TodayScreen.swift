@@ -202,13 +202,16 @@ private struct Headline: View {
             // flows as one sentence — wraps as one block, just with the
             // leading number bolder + tighter (matches the spec's <h1>
             // with inline <span class="hero-n">).
+            //
+            // Rendered in New York (Apple's native serif via
+            // design: .serif) for editorial weight on the headline.
             (
                 Text("\(count)")
-                    .font(.system(size: 30, weight: .heavy))
+                    .font(.system(size: 30, weight: .heavy, design: .serif))
                     .tracking(-1.35)
                 +
                 Text(" things that matter today")
-                    .font(.system(size: 30, weight: .light))
+                    .font(.system(size: 30, weight: .light, design: .serif))
                     .tracking(-0.6)
             )
             .foregroundStyle(Color.theme.fg1)
