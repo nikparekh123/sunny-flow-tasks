@@ -181,15 +181,31 @@ Deno.serve(async (req) => {
           const result = await upsertOption(supabase, t);
           if (result === 'inserted') rowsInserted++;
           else if (result === 'updated') rowsUpdated++;
+          else if (result === 'skipped') {
+            // Diagnostic: log every skip with the IBKR code so we can
+            // spot codes my handler doesn't recognize.
+            errors.push({
+              trade_id: t.tradeID,
+              symbol: t.symbol,
+              reason: `SKIPPED OPT: code='${t.code}' buySell='${t.buySell}'`,
+            });
+          }
         } else if (t.assetCategory === 'STK') {
           const result = await upsertStock(supabase, t);
           if (result === 'inserted') rowsInserted++;
           else if (result === 'updated') rowsUpdated++;
+          else if (result === 'skipped') {
+            errors.push({
+              trade_id: t.tradeID,
+              symbol: t.symbol,
+              reason: `SKIPPED STK: code='${t.code}' buySell='${t.buySell}'`,
+            });
+          }
         } else {
           errors.push({
             trade_id: t.tradeID,
             symbol: t.symbol,
-            reason: `Unsupported assetCategory: ${t.assetCategory}`,
+            reason: `Unsupported assetCategory: ${t.assetCategory} code='${t.code}'`,
           });
         }
       } catch (e) {
@@ -235,9 +251,13 @@ Deno.serve(async (req) => {
   }
 
   // ── 8. Close the audit row ────────────────────────────────
+  // SKIPPED entries are diagnostic, not failures — they keep status='success'
+  // so health-monitor doesn't fire false-positive stall alerts. Real failures
+  // (insert errors, fetch errors) downgrade to 'partial' or 'failed'.
+  const realErrors = errors.filter((x) => !x.reason.startsWith('SKIPPED'));
   const status: 'success' | 'partial' | 'failed' =
-    errors.some((x) => x.reason.startsWith('Fatal:')) ? 'failed'
-    : errors.length > 0 ? 'partial'
+    realErrors.some((x) => x.reason.startsWith('Fatal:')) ? 'failed'
+    : realErrors.length > 0 ? 'partial'
     : 'success';
 
   await supabase.from('ibkr_sync_runs').update({
