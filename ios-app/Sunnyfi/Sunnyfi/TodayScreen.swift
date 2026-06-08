@@ -371,7 +371,8 @@ private struct TodayRow: View {
                 HStack(alignment: .center, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(numRendered)
-                            .font(.system(size: 32, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 32, weight: .semibold))
+                            .monospacedDigit()                  // tabular digits, SF Pro 0 (no slash) — matches Trades
                             .tracking(-1.0)
                             .foregroundStyle(toneColor(item.tone))
                             .lineLimit(1)
@@ -400,7 +401,8 @@ private struct TodayRow: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .multilineTextAlignment(.leading)
                         Text(item.sub)
-                            .font(.system(size: 14, design: .monospaced))
+                            .font(.system(size: 14))
+                            .monospacedDigit()
                             .foregroundStyle(Color.theme.fg3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -496,7 +498,8 @@ struct TodaySheet: View {
                 // at 68 to match earlier-screenshot visual weight).
                 HStack(alignment: .lastTextBaseline, spacing: 12) {
                     Text(item.num)
-                        .font(.system(size: 40, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 40, weight: .semibold))
+                        .monospacedDigit()         // SF Pro tabular 0 — matches Trades convention
                         .tracking(-1.4)            // -.035em × 40 ≈ -1.4
                         .foregroundStyle(toneColor(item.tone))
                         .lineLimit(1)
@@ -535,12 +538,14 @@ struct TodaySheet: View {
                                     .font(.system(size: 18, weight: .semibold))
                                     .foregroundStyle(Color.theme.fg1)
                                 Text(r.sub)
-                                    .font(.system(size: 12, design: .monospaced))
+                                    .font(.system(size: 12))
+                                    .monospacedDigit()
                                     .foregroundStyle(Color.theme.fg3)
                             }
                             Spacer()
                             Text(r.value)
-                                .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 20, weight: .semibold))
+                                .monospacedDigit()
                                 .foregroundStyle(toneColor(r.tone))
                         }
                         .padding(.vertical, 15)
