@@ -373,7 +373,7 @@ async function upsertOption(
   const isLifecycle = primaryCode === 'A' || primaryCode === 'Ex' || primaryCode === 'Ep';
   const premium = isLifecycle ? 0 : Math.abs(Number(t.price));
 
-  const row = {
+  const row: Record<string, unknown> = {
     ticker: t.underlyingSymbol,
     trade_date: ymdToDate(t.tradeDate),
     action,
@@ -388,7 +388,38 @@ async function upsertOption(
     last_synced_at: new Date().toISOString(),
     voided_at: null,
     note: isLifecycle ? `IBKR ${primaryCode} lifecycle event` : null,
+    closes_trade_id: null as string | null,
   };
+
+  // For closes (C/A/Ex/Ep): link to the matching open via closes_trade_id.
+  // iOS's "remaining contracts" math depends on this FK to subtract closes
+  // from opens; without it, every IBKR close is orphaned and the position
+  // appears forever-open.
+  //
+  // Matching rule: same (ticker, option_type, direction, strike, expiry),
+  // action='open', oldest first (FIFO). Partial closes are fine — multiple
+  // closes can all point to the same open; iOS sums their quantities.
+  if (action === 'close') {
+    const { data: openMatch } = await supabase
+      .from('option_trades')
+      .select('id')
+      .eq('ticker', row.ticker as string)
+      .eq('option_type', row.option_type as string)
+      .eq('direction', row.direction as string)
+      .eq('strike', row.strike as number)
+      .eq('expiry', row.expiry as string)
+      .eq('action', 'open')
+      .is('voided_at', null)
+      .order('trade_date', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (openMatch) {
+      row.closes_trade_id = openMatch.id;
+    }
+    // If no matching open found, leave NULL. iOS treats it as an orphan
+    // close; we'd surface it as a row to investigate, not silently drop.
+  }
 
   // Check if exists
   const { data: existing } = await supabase
