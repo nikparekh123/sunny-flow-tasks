@@ -94,7 +94,7 @@ enum TodayData {
                 tone: tone,
                 line: "\(company.ticker) is \(dayPct >= 0 ? "up" : "down") \(absPctString(dayPct, decimals: 1)) today — a \(fmtMoney(abs(dollar))) move on your position.",
                 detailTitle: "Portfolio",
-                detailSub: "Your positions, ranked by today's $ move",
+                detailSub: "Ranked by today's $ move",
                 detailRows: portfolioDetailRows(store: store),
                 pinNarrative: PinNarrative(
                     lead: "\(company.ticker) is ",

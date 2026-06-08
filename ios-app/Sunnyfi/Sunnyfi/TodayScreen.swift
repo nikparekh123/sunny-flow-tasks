@@ -198,25 +198,16 @@ private struct Headline: View {
                 .tracking(1.6)
                 .foregroundStyle(Color.theme.fg3)
 
-            // Single concatenated Text so "{N} things that matter today"
-            // flows as one sentence — wraps as one block, just with the
-            // leading number bolder + tighter (matches the spec's <h1>
-            // with inline <span class="hero-n">).
-            //
-            // Rendered in New York (Apple's native serif via
-            // design: .serif) for editorial weight on the headline.
-            (
-                Text("\(count)")
-                    .font(.system(size: 30, weight: .heavy, design: .serif))
-                    .tracking(-1.35)
-                +
-                Text(" things that matter today")
-                    .font(.system(size: 30, weight: .light, design: .serif))
-                    .tracking(-0.6)
-            )
-            .foregroundStyle(Color.theme.fg1)
-            .lineSpacing(2)
-            .multilineTextAlignment(.leading)
+            // "{N} things that matter today" — all one weight, New York
+            // serif via design: .serif. No bold-emphasis on the count
+            // (per user — the editorial weight comes from the serif
+            // itself, not weight contrast).
+            Text("\(count) things that matter today")
+                .font(.system(size: 30, weight: .light, design: .serif))
+                .tracking(-0.6)
+                .foregroundStyle(Color.theme.fg1)
+                .lineSpacing(2)
+                .multilineTextAlignment(.leading)
 
             Rectangle()
                 .fill(Color.theme.neon)
@@ -504,14 +495,17 @@ struct TodaySheet: View {
                     }
                 }
 
-                // Hero
+                // Hero — big editorial number per spec. Larger than
+                // the original 54pt to match the visual weight in the
+                // handoff screenshots; auto-shrinks if a long value
+                // like "+1,234d" wouldn't fit.
                 HStack(alignment: .lastTextBaseline, spacing: 12) {
                     Text(item.num)
-                        .font(.system(size: 54, weight: .semibold, design: .monospaced))
-                        .tracking(-1.9)
+                        .font(.system(size: 68, weight: .semibold, design: .monospaced))
+                        .tracking(-2.4)            // -.035em × 68 ≈ -2.4
                         .foregroundStyle(toneColor(item.tone))
                         .lineLimit(1)
-                        .minimumScaleFactor(0.6)
+                        .minimumScaleFactor(0.5)
                     Text("\(item.unit.lowercased()) · \(item.short)")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(Color.theme.fg3)
