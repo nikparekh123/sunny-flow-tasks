@@ -389,7 +389,7 @@ private struct TodayRow: View {
                         HStack(spacing: 9) {
                             Text(String(format: "%02d", idx))
                                 .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color.theme.fg1)   // brighter — deep near-black green for high contrast
+                                .foregroundStyle(Color.theme.neon)   // brand accent — vivid teal-green, brighter than fg1
                             Text(item.category.uppercased())
                                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                                 .tracking(1.6)
