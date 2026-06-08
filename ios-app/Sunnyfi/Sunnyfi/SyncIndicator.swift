@@ -37,12 +37,13 @@ struct SyncIndicator: View {
     let store: PortfolioStore
     /// Optional pulling progress 0…1 passed in from a pull-to-refresh
     /// gesture host. When non-nil, the ring tracks the drag and the
-    /// label hides. Production wiring can leave this nil and the
-    /// indicator still works.
+    /// label hides. Today's app uses SwiftUI's native .refreshable on
+    /// the ScrollViews, which doesn't expose drag progress — so we
+    /// leave this nil in production and rely on store.isRefreshing
+    /// to drive the syncing animation. Hook this up later if we ever
+    /// swap to a custom scroll-offset pull-zone.
     var pulling: Double? = nil
 
-    @State private var refreshing: Bool = false
-    @State private var lastRefreshFailed: Bool = false
     /// Bumped every second by the timer so the ring fills smoothly
     /// without the store needing to re-emit.
     @State private var tick: Int = 0
@@ -51,10 +52,12 @@ struct SyncIndicator: View {
     /// 15 min — matches mp-refresh cron.
     private static let cycleSeconds: Double = 15 * 60
 
-    // Derived state
+    // Derived state — entirely read from the store so the indicator
+    // animates correctly whether refresh was triggered by tap,
+    // pull-to-refresh, background task, or scheduled cron.
     private var status: Status {
-        if refreshing { return .syncing }
-        if lastRefreshFailed { return .stale }
+        if store.isRefreshing { return .syncing }
+        if store.lastRefreshError != nil { return .stale }
         guard let last = store.freshness else { return .stale }
         let elapsed = Date().timeIntervalSince(last)
         return elapsed > Self.cycleSeconds + 60 ? .stale : .live
@@ -116,16 +119,8 @@ struct SyncIndicator: View {
     }
 
     private func triggerSync() {
-        guard !refreshing else { return }                // re-entry guard
-        Task {
-            refreshing = true
-            await store.refresh()
-            refreshing = false
-            // PortfolioStore doesn't currently surface a refresh-error
-            // signal; for now infer stale-after-refresh from freshness
-            // staying nil. Wire `store.lastRefreshError` here later.
-            lastRefreshFailed = store.freshness == nil
-        }
+        guard !store.isRefreshing else { return }        // re-entry guard
+        Task { await store.refresh() }
     }
 }
 

@@ -26,6 +26,12 @@ final class PortfolioStore {
     var isLoading: Bool = true
     var isRefreshing: Bool = false
     var error: String?
+    /// True if the most recent refresh() attempt threw. Cleared on
+    /// every new refresh attempt. Separate from `error` (which is a
+    /// broader "something went wrong including partial-data") so the
+    /// SyncIndicator can light up the stale state precisely on real
+    /// refresh failures.
+    var lastRefreshError: String?
 
     // Raw rows kept around so Trades / Performance / event-card derivers
     // don't need to re-fetch. Set inside fetchAll() before the join.
@@ -69,6 +75,7 @@ final class PortfolioStore {
     /// Pull-to-refresh — invokes the mp-refresh edge function, then re-fetches.
     func refresh() async {
         isRefreshing = true
+        lastRefreshError = nil       // clear at the start of every attempt
         defer { isRefreshing = false }
         do {
             _ = try await client.functions.invoke(
@@ -77,7 +84,9 @@ final class PortfolioStore {
             )
         } catch {
             // Refresh failure isn't fatal — we'll just re-render with whatever
-            // data is already in the tables.
+            // data is already in the tables. But the SyncIndicator reads
+            // lastRefreshError to flip to the stale visual.
+            lastRefreshError = error.localizedDescription
             self.error = "Refresh failed: \(error.localizedDescription)"
         }
         await fetchAll()
