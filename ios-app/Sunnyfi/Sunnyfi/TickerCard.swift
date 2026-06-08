@@ -490,10 +490,10 @@ struct StockLegView: View {
 
         return VStack(alignment: .leading, spacing: 0) {
             statGrid([
-                ("Shares",       Int(leg.qty).formatted(.number)),
-                ("Market value", fmtMoney(mv)),
-                ("Avg cost",     fmtMoney(leg.avg, decimals: 2)),
-                ("Current",      fmtMoney(leg.last, decimals: 2)),
+                ("Shares",       Int(leg.qty).formatted(.number), nil),
+                ("Market value", fmtMoney(mv), nil),
+                ("Avg cost",     fmtMoney(leg.avg, decimals: 2), nil),
+                ("Current",      fmtMoney(leg.last, decimals: 2), nil),
             ])
             .padding(.horizontal, CardInset.h)
             .padding(.top, 14)
@@ -621,11 +621,25 @@ struct OptionLegView: View {
             .padding(.top, positionNumber == nil ? 14 : 0)
             .padding(.bottom, 13)
 
+            // Distance to spot as a gray "(X% ITM/OTM/ATM)" suffix
+            // on the Strike cell. Direction (long/short) doesn't change
+            // the ITM/OTM rule — only call vs put does:
+            //   CALL: ITM if spot > strike
+            //   PUT : ITM if spot < strike
+            let distPct = c.spot > 0 ? abs(c.spot - trade.strike) / trade.strike * 100 : 0
+            let isITM = isCall ? c.spot > trade.strike : c.spot < trade.strike
+            let strikeSuffix: String? = {
+                guard c.spot > 0 else { return nil }
+                if distPct < 0.05 { return "ATM" }
+                let pct = String(format: "%.1f", distPct)
+                return "(\(pct)% \(isITM ? "ITM" : "OTM"))"
+            }()
+
             statGrid([
-                ("Contracts",    "\(Int(remaining))"),
-                ("Market value", fmtMoney(mv)),
-                ("Strike",       "$\(fmtStrike(trade.strike))"),
-                ("Fill price",   "$\(String(format: "%.2f", trade.premium))"),
+                ("Contracts",    "\(Int(remaining))", nil),
+                ("Market value", fmtMoney(mv), nil),
+                ("Strike",       "$\(fmtStrike(trade.strike))", strikeSuffix),
+                ("Fill price",   "$\(String(format: "%.2f", trade.premium))", nil),
             ])
             .padding(.horizontal, CardInset.h)
             .padding(.bottom, 6)
@@ -737,25 +751,36 @@ struct FullBleedHair: View {
 
 /// 2×2 stat grid — labels muted (`labelMuted`), values black mono
 /// 18pt 500. Per `.tleg-grid` + `.tleg-stat`.
+/// Third tuple element is an optional gray suffix rendered inline
+/// beside the value (e.g. "$650 (5.1% ITM)" — the parens text is
+/// the suffix, in fg3 at 11pt). Use nil when no suffix is wanted.
 @ViewBuilder
-private func statGrid(_ cells: [(String, String)]) -> some View {
+private func statGrid(_ cells: [(String, String, String?)]) -> some View {
     let pairs = cells.chunked(into: 2)
     VStack(alignment: .leading, spacing: 18) {
         ForEach(pairs.indices, id: \.self) { i in
             HStack(spacing: 16) {
                 ForEach(pairs[i].indices, id: \.self) { j in
-                    let (k, v) = pairs[i][j]
+                    let (k, v, suffix) = pairs[i][j]
                     VStack(alignment: .leading, spacing: 5) {
                         Text(k)
                             .font(.system(size: 12, weight: .regular))
                             .foregroundStyle(Color.theme.labelMuted)
-                        Text(v)
-                            .font(.system(size: 18, weight: .medium))
-                            .monospacedDigit()
-                            .tracking(-0.36)
-                            .foregroundStyle(Color.theme.fg1)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            Text(v)
+                                .font(.system(size: 18, weight: .medium))
+                                .monospacedDigit()
+                                .tracking(-0.36)
+                                .foregroundStyle(Color.theme.fg1)
+                            if let s = suffix {
+                                Text(s)
+                                    .font(.system(size: 11, weight: .regular))
+                                    .monospacedDigit()
+                                    .foregroundStyle(Color.theme.fg3)
+                            }
+                        }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
