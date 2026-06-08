@@ -388,8 +388,9 @@ private struct TodayRow: View {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 9) {
                             Text(String(format: "%02d", idx))
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color.theme.neon)   // brand accent — vivid teal-green, brighter than fg1
+                                .font(.system(size: 11, weight: .bold))
+                                .monospacedDigit()                  // SF Pro tabular — matches the row number/sub font
+                                .foregroundStyle(Color.theme.neon)
                             Text(item.category.uppercased())
                                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                                 .tracking(1.6)
