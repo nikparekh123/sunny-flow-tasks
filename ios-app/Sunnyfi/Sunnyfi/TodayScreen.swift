@@ -496,8 +496,8 @@ struct TodaySheet: View {
                 // at 68 to match earlier-screenshot visual weight).
                 HStack(alignment: .lastTextBaseline, spacing: 12) {
                     Text(item.num)
-                        .font(.system(size: 56, weight: .semibold, design: .monospaced))
-                        .tracking(-2.0)            // -.035em × 56 ≈ -2.0
+                        .font(.system(size: 40, weight: .semibold, design: .monospaced))
+                        .tracking(-1.4)            // -.035em × 40 ≈ -1.4
                         .foregroundStyle(toneColor(item.tone))
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -508,7 +508,7 @@ struct TodaySheet: View {
                 .padding(.top, 18)
 
                 Text(item.line)
-                    .font(.system(size: 13.5))
+                    .font(.system(size: 15))
                     .lineSpacing(4)
                     .foregroundStyle(Color.theme.fg2)
                     .padding(.top, 14)
@@ -535,7 +535,7 @@ struct TodaySheet: View {
                                     .font(.system(size: 18, weight: .semibold))
                                     .foregroundStyle(Color.theme.fg1)
                                 Text(r.sub)
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(.system(size: 12, design: .monospaced))
                                     .foregroundStyle(Color.theme.fg3)
                             }
                             Spacer()
