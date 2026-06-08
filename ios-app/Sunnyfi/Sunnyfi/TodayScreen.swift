@@ -382,12 +382,8 @@ private struct TodayRow: View {
                 HStack(alignment: .center, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(numRendered)
-                            .font(.system(
-                                size: isLead ? 38 : 30,
-                                weight: .semibold,
-                                design: .monospaced
-                            ))
-                            .tracking(-1)
+                            .font(.system(size: 30, weight: .semibold, design: .monospaced))
+                            .tracking(-0.9)
                             .foregroundStyle(toneColor(item.tone))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
@@ -410,10 +406,7 @@ private struct TodayRow: View {
                                 .foregroundStyle(Color.theme.fg3)
                         }
                         Text(item.name)
-                            .font(.system(
-                                size: isLead ? 19 : 17,
-                                weight: .semibold
-                            ))
+                            .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(Color.theme.fg1)
                             .lineLimit(1)
                             .minimumScaleFactor(0.85)
