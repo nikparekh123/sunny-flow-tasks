@@ -579,7 +579,7 @@ struct OptionLegView: View {
 
         VStack(alignment: .leading, spacing: 0) {
             if let n = positionNumber {
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
                     Text("Option position \(n)")
                         .font(.system(size: 9.5, weight: .medium))
                         .monospacedDigit()
@@ -587,12 +587,15 @@ struct OptionLegView: View {
                         .foregroundStyle(Color.theme.fg4)
                         .textCase(.uppercase)
                     if Self.isFreshlySynced(trade) {
+                        Text("-")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(Color.theme.fg4)
                         Text("NEW")
-                            .font(.system(size: 9.5, weight: .bold))
+                            .font(.system(size: 9.5, weight: .regular))
                             .tracking(0.8)
                             .foregroundStyle(.red)
                         Text("(Just updated)")
-                            .font(.system(size: 9.5, weight: .medium))
+                            .font(.system(size: 9.5, weight: .regular))
                             .foregroundStyle(Color.theme.fg3)
                     }
                     Spacer(minLength: 0)

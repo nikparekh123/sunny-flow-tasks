@@ -91,8 +91,13 @@ Deno.serve(async (req) => {
     const last = dts?.[0]?.snapshot_date as string | undefined;
     // If we're past 20:30 UTC today (after the cron should have run),
     // we expect today's row. Otherwise yesterday's is fine.
-    const expectToday = now.getUTCHours() >= 21;
-    const expected = expectToday ? todayEst : isoYesterday(todayEst);
+    // Past 21:00 UTC (after the post-close cron has run) we expect TODAY's
+    // snapshot if today is a weekday. Otherwise expect the most recent
+    // weekday — handles Mon mornings (Sun is not a trading day so Fri's
+    // snapshot is the latest possible) and Sat/Sun runs.
+    const todayIsWeekday = !['Sat', 'Sun'].includes(wd);
+    const expectToday = todayIsWeekday && now.getUTCHours() >= 21;
+    const expected = expectToday ? todayEst : isoLastTradingDayBefore(todayEst);
     if (!last || last < expected) {
       findings.push({
         code: 'cron.daily_theta_snapshot_missing',
@@ -119,8 +124,13 @@ Deno.serve(async (req) => {
     });
   } else {
     const last = ph?.[0]?.snapshot_date as string | undefined;
-    const expectToday = now.getUTCHours() >= 21;
-    const expected = expectToday ? todayEst : isoYesterday(todayEst);
+    // Past 21:00 UTC (after the post-close cron has run) we expect TODAY's
+    // snapshot if today is a weekday. Otherwise expect the most recent
+    // weekday — handles Mon mornings (Sun is not a trading day so Fri's
+    // snapshot is the latest possible) and Sat/Sun runs.
+    const todayIsWeekday = !['Sat', 'Sun'].includes(wd);
+    const expectToday = todayIsWeekday && now.getUTCHours() >= 21;
+    const expected = expectToday ? todayEst : isoLastTradingDayBefore(todayEst);
     if (!last || last < expected) {
       findings.push({
         code: 'cron.position_snapshot_missing',
@@ -192,6 +202,22 @@ function isoYesterday(today: string): string {
   // today is YYYY-MM-DD; just step back one calendar day in UTC.
   const d = new Date(`${today}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/// Most recent trading day STRICTLY BEFORE today. Used as the expected
+/// snapshot date when today's cron hasn't run yet (i.e. it's before
+/// 21:00 UTC). Examples:
+///   today = Mon → returns Fri (skips Sat+Sun)
+///   today = Sat → returns Fri
+///   today = Sun → returns Fri
+///   today = Tue → returns Mon
+function isoLastTradingDayBefore(today: string): string {
+  const d = new Date(`${today}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) {
+    d.setUTCDate(d.getUTCDate() - 1);
+  }
   return d.toISOString().slice(0, 10);
 }
 
