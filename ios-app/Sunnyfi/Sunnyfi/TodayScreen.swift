@@ -248,7 +248,7 @@ private struct PinnedRail: View {
             .padding(.bottom, 11)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     ForEach(items) { item in
                         PinCard(
                             item: item,
@@ -314,7 +314,12 @@ private struct PinCard: View {
                 .padding(.trailing, 7)
                 .padding(.bottom, 6)
             }
-            .frame(width: 270, height: 154, alignment: .topLeading)
+            // Width fixed for horizontal rail; height grows with the
+            // narrative so the full sentence is always visible. minHeight
+            // keeps the visual rhythm when the text happens to be short.
+            .frame(width: 270, alignment: .topLeading)
+            .frame(minHeight: 154)
+            .fixedSize(horizontal: false, vertical: true)
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color.theme.elevated)

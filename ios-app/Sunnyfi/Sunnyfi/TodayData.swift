@@ -92,14 +92,14 @@ enum TodayData {
                 num: pctString(dayPct, decimals: 1),
                 unit: "1-DAY",
                 tone: tone,
-                line: "\(company.ticker) is \(dayPct >= 0 ? "up" : "down") \(pctString(abs(dayPct), decimals: 1)) today on \(fmtMoney(abs(dollar))) move at the position level.",
-                detailTitle: "Portfolio movers",
+                line: "\(company.ticker) is \(dayPct >= 0 ? "up" : "down") \(absPctString(dayPct, decimals: 1)) today — a \(fmtMoney(abs(dollar))) move on your position.",
+                detailTitle: "Portfolio",
                 detailSub: "Your positions, ranked by today's $ move",
                 detailRows: portfolioDetailRows(store: store),
                 pinNarrative: PinNarrative(
                     lead: "\(company.ticker) is ",
-                    value: "\(dayPct >= 0 ? "up" : "down") \(pctString(abs(dayPct), decimals: 1))",
-                    tail: " today — \(fmtMoney(abs(dollar))) move at the position level."
+                    value: "\(dayPct >= 0 ? "up" : "down") \(absPctString(dayPct, decimals: 1))",
+                    tail: " today — \(fmtMoney(abs(dollar))) move on your position."
                 )
             )
             return (abs(dollar), item)
@@ -156,7 +156,7 @@ enum TodayData {
             unit: days == 0 ? "today" : "UNTIL",
             tone: .neutral,
             line: ev.summary ?? "Upcoming event — \(ev.name).",
-            detailTitle: "Upcoming events",
+            detailTitle: "Events",
             detailSub: "Calendar that moves your book",
             detailRows: upcoming.prefix(7).map { (d, e) in
                 DetailRow(
@@ -223,7 +223,7 @@ enum TodayData {
             unit: unit,
             tone: .neutral,
             line: line,
-            detailTitle: "Earnings on deck",
+            detailTitle: "Earnings",
             detailSub: "Reports that move your book",
             detailRows: allUpcoming.prefix(7).map { (d, row) in
                 DetailRow(
@@ -321,7 +321,7 @@ enum TodayData {
             unit: expiringQty > 0 ? "EXPIRING" : "COLLECTED",
             tone: expiringQty > 0 ? .warn : .neon,
             line: line,
-            detailTitle: "Options book",
+            detailTitle: "Options",
             detailSub: "Open positions and decay",
             detailRows: optionsDetailRows(store: store, today: today),
             pinNarrative: PinNarrative(
@@ -381,6 +381,14 @@ enum TodayData {
         let sign = v >= 0 ? "+" : "−"   // proper minus sign
         let abs = String(format: "%.\(decimals)f", Swift.abs(v))
         return "\(sign)\(abs)%"
+    }
+
+    /// "0.9%" — for use INSIDE narratives where the direction is
+    /// already conveyed in words ("up" / "down"). Avoids the
+    /// awkward "down +0.9%" phrasing.
+    private static func absPctString(_ v: Double, decimals: Int) -> String {
+        let abs = String(format: "%.\(decimals)f", Swift.abs(v))
+        return "\(abs)%"
     }
 
     private static func fmtMoney(_ v: Double) -> String {
