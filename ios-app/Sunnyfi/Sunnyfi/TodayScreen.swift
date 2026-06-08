@@ -20,7 +20,6 @@ struct TodayScreen: View {
 
     @Bindable var store: PortfolioStore
     @State private var openItemId: String? = nil
-    @State private var sheetFull: Bool = false
     @State private var pins = TodayPinStore.shared
 
     private var allItems: [TodayItem] { TodayData.compute(store: store) }
@@ -90,17 +89,16 @@ struct TodayScreen: View {
         }
         .sheet(isPresented: Binding(
             get: { openItemId != nil },
-            set: { if !$0 { openItemId = nil; sheetFull = false } }
+            set: { if !$0 { openItemId = nil } }
         )) {
             if let id = openItemId, let item = allItems.first(where: { $0.id == id }) {
                 TodaySheet(
                     item: item,
-                    full: $sheetFull,
                     isPinned: pins.isPinned(item.id),
                     onPin:  { pins.toggle(item.id) },
-                    onClose: { openItemId = nil; sheetFull = false }
+                    onClose: { openItemId = nil }
                 )
-                .presentationDetents(sheetFull ? [.large] : [.medium, .large])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color.theme.elevated)
             }
@@ -432,15 +430,13 @@ private struct TodayRow: View {
 
 struct TodaySheet: View {
     let item: TodayItem
-    @Binding var full: Bool
     let isPinned: Bool
     let onPin: () -> Void
     let onClose: () -> Void
 
-    private var visibleRows: [DetailRow] {
-        full ? item.detailRows : Array(item.detailRows.prefix(3))
-    }
-    private var hiddenCount: Int { max(0, item.detailRows.count - 3) }
+    // Show all rows always — no peek/full toggle. The sheet is
+    // scrollable, so a longer list just scrolls naturally.
+    private var visibleRows: [DetailRow] { item.detailRows }
 
     var body: some View {
         ScrollView {
@@ -517,25 +513,13 @@ struct TodaySheet: View {
                     .foregroundStyle(Color.theme.fg2)
                     .padding(.top, 14)
 
-                // List head + toggle
-                HStack {
-                    Text(full ? "THE FULL LIST" : "TOP OF THE LIST")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .tracking(2)
-                        .foregroundStyle(Color.theme.fg3)
-                    Spacer()
-                    if hiddenCount > 0 {
-                        Button(action: { full.toggle() }) {
-                            Text(full ? "Show less" : "View all \(item.detailRows.count) →")
-                                .font(.system(size: 10.5, design: .monospaced))
-                                .foregroundStyle(Color.theme.neon)
-                                .padding(.vertical, 6)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.top, 18)
-                .padding(.bottom, 4)
+                // List head (no toggle — all rows show always)
+                Text("THE LIST")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(2)
+                    .foregroundStyle(Color.theme.fg3)
+                    .padding(.top, 18)
+                    .padding(.bottom, 4)
 
                 // Rows
                 VStack(spacing: 0) {
@@ -546,20 +530,20 @@ struct TodaySheet: View {
                                 .frame(height: 1)
                         }
                         HStack {
-                            VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 5) {
                                 Text(r.name)
-                                    .font(.system(size: 14.5, weight: .medium))
+                                    .font(.system(size: 18, weight: .semibold))
                                     .foregroundStyle(Color.theme.fg1)
                                 Text(r.sub)
-                                    .font(.system(size: 10.5, design: .monospaced))
+                                    .font(.system(size: 11, design: .monospaced))
                                     .foregroundStyle(Color.theme.fg3)
                             }
                             Spacer()
                             Text(r.value)
-                                .font(.system(size: 16, weight: .medium, design: .monospaced))
+                                .font(.system(size: 20, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(toneColor(r.tone))
                         }
-                        .padding(.vertical, 13)
+                        .padding(.vertical, 15)
                     }
                 }
             }
