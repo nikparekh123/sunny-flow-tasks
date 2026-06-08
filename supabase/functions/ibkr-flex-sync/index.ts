@@ -303,10 +303,15 @@ function ymdToDate(ymd: string): string {
 }
 
 function inferOptionDirection(buySell: string, code: string): 'long' | 'short' {
-  // O = open: BUY→long, SELL→short
-  // C = close: BUY closes a short, SELL closes a long
+  // O  = open: BUY→long, SELL→short
+  // C  = close: BUY closes a short, SELL closes a long
+  // A  = assignment (only happens to short options): always 'short'
+  // Ex = exercise (only happens to long options):    always 'long'
+  // Ep = expired: same logic as C — derive from the IBKR-emitted side
   if (code === 'O') return buySell === 'BUY' ? 'long' : 'short';
-  if (code === 'C') return buySell === 'BUY' ? 'short' : 'long';
+  if (code === 'C' || code === 'Ep') return buySell === 'BUY' ? 'short' : 'long';
+  if (code === 'A') return 'short';
+  if (code === 'Ex') return 'long';
   // Default: treat unknown codes as opens (defensive)
   return buySell === 'BUY' ? 'long' : 'short';
 }
@@ -316,25 +321,44 @@ async function upsertOption(
   t: TradeConfirm,
 ): Promise<'inserted' | 'updated' | 'skipped'> {
 
-  // Lifecycle codes A/Ex/Ep are deferred to a separate reconcile job.
-  if (t.code !== 'O' && t.code !== 'C') {
+  // Code mapping:
+  //   O  = open
+  //   C  = close
+  //   A  = assignment (short option assigned → option closes + share movement)
+  //   Ex = exercise   (long option exercised → option closes + share movement)
+  //   Ep = expired    (option closes at $0, no share movement)
+  //
+  // For A/Ex/Ep we record the option as a close; the share movement
+  // (if any) is recorded by upsertStock when IBKR emits the matching
+  // STK TradeConfirm in the same report (which it does — A/Ex always
+  // come paired with the underlying delivery).
+
+  if (!['O', 'C', 'A', 'Ex', 'Ep'].includes(t.code)) {
     return 'skipped';
   }
+
+  const action = t.code === 'O' ? 'open' : 'close';
+  // For A/Ex/Ep the option is being closed by a lifecycle event,
+  // not by an explicit buy/sell. Premium is what was exchanged at
+  // settlement: $0 for assignment/exercise/expired.
+  const isLifecycle = t.code === 'A' || t.code === 'Ex' || t.code === 'Ep';
+  const premium = isLifecycle ? 0 : Math.abs(Number(t.price));
 
   const row = {
     ticker: t.underlyingSymbol,
     trade_date: ymdToDate(t.tradeDate),
-    action: t.code === 'O' ? 'open' : 'close',
+    action,
     option_type: t.putCall === 'P' ? 'put' : 'call',
     direction: inferOptionDirection(t.buySell, t.code),
     contracts: Math.abs(Number(t.quantity)),
     strike: Number(t.strike),
-    premium: Math.abs(Number(t.price)),
+    premium,
     expiry: ymdToDate(t.expiry!),
     source: 'ibkr_flex',
     ibkr_trade_id: t.tradeID,
     last_synced_at: new Date().toISOString(),
     voided_at: null,
+    note: isLifecycle ? `IBKR ${t.code} lifecycle event` : null,
   };
 
   // Check if exists
