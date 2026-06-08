@@ -348,20 +348,29 @@ async function upsertOption(
   //   Ex = exercise   (long option exercised → option closes + share movement)
   //   Ep = expired    (option closes at $0, no share movement)
   //
+  // IBKR uses ';' to chain qualifiers onto the primary code:
+  //   O;P = Open + Partial fill
+  //   C;P = Close + Partial fill
+  // The qualifier doesn't change the semantics for us — each
+  // TradeConfirm is one fill regardless of whether it's part of
+  // a larger order. So we take the primary code (first token) and
+  // proceed.
+  //
   // For A/Ex/Ep we record the option as a close; the share movement
   // (if any) is recorded by upsertStock when IBKR emits the matching
-  // STK TradeConfirm in the same report (which it does — A/Ex always
-  // come paired with the underlying delivery).
+  // STK TradeConfirm in the same report.
 
-  if (!['O', 'C', 'A', 'Ex', 'Ep'].includes(t.code)) {
+  const primaryCode = t.code.split(';')[0];
+
+  if (!['O', 'C', 'A', 'Ex', 'Ep'].includes(primaryCode)) {
     return 'skipped';
   }
 
-  const action = t.code === 'O' ? 'open' : 'close';
+  const action = primaryCode === 'O' ? 'open' : 'close';
   // For A/Ex/Ep the option is being closed by a lifecycle event,
   // not by an explicit buy/sell. Premium is what was exchanged at
   // settlement: $0 for assignment/exercise/expired.
-  const isLifecycle = t.code === 'A' || t.code === 'Ex' || t.code === 'Ep';
+  const isLifecycle = primaryCode === 'A' || primaryCode === 'Ex' || primaryCode === 'Ep';
   const premium = isLifecycle ? 0 : Math.abs(Number(t.price));
 
   const row = {
@@ -369,7 +378,7 @@ async function upsertOption(
     trade_date: ymdToDate(t.tradeDate),
     action,
     option_type: t.putCall === 'P' ? 'put' : 'call',
-    direction: inferOptionDirection(t.buySell, t.code),
+    direction: inferOptionDirection(t.buySell, primaryCode),
     contracts: Math.abs(Number(t.quantity)),
     strike: Number(t.strike),
     premium,
@@ -378,7 +387,7 @@ async function upsertOption(
     ibkr_trade_id: t.tradeID,
     last_synced_at: new Date().toISOString(),
     voided_at: null,
-    note: isLifecycle ? `IBKR ${t.code} lifecycle event` : null,
+    note: isLifecycle ? `IBKR ${primaryCode} lifecycle event` : null,
   };
 
   // Check if exists
