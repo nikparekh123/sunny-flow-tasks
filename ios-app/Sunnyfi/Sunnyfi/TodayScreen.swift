@@ -548,7 +548,7 @@ struct TodaySheet: View {
                 }
             }
             .padding(.horizontal, 22)
-            .padding(.top, 32)        // breathing room below the grab handle
+            .padding(.top, 45)        // breathing room below the grab handle
             .padding(.bottom, 32)
         }
     }
