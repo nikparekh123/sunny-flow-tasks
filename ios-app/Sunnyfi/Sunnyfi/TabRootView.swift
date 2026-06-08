@@ -12,13 +12,17 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Hashable {
-    case home, trades, performance
+    case home, trades, hedge, performance, account
 
     var label: String {
         switch self {
         case .home:        return "Home"
         case .trades:      return "Trades"
-        case .performance: return "Performance"
+        case .hedge:       return "Hedge"
+        // 5-tab layout — "Performance" shortens to "Perf" so the
+        // labels don't crowd. Per package 4 of the design handoff.
+        case .performance: return "Perf"
+        case .account:     return "You"
         }
     }
 
@@ -26,84 +30,225 @@ enum AppTab: String, CaseIterable, Hashable {
         switch self {
         case .home:        return "house.fill"
         case .trades:      return "chart.line.uptrend.xyaxis"
+        // Shield = "protect the book". Hedge tab is the awareness
+        // surface — not transactional like Trades.
+        case .hedge:       return "shield.lefthalf.filled"
         case .performance: return "chart.bar.fill"
+        case .account:     return "person.fill"
         }
     }
 }
 
 struct TabRootView: View {
     let auth: AuthStore
+    let lock: AppLock
+    let prefs: NotificationPrefs
     @State private var store = PortfolioStore()
-    @State private var tab: AppTab = .home
+    @State private var reach = Reachability()
+    // Home + Hedge are being rebuilt — landing the user on Trades
+    // in the interim so they don't see an empty/unfinished Home.
+    @State private var tab: AppTab = .trades
+    /// Ticker for the top-level TickerTradesSheet — driven by push
+    /// deep-link taps (AppNavigator) or any in-app trigger that
+    /// wants to surface the per-ticker modal from anywhere.
+    @State private var pushTickerSheet: String?
+    /// Ephemeral logo display — appears when the app is actively
+    /// loading/refreshing, lingers a few seconds after to confirm
+    /// "live data", then hides. Reclaims the top of every screen
+    /// for content the rest of the time.
+    @State private var logoVisible: Bool = false
+    @State private var logoHideTask: Task<Void, Never>?
+
+    /// Combined "actively pulling data" flag used to drive logoVisible.
+    private var isAnyLoading: Bool { store.isLoading || store.isRefreshing }
+
+    /// Show now / linger 5s / hide. Centralized so .onChange and
+    /// .onAppear can both call it without duplicating the logic.
+    private func updateLogoVisibility(busy: Bool) {
+        logoHideTask?.cancel()
+        if busy {
+            withAnimation(.easeOut(duration: 0.25)) { logoVisible = true }
+        } else {
+            logoHideTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeOut(duration: 0.35)) { logoVisible = false }
+            }
+        }
+    }
+    /// Process singleton — reading its observable properties here
+    /// re-runs the body on push intents.
+    private let navigator = AppNavigator.shared
 
     var body: some View {
         ZStack(alignment: .bottom) {
             // Active tab content fills the screen; bottom padding leaves
             // room for the floating nav.
-            Group {
-                switch tab {
-                case .home:        HomeScreen(store: store, auth: auth)
-                case .trades:      StubScreen(title: "Trades")
-                case .performance: StubScreen(title: "Performance")
+            VStack(spacing: 0) {
+                // Ephemeral logo header — only mounts during refresh +
+                // a short "live" tail. Most of the time it's collapsed
+                // to zero height so the page sits flush with the safe
+                // area.
+                if logoVisible {
+                    HStack(alignment: .center) {
+                        SyncIndicator(store: store)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 18)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+                    .transition(
+                        .move(edge: .top)
+                            .combined(with: .opacity)
+                    )
                 }
+
+                SystemAlertBanner(alerts: store.activeAlerts)
+                OfflineBanner(isOnline: reach.isOnline, lastFreshness: store.freshness)
+                Group {
+                    switch tab {
+                    case .home:        HomeScreen(store: store, auth: auth)
+                    case .trades:      TradesScreen(store: store, auth: auth)
+                    case .hedge:       HedgeScreen(store: store, auth: auth)
+                    case .performance: PerformanceScreen(store: store, auth: auth)
+                    case .account:     AccountScreen(auth: auth, lock: lock, prefs: prefs, store: store)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.theme.page.ignoresSafeArea())
 
-            LiquidGlassTabBar(active: $tab)
-                .padding(.horizontal, 18)
-                .padding(.bottom, 8)
+            // Docked tab bar — full-width, solid surface, top hairline.
+            // Replaces the prior floating glass capsule per Handoff 2
+            // §9. Sits flush against the bottom safe area; the safe-area
+            // inset handles home-indicator clearance automatically.
+            DockedTabBar(active: $tab)
         }
-        .preferredColorScheme(.dark)
-        .task { await store.load() }
+        .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)
+        // Logo visibility: show while busy, linger 5s after, then hide.
+        // We intentionally don't pass `initial: true` here — mutating
+        // state during the first render pass can cause SwiftUI to
+        // tear down `.task` and cancel the 10 parallel fetches inside
+        // fetchAll(). Initial state is set from .onAppear below.
+        .onChange(of: isAnyLoading) { _, busy in
+            updateLogoVisibility(busy: busy)
+        }
+        .task {
+            await store.load()
+            // If the user previously granted notification permission,
+            // re-trigger registration so we capture any token rotation
+            // since last launch. iOS rate-limits this internally, so
+            // calling on every cold start is fine.
+            await prefs.refreshSystemPermission()
+            if prefs.systemPermission == .authorized || prefs.systemPermission == .provisional {
+                PushAppDelegate.registrar.requestSystemRegistration()
+            }
+        }
+        // ── Push deep-link routing ──
+        // When the user taps a notification, AppNavigator.shared fills
+        // these fields. We react here so the routing lives in one
+        // place rather than each screen.
+        .onChange(of: navigator.requestedTab) { _, newTab in
+            guard let newTab else { return }
+            withAnimation(Motion.overshoot) { tab = newTab }
+            navigator.consumeTabRequest()
+        }
+        .onChange(of: navigator.requestedTickerSheet) { _, newTicker in
+            guard let newTicker else { return }
+            pushTickerSheet = newTicker
+            navigator.consumeTickerRequest()
+        }
+        .onAppear {
+            // Initial logo state — load is almost certainly in flight
+            // on cold launch (.task fires concurrently with this).
+            // Showing it here instead of via .onChange(initial:true)
+            // avoids the render-time mutation that was cancelling
+            // fetchAll's child tasks.
+            if isAnyLoading && !logoVisible {
+                logoVisible = true
+            }
+            // If a tap arrived while the app was on sign-in / locked,
+            // the navigator already has the intent buffered. Apply it
+            // now that TabRootView is mounting.
+            if let pendingTab = navigator.requestedTab {
+                tab = pendingTab
+                navigator.consumeTabRequest()
+            }
+            if let pendingTicker = navigator.requestedTickerSheet {
+                pushTickerSheet = pendingTicker
+                navigator.consumeTickerRequest()
+            }
+        }
+        .sheet(item: Binding(
+            get: { pushTickerSheet.map(TickerWrapper.init) },
+            set: { pushTickerSheet = $0?.ticker }
+        )) { wrap in
+            TickerTradesSheet(store: store, ticker: wrap.ticker, initialTab: .shares)
+        }
     }
 }
 
-// MARK: - Floating tab bar
+/// Identifiable wrapper so a String can drive `.sheet(item:)`.
+private struct TickerWrapper: Identifiable {
+    let ticker: String
+    var id: String { ticker }
+}
 
-private struct LiquidGlassTabBar: View {
+
+// MARK: - Docked tab bar
+
+/// Full-width, surface-filled, top-hairline tab bar — replaces the
+/// floating glass capsule per Handoff 2 §9. No background blur, no
+/// rounded corners; sits flush against the bottom safe area. The
+/// active tab tints with `--neon`; inactive tabs read in `fg3`.
+private struct DockedTabBar: View {
     @Binding var active: AppTab
-    @Namespace private var pillNS
+
+    /// Tabs we actually render. Home + Hedge are temporarily
+    /// suppressed while they get rebuilt — leaving the enum cases
+    /// intact so push deep-links / push notifications targeting
+    /// those screens keep compiling, just not visible in the bar.
+    private var visibleTabs: [AppTab] {
+        AppTab.allCases.filter { $0 != .home && $0 != .hedge }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(AppTab.allCases, id: \.self) { t in
+            ForEach(visibleTabs, id: \.self) { t in
                 Button {
-                    withAnimation(.spring(response: 0.42, dampingFraction: 0.78)) {
-                        active = t
-                    }
+                    withAnimation(Motion.overshoot) { active = t }
                 } label: {
                     tabButton(for: t)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
             }
         }
-        .padding(6)
-        .frame(height: 64)
-        .glassEffect(.regular.tint(Color.theme.page2.opacity(0.4)), in: .capsule)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 6)
+        .padding(.bottom, 4)        // safe-area inset handles the rest
+        .background(
+            Color.theme.surface
+                .ignoresSafeArea(edges: .bottom)
+                .overlay(
+                    Color.theme.borderBright.opacity(0.6)
+                        .frame(height: 0.5),
+                    alignment: .top
+                )
+        )
     }
 
     @ViewBuilder
     private func tabButton(for t: AppTab) -> some View {
         let isActive = active == t
-        ZStack {
-            if isActive {
-                Capsule()
-                    .fill(Color.theme.tintNeon)
-                    .overlay(
-                        Capsule().strokeBorder(Color.theme.neon.opacity(0.28), lineWidth: 1)
-                    )
-                    .matchedGeometryEffect(id: "activePill", in: pillNS)
-            }
-            VStack(spacing: 4) {
-                Image(systemName: t.symbol)
-                    .font(.system(size: 18, weight: .semibold))
-                Text(t.label)
-                    .font(.ui(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(isActive ? Color.theme.neon : Color.theme.fg3)
+        VStack(spacing: 3) {
+            Image(systemName: t.symbol)
+                .font(.system(size: 22, weight: .medium))
+            Text(t.label)
+                .font(.ui(size: 10, weight: isActive ? .semibold : .regular))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(isActive ? Color.theme.neon : Color.theme.fg3)
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .contentShape(Rectangle())
     }
 }
 
