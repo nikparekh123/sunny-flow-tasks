@@ -397,12 +397,12 @@ private struct TodayRow: View {
                         Text(item.name)
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(Color.theme.fg1)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .multilineTextAlignment(.leading)
                         Text(item.sub)
                             .font(.system(size: 14, design: .monospaced))
                             .foregroundStyle(Color.theme.fg3)
-                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
