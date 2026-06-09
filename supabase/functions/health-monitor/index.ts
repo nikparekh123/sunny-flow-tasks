@@ -41,10 +41,21 @@ Deno.serve(async (req) => {
   const isWeekday = !['Sat', 'Sun'].includes(wd);
   const inMarket = isWeekday && h >= 9 && h < 16;
 
-  const findings: { code: string; ok: boolean; detail: string; meta?: Record<string, unknown> }[] = [];
+  const findings: { code: string; ok: boolean; severity?: 'warn' | 'critical'; detail: string; meta?: Record<string, unknown> }[] = [];
 
   // 1) mp-refresh: latest option_greeks captured_at.
   //    Skip the check outside market hours — staleness is expected.
+  //
+  //    Threshold tuning (2026-06-09): the prior 20-min cutoff was
+  //    too tight for a 15-min cron. One slow Polygon round-trip
+  //    pushed runs to 16-18 min apart, alarm fires at 21 min, then
+  //    next run clears it — but the user saw the red banner every
+  //    time. New ladder:
+  //      ≤ 35m  → ok (matches IBKR pattern: 2× cadence + slack)
+  //      35-60m → warn ("Market data refreshing"; soft yellow)
+  //      > 60m  → critical ("Market data is stale"; red)
+  //    Banner severity comes from `severity` below — apply step uses
+  //    it instead of always raising critical.
   if (inMarket) {
     const { data: g, error: gErr } = await supabase
       .from('option_greeks_latest')
@@ -55,16 +66,26 @@ Deno.serve(async (req) => {
       findings.push({
         code: 'cron.mp_refresh_stale',
         ok: false,
+        severity: 'critical',
         detail: `option_greeks_latest query failed: ${gErr.message}`,
       });
     } else {
       const latest = g?.[0]?.captured_at ? new Date(g[0].captured_at as string).getTime() : 0;
       const ageMin = latest > 0 ? (now.getTime() - latest) / 60000 : Infinity;
-      if (ageMin > 20) {
+      if (ageMin > 60) {
         findings.push({
           code: 'cron.mp_refresh_stale',
           ok: false,
-          detail: `Greeks last refreshed ${Math.round(ageMin)}m ago; expected ≤ 20m during market hours.`,
+          severity: 'critical',
+          detail: `Market data hasn't refreshed in ${Math.round(ageMin)} minutes. The mp-refresh cron may be down.`,
+          meta: { last_captured_at: g?.[0]?.captured_at ?? null, age_minutes: Math.round(ageMin) },
+        });
+      } else if (ageMin > 35) {
+        findings.push({
+          code: 'cron.mp_refresh_stale',
+          ok: false,
+          severity: 'warn',
+          detail: `Market data last refreshed ${Math.round(ageMin)}m ago — slightly delayed; usually resolves on its own.`,
           meta: { last_captured_at: g?.[0]?.captured_at ?? null, age_minutes: Math.round(ageMin) },
         });
       } else {
@@ -105,12 +126,24 @@ Deno.serve(async (req) => {
         ? new Date(ibkr[0].finished_at as string).getTime()
         : 0;
       const ageMin = latest > 0 ? (now.getTime() - latest) / 60000 : Infinity;
-      // Cron is 15-min; allow 2× cadence + slack before alerting.
-      if (ageMin > 35) {
+      // Cron is 15-min. Two tiers:
+      //   ≤ 35m  → ok
+      //   35-90m → warn (yellow, "IBKR sync delayed")
+      //   > 90m  → critical (red, "IBKR sync is stale")
+      if (ageMin > 90) {
         findings.push({
           code: 'cron.ibkr_flex_stale',
           ok: false,
-          detail: `IBKR sync last successful ${Math.round(ageMin)}m ago; expected ≤ 35m during market hours.`,
+          severity: 'critical',
+          detail: `IBKR sync hasn't run successfully in ${Math.round(ageMin)} minutes. The cron may be down.`,
+          meta: { last_finished_at: ibkr?.[0]?.finished_at ?? null, age_minutes: Math.round(ageMin) },
+        });
+      } else if (ageMin > 35) {
+        findings.push({
+          code: 'cron.ibkr_flex_stale',
+          ok: false,
+          severity: 'warn',
+          detail: `IBKR sync last completed ${Math.round(ageMin)}m ago — slightly delayed; usually resolves on its own.`,
           meta: { last_finished_at: ibkr?.[0]?.finished_at ?? null, age_minutes: Math.round(ageMin) },
         });
       } else {
@@ -119,15 +152,18 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Apply findings.
+  // Apply findings. Severity is per-finding (default critical for
+  // back-compat with any caller that doesn't set it); titles vary
+  // by severity so a 'warn' tier doesn't read like a 9-1-1.
   for (const f of findings) {
     if (f.ok) {
       await supabase.rpc('clear_system_alert', { p_code: f.code });
     } else {
+      const sev = f.severity ?? 'critical';
       await supabase.rpc('raise_system_alert', {
         p_code: f.code,
-        p_severity: 'critical',
-        p_title: titleForCode(f.code),
+        p_severity: sev,
+        p_title: titleForCode(f.code, sev),
         p_detail: f.detail,
         p_meta: f.meta ?? {},
       });
@@ -162,12 +198,14 @@ function isoLastTradingDayBefore(today: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-function titleForCode(code: string): string {
+function titleForCode(code: string, sev: 'warn' | 'critical' = 'critical'): string {
   switch (code) {
-    case 'cron.mp_refresh_stale':              return 'Market data is stale';
+    case 'cron.mp_refresh_stale':
+      return sev === 'warn' ? 'Market data refreshing' : 'Market data is stale';
     case 'cron.daily_theta_snapshot_missing':  return 'Daily theta snapshot missing';
     case 'cron.position_snapshot_missing':     return 'Position snapshot missing';
-    case 'cron.ibkr_flex_stale':               return 'IBKR sync is stale';
+    case 'cron.ibkr_flex_stale':
+      return sev === 'warn' ? 'IBKR sync delayed' : 'IBKR sync is stale';
     default:                                    return code;
   }
 }
