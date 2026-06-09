@@ -52,7 +52,7 @@ struct EarningsEventRow: Decodable, Sendable {
 /// The five buckets the Today list draws from. Top-1-per-bucket
 /// ensures a diverse ranking (we don't want 5 portfolio rows).
 enum TodayBucket: String, CaseIterable, Codable, Sendable {
-    case markets, portfolio, events, earnings, options, iv
+    case markets, portfolio, events, earnings, options
 }
 
 enum TodayTone: String, Sendable {

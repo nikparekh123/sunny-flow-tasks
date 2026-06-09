@@ -52,10 +52,8 @@ final class PortfolioStore {
     /// Upcoming earnings for positions + sector peers — drives the
     /// Today screen's Earnings bucket.
     var allEarningsEvents: [EarningsEventRow] = []
-    /// Day-over-day IV change per option_trade_id — drives the
-    /// Today screen's IV bucket. Sourced from the
-    /// `option_iv_daily_change` view.
-    var allIvChanges: [OptionIvChangeRow] = []
+    // (allIvChanges removed — the day-over-day IV bucket is gone.
+    // The new IV section reads from TickerIVRow / ticker_iv_summary.)
     /// True if the last fetchAll() returned CancellationError on every
     /// child task — signals a transient view-lifecycle race so load()
     /// retries once on a detached task. Internal to the store.
@@ -171,13 +169,9 @@ final class PortfolioStore {
             .lte("report_date", value: Self.isoDate(daysFromNow: 60))
             .order("report_date", ascending: true)
             .execute().value as [EarningsEventRow] }
-        // Day-over-day IV change per option trade — drives the
-        // Today screen's IV bucket. Pure view on top of option_greeks
-        // (no new cron). Empty result is fine if there's no prior-day
-        // capture yet for any open trade.
-        async let ivTask = Self.tryFetch { try await c.from("option_iv_daily_change")
-            .select("option_trade_id, iv_now, iv_prev, iv_change_pts, iv_change_pct, captured_at, prev_captured_at")
-            .execute().value as [OptionIvChangeRow] }
+        // (ivTask removed — the day-over-day IV change query is gone.
+        // The new Seller Score IV section fetches from `ticker_iv_summary`
+        // via a future task wired in when the table/view ship.)
 
         let p   = await pTask
         let t   = await tTask
@@ -191,7 +185,6 @@ final class PortfolioStore {
         let alerts = await alertsTask
         let me  = await meTask
         let ee  = await eeTask
-        let iv  = await ivTask
 
         // Collect any errors so the UI can surface the failed-table list.
         var errs: [String] = []
@@ -215,7 +208,6 @@ final class PortfolioStore {
         let liveAlerts = unwrap(alerts, "system_alerts",    default: [])
         let macroEvents = unwrap(me, "macro_events",        default: [])
         let earningsEvents = unwrap(ee, "earnings_events",  default: [])
-        let ivChanges  = unwrap(iv, "option_iv_daily_change", default: [])
 
         // Filter cancellations — they're internal SwiftUI lifecycle
         // mechanics, never something the user can act on. If those
@@ -261,7 +253,6 @@ final class PortfolioStore {
         self.activeAlerts = liveAlerts
         self.allMacroEvents = macroEvents
         self.allEarningsEvents = earningsEvents
-        self.allIvChanges = ivChanges
 
         let built = Self.buildCompanies(
             positions: positions, trades: trades, greeks: greeks,

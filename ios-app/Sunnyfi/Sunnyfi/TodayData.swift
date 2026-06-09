@@ -34,8 +34,9 @@ enum TodayData {
         var items: [TodayItem] = []
 
         // Order matters — first picks render at the top of the list.
+        // IV used to be a bucket here; it's now a dedicated section
+        // (IVMergedRow + IVTracker rail) rendered outside this list.
         if let p = portfolioItem(store: store)                 { items.append(p) }
-        if let iv = ivItem(store: store)                       { items.append(iv) }
         if let ev = eventsItem(store: store, today: today)     { items.append(ev) }
         if let ea = earningsItem(store: store, today: today)   { items.append(ea) }
         if let op = optionsItem(store: store, today: today)    { items.append(op) }
@@ -390,172 +391,11 @@ enum TodayData {
         ]
     }
 
-    // ─── IV bucket ─────────────────────────────────────────────
-
-    /// Per-ticker weighted IV change vs yesterday, filtered by the
-    /// hybrid threshold. Drives the Today screen's IV bucket and the
-    /// detail-sheet rows.
-    struct IvTickerMove: Sendable {
-        let ticker: String
-        let avgPts: Double      // decimal IV points; 0.03 = +3 IV pts
-        let avgPct: Double      // relative change; 0.18 = +18%
-        let ivNow: Double       // weighted current IV (decimal)
-        let ivPrev: Double      // weighted prior IV (decimal)
-        let legCount: Int
-        var absPts: Double { Swift.abs(avgPts) }
-        var isJump: Bool { avgPts > 0 }
-    }
-
-    /// Hybrid threshold: |Δ IV| ≥ 3 pts OR |Δ IV%| ≥ 15%. Either
-    /// direction qualifies (jumps and crashes both surface).
-    private static let ivThresholdPts: Double = 0.03
-    private static let ivThresholdPct: Double = 0.15
-
-    /// Aggregate per-ticker IV change across open option positions,
-    /// weighted by remaining contracts. Used by both the Today bucket
-    /// and the per-ticker pin synthesizer so the two stay consistent.
-    static func computeIvMoves(store: PortfolioStore) -> [IvTickerMove] {
-        let openTradesById: [String: OptionTradeRow] = Dictionary(
-            uniqueKeysWithValues: store.allTrades
-                .filter { $0.action == "open" && store.remainingContracts(for: $0) > 0 }
-                .map { ($0.id, $0) }
-        )
-        guard !openTradesById.isEmpty, !store.allIvChanges.isEmpty else { return [] }
-
-        struct Acc {
-            var sumPts: Double = 0
-            var sumPct: Double = 0
-            var sumIvNow: Double = 0
-            var sumIvPrev: Double = 0
-            var weight: Double = 0
-            var legCount: Int = 0
-        }
-        var byTicker: [String: Acc] = [:]
-        for ch in store.allIvChanges {
-            guard let trade = openTradesById[ch.option_trade_id],
-                  let pts = ch.iv_change_pts,
-                  let pct = ch.iv_change_pct,
-                  let ivNow = ch.iv_now,
-                  let ivPrev = ch.iv_prev
-            else { continue }
-            let w = store.remainingContracts(for: trade)
-            guard w > 0 else { continue }
-            var acc = byTicker[trade.ticker] ?? Acc()
-            acc.sumPts += pts * w
-            acc.sumPct += pct * w
-            acc.sumIvNow += ivNow * w
-            acc.sumIvPrev += ivPrev * w
-            acc.weight += w
-            acc.legCount += 1
-            byTicker[trade.ticker] = acc
-        }
-
-        return byTicker.compactMap { (ticker, acc) -> IvTickerMove? in
-            guard acc.weight > 0 else { return nil }
-            let pts = acc.sumPts / acc.weight
-            let pct = acc.sumPct / acc.weight
-            let now = acc.sumIvNow / acc.weight
-            let prev = acc.sumIvPrev / acc.weight
-            guard Swift.abs(pts) >= ivThresholdPts || Swift.abs(pct) >= ivThresholdPct
-            else { return nil }
-            return IvTickerMove(
-                ticker: ticker, avgPts: pts, avgPct: pct,
-                ivNow: now, ivPrev: prev, legCount: acc.legCount
-            )
-        }
-        .sorted { $0.absPts > $1.absPts }
-    }
-
-    /// "+9pts" / "−7pts" — formatter for the IV pt-change display.
-    private static func ivPtsLabel(_ pts: Double) -> String {
-        let v = pts * 100
-        let sign = v >= 0 ? "+" : "−"
-        return "\(sign)\(Int(Swift.abs(v).rounded()))pts"
-    }
-
-    /// "28% → 33%" — IV prev → now display.
-    private static func ivBeforeAfter(prev: Double, now: Double) -> String {
-        "\(Int((prev * 100).rounded()))% → \(Int((now * 100).rounded()))%"
-    }
-
-    private static func ivItem(store: PortfolioStore) -> TodayItem? {
-        let moves = computeIvMoves(store: store)
-        guard let top = moves.first else { return nil }
-
-        let pts = ivPtsLabel(top.avgPts)
-        let verb = top.isJump ? "jumped" : "crushed"
-        let tone: TodayTone = top.isJump ? .pos : .neg
-        let line: String
-        if top.isJump {
-            line = "\(top.ticker) IV jumped \(pts) today — premiums richer; consider rolling covered calls or selling new credit."
-        } else {
-            line = "\(top.ticker) IV crushed \(pts) today — premiums leaner; hedges cheaper."
-        }
-
-        let detailRows = moves.prefix(7).map { m -> DetailRow in
-            DetailRow(
-                name: m.ticker,
-                sub: "\(ivBeforeAfter(prev: m.ivPrev, now: m.ivNow)) · \(m.legCount) leg\(m.legCount == 1 ? "" : "s")",
-                value: ivPtsLabel(m.avgPts),
-                tone: m.isJump ? .pos : .neg,
-                pinId: "iv:\(m.ticker)"
-            )
-        }
-
-        return TodayItem(
-            id: "iv:\(top.ticker)",
-            bucket: .iv,
-            category: "IV",
-            short: top.ticker,
-            name: "\(top.ticker) IV \(verb)",
-            sub: "\(ivBeforeAfter(prev: top.ivPrev, now: top.ivNow)) · \(top.legCount) leg\(top.legCount == 1 ? "" : "s")",
-            num: pts,
-            unit: "IV PTS",
-            tone: tone,
-            line: line,
-            detailTitle: "IV moves today",
-            detailSub: "",
-            detailRows: detailRows,
-            pinNarrative: PinNarrative(
-                lead: "\(top.ticker) IV ",
-                value: "\(verb) \(pts)",
-                tail: " today — \(top.isJump ? "premiums richer" : "premiums leaner")."
-            )
-        )
-    }
-
-    /// Build a standalone TodayItem for one ticker's IV move — used
-    /// when the user has pinned a specific ticker's IV row from the
-    /// sheet, so the home rail can render it as its own card.
-    static func itemForIvTicker(_ ticker: String, store: PortfolioStore) -> TodayItem? {
-        let moves = computeIvMoves(store: store)
-        guard let m = moves.first(where: { $0.ticker == ticker }) else { return nil }
-        let pts = ivPtsLabel(m.avgPts)
-        let verb = m.isJump ? "jumped" : "crushed"
-        let tone: TodayTone = m.isJump ? .pos : .neg
-        return TodayItem(
-            id: "iv:\(m.ticker)",
-            bucket: .iv,
-            category: "IV",
-            short: m.ticker,
-            name: "\(m.ticker) IV \(verb)",
-            sub: "\(ivBeforeAfter(prev: m.ivPrev, now: m.ivNow)) · \(m.legCount) leg\(m.legCount == 1 ? "" : "s")",
-            num: pts,
-            unit: "IV PTS",
-            tone: tone,
-            line: m.isJump
-                ? "\(m.ticker) IV jumped \(pts) today — premiums richer; consider rolling covered calls or selling new credit."
-                : "\(m.ticker) IV crushed \(pts) today — premiums leaner; hedges cheaper.",
-            detailTitle: "\(m.ticker) IV",
-            detailSub: "",
-            detailRows: [],
-            pinNarrative: PinNarrative(
-                lead: "\(m.ticker) IV ",
-                value: "\(verb) \(pts)",
-                tail: " today — \(m.isJump ? "premiums richer" : "premiums leaner")."
-            )
-        )
-    }
+    // ─── (former IV bucket removed) ────────────────────────────
+    // The day-over-day IV-change bucket that lived here is gone.
+    // IV now has its own dedicated section on the Today screen
+    // (IVMergedRow + IVTracker rail) backed by the Seller Score
+    // model — see IVCard.swift, IVSheet.swift, IVTracker.swift.
 
     /// Build a standalone TodayItem for a single earnings event —
     /// used when the user has pinned an individual row from the

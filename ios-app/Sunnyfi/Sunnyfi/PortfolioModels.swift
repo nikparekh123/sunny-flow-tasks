@@ -56,19 +56,10 @@ struct OptionGreeksRow: Decodable, Sendable {
     let captured_at: String?
 }
 
-/// Day-over-day IV change per option trade. Sourced from the
-/// `option_iv_daily_change` view, which joins the latest greeks
-/// capture against the last capture from a strictly prior date.
-/// `iv_change_pts` is in decimal IV points (0.03 = +3 IV pts).
-struct OptionIvChangeRow: Decodable, Sendable {
-    let option_trade_id: String
-    let iv_now: Double?
-    let iv_prev: Double?
-    let iv_change_pts: Double?
-    let iv_change_pct: Double?
-    let captured_at: String?
-    let prev_captured_at: String?
-}
+// (OptionIvChangeRow removed — the day-over-day IV bucket it
+// powered is gone. IV now flows through `ticker_iv_summary` /
+// TickerIVRow. The `option_iv_daily_change` view in Supabase is
+// dormant; safe to drop or leave.)
 
 /// One row per trading day captured by the daily-theta-snapshot cron.
 /// Powers the Hedge tab's day-over-day Δ-change, the 14-day sparkline,

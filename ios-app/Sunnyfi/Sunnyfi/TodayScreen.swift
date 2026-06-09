@@ -42,10 +42,9 @@ struct TodayScreen: View {
                     return TodayData.itemForEarnings(ev, today: today)
                 }
             }
-            if id.hasPrefix("iv:") {
-                let ticker = String(id.dropFirst("iv:".count))
-                return TodayData.itemForIvTicker(ticker, store: store)
-            }
+            // (iv:<TICKER> pins removed — IV pins now live in their own
+            // store (IVPinStore) and render via IVTracker above the
+            // headline, not in this Pinned rail.)
             return nil
         }
     }
