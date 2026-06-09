@@ -4,10 +4,10 @@
 //
 
 import SwiftUI
-// Sentry TEMPORARILY REMOVED — investigating a real-device launch
-// crash on iOS 27 where libxpc init fails during dyld initializer
-// phase. Sentry's +load swizzling is a prime suspect; we removed the
-// package dependency to isolate. Re-add after launch is green.
+// Sentry SPM package is added but the product hasn't been linked to
+// the Sunnyfi target yet. Uncomment the import + init once the Sentry
+// product is added under target → General → Frameworks, Libraries,
+// and Embedded Content.
 // import Sentry
 
 
@@ -22,8 +22,8 @@ struct SunnyfiApp: App {
     @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var appDelegate
 
     init() {
-        // Sentry init disabled while the framework is removed — see
-        // import comment above.
+        // Sentry init disabled until the SPM product is linked to the
+        // target — see import comment above.
         //
         // SentrySDK.start { options in
         //     options.dsn = "https://cc6408ce3279aa2d9303d9de854a955b@o4511490640707584.ingest.us.sentry.io/4511490644443136"
