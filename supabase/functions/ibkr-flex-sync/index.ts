@@ -102,6 +102,10 @@ Deno.serve(async (req) => {
   // Trigger annotation for the audit row
   const body = await req.json().catch(() => ({}));
   const trigger: 'cron' | 'manual' | 'backfill' = body.trigger ?? 'cron';
+  // When ?debug=true (or {debug:true} body), return the raw IBKR XML
+  // (first ~3KB) plus parsed trade count in the response. Use to verify
+  // what IBKR is actually serving without needing dashboard access.
+  const debug: boolean = body.debug === true;
 
   // ── 1. Validate secrets ─────────────────────────────────────
   if (!token || !queryId) {
@@ -138,6 +142,8 @@ Deno.serve(async (req) => {
   let rowsInserted = 0;
   let rowsUpdated = 0;
   let rowsVoided = 0;
+  // Outer scope so debug return can include it.
+  let reportXml = '';
 
   try {
     // ── 4. Fetch report (two-step) ────────────────────────────
@@ -153,7 +159,6 @@ Deno.serve(async (req) => {
     }
 
     // Poll GetStatement until generated (max ~30s)
-    let reportXml = '';
     for (let i = 0; i < 10; i++) {
       const getUrl = `${IBKR_GET_BASE}/GetStatement?q=${referenceCode}&t=${token}&v=3`;
       reportXml = await (await fetch(getUrl)).text();
@@ -319,6 +324,22 @@ Deno.serve(async (req) => {
     rows_voided: rowsVoided,
     rows_errored: errors.length,
     errors: errors.slice(0, 10), // truncate response payload
+    // Debug payload — only included when caller passed {debug: true}.
+    // Trims XML to keep response under 6KB; enough to see Trade
+    // sections and account scoping for diagnosis.
+    debug: debug
+      ? {
+          reference_code: referenceCode,
+          account_id: accountId,
+          xml_length: reportXml.length,
+          xml_head: reportXml.slice(0, 1500),
+          // Try to surface any TradeConfirms tag presence even if our
+          // parser dropped them — quick sanity check for parser bugs vs.
+          // genuinely empty reports.
+          trade_confirm_tag_count: (reportXml.match(/<TradeConfirm/g) || []).length,
+          flex_statement_count: (reportXml.match(/<FlexStatement\s/g) || []).length,
+        }
+      : undefined,
   }));
 });
 
