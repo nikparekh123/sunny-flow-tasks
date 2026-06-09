@@ -81,6 +81,34 @@ final class PortfolioStore {
         }
     }
 
+    /// Lightweight poll — re-fetches only `ticker_iv_summary` so new
+    /// daily IV snapshots show up in the app without a full pull-to-
+    /// refresh. Source updates once a day after market close (20:15
+    /// UTC weekdays) so this is checked on a slower cadence than
+    /// alerts. Mirrors refreshAlertsOnly's silent-failure pattern.
+    func refreshIvSummariesOnly() async {
+        let result = await Self.tryFetch {
+            try await client.from("ticker_iv_summary")
+                .select("ticker, current_iv, current_hv30, iv_low, iv_high, iv_window_days, last_snapshot_date, window_start")
+                .execute().value as [TickerIVRow]
+        }
+        if case .success(let rows) = result {
+            // Preserve the DEBUG mock fallback only when the real
+            // view comes back empty — same rule as fetchAll().
+            #if DEBUG
+            if rows.isEmpty {
+                if self.allIvSummaries.isEmpty {
+                    self.allIvSummaries = IVMockData.rows
+                }
+            } else {
+                self.allIvSummaries = rows
+            }
+            #else
+            self.allIvSummaries = rows
+            #endif
+        }
+    }
+
     /// Lightweight poll — re-fetches only `system_alerts` (the tiny
     /// banner-source table) without touching any of the other 10
     /// queries in fetchAll(). Used by AlertPoller so cleared alerts

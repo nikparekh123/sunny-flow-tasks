@@ -160,6 +160,18 @@ struct TabRootView: View {
                 await store.refreshAlertsOnly()
             }
         }
+        // IV-summary background poll — same pattern as the alert poll
+        // but on a 5-min cadence. The source view (ticker_iv_summary)
+        // only changes when ticker-iv-snapshot runs (once daily
+        // 20:15 UTC, or manual). 5 min picks up off-schedule manual
+        // triggers without burning bandwidth.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                guard !Task.isCancelled else { break }
+                await store.refreshIvSummariesOnly()
+            }
+        }
         // ── Push deep-link routing ──
         // When the user taps a notification, AppNavigator.shared fills
         // these fields. We react here so the routing lives in one
