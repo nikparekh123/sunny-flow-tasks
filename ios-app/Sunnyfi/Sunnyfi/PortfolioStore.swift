@@ -260,7 +260,15 @@ final class PortfolioStore {
         self.activeAlerts = liveAlerts
         self.allMacroEvents = macroEvents
         self.allEarningsEvents = earningsEvents
+        // TEMPORARY: fall back to mock IV rows so the IV section can
+        // be designed/audited before the daily ticker-iv-snapshot
+        // cron has populated real data. Remove this fallback once
+        // ticker_iv_summary returns rows.
+        #if DEBUG
+        self.allIvSummaries = ivSummaries.isEmpty ? IVMockData.rows : ivSummaries
+        #else
         self.allIvSummaries = ivSummaries
+        #endif
 
         let built = Self.buildCompanies(
             positions: positions, trades: trades, greeks: greeks,
