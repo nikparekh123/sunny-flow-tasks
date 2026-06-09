@@ -44,7 +44,7 @@ private extension UIColor {
 extension Color {
     enum theme {
         // Canvas / surfaces
-        static let page       = Color.dyn(light: UIColor(hex: 0xf2f2f7), dark: UIColor(hex: 0x061a10))
+        static let page       = Color.dyn(light: UIColor(hex: 0xf2eee5), dark: UIColor(hex: 0x061a10))
         static let page2      = Color.dyn(light: UIColor(hex: 0xe7ece1), dark: UIColor(hex: 0x0a2828))
         static let surface    = Color.dyn(light: UIColor(hex: 0xfbfaf6), dark: UIColor(hex: 0x0f3333))
         // cardSolid: in dark = solid card fill; in light = warm-white tint over paper

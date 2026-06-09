@@ -220,28 +220,45 @@ Deno.serve(async (req) => {
     // ── 7. Soft-void trades that disappeared ──────────────────
     // Only consider trades within the last VOID_WINDOW_DAYS that
     // came from IBKR and haven't already been voided.
-    const voidCutoff = new Date(Date.now() - VOID_WINDOW_DAYS * 86400_000)
-      .toISOString();
+    //
+    // SAFETY: skip voiding entirely if the report came back empty.
+    // An empty TradeConfirms list almost always means the IBKR Flex
+    // Query is misconfigured (Period=Today on a slow day, expired
+    // token, account-side issue) — NOT that every trade from the
+    // last 7 days was simultaneously cancelled. A 2026-06-09 incident
+    // where the Period was switched to "Today" voided every trade in
+    // the database; we never let that happen again.
+    if (trades.length === 0) {
+      errors.push({
+        reason: `SAFETY: report contained 0 TradeConfirms — skipped voiding ${
+          'pass to avoid mass-voiding existing rows. Likely an IBKR-side ' +
+          'misconfig (Period=Today on a non-trading day, expired token, etc.)'
+        }`,
+      });
+    } else {
+      const voidCutoff = new Date(Date.now() - VOID_WINDOW_DAYS * 86400_000)
+        .toISOString();
 
-    for (const table of ['option_trades', 'share_lots', 'share_sells'] as const) {
-      const { data: existing } = await supabase
-        .from(table)
-        .select('id, ibkr_trade_id')
-        .eq('source', 'ibkr_flex')
-        .is('voided_at', null)
-        .gte('last_synced_at', voidCutoff);
-
-      const orphans = (existing ?? [])
-        .filter((r) => r.ibkr_trade_id && !seenIds.includes(r.ibkr_trade_id))
-        .map((r) => r.id);
-
-      if (orphans.length > 0) {
-        const { error: voidErr } = await supabase
+      for (const table of ['option_trades', 'share_lots', 'share_sells'] as const) {
+        const { data: existing } = await supabase
           .from(table)
-          .update({ voided_at: new Date().toISOString() })
-          .in('id', orphans);
+          .select('id, ibkr_trade_id')
+          .eq('source', 'ibkr_flex')
+          .is('voided_at', null)
+          .gte('last_synced_at', voidCutoff);
 
-        if (!voidErr) rowsVoided += orphans.length;
+        const orphans = (existing ?? [])
+          .filter((r) => r.ibkr_trade_id && !seenIds.includes(r.ibkr_trade_id))
+          .map((r) => r.id);
+
+        if (orphans.length > 0) {
+          const { error: voidErr } = await supabase
+            .from(table)
+            .update({ voided_at: new Date().toISOString() })
+            .in('id', orphans);
+
+          if (!voidErr) rowsVoided += orphans.length;
+        }
       }
     }
 
