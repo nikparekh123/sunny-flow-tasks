@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		8EE59D1AE262405AB3C7F3C2 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 30F9809403E74872BA1B8C41 /* Sentry */; };
 		D8CE241A2FCC98BD005FE434 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D8CE24192FCC98BD005FE434 /* Supabase */; };
 /* End PBXBuildFile section */
 
@@ -29,7 +28,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				D8CE241A2FCC98BD005FE434 /* Supabase in Frameworks */,
-				8EE59D1AE262405AB3C7F3C2 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -74,7 +72,6 @@
 			name = Sunnyfi;
 			packageProductDependencies = (
 				D8CE24192FCC98BD005FE434 /* Supabase */,
-				30F9809403E74872BA1B8C41 /* Sentry */,
 			);
 			productName = Sunnyfi;
 			productReference = D8CE23FE2FCC96F2005FE434 /* Sunnyfi.app */;
@@ -88,7 +85,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2650;
-				LastUpgradeCheck = 2650;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					D8CE23FD2FCC96F2005FE434 = {
 						CreatedOnToolsVersion = 26.5;
@@ -106,7 +103,6 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D8CE24182FCC98BC005FE434 /* XCRemoteSwiftPackageReference "supabase-swift" */,
-				249184DF9A604A10AE280832 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D8CE23FF2FCC96F2005FE434 /* Products */;
@@ -210,12 +206,13 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -268,11 +265,12 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -386,14 +384,6 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		249184DF9A604A10AE280832 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/getsentry/sentry-cocoa/";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 8.0.0;
-			};
-		};
 		D8CE24182FCC98BC005FE434 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/supabase/supabase-swift";
@@ -405,11 +395,6 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		30F9809403E74872BA1B8C41 /* Sentry */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 249184DF9A604A10AE280832 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
-			productName = Sentry;
-		};
 		D8CE24192FCC98BD005FE434 /* Supabase */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D8CE24182FCC98BC005FE434 /* XCRemoteSwiftPackageReference "supabase-swift" */;

@@ -4,7 +4,11 @@
 //
 
 import SwiftUI
-import Sentry
+// Sentry TEMPORARILY REMOVED — investigating a real-device launch
+// crash on iOS 27 where libxpc init fails during dyld initializer
+// phase. Sentry's +load swizzling is a prime suspect; we removed the
+// package dependency to isolate. Re-add after launch is green.
+// import Sentry
 
 
 @main
@@ -18,18 +22,15 @@ struct SunnyfiApp: App {
     @UIApplicationDelegateAdaptor(PushAppDelegate.self) private var appDelegate
 
     init() {
-        // Sentry — error/crash analytics. Trace + profile sampling are
-        // intentionally low so we don't burn the free-tier event quota
-        // on routine activity. Bump them up while diagnosing a specific
-        // issue, then drop back.
-        SentrySDK.start { options in
-            options.dsn = "https://cc6408ce3279aa2d9303d9de854a955b@o4511490640707584.ingest.us.sentry.io/4511490644443136"
-            options.sendDefaultPii = true
-            options.tracesSampleRate = 0.1
-            // Profiling disabled by default — re-enable with a sample
-            // rate when chasing a specific performance regression.
-            options.experimental.enableLogs = true
-        }
+        // Sentry init disabled while the framework is removed — see
+        // import comment above.
+        //
+        // SentrySDK.start { options in
+        //     options.dsn = "https://cc6408ce3279aa2d9303d9de854a955b@o4511490640707584.ingest.us.sentry.io/4511490644443136"
+        //     options.sendDefaultPii = true
+        //     options.tracesSampleRate = 0.1
+        //     options.experimental.enableLogs = true
+        // }
 
         // Register the BG task handler at process launch (before
         // application(_:didFinishLaunchingWithOptions:) returns, per
