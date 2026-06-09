@@ -81,6 +81,25 @@ final class PortfolioStore {
         }
     }
 
+    /// Lightweight poll — re-fetches only `system_alerts` (the tiny
+    /// banner-source table) without touching any of the other 10
+    /// queries in fetchAll(). Used by AlertPoller so cleared alerts
+    /// disappear from the app without a full pull-to-refresh.
+    func refreshAlertsOnly() async {
+        let result = await Self.tryFetch {
+            try await client.from("system_alerts")
+                .select("id, code, severity, title, detail, created_at, resolved_at")
+                .is("resolved_at", value: nil)
+                .order("created_at", ascending: false)
+                .execute().value as [SystemAlertRow]
+        }
+        if case .success(let alerts) = result {
+            self.activeAlerts = alerts
+        }
+        // Failures are silent — we'll catch them on the next poll or
+        // on the next fetchAll(). No UI surfacing for this background loop.
+    }
+
     /// Pull-to-refresh — invokes the mp-refresh edge function, then re-fetches.
     func refresh() async {
         isRefreshing = true
