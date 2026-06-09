@@ -42,6 +42,10 @@ struct TodayScreen: View {
                     return TodayData.itemForEarnings(ev, today: today)
                 }
             }
+            if id.hasPrefix("iv:") {
+                let ticker = String(id.dropFirst("iv:".count))
+                return TodayData.itemForIvTicker(ticker, store: store)
+            }
             return nil
         }
     }
