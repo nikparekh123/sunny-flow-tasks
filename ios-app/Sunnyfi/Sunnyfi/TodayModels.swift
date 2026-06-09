@@ -94,6 +94,18 @@ struct DetailRow: Identifiable, Hashable, Sendable {
     let sub: String
     let value: String
     let tone: TodayTone
+    /// Stable pin key for this row, if it represents a pinnable entity
+    /// (e.g. a single macro event or earnings report). nil for rows
+    /// that are just informational (option counts, etc.).
+    let pinId: String?
+
+    init(name: String, sub: String, value: String, tone: TodayTone, pinId: String? = nil) {
+        self.name = name
+        self.sub = sub
+        self.value = value
+        self.tone = tone
+        self.pinId = pinId
+    }
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(name); hasher.combine(value)

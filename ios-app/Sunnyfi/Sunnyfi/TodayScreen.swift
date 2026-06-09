@@ -24,9 +24,25 @@ struct TodayScreen: View {
 
     private var allItems: [TodayItem] { TodayData.compute(store: store) }
     private var pinnedItems: [TodayItem] {
-        // Preserve user's pin order.
-        pins.pinnedIds.compactMap { id in
-            allItems.first(where: { $0.id == id })
+        // Preserve user's pin order. Falls back to synthesizing a
+        // TodayItem from store.macro/earnings rows when the pin is
+        // an individual event id rather than a bucket id.
+        let today = Date()
+        return pins.pinnedIds.compactMap { id -> TodayItem? in
+            if let direct = allItems.first(where: { $0.id == id }) { return direct }
+            if id.hasPrefix("macro:") {
+                let evId = String(id.dropFirst("macro:".count))
+                if let ev = store.allMacroEvents.first(where: { $0.id == evId }) {
+                    return TodayData.itemForMacroEvent(ev, today: today)
+                }
+            }
+            if id.hasPrefix("earnings:") {
+                let evId = String(id.dropFirst("earnings:".count))
+                if let ev = store.allEarningsEvents.first(where: { $0.id == evId }) {
+                    return TodayData.itemForEarnings(ev, today: today)
+                }
+            }
+            return nil
         }
     }
     /// Top-N from the ranking, with pinned items removed (they're
@@ -94,8 +110,7 @@ struct TodayScreen: View {
             if let id = openItemId, let item = allItems.first(where: { $0.id == id }) {
                 TodaySheet(
                     item: item,
-                    isPinned: pins.isPinned(item.id),
-                    onPin:  { pins.toggle(item.id) },
+                    pins: pins,
                     onClose: { openItemId = nil }
                 )
                 .presentationDetents([.large])
@@ -433,8 +448,7 @@ private struct TodayRow: View {
 
 struct TodaySheet: View {
     let item: TodayItem
-    let isPinned: Bool
-    let onPin: () -> Void
+    @Bindable var pins: TodayPinStore
     let onClose: () -> Void
 
     // Show all rows always — no peek/full toggle. The sheet is
@@ -444,7 +458,8 @@ struct TodaySheet: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                // Head
+                // Head — no top-level Tracking pill; pinning happens
+                // per-row below (each event is independently pinnable).
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 7) {
                         Text(item.category.uppercased())
@@ -456,47 +471,26 @@ struct TodaySheet: View {
                             .tracking(-0.78)
                             .foregroundStyle(Color.theme.fg1)
                             .lineLimit(2)
-                        Text(item.detailSub)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Color.theme.fg3)
-                            .padding(.top, 2)
+                        if !item.detailSub.isEmpty {
+                            Text(item.detailSub)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(Color.theme.fg3)
+                                .padding(.top, 2)
+                        }
                     }
                     Spacer()
-                    HStack(spacing: 8) {
-                        Button(action: onPin) {
-                            HStack(spacing: 6) {
-                                Image(systemName: isPinned ? "pin.fill" : "pin")
-                                    .font(.system(size: 11, weight: .semibold))
-                                Text(isPinned ? "Tracking" : "Track")
-                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                    .tracking(0.4)
-                            }
-                            .foregroundStyle(isPinned ? Color.white : Color.theme.neon)
-                            .padding(.horizontal, 13)
-                            .frame(minHeight: 38)         // spec min-height
-                            .background(
-                                Capsule().fill(isPinned ? Color.theme.neon : Color.theme.neon.opacity(0.09))
-                            )
-                            .overlay(
-                                Capsule().stroke(Color.theme.neon.opacity(isPinned ? 1 : 0.32), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        Button(action: onClose) {
-                            Text("✕")
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(Color.theme.fg3)
-                                .frame(width: 38, height: 38)
-                                .background(Circle().fill(Color.theme.surface))
-                                .overlay(Circle().stroke(Color.theme.borderBright, lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
+                    Button(action: onClose) {
+                        Text("✕")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Color.theme.fg3)
+                            .frame(width: 38, height: 38)
+                            .background(Circle().fill(Color.theme.surface))
+                            .overlay(Circle().stroke(Color.theme.borderBright, lineWidth: 1))
                     }
+                    .buttonStyle(.plain)
                 }
 
-                // Hero — slightly smaller than before per user. 56pt
-                // hits a clean middle ground (spec is 54pt; we'd been
-                // at 68 to match earlier-screenshot visual weight).
+                // Hero
                 HStack(alignment: .lastTextBaseline, spacing: 12) {
                     Text(item.num)
                         .font(.system(size: 40, weight: .semibold))
@@ -505,7 +499,10 @@ struct TodaySheet: View {
                         .foregroundStyle(toneColor(item.tone))
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                    Text("\(item.unit.lowercased()) · \(item.short)")
+                    // Subhead: just the short tag (HOUSING, etc.). The
+                    // unit prefix ("today ·", "until ·") was redundant
+                    // beside the hero num and got dropped per design.
+                    Text(item.short)
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(Color.theme.fg3)
                 }
@@ -517,15 +514,9 @@ struct TodaySheet: View {
                     .foregroundStyle(Color.theme.fg2)
                     .padding(.top, 14)
 
-                // List head (no toggle — all rows show always)
-                Text("THE LIST")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(2)
-                    .foregroundStyle(Color.theme.fg3)
-                    .padding(.top, 18)
-                    .padding(.bottom, 4)
-
-                // Rows
+                // Rows — each pinnable independently when `pinId` is
+                // set (events / earnings). Other rows render without
+                // a pin affordance.
                 VStack(spacing: 0) {
                     ForEach(Array(visibleRows.enumerated()), id: \.offset) { idx, r in
                         if idx > 0 {
@@ -533,7 +524,7 @@ struct TodaySheet: View {
                                 .fill(Color.theme.hair)
                                 .frame(height: 1)
                         }
-                        HStack {
+                        HStack(spacing: 10) {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(r.name)
                                     .font(.system(size: 18, weight: .semibold))
@@ -548,10 +539,22 @@ struct TodaySheet: View {
                                 .font(.system(size: 20, weight: .semibold))
                                 .monospacedDigit()
                                 .foregroundStyle(toneColor(r.tone))
+                            if let pinId = r.pinId {
+                                Button {
+                                    pins.toggle(pinId)
+                                } label: {
+                                    Image(systemName: pins.isPinned(pinId) ? "pin.fill" : "pin")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(pins.isPinned(pinId) ? Color.theme.neon : Color.theme.fg4)
+                                        .frame(width: 30, height: 30)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         .padding(.vertical, 15)
                     }
                 }
+                .padding(.top, 14)
             }
             .padding(.horizontal, 22)
             .padding(.top, 45)        // breathing room below the grab handle

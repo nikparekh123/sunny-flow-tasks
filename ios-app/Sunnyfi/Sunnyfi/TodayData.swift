@@ -144,7 +144,7 @@ enum TodayData {
             .sorted { $0.0 < $1.0 }
 
         guard let (days, ev) = upcoming.first else { return nil }
-        let num = days == 0 ? "TODAY" : "\(days)d"
+        let num = dayLabel(days)
         return TodayItem(
             id: "events:\(ev.id)",
             bucket: .events,
@@ -157,18 +157,47 @@ enum TodayData {
             tone: .neutral,
             line: ev.summary ?? "Upcoming event — \(ev.name).",
             detailTitle: "Events",
-            detailSub: "Calendar that moves your book",
+            detailSub: "",
             detailRows: upcoming.prefix(7).map { (d, e) in
                 DetailRow(
                     name: e.name,
                     sub: formatEventTime(e),
-                    value: d == 0 ? "TODAY" : "\(d)d",
-                    tone: .neutral
+                    value: dayLabel(d),
+                    tone: .neutral,
+                    pinId: "macro:\(e.id)"
                 )
             },
             pinNarrative: PinNarrative(
-                lead: "\(ev.name) lands in ",
-                value: num,
+                lead: "\(ev.name) lands ",
+                value: days <= 1 ? num.lowercased() : "in \(num)",
+                tail: " — \(ev.summary ?? "watch the print")."
+            )
+        )
+    }
+
+    /// Build a standalone TodayItem for a single macro event — used
+    /// when the user has pinned an individual row from the Events
+    /// sheet, so the home rail can render it as its own card.
+    static func itemForMacroEvent(_ ev: MacroEventRow, today: Date) -> TodayItem {
+        let days = parseDate(ev.event_date).map { daysBetween(today, $0) } ?? 0
+        let num = dayLabel(days)
+        return TodayItem(
+            id: "macro:\(ev.id)",
+            bucket: .events,
+            category: "Events",
+            short: ev.category?.uppercased() ?? "EVENT",
+            name: ev.name,
+            sub: ev.summary ?? formatEventTime(ev),
+            num: num,
+            unit: days == 0 ? "today" : "UNTIL",
+            tone: .neutral,
+            line: ev.summary ?? "Upcoming event — \(ev.name).",
+            detailTitle: ev.name,
+            detailSub: "",
+            detailRows: [],
+            pinNarrative: PinNarrative(
+                lead: "\(ev.name) lands ",
+                value: days <= 1 ? num.lowercased() : "in \(num)",
                 tail: " — \(ev.summary ?? "watch the print")."
             )
         )
@@ -176,7 +205,7 @@ enum TodayData {
 
     private static func formatEventTime(_ ev: MacroEventRow) -> String {
         let time = ev.event_time?.prefix(5) ?? ""    // HH:MM
-        let date = ev.event_date
+        let date = fmtShortDate(ev.event_date)
         return time.isEmpty ? date : "\(date) · \(time) ET"
     }
 
@@ -194,11 +223,11 @@ enum TodayData {
         let unit: String
         let line: String
         if days <= 6 {
-            num = days == 0 ? "TODAY" : "\(days)d"
+            num = dayLabel(days)
             unit = "UNTIL"
-            line = "\(e.ticker) reports in \(days == 0 ? "today" : "\(days) days") — \(e.scope_tag == "position" ? "you own this" : "sector peer of your book")."
+            line = "\(e.ticker) reports \(days == 0 ? "today" : days == 1 ? "tomorrow" : "in \(days) days") — \(e.scope_tag == "position" ? "you own this" : "sector peer of your book")."
         } else {
-            num = "\(days)d"
+            num = dayLabel(days)
             unit = "UNTIL"
             line = "\(e.ticker) reports in \(days) days — \(e.scope_tag == "position" ? "in your book" : "peer of your positions")."
         }
@@ -218,7 +247,7 @@ enum TodayData {
             category: "Earnings",
             short: e.ticker,
             name: e.company_name ?? e.ticker,
-            sub: "\(e.report_date) · \(reportTimeLabel(e.report_time))",
+            sub: "\(fmtShortDate(e.report_date)) · \(reportTimeLabel(e.report_time))",
             num: num,
             unit: unit,
             tone: .neutral,
@@ -228,9 +257,10 @@ enum TodayData {
             detailRows: allUpcoming.prefix(7).map { (d, row) in
                 DetailRow(
                     name: row.ticker,
-                    sub: "\(reportTimeLabel(row.report_time)) · \(row.scope_tag == "position" ? "you own" : (row.sector_etf ?? "peer"))",
-                    value: d == 0 ? "TODAY" : "\(d)d",
-                    tone: row.scope_tag == "position" ? .neon : .neutral
+                    sub: "\(fmtShortDate(row.report_date)) · \(reportTimeLabel(row.report_time)) · \(row.scope_tag == "position" ? "you own" : (row.sector_etf ?? "peer"))",
+                    value: dayLabel(d),
+                    tone: row.scope_tag == "position" ? .neon : .neutral,
+                    pinId: "earnings:\(row.id)"
                 )
             },
             pinNarrative: PinNarrative(
@@ -359,7 +389,58 @@ enum TodayData {
         ]
     }
 
+    /// Build a standalone TodayItem for a single earnings event —
+    /// used when the user has pinned an individual row from the
+    /// Earnings sheet.
+    static func itemForEarnings(_ e: EarningsEventRow, today: Date) -> TodayItem {
+        let days = parseDate(e.report_date).map { daysBetween(today, $0) } ?? 0
+        let num = dayLabel(days)
+        let line = "\(e.ticker) reports \(days == 0 ? "today" : days == 1 ? "tomorrow" : "in \(days) days") — \(e.scope_tag == "position" ? "in your book" : "sector peer of your positions")."
+        return TodayItem(
+            id: "earnings:\(e.id)",
+            bucket: .earnings,
+            category: "Earnings",
+            short: e.ticker,
+            name: e.company_name ?? e.ticker,
+            sub: "\(fmtShortDate(e.report_date)) · \(reportTimeLabel(e.report_time))",
+            num: num,
+            unit: "UNTIL",
+            tone: .neutral,
+            line: line,
+            detailTitle: e.company_name ?? e.ticker,
+            detailSub: "",
+            detailRows: [],
+            pinNarrative: PinNarrative(
+                lead: "\(e.ticker) reports ",
+                value: days <= 1 ? (days == 0 ? "today" : "tomorrow") : "in \(num)",
+                tail: " — \(e.scope_tag == "position" ? "in your book" : "sector peer")."
+            )
+        )
+    }
+
     // ─── Helpers ───────────────────────────────────────────────
+
+    /// "TODAY" / "TOMORROW" / "Nd" — used for day-countdown values
+    /// across the Today screen and sheets.
+    static func dayLabel(_ days: Int) -> String {
+        switch days {
+        case 0:  return "TODAY"
+        case 1:  return "TOMORROW"
+        default: return "\(days)d"
+        }
+    }
+
+    /// "Jun 9, 26" — app-wide short date format. Input is the
+    /// canonical "yyyy-MM-dd" string we store in Supabase; output
+    /// is the human-readable short form used on cards, sheets, and
+    /// row subs.
+    static func fmtShortDate(_ ymd: String) -> String {
+        guard let d = parseDate(ymd) else { return ymd }
+        let out = DateFormatter()
+        out.dateFormat = "MMM d, yy"
+        out.timeZone = TimeZone(identifier: "America/New_York")
+        return out.string(from: d)
+    }
 
     private static func parseDate(_ s: String) -> Date? {
         let f = ISO8601DateFormatter()
