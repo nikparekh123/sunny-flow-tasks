@@ -20,6 +20,18 @@ enum SupabaseService {
         guard let url = URL(string: Secrets.supabaseURL) else {
             fatalError("Invalid Supabase URL in Secrets.swift")
         }
-        return SupabaseClient(supabaseURL: url, supabaseKey: Secrets.supabasePublishableKey)
+        // Opt into the new initial-session emission behavior to
+        // silence the SDK deprecation warning. Once the next major
+        // supabase-swift release lands this becomes the default and
+        // the option can be removed.
+        return SupabaseClient(
+            supabaseURL: url,
+            supabaseKey: Secrets.supabasePublishableKey,
+            options: SupabaseClientOptions(
+                auth: SupabaseClientOptions.AuthOptions(
+                    emitLocalSessionAsInitialSession: true
+                )
+            )
+        )
     }()
 }

@@ -17,7 +17,7 @@ import Supabase
 @MainActor
 @Observable
 final class AuthStore {
-    enum State {
+    enum State: Equatable {
         case loading
         case signedOut
         case signedIn(email: String)
@@ -40,7 +40,7 @@ final class AuthStore {
         stateTask = Task { [weak self] in
             guard let self else { return }
             for await change in self.client.auth.authStateChanges {
-                await self.apply(session: change.session)
+                self.apply(session: change.session)
             }
         }
     }

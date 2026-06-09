@@ -5,9 +5,11 @@
  * Reads:
  *   - public.option_trades  (open legs with remaining contracts > 0)
  *   - public.positions      (held tickers with quantity > 0, status=open)
- * Writes (upsert):
- *   - public.option_greeks  (1 row per open option trade)
- *   - public.ticker_quotes  (1 row per held ticker)
+ * Writes (append):
+ *   - public.option_greeks  (one new row per open option trade per
+ *     cron run; latest exposed via option_greeks_latest view)
+ *   - public.ticker_quotes  (one new row per held ticker per run;
+ *     latest exposed via ticker_quotes_latest view)
  *
  * Polygon endpoints:
  *   - per option contract:
@@ -296,10 +298,13 @@ Deno.serve(async (req) => {
         iv: r.iv, open_interest: r.oi, volume: r.vol, last_mark: r.last_mark,
         captured_at: now,
       }));
+      // Append-only: each cron run inserts a new row. The
+      // `option_greeks_latest` view exposes the most recent capture
+      // per trade for read paths. 90-day retention prune runs daily.
       const { error: gErr } = await admin
         .from('option_greeks')
-        .upsert(rows, { onConflict: 'option_trade_id' });
-      if (gErr) throw new Error(`option_greeks upsert failed: ${gErr.message}`);
+        .insert(rows);
+      if (gErr) throw new Error(`option_greeks insert failed: ${gErr.message}`);
     }
     if (stockResults.length > 0) {
       const rows = stockResults
@@ -311,10 +316,11 @@ Deno.serve(async (req) => {
           captured_at: now,
         }));
       if (rows.length > 0) {
+        // Append-only — see `ticker_quotes_latest` view. 30-day prune.
         const { error: qErr } = await admin
           .from('ticker_quotes')
-          .upsert(rows, { onConflict: 'ticker' });
-        if (qErr) throw new Error(`ticker_quotes upsert failed: ${qErr.message}`);
+          .insert(rows);
+        if (qErr) throw new Error(`ticker_quotes insert failed: ${qErr.message}`);
       }
     }
 
@@ -328,6 +334,20 @@ Deno.serve(async (req) => {
     // if no exception was thrown — surface it that way on /health so the
     // staleness traffic-light catches "Polygon returned 403 on every leg".
     const allFailed = openLegs.length > 0 && legResults.length === 0;
+    // Raise / clear a Polygon-outage alert in system_alerts so the iOS
+    // banner reflects upstream state immediately rather than waiting
+    // for the 30-min health-monitor.
+    if (allFailed) {
+      await admin.rpc('raise_system_alert', {
+        p_code: 'polygon.outage',
+        p_severity: 'critical',
+        p_title: 'Polygon feed unavailable',
+        p_detail: `All ${openLegs.length} legs failed this refresh — upstream feed may be down.`,
+        p_meta: { failures: legFailures.slice(0, 5) },
+      });
+    } else {
+      await admin.rpc('clear_system_alert', { p_code: 'polygon.outage' });
+    }
     await finishRun(allFailed ? 'error' : 'ok', {
       legs_total: openLegs.length,
       legs_updated: legResults.length,

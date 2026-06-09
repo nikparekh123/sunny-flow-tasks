@@ -63,7 +63,7 @@ struct SignInView: View {
                     } else {
                         Text("Sign in")
                             .font(.ui(size: 16, weight: .bold))
-                            .foregroundStyle(Color.black)
+                            .foregroundStyle(Color.theme.onNeon)
                     }
                 }
                 .frame(height: 48)
@@ -77,6 +77,6 @@ struct SignInView: View {
             Spacer()
         }
         .background(Color.theme.page.ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)
     }
 }

@@ -41,6 +41,7 @@ create index if not exists idx_mp_refresh_runs_status_started
 
 alter table public.mp_refresh_runs enable row level security;
 
+drop policy if exists "mp_refresh_runs readable to authenticated" on public.mp_refresh_runs;
 create policy "mp_refresh_runs readable to authenticated"
   on public.mp_refresh_runs for select
   to authenticated
