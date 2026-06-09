@@ -43,7 +43,7 @@ This replaces a prior buggy rule ("any IBKR trade with `last_synced_at` in the l
 
 - **No checklists. Do the work.** "Try this, try that, then check this" frustrates the user fast. When something is broken, dig in (read code, query the API with the publishable key in `Secrets.swift`, inspect built artifacts) rather than asking the user to run diagnostics. Their job is to use the app, not run a debugger for you.
 - **Trust the runbooks.** `docs/IBKR_CUTOVER_RUNBOOK.md`, `docs/portfolio-go-live.md`, `docs/METRICS.md` are source of truth for things already designed.
-- **Commit + push as you go.** The user wants visible progress on GitHub, not local-only commits. Push every meaningful commit.
+- **Always commit + push iteratively.** No "want me to commit?" prompts. After every meaningful edit, `git add` the relevant files (NOT TabRootView.swift bisect reverts, NOT xcuserstate, NOT supabase/.temp/*), commit with a real message, and `git push origin main`. The user wants visible progress on GitHub continuously.
 - **Don't disable features to "test"** without restoring them in the same turn unless explicitly told to leave them off.
 
 ## What's "in production" (per Jun 2026)
