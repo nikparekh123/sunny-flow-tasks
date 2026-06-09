@@ -78,6 +78,11 @@ extension Color {
         // (live-dot, cursor, etc.). In dark it's identical to `neon`.
         static let lime         = Color.dyn(light: UIColor(hex: 0xb9d119), dark: UIColor(hex: 0xd2e632))
 
+        // IV-specific CAUTION fill — sRGB approximation of the design
+        // spec's oklch(.82 .135 86) amber. Dark mode bumps brightness
+        // slightly so the chip reads against the deeper canvas.
+        static let ivAmber      = Color.dyn(light: UIColor(hex: 0xe6c14a), dark: UIColor(hex: 0xf0cc55))
+
         // Ink color for text/glyphs sitting ON a `neon` fill (CTA pills,
         // segmented control thumbs, etc.). In light the neon is deep
         // teal so white reads cleanly; in dark the neon is lime so

@@ -61,6 +61,23 @@ struct OptionGreeksRow: Decodable, Sendable {
 // TickerIVRow. The `option_iv_daily_change` view in Supabase is
 // dormant; safe to drop or leave.)
 
+/// Per-ticker IV roll-up sourced from the `ticker_iv_summary` view.
+/// All math (IVR / spread / Seller Score / zones) is computed
+/// client-side via IVMath from these primitives.
+///
+/// Decimal convention: atm_iv / hv30 are decimal IV (0.42 = 42%).
+struct TickerIVRow: Decodable, Sendable, Identifiable {
+    var id: String { ticker }
+    let ticker: String
+    let current_iv: Double?
+    let current_hv30: Double?
+    let iv_low: Double?
+    let iv_high: Double?
+    let iv_window_days: Int?
+    let last_snapshot_date: String?       // YYYY-MM-DD
+    let window_start: String?             // YYYY-MM-DD
+}
+
 /// One row per trading day captured by the daily-theta-snapshot cron.
 /// Powers the Hedge tab's day-over-day Δ-change, the 14-day sparkline,
 /// and the prior-week paid-vs-collected history.
