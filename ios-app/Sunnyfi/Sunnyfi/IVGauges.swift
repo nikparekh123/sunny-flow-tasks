@@ -180,9 +180,9 @@ struct RangeTrack: View {
     private func pctStr(_ d: Double) -> String { "\(Int((d * 100).rounded()))%" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            GeometryReader { geo in
-                let w = geo.size.width
+        GeometryReader { geo in
+            let w = geo.size.width
+            VStack(alignment: .leading, spacing: 9) {
                 ZStack(alignment: .leading) {
                     // Track
                     RoundedRectangle(cornerRadius: 3)
@@ -192,33 +192,84 @@ struct RangeTrack: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(Color.theme.tintNeon)
                         .frame(width: w * (pct / 100), height: 6)
-                    // Marker
+                    // Marker — slightly wider with a page-color hairline
+                    // outline so it reads clearly against the same-hue fill.
                     Rectangle()
                         .fill(Color.theme.neon)
-                        .frame(width: 3, height: 14)
+                        .frame(width: 4, height: 14)
+                        .overlay(
+                            Rectangle().stroke(Color.theme.page, lineWidth: 1)
+                        )
                         .clipShape(RoundedRectangle(cornerRadius: 2))
-                        .offset(x: w * (pct / 100) - 1.5, y: -4)
+                        .offset(x: w * (pct / 100) - 2, y: -4)
+                }
+                .frame(height: 14)
+
+                // Scale labels:
+                //   • lo pinned left
+                //   • hi pinned right
+                //   • "now" anchored to the marker's x-position via an
+                //     absolute overlay so it tracks the actual location
+                //     of the current value (not the center of the row).
+                ZStack(alignment: .leading) {
+                    HStack {
+                        Text("\(pctStr(low)) low")
+                            .font(.system(size: 9, weight: .regular, design: .monospaced))
+                            .tracking(0.4)
+                            .foregroundStyle(Color.theme.fg4)
+                        Spacer()
+                        Text("\(pctStr(high)) high")
+                            .font(.system(size: 9, weight: .regular, design: .monospaced))
+                            .tracking(0.4)
+                            .foregroundStyle(Color.theme.fg4)
+                    }
+                    Text("\(pctStr(current)) now")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .tracking(0.4)
+                        .foregroundStyle(Color.theme.neon)
+                        .fixedSize()
+                        // Center the label horizontally on the marker by
+                        // measuring its width via background-GeometryReader
+                        // and offsetting by half. Clamp to keep the label
+                        // inside the row even when pct is near 0 or 100.
+                        .background(
+                            GeometryReader { lbl in
+                                Color.clear.preference(
+                                    key: NowLabelWidth.self,
+                                    value: lbl.size.width
+                                )
+                            }
+                        )
+                        .modifier(AnchorToMarker(rowWidth: w, pct: pct))
                 }
             }
-            .frame(height: 14)
-
-            // Scale: lo · now · hi
-            HStack {
-                Text("\(pctStr(low)) low")
-                    .font(.system(size: 9, weight: .regular, design: .monospaced))
-                    .tracking(0.4)
-                    .foregroundStyle(Color.theme.fg4)
-                Spacer()
-                Text("\(pctStr(current)) now")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                    .tracking(0.4)
-                    .foregroundStyle(Color.theme.neon)
-                Spacer()
-                Text("\(pctStr(high)) high")
-                    .font(.system(size: 9, weight: .regular, design: .monospaced))
-                    .tracking(0.4)
-                    .foregroundStyle(Color.theme.fg4)
-            }
         }
+        .frame(height: 35) // total of marker row (14) + spacing (9) + labels (~12)
+    }
+}
+
+// MARK: - Plumbing for the marker-anchored "now" label
+
+private struct NowLabelWidth: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct AnchorToMarker: ViewModifier {
+    let rowWidth: CGFloat
+    let pct: Double
+    @State private var labelWidth: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        let markerX = rowWidth * (pct / 100)
+        // Center the label on the marker, but clamp so it doesn't
+        // run past the row edges.
+        let rawX = markerX - labelWidth / 2
+        let clampedX = max(0, min(rowWidth - labelWidth, rawX))
+        return content
+            .onPreferenceChange(NowLabelWidth.self) { labelWidth = $0 }
+            .offset(x: clampedX)
     }
 }
