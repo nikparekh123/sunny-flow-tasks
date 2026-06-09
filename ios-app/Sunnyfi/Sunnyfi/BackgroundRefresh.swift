@@ -32,6 +32,13 @@ enum BackgroundRefresh {
     /// scheduling and firing).
     @MainActor
     static func register() {
+        // BGTaskScheduler isn't available in the iOS Simulator — calling
+        // it spams the console with "BGTaskScheduler is not available on
+        // this platform." errors that aren't actionable. Skip silently
+        // in sim; the server-side cron handles refresh anyway.
+        #if targetEnvironment(simulator)
+        return
+        #else
         let registered = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: taskIdentifier,
             using: nil
@@ -50,11 +57,15 @@ enum BackgroundRefresh {
         }
         // Schedule the first run.
         schedule()
+        #endif
     }
 
     /// Ask the system to fire the task again in ≥ 15 min. iOS treats
     /// this as a hint, not a guarantee.
     static func schedule() {
+        #if targetEnvironment(simulator)
+        return  // BGTaskScheduler unavailable on simulators
+        #else
         let request = BGAppRefreshTaskRequest(identifier: taskIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
         do {
@@ -62,6 +73,7 @@ enum BackgroundRefresh {
         } catch {
             print("[BackgroundRefresh] submit failed: \(error)")
         }
+        #endif
     }
 
     /// Called by the system. We have ~30s of wall time — spin up a
