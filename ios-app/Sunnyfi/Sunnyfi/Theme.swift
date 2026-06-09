@@ -46,7 +46,7 @@ extension Color {
         // Canvas / surfaces
         static let page       = Color.dyn(light: UIColor(hex: 0xf2eee5), dark: UIColor(hex: 0x061a10))
         static let page2      = Color.dyn(light: UIColor(hex: 0xe7ece1), dark: UIColor(hex: 0x0a2828))
-        static let surface    = Color.dyn(light: UIColor(hex: 0xfbfaf6), dark: UIColor(hex: 0x0f3333))
+        static let surface    = Color.dyn(light: UIColor(hex: 0xffffff), dark: UIColor(hex: 0x0f3333))
         // cardSolid: in dark = solid card fill; in light = warm-white tint over paper
         static let cardSolid  = Color.dyn(light: UIColor(hex: 0xffffff, alpha: 0.74), dark: UIColor(hex: 0x0e2e2c))
         static let elevated   = Color.dyn(light: UIColor(hex: 0xffffff), dark: UIColor(hex: 0x1e5a50))

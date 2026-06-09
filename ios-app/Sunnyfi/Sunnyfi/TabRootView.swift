@@ -228,15 +228,21 @@ private struct DockedTabBar: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 6)
         .padding(.bottom, 4)        // safe-area inset handles the rest
-        .background(
-            Color.theme.surface
+        // iOS 26 liquid glass — translucent material that picks up
+        // and softly blurs whatever's scrolling behind it, instead of
+        // the prior opaque white slab. Matches the SegmentedToggle's
+        // glassEffect treatment so the bar feels native to the OS.
+        .background {
+            Rectangle()
+                .fill(.clear)
+                .glassEffect(.regular, in: .rect)
                 .ignoresSafeArea(edges: .bottom)
                 .overlay(
-                    Color.theme.borderBright.opacity(0.6)
+                    Color.theme.borderBright.opacity(0.35)
                         .frame(height: 0.5),
                     alignment: .top
                 )
-        )
+        }
     }
 
     @ViewBuilder
