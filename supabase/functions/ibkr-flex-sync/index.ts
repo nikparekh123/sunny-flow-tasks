@@ -218,38 +218,51 @@ Deno.serve(async (req) => {
     }
 
     // ── 7. Soft-void trades that disappeared ──────────────────
-    // Only consider trades within the last VOID_WINDOW_DAYS that
-    // came from IBKR and haven't already been voided.
     //
-    // SAFETY: skip voiding entirely if the report came back empty.
-    // An empty TradeConfirms list almost always means the IBKR Flex
-    // Query is misconfigured (Period=Today on a slow day, expired
-    // token, account-side issue) — NOT that every trade from the
-    // last 7 days was simultaneously cancelled. A 2026-06-09 incident
-    // where the Period was switched to "Today" voided every trade in
-    // the database; we never let that happen again.
-    if (trades.length === 0) {
+    // CRITICAL: scope voids to the date range present in the report.
+    //
+    // We use IBKR's Trade Confirmation Flex (Period = "Today") so we
+    // get 15-min-delayed intraday trades. Each cron run pulls only
+    // today's executions. That means an empty report (or a report
+    // with only today's trades) cannot tell us anything about whether
+    // a trade from YESTERDAY was cancelled — yesterday's trades are
+    // simply outside the report's scope.
+    //
+    // Rule: only void IBKR trades whose `trade_date` falls within the
+    // set of dates actually present in the current report. Trades
+    // dated outside that set are untouched (the report has no opinion
+    // on them).
+    //
+    // Edge cases:
+    //   - 0 TradeConfirms => report covers no dates => void nothing.
+    //   - 1 date in report => only consider that one trade_date.
+    //   - N dates in report => only consider those N trade_dates.
+    //
+    // Incident (2026-06-09): with the prior "any orphan within 7d"
+    // rule, switching the Flex Query to Period=Today caused an empty
+    // report to mass-void every IBKR trade from the prior week.
+    // The new rule makes that impossible by construction.
+
+    const reportDates = new Set(trades.map((t) => ymdToDate(t.tradeDate)));
+
+    if (reportDates.size === 0) {
       errors.push({
-        reason: `SAFETY: report contained 0 TradeConfirms — skipped voiding ${
-          'pass to avoid mass-voiding existing rows. Likely an IBKR-side ' +
-          'misconfig (Period=Today on a non-trading day, expired token, etc.)'
-        }`,
+        reason: 'SAFETY: report covered no dates — skipped void pass entirely.',
       });
     } else {
-      const voidCutoff = new Date(Date.now() - VOID_WINDOW_DAYS * 86400_000)
-        .toISOString();
-
+      const reportDatesArr = Array.from(reportDates);
       for (const table of ['option_trades', 'share_lots', 'share_sells'] as const) {
+        const dateColumn = table === 'share_lots' ? 'acquired_date' : 'trade_date';
         const { data: existing } = await supabase
           .from(table)
-          .select('id, ibkr_trade_id')
+          .select(`id, ibkr_trade_id, ${dateColumn}`)
           .eq('source', 'ibkr_flex')
           .is('voided_at', null)
-          .gte('last_synced_at', voidCutoff);
+          .in(dateColumn, reportDatesArr);
 
         const orphans = (existing ?? [])
-          .filter((r) => r.ibkr_trade_id && !seenIds.includes(r.ibkr_trade_id))
-          .map((r) => r.id);
+          .filter((r: any) => r.ibkr_trade_id && !seenIds.includes(r.ibkr_trade_id))
+          .map((r: any) => r.id);
 
         if (orphans.length > 0) {
           const { error: voidErr } = await supabase
