@@ -21,6 +21,31 @@ struct TodayScreen: View {
     @Bindable var store: PortfolioStore
     @State private var openItemId: String? = nil
     @State private var pins = TodayPinStore.shared
+    @State private var ivPins = IVPinStore.shared
+
+    /// Sheet state for the IV section.
+    /// .scan = open the cross-portfolio scan list.
+    /// .ticker(t) = open directly on the per-ticker detail view.
+    @State private var ivSheet: IVSheetMode?
+
+    enum IVSheetMode: Identifiable {
+        case scan
+        case ticker(String)
+        var id: String { if case .ticker(let t) = self { return "iv:\(t)" } else { return "iv:scan" } }
+    }
+
+    /// Summary keyed by ticker for the tracker rail lookup.
+    private var ivByTicker: [String: TickerIVRow] {
+        Dictionary(uniqueKeysWithValues: store.allIvSummaries.map { ($0.ticker, $0) })
+    }
+
+    /// The single ticker featured in the in-list Volatility card.
+    /// Top Seller Score wins. nil → don't render the card.
+    private var featuredIvRow: TickerIVRow? {
+        store.allIvSummaries
+            .filter { IVMath.sellerScore($0) != nil }
+            .max { (IVMath.sellerScore($0) ?? -1) < (IVMath.sellerScore($1) ?? -1) }
+    }
 
     private var allItems: [TodayItem] { TodayData.compute(store: store) }
     private var pinnedItems: [TodayItem] {
@@ -75,22 +100,45 @@ struct TodayScreen: View {
                         .padding(.top, 18)
                     }
 
-                    Headline(count: rankedItems.count)
+                    // "Tracking IV" chip rail — separate from regular
+                    // Pinned. Only renders when ≥ 1 ticker is IV-pinned.
+                    if !ivPins.pinnedTickers.isEmpty {
+                        IVTrackerRail(
+                            tickers: ivPins.pinnedTickers,
+                            summary: ivByTicker,
+                            onOpenTicker: { tk in ivSheet = .ticker(tk) }
+                        )
+                        .padding(.top, pinnedItems.isEmpty ? 18 : 16)
+                    }
+
+                    Headline(count: rankedItems.count + (featuredIvRow != nil ? 1 : 0))
                         .padding(.horizontal, 22)
-                        .padding(.top, pinnedItems.isEmpty ? 18 : 22)
+                        .padding(.top, (pinnedItems.isEmpty && ivPins.pinnedTickers.isEmpty) ? 18 : 22)
 
                     LazyVStack(spacing: 0) {
+                        // Volatility card always first in the list when
+                        // we have any IV data to feature.
+                        if let row = featuredIvRow {
+                            IVMergedRow(
+                                row: row,
+                                isPinned: ivPins.isPinned(row.ticker),
+                                onOpen: { ivSheet = .scan },
+                                onPin: { ivPins.toggle(row.ticker) }
+                            )
+                            .padding(.horizontal, 22)
+                        }
+
                         ForEach(Array(rankedItems.enumerated()), id: \.element.id) { idx, item in
-                            if idx > 0 {
+                            if idx > 0 || featuredIvRow != nil {
                                 Rectangle()
                                     .fill(Color.theme.hair)
                                     .frame(height: 1)
                                     .padding(.horizontal, 22)
                             }
                             TodayRow(
-                                idx: idx + 1,
+                                idx: idx + 1 + (featuredIvRow != nil ? 1 : 0),
                                 item: item,
-                                isLead: idx == 0,
+                                isLead: idx == 0 && featuredIvRow == nil,
                                 isPinned: pins.isPinned(item.id),
                                 onOpen: { openItemId = item.id },
                                 onPin:  { pins.toggle(item.id) }
@@ -120,6 +168,20 @@ struct TodayScreen: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(Color.theme.elevated)
             }
+        }
+        .sheet(item: $ivSheet) { mode in
+            let initial: String? = {
+                if case .ticker(let t) = mode { return t } else { return nil }
+            }()
+            IVSheet(
+                summaries: store.allIvSummaries,
+                initialTicker: initial,
+                pins: ivPins,
+                onClose: { ivSheet = nil }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.theme.elevated)
         }
     }
 }
