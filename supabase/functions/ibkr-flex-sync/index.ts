@@ -246,9 +246,14 @@ Deno.serve(async (req) => {
     const reportDates = new Set(trades.map((t) => ymdToDate(t.tradeDate)));
 
     if (reportDates.size === 0) {
-      errors.push({
-        reason: 'SAFETY: report covered no dates — skipped void pass entirely.',
-      });
+      // Informational only — DO NOT push to errors[]. The errors array
+      // drives the status='partial' downgrade and bumps rows_errored,
+      // which makes health-monitor stop counting this run as 'success'
+      // and triggers a false IBKR_stale alert. This is expected behavior
+      // on a quiet market moment (cron fires every 15 min, sometimes
+      // before any new trades exist), so it must keep status='success'.
+      // The empty-report fact is still recoverable from
+      // (rows_seen === 0 && trades.length === 0) for post-hoc debugging.
     } else {
       const reportDatesArr = Array.from(reportDates);
       for (const table of ['option_trades', 'share_lots', 'share_sells'] as const) {
