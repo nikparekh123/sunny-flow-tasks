@@ -422,12 +422,14 @@ struct TradesScreen: View {
             // the right edge, which read as a broken layout.
 
             // Custom dots — only when there's something to switch
-            // between. Tappable as a fallback for users who don't
-            // discover the swipe.
+            // between. One dot per active page, in the same order
+            // as the cards above. Tappable as a fallback for users
+            // who don't discover the swipe.
             if pageCount > 1 {
                 HStack(spacing: 8) {
-                    dot(id: "calls")
-                    dot(id: "puts")
+                    if hasCalls { dot(id: "calls") }
+                    if hasPutsLocal { dot(id: "puts") }
+                    if hasShares { dot(id: "shares") }
                 }
                 .padding(.top, 4)
             }
