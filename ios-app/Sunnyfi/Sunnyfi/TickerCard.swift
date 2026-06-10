@@ -128,6 +128,20 @@ struct OpenCallCard: View {
     /// intrinsic behind.
     let timeValue: Double
 
+    // ── Hedge-funding row inputs (Section 1 of the design handoff) ──
+    /// Whether the portfolio currently holds long puts. When false,
+    /// the Funds hedge row hides entirely (per design — funding only
+    /// makes sense when there's something to fund).
+    var hasPuts: Bool = false
+    /// `min(100, round(callCredit / putPaid × 100))`. 0 when no puts.
+    var fundedPct: Int = 0
+    /// `callCredit − putPaid`. Positive → over-funded ("Hedge fully
+    /// funded · +$X" copy variant).
+    var hedgeSurplus: Double = 0
+    /// Tap target. Default no-op so existing call sites that don't
+    /// thread it in don't need to change.
+    var onHedge: () -> Void = {}
+
     private var gain: Double { collected - valueNow }
     private var gainPct: Double { collected > 0 ? (gain / collected) * 100 : 0 }
 
@@ -167,9 +181,76 @@ struct OpenCallCard: View {
                  pct: valueNow > 0 ? (timeValue / valueNow) * 100 : nil)
                 .padding(.horizontal, CardInset.h)
                 .padding(.vertical, 13)
+
+            // Funds hedge — tappable row mirroring the Funds-hedge
+            // chevron pattern from design_handoff_hedge_rows. Only
+            // renders when the book holds at least one open long put.
+            if hasPuts {
+                FullBleedHair()
+                FundsHedgeRow(
+                    fundedPct: fundedPct,
+                    hedgeSurplus: hedgeSurplus,
+                    onTap: onHedge
+                )
+                .padding(.horizontal, CardInset.h)
+                .padding(.vertical, 13)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CardChrome())
+    }
+}
+
+// MARK: - Funds hedge row (chevron variant on Open call credit)
+
+/// Tappable row with a percent-or-surplus value and a neon chevron.
+/// Under-funded: "Funds hedge · 73% · of puts · ›" (chev neon).
+/// Over-funded: "Hedge fully funded · +$X" in positive tone, still tappable.
+private struct FundsHedgeRow: View {
+    let fundedPct: Int
+    let hedgeSurplus: Double
+    let onTap: () -> Void
+
+    private var fullyFunded: Bool { hedgeSurplus >= 0 }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .center, spacing: 7) {
+                Text(fullyFunded ? "Hedge fully funded" : "Funds hedge")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(Color.theme.labelMuted)
+                Spacer(minLength: 0)
+                if fullyFunded {
+                    Text(signedMoney(hedgeSurplus))
+                        .font(.system(size: 16, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.theme.pos)
+                } else {
+                    Text("\(fundedPct)%")
+                        .font(.system(size: 16, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.theme.fg1)
+                    Text("of puts")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Color.theme.fg3)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.theme.neon)
+                    .padding(.leading, 3)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "+$1,234" / "−$1,234" — uses U+2212 for the minus per design.
+    private func signedMoney(_ v: Double) -> String {
+        let abs = Int(Swift.abs(v).rounded())
+        let formatted = abs.formatted(.number.grouping(.automatic))
+        if v > 0 { return "+$\(formatted)" }
+        if v < 0 { return "\u{2212}$\(formatted)" }
+        return "$\(formatted)"
     }
 }
 
@@ -184,6 +265,14 @@ struct OpenPutsBoughtCard: View {
     let paid: Double
     let valueNow: Double
     let timeValue: Double
+
+    /// Out-of-pocket hedge cost: `putPaid − callCredit`. Drives the
+    /// new "Net cost" row. Negative would mean over-funded (call
+    /// credit > put paid) — in that case the row hides because the
+    /// surplus story lives on the Open call credit card instead.
+    var netCost: Double = 0
+    /// `netCost / sharesValue × 100`. The "(0.22% of book)" sub.
+    var netCostBookPct: Double = 0
 
     /// Gain = current value − cost. Positive when puts have
     /// appreciated (markets fell or vol expanded — your hedges
@@ -227,9 +316,129 @@ struct OpenPutsBoughtCard: View {
                  pct: valueNow > 0 ? (timeValue / valueNow) * 100 : nil)
                 .padding(.horizontal, CardInset.h)
                 .padding(.vertical, 13)
+
+            // Net cost — static informational row. Shows the
+            // out-of-pocket cost of the hedge (putPaid − callCredit)
+            // and its share of the book. Muted note color — this is
+            // informational, not a P&L gain/loss.
+            if netCost > 0 {
+                FullBleedHair()
+                NoteRowSimple(
+                    label: "Net cost",
+                    amount: netCost,
+                    note: String(format: "(%.2f%% of book)", abs(netCostBookPct))
+                )
+                .padding(.horizontal, CardInset.h)
+                .padding(.vertical, 13)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CardChrome())
+    }
+}
+
+// MARK: - Open shares card (third carousel page)
+
+/// Mirror of OpenCallCard / OpenPutsBoughtCard for the equity side.
+/// Rows: Cost basis · Effective basis · Value now · Today.
+/// Effective basis sits directly under Cost basis per design — the
+/// two "basis" figures are intentionally adjacent.
+struct OpenSharesCard: View {
+    let cost: Double            // Σ shares × avgCost
+    let effectiveBasis: Double  // cost − lifetimePremiumHarvested
+    let effectiveBasisPct: Double
+    let valueNow: Double        // Σ shares × last
+    let todayPnL: Double        // Σ shares × spot × dayPct
+
+    private var totalGain: Double { valueNow - cost }
+    private var totalGainPct: Double { cost > 0 ? (totalGain / cost) * 100 : 0 }
+    private var todayPct: Double {
+        let prior = valueNow - todayPnL
+        return prior > 0 ? (todayPnL / prior) * 100 : 0
+    }
+    private var ebSignedPct: String {
+        let sign = effectiveBasisPct >= 0 ? "+" : "\u{2212}"
+        return "(\(sign)\(String(format: "%.2f", abs(effectiveBasisPct)))%)"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Open shares")
+                .font(.system(size: 19, weight: .bold))
+                .monospacedDigit()
+                .tracking(-0.48)
+                .foregroundStyle(Color.theme.fg1)
+                .padding(.horizontal, CardInset.h)
+                .padding(.top, 14)
+                .padding(.bottom, 11)
+
+            // Cost basis — what you actually paid in.
+            PRow(label: "Cost basis", amount: cost, amountSign: false, pct: nil)
+                .padding(.horizontal, CardInset.h)
+                .padding(.vertical, 13)
+            FullBleedHair()
+            // Effective basis — slot 2 per design, directly under
+            // Cost basis. Lifetime premium harvested subtracted.
+            // Note is muted (informational), explicit +/− sign (not arrow).
+            NoteRowSimple(
+                label: "Effective basis",
+                amount: effectiveBasis,
+                note: ebSignedPct
+            )
+            .padding(.horizontal, CardInset.h)
+            .padding(.vertical, 13)
+            FullBleedHair()
+            PRow(label: "Value now",
+                 amount: valueNow,
+                 amountSign: false,
+                 pct: totalGainPct)
+                .padding(.horizontal, CardInset.h)
+                .padding(.vertical, 13)
+            FullBleedHair()
+            PRow(label: "Today",
+                 amount: todayPnL,
+                 amountSign: true,
+                 pct: todayPct)
+                .padding(.horizontal, CardInset.h)
+                .padding(.vertical, 13)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CardChrome())
+    }
+}
+
+// MARK: - Note row (label · amount · muted note)
+
+/// Static label/value row carrying a free-text note in the % slot
+/// (e.g. "(0.22% of book)", "(+0.25%)"). House rule: $ stays neutral
+/// ink, note muted — distinguishes from P&L rows whose % is colored.
+private struct NoteRowSimple: View {
+    let label: String
+    let amount: Double
+    let note: String
+
+    var body: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 7) {
+            Text(label)
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(Color.theme.labelMuted)
+            Spacer(minLength: 0)
+            Text(plainMoney(amount))
+                .font(.system(size: 16, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(Color.theme.fg1)
+            Text(note)
+                .font(.system(size: 12.5, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(Color.theme.fg3)
+        }
+    }
+
+    private func plainMoney(_ v: Double) -> String {
+        let abs = Int(Swift.abs(v).rounded())
+        let formatted = abs.formatted(.number.grouping(.automatic))
+        if v < 0 { return "\u{2212}$\(formatted)" }
+        return "$\(formatted)"
     }
 }
 

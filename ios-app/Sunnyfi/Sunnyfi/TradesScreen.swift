@@ -43,6 +43,10 @@ struct TradesScreen: View {
     /// disappears (e.g. user closes all short calls — the carousel
     /// still works for the remaining Puts card).
     @State private var hedgeCardPage: String? = "calls"
+    /// Hedge funding sheet — opens from the "Funds hedge" row on
+    /// Open call credit. Bool because the sheet renders portfolio-
+    /// level data, no per-row context to carry.
+    @State private var showHedgeFunding: Bool = false
     /// Non-nil = per-ticker lot/trade admin sheet is visible
     /// (Edit on a shares leg routes here).
     @State private var editStockTicker: TickerWrap? = nil
@@ -83,6 +87,18 @@ struct TradesScreen: View {
         TradesData.openPutsTimeValue(store: store)
     }
 
+    // ── Hedge / cross-book figures (design_handoff_hedge_rows) ─────
+    private var openSharesCost: Double { TradesData.openSharesCost(store: store) }
+    private var openSharesValueNow: Double { TradesData.openSharesValue(store: store) }
+    private var openSharesTodayPnL: Double { TradesData.openSharesTodayPnL(store: store) }
+    private var fundedPct: Int { TradesData.fundedPct(store: store) }
+    private var hedgeSurplus: Double { TradesData.hedgeSurplus(store: store) }
+    private var hedgeNetCost: Double { TradesData.netCost(store: store) }
+    private var hedgeNetCostBookPct: Double { TradesData.netCostBookPct(store: store) }
+    private var effectiveBasis: Double { TradesData.effectiveBasis(store: store) }
+    private var effectiveBasisPct: Double { TradesData.effectiveBasisPct(store: store) }
+    private var hasPuts: Bool { TradesData.hasPuts(store: store) }
+
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 0) {
@@ -110,6 +126,21 @@ struct TradesScreen: View {
             AssignmentSheet(store: store,
                             trade: wrap.trade,
                             onDismiss: { assignmentTrade = nil })
+        }
+        .sheet(isPresented: $showHedgeFunding) {
+            HedgeFundingSheet(
+                callCredit: openCallCredit,
+                putPaid: openPutsPaid,
+                fundedPct: fundedPct,
+                hedgeSurplus: hedgeSurplus,
+                netCost: hedgeNetCost,
+                putRows: TradesData.hedgePutRows(store: store),
+                creditRows: TradesData.hedgeCreditRows(store: store),
+                onClose: { showHedgeFunding = false }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.theme.elevated)
         }
         // Stock-leg swipe → Edit. Opens the per-ticker admin sheet
         // on the lots tab so the user can fix a bad cost basis.
@@ -345,8 +376,9 @@ struct TradesScreen: View {
     /// feel jerky.
     private var hedgeCarousel: some View {
         let hasCalls = openCallCredit > 0
-        let hasPuts = openPutsPaid > 0
-        let pageCount = (hasCalls ? 1 : 0) + (hasPuts ? 1 : 0)
+        let hasPutsLocal = openPutsPaid > 0
+        let hasShares = openSharesCost > 0
+        let pageCount = (hasCalls ? 1 : 0) + (hasPutsLocal ? 1 : 0) + (hasShares ? 1 : 0)
 
         return VStack(spacing: 10) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -354,16 +386,31 @@ struct TradesScreen: View {
                     if hasCalls {
                         OpenCallCard(collected: openCallCredit,
                                      valueNow: openCallCreditNow,
-                                     timeValue: openCallCreditTimeValue)
+                                     timeValue: openCallCreditTimeValue,
+                                     hasPuts: hasPutsLocal,
+                                     fundedPct: fundedPct,
+                                     hedgeSurplus: hedgeSurplus,
+                                     onHedge: { showHedgeFunding = true })
                             .containerRelativeFrame(.horizontal)
                             .id("calls")
                     }
-                    if hasPuts {
+                    if hasPutsLocal {
                         OpenPutsBoughtCard(paid: openPutsPaid,
                                            valueNow: openPutsValueNow,
-                                           timeValue: openPutsTimeValue)
+                                           timeValue: openPutsTimeValue,
+                                           netCost: hedgeNetCost,
+                                           netCostBookPct: hedgeNetCostBookPct)
                             .containerRelativeFrame(.horizontal)
                             .id("puts")
+                    }
+                    if hasShares {
+                        OpenSharesCard(cost: openSharesCost,
+                                       effectiveBasis: effectiveBasis,
+                                       effectiveBasisPct: effectiveBasisPct,
+                                       valueNow: openSharesValueNow,
+                                       todayPnL: openSharesTodayPnL)
+                            .containerRelativeFrame(.horizontal)
+                            .id("shares")
                     }
                 }
                 .scrollTargetLayout()

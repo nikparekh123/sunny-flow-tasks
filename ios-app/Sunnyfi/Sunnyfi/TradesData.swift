@@ -333,4 +333,200 @@ enum TradesData {
                 return sum + store.remainingContracts(for: t) * timeValuePerShare * 100
             }
     }
+
+    // MARK: - Open Shares totals
+
+    /// Σ shares × avgCost across every open long-stock leg. The raw
+    /// equity outlay before any option-premium offset.
+    static func openSharesCost(store: PortfolioStore) -> Double {
+        store.companies.reduce(0) { sum, c in
+            guard let stk = c.legs.first(where: { $0.kind == .stock && $0.qty > 0 })
+            else { return sum }
+            return sum + stk.qty * stk.avg
+        }
+    }
+
+    /// Σ shares × last across every open long-stock leg. Current
+    /// market value of the share book.
+    static func openSharesValue(store: PortfolioStore) -> Double {
+        store.companies.reduce(0) { sum, c in
+            guard let stk = c.legs.first(where: { $0.kind == .stock && $0.qty > 0 })
+            else { return sum }
+            return sum + stk.qty * stk.last
+        }
+    }
+
+    /// Σ today's $ move across every open long-stock leg (qty × spot × dayPct).
+    /// Drives the "Today" row on Open Shares card.
+    static func openSharesTodayPnL(store: PortfolioStore) -> Double {
+        store.companies.reduce(0) { sum, c in
+            guard let stk = c.legs.first(where: { $0.kind == .stock && $0.qty > 0 })
+            else { return sum }
+            return sum + stk.qty * c.spot * (c.dayPct / 100.0)
+        }
+    }
+
+    // MARK: - Hedge / cross-book derivations
+
+    /// Lifetime net premium harvested across the entire option book.
+    /// Walks every NON-voided option trade row (open AND close) and
+    /// computes net dollars in vs out — i.e. the realized + still-
+    /// unrealized credit you've ever pulled in from selling premium,
+    /// minus what you've spent buying it.
+    ///
+    /// Sign convention (so positive = "money harvested"):
+    ///   action=open  · direction=short → +premium·ct·100   (collected at open)
+    ///   action=open  · direction=long  → −premium·ct·100   (paid at open)
+    ///   action=close · direction=short → −premium·ct·100   (paid to buy back)
+    ///   action=close · direction=long  → +premium·ct·100   (received on sell-close)
+    ///
+    /// Excludes lifecycle codes that flow through assignment / exercise
+    /// (premium == 0 in those rows by convention), so they're a no-op
+    /// in the sum.
+    ///
+    /// This is the "all premium ever harvested" definition used by
+    /// effectiveBasis on the Open Shares card — drives basis BELOW
+    /// raw cost when net premium is positive.
+    static func lifetimePremiumHarvested(store: PortfolioStore) -> Double {
+        store.allTrades
+            .filter { $0.voided_at == nil }
+            .reduce(0) { sum, t in
+                let dollars = t.contracts * t.premium * 100
+                let signed: Double
+                switch (t.action, t.direction) {
+                case ("open",  "short"): signed =  dollars   // credit
+                case ("open",  "long"):  signed = -dollars   // debit
+                case ("close", "short"): signed = -dollars   // buy back
+                case ("close", "long"):  signed =  dollars   // sell to close
+                default:                 signed =  0         // lifecycle / unknown
+                }
+                return sum + signed
+            }
+    }
+
+    /// % of put-paid that the open call credit covers. Capped 100.
+    /// Returns 0 when putPaid is 0 (the "no puts" state hides the row).
+    static func fundedPct(store: PortfolioStore) -> Int {
+        let credit = openCallCredit(store: store)
+        let paid = openPutsPaid(store: store)
+        guard paid > 0 else { return 0 }
+        return min(100, Int((credit / paid * 100).rounded()))
+    }
+
+    /// hedgeSurplus = callCredit − putPaid. Positive = over-funded
+    /// (the call book pays for the entire put book + extra). Drives
+    /// the "Hedge fully funded · +$X" copy variant.
+    static func hedgeSurplus(store: PortfolioStore) -> Double {
+        openCallCredit(store: store) - openPutsPaid(store: store)
+    }
+
+    /// netCost = putPaid − callCredit. The out-of-pocket cost of the
+    /// hedge when under-funded. Drives "Net cost" on the Open Puts
+    /// Bought card and "$X to go" on the funding sheet.
+    static func netCost(store: PortfolioStore) -> Double {
+        openPutsPaid(store: store) - openCallCredit(store: store)
+    }
+
+    /// netCostBookPct = netCost / sharesValue × 100. The sub-text
+    /// on Net cost: "(0.22% of book)".
+    static func netCostBookPct(store: PortfolioStore) -> Double {
+        let sv = openSharesValue(store: store)
+        guard sv > 0 else { return 0 }
+        return netCost(store: store) / sv * 100
+    }
+
+    /// effectiveBasis = sharesCost − lifetimePremiumHarvested.
+    /// Lifetime-premium variant per design's option B: subtracts every
+    /// dollar of net premium ever harvested. With Sunnyfi's covered-
+    /// call strategy this typically reads BELOW raw cost basis — the
+    /// motivating number that says "my real cost on these shares is
+    /// less than I paid because I've been collecting premium against
+    /// them".
+    static func effectiveBasis(store: PortfolioStore) -> Double {
+        openSharesCost(store: store) - lifetimePremiumHarvested(store: store)
+    }
+
+    /// (effectiveBasis − sharesCost) / sharesCost × 100. Negative
+    /// when basis has dropped below cost (good); positive when above
+    /// (rare — only when net premium is negative for the lifetime).
+    static func effectiveBasisPct(store: PortfolioStore) -> Double {
+        let cost = openSharesCost(store: store)
+        guard cost > 0 else { return 0 }
+        return (effectiveBasis(store: store) - cost) / cost * 100
+    }
+
+    /// True when the book holds at least one open long put. The
+    /// Funds hedge row + the entire Open Puts Bought card hide when
+    /// false; the Hedge funding sheet never opens.
+    static func hasPuts(store: PortfolioStore) -> Bool {
+        openPutsPaid(store: store) > 0
+    }
+
+    // MARK: - Hedge funding sheet rows
+
+    /// One row per held long-put leg, sorted by paid desc. Drives the
+    /// "Hedge cost · puts bought" group in HedgeFundingSheet.
+    struct HedgePutRow: Identifiable, Sendable {
+        let id: String
+        let ticker: String
+        let strike: Double
+        let expiry: String
+        let contracts: Double
+        let paid: Double            // contracts × premium × 100
+    }
+
+    static func hedgePutRows(store: PortfolioStore) -> [HedgePutRow] {
+        store.allTrades
+            .filter {
+                $0.action == "open"
+                    && $0.option_type == "put"
+                    && $0.direction == "long"
+                    && store.remainingContracts(for: $0) > 0
+            }
+            .map { t -> HedgePutRow in
+                let ct = store.remainingContracts(for: t)
+                return HedgePutRow(
+                    id: t.id,
+                    ticker: t.ticker,
+                    strike: t.strike,
+                    expiry: t.expiry,
+                    contracts: ct,
+                    paid: ct * t.premium * 100
+                )
+            }
+            .sorted { $0.paid > $1.paid }
+    }
+
+    /// One row per ticker holding open short calls, sorted by collected
+    /// desc. Drives the "Funded by · call credit" group in
+    /// HedgeFundingSheet. Aggregated per-ticker (not per-leg) because
+    /// the design treats the call-credit side as a single line per
+    /// underlying.
+    struct HedgeCreditRow: Identifiable, Sendable {
+        let id: String              // ticker symbol (stable, unique)
+        let ticker: String
+        let contracts: Double
+        let collected: Double
+    }
+
+    static func hedgeCreditRows(store: PortfolioStore) -> [HedgeCreditRow] {
+        let calls = store.allTrades.filter {
+            $0.action == "open"
+                && $0.option_type == "call"
+                && $0.direction == "short"
+                && store.remainingContracts(for: $0) > 0
+        }
+        let byTicker = Dictionary(grouping: calls, by: \.ticker)
+        return byTicker.map { (ticker, trades) -> HedgeCreditRow in
+            let totalCt = trades.reduce(0.0) { $0 + store.remainingContracts(for: $1) }
+            let totalCollected = trades.reduce(0.0) { $0 + store.remainingContracts(for: $1) * $1.premium * 100 }
+            return HedgeCreditRow(
+                id: ticker,
+                ticker: ticker,
+                contracts: totalCt,
+                collected: totalCollected
+            )
+        }
+        .sorted { $0.collected > $1.collected }
+    }
 }
