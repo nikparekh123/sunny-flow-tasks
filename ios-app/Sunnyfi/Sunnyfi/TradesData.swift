@@ -529,4 +529,152 @@ enum TradesData {
         }
         .sorted { $0.collected > $1.collected }
     }
+
+    // MARK: - Per-ticker lifetime premium
+
+    /// Lifetime net premium harvested for a SINGLE ticker — used by
+    /// the Break-even sheet to compute per-lot effective basis.
+    /// Same 4-case sign convention as the portfolio-wide helper:
+    ///   open  · short  → +premium·ct·100   (collected)
+    ///   open  · long   → −premium·ct·100   (paid)
+    ///   close · short  → −premium·ct·100   (paid to buy back)
+    ///   close · long   → +premium·ct·100   (sold to close)
+    static func lifetimePremiumHarvested(for ticker: String, store: PortfolioStore) -> Double {
+        store.allTrades
+            .filter { $0.voided_at == nil && $0.ticker == ticker }
+            .reduce(0) { sum, t in
+                let dollars = t.contracts * t.premium * 100
+                let signed: Double
+                switch (t.action, t.direction) {
+                case ("open",  "short"): signed =  dollars
+                case ("open",  "long"):  signed = -dollars
+                case ("close", "short"): signed = -dollars
+                case ("close", "long"):  signed =  dollars
+                default:                 signed =  0
+                }
+                return sum + signed
+            }
+    }
+
+    // MARK: - Downside protection rows
+
+    /// One row per open long put — used by the Downside Protection
+    /// sheet. cushionPct is positive when OTM (spot above strike for
+    /// a put — the cushion before the floor starts paying).
+    struct ProtectionRow: Identifiable, Sendable {
+        let id: String              // option_trade_id
+        let ticker: String
+        let strike: Double
+        let spot: Double
+        let contracts: Double
+        let expiry: String
+        let paid: Double            // contracts × premium × 100
+        let cushionPct: Double      // (spot − strike) / spot × 100
+    }
+
+    static func protectionRows(store: PortfolioStore) -> [ProtectionRow] {
+        let spotByTicker = Dictionary(
+            uniqueKeysWithValues: store.companies.map { ($0.ticker, $0.spot) }
+        )
+        return store.allTrades
+            .filter {
+                $0.action == "open"
+                    && $0.option_type == "put"
+                    && $0.direction == "long"
+                    && store.remainingContracts(for: $0) > 0
+            }
+            .compactMap { t -> ProtectionRow? in
+                guard let spot = spotByTicker[t.ticker], spot > 0 else { return nil }
+                let ct = store.remainingContracts(for: t)
+                let cushion = (spot - t.strike) / spot * 100
+                return ProtectionRow(
+                    id: t.id,
+                    ticker: t.ticker,
+                    strike: t.strike,
+                    spot: spot,
+                    contracts: ct,
+                    expiry: t.expiry,
+                    paid: ct * t.premium * 100,
+                    cushionPct: cushion
+                )
+            }
+            // Tightest cushion first — most-actively-protective puts at top.
+            .sorted { $0.cushionPct < $1.cushionPct }
+    }
+
+    // MARK: - Break-even rows (effective basis math)
+
+    /// One row per held equity lot. effectiveAvg uses LIFETIME
+    /// premium harvested per ticker (matches the Effective basis
+    /// row on the Open shares card), so gainPct/needPct reflect
+    /// the user's real break-even after all option income on that
+    /// ticker.
+    struct BreakevenRow: Identifiable, Sendable {
+        let id: String              // ticker (stable, unique)
+        let ticker: String
+        let shares: Double
+        let avg: Double             // raw cost per share
+        let last: Double            // current price
+        let premiumPerShare: Double // lifetime premium / shares
+        var effectiveAvg: Double { avg - premiumPerShare }
+        var underwater: Bool { last < effectiveAvg }
+        /// (last − effectiveAvg) / effectiveAvg × 100. Sign matches
+        /// "is current above or below the real break-even".
+        var gainPct: Double {
+            guard effectiveAvg > 0 else { return 0 }
+            return (last - effectiveAvg) / effectiveAvg * 100
+        }
+        /// Recovery move needed from current price to hit effective
+        /// break-even. Positive when underwater; 0 or negative
+        /// otherwise (we only show this row when underwater anyway).
+        var needPct: Double {
+            guard last > 0 else { return 0 }
+            return (effectiveAvg - last) / last * 100
+        }
+    }
+
+    static func breakevenRows(store: PortfolioStore) -> [BreakevenRow] {
+        store.companies.compactMap { c -> BreakevenRow? in
+            guard let stk = c.legs.first(where: { $0.kind == .stock && $0.qty > 0 })
+            else { return nil }
+            let lifetime = lifetimePremiumHarvested(for: c.ticker, store: store)
+            let perShare = stk.qty > 0 ? lifetime / stk.qty : 0
+            return BreakevenRow(
+                id: c.ticker,
+                ticker: c.ticker,
+                shares: stk.qty,
+                avg: stk.avg,
+                last: stk.last,
+                premiumPerShare: perShare
+            )
+        }
+        // Underwater group first. Within each group: largest move
+        // first (worst lot at top of underwater group; smallest
+        // gain first within in-profit).
+        .sorted { a, b in
+            if a.underwater != b.underwater { return a.underwater }
+            if a.underwater {
+                return a.needPct > b.needPct       // worst recovery first
+            } else {
+                return a.gainPct < b.gainPct       // smallest gain first
+            }
+        }
+    }
+
+    // MARK: - Patch-tile stat helpers
+
+    /// Current mark-to-market gain/loss on the OPEN long-put book.
+    /// putValue − putPaid. Drives the "Puts P/L" tile on the
+    /// Hedge Funding patch. Negative when hedges have decayed
+    /// without underlying movement; positive when they're paying off.
+    static func putGain(store: PortfolioStore) -> Double {
+        openPutsValueNow(store: store) - openPutsPaid(store: store)
+    }
+
+    /// True when ≥ 1 share lot exists at all (any held positions
+    /// with qty > 0). The Break-even sheet renders an empty state
+    /// when this is false.
+    static func hasShares(store: PortfolioStore) -> Bool {
+        openSharesCost(store: store) > 0
+    }
 }
