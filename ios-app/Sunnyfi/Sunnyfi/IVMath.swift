@@ -49,11 +49,26 @@ enum IVMath {
         return min(100, max(0, s / 0.20 * 100))
     }
 
-    /// Composite Seller Score (0–100). Returns nil if either IVR
-    /// or normSpread can't be computed (then we have nothing to show).
+    /// Composite Seller Score (0–100).
+    /// Standard: IVR × 0.6 + normSpread × 0.4 when both are available.
+    /// Early-life fallback: when IVR can't be computed yet
+    /// (iv_low == iv_high — only one snapshot in history so far),
+    /// falls back to spread-only so the real ticker still surfaces.
+    /// The detail view labels this as "spread-only score" so the
+    /// reduced confidence is visible to the user.
     static func sellerScore(_ row: TickerIVRow) -> Double? {
-        guard let r = ivr(row), let ns = normSpread(row) else { return nil }
-        return r * 0.6 + ns * 0.4
+        let r = ivr(row)
+        let ns = normSpread(row)
+        if let r, let ns { return r * 0.6 + ns * 0.4 }
+        if let ns { return ns }
+        return nil
+    }
+
+    /// True when the score was computed from spread alone (no IVR).
+    /// UI uses this to label the card "spread-only" and avoid
+    /// implying we have full Seller-Score signal.
+    static func isSpreadOnlyScore(_ row: TickerIVRow) -> Bool {
+        ivr(row) == nil && normSpread(row) != nil
     }
 
     // MARK: - Verdict zones

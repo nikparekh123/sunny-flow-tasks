@@ -93,16 +93,7 @@ final class PortfolioStore {
                 .execute().value as [TickerIVRow]
         }
         if case .success(let rows) = result {
-            // Same rule as fetchAll(): use real rows once any of them
-            // has a computable sellerScore (i.e. iv_low < iv_high and
-            // hv30 is present). Until then, keep mock so the UI stays
-            // populated for the audit.
-            #if DEBUG
-            let anyComputable = rows.contains { IVMath.sellerScore($0) != nil }
-            self.allIvSummaries = anyComputable ? rows : IVMockData.rows
-            #else
             self.allIvSummaries = rows
-            #endif
         }
     }
 
@@ -304,19 +295,10 @@ final class PortfolioStore {
         self.activeAlerts = liveAlerts
         self.allMacroEvents = macroEvents
         self.allEarningsEvents = earningsEvents
-        // TEMPORARY: fall back to mock IV rows so the IV section can
-        // be designed/audited before we have ≥ 2 days of real
-        // history. The Seller Score requires IVR, which needs
-        // iv_low < iv_high — true only after a second snapshot lands.
-        // Once any real row has a computable sellerScore, mock is
-        // skipped and real data wins. Remove this fallback when
-        // the daily cron has built up enough history.
-        #if DEBUG
-        let anyRealComputable = ivSummaries.contains { IVMath.sellerScore($0) != nil }
-        self.allIvSummaries = anyRealComputable ? ivSummaries : IVMockData.rows
-        #else
+        // Real data always — no mock fallback. sellerScore() handles
+        // the "only 1 snapshot in history" case by falling back to
+        // spread-only, so real tickers surface from day one.
         self.allIvSummaries = ivSummaries
-        #endif
 
         let built = Self.buildCompanies(
             positions: positions, trades: trades, greeks: greeks,
