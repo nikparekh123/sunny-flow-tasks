@@ -145,6 +145,41 @@ Deno.serve(async (req) => {
     }
   }
 
+  // system health alerts — pull unresolved rows from system_alerts.
+  // health-monitor raises these (mp_refresh_stale, ibkr_flex_stale,
+  // etc.); we mirror them into alert_dispatch so the push pipeline
+  // delivers them to APNs. Dedup_key includes the alert id so a
+  // single alert fires push at most once even if the dispatcher
+  // sees it across many minute-cron runs.
+  //
+  // We deliberately don't push for 'warn' tier — those are transient
+  // (Polygon hiccup) and self-resolve within a cron cycle. Only
+  // 'critical' interrupts the user.
+  const { data: sysAlerts } = await supabase
+    .from('system_alerts')
+    .select('id, code, severity, title, detail, created_at, resolved_at')
+    .is('resolved_at', null)
+    .eq('severity', 'critical');
+
+  for (const a of (sysAlerts ?? []) as Array<{
+    id: string;
+    code: string;
+    severity: string;
+    title: string;
+    detail: string | null;
+    created_at: string;
+  }>) {
+    await enqueue(queued, supabase, {
+      category: 'system_health',
+      dedup_key: `system:${a.id}`,    // alert.id is stable per-incident
+      ticker: 'SYSTEM',                // placeholder — system alerts aren't per-ticker
+      title: a.title,
+      body: a.detail ?? 'Open Sunnyfi to investigate.',
+      deep_link: 'app://settings',
+      meta: { code: a.code, severity: a.severity, created_at: a.created_at },
+    });
+  }
+
   return new Response(
     JSON.stringify({ ok: true, queued: queued.length, items: queued }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
