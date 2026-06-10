@@ -273,6 +273,9 @@ struct OpenPutsBoughtCard: View {
     var netCost: Double = 0
     /// `netCost / sharesValue × 100`. The "(0.22% of book)" sub.
     var netCostBookPct: Double = 0
+    /// Tap handler for the Net cost row → opens DownsideProtectionSheet.
+    /// When nil, the row renders as a static `NoteRowSimple` (no chevron).
+    var onProtection: (() -> Void)? = nil
 
     /// Gain = current value − cost. Positive when puts have
     /// appreciated (markets fell or vol expanded — your hedges
@@ -317,19 +320,30 @@ struct OpenPutsBoughtCard: View {
                 .padding(.horizontal, CardInset.h)
                 .padding(.vertical, 13)
 
-            // Net cost — static informational row. Shows the
-            // out-of-pocket cost of the hedge (putPaid − callCredit)
-            // and its share of the book. Muted note color — this is
-            // informational, not a P&L gain/loss.
+            // Net cost — out-of-pocket hedge cost (putPaid − callCredit).
+            // Tappable when an `onProtection` handler is provided: opens
+            // the Downside Protection sheet. Otherwise renders as the
+            // legacy static note row.
             if netCost > 0 {
                 FullBleedHair()
-                NoteRowSimple(
-                    label: "Net cost",
-                    amount: netCost,
-                    note: String(format: "(%.2f%% of book)", abs(netCostBookPct))
-                )
-                .padding(.horizontal, CardInset.h)
-                .padding(.vertical, 13)
+                if let onProtection {
+                    NoteRowChevron(
+                        label: "Net cost",
+                        amount: netCost,
+                        note: String(format: "(%.2f%% of book)", abs(netCostBookPct)),
+                        onTap: onProtection
+                    )
+                    .padding(.horizontal, CardInset.h)
+                    .padding(.vertical, 13)
+                } else {
+                    NoteRowSimple(
+                        label: "Net cost",
+                        amount: netCost,
+                        note: String(format: "(%.2f%% of book)", abs(netCostBookPct))
+                    )
+                    .padding(.horizontal, CardInset.h)
+                    .padding(.vertical, 13)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -349,6 +363,9 @@ struct OpenSharesCard: View {
     let effectiveBasisPct: Double
     let valueNow: Double        // Σ shares × last
     let todayPnL: Double        // Σ shares × spot × dayPct
+    /// Tap handler for the Effective basis row → opens BreakevenSheet.
+    /// Nil = static row, no chevron (back-compat with any older caller).
+    var onBreakeven: (() -> Void)? = nil
 
     private var totalGain: Double { valueNow - cost }
     private var totalGainPct: Double { cost > 0 ? (totalGain / cost) * 100 : 0 }
@@ -377,17 +394,6 @@ struct OpenSharesCard: View {
                 .padding(.horizontal, CardInset.h)
                 .padding(.vertical, 13)
             FullBleedHair()
-            // Effective basis — slot 2 per design, directly under
-            // Cost basis. Lifetime premium harvested subtracted.
-            // Note is muted (informational), explicit +/− sign (not arrow).
-            NoteRowSimple(
-                label: "Effective basis",
-                amount: effectiveBasis,
-                note: ebSignedPct
-            )
-            .padding(.horizontal, CardInset.h)
-            .padding(.vertical, 13)
-            FullBleedHair()
             PRow(label: "Value now",
                  amount: valueNow,
                  amountSign: false,
@@ -401,6 +407,30 @@ struct OpenSharesCard: View {
                  pct: todayPct)
                 .padding(.horizontal, CardInset.h)
                 .padding(.vertical, 13)
+            FullBleedHair()
+            // Effective basis — moved to LAST slot per the
+            // standardized-popups design pass. Subtracts lifetime
+            // premium harvested from cost. Tappable when a
+            // `onBreakeven` handler is provided — opens BreakevenSheet
+            // for the per-lot view of recovery to effective basis.
+            if let onBreakeven {
+                NoteRowChevron(
+                    label: "Effective basis",
+                    amount: effectiveBasis,
+                    note: ebSignedPct,
+                    onTap: onBreakeven
+                )
+                .padding(.horizontal, CardInset.h)
+                .padding(.vertical, 13)
+            } else {
+                NoteRowSimple(
+                    label: "Effective basis",
+                    amount: effectiveBasis,
+                    note: ebSignedPct
+                )
+                .padding(.horizontal, CardInset.h)
+                .padding(.vertical, 13)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CardChrome())
@@ -432,6 +462,53 @@ private struct NoteRowSimple: View {
                 .monospacedDigit()
                 .foregroundStyle(Color.theme.fg3)
         }
+    }
+
+    private func plainMoney(_ v: Double) -> String {
+        let abs = Int(Swift.abs(v).rounded())
+        let formatted = abs.formatted(.number.grouping(.automatic))
+        if v < 0 { return "\u{2212}$\(formatted)" }
+        return "$\(formatted)"
+    }
+}
+
+// MARK: - Note row chevron variant (tappable)
+
+/// Tappable twin of `NoteRowSimple` used by the new standardized popup
+/// rows. Same visual rhythm as `FundsHedgeRow` — neon chevron, full-row
+/// hit target — but carries an amount + muted note instead of a percent.
+/// Used on:
+///   • Open puts bought · "Net cost" → DownsideProtectionSheet
+///   • Open shares · "Effective basis" → BreakevenSheet
+private struct NoteRowChevron: View {
+    let label: String
+    let amount: Double
+    let note: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .center, spacing: 7) {
+                Text(label)
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(Color.theme.labelMuted)
+                Spacer(minLength: 0)
+                Text(plainMoney(amount))
+                    .font(.system(size: 16, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.theme.fg1)
+                Text(note)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.theme.fg3)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.theme.neon)
+                    .padding(.leading, 3)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func plainMoney(_ v: Double) -> String {

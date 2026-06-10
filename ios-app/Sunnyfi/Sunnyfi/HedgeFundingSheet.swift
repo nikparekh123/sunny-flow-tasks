@@ -2,24 +2,17 @@
 //  HedgeFundingSheet.swift
 //  Sunnyfi
 //
-//  Bottom-sheet drill-in opened from the "Funds hedge" row on the
-//  Open call credit card. Explains the cross-book funding picture:
-//  how much of the protective-put bill the call-credit book pays
-//  for, broken down by leg.
+//  Drill-in opened from the "Funds hedge" row on Open call credit.
+//  Standardized popup shape from design_handoff_standardized_popups:
 //
-//  Layout follows design_handoff_hedge_rows / b-sheets.jsx →
-//  HedgeFundingSheet. Two states:
-//
-//   • Under-funded (call credit < put paid):
-//       big "73%" + sub "$11,990 of $16,450 / $4,460 to go"
-//       meter fills to fundedPct%
-//   • Over-funded (call credit ≥ put paid):
-//       big "+$X" in positive tone + sub "fully funded · surplus"
-//       meter fills to 100%
-//
-//  Lists below the total box:
-//   • HEDGE COST · PUTS BOUGHT — one row per long-put leg
-//   • FUNDED BY · CALL CREDIT — one row per ticker with calls sold
+//    HEAD-TAG · big title · subcopy
+//    Patch block:
+//       mini-label + status tag
+//       hero value
+//       ZoneGauge (UNFUNDED → FULLY FUNDED)
+//       3 stats (Call income / Hedge cost / Puts P/L)
+//    By-position groups (calls collected · puts bought)
+//    Done capsule
 //
 
 import SwiftUI
@@ -32,22 +25,29 @@ struct HedgeFundingSheet: View {
     let netCost: Double
     let putRows: [TradesData.HedgePutRow]
     let creditRows: [TradesData.HedgeCreditRow]
+    /// Mark-to-market on the open put book (putValue − putPaid). Drives
+    /// the third stat tile. Defaults to 0 so older callers don't break.
+    var putGain: Double = 0
     let onClose: () -> Void
 
     private var fullyFunded: Bool { hedgeSurplus >= 0 }
-    private var meterFill: Double { fullyFunded ? 1.0 : Double(fundedPct) / 100.0 }
+    /// Gauge value: clamp fundedPct, push to 100 when surplus.
+    private var gaugeValue: Double {
+        fullyFunded ? 100 : Double(fundedPct)
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                head
-                    .padding(.top, 8)
-                    .padding(.bottom, 18)
+                SheetHead(
+                    tag: "HEDGE FUNDING",
+                    title: "Call credit → puts",
+                    subcopy: subCopy
+                )
+                .padding(.top, 8)
+                .padding(.bottom, 18)
 
-                totalBox
-                    .padding(.bottom, 11)
-
-                meter
+                patch
                     .padding(.bottom, 22)
 
                 putsGroup
@@ -56,15 +56,7 @@ struct HedgeFundingSheet: View {
                 creditGroup
 
                 Spacer(minLength: 18)
-                Button("Done", action: onClose)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .tracking(0.4)
-                    .foregroundStyle(Color.theme.neon)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(
-                        Capsule()
-                            .strokeBorder(Color.theme.borderBright, lineWidth: 1)
-                    )
+                SheetDoneButton(onTap: onClose)
                     .padding(.top, 8)
             }
             .padding(.horizontal, 22)
@@ -74,83 +66,68 @@ struct HedgeFundingSheet: View {
         .background(Color.theme.elevated.ignoresSafeArea())
     }
 
-    // MARK: - Sections
-
-    private var head: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("HEDGE FUNDING")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .tracking(1.8)
-                .foregroundStyle(Color.theme.neon)
-            Text("Call credit → puts")
-                .font(.system(size: 26, weight: .bold))
-                .tracking(-0.78)
-                .foregroundStyle(Color.theme.fg1)
-                .lineLimit(2)
-            Text(subCopy)
-                .font(.system(size: 12.5))
-                .lineSpacing(4)
-                .foregroundStyle(Color.theme.fg3)
-                .padding(.top, 4)
-        }
-    }
-
     private var subCopy: String {
-        let intro = "Premium collected on your open short calls offsets what you paid for protective puts."
+        let intro = "Premium collected on open short calls offsets the cost of protective puts."
         if fullyFunded {
             return intro + " Call income covers the entire hedge."
         }
         return intro + " \(fundedPct)% of the hedge is funded by call income — the rest is out of pocket."
     }
 
-    private var totalBox: some View {
-        HStack(alignment: .center) {
-            // Big value: % (under-funded) or +$surplus (over-funded)
+    // MARK: - Patch
+
+    private var patch: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center) {
+                Text("FUNDING STATUS")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(1.6)
+                    .foregroundStyle(Color.theme.fg3)
+                Spacer()
+                PatchTag(
+                    text: fullyFunded ? "fully funded" : "\(fundedPct)% funded",
+                    tone: fullyFunded ? .pos : .neutral
+                )
+            }
+            // Hero — under-funded: "% of put bill"; over-funded: "+$surplus"
             if fullyFunded {
                 Text(signedMoney(hedgeSurplus))
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(.system(size: 30, weight: .semibold))
                     .monospacedDigit()
+                    .tracking(-0.9)
                     .foregroundStyle(Color.theme.pos)
-                    .tracking(-0.84)
             } else {
-                Text("\(fundedPct)%")
-                    .font(.system(size: 28, weight: .semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.theme.fg1)
-                    .tracking(-0.84)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(plainMoney(callCredit))
+                        .font(.system(size: 30, weight: .semibold))
+                        .monospacedDigit()
+                        .tracking(-0.9)
+                        .foregroundStyle(Color.theme.fg1)
+                    Text("of \(plainMoney(putPaid))")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.theme.fg3)
+                }
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 3) {
-                Text("\(plainMoney(callCredit)) of \(plainMoney(putPaid))")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.theme.fg3)
-                Text(fullyFunded ? "fully funded · surplus" : "\(plainMoney(netCost)) to go")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.theme.fg3)
-            }
+            ZoneGauge(value: gaugeValue,
+                      leftLabel: "Unfunded",
+                      rightLabel: "Fully funded")
+                .padding(.top, 2)
+            PatchStatsRow(stats: [
+                .init(label: "Call income", value: plainMoney(callCredit), tone: .pos),
+                .init(label: "Hedge cost",  value: "\u{2212}" + plainMoney(putPaid), tone: .neg),
+                .init(label: "Puts P/L",    value: signedMoney(putGain),
+                      tone: putGain >= 0 ? .pos : .neg),
+            ])
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 16)
         .background(
             RoundedRectangle(cornerRadius: Radius.lg)
                 .fill(Color.theme.page2)
         )
     }
 
-    private var meter: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.theme.page2)
-                    .frame(height: 8)
-                Capsule()
-                    .fill(Color.theme.neon)
-                    .frame(width: geo.size.width * meterFill, height: 8)
-                    .animation(.easeOut(duration: 0.45), value: meterFill)
-            }
-        }
-        .frame(height: 8)
-    }
+    // MARK: - By-position groups
 
     private var putsGroup: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -216,13 +193,13 @@ struct HedgeFundingSheet: View {
         }
     }
 
-    // MARK: - Format helpers
+    // MARK: - Format helpers (file-local — duplicated from sibling sheets
+    //          on purpose: keeps each popup self-contained)
 
     private func plainMoney(_ v: Double) -> String {
         let abs = Int(Swift.abs(v).rounded())
         return "$" + abs.formatted(.number.grouping(.automatic))
     }
-
     private func signedMoney(_ v: Double) -> String {
         let abs = Int(Swift.abs(v).rounded())
         let formatted = abs.formatted(.number.grouping(.automatic))
@@ -230,15 +207,11 @@ struct HedgeFundingSheet: View {
         if v < 0 { return "\u{2212}$\(formatted)" }
         return "$\(formatted)"
     }
-
     private func strikeFmt(_ v: Double) -> String {
         v.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", v)
             : String(format: "%.2f", v)
     }
-
-    /// Compact expiry like "Jul 18". Falls back to the raw string
-    /// if the input isn't yyyy-MM-dd.
     private func shortDate(_ ymd: String) -> String {
         let inFmt = DateFormatter()
         inFmt.dateFormat = "yyyy-MM-dd"
@@ -248,5 +221,127 @@ struct HedgeFundingSheet: View {
         outFmt.dateFormat = "MMM d"
         outFmt.timeZone = TimeZone(identifier: "America/New_York")
         return outFmt.string(from: d)
+    }
+}
+
+// MARK: - Shared sheet primitives
+
+/// HEAD-TAG + big title + subcopy. Used at the top of every
+/// standardized popup. Title carries the design's -0.9pt tracking.
+struct SheetHead: View {
+    let tag: String
+    let title: String
+    let subcopy: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(tag)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .tracking(1.8)
+                .foregroundStyle(Color.theme.neon)
+            Text(title)
+                .font(.system(size: 26, weight: .bold))
+                .tracking(-0.78)
+                .foregroundStyle(Color.theme.fg1)
+                .lineLimit(2)
+            Text(subcopy)
+                .font(.system(size: 12.5))
+                .lineSpacing(4)
+                .foregroundStyle(Color.theme.fg3)
+                .padding(.top, 4)
+        }
+    }
+}
+
+/// Neon-outlined Done capsule. Lives in every sheet's footer.
+struct SheetDoneButton: View {
+    let onTap: () -> Void
+    var body: some View {
+        Button("Done", action: onTap)
+            .font(.system(size: 13, weight: .medium, design: .monospaced))
+            .tracking(0.4)
+            .foregroundStyle(Color.theme.neon)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(
+                Capsule()
+                    .strokeBorder(Color.theme.borderBright, lineWidth: 1)
+            )
+    }
+}
+
+/// Small pill tag rendered to the right of the patch mini-label.
+/// Tone drives color treatment.
+struct PatchTag: View {
+    enum Tone { case pos, neg, neutral }
+    let text: String
+    let tone: Tone
+
+    private var fg: Color {
+        switch tone {
+        case .pos: return Color.theme.pos
+        case .neg: return Color.theme.neg
+        case .neutral: return Color.theme.fg2
+        }
+    }
+    private var bg: Color {
+        switch tone {
+        case .pos: return Color.theme.pos.opacity(0.14)
+        case .neg: return Color.theme.neg.opacity(0.14)
+        case .neutral: return Color.theme.page
+        }
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .tracking(0.4)
+            .foregroundStyle(fg)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(bg))
+    }
+}
+
+/// 3 evenly-divided stat tiles below the gauge. Tone colors each value.
+struct PatchStatsRow: View {
+    struct Stat: Identifiable {
+        let id = UUID()
+        let label: String
+        let value: String
+        let tone: Tone
+        enum Tone { case pos, neg, neutral }
+    }
+    let stats: [Stat]
+
+    private func color(for t: Stat.Tone) -> Color {
+        switch t {
+        case .pos: return Color.theme.pos
+        case .neg: return Color.theme.neg
+        case .neutral: return Color.theme.fg1
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(stats.enumerated()), id: \.element.id) { idx, s in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(s.label.uppercased())
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .tracking(1.2)
+                        .foregroundStyle(Color.theme.fg3)
+                    Text(s.value)
+                        .font(.system(size: 15, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(color(for: s.tone))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if idx < stats.count - 1 {
+                    Rectangle()
+                        .fill(Color.theme.hair)
+                        .frame(width: 1, height: 28)
+                        .padding(.horizontal, 8)
+                }
+            }
+        }
     }
 }

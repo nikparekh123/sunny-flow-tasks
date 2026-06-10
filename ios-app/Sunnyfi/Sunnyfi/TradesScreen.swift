@@ -47,6 +47,13 @@ struct TradesScreen: View {
     /// Open call credit. Bool because the sheet renders portfolio-
     /// level data, no per-row context to carry.
     @State private var showHedgeFunding: Bool = false
+    /// Downside Protection sheet — opens from "Net cost" row on
+    /// Open puts bought. Portfolio-wide view of how each long put
+    /// shelters the share book against drawdown.
+    @State private var showDownsideProtection: Bool = false
+    /// Break-even sheet — opens from "Effective basis" row on Open
+    /// shares. Per-lot recovery view using lifetime-adjusted basis.
+    @State private var showBreakeven: Bool = false
     /// Non-nil = per-ticker lot/trade admin sheet is visible
     /// (Edit on a shares leg routes here).
     @State private var editStockTicker: TickerWrap? = nil
@@ -136,7 +143,26 @@ struct TradesScreen: View {
                 netCost: hedgeNetCost,
                 putRows: TradesData.hedgePutRows(store: store),
                 creditRows: TradesData.hedgeCreditRows(store: store),
+                putGain: TradesData.putGain(store: store),
                 onClose: { showHedgeFunding = false }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.theme.elevated)
+        }
+        .sheet(isPresented: $showDownsideProtection) {
+            DownsideProtectionSheet(
+                store: store,
+                onClose: { showDownsideProtection = false }
+            )
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.theme.elevated)
+        }
+        .sheet(isPresented: $showBreakeven) {
+            BreakevenSheet(
+                store: store,
+                onClose: { showBreakeven = false }
             )
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -399,7 +425,8 @@ struct TradesScreen: View {
                                            valueNow: openPutsValueNow,
                                            timeValue: openPutsTimeValue,
                                            netCost: hedgeNetCost,
-                                           netCostBookPct: hedgeNetCostBookPct)
+                                           netCostBookPct: hedgeNetCostBookPct,
+                                           onProtection: { showDownsideProtection = true })
                             .containerRelativeFrame(.horizontal)
                             .id("puts")
                     }
@@ -408,7 +435,8 @@ struct TradesScreen: View {
                                        effectiveBasis: effectiveBasis,
                                        effectiveBasisPct: effectiveBasisPct,
                                        valueNow: openSharesValueNow,
-                                       todayPnL: openSharesTodayPnL)
+                                       todayPnL: openSharesTodayPnL,
+                                       onBreakeven: { showBreakeven = true })
                             .containerRelativeFrame(.horizontal)
                             .id("shares")
                     }
