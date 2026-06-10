@@ -93,16 +93,13 @@ final class PortfolioStore {
                 .execute().value as [TickerIVRow]
         }
         if case .success(let rows) = result {
-            // Preserve the DEBUG mock fallback only when the real
-            // view comes back empty — same rule as fetchAll().
+            // Same rule as fetchAll(): use real rows once any of them
+            // has a computable sellerScore (i.e. iv_low < iv_high and
+            // hv30 is present). Until then, keep mock so the UI stays
+            // populated for the audit.
             #if DEBUG
-            if rows.isEmpty {
-                if self.allIvSummaries.isEmpty {
-                    self.allIvSummaries = IVMockData.rows
-                }
-            } else {
-                self.allIvSummaries = rows
-            }
+            let anyComputable = rows.contains { IVMath.sellerScore($0) != nil }
+            self.allIvSummaries = anyComputable ? rows : IVMockData.rows
             #else
             self.allIvSummaries = rows
             #endif
@@ -308,11 +305,15 @@ final class PortfolioStore {
         self.allMacroEvents = macroEvents
         self.allEarningsEvents = earningsEvents
         // TEMPORARY: fall back to mock IV rows so the IV section can
-        // be designed/audited before the daily ticker-iv-snapshot
-        // cron has populated real data. Remove this fallback once
-        // ticker_iv_summary returns rows.
+        // be designed/audited before we have ≥ 2 days of real
+        // history. The Seller Score requires IVR, which needs
+        // iv_low < iv_high — true only after a second snapshot lands.
+        // Once any real row has a computable sellerScore, mock is
+        // skipped and real data wins. Remove this fallback when
+        // the daily cron has built up enough history.
         #if DEBUG
-        self.allIvSummaries = ivSummaries.isEmpty ? IVMockData.rows : ivSummaries
+        let anyRealComputable = ivSummaries.contains { IVMath.sellerScore($0) != nil }
+        self.allIvSummaries = anyRealComputable ? ivSummaries : IVMockData.rows
         #else
         self.allIvSummaries = ivSummaries
         #endif
