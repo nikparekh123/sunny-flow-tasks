@@ -107,6 +107,51 @@ Deno.serve(async (req) => {
   // what IBKR is actually serving without needing dashboard access.
   const debug: boolean = body.debug === true;
 
+  // ── 0. Window + slot gating (cron-only) ─────────────────────
+  // Manual/backfill triggers always run. Cron triggers only run
+  // inside the 10:00–16:30 America/New_York window on weekdays,
+  // and within that window the cron fires every 15 min but the
+  // function self-throttles to a 30-min cadence:
+  //   • :00 / :30 → primary slot, always run
+  //   • :15 / :45 → retry slot, run ONLY if the previous run failed
+  //
+  // Skipped runs do NOT write an ibkr_sync_runs row — keeps the
+  // audit log focused on actual attempts.
+  const slot = etSlotInfo(new Date());
+  if (trigger === 'cron') {
+    if (!slot.inWindow) {
+      return jsonText(200, JSON.stringify({
+        ok: true, skipped: 'out-of-window',
+        et: slot.etStamp,
+      }));
+    }
+    if (slot.isRetrySlot && !slot.isPrimarySlot) {
+      // Retry slot: peek at the most recent run. Only proceed if it
+      // failed. `partial` and `success` both mean "primary slot did
+      // its job" — no retry needed.
+      const { data: lastRun } = await supabase
+        .from('ibkr_sync_runs')
+        .select('status')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastRun?.status !== 'failed') {
+        return jsonText(200, JSON.stringify({
+          ok: true, skipped: 'retry-not-needed',
+          last_status: lastRun?.status ?? 'none',
+          et: slot.etStamp,
+        }));
+      }
+    } else if (!slot.isPrimarySlot && !slot.isRetrySlot) {
+      // Cron fires only on /15s, so this branch is defensive: if a
+      // human re-triggers cron off-rhythm, no-op cleanly.
+      return jsonText(200, JSON.stringify({
+        ok: true, skipped: 'off-slot',
+        et: slot.etStamp,
+      }));
+    }
+  }
+
   // ── 1. Validate secrets ─────────────────────────────────────
   if (!token || !queryId) {
     return jsonError(supabase, 'IBKR_FLEX_TOKEN or IBKR_FLEX_QUERY_ID not set', trigger);
@@ -314,6 +359,24 @@ Deno.serve(async (req) => {
     ibkr_account_id: accountId,
   }).eq('id', run.id);
 
+  // ── 9. Persistent-failure alert ───────────────────────────
+  // If we got here via a cron retry slot (:15 / :45) and STILL
+  // failed, the in-window retry just blew up too. Write an
+  // ibkr_sync_alerts row so the user can see it from Claude
+  // Code. Not pushed to APNs — by design.
+  if (status === 'failed' && trigger === 'cron' && slot.isRetrySlot) {
+    await supabase.from('ibkr_sync_alerts').insert({
+      run_id: run.id,
+      slot_minute: slot.minute,
+      reason: errors[0]?.reason?.slice(0, 240) ?? 'IBKR sync failed twice in a row',
+      details: {
+        et: slot.etStamp,
+        reference_code: referenceCode,
+        errors: errors.slice(0, 10),
+      },
+    });
+  }
+
   return jsonText(200, JSON.stringify({
     ok: status !== 'failed',
     run_id: run.id,
@@ -346,6 +409,51 @@ Deno.serve(async (req) => {
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
+
+/**
+ * Window + slot classification for a given instant, in America/New_York.
+ * Used by the cron gate to decide whether to run, retry, or no-op.
+ *
+ * inWindow      — weekday & 10:00 ≤ ET < 16:30
+ * isPrimarySlot — minute ∈ [0..4] or [30..34]   (the :00 / :30 run)
+ * isRetrySlot   — minute ∈ [15..19] or [45..49] (the :15 / :45 run)
+ *
+ * The 5-min half-open windows absorb cron jitter — net.http_post often
+ * fires a few seconds late, and we don't want a 12s lag to flip a :15
+ * run to "off-slot".
+ */
+function etSlotInfo(now: Date): {
+  inWindow: boolean;
+  isPrimarySlot: boolean;
+  isRetrySlot: boolean;
+  hour: number;
+  minute: number;
+  etStamp: string;
+} {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'short',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts: Record<string, string> = {};
+  for (const p of fmt.formatToParts(now)) parts[p.type] = p.value;
+  const weekday = parts.weekday; // 'Mon'..'Sun'
+  const hour = parseInt(parts.hour, 10);
+  const minute = parseInt(parts.minute, 10);
+
+  const isWeekday = !(weekday === 'Sat' || weekday === 'Sun');
+  const minsOfDay = hour * 60 + minute;
+  const inWindow = isWeekday && minsOfDay >= (10 * 60) && minsOfDay < (16 * 60 + 30);
+
+  const isPrimarySlot = (minute < 5) || (minute >= 30 && minute < 35);
+  const isRetrySlot   = (minute >= 15 && minute < 20) || (minute >= 45 && minute < 50);
+
+  const etStamp = `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ET ${weekday}`;
+
+  return { inWindow, isPrimarySlot, isRetrySlot, hour, minute, etStamp };
+}
 
 function matchTag(xml: string, tag: string): string | null {
   const m = xml.match(new RegExp(`<${tag}>([^<]+)</${tag}>`));
