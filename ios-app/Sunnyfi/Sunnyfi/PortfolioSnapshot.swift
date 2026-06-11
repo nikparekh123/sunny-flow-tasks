@@ -52,7 +52,11 @@ struct PortfolioSnapshot: Codable {
 
 enum PortfolioSnapshotStore {
 
-    private static let filename = "portfolio-snapshot.v1.json"
+    /// Binary plist for ~3× faster decode than JSON on the
+    /// cold-launch hydrate path. v1 .json files from prior builds
+    /// are ignored by the differing extension — they'll be
+    /// overwritten the next time fetchAll lands.
+    private static let filename = "portfolio-snapshot.v1.plist"
 
     /// Disk URL under Application Support/Sunnyfi/.
     /// Created on demand on first save.
@@ -74,7 +78,7 @@ enum PortfolioSnapshotStore {
     static func read() -> PortfolioSnapshot? {
         guard let url = fileURL,
               let data = try? Data(contentsOf: url),
-              let snap = try? JSONDecoder().decode(PortfolioSnapshot.self, from: data),
+              let snap = try? PropertyListDecoder().decode(PortfolioSnapshot.self, from: data),
               snap.version == PortfolioSnapshot.currentVersion
         else { return nil }
         return snap
@@ -88,7 +92,9 @@ enum PortfolioSnapshotStore {
         Task.detached(priority: .utility) {
             guard let url = fileURL else { return }
             do {
-                let data = try JSONEncoder().encode(snapshot)
+                let encoder = PropertyListEncoder()
+                encoder.outputFormat = .binary
+                let data = try encoder.encode(snapshot)
                 try data.write(to: url, options: [.atomic])
             } catch {
                 // Silent. The cache is best-effort.

@@ -212,16 +212,8 @@ struct HedgeFundingSheet: View {
             ? String(format: "%.0f", v)
             : String(format: "%.2f", v)
     }
-    private func shortDate(_ ymd: String) -> String {
-        let inFmt = DateFormatter()
-        inFmt.dateFormat = "yyyy-MM-dd"
-        inFmt.timeZone = TimeZone(identifier: "America/New_York")
-        guard let d = inFmt.date(from: ymd) else { return ymd }
-        let outFmt = DateFormatter()
-        outFmt.dateFormat = "MMM d"
-        outFmt.timeZone = TimeZone(identifier: "America/New_York")
-        return outFmt.string(from: d)
-    }
+    /// Backed by static formatters in `Fmt` (Formatters.swift).
+    private func shortDate(_ ymd: String) -> String { Fmt.shortDate(ymd) }
 }
 
 // MARK: - Shared sheet primitives

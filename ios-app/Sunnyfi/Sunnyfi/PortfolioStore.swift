@@ -185,6 +185,14 @@ final class PortfolioStore {
     func load() async {
         isLoading = true
         defer { isLoading = false }
+        // Snapshot fast-path: if init() hydrated us with state that's
+        // newer than 30s, skip the network fan-out entirely. App
+        // switching back into Sunnyfi is instant — no spinner, no
+        // wait. The next deliberate refresh (or a backgrounded scene
+        // returning fresh-stale) goes through fetchAll normally.
+        if let last = freshness, -last.timeIntervalSinceNow < 30 {
+            return
+        }
         await Perf.interval("store.load") {
             await fetchAll()
             if lastRunWasAllCancelled {

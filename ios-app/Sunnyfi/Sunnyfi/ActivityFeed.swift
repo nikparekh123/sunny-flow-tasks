@@ -205,16 +205,9 @@ enum ActivityFeed {
         let today = cal.startOfDay(for: now)
         let yesterday = cal.date(byAdding: .day, value: -1, to: today) ?? today
 
-        let dateFmt = DateFormatter()
-        dateFmt.dateFormat = "MMM d"
-        dateFmt.timeZone = cal.timeZone
-
-        if day == today      { return "Today · \(dateFmt.string(from: day))" }
-        if day == yesterday  { return "Yesterday · \(dateFmt.string(from: day))" }
-
-        let weekdayFmt = DateFormatter()
-        weekdayFmt.dateFormat = "EEE"
-        weekdayFmt.timeZone = cal.timeZone
-        return "\(weekdayFmt.string(from: day)) · \(dateFmt.string(from: day))"
+        // Static formatters in `Fmt` — no per-call allocation.
+        if day == today      { return "Today · \(Fmt.monthDayET.string(from: day))" }
+        if day == yesterday  { return "Yesterday · \(Fmt.monthDayET.string(from: day))" }
+        return "\(Fmt.weekdayET.string(from: day)) · \(Fmt.monthDayET.string(from: day))"
     }
 }

@@ -247,10 +247,7 @@ enum EventCardDeriver {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? cal.timeZone
         guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) else { return 0 }
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
-        df.timeZone = cal.timeZone
-        let cutoff = df.string(from: monthStart)
+        let cutoff = Fmt.ymdET.string(from: monthStart)
         return trades
             .filter { $0.action == "open" && $0.direction == "short" && String($0.trade_date.prefix(10)) >= cutoff }
             .reduce(0) { $0 + $1.premium * $1.contracts * 100 }
@@ -260,10 +257,7 @@ enum EventCardDeriver {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? cal.timeZone
         guard let yearStart = cal.date(from: cal.dateComponents([.year], from: now)) else { return 0 }
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
-        df.timeZone = cal.timeZone
-        let cutoff = df.string(from: yearStart)
+        let cutoff = Fmt.ymdET.string(from: yearStart)
         return trades
             .filter { $0.action == "open" && $0.direction == "short" && String($0.trade_date.prefix(10)) >= cutoff }
             .reduce(0) { $0 + $1.premium * $1.contracts * 100 }
