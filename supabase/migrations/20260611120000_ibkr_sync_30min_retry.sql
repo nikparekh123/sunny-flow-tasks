@@ -34,7 +34,7 @@ create extension if not exists pg_net  with schema extensions;
 create table if not exists public.ibkr_sync_alerts (
   id           bigserial primary key,
   created_at   timestamptz not null default now(),
-  run_id       bigint references public.ibkr_sync_runs(id) on delete set null,
+  run_id       uuid references public.ibkr_sync_runs(id) on delete set null,
   slot_minute  int  not null,                -- 15 or 45 (the retry slot)
   reason       text not null,                -- short human summary
   details      jsonb,                        -- run errors[], reference codes, etc.
@@ -71,7 +71,7 @@ create or replace function public.ibkr_alerts_recent(p_limit int default 20)
 returns table (
   id bigint,
   created_at timestamptz,
-  run_id bigint,
+  run_id uuid,
   slot_minute int,
   reason text,
   details jsonb,
