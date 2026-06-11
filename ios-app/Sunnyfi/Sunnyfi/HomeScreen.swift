@@ -53,7 +53,6 @@ struct HomeScreen: View {
                 .padding(.top, 10)
             }
             .background(Color.theme.page)
-            .refreshable { await store.refresh() }
             .navigationDestination(for: String.self) { ticker in
                 CompanyScreen(ticker: ticker, store: store)
             }

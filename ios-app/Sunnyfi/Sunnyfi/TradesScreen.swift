@@ -309,9 +309,6 @@ struct TradesScreen: View {
                     .padding(.top, 10)
                     .padding(.bottom, 120)   // clear FAB + tab bar
             }
-            .refreshable {
-                await store.refresh()
-            }
         }
     }
 
@@ -387,9 +384,6 @@ struct TradesScreen: View {
             }
             .padding(.horizontal, 18)
             .padding(.top, 14)
-        }
-        .refreshable {
-            await store.refresh()
         }
     }
 

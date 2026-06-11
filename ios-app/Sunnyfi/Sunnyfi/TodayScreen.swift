@@ -151,7 +151,6 @@ struct TodayScreen: View {
                     Color.clear.frame(height: 120) // clear floating tab bar
                 }
             }
-            .refreshable { await store.refresh() }
             .background(Color.theme.page)
         }
         .sheet(isPresented: Binding(

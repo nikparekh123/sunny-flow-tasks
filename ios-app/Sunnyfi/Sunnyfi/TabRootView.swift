@@ -55,30 +55,6 @@ struct TabRootView: View {
     /// deep-link taps (AppNavigator) or any in-app trigger that
     /// wants to surface the per-ticker modal from anywhere.
     @State private var pushTickerSheet: String?
-    /// Ephemeral logo display — appears when the app is actively
-    /// loading/refreshing, lingers a few seconds after to confirm
-    /// "live data", then hides. Reclaims the top of every screen
-    /// for content the rest of the time.
-    @State private var logoVisible: Bool = false
-    @State private var logoHideTask: Task<Void, Never>?
-
-    /// Combined "actively pulling data" flag used to drive logoVisible.
-    private var isAnyLoading: Bool { store.isLoading || store.isRefreshing }
-
-    /// Show now / linger 5s / hide. Centralized so .onChange and
-    /// .onAppear can both call it without duplicating the logic.
-    private func updateLogoVisibility(busy: Bool) {
-        logoHideTask?.cancel()
-        if busy {
-            withAnimation(.easeOut(duration: 0.25)) { logoVisible = true }
-        } else {
-            logoHideTask = Task { @MainActor in
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled else { return }
-                withAnimation(.easeOut(duration: 0.35)) { logoVisible = false }
-            }
-        }
-    }
     /// Process singleton — reading its observable properties here
     /// re-runs the body on push intents.
     private let navigator = AppNavigator.shared
@@ -88,23 +64,19 @@ struct TabRootView: View {
             // Active tab content fills the screen; bottom padding leaves
             // room for the floating nav.
             VStack(spacing: 0) {
-                // Ephemeral logo header — only mounts during refresh +
-                // a short "live" tail. Most of the time it's collapsed
-                // to zero height so the page sits flush with the safe
-                // area.
-                if logoVisible {
-                    HStack(alignment: .center) {
-                        SyncIndicator(store: store)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.top, 8)
-                    .padding(.bottom, 6)
-                    .transition(
-                        .move(edge: .top)
-                            .combined(with: .opacity)
-                    )
+                // Passive sync heartbeat — a tiny orange/red dot
+                // appears in the top-left ONLY when the IBKR feed
+                // is stale or has failed. Fresh = hidden. Not
+                // tappable. Replaces the prior orbit SyncIndicator
+                // + ephemeral logo header per the stabilization
+                // pass (no manual sync entry points).
+                HStack(alignment: .center) {
+                    StatusDot(store: store)
+                    Spacer()
                 }
+                .padding(.horizontal, 18)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
 
                 SystemAlertBanner(alerts: store.activeAlerts)
                 OfflineBanner(isOnline: reach.isOnline, lastFreshness: store.freshness)
@@ -128,14 +100,6 @@ struct TabRootView: View {
             DockedTabBar(active: $tab)
         }
         .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)
-        // Logo visibility: show while busy, linger 5s after, then hide.
-        // We intentionally don't pass `initial: true` here — mutating
-        // state during the first render pass can cause SwiftUI to
-        // tear down `.task` and cancel the 10 parallel fetches inside
-        // fetchAll(). Initial state is set from .onAppear below.
-        .onChange(of: isAnyLoading) { _, busy in
-            updateLogoVisibility(busy: busy)
-        }
         .task {
             await store.load()
             // If the user previously granted notification permission,
@@ -187,14 +151,6 @@ struct TabRootView: View {
             navigator.consumeTickerRequest()
         }
         .onAppear {
-            // Initial logo state — load is almost certainly in flight
-            // on cold launch (.task fires concurrently with this).
-            // Showing it here instead of via .onChange(initial:true)
-            // avoids the render-time mutation that was cancelling
-            // fetchAll's child tasks.
-            if isAnyLoading && !logoVisible {
-                logoVisible = true
-            }
             // If a tap arrived while the app was on sign-in / locked,
             // the navigator already has the intent buffered. Apply it
             // now that TabRootView is mounting.
