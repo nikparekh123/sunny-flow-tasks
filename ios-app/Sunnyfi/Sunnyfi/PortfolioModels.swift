@@ -10,7 +10,7 @@ import Foundation
 
 // MARK: - Raw Supabase row shapes
 
-struct PositionRow: Decodable, Sendable {
+struct PositionRow: Codable, Sendable {
     let ticker: String
     let name: String?
     let sector: String?
@@ -23,7 +23,7 @@ struct PositionRow: Decodable, Sendable {
     let realized_stock_pl: Double?
 }
 
-struct OptionTradeRow: Decodable, Sendable {
+struct OptionTradeRow: Codable, Sendable {
     let id: String
     let ticker: String
     let trade_date: String
@@ -43,7 +43,7 @@ struct OptionTradeRow: Decodable, Sendable {
     let voided_at: String?         // ISO8601, set if IBKR cancelled
 }
 
-struct OptionGreeksRow: Decodable, Sendable {
+struct OptionGreeksRow: Codable, Sendable {
     let option_trade_id: String
     let delta: Double?
     let gamma: Double?
@@ -66,7 +66,7 @@ struct OptionGreeksRow: Decodable, Sendable {
 /// client-side via IVMath from these primitives.
 ///
 /// Decimal convention: atm_iv / hv30 are decimal IV (0.42 = 42%).
-struct TickerIVRow: Decodable, Sendable, Identifiable {
+struct TickerIVRow: Codable, Sendable, Identifiable {
     var id: String { ticker }
     let ticker: String
     let current_iv: Double?
@@ -81,7 +81,7 @@ struct TickerIVRow: Decodable, Sendable, Identifiable {
 /// One row per trading day captured by the daily-theta-snapshot cron.
 /// Powers the Hedge tab's day-over-day Δ-change, the 14-day sparkline,
 /// and the prior-week paid-vs-collected history.
-struct DailyThetaSnapshotRow: Decodable, Sendable, Hashable {
+struct DailyThetaSnapshotRow: Codable, Sendable, Hashable {
     let snapshot_date: String           // "YYYY-MM-DD" (EST date)
     let total_burn: Double
     let long_put_count: Int
@@ -105,7 +105,7 @@ struct SystemAlertRow: Decodable, Sendable, Hashable, Identifiable {
     var isCritical: Bool { severity == "critical" }
 }
 
-struct TickerQuoteRow: Decodable, Sendable {
+struct TickerQuoteRow: Codable, Sendable {
     let ticker: String
     let spot: Double?
     let day_change_pct: Double?
@@ -113,18 +113,18 @@ struct TickerQuoteRow: Decodable, Sendable {
     let captured_at: String?
 }
 
-struct ShareSellRow: Decodable, Sendable {
+struct ShareSellRow: Codable, Sendable {
     let ticker: String
     let realized_pl: Double
     let trade_date: String
 }
 
-struct StrategyOverlayRow: Decodable, Sendable {
+struct StrategyOverlayRow: Codable, Sendable {
     let ticker: String
     let bucket: String        // "income" | "invest" | "yield"
 }
 
-struct DailyCloseRow: Decodable, Sendable {
+struct DailyCloseRow: Codable, Sendable {
     let ticker: String
     let date: String          // YYYY-MM-DD
     let close_price: Double
@@ -132,7 +132,7 @@ struct DailyCloseRow: Decodable, Sendable {
 
 // MARK: - Phase 3: share lots (FIFO)
 
-struct ShareLotRow: Decodable, Sendable, Identifiable {
+struct ShareLotRow: Codable, Sendable, Identifiable {
     let id: String
     let ticker: String
     let acquired_date: String      // YYYY-MM-DD

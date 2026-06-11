@@ -69,7 +69,9 @@ struct TradesScreen: View {
 
     // ── Derived ─────────────────────────────────────────────────
     private var allSummaries: [TickerSummary] {
-        TradesData.buildSummaries(store: store)
+        // Memoized — cheap on repeat reads within the same store
+        // version. See PortfolioStore.cachedSummaries.
+        store.cachedSummaries()
     }
     private var summaries: [TickerSummary] {
         guard let t = tickerFilter else { return allSummaries }

@@ -80,6 +80,10 @@ final class AuthStore {
         } catch {
             print("[AuthStore] sign-out error: \(error)")
         }
+        // Drop the on-disk portfolio cache so a different user signing
+        // in next doesn't see the previous user's data flash on cold
+        // launch before fetchAll lands.
+        PortfolioSnapshotStore.clear()
     }
 
     // MARK: - Errors

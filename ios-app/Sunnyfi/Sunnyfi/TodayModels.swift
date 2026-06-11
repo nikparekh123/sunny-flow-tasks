@@ -16,7 +16,7 @@ import Foundation
 // ─── Decodable Supabase rows ──────────────────────────────────
 
 /// Row from public.macro_events (FOMC, CPI, holidays, etc.).
-struct MacroEventRow: Decodable, Sendable {
+struct MacroEventRow: Codable, Sendable {
     let id: String
     let event_date: String        // YYYY-MM-DD
     let event_time: String?       // HH:MM:SS (nil for all-day)
@@ -33,7 +33,7 @@ struct MacroEventRow: Decodable, Sendable {
 }
 
 /// Row from public.earnings_events.
-struct EarningsEventRow: Decodable, Sendable {
+struct EarningsEventRow: Codable, Sendable {
     let id: String
     let ticker: String
     let company_name: String?

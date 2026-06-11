@@ -40,6 +40,16 @@ final class PortfolioStore {
     var allGreeks: [OptionGreeksRow] = []
     var dailyCloses: [DailyCloseRow] = []
     var allShareLots: [ShareLotRow] = []
+    /// Raw `positions` and `strategy_overlay` rows — kept so the
+    /// cold-launch snapshot can re-run buildCompanies without a
+    /// network round-trip. Previously these were locals inside
+    /// fetchAll(). Memory cost is trivial (a few KB).
+    @ObservationIgnored
+    var allPositions: [PositionRow] = []
+    @ObservationIgnored
+    var allOverlay: [StrategyOverlayRow] = []
+    @ObservationIgnored
+    var allQuotes: [TickerQuoteRow] = []
     /// History from the daily-theta-snapshot cron. Sorted oldest → newest.
     /// Powers the Hedge tab's Δ-vs-yesterday, sparkline, and prior-week strip.
     var dailyTheta: [DailyThetaSnapshotRow] = []
@@ -60,7 +70,111 @@ final class PortfolioStore {
     /// retries once on a detached task. Internal to the store.
     private(set) var lastRunWasAllCancelled: Bool = false
 
+    /// Monotonic version bumped whenever the inputs that feed
+    /// `buildSummaries` change (companies / allTrades / allGreeks /
+    /// dailyCloses). Consumers cache derivations against this — see
+    /// `cachedSummaries()`.
+    ///
+    /// Without this, SwiftUI re-runs the Trades-tab body multiple
+    /// times per real store mutation, each one re-walking the trade
+    /// list. Instruments showed 4 back-to-back buildSummaries calls
+    /// (~99 ms total) plus an 845 ms main-thread hang.
+    ///
+    /// @ObservationIgnored so a version bump alone doesn't trigger
+    /// any view body — the body re-runs because the underlying
+    /// observable arrays changed; this just decides whether the
+    /// cache stays warm.
+    @ObservationIgnored
+    private(set) var summariesVersion: Int = 0
+
+    @ObservationIgnored
+    private var cachedSummariesValue: [TickerSummary] = []
+    @ObservationIgnored
+    private var cachedSummariesVersion: Int = -1
+
+    /// Memoized accessor. Recomputes on first call after each version
+    /// bump; cheap reads afterward.
+    func cachedSummaries() -> [TickerSummary] {
+        if cachedSummariesVersion == summariesVersion {
+            return cachedSummariesValue
+        }
+        let fresh = TradesData.buildSummaries(store: self)
+        cachedSummariesValue = fresh
+        cachedSummariesVersion = summariesVersion
+        return fresh
+    }
+
     private let client = SupabaseService.client
+
+    init() {
+        // Cold-launch hydration: if a snapshot from a prior session
+        // is on disk, decode it synchronously and re-run the join
+        // before the network fetch lands. ~16 ms of CPU work buys
+        // us a populated UI on first frame instead of a 650 ms
+        // blank-state wait.
+        //
+        // If decode fails (corrupt file, schema bump), the catch-all
+        // `?` returns nil and the app behaves as it did pre-cache.
+        if let snap = PortfolioSnapshotStore.read() {
+            hydrate(from: snap)
+        }
+    }
+
+    /// Apply a decoded snapshot to the store. Mirrors what fetchAll's
+    /// success path does after the network lands, minus the freshness
+    /// re-derivation (the snapshot carries its own captured freshness).
+    private func hydrate(from snap: PortfolioSnapshot) {
+        self.allTrades = snap.trades
+        self.allShareSells = snap.sells
+        self.allGreeks = snap.greeks
+        self.dailyCloses = snap.closes
+        self.allShareLots = snap.lots
+        self.dailyTheta = snap.theta
+        self.allMacroEvents = snap.macroEvents
+        self.allEarningsEvents = snap.earningsEvents
+        self.allIvSummaries = snap.ivSummaries
+        self.allPositions = snap.positions
+        self.allOverlay = snap.overlay
+        self.allQuotes = snap.quotes
+        let built = Self.buildCompanies(
+            positions: snap.positions,
+            trades: snap.trades,
+            greeks: snap.greeks,
+            quotes: snap.quotes,
+            shareSells: snap.sells,
+            overlay: snap.overlay
+        )
+        self.companies = built.open
+        self.closedCompanies = built.closed
+        self.portfolio = Self.buildPortfolio(built.open)
+        self.freshness = snap.freshness
+        self.summariesVersion &+= 1
+        // isLoading stays true because a fetchAll is about to run —
+        // the StatusDot uses lastRefreshError instead of isLoading,
+        // so this doesn't flicker a "fresh" state.
+    }
+
+    /// Capture the current store state into a snapshot. Called at the
+    /// end of every successful fetchAll().
+    private func persistSnapshot() {
+        let snap = PortfolioSnapshot(
+            savedAt: Date(),
+            freshness: self.freshness,
+            positions: self.allPositions,
+            trades: self.allTrades,
+            greeks: self.allGreeks,
+            quotes: self.allQuotes,
+            sells: self.allShareSells,
+            overlay: self.allOverlay,
+            closes: self.dailyCloses,
+            lots: self.allShareLots,
+            theta: self.dailyTheta,
+            macroEvents: self.allMacroEvents,
+            earningsEvents: self.allEarningsEvents,
+            ivSummaries: self.allIvSummaries
+        )
+        PortfolioSnapshotStore.write(snap)
+    }
 
     // MARK: - Public API
 
@@ -296,6 +410,9 @@ final class PortfolioStore {
         self.allGreeks = greeks
         self.dailyCloses = closes
         self.allShareLots = lots
+        self.allPositions = positions
+        self.allOverlay = overlay
+        self.allQuotes = quotes
         // Server returns newest → oldest; flip so [0] is the earliest
         // and the sparkline/history utilities can walk forward.
         self.dailyTheta = theta.reversed()
@@ -318,6 +435,9 @@ final class PortfolioStore {
         self.companies = built.open
         self.closedCompanies = built.closed
         self.portfolio = Self.buildPortfolio(built.open)
+        // Invalidate memoized summaries — cachedSummaries() will
+        // recompute on next read instead of every body invocation.
+        summariesVersion &+= 1
         Perf.end("fetchAll.join", perfJoin)
         // Only overwrite the freshness timestamp when we actually
         // received fresh greeks/quotes — otherwise we'd reset it to
@@ -325,6 +445,8 @@ final class PortfolioStore {
         if let newFreshness = Self.latestCapture(greeks: greeks, quotes: quotes) {
             self.freshness = newFreshness
         }
+        // Persist a snapshot for the next cold launch. Async, off-main.
+        persistSnapshot()
     }
 
     // MARK: - Per-query helper
