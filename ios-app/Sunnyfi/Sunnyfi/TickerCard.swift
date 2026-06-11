@@ -538,7 +538,11 @@ struct TickerCard: View {
     let onAssign: (OptionTradeRow) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Per-rebuild signpost so we can measure "how many times does
+        // this card re-render per store mutation / per scroll / per
+        // tap". Each tick in Instruments = one body invocation.
+        Perf.event("TickerCard.body", summary.ticker)
+        return VStack(alignment: .leading, spacing: 0) {
             header
             greeksPanel
                 .padding(.horizontal, CardInset.h)

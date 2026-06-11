@@ -78,6 +78,11 @@ enum TradesData {
     /// Build one TickerSummary per held ticker (open option legs OR
     /// share position). Sorted by absolute net P&L desc.
     static func buildSummaries(store: PortfolioStore) -> [TickerSummary] {
+        // Signpost so we can count how often Trades-tab body rebuilds
+        // force a full re-derivation. Each occurrence in Instruments
+        // = one walk of the trades list.
+        let perf = Perf.begin("buildSummaries")
+        defer { Perf.end("buildSummaries", perf) }
         let companies = store.companies
         let allGreeks = store.allGreeks
 

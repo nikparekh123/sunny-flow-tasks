@@ -71,13 +71,15 @@ final class PortfolioStore {
     func load() async {
         isLoading = true
         defer { isLoading = false }
-        await fetchAll()
-        if lastRunWasAllCancelled {
-            // Unstructured detached task — survives view re-renders
-            // and scene-phase blips. Bounded by the app's lifetime.
-            _ = await Task.detached { @MainActor [weak self] in
-                await self?.fetchAll()
-            }.value
+        await Perf.interval("store.load") {
+            await fetchAll()
+            if lastRunWasAllCancelled {
+                // Unstructured detached task — survives view re-renders
+                // and scene-phase blips. Bounded by the app's lifetime.
+                _ = await Task.detached { @MainActor [weak self] in
+                    await self?.fetchAll()
+                }.value
+            }
         }
     }
 
@@ -213,6 +215,10 @@ final class PortfolioStore {
             .select("ticker, current_iv, current_hv30, iv_low, iv_high, iv_window_days, last_snapshot_date, window_start")
             .execute().value as [TickerIVRow] }
 
+        // Phase 1 — wait for all 13 parallel network fetches to land.
+        // In Instruments, this interval = the long pole of the whole
+        // cold-launch (assuming join phase 2 stays tight).
+        let perfFetch = Perf.begin("fetchAll.network")
         let p   = await pTask
         let t   = await tTask
         let g   = await gTask
@@ -226,6 +232,7 @@ final class PortfolioStore {
         let me  = await meTask
         let ee  = await eeTask
         let ivs = await ivSumTask
+        Perf.end("fetchAll.network", perfFetch)
 
         // Collect any errors so the UI can surface the failed-table list.
         var errs: [String] = []
@@ -300,6 +307,10 @@ final class PortfolioStore {
         // spread-only, so real tickers surface from day one.
         self.allIvSummaries = ivSummaries
 
+        // Phase 2 — CPU-bound join. If this is fat in Instruments, the
+        // win is either reducing what buildCompanies recomputes or
+        // moving derivations to detached tasks.
+        let perfJoin = Perf.begin("fetchAll.join")
         let built = Self.buildCompanies(
             positions: positions, trades: trades, greeks: greeks,
             quotes: quotes, shareSells: sells, overlay: overlay
@@ -307,6 +318,7 @@ final class PortfolioStore {
         self.companies = built.open
         self.closedCompanies = built.closed
         self.portfolio = Self.buildPortfolio(built.open)
+        Perf.end("fetchAll.join", perfJoin)
         // Only overwrite the freshness timestamp when we actually
         // received fresh greeks/quotes — otherwise we'd reset it to
         // nil ("no sync yet") on a partial-data fetch.
