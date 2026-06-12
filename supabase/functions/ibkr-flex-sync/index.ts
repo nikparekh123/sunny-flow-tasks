@@ -120,6 +120,12 @@ Deno.serve(async (req) => {
   // (first ~3KB) plus parsed trade count in the response. Use to verify
   // what IBKR is actually serving without needing dashboard access.
   const debug: boolean = body.debug === true;
+  // Dry-run: parse + report but DON'T touch the DB. No insert/update,
+  // no void, no audit row. The response includes the parsed trade
+  // list so the caller can review what would have been written.
+  // Ignored for cron triggers — only manual/backfill operators get
+  // preview mode.
+  const dryRun: boolean = body.dry_run === true && trigger !== 'cron';
 
   // ── 0. Window + slot gating (cron-only) ─────────────────────
   // Manual/backfill triggers always run. Cron triggers only run
@@ -234,6 +240,51 @@ Deno.serve(async (req) => {
     // ── 5. Parse TradeConfirm rows ────────────────────────────
     const trades = parseTradeConfirms(reportXml);
     rowsSeen = trades.length;
+
+    // ── 5b. Dry-run short-circuit ─────────────────────────────
+    // Return the parsed trades so the caller can preview what
+    // *would* be written. We deliberately exit here — no upserts,
+    // no void scan. The audit row above is already open; we
+    // close it with status='success' and rows_seen reflecting
+    // what we parsed so the run still appears in history.
+    if (dryRun) {
+      await supabase.from('ibkr_sync_runs').update({
+        finished_at: new Date().toISOString(),
+        duration_ms: Date.now() - startMs,
+        status: 'success',
+        rows_seen: rowsSeen,
+        rows_inserted: 0,
+        rows_updated: 0,
+        rows_voided: 0,
+        rows_errored: 0,
+        errors: [{ reason: 'DRY-RUN: no writes performed' }],
+        reference_code: referenceCode,
+        ibkr_account_id: accountId,
+      }).eq('id', run.id);
+
+      return jsonText(200, JSON.stringify({
+        ok: true,
+        dry_run: true,
+        run_id: run.id,
+        rows_seen: rowsSeen,
+        // Compact projection — just the fields the user wants to
+        // eyeball. Caller can hit debug=true to see the full XML.
+        trades: trades.map((t) => ({
+          tradeID: t.tradeID,
+          tradeDate: t.tradeDate,
+          symbol: t.symbol,
+          underlyingSymbol: t.underlyingSymbol,
+          assetCategory: t.assetCategory,
+          buySell: t.buySell,
+          quantity: t.quantity,
+          price: t.price,
+          strike: t.strike,
+          expiry: t.expiry,
+          putCall: t.putCall,
+          code: t.code,
+        })),
+      }));
+    }
 
     // ── 6. Upsert each trade ──────────────────────────────────
     const seenIds: string[] = [];
@@ -410,11 +461,21 @@ Deno.serve(async (req) => {
           account_id: accountId,
           xml_length: reportXml.length,
           xml_head: reportXml.slice(0, 1500),
-          // Try to surface any TradeConfirms tag presence even if our
-          // parser dropped them — quick sanity check for parser bugs vs.
-          // genuinely empty reports.
-          trade_confirm_tag_count: (reportXml.match(/<TradeConfirm/g) || []).length,
+          // Per-tag counts so we can tell if the parser is missing
+          // a different element shape (TCF emits <TradeConfirm>;
+          // Activity Flex emits <Trade ...>) vs IBKR genuinely not
+          // including any trades section.
+          trade_confirm_tag_count: (reportXml.match(/<TradeConfirm\s/g) || []).length,
+          trade_tag_count: (reportXml.match(/<Trade\s/g) || []).length,
+          trades_section_count: (reportXml.match(/<Trades>/g) || []).length,
           flex_statement_count: (reportXml.match(/<FlexStatement\s/g) || []).length,
+          // First 1500 chars of any Trades section we can find, to
+          // make the field names visible without dumping the full
+          // 750 KB.
+          trades_head: (() => {
+            const i = reportXml.indexOf('<Trades>');
+            return i >= 0 ? reportXml.slice(i, i + 1500) : null;
+          })(),
         }
       : undefined,
   }));
@@ -481,17 +542,74 @@ function matchAttr(xml: string, tag: string, attr: string): string | null {
 
 function parseTradeConfirms(xml: string): TradeConfirm[] {
   const trades: TradeConfirm[] = [];
-  const rowRe = /<TradeConfirm\s([^/]*?)\/?>/g;
-  let m: RegExpExecArray | null;
-  while ((m = rowRe.exec(xml)) !== null) {
-    const attrs: Record<string, string> = {};
-    const attrRe = /(\w+)="([^"]*)"/g;
-    let a: RegExpExecArray | null;
-    while ((a = attrRe.exec(m[1])) !== null) {
-      attrs[a[1]] = a[2];
+
+  const collect = (re: RegExp, normalize: (a: Record<string, string>) => TradeConfirm | null) => {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(xml)) !== null) {
+      const attrs: Record<string, string> = {};
+      const attrRe = /(\w+)="([^"]*)"/g;
+      let a: RegExpExecArray | null;
+      while ((a = attrRe.exec(m[1])) !== null) {
+        attrs[a[1]] = a[2];
+      }
+      const t = normalize(attrs);
+      if (t) trades.push(t);
     }
-    trades.push(attrs as unknown as TradeConfirm);
-  }
+  };
+
+  // 1. TCF shape — what the intraday cron's "Today" report emits.
+  collect(/<TradeConfirm\s([^/]*?)\/?>/g, (a) => a as unknown as TradeConfirm);
+
+  // 2. Activity Flex shape — what the nightly backfill's Daily query
+  //    emits. Different element name (<Trade>) and several different
+  //    attribute names; also multiple `levelOfDetail` rollup levels
+  //    in the same <Trades> block (ASSET_SUMMARY, SYMBOL_SUMMARY,
+  //    ORDER, EXECUTION). We only want EXECUTION-level rows — those
+  //    are the actual fills. Skipping the summaries avoids
+  //    double-counting.
+  collect(/<Trade\s([^/]*?)\/?>/g, (a) => {
+    if (a.levelOfDetail !== 'EXECUTION') return null;
+    if (!a.tradeID) return null;
+
+    // Activity Flex carries action codes in `notes` (A/Ex/Ep) plus a
+    // dedicated `openCloseIndicator` (O/C). TCF jams it all into
+    // `code`. Translate to the TCF code shape downstream parsers
+    // already understand.
+    let code = a.notes ?? '';
+    if (!code) {
+      // No special-case note → fall back to the open/close indicator.
+      code = a.openCloseIndicator ?? '';
+    }
+
+    return {
+      accountId: a.accountId ?? '',
+      currency: a.currency ?? '',
+      assetCategory: (a.assetCategory ?? '') as TradeConfirm['assetCategory'],
+      symbol: a.symbol ?? '',
+      conid: a.conid ?? '',
+      underlyingSymbol: a.underlyingSymbol ?? '',
+      multiplier: a.multiplier ?? '',
+      strike: a.strike,
+      expiry: a.expiry,
+      putCall: a.putCall as TradeConfirm['putCall'],
+      transactionType: a.transactionType ?? '',
+      tradeID: a.tradeID,
+      orderID: a.ibOrderID ?? a.orderID ?? '',
+      execID: a.ibExecID ?? a.execID ?? '',
+      dateTime: a.dateTime ?? '',
+      tradeDate: a.tradeDate ?? '',
+      buySell: (a.buySell ?? '') as TradeConfirm['buySell'],
+      quantity: a.quantity ?? '',
+      // Activity Flex calls it `tradePrice`; TCF calls it `price`.
+      price: a.tradePrice ?? a.price ?? '',
+      amount: a.tradeMoney ?? a.amount ?? '',
+      proceeds: a.proceeds ?? '',
+      netCash: a.netCash ?? '',
+      commission: a.ibCommission ?? a.commission ?? '',
+      code,
+    };
+  });
+
   return trades;
 }
 
