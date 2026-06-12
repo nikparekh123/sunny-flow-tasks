@@ -81,6 +81,11 @@ interface TradeConfirm {
   netCash: string;
   commission: string;
   code: string;              // O | C | A | Ex | Ep | (combinations)
+  // Raw Activity Flex source fields, preserved for dry-run
+  // verification. Not used downstream — `code` is the canonical
+  // post-translation value.
+  _rawNotes?: string;
+  _rawOC?: string;
 }
 
 interface SyncError {
@@ -282,6 +287,11 @@ Deno.serve(async (req) => {
           expiry: t.expiry,
           putCall: t.putCall,
           code: t.code,
+          // Raw Activity Flex fields for review — confirms the
+          // translation from (openCloseIndicator, notes) → code
+          // landed correctly.
+          rawNotes: t._rawNotes,
+          rawOC: t._rawOC,
         })),
       }));
     }
@@ -581,14 +591,35 @@ function parseTradeConfirms(xml: string): TradeConfirm[] {
     // TRADE_TRANSACTION / etc — varies by IBKR account type).
     if (!a.tradeID) return null;
 
-    // Activity Flex carries action codes in `notes` (A/Ex/Ep) plus a
-    // dedicated `openCloseIndicator` (O/C). TCF jams it all into
-    // `code`. Translate to the TCF code shape downstream parsers
-    // already understand.
-    let code = a.notes ?? '';
-    if (!code) {
-      // No special-case note → fall back to the open/close indicator.
-      code = a.openCloseIndicator ?? '';
+    // Activity Flex carries action codes in TWO separate fields:
+    //   • openCloseIndicator (O / C) — the primary signal for
+    //     position-changing trades.
+    //   • notes — semicolon-list of qualifiers. Some are *special
+    //     actions* that REPLACE the OC signal (A=assignment,
+    //     Ex=exercise, Ep=expiry; these come WITHOUT an OC because
+    //     they're not user-initiated). Others are qualifiers
+    //     (P=partial fill, IA=internal adjustment).
+    // TCF jams everything into one `code` field using `O;P` /
+    // `C;P` semicolon syntax. We translate Activity Flex →
+    // TCF here so inferOptionDirection / upsertOption don't have
+    // to learn the new shape.
+    const oc = a.openCloseIndicator ?? '';
+    const note = a.notes ?? '';
+    const specialAction = /\b(A|Ex|Ep)\b/.exec(note)?.[0];
+    let code: string;
+    if (specialAction) {
+      // Assignment / exercise / expiry: notes wins; OC ignored
+      // (typically empty anyway for these).
+      code = note;
+    } else if (oc) {
+      // Normal open/close. Append qualifying notes (P / IA / etc)
+      // as TCF semicolon suffix so existing downstream logic that
+      // splits on `;` to take the primary code still works.
+      code = note ? `${oc};${note}` : oc;
+    } else {
+      // No OC and no special action — pass notes through as-is.
+      // upsertOption defaults to treating unknowns as opens.
+      code = note;
     }
 
     return {
@@ -617,6 +648,8 @@ function parseTradeConfirms(xml: string): TradeConfirm[] {
       netCash: a.netCash ?? '',
       commission: a.ibCommission ?? a.commission ?? '',
       code,
+      _rawNotes: note,
+      _rawOC: oc,
     };
   });
 
