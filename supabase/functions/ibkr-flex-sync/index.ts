@@ -96,12 +96,26 @@ Deno.serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const token = Deno.env.get('IBKR_FLEX_TOKEN');
-  const queryId = Deno.env.get('IBKR_FLEX_QUERY_ID');
   const supabase = createClient(supabaseUrl, serviceKey);
 
   // Trigger annotation for the audit row
   const body = await req.json().catch(() => ({}));
   const trigger: 'cron' | 'manual' | 'backfill' = body.trigger ?? 'cron';
+  // Query ID resolution:
+  //   • Cron / manual triggers use the env-configured TCF query
+  //     (`IBKR_FLEX_QUERY_ID` = 1535729 = the primary "Today" feed).
+  //   • Backfill triggers MAY pass `query_id` in the request body to
+  //     point at a *separate* Daily Flex query (different ID, multi-
+  //     day period). This is the only supported way to backfill —
+  //     the TCF query is locked to "Today" by IBKR and cannot be
+  //     changed (see CLAUDE.md "NEVER suggest changing query
+  //     1535729's Period"). The override is ignored for cron so a
+  //     misuse can't accidentally divert the cron's 15-min feed.
+  const envQueryId = Deno.env.get('IBKR_FLEX_QUERY_ID');
+  const queryId: string | undefined =
+    (trigger === 'backfill' && typeof body.query_id === 'string' && body.query_id.length > 0)
+      ? body.query_id
+      : envQueryId;
   // When ?debug=true (or {debug:true} body), return the raw IBKR XML
   // (first ~3KB) plus parsed trade count in the response. Use to verify
   // what IBKR is actually serving without needing dashboard access.

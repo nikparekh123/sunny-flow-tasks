@@ -15,7 +15,13 @@ IBKR Flex Web Service has **two different report types**. They are not interchan
 | **Trade Confirmation Flex** | ~15 min after execution | "Today" only | This is what `ibkr-flex-sync` calls every 15 min during market hours. Query ID **1535729** is configured as Period = "Today". |
 | **Daily Flex** | T+1 (24-hour) overnight | Multi-day periods OK | Used for historical backfills only (see `docs/IBKR_CUTOVER_RUNBOOK.md` Option B). Not the cron's primary feed. |
 
-**Do not suggest the user change Trade Confirmation Flex's Period to a multi-day range** — it just won't return intraday data, and they'll lose the 15-min freshness that's the whole point. If they want historical backfill, that's a *separate* Flex Query with a different ID.
+### ⛔ NEVER suggest changing query 1535729's Period — read this twice
+
+This is the single most-repeated mistake. The user has had it ~50 times across prior sessions and is genuinely angry every time it comes up again.
+
+The TCF (Trade Confirmation Flex) report type is **locked to `Period = Today` by IBKR itself** — it is not a knob the user can change in the portal. Trying to save a different period either fails or silently produces empty reports. **Do not** propose Option A from `docs/IBKR_CUTOVER_RUNBOOK.md` — its "temporarily change Period" path is wrong and was written before this was understood. Option B is the only path.
+
+**For backfilling missed trades:** create a *separate* Flex Query in IBKR's portal of type **Daily Flex** (NOT Trade Confirmation Flex) with `Period = Last 5 Business Days` (or whatever range). That gives a new Query ID. The `ibkr-flex-sync` edge function accepts a request body of `{"trigger":"backfill","query_id":"<id>"}` and uses that ID instead of the env var `IBKR_FLEX_QUERY_ID` — so the backfill runs against the Daily query without touching the cron's primary TCF query. Daily Flex has T+1 latency (overnight) — fine for backfill, irrelevant for intraday.
 
 ## The void/cancellation logic (fixed 2026-06-09)
 
