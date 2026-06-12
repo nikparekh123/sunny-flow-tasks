@@ -558,16 +558,20 @@ function parseTradeConfirms(xml: string): TradeConfirm[] {
   };
 
   // 1. TCF shape — what the intraday cron's "Today" report emits.
-  collect(/<TradeConfirm\s([^/]*?)\/?>/g, (a) => a as unknown as TradeConfirm);
+  //    The `[^>]` (not `[^/]`) pattern is important: Activity Flex
+  //    attribute values can contain `/` (URLs, path separators) which
+  //    the older `[^/]` regex would stop short on, returning empty
+  //    matches. The unified pattern works for both TCF and Activity.
+  collect(/<TradeConfirm\s([^>]*?)\/?>/g, (a) => a as unknown as TradeConfirm);
 
   // 2. Activity Flex shape — what the nightly backfill's Daily query
   //    emits. Different element name (<Trade>) and several different
   //    attribute names; also multiple `levelOfDetail` rollup levels
   //    in the same <Trades> block (ASSET_SUMMARY, SYMBOL_SUMMARY,
-  //    ORDER, EXECUTION). We only want EXECUTION-level rows — those
-  //    are the actual fills. Skipping the summaries avoids
-  //    double-counting.
-  collect(/<Trade\s([^/]*?)\/?>/g, (a) => {
+  //    ORDER, etc). Summaries leave tradeID="" — filtering by
+  //    non-empty tradeID below drops them automatically without
+  //    needing to know which exact level value the query emits.
+  collect(/<Trade\s([^>]*?)\/?>/g, (a) => {
     // Activity Flex emits rollup summaries (ASSET_SUMMARY,
     // SYMBOL_SUMMARY, ORDER) alongside actual fills. The summaries
     // leave tradeID empty; real fills always have one. So a
