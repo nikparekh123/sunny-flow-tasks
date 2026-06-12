@@ -818,6 +818,10 @@ enum HistoryDeriver {
     ) -> [HistoryRow] {
         var out: [HistoryRow] = []
 
+        // Pooled FIFO entry premiums for close-row realized $ —
+        // closes_trade_id is unreliable (see OptionFIFO.swift).
+        let fifo = OptionFIFO.build(trades: trades)
+
         for t in trades where t.ticker == ticker {
             guard let d = AppDates.parseISODay(t.trade_date) else { continue }
             let kind = t.option_type
@@ -835,11 +839,10 @@ enum HistoryDeriver {
                     tone: value >= 0 ? .pos : .neg
                 ))
             } else {
-                let open = trades.first(where: { $0.id == (t.closes_trade_id ?? "") })
                 let realized: Double = {
-                    guard let o = open else { return 0 }
-                    let sign: Double = o.direction == "short" ? 1 : -1
-                    return (o.premium - t.premium) * t.contracts * 100 * sign
+                    guard let entry = fifo.entryPremiumByCloseID[t.id] else { return 0 }
+                    let sign: Double = t.direction == "short" ? 1 : -1
+                    return (entry - t.premium) * t.contracts * 100 * sign
                 }()
                 out.append(HistoryRow(
                     date: d,

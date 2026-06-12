@@ -180,8 +180,10 @@ enum EventCardDeriver {
             ))
         }
 
-        // 4. Roll candidate — short option past 80% max profit
-        let closedIDs = Set(allTrades.compactMap { $0.closes_trade_id })
+        // 4. Roll candidate — short option past 80% max profit.
+        // "Still open" = pooled FIFO remaining > 0, not FK-link absence
+        // (the FK lies on multi-lot chains; see OptionFIFO.swift).
+        let fifo = OptionFIFO.build(trades: allTrades)
         let markByTradeID: [String: Double] = Dictionary(uniqueKeysWithValues:
             allGreeks.compactMap { g in
                 guard let mark = g.last_mark else { return nil }
@@ -189,7 +191,8 @@ enum EventCardDeriver {
             }
         )
         for t in allTrades where
-            t.action == "open" && t.direction == "short" && !closedIDs.contains(t.id) {
+            t.action == "open" && t.direction == "short"
+            && (fifo.remainingByOpenID[t.id] ?? t.contracts) > 0.0001 {
             let mark = markByTradeID[t.id] ?? t.premium
             guard t.premium > 0 else { continue }
             let captured = (t.premium - mark) / t.premium

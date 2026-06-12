@@ -223,18 +223,25 @@ enum PerformanceData {
 
         // Closes — realized P&L per source. This drives both the chart
         // bars (period bucketed) and the Return-by-source rows.
+        //
+        // Entry premium comes from the pooled FIFO ledger rather than
+        // the closes_trade_id FK — the FK lies on multi-lot chains and
+        // is NULL for closes whose opens predate the sync window. The
+        // close row carries the same (type, direction) as its open, so
+        // sign and source attribution read from the close directly.
+        let fifo = OptionFIFO.build(trades: allTrades)
         for c in allTrades where c.action == "close" {
             guard let d = AppDates.parseISODay(c.trade_date), d >= start, d <= windowEnd else { continue }
-            guard let open = allTrades.first(where: { $0.id == (c.closes_trade_id ?? "") }) else { continue }
-            let sign: Double = open.direction == "short" ? 1 : -1
-            let realized = (open.premium - c.premium) * c.contracts * 100 * sign
+            guard let entry = fifo.entryPremiumByCloseID[c.id] else { continue }
+            let sign: Double = c.direction == "short" ? 1 : -1
+            let realized = (entry - c.premium) * c.contracts * 100 * sign
             realizedFromCloses += realized
             let day = cal.startOfDay(for: d)
             dayBuckets[day, default: 0] += realized
 
-            // Attribute to source = open's (type, direction)
+            // Attribute to source = (type, direction)
             let source: FlowSource
-            switch (open.option_type, open.direction) {
+            switch (c.option_type, c.direction) {
             case ("call", "short"): source = .callsSold
             case ("put",  "short"): source = .putsSold
             case ("call", "long"):  source = .callsBought
@@ -334,9 +341,9 @@ enum PerformanceData {
         var realizedByTicker: [String: Double] = [:]
         for c in allTrades where c.action == "close" {
             guard let d = AppDates.parseISODay(c.trade_date), d >= start, d <= windowEnd else { continue }
-            guard let open = allTrades.first(where: { $0.id == (c.closes_trade_id ?? "") }) else { continue }
-            let sign: Double = open.direction == "short" ? 1 : -1
-            let realized = (open.premium - c.premium) * c.contracts * 100 * sign
+            guard let entry = fifo.entryPremiumByCloseID[c.id] else { continue }
+            let sign: Double = c.direction == "short" ? 1 : -1
+            let realized = (entry - c.premium) * c.contracts * 100 * sign
             realizedByTicker[c.ticker, default: 0] += realized
         }
         for s in shareSells {
@@ -444,11 +451,13 @@ enum PerformanceData {
         shareSells: [ShareSellRow],
         shareLots: [ShareLotRow] = []
     ) -> [StockPerf] {
+        // Pooled FIFO entry premiums — see OptionFIFO.swift header.
+        let fifo = OptionFIFO.build(trades: allTrades)
         var realizedByTicker: [String: Double] = [:]
         for c in allTrades where c.action == "close" {
-            guard let open = allTrades.first(where: { $0.id == (c.closes_trade_id ?? "") }) else { continue }
-            let sign: Double = open.direction == "short" ? 1 : -1
-            let realized = (open.premium - c.premium) * c.contracts * 100 * sign
+            guard let entry = fifo.entryPremiumByCloseID[c.id] else { continue }
+            let sign: Double = c.direction == "short" ? 1 : -1
+            let realized = (entry - c.premium) * c.contracts * 100 * sign
             realizedByTicker[c.ticker, default: 0] += realized
         }
         for s in shareSells {
@@ -539,16 +548,18 @@ enum PerformanceData {
             }
         }
 
-        // Closed options — realized = (open.premium - close.premium) × ct × 100 × sign.
+        // Closed options — realized = (entry − close.premium) × ct × 100 × sign,
+        // entry from the pooled FIFO ledger (closes_trade_id is unreliable).
+        let fifo = OptionFIFO.build(trades: allTrades)
         for c in allTrades where c.action == "close" {
             guard let d = AppDates.parseISODay(c.trade_date),
                   d >= start, d <= end,
-                  let open = allTrades.first(where: { $0.id == (c.closes_trade_id ?? "") })
+                  let entry = fifo.entryPremiumByCloseID[c.id]
             else { continue }
-            let sign: Double = open.direction == "short" ? 1 : -1
-            let realized = (open.premium - c.premium) * c.contracts * 100 * sign
+            let sign: Double = c.direction == "short" ? 1 : -1
+            let realized = (entry - c.premium) * c.contracts * 100 * sign
             let src: FlowSource
-            switch (open.option_type, open.direction) {
+            switch (c.option_type, c.direction) {
             case ("call", "short"): src = .callsSold
             case ("put",  "short"): src = .putsSold
             case ("call", "long"):  src = .callsBought

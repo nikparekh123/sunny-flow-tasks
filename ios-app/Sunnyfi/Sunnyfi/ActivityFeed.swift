@@ -87,14 +87,10 @@ enum ActivityFeed {
     ) -> [ActivityDayGroup] {
         var rows: [ActivityRow] = []
 
-        // Sum closed contracts per open id so we can tag option-open
-        // rows OPEN (some remaining) vs CLOSED (fully closed).
-        var closedByOpenID: [String: Double] = [:]
-        for t in trades where t.action == "close" {
-            if let oid = t.closes_trade_id {
-                closedByOpenID[oid, default: 0] += t.contracts
-            }
-        }
+        // Pooled FIFO ledger — drives the OPEN/CLOSED tag on option
+        // opens and the realized $ on closes. Replaces closes_trade_id
+        // lookups (the FK lies on multi-lot chains; see OptionFIFO.swift).
+        let fifo = OptionFIFO.build(trades: trades)
 
         // ── Option opens ──
         for t in trades where t.action == "open" {
@@ -105,8 +101,8 @@ enum ActivityFeed {
             let asset = "\(t.ticker) $\(fmtStrike(t.strike)) \(kind)"
             let action = "\(Int(t.contracts)) \(kindPlural) \(verb) for \(AppDates.shortMonthDay(t.expiry))"
             let signed = t.premium * t.contracts * 100 * (t.direction == "short" ? 1 : -1)
-            let closed = closedByOpenID[t.id] ?? 0
-            let status: ActivityStatus = (t.contracts - closed > 0.0001) ? .open : .closed
+            let remaining = fifo.remainingByOpenID[t.id] ?? t.contracts
+            let status: ActivityStatus = (remaining > 0.0001) ? .open : .closed
             rows.append(ActivityRow(
                 date: d, ticker: t.ticker, kind: .optionOpen, status: status,
                 asset: asset, action: action,
@@ -120,11 +116,10 @@ enum ActivityFeed {
             guard let d = AppDates.parseISODay(c.trade_date) else { continue }
             let kind = c.option_type == "call" ? "call" : "put"
             let kindPlural = c.option_type == "call" ? "calls" : "puts"
-            let open = trades.first(where: { $0.id == (c.closes_trade_id ?? "") })
             let realized: Double = {
-                guard let o = open else { return 0 }
-                let sign: Double = o.direction == "short" ? 1 : -1
-                return (o.premium - c.premium) * c.contracts * 100 * sign
+                guard let entry = fifo.entryPremiumByCloseID[c.id] else { return 0 }
+                let sign: Double = c.direction == "short" ? 1 : -1
+                return (entry - c.premium) * c.contracts * 100 * sign
             }()
             let asset = "\(c.ticker) $\(fmtStrike(c.strike)) \(kind)"
             let action = "\(Int(c.contracts)) \(kindPlural) closed"

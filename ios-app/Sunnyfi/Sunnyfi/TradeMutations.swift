@@ -473,16 +473,21 @@ extension PortfolioStore {
 
     // ── Lookup helpers (used by Trades / Company screens) ──────────
 
-    /// Sum of contracts already closed against the given open id.
+    /// Sum of contracts already closed against the given open id —
+    /// derived from the pooled FIFO ledger, NOT from closes_trade_id.
+    /// The FK can't represent a close spanning multiple opens and the
+    /// sync's link derivation is naive (oldest-open LIMIT 1), so it
+    /// lies whenever a position was opened in multiple lots. See
+    /// OptionFIFO.swift.
     func closedContracts(forOpenID id: String) -> Double {
-        allTrades
-            .filter { $0.action == "close" && $0.closes_trade_id == id }
-            .reduce(0) { $0 + $1.contracts }
+        guard let open = allTrades.first(where: { $0.id == id }) else { return 0 }
+        return max(0, open.contracts - remainingContracts(for: open))
     }
 
-    /// Contracts still active on this open (after partial closes).
+    /// Contracts still active on this open (after partial closes),
+    /// per the pooled FIFO ledger.
     func remainingContracts(for open: OptionTradeRow) -> Double {
-        max(0, open.contracts - closedContracts(forOpenID: open.id))
+        fifoLedger().remainingByOpenID[open.id] ?? open.contracts
     }
 
     /// Cost-of-protection rollup — every open long put, its daily burn,

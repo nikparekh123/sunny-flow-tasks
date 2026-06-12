@@ -101,6 +101,26 @@ final class PortfolioStore {
         return fresh
     }
 
+    @ObservationIgnored
+    private var fifoCache: OptionFIFO.Ledger?
+    @ObservationIgnored
+    private var fifoCacheVersion: Int = -1
+
+    /// Memoized pooled-FIFO ledger over allTrades. This is the source
+    /// of truth for "how many contracts remain on this open" and
+    /// "what entry premium does this close realize against" — it
+    /// deliberately ignores closes_trade_id (see OptionFIFO.swift
+    /// header for the incident that motivated this).
+    func fifoLedger() -> OptionFIFO.Ledger {
+        if fifoCacheVersion == summariesVersion, let cached = fifoCache {
+            return cached
+        }
+        let fresh = OptionFIFO.build(trades: allTrades)
+        fifoCache = fresh
+        fifoCacheVersion = summariesVersion
+        return fresh
+    }
+
     private let client = SupabaseService.client
 
     init() {
@@ -498,6 +518,10 @@ final class PortfolioStore {
         var open: [Company] = []
         var closed: [Company] = []
 
+        // Pooled FIFO ledger — closes consume opens oldest-first by
+        // contract key, ignoring the unreliable closes_trade_id FK.
+        let fifo = OptionFIFO.build(trades: trades)
+
         // Group trades by ticker — only "open" actions form live legs.
         let openLegsByTicker = Dictionary(grouping: trades.filter { $0.action == "open" && $0.closes_trade_id == nil }) {
             $0.ticker.uppercased()
@@ -529,19 +553,10 @@ final class PortfolioStore {
                 ))
             }
 
-            // Sum of contracts already closed per open id (for partial-close support).
-            var closedByOpenId: [String: Double] = [:]
-            for tr in trades where tr.action == "close" {
-                if let oid = tr.closes_trade_id {
-                    closedByOpenId[oid, default: 0] += tr.contracts
-                }
-            }
-
             // Option legs — apply contract × 100 multiplier + sign by direction.
-            // Effective contracts = open.contracts − already-closed; if 0, skip.
+            // Effective contracts come from the pooled FIFO ledger; if 0, skip.
             for trade in openLegsByTicker[ticker] ?? [] {
-                let closedSoFar = closedByOpenId[trade.id] ?? 0
-                let active = max(0, trade.contracts - closedSoFar)
+                let active = fifo.remainingByOpenID[trade.id] ?? trade.contracts
                 if active <= 0 { continue }
 
                 let g = greeksByTradeID[trade.id]
