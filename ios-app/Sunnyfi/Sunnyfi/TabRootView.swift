@@ -78,7 +78,6 @@ struct TabRootView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 6)
 
-                SystemAlertBanner(alerts: store.activeAlerts)
                 OfflineBanner(isOnline: reach.isOnline, lastFreshness: store.freshness)
                 Group {
                     switch tab {
@@ -111,20 +110,7 @@ struct TabRootView: View {
                 PushAppDelegate.registrar.requestSystemRegistration()
             }
         }
-        // Alert-only background poll — cleared system_alerts disappear
-        // from the banner within ~30s without the user having to pull-
-        // to-refresh. Lightweight: one query (~50ms), no Polygon, no
-        // edge function. Loop owns its lifetime via .task — SwiftUI
-        // tears it down automatically when TabRootView unmounts (or
-        // when the app backgrounds; .task pauses on .inactive).
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
-                guard !Task.isCancelled else { break }
-                await store.refreshAlertsOnly()
-            }
-        }
-        // IV-summary background poll — same pattern as the alert poll
+        // IV-summary background poll — runs on a 5-min cadence.
         // but on a 5-min cadence. The source view (ticker_iv_summary)
         // only changes when ticker-iv-snapshot runs (once daily
         // 20:15 UTC, or manual). 5 min picks up off-schedule manual

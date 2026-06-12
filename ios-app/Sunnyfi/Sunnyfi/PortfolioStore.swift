@@ -53,9 +53,6 @@ final class PortfolioStore {
     /// History from the daily-theta-snapshot cron. Sorted oldest → newest.
     /// Powers the Hedge tab's Δ-vs-yesterday, sparkline, and prior-week strip.
     var dailyTheta: [DailyThetaSnapshotRow] = []
-    /// Active rows from the health-monitor cron. Drives the global
-    /// "something is broken" banner.
-    var activeAlerts: [SystemAlertRow] = []
     /// Upcoming + recent macro events (FOMC, CPI, holidays) — drives
     /// the Today screen's Events bucket.
     var allMacroEvents: [MacroEventRow] = []
@@ -206,10 +203,10 @@ final class PortfolioStore {
     }
 
     /// Lightweight poll — re-fetches only `ticker_iv_summary` so new
-    /// daily IV snapshots show up in the app without a full pull-to-
-    /// refresh. Source updates once a day after market close (20:15
-    /// UTC weekdays) so this is checked on a slower cadence than
-    /// alerts. Mirrors refreshAlertsOnly's silent-failure pattern.
+    /// daily IV snapshots show up in the app. Source updates once a
+    /// day after market close (20:15 UTC weekdays) so this is checked
+    /// on a slower cadence. Failures are silent — we'll pick up new
+    /// data on the next poll or the next fetchAll().
     func refreshIvSummariesOnly() async {
         let result = await Self.tryFetch {
             try await client.from("ticker_iv_summary")
@@ -219,25 +216,6 @@ final class PortfolioStore {
         if case .success(let rows) = result {
             self.allIvSummaries = rows
         }
-    }
-
-    /// Lightweight poll — re-fetches only `system_alerts` (the tiny
-    /// banner-source table) without touching any of the other 10
-    /// queries in fetchAll(). Used by AlertPoller so cleared alerts
-    /// disappear from the app without a full pull-to-refresh.
-    func refreshAlertsOnly() async {
-        let result = await Self.tryFetch {
-            try await client.from("system_alerts")
-                .select("id, code, severity, title, detail, created_at, resolved_at")
-                .is("resolved_at", value: nil)
-                .order("created_at", ascending: false)
-                .execute().value as [SystemAlertRow]
-        }
-        if case .success(let alerts) = result {
-            self.activeAlerts = alerts
-        }
-        // Failures are silent — we'll catch them on the next poll or
-        // on the next fetchAll(). No UI surfacing for this background loop.
     }
 
     /// Pull-to-refresh — invokes the mp-refresh edge function, then re-fetches.
@@ -307,12 +285,6 @@ final class PortfolioStore {
             .order("snapshot_date", ascending: false)
             .limit(60)
             .execute().value as [DailyThetaSnapshotRow] }
-        // Active alerts from the health-monitor cron — drives the global banner.
-        async let alertsTask = Self.tryFetch { try await c.from("system_alerts")
-            .select("id, code, severity, title, detail, created_at, resolved_at")
-            .is("resolved_at", value: nil)
-            .order("created_at", ascending: false)
-            .execute().value as [SystemAlertRow] }
         // Macro events for the Today screen — drives the Events bucket.
         // Pull a generous window so v1 ranking has options to pick from
         // (next 90 days). The query is cheap (few dozen rows).
@@ -350,7 +322,6 @@ final class PortfolioStore {
         let dc  = await dcTask
         let sl  = await slTask
         let dts = await dtsTask
-        let alerts = await alertsTask
         let me  = await meTask
         let ee  = await eeTask
         let ivs = await ivSumTask
@@ -375,7 +346,6 @@ final class PortfolioStore {
         let closes    = unwrap(dc,  "daily_closes",         default: [])
         let lots      = unwrap(sl,  "share_lots",           default: [])
         let theta     = unwrap(dts, "daily_theta_snapshot", default: [])
-        let liveAlerts = unwrap(alerts, "system_alerts",    default: [])
         let macroEvents = unwrap(me, "macro_events",        default: [])
         let earningsEvents = unwrap(ee, "earnings_events",  default: [])
         let ivSummaries = unwrap(ivs, "ticker_iv_summary",  default: [])
@@ -424,7 +394,6 @@ final class PortfolioStore {
         // Server returns newest → oldest; flip so [0] is the earliest
         // and the sparkline/history utilities can walk forward.
         self.dailyTheta = theta.reversed()
-        self.activeAlerts = liveAlerts
         self.allMacroEvents = macroEvents
         self.allEarningsEvents = earningsEvents
         // Real data always — no mock fallback. sellerScore() handles
