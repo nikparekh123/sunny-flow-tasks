@@ -568,7 +568,13 @@ function parseTradeConfirms(xml: string): TradeConfirm[] {
   //    are the actual fills. Skipping the summaries avoids
   //    double-counting.
   collect(/<Trade\s([^/]*?)\/?>/g, (a) => {
-    if (a.levelOfDetail !== 'EXECUTION') return null;
+    // Activity Flex emits rollup summaries (ASSET_SUMMARY,
+    // SYMBOL_SUMMARY, ORDER) alongside actual fills. The summaries
+    // leave tradeID empty; real fills always have one. So a
+    // non-empty tradeID is the cleanest "is this a real trade
+    // row" test — works regardless of which levelOfDetail value
+    // the user's specific query configuration emits (EXECUTION /
+    // TRADE_TRANSACTION / etc — varies by IBKR account type).
     if (!a.tradeID) return null;
 
     // Activity Flex carries action codes in `notes` (A/Ex/Ep) plus a
