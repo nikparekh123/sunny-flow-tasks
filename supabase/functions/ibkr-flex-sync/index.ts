@@ -486,6 +486,38 @@ Deno.serve(async (req) => {
             const i = reportXml.indexOf('<Trades>');
             return i >= 0 ? reportXml.slice(i, i + 1500) : null;
           })(),
+          // Parsed OpenPositions (SUMMARY level = one net row per
+          // symbol). This is IBKR's authoritative current holding —
+          // qty + cost basis — which the sync currently ignores and
+          // which the stale `positions` table drifts from. STK only.
+          open_positions: (() => {
+            // Keep the LATEST reportDate per symbol — with a daily
+            // breakout the report repeats OpenPositions for every day,
+            // and only the most recent reflects the current holding.
+            const bySymbol = new Map<string, Record<string, string>>();
+            const re = /<OpenPosition\s([^>]*?)\/?>/g;
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(reportXml)) !== null) {
+              const a: Record<string, string> = {};
+              const ar = /(\w+)="([^"]*)"/g;
+              let x: RegExpExecArray | null;
+              while ((x = ar.exec(m[1])) !== null) a[x[1]] = x[2];
+              if (a.assetCategory !== 'STK') continue;
+              if (a.levelOfDetail && a.levelOfDetail !== 'SUMMARY') continue;
+              const prev = bySymbol.get(a.symbol);
+              if (!prev || (a.reportDate ?? '') >= (prev.reportDate ?? '')) {
+                bySymbol.set(a.symbol, {
+                  symbol: a.symbol,
+                  position: a.position,
+                  costBasisPrice: a.costBasisPrice,
+                  markPrice: a.markPrice,
+                  reportDate: a.reportDate,
+                });
+              }
+            }
+            return Array.from(bySymbol.values()).sort((p, q) =>
+              p.symbol.localeCompare(q.symbol));
+          })(),
         }
       : undefined,
   }));
