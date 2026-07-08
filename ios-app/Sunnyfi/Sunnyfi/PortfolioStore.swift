@@ -159,6 +159,7 @@ final class PortfolioStore {
             greeks: snap.greeks,
             quotes: snap.quotes,
             shareSells: snap.sells,
+            shareLots: snap.lots,
             overlay: snap.overlay
         )
         self.companies = built.open
@@ -267,7 +268,7 @@ final class PortfolioStore {
         let c = client
 
         async let pTask  = Self.tryFetch { try await c.from("positions")
-            .select("ticker, name, sector, quantity, avg_cost, current_price, prev_close, status, earnings_date, realized_stock_pl")
+            .select("ticker, name, sector, quantity, avg_cost, current_price, prev_close, status, earnings_date, realized_stock_pl, reconciled_through")
             .execute().value as [PositionRow] }
         async let tTask  = Self.tryFetch { try await c.from("option_trades")
             .select("id, ticker, trade_date, action, option_type, direction, contracts, strike, premium, expiry, closes_trade_id, source, ibkr_trade_id, last_synced_at, voided_at")
@@ -280,7 +281,7 @@ final class PortfolioStore {
             .select("ticker, spot, day_change_pct, beta, captured_at")
             .execute().value as [TickerQuoteRow] }
         async let sTask  = Self.tryFetch { try await c.from("share_sells")
-            .select("ticker, realized_pl, trade_date")
+            .select("ticker, realized_pl, trade_date, quantity")
             .execute().value as [ShareSellRow] }
         async let oTask  = Self.tryFetch { try await c.from("strategy_overlay")
             .select("ticker, bucket")
@@ -427,7 +428,7 @@ final class PortfolioStore {
         let perfJoin = Perf.begin("fetchAll.join")
         let built = Self.buildCompanies(
             positions: positions, trades: trades, greeks: greeks,
-            quotes: quotes, shareSells: sells, overlay: overlay
+            quotes: quotes, shareSells: sells, shareLots: lots, overlay: overlay
         )
         self.companies = built.open
         self.closedCompanies = built.closed
@@ -488,12 +489,40 @@ final class PortfolioStore {
     /// Slim port of src/portfolio/buildCompanies.ts — enough for the
     /// portfolio Greeks + per-company aggregate. Full flag computation
     /// lands in Phase 4 when the Company screen needs it.
+    /// Intraday-adjusted share quantity: the reconciled overnight
+    /// baseline (`positions.quantity`, current as-of
+    /// `reconciled_through`) plus share trades captured AFTER that
+    /// date. Lets same-day buys/sells show before the next overnight
+    /// reconcile folds them into the baseline (#17).
+    ///
+    /// String date comparison is valid — all are ISO "YYYY-MM-DD".
+    static func layeredShareQty(
+        pos: PositionRow,
+        lots: [ShareLotRow],
+        sells: [ShareSellRow]
+    ) -> Double {
+        guard let through = pos.reconciled_through else {
+            // Never reconciled → no baseline anchor. Use the raw
+            // quantity so legacy / manual rows behave exactly as before.
+            return pos.quantity
+        }
+        let t = pos.ticker.uppercased()
+        let buys = lots
+            .filter { $0.ticker.uppercased() == t && $0.voided_at == nil && $0.acquired_date > through }
+            .reduce(0.0) { $0 + $1.qty_original }
+        let solds = sells
+            .filter { $0.ticker.uppercased() == t && $0.trade_date > through }
+            .reduce(0.0) { $0 + ($1.quantity ?? 0) }
+        return max(0, pos.quantity + buys - solds)
+    }
+
     private static func buildCompanies(
         positions: [PositionRow],
         trades: [OptionTradeRow],
         greeks: [OptionGreeksRow],
         quotes: [TickerQuoteRow],
         shareSells: [ShareSellRow],
+        shareLots: [ShareLotRow],
         overlay: [StrategyOverlayRow]
     ) -> (open: [Company], closed: [Company]) {
 
@@ -540,17 +569,23 @@ final class PortfolioStore {
 
             var legs: [Leg] = []
 
-            // Stock leg (if shares > 0)
-            if let pos, pos.quantity != 0, pos.status == "open" {
-                let last = spot > 0 ? spot : pos.current_price ?? pos.avg_cost
-                let unreal = (last - pos.avg_cost) * pos.quantity
-                legs.append(Leg(
-                    kind: .stock, side: nil, qty: pos.quantity,
-                    avg: pos.avg_cost, last: last,
-                    unreal: unreal, real: pos.realized_stock_pl ?? 0,
-                    delta: pos.quantity, gamma: 0, theta: 0, vega: 0,
-                    strike: nil, expiry: nil, dte: nil, iv: nil, oi: nil
-                ))
+            // Stock leg — quantity is the reconciled baseline layered
+            // with today's captured share trades (intraday accuracy,
+            // #17). A same-day sell-to-zero drops the leg; a same-day
+            // buy from flat surfaces it, before the next reconcile.
+            if let pos, pos.status == "open" {
+                let qty = Self.layeredShareQty(pos: pos, lots: shareLots, sells: shareSells)
+                if qty != 0 {
+                    let last = spot > 0 ? spot : pos.current_price ?? pos.avg_cost
+                    let unreal = (last - pos.avg_cost) * qty
+                    legs.append(Leg(
+                        kind: .stock, side: nil, qty: qty,
+                        avg: pos.avg_cost, last: last,
+                        unreal: unreal, real: pos.realized_stock_pl ?? 0,
+                        delta: qty, gamma: 0, theta: 0, vega: 0,
+                        strike: nil, expiry: nil, dte: nil, iv: nil, oi: nil
+                    ))
+                }
             }
 
             // Option legs — apply contract × 100 multiplier + sign by direction.

@@ -21,6 +21,11 @@ struct PositionRow: Codable, Sendable {
     let status: String   // "open" | "closed"
     let earnings_date: String?
     let realized_stock_pl: Double?
+    /// IBKR report date (YYYY-MM-DD) that `quantity` is current as-of,
+    /// set by the nightly reconcile. The app layers share trades dated
+    /// AFTER this on top of `quantity` for intraday accuracy (#17).
+    /// Nil ⇒ never reconciled ⇒ no intraday layering (use quantity raw).
+    let reconciled_through: String?
 }
 
 struct OptionTradeRow: Codable, Sendable {
@@ -117,6 +122,9 @@ struct ShareSellRow: Codable, Sendable {
     let ticker: String
     let realized_pl: Double
     let trade_date: String
+    /// Shares sold in this transaction. Used to layer same-day sells
+    /// on top of the reconciled baseline (#17).
+    let quantity: Double?
 }
 
 struct StrategyOverlayRow: Codable, Sendable {

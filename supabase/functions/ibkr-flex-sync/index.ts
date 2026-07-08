@@ -641,6 +641,18 @@ async function reconcilePositions(
   }
 
   const held = new Set(openPositions.map((p) => p.symbol));
+  // Baseline date the reconciled quantities are current as-of — the
+  // report's latest reportDate. Stamped on each row so the app knows
+  // which same-day trades to layer on top (intraday accuracy, #17).
+  const throughRaw = openPositions
+    .map((p) => p.reportDate)
+    .filter(Boolean)
+    .sort()
+    .at(-1) ?? '';
+  // YYYYMMDD → YYYY-MM-DD for the date column.
+  const reconciledThrough = throughRaw.length === 8
+    ? `${throughRaw.slice(0, 4)}-${throughRaw.slice(4, 6)}-${throughRaw.slice(6, 8)}`
+    : null;
   let updated = 0;
   let inserted = 0;
 
@@ -653,10 +665,16 @@ async function reconcilePositions(
       .maybeSingle();
 
     if (existing) {
-      // Own qty + avg_cost + status; DON'T touch current_price
-      // (mp-refresh owns live pricing) or name/sector/earnings_date.
+      // Own qty + avg_cost + status + reconciled_through; DON'T touch
+      // current_price (mp-refresh owns live pricing) or
+      // name/sector/earnings_date.
       await supabase.from('positions')
-        .update({ quantity: p.quantity, avg_cost: p.costBasisPrice, status: 'open' })
+        .update({
+          quantity: p.quantity,
+          avg_cost: p.costBasisPrice,
+          status: 'open',
+          reconciled_through: reconciledThrough,
+        })
         .eq('ticker', p.symbol);
       updated++;
     } else {
@@ -667,6 +685,7 @@ async function reconcilePositions(
         avg_cost: p.costBasisPrice,
         current_price: p.markPrice, // placeholder until mp-refresh prices it
         status: 'open',
+        reconciled_through: reconciledThrough,
       });
       inserted++;
     }
