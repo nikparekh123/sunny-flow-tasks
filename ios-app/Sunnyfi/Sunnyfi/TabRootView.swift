@@ -110,11 +110,25 @@ struct TabRootView: View {
                 PushAppDelegate.registrar.requestSystemRegistration()
             }
         }
+        // Full-data auto-refresh — re-pulls trades / positions / prices
+        // every 2 min while the app is foregrounded. Replaces the
+        // pull-to-refresh we removed: with no manual trigger, this is
+        // the ONLY way new trades (synced to the DB every ~15 min by
+        // IBKR) reach the open app. `.task` pauses automatically when
+        // the app backgrounds and resumes on foreground, so it doesn't
+        // burn network while unused. fetchAll (not load) so it bypasses
+        // the cold-launch fresh-skip and always pulls.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(120))
+                guard !Task.isCancelled else { break }
+                await store.fetchAll()
+            }
+        }
         // IV-summary background poll — runs on a 5-min cadence.
-        // but on a 5-min cadence. The source view (ticker_iv_summary)
-        // only changes when ticker-iv-snapshot runs (once daily
-        // 20:15 UTC, or manual). 5 min picks up off-schedule manual
-        // triggers without burning bandwidth.
+        // The source view (ticker_iv_summary) only changes when
+        // ticker-iv-snapshot runs (once daily 20:15 UTC, or manual).
+        // 5 min picks up off-schedule manual triggers cheaply.
         .task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(300))
