@@ -212,6 +212,7 @@ Deno.serve(async (req) => {
   let rowsInserted = 0;
   let rowsUpdated = 0;
   let rowsVoided = 0;
+  let posReconcile = { updated: 0, inserted: 0, closed: 0, closedTickers: [] as string[] };
   // Outer scope so debug return can include it.
   let reportXml = '';
 
@@ -272,6 +273,10 @@ Deno.serve(async (req) => {
         dry_run: true,
         run_id: run.id,
         rows_seen: rowsSeen,
+        // Read-only preview of what the positions reconcile WOULD write
+        // (no DB changes in dry-run). Lets us verify the parse against
+        // live data before trusting the nightly write path.
+        open_positions_preview: parseOpenPositions(reportXml),
         // Compact projection — just the fields the user wants to
         // eyeball. Caller can hit debug=true to see the full XML.
         trades: trades.map((t) => ({
@@ -405,6 +410,14 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ── 7b. Reconcile the positions table from OpenPositions ───
+    // Only Daily/Activity Flex reports carry OpenPositions; TCF
+    // ("Today") does not, so this self-skips on the intraday cron.
+    // Makes the share-position summary self-correct from IBKR's
+    // authoritative holdings every night (see reconcilePositions).
+    const openPositions = parseOpenPositions(reportXml);
+    posReconcile = await reconcilePositions(supabase, openPositions);
+
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     errors.push({ reason: `Fatal: ${msg}` });
@@ -461,6 +474,7 @@ Deno.serve(async (req) => {
     rows_updated: rowsUpdated,
     rows_voided: rowsVoided,
     rows_errored: errors.length,
+    positions_reconcile: posReconcile,
     errors: errors.slice(0, 10), // truncate response payload
     // Debug payload — only included when caller passed {debug: true}.
     // Trims XML to keep response under 6KB; enough to see Trade
@@ -486,38 +500,10 @@ Deno.serve(async (req) => {
             const i = reportXml.indexOf('<Trades>');
             return i >= 0 ? reportXml.slice(i, i + 1500) : null;
           })(),
-          // Parsed OpenPositions (SUMMARY level = one net row per
-          // symbol). This is IBKR's authoritative current holding —
-          // qty + cost basis — which the sync currently ignores and
-          // which the stale `positions` table drifts from. STK only.
-          open_positions: (() => {
-            // Keep the LATEST reportDate per symbol — with a daily
-            // breakout the report repeats OpenPositions for every day,
-            // and only the most recent reflects the current holding.
-            const bySymbol = new Map<string, Record<string, string>>();
-            const re = /<OpenPosition\s([^>]*?)\/?>/g;
-            let m: RegExpExecArray | null;
-            while ((m = re.exec(reportXml)) !== null) {
-              const a: Record<string, string> = {};
-              const ar = /(\w+)="([^"]*)"/g;
-              let x: RegExpExecArray | null;
-              while ((x = ar.exec(m[1])) !== null) a[x[1]] = x[2];
-              if (a.assetCategory !== 'STK') continue;
-              if (a.levelOfDetail && a.levelOfDetail !== 'SUMMARY') continue;
-              const prev = bySymbol.get(a.symbol);
-              if (!prev || (a.reportDate ?? '') >= (prev.reportDate ?? '')) {
-                bySymbol.set(a.symbol, {
-                  symbol: a.symbol,
-                  position: a.position,
-                  costBasisPrice: a.costBasisPrice,
-                  markPrice: a.markPrice,
-                  reportDate: a.reportDate,
-                });
-              }
-            }
-            return Array.from(bySymbol.values()).sort((p, q) =>
-              p.symbol.localeCompare(q.symbol));
-          })(),
+          // Parsed OpenPositions (SUMMARY / STK, latest reportDate per
+          // symbol) — IBKR's authoritative current holdings. Same parse
+          // the nightly reconcile uses.
+          open_positions: parseOpenPositions(reportXml),
         }
       : undefined,
   }));
@@ -580,6 +566,129 @@ function matchTag(xml: string, tag: string): string | null {
 function matchAttr(xml: string, tag: string, attr: string): string | null {
   const m = xml.match(new RegExp(`<${tag}\\s[^>]*${attr}="([^"]+)"`));
   return m ? m[1] : null;
+}
+
+interface OpenPos {
+  symbol: string;
+  quantity: number;
+  costBasisPrice: number;
+  markPrice: number;
+  reportDate: string;
+}
+
+/**
+ * Parse STK OpenPositions from an Activity/Daily Flex report. Keeps the
+ * SUMMARY level (one net row per symbol) and, when the report has a
+ * daily breakout, the LATEST reportDate per symbol — i.e. IBKR's most
+ * recent authoritative net share holding + cost basis.
+ *
+ * TCF (intraday "Today") reports carry no OpenPositions, so this
+ * returns [] for them — which makes reconcilePositions a safe no-op on
+ * the intraday cron.
+ */
+function parseOpenPositions(xml: string): OpenPos[] {
+  const bySymbol = new Map<string, OpenPos>();
+  const re = /<OpenPosition\s([^>]*?)\/?>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    const a: Record<string, string> = {};
+    const ar = /(\w+)="([^"]*)"/g;
+    let x: RegExpExecArray | null;
+    while ((x = ar.exec(m[1])) !== null) a[x[1]] = x[2];
+    if (a.assetCategory !== 'STK') continue;
+    if (a.levelOfDetail && a.levelOfDetail !== 'SUMMARY') continue;
+    if (!a.symbol) continue;
+    const qty = parseFloat(a.position);
+    if (!isFinite(qty)) continue;
+    const prev = bySymbol.get(a.symbol);
+    if (!prev || (a.reportDate ?? '') >= prev.reportDate) {
+      bySymbol.set(a.symbol, {
+        symbol: a.symbol,
+        quantity: qty,
+        costBasisPrice: parseFloat(a.costBasisPrice) || 0,
+        markPrice: parseFloat(a.markPrice) || 0,
+        reportDate: a.reportDate ?? '',
+      });
+    }
+  }
+  return Array.from(bySymbol.values());
+}
+
+/**
+ * Reconcile the `positions` table from IBKR's authoritative OpenPositions.
+ *
+ * WHY: the positions table (share qty + avg cost, what the app displays)
+ * was hand-maintained and drifted badly (META 2500 vs real 1500, FIG
+ * 5000 vs 1000, HOOD held with 0 real shares, etc). IBKR's OpenPositions
+ * is the source of truth — this makes the table self-correct every
+ * night from the Daily Flex report.
+ *
+ * SAFETY: no-ops when `positions` is empty (a TCF/intraday report, or a
+ * bad/partial pull) — never wipes the table on missing data, mirroring
+ * the empty-report void guard. Only sets qty/avg_cost/status; leaves
+ * current_price to mp-refresh (owns live pricing) except as an insert
+ * placeholder. Positions IBKR no longer reports get zeroed + closed.
+ *
+ * Note: T+1. Reflects last-close holdings. Same-day trades roll in on
+ * the next overnight report (intraday accuracy is a separate build).
+ */
+async function reconcilePositions(
+  supabase: ReturnType<typeof createClient>,
+  openPositions: OpenPos[],
+): Promise<{ updated: number; inserted: number; closed: number; closedTickers: string[] }> {
+  if (openPositions.length === 0) {
+    return { updated: 0, inserted: 0, closed: 0, closedTickers: [] };
+  }
+
+  const held = new Set(openPositions.map((p) => p.symbol));
+  let updated = 0;
+  let inserted = 0;
+
+  for (const p of openPositions) {
+    const { data: existing } = await supabase
+      .from('positions')
+      .select('id')
+      .eq('ticker', p.symbol)
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      // Own qty + avg_cost + status; DON'T touch current_price
+      // (mp-refresh owns live pricing) or name/sector/earnings_date.
+      await supabase.from('positions')
+        .update({ quantity: p.quantity, avg_cost: p.costBasisPrice, status: 'open' })
+        .eq('ticker', p.symbol);
+      updated++;
+    } else {
+      await supabase.from('positions').insert({
+        ticker: p.symbol,
+        name: p.symbol,
+        quantity: p.quantity,
+        avg_cost: p.costBasisPrice,
+        current_price: p.markPrice, // placeholder until mp-refresh prices it
+        status: 'open',
+      });
+      inserted++;
+    }
+  }
+
+  // Close any open share position IBKR no longer reports as held
+  // (e.g. HOOD sold out). The ticker may still appear in the app via
+  // its options — that's fine, this only zeroes the SHARE leg.
+  const { data: openRows } = await supabase
+    .from('positions')
+    .select('ticker')
+    .eq('status', 'open');
+  const closedTickers = (openRows ?? [])
+    .map((r: any) => r.ticker as string)
+    .filter((t) => !held.has(t));
+  if (closedTickers.length > 0) {
+    await supabase.from('positions')
+      .update({ quantity: 0, status: 'closed' })
+      .in('ticker', closedTickers);
+  }
+
+  return { updated, inserted, closed: closedTickers.length, closedTickers };
 }
 
 function parseTradeConfirms(xml: string): TradeConfirm[] {
