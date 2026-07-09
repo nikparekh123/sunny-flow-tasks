@@ -230,10 +230,12 @@ private struct IncomeDetailBody: View {
         if let iv = detail.ivPct {
             out.append(AttributedString("Implied vol is "))
             out.append(em("\(Int(iv.rounded()))%", Color.theme.gold))
-            if let rank = detail.ivRank {
+            if let rank = detail.ivRank, ivRankMature {
                 out.append(AttributedString(" (rank \(Int(rank.rounded())))"))
                 if rank >= 60 { out.append(AttributedString(" — premium is running rich")) }
                 else if rank <= 25 { out.append(AttributedString(" — premium is thin")) }
+            } else {
+                out.append(AttributedString(" — its range is still building, so no rank yet"))
             }
             out.append(AttributedString(". "))
         }
@@ -448,8 +450,16 @@ private struct IncomeDetailBody: View {
         .incomeCard()
     }
 
+    /// The IV rank is only trustworthy once ~40+ days of IV history
+    /// have accumulated — before that a ticker pins to rank 0/100
+    /// trivially (current == window high/low). We keep the IV *level*
+    /// (it's a live read) but suppress the rank + rich/thin verdict.
+    private var ivRankMature: Bool {
+        detail.ivRank != nil && (detail.ivWindowDays ?? 0) >= 40
+    }
+
     private var ivSubText: String {
-        guard let rank = detail.ivRank else { return "no history yet" }
+        guard let rank = detail.ivRank, ivRankMature else { return "range building" }
         let tail = rank >= 60 ? " · running rich" : rank <= 25 ? " · thin" : ""
         return "rank \(Int(rank.rounded()))\(tail)"
     }

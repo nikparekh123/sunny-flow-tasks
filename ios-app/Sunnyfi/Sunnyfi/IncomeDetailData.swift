@@ -45,6 +45,10 @@ struct IncomeDetail {
     let expiryCount: Int            // # short-call opens ever (proxy for "N expiries")
     let ivPct: Double?              // current_iv × 100
     let ivRank: Double?             // IVR 0–100
+    /// Days of accumulated IV history (window_start → last snapshot).
+    /// The rank is only trustworthy once this window is mature — a
+    /// just-seeded ticker pins to rank 0/100 trivially.
+    let ivWindowDays: Int?
 
     // ── Weekly premium series (oldest → newest, last 6 weeks) ──
     let weeks: [WeekBar]
@@ -191,6 +195,12 @@ extension IncomeDetail {
         let ivRow = store.allIvSummaries.first(where: { $0.ticker == ticker })
         let ivPct = ivRow?.current_iv.map { $0 * 100 }
         let ivRank = ivRow.flatMap { IVMath.ivr($0) }
+        let ivWindowDays: Int? = {
+            if let ws = ivRow?.window_start, let ls = ivRow?.last_snapshot_date,
+               let lsDate = AppDates.parseISODay(ls),
+               let span = AppDates.daysBetween(ws, lsDate) { return span }
+            return ivRow?.iv_window_days
+        }()
 
         // ── Weekly premium series (last 6 weeks) ──
         let assignmentRows = store.allTrades.filter {
@@ -279,6 +289,7 @@ extension IncomeDetail {
             expiryCount: allShortCallOpens.count,
             ivPct: ivPct,
             ivRank: ivRank,
+            ivWindowDays: ivWindowDays,
             weeks: weeks,
             history: history,
             keptStreak: keptStreak,
