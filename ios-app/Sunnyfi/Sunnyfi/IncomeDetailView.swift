@@ -3,20 +3,25 @@
 //  Sunnyfi
 //
 //  The "Income" segment of Trades — a per-ticker live monitoring view
-//  for the buy-write strategy (design_handoff_meta_detail, v3). Opened
-//  from the ticker switcher at the top; shows, in order:
+//  for the buy-write strategy. Recreates design_handoff_meta_detail
+//  "META Detail v3.html" (the primary design) 1:1 in SwiftUI, using the
+//  app's own tokens. Order, top → bottom:
 //
+//    • Ticker switcher (share book)
 //    1. Position header — shares, avg, and the "average after premium"
-//       heartbeat + unrealized (the anchor).
-//    2. "What changed" brief — a one-line intelligence read generated
-//       from live IV / moneyness / DTE / kept-streak.
-//    3. Open call · working — the assignment fork (assign vs keep).
+//       heartbeat + unrealized (on the page, no card).
+//    2. "What changed" brief — one-line intelligence read.
+//    3. Open call · working — moneyness track + 3 stats
+//       (Assign odds / Premium in / If kept).
 //    4. Premium yield — this week / month / annualized + weekly bars.
-//    5. Exercise streak — kept/called-away history.
+//    5. Exercise streak — kept / exercised history.
 //
 //  Coexists with the classic Positions segment until the strategy is
-//  fully proven, then Positions retires. All numbers are LIVE (see
+//  proven, then Positions retires. All numbers are LIVE (see
 //  IncomeDetailData); history cards render sparse until trades accrue.
+//
+//  Spec constants (from the v3 handoff): content inset 20, inter-card
+//  gap 16, card radius 26, card padding 22, two-layer soft shadow.
 //
 
 import SwiftUI
@@ -38,7 +43,7 @@ struct IncomeStrategyView: View {
                 emptyState
             } else {
                 ScrollView {
-                    VStack(spacing: 14) {
+                    VStack(spacing: 16) {
                         switcher
                         if let t = activeTicker,
                            let detail = IncomeDetail.compute(store: store, ticker: t) {
@@ -46,13 +51,16 @@ struct IncomeStrategyView: View {
                         }
                         Color.clear.frame(height: 120)   // clear tab bar
                     }
-                    .padding(.horizontal, 18)
+                    .padding(.horizontal, 20)
                     .padding(.top, 8)
                 }
             }
         }
     }
 
+    // Horizontally scrollable pill strip — matches v3 `.tk`: 42pt min
+    // height, card fill + hair border (fg3 text) unselected; accent
+    // fill + white + soft shadow selected.
     private var switcher: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -63,16 +71,18 @@ struct IncomeStrategyView: View {
                     } label: {
                         Text(t)
                             .font(.system(size: 15, weight: .bold))
-                            .tracking(-0.1)
-                            .foregroundStyle(on ? Color.theme.onNeon : Color.theme.fg2)
+                            .tracking(-0.15)
+                            .foregroundStyle(on ? Color.theme.onNeon : Color.theme.fg3)
                             .padding(.horizontal, 20)
                             .frame(minHeight: 42)
                             .background(
                                 Capsule()
                                     .fill(on ? Color.theme.neon : Color.theme.surface)
                                     .overlay(Capsule().strokeBorder(
-                                        on ? Color.clear : Color.theme.borderBright, lineWidth: 1))
+                                        on ? Color.clear : Color.theme.hair, lineWidth: 1))
                             )
+                            .shadow(color: on ? Color.theme.neon.opacity(0.26) : .clear,
+                                    radius: 6, x: 0, y: 3)
                     }
                     .buttonStyle(.pressable)
                 }
@@ -104,7 +114,7 @@ private struct IncomeDetailBody: View {
     let detail: IncomeDetail
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 16) {
             positionHeader
             briefCard
             if let call = detail.call { openCallCard(call) }
@@ -120,22 +130,23 @@ private struct IncomeDetailBody: View {
             HStack(alignment: .bottom) {
                 Text(detail.ticker)
                     .font(.system(size: 34, weight: .heavy))
-                    .tracking(-1.3)
+                    .tracking(-1.36)                      // -.04em × 34
                     .foregroundStyle(Color.theme.fg1)
                 Spacer()
                 VStack(alignment: .trailing, spacing: 5) {
                     Text(fmtMoney(detail.spot, decimals: 2))
-                        .font(.numeric(size: 18, weight: .semibold))
+                        .font(.numeric(size: 18, weight: .medium))
                         .monospacedDigit()
                         .foregroundStyle(Color.theme.fg1)
-                    Text(fmtPct(detail.dayPct) + " today")
+                    Text(dayChangeText)
                         .font(.numeric(size: 12, weight: .medium))
                         .monospacedDigit()
                         .foregroundStyle(Color.signed(detail.dayPct))
                 }
             }
 
-            // avg after premium — the strategy's heartbeat
+            // avg after premium — the strategy's heartbeat. Clustered
+            // left (raw → arrow → eff → label → drop) per v3 `.pos-avg`.
             HStack(alignment: .center, spacing: 10) {
                 Text(fmtMoney(detail.rawAvg, decimals: 2))
                     .font(.numeric(size: 14, weight: .medium))
@@ -152,7 +163,6 @@ private struct IncomeDetailBody: View {
                     .tracking(0.8)
                     .foregroundStyle(Color.theme.fg4)
                     .lineSpacing(1)
-                Spacer(minLength: 0)
                 if detail.premiumDrop > 0.005 {
                     Text("▼ " + fmtMoney(detail.premiumDrop, decimals: 2))
                         .font(.numeric(size: 10.5, weight: .semibold))
@@ -161,6 +171,7 @@ private struct IncomeDetailBody: View {
                         .padding(.horizontal, 9).padding(.vertical, 4)
                         .background(Capsule().fill(Color.theme.tintPos))
                 }
+                Spacer(minLength: 0)
             }
             .padding(.top, 18)
 
@@ -173,6 +184,11 @@ private struct IncomeDetailBody: View {
         .padding(.horizontal, 4)
         .padding(.top, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var dayChangeText: String {
+        let g = detail.dayPct < 0 ? "▼ " : detail.dayPct > 0 ? "▲ " : ""
+        return g + String(format: "%.1f", abs(detail.dayPct)) + "% today"
     }
 
     private var sharesLine: AttributedString {
@@ -203,31 +219,45 @@ private struct IncomeDetailBody: View {
         .incomeCard()
     }
 
-    private var briefText: String {
-        var parts: [String] = []
+    /// Generated from live IV / moneyness / DTE, with colored emphasis
+    /// per v3 (gold for vol, pos for the OTM figure, ink for the call).
+    private var briefText: AttributedString {
+        func em(_ t: String, _ c: Color) -> AttributedString {
+            var a = AttributedString(t); a.foregroundColor = c
+            a.font = .system(size: 15, weight: .semibold); return a
+        }
+        var out = AttributedString("")
         if let iv = detail.ivPct {
+            out.append(AttributedString("Implied vol is "))
+            out.append(em("\(Int(iv.rounded()))%", Color.theme.gold))
             if let rank = detail.ivRank {
-                let rich = rank >= 60 ? " — premium is running rich" : rank <= 25 ? " — premium is thin" : ""
-                parts.append("Implied vol is \(Int(iv.rounded()))% (rank \(Int(rank.rounded())))\(rich).")
-            } else {
-                parts.append("Implied vol is \(Int(iv.rounded()))%.")
+                out.append(AttributedString(" (rank \(Int(rank.rounded())))"))
+                if rank >= 60 { out.append(AttributedString(" — premium is running rich")) }
+                else if rank <= 25 { out.append(AttributedString(" — premium is thin")) }
             }
+            out.append(AttributedString(". "))
         }
         if let call = detail.call {
+            out.append(AttributedString("Your "))
+            out.append(em("$\(fmt0(call.strike)) call", Color.theme.fg1))
             if call.otmDollars > 0 {
-                parts.append("Your $\(fmt0(call.strike)) call is \(fmtMoney(call.otmDollars, decimals: 2)) out-of-the-money with \(call.dte) day\(call.dte == 1 ? "" : "s") left — on track to keep the shares and ratchet your average lower.")
+                out.append(AttributedString(" is "))
+                out.append(em(fmtMoney(call.otmDollars, decimals: 2) + " out-of-the-money", Color.theme.pos))
+                out.append(AttributedString(" with \(call.dte) day\(call.dte == 1 ? "" : "s") left — on track to keep the shares and ratchet your average lower."))
             } else if call.otmDollars < 0 {
-                parts.append("Your $\(fmt0(call.strike)) call is \(fmtMoney(-call.otmDollars, decimals: 2)) in-the-money with \(call.dte) day\(call.dte == 1 ? "" : "s") left — assignment looks likely. If it's above your average, that's a clean win.")
+                out.append(AttributedString(" is "))
+                out.append(em(fmtMoney(-call.otmDollars, decimals: 2) + " in-the-money", Color.theme.neg))
+                out.append(AttributedString(" with \(call.dte) day\(call.dte == 1 ? "" : "s") left — assignment looks likely. Above your average, that's a clean win."))
             } else {
-                parts.append("Your $\(fmt0(call.strike)) call is right at the money with \(call.dte) day\(call.dte == 1 ? "" : "s") left — a coin-flip into expiry.")
+                out.append(AttributedString(" is right at the money with \(call.dte) day\(call.dte == 1 ? "" : "s") left — a coin-flip into expiry."))
             }
         } else {
-            parts.append("No call is working right now — sell one to start collecting premium against these shares.")
+            out.append(AttributedString("No call is working right now — sell one to start collecting premium against these shares."))
         }
-        return parts.joined(separator: " ")
+        return out
     }
 
-    // MARK: 3 · Open call · working (the assignment fork)
+    // MARK: 3 · Open call · working
 
     private func openCallCard(_ call: IncomeDetail.OpenCall) -> some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -240,7 +270,7 @@ private struct IncomeDetailBody: View {
                 VStack(alignment: .leading, spacing: 9) {
                     Text("$\(fmt0(call.strike)) call ×\(Int(call.contracts))")
                         .font(.system(size: 22, weight: .heavy))
-                        .tracking(-0.5)
+                        .tracking(-0.66)
                         .monospacedDigit()
                         .foregroundStyle(Color.theme.fg1)
                     Text("sold \(call.soldWeekday) · \(fmtMoney(call.premiumCollected)) premium banked")
@@ -249,12 +279,12 @@ private struct IncomeDetailBody: View {
                         .foregroundStyle(Color.theme.fg3)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 5) {
+                VStack(alignment: .trailing, spacing: 6) {
                     Text("\(call.dte)d")
                         .font(.numeric(size: 20, weight: .bold))
                         .monospacedDigit()
                         .foregroundStyle(Color.theme.gold)
-                    Text("\(call.expiryWeekday.uppercased()) EXP")
+                    Text("\(call.expiryWeekday.uppercased()) EXPIRY")
                         .font(.system(size: 9, weight: .semibold))
                         .tracking(0.8)
                         .foregroundStyle(Color.theme.fg4)
@@ -263,59 +293,40 @@ private struct IncomeDetailBody: View {
             .padding(.top, 16)
 
             moneynessTrack(call)
-                .padding(.top, 22)
+                .padding(.top, 24)
 
-            // assignment fork
-            HStack(spacing: 0) {
-                forkCell(
-                    prob: call.assignProb,
-                    probLabel: "ASSIGN",
-                    title: "If assigned",
-                    value: fmtMoney(call.ifAssigned, sign: true),
-                    valueColor: Color.signed(call.ifAssigned)
-                )
-                Rectangle().fill(Color.theme.hair).frame(width: 0.5, height: 54)
-                forkCell(
-                    prob: call.assignProb.map { 100 - $0 },
-                    probLabel: "KEEP",
-                    title: "If it expires",
-                    value: fmtMoney(call.ifKeptAvg, decimals: 2),
-                    valueColor: Color.theme.fg1
-                )
+            // 3 stats (v3 `.call-stats`) — Assign odds / Premium in / If kept
+            HStack(alignment: .top, spacing: 4) {
+                stat("ASSIGN ODDS",
+                     call.assignProb.map { "\($0)%" } ?? "—",
+                     Color.theme.gold,
+                     call.delta.map { String(format: "%.2f", abs($0)) + "Δ" } ?? "no greek yet")
+                stat("PREMIUM IN",
+                     fmtMoney(call.premiumCollected),
+                     Color.theme.pos,
+                     fmtMoney(call.contracts > 0 ? call.premiumCollected / (call.contracts * 100) : 0, decimals: 2) + " / sh")
+                stat("IF KEPT",
+                     fmtMoney(call.ifKeptAvg, decimals: 2),
+                     Color.theme.fg1,
+                     "new avg")
             }
-            .padding(.top, 20)
-            .padding(.top, 2)
+            .padding(.top, 22)
+            .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 0.5) }
         }
         .incomeCard()
     }
 
-    private func forkCell(prob: Int?, probLabel: String, title: String,
-                          value: String, valueColor: Color) -> some View {
-        HStack(spacing: 12) {
-            VStack(spacing: 4) {
-                Text(prob.map { "\($0)%" } ?? "—")
-                    .font(.numeric(size: 17, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.theme.fg2)
-                Text(probLabel)
-                    .font(.system(size: 8, weight: .semibold))
-                    .tracking(0.6)
-                    .foregroundStyle(Color.theme.fg4)
-            }
-            .frame(width: 44)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundStyle(Color.theme.fg1)
-                Text(value)
-                    .font(.numeric(size: 15, weight: .bold))
-                    .monospacedDigit()
-                    .foregroundStyle(valueColor)
-            }
-            Spacer(minLength: 0)
+    private func stat(_ k: String, _ v: String, _ vColor: Color, _ s: String) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(k).font(.system(size: 9, weight: .semibold)).tracking(1)
+                .foregroundStyle(Color.theme.fg3)
+            Text(v).font(.numeric(size: 19, weight: .bold)).tracking(-0.57)
+                .monospacedDigit().foregroundStyle(vColor)
+            Text(s).font(.numeric(size: 10, weight: .medium)).monospacedDigit()
+                .foregroundStyle(Color.theme.fg4)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 8)
+        .padding(.top, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func moneynessTrack(_ call: IncomeDetail.OpenCall) -> some View {
@@ -337,7 +348,6 @@ private struct IncomeDetailBody: View {
                 let w = geo.size.width
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.theme.page2).frame(height: 8)
-                    // cushion between price and strike
                     Capsule().fill(otm ? Color.theme.tintPos : Color.theme.tintNeg)
                         .frame(width: abs(strikeFrac - priceFrac) * w, height: 8)
                         .offset(x: min(priceFrac, strikeFrac) * w)
@@ -356,9 +366,9 @@ private struct IncomeDetailBody: View {
 
     private func cushionCaption(_ call: IncomeDetail.OpenCall) -> String {
         if call.otmDollars > 0 {
-            return "\(fmtMoney(call.otmDollars, decimals: 2)) OTM · \(String(format: "%.1f", abs(call.cushionPct)))% cushion to assignment"
+            return "\(fmtMoney(call.otmDollars, decimals: 2)) out-of-the-money · \(String(format: "%.1f", abs(call.cushionPct)))% cushion to assignment"
         } else if call.otmDollars < 0 {
-            return "\(fmtMoney(-call.otmDollars, decimals: 2)) ITM · assignment likely"
+            return "\(fmtMoney(-call.otmDollars, decimals: 2)) in-the-money · assignment likely"
         }
         return "At the money"
     }
@@ -367,17 +377,25 @@ private struct IncomeDetailBody: View {
         RoundedRectangle(cornerRadius: 2)
             .fill(color)
             .frame(width: 3, height: 18)
-            .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Color.theme.surface, lineWidth: 2.5))
+            .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Color.theme.surface, lineWidth: 3))
     }
 
     // MARK: 4 · Premium yield
 
     private var yieldCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("PREMIUM YIELD · \(detail.ticker)")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.6)
-                .foregroundStyle(Color.theme.fg3)
+            HStack {
+                Text("PREMIUM YIELD · \(detail.ticker)")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(1.6)
+                    .foregroundStyle(Color.theme.fg3)
+                Spacer()
+                HStack(spacing: 6) {
+                    PulsingDot()
+                    Text("live").font(.numeric(size: 10, weight: .medium))
+                        .foregroundStyle(Color.theme.fg4)
+                }
+            }
 
             HStack(alignment: .firstTextBaseline, spacing: 22) {
                 yieldStat(fmtMoney(detail.premThisWeek), "this week", Color.theme.fg1)
@@ -387,6 +405,7 @@ private struct IncomeDetailBody: View {
             .padding(.top, 18)
 
             weeklyBars.padding(.top, 24)
+            weeklyLegend.padding(.top, 20)
 
             // footer: harvested + IV
             HStack(spacing: 16) {
@@ -410,26 +429,35 @@ private struct IncomeDetailBody: View {
                     Text(detail.ivPct.map { "\(Int($0.rounded()))%" } ?? "—")
                         .font(.numeric(size: 18, weight: .bold)).monospacedDigit()
                         .foregroundStyle(Color.theme.gold)
-                    Text(detail.ivRank.map { "rank \(Int($0.rounded()))" } ?? "no history yet")
+                    Text(ivSubText)
                         .font(.numeric(size: 10.5, weight: .medium)).monospacedDigit()
                         .foregroundStyle(Color.theme.fg3)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.top, 20)
+            .padding(.top, 22)
             .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 0.5) }
         }
         .incomeCard()
     }
 
+    private var ivSubText: String {
+        guard let rank = detail.ivRank else { return "no history yet" }
+        let tail = rank >= 60 ? " · running rich" : rank <= 25 ? " · thin" : ""
+        return "rank \(Int(rank.rounded()))\(tail)"
+    }
+
     private func yieldStat(_ v: String, _ k: String, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(v).font(.numeric(size: 24, weight: .bold)).tracking(-0.6)
+            Text(v).font(.numeric(size: 24, weight: .bold)).tracking(-0.84)
                 .monospacedDigit().foregroundStyle(color)
             Text(k).font(.numeric(size: 10, weight: .medium)).foregroundStyle(Color.theme.fg3)
         }
     }
 
+    // Weekly bars — v3: normal weeks grey (page-2), "now" = accent,
+    // "assigned" = accent @ 50%. Height 30 + ratio×44. Bar width ≤ 30.
+    // Gold dot atop assigned weeks.
     private var weeklyBars: some View {
         let maxPrem = max(detail.weeks.map(\.premium).max() ?? 1, 1)
         return HStack(alignment: .bottom, spacing: 9) {
@@ -438,12 +466,12 @@ private struct IncomeDetailBody: View {
                     Circle()
                         .fill(w.assigned ? Color.theme.gold : Color.clear)
                         .frame(width: 5, height: 5)
-                    Spacer(minLength: 0)
                     RoundedRectangle(cornerRadius: 4)
                         .fill(w.isCurrent ? Color.theme.neon
                               : w.assigned ? Color.theme.neon.opacity(0.5)
-                              : Color.theme.pos.opacity(0.35))
-                        .frame(height: max(6, CGFloat(w.premium / maxPrem) * 70))
+                              : Color.theme.page2)
+                        .frame(maxWidth: 30)
+                        .frame(height: 30 + CGFloat(w.premium / maxPrem) * 44)
                     Text(w.label)
                         .font(.system(size: 9, weight: w.isCurrent ? .bold : .medium))
                         .foregroundStyle(w.isCurrent ? Color.theme.neon : Color.theme.fg4)
@@ -451,7 +479,20 @@ private struct IncomeDetailBody: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .frame(height: 108)
+    }
+
+    private var weeklyLegend: some View {
+        HStack(spacing: 16) {
+            legendItem(Color.theme.neon, "premium / week")
+            legendItem(Color.theme.gold, "assigned that week")
+        }
+    }
+
+    private func legendItem(_ c: Color, _ t: String) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(c).frame(width: 8, height: 8)
+            Text(t).font(.numeric(size: 10, weight: .medium)).foregroundStyle(Color.theme.fg3)
+        }
     }
 
     // MARK: 5 · Exercise streak
@@ -469,7 +510,7 @@ private struct IncomeDetailBody: View {
             }
 
             if detail.history.isEmpty {
-                Text("No resolved expiries yet. Each call that expires or gets called away logs here — kept drops your average, called-away books a realized win.")
+                Text("No resolved expiries yet. Each call that expires or gets exercised logs here — kept drops your average, exercised books a realized win.")
                     .font(.system(size: 13)).lineSpacing(3)
                     .foregroundStyle(Color.theme.fg3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -490,8 +531,7 @@ private struct IncomeDetailBody: View {
     }
 
     private var streakStrip: some View {
-        // oldest → newest
-        let ordered = Array(detail.history.reversed())
+        let ordered = Array(detail.history.reversed())   // oldest → newest
         return HStack(spacing: 3) {
             ForEach(Array(ordered.enumerated()), id: \.element.id) { idx, h in
                 RoundedRectangle(cornerRadius: 4)
@@ -512,7 +552,7 @@ private struct IncomeDetailBody: View {
         if let days = detail.daysSinceExercise {
             var d = AttributedString("\(days) day\(days == 1 ? "" : "s")")
             d.foregroundColor = Color.theme.pos
-            s.append(d); s.append(AttributedString(" since last called away · "))
+            s.append(d); s.append(AttributedString(" since last exercise · "))
         }
         var k = AttributedString("kept \(detail.keptStreak) in a row")
         k.foregroundColor = Color.theme.pos
@@ -522,10 +562,10 @@ private struct IncomeDetailBody: View {
 
     private func logRow(_ h: IncomeDetail.ExpiryOutcome) -> some View {
         HStack(spacing: 13) {
-            Text(h.exercised ? "Called away" : "Kept")
-                .font(.system(size: 9, weight: .bold)).tracking(0.6)
+            Text(h.exercised ? "Exercised" : "Kept")
+                .font(.system(size: 9, weight: .bold)).tracking(0.7)
                 .foregroundStyle(h.exercised ? Color.theme.gold : Color.theme.pos)
-                .frame(width: 88)
+                .frame(width: 82)
                 .padding(.vertical, 6)
                 .background(Capsule().fill(h.exercised ? Color.theme.tintWarn : Color.theme.tintPos))
             VStack(alignment: .leading, spacing: 5) {
@@ -573,21 +613,43 @@ private struct IncomeDetailBody: View {
     }
 }
 
+// MARK: - Live dot (pulsing)
+
+/// 7pt lime dot with a soft expanding pulse ring — the v3 `.live-dot`.
+private struct PulsingDot: View {
+    @State private var on = false
+    var body: some View {
+        Circle()
+            .fill(Color.theme.lime)
+            .frame(width: 7, height: 7)
+            .overlay(
+                Circle().stroke(Color.theme.lime, lineWidth: 1.5)
+                    .scaleEffect(on ? 2.6 : 1)
+                    .opacity(on ? 0 : 0.5)
+            )
+            .onAppear {
+                withAnimation(.easeOut(duration: 2.4).repeatForever(autoreverses: false)) {
+                    on = true
+                }
+            }
+    }
+}
+
 // MARK: - Card chrome
 
 private extension View {
-    /// White (light) / teal (dark) rounded card with a hairline and a
-    /// soft shadow — the income screen's card surface.
+    /// v3 card surface: radius 26, padding 22, two-layer soft shadow.
     func incomeCard() -> some View {
         self
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 24)
+                RoundedRectangle(cornerRadius: 26)
                     .fill(Color.theme.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 24)
+                    .overlay(RoundedRectangle(cornerRadius: 26)
                         .strokeBorder(Color.theme.hair, lineWidth: 0.5))
-                    .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 6)
+                    .shadow(color: Color(hex: 0x16251d, alpha: 0.05), radius: 2, x: 0, y: 1)
+                    .shadow(color: Color(hex: 0x16251d, alpha: 0.10), radius: 17, x: 0, y: 6)
             )
     }
 }
