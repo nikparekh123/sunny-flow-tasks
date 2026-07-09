@@ -70,6 +70,7 @@ interface OpenTradeRow {
   ticker: string;
   action: 'open' | 'close';
   option_type: 'call' | 'put';
+  direction: 'long' | 'short';
   contracts: number;
   strike: number;
   expiry: string;     // 'YYYY-MM-DD'
@@ -104,20 +105,50 @@ function occSymbol(ticker: string, expiry: string, type: 'call' | 'put', strike:
   return `O:${ticker}${yy}${mm}${dd}${cp}${k}`;
 }
 
-/** Build remaining-contracts map by walking opens + closes_trade_id closes.
- *  Mirrors src/positions/metrics/atoms.ts remainingByOpenId. */
+/** Pooled-FIFO remaining-contracts, mirroring the iOS OptionFIFO
+ *  (ios-app/.../OptionFIFO.swift). Groups by contract key
+ *  (ticker, option_type, direction, strike, expiry) and consumes closes
+ *  oldest-first, IGNORING closes_trade_id — that single-FK link cannot
+ *  represent multi-lot chains and is set naively by the sync.
+ *
+ *  WHY THIS CHANGED (2026-07-09): the prior per-id logic here disagreed
+ *  with the app. It (a) left over-closed opens looking forever-open, so
+ *  mp-refresh 404-quoted expired contracts every run, and (b) skipped
+ *  genuinely-open legs whose open had a close wrongly linked to it —
+ *  freezing those legs' marks (Value now / Time value went stale, some
+ *  back to June 1). Pooling by key matches the app's open set exactly. */
 function remainingByOpenId(trades: OpenTradeRow[]): Map<string, number> {
-  const open = new Map<string, OpenTradeRow>();
-  const closed = new Map<string, number>();
+  const keyOf = (t: OpenTradeRow) =>
+    `${t.ticker.toUpperCase()}|${t.option_type}|${t.direction}|${t.strike}|${t.expiry}`;
+
+  const groups = new Map<string, OpenTradeRow[]>();
   for (const t of trades) {
-    if (t.action === 'open') open.set(t.id, t);
-    else if (t.action === 'close' && t.closes_trade_id) {
-      closed.set(t.closes_trade_id, (closed.get(t.closes_trade_id) ?? 0) + t.contracts);
-    }
+    const k = keyOf(t);
+    const arr = groups.get(k);
+    if (arr) arr.push(t); else groups.set(k, [t]);
   }
+
   const out = new Map<string, number>();
-  for (const [id, o] of open) {
-    out.set(id, Math.max(0, o.contracts - (closed.get(id) ?? 0)));
+  for (const rows of groups.values()) {
+    // Stable oldest-first by id (trade_date isn't selected here; the
+    // per-key TOTAL remaining is order-independent, and all opens in a
+    // key share one OCC symbol, so id-order is a safe proxy).
+    const opens = rows
+      .filter((r) => r.action === 'open')
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    let closeQty = rows
+      .filter((r) => r.action === 'close')
+      .reduce((s, c) => s + c.contracts, 0);
+
+    const slots = opens.map((o) => ({ id: o.id, left: o.contracts }));
+    let cursor = 0;
+    while (closeQty > 0 && cursor < slots.length) {
+      const take = Math.min(closeQty, slots[cursor].left);
+      slots[cursor].left -= take;
+      closeQty -= take;
+      if (slots[cursor].left <= 0) cursor++;
+    }
+    for (const s of slots) out.set(s.id, Math.max(0, s.left));
   }
   return out;
 }
@@ -180,12 +211,20 @@ Deno.serve(async (req) => {
     // ─── 1. Read open option legs with remaining contracts > 0 ──
     const { data: tradeRows, error: tradesErr } = await admin
       .from('option_trades')
-      .select('id, ticker, action, option_type, contracts, strike, expiry, closes_trade_id');
+      .select('id, ticker, action, option_type, direction, contracts, strike, expiry, closes_trade_id');
     if (tradesErr) throw tradesErr;
 
     const remaining = remainingByOpenId((tradeRows ?? []) as OpenTradeRow[]);
+    // Today in US-Eastern (the market clock) as 'YYYY-MM-DD'. Skip legs
+    // whose expiry is already past — Polygon 404s expired contracts, and
+    // an expired leg isn't a live position anyway.
+    const estToday = new Date().toLocaleDateString('en-CA', {
+      timeZone: 'America/New_York',
+    });
     const openLegs = (tradeRows ?? []).filter(
-      (t) => t.action === 'open' && (remaining.get(t.id) ?? 0) > 0,
+      (t) => t.action === 'open'
+        && (remaining.get(t.id) ?? 0) > 0
+        && t.expiry >= estToday,
     ) as OpenTradeRow[];
 
     // ─── 2. Read held tickers (open positions with qty > 0) ──────
