@@ -348,14 +348,14 @@ private struct IncomeDetailBody: View {
                 let w = geo.size.width
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.theme.page2).frame(height: 8)
-                    Capsule().fill(otm ? Color.theme.tintPos : Color.theme.tintNeg)
+                    Capsule().fill(otm ? Color.theme.pos.opacity(0.22) : Color.theme.neg.opacity(0.22))
                         .frame(width: abs(strikeFrac - priceFrac) * w, height: 8)
                         .offset(x: min(priceFrac, strikeFrac) * w)
-                    marker(color: Color.theme.fg1).offset(x: priceFrac * w - 1.5)
-                    marker(color: Color.theme.neon).offset(x: strikeFrac * w - 1.5)
+                    moneyMarker(color: Color.theme.fg1, frac: priceFrac, w: w)
+                    moneyMarker(color: Color.theme.neon, frac: strikeFrac, w: w)
                 }
             }
-            .frame(height: 18)
+            .frame(height: 20)
             Text(cushionCaption(call))
                 .font(.numeric(size: 11, weight: .medium))
                 .monospacedDigit()
@@ -373,11 +373,18 @@ private struct IncomeDetailBody: View {
         return "At the money"
     }
 
-    private func marker(color: Color) -> some View {
-        RoundedRectangle(cornerRadius: 2)
-            .fill(color)
-            .frame(width: 3, height: 18)
-            .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Color.theme.surface, lineWidth: 3))
+    /// Price / strike marker on the moneyness track — a thin colored
+    /// bar with a card-colored halo so it pops against the cushion
+    /// (v3 `box-shadow: 0 0 0 3px var(--card)`). The halo is drawn
+    /// BEHIND the bar, not as an inset border, so the fill stays visible.
+    private func moneyMarker(color: Color, frac: CGFloat, w: CGFloat) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 3).fill(Color.theme.surface)
+                .frame(width: 9, height: 20)
+            RoundedRectangle(cornerRadius: 2).fill(color)
+                .frame(width: 3, height: 18)
+        }
+        .offset(x: frac * w - 4.5)
     }
 
     // MARK: 4 · Premium yield
