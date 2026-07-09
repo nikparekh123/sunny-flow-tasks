@@ -15,30 +15,37 @@ go/no-go decision after preview.
 
 ## Step 1 — Run the backfill
 
-Two options:
+> ⛔ **DO NOT change query 1535729's Period.** The old "Option A"
+> (temporarily switch 1535729 from "Today" to a multi-day period) is
+> **wrong and removed.** Query 1535729 is a **Trade Confirmation Flex
+> (TCF)** report — IBKR *locks* its Period to "Today"; saving any other
+> period fails or silently yields empty reports. Never touch it.
 
-**Option A: Temporarily change the IBKR Flex Query in IBKR's UI**
-1. Open the existing query (ID 1535729) → change Period from "Today" to "Last 90 Business Days"
-2. Save
-3. Invoke ibkr-flex-sync manually:
+**Use a separate Daily Flex query (the only supported path — now built):**
+1. In IBKR's portal, create a **Daily Flex** query (NOT Trade
+   Confirmation Flex) with the same field selection and
+   `Period = "Last 90 Business Days"` (or "Year to Date" / whatever
+   range you want IBKR to own). Note its **Query ID**.
+   - There is already a Daily Flex query **1540791** at
+     `Period = "Last 5 Business Days"` (the nightly backfill cron). If
+     5 business days is enough coverage, reuse it. For a deeper cutover,
+     make a longer-period Daily Flex query and use its ID below.
+2. Invoke `ibkr-flex-sync` with a `query_id` **override in the request
+   body** — this points the sync at the Daily query for one run and
+   leaves the TCF env var (`IBKR_FLEX_QUERY_ID` = 1535729) untouched:
    ```bash
    curl -X POST \
      "https://ziwoutsnuywjnsyfbzsp.supabase.co/functions/v1/ibkr-flex-sync" \
-     -H "Authorization: Bearer <publishable-key>" \
+     -H "Authorization: Bearer <publishable-or-service-key>" \
      -H "Content-Type: application/json" \
-     -d '{"trigger":"backfill"}'
+     -d '{"trigger":"backfill","query_id":"<DAILY_QUERY_ID>"}'
    ```
-4. Verify counts (see Step 2)
-5. **Change the Period back to "Today"** in IBKR before next cron run!
+   `trigger=backfill` bypasses the ET market-hours gate; the `query_id`
+   override is honored only for backfill/manual triggers, never cron.
+3. Daily Flex has T+1 (overnight) latency — fine for backfill.
+4. Verify counts (see Step 2).
 
-**Option B: Create a separate "Backfill" Flex Query in IBKR**
-1. New query with same field selection, but `Period = "Last 90 Business Days"`
-2. Note the new Query ID
-3. Set `IBKR_FLEX_BACKFILL_QUERY_ID` in Supabase secrets
-4. *(Requires a follow-up to ibkr-flex-sync to accept a query_id override in
-   the request body — not built yet)*
-
-Option A is the quick path. Option B is the durable path.
+There is no "switch it back" step — the TCF query was never touched.
 
 ## Step 2 — Verify backfill coverage
 
@@ -127,8 +134,8 @@ COMMIT;
 If anything's off, the transaction kept the data — re-investigate before
 running again.
 
-## Step 6 — Switch Flex Query back to "Today"
+## Step 6 — (nothing to undo)
 
-If you used Option A, **don't forget this step.** Cron will keep using
-whatever period the query has set, so leaving it at "Last 90 Business
-Days" means every 15-min cron run pulls 90 days of data unnecessarily.
+The backfill ran against a **separate** Daily Flex query via the
+`query_id` body override, so the intraday TCF query (1535729) and the
+cron were never modified. There is nothing to switch back.
