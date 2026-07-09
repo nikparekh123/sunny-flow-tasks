@@ -63,6 +63,10 @@ struct TradesScreen: View {
 
     enum TradesTab: String, CaseIterable, Identifiable, Hashable {
         case positions = "Positions"
+        // New per-ticker buy-write monitoring view
+        // (design_handoff_meta_detail v3). Coexists with Positions
+        // until the income strategy is proven, then Positions retires.
+        case income    = "Income"
         case activity  = "Activity"
         var id: String { rawValue }
     }
@@ -187,6 +191,7 @@ struct TradesScreen: View {
     private var compactHeader: some View {
         HStack(spacing: 0) {
             segmentedTab(.positions)
+            segmentedTab(.income)
             segmentedTab(.activity)
         }
         .padding(4)
@@ -299,6 +304,8 @@ struct TradesScreen: View {
     private var contentArea: some View {
         if tab == .positions {
             positionsTab
+        } else if tab == .income {
+            IncomeStrategyView(store: store)
         } else {
             // TradesActivityTab is a plain VStack — without a
             // ScrollView wrapper it overflows beyond the screen and
