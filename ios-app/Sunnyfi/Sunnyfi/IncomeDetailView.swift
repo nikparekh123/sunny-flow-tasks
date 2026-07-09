@@ -239,7 +239,7 @@ private struct IncomeDetailBody: View {
         }
         if let call = detail.call {
             out.append(AttributedString("Your "))
-            out.append(em("$\(fmt0(call.strike)) call", Color.theme.fg1))
+            out.append(em("$\(fmtStrike(call.strike)) call", Color.theme.fg1))
             if call.otmDollars > 0 {
                 out.append(AttributedString(" is "))
                 out.append(em(fmtMoney(call.otmDollars, decimals: 2) + " out-of-the-money", Color.theme.pos))
@@ -268,7 +268,7 @@ private struct IncomeDetailBody: View {
 
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("$\(fmt0(call.strike)) call ×\(Int(call.contracts))")
+                    Text("$\(fmtStrike(call.strike)) call ×\(Int(call.contracts))")
                         .font(.system(size: 22, weight: .heavy))
                         .tracking(-0.66)
                         .monospacedDigit()
@@ -569,7 +569,7 @@ private struct IncomeDetailBody: View {
                 .padding(.vertical, 6)
                 .background(Capsule().fill(h.exercised ? Color.theme.tintWarn : Color.theme.tintPos))
             VStack(alignment: .leading, spacing: 5) {
-                Text("\(h.weekday) · $\(fmt0(h.strike)) call")
+                Text("\(h.weekday) · $\(fmtStrike(h.strike)) call")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Color.theme.fg1)
                 Text(h.exercised ? "called away — realized win" : "expired OTM — shares held")
@@ -608,8 +608,14 @@ private struct IncomeDetailBody: View {
         }
     }
 
-    private func fmt0(_ v: Double) -> String {
-        Int(v.rounded()).formatted(.number.grouping(.automatic))
+    /// Strike display — whole strikes read clean ("625"), fractional
+    /// strikes keep their cents ("607.50"). Rounding to a whole number
+    /// misreported 607.50 as "608".
+    private func fmtStrike(_ v: Double) -> String {
+        if v == v.rounded() {
+            return Int(v).formatted(.number.grouping(.automatic))
+        }
+        return v.formatted(.number.precision(.fractionLength(2)).grouping(.automatic))
     }
 }
 
