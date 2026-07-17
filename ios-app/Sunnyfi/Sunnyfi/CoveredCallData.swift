@@ -271,16 +271,33 @@ enum CoveredCallData {
             if let d = AppDates.parseISODay(l.expiry) { legByDay[keyFmt.string(from: d)] = l }
         }
 
-        // Render weeks = every week that holds a leg, plus the current
-        // month's weeks (so upcoming M/W/F slots surface as "future").
+        // Target months: any month holding a leg's expiry-week, plus the
+        // current month. EACH renders its FULL M/W/F skeleton (every
+        // Friday-week of the month), so no circle is ever missing — past
+        // gaps show as "none", after-today as "future".
+        func friMonthKey(_ d: Date) -> String {
+            let fri = cal.date(byAdding: .day, value: 4, to: monday(d)) ?? d
+            let c = cal.dateComponents([.year, .month], from: fri)
+            return String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
+        }
+        var targetMonths = Set<String>()
+        for l in legs { if let d = AppDates.parseISODay(l.expiry) { targetMonths.insert(friMonthKey(d)) } }
+        let tc = cal.dateComponents([.year, .month], from: today)
+        targetMonths.insert(String(format: "%04d-%02d", tc.year ?? 0, tc.month ?? 0))
+
         var mondays = Set<Date>()
-        for l in legs { if let d = AppDates.parseISODay(l.expiry) { mondays.insert(monday(d)) } }
-        let mc = cal.dateComponents([.year, .month], from: today)
-        if let firstOfMonth = cal.date(from: mc),
-           let range = cal.range(of: .day, in: .month, for: today) {
-            let last = cal.date(byAdding: .day, value: range.count - 1, to: firstOfMonth) ?? firstOfMonth
-            var wk = monday(firstOfMonth)
-            while wk <= last { mondays.insert(wk); wk = cal.date(byAdding: .day, value: 7, to: wk) ?? last.addingTimeInterval(1) }
+        for mk in targetMonths {
+            let parts = mk.split(separator: "-")
+            guard parts.count == 2, let y = Int(parts[0]), let mo = Int(parts[1]) else { continue }
+            var comps = DateComponents(); comps.year = y; comps.month = mo; comps.day = 1
+            guard let first = cal.date(from: comps),
+                  let range = cal.range(of: .day, in: .month, for: first) else { continue }
+            for day in 0..<range.count {
+                guard let d = cal.date(byAdding: .day, value: day, to: first) else { continue }
+                if cal.component(.weekday, from: d) == 6 {   // Friday
+                    mondays.insert(cal.date(byAdding: .day, value: -4, to: d) ?? d)
+                }
+            }
         }
 
         func slot(_ date: Date, _ name: String) -> CalSlot {

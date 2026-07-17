@@ -135,7 +135,18 @@ private struct TickerBody: View {
 
     private var cycle: CoveredCallCycle? { data.current }
     private var months: [CalMonth] { data.calendar }
-    private var mIdx: Int { min(monthIndex ?? (months.count - 1), max(months.count - 1, 0)) }
+    private var mIdx: Int { min(monthIndex ?? defaultMonthIdx, max(months.count - 1, 0)) }
+
+    /// Open on THIS month, not the oldest.
+    private var defaultMonthIdx: Int {
+        let ym = Self.ymFmt.string(from: Date())
+        if let i = months.firstIndex(where: { $0.id == ym }) { return i }
+        return max(months.count - 1, 0)
+    }
+    private static let ymFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM"
+        f.timeZone = TimeZone(identifier: "America/New_York"); return f
+    }()
 
     /// Brand accents for the badge (falls back to the app accent).
     private static let brand: [String: Color] = [
