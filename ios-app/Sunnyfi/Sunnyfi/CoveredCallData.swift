@@ -114,11 +114,27 @@ struct CoveredCallTicker: Identifiable, Sendable {
     let currentPrice: Double
     let current: CoveredCallCycle?
     let closed: [CoveredCallCycle]
-    let put: CoveredCallPut?
+    let put: CoveredCallPut?     // furthest-dated put, for the one-line panel
     /// Realized P&L across every closed cycle for this ticker.
     let realizedToDate: Double
 
+    // ── Aggregates over EVERY open leg (not just the working one) ──
+    let openCallContracts: Double
+    let openCallAvgPremium: Double
+    let openCallPremiumTotal: Double
+    let openCallCostToClose: Double
+    let putContracts: Double
+    let putAvgCost: Double
+    let putCostTotal: Double
+    let putValueTotal: Double
+
     var shares: Double { current?.shares ?? 0 }
+
+    /// Realized P&L as a % of the current cycle's invested capital.
+    var realizedPct: Double {
+        guard let c = current, c.entryPrice > 0, c.shares > 0 else { return 0 }
+        return realizedToDate / (c.entryPrice * c.shares) * 100
+    }
 
     /// Distance of price from adjusted basis, in percent. Negative =
     /// underwater against the cycle's real cost.
@@ -145,16 +161,12 @@ struct CoveredCallTicker: Identifiable, Sendable {
         guard let c = current else { return 0 }
         return (currentPrice - c.adjustedBasis) * c.shares
     }
-    /// NET result of unwinding the open call: premium collected on it
-    /// less what it costs to buy back. Because the open call's premium
-    /// isn't in the basis, this line carries it — so the exit net is
-    /// correct (v7's mock showed only the buyback and understated it).
-    var exitCallBuyback: Double {
-        guard let leg = current?.openLeg, let mark = leg.mark else { return 0 }
-        return (leg.premiumPerShare - mark) * leg.remaining * 100
-    }
-    /// Put mark-to-market vs what was paid.
-    var exitPutPL: Double { put?.pnl ?? 0 }
+    /// NET result of unwinding EVERY open call: premium collected less
+    /// what it costs to buy them back. Because open-call premium isn't in
+    /// the basis, this line carries it, so the exit net is correct.
+    var exitCallBuyback: Double { openCallPremiumTotal - openCallCostToClose }
+    /// Mark-to-market across ALL open long puts vs what was paid.
+    var exitPutPL: Double { putValueTotal - putCostTotal }
     var exitNet: Double { exitSharesPL + exitCallBuyback + exitPutPL }
 
     /// Total P&L for this ticker: realized (closed cycles) + everything
@@ -403,12 +415,24 @@ enum CoveredCallData {
             cursor = a.trade_date
         }
 
-        // Live cycle — lots acquired after the last assignment.
+        // Live cycle — shares + entry from the IBKR-reconciled position
+        // (the real current holding), lots only for the start date.
         let liveLots = lots.filter { cursor == nil || $0.acquired_date > cursor! }
+        let stockLeg = company.legs.first { $0.kind == .stock && $0.qty > 0 }
+        let liveStart = liveLots.first?.acquired_date
+            ?? store.allTrades
+                .filter { $0.ticker == ticker && $0.action == "open"
+                        && $0.option_type == "call" && $0.direction == "short"
+                        && $0.voided_at == nil && (cursor == nil || $0.trade_date > cursor!) }
+                .map(\.trade_date).min()
         let current = makeCycle(
             store: store, ticker: ticker, lots: liveLots,
             startAfter: cursor, endDate: nil,
-            assignmentStrike: nil, sharesOverride: nil, realized: nil
+            assignmentStrike: nil,
+            sharesOverride: stockLeg?.qty,
+            entryOverride: stockLeg?.avg,
+            startOverride: liveStart,
+            realized: nil
         )
 
         // ── Put leg (per ticker, survives cycle resets) ──
@@ -430,13 +454,44 @@ enum CoveredCallData {
             )
         }
 
+        // ── Aggregates over EVERY open leg (the qty cards + exit math) ──
+        func mark(_ t: OptionTradeRow) -> Double {
+            store.allGreeks.first(where: { $0.option_trade_id == t.id })?.last_mark ?? t.premium
+        }
+        let openCalls = store.allTrades.filter {
+            $0.ticker == ticker && $0.option_type == "call" && $0.direction == "short"
+                && $0.action == "open" && $0.voided_at == nil && store.remainingContracts(for: $0) > 0
+        }
+        var ccCt = 0.0, ccPrem = 0.0, ccClose = 0.0
+        for t in openCalls {
+            let r = store.remainingContracts(for: t)
+            ccCt += r; ccPrem += r * t.premium * 100; ccClose += r * mark(t) * 100
+        }
+        let openPuts = store.allTrades.filter {
+            $0.ticker == ticker && $0.option_type == "put" && $0.direction == "long"
+                && $0.action == "open" && $0.voided_at == nil && store.remainingContracts(for: $0) > 0
+        }
+        var pCt = 0.0, pCost = 0.0, pVal = 0.0
+        for t in openPuts {
+            let r = store.remainingContracts(for: t)
+            pCt += r; pCost += r * t.premium * 100; pVal += r * mark(t) * 100
+        }
+
         return CoveredCallTicker(
             ticker: ticker,
             currentPrice: spot,
             current: current,
             closed: cycles.reversed(),          // newest first for history
             put: put,
-            realizedToDate: cycles.compactMap(\.realizedPL).reduce(0, +)
+            realizedToDate: cycles.compactMap(\.realizedPL).reduce(0, +),
+            openCallContracts: ccCt,
+            openCallAvgPremium: ccCt > 0 ? ccPrem / (ccCt * 100) : 0,
+            openCallPremiumTotal: ccPrem,
+            openCallCostToClose: ccClose,
+            putContracts: pCt,
+            putAvgCost: pCt > 0 ? pCost / (pCt * 100) : 0,
+            putCostTotal: pCost,
+            putValueTotal: pVal
         )
     }
 
@@ -449,19 +504,23 @@ enum CoveredCallData {
         endDate: String?,
         assignmentStrike: Double?,
         sharesOverride: Double?,
+        entryOverride: Double? = nil,
+        startOverride: String? = nil,
         realized: Double?
     ) -> CoveredCallCycle? {
-        guard let start = lots.first?.acquired_date else { return nil }
+        // The live cycle's shares + entry come from the IBKR-reconciled
+        // position (overrides), not the lot sum, so the count matches the
+        // real holding even when share_lots history is partial.
+        guard let start = startOverride ?? lots.first?.acquired_date else { return nil }
 
-        // Entry = weighted average cost across the cycle's lots.
         let totalQty = lots.reduce(0.0) { $0 + $1.qty_original }
-        guard totalQty > 0 else { return nil }
-        let entry = lots.reduce(0.0) { $0 + $1.qty_original * $1.cost_per_share } / totalQty
-        // Live cycle holds what's left; a closed cycle's shares are what
-        // actually got assigned away.
-        let shares: Double = endDate == nil
-            ? max(lots.reduce(0.0) { $0 + $1.qty_remaining }, 0)
-            : (sharesOverride ?? totalQty)
+        let weightedEntry = totalQty > 0
+            ? lots.reduce(0.0) { $0 + $1.qty_original * $1.cost_per_share } / totalQty : 0
+        let entry = entryOverride ?? weightedEntry
+        let shares: Double = {
+            if let o = sharesOverride { return o }
+            return endDate == nil ? max(lots.reduce(0.0) { $0 + $1.qty_remaining }, 0) : totalQty
+        }()
         guard shares > 0 else { return nil }
 
         // ── Call legs sold inside this cycle's window ──
@@ -594,15 +653,10 @@ enum CoveredCallData {
         for sym in tickers {
             guard let tk = build(store: store, ticker: sym) else { continue }
             t.sharesUnrealized += tk.exitSharesPL
-            if let leg = tk.current?.openLeg, let mark = leg.mark {
-                // Short call: collected premium less cost to close.
-                t.callsUnrealized += (leg.premiumPerShare - mark) * leg.remaining * 100
-            }
+            t.callsUnrealized += tk.exitCallBuyback   // all open calls, premium − buyback
             t.realized += tk.realizedToDate
-            if let p = tk.put {
-                t.putsPL += p.pnl
-                t.putsCost += p.cost
-            }
+            t.putsPL += tk.exitPutPL                  // all open puts, MTM
+            t.putsCost += tk.putCostTotal
         }
         return t
     }

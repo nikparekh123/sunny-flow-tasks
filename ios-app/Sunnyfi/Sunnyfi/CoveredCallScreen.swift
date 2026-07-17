@@ -176,16 +176,16 @@ private struct TickerBody: View {
         }
     }
 
-    // ── Total P&L snapshot (per ticker) ──
+    // ── Realized P&L snapshot (per ticker) ──
     private var pnlSnapshot: some View {
-        let v = data.totalPnL
+        let v = data.realizedToDate
         return HStack(spacing: 9) {
-            Text("TOTAL P&L").font(.system(size: 11, weight: .bold)).tracking(0.4)
+            Text("REALIZED P&L").font(.system(size: 11, weight: .bold)).tracking(0.4)
                 .foregroundStyle(Color.theme.fg3)
             Text(fmtMoney(v, sign: true))
                 .font(.numeric(size: 22, weight: .heavy)).tracking(-0.4).monospacedDigit()
                 .foregroundStyle(Color.signed(v))
-            Text(fmtPct(data.totalPnLPct))
+            Text(fmtPct(data.realizedPct))
                 .font(.numeric(size: 13, weight: .bold)).monospacedDigit()
                 .foregroundStyle(Color.signed(v))
         }
@@ -432,14 +432,14 @@ private struct TickerBody: View {
                     sub: "\(c.lotCount) lot\(c.lotCount == 1 ? "" : "s")",
                     total: fmtMoney(c.shares * data.currentPrice), totalTone: Color.theme.fg1)
             qtyCard("Calls",
-                    c.openLeg.map { "\(Int($0.remaining))" } ?? "0",
-                    sub: c.openLeg.map { "avg \(fmtMoney($0.premiumPerShare, decimals: 2))" } ?? "none",
-                    total: c.openCallPremium > 0 ? fmtMoney(c.openCallPremium, sign: true) : "$0",
-                    totalTone: c.openCallPremium > 0 ? Color.theme.pos : Color.theme.fg3)
+                    data.openCallContracts > 0 ? "\(Int(data.openCallContracts))" : "0",
+                    sub: data.openCallContracts > 0 ? "avg \(fmtMoney(data.openCallAvgPremium, decimals: 2))" : "none",
+                    total: data.openCallPremiumTotal > 0 ? fmtMoney(data.openCallPremiumTotal, sign: true) : "$0",
+                    totalTone: data.openCallPremiumTotal > 0 ? Color.theme.pos : Color.theme.fg3)
             qtyCard("Puts",
-                    data.put.map { "\(Int($0.contracts))" } ?? "0",
-                    sub: data.put.map { "avg \(fmtMoney($0.costBasisPerShare, decimals: 2))" } ?? "none",
-                    total: data.put.map { fmtMoney($0.value) } ?? "$0",
+                    data.putContracts > 0 ? "\(Int(data.putContracts))" : "0",
+                    sub: data.putContracts > 0 ? "avg \(fmtMoney(data.putAvgCost, decimals: 2))" : "none",
+                    total: fmtMoney(data.putValueTotal),
                     totalTone: Color.theme.fg1)
         }
     }
