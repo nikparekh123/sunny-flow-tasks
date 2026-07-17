@@ -40,6 +40,12 @@ final class PortfolioStore {
     var allGreeks: [OptionGreeksRow] = []
     var dailyCloses: [DailyCloseRow] = []
     var allShareLots: [ShareLotRow] = []
+    /// Every non-voided share lot, including fully-sold ones
+    /// (qty_remaining == 0). `allShareLots` keeps the open-lots-only
+    /// filter its existing consumers expect; this is the full history,
+    /// used to reconstruct closed Covered Call cycles. Not persisted in
+    /// the cold-launch snapshot — it fills in on the first fetch.
+    var allShareLotsHistory: [ShareLotRow] = []
     /// Raw `positions` and `strategy_overlay` rows — kept so the
     /// cold-launch snapshot can re-run buildCompanies without a
     /// network round-trip. Previously these were locals inside
@@ -271,7 +277,7 @@ final class PortfolioStore {
             .select("ticker, name, sector, quantity, avg_cost, current_price, prev_close, status, earnings_date, realized_stock_pl, reconciled_through")
             .execute().value as [PositionRow] }
         async let tTask  = Self.tryFetch { try await c.from("option_trades")
-            .select("id, ticker, trade_date, action, option_type, direction, contracts, strike, premium, expiry, closes_trade_id, source, ibkr_trade_id, last_synced_at, voided_at")
+            .select("id, ticker, trade_date, action, option_type, direction, contracts, strike, premium, expiry, closes_trade_id, source, ibkr_trade_id, last_synced_at, voided_at, closed_via, rolled_from, share_pnl")
             .is("voided_at", value: nil)
             .execute().value as [OptionTradeRow] }
         async let gTask  = Self.tryFetch { try await c.from("option_greeks_latest")
@@ -281,7 +287,7 @@ final class PortfolioStore {
             .select("ticker, spot, day_change_pct, beta, captured_at")
             .execute().value as [TickerQuoteRow] }
         async let sTask  = Self.tryFetch { try await c.from("share_sells")
-            .select("ticker, realized_pl, trade_date, quantity")
+            .select("ticker, realized_pl, trade_date, quantity, price, source, linked_option_close_id")
             .execute().value as [ShareSellRow] }
         async let oTask  = Self.tryFetch { try await c.from("strategy_overlay")
             .select("ticker, bucket")
@@ -295,6 +301,20 @@ final class PortfolioStore {
             .select("id, ticker, acquired_date, fifo_order, qty_original, qty_remaining, cost_per_share, source, linked_assignment_id, ibkr_trade_id, last_synced_at, voided_at")
             .is("voided_at", value: nil)
             .gt("qty_remaining", value: 0)
+            .order("acquired_date", ascending: true)
+            .order("fifo_order", ascending: true)
+            .execute().value as [ShareLotRow] }
+        // Full lot history — same rows as `slTask` but WITHOUT the
+        // qty_remaining > 0 filter, so fully-sold lots are included.
+        // Covered Call needs these: a closed cycle's entry lot has
+        // qty_remaining = 0 (the shares were assigned away), and
+        // without it a closed cycle has no start date / entry price.
+        // Kept as a separate property so existing consumers of
+        // `allShareLots` (ActivityFeed, PerformanceData) keep their
+        // current "open lots only" semantics.
+        async let slhTask = Self.tryFetch { try await c.from("share_lots")
+            .select("id, ticker, acquired_date, fifo_order, qty_original, qty_remaining, cost_per_share, source, linked_assignment_id, ibkr_trade_id, last_synced_at, voided_at")
+            .is("voided_at", value: nil)
             .order("acquired_date", ascending: true)
             .order("fifo_order", ascending: true)
             .execute().value as [ShareLotRow] }
@@ -342,6 +362,7 @@ final class PortfolioStore {
         let o   = await oTask
         let dc  = await dcTask
         let sl  = await slTask
+        let slh = await slhTask
         let dts = await dtsTask
         let me  = await meTask
         let ee  = await eeTask
@@ -366,6 +387,7 @@ final class PortfolioStore {
         let overlay   = unwrap(o,   "strategy_overlay",     default: [])
         let closes    = unwrap(dc,  "daily_closes",         default: [])
         let lots      = unwrap(sl,  "share_lots",           default: [])
+        let lotsAll   = unwrap(slh, "share_lots_history",   default: [])
         let theta     = unwrap(dts, "daily_theta_snapshot", default: [])
         let macroEvents = unwrap(me, "macro_events",        default: [])
         let earningsEvents = unwrap(ee, "earnings_events",  default: [])
@@ -409,6 +431,7 @@ final class PortfolioStore {
         self.allGreeks = greeks
         self.dailyCloses = closes
         self.allShareLots = lots
+        self.allShareLotsHistory = lotsAll
         self.allPositions = positions
         self.allOverlay = overlay
         self.allQuotes = quotes

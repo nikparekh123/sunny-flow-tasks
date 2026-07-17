@@ -42,10 +42,20 @@ struct OptionTradeRow: Codable, Sendable {
     let closes_trade_id: String?
     /// IBKR Flex sync columns. Optional to keep older API responses
     /// (and seed/manual rows) decoding cleanly.
-    let source: String?            // "manual" | "ibkr_flex" | "assignment" | "seed"
+    let source: String?            // "manual" | "ibkr_flex" | "assignment" | "seed" | "expiry"
     let ibkr_trade_id: String?
     let last_synced_at: String?    // ISO8601, only set when source='ibkr_flex'
     let voided_at: String?         // ISO8601, set if IBKR cancelled
+    /// How this option was resolved. Set only on action=close rows:
+    /// "expired_worthless" | "rolled" | "assigned" | "manual". Drives
+    /// the Covered Call dot row (filled / hollow / red) and cycle ends.
+    let closed_via: String?
+    /// On action=open rows created BY a roll, points at the original
+    /// open. Lets a rolled chain read as one continuous call.
+    let rolled_from: String?
+    /// Realized stock P&L snapshotted at assignment (only on assigned
+    /// short-call closes) — immune to later avg_cost changes.
+    let share_pnl: Double?
 }
 
 struct OptionGreeksRow: Codable, Sendable {
@@ -125,6 +135,13 @@ struct ShareSellRow: Codable, Sendable {
     /// Shares sold in this transaction. Used to layer same-day sells
     /// on top of the reconciled baseline (#17).
     let quantity: Double?
+    /// Price the shares left at. When source == "assignment" this IS
+    /// the assignment strike — it's what closes a Covered Call cycle.
+    let price: Double?
+    /// "manual" | "assignment". Assignment sells end a cycle.
+    let source: String?
+    /// The option close that triggered an assignment sale.
+    let linked_option_close_id: String?
 }
 
 struct StrategyOverlayRow: Codable, Sendable {
