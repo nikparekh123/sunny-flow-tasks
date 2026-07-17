@@ -31,11 +31,27 @@ struct PerformanceScreen: View {
         var id: String { rawValue }
     }
     @State private var tab: Tab = .gainsLosses
+    /// Multi-select ticker filter. EMPTY = all tickers (the default).
+    /// Every metric and chart on this page reads through it.
+    @State private var tickerFilter: Set<String> = []
+
+    /// Every ticker with any history — held or fully closed out.
+    private var availableTickers: [String] {
+        Set(store.companies.map(\.ticker))
+            .union(store.closedCompanies.map(\.ticker))
+            .union(store.allTrades.map(\.ticker))
+            .sorted()
+    }
+    private var activeTickers: [String] {
+        tickerFilter.isEmpty ? availableTickers : availableTickers.filter { tickerFilter.contains($0) }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 titleRow
+                pnlStrip
+                tickerFilterRow
                 tabBar
 
                 // Tab content with a sliding transition + horizontal
@@ -45,13 +61,13 @@ struct PerformanceScreen: View {
                 // the second tab in from the right (iOS-native feel).
                 ZStack {
                     if tab == .gainsLosses {
-                        GainsLossesTab(store: store)
+                        GainsLossesTab(store: store, filter: tickerFilter)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .leading).combined(with: .opacity),
                                 removal:   .move(edge: .leading).combined(with: .opacity)
                             ))
                     } else {
-                        LeaderboardTab(store: store)
+                        LeaderboardTab(store: store, filter: tickerFilter)
                             .transition(.asymmetric(
                                 insertion: .move(edge: .trailing).combined(with: .opacity),
                                 removal:   .move(edge: .trailing).combined(with: .opacity)
@@ -95,6 +111,81 @@ struct PerformanceScreen: View {
 
     // ── Top tabs — design-spec solid-neon segmented (page-2 track,
     // neon-filled active, white ink) with a sliding thumb. ──
+    // MARK: P&L strip
+    //
+    // Realized / unrealized / total, computed by CoveredCallData — the
+    // SAME engine the Covered Call tab uses — so the two can never
+    // disagree. Respects the ticker filter.
+    private var pnlStrip: some View {
+        let p = CoveredCallData.pnl(store: store, tickers: activeTickers)
+        return HStack(alignment: .top, spacing: 0) {
+            pnlCell("REALIZED", p.realized)
+            Rectangle().fill(Color.theme.hair).frame(width: 0.5, height: 34)
+            pnlCell("UNREALIZED", p.unrealized)
+            Rectangle().fill(Color.theme.hair).frame(width: 0.5, height: 34)
+            pnlCell("TOTAL", p.total, loud: true)
+        }
+        .padding(.vertical, 11)
+        .padding(.horizontal, 12)
+        .background(RoundedRectangle(cornerRadius: Radius.xl).fill(Color.theme.surface))
+        .overlay(RoundedRectangle(cornerRadius: Radius.xl)
+            .strokeBorder(Color.theme.hair, lineWidth: 0.5))
+    }
+
+    private func pnlCell(_ k: String, _ v: Double, loud: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(k).font(.system(size: 8.5, weight: .bold)).tracking(0.9)
+                .foregroundStyle(Color.theme.fg3)
+            Text(fmtMoney(v, sign: true))
+                .font(.numeric(size: loud ? 18 : 16, weight: .heavy))
+                .tracking(-0.4).monospacedDigit()
+                .foregroundStyle(Color.signed(v))
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 2)
+    }
+
+    // MARK: Ticker filter (multi-select, all by default)
+
+    private var tickerFilterRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                filterPill("All", active: tickerFilter.isEmpty) {
+                    withAnimation(Motion.standard) { tickerFilter.removeAll() }
+                }
+                ForEach(availableTickers, id: \.self) { t in
+                    filterPill(t, active: tickerFilter.contains(t)) {
+                        withAnimation(Motion.standard) {
+                            if tickerFilter.contains(t) { tickerFilter.remove(t) }
+                            else { tickerFilter.insert(t) }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+    }
+
+    @ViewBuilder
+    private func filterPill(_ label: String, active: Bool, tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            Text(label)
+                .font(.system(size: 11.5, weight: active ? .bold : .semibold))
+                .tracking(0.3)
+                .foregroundStyle(active ? Color.theme.onNeon : Color.theme.fg2)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 30)
+                .background(
+                    Capsule()
+                        .fill(active ? Color.theme.neon : Color.theme.surface)
+                        .overlay(Capsule().strokeBorder(
+                            active ? Color.clear : Color.theme.borderBright, lineWidth: 1))
+                )
+        }
+        .buttonStyle(.pressable)
+    }
+
     @Namespace private var topTabNS
     private var tabBar: some View {
         HStack(spacing: 4) {
@@ -133,6 +224,17 @@ struct PerformanceScreen: View {
 
 private struct GainsLossesTab: View {
     let store: PortfolioStore
+    /// Ticker filter from the page header. Empty = all.
+    let filter: Set<String>
+
+    /// Filtering the SOURCE arrays means every metric, readout, legend
+    /// and chart below inherits the filter for free.
+    private var trades: [OptionTradeRow] {
+        filter.isEmpty ? store.allTrades : store.allTrades.filter { filter.contains($0.ticker) }
+    }
+    private var sells: [ShareSellRow] {
+        filter.isEmpty ? store.allShareSells : store.allShareSells.filter { filter.contains($0.ticker) }
+    }
 
     @State private var scope: ChartScope = .month        // Default: Month
     @State private var offset: Int = 0
@@ -148,8 +250,8 @@ private struct GainsLossesTab: View {
         PerformanceData.sourceBars(
             scope: scope,
             offset: offset,
-            allTrades: store.allTrades,
-            shareSells: store.allShareSells
+            allTrades: trades,
+            shareSells: sells
         )
     }
 
@@ -711,15 +813,21 @@ private struct PerfBarChart: View {
 
 private struct LeaderboardTab: View {
     let store: PortfolioStore
+    /// Ticker filter from the page header. Empty = all.
+    let filter: Set<String>
+
+    private func keep(_ ticker: String) -> Bool {
+        filter.isEmpty || filter.contains(ticker)
+    }
 
     /// Lifetime-realized ranking. Combines open companies + closed
     /// companies so a fully-exited winner still shows up.
     private var ranked: [StockPerf] {
         let lifetime = PerformanceData.lifetimeStocks(
-            companies: store.companies + store.closedCompanies,
-            allTrades: store.allTrades,
-            shareSells: store.allShareSells,
-            shareLots: store.allShareLots
+            companies: (store.companies + store.closedCompanies).filter { keep($0.ticker) },
+            allTrades: store.allTrades.filter { keep($0.ticker) },
+            shareSells: store.allShareSells.filter { keep($0.ticker) },
+            shareLots: store.allShareLots.filter { keep($0.ticker) }
         )
         return lifetime.sorted { $0.realized > $1.realized }
     }

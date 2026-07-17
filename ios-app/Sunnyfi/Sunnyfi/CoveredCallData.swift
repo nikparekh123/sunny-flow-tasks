@@ -374,6 +374,23 @@ enum CoveredCallData {
         var net: Double { sharesAndCalls + putsPL }
     }
 
+    /// Realized / unrealized / total, over a ticker set. The Performance
+    /// page renders THIS — same engine as the Covered Call tally — so the
+    /// two surfaces can never disagree.
+    struct PnL: Sendable {
+        let realized: Double
+        let unrealized: Double
+        var total: Double { realized + unrealized }
+    }
+
+    static func pnl(store: PortfolioStore, tickers: [String]) -> PnL {
+        let t = tally(store: store, tickers: tickers)
+        return PnL(
+            realized: t.realized,
+            unrealized: t.sharesUnrealized + t.callsUnrealized + t.putsPL
+        )
+    }
+
     static func tally(store: PortfolioStore, tickers: [String]) -> Tally {
         var t = Tally()
         for sym in tickers {
