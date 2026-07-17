@@ -258,7 +258,7 @@ private struct TickerBody: View {
                 calendarGrid(m).padding(.top, 18)
                 if let s = effectiveSlot(m) { slotDetail(s).padding(.top, 16) }
                 legend.padding(.top, 22)
-                Text("Numbers show premium / share · tap any expiry for detail")
+                Text("Numbers show premium collected · tap any expiry for detail")
                     .font(.system(size: 11)).foregroundStyle(Color.theme.fg4)
                     .frame(maxWidth: .infinity).padding(.top, 12)
             }
@@ -330,20 +330,30 @@ private struct TickerBody: View {
         }
     }
 
+    /// Compact dollar amount for a calendar box: 400→".4k", 1200→"1.2k",
+    /// 12000→"12k". Matches the total shown in the tap-through detail.
+    private func compactAmt(_ v: Double) -> String {
+        let k = v / 1000
+        if k >= 10 { return String(format: "%.0fk", k) }
+        if k >= 1 { return String(format: "%.1fk", k) }
+        let s = String(format: "%.1f", k)
+        return (s.hasPrefix("0") ? String(s.dropFirst()) : s) + "k"
+    }
+
     @ViewBuilder
     private func boxFill(_ s: CalSlot) -> some View {
-        let num = s.premiumPerShare.map { String(format: "%.1f", $0) } ?? ""
+        let num = s.premiumTotal.map { compactAmt($0) } ?? ""
         switch s.kind {
         case .assigned:
             Circle().fill(Color.theme.gold)
-                .overlay(Text(num).font(.numeric(size: 12, weight: .bold)).foregroundStyle(Color(hex: 0x1d1500)))
+                .overlay(Text(num).font(.numeric(size: 10.5, weight: .bold)).minimumScaleFactor(0.7).lineLimit(1).padding(.horizontal, 1).foregroundStyle(Color(hex: 0x1d1500)))
         case .kept:
             Circle().fill(Color.theme.pos)
-                .overlay(Text(num).font(.numeric(size: 12, weight: .bold)).foregroundStyle(.white))
+                .overlay(Text(num).font(.numeric(size: 10.5, weight: .bold)).minimumScaleFactor(0.7).lineLimit(1).padding(.horizontal, 1).foregroundStyle(.white))
         case .open:
             Circle().fill(Color.theme.page)
                 .overlay(Circle().strokeBorder(Color.theme.pos, lineWidth: 2.5))
-                .overlay(Text(num).font(.numeric(size: 12, weight: .bold)).foregroundStyle(Color.theme.pos))
+                .overlay(Text(num).font(.numeric(size: 10.5, weight: .bold)).minimumScaleFactor(0.7).lineLimit(1).padding(.horizontal, 1).foregroundStyle(Color.theme.pos))
         case .future:
             Circle().fill(Color.clear)
                 .overlay(Circle().strokeBorder(Color.theme.fg4.opacity(0.5), lineWidth: 1.5))

@@ -194,11 +194,12 @@ private struct TickerWrapper: Identifiable {
 private struct DockedTabBar: View {
     @Binding var active: AppTab
 
-    /// Tabs we actually render. Hedge is still rebuilding so it's
-    /// suppressed (enum case kept for push deep-links). Home is now
-    /// the live Today landing tab — visible and default.
+    /// Tabs we actually render. Hedge is still rebuilding, and Trades is
+    /// hidden now that Covered Call is the primary surface — both enum
+    /// cases are kept for push deep-links / routing. Home is the live
+    /// Today landing tab — visible and default.
     private var visibleTabs: [AppTab] {
-        AppTab.allCases.filter { $0 != .hedge }
+        AppTab.allCases.filter { $0 != .hedge && $0 != .trades }
     }
 
     var body: some View {
