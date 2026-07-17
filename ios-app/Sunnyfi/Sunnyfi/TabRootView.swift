@@ -12,7 +12,7 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Hashable {
-    case home, trades, hedge, performance, account
+    case home, trades, coveredCall, hedge, performance, account
 
     var label: String {
         switch self {
@@ -20,6 +20,9 @@ enum AppTab: String, CaseIterable, Hashable {
         // N things that matter today. See design_handoff_today_homepage.
         case .home:        return "Today"
         case .trades:      return "Trades"
+        // Wheel-style cycle monitoring, one tab per ticker. Supersedes
+        // the short-lived Trades → Income segment.
+        case .coveredCall: return "Covered Call"
         case .hedge:       return "Hedge"
         // 5-tab layout — "Performance" shortens to "Perf" so the
         // labels don't crowd. Per package 4 of the design handoff.
@@ -32,6 +35,8 @@ enum AppTab: String, CaseIterable, Hashable {
         switch self {
         case .home:        return "sun.max.fill"
         case .trades:      return "chart.line.uptrend.xyaxis"
+        // The wheel: buy → sell call → assigned → repeat.
+        case .coveredCall: return "arrow.triangle.2.circlepath"
         // Shield = "protect the book". Hedge tab is the awareness
         // surface — not transactional like Trades.
         case .hedge:       return "shield.lefthalf.filled"
@@ -83,6 +88,7 @@ struct TabRootView: View {
                     switch tab {
                     case .home:        TodayScreen(store: store)
                     case .trades:      TradesScreen(store: store, auth: auth)
+                    case .coveredCall: CoveredCallScreen(store: store)
                     case .hedge:       HedgeScreen(store: store, auth: auth)
                     case .performance: PerformanceScreen(store: store, auth: auth)
                     case .account:     AccountScreen(auth: auth, lock: lock, prefs: prefs, store: store)
@@ -234,6 +240,10 @@ private struct DockedTabBar: View {
                 .font(.system(size: 22, weight: .medium))
             Text(t.label)
                 .font(.ui(size: 10, weight: isActive ? .semibold : .regular))
+                // "Covered Call" is the longest label — keep every tab
+                // on one line rather than letting it wrap the bar.
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .foregroundStyle(isActive ? Color.theme.neon : Color.theme.fg3)
         .frame(maxWidth: .infinity, minHeight: 48)
