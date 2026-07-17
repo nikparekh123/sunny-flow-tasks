@@ -55,6 +55,7 @@ struct CoveredCallCycle: Identifiable, Sendable {
     let cycleStartDate: String
     let shares: Double
     let entryPrice: Double
+    let lotCount: Int
     let legs: [CoveredCallLeg]
     let cycleEndDate: String?        // nil = current, open cycle
     let assignmentStrike: Double?
@@ -155,6 +156,15 @@ struct CoveredCallTicker: Identifiable, Sendable {
     /// Put mark-to-market vs what was paid.
     var exitPutPL: Double { put?.pnl ?? 0 }
     var exitNet: Double { exitSharesPL + exitCallBuyback + exitPutPL }
+
+    /// Total P&L for this ticker: realized (closed cycles) + everything
+    /// currently unrealized (which is exactly the "if closed now" net).
+    var totalPnL: Double { realizedToDate + exitNet }
+    /// Return on the current cycle's invested capital.
+    var totalPnLPct: Double {
+        guard let c = current, c.entryPrice > 0, c.shares > 0 else { return 0 }
+        return totalPnL / (c.entryPrice * c.shares) * 100
+    }
     /// Net as % of the cycle's capital at adjusted basis.
     var exitNetPct: Double {
         guard let c = current, c.adjustedBasis > 0, c.shares > 0 else { return 0 }
@@ -179,24 +189,40 @@ struct CoveredCallTicker: Identifiable, Sendable {
 
 // MARK: - Win rate + calendar
 
-/// A single expiry slot on the win calendar.
-enum CalCell: Sendable { case assigned, kept, open, none }
+enum SlotKind: Sendable { case assigned, kept, open, future, none }
+
+/// A single M/W/F expiry slot on the win calendar. Carries enough to
+/// render the box AND drive the tap-through detail panel.
+struct CalSlot: Identifiable, Sendable {
+    let id: String
+    let kind: SlotKind
+    let weekday: String        // "Mon" | "Wed" | "Fri"
+    let dateLabel: String      // "7/14"
+    let premiumPerShare: Double?
+    let premiumTotal: Double?
+    let strike: Double?
+    var isTappable: Bool { kind != .none }
+}
 
 struct CalWeek: Identifiable, Sendable {
-    let id: String       // Monday ISO
-    let label: String    // "6/2"
-    let mon: CalCell
-    let wed: CalCell
-    let fri: CalCell
+    let id: String
+    let label: String          // Monday "M/d"
+    let mon: CalSlot
+    let wed: CalSlot
+    let fri: CalSlot
+    var slots: [CalSlot] { [mon, wed, fri] }
 }
 
 struct CalMonth: Identifiable, Sendable {
-    let id: String       // "2026-06"
-    let label: String    // "June 2026"
+    let id: String
+    let label: String          // "June 2026"
     let weeks: [CalWeek]
-    let wins: Int        // assigned
-    let resolved: Int    // assigned + kept
-    var winRatePct: Double { resolved > 0 ? Double(wins) / Double(resolved) * 100 : 0 }
+    let assigned: Int
+    let kept: Int
+    let open: Int
+    var resolved: Int { assigned + kept }
+    var winRatePct: Double { resolved > 0 ? Double(assigned) / Double(resolved) * 100 : 0 }
+    var allSlots: [CalSlot] { weeks.flatMap(\.slots) }
 }
 
 extension CoveredCallTicker {
@@ -220,58 +246,87 @@ extension CoveredCallTicker {
 
 enum CoveredCallData {
 
-    /// Lay legs onto a Monday/Wednesday/Friday grid, grouped by month.
-    /// The M/W/F cadence is fixed for these names, so empty slots render
-    /// as "none" and the hit/miss pattern reads like a heartbeat.
-    static func calendar(legs: [CoveredCallLeg]) -> [CalMonth] {
+    /// Lay legs onto a fixed Monday/Wednesday/Friday grid, grouped by
+    /// month. Weeks with a leg render fully; past slots with no call are
+    /// "none", upcoming slots (after today) are "future". Each slot
+    /// carries its premium + strike so the box shows premium/share and
+    /// tapping opens a detail. The M/W/F cadence is permanent for these
+    /// names, so the hit/miss pattern reads like a heartbeat.
+    static func calendar(legs: [CoveredCallLeg], now: Date = Date()) -> [CalMonth] {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
-        cal.firstWeekday = 2   // Monday
+        cal.firstWeekday = 2
+        let today = cal.startOfDay(for: now)
 
-        struct Slot { let date: Date; let weekday: Int; let cell: CalCell }
-        var slots: [Slot] = []
-        for leg in legs {
-            guard let d = AppDates.parseISODay(leg.expiry) else { continue }
-            let cell: CalCell
-            switch leg.status {
-            case .assigned: cell = .assigned
-            case .open:     cell = .open
-            default:        cell = .kept          // expired / rolled
-            }
-            slots.append(Slot(date: d, weekday: cal.component(.weekday, from: d), cell: cell))
+        let mdFmt = DateFormatter(); mdFmt.dateFormat = "M/d"; mdFmt.timeZone = cal.timeZone
+        let monthFmt = DateFormatter(); monthFmt.dateFormat = "LLLL yyyy"; monthFmt.timeZone = cal.timeZone
+        let keyFmt = DateFormatter(); keyFmt.dateFormat = "yyyy-MM-dd"; keyFmt.timeZone = cal.timeZone
+
+        func monday(_ d: Date) -> Date {
+            cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: d)) ?? d
         }
 
-        let monthFmt = DateFormatter(); monthFmt.dateFormat = "LLLL yyyy"; monthFmt.timeZone = cal.timeZone
-        let mdFmt = DateFormatter(); mdFmt.dateFormat = "M/d"; mdFmt.timeZone = cal.timeZone
-        let isoFmt = DateFormatter(); isoFmt.dateFormat = "yyyy-MM-dd"; isoFmt.timeZone = cal.timeZone
+        var legByDay: [String: CoveredCallLeg] = [:]
+        for l in legs {
+            if let d = AppDates.parseISODay(l.expiry) { legByDay[keyFmt.string(from: d)] = l }
+        }
 
-        let byMonth = Dictionary(grouping: slots) { s -> String in
-            let c = cal.dateComponents([.year, .month], from: s.date)
-            return String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
+        // Render weeks = every week that holds a leg, plus the current
+        // month's weeks (so upcoming M/W/F slots surface as "future").
+        var mondays = Set<Date>()
+        for l in legs { if let d = AppDates.parseISODay(l.expiry) { mondays.insert(monday(d)) } }
+        let mc = cal.dateComponents([.year, .month], from: today)
+        if let firstOfMonth = cal.date(from: mc),
+           let range = cal.range(of: .day, in: .month, for: today) {
+            let last = cal.date(byAdding: .day, value: range.count - 1, to: firstOfMonth) ?? firstOfMonth
+            var wk = monday(firstOfMonth)
+            while wk <= last { mondays.insert(wk); wk = cal.date(byAdding: .day, value: 7, to: wk) ?? last.addingTimeInterval(1) }
+        }
+
+        func slot(_ date: Date, _ name: String) -> CalSlot {
+            let key = keyFmt.string(from: date)
+            if let leg = legByDay[key] {
+                let kind: SlotKind
+                switch leg.status {
+                case .assigned: kind = .assigned
+                case .open:     kind = .open
+                default:        kind = .kept
+                }
+                let ct = leg.status == .open ? leg.remaining : leg.contracts
+                return CalSlot(id: key + name, kind: kind, weekday: name, dateLabel: mdFmt.string(from: date),
+                               premiumPerShare: leg.premiumPerShare,
+                               premiumTotal: leg.premiumPerShare * ct * 100, strike: leg.strike)
+            }
+            return CalSlot(id: key + name, kind: date > today ? .future : .none,
+                           weekday: name, dateLabel: mdFmt.string(from: date),
+                           premiumPerShare: nil, premiumTotal: nil, strike: nil)
+        }
+
+        // Group weeks by the FRIDAY's month (the primary weekly expiry),
+        // so a Mon 6/30 week whose Fri is 7/3 files under July.
+        var byMonth: [String: [(Date, CalWeek)]] = [:]
+        for m in mondays {
+            let wed = cal.date(byAdding: .day, value: 2, to: m) ?? m
+            let fri = cal.date(byAdding: .day, value: 4, to: m) ?? m
+            let week = CalWeek(id: keyFmt.string(from: m), label: mdFmt.string(from: m),
+                               mon: slot(m, "Mon"), wed: slot(wed, "Wed"), fri: slot(fri, "Fri"))
+            let fc = cal.dateComponents([.year, .month], from: fri)
+            byMonth[String(format: "%04d-%02d", fc.year ?? 0, fc.month ?? 0), default: []].append((m, week))
         }
 
         var months: [CalMonth] = []
         for key in byMonth.keys.sorted() {
-            let ms = byMonth[key]!
-            let byWeek = Dictionary(grouping: ms) { s -> Date in
-                cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: s.date)) ?? s.date
-            }
-            var weeks: [CalWeek] = []
-            for monday in byWeek.keys.sorted() {
-                let ws = byWeek[monday]!
-                func cell(_ wd: Int) -> CalCell { ws.first(where: { $0.weekday == wd })?.cell ?? .none }
-                weeks.append(CalWeek(
-                    id: isoFmt.string(from: monday),
-                    label: mdFmt.string(from: monday),
-                    mon: cell(2), wed: cell(4), fri: cell(6)
-                ))
-            }
+            let weeks = byMonth[key]!.sorted { $0.0 < $1.0 }.map(\.1)
+            let slots = weeks.flatMap(\.slots)
+            let label = weeks.first
+                .flatMap { AppDates.parseISODay($0.id) }
+                .map { cal.date(byAdding: .day, value: 4, to: $0) ?? $0 }
+                .map { monthFmt.string(from: $0) } ?? key
             months.append(CalMonth(
-                id: key,
-                label: ms.first.map { monthFmt.string(from: $0.date) } ?? key,
-                weeks: weeks,
-                wins: ms.filter { $0.cell == .assigned }.count,
-                resolved: ms.filter { $0.cell == .assigned || $0.cell == .kept }.count
+                id: key, label: label, weeks: weeks,
+                assigned: slots.filter { $0.kind == .assigned }.count,
+                kept: slots.filter { $0.kind == .kept }.count,
+                open: slots.filter { $0.kind == .open }.count
             ))
         }
         return months
@@ -446,6 +501,7 @@ enum CoveredCallData {
             cycleStartDate: start,
             shares: shares,
             entryPrice: entry,
+            lotCount: lots.count,
             legs: legs,
             cycleEndDate: endDate,
             assignmentStrike: assignmentStrike,

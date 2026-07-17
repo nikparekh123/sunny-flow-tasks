@@ -130,6 +130,7 @@ struct CoveredCallScreen: View {
 private struct TickerBody: View {
     let data: CoveredCallTicker
     @State private var monthIndex: Int? = nil
+    @State private var selectedSlotID: String? = nil
     @State private var historyOpen = false
 
     private var cycle: CoveredCallCycle? { data.current }
@@ -146,11 +147,11 @@ private struct TickerBody: View {
         VStack(alignment: .leading, spacing: 0) {
             if let c = cycle {
                 badge
+                pnlSnapshot
                 heroBasis(c)
                 rule
                 winCalendar
-                rule
-                forkRow(c)
+                currentPositionSection(c)
                 statsGrid(c)
                 openCallSection(c)
                 exitSection
@@ -162,6 +163,23 @@ private struct TickerBody: View {
             }
             historySection
         }
+    }
+
+    // ── Total P&L snapshot (per ticker) ──
+    private var pnlSnapshot: some View {
+        let v = data.totalPnL
+        return HStack(spacing: 9) {
+            Text("TOTAL P&L").font(.system(size: 11, weight: .bold)).tracking(0.4)
+                .foregroundStyle(Color.theme.fg3)
+            Text(fmtMoney(v, sign: true))
+                .font(.numeric(size: 22, weight: .heavy)).tracking(-0.4).monospacedDigit()
+                .foregroundStyle(Color.signed(v))
+            Text(fmtPct(data.totalPnLPct))
+                .font(.numeric(size: 13, weight: .bold)).monospacedDigit()
+                .foregroundStyle(Color.signed(v))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 16)
     }
 
     private var rule: some View {
@@ -202,55 +220,66 @@ private struct TickerBody: View {
         .frame(maxWidth: .infinity)
     }
 
-    // ── Win calendar (month nav + M/W/F grid + win rate) ──
+    // ── Win calendar (month nav + M/W/F premium boxes + tap detail) ──
+    private func effectiveSlot(_ m: CalMonth) -> CalSlot? {
+        let slots = m.allSlots
+        if let id = selectedSlotID, let s = slots.first(where: { $0.id == id }) { return s }
+        if let open = slots.first(where: { $0.kind == .open }) { return open }
+        return slots.last(where: { $0.kind == .assigned || $0.kind == .kept })
+    }
+
     private var winCalendar: some View {
         VStack(spacing: 0) {
             if months.isEmpty {
                 Text("No expiries yet")
-                    .font(.system(size: 13)).foregroundStyle(Color.theme.fg4)
-                    .padding(.top, 24)
+                    .font(.system(size: 13)).foregroundStyle(Color.theme.fg4).padding(.top, 24)
             } else {
                 let m = months[mIdx]
                 HStack(spacing: 14) {
-                    navButton("chevron.left", enabled: mIdx > 0) {
-                        monthIndex = max(0, mIdx - 1)
-                    }
-                    VStack(spacing: 3) {
-                        Text(m.label).font(.system(size: 15, weight: .bold)).tracking(-0.2)
-                            .foregroundStyle(Color.theme.fg1)
-                        if m.resolved > 0 {
-                            Text("\(Int(m.winRatePct.rounded()))% exercised")
-                                .font(.numeric(size: 10.5, weight: .semibold)).monospacedDigit()
-                                .foregroundStyle(Color.theme.gold)
-                        }
-                    }
-                    .frame(minWidth: 130)
-                    navButton("chevron.right", enabled: mIdx < months.count - 1) {
-                        monthIndex = min(months.count - 1, mIdx + 1)
-                    }
+                    navButton("chevron.left", enabled: mIdx > 0) { monthIndex = max(0, mIdx - 1) }
+                    Text(m.label).font(.system(size: 15, weight: .bold)).tracking(-0.2)
+                        .foregroundStyle(Color.theme.fg1).frame(minWidth: 130)
+                    navButton("chevron.right", enabled: mIdx < months.count - 1) { monthIndex = min(months.count - 1, mIdx + 1) }
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 24)
+                .frame(maxWidth: .infinity).padding(.top, 24)
 
-                calendarGrid(m).padding(.top, 22)
+                summaryLine(m).padding(.top, 18)
+                calendarGrid(m).padding(.top, 18)
+                if let s = effectiveSlot(m) { slotDetail(s).padding(.top, 16) }
                 legend.padding(.top, 22)
-                winRateLine.padding(.top, 20)
+                Text("Numbers show premium / share · tap any expiry for detail")
+                    .font(.system(size: 11)).foregroundStyle(Color.theme.fg4)
+                    .frame(maxWidth: .infinity).padding(.top, 12)
             }
         }
     }
 
+    /// "N assigned · N kept · N% rate · N open" for the shown month.
+    private func summaryLine(_ m: CalMonth) -> some View {
+        HStack(spacing: 7) {
+            Text("\(m.assigned) assigned")
+                .font(.numeric(size: 14, weight: .heavy)).monospacedDigit().foregroundStyle(Color.theme.fg1)
+            sep; Text("\(m.kept) kept")
+            sep; Text("\(Int(m.winRatePct.rounded()))% rate")
+            if m.open > 0 { sep; Text("\(m.open) open") }
+        }
+        .font(.numeric(size: 13, weight: .medium)).monospacedDigit()
+        .foregroundStyle(Color.theme.fg3)
+        .frame(maxWidth: .infinity)
+    }
+    private var sep: some View { Text("·").foregroundStyle(Color.theme.fg4) }
+
     private func navButton(_ icon: String, enabled: Bool, _ tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
             Image(systemName: icon).font(.system(size: 12, weight: .bold))
-                .foregroundStyle(Color.theme.fg2)
-                .frame(width: 30, height: 30)
+                .foregroundStyle(Color.theme.fg2).frame(width: 30, height: 30)
                 .overlay(Circle().strokeBorder(Color.theme.hair, lineWidth: 1))
         }
         .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.3)
     }
 
     private func calendarGrid(_ m: CalMonth) -> some View {
-        Grid(horizontalSpacing: 6, verticalSpacing: 15) {
+        Grid(horizontalSpacing: 7, verticalSpacing: 7) {
             GridRow {
                 Color.clear.frame(width: 16, height: 1)
                 ForEach(m.weeks) { w in
@@ -265,87 +294,162 @@ private struct TickerBody: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func dayRow(_ label: String, _ cells: [CalCell]) -> some View {
+    private func dayRow(_ label: String, _ slots: [CalSlot]) -> some View {
         GridRow {
             Text(label).font(.system(size: 11, weight: .heavy))
-                .foregroundStyle(Color.theme.fg3)
-                .gridColumnAlignment(.leading)
-            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
-                calDot(cell)
-            }
+                .foregroundStyle(Color.theme.fg3).gridColumnAlignment(.leading)
+            ForEach(slots) { s in box(s) }
         }
     }
 
     @ViewBuilder
-    private func calDot(_ cell: CalCell) -> some View {
-        switch cell {
-        case .assigned: Circle().fill(Color.theme.gold).frame(width: 22, height: 22)
-        case .kept:     Circle().fill(Color.theme.pos).frame(width: 22, height: 22)
-        case .open:
-            Circle().fill(Color.theme.page)
-                .overlay(Circle().strokeBorder(Color.theme.pos, lineWidth: 3))
-                .frame(width: 22, height: 22)
-        case .none:
-            Circle().fill(Color.theme.fg4.opacity(0.4)).frame(width: 8, height: 8)
+    private func box(_ s: CalSlot) -> some View {
+        let selected = effectiveSlot(months[mIdx])?.id == s.id
+        let content = boxFill(s)
+            .frame(maxWidth: 44).aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if selected && s.isTappable {
+                    Circle().strokeBorder(Color.theme.fg1, lineWidth: 2.5).padding(-3)
+                }
+            }
+        if s.isTappable {
+            Button { selectedSlotID = s.id } label: { content }.buttonStyle(.plain)
+        } else {
+            content
         }
     }
 
+    @ViewBuilder
+    private func boxFill(_ s: CalSlot) -> some View {
+        let num = s.premiumPerShare.map { String(format: "%.1f", $0) } ?? ""
+        switch s.kind {
+        case .assigned:
+            Circle().fill(Color.theme.gold)
+                .overlay(Text(num).font(.numeric(size: 12, weight: .bold)).foregroundStyle(Color(hex: 0x1d1500)))
+        case .kept:
+            Circle().fill(Color.theme.pos)
+                .overlay(Text(num).font(.numeric(size: 12, weight: .bold)).foregroundStyle(.white))
+        case .open:
+            Circle().fill(Color.theme.page)
+                .overlay(Circle().strokeBorder(Color.theme.pos, lineWidth: 2.5))
+                .overlay(Text(num).font(.numeric(size: 12, weight: .bold)).foregroundStyle(Color.theme.pos))
+        case .future:
+            Circle().fill(Color.clear)
+                .overlay(Circle().strokeBorder(Color.theme.fg4.opacity(0.5), lineWidth: 1.5))
+        case .none:
+            Circle().fill(Color.theme.page2)
+                .overlay(Text("–").font(.system(size: 12)).foregroundStyle(Color.theme.fg4))
+        }
+    }
+
+    private func slotDetail(_ s: CalSlot) -> some View {
+        let (desc, valLabel): (String, String) = {
+            switch s.kind {
+            case .assigned: return ("Called away · shares delivered", "premium · assigned")
+            case .kept:     return ("Expired OTM · shares held", "premium kept")
+            case .open:     return ("Working · expires this week", "premium in")
+            case .future:   return ("Upcoming expiry · no call yet", "pending")
+            case .none:     return ("No call sold this expiry", "")
+            }
+        }()
+        return HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("\(s.weekday) \(s.dateLabel) · " + (s.strike.map { "$\(fmtStrike($0)) call" } ?? "no call"))
+                    .font(.numeric(size: 15, weight: .heavy)).monospacedDigit().foregroundStyle(Color.theme.fg1)
+                Text(desc).font(.system(size: 12)).foregroundStyle(Color.theme.fg3)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(s.premiumTotal.map { fmtMoney($0, sign: s.kind == .assigned) } ?? "—")
+                    .font(.numeric(size: 17, weight: .heavy)).monospacedDigit()
+                    .foregroundStyle(s.kind == .assigned ? Color.theme.pos : Color.theme.fg1)
+                Text(valLabel.uppercased()).font(.system(size: 10, weight: .bold)).tracking(0.5)
+                    .foregroundStyle(Color.theme.fg4)
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.theme.page2))
+    }
+
     private var legend: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 16) {
             legendItem(Color.theme.pos, "kept")
             legendItem(Color.theme.gold, "assigned")
-            legendRing("open")
+            legendRing(false, "open")
+            legendRing(true, "upcoming")
         }
         .frame(maxWidth: .infinity)
     }
     private func legendItem(_ c: Color, _ t: String) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             Circle().fill(c).frame(width: 11, height: 11)
-            Text(t).font(.system(size: 12)).foregroundStyle(Color.theme.fg3)
+            Text(t).font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3)
         }
     }
-    private func legendRing(_ t: String) -> some View {
-        HStack(spacing: 7) {
+    private func legendRing(_ grey: Bool, _ t: String) -> some View {
+        HStack(spacing: 6) {
             Circle().fill(Color.theme.page)
-                .overlay(Circle().strokeBorder(Color.theme.pos, lineWidth: 2.5))
+                .overlay(Circle().strokeBorder(grey ? Color.theme.fg4.opacity(0.5) : Color.theme.pos, lineWidth: 2))
                 .frame(width: 11, height: 11)
-            Text(t).font(.system(size: 12)).foregroundStyle(Color.theme.fg3)
+            Text(t).font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3)
         }
     }
 
-    private var winRateLine: some View {
-        HStack(spacing: 8) {
-            Text("WIN RATE").font(.system(size: 10, weight: .heavy)).tracking(1)
-                .foregroundStyle(Color.theme.fg3)
-            Text("\(Int(data.winRatePct.rounded()))%")
-                .font(.numeric(size: 17, weight: .heavy)).monospacedDigit()
-                .foregroundStyle(Color.theme.gold)
-            Text("\(data.winsCount) of \(data.resolvedCount) exercised")
-                .font(.numeric(size: 12, weight: .medium)).monospacedDigit()
-                .foregroundStyle(Color.theme.fg4)
-            Spacer(minLength: 0)
-        }
-    }
-
-    // ── Exercised / not-exercised fork ──
-    private func forkRow(_ c: CoveredCallCycle) -> some View {
-        Group {
+    // ── Current position: qty cards + exercised/not-exercised fork ──
+    private func currentPositionSection(_ c: CoveredCallCycle) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Current position")
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.theme.fg2)
+                .padding(.top, 26)
+            qtyCards(c).padding(.top, 16)
             if let gain = data.ifExercisedGain {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Current position")
-                        .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.theme.fg2)
-                        .padding(.top, 24)
-                    HStack(alignment: .top, spacing: 20) {
-                        forkCell("If exercised", fmtMoney(gain, sign: true),
-                                 sub: "\(fmtMoney(data.realizedToDate, sign: true)) realized so far",
-                                 tone: Color.theme.pos)
-                        forkCell("If not exercised", fmtMoney(c.ifNotExercisedBasis, decimals: c.ifNotExercisedBasis >= 1000 ? 0 : 2),
-                                 sub: notExercisedSub(c), tone: Color.theme.fg1)
-                    }
-                    .padding(.top, 18)
+                HStack(alignment: .top, spacing: 20) {
+                    forkCell("If exercised", fmtMoney(gain, sign: true),
+                             sub: "\(fmtMoney(data.realizedToDate, sign: true)) realized so far",
+                             tone: Color.theme.pos)
+                    forkCell("If not exercised", fmtMoney(c.ifNotExercisedBasis, decimals: c.ifNotExercisedBasis >= 1000 ? 0 : 2),
+                             sub: notExercisedSub(c), tone: Color.theme.fg1)
                 }
+                .padding(.top, 20)
             }
         }
+    }
+
+    private func qtyCards(_ c: CoveredCallCycle) -> some View {
+        HStack(spacing: 10) {
+            qtyCard("Shares", "\(Int(c.shares).formatted())",
+                    sub: "\(c.lotCount) lot\(c.lotCount == 1 ? "" : "s")",
+                    total: fmtMoney(c.shares * data.currentPrice), totalTone: Color.theme.fg1)
+            qtyCard("Calls",
+                    c.openLeg.map { "\(Int($0.remaining))" } ?? "0",
+                    sub: c.openLeg.map { "avg \(fmtMoney($0.premiumPerShare, decimals: 2))" } ?? "none",
+                    total: c.openCallPremium > 0 ? fmtMoney(c.openCallPremium, sign: true) : "$0",
+                    totalTone: c.openCallPremium > 0 ? Color.theme.pos : Color.theme.fg3)
+            qtyCard("Puts",
+                    data.put.map { "\(Int($0.contracts))" } ?? "0",
+                    sub: data.put.map { "avg \(fmtMoney($0.costBasisPerShare, decimals: 2))" } ?? "none",
+                    total: data.put.map { fmtMoney($0.value) } ?? "$0",
+                    totalTone: Color.theme.fg1)
+        }
+    }
+
+    private func qtyCard(_ k: String, _ v: String, sub: String, total: String, totalTone: Color) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(k.uppercased()).font(.system(size: 10.5, weight: .bold)).tracking(0.3)
+                .foregroundStyle(Color.theme.fg3)
+            Text(v).font(.numeric(size: 24, weight: .heavy)).tracking(-0.7).monospacedDigit()
+                .foregroundStyle(Color.theme.fg1).lineLimit(1).minimumScaleFactor(0.6)
+                .padding(.top, 9)
+            Text(sub).font(.numeric(size: 10.5, weight: .medium)).monospacedDigit()
+                .foregroundStyle(Color.theme.fg4).padding(.top, 3)
+            Text(total).font(.numeric(size: 13, weight: .bold)).monospacedDigit()
+                .foregroundStyle(totalTone).lineLimit(1).minimumScaleFactor(0.7)
+                .padding(.top, 10)
+                .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1).padding(.top, 5) }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.theme.page2))
     }
 
     private func notExercisedSub(_ c: CoveredCallCycle) -> String {
