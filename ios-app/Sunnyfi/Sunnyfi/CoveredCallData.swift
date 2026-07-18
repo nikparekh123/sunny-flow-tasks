@@ -162,10 +162,13 @@ struct CoveredCallTicker: Identifiable, Sendable {
     }
 
     // ── Exit math (what closing this ticker right now nets) ──
-    /// Shares P&L vs adjusted basis.
+    /// Shares P&L vs RAW cost. Premium is booked in realizedToDate, so
+    /// the share line must NOT also credit it (that would double-count).
+    /// The exit NET is identical to the old adjusted-basis version — the
+    /// premium just moves from here into realized.
     var exitSharesPL: Double {
         guard let c = current else { return 0 }
-        return (currentPrice - c.adjustedBasis) * c.shares
+        return (currentPrice - c.entryPrice) * c.shares
     }
     /// NET result of unwinding EVERY open call: premium collected less
     /// what it costs to buy them back. Because open-call premium isn't in
@@ -489,7 +492,11 @@ enum CoveredCallData {
             current: current,
             closed: cycles.reversed(),          // newest first for history
             put: put,
-            realizedToDate: cycles.compactMap(\.realizedPL).reduce(0, +),
+            // Realized = premium banked on every RESOLVED call (closed
+            // cycles' realizedPL already folds theirs in; add the live
+            // cycle's resolved premium) + assignment share gains. The
+            // open call's premium is NOT here — it's still pending.
+            realizedToDate: cycles.compactMap(\.realizedPL).reduce(0, +) + (current?.premiumCollected ?? 0),
             openCallContracts: ccCt,
             openCallAvgPremium: ccCt > 0 ? ccPrem / (ccCt * 100) : 0,
             openCallPremiumTotal: ccPrem,

@@ -601,7 +601,7 @@ private struct TickerBody: View {
                 }
             }
             .padding(.top, 14)
-            exitRow("Shares vs adjusted basis", data.exitSharesPL)
+            exitRow("Shares vs cost", data.exitSharesPL)
             exitRow("Close open call (net)", data.exitCallBuyback)
             if data.put != nil { exitRow("Put at current mark", data.exitPutPL) }
             Rectangle().fill(Color.theme.hair).frame(height: 1).padding(.vertical, 13)
