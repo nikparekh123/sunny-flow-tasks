@@ -67,6 +67,12 @@ struct CoveredCallCycle: Identifiable, Sendable {
     /// Premium collected on the call currently open (pending). Shows up
     /// as the extra basis you'd pick up if it expires worthless.
     let openCallPremium: Double
+    /// TOTAL premium collected this cycle — every call sold (resolved
+    /// AND the open one), gross. This is the headline number and it
+    /// equals the sum of the calendar circles. Distinct from
+    /// premiumCollected (resolved-only), which is what's locked into the
+    /// basis; the difference is exactly the pending open-call premium.
+    let premiumGross: Double
     /// Realized P&L booked when the cycle closed (shares + premium).
     let realizedPL: Double?
 
@@ -567,6 +573,11 @@ enum CoveredCallData {
             .reduce(0.0) { $0 + $1.premiumPerShare * $1.remaining * 100 }
         let debits = closes.reduce(0.0) { $0 + $1.premium * $1.contracts * 100 }
         let resolvedPremium = resolvedCredits - debits
+        // Headline: gross premium across every call sold this cycle
+        // (resolved + open). Matches the sum of the calendar circles.
+        let premiumGross = legs.reduce(0.0) { sum, l in
+            sum + l.premiumPerShare * (l.status == .open ? l.remaining : l.contracts) * 100
+        }
 
         // Realized on a closed cycle = the share P&L snapshot booked at
         // assignment + the premium that cycle locked in.
@@ -583,6 +594,7 @@ enum CoveredCallData {
             assignmentStrike: assignmentStrike,
             premiumCollected: resolvedPremium,
             openCallPremium: openCredits,
+            premiumGross: premiumGross,
             realizedPL: realizedTotal
         )
     }

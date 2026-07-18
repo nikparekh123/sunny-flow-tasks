@@ -503,7 +503,7 @@ private struct TickerBody: View {
                              sub: data.lastAssignment == nil ? "—" : "assigned")
                 }
                 GridRow {
-                    statCell("PREMIUM", fmtMoney(c.premiumCollected), sub: "this cycle", tone: Color.theme.pos)
+                    statCell("PREMIUM", fmtMoney(c.premiumGross), sub: "collected this cycle", tone: Color.theme.pos)
                     statCell("PRICE", fmtMoney(data.currentPrice, decimals: 2),
                              sub: fmtPct(data.distanceToBasisPct) + " vs basis",
                              subTone: Color.signed(data.distanceToBasisPct))
