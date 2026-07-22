@@ -134,6 +134,16 @@ struct CoveredCallTicker: Identifiable, Sendable {
     let putCostTotal: Double
     let putValueTotal: Double
 
+    // ── Position-tab detail (v2) ──
+    let callLegs: [OpenLegDetail]      // open short calls
+    let putLegs: [OpenLegDetail]       // open long puts
+    let longCallLegs: [OpenLegDetail]  // open long calls (LEAP overlay)
+    /// Recent calls vs the share price at their expiry, newest first.
+    let cushions: [CushionRow]
+    /// Today's $ move on the share position.
+    let todayPL: Double
+    let dayPct: Double
+
     var shares: Double { current?.shares ?? 0 }
 
     /// Realized P&L as a % of the current cycle's invested capital.
@@ -205,6 +215,87 @@ struct CoveredCallTicker: Identifiable, Sendable {
         guard let c = current, let leg = c.openLeg else { return nil }
         guard leg.strike < c.adjustedBasis else { return nil }
         return leg.strike - c.adjustedBasis   // negative
+    }
+}
+
+// MARK: - Position Detail v2 surfaces
+
+/// One open option leg, rendered in the position tabs.
+struct OpenLegDetail: Identifiable, Sendable {
+    let id: String
+    let expiry: String
+    let strike: Double
+    let contracts: Double
+    let costPerShare: Double     // premium paid/collected per share
+    let markPerShare: Double
+    /// Signed P&L for the holder. Long: (mark − cost); short: (cost − mark).
+    let pnl: Double
+    var pnlPct: Double { costPerShare > 0 ? (markPerShare - costPerShare) / costPerShare * 100 : 0 }
+}
+
+/// A resolved-or-open call plotted against the share price at its expiry
+/// — "how close each call sat".
+struct CushionRow: Identifiable, Sendable {
+    let id: String
+    let expiry: String
+    let strike: Double
+    let contracts: Double
+    let priceAtExpiry: Double
+    let status: CallLegStatus
+    /// % the strike sat above the price. Positive = OTM cushion.
+    var moneynessPct: Double {
+        priceAtExpiry > 0 ? (strike - priceAtExpiry) / priceAtExpiry * 100 : 0
+    }
+    var premiumTotal: Double
+}
+
+enum IncomeRange: String, CaseIterable, Identifiable, Sendable {
+    case month = "This month", quarter = "Quarter", all = "All time"
+    var id: String { rawValue }
+}
+
+extension CoveredCallTicker {
+    /// Every cycle, newest last.
+    var allCycles: [CoveredCallCycle] { closed.reversed() + (current.map { [$0] } ?? []) }
+    /// Premium harvested across every cycle — the hero number.
+    var lifetimePremium: Double { allCycles.reduce(0) { $0 + $1.premiumGross } }
+    var cycleCount: Int { allCycles.count }
+
+    /// Capital side of the return: realized share gains + unrealized
+    /// shares vs raw cost. Premium is the other half.
+    var capitalReturn: Double { exitSharesPL }
+    var totalReturn: Double { lifetimePremium + capitalReturn }
+
+    /// Annualized premium yield on capital at risk (shares × entry).
+    var annualizedYieldPct: Double {
+        guard let c = current, c.entryPrice > 0, c.shares > 0 else { return 0 }
+        let capital = c.entryPrice * c.shares
+        let days = max(c.daysHeld, 1)
+        return lifetimePremium / capital * (365.0 / Double(days)) * 100
+    }
+
+    /// Realized premium grouped by expiry weekday (Mon/Wed/Fri).
+    func incomeByWeekday(_ range: IncomeRange, now: Date = Date()) -> [(day: String, amount: Double)] {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let cutoff: Date? = {
+            switch range {
+            case .all:     return nil
+            case .month:   return AppDates.startOfMonth(now)
+            case .quarter: return cal.date(byAdding: .month, value: -3, to: now)
+            }
+        }()
+        var buckets: [Int: Double] = [2: 0, 4: 0, 6: 0]   // Mon, Wed, Fri
+        for leg in allLegs where leg.status != .open {
+            guard let d = AppDates.parseISODay(leg.expiry) else { continue }
+            if let cutoff, d < cutoff { continue }
+            let wd = cal.component(.weekday, from: d)
+            guard buckets[wd] != nil else { continue }
+            buckets[wd, default: 0] += leg.premiumPerShare * leg.contracts * 100
+        }
+        return [(day: "Mon", amount: buckets[2] ?? 0),
+                (day: "Wed", amount: buckets[4] ?? 0),
+                (day: "Fri", amount: buckets[6] ?? 0)]
     }
 }
 
@@ -514,6 +605,49 @@ enum CoveredCallData {
             pCt += r; pCost += r * t.premium * 100; pVal += r * mark(t) * 100
         }
 
+        // ── Per-leg detail for the position tabs ──
+        func legDetail(_ t: OptionTradeRow, isLong: Bool) -> OpenLegDetail {
+            let r = store.remainingContracts(for: t)
+            let m = mark(t)
+            let signed = isLong ? (m - t.premium) : (t.premium - m)
+            return OpenLegDetail(
+                id: t.id, expiry: t.expiry, strike: t.strike, contracts: r,
+                costPerShare: t.premium, markPerShare: m, pnl: signed * r * 100
+            )
+        }
+        let callLegs = openCalls
+            .sorted { $0.expiry < $1.expiry }
+            .map { legDetail($0, isLong: false) }
+        let putLegs = openPuts
+            .sorted { $0.expiry < $1.expiry }
+            .map { legDetail($0, isLong: true) }
+        let longCallLegs = store.allTrades
+            .filter {
+                $0.ticker == ticker && $0.option_type == "call" && $0.direction == "long"
+                    && $0.action == "open" && $0.voided_at == nil && store.remainingContracts(for: $0) > 0
+            }
+            .sorted { $0.expiry < $1.expiry }
+            .map { legDetail($0, isLong: true) }
+
+        // ── Cushion rows: each call vs the share price at its expiry ──
+        let closesByDate: [String: Double] = Dictionary(
+            store.dailyCloses.filter { $0.ticker == ticker }.map { ($0.date, $0.close_price) },
+            uniquingKeysWith: { a, _ in a }
+        )
+        let everyLeg = (cycles.flatMap(\.legs) + (current?.legs ?? []))
+            .sorted { $0.expiry > $1.expiry }
+        let cushions: [CushionRow] = everyLeg.prefix(6).map { leg in
+            let px = leg.status == .open
+                ? spot
+                : (closesByDate[String(leg.expiry.prefix(10))] ?? spot)
+            return CushionRow(
+                id: leg.id, expiry: leg.expiry, strike: leg.strike,
+                contracts: leg.status == .open ? leg.remaining : leg.contracts,
+                priceAtExpiry: px, status: leg.status,
+                premiumTotal: leg.premiumPerShare * (leg.status == .open ? leg.remaining : leg.contracts) * 100
+            )
+        }
+
         return CoveredCallTicker(
             ticker: ticker,
             currentPrice: spot,
@@ -532,7 +666,13 @@ enum CoveredCallData {
             putContracts: pCt,
             putAvgCost: pCt > 0 ? pCost / (pCt * 100) : 0,
             putCostTotal: pCost,
-            putValueTotal: pVal
+            putValueTotal: pVal,
+            callLegs: callLegs,
+            putLegs: putLegs,
+            longCallLegs: longCallLegs,
+            cushions: cushions,
+            todayPL: (stockLeg?.qty ?? 0) * spot * (company.dayPct / 100),
+            dayPct: company.dayPct
         )
     }
 
