@@ -461,9 +461,14 @@ enum CoveredCallData {
         return months
     }
 
+    /// Tickers surfaced on this tab. Scoped to NVDA while the strategy
+    /// is being validated — add symbols here (or return nil to disable
+    /// the filter) to widen it.
+    static let allowed: Set<String>? = ["NVDA"]
+
     /// Tickers with a covered-call book — shares held plus at least one
-    /// short call ever sold. Data-driven so it extends past NVDA/META
-    /// automatically. Ordered by position value desc.
+    /// short call ever sold. Data-driven so it extends automatically
+    /// once `allowed` is widened. Ordered by position value desc.
     static func tickers(store: PortfolioStore) -> [String] {
         let callTickers = Set(
             store.allTrades
@@ -472,6 +477,7 @@ enum CoveredCallData {
         )
         return store.companies
             .filter { callTickers.contains($0.ticker) }
+            .filter { allowed?.contains($0.ticker) ?? true }
             .compactMap { c -> (String, Double)? in
                 let qty = c.legs.first(where: { $0.kind == .stock })?.qty ?? 0
                 let lots = store.allShareLotsHistory.contains { $0.ticker == c.ticker }
@@ -517,6 +523,17 @@ enum CoveredCallData {
             if let c = matchingCall(s) { assignedKeys.insert("\(c.strike)|\(c.expiry)") }
         }
 
+        // Only a FULL call-away ends a cycle. A partial assignment (e.g.
+        // NVDA 7/20: 200 of ~1,800 shares) is an event INSIDE the cycle —
+        // resetting on it would split a continuously-held position and
+        // shred its basis, premium and history. Threshold: the sale has
+        // to take ~all of the shares held.
+        let heldNow = company.legs.first { $0.kind == .stock && $0.qty > 0 }?.qty ?? 0
+        let cycleEnders = assignments.filter { a in
+            guard let q = a.quantity, heldNow > 0 else { return false }
+            return q >= heldNow * 0.9
+        }
+
         let lots = store.allShareLotsHistory
             .filter { $0.ticker == ticker }
             .sorted { $0.acquired_date < $1.acquired_date }
@@ -526,7 +543,7 @@ enum CoveredCallData {
         var cycles: [CoveredCallCycle] = []
         var cursor: String? = nil     // exclusive lower bound (prev assignment date)
 
-        for a in assignments {
+        for a in cycleEnders {
             let window = lots.filter { lot in
                 (cursor == nil || lot.acquired_date > cursor!) && lot.acquired_date <= a.trade_date
             }
