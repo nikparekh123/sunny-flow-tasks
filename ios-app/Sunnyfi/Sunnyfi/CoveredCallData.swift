@@ -396,9 +396,35 @@ enum CoveredCallData {
         let spot = company.spot
 
         // ── Cycle boundaries: assignment sells, oldest → newest ──
+        //
+        // IBKR-synced trades arrive with closed_via NULL and their share
+        // sells tagged source='ibkr_flex' (only 8 legacy rows carry
+        // 'assignment'), so we can't rely on either tag. Infer instead
+        // from the unmistakable signature of an assignment: shares sold
+        // at EXACTLY a short call's strike, on or near that call's expiry.
+        let shortCalls = store.allTrades.filter {
+            $0.ticker == ticker && $0.option_type == "call"
+                && $0.direction == "short" && $0.action == "open" && $0.voided_at == nil
+        }
+        func matchingCall(_ s: ShareSellRow) -> OptionTradeRow? {
+            guard let price = s.price, let d = AppDates.parseISODay(s.trade_date) else { return nil }
+            return shortCalls.first { c in
+                guard let e = AppDates.parseISODay(c.expiry) else { return false }
+                return abs(c.strike - price) < 0.01
+                    && abs(e.timeIntervalSince(d)) <= 4 * 86_400
+            }
+        }
         let assignments = store.allShareSells
-            .filter { $0.ticker == ticker && $0.source == "assignment" }
+            .filter { $0.ticker == ticker }
+            .filter { $0.source == "assignment" || matchingCall($0) != nil }
             .sorted { $0.trade_date < $1.trade_date }
+
+        // Contract keys (strike|expiry) that were called away — drives the
+        // per-leg "assigned" status when closed_via is missing.
+        var assignedKeys = Set<String>()
+        for s in assignments {
+            if let c = matchingCall(s) { assignedKeys.insert("\(c.strike)|\(c.expiry)") }
+        }
 
         let lots = store.allShareLotsHistory
             .filter { $0.ticker == ticker }
@@ -417,6 +443,7 @@ enum CoveredCallData {
                 store: store, ticker: ticker, lots: window,
                 startAfter: cursor, endDate: a.trade_date,
                 assignmentStrike: a.price, sharesOverride: a.quantity,
+                assignedKeys: assignedKeys,
                 realized: a.realized_pl
             ) {
                 cycles.append(cycle)
@@ -441,6 +468,7 @@ enum CoveredCallData {
             sharesOverride: stockLeg?.qty,
             entryOverride: stockLeg?.avg,
             startOverride: liveStart,
+            assignedKeys: assignedKeys,
             realized: nil
         )
 
@@ -519,6 +547,7 @@ enum CoveredCallData {
         sharesOverride: Double?,
         entryOverride: Double? = nil,
         startOverride: String? = nil,
+        assignedKeys: Set<String> = [],
         realized: Double?
     ) -> CoveredCallCycle? {
         // The live cycle's shares + entry come from the IBKR-reconciled
@@ -562,7 +591,7 @@ enum CoveredCallData {
                 strike: t.strike,
                 premiumPerShare: t.premium,
                 contracts: t.contracts,
-                status: status(for: t, remaining: remaining, closes: closes),
+                status: status(for: t, remaining: remaining, closes: closes, assignedKeys: assignedKeys),
                 remaining: remaining,
                 mark: mark
             )
@@ -586,9 +615,16 @@ enum CoveredCallData {
             sum + l.premiumPerShare * (l.status == .open ? l.remaining : l.contracts) * 100
         }
 
-        // Realized on a closed cycle = the share P&L snapshot booked at
-        // assignment + the premium that cycle locked in.
-        let realizedTotal: Double? = endDate == nil ? nil : (realized ?? 0) + resolvedPremium
+        // Realized on a closed cycle = share P&L at assignment + the
+        // premium that cycle locked in. IBKR-synced sells come through
+        // with realized_pl = 0, so derive the share side from the
+        // assignment strike vs this cycle's entry when it's missing.
+        let assignedShareGain: Double = {
+            if let r = realized, r != 0 { return r }
+            guard let k = assignmentStrike, endDate != nil else { return 0 }
+            return (k - entry) * shares
+        }()
+        let realizedTotal: Double? = endDate == nil ? nil : assignedShareGain + resolvedPremium
 
         return CoveredCallCycle(
             ticker: ticker,
@@ -611,15 +647,22 @@ enum CoveredCallData {
     private static func status(
         for open: OptionTradeRow,
         remaining: Double,
-        closes: [OptionTradeRow]
+        closes: [OptionTradeRow],
+        assignedKeys: Set<String>
     ) -> CallLegStatus {
+        let key = "\(open.strike)|\(open.expiry)"
         if remaining > 0 {
-            // Still live — unless it's already past expiry with no close,
-            // in which case it lapsed worthless.
-            if (AppDates.daysUntil(open.expiry) ?? 0) < 0 { return .expired }
+            // An assigned call gets NO close row from IBKR, so it still
+            // reads as open here. Check assignment before assuming a
+            // past-expiry leg simply lapsed worthless.
+            if (AppDates.daysUntil(open.expiry) ?? 0) < 0 {
+                return assignedKeys.contains(key) ? .assigned : .expired
+            }
             return .open
         }
-        // Closed: find the close on the same contract and read closed_via.
+        // Closed. Inferred assignment wins over the (usually NULL)
+        // closed_via tag.
+        if assignedKeys.contains(key) { return .assigned }
         let match = closes.first {
             $0.strike == open.strike && $0.expiry == open.expiry
                 && ($0.closes_trade_id == open.id || $0.closed_via != nil)
