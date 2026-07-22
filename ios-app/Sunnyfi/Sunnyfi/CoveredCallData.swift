@@ -49,6 +49,21 @@ struct CoveredCallLeg: Identifiable, Sendable {
     var dte: Int { AppDates.daysUntil(expiry) ?? 0 }
 }
 
+/// All calls sold at one (expiry, strike), netted against whatever was
+/// paid to buy them back. This is the unit everything reconciles on: an
+/// expiry routinely has many separate fills, and a roll/buy-back can
+/// swamp the credit (NVDA 7/22: sold $2,800, bought back $11,302).
+struct ExpiryRollup: Identifiable, Sendable {
+    var id: String { "\(expiry)|\(strike)" }
+    let expiry: String
+    let strike: Double
+    let contracts: Double
+    let credit: Double
+    let buyback: Double
+    let status: CallLegStatus
+    var net: Double { credit - buyback }
+}
+
 struct CoveredCallCycle: Identifiable, Sendable {
     var id: String { "\(ticker)-\(cycleStartDate)" }
     let ticker: String
@@ -67,12 +82,13 @@ struct CoveredCallCycle: Identifiable, Sendable {
     /// Premium collected on the call currently open (pending). Shows up
     /// as the extra basis you'd pick up if it expires worthless.
     let openCallPremium: Double
-    /// TOTAL premium collected this cycle — every call sold (resolved
-    /// AND the open one), gross. This is the headline number and it
-    /// equals the sum of the calendar circles. Distinct from
-    /// premiumCollected (resolved-only), which is what's locked into the
-    /// basis; the difference is exactly the pending open-call premium.
-    let premiumGross: Double
+    /// NET premium this cycle — every call sold, less everything paid to
+    /// buy calls back. Gross alone lies badly when you roll: NVDA 7/22
+    /// sold $2,800 of 205s and bought them back for $11,302. Equals the
+    /// sum of the calendar circles.
+    let premiumNet: Double
+    /// Per (expiry, strike) rollups — the unit everything reconciles on.
+    let rollups: [ExpiryRollup]
     /// Realized P&L booked when the cycle closed (shares + premium).
     let realizedPL: Double?
 
@@ -257,8 +273,10 @@ enum IncomeRange: String, CaseIterable, Identifiable, Sendable {
 extension CoveredCallTicker {
     /// Every cycle, newest last.
     var allCycles: [CoveredCallCycle] { closed.reversed() + (current.map { [$0] } ?? []) }
-    /// Premium harvested across every cycle — the hero number.
-    var lifetimePremium: Double { allCycles.reduce(0) { $0 + $1.premiumGross } }
+    /// Every (expiry, strike) rollup across every cycle.
+    var allRollups: [ExpiryRollup] { allCycles.flatMap(\.rollups) }
+    /// Net premium harvested across every cycle — the hero number.
+    var lifetimePremium: Double { allCycles.reduce(0) { $0 + $1.premiumNet } }
     var cycleCount: Int { allCycles.count }
 
     /// Capital side of the return: realized share gains + unrealized
@@ -289,11 +307,11 @@ extension CoveredCallTicker {
         // fixed Mon/Wed/Fri skeleton silently dropped anything else and
         // could leave the chart empty.
         var buckets: [Int: Double] = [:]
-        for leg in allLegs where leg.status != .open {
-            guard let d = AppDates.parseISODay(leg.expiry) else { continue }
+        for r in allRollups where r.status != .open {
+            guard let d = AppDates.parseISODay(r.expiry) else { continue }
             if let cutoff, d < cutoff { continue }
             let wd = cal.component(.weekday, from: d)
-            buckets[wd, default: 0] += leg.premiumPerShare * leg.contracts * 100
+            buckets[wd, default: 0] += r.net       // net of buybacks
         }
         let names = [1: "Sun", 2: "Mon", 3: "Tue", 4: "Wed", 5: "Thu", 6: "Fri", 7: "Sat"]
         guard !buckets.isEmpty else {
@@ -355,7 +373,7 @@ extension CoveredCallTicker {
     var winRatePct: Double { resolvedCount > 0 ? Double(winsCount) / Double(resolvedCount) * 100 : 0 }
 
     /// Month-by-month, week-by-week, expiry-by-expiry win calendar.
-    var calendar: [CalMonth] { CoveredCallData.calendar(legs: allLegs) }
+    var calendar: [CalMonth] { CoveredCallData.calendar(rollups: allRollups) }
 }
 
 // MARK: - Engine
@@ -368,7 +386,23 @@ enum CoveredCallData {
     /// carries its premium + strike so the box shows premium/share and
     /// tapping opens a detail. The M/W/F cadence is permanent for these
     /// names, so the hit/miss pattern reads like a heartbeat.
-    static func calendar(legs: [CoveredCallLeg], now: Date = Date()) -> [CalMonth] {
+    static func calendar(rollups: [ExpiryRollup], now: Date = Date()) -> [CalMonth] {
+        // Collapse (expiry, strike) rollups to ONE entry per expiry — an
+        // expiry can hold several strikes and many fills.
+        struct DayAgg { var net = 0.0; var contracts = 0.0; var strikes: [Double] = []; var status = CallLegStatus.expired }
+        var byDay: [String: DayAgg] = [:]
+        for r in rollups {
+            let k = String(r.expiry.prefix(10))
+            var a = byDay[k] ?? DayAgg()
+            a.net += r.net
+            a.contracts += r.contracts
+            a.strikes.append(r.strike)
+            // assigned wins, then open, else kept
+            if r.status == .assigned { a.status = .assigned }
+            else if r.status == .open, a.status != .assigned { a.status = .open }
+            byDay[k] = a
+        }
+
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
         cal.firstWeekday = 2
@@ -382,11 +416,6 @@ enum CoveredCallData {
             cal.date(from: cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: d)) ?? d
         }
 
-        var legByDay: [String: CoveredCallLeg] = [:]
-        for l in legs {
-            if let d = AppDates.parseISODay(l.expiry) { legByDay[keyFmt.string(from: d)] = l }
-        }
-
         // Target months: any month holding a leg's expiry-week, plus the
         // current month. EACH renders its FULL M/W/F skeleton (every
         // Friday-week of the month), so no circle is ever missing — past
@@ -397,7 +426,7 @@ enum CoveredCallData {
             return String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
         }
         var targetMonths = Set<String>()
-        for l in legs { if let d = AppDates.parseISODay(l.expiry) { targetMonths.insert(friMonthKey(d)) } }
+        for k in byDay.keys { if let d = AppDates.parseISODay(k) { targetMonths.insert(friMonthKey(d)) } }
         let tc = cal.dateComponents([.year, .month], from: today)
         targetMonths.insert(String(format: "%04d-%02d", tc.year ?? 0, tc.month ?? 0))
 
@@ -418,17 +447,18 @@ enum CoveredCallData {
 
         func slot(_ date: Date, _ name: String) -> CalSlot {
             let key = keyFmt.string(from: date)
-            if let leg = legByDay[key] {
+            if let a = byDay[key] {
                 let kind: SlotKind
-                switch leg.status {
+                switch a.status {
                 case .assigned: kind = .assigned
                 case .open:     kind = .open
                 default:        kind = .kept
                 }
-                let ct = leg.status == .open ? leg.remaining : leg.contracts
+                let perShare = a.contracts > 0 ? a.net / (a.contracts * 100) : 0
                 return CalSlot(id: key + name, kind: kind, weekday: name, dateLabel: mdFmt.string(from: date),
-                               premiumPerShare: leg.premiumPerShare,
-                               premiumTotal: leg.premiumPerShare * ct * 100, strike: leg.strike)
+                               premiumPerShare: perShare,
+                               premiumTotal: a.net,
+                               strike: Set(a.strikes).count == 1 ? a.strikes.first : nil)
             }
             return CalSlot(id: key + name, kind: date > today ? .future : .none,
                            weekday: name, dateLabel: mdFmt.string(from: date),
@@ -758,23 +788,34 @@ enum CoveredCallData {
             )
         }
 
-        // Premium split: only RESOLVED calls' credit counts toward the
-        // basis; the still-open call's premium is pending (it can be
-        // clawed back by a roll). Buybacks (debits) reduce the resolved
-        // side — a roll's buyback nets against the old call there.
-        let resolvedCredits = legs
-            .filter { $0.status != .open }
-            .reduce(0.0) { $0 + $1.premiumPerShare * $1.contracts * 100 }
-        let openCredits = legs
-            .filter { $0.status == .open }
-            .reduce(0.0) { $0 + $1.premiumPerShare * $1.remaining * 100 }
-        let debits = closes.reduce(0.0) { $0 + $1.premium * $1.contracts * 100 }
-        let resolvedPremium = resolvedCredits - debits
-        // Headline: gross premium across every call sold this cycle
-        // (resolved + open). Matches the sum of the calendar circles.
-        let premiumGross = legs.reduce(0.0) { sum, l in
-            sum + l.premiumPerShare * (l.status == .open ? l.remaining : l.contracts) * 100
-        }
+        // ── Roll up per (expiry, strike) ──
+        // An expiry routinely has many fills (7/17 had eight), and a
+        // buy-back can exceed the credit, so every premium figure is
+        // derived from these netted rollups rather than raw legs.
+        let closeByKey = Dictionary(grouping: closes) { "\($0.expiry)|\($0.strike)" }
+        let rollups: [ExpiryRollup] = Dictionary(grouping: legs) { "\($0.expiry)|\($0.strike)" }
+            .map { _, group -> ExpiryRollup in
+                let first = group[0]
+                let key = "\(first.expiry)|\(first.strike)"
+                let credit = group.reduce(0.0) { $0 + $1.premiumPerShare * $1.contracts * 100 }
+                let buyback = (closeByKey[key] ?? []).reduce(0.0) { $0 + $1.premium * $1.contracts * 100 }
+                let st: CallLegStatus = group.contains { $0.status == .assigned } ? .assigned
+                    : group.contains { $0.status == .open } ? .open
+                    : group.contains { $0.status == .rolled } ? .rolled : .expired
+                return ExpiryRollup(
+                    expiry: first.expiry, strike: first.strike,
+                    contracts: group.reduce(0.0) { $0 + $1.contracts },
+                    credit: credit, buyback: buyback, status: st
+                )
+            }
+            .sorted { $0.expiry < $1.expiry }
+
+        // Net across everything sold this cycle.
+        let premiumNet = rollups.reduce(0.0) { $0 + $1.net }
+        // Locked into the basis: only what's RESOLVED (an open call can
+        // still be bought back at a loss, as 7/22 showed).
+        let resolvedPremium = rollups.filter { $0.status != .open }.reduce(0.0) { $0 + $1.net }
+        let openCredits = rollups.filter { $0.status == .open }.reduce(0.0) { $0 + $1.net }
 
         // Realized on a closed cycle = share P&L at assignment + the
         // premium that cycle locked in. IBKR-synced sells come through
@@ -798,7 +839,8 @@ enum CoveredCallData {
             assignmentStrike: assignmentStrike,
             premiumCollected: resolvedPremium,
             openCallPremium: openCredits,
-            premiumGross: premiumGross,
+            premiumNet: premiumNet,
+            rollups: rollups,
             realizedPL: realizedTotal
         )
     }
