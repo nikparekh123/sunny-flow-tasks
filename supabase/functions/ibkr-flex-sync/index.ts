@@ -996,7 +996,11 @@ async function upsertStock(
     return 'inserted';
   }
 
-  // SELL → share_sells (realized_pl=0, FIFO consumption deferred)
+  // SELL → share_sells. realized_pl is left 0 here and filled in by
+  // public.reconcile_share_fifo(), which consumes share_lots FIFO and
+  // books the realized P&L (nightly cron at 09:30 UTC, idempotent via
+  // share_sells.fifo_reconciled_at). See migration
+  // 20260722120000_share_fifo_reconcile.sql.
   const row = {
     ticker: t.underlyingSymbol,
     quantity: Math.abs(Number(t.quantity)),
@@ -1007,7 +1011,7 @@ async function upsertStock(
     last_synced_at: new Date().toISOString(),
     voided_at: null,
     realized_pl: 0,
-    note: 'IBKR sync — FIFO consumption pending reconcile',
+    note: 'IBKR sync — realized_pl set by reconcile_share_fifo()',
   };
 
   const { data: existing } = await supabase
@@ -1017,9 +1021,14 @@ async function upsertStock(
     .maybeSingle();
 
   if (existing) {
+    // Only update fields IBKR controls. realized_pl is owned by
+    // reconcile_share_fifo() — re-syncing (the nightly Daily Flex
+    // re-walks 5 business days) must NOT reset it to 0 and orphan the
+    // already-consumed lots.
+    const { realized_pl: _rp, ...amend } = row;
     const { error } = await supabase
       .from('share_sells')
-      .update(row)
+      .update(amend)
       .eq('id', existing.id);
     if (error) throw error;
     return 'updated';

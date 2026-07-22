@@ -246,6 +246,19 @@ struct OpenLegDetail: Identifiable, Sendable {
     let markPerShare: Double
     /// Signed P&L for the holder. Long: (mark − cost); short: (cost − mark).
     let pnl: Double
+    /// Position theta in $/day — signed so a short leg reads positive
+    /// (decay works for you).
+    let theta: Double
+    let intrinsic: Double        // $ total
+    let timeValue: Double        // $ total (extrinsic)
+    let isLong: Bool
+    let isCall: Bool
+    /// Credit taken in (short) or cost paid (long), $ total.
+    let basis: Double
+    /// Cost to buy back (short) or current worth (long), $ total.
+    let marketValue: Double
+
+    var dte: Int { AppDates.daysUntil(expiry) ?? 0 }
     var pnlPct: Double { costPerShare > 0 ? (markPerShare - costPerShare) / costPerShare * 100 : 0 }
 }
 
@@ -660,10 +673,22 @@ enum CoveredCallData {
         func legDetail(_ t: OptionTradeRow, isLong: Bool) -> OpenLegDetail {
             let r = store.remainingContracts(for: t)
             let m = mark(t)
+            let mult = r * 100
+            let isCall = t.option_type == "call"
+            let g = store.allGreeks.first { $0.option_trade_id == t.id }
+            // Short legs collect decay, so flip the sign — a short leg's
+            // theta should read positive.
+            let theta = (g?.theta ?? 0) * (isLong ? 1 : -1) * mult
+            let intrinsicPS = isCall ? max(spot - t.strike, 0) : max(t.strike - spot, 0)
             let signed = isLong ? (m - t.premium) : (t.premium - m)
             return OpenLegDetail(
                 id: t.id, expiry: t.expiry, strike: t.strike, contracts: r,
-                costPerShare: t.premium, markPerShare: m, pnl: signed * r * 100
+                costPerShare: t.premium, markPerShare: m, pnl: signed * mult,
+                theta: theta,
+                intrinsic: intrinsicPS * mult,
+                timeValue: max(0, m - intrinsicPS) * mult,
+                isLong: isLong, isCall: isCall,
+                basis: t.premium * mult, marketValue: m * mult
             )
         }
         let callLegs = openCalls
