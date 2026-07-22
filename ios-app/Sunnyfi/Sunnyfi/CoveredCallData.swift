@@ -285,17 +285,21 @@ extension CoveredCallTicker {
             case .quarter: return cal.date(byAdding: .month, value: -3, to: now)
             }
         }()
-        var buckets: [Int: Double] = [2: 0, 4: 0, 6: 0]   // Mon, Wed, Fri
+        // Bucket by WHATEVER weekday each expiry actually falls on — a
+        // fixed Mon/Wed/Fri skeleton silently dropped anything else and
+        // could leave the chart empty.
+        var buckets: [Int: Double] = [:]
         for leg in allLegs where leg.status != .open {
             guard let d = AppDates.parseISODay(leg.expiry) else { continue }
             if let cutoff, d < cutoff { continue }
             let wd = cal.component(.weekday, from: d)
-            guard buckets[wd] != nil else { continue }
             buckets[wd, default: 0] += leg.premiumPerShare * leg.contracts * 100
         }
-        return [(day: "Mon", amount: buckets[2] ?? 0),
-                (day: "Wed", amount: buckets[4] ?? 0),
-                (day: "Fri", amount: buckets[6] ?? 0)]
+        let names = [1: "Sun", 2: "Mon", 3: "Tue", 4: "Wed", 5: "Thu", 6: "Fri", 7: "Sat"]
+        guard !buckets.isEmpty else {
+            return [("Mon", 0), ("Wed", 0), ("Fri", 0)]   // skeleton, never blank
+        }
+        return buckets.keys.sorted().map { (day: names[$0] ?? "?", amount: buckets[$0] ?? 0) }
     }
 }
 
