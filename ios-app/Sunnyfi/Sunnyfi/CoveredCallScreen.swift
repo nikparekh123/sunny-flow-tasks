@@ -157,16 +157,20 @@ private struct PositionDetail: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Circle().fill(lime).frame(width: 6, height: 6)
-                Text("PREMIUM HARVESTED · LIFETIME")
+                Text("TOTAL MADE · LIFETIME")
                     .font(.system(size: 10, weight: .heavy)).tracking(1.6)
                     .foregroundStyle(lime)
             }
-            Text(fmtMoney(data.lifetimePremium))
+            // Everything banked plus everything unrealized, with open
+            // calls at their mark — a loss has to be unmistakable, so it
+            // flips to coral rather than staying white.
+            Text(fmtMoney(data.totalReturn, sign: true))
                 .font(.system(size: 52, weight: .heavy)).tracking(-2.2)
-                .monospacedDigit().foregroundStyle(.white)
+                .monospacedDigit()
+                .foregroundStyle(data.totalReturn < 0 ? Color(hex: 0xF0664F) : .white)
                 .minimumScaleFactor(0.5).lineLimit(1)
                 .padding(.top, 14)
-            Text("Collected across \(data.cycleCount) cycle\(data.cycleCount == 1 ? "" : "s") on \(Int(data.shares).formatted()) \(data.ticker) shares")
+            Text("\(fmtMoney(data.premiumIncome, sign: true)) premium · \(fmtMoney(data.capitalReturn, sign: true)) capital — across \(data.cycleCount) cycle\(data.cycleCount == 1 ? "" : "s") on \(Int(data.shares).formatted()) \(data.ticker) shares")
                 .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 9)
