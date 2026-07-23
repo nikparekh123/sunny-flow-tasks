@@ -170,7 +170,7 @@ private struct PositionDetail: View {
                 .foregroundStyle(data.totalReturn < 0 ? Color(hex: 0xF0664F) : .white)
                 .minimumScaleFactor(0.5).lineLimit(1)
                 .padding(.top, 14)
-            Text("\(fmtMoney(data.premiumIncome, sign: true)) premium · \(fmtMoney(data.capitalReturn, sign: true)) capital — across \(data.cycleCount) cycle\(data.cycleCount == 1 ? "" : "s") on \(Int(data.shares).formatted()) \(data.ticker) shares")
+            Text("\(fmtMoney(data.lifetimePremium, sign: true)) premium collected · \(Int(data.shares).formatted()) \(data.ticker) shares across \(data.cycleCount) cycle\(data.cycleCount == 1 ? "" : "s")")
                 .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 9)
@@ -638,10 +638,16 @@ private struct PositionDetail: View {
 
     // ── WHAT THE STRATEGY EARNED ──
     private var returnCard: some View {
-        let prem = data.premiumIncome      // open calls marked to market
+        // Shown as three lines rather than one net "premium income".
+        // Collapsing collected premium with the cost to close open calls
+        // reads as if the premium strategy lost money — but on the wheel
+        // you never pay that buyback: you deliver at the strike and keep
+        // the credit. Separating them keeps both facts visible.
+        let collected = data.lifetimePremium          // net of buybacks already paid
+        let toClose = -data.openCallCostToClose       // liability if you unwound today
         let cap = data.capitalReturn
         let total = data.totalReturn
-        let denom = max(abs(prem) + abs(cap), 1)
+        let denom = max(abs(collected) + abs(toClose) + abs(cap), 1)
         return card {
             Text("What the strategy earned").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
@@ -650,7 +656,9 @@ private struct PositionDetail: View {
 
             HStack(spacing: 3) {
                 RoundedRectangle(cornerRadius: 3).fill(Color.theme.fg1)
-                    .frame(width: max(4, CGFloat(abs(prem) / denom) * 300))
+                    .frame(width: max(4, CGFloat(abs(collected) / denom) * 300))
+                RoundedRectangle(cornerRadius: 3).fill(Color.theme.neg)
+                    .frame(width: max(4, CGFloat(abs(toClose) / denom) * 300))
                 RoundedRectangle(cornerRadius: 3).fill(lime)
                     .frame(width: max(4, CGFloat(abs(cap) / denom) * 300))
             }
@@ -658,7 +666,10 @@ private struct PositionDetail: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.top, 20)
 
-            splitRow(Color.theme.fg1, "Premium income", prem)
+            splitRow(Color.theme.fg1, "Premium collected", collected)
+            if data.openCallCostToClose > 0 {
+                splitRow(Color.theme.neg, "Open calls — cost to close", toClose)
+            }
             splitRow(lime, "Capital (shares)", cap)
 
             HStack {
