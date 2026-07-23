@@ -125,11 +125,15 @@ struct CoveredCallScreen: View {
 private enum PosTab: String, CaseIterable, Identifiable {
     case shares = "Shares", calls = "Calls sold", puts = "Puts", longCalls = "Long calls"
     var id: String { rawValue }
+    var isLong: Bool { self != .calls }
 }
 
 private struct PositionDetail: View {
     let data: CoveredCallTicker
     @State private var tab: PosTab = .shares
+    /// Group → whether the legs list is expanded, and which leg is drilled into.
+    @State private var expanded: Set<PosTab> = []
+    @State private var openLeg: [PosTab: Int] = [:]
     @State private var range: IncomeRange = .all
     @State private var showAllHistory = false
 
@@ -211,7 +215,16 @@ private struct PositionDetail: View {
         )
     }
 
-    // ── YOUR POSITION ──
+    // ── YOUR POSITION — cards → aggregate → legs → leg detail ──
+    private func legs(_ t: PosTab) -> [OpenLegDetail] {
+        switch t {
+        case .shares:    return []
+        case .calls:     return data.callLegs
+        case .puts:      return data.putLegs
+        case .longCalls: return data.longCallLegs
+        }
+    }
+
     private var positionCard: some View {
         card {
             Text("Your position").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
@@ -219,136 +232,253 @@ private struct PositionDetail: View {
             Text(posMeta).font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
                 .padding(.top, 6)
 
-            segmented(PosTab.allCases, selection: $tab) { $0.rawValue }
-                .padding(.top, 16)
+            posCards
 
-            switch tab {
-            case .shares:    sharesTab
-            case .calls:     legsTab(data.callLegs, empty: "No calls sold right now.", short: true)
-            case .puts:      legsTab(data.putLegs, empty: "No protective puts open.", short: false)
-            case .longCalls: legsTab(data.longCallLegs, empty: "No long calls open.", short: false)
+            if tab == .shares {
+                sharesView
+            } else if let i = openLeg[tab], i < legs(tab).count {
+                legDetailView(legs(tab)[i])
+            } else {
+                aggregateView
             }
         }
+    }
+
+    /// Horizontally-scrolling selector cards, one per position group.
+    private var posCards: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(PosTab.allCases) { t in
+                    let on = tab == t
+                    Button {
+                        withAnimation(Motion.standard) { tab = t; openLeg[t] = nil }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(t.rawValue.uppercased())
+                                .font(.system(size: 10.5, weight: .heavy)).tracking(0.3)
+                                .foregroundStyle(Color.theme.fg4)
+                            Text(cardValue(t))
+                                .font(.numeric(size: 19, weight: .heavy)).tracking(-0.5)
+                                .monospacedDigit().foregroundStyle(cardTone(t))
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                                .padding(.top, 10)
+                            Text(cardSub(t))
+                                .font(.numeric(size: 11, weight: .bold)).monospacedDigit()
+                                .foregroundStyle(Color.theme.fg4).padding(.top, 4)
+                        }
+                        .padding(13)
+                        .frame(width: 134, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: 16)
+                            .fill(on ? Color.theme.surface : Color.theme.page2))
+                        .overlay(RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(on ? Color.theme.fg1 : Color.clear, lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .padding(.top, 16)
+    }
+
+    private func cardValue(_ t: PosTab) -> String {
+        if t == .shares { return fmtMoney(data.shares * data.currentPrice) }
+        return fmtMoney(legs(t).reduce(0) { $0 + $1.pnl }, sign: true)
+    }
+    private func cardTone(_ t: PosTab) -> Color {
+        if t == .shares { return Color.theme.fg1 }
+        return Color.signed(legs(t).reduce(0) { $0 + $1.pnl })
+    }
+    private func cardSub(_ t: PosTab) -> String {
+        if t == .shares { return "\(Int(data.shares).formatted()) sh" }
+        let n = Int(legs(t).reduce(0) { $0 + $1.contracts })
+        return "\(n) contract\(n == 1 ? "" : "s")"
+    }
+
+    /// 2-column key/value grid used by every position view.
+    private func kvGrid(_ rows: [(String, String, Color, String?)]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible(), alignment: .topLeading),
+                            GridItem(.flexible(), alignment: .topLeading)],
+                  alignment: .leading, spacing: 20) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(r.0).font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.theme.fg3)
+                    Text(r.1).font(.numeric(size: 21, weight: .heavy)).tracking(-0.5)
+                        .monospacedDigit().foregroundStyle(r.2)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                    if let s = r.3, !s.isEmpty {
+                        Text(s).font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
+                            .foregroundStyle(r.2 == Color.theme.fg1 ? Color.theme.fg4 : r.2)
+                    }
+                }
+            }
+        }
+        .padding(.top, 22)
+    }
+
+    @ViewBuilder
+    private var aggregateView: some View {
+        let ls = legs(tab)
+        if ls.isEmpty {
+            Text("Nothing open here.").font(.system(size: 13))
+                .foregroundStyle(Color.theme.fg4).padding(.top, 22)
+        } else {
+            let qty = ls.reduce(0.0) { $0 + $1.contracts }
+            let basis = ls.reduce(0.0) { $0 + $1.basis }
+            let mv = ls.reduce(0.0) { $0 + $1.marketValue }
+            let pnl = ls.reduce(0.0) { $0 + $1.pnl }
+            let tv = ls.reduce(0.0) { $0 + $1.timeValue }
+            let th = ls.reduce(0.0) { $0 + $1.theta }
+            let sold = (tab == .calls)
+            kvGrid([
+                ("Contracts", "\(Int(qty)) \(sold ? "sold" : "long")", Color.theme.fg1, nil),
+                (sold ? "Premium in" : "Cost basis", fmtMoney(basis),
+                 sold ? Color.theme.pos : Color.theme.fg1, nil),
+                (sold ? "Cost to close" : "Market value", fmtMoney(mv), Color.theme.fg1, nil),
+                ("Open P&L", fmtMoney(pnl, sign: true), Color.signed(pnl), nil),
+                ("Time value", fmtMoney(tv), Color.theme.fg1, nil),
+                ("Theta", fmtMoney(th, sign: true) + "/day", Color.signed(th), nil),
+            ])
+
+            if expanded.contains(tab) {
+                Text("LEGS").font(.system(size: 10.5, weight: .heavy)).tracking(1.4)
+                    .foregroundStyle(Color.theme.fg4).padding(.top, 24)
+                ForEach(Array(ls.enumerated()), id: \.element.id) { i, leg in
+                    legRow(leg, index: i)
+                }
+            } else {
+                Button {
+                    withAnimation(Motion.standard) { _ = expanded.insert(tab) }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("Tap for leg details")
+                            .font(.system(size: 13, weight: .heavy)).tracking(-0.1)
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .heavy))
+                    }
+                    .foregroundStyle(Color.theme.pos)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 22)
+            }
+        }
+    }
+
+    private func legRow(_ leg: OpenLegDetail, index: Int) -> some View {
+        let mny = moneyness(leg)
+        return Button {
+            withAnimation(Motion.standard) { openLeg[tab] = index }
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("\(AppDates.shortMonthDay(leg.expiry)) · \(fmtStrike(leg.strike))\(leg.isCall ? "c" : "p")")
+                        .font(.system(size: 15, weight: .heavy)).tracking(-0.3)
+                        .foregroundStyle(Color.theme.fg1)
+                    Text("×\(Int(leg.contracts)) · \(leg.dte) DTE")
+                        .font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
+                        .foregroundStyle(Color.theme.fg4)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(fmtMoney(leg.pnl, sign: true))
+                        .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
+                        .foregroundStyle(Color.signed(leg.pnl))
+                    Text(mny.0).font(.numeric(size: 10.5, weight: .heavy)).monospacedDigit()
+                        .foregroundStyle(mny.1)
+                }
+                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Color.theme.fg4)
+            }
+            .padding(.vertical, 16)
+            .contentShape(Rectangle())
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func legDetailView(_ leg: OpenLegDetail) -> some View {
+        let sold = !leg.isLong
+        let mny = moneyness(leg)
+        Button {
+            withAnimation(Motion.standard) { openLeg[tab] = nil }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.left").font(.system(size: 12, weight: .heavy))
+                Text(tab.rawValue).font(.system(size: 12.5, weight: .heavy)).tracking(-0.1)
+            }
+            .foregroundStyle(Color.theme.fg3)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 18)
+
+        Text("\(AppDates.shortMonthDay(leg.expiry)) · $\(fmtStrike(leg.strike)) \(leg.isCall ? "call" : "put")")
+            .font(.system(size: 20, weight: .heavy)).tracking(-0.5)
+            .foregroundStyle(Color.theme.fg1).padding(.top, 12)
+        Text("×\(Int(leg.contracts)) \(sold ? "sold" : "long") · \(leg.dte) day\(leg.dte == 1 ? "" : "s") to expiry")
+            .font(.numeric(size: 12, weight: .bold)).monospacedDigit()
+            .foregroundStyle(Color.theme.fg4).padding(.top, 6)
+
+        kvGrid(sold ? [
+            ("Contracts", "\(Int(leg.contracts)) sold", Color.theme.fg1, nil),
+            ("Strike", fmtStrike(leg.strike), Color.theme.fg1, nil),
+            ("Premium in", fmtMoney(leg.basis), Color.theme.pos, nil),
+            ("Time value", fmtMoney(leg.timeValue), Color.theme.fg1, nil),
+            ("Theta", fmtMoney(leg.theta, sign: true) + "/day", Color.signed(leg.theta), nil),
+            ("Moneyness", mny.0, mny.1, nil),
+            ("Open P&L", fmtMoney(leg.pnl, sign: true), Color.signed(leg.pnl), nil),
+        ] : [
+            ("Contracts", "\(Int(leg.contracts)) long", Color.theme.fg1, nil),
+            ("Strike", fmtStrike(leg.strike), Color.theme.fg1, nil),
+            ("Cost basis", fmtMoney(leg.basis), Color.theme.fg1, nil),
+            ("Market value", fmtMoney(leg.marketValue), Color.theme.fg1, nil),
+            ("Intrinsic", fmtMoney(leg.intrinsic), Color.theme.fg1, nil),
+            ("Time value", fmtMoney(leg.timeValue), Color.theme.fg1, nil),
+            ("Theta", fmtMoney(leg.theta, sign: true) + "/day", Color.signed(leg.theta), nil),
+            ("Open P&L", fmtMoney(leg.pnl, sign: true), Color.signed(leg.pnl), nil),
+        ])
+    }
+
+    private func moneyness(_ leg: OpenLegDetail) -> (String, Color) {
+        let px = data.currentPrice
+        guard px > 0 else { return ("—", Color.theme.fg3) }
+        if leg.isCall {
+            let m = (leg.strike - px) / px * 100
+            let tone: Color = m >= 0.8 ? Color.theme.pos : (m <= -0.2 ? Color.theme.neg : Color.theme.warn)
+            let lab = m >= 0.8 ? "OTM" : (m <= -0.2 ? "ITM" : "ATM")
+            return ("\(lab) \(m >= 0 ? "+" : "−")\(String(format: "%.1f", abs(m)))%", tone)
+        }
+        return ("\(String(format: "%.0f", (px - leg.strike) / px * 100))% below", Color.theme.fg3)
     }
 
     private var posMeta: String {
         switch tab {
         case .shares:
-            return "\(Int(data.shares).formatted()) shares · \(cycle?.lotCount ?? 0) lot\((cycle?.lotCount ?? 0) == 1 ? "" : "s")"
+            return "\(Int(data.shares).formatted()) shares · covered"
         case .calls:
-            return "\(Int(data.openCallContracts)) contract\(Int(data.openCallContracts) == 1 ? "" : "s") open · \(data.callLegs.count) expir\(data.callLegs.count == 1 ? "y" : "ies")"
+            let n = Int(data.openCallContracts)
+            return "\(n) contract\(n == 1 ? "" : "s") open · \(data.callLegs.count) expir\(data.callLegs.count == 1 ? "y" : "ies")"
         case .puts:
-            return "\(Int(data.putContracts)) protective put\(Int(data.putContracts) == 1 ? "" : "s")"
+            let n = Int(data.putContracts)
+            return "\(n) protective put\(n == 1 ? "" : "s")"
         case .longCalls:
             let n = Int(data.longCallLegs.reduce(0) { $0 + $1.contracts })
-            return "\(n) long call\(n == 1 ? "" : "s")"
+            return "\(n) long call\(n == 1 ? "" : "s") · LEAP overlay"
         }
     }
 
-    private var sharesTab: some View {
+    private var sharesView: some View {
         let c = cycle
-        let rows: [(String, String, String?, Color)] = [
-            ("Shares", Int(data.shares).formatted(), nil, Color.theme.fg1),
-            ("Market value", fmtMoney(data.shares * data.currentPrice), nil, Color.theme.fg1),
-            ("Cost basis", fmtMoney(c?.entryPrice ?? 0, decimals: 2), nil, Color.theme.fg1),
-            ("Adjusted basis", fmtMoney(c?.adjustedBasis ?? 0, decimals: 2),
-             c.map { "−\(String(format: "%.1f", $0.entryPrice > 0 ? $0.premiumPerShare / $0.entryPrice * 100 : 0))% via premium" }, Color.theme.pos),
-            ("Today's return", fmtMoney(data.todayPL, sign: true), fmtPct(data.dayPct), Color.signed(data.todayPL)),
-            ("Total return", fmtMoney(data.totalReturn, sign: true),
-             c.map { $0.entryPrice * $0.shares > 0 ? fmtPct(data.totalReturn / ($0.entryPrice * $0.shares) * 100) : "" },
-             Color.signed(data.totalReturn)),
-        ]
-        return LazyVGrid(columns: [GridItem(.flexible(), alignment: .topLeading),
-                                   GridItem(.flexible(), alignment: .topLeading)],
-                         alignment: .leading, spacing: 20) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(r.0).font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.theme.fg3)
-                    Text(r.1).font(.numeric(size: 21, weight: .heavy)).tracking(-0.5)
-                        .monospacedDigit().foregroundStyle(r.3)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                    if let s = r.2, !s.isEmpty {
-                        Text(s).font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(r.3 == Color.theme.fg1 ? Color.theme.fg4 : r.3)
-                    }
-                }
-            }
-        }
-        .padding(.top, 20)
-    }
-
-    @ViewBuilder
-    private func legsTab(_ legs: [OpenLegDetail], empty: String, short: Bool) -> some View {
-        if legs.isEmpty {
-            Text(empty).font(.system(size: 13)).foregroundStyle(Color.theme.fg4)
-                .padding(.top, 20)
-        } else {
-            let total = legs.reduce(0.0) { $0 + $1.contracts }
-            let pnl = legs.reduce(0.0) { $0 + $1.pnl }
-            // Summary strip
-            HStack {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(Int(total))").font(.system(size: 23, weight: .heavy)).tracking(-0.5)
-                        .monospacedDigit().foregroundStyle(Color.theme.fg1)
-                    Text(short ? "contracts · \(legs.count) strike\(legs.count == 1 ? "" : "s")" : "contracts")
-                        .font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.theme.fg3)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(fmtMoney(pnl, sign: true))
-                        .font(.numeric(size: 16, weight: .heavy)).monospacedDigit()
-                        .foregroundStyle(Color.signed(pnl))
-                    Text(short ? "PREMIUM P&L" : "OPEN P&L")
-                        .font(.system(size: 9, weight: .heavy)).tracking(1)
-                        .foregroundStyle(Color.theme.fg4)
-                }
-            }
-            .padding(15)
-            .background(RoundedRectangle(cornerRadius: 16).fill(Color.theme.page2))
-            .padding(.top, 18)
-
-            ForEach(legs) { leg in
-                if short {
-                    gaugeLeg(expiry: leg.expiry, strike: leg.strike, contracts: leg.contracts,
-                             price: data.currentPrice,
-                             foot: fmtMoney(leg.costPerShare * leg.contracts * 100) + " in",
-                             footColor: Color.theme.pos)
-                } else {
-                    optionRow(leg)
-                }
-            }
-        }
-    }
-
-    private func optionRow(_ leg: OpenLegDetail) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text("\(AppDates.shortMonthDay(leg.expiry)) · \(fmtStrike(leg.strike))")
-                        .font(.system(size: 15, weight: .heavy)).tracking(-0.3)
-                        .foregroundStyle(Color.theme.fg1)
-                    Text("×\(Int(leg.contracts))")
-                        .font(.numeric(size: 10.5, weight: .heavy)).monospacedDigit()
-                        .foregroundStyle(Color.theme.fg3)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(Color.theme.page2))
-                }
-                Text("cost \(String(format: "%.2f", leg.costPerShare)) → mark \(String(format: "%.2f", leg.markPerShare))")
-                    .font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(Color.theme.fg4)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 5) {
-                Text(fmtMoney(leg.pnl, sign: true))
-                    .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                    .foregroundStyle(Color.signed(leg.pnl))
-                Text(fmtPct(leg.pnlPct))
-                    .font(.numeric(size: 11, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(Color.signed(leg.pnl))
-            }
-        }
-        .padding(.vertical, 16)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+        return kvGrid([
+            ("Shares", Int(data.shares).formatted(), Color.theme.fg1, nil),
+            ("Market value", fmtMoney(data.shares * data.currentPrice), Color.theme.fg1, nil),
+            ("Cost basis", fmtMoney(c?.entryPrice ?? 0, decimals: 2), Color.theme.fg1, nil),
+            ("Adjusted basis", fmtMoney(c?.adjustedBasis ?? 0, decimals: 2), Color.theme.pos,
+             c.map { $0.entryPrice > 0 ? String(format: "%.1f%% via premium", -$0.premiumPerShare / $0.entryPrice * 100) : "" }),
+            ("Today's return", fmtMoney(data.todayPL, sign: true), Color.signed(data.todayPL), fmtPct(data.dayPct)),
+            ("Total return", fmtMoney(data.totalReturn, sign: true), Color.signed(data.totalReturn),
+             c.map { $0.entryPrice * $0.shares > 0 ? fmtPct(data.totalReturn / ($0.entryPrice * $0.shares) * 100) : "" }),
+        ])
     }
 
     // ── Cushion gauge (shared by Calls-sold tab + "how close" card) ──

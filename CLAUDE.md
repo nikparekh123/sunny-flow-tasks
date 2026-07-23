@@ -68,5 +68,5 @@ This replaces a prior buggy rule ("any IBKR trade with `last_synced_at` in the l
 
 - #7 Notification permission prompt bug (real bug, found during smoke test)
 - #11 Hard cutover — wipe manual trades + IBKR backfill (runbook ready, awaiting trigger)
-- #17 FIFO share consumption reconcile (`realized_pl` on IBKR-sourced share sells stays at 0 until built)
+- ~~#17 FIFO share consumption reconcile~~ — DONE 2026-07-22: `reconcile_share_fifo()` consumes lots FIFO + books `realized_pl`; nightly cron 09:30 UTC, idempotent via `share_sells.fifo_reconciled_at`.
 - #19 Snapshot pipeline debug (daily_theta + position_history empty despite cron "success") — suppressed in health-monitor for now
