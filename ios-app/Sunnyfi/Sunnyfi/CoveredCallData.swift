@@ -292,17 +292,32 @@ extension CoveredCallTicker {
     var lifetimePremium: Double { allCycles.reduce(0) { $0 + $1.premiumNet } }
     var cycleCount: Int { allCycles.count }
 
-    /// Capital side of the return: realized share gains + unrealized
-    /// shares vs raw cost. Premium is the other half.
-    var capitalReturn: Double { exitSharesPL }
-    var totalReturn: Double { lifetimePremium + capitalReturn }
+    /// Everything banked + everything currently unrealized.
+    ///
+    /// Deliberately values open calls at their MARK, not their credit.
+    /// Crediting the full premium while ALSO crediting the shares' full
+    /// run double-counts the upside — the calls cap precisely that gain.
+    /// (NVDA 7/24: $15,823 collected on strikes now deep ITM at ~213,
+    /// which would cost far more than that to close.)
+    var totalReturn: Double { realizedToDate + exitNet }
+
+    /// The premium engine's contribution: premium actually locked in on
+    /// resolved calls, plus the open calls marked to market.
+    var premiumIncome: Double {
+        allCycles.reduce(0) { $0 + $1.premiumCollected } + exitCallBuyback
+    }
+    /// Residual — share gains (realized + unrealized) and the puts. Kept
+    /// as a remainder so the two rows always sum to totalReturn.
+    var capitalReturn: Double { totalReturn - premiumIncome }
 
     /// Annualized premium yield on capital at risk (shares × entry).
+    /// Uses premiumIncome (open calls marked to market) so a position
+    /// that has to buy its calls back doesn't report a phantom yield.
     var annualizedYieldPct: Double {
         guard let c = current, c.entryPrice > 0, c.shares > 0 else { return 0 }
         let capital = c.entryPrice * c.shares
         let days = max(c.daysHeld, 1)
-        return lifetimePremium / capital * (365.0 / Double(days)) * 100
+        return premiumIncome / capital * (365.0 / Double(days)) * 100
     }
 
     /// Realized premium grouped by expiry weekday (Mon/Wed/Fri).

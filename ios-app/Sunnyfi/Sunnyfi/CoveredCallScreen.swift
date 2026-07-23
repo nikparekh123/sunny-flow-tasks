@@ -634,7 +634,7 @@ private struct PositionDetail: View {
 
     // ── WHAT THE STRATEGY EARNED ──
     private var returnCard: some View {
-        let prem = data.lifetimePremium
+        let prem = data.premiumIncome      // open calls marked to market
         let cap = data.capitalReturn
         let total = data.totalReturn
         let denom = max(abs(prem) + abs(cap), 1)
