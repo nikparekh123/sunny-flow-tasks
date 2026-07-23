@@ -481,68 +481,66 @@ private struct PositionDetail: View {
         ])
     }
 
-    // ── Cushion gauge (shared by Calls-sold tab + "how close" card) ──
+    // ── Cushion gauge — updated v2: thin rail, tall "now" tick with the
+    // label above it, strike dot labelled below, large moneyness pill.
     private func gaugeLeg(expiry: String, strike: Double, contracts: Double,
                           price: Double, foot: String, footColor: Color) -> some View {
         let m = price > 0 ? (strike - price) / price * 100 : 0
         let tone: Color = m >= 0.8 ? Color.theme.pos : (m <= -0.2 ? Color.theme.neg : Color.theme.warn)
         let label = m >= 0.8 ? "OTM" : (m <= -0.2 ? "ITM" : "ATM")
         let pxL: CGFloat = 0.40
-        let kL: CGFloat = max(0.07, min(0.93, pxL + CGFloat(m / 6.5) * 0.46))
+        let kL: CGFloat = max(0.09, min(0.91, pxL + CGFloat(m / 6.5) * 0.44))
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("\(AppDates.shortMonthDay(expiry)) · \(fmtStrike(strike)) call")
-                        .font(.system(size: 14.5, weight: .heavy)).tracking(-0.3)
+                        .font(.system(size: 15, weight: .heavy)).tracking(-0.3)
                         .foregroundStyle(Color.theme.fg1)
-                    Text("×\(Int(contracts)) contract\(Int(contracts) == 1 ? "" : "s")")
+                    Text("×\(Int(contracts)) · \(foot)")
                         .font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
-                        .foregroundStyle(Color.theme.fg4)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 6) {
-                    Text("\(label) \(m >= 0 ? "+" : "−")\(String(format: "%.1f", abs(m)))%")
-                        .font(.numeric(size: 10.5, weight: .heavy)).monospacedDigit()
-                        .foregroundStyle(tone)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(tone.opacity(0.13)))
-                    Text(foot).font(.numeric(size: 12.5, weight: .heavy)).monospacedDigit()
                         .foregroundStyle(footColor)
                 }
+                Spacer(minLength: 0)
+                Text("\(label) \(m >= 0 ? "+" : "−")\(String(format: "%.1f", abs(m)))%")
+                    .font(.numeric(size: 13, weight: .heavy)).monospacedDigit()
+                    .foregroundStyle(tone)
+                    .padding(.horizontal, 15).padding(.vertical, 8)
+                    .background(Capsule().fill(tone.opacity(0.13)))
+                    .fixedSize()
             }
+
             GeometryReader { geo in
                 let w = geo.size.width
                 ZStack(alignment: .topLeading) {
+                    // rail + cushion zone
                     Capsule().fill(Color.theme.page2)
-                        .frame(width: w, height: 6).offset(y: 20)
-                    Capsule().fill(tone.opacity(0.35))
-                        .frame(width: abs(kL - pxL) * w, height: 6)
-                        .offset(x: min(pxL, kL) * w, y: 20)
-                    // price tick
-                    VStack(spacing: 2) {
-                        Text(String(format: "%.2f", price))
-                            .font(.numeric(size: 9, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(Color.theme.fg4).fixedSize()
+                        .frame(width: w, height: 3).position(x: w / 2, y: 22)
+                    Capsule().fill(tone.opacity(0.45))
+                        .frame(width: abs(kL - pxL) * w, height: 3)
+                        .position(x: (min(pxL, kL) + abs(kL - pxL) / 2) * w, y: 22)
+                    // "now" tick, label above
+                    VStack(spacing: 3) {
+                        Text("now \(String(format: "%.2f", price))")
+                            .font(.numeric(size: 10.5, weight: .heavy)).monospacedDigit()
+                            .foregroundStyle(Color.theme.fg1).fixedSize()
                         RoundedRectangle(cornerRadius: 2).fill(Color.theme.fg1)
-                            .frame(width: 2.5, height: 18)
+                            .frame(width: 3, height: 28)
                     }
-                    .offset(x: pxL * w - 14, y: 0)
-                    // strike dot
-                    VStack(spacing: 1) {
-                        Circle().fill(tone)
-                            .frame(width: 16, height: 16)
-                            .overlay(Circle().strokeBorder(Color.theme.surface, lineWidth: 3.5))
-                        Text(fmtStrike(strike))
-                            .font(.numeric(size: 9.5, weight: .heavy)).monospacedDigit()
+                    .position(x: pxL * w, y: 24)
+                    // strike dot, label below
+                    VStack(spacing: 6) {
+                        Circle().fill(tone).frame(width: 16, height: 16)
+                        Text("$\(fmtStrike(strike))")
+                            .font(.numeric(size: 11, weight: .heavy)).monospacedDigit()
                             .foregroundStyle(tone).fixedSize()
                     }
-                    .offset(x: kL * w - 8, y: 15)
+                    .position(x: kL * w, y: 31)
                 }
             }
-            .frame(height: 52)
-            .padding(.top, 8)
+            .frame(height: 58)
+            .padding(.top, 22)
         }
-        .padding(.vertical, 16)
+        .padding(.top, 20).padding(.bottom, 30)
         .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
     }
 
