@@ -40,7 +40,7 @@ struct CoveredCallScreen: View {
             } else {
                 ScrollView {
                     if let t = active, let data = CoveredCallData.build(store: store, ticker: t) {
-                        PositionDetail(data: data)
+                        PositionDetail(data: data, store: store)
                             .padding(.horizontal, 16)
                             .padding(.bottom, 110)
                             .id(t)
@@ -130,6 +130,8 @@ private enum PosTab: String, CaseIterable, Identifiable {
 
 private struct PositionDetail: View {
     let data: CoveredCallTicker
+    var store: PortfolioStore? = nil
+    @State private var showPlanner = false
     @State private var tab: PosTab = .shares
     /// Group → whether the legs list is expanded, and which leg is drilled into.
     @State private var expanded: Set<PosTab> = []
@@ -145,12 +147,49 @@ private struct PositionDetail: View {
     var body: some View {
         VStack(spacing: 14) {
             hero
+            if store != nil { planEntry }
             positionCard
             premiumCard
             cushionCard
             returnCard
             historyCard
         }
+        .sheet(isPresented: $showPlanner) {
+            if let store {
+                CoveredCallPlanner(
+                    model: PlannerModel(store: store, data: data),
+                    onClose: { showPlanner = false }
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            }
+        }
+    }
+
+    // ── Plan premium entry ──
+    private var planEntry: some View {
+        Button { showPlanner = true } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.system(size: 20, weight: .bold)).foregroundStyle(limeInk)
+                    .frame(width: 46, height: 46)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(lime.opacity(0.35)))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Plan next week's premium")
+                        .font(.system(size: 16, weight: .heavy)).tracking(-0.2)
+                        .foregroundStyle(Color.theme.fg1)
+                    Text("Pick expiries & strikes · see what you'd collect")
+                        .font(.system(size: 12)).foregroundStyle(Color.theme.fg3)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Color.theme.fg4)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 26).fill(Color.theme.surface))
+        }
+        .buttonStyle(.plain)
     }
 
     // ── HERO ──
