@@ -238,28 +238,25 @@ struct CoveredCallPlanner: View {
 
     private var strikeLadder: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 7) {
+            HStack(spacing: 9) {
                 ForEach(model.ladder) { s in
                     let mny = cushionKind(s.strike)
                     let on = model.selectedStrike?.strike == s.strike
                     Button { model.selectedStrike = s } label: {
-                        VStack(spacing: 5) {
-                            Text(fmtStrike(s.strike)).font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                                .foregroundStyle(on ? limeInk : Color.theme.fg1)
-                            Text(fmtMoney(s.premium, decimals: 2)).font(.numeric(size: 11, weight: .heavy)).monospacedDigit()
-                                .foregroundStyle(on ? limeInk : Color.theme.pos)
-                            Text(mny.0).font(.system(size: 8, weight: .heavy)).tracking(0.3)
-                                .foregroundStyle(on ? limeInk.opacity(0.7) : mny.1)
+                        VStack(spacing: 8) {
+                            Text(fmtStrike(s.strike)).font(.numeric(size: 16, weight: .heavy)).monospacedDigit()
+                                .foregroundStyle(on ? .white : Color.theme.fg1)
+                            Text(fmtMoney(s.premium, decimals: 2)).font(.numeric(size: 12.5, weight: .heavy)).monospacedDigit()
+                                .foregroundStyle(on ? lime : Color.theme.fg2)
+                            Text(mny.0).font(.system(size: 9, weight: .heavy)).tracking(0.4)
+                                .foregroundStyle(on ? .white.opacity(0.7) : mny.1)
                         }
-                        .frame(width: 58, height: 74)
-                        .background(RoundedRectangle(cornerRadius: 14)
-                            .fill(on ? lime : Color.theme.page2))
-                        .overlay(alignment: .top) {
-                            if !on && abs(s.strike - model.spot) < 2.5 {
-                                RoundedRectangle(cornerRadius: 14)
-                                    .strokeBorder(Color.theme.fg4, style: StrokeStyle(lineWidth: 1.5, dash: [3]))
-                            }
-                        }
+                        .frame(width: 74, height: 94)
+                        // Selected = dark ink like a chosen date; otherwise
+                        // tinted by moneyness (ITM red / ATM amber / OTM green)
+                        // instead of a dashed spot marker.
+                        .background(RoundedRectangle(cornerRadius: 16)
+                            .fill(on ? Color.theme.fg1 : mny.1.opacity(0.14)))
                     }.buttonStyle(.plain)
                 }
             }
