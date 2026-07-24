@@ -246,14 +246,14 @@ final class PortfolioStore {
     }
 
     /// Live option strike ladder for one expiry (Plan Premium tool).
-    /// Calls the option-ladder edge function → Polygon. Premiums ~15-min
-    /// delayed on the current plan; fine for planning.
+    /// Calls option-chain in ladder mode (pass `expiry`) → Polygon.
+    /// Premiums ~15-min delayed on the current plan; fine for planning.
     func fetchOptionLadder(ticker: String, expiry: String, center: Double) async throws -> OptionLadder {
         struct Req: Encodable {
             let ticker: String; let expiry: String; let center: Double; let contract_type: String
         }
         return try await client.functions.invoke(
-            "option-ladder",
+            "option-chain",
             options: FunctionInvokeOptions(
                 body: Req(ticker: ticker, expiry: expiry, center: center, contract_type: "call")
             )
