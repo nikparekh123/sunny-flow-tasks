@@ -139,6 +139,9 @@ struct CoveredCallTicker: Identifiable, Sendable {
     let put: CoveredCallPut?     // furthest-dated put, for the one-line panel
     /// Realized P&L across every closed cycle for this ticker.
     let realizedToDate: Double
+    /// Realized SHARE P&L — sum of share_sells.realized_pl (populated by
+    /// the FIFO reconcile). Assignments + market sells.
+    let realizedCapital: Double
 
     // ── Aggregates over EVERY open leg (not just the working one) ──
     let openCallContracts: Double
@@ -292,23 +295,38 @@ extension CoveredCallTicker {
     var lifetimePremium: Double { allCycles.reduce(0) { $0 + $1.premiumNet } }
     var cycleCount: Int { allCycles.count }
 
-    /// Everything banked + everything currently unrealized.
-    ///
-    /// Deliberately values open calls at their MARK, not their credit.
-    /// Crediting the full premium while ALSO crediting the shares' full
-    /// run double-counts the upside — the calls cap precisely that gain.
-    /// (NVDA 7/24: $15,823 collected on strikes now deep ITM at ~213,
-    /// which would cost far more than that to close.)
-    var totalReturn: Double { realizedToDate + exitNet }
+    /// TOTAL MADE — the wheel owner's P&L. Premium is INCOME (never
+    /// marked as a buyback liability: on assignment you deliver at the
+    /// strike and keep it), shares are valued at market vs raw average.
+    ///   realized  = premium banked on resolved calls + realized share
+    ///               P&L (from share_sells.realized_pl, FIFO-reconciled)
+    ///   running   = premium on open calls (collected) + shares vs avg
+    ///               + puts marked to market
+    var totalReturn: Double { premiumIncome + capitalReturn }
 
-    /// The premium engine's contribution: premium actually locked in on
-    /// resolved calls, plus the open calls marked to market.
-    var premiumIncome: Double {
-        allCycles.reduce(0) { $0 + $1.premiumCollected } + exitCallBuyback
+    /// Premium the strategy has produced, gross of any future buyback —
+    /// every call sold this book, net only of buybacks ALREADY paid.
+    var premiumIncome: Double { lifetimePremium }
+    /// Share P&L: realized (sells) + unrealized (held shares vs average)
+    /// + protective puts marked to market.
+    var capitalReturn: Double { realizedCapital + exitSharesPL + exitPutPL }
+
+    /// Realized P&L actually banked: resolved-call premium + realized
+    /// share gains. (Open-call premium and unrealized shares are still
+    /// running.)
+    var realizedBanked: Double {
+        allCycles.reduce(0) { $0 + $1.premiumCollected } + realizedCapital
     }
-    /// Residual — share gains (realized + unrealized) and the puts. Kept
-    /// as a remainder so the two rows always sum to totalReturn.
-    var capitalReturn: Double { totalReturn - premiumIncome }
+    /// The average that matters — raw cost less all premium made per
+    /// share. "How much we've made" lowers this.
+    var currentAverage: Double {
+        guard let c = current, c.shares > 0 else { return current?.entryPrice ?? 0 }
+        return c.entryPrice - lifetimePremium / c.shares
+    }
+    var totalReturnPct: Double {
+        guard let c = current, c.entryPrice > 0, c.shares > 0 else { return 0 }
+        return totalReturn / (c.entryPrice * c.shares) * 100
+    }
 
     /// Annualized premium yield on capital at risk (shares × entry).
     /// Uses premiumIncome (open calls marked to market) so a position
@@ -725,17 +743,15 @@ enum CoveredCallData {
             store.dailyCloses.filter { $0.ticker == ticker }.map { ($0.date, $0.close_price) },
             uniquingKeysWith: { a, _ in a }
         )
-        let everyLeg = (cycles.flatMap(\.legs) + (current?.legs ?? []))
+        // One row per (expiry, strike) — combine every fill on a strike,
+        // not one row per execution.
+        let allRolls = (cycles.flatMap(\.rollups) + (current?.rollups ?? []))
             .sorted { $0.expiry > $1.expiry }
-        let cushions: [CushionRow] = everyLeg.prefix(6).map { leg in
-            let px = leg.status == .open
-                ? spot
-                : (closesByDate[String(leg.expiry.prefix(10))] ?? spot)
+        let cushions: [CushionRow] = allRolls.prefix(8).map { r in
+            let px = r.status == .open ? spot : (closesByDate[String(r.expiry.prefix(10))] ?? spot)
             return CushionRow(
-                id: leg.id, expiry: leg.expiry, strike: leg.strike,
-                contracts: leg.status == .open ? leg.remaining : leg.contracts,
-                priceAtExpiry: px, status: leg.status,
-                premiumTotal: leg.premiumPerShare * (leg.status == .open ? leg.remaining : leg.contracts) * 100
+                id: r.id, expiry: r.expiry, strike: r.strike, contracts: r.contracts,
+                priceAtExpiry: px, status: r.status, premiumTotal: r.net
             )
         }
 
@@ -750,6 +766,9 @@ enum CoveredCallData {
             // cycle's resolved premium) + assignment share gains. The
             // open call's premium is NOT here — it's still pending.
             realizedToDate: cycles.compactMap(\.realizedPL).reduce(0, +) + (current?.premiumCollected ?? 0),
+            realizedCapital: store.allShareSells
+                .filter { $0.ticker == ticker }
+                .reduce(0.0) { $0 + $1.realized_pl },
             openCallContracts: ccCt,
             openCallAvgPremium: ccCt > 0 ? ccPrem / (ccCt * 100) : 0,
             openCallPremiumTotal: ccPrem,

@@ -175,32 +175,22 @@ private struct PositionDetail: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 9)
 
-            if let c = cycle {
+            if cycle != nil {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("COST BASIS").font(.system(size: 9, weight: .heavy)).tracking(1.1)
+                        Text("CURRENT AVERAGE").font(.system(size: 9, weight: .heavy)).tracking(1.1)
                             .foregroundStyle(.white.opacity(0.45))
-                        Text(fmtMoney(c.entryPrice, decimals: 2).replacingOccurrences(of: "$", with: ""))
-                            .font(.numeric(size: 22, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(.white)
-                    }
-                    VStack(spacing: 6) {
-                        Text("−\(fmtMoney(c.premiumPerShare, decimals: 2).replacingOccurrences(of: "$", with: ""))")
-                            .font(.numeric(size: 11, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(limeInk)
-                            .padding(.horizontal, 9).padding(.vertical, 3)
-                            .background(Capsule().fill(lime))
-                        Rectangle().fill(LinearGradient(colors: [.white.opacity(0.15), lime],
-                                                        startPoint: .leading, endPoint: .trailing))
-                            .frame(height: 2).clipShape(Capsule())
-                    }
-                    .frame(maxWidth: .infinity)
-                    VStack(alignment: .trailing, spacing: 6) {
-                        Text("ADJUSTED").font(.system(size: 9, weight: .heavy)).tracking(1.1)
-                            .foregroundStyle(.white.opacity(0.45))
-                        Text(fmtMoney(c.adjustedBasis, decimals: 2).replacingOccurrences(of: "$", with: ""))
-                            .font(.numeric(size: 22, weight: .heavy)).monospacedDigit()
+                        Text(fmtMoney(data.currentAverage, decimals: 2).replacingOccurrences(of: "$", with: ""))
+                            .font(.numeric(size: 24, weight: .heavy)).monospacedDigit()
                             .foregroundStyle(lime)
+                    }
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Text("CURRENT PRICE").font(.system(size: 9, weight: .heavy)).tracking(1.1)
+                            .foregroundStyle(.white.opacity(0.45))
+                        Text(fmtMoney(data.currentPrice, decimals: 2).replacingOccurrences(of: "$", with: ""))
+                            .font(.numeric(size: 24, weight: .heavy)).monospacedDigit()
+                            .foregroundStyle(.white)
                     }
                 }
                 .padding(16)
@@ -638,27 +628,20 @@ private struct PositionDetail: View {
 
     // ── WHAT THE STRATEGY EARNED ──
     private var returnCard: some View {
-        // Shown as three lines rather than one net "premium income".
-        // Collapsing collected premium with the cost to close open calls
-        // reads as if the premium strategy lost money — but on the wheel
-        // you never pay that buyback: you deliver at the strike and keep
-        // the credit. Separating them keeps both facts visible.
-        let collected = data.lifetimePremium          // net of buybacks already paid
-        let toClose = -data.openCallCostToClose       // liability if you unwound today
-        let cap = data.capitalReturn
+        let prem = data.premiumIncome     // premium collected (income)
+        let cap = data.capitalReturn      // realized + unrealized share P&L + puts
         let total = data.totalReturn
-        let denom = max(abs(collected) + abs(toClose) + abs(cap), 1)
+        let denom = max(abs(prem) + abs(cap), 1)
         return card {
             Text("What the strategy earned").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
-            Text("Total return since the first call, split by source.")
-                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3).padding(.top, 6)
+            Text("Premium is income; shares are marked at price vs your average.")
+                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
+                .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
             HStack(spacing: 3) {
                 RoundedRectangle(cornerRadius: 3).fill(Color.theme.fg1)
-                    .frame(width: max(4, CGFloat(abs(collected) / denom) * 300))
-                RoundedRectangle(cornerRadius: 3).fill(Color.theme.neg)
-                    .frame(width: max(4, CGFloat(abs(toClose) / denom) * 300))
+                    .frame(width: max(4, CGFloat(abs(prem) / denom) * 300))
                 RoundedRectangle(cornerRadius: 3).fill(lime)
                     .frame(width: max(4, CGFloat(abs(cap) / denom) * 300))
             }
@@ -666,10 +649,7 @@ private struct PositionDetail: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.top, 20)
 
-            splitRow(Color.theme.fg1, "Premium collected", collected)
-            if data.openCallCostToClose > 0 {
-                splitRow(Color.theme.neg, "Open calls — cost to close", toClose)
-            }
+            splitRow(Color.theme.fg1, "Premium income", prem)
             splitRow(lime, "Capital (shares)", cap)
 
             HStack {
@@ -679,6 +659,9 @@ private struct PositionDetail: View {
                 Text(fmtMoney(total, sign: true))
                     .font(.numeric(size: 21, weight: .heavy)).tracking(-0.5)
                     .monospacedDigit().foregroundStyle(Color.signed(total))
+                Text("(\(fmtPct(data.totalReturnPct)))")
+                    .font(.numeric(size: 12, weight: .bold)).monospacedDigit()
+                    .foregroundStyle(Color.signed(total))
             }
             .padding(.top, 16)
 
@@ -715,34 +698,36 @@ private struct PositionDetail: View {
 
     // ── HISTORY ──
     private var historyCard: some View {
-        let resolved = data.allLegs
+        // One row per resolved strike, NET of buybacks (a rolled strike
+        // can read negative), so it reconciles with the total above.
+        let resolved = data.allRollups
             .filter { $0.status != .open }
             .sorted { $0.expiry > $1.expiry }
         let shown = showAllHistory ? resolved : Array(resolved.prefix(5))
         return card {
             Text("History").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
-            Text("Legs recorded as they close.")
+            Text("Each strike as it resolved, net of buybacks.")
                 .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3).padding(.top, 6)
 
             if resolved.isEmpty {
                 Text("Nothing closed yet.").font(.system(size: 13))
                     .foregroundStyle(Color.theme.fg4).padding(.top, 18)
             } else {
-                ForEach(shown) { leg in
+                ForEach(shown) { r in
                     HStack {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("\(AppDates.shortMonthDay(leg.expiry)) · \(fmtStrike(leg.strike)) call ×\(Int(leg.contracts))")
+                            Text("\(AppDates.shortMonthDay(r.expiry)) · \(fmtStrike(r.strike)) call ×\(Int(r.contracts))")
                                 .font(.system(size: 14.5, weight: .heavy)).tracking(-0.3)
                                 .foregroundStyle(Color.theme.fg1)
-                            Text(historySub(leg.status))
+                            Text(historySub(r.status) + (r.buyback > 0 ? " · \(fmtMoney(r.buyback)) bought back" : ""))
                                 .font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
                                 .foregroundStyle(Color.theme.fg4)
                         }
                         Spacer()
-                        Text(fmtMoney(leg.premiumPerShare * leg.contracts * 100, sign: true))
+                        Text(fmtMoney(r.net, sign: true))
                             .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(Color.theme.pos)
+                            .foregroundStyle(Color.signed(r.net))
                     }
                     .padding(.vertical, 16)
                     .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
