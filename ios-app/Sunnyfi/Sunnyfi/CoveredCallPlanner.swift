@@ -118,7 +118,9 @@ final class PlannerModel: ObservableObject {
 
     func addLeg(_ s: LadderStrike) {
         guard let e = selectedExpiry else { return }
-        let qty = max(1, uncoveredContracts)
+        // Default each leg to cover the FULL position (shares ÷ 100),
+        // editable via the stepper.
+        let qty = max(1, Int(shares / 100))
         legs.append(PlannedLeg(expiry: e, strike: s.strike, premiumPerShare: s.premium, contracts: qty))
     }
     func setContracts(_ leg: PlannedLeg, _ n: Int) {
@@ -183,7 +185,7 @@ struct CoveredCallPlanner: View {
     // ── Context ──
     private var contextStrip: some View {
         HStack(spacing: 0) {
-            ctxCell("SHARES", "\(Int(model.shares).formatted())", sub: "\(model.uncoveredContracts) uncovered")
+            ctxCell("SHARES", "\(Int(model.shares).formatted())", sub: "covers \(Int(model.shares / 100)) contracts")
             Rectangle().fill(Color.theme.hair).frame(width: 0.5, height: 38)
             ctxCell("AVERAGE", fmtMoney(model.average, decimals: 2), sub: "score against this")
         }
