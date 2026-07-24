@@ -204,13 +204,13 @@ private struct PositionDetail: View {
             // Everything banked plus everything unrealized, with open
             // calls at their mark — a loss has to be unmistakable, so it
             // flips to coral rather than staying white.
-            Text(fmtMoney(data.totalReturn, sign: true))
+            Text(fmtMoney(data.realizedBanked, sign: true))
                 .font(.system(size: 52, weight: .heavy)).tracking(-2.2)
                 .monospacedDigit()
-                .foregroundStyle(data.totalReturn < 0 ? Color(hex: 0xF0664F) : .white)
+                .foregroundStyle(data.realizedBanked < 0 ? Color(hex: 0xF0664F) : .white)
                 .minimumScaleFactor(0.5).lineLimit(1)
                 .padding(.top, 14)
-            Text("\(fmtMoney(data.lifetimePremium, sign: true)) premium collected · \(Int(data.shares).formatted()) \(data.ticker) shares across \(data.cycleCount) cycle\(data.cycleCount == 1 ? "" : "s")")
+            Text("\(fmtMoney(data.premiumIncome, sign: true)) premium + \(fmtMoney(data.realizedCapital, sign: true)) shares realized · banked, won't move on price")
                 .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 9)
@@ -724,14 +724,15 @@ private struct PositionDetail: View {
 
     // ── WHAT THE STRATEGY EARNED ──
     private var returnCard: some View {
-        let prem = data.premiumIncome     // closed-option P&L
-        let cap = data.capitalReturn      // realized + unrealized share P&L
-        let total = data.totalReturn
-        let denom = max(abs(prem) + abs(cap), 1)
+        let prem = data.premiumIncome         // premium collected (cash)
+        let realizedSh = data.realizedCapital // realized share P&L
+        let banked = data.realizedBanked      // = prem + realizedSh (the hero)
+        let unreal = data.exitSharesPL        // unrealized shares — moves with price
+        let denom = max(abs(prem) + abs(realizedSh), 1)
         return card {
             Text("What the strategy earned").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
-            Text("Premium collected (cash) plus share P&L. Open calls aren't marked to market.")
+            Text("Banked = premium collected + realized share gains. It only changes when you trade, never on price.")
                 .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
                 .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
@@ -739,27 +740,41 @@ private struct PositionDetail: View {
                 RoundedRectangle(cornerRadius: 3).fill(Color.theme.fg1)
                     .frame(width: max(4, CGFloat(abs(prem) / denom) * 300))
                 RoundedRectangle(cornerRadius: 3).fill(lime)
-                    .frame(width: max(4, CGFloat(abs(cap) / denom) * 300))
+                    .frame(width: max(4, CGFloat(abs(realizedSh) / denom) * 300))
             }
             .frame(height: 24).frame(maxWidth: .infinity, alignment: .leading)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.top, 20)
 
             splitRow(Color.theme.fg1, "Premium collected", prem)
-            splitRow(lime, "Shares", cap)
+            splitRow(lime, "Shares realized", realizedSh)
 
             HStack {
-                Text("Total return").font(.system(size: 16, weight: .heavy)).tracking(-0.3)
+                Text("Banked").font(.system(size: 16, weight: .heavy)).tracking(-0.3)
                     .foregroundStyle(Color.theme.fg1)
                 Spacer()
-                Text(fmtMoney(total, sign: true))
+                Text(fmtMoney(banked, sign: true))
                     .font(.numeric(size: 21, weight: .heavy)).tracking(-0.5)
-                    .monospacedDigit().foregroundStyle(Color.signed(total))
-                Text("(\(fmtPct(data.totalReturnPct)))")
-                    .font(.numeric(size: 12, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(Color.signed(total))
+                    .monospacedDigit().foregroundStyle(Color.signed(banked))
             }
             .padding(.top, 16)
+
+            // Unrealized — separate, so it never touches the banked number.
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Unrealized shares").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.theme.fg2)
+                    Text("moves with price · not banked")
+                        .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
+                }
+                Spacer()
+                Text(fmtMoney(unreal, sign: true))
+                    .font(.numeric(size: 15, weight: .bold)).monospacedDigit()
+                    .foregroundStyle(Color.signed(unreal))
+            }
+            .padding(.vertical, 13)
+            .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+            .padding(.top, 8)
         }
     }
 
