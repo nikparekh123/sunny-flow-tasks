@@ -260,6 +260,22 @@ final class PortfolioStore {
         )
     }
 
+    /// Latest headlines for the NVDA Home news card. Best-effort — a dead
+    /// feed just yields an empty list, so the card degrades quietly.
+    func fetchNews(tickers: [String]) async -> [NewsHeadline] {
+        struct Req: Encodable { let tickers: [String] }
+        struct Resp: Decodable { let items: [NewsHeadline] }
+        do {
+            let r: Resp = try await client.functions.invoke(
+                "dashboard-news",
+                options: FunctionInvokeOptions(body: Req(tickers: tickers))
+            )
+            return r.items
+        } catch {
+            return []
+        }
+    }
+
     /// Pull-to-refresh — invokes the mp-refresh edge function, then re-fetches.
     func refresh() async {
         isRefreshing = true

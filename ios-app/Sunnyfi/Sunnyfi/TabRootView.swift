@@ -86,7 +86,9 @@ struct TabRootView: View {
                 OfflineBanner(isOnline: reach.isOnline, lastFreshness: store.freshness)
                 Group {
                     switch tab {
-                    case .home:        TodayScreen(store: store)
+                    // Single-ticker NVDA command center (was the generic
+                    // multi-ticker TodayScreen digest, kept for reference).
+                    case .home:        NVDAHomeScreen(store: store)
                     case .trades:      TradesScreen(store: store, auth: auth)
                     case .coveredCall: CoveredCallScreen(store: store)
                     case .hedge:       HedgeScreen(store: store, auth: auth)
