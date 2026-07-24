@@ -134,7 +134,8 @@ private struct PositionDetail: View {
     /// Group → whether the legs list is expanded, and which leg is drilled into.
     @State private var expanded: Set<PosTab> = []
     @State private var openLeg: [PosTab: Int] = [:]
-    @State private var range: IncomeRange = .all
+    @State private var premRange: PremRange = .all
+    @State private var selectedDay: String? = nil
     @State private var showAllHistory = false
 
     private var cycle: CoveredCallCycle? { data.current }
@@ -145,7 +146,7 @@ private struct PositionDetail: View {
         VStack(spacing: 14) {
             hero
             positionCard
-            weekdayCard
+            premiumCard
             cushionCard
             returnCard
             historyCard
@@ -538,53 +539,78 @@ private struct PositionDetail: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
     }
 
-    // ── WHERE PREMIUM LANDS ──
-    private var weekdayCard: some View {
-        let series = data.incomeByWeekday(range)
-        let maxV = max(series.map(\.amount).max() ?? 1, 1)
+    // ── WHERE PREMIUM LANDS — daily, scrub to reveal (Robinhood-style) ──
+    private var premiumCard: some View {
+        let series = data.premiumByDay(premRange)
         let total = series.reduce(0) { $0 + $1.amount }
-        let lead = series.max { $0.amount < $1.amount }
+        let sel = series.first { $0.id == selectedDay }
+        let maxAbs = max(series.map { abs($0.amount) }.max() ?? 1, 1)
         return card {
             Text("Where premium lands").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
-            Text("Realized premium on closed calls, grouped by the expiry weekday.")
-                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
-                .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
-            segmented(IncomeRange.allCases, selection: $range) { $0.rawValue }
-                .padding(.top, 16)
+            // Readout — the scrubbed day, or the range total.
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(fmtMoney(sel?.amount ?? total, sign: true))
+                    .font(.numeric(size: 30, weight: .heavy)).tracking(-1)
+                    .monospacedDigit().foregroundStyle(Color.signed(sel?.amount ?? total))
+                Text(sel.map { fullDate($0.date) } ?? "\(series.count) day\(series.count == 1 ? "" : "s") · net")
+                    .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.theme.fg3)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 10)
 
-            HStack(alignment: .bottom, spacing: 14) {
-                ForEach(series, id: \.day) { s in
-                    let isLead = s.day == lead?.day && s.amount > 0
-                    VStack(spacing: 9) {
-                        Text(fmtMoney(s.amount))
-                            .font(.numeric(size: 13, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(isLead ? Color.theme.fg1 : Color.theme.fg3)
-                            .lineLimit(1).minimumScaleFactor(0.6)
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(isLead ? lime : Color.theme.page2)
-                            .frame(maxWidth: 72)
-                            .frame(height: max(8, CGFloat(s.amount / maxV) * 112))
-                        Text(s.day).font(.system(size: 12, weight: .heavy))
-                            .foregroundStyle(Color.theme.fg2)
+            if series.isEmpty {
+                Text("No premium realized in this range.")
+                    .font(.system(size: 13)).foregroundStyle(Color.theme.fg4).padding(.top, 24)
+            } else {
+                dailyBars(series, maxAbs: maxAbs).padding(.top, 20)
+            }
+
+            segmented(PremRange.allCases, selection: $premRange) { $0.rawValue }
+                .padding(.top, 20)
+                .onChange(of: premRange) { _, _ in selectedDay = nil }
+        }
+    }
+
+    private func dailyBars(_ series: [PremiumDay], maxAbs: Double) -> some View {
+        // Zero baseline in the middle: positive up (lime), negative down
+        // (coral). Tap a bar to scrub it; tap again to clear.
+        let half: CGFloat = 46
+        return HStack(alignment: .center, spacing: 6) {
+            ForEach(series) { d in
+                let on = selectedDay == d.id
+                let frac = d.amount / maxAbs
+                let h = max(4, CGFloat(abs(frac)) * half)
+                Button {
+                    withAnimation(Motion.standard) { selectedDay = on ? nil : d.id }
+                } label: {
+                    VStack(spacing: 6) {
+                        ZStack {
+                            Rectangle().fill(Color.theme.hair).frame(height: 1)   // baseline
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(d.amount >= 0 ? lime : Color.theme.neg)
+                                .opacity(selectedDay == nil || on ? 1 : 0.35)
+                                .frame(width: 22, height: h)
+                                .offset(y: frac >= 0 ? -h / 2 : h / 2)
+                        }
+                        .frame(height: half * 2)
+                        Text(d.label).font(.system(size: 9.5, weight: on ? .heavy : .medium))
+                            .foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
+                            .fixedSize()
                     }
                     .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
                 }
-            }
-            .frame(height: 165, alignment: .bottom)
-            .padding(.top, 22)
-
-            if total > 0, let lead, lead.amount > 0 {
-                Text("\(lead.day) expiries carry \(fmtMoney(lead.amount)) of \(fmtMoney(total)) realized — \(Int((lead.amount / total * 100).rounded()))%.")
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(Color.theme.fg1)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(lime.opacity(0.35)))
-                    .padding(.top, 18)
+                .buttonStyle(.plain)
             }
         }
+    }
+
+    private func fullDate(_ d: Date) -> String {
+        let f = DateFormatter(); f.dateFormat = "EEE, MMM d"
+        f.timeZone = TimeZone(identifier: "America/New_York")
+        return f.string(from: d)
     }
 
     // ── HOW CLOSE EACH CALL SAT ──

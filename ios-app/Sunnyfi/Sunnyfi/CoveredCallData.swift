@@ -281,9 +281,20 @@ struct CushionRow: Identifiable, Sendable {
     var premiumTotal: Double
 }
 
-enum IncomeRange: String, CaseIterable, Identifiable, Sendable {
-    case month = "This month", quarter = "Quarter", all = "All time"
+enum PremRange: String, CaseIterable, Identifiable, Sendable {
+    case week = "1W", month = "1M", quarter = "3M", all = "All"
     var id: String { rawValue }
+    var days: Int? {
+        switch self { case .week: return 7; case .month: return 31
+        case .quarter: return 93; case .all: return nil }
+    }
+}
+
+struct PremiumDay: Identifiable, Sendable {
+    let id: String       // yyyy-MM-dd
+    let date: Date
+    let label: String    // "M/d"
+    let amount: Double    // net premium realized that day
 }
 
 extension CoveredCallTicker {
@@ -339,31 +350,24 @@ extension CoveredCallTicker {
     }
 
     /// Realized premium grouped by expiry weekday (Mon/Wed/Fri).
-    func incomeByWeekday(_ range: IncomeRange, now: Date = Date()) -> [(day: String, amount: Double)] {
+    /// Net premium realized PER DAY (by expiry date), oldest → newest,
+    /// within the range. One entry per day premium actually landed.
+    func premiumByDay(_ range: PremRange, now: Date = Date()) -> [PremiumDay] {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
-        let cutoff: Date? = {
-            switch range {
-            case .all:     return nil
-            case .month:   return AppDates.startOfMonth(now)
-            case .quarter: return cal.date(byAdding: .month, value: -3, to: now)
-            }
-        }()
-        // Bucket by WHATEVER weekday each expiry actually falls on — a
-        // fixed Mon/Wed/Fri skeleton silently dropped anything else and
-        // could leave the chart empty.
-        var buckets: [Int: Double] = [:]
+        let cutoff: Date? = range.days.flatMap { cal.date(byAdding: .day, value: -$0, to: now) }
+
+        var byDate: [String: Double] = [:]
         for r in allRollups where r.status != .open {
             guard let d = AppDates.parseISODay(r.expiry) else { continue }
             if let cutoff, d < cutoff { continue }
-            let wd = cal.component(.weekday, from: d)
-            buckets[wd, default: 0] += r.net       // net of buybacks
+            byDate[String(r.expiry.prefix(10)), default: 0] += r.net
         }
-        let names = [1: "Sun", 2: "Mon", 3: "Tue", 4: "Wed", 5: "Thu", 6: "Fri", 7: "Sat"]
-        guard !buckets.isEmpty else {
-            return [("Mon", 0), ("Wed", 0), ("Fri", 0)]   // skeleton, never blank
+        let mdFmt = DateFormatter(); mdFmt.dateFormat = "M/d"; mdFmt.timeZone = cal.timeZone
+        return byDate.keys.sorted().compactMap { key in
+            guard let d = AppDates.parseISODay(key) else { return nil }
+            return PremiumDay(id: key, date: d, label: mdFmt.string(from: d), amount: byDate[key] ?? 0)
         }
-        return buckets.keys.sorted().map { (day: names[$0] ?? "?", amount: buckets[$0] ?? 0) }
     }
 }
 
