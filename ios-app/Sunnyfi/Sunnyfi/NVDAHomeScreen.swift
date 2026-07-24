@@ -75,8 +75,13 @@ struct NVDAHomeScreen: View {
             HStack(spacing: 8) {
                 Text(d.ticker).font(.system(size: 15, weight: .black)).tracking(0.4)
                     .foregroundStyle(.white)
-                Text("· \(d.name)").font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
+                // Only show the long name when it actually differs from the
+                // ticker — the DB stores NVDA's name as "NVDA", which read as
+                // a redundant "NVDA · NVDA".
+                if d.name.uppercased() != d.ticker.uppercased() {
+                    Text("· \(d.name)").font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
                 Spacer()
                 HStack(spacing: 5) {
                     Circle().fill(lime).frame(width: 6, height: 6)
@@ -103,7 +108,7 @@ struct NVDAHomeScreen: View {
                 Spacer(minLength: 0)
                 heroStat("UNREALIZED", fmtMoney(d.unrealizedShares, sign: true),
                          d.unrealizedShares >= 0 ? dayColor : Color(hex: 0xF0664F),
-                         "shares vs cost", trailing: true)
+                         "shares vs your basis", trailing: true)
             }
             .padding(.top, 16)
 

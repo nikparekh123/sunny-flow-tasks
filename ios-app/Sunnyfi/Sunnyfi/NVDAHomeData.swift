@@ -32,7 +32,7 @@ struct NVDAHome: Sendable {
     let todayPL: Double          // $ move on the shares today
     let positionValue: Double    // shares × spot
     let shares: Double
-    let unrealizedShares: Double // (spot − raw avg) × shares
+    let unrealizedShares: Double // (spot − EFFECTIVE basis) × shares — matches the basis card
 
     // ── Effective basis ──
     let rawAvg: Double           // what you paid, e.g. 209.19
@@ -115,15 +115,23 @@ struct NVDAHome: Sendable {
         }
         let ev = soonestEvent(minStars: 2) ?? soonestEvent(minStars: 1)
 
+        // The DB stores NVDA's name as "NVDA"; prefer a real company name.
+        let friendlyName: String = {
+            let n = company?.name ?? ""
+            return (n.isEmpty || n.uppercased() == ticker) ? "NVIDIA" : n
+        }()
         return NVDAHome(
             ticker: ticker,
-            name: company?.name ?? "NVIDIA",
+            name: friendlyName,
             spot: spot,
             dayPct: company?.dayPct ?? cc.dayPct,
             todayPL: cc.todayPL,
             positionValue: shares * spot,
             shares: shares,
-            unrealizedShares: cc.exitSharesPL,
+            // Measured vs the EFFECTIVE basis (raw cost less premium), so the
+            // banner agrees with the "+X% above basis" card instead of
+            // contradicting it with a raw-cost figure.
+            unrealizedShares: (spot - effectiveAvg) * shares,
             rawAvg: rawAvg,
             effectiveAvg: effectiveAvg,
             premiumPerShare: max(0, rawAvg - effectiveAvg),
