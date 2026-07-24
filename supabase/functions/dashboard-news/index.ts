@@ -1,38 +1,32 @@
 /**
- * dashboard-news — Yahoo Finance scrape of recent headlines per ticker.
+ * dashboard-news — recent headlines per ticker, from Polygon.
  *
- * Used by the dashboard's NewsBand block to surface the latest news for
- * each held position. Yahoo's public search endpoint returns a JSON
- * payload that includes a `news` array per ticker query — no API key
- * required, but we set a browser-style User-Agent because the default
- * Deno UA gets blocked.
+ * Was a Yahoo Finance scrape, but Yahoo's public search endpoint now
+ * blocks non-browser clients (returns an HTML challenge, not JSON), so
+ * this uses Polygon's reference-news API instead — the same
+ * POLYGON_API_KEY secret the rest of the app already uses.
  *
- * Endpoint:  https://query1.finance.yahoo.com/v1/finance/search
- *            ?q=TICKER&newsCount=3&quotesCount=0
+ * Endpoint:  https://api.polygon.io/v2/reference/news?ticker=TICKER&limit=3
  *
  * Request:  POST { tickers: string[] }
  * Response: { items: Array<{ ticker, headline, url, publisher, ts }> }
+ *           ts is an ISO-8601 string (Polygon's published_utc).
  *
- * Brittle by design — Yahoo can change shape anytime. Failures per
- * ticker are isolated (one bad fetch doesn't kill the rest of the
- * batch). We swallow + skip silently.
+ * Per-ticker failures are isolated — one bad fetch doesn't kill the batch.
  */
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-interface YahooNewsItem {
-  uuid?: string;
+interface PolyNewsResult {
   title?: string;
-  publisher?: string;
-  providerPublishTime?: number;       // unix seconds
-  link?: string;
-  type?: string;
+  article_url?: string;
+  published_utc?: string;               // ISO-8601
+  publisher?: { name?: string };
 }
-
-interface YahooSearchResponse {
-  news?: YahooNewsItem[];
+interface PolyNewsResponse {
+  results?: PolyNewsResult[];
 }
 
 interface OutItem {
@@ -40,34 +34,31 @@ interface OutItem {
   headline: string;
   url: string | null;
   publisher: string | null;
-  ts: number | null;                  // unix seconds
+  ts: string | null;                    // ISO-8601
 }
 
-async function fetchOne(ticker: string): Promise<OutItem | null> {
-  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}&newsCount=3&quotesCount=0`;
+async function fetchTicker(ticker: string, key: string): Promise<OutItem[]> {
+  const url = new URL("https://api.polygon.io/v2/reference/news");
+  url.searchParams.set("ticker", ticker.toUpperCase());
+  url.searchParams.set("limit", "3");
+  url.searchParams.set("order", "desc");
+  url.searchParams.set("sort", "published_utc");
+  url.searchParams.set("apiKey", key);
   try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; Sunnyfi/1.0)",
-        "Accept": "application/json",
-      },
-    });
-    if (!res.ok) return null;
-    const j = await res.json() as YahooSearchResponse;
-    const news = j.news ?? [];
-    // Take the most recent STORY (skip 'pressrelease' / video stubs
-    // when we can — they're noisy). Yahoo orders newest-first already.
-    const pick = news.find((n) => n.type === "STORY" || n.type === undefined) ?? news[0];
-    if (!pick || !pick.title) return null;
-    return {
-      ticker,
-      headline: pick.title,
-      url: pick.link ?? null,
-      publisher: pick.publisher ?? null,
-      ts: pick.providerPublishTime ?? null,
-    };
+    const res = await fetch(url.toString());
+    if (!res.ok) return [];
+    const j = (await res.json()) as PolyNewsResponse;
+    return (j.results ?? [])
+      .filter((r) => r.title)
+      .map((r) => ({
+        ticker,
+        headline: r.title as string,
+        url: r.article_url ?? null,
+        publisher: r.publisher?.name ?? null,
+        ts: r.published_utc ?? null,
+      }));
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -75,13 +66,23 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    const key = Deno.env.get("POLYGON_API_KEY");
+    if (!key) {
+      return new Response(
+        JSON.stringify({ error: "POLYGON_API_KEY is not set", items: [] }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     let tickers: string[] = [];
     try {
-      const body = await req.json() as { tickers?: string[] };
+      const body = (await req.json()) as { tickers?: string[] };
       if (Array.isArray(body?.tickers)) {
-        tickers = body.tickers.filter((t): t is string => typeof t === "string" && t.length > 0).slice(0, 10);
+        tickers = body.tickers
+          .filter((t): t is string => typeof t === "string" && t.length > 0)
+          .slice(0, 10);
       }
-    } catch { /* fall through with empty list */ }
+    } catch { /* empty list */ }
 
     if (tickers.length === 0) {
       return new Response(
@@ -90,10 +91,8 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Fetch in parallel — Yahoo is happy enough with 10 concurrent
-    // requests from one client. Each ticker's failure is isolated.
-    const results = await Promise.all(tickers.map(fetchOne));
-    const items = results.filter((r): r is OutItem => r != null);
+    const perTicker = await Promise.all(tickers.map((t) => fetchTicker(t, key)));
+    const items = perTicker.flat();
 
     return new Response(
       JSON.stringify({ items }),
@@ -102,7 +101,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     console.error("dashboard-news failed:", e);
     return new Response(
-      JSON.stringify({ error: (e as Error).message }),
+      JSON.stringify({ error: (e as Error).message, items: [] }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
