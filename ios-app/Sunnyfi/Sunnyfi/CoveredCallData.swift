@@ -321,13 +321,30 @@ extension CoveredCallTicker {
     /// credits less the buybacks you ACTUALLY paid (not marks). Includes
     /// open calls because you already received that cash.
     var premiumIncome: Double { lifetimePremium }
+
+    /// REALIZED option premium — only calls that have RESOLVED (expired,
+    /// assigned, or fully bought back). Credit on a still-open call is NOT
+    /// here; it's unrealized until that call closes. This is the piece the
+    /// hero counts. (lifetimePremium = realizedPremium + openPremium.)
+    var realizedPremium: Double {
+        allRollups.filter { $0.status != .open }.reduce(0) { $0 + $1.net }
+    }
+    /// Credit sitting in calls STILL OPEN — cash in hand, but not realized
+    /// (the call can still be bought back). Never marked to market. Shown
+    /// as unrealized, alongside unrealized shares.
+    var openPremium: Double {
+        allRollups.filter { $0.status == .open }.reduce(0) { $0 + $1.net }
+    }
+
     /// Share P&L: realized (FIFO sells) + unrealized (held shares vs
     /// average). No option marks.
     var capitalReturn: Double { realizedCapital + exitSharesPL }
 
-    /// Purely banked (no unrealized): premium collected + realized share
-    /// gains. What the account has actually pocketed.
-    var realizedBanked: Double { lifetimePremium + realizedCapital }
+    /// Purely banked (no unrealized): REALIZED option premium (resolved
+    /// calls only) + realized share gains. Open-call credit and held-share
+    /// paper are both excluded — they live in the unrealized lines. This is
+    /// what the account has actually locked in.
+    var realizedBanked: Double { realizedPremium + realizedCapital }
     /// The average that matters — raw cost less all premium made per
     /// share. "How much we've made" lowers this.
     var currentAverage: Double {

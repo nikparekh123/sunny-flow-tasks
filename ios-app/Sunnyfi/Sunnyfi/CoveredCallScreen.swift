@@ -210,7 +210,7 @@ private struct PositionDetail: View {
                 .foregroundStyle(data.realizedBanked < 0 ? Color(hex: 0xF0664F) : .white)
                 .minimumScaleFactor(0.5).lineLimit(1)
                 .padding(.top, 14)
-            Text("\(fmtMoney(data.premiumIncome, sign: true)) premium + \(fmtMoney(data.realizedCapital, sign: true)) shares realized · banked, won't move on price")
+            Text("\(fmtMoney(data.realizedPremium, sign: true)) premium realized + \(fmtMoney(data.realizedCapital, sign: true)) shares realized · banked, won't move on price")
                 .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.6))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 9)
@@ -724,9 +724,10 @@ private struct PositionDetail: View {
 
     // ── WHAT THE STRATEGY EARNED ──
     private var returnCard: some View {
-        let prem = data.premiumIncome         // premium collected (cash)
+        let prem = data.realizedPremium       // REALIZED premium (resolved calls only)
         let realizedSh = data.realizedCapital // realized share P&L
         let banked = data.realizedBanked      // = prem + realizedSh (the hero)
+        let openPrem = data.openPremium       // credit on OPEN calls — unrealized
         let unreal = data.exitSharesPL        // unrealized shares — moves with price
         let denom = max(abs(prem) + abs(realizedSh), 1)
         // Spell out the paper P&L: shares × (spot − raw cost). Explains the sign.
@@ -736,7 +737,7 @@ private struct PositionDetail: View {
         return card {
             Text("What the strategy earned").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
-            Text("Banked = premium collected + realized share gains. It only changes when you trade, never on price.")
+            Text("Banked = realized premium (closed calls) + realized share gains. It only changes when you trade, never on price.")
                 .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
                 .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
@@ -750,7 +751,7 @@ private struct PositionDetail: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.top, 20)
 
-            splitRow(Color.theme.fg1, "Premium collected", prem)
+            splitRow(Color.theme.fg1, "Premium realized", prem)
             splitRow(lime, "Shares realized", realizedSh)
 
             HStack {
@@ -763,24 +764,37 @@ private struct PositionDetail: View {
             }
             .padding(.top, 16)
 
-            // Unrealized — separate, so it never touches the banked number.
-            // Caption spells out the arithmetic so the figure explains itself.
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Unrealized shares").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.theme.fg2)
-                    Text(unrealBreakdown)
-                        .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
-                }
-                Spacer()
-                Text(fmtMoney(unreal, sign: true))
-                    .font(.numeric(size: 15, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(Color.signed(unreal))
+            // ── Unrealized — kept fully separate, never touches Banked ──
+            // Two kinds: open-call credit (cash received, call still live)
+            // and held-share paper (moves with price). Neither is locked.
+            VStack(spacing: 0) {
+                unrealizedRow(
+                    "Unrealized premium",
+                    "open calls · credit received, not yet closed",
+                    openPrem
+                )
+                Rectangle().fill(Color.theme.hair).frame(height: 1)
+                unrealizedRow("Unrealized shares", unrealBreakdown, unreal)
             }
-            .padding(.vertical, 13)
             .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
-            .padding(.top, 8)
+            .padding(.top, 10)
         }
+    }
+
+    private func unrealizedRow(_ title: String, _ sub: String, _ v: Double) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.theme.fg2)
+                Text(sub).font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(Color.theme.fg4)
+            }
+            Spacer()
+            Text(fmtMoney(v, sign: true))
+                .font(.numeric(size: 15, weight: .bold)).monospacedDigit()
+                .foregroundStyle(Color.signed(v))
+        }
+        .padding(.vertical, 13)
     }
 
     private func splitRow(_ sw: Color, _ label: String, _ v: Double) -> some View {
