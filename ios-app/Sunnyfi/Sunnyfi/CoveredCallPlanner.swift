@@ -29,15 +29,6 @@ struct LadderStrike: Decodable, Sendable, Identifiable {
 
 // MARK: - Planner state
 
-struct PlannedLeg: Identifiable, Sendable {
-    let id = UUID()
-    let expiry: String
-    let strike: Double
-    let premiumPerShare: Double
-    var contracts: Int
-    var premiumTotal: Double { premiumPerShare * Double(contracts) * 100 }
-}
-
 @MainActor
 final class PlannerModel: ObservableObject {
     let store: PortfolioStore
@@ -45,11 +36,12 @@ final class PlannerModel: ObservableObject {
     let shares: Double
     let average: Double         // current average (adjusted) to score against
     let spot: Double
-    let existingOpenContracts: Int   // calls already written against the book
 
-    @Published var legs: [PlannedLeg] = []
+    // Single selection: one expiry, one strike.
     @Published var selectedExpiry: String?
     @Published var ladder: [LadderStrike] = []
+    @Published var selectedStrike: LadderStrike?
+    @Published var contracts: Int
     @Published var loading = false
     @Published var loadError: String?
 
@@ -59,7 +51,7 @@ final class PlannerModel: ObservableObject {
         self.shares = data.shares
         self.average = data.currentAverage
         self.spot = data.currentPrice
-        self.existingOpenContracts = Int(data.openCallContracts)
+        self.contracts = max(1, Int(data.shares / 100))   // cover the full position
     }
 
     /// Upcoming Mon/Wed/Fri expiries (next ~2 weeks), as ISO days.
@@ -77,31 +69,25 @@ final class PlannerModel: ObservableObject {
         return out
     }
 
-    /// Contracts already committed to existing open calls + planned legs.
-    var committedContracts: Int {
-        existingOpenContracts + legs.reduce(0) { $0 + $1.contracts }
-    }
-    /// Contracts you could still write against uncovered shares.
-    var uncoveredContracts: Int {
-        max(0, Int(shares / 100) - committedContracts)
-    }
+    var hasSelection: Bool { selectedStrike != nil }
+    var totalPremium: Double { (selectedStrike?.premium ?? 0) * Double(contracts) * 100 }
 
-    var totalPremium: Double { legs.reduce(0) { $0 + $1.premiumTotal } }
-
-    /// If every planned call expires worthless: keep the shares, average
-    /// drops by the premium collected per share.
+    /// If it expires worthless: keep the shares, average drops by the
+    /// premium collected per share.
     var keepGain: Double { totalPremium }
     var newAverage: Double { shares > 0 ? average - totalPremium / shares : average }
 
-    /// If every planned call is assigned: keep the premium AND realize the
-    /// share gain to each strike on the called-away shares.
+    /// If assigned: keep the premium AND realize the share gain to the
+    /// strike on the called-away shares.
     var assignGain: Double {
-        totalPremium + legs.reduce(0) { $0 + ($1.strike - average) * Double($1.contracts) * 100 }
+        guard let s = selectedStrike else { return 0 }
+        return totalPremium + (s.strike - average) * Double(contracts) * 100
     }
-    var assignedShares: Int { min(Int(shares / 100), legs.reduce(0) { $0 + $1.contracts }) * 100 }
+    var assignedShares: Int { min(Int(shares / 100), contracts) * 100 }
 
     func selectExpiry(_ e: String) {
         selectedExpiry = e
+        selectedStrike = nil
         Task { await loadLadder(e) }
     }
 
@@ -116,18 +102,7 @@ final class PlannerModel: ObservableObject {
         loading = false
     }
 
-    func addLeg(_ s: LadderStrike) {
-        guard let e = selectedExpiry else { return }
-        // Default each leg to cover the FULL position (shares ÷ 100),
-        // editable via the stepper.
-        let qty = max(1, Int(shares / 100))
-        legs.append(PlannedLeg(expiry: e, strike: s.strike, premiumPerShare: s.premium, contracts: qty))
-    }
-    func setContracts(_ leg: PlannedLeg, _ n: Int) {
-        guard let i = legs.firstIndex(where: { $0.id == leg.id }) else { return }
-        legs[i].contracts = max(1, n)
-    }
-    func remove(_ leg: PlannedLeg) { legs.removeAll { $0.id == leg.id } }
+    func setContracts(_ n: Int) { contracts = max(1, n) }
 }
 
 // MARK: - Drawer
@@ -145,7 +120,6 @@ struct CoveredCallPlanner: View {
             ScrollView {
                 VStack(spacing: 12) {
                     contextStrip
-                    if !model.legs.isEmpty { planList }
                     builder
                     Color.clear.frame(height: 8)
                 }
@@ -201,56 +175,11 @@ struct CoveredCallPlanner: View {
         .frame(maxWidth: .infinity)
     }
 
-    // ── Planned legs ──
-    private var planList: some View {
-        VStack(spacing: 10) {
-            ForEach(model.legs) { leg in
-                HStack(spacing: 12) {
-                    VStack(spacing: 2) {
-                        Text(weekday(leg.expiry)).font(.system(size: 9, weight: .heavy)).tracking(0.4)
-                            .foregroundStyle(limeInk.opacity(0.7))
-                        Text(dayNum(leg.expiry)).font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(limeInk)
-                    }
-                    .frame(width: 42, height: 42)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(lime.opacity(0.35)))
-
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("$\(fmtStrike(leg.strike)) call").font(.system(size: 14.5, weight: .heavy))
-                            .tracking(-0.2).foregroundStyle(Color.theme.fg1)
-                        Text("\(fmtMoney(leg.premiumPerShare, decimals: 2)) / sh · \(cushionLabel(leg.strike))")
-                            .font(.numeric(size: 11, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(Color.theme.fg4)
-                    }
-                    Spacer(minLength: 0)
-
-                    // contracts stepper
-                    HStack(spacing: 8) {
-                        stepBtn("minus") { model.setContracts(leg, leg.contracts - 1) }
-                        Text("\(leg.contracts)").font(.numeric(size: 14, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(Color.theme.fg1).frame(minWidth: 22)
-                        stepBtn("plus") { model.setContracts(leg, leg.contracts + 1) }
-                    }
-                    VStack(alignment: .trailing, spacing: 3) {
-                        Text(fmtMoney(leg.premiumTotal, sign: true))
-                            .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(Color.theme.pos)
-                        Button { model.remove(leg) } label: {
-                            Image(systemName: "trash").font(.system(size: 11, weight: .bold))
-                                .foregroundStyle(Color.theme.fg4)
-                        }.buttonStyle(.plain)
-                    }
-                }
-                .padding(13)
-                .background(RoundedRectangle(cornerRadius: 16).fill(Color.theme.surface))
-            }
-        }
-    }
-    private func stepBtn(_ icon: String, _ tap: @escaping () -> Void) -> some View {
+    private func stepBtn(_ icon: String, _ tint: Color, _ tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
-            Image(systemName: icon).font(.system(size: 10, weight: .heavy))
-                .foregroundStyle(Color.theme.fg2)
-                .frame(width: 26, height: 26).background(Circle().fill(Color.theme.page2))
+            Image(systemName: icon).font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(tint)
+                .frame(width: 30, height: 30).background(Circle().fill(.white.opacity(0.12)))
         }.buttonStyle(.plain)
     }
 
@@ -312,20 +241,21 @@ struct CoveredCallPlanner: View {
             HStack(spacing: 7) {
                 ForEach(model.ladder) { s in
                     let mny = cushionKind(s.strike)
-                    Button { model.addLeg(s) } label: {
+                    let on = model.selectedStrike?.strike == s.strike
+                    Button { model.selectedStrike = s } label: {
                         VStack(spacing: 5) {
                             Text(fmtStrike(s.strike)).font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                                .foregroundStyle(Color.theme.fg1)
+                                .foregroundStyle(on ? limeInk : Color.theme.fg1)
                             Text(fmtMoney(s.premium, decimals: 2)).font(.numeric(size: 11, weight: .heavy)).monospacedDigit()
-                                .foregroundStyle(Color.theme.pos)
+                                .foregroundStyle(on ? limeInk : Color.theme.pos)
                             Text(mny.0).font(.system(size: 8, weight: .heavy)).tracking(0.3)
-                                .foregroundStyle(mny.1)
+                                .foregroundStyle(on ? limeInk.opacity(0.7) : mny.1)
                         }
                         .frame(width: 58, height: 74)
                         .background(RoundedRectangle(cornerRadius: 14)
-                            .fill(Color.theme.page2))
+                            .fill(on ? lime : Color.theme.page2))
                         .overlay(alignment: .top) {
-                            if abs(s.strike - model.spot) < 2.5 {
+                            if !on && abs(s.strike - model.spot) < 2.5 {
                                 RoundedRectangle(cornerRadius: 14)
                                     .strokeBorder(Color.theme.fg4, style: StrokeStyle(lineWidth: 1.5, dash: [3]))
                             }
@@ -347,19 +277,25 @@ struct CoveredCallPlanner: View {
                 .font(.numeric(size: 42, weight: .heavy)).tracking(-1.6).monospacedDigit()
                 .foregroundStyle(.white).padding(.top, 8)
 
-            if model.legs.isEmpty {
-                Text("Pick an expiry and strike to see your outcome")
-                    .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.white.opacity(0.5))
-                    .padding(.top, 8)
-            } else {
-                Text("\(model.legs.count) leg\(model.legs.count == 1 ? "" : "s") · \(model.legs.reduce(0){ $0 + $1.contracts }) contracts")
-                    .font(.numeric(size: 11.5, weight: .medium)).monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.5)).padding(.top, 8)
+            if let s = model.selectedStrike {
+                HStack {
+                    Text("$\(fmtStrike(s.strike)) call · \(cushionLabel(s.strike))")
+                        .font(.numeric(size: 11.5, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.55))
+                    Spacer()
+                    HStack(spacing: 10) {
+                        stepBtn("minus", .white) { model.setContracts(model.contracts - 1) }
+                        Text("\(model.contracts)").font(.numeric(size: 14, weight: .heavy)).monospacedDigit()
+                            .foregroundStyle(.white).frame(minWidth: 24)
+                        stepBtn("plus", .white) { model.setContracts(model.contracts + 1) }
+                    }
+                }
+                .padding(.top, 12)
 
                 scenario("If it expires", "You keep \(Int(model.shares).formatted()) shares",
                          value: model.keepGain, valueColor: lime,
                          sub: "new avg \(fmtMoney(model.newAverage, decimals: 2))")
-                    .padding(.top, 16)
+                    .padding(.top, 14)
                 scenario("If assigned", "\(model.assignedShares.formatted()) shares called away",
                          value: model.assignGain, valueColor: Color(hex: 0xA9CBFF),
                          sub: "premium + gain to strike")
@@ -368,6 +304,10 @@ struct CoveredCallPlanner: View {
                     .font(.system(size: 10, weight: .semibold)).tracking(0.3)
                     .foregroundStyle(.white.opacity(0.4))
                     .frame(maxWidth: .infinity).padding(.top, 14)
+            } else {
+                Text("Pick an expiry and strike to see your outcome")
+                    .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.white.opacity(0.5))
+                    .padding(.top, 8)
             }
         }
         .padding(20)
