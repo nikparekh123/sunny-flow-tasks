@@ -307,21 +307,27 @@ extension CoveredCallTicker {
     var lifetimePremium: Double { allCycles.reduce(0) { $0 + $1.premiumNet } }
     var cycleCount: Int { allCycles.count }
 
-    /// TOTAL MADE = closed-option P&L + share P&L. Deliberately EXCLUDES
-    /// open calls, so their premium / rolls / buybacks / marks can't swing
-    /// this number — it only moves when an option closes, shares are sold,
-    /// or the share price changes.
+    /// TOTAL MADE = premium collected + share P&L.
+    ///
+    /// The key: premium is the CASH you received, counted whether the call
+    /// is open or closed — but the open call is NEVER marked to market.
+    /// Cash received doesn't swing; only a mark does. So this moves ONLY
+    /// on the share price and on real cash events (selling/buying back a
+    /// call, selling shares) — never on option marks. It can't go negative
+    /// unless you're genuinely underwater on the stock.
     var totalReturn: Double { premiumIncome + capitalReturn }
 
-    /// Closed-option P&L: premium from every RESOLVED call this book, net
-    /// of buybacks (a rolled/bought-back strike can be negative). Open
-    /// calls are NOT here — they're pending until they resolve.
-    var premiumIncome: Double { allCycles.reduce(0) { $0 + $1.premiumCollected } }
+    /// Premium actually collected across every call this book — opens'
+    /// credits less the buybacks you ACTUALLY paid (not marks). Includes
+    /// open calls because you already received that cash.
+    var premiumIncome: Double { lifetimePremium }
     /// Share P&L: realized (FIFO sells) + unrealized (held shares vs
-    /// average). No option marks — keeps the total steady.
+    /// average). No option marks.
     var capitalReturn: Double { realizedCapital + exitSharesPL }
 
-    var realizedBanked: Double { premiumIncome + realizedCapital }
+    /// Purely banked (no unrealized): premium collected + realized share
+    /// gains. What the account has actually pocketed.
+    var realizedBanked: Double { lifetimePremium + realizedCapital }
     /// The average that matters — raw cost less all premium made per
     /// share. "How much we've made" lowers this.
     var currentAverage: Double {

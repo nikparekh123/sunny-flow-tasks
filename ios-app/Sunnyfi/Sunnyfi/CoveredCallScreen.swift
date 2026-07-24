@@ -731,7 +731,7 @@ private struct PositionDetail: View {
         return card {
             Text("What the strategy earned").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
-            Text("Closed-option P&L plus shares. Open calls aren't counted until they resolve.")
+            Text("Premium collected (cash) plus share P&L. Open calls aren't marked to market.")
                 .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
                 .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
@@ -745,7 +745,7 @@ private struct PositionDetail: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.top, 20)
 
-            splitRow(Color.theme.fg1, "Closed options", prem)
+            splitRow(Color.theme.fg1, "Premium collected", prem)
             splitRow(lime, "Shares", cap)
 
             HStack {
