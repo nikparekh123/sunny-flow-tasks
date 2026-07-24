@@ -560,16 +560,38 @@ private struct PositionDetail: View {
             }
             .padding(.top, 10)
 
+            Text(sel?.pending == true
+                 ? "Collected on an open expiry — not yet resolved."
+                 : "Net premium by expiry day. Sums to your premium income.")
+                .font(.system(size: 12)).foregroundStyle(Color.theme.fg4)
+                .padding(.top, 5)
+
             if series.isEmpty {
-                Text("No premium realized in this range.")
+                Text("No premium in this range.")
                     .font(.system(size: 13)).foregroundStyle(Color.theme.fg4).padding(.top, 24)
             } else {
-                dailyBars(series, maxAbs: maxAbs).padding(.top, 20)
+                dailyBars(series, maxAbs: maxAbs).padding(.top, 18)
+                HStack(spacing: 16) {
+                    legendSwatch(lime, "realized")
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .strokeBorder(lime, lineWidth: 2).frame(width: 11, height: 11)
+                        Text("open (pending)").font(.system(size: 11)).foregroundStyle(Color.theme.fg3)
+                    }
+                }
+                .frame(maxWidth: .infinity).padding(.top, 14)
             }
 
             segmented(PremRange.allCases, selection: $premRange) { $0.rawValue }
-                .padding(.top, 20)
+                .padding(.top, 18)
                 .onChange(of: premRange) { _, _ in selectedDay = nil }
+        }
+    }
+
+    private func legendSwatch(_ c: Color, _ t: String) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 3).fill(c).frame(width: 11, height: 11)
+            Text(t).font(.system(size: 11)).foregroundStyle(Color.theme.fg3)
         }
     }
 
@@ -588,11 +610,20 @@ private struct PositionDetail: View {
                     VStack(spacing: 6) {
                         ZStack {
                             Rectangle().fill(Color.theme.hair).frame(height: 1)   // baseline
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(d.amount >= 0 ? lime : Color.theme.neg)
-                                .opacity(selectedDay == nil || on ? 1 : 0.35)
-                                .frame(width: 22, height: h)
-                                .offset(y: frac >= 0 ? -h / 2 : h / 2)
+                            // Pending (open) expiries read as a hollow
+                            // outline; realized are solid.
+                            Group {
+                                if d.pending {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .strokeBorder(d.amount >= 0 ? lime : Color.theme.neg, lineWidth: 2)
+                                } else {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(d.amount >= 0 ? lime : Color.theme.neg)
+                                }
+                            }
+                            .opacity(selectedDay == nil || on ? 1 : 0.35)
+                            .frame(width: 22, height: h)
+                            .offset(y: frac >= 0 ? -h / 2 : h / 2)
                         }
                         .frame(height: half * 2)
                         Text(d.label).font(.system(size: 9.5, weight: on ? .heavy : .medium))

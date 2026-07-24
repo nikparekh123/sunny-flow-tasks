@@ -294,7 +294,8 @@ struct PremiumDay: Identifiable, Sendable {
     let id: String       // yyyy-MM-dd
     let date: Date
     let label: String    // "M/d"
-    let amount: Double    // net premium realized that day
+    let amount: Double    // net premium for that expiry day
+    let pending: Bool     // day holds an open call — collected, not yet resolved
 }
 
 extension CoveredCallTicker {
@@ -357,16 +358,23 @@ extension CoveredCallTicker {
         cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
         let cutoff: Date? = range.days.flatMap { cal.date(byAdding: .day, value: -$0, to: now) }
 
+        // Include OPEN expiries (marked pending) so the total reconciles
+        // with lifetime premium / the "Premium income" row — resolved-
+        // only would silently drop the collected-but-open credit.
         var byDate: [String: Double] = [:]
-        for r in allRollups where r.status != .open {
+        var pendingDate = Set<String>()
+        for r in allRollups {
             guard let d = AppDates.parseISODay(r.expiry) else { continue }
             if let cutoff, d < cutoff { continue }
-            byDate[String(r.expiry.prefix(10)), default: 0] += r.net
+            let key = String(r.expiry.prefix(10))
+            byDate[key, default: 0] += r.net
+            if r.status == .open { pendingDate.insert(key) }
         }
         let mdFmt = DateFormatter(); mdFmt.dateFormat = "M/d"; mdFmt.timeZone = cal.timeZone
         return byDate.keys.sorted().compactMap { key in
             guard let d = AppDates.parseISODay(key) else { return nil }
-            return PremiumDay(id: key, date: d, label: mdFmt.string(from: d), amount: byDate[key] ?? 0)
+            return PremiumDay(id: key, date: d, label: mdFmt.string(from: d),
+                              amount: byDate[key] ?? 0, pending: pendingDate.contains(key))
         }
     }
 }
