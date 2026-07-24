@@ -25,74 +25,19 @@ struct PerformanceScreen: View {
     let store: PortfolioStore
     let auth: AuthStore
 
-    enum Tab: String, CaseIterable, Identifiable {
-        case gainsLosses = "Gains & Losses"
-        case leaderboard = "Leaderboard"
-        var id: String { rawValue }
-    }
-    @State private var tab: Tab = .gainsLosses
-    /// Multi-select ticker filter. EMPTY = all tickers (the default).
-    /// Every metric and chart on this page reads through it.
-    @State private var tickerFilter: Set<String> = []
-
-    /// Every ticker with any history — held or fully closed out.
-    private var availableTickers: [String] {
-        Set(store.companies.map(\.ticker))
-            .union(store.closedCompanies.map(\.ticker))
-            .union(store.allTrades.map(\.ticker))
-            .sorted()
-    }
-    private var activeTickers: [String] {
-        tickerFilter.isEmpty ? availableTickers : availableTickers.filter { tickerFilter.contains($0) }
-    }
+    /// Single-ticker app — the whole Performance tab is scoped to NVDA, so
+    /// there's no ticker filter and no cross-ticker leaderboard.
+    private let scope: Set<String> = ["NVDA"]
+    private var activeTickers: [String] { ["NVDA"] }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 titleRow
                 pnlStrip
-                tickerFilterRow
-                tabBar
-
-                // Tab content with a sliding transition + horizontal
-                // swipe gesture so the user can flick between Gains &
-                // Losses and Leaderboard. The transition direction is
-                // wired so that swiping LEFT on the first tab brings
-                // the second tab in from the right (iOS-native feel).
-                ZStack {
-                    if tab == .gainsLosses {
-                        GainsLossesTab(store: store, filter: tickerFilter)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .leading).combined(with: .opacity),
-                                removal:   .move(edge: .leading).combined(with: .opacity)
-                            ))
-                    } else {
-                        LeaderboardTab(store: store, filter: tickerFilter)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal:   .move(edge: .trailing).combined(with: .opacity)
-                            ))
-                    }
-                }
-                .animation(Motion.standard, value: tab)
-                // Horizontal swipe to flip tabs. minimumDistance is
-                // high enough that vertical scrolling still wins, but
-                // a clear horizontal flick (>80pt) commits a switch.
-                .gesture(
-                    DragGesture(minimumDistance: 30)
-                        .onEnded { value in
-                            let dx = value.translation.width
-                            let dy = value.translation.height
-                            guard abs(dx) > abs(dy) * 1.4, abs(dx) > 70 else { return }
-                            withAnimation(Motion.standard) {
-                                if dx < 0 {
-                                    if tab == .gainsLosses { tab = .leaderboard }
-                                } else {
-                                    if tab == .leaderboard { tab = .gainsLosses }
-                                }
-                            }
-                        }
-                )
+                // Single NVDA view — realized P&L broken down by source
+                // (shares, calls sold, puts, LEAPs) with period navigation.
+                GainsLossesTab(store: store, filter: scope)
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
@@ -101,10 +46,15 @@ struct PerformanceScreen: View {
         .background(Color.theme.page.ignoresSafeArea())
     }
 
-    // ── Title — Navi DS hero ──
+    // ── Title — Navi DS hero, NVDA-scoped ──
     private var titleRow: some View {
-        HStack {
+        HStack(spacing: 9) {
             Text("Performance").heroTitle()
+            Text("NVDA")
+                .font(.system(size: 11, weight: .heavy)).tracking(1.2)
+                .foregroundStyle(Color.theme.onNeon)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color.theme.neon))
             Spacer()
         }
     }
@@ -146,78 +96,6 @@ struct PerformanceScreen: View {
         .padding(.leading, 2)
     }
 
-    // MARK: Ticker filter (multi-select, all by default)
-
-    private var tickerFilterRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                filterPill("All", active: tickerFilter.isEmpty) {
-                    withAnimation(Motion.standard) { tickerFilter.removeAll() }
-                }
-                ForEach(availableTickers, id: \.self) { t in
-                    filterPill(t, active: tickerFilter.contains(t)) {
-                        withAnimation(Motion.standard) {
-                            if tickerFilter.contains(t) { tickerFilter.remove(t) }
-                            else { tickerFilter.insert(t) }
-                        }
-                    }
-                }
-            }
-            .padding(.horizontal, 1)
-        }
-    }
-
-    @ViewBuilder
-    private func filterPill(_ label: String, active: Bool, tap: @escaping () -> Void) -> some View {
-        Button(action: tap) {
-            Text(label)
-                .font(.system(size: 11.5, weight: active ? .bold : .semibold))
-                .tracking(0.3)
-                .foregroundStyle(active ? Color.theme.onNeon : Color.theme.fg2)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 30)
-                .background(
-                    Capsule()
-                        .fill(active ? Color.theme.neon : Color.theme.surface)
-                        .overlay(Capsule().strokeBorder(
-                            active ? Color.clear : Color.theme.borderBright, lineWidth: 1))
-                )
-        }
-        .buttonStyle(.pressable)
-    }
-
-    @Namespace private var topTabNS
-    private var tabBar: some View {
-        HStack(spacing: 4) {
-            ForEach(Tab.allCases) { t in
-                let active = tab == t
-                Button {
-                    withAnimation(Motion.standard) { tab = t }
-                } label: {
-                    Text(t.rawValue)
-                        .font(.ui(size: 14, weight: active ? .bold : .semibold))
-                        .tracking(-0.1)
-                        .foregroundStyle(active ? Color.theme.onNeon : Color.theme.fg2)
-                        .frame(maxWidth: .infinity, minHeight: 32)
-                        .padding(.vertical, 4)
-                        .background {
-                            if active {
-                                Capsule()
-                                    .fill(Color.theme.neon)
-                                    .matchedGeometryEffect(id: "perfTopTab", in: topTabNS)
-                            }
-                        }
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(4)
-        .background(
-            Capsule()
-                .fill(Color.theme.page2)
-        )
-    }
 }
 
 // MARK: - Gains & Losses tab
