@@ -709,18 +709,28 @@ enum CoveredCallData {
             // Long-dated protection: the furthest expiry is the one.
             .sorted { $0.expiry > $1.expiry }
             .first
-        let put: CoveredCallPut? = putLeg.map { t in
-            let remaining = store.remainingContracts(for: t)
-            let mark = store.allGreeks.first(where: { $0.option_trade_id == t.id })?.last_mark ?? t.premium
-            return CoveredCallPut(
-                expiry: t.expiry, strike: t.strike, contracts: remaining,
-                costBasisPerShare: t.premium, currentMark: mark
-            )
+        // Live mark for a leg. When the feed has no mark (a thin or
+        // long-dated contract Polygon won't quote), never value the option
+        // below its INTRINSIC floor — a deep-ITM put is worth at least
+        // strike−spot. OTM legs have 0 intrinsic, so fall back to cost to
+        // keep their time value. So: live mark ?? max(intrinsic, cost).
+        func mark(_ t: OptionTradeRow) -> Double {
+            if let m = store.allGreeks.first(where: { $0.option_trade_id == t.id })?.last_mark {
+                return m
+            }
+            let intrinsic = t.option_type == "call"
+                ? max(spot - t.strike, 0)
+                : max(t.strike - spot, 0)
+            return max(intrinsic, t.premium)
         }
 
-        // ── Aggregates over EVERY open leg (the qty cards + exit math) ──
-        func mark(_ t: OptionTradeRow) -> Double {
-            store.allGreeks.first(where: { $0.option_trade_id == t.id })?.last_mark ?? t.premium
+        // ── Put leg (one-line panel) — marked the same intrinsic-safe way ──
+        let put: CoveredCallPut? = putLeg.map { t in
+            CoveredCallPut(
+                expiry: t.expiry, strike: t.strike,
+                contracts: store.remainingContracts(for: t),
+                costBasisPerShare: t.premium, currentMark: mark(t)
+            )
         }
         let openCalls = store.allTrades.filter {
             $0.ticker == ticker && $0.option_type == "call" && $0.direction == "short"
