@@ -307,28 +307,21 @@ extension CoveredCallTicker {
     var lifetimePremium: Double { allCycles.reduce(0) { $0 + $1.premiumNet } }
     var cycleCount: Int { allCycles.count }
 
-    /// TOTAL MADE — the wheel owner's P&L. Premium is INCOME (never
-    /// marked as a buyback liability: on assignment you deliver at the
-    /// strike and keep it), shares are valued at market vs raw average.
-    ///   realized  = premium banked on resolved calls + realized share
-    ///               P&L (from share_sells.realized_pl, FIFO-reconciled)
-    ///   running   = premium on open calls (collected) + shares vs avg
-    ///               + puts marked to market
+    /// TOTAL MADE = closed-option P&L + share P&L. Deliberately EXCLUDES
+    /// open calls, so their premium / rolls / buybacks / marks can't swing
+    /// this number — it only moves when an option closes, shares are sold,
+    /// or the share price changes.
     var totalReturn: Double { premiumIncome + capitalReturn }
 
-    /// Premium the strategy has produced, gross of any future buyback —
-    /// every call sold this book, net only of buybacks ALREADY paid.
-    var premiumIncome: Double { lifetimePremium }
-    /// Share P&L: realized (sells) + unrealized (held shares vs average)
-    /// + protective puts marked to market.
-    var capitalReturn: Double { realizedCapital + exitSharesPL + exitPutPL }
+    /// Closed-option P&L: premium from every RESOLVED call this book, net
+    /// of buybacks (a rolled/bought-back strike can be negative). Open
+    /// calls are NOT here — they're pending until they resolve.
+    var premiumIncome: Double { allCycles.reduce(0) { $0 + $1.premiumCollected } }
+    /// Share P&L: realized (FIFO sells) + unrealized (held shares vs
+    /// average). No option marks — keeps the total steady.
+    var capitalReturn: Double { realizedCapital + exitSharesPL }
 
-    /// Realized P&L actually banked: resolved-call premium + realized
-    /// share gains. (Open-call premium and unrealized shares are still
-    /// running.)
-    var realizedBanked: Double {
-        allCycles.reduce(0) { $0 + $1.premiumCollected } + realizedCapital
-    }
+    var realizedBanked: Double { premiumIncome + realizedCapital }
     /// The average that matters — raw cost less all premium made per
     /// share. "How much we've made" lowers this.
     var currentAverage: Double {
@@ -755,15 +748,15 @@ enum CoveredCallData {
             store.dailyCloses.filter { $0.ticker == ticker }.map { ($0.date, $0.close_price) },
             uniquingKeysWith: { a, _ in a }
         )
-        // One row per (expiry, strike) — combine every fill on a strike,
-        // not one row per execution.
-        let allRolls = (cycles.flatMap(\.rollups) + (current?.rollups ?? []))
-            .sorted { $0.expiry > $1.expiry }
-        let cushions: [CushionRow] = allRolls.prefix(8).map { r in
-            let px = r.status == .open ? spot : (closesByDate[String(r.expiry.prefix(10))] ?? spot)
-            return CushionRow(
+        // OPEN calls only — the working strikes, against the current
+        // price. One row per (expiry, strike).
+        let openRolls = (current?.rollups ?? [])
+            .filter { $0.status == .open }
+            .sorted { $0.expiry < $1.expiry }
+        let cushions: [CushionRow] = openRolls.map { r in
+            CushionRow(
                 id: r.id, expiry: r.expiry, strike: r.strike, contracts: r.contracts,
-                priceAtExpiry: px, status: r.status, premiumTotal: r.net
+                priceAtExpiry: spot, status: r.status, premiumTotal: r.net
             )
         }
 

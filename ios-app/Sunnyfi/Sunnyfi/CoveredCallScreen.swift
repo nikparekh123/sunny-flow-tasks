@@ -686,14 +686,14 @@ private struct PositionDetail: View {
     // ── HOW CLOSE EACH CALL SAT ──
     private var cushionCard: some View {
         card {
-            Text("How close each call sat").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
+            Text("How close each call sits").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
-            Text("Each strike against the share price at expiry. The dot's distance from the black tick is the cushion.")
+            Text("Your open strikes against the current price. The dot's distance from the black tick is the cushion.")
                 .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
                 .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
             if data.cushions.isEmpty {
-                Text("No calls yet.").font(.system(size: 13)).foregroundStyle(Color.theme.fg4)
+                Text("No calls open right now.").font(.system(size: 13)).foregroundStyle(Color.theme.fg4)
                     .padding(.top, 18)
             } else {
                 ForEach(data.cushions) { c in
@@ -724,14 +724,14 @@ private struct PositionDetail: View {
 
     // ── WHAT THE STRATEGY EARNED ──
     private var returnCard: some View {
-        let prem = data.premiumIncome     // premium collected (income)
-        let cap = data.capitalReturn      // realized + unrealized share P&L + puts
+        let prem = data.premiumIncome     // closed-option P&L
+        let cap = data.capitalReturn      // realized + unrealized share P&L
         let total = data.totalReturn
         let denom = max(abs(prem) + abs(cap), 1)
         return card {
             Text("What the strategy earned").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
-            Text("Premium is income; shares are marked at price vs your average.")
+            Text("Closed-option P&L plus shares. Open calls aren't counted until they resolve.")
                 .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
                 .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
 
@@ -745,8 +745,8 @@ private struct PositionDetail: View {
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .padding(.top, 20)
 
-            splitRow(Color.theme.fg1, "Premium income", prem)
-            splitRow(lime, "Capital (shares)", cap)
+            splitRow(Color.theme.fg1, "Closed options", prem)
+            splitRow(lime, "Shares", cap)
 
             HStack {
                 Text("Total return").font(.system(size: 16, weight: .heavy)).tracking(-0.3)
@@ -760,20 +760,6 @@ private struct PositionDetail: View {
                     .foregroundStyle(Color.signed(total))
             }
             .padding(.top, 16)
-
-            HStack(alignment: .center, spacing: 16) {
-                Text("\(String(format: "%.1f", data.annualizedYieldPct))%")
-                    .font(.numeric(size: 36, weight: .heavy)).tracking(-1.4)
-                    .monospacedDigit().foregroundStyle(Color.theme.fg1)
-                    .lineLimit(1).minimumScaleFactor(0.5)
-                Spacer(minLength: 0)
-                Text("Annualized premium yield on capital at risk")
-                    .font(.system(size: 11.5, weight: .semibold)).foregroundStyle(Color.theme.fg3)
-                    .multilineTextAlignment(.trailing).frame(maxWidth: 170)
-            }
-            .padding(18)
-            .background(RoundedRectangle(cornerRadius: 18).fill(Color.theme.page2))
-            .padding(.top, 20)
         }
     }
 
