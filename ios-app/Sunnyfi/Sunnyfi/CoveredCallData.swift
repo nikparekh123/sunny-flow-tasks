@@ -340,11 +340,14 @@ extension CoveredCallTicker {
     /// average). No option marks.
     var capitalReturn: Double { realizedCapital + exitSharesPL }
 
-    /// Purely banked (no unrealized): REALIZED option premium (resolved
-    /// calls only) + realized share gains. Open-call credit and held-share
-    /// paper are both excluded — they live in the unrealized lines. This is
-    /// what the account has actually locked in.
-    var realizedBanked: Double { realizedPremium + realizedCapital }
+    /// The hero. Premium you've actually COLLECTED IN CASH (opens' credits
+    /// net of buybacks paid, across open AND closed calls — open-call cash is
+    /// real, it's in the account) + realized share gains. Never marks the open
+    /// call to market, so it moves ONLY on real trades, never on price. The
+    /// realized-only view (`realizedPremium`) is far too low for a continuous
+    /// roller because most premium rides on still-open calls — so the hero is
+    /// cash collected, with the realized/open split shown underneath.
+    var realizedBanked: Double { lifetimePremium + realizedCapital }
     /// The average that matters — raw cost less all premium made per
     /// share. "How much we've made" lowers this.
     var currentAverage: Double {
