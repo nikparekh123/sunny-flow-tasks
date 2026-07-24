@@ -729,6 +729,10 @@ private struct PositionDetail: View {
         let banked = data.realizedBanked      // = prem + realizedSh (the hero)
         let unreal = data.exitSharesPL        // unrealized shares — moves with price
         let denom = max(abs(prem) + abs(realizedSh), 1)
+        // Spell out the paper P&L: shares × (spot − raw cost). Explains the sign.
+        let rawAvg = data.current?.entryPrice ?? 0
+        let shareStr = Int(data.shares.rounded()).formatted(.number.grouping(.automatic))
+        let unrealBreakdown = "\(shareStr) sh × (\(fmtMoney(data.currentPrice, decimals: 2)) − \(fmtMoney(rawAvg, decimals: 2))) · moves with price"
         return card {
             Text("What the strategy earned").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
                 .foregroundStyle(Color.theme.fg1)
@@ -760,11 +764,12 @@ private struct PositionDetail: View {
             .padding(.top, 16)
 
             // Unrealized — separate, so it never touches the banked number.
+            // Caption spells out the arithmetic so the figure explains itself.
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Unrealized shares").font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color.theme.fg2)
-                    Text("moves with price · not banked")
+                    Text(unrealBreakdown)
                         .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
                 }
                 Spacer()
