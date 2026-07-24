@@ -215,6 +215,22 @@ private struct PositionDetail: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 9)
 
+            // The realized (closed) slice — the broker's "realized P&L"
+            // concept. Below the cash-collected hero so you see both.
+            HStack(spacing: 8) {
+                Text("REALIZED").font(.system(size: 9, weight: .heavy)).tracking(1.2)
+                    .foregroundStyle(.white.opacity(0.45))
+                Text(fmtMoney(data.realizedPnL, sign: true))
+                    .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
+                    .foregroundStyle(.white.opacity(0.92))
+                Text("closed calls + shares")
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Capsule().fill(.white.opacity(0.06)))
+            .overlay(Capsule().strokeBorder(.white.opacity(0.10), lineWidth: 1))
+            .padding(.top, 13)
+
             if cycle != nil {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {

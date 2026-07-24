@@ -340,6 +340,14 @@ extension CoveredCallTicker {
     /// average). No option marks.
     var capitalReturn: Double { realizedCapital + exitSharesPL }
 
+    /// REALIZED P&L — the broker's "realized" concept for this strategy:
+    /// premium on calls that have CLOSED/expired + realized share gains.
+    /// Excludes the cash still riding on open calls (that lives in the hero's
+    /// cash-collected total and the open-premium split). Grows every time a
+    /// call expires. Ties to IBKR's realized P&L, allowing for IBKR's period
+    /// scoping + its habit of booking assigned-call premium to the stock line.
+    var realizedPnL: Double { realizedPremium + realizedCapital }
+
     /// The hero. Premium you've actually COLLECTED IN CASH (opens' credits
     /// net of buybacks paid, across open AND closed calls — open-call cash is
     /// real, it's in the account) + realized share gains. Never marks the open
