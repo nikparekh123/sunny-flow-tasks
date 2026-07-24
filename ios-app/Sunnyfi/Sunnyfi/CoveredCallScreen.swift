@@ -139,6 +139,7 @@ private struct PositionDetail: View {
     @State private var premRange: PremRange = .all
     @State private var selectedDay: String? = nil
     @State private var showAllHistory = false
+    @State private var openSleeves: Set<String> = []
 
     private var cycle: CoveredCallCycle? { data.current }
     private let lime = Color(hex: 0xD7EE53)
@@ -149,8 +150,7 @@ private struct PositionDetail: View {
             hero
             if store != nil { planEntry }
             positionCard
-            premiumCard
-            cushionCard
+            optionsInsightsCard
             returnCard
             historyCard
         }
@@ -736,6 +736,180 @@ private struct PositionDetail: View {
         case .rolled: return Color.theme.fg3
         case .expired: return Color.theme.pos
         }
+    }
+
+    // ── OPTIONS INSIGHTS — one collapsible sleeve per option group, each
+    // showing where its strikes sit vs the share price (Position Detail v3). ──
+    private struct SleeveGroup: Identifiable {
+        let id: String
+        let name: String
+        let isCall: Bool
+        let isLong: Bool          // holder's side: false = sold, true = long
+        let legs: [OpenLegDetail]
+    }
+    private enum Moneyness { case itm, atm, otm }
+
+    private var sleeveGroups: [SleeveGroup] {
+        [
+            SleeveGroup(id: "csold",   name: "Calls sold",   isCall: true,  isLong: false, legs: data.callLegs),
+            SleeveGroup(id: "pbought", name: "Puts bought",  isCall: false, isLong: true,  legs: data.putLegs),
+            SleeveGroup(id: "cbought", name: "Calls bought", isCall: true,  isLong: true,  legs: data.longCallLegs),
+            SleeveGroup(id: "psold",   name: "Puts sold",    isCall: false, isLong: false, legs: []),
+        ]
+    }
+
+    private func mnyPct(_ strike: Double) -> Double {
+        data.currentPrice > 0 ? (strike - data.currentPrice) / data.currentPrice * 100 : 0
+    }
+    private func moneyness(_ strike: Double, isCall: Bool) -> Moneyness {
+        let m = mnyPct(strike)
+        if isCall { return m >= 0.8 ? .otm : (m <= -0.2 ? .itm : .atm) }
+        return m <= -0.8 ? .otm : (m >= 0.2 ? .itm : .atm)
+    }
+    /// Colour reads from the holder's side — sold legs want OTM (green),
+    /// long legs want ITM (green). Off-side long legs mute to grey.
+    private func mnyColor(_ c: Moneyness, isLong: Bool) -> Color {
+        let tone: Moneyness?
+        if isLong { tone = c == .itm ? .otm : (c == .atm ? .atm : nil) }
+        else      { tone = c }
+        switch tone {
+        case .otm:  return Color.theme.pos
+        case .itm:  return Color.theme.neg
+        case .atm:  return Color.theme.warn
+        case .none: return Color.theme.fg3
+        }
+    }
+    private func mnyLabel(_ c: Moneyness) -> String {
+        switch c { case .otm: return "OTM"; case .itm: return "ITM"; case .atm: return "ATM" }
+    }
+    private func nearestStrike(_ legs: [OpenLegDetail]) -> Double {
+        legs.map(\.strike).min(by: { abs($0 - data.currentPrice) < abs($1 - data.currentPrice) }) ?? data.currentPrice
+    }
+    private func sleeveDomain(_ ks: [Double]) -> (Double, Double) {
+        let vals = ks + [data.currentPrice]
+        let lo = vals.min() ?? 0, hi = vals.max() ?? 0
+        let pad = max((hi - lo) * 0.24, data.currentPrice * 0.022)
+        return (lo - pad, hi + pad)
+    }
+
+    private var optionsInsightsCard: some View {
+        card {
+            Text("Options insights").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
+                .foregroundStyle(Color.theme.fg1)
+            Text("Where each open contract sits against the \(fmtMoney(data.currentPrice, decimals: 2)) share price. Tap a sleeve for its strikes.")
+                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
+                .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+            VStack(spacing: 0) {
+                ForEach(sleeveGroups) { sleeve($0) }
+            }
+            .padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func sleeve(_ g: SleeveGroup) -> some View {
+        if g.legs.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(g.name).font(.system(size: 15.5, weight: .heavy)).tracking(-0.3)
+                    .foregroundStyle(Color.theme.fg3)
+                Text("none open").font(.numeric(size: 11.5, weight: .semibold))
+                    .foregroundStyle(Color.theme.fg4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 18)
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+        } else {
+            let near = nearestStrike(g.legs)
+            let nearC = moneyness(near, isCall: g.isCall)
+            let nearCol = mnyColor(nearC, isLong: g.isLong)
+            let qty = Int(g.legs.reduce(0) { $0 + $1.contracts }.rounded())
+            let isOpen = openSleeves.contains(g.id)
+            Button {
+                withAnimation(Motion.standard) {
+                    if isOpen { openSleeves.remove(g.id) } else { openSleeves.insert(g.id) }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(g.name).font(.system(size: 15.5, weight: .heavy)).tracking(-0.3)
+                                .foregroundStyle(Color.theme.fg1)
+                            Text("\(qty) contracts").font(.numeric(size: 11.5, weight: .semibold))
+                                .foregroundStyle(Color.theme.fg4)
+                        }
+                        Spacer(minLength: 0)
+                        Text("\(mnyLabel(nearC)) \(String(format: "%.1f", abs(mnyPct(near))))%")
+                            .font(.numeric(size: 13, weight: .heavy)).foregroundStyle(nearCol)
+                            .padding(.horizontal, 13).padding(.vertical, 7)
+                            .background(Capsule().fill(nearCol.opacity(0.14)))
+                            .fixedSize()
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .heavy))
+                            .foregroundStyle(Color.theme.fg4)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
+                            .padding(.top, 6)
+                    }
+                    sleeveTrack(g).padding(.top, 16)
+                    if isOpen {
+                        VStack(spacing: 3) {
+                            ForEach(g.legs) { strikeRow(g, $0) }
+                        }
+                        .padding(.top, 14)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.vertical, 18)
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+        }
+    }
+
+    private func sleeveTrack(_ g: SleeveGroup) -> some View {
+        let ks = g.legs.map(\.strike)
+        let (d0, d1) = sleeveDomain(ks)
+        let lo = ks.min() ?? 0, hi = ks.max() ?? 0
+        let zoneCol = mnyColor(moneyness(nearestStrike(g.legs), isCall: g.isCall), isLong: g.isLong)
+        func frac(_ v: Double) -> CGFloat {
+            guard d1 > d0 else { return 0.5 }
+            return CGFloat(min(0.96, max(0.04, (v - d0) / (d1 - d0))))
+        }
+        return GeometryReader { geo in
+            let w = geo.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.theme.page2).frame(height: 2).offset(y: 6)
+                if hi > lo {
+                    Capsule().fill(zoneCol.opacity(0.45))
+                        .frame(width: max(2, (frac(hi) - frac(lo)) * w), height: 2)
+                        .offset(x: frac(lo) * w, y: 6)
+                }
+                RoundedRectangle(cornerRadius: 1).fill(Color.theme.fg1)
+                    .frame(width: 2, height: 14).offset(x: frac(data.currentPrice) * w - 1)
+                ForEach(g.legs) { l in
+                    Circle().fill(mnyColor(moneyness(l.strike, isCall: g.isCall), isLong: g.isLong))
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().strokeBorder(Color.theme.surface, lineWidth: 2.5))
+                        .offset(x: frac(l.strike) * w - 5, y: 2)
+                }
+            }
+        }
+        .frame(height: 14)
+    }
+
+    private func strikeRow(_ g: SleeveGroup, _ l: OpenLegDetail) -> some View {
+        let c = moneyness(l.strike, isCall: g.isCall)
+        let col = mnyColor(c, isLong: g.isLong)
+        return HStack(spacing: 10) {
+            Text("\(fmtStrike(l.strike))\(g.isCall ? "c" : "p")")
+                .font(.numeric(size: 12.5, weight: .heavy)).foregroundStyle(Color.theme.fg1)
+                .frame(width: 52, alignment: .leading)
+            Text("\(AppDates.shortMonthDay(l.expiry)) · ×\(Int(l.contracts))")
+                .font(.numeric(size: 11.5, weight: .semibold)).foregroundStyle(Color.theme.fg4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("\(String(format: "%.1f", abs(mnyPct(l.strike))))%")
+                .font(.numeric(size: 12, weight: .heavy)).foregroundStyle(col)
+        }
+        .padding(.horizontal, 13).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 11).fill(Color.theme.page2))
     }
 
     // ── WHAT THE STRATEGY EARNED ──
