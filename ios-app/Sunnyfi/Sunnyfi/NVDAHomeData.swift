@@ -2,12 +2,11 @@
 //  NVDAHomeData.swift
 //  Sunnyfi
 //
-//  The NVDA-focused Home tab. The user trades one ticker, so the landing
-//  page is a single-ticker command center — pulse, effective basis,
-//  premium pace, IV signal, next earnings/event — not the generic
-//  multi-ticker digest. All values derive from the shared PortfolioStore
-//  (reusing CoveredCallData for the position + premium math), so nothing
-//  here moves on anything but real trades and the live quote.
+//  The Home tab, per the "NVDA Today" editorial handoff (nvda-app.jsx /
+//  nvda-data.jsx). Single-position covered-call surface: hairline rows,
+//  one big glance number each, a volatility verdict, a 5-session column
+//  chart and a news tape. Every derived number is computed here from the
+//  shared store so the story can never contradict itself.
 //
 
 import Foundation
@@ -22,134 +21,375 @@ struct NewsHeadline: Decodable, Sendable, Identifiable {
     var id: String { headline }
 }
 
-struct NVDAHome: Sendable {
+enum Tone: Sendable { case pos, neg, neon, warn, fg1, fg3 }
+
+/// One editorial row + its detail sheet.
+struct NVRow: Identifiable, Sendable {
+    let k: String            // viz + sheet key
+    let cat: String
+    let num: String
+    let unit: String
+    let tone: Tone
+    let name: String
+    let sub: String
+    var id: String { k }
+}
+
+struct SheetRow: Sendable { let name: String; let sub: String; let val: String; let tone: Tone }
+
+struct NVSheet: Sendable {
+    let cat: String
+    let title: String
+    let sub: String
+    let hero: String
+    let heroUnit: String
+    let line: String
+    let rows: [SheetRow]
+    let isVol: Bool
+}
+
+struct NVSession: Identifiable, Sendable {
+    let label: String        // "Fri 24"
+    let close: Double
+    let pct: Double
+    let today: Bool
+    var id: String { label }
+}
+
+struct VolZone: Sendable { let key: String; let verdict: String; let sub: String; let read: String }
+
+struct NVDAToday: Sendable {
     let ticker: String
     let name: String
 
-    // ── Pulse ──
-    let spot: Double
-    let dayPct: Double
-    let todayPL: Double          // $ move on the shares today
-    let positionValue: Double    // shares × spot
+    // pulse / ticker strip
+    let price: Double
+    let chgPct: Double
+    let chgAbs: Double
     let shares: Double
-    let unrealizedShares: Double // (spot − EFFECTIVE basis) × shares — matches the basis card
+    let posValue: Double
+    let todayPL: Double
 
-    // ── Effective basis ──
-    let rawAvg: Double           // what you paid, e.g. 209.19
-    let effectiveAvg: Double     // after all premium, e.g. 204.89
-    let premiumPerShare: Double  // how much premium lowered the basis
-    let banked: Double           // cash collected + realized shares
-    let aboveBasisPct: Double    // spot vs effective basis
+    // break-even
+    let basisOrig: Double
+    let basisEff: Double
+    let premPerShare: Double
+    let overBE: Double
+    let cushionPct: Double
+    let sharesPL: Double
+    let netPL: Double
 
-    // ── Premium pace ──
+    // premium
     let premWeek: Double
     let premMonth: Double
-    let premLifetime: Double
+    let premLife: Double
+    let premPrev: Double
+    let vsLast: Double
+    let weeks: [(String, Double)]        // last weeks with writes, oldest→newest
+    let protectPct: Double
 
-    // ── IV signal ──
-    let ivCurrent: Double?
-    let ivLow: Double?
-    let ivHigh: Double?
+    // options book
+    let strike: Double
+    let expiry: String
+    let dte: Int
+    let contractsWritten: Int
+    let contractsTotal: Int
 
-    // ── Earnings + events ──
-    let earningsDate: String?
-    let earningsDays: Int?
-    let earningsTime: String?    // 'bmo' | 'amc' | 'tba'
-    let eventName: String?
-    let eventDate: String?
-    let eventDays: Int?
-    let eventStars: Int?
+    // sessions
+    let days: [NVSession]                  // newest → oldest, up to 5
+    let dayMax: Double
+    let avgAbs: Double
+    let week5: Double
+    let pricedDay: Double
 
-    /// Where current IV sits in its recent [low, high] band, 0…1.
-    var ivPercentile: Double? {
-        guard let c = ivCurrent, let lo = ivLow, let hi = ivHigh, hi > lo else { return nil }
-        return min(1, max(0, (c - lo) / (hi - lo)))
-    }
-    /// One-word read on whether it's a good time to write calls.
-    var ivVerdict: (label: String, rich: Bool)? {
-        guard let p = ivPercentile else { return nil }
-        if p >= 0.66 { return ("Rich — good to sell", true) }
-        if p <= 0.33 { return ("Cheap — maybe wait", false) }
-        return ("Middling", true)
-    }
+    // volatility
+    let iv: Double                       // percent, e.g. 40.3
+    let ivLow: Double
+    let ivHigh: Double
+    let hv30: Double?                    // nil when the feed hasn't supplied it
+    let ivr: Int
+    let spread: Double?
+    let score: Int
+    let zone: VolZone
 
-    static func build(store: PortfolioStore, today: Date = Date()) -> NVDAHome? {
+    // events
+    let erMove: Double
+    let erLow: Double
+    let erHigh: Double
+    let fedDays: Int?
+    let fedWhen: String?
+    let erDays: Int?
+
+    let items: [NVRow]
+    let sheets: [String: NVSheet]
+
+    static func build(store: PortfolioStore, today: Date = Date()) -> NVDAToday? {
         let ticker = "NVDA"
         guard let cc = CoveredCallData.build(store: store, ticker: ticker) else { return nil }
         let company = store.companies.first { $0.ticker.uppercased() == ticker }
 
-        let spot = cc.currentPrice
+        let price = cc.currentPrice
         let shares = cc.shares
-        let rawAvg = cc.current?.entryPrice ?? 0
-        let effectiveAvg = cc.currentAverage
+        let chgPct = company?.dayPct ?? cc.dayPct
+        let chgAbs = price * chgPct / 100
+        let todayPL = cc.todayPL
+        let basisOrig = cc.current?.entryPrice ?? 0
+        let basisEff = cc.currentAverage
+        let premPerShare = max(0, basisOrig - basisEff)
+        let overBE = price - basisEff
+        let cushionPct = basisEff > 0 ? (price - basisEff) / basisEff * 100 : 0
+        let sharesPL = (price - basisOrig) * shares
+        let premLife = cc.lifetimePremium
+        let netPL = sharesPL + premLife
 
-        // Premium collected in a trailing window — short calls only, net of
-        // buybacks paid. trade_date is "YYYY-MM-DD"; ISO strings compare
-        // lexicographically, so string ">=" is a genuine date filter.
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
+        // ── premium by week (short calls, net of buybacks) ──
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
         df.timeZone = TimeZone(identifier: "America/New_York")
         func premiumSince(_ startISO: String) -> Double {
             store.allTrades.reduce(0.0) { acc, t in
                 guard t.ticker.uppercased() == ticker, t.option_type == "call",
-                      t.direction == "short", t.voided_at == nil,
-                      t.trade_date >= startISO else { return acc }
+                      t.direction == "short", t.voided_at == nil, t.trade_date >= startISO
+                else { return acc }
                 let v = t.premium * t.contracts * 100
                 return acc + (t.action == "open" ? v : -v)
             }
         }
-        let premWeek  = premiumSince(df.string(from: AppDates.startOfWeek(today)))
+        let weekStart = AppDates.startOfWeek(today)
+        let premWeek = premiumSince(df.string(from: weekStart))
         let premMonth = premiumSince(df.string(from: AppDates.startOfMonth(today)))
 
-        let iv = store.allIvSummaries.first { $0.ticker.uppercased() == ticker }
+        // Build a per-week series for the last 5 weeks (Monday-anchored).
+        var weeks: [(String, Double)] = []
+        let cal = { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "America/New_York")!; c.firstWeekday = 2; return c }()
+        for back in stride(from: 4, through: 0, by: -1) {
+            guard let ws = cal.date(byAdding: .day, value: -7 * back, to: weekStart),
+                  let we = cal.date(byAdding: .day, value: 7, to: ws) else { continue }
+            let a = df.string(from: ws), b = df.string(from: we)
+            let v = store.allTrades.reduce(0.0) { acc, t in
+                guard t.ticker.uppercased() == ticker, t.option_type == "call",
+                      t.direction == "short", t.voided_at == nil,
+                      t.trade_date >= a, t.trade_date < b else { return acc }
+                let val = t.premium * t.contracts * 100
+                return acc + (t.action == "open" ? val : -val)
+            }
+            let lbl = AppDates.shortMonthDay(a)
+            weeks.append((lbl, v))
+        }
+        let writeWeeks = weeks.filter { $0.1 > 0 }
+        let premPrev = writeWeeks.count >= 2 ? writeWeeks[writeWeeks.count - 2].1 : 0
+        let vsLast = premPrev > 0 ? premWeek / premPrev : 0
+        let protectPct = price > 0 ? premPerShare / price * 100 : 0
 
-        let earn = store.allEarningsEvents
-            .filter { $0.ticker.uppercased() == ticker }
-            .min { $0.report_date < $1.report_date }
+        // ── options book: soonest-expiry open short call ──
+        let openCalls = cc.callLegs.sorted { $0.expiry < $1.expiry }
+        let working = openCalls.first
+        let strike = working?.strike ?? 0
+        let expiry = working?.expiry ?? ""
+        let dte = expiry.isEmpty ? 0 : max(0, AppDates.daysUntil(expiry, from: today) ?? 0)
+        let contractsWritten = Int(cc.callLegs.reduce(0) { $0 + $1.contracts }.rounded())
+        let contractsTotal = Int((shares / 100).rounded(.down))
 
-        // Soonest upcoming macro event; prefer high-importance (≥ 2 stars).
-        func soonestEvent(minStars: Int) -> MacroEventRow? {
+        // ── last 5 sessions ──
+        let hist = store.dailyCloses.filter { $0.ticker.uppercased() == ticker }
+            .sorted { $0.date > $1.date }
+        var days: [NVSession] = [NVSession(label: sessionLabel(df.string(from: today), df: df), close: price, pct: chgPct, today: true)]
+        for i in 0..<min(4, max(0, hist.count - 1)) {
+            let c = hist[i].close_price, prev = hist[i + 1].close_price
+            let pct = prev > 0 ? (c / prev - 1) * 100 : 0
+            days.append(NVSession(label: sessionLabel(hist[i].date, df: df), close: c, pct: pct, today: false))
+        }
+        let dayMax = max(days.map { abs($0.pct) }.max() ?? 1, 0.1)
+        let avgAbs = days.isEmpty ? 0 : days.map { abs($0.pct) }.reduce(0, +) / Double(days.count)
+        let fiveAgo = hist.indices.contains(3) ? hist[3].close_price : (hist.last?.close_price ?? price)
+        let week5 = fiveAgo > 0 ? (price / fiveAgo - 1) * 100 : 0
+
+        // ── volatility ──
+        let iv0 = (store.allIvSummaries.first { $0.ticker.uppercased() == ticker })
+        let iv = (iv0?.current_iv ?? 0) * 100
+        let ivLow = (iv0?.iv_low ?? 0) * 100
+        let ivHigh = (iv0?.iv_high ?? 0) * 100
+        let hvRaw = (iv0?.current_hv30 ?? 0) * 100
+        let hv30: Double? = hvRaw > 0 ? hvRaw : nil
+        let ivr = ivHigh > ivLow ? Int((((iv - ivLow) / (ivHigh - ivLow)) * 100).rounded()) : 0
+        let spread: Double? = hv30.map { iv - $0 }
+        let pricedDay = iv > 0 ? iv / (252.0).squareRoot() : 0
+        // Seller score: IVR 60% + normalized spread 40% (spread −20…+30 → 0…100).
+        let nSpread = spread.map { max(0, min(100, (($0 + 20) / 50) * 100)) } ?? 40
+        let score = Int((Double(ivr) * 0.6 + nSpread * 0.4).rounded())
+        let zone = zoneFor(score: score, iv: iv, hv30: hv30)
+
+        // ── expected move for the working expiry (1-SD, IV-implied) ──
+        let erMove = iv > 0 && dte > 0 ? (iv / 100 * (Double(dte) / 365).squareRoot() * 100) : max(6, iv / 5)
+        let erLow = price * (1 - erMove / 100)
+        let erHigh = price * (1 + erMove / 100)
+
+        // ── events ──
+        func soonestMacro(_ needle: [String]) -> MacroEventRow? {
             store.allMacroEvents
-                .filter { (AppDates.daysUntil($0.event_date, from: today) ?? -1) >= 0 && $0.importance >= minStars }
+                .filter { m in (AppDates.daysUntil(m.event_date, from: today) ?? -1) >= 0
+                    && needle.contains { m.name.lowercased().contains($0) } }
                 .min { $0.event_date < $1.event_date }
         }
-        let ev = soonestEvent(minStars: 2) ?? soonestEvent(minStars: 1)
+        let fed = soonestMacro(["fed", "fomc", "rate decision"])
+        let fedDays = fed.flatMap { AppDates.daysUntil($0.event_date, from: today) }
+        let fedWhen = fed.map { AppDates.shortMonthDay($0.event_date) }
+        let earn = store.allEarningsEvents.filter { $0.ticker.uppercased() == ticker }
+            .min { $0.report_date < $1.report_date }
+        let erDays = earn.flatMap { AppDates.daysUntil($0.report_date, from: today) }
 
-        // The DB stores NVDA's name as "NVDA"; prefer a real company name.
-        let friendlyName: String = {
-            let n = company?.name ?? ""
-            return (n.isEmpty || n.uppercased() == ticker) ? "NVIDIA" : n
-        }()
-        return NVDAHome(
-            ticker: ticker,
-            name: friendlyName,
-            spot: spot,
-            dayPct: company?.dayPct ?? cc.dayPct,
-            todayPL: cc.todayPL,
-            positionValue: shares * spot,
-            shares: shares,
-            // Measured vs the EFFECTIVE basis (raw cost less premium), so the
-            // banner agrees with the "+X% above basis" card instead of
-            // contradicting it with a raw-cost figure.
-            unrealizedShares: (spot - effectiveAvg) * shares,
-            rawAvg: rawAvg,
-            effectiveAvg: effectiveAvg,
-            premiumPerShare: max(0, rawAvg - effectiveAvg),
-            banked: cc.realizedBanked,
-            aboveBasisPct: effectiveAvg > 0 ? (spot - effectiveAvg) / effectiveAvg * 100 : 0,
-            premWeek: premWeek,
-            premMonth: premMonth,
-            premLifetime: cc.lifetimePremium,
-            ivCurrent: iv?.current_iv,
-            ivLow: iv?.iv_low,
-            ivHigh: iv?.iv_high,
-            earningsDate: earn?.report_date,
-            earningsDays: earn.flatMap { AppDates.daysUntil($0.report_date, from: today) },
-            earningsTime: earn?.report_time,
-            eventName: ev?.name,
-            eventDate: ev?.event_date,
-            eventDays: ev.flatMap { AppDates.daysUntil($0.event_date, from: today) },
-            eventStars: ev?.importance
-        )
+        // ── the 5 editorial rows ──
+        var items: [NVRow] = [
+            NVRow(k: "basis", cat: "Break-even", num: fmtMoney(overBE, sign: true, decimals: 2), unit: "per share", tone: overBE >= 0 ? .pos : .neg,
+                      name: overBE >= 0 ? "Above break-even" : "Below break-even",
+                      sub: "now \(fmtMoney(price, decimals: 2)) · break-even \(fmtMoney(basisEff, decimals: 2))"),
+            NVRow(k: "prem", cat: "Premium", num: fmtK(premWeek).replacingOccurrences(of: "+$", with: "").replacingOccurrences(of: "$", with: ""), unit: "this week", tone: .pos,
+                      name: "Premium by week",
+                      sub: vsLast > 0 ? "\(fmtMoney(premPrev)) last week · \(fmtDec(vsLast))×" : "\(fmtMoney(premLife)) lifetime"),
+            NVRow(k: "prot", cat: "Protection", num: String(format: "%.1f%%", protectPct), unit: "cushion", tone: .pos,
+                      name: "Downside protection",
+                      sub: "\(fmtMoney(premPerShare, decimals: 2))/sh off your cost · \(fmtMoney(premLife)) lifetime"),
+        ]
+        if let fd = fedDays, let fw = fedWhen {
+            items.append(NVRow(k: "fed", cat: "Events", num: "\(fd)d", unit: "until Fed", tone: .fg1,
+                                   name: "Fed rate decision", sub: "\(fw) · the next real vol in the name"))
+        }
+        if strike > 0 {
+            let erLabel = erDays.map { $0 <= 0 ? "confirmed" : "\(Int((Double($0) / 7).rounded()))w" } ?? "~4w"
+            items.append(NVRow(k: "er", cat: "Earnings", num: erDays == nil ? "~4w" : erLabel, unit: "until ER",
+                                   tone: .warn, name: erDays == nil ? "Earnings not yet scheduled" : "Earnings ahead",
+                                   sub: "expected move ±\(String(format: "%.0f", erMove))% · \(fmtStrike(strike))c sits inside it"))
+        }
+
+        let sheets = buildSheets(ticker: ticker, price: price, chgPct: chgPct, chgAbs: chgAbs, todayPL: todayPL,
+                                 shares: shares, basisOrig: basisOrig, basisEff: basisEff, premPerShare: premPerShare,
+                                 overBE: overBE, cushionPct: cushionPct, netPL: netPL, premWeek: premWeek,
+                                 premLife: premLife, premPrev: premPrev, vsLast: vsLast, weeks: weeks,
+                                 protectPct: protectPct, strike: strike, expiry: expiry, iv: iv, ivLow: ivLow,
+                                 ivHigh: ivHigh, hv30: hv30, ivr: ivr, spread: spread, zone: zone, week5: week5,
+                                 avgAbs: avgAbs, erMove: erMove, erLow: erLow, erHigh: erHigh, fedDays: fedDays,
+                                 fedWhen: fedWhen)
+
+        return NVDAToday(
+            ticker: ticker, name: friendlyName(company?.name, ticker: ticker),
+            price: price, chgPct: chgPct, chgAbs: chgAbs, shares: shares, posValue: shares * price, todayPL: todayPL,
+            basisOrig: basisOrig, basisEff: basisEff, premPerShare: premPerShare, overBE: overBE, cushionPct: cushionPct,
+            sharesPL: sharesPL, netPL: netPL, premWeek: premWeek, premMonth: premMonth, premLife: premLife,
+            premPrev: premPrev, vsLast: vsLast, weeks: writeWeeks.isEmpty ? weeks : writeWeeks, protectPct: protectPct,
+            strike: strike, expiry: expiry, dte: dte, contractsWritten: contractsWritten, contractsTotal: contractsTotal,
+            days: days, dayMax: dayMax, avgAbs: avgAbs, week5: week5, pricedDay: pricedDay,
+            iv: iv, ivLow: ivLow, ivHigh: ivHigh, hv30: hv30, ivr: ivr, spread: spread, score: score, zone: zone,
+            erMove: erMove, erLow: erLow, erHigh: erHigh, fedDays: fedDays, fedWhen: fedWhen, erDays: erDays,
+            items: items, sheets: sheets)
+    }
+
+    // ── helpers ──
+    private static func friendlyName(_ n: String?, ticker: String) -> String {
+        let s = n ?? ""
+        return (s.isEmpty || s.uppercased() == ticker) ? "NVIDIA" : s
+    }
+    private static func sessionLabel(_ iso: String, df: DateFormatter) -> String {
+        "\(AppDates.weekdayShort(iso)) \(String(iso.suffix(2)))"
+    }
+    private static func zoneFor(score: Int, iv: Double, hv30: Double?) -> VolZone {
+        if score >= 75 { return VolZone(key: "caution", verdict: "Caution", sub: "vol is extreme",
+            read: "Premiums are fat because something is coming. Check the catalyst before you size up.") }
+        if score >= 55 { return VolZone(key: "sell", verdict: "Write", sub: "vol is rich",
+            read: "The sweet spot. Options are pricing more movement than the stock has been delivering — sell into it.") }
+        if score >= 35 { return VolZone(key: "neutral", verdict: "Neutral", sub: "no edge either way",
+            read: "Fair pricing. Write only if the income is needed this month, and stay wide of the strike.") }
+        let hvNote = hv30.map { String(format: "IV %.1f%% sits under 30-day realized %.0f%% — ", iv, $0) } ?? ""
+        return VolZone(key: "hold", verdict: "Hold", sub: "vol is cheap",
+            read: "\(hvNote)writing here undercompensates you for the movement. Wait for IV rank above 50.")
+    }
+    private static func fmtDec(_ v: Double) -> String { String(format: "%.1f", v) }
+
+    // Detail sheets — real, derivable rows only (no fabricated ticks/probabilities).
+    private static func buildSheets(
+        ticker: String, price: Double, chgPct: Double, chgAbs: Double, todayPL: Double, shares: Double,
+        basisOrig: Double, basisEff: Double, premPerShare: Double, overBE: Double, cushionPct: Double, netPL: Double,
+        premWeek: Double, premLife: Double, premPrev: Double, vsLast: Double, weeks: [(String, Double)],
+        protectPct: Double, strike: Double, expiry: String, iv: Double, ivLow: Double, ivHigh: Double,
+        hv30: Double?, ivr: Int, spread: Double?, zone: VolZone, week5: Double, avgAbs: Double,
+        erMove: Double, erLow: Double, erHigh: Double, fedDays: Int?, fedWhen: String?
+    ) -> [String: NVSheet] {
+        let shN = Int(shares.rounded()).formatted(.number.grouping(.automatic))
+        var s: [String: NVSheet] = [:]
+
+        var volRows: [SheetRow] = [
+            SheetRow(name: "IV rank", sub: "recent range", val: "\(ivr)/100", tone: .fg1),
+            SheetRow(name: "Implied vol", sub: "front month", val: String(format: "%.1f%%", iv), tone: .fg1),
+        ]
+        if let hv = hv30 {
+            volRows.append(SheetRow(name: "Realized vol", sub: "30-day actual", val: String(format: "%.0f%%", hv), tone: .fg1))
+            if let sp = spread { volRows.append(SheetRow(name: "Implied − realized", sub: "seller edge", val: (sp >= 0 ? "+" : "−") + String(format: "%.0f", abs(sp)), tone: sp >= 0 ? .pos : .neg)) }
+        }
+        volRows.append(SheetRow(name: "IV range", sub: "low · high", val: String(format: "%.0f–%.0f%%", ivLow, ivHigh), tone: .fg3))
+        s["vol"] = NVSheet(cat: "Volatility", title: "Should you write?", sub: "\(ticker) · 30-day options",
+            hero: String(format: "%.1f%%", iv), heroUnit: "implied vol · rank \(ivr) of 100", line: zone.read, rows: volRows, isVol: true)
+
+        var premRows: [SheetRow] = weeks.reversed().map {
+            SheetRow(name: "Week of \($0.0)", sub: $0.1 > 0 ? "calls written" : "no writes",
+                     val: $0.1 > 0 ? fmtMoney($0.1, sign: true) : "—", tone: $0.1 > 0 ? .pos : .fg3)
+        }
+        premRows.append(SheetRow(name: "Lifetime", sub: String(format: "%.1f%% downside protection", protectPct), val: fmtMoney(premLife, sign: true), tone: .neon))
+        s["prem"] = NVSheet(cat: "Premium", title: "Income collected", sub: "This week · \(ticker)",
+            hero: fmtMoney(premWeek, sign: true), heroUnit: vsLast > 0 ? "\(fmtDec(vsLast))× last week" : "lifetime \(fmtMoney(premLife))",
+            line: vsLast > 0 ? "This week is \(fmtDec(vsLast))× the \(fmtMoney(premPrev)) collected last week. Lifetime premium now buys \(String(format: "%.1f", protectPct))% of downside protection on the position."
+                             : "Lifetime premium now buys \(String(format: "%.1f", protectPct))% of downside protection on the position.",
+            rows: premRows, isVol: false)
+
+        s["prot"] = NVSheet(cat: "Protection", title: "How far premium carries you", sub: "Lifetime premium · \(ticker)",
+            hero: String(format: "%.1f%%", protectPct), heroUnit: "cushion · \(fmtMoney(premPerShare, decimals: 2)) a share",
+            line: "Premium is the buffer between the market and a loss. Every dollar collected moves your break-even lower — currently \(fmtMoney(basisEff, decimals: 2)), \(String(format: "%.1f", protectPct))% under the original cost.",
+            rows: [
+                SheetRow(name: "Original cost", sub: "\(shN) sh", val: fmtMoney(basisOrig, decimals: 2), tone: .fg1),
+                SheetRow(name: "Premium per share", sub: "lifetime", val: "−" + fmtMoney(premPerShare, decimals: 2), tone: .pos),
+                SheetRow(name: "Break-even now", sub: "effective basis", val: fmtMoney(basisEff, decimals: 2), tone: .neon),
+                SheetRow(name: "Cushion", sub: "of the share price", val: String(format: "%.1f%%", protectPct), tone: .pos),
+            ], isVol: false)
+
+        s["basis"] = NVSheet(cat: "Break-even", title: "Where break-even sits", sub: "\(shN) shares",
+            hero: fmtMoney(basisEff, decimals: 2), heroUnit: "break-even · was \(fmtMoney(basisOrig, decimals: 2))",
+            line: "Premium lowers the line you have to clear. The stock is \(fmtMoney(overBE, decimals: 2)) above it — worth \(fmtMoney(netPL, sign: true)) on the whole position.",
+            rows: [
+                SheetRow(name: "Original cost", sub: "\(shN) sh", val: fmtMoney(basisOrig, decimals: 2), tone: .fg1),
+                SheetRow(name: "Premium collected", sub: "−" + fmtMoney(premPerShare, decimals: 2) + "/sh", val: "−" + fmtMoney(premLife), tone: .pos),
+                SheetRow(name: "Effective basis", sub: "post-premium", val: fmtMoney(basisEff, decimals: 2), tone: .neon),
+                SheetRow(name: "Last price", sub: "live", val: fmtMoney(price, decimals: 2), tone: .fg1),
+                SheetRow(name: "Cushion", sub: "price vs effective basis", val: String(format: "+%.1f%%", cushionPct), tone: .pos),
+                strike > 0 ? SheetRow(name: "Assigned at \(fmtStrike(strike))", sub: "gain per share", val: fmtMoney(strike - basisEff, sign: true, decimals: 2), tone: .pos) : nil,
+            ].compactMap { $0 }, isVol: false)
+
+        s["day"] = NVSheet(cat: "Tape", title: "Today's session", sub: "\(ticker)",
+            hero: fmtMoney(price, decimals: 2), heroUnit: "\(fmtPct(chgPct)) · " + fmtMoney(chgAbs, sign: true, decimals: 2),
+            line: "Five-session net \(String(format: "%.1f", week5))%, averaging \(String(format: "%.1f", avgAbs))% a day.",
+            rows: [
+                SheetRow(name: "Last price", sub: "live", val: fmtMoney(price, decimals: 2), tone: .fg1),
+                SheetRow(name: "Day change", sub: "since prior close", val: fmtPct(chgPct), tone: chgPct >= 0 ? .pos : .neg),
+                SheetRow(name: "Position P&L", sub: "\(shN) sh today", val: fmtMoney(todayPL, sign: true), tone: todayPL >= 0 ? .pos : .neg),
+            ], isVol: false)
+
+        if let fd = fedDays, let fw = fedWhen {
+            s["fed"] = NVSheet(cat: "Events", title: "Fed rate decision", sub: fw,
+                hero: "\(fd)d", heroUnit: "until the print",
+                line: "The chance to write is the vol bid into the print — not the decision itself.",
+                rows: [
+                    SheetRow(name: "Fed rate decision", sub: fw, val: "\(fd)d", tone: .fg1),
+                    strike > 0 ? SheetRow(name: "Your strike", sub: "\(fmtStrike(strike)) · \(AppDates.shortMonthDay(expiry))", val: "open", tone: .neon) : nil,
+                ].compactMap { $0 }, isVol: false)
+        }
+
+        if strike > 0 {
+            s["er"] = NVSheet(cat: "Earnings", title: "Next earnings", sub: "date unconfirmed",
+                hero: String(format: "±%.0f%%", erMove), heroUnit: "expected move · \(fmtMoney(erLow, decimals: 0))–\(fmtMoney(erHigh, decimals: 0))",
+                line: "The \(fmtStrike(strike)) strike sits inside the expected move, so an in-line print can still take the shares. Roll up or close before the date is confirmed.",
+                rows: [
+                    SheetRow(name: "Expected move", sub: "options-implied", val: String(format: "±%.0f%%", erMove), tone: .fg1),
+                    SheetRow(name: "Implied range", sub: "post-print", val: "\(fmtMoney(erLow, decimals: 0))–\(fmtMoney(erHigh, decimals: 0))", tone: .fg1),
+                    SheetRow(name: "Your strike", sub: "\(fmtStrike(strike)) · \(AppDates.shortMonthDay(expiry))", val: "inside range", tone: .warn),
+                    SheetRow(name: "Assignment gain", sub: "vs effective basis", val: fmtMoney(strike - basisEff, sign: true, decimals: 2) + "/sh", tone: .pos),
+                ], isVol: false)
+        }
+        return s
     }
 }
