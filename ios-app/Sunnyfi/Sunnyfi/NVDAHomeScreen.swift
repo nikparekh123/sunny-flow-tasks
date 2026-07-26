@@ -363,23 +363,15 @@ struct NVDAHomeScreen: View {
     }
 
     private func premViz(_ d: NVDAToday) -> some View {
-        let ws = Array(d.weeks.suffix(3))
-        let maxV = max(ws.map { $0.1 }.max() ?? 1, 1)
-        return HStack(alignment: .bottom, spacing: 10) {
-            ForEach(Array(ws.enumerated()), id: \.offset) { i, wk in
-                let on = i == ws.count - 1
-                VStack(spacing: 6) {
-                    Text(wk.1 >= 1000 ? "$\(String(format: "%.1f", wk.1 / 1000))K" : "$\(Int(wk.1))")
-                        .font(.mono(size: 9.5, weight: .semibold)).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
-                    RoundedRectangle(cornerRadius: 4).fill(on ? Color.theme.neon : Color.theme.neon.opacity(0.22))
-                        .frame(height: max(6, CGFloat(wk.1 / maxV) * 58))
-                    Text(wk.0).font(.mono(size: 8, weight: .semibold)).tracking(0.7)
-                        .foregroundStyle(on ? Color.theme.fg2 : Color.theme.fg4).textCase(.uppercase)
-                }
-                .frame(maxWidth: .infinity)
-            }
+        // Handoff 7: the one bar-chart vocabulary, compact in-card. Write
+        // weeks (v > 0), latest bar neon, the rest faded neon.
+        let ws = d.weeks.filter { $0.1 > 0 }
+        let last = ws.count - 1
+        let bars = ws.enumerated().map { i, wk in
+            SBCBar(key: wk.0, label: wk.0, sub: "Week of \(wk.0)",
+                   segs: [SBCSeg(v: wk.1, color: i == last ? Color.theme.neon : Color.theme.neon.opacity(0.26))])
         }
-        .frame(height: 96, alignment: .bottom)
+        return SunnyBarChart(bars: bars, height: 92, compact: true)
     }
 
     private func trackViz(fillFrac: CGFloat, markFrac: CGFloat, dimMarkFrac: CGFloat?, scale: (String, String, String)) -> some View {

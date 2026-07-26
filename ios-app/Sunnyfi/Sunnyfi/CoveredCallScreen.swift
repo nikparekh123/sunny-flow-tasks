@@ -15,6 +15,7 @@ struct CoveredCallScreen: View {
     @State private var sheetKey: String?
     @State private var showPlanner = false
     @State private var railPos: [String: String] = [:]
+    @State private var weekSel: Int?   // "Where premium lands" selection (nil = latest)
 
     private func posBinding(_ key: String) -> Binding<String?> {
         Binding(get: { railPos[key] }, set: { if let v = $0 { railPos[key] = v } })
@@ -47,6 +48,12 @@ struct CoveredCallScreen: View {
         case .fg1: return Color.theme.fg1
         case .fg3: return Color.theme.fg3
         }
+    }
+
+    /// K-money for the harvest chart axis (no sign, $ K steps; 0 → "0").
+    private func kMoney(_ v: Double) -> String {
+        guard v != 0 else { return "0" }
+        return v >= 1000 ? "$" + String(format: "%.1f", v / 1000) + "K" : "$" + String(format: "%.0f", v)
     }
 
     var body: some View {
@@ -124,7 +131,6 @@ struct CoveredCallScreen: View {
     private func lifetimeCard(_ d: PosData) -> some View {
         var run = 0.0
         let cum: [(String, Double, Double)] = d.weeks.map { run += $0.v; return ($0.w, $0.v, run) }
-        let maxC = max(d.premLife, 1)
         return Button { sheetKey = "prem" } label: {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -140,22 +146,20 @@ struct CoveredCallScreen: View {
                 .padding(.top, 18)
                 Text("Write weeks on \(Int(d.shares).formatted(.number.grouping(.automatic))) shares. Week of \(d.bigWeekLabel) carried \(d.bigWeekPct)% of it.")
                     .font(.system(size: 12)).foregroundStyle(inkText.opacity(0.6)).padding(.top, 12).fixedSize(horizontal: false, vertical: true)
-                // cumulative harvest columns
-                HStack(alignment: .bottom, spacing: 10) {
-                    ForEach(Array(cum.enumerated()), id: \.offset) { i, c in
-                        let on = i == cum.count - 1
-                        VStack(spacing: 7) {
-                            Text(c.2 > 0 ? (c.2 >= 1000 ? "$\(String(format: "%.1f", c.2 / 1000))K" : "$\(Int(c.2))") : "—")
-                                .font(.mono(size: 9.5, weight: .semibold)).foregroundStyle(on ? lime : inkText.opacity(0.5))
-                            RoundedRectangle(cornerRadius: 4).fill(on ? lime : lime.opacity(0.28))
-                                .frame(height: max(4, CGFloat(c.2 / maxC) * 58))
-                                .overlay { if c.1 <= 0 { RoundedRectangle(cornerRadius: 4).stroke(inkText.opacity(0.12), style: .init(lineWidth: 1, dash: [3, 3])) } }
-                            Text(c.0).font(.mono(size: 8, weight: .semibold)).tracking(0.6).foregroundStyle(inkText.opacity(on ? 0.7 : 0.42)).textCase(.uppercase)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
+                // cumulative harvest — dark SunnyBarChart under a key row
+                HStack(alignment: .firstTextBaseline) {
+                    Text("CUMULATIVE · \(cum.count) WEEKS").font(.mono(size: 9, weight: .semibold)).tracking(1.2)
+                        .foregroundStyle(inkText.opacity(0.45))
+                    Spacer()
+                    Text(kMoney(d.premLife)).font(.mono(size: 14, weight: .bold)).tracking(-0.25).foregroundStyle(lime)
                 }
-                .frame(height: 98, alignment: .bottom).padding(.top, 22)
+                .padding(.top, 22)
+                SunnyBarChart(
+                    bars: cum.enumerated().map { i, c in
+                        SBCBar(key: c.0, label: c.0, sub: "Week of \(c.0)",
+                               segs: [SBCSeg(v: c.2, color: i == cum.count - 1 ? lime : lime.opacity(0.34))])
+                    },
+                    height: 104, fmtY: kMoney, dark: true)
                 HStack(spacing: 14) {
                     inkStat("Per share", "−" + fmtMoney(d.premPerShare, decimals: 2))
                     inkStat("On position value", String(format: "%.2f%%", d.premYield), divider: true)
@@ -306,28 +310,19 @@ struct CoveredCallScreen: View {
 
     // ── where premium lands ──
     private func weeksPanel(_ d: PosData) -> some View {
-        let maxV = max(d.weeks.map(\.v).max() ?? 1, 1)
+        let selIdx = min(weekSel ?? (d.weeks.count - 1), d.weeks.count - 1)
+        let w = d.weeks.indices.contains(selIdx) ? d.weeks[selIdx] : (d.weeks.last ?? PosWeek(w: "", v: 0, note: ""))
         return panel {
             HStack(alignment: .firstTextBaseline) {
                 Text("Where premium lands").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                 Spacer()
-                Text(fmtMoney(d.premLife, sign: true)).font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
+                Text(w.v > 0 ? fmtMoney(w.v, sign: true) : "—").font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
             }
-            Text("Premium collected per write week, newest at the right.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
-            HStack(alignment: .bottom, spacing: 9) {
-                ForEach(d.weeks) { wk in
-                    let on = wk.w == (d.weeks.last?.w ?? "")
-                    VStack(spacing: 8) {
-                        Text(wk.v > 0 ? "$\(String(format: "%.1f", wk.v / 1000))K" : "—").font(.mono(size: 9.5, weight: .semibold)).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
-                        RoundedRectangle(cornerRadius: 5).fill(on ? Color.theme.neon : Color.theme.page2)
-                            .frame(height: max(5, CGFloat(wk.v / maxV) * 104))
-                            .overlay { if wk.v <= 0 { RoundedRectangle(cornerRadius: 5).stroke(Color.theme.dusk, style: .init(lineWidth: 1, dash: [3, 3])) } }
-                        Text(wk.w).font(.mono(size: 8.5, weight: .semibold)).tracking(0.6).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4).textCase(.uppercase)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(height: 150, alignment: .bottom).padding(.top, 20)
+            Text("Week of \(w.w) · \(w.note)").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
+            SunnyBarChart(
+                bars: d.weeks.map { SBCBar(key: $0.w, label: $0.w, sub: "Week of \($0.w)",
+                                           segs: [SBCSeg(v: $0.v, color: Color.theme.neon)]) },
+                height: 168, sel: selIdx, onSel: { weekSel = $0 ?? selIdx })
             Text("Week of \(d.bigWeekLabel) carried \(fmtMoney(d.bigWeekVal)) of \(fmtMoney(d.premLife)) — \(d.bigWeekPct)% of everything collected.")
                 .font(.system(size: 11.5)).foregroundStyle(Color.theme.fg2).lineSpacing(2)
                 .padding(13).background(RoundedRectangle(cornerRadius: Radius.md).fill(Color.theme.tintNeon)).padding(.top, 18)
