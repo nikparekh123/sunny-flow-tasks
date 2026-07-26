@@ -165,6 +165,14 @@ extension Font {
         .system(size: size, weight: weight, design: .default)
     }
 
+    /// SF Mono — the design system's `--mono` (num-mono). Used for numbers,
+    /// units and mono micro-labels on the handoff-6 screens (Today /
+    /// Position / Performance). Inherently tabular. The rest of the app
+    /// stays on SF Pro via `numeric` per Handoff 2.
+    static func mono(size: CGFloat, weight: Weight = .medium) -> Font {
+        .system(size: size, weight: weight, design: .monospaced)
+    }
+
     /// Uppercase micro-label (~9.5pt, tracked).
     static let microLabel = Font.ui(size: 11, weight: .semibold)
 

@@ -15,6 +15,27 @@ struct NVDAHomeScreen: View {
     @State private var news: [NewsHeadline] = []
     @State private var newsLoaded = false
     @State private var sheetKey: String?
+    // Per-rail scroll position → drives the handoff `.dots` indicator.
+    @State private var railPos: [String: String] = [:]
+
+    private func posBinding(_ key: String) -> Binding<String?> {
+        Binding(get: { railPos[key] }, set: { if let v = $0 { railPos[key] = v } })
+    }
+
+    // Handoff `.dots`: one dot per card, active = neon, rest = dusk. Only
+    // shown when the rail has more than one card.
+    @ViewBuilder private func dots(_ ids: [String], _ active: String?) -> some View {
+        if ids.count > 1 {
+            let idx = ids.firstIndex(of: active ?? ids.first ?? "") ?? 0
+            HStack(spacing: 5) {
+                ForEach(ids.indices, id: \.self) { i in
+                    Circle().fill(i == idx ? Color.theme.neon : Color.theme.dusk)
+                        .frame(width: 5, height: 5)
+                        .animation(Motion.standard, value: idx)
+                }
+            }
+        }
+    }
 
     // Rich-black anchor card — always dark (it's the anchor), not fg1 which
     // flips in dark mode.
@@ -82,7 +103,7 @@ struct NVDAHomeScreen: View {
             Spacer()
             HStack(spacing: 7) {
                 Circle().fill(Color.theme.lime).frame(width: 6, height: 6)
-                Text("NVDA · MARKETS OPEN").font(.numeric(size: 9.5, weight: .semibold)).tracking(0.5)
+                Text("NVDA · MARKETS OPEN").font(.mono(size: 9.5, weight: .semibold)).tracking(0.5)
                     .foregroundStyle(Color.theme.fg3)
             }
         }
@@ -92,9 +113,9 @@ struct NVDAHomeScreen: View {
     private func tickerStrip(_ d: NVDAToday) -> some View {
         Button { sheetKey = "day" } label: {
             HStack(spacing: 8) {
-                Text(d.ticker).font(.numeric(size: 11, weight: .medium)).tracking(1.4).foregroundStyle(Color.theme.fg2)
-                Text(fmtMoney(d.price, decimals: 2)).font(.numeric(size: 13, weight: .medium)).foregroundStyle(Color.theme.fg1)
-                Text(fmtPct(d.chgPct)).font(.numeric(size: 11.5, weight: .medium)).foregroundStyle(Color.signed(d.chgPct))
+                Text(d.ticker).font(.mono(size: 11, weight: .medium)).tracking(1.4).foregroundStyle(Color.theme.fg2)
+                Text(fmtMoney(d.price, decimals: 2)).font(.mono(size: 13, weight: .medium)).foregroundStyle(Color.theme.fg1)
+                Text(fmtPct(d.chgPct)).font(.mono(size: 11.5, weight: .medium)).foregroundStyle(Color.signed(d.chgPct))
                 Spacer(minLength: 0)
             }
             .padding(.vertical, 13).padding(.top, 6)
@@ -106,7 +127,7 @@ struct NVDAHomeScreen: View {
     // ── headline ──
     private func headline(_ d: NVDAToday) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(eyebrowDate()).font(.numeric(size: 10, weight: .semibold)).tracking(1.6)
+            Text(eyebrowDate()).font(.mono(size: 10, weight: .semibold)).tracking(1.6)
                 .foregroundStyle(Color.theme.fg3).textCase(.uppercase)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(d.items.count)").font(.system(size: 34, weight: .heavy)).tracking(-1.4).foregroundStyle(Color.theme.fg1)
@@ -120,18 +141,25 @@ struct NVDAHomeScreen: View {
 
     // ── "The decision" rail: vol card + session cards ──
     private func decisionRail(_ d: NVDAToday) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("THE DECISION").font(.numeric(size: 9, weight: .semibold)).tracking(2.2)
-                .foregroundStyle(Color.theme.fg4).padding(.horizontal, 22).padding(.top, 22)
+        let ids = ["vol"] + d.refSeries.map(\.tk)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("THE DECISION").font(.mono(size: 9, weight: .semibold)).tracking(2.2)
+                    .foregroundStyle(Color.theme.fg4)
+                Spacer()
+                dots(ids, railPos["decision"])
+            }
+            .padding(.horizontal, 22).padding(.top, 22)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 11) {
-                    volCard(d).frame(width: cardW)
-                    ForEach(d.refSeries) { s in sessionCard(s).frame(width: cardW) }
+                    volCard(d).frame(width: cardW).id("vol")
+                    ForEach(d.refSeries) { s in sessionCard(s).frame(width: cardW).id(s.tk) }
                 }
                 .padding(.horizontal, 22).padding(.vertical, 10)
                 .scrollTargetLayout()
             }
             .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: posBinding("decision"))
         }
     }
 
@@ -139,19 +167,19 @@ struct NVDAHomeScreen: View {
         Button { sheetKey = "vol" } label: {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("VOLATILITY · \(d.ticker)").font(.numeric(size: 9, weight: .semibold)).tracking(1.6)
+                    Text("VOLATILITY · \(d.ticker)").font(.mono(size: 9, weight: .semibold)).tracking(1.6)
                         .foregroundStyle(inkText.opacity(0.58))
                     Spacer()
                     ivTag(d.zone.verdict, key: d.zone.key, onInk: true)
                 }
-                Text(String(format: "%.1f%%", d.iv)).font(.numeric(size: 28, weight: .bold)).tracking(-0.9)
+                Text(String(format: "%.1f%%", d.iv)).font(.mono(size: 28, weight: .bold)).tracking(-0.9)
                     .foregroundStyle(lime).padding(.top, 16)
-                Text("IMPLIED VOL").font(.numeric(size: 9, weight: .medium)).tracking(0.8)
+                Text("IMPLIED VOL").font(.mono(size: 9, weight: .medium)).tracking(0.8)
                     .foregroundStyle(inkText.opacity(0.5)).padding(.top, 9)
                 Text(d.zone.sub.prefix(1).uppercased() + d.zone.sub.dropFirst())
                     .font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color(hex: 0xf4f1e8)).padding(.top, 15)
                 Text("rank \(d.ivr) · realized \(String(format: "%.0f", d.iv - (d.spread ?? 0)))%")
-                    .font(.numeric(size: 12, weight: .regular)).foregroundStyle(inkText.opacity(0.6)).padding(.top, 8)
+                    .font(.mono(size: 12, weight: .regular)).foregroundStyle(inkText.opacity(0.6)).padding(.top, 8)
                 HStack(spacing: 12) {
                     inkStat("\(d.ivWindowDays >= 220 ? "52w" : "\(d.ivWindowDays)d") IV range", String(format: "%.0f–%.0f%%", d.ivLow, d.ivHigh))
                     inkStat("Implied − realized", (d.spread ?? 0) >= 0 ? "+\(String(format: "%.1f", d.spread ?? 0))" : String(format: "%.1f", d.spread ?? 0), divider: true)
@@ -160,9 +188,9 @@ struct NVDAHomeScreen: View {
                 Spacer(minLength: 0)
                 miniGauge(marker: d.ivr, onInk: true).padding(.top, 20)
                 HStack {
-                    Text("cheap").font(.numeric(size: 9, weight: .medium)).foregroundStyle(inkText.opacity(0.42))
+                    Text("cheap").font(.mono(size: 9, weight: .medium)).foregroundStyle(inkText.opacity(0.42))
                     Spacer()
-                    Text("rich").font(.numeric(size: 9, weight: .medium)).foregroundStyle(inkText.opacity(0.42))
+                    Text("rich").font(.mono(size: 9, weight: .medium)).foregroundStyle(inkText.opacity(0.42))
                 }
                 .padding(.top, 8)
             }
@@ -177,9 +205,9 @@ struct NVDAHomeScreen: View {
 
     private func inkStat(_ label: String, _ value: String, divider: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label.uppercased()).font(.numeric(size: 8, weight: .semibold)).tracking(1.2)
+            Text(label.uppercased()).font(.mono(size: 8, weight: .semibold)).tracking(1.2)
                 .foregroundStyle(inkText.opacity(0.45))
-            Text(value).font(.numeric(size: 14, weight: .bold)).tracking(-0.2).foregroundStyle(Color(hex: 0xf4f1e8))
+            Text(value).font(.mono(size: 14, weight: .bold)).tracking(-0.2).foregroundStyle(Color(hex: 0xf4f1e8))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, divider ? 12 : 0)
@@ -193,31 +221,31 @@ struct NVDAHomeScreen: View {
         return Button { if s.tk == "NVDA" { sheetKey = "day" } } label: {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("\(s.tk) · 5 SESSIONS").font(.numeric(size: 9, weight: .semibold)).tracking(1.6)
+                    Text("\(s.tk) · 5 SESSIONS").font(.mono(size: 9, weight: .semibold)).tracking(1.6)
                         .foregroundStyle(Color.theme.fg3)
                     Spacer()
-                    Text(fmtMoney(s.last, decimals: 2)).font(.numeric(size: 10, weight: .semibold))
+                    Text(fmtMoney(s.last, decimals: 2)).font(.mono(size: 10, weight: .semibold))
                         .foregroundStyle(Color.theme.fg2).padding(.horizontal, 9).padding(.vertical, 4)
                         .background(Capsule().fill(Color.theme.tintMuted))
                 }
                 Text("\(down ? "−" : "+")\(String(format: "%.1f", abs(s.net)))%")
-                    .font(.numeric(size: 28, weight: .bold)).tracking(-0.9)
+                    .font(.mono(size: 28, weight: .bold)).tracking(-0.9)
                     .foregroundStyle(down ? Color.theme.neg : Color.theme.pos).padding(.top, 16)
-                Text(s.sub.uppercased()).font(.numeric(size: 9, weight: .medium)).tracking(0.8)
+                Text(s.sub.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8)
                     .foregroundStyle(Color.theme.fg4).padding(.top, 9)
                 Text(verdict).font(.system(size: 17, weight: .bold)).tracking(-0.3)
                     .foregroundStyle(Color.theme.fg1).padding(.top, 15)
                 Text("avg \(String(format: "%.1f", s.avg))%/day · priced \(String(format: "%.1f", s.priced))%")
-                    .font(.numeric(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
+                    .font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                 Spacer(minLength: 0)
                 sparkline(s).frame(height: 82).padding(.top, 20)
                 HStack(spacing: 0) {
                     ForEach(s.days) { day in
                         VStack(spacing: 5) {
-                            Text(day.label.uppercased()).font(.numeric(size: 8, weight: .semibold)).tracking(0.8)
+                            Text(day.label.uppercased()).font(.mono(size: 8, weight: .semibold)).tracking(0.8)
                                 .foregroundStyle(day.today ? Color.theme.fg2 : Color.theme.fg4)
                             Text("\(day.pct > 0 ? "+" : "−")\(String(format: "%.2f", abs(day.pct)))%")
-                                .font(.numeric(size: 10, weight: .semibold)).foregroundStyle(day.pct > 0 ? Color.theme.pos : Color.theme.neg)
+                                .font(.mono(size: 10, weight: .semibold)).foregroundStyle(day.pct > 0 ? Color.theme.pos : Color.theme.neg)
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -267,17 +295,24 @@ struct NVDAHomeScreen: View {
     private func groupsSection(_ d: NVDAToday) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(grouped(d.items), id: \.0) { grp in
+                let ids = grp.1.map(\.1.k)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(grp.0.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(2.2)
-                        .foregroundStyle(Color.theme.fg4).padding(.horizontal, 22).padding(.top, 20)
+                    HStack {
+                        Text(grp.0.uppercased()).font(.mono(size: 9, weight: .semibold)).tracking(2.2)
+                            .foregroundStyle(Color.theme.fg4)
+                        Spacer()
+                        dots(ids, railPos["grp-\(grp.0)"])
+                    }
+                    .padding(.horizontal, 22).padding(.top, 20)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(alignment: .top, spacing: 11) {
-                            ForEach(grp.1, id: \.1.id) { pair in groupCard(pair.1, idx: pair.0) }
+                            ForEach(grp.1, id: \.1.id) { pair in groupCard(pair.1, idx: pair.0).id(pair.1.k) }
                         }
                         .padding(.horizontal, 22).padding(.vertical, 10)
                         .scrollTargetLayout()
                     }
                     .scrollTargetBehavior(.viewAligned)
+                    .scrollPosition(id: posBinding("grp-\(grp.0)"))
                 }
             }
         }
@@ -287,15 +322,15 @@ struct NVDAHomeScreen: View {
         Button { sheetKey = it.k } label: {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 9) {
-                    Text(String(format: "%02d", idx + 1)).font(.numeric(size: 11.5, weight: .bold)).foregroundStyle(Color.theme.neon)
-                    Text(it.cat.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg3)
+                    Text(String(format: "%02d", idx + 1)).font(.mono(size: 11.5, weight: .bold)).foregroundStyle(Color.theme.neon)
+                    Text(it.cat.uppercased()).font(.mono(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg3)
                     Spacer(minLength: 0)
                 }
-                Text(it.num).font(.numeric(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(tc(it.tone)).padding(.top, 16)
-                Text(it.unit.uppercased()).font(.numeric(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
+                Text(it.num).font(.mono(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(tc(it.tone)).padding(.top, 16)
+                Text(it.unit.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
                 Text(it.name).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                     .padding(.top, 15).fixedSize(horizontal: false, vertical: true)
-                Text(it.sub).font(.numeric(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
+                Text(it.sub).font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 rowViz(it.k).padding(.top, 20)
@@ -331,10 +366,10 @@ struct NVDAHomeScreen: View {
                 let on = i == ws.count - 1
                 VStack(spacing: 6) {
                     Text(wk.1 >= 1000 ? "$\(String(format: "%.1f", wk.1 / 1000))K" : "$\(Int(wk.1))")
-                        .font(.numeric(size: 9.5, weight: .semibold)).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
+                        .font(.mono(size: 9.5, weight: .semibold)).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
                     RoundedRectangle(cornerRadius: 4).fill(on ? Color.theme.neon : Color.theme.neon.opacity(0.22))
                         .frame(height: max(6, CGFloat(wk.1 / maxV) * 58))
-                    Text(wk.0).font(.numeric(size: 8, weight: .semibold)).tracking(0.7)
+                    Text(wk.0).font(.mono(size: 8, weight: .semibold)).tracking(0.7)
                         .foregroundStyle(on ? Color.theme.fg2 : Color.theme.fg4).textCase(.uppercase)
                 }
                 .frame(maxWidth: .infinity)
@@ -407,7 +442,7 @@ struct NVDAHomeScreen: View {
                     ForEach(Array(marks.enumerated()), id: \.offset) { _, m in
                         VStack(spacing: 4) {
                             Circle().fill(Color.theme.fg2).frame(width: 7, height: 7)
-                            Text(m.1).font(.numeric(size: 8.5, weight: .semibold)).tracking(0.6).foregroundStyle(Color.theme.fg3)
+                            Text(m.1).font(.mono(size: 8.5, weight: .semibold)).tracking(0.6).foregroundStyle(Color.theme.fg3)
                         }.offset(x: m.0 * w - 8)
                     }
                 }
@@ -422,10 +457,10 @@ struct NVDAHomeScreen: View {
     }
     private func scaleRow(_ a: String, _ b: String, _ c: String) -> some View {
         HStack {
-            Text(a).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
+            Text(a).font(.mono(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
             Spacer()
-            if !b.isEmpty { Text(b).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4); Spacer() }
-            Text(c).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
+            if !b.isEmpty { Text(b).font(.mono(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4); Spacer() }
+            Text(c).font(.mono(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
         }
     }
 
@@ -459,14 +494,14 @@ struct NVDAHomeScreen: View {
             default: return onInk ? (Color.white.opacity(0.13), Color(hex: 0xe9ede0)) : (Color.theme.tintMuted, Color.theme.fg3)
             }
         }()
-        return Text(text.uppercased()).font(.numeric(size: 8, weight: .semibold)).tracking(1)
+        return Text(text.uppercased()).font(.mono(size: 8, weight: .semibold)).tracking(1)
             .foregroundStyle(fg).padding(.horizontal, 9).padding(.vertical, 5).background(Capsule().fill(bg))
     }
 
     // ── news tape ──
     private var tape: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("NVDA TAPE").font(.numeric(size: 9, weight: .semibold)).tracking(2)
+            Text("NVDA TAPE").font(.mono(size: 9, weight: .semibold)).tracking(2)
                 .foregroundStyle(Color.theme.fg3).padding(.bottom, 12)
             if news.isEmpty {
                 Text(newsLoaded ? "No fresh headlines." : "Loading headlines…").font(.system(size: 13)).foregroundStyle(Color.theme.fg3)
@@ -476,7 +511,7 @@ struct NVDAHomeScreen: View {
                         Text(n.headline).font(.system(size: 13, weight: .medium)).tracking(-0.1)
                             .foregroundStyle(Color.theme.fg1).fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
                         Text("\((n.publisher ?? "").uppercased()) · \(relAge(n.ts))")
-                            .font(.numeric(size: 9, weight: .medium)).tracking(0.5).foregroundStyle(Color.theme.fg4)
+                            .font(.mono(size: 9, weight: .medium)).tracking(0.5).foregroundStyle(Color.theme.fg4)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, i == 0 ? 0 : 13)
@@ -491,19 +526,19 @@ struct NVDAHomeScreen: View {
     private func detailSheet(_ sh: NVSheet, d: NVDAToday) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text(sh.cat.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.theme.neon)
+                Text(sh.cat.uppercased()).font(.mono(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.theme.neon)
                 Text(sh.title).font(.system(size: 25, weight: .bold)).tracking(-0.6).foregroundStyle(Color.theme.fg1).padding(.top, 7)
                 Text(sh.sub).font(.system(size: 10.5)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                 HStack(alignment: .firstTextBaseline, spacing: 11) {
-                    Text(sh.hero).font(.numeric(size: 48, weight: .bold)).tracking(-1.6).foregroundStyle(Color.theme.fg1)
+                    Text(sh.hero).font(.mono(size: 48, weight: .bold)).tracking(-1.6).foregroundStyle(Color.theme.fg1)
                     Text(sh.heroUnit).font(.system(size: 10.5)).foregroundStyle(Color.theme.fg3)
                 }.padding(.top, 17)
                 if sh.isVol {
                     miniGauge(marker: d.ivr).padding(.top, 16)
                     HStack {
-                        Text("IV rank \(d.ivr)").font(.numeric(size: 9, weight: .medium)).foregroundStyle(Color.theme.fg4)
+                        Text("IV rank \(d.ivr)").font(.mono(size: 9, weight: .medium)).foregroundStyle(Color.theme.fg4)
                         Spacer()
-                        Text("write zone ≥ 55").font(.numeric(size: 9, weight: .medium)).foregroundStyle(Color.theme.fg4)
+                        Text("write zone ≥ 55").font(.mono(size: 9, weight: .medium)).foregroundStyle(Color.theme.fg4)
                     }.padding(.top, 9)
                 }
                 Text(sh.line).font(.system(size: 12.5)).foregroundStyle(Color.theme.fg2).lineSpacing(3)
@@ -516,7 +551,7 @@ struct NVDAHomeScreen: View {
                                 Text(r.sub).font(.system(size: 10)).foregroundStyle(Color.theme.fg3)
                             }
                             Spacer()
-                            Text(r.val).font(.numeric(size: 15, weight: .medium)).foregroundStyle(tc(r.tone))
+                            Text(r.val).font(.mono(size: 15, weight: .medium)).foregroundStyle(tc(r.tone))
                         }
                         .padding(.vertical, 12)
                         .overlay(alignment: .top) { if i > 0 { Rectangle().fill(Color.theme.hair).frame(height: 1) } }

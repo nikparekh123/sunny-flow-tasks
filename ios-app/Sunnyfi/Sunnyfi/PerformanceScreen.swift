@@ -18,6 +18,19 @@ struct PerformanceScreen: View {
     @State private var on: [PerfSource: Bool] = [.shares: true, .calls: true]
     @State private var sel: Int?
     @State private var sheetKey: String?
+    @State private var srcPos: String?
+
+    @ViewBuilder private func dots(_ ids: [String], _ active: String?) -> some View {
+        if ids.count > 1 {
+            let idx = ids.firstIndex(of: active ?? ids.first ?? "") ?? 0
+            HStack(spacing: 5) {
+                ForEach(ids.indices, id: \.self) { i in
+                    Circle().fill(i == idx ? Color.theme.neon : Color.theme.dusk)
+                        .frame(width: 5, height: 5).animation(Motion.standard, value: idx)
+                }
+            }
+        }
+    }
 
     private let inkBG = Color(hex: 0x18241c)
     private let inkText = Color(hex: 0xf2eee5)
@@ -67,11 +80,11 @@ struct PerformanceScreen: View {
 
     private func header(_ d: PerfData) -> some View {
         HStack(spacing: 7) {
-            Text("\(d.ticker) PERFORMANCE").font(.numeric(size: 12, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg1)
+            Text("\(d.ticker) PERFORMANCE").font(.mono(size: 12, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg1)
             Circle().fill(Color.theme.lime).frame(width: 6, height: 6)
             Spacer()
             Text("COVERED CALL · \(Int(d.shares).formatted(.number.grouping(.automatic))) SHARES")
-                .font(.numeric(size: 9.5, weight: .semibold)).tracking(0.5).foregroundStyle(Color.theme.fg4)
+                .font(.mono(size: 9.5, weight: .semibold)).tracking(0.5).foregroundStyle(Color.theme.fg4)
         }
         .padding(.horizontal, 22).padding(.top, 8)
     }
@@ -81,15 +94,15 @@ struct PerformanceScreen: View {
         let tot = d.premLife + abs(d.sharesPL)
         return VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("NET P&L · SINCE FIRST WRITE").font(.numeric(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(inkText.opacity(0.58))
+                Text("NET P&L · SINCE FIRST WRITE").font(.mono(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(inkText.opacity(0.58))
                 Spacer()
-                Text("\(String(format: "%.2f", d.premYield))% OF VALUE").font(.numeric(size: 8, weight: .semibold)).tracking(1)
+                Text("\(String(format: "%.2f", d.premYield))% OF VALUE").font(.mono(size: 8, weight: .semibold)).tracking(1)
                     .foregroundStyle(limeInk).padding(.horizontal, 9).padding(.vertical, 5).background(Capsule().fill(lime))
             }
             HStack(alignment: .firstTextBaseline, spacing: 11) {
-                Text(fmtMoney(d.netPL, sign: true)).font(.numeric(size: 42, weight: .bold)).tracking(-1.6)
+                Text(fmtMoney(d.netPL, sign: true)).font(.mono(size: 42, weight: .bold)).tracking(-1.6)
                     .foregroundStyle(d.netPL >= 0 ? lime : Color(hex: 0xe59a83))
-                Text("ALL IN").font(.numeric(size: 9, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.5))
+                Text("ALL IN").font(.mono(size: 9, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.5))
             }.padding(.top, 18)
             Text("Premium \(fmtMoney(d.premLife, sign: true)) against \(fmtMoney(d.sharesPL, sign: true)) on the stock.")
                 .font(.system(size: 12)).foregroundStyle(inkText.opacity(0.6)).padding(.top, 12)
@@ -110,8 +123,8 @@ struct PerformanceScreen: View {
 
     private func inkStat(_ label: String, _ value: String, color: Color, divider: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(label.uppercased()).font(.numeric(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
-            Text(value).font(.numeric(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(color)
+            Text(label.uppercased()).font(.mono(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
+            Text(value).font(.mono(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(color)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, divider ? 14 : 0)
         .overlay(alignment: .leading) { if divider { Rectangle().fill(inkText.opacity(0.12)).frame(width: 1) } }
@@ -131,7 +144,7 @@ struct PerformanceScreen: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Gains & losses").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                 Spacer()
-                Text(fmtMoney(t.net, sign: true)).font(.numeric(size: 15, weight: .bold)).foregroundStyle(Color.signed(t.net))
+                Text(fmtMoney(t.net, sign: true)).font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.signed(t.net))
             }
             Text("Daily, split into stock and written calls. Tap a bar.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
             // period switch
@@ -187,7 +200,7 @@ struct PerformanceScreen: View {
             HStack(spacing: dense ? 1.5 : 3) {
                 ForEach(Array(p.bars.enumerated()), id: \.offset) { i, bar in
                     Text(p.ticks != nil ? (p.ticks?[i] ?? (sel == i ? bar.label : "")) : bar.label)
-                        .font(.numeric(size: 9, weight: sel == i ? .semibold : .regular))
+                        .font(.mono(size: 9, weight: sel == i ? .semibold : .regular))
                         .foregroundStyle(sel == i ? Color.theme.neon : Color.theme.fg4)
                         .frame(maxWidth: .infinity).lineLimit(1)
                 }
@@ -203,8 +216,8 @@ struct PerformanceScreen: View {
                     Button { on[s] = !isOn } label: {
                         HStack(spacing: 7) {
                             RoundedRectangle(cornerRadius: 2).fill(srcColor(s)).frame(width: 9, height: 9)
-                            Text(s == .shares ? "Shares" : "Calls sold").font(.numeric(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg1)
-                            Text(fmtMoney(v, sign: true)).font(.numeric(size: 10, weight: .regular)).foregroundStyle(Color.signed(v))
+                            Text(s == .shares ? "Shares" : "Calls sold").font(.mono(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg1)
+                            Text(fmtMoney(v, sign: true)).font(.mono(size: 10, weight: .regular)).foregroundStyle(Color.signed(v))
                         }
                         .padding(.horizontal, 11).padding(.vertical, 8)
                         .background(Capsule().fill(isOn ? Color.theme.elevated : Color.theme.page2))
@@ -222,21 +235,21 @@ struct PerformanceScreen: View {
         if let i = sel {
             let b = p.bars[i]
             HStack(spacing: 10) {
-                Text(b.sub).font(.numeric(size: 11, weight: .semibold)).foregroundStyle(Color.theme.fg1)
+                Text(b.sub).font(.mono(size: 11, weight: .semibold)).foregroundStyle(Color.theme.fg1)
                 Text("↑\(fmtMoney(gainOf(b)).replacingOccurrences(of: "+", with: "")) · ↓\(fmtMoney(abs(lossOf(b))))")
-                    .font(.numeric(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg3).lineLimit(1)
+                    .font(.mono(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg3).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(fmtMoney(gainOf(b) + lossOf(b), sign: true)).font(.numeric(size: 11, weight: .semibold)).foregroundStyle(Color.signed(gainOf(b) + lossOf(b)))
+                Text(fmtMoney(gainOf(b) + lossOf(b), sign: true)).font(.mono(size: 11, weight: .semibold)).foregroundStyle(Color.signed(gainOf(b) + lossOf(b)))
                 Button { withAnimation { sel = nil } } label: {
-                    Text("CLEAR").font(.numeric(size: 9.5, weight: .semibold)).tracking(0.6).foregroundStyle(Color.theme.neon)
+                    Text("CLEAR").font(.mono(size: 9.5, weight: .semibold)).tracking(0.6).foregroundStyle(Color.theme.neon)
                         .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(Color.theme.tintNeon))
                 }.buttonStyle(.plain)
             }
         } else {
             HStack {
-                Text("\(p.bars.count) sessions · tap for a day").font(.numeric(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg3)
+                Text("\(p.bars.count) sessions · tap for a day").font(.mono(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg3)
                 Spacer()
-                Text(fmtMoney(t.net, sign: true)).font(.numeric(size: 11, weight: .semibold)).foregroundStyle(Color.signed(t.net))
+                Text(fmtMoney(t.net, sign: true)).font(.mono(size: 11, weight: .semibold)).foregroundStyle(Color.signed(t.net))
             }
         }
     }
@@ -251,7 +264,7 @@ struct PerformanceScreen: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Premium by expiry").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                 Spacer()
-                Text(fmtMoney(d.expNet, sign: true)).font(.numeric(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
+                Text(fmtMoney(d.expNet, sign: true)).font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
             }
             Text("Credit taken up, cost to close down.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
             HStack(alignment: .top, spacing: 6) {
@@ -269,16 +282,16 @@ struct PerformanceScreen: View {
             }
             .frame(height: H).padding(.top, 16)
             HStack(spacing: 6) {
-                ForEach(d.expiries) { e in Text(e.ex).font(.numeric(size: 9, weight: .regular)).foregroundStyle(Color.theme.fg4).frame(maxWidth: .infinity) }
+                ForEach(d.expiries) { e in Text(e.ex).font(.mono(size: 9, weight: .regular)).foregroundStyle(Color.theme.fg4).frame(maxWidth: .infinity) }
             }.padding(.top, 9)
             ForEach(Array(d.expiries.reversed().enumerated()), id: \.element.id) { i, e in
                 Button { sheetKey = "exp-\(e.ex)" } label: {
                     HStack(spacing: 11) {
-                        Text("\(d.expiries.count - i)").font(.numeric(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg4).frame(width: 16)
+                        Text("\(d.expiries.count - i)").font(.mono(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg4).frame(width: 16)
                         Text(e.ex).font(.system(size: 14.5, weight: .bold)).tracking(-0.2).foregroundStyle(Color.theme.fg1).frame(width: 50, alignment: .leading)
-                        Text("\(fmtStrike(e.strike))c ×\(e.qty) · \(e.status)").font(.numeric(size: 9.5, weight: .regular)).foregroundStyle(Color.theme.fg4).lineLimit(1)
+                        Text("\(fmtStrike(e.strike))c ×\(e.qty) · \(e.status)").font(.mono(size: 9.5, weight: .regular)).foregroundStyle(Color.theme.fg4).lineLimit(1)
                         Spacer(minLength: 0)
-                        Text(fmtMoney(e.net, sign: true)).font(.numeric(size: 13, weight: .semibold)).foregroundStyle(Color.signed(e.net))
+                        Text(fmtMoney(e.net, sign: true)).font(.mono(size: 13, weight: .semibold)).foregroundStyle(Color.signed(e.net))
                         Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.theme.fg5)
                     }
                     .padding(.vertical, 14).contentShape(Rectangle()).overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
@@ -290,13 +303,18 @@ struct PerformanceScreen: View {
     // ── by-source rail ──
     private func sourceRail(_ d: PerfData) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("PERFORMANCE BY SOURCE").font(.numeric(size: 9, weight: .semibold)).tracking(2.2).foregroundStyle(Color.theme.fg4)
-                .padding(.horizontal, 22).padding(.top, 20)
+            HStack {
+                Text("PERFORMANCE BY SOURCE").font(.mono(size: 9, weight: .semibold)).tracking(2.2).foregroundStyle(Color.theme.fg4)
+                Spacer()
+                dots(d.sources.map(\.key), srcPos)
+            }
+            .padding(.horizontal, 22).padding(.top, 20)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 11) { ForEach(d.sources) { sourceCard($0) } }
+                HStack(alignment: .top, spacing: 11) { ForEach(d.sources) { sourceCard($0).id($0.key) } }
                     .padding(.horizontal, 22).padding(.vertical, 10).scrollTargetLayout()
             }
             .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $srcPos)
         }
     }
 
@@ -307,7 +325,7 @@ struct PerformanceScreen: View {
                 HStack {
                     HStack(spacing: 7) {
                         RoundedRectangle(cornerRadius: 2).fill(srcColor(s.colorKey)).frame(width: 8, height: 8)
-                        Text(s.label.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg3)
+                        Text(s.label.uppercased()).font(.mono(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg3)
                     }
                     Spacer()
                     Text(s.chip).font(.system(size: 10, weight: .semibold))
@@ -315,9 +333,9 @@ struct PerformanceScreen: View {
                         .padding(.horizontal, 9).padding(.vertical, 4)
                         .background(Capsule().fill(s.empty ? Color.theme.tintMuted : (pos ? Color.theme.tintPos : Color.theme.tintNeg)))
                 }
-                Text(s.empty ? "—" : fmtMoney(s.today, sign: true)).font(.numeric(size: 28, weight: .bold)).tracking(-0.9)
+                Text(s.empty ? "—" : fmtMoney(s.today, sign: true)).font(.mono(size: 28, weight: .bold)).tracking(-0.9)
                     .foregroundStyle(s.empty ? Color.theme.fg4 : (pos ? Color.theme.pos : Color.theme.neg)).padding(.top, 16)
-                Text("PERFORMANCE AS OF TODAY").font(.numeric(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
+                Text("PERFORMANCE AS OF TODAY").font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
                 Text(s.name).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(s.sub).font(.system(size: 12)).foregroundStyle(Color.theme.fg3).padding(.top, 8).fixedSize(horizontal: false, vertical: true)
@@ -337,8 +355,8 @@ struct PerformanceScreen: View {
 
     private func srcStat(_ label: String, _ value: String, muted: Bool, divider: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(label.uppercased()).font(.numeric(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(Color.theme.fg4)
-            Text(value).font(.numeric(size: 15, weight: .bold)).tracking(-0.2).foregroundStyle(muted ? Color.theme.fg4 : Color.theme.fg1)
+            Text(label.uppercased()).font(.mono(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(Color.theme.fg4)
+            Text(value).font(.mono(size: 15, weight: .bold)).tracking(-0.2).foregroundStyle(muted ? Color.theme.fg4 : Color.theme.fg1)
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, divider ? 14 : 0)
         .overlay(alignment: .leading) { if divider { Rectangle().fill(Color.theme.hair).frame(width: 1) } }
@@ -361,11 +379,11 @@ struct PerformanceScreen: View {
     private func detailSheet(_ sh: NVSheet) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text(sh.cat.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.theme.neon)
+                Text(sh.cat.uppercased()).font(.mono(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.theme.neon)
                 Text(sh.title).font(.system(size: 23, weight: .bold)).tracking(-0.6).foregroundStyle(Color.theme.fg1).padding(.top, 7)
                 Text(sh.sub).font(.system(size: 10.5)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                 HStack(alignment: .firstTextBaseline, spacing: 11) {
-                    Text(sh.hero).font(.numeric(size: 44, weight: .bold)).tracking(-1.4).foregroundStyle(Color.theme.fg1)
+                    Text(sh.hero).font(.mono(size: 44, weight: .bold)).tracking(-1.4).foregroundStyle(Color.theme.fg1)
                     Text(sh.heroUnit).font(.system(size: 10.5)).foregroundStyle(Color.theme.fg3)
                 }.padding(.top, 17)
                 Text(sh.line).font(.system(size: 12.5)).foregroundStyle(Color.theme.fg2).lineSpacing(3).padding(.top, 14)
@@ -378,7 +396,7 @@ struct PerformanceScreen: View {
                                 Text(r.sub).font(.system(size: 10)).foregroundStyle(Color.theme.fg3)
                             }
                             Spacer()
-                            Text(r.val).font(.numeric(size: 15, weight: .medium)).foregroundStyle(tc(r.tone))
+                            Text(r.val).font(.mono(size: 15, weight: .medium)).foregroundStyle(tc(r.tone))
                         }
                         .padding(.vertical, 12).overlay(alignment: .top) { if i > 0 { Rectangle().fill(Color.theme.hair).frame(height: 1) } }
                     }

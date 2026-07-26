@@ -141,7 +141,7 @@ struct CoveredCallPlanner: View {
                     Circle().fill(lime).frame(width: 7, height: 7)
                 }
                 Text("\(model.ticker) · \(fmtMoney(model.spot, decimals: 2)) · ~15-min delayed")
-                    .font(.numeric(size: 11.5, weight: .medium)).monospacedDigit()
+                    .font(.mono(size: 11.5, weight: .medium)).monospacedDigit()
                     .foregroundStyle(Color.theme.fg3)
             }
             Spacer()
@@ -169,8 +169,8 @@ struct CoveredCallPlanner: View {
     private func ctxCell(_ k: String, _ v: String, sub: String) -> some View {
         VStack(spacing: 6) {
             Text(k).font(.system(size: 9.5, weight: .heavy)).tracking(0.6).foregroundStyle(Color.theme.fg4)
-            Text(v).font(.numeric(size: 20, weight: .heavy)).monospacedDigit().foregroundStyle(Color.theme.fg1)
-            Text(sub).font(.numeric(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(Color.theme.fg4)
+            Text(v).font(.mono(size: 20, weight: .heavy)).monospacedDigit().foregroundStyle(Color.theme.fg1)
+            Text(sub).font(.mono(size: 10, weight: .medium)).monospacedDigit().foregroundStyle(Color.theme.fg4)
         }
         .frame(maxWidth: .infinity)
     }
@@ -195,9 +195,9 @@ struct CoveredCallPlanner: View {
                             VStack(spacing: 6) {
                                 Text(weekday(e)).font(.system(size: 10, weight: .heavy)).tracking(0.5)
                                     .foregroundStyle(on ? lime : Color.theme.fg4)
-                                Text(dayNum(e)).font(.numeric(size: 14, weight: .heavy)).monospacedDigit()
+                                Text(dayNum(e)).font(.mono(size: 14, weight: .heavy)).monospacedDigit()
                                     .foregroundStyle(on ? .white : Color.theme.fg1)
-                                Text(monthShort(e)).font(.numeric(size: 9.5, weight: .bold)).monospacedDigit()
+                                Text(monthShort(e)).font(.mono(size: 9.5, weight: .bold)).monospacedDigit()
                                     .foregroundStyle(on ? .white.opacity(0.55) : Color.theme.fg4)
                             }
                             .frame(minWidth: 62).padding(.vertical, 11).padding(.horizontal, 10)
@@ -244,9 +244,9 @@ struct CoveredCallPlanner: View {
                     let on = model.selectedStrike?.strike == s.strike
                     Button { model.selectedStrike = s } label: {
                         VStack(spacing: 8) {
-                            Text(fmtStrike(s.strike)).font(.numeric(size: 16, weight: .heavy)).monospacedDigit()
+                            Text(fmtStrike(s.strike)).font(.mono(size: 16, weight: .heavy)).monospacedDigit()
                                 .foregroundStyle(on ? .white : Color.theme.fg1)
-                            Text(fmtMoney(s.premium, decimals: 2)).font(.numeric(size: 12.5, weight: .heavy)).monospacedDigit()
+                            Text(fmtMoney(s.premium, decimals: 2)).font(.mono(size: 12.5, weight: .heavy)).monospacedDigit()
                                 .foregroundStyle(on ? lime : Color.theme.fg2)
                             Text(mny.0).font(.system(size: 9, weight: .heavy)).tracking(0.4)
                                 .foregroundStyle(on ? .white.opacity(0.7) : mny.1)
@@ -271,18 +271,18 @@ struct CoveredCallPlanner: View {
             Text("PREMIUM YOU'D COLLECT")
                 .font(.system(size: 10, weight: .heavy)).tracking(1.4).foregroundStyle(lime)
             Text(fmtMoney(model.totalPremium))
-                .font(.numeric(size: 42, weight: .heavy)).tracking(-1.6).monospacedDigit()
+                .font(.mono(size: 42, weight: .heavy)).tracking(-1.6).monospacedDigit()
                 .foregroundStyle(.white).padding(.top, 8)
 
             if let s = model.selectedStrike {
                 HStack {
                     Text("$\(fmtStrike(s.strike)) call · \(cushionLabel(s.strike))")
-                        .font(.numeric(size: 11.5, weight: .semibold)).monospacedDigit()
+                        .font(.mono(size: 11.5, weight: .semibold)).monospacedDigit()
                         .foregroundStyle(.white.opacity(0.55))
                     Spacer()
                     HStack(spacing: 10) {
                         stepBtn("minus", .white) { model.setContracts(model.contracts - 1) }
-                        Text("\(model.contracts)").font(.numeric(size: 14, weight: .heavy)).monospacedDigit()
+                        Text("\(model.contracts)").font(.mono(size: 14, weight: .heavy)).monospacedDigit()
                             .foregroundStyle(.white).frame(minWidth: 24)
                         stepBtn("plus", .white) { model.setContracts(model.contracts + 1) }
                     }
@@ -326,9 +326,9 @@ struct CoveredCallPlanner: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
                 Text(fmtMoney(value, sign: true))
-                    .font(.numeric(size: 22, weight: .heavy)).tracking(-0.4).monospacedDigit()
+                    .font(.mono(size: 22, weight: .heavy)).tracking(-0.4).monospacedDigit()
                     .foregroundStyle(valueColor)
-                Text(sub).font(.numeric(size: 10, weight: .medium)).monospacedDigit()
+                Text(sub).font(.mono(size: 10, weight: .medium)).monospacedDigit()
                     .foregroundStyle(.white.opacity(0.5))
             }
         }

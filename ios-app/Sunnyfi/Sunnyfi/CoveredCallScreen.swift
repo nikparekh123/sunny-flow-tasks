@@ -13,6 +13,23 @@ struct CoveredCallScreen: View {
     let store: PortfolioStore
     @State private var sheetKey: String?
     @State private var showPlanner = false
+    @State private var railPos: [String: String] = [:]
+
+    private func posBinding(_ key: String) -> Binding<String?> {
+        Binding(get: { railPos[key] }, set: { if let v = $0 { railPos[key] = v } })
+    }
+
+    @ViewBuilder private func dots(_ ids: [String], _ active: String?) -> some View {
+        if ids.count > 1 {
+            let idx = ids.firstIndex(of: active ?? ids.first ?? "") ?? 0
+            HStack(spacing: 5) {
+                ForEach(ids.indices, id: \.self) { i in
+                    Circle().fill(i == idx ? Color.theme.neon : Color.theme.dusk)
+                        .frame(width: 5, height: 5).animation(Motion.standard, value: idx)
+                }
+            }
+        }
+    }
 
     private let inkBG = Color(hex: 0x18241c)
     private let inkText = Color(hex: 0xf2eee5)
@@ -69,11 +86,11 @@ struct CoveredCallScreen: View {
     // ── header ──
     private func header(_ d: PosData) -> some View {
         HStack(spacing: 7) {
-            Text(d.ticker).font(.numeric(size: 12, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg1)
+            Text(d.ticker).font(.mono(size: 12, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg1)
             Circle().fill(Color.theme.lime).frame(width: 6, height: 6)
             Spacer()
             Text("COVERED CALL · \(d.contractsWritten) OF \(d.contractsTotal) WRITTEN")
-                .font(.numeric(size: 9.5, weight: .semibold)).tracking(0.5).foregroundStyle(Color.theme.fg4)
+                .font(.mono(size: 9.5, weight: .semibold)).tracking(0.5).foregroundStyle(Color.theme.fg4)
         }
         .padding(.horizontal, 22).padding(.top, 8)
     }
@@ -83,9 +100,9 @@ struct CoveredCallScreen: View {
         HStack(spacing: 10) {
             Button { sheetKey = "shares" } label: {
                 HStack(spacing: 8) {
-                    Text(d.ticker).font(.numeric(size: 11, weight: .medium)).tracking(1.4).foregroundStyle(Color.theme.fg2)
-                    Text(fmtMoney(d.price, decimals: 2)).font(.numeric(size: 13, weight: .medium)).foregroundStyle(Color.theme.fg1)
-                    Text(fmtPct(d.chgPct)).font(.numeric(size: 11.5, weight: .medium)).foregroundStyle(Color.signed(d.chgPct))
+                    Text(d.ticker).font(.mono(size: 11, weight: .medium)).tracking(1.4).foregroundStyle(Color.theme.fg2)
+                    Text(fmtMoney(d.price, decimals: 2)).font(.mono(size: 13, weight: .medium)).foregroundStyle(Color.theme.fg1)
+                    Text(fmtPct(d.chgPct)).font(.mono(size: 11.5, weight: .medium)).foregroundStyle(Color.signed(d.chgPct))
                     Spacer(minLength: 0)
                 }
                 .padding(.vertical, 12).contentShape(Rectangle())
@@ -109,14 +126,14 @@ struct CoveredCallScreen: View {
         return Button { sheetKey = "prem" } label: {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text("PREMIUM HARVESTED").font(.numeric(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(inkText.opacity(0.58))
+                    Text("PREMIUM HARVESTED").font(.mono(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(inkText.opacity(0.58))
                     Spacer()
-                    Text("\(String(format: "%.1f", d.protectPct))% CUSHION").font(.numeric(size: 8, weight: .semibold)).tracking(1)
+                    Text("\(String(format: "%.1f", d.protectPct))% CUSHION").font(.mono(size: 8, weight: .semibold)).tracking(1)
                         .foregroundStyle(limeInk).padding(.horizontal, 9).padding(.vertical, 5).background(Capsule().fill(lime))
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 11) {
-                    Text(fmtMoney(d.premLife, sign: true)).font(.numeric(size: 42, weight: .bold)).tracking(-1.6).foregroundStyle(lime)
-                    Text("LIFETIME").font(.numeric(size: 9, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.5))
+                    Text(fmtMoney(d.premLife, sign: true)).font(.mono(size: 42, weight: .bold)).tracking(-1.6).foregroundStyle(lime)
+                    Text("LIFETIME").font(.mono(size: 9, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.5))
                 }
                 .padding(.top, 18)
                 Text("Write weeks on \(Int(d.shares).formatted(.number.grouping(.automatic))) shares. Week of \(d.bigWeekLabel) carried \(d.bigWeekPct)% of it.")
@@ -127,11 +144,11 @@ struct CoveredCallScreen: View {
                         let on = i == cum.count - 1
                         VStack(spacing: 7) {
                             Text(c.2 > 0 ? (c.2 >= 1000 ? "$\(String(format: "%.1f", c.2 / 1000))K" : "$\(Int(c.2))") : "—")
-                                .font(.numeric(size: 9.5, weight: .semibold)).foregroundStyle(on ? lime : inkText.opacity(0.5))
+                                .font(.mono(size: 9.5, weight: .semibold)).foregroundStyle(on ? lime : inkText.opacity(0.5))
                             RoundedRectangle(cornerRadius: 4).fill(on ? lime : lime.opacity(0.28))
                                 .frame(height: max(4, CGFloat(c.2 / maxC) * 58))
                                 .overlay { if c.1 <= 0 { RoundedRectangle(cornerRadius: 4).stroke(inkText.opacity(0.12), style: .init(lineWidth: 1, dash: [3, 3])) } }
-                            Text(c.0).font(.numeric(size: 8, weight: .semibold)).tracking(0.6).foregroundStyle(inkText.opacity(on ? 0.7 : 0.42)).textCase(.uppercase)
+                            Text(c.0).font(.mono(size: 8, weight: .semibold)).tracking(0.6).foregroundStyle(inkText.opacity(on ? 0.7 : 0.42)).textCase(.uppercase)
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -146,18 +163,18 @@ struct CoveredCallScreen: View {
                 // basis strip
                 HStack(spacing: 14) {
                     VStack(alignment: .leading, spacing: 7) {
-                        Text("COST BASIS").font(.numeric(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
-                        Text(String(format: "%.2f", d.basisOrig)).font(.numeric(size: 19, weight: .bold)).tracking(-0.5).foregroundStyle(Color(hex: 0xf4f1e8))
+                        Text("COST BASIS").font(.mono(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
+                        Text(String(format: "%.2f", d.basisOrig)).font(.mono(size: 19, weight: .bold)).tracking(-0.5).foregroundStyle(Color(hex: 0xf4f1e8))
                     }
                     VStack(spacing: 7) {
-                        Text("−\(String(format: "%.2f", d.premPerShare))").font(.numeric(size: 10, weight: .bold)).foregroundStyle(limeInk)
+                        Text("−\(String(format: "%.2f", d.premPerShare))").font(.mono(size: 10, weight: .bold)).foregroundStyle(limeInk)
                             .padding(.horizontal, 9).padding(.vertical, 3).background(Capsule().fill(lime))
                         Rectangle().fill(LinearGradient(colors: [inkText.opacity(0.16), lime], startPoint: .leading, endPoint: .trailing)).frame(height: 2)
                     }
                     .frame(maxWidth: .infinity)
                     VStack(alignment: .trailing, spacing: 7) {
-                        Text("BREAK-EVEN").font(.numeric(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
-                        Text(String(format: "%.2f", d.basisEff)).font(.numeric(size: 19, weight: .bold)).tracking(-0.5).foregroundStyle(lime)
+                        Text("BREAK-EVEN").font(.mono(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
+                        Text(String(format: "%.2f", d.basisEff)).font(.mono(size: 19, weight: .bold)).tracking(-0.5).foregroundStyle(lime)
                     }
                 }
                 .padding(14).padding(.top, 20)
@@ -172,8 +189,8 @@ struct CoveredCallScreen: View {
 
     private func inkStat(_ label: String, _ value: String, divider: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(label.uppercased()).font(.numeric(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
-            Text(value).font(.numeric(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color(hex: 0xf4f1e8))
+            Text(label.uppercased()).font(.mono(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
+            Text(value).font(.mono(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color(hex: 0xf4f1e8))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, divider ? 14 : 0)
@@ -183,15 +200,20 @@ struct CoveredCallScreen: View {
     // ── the position rail ──
     private func positionRail(_ d: PosData) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("THE POSITION").font(.numeric(size: 9, weight: .semibold)).tracking(2.2).foregroundStyle(Color.theme.fg4)
-                .padding(.horizontal, 22).padding(.top, 20)
+            HStack {
+                Text("THE POSITION").font(.mono(size: 9, weight: .semibold)).tracking(2.2).foregroundStyle(Color.theme.fg4)
+                Spacer()
+                dots(d.cards.map(\.k), railPos["position"])
+            }
+            .padding(.horizontal, 22).padding(.top, 20)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 11) {
-                    ForEach(d.cards) { posCard($0, d: d) }
+                    ForEach(d.cards) { posCard($0, d: d).id($0.k) }
                 }
                 .padding(.horizontal, 22).padding(.vertical, 10).scrollTargetLayout()
             }
             .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: posBinding("position"))
         }
     }
 
@@ -199,17 +221,17 @@ struct CoveredCallScreen: View {
         Button { sheetKey = it.k } label: {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text(it.cat.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg3)
+                    Text(it.cat.uppercased()).font(.mono(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg3)
                     Spacer()
                     if it.k == "calls", d.strike > 0 { chip("OTM +\(String(format: "%.1f", d.strikeDist))%", .pos) }
                     else if it.k == "shares" { chip(fmtMoney(d.price, decimals: 2), .fg1) }
                     else if it.k == "uncov" { chip("\(d.dte)d cycle", .fg1) }
                 }
-                Text(it.num).font(.numeric(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(tc(it.tone)).padding(.top, 16)
-                Text(it.unit.uppercased()).font(.numeric(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
+                Text(it.num).font(.mono(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(tc(it.tone)).padding(.top, 16)
+                Text(it.unit.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
                 Text(it.name).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(it.sub).font(.numeric(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
+                Text(it.sub).font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                 Spacer(minLength: 0)
                 posViz(it.viz, d: d).padding(.top, 20)
             }
@@ -272,10 +294,10 @@ struct CoveredCallScreen: View {
     }
     private func scaleRow(_ a: String, _ b: String, _ c: String) -> some View {
         HStack {
-            Text(a).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
+            Text(a).font(.mono(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
             Spacer()
-            if !b.isEmpty { Text(b).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4); Spacer() }
-            Text(c).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
+            if !b.isEmpty { Text(b).font(.mono(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4); Spacer() }
+            Text(c).font(.mono(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
         }
     }
 
@@ -286,18 +308,18 @@ struct CoveredCallScreen: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Where premium lands").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                 Spacer()
-                Text(fmtMoney(d.premLife, sign: true)).font(.numeric(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
+                Text(fmtMoney(d.premLife, sign: true)).font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
             }
             Text("Premium collected per write week, newest at the right.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
             HStack(alignment: .bottom, spacing: 9) {
                 ForEach(d.weeks) { wk in
                     let on = wk.w == (d.weeks.last?.w ?? "")
                     VStack(spacing: 8) {
-                        Text(wk.v > 0 ? "$\(String(format: "%.1f", wk.v / 1000))K" : "—").font(.numeric(size: 9.5, weight: .semibold)).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
+                        Text(wk.v > 0 ? "$\(String(format: "%.1f", wk.v / 1000))K" : "—").font(.mono(size: 9.5, weight: .semibold)).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
                         RoundedRectangle(cornerRadius: 5).fill(on ? Color.theme.neon : Color.theme.page2)
                             .frame(height: max(5, CGFloat(wk.v / maxV) * 104))
                             .overlay { if wk.v <= 0 { RoundedRectangle(cornerRadius: 5).stroke(Color.theme.dusk, style: .init(lineWidth: 1, dash: [3, 3])) } }
-                        Text(wk.w).font(.numeric(size: 8.5, weight: .semibold)).tracking(0.6).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4).textCase(.uppercase)
+                        Text(wk.w).font(.mono(size: 8.5, weight: .semibold)).tracking(0.6).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4).textCase(.uppercase)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -311,10 +333,10 @@ struct CoveredCallScreen: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("All write weeks").font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.theme.fg1)
-                        Text("\(d.weeks.count) weeks · \(d.weeks.filter { $0.v > 0 }.count) with writes").font(.numeric(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
+                        Text("\(d.weeks.count) weeks · \(d.weeks.filter { $0.v > 0 }.count) with writes").font(.mono(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
                     }
                     Spacer()
-                    Text(fmtMoney(d.premLife, sign: true)).font(.numeric(size: 14, weight: .semibold)).foregroundStyle(Color.theme.pos)
+                    Text(fmtMoney(d.premLife, sign: true)).font(.mono(size: 14, weight: .semibold)).foregroundStyle(Color.theme.pos)
                     Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.theme.fg5)
                 }
                 .padding(.vertical, 15).contentShape(Rectangle())
@@ -331,7 +353,7 @@ struct CoveredCallScreen: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("What the position earned").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                 Spacer()
-                Text(fmtMoney(d.netPL, sign: true)).font(.numeric(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
+                Text(fmtMoney(d.netPL, sign: true)).font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
             }
             Text("Premium against unrealized share loss, since the first write.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
             HStack(spacing: 3) {
@@ -344,7 +366,7 @@ struct CoveredCallScreen: View {
             }.buttonStyle(.plain)
             earnedRow("Shares", "unrealized vs \(fmtMoney(d.basisOrig, decimals: 2))", fmtMoney(d.sharesPL, sign: true), .neg, chevron: false)
             HStack {
-                Text(String(format: "%.2f%%", d.premYield)).font(.numeric(size: 32, weight: .bold)).tracking(-1.2).foregroundStyle(Color.theme.fg1)
+                Text(String(format: "%.2f%%", d.premYield)).font(.mono(size: 32, weight: .bold)).tracking(-1.2).foregroundStyle(Color.theme.fg1)
                 Spacer()
                 Text("Premium collected against position value").font(.system(size: 11)).foregroundStyle(Color.theme.fg3)
                     .multilineTextAlignment(.trailing).frame(maxWidth: 160)
@@ -357,10 +379,10 @@ struct CoveredCallScreen: View {
         HStack {
             VStack(alignment: .leading, spacing: 5) {
                 Text(a).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.theme.fg1)
-                Text(b).font(.numeric(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
+                Text(b).font(.mono(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
             }
             Spacer()
-            Text(v).font(.numeric(size: 14, weight: .semibold)).foregroundStyle(tone == .pos ? Color.theme.pos : Color.theme.neg)
+            Text(v).font(.mono(size: 14, weight: .semibold)).foregroundStyle(tone == .pos ? Color.theme.pos : Color.theme.neg)
             if chevron { Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.theme.fg5) }
         }
         .padding(.vertical, 15).overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
@@ -378,10 +400,10 @@ struct CoveredCallScreen: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 5) {
                             Text(h.w).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.theme.fg3)
-                            Text(h.note).font(.numeric(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
+                            Text(h.note).font(.mono(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
                         }
                         Spacer()
-                        Text(fmtMoney(h.v, sign: true)).font(.numeric(size: 14, weight: .semibold)).foregroundStyle(Color.theme.pos)
+                        Text(fmtMoney(h.v, sign: true)).font(.mono(size: 14, weight: .semibold)).foregroundStyle(Color.theme.pos)
                     }
                     .padding(.vertical, 15).overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
                 }
@@ -400,11 +422,11 @@ struct CoveredCallScreen: View {
     private func detailSheet(_ sh: NVSheet) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text(sh.cat.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.theme.neon)
+                Text(sh.cat.uppercased()).font(.mono(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.theme.neon)
                 Text(sh.title).font(.system(size: 25, weight: .bold)).tracking(-0.6).foregroundStyle(Color.theme.fg1).padding(.top, 7)
                 Text(sh.sub).font(.system(size: 10.5)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                 HStack(alignment: .firstTextBaseline, spacing: 11) {
-                    Text(sh.hero).font(.numeric(size: 44, weight: .bold)).tracking(-1.4).foregroundStyle(Color.theme.fg1)
+                    Text(sh.hero).font(.mono(size: 44, weight: .bold)).tracking(-1.4).foregroundStyle(Color.theme.fg1)
                     Text(sh.heroUnit).font(.system(size: 10.5)).foregroundStyle(Color.theme.fg3)
                 }.padding(.top, 17)
                 Text(sh.line).font(.system(size: 12.5)).foregroundStyle(Color.theme.fg2).lineSpacing(3).padding(.top, 14)
@@ -417,7 +439,7 @@ struct CoveredCallScreen: View {
                                 Text(r.sub).font(.system(size: 10)).foregroundStyle(Color.theme.fg3)
                             }
                             Spacer()
-                            Text(r.val).font(.numeric(size: 15, weight: .medium)).foregroundStyle(tc(r.tone))
+                            Text(r.val).font(.mono(size: 15, weight: .medium)).foregroundStyle(tc(r.tone))
                         }
                         .padding(.vertical, 12).overlay(alignment: .top) { if i > 0 { Rectangle().fill(Color.theme.hair).frame(height: 1) } }
                     }
