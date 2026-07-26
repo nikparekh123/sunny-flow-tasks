@@ -540,17 +540,24 @@ final class PortfolioStore {
         // spread-only, so real tickers surface from day one.
         self.allIvSummaries = ivSummaries
 
-        // Phase 2 — CPU-bound join. If this is fat in Instruments, the
-        // win is either reducing what buildCompanies recomputes or
-        // moving derivations to detached tasks.
+        // Phase 2 — CPU-bound join. Run it (and the portfolio rollup) on a
+        // background executor via a detached task so a large trade history
+        // doesn't hang the main thread during a refresh. Every input and
+        // output here is a Sendable value type, so this crosses the actor
+        // boundary cleanly. Results are assigned back on the main actor.
         let perfJoin = Perf.begin("fetchAll.join")
-        let built = Self.buildCompanies(
-            positions: positions, trades: trades, greeks: greeks,
-            quotes: quotes, shareSells: sells, shareLots: lots, overlay: overlay
-        )
+        let built = await Task.detached(priority: .userInitiated) {
+            let companies = Self.buildCompanies(
+                positions: positions, trades: trades, greeks: greeks,
+                quotes: quotes, shareSells: sells, shareLots: lots, overlay: overlay
+            )
+            return (open: companies.open,
+                    closed: companies.closed,
+                    portfolio: Self.buildPortfolio(companies.open))
+        }.value
         self.companies = built.open
         self.closedCompanies = built.closed
-        self.portfolio = Self.buildPortfolio(built.open)
+        self.portfolio = built.portfolio
         // Invalidate memoized summaries — cachedSummaries() will
         // recompute on next read instead of every body invocation.
         summariesVersion &+= 1
@@ -618,7 +625,7 @@ final class PortfolioStore {
     /// reconcile folds them into the baseline (#17).
     ///
     /// String date comparison is valid — all are ISO "YYYY-MM-DD".
-    static func layeredShareQty(
+    nonisolated static func layeredShareQty(
         pos: PositionRow,
         lots: [ShareLotRow],
         sells: [ShareSellRow]
@@ -638,7 +645,7 @@ final class PortfolioStore {
         return max(0, pos.quantity + buys - solds)
     }
 
-    private static func buildCompanies(
+    private nonisolated static func buildCompanies(
         positions: [PositionRow],
         trades: [OptionTradeRow],
         greeks: [OptionGreeksRow],
@@ -790,7 +797,7 @@ final class PortfolioStore {
         return (open, closed)
     }
 
-    private static func buildPortfolio(_ companies: [Company]) -> PortfolioRollup {
+    private nonisolated static func buildPortfolio(_ companies: [Company]) -> PortfolioRollup {
         var p = PortfolioRollup()
         for c in companies {
             p.delta  += c.agg.delta
@@ -809,7 +816,7 @@ final class PortfolioStore {
 
     // MARK: - Helpers
 
-    private static func mapStrategy(_ bucket: String) -> Strategy {
+    private nonisolated static func mapStrategy(_ bucket: String) -> Strategy {
         switch bucket {
         case "income":  return .income
         case "invest":  return .investment
@@ -818,7 +825,7 @@ final class PortfolioStore {
         }
     }
 
-    private static func daysUntil(_ iso: String) -> Int? {
+    private nonisolated static func daysUntil(_ iso: String) -> Int? {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         df.timeZone = TimeZone(identifier: "UTC")
