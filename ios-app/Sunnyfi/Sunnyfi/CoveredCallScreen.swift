@@ -35,7 +35,7 @@ struct CoveredCallScreen: View {
     private let inkText = Color(hex: 0xf2eee5)
     private let limeInk = Color(hex: 0x1c260a)
     private var lime: Color { Color.theme.lime }
-    private let cardW: CGFloat = 290
+    private let cardW: CGFloat = 292
 
     private func tc(_ t: Tone) -> Color {
         switch t {
@@ -227,7 +227,8 @@ struct CoveredCallScreen: View {
                     else if it.k == "shares" { chip(fmtMoney(d.price, decimals: 2), .fg1) }
                     else if it.k == "uncov" { chip("\(d.dte)d cycle", .fg1) }
                 }
-                Text(it.num).font(.mono(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(tc(it.tone)).padding(.top, 16)
+                // Handoff: .kc-num is always --fg1 on non-ink cards.
+                Text(it.num).font(.mono(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(Color.theme.fg1).padding(.top, 16)
                 Text(it.unit.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
                 Text(it.name).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
                     .fixedSize(horizontal: false, vertical: true)
