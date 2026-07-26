@@ -141,11 +141,15 @@ Deno.serve(async (req) => {
     // Simpler: just collect distinct tickers with at least one open-row.
     // Remaining-contracts precision doesn't matter for the IV snapshot;
     // if you ever opened a leg on a ticker, you care about its IV.
-    const heldTickers = Array.from(new Set(
-      (trades ?? [])
+    // Reference tapes (SMH, QQQ) are always included so the Today screen's
+    // 5-session cards have real closes + IV even though they aren't held.
+    const REFERENCE_TICKERS = ['SMH', 'QQQ'];
+    const heldTickers = Array.from(new Set([
+      ...(trades ?? [])
         .filter((t) => (t as { action: string }).action === 'open')
         .map((t) => (t as { ticker: string }).ticker.toUpperCase()),
-    ));
+      ...REFERENCE_TICKERS,
+    ]));
 
     if (heldTickers.length === 0) {
       return new Response(
@@ -193,6 +197,9 @@ Deno.serve(async (req) => {
           await admin.from('daily_closes').upsert(rows.slice(i, i + 100), { onConflict: 'ticker,date' });
         }
         closesByTicker.set(tk, bars.map((b) => b.c));  // oldest → newest (sort=asc)
+        // Reference tickers aren't in ticker_quotes_latest — seed a spot
+        // from the latest bar so their ATM-IV lookup can run.
+        if (!spotByTicker.has(tk)) spotByTicker.set(tk, bars[bars.length - 1].c);
       } catch { /* skip this ticker's closes; HV30 stays null for it */ }
     }
 
