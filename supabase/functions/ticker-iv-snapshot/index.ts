@@ -166,22 +166,34 @@ Deno.serve(async (req) => {
         .map((q) => [(q as { ticker: string }).ticker.toUpperCase(), (q as { spot: number }).spot]),
     );
 
-    // ── 3. Get last HV_DAYS+5 daily closes per ticker (5 day buffer for weekends/holidays) ──
+    // ── 3. REAL daily closes from Polygon aggregates. ──
+    // The old `capture-daily-close` cron copied positions.current_price,
+    // which was stale/flat (42 rows → 2 distinct prices), so HV30 came out
+    // 0 and the 5-session chart was dead. We fetch the truth here, backfill
+    // `daily_closes` with it, and compute HV30 from real closes.
     const closesByTicker = new Map<string, number[]>();
+    const aggFrom = new Date(startedAt.getTime() - 120 * 86400000).toISOString().slice(0, 10);
+    const aggTo = snapshotDate;
     for (const tk of heldTickers) {
-      const { data: dc } = await admin
-        .from('daily_closes')
-        .select('date, close_price')
-        .eq('ticker', tk)
-        .order('date', { ascending: false })
-        .limit(HV_DAYS + 5);
-      if (dc && dc.length > 0) {
-        // Reverse to oldest → newest for hv30FromCloses
-        const closes = (dc as { close_price: number }[])
-          .map((r) => r.close_price)
-          .reverse();
-        closesByTicker.set(tk, closes);
-      }
+      try {
+        const aggUrl = `https://api.polygon.io/v2/aggs/ticker/${tk}/range/1/day/${aggFrom}/${aggTo}`
+          + `?adjusted=true&sort=asc&limit=200&apiKey=${polygonKey}`;
+        const r = await fetch(aggUrl);
+        if (!r.ok) continue;
+        const j = await r.json() as { results?: { t: number; c: number }[] };
+        const bars = j.results ?? [];
+        if (bars.length === 0) continue;
+        // Backfill real closes so daily_closes (5-session chart, HV30) is truthful.
+        const rows = bars.map((b) => ({
+          ticker: tk,
+          date: new Date(b.t).toISOString().slice(0, 10),
+          close_price: b.c,
+        }));
+        for (let i = 0; i < rows.length; i += 100) {
+          await admin.from('daily_closes').upsert(rows.slice(i, i + 100), { onConflict: 'ticker,date' });
+        }
+        closesByTicker.set(tk, bars.map((b) => b.c));  // oldest → newest (sort=asc)
+      } catch { /* skip this ticker's closes; HV30 stays null for it */ }
     }
 
     // ── 4. For each ticker: ATM-30d IV + HV30, then upsert ────
