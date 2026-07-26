@@ -111,21 +111,29 @@ struct PosData: Sendable {
         df.timeZone = TimeZone(identifier: "America/New_York")
         let weekStart = AppDates.startOfWeek(today)
         let cal = { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "America/New_York")!; c.firstWeekday = 2; return c }()
-        var weeks: [PosWeek] = []
-        for back in stride(from: 3, through: 0, by: -1) {
-            guard let ws = cal.date(byAdding: .day, value: -7 * back, to: weekStart),
-                  let we = cal.date(byAdding: .day, value: 7, to: ws) else { continue }
-            let a = df.string(from: ws), b = df.string(from: we)
-            let v = store.allTrades.reduce(0.0) { acc, t in
+        func weekPremium(_ a: String, _ b: String) -> Double {
+            store.allTrades.reduce(0.0) { acc, t in
                 guard t.ticker.uppercased() == ticker, t.option_type == "call", t.direction == "short",
                       t.voided_at == nil, t.trade_date >= a, t.trade_date < b else { return acc }
                 let val = t.premium * t.contracts * 100
                 return acc + (t.action == "open" ? val : -val)
             }
-            let note = v <= 0 ? "no writes" : (back == 0 && dte > 0 ? "open · \(dte) DTE" : "expired · kept")
-            weeks.append(PosWeek(w: AppDates.shortMonthDay(a), v: v, note: note))
         }
-        let writeWeeks = weeks.filter { $0.v > 0 }
+        // Show the last 8 weeks; fold everything older into a "Prior" bucket so
+        // the cumulative harvest lands exactly on lifetime premium (and the
+        // "big week %" is of the true total) — reconciles with the hero.
+        var weeks: [PosWeek] = []
+        for back in stride(from: 7, through: 0, by: -1) {
+            guard let ws = cal.date(byAdding: .day, value: -7 * back, to: weekStart),
+                  let we = cal.date(byAdding: .day, value: 7, to: ws) else { continue }
+            let v = weekPremium(df.string(from: ws), df.string(from: we))
+            let note = v <= 0 ? "no writes" : (back == 0 && dte > 0 ? "open · \(dte) DTE" : "expired · kept")
+            weeks.append(PosWeek(w: AppDates.shortMonthDay(df.string(from: ws)), v: v, note: note))
+        }
+        let recentSum = weeks.reduce(0) { $0 + $1.v }
+        let prior = premLife - recentSum
+        if prior > 1 { weeks.insert(PosWeek(w: "Prior", v: prior, note: "earlier weeks"), at: 0) }
+        let writeWeeks = weeks.filter { $0.v > 0 && $0.w != "Prior" }
         let bigWeek = writeWeeks.max(by: { $0.v < $1.v }) ?? PosWeek(w: "—", v: 0, note: "")
         let bigWeekPct = premLife > 0 ? Int((bigWeek.v / premLife * 100).rounded()) : 0
 

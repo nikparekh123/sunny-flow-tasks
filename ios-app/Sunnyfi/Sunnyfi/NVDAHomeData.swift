@@ -287,7 +287,7 @@ struct NVDAToday: Sendable {
 
         // ── 5-session reference cards: NVDA (position) + SMH + QQQ ──
         let refSeries: [RefSeries] = [
-            makeSeries(store: store, ticker: ticker, sub: "your position", today: today),
+            makeSeries(store: store, ticker: ticker, sub: "your position", today: today, livePrice: price),
             makeSeries(store: store, ticker: "SMH", sub: "semis etf", today: today),
             makeSeries(store: store, ticker: "QQQ", sub: "nasdaq 100", today: today),
         ].compactMap { $0 }
@@ -320,32 +320,32 @@ struct NVDAToday: Sendable {
         return (s.isEmpty || s.uppercased() == ticker) ? "NVIDIA" : s
     }
 
-    /// A 5-session price-path from real daily closes. nil if we don't have
-    /// at least 5 sessions for the ticker (so unwired refs simply drop out).
-    private static func makeSeries(store: PortfolioStore, ticker: String, sub: String, today: Date) -> RefSeries? {
-        let hist = store.dailyCloses.filter { $0.ticker.uppercased() == ticker.uppercased() }
-            .sorted { $0.date > $1.date }
-        guard hist.count >= 5 else { return nil }
-        let recent = Array(hist.prefix(5))                       // newest → oldest
-        let ordered = recent.reversed().map { $0 }               // oldest → newest
+    /// A 5-session price-path from real daily closes. When `livePrice` is
+    /// given (NVDA), today's live quote is appended as the latest session so
+    /// the card reconciles with the ticker strip and the Performance week.
+    /// nil if we don't have enough sessions (so unwired refs drop out).
+    private static func makeSeries(store: PortfolioStore, ticker: String, sub: String, today: Date, livePrice: Double? = nil) -> RefSeries? {
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
+        df.timeZone = TimeZone(identifier: "America/New_York")
+        var pts: [(String, Double)] = store.dailyCloses
+            .filter { $0.ticker.uppercased() == ticker.uppercased() }
+            .sorted { $0.date < $1.date }
+            .map { ($0.date, $0.close_price) }
+        if let lp = livePrice { pts.append((df.string(from: today), lp)) }  // today, live
+        guard pts.count >= 6 else { return nil }                // 6 points → 5 sessions
+        let last6 = Array(pts.suffix(6))
         var days: [NVSession] = []
-        for i in ordered.indices {
-            let c = ordered[i].close_price
-            let prev = i > 0 ? ordered[i - 1].close_price
-                             : (hist.count > 5 ? hist[5].close_price : c)
+        for i in 1..<last6.count {
+            let c = last6[i].1, prev = last6[i - 1].1
             let pct = prev > 0 ? (c / prev - 1) * 100 : 0
-            let df = DateFormatter(); df.dateFormat = "EEE"
-            df.timeZone = TimeZone(identifier: "America/New_York")
-            days.append(NVSession(label: AppDates.weekdayShort(ordered[i].date),
-                                  close: c, pct: pct, today: i == ordered.count - 1))
+            days.append(NVSession(label: AppDates.weekdayShort(last6[i].0), close: c, pct: pct, today: i == last6.count - 1))
         }
-        let last = ordered.last?.close_price ?? 0
+        let last = days.last?.close ?? 0
         let net = days.reduce(1.0) { $0 * (1 + $1.pct / 100) } - 1
         let avg = days.isEmpty ? 0 : days.map { abs($0.pct) }.reduce(0, +) / Double(days.count)
         let iv = (store.allIvSummaries.first { $0.ticker.uppercased() == ticker.uppercased() }?.current_iv ?? 0) * 100
         let priced = iv > 0 ? iv / (252.0).squareRoot() : 0
-        return RefSeries(tk: ticker.uppercased(), sub: sub, last: last, days: days,
-                         net: net * 100, avg: avg, priced: priced)
+        return RefSeries(tk: ticker.uppercased(), sub: sub, last: last, days: days, net: net * 100, avg: avg, priced: priced)
     }
     private static func sessionLabel(_ iso: String, df: DateFormatter) -> String {
         "\(AppDates.weekdayShort(iso)) \(String(iso.suffix(2)))"
