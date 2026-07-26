@@ -821,6 +821,39 @@ function ymdToDate(ymd: string): string {
   return `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
 }
 
+/**
+ * Parse an IBKR Flex `dateTime` ("YYYYMMDD;HHMMSS") into a UTC ISO
+ * timestamp. IBKR reports US execution times in Eastern (America/
+ * New_York) with no zone suffix, so we interpret the wall-clock in that
+ * zone and convert to UTC — matching `last_synced_at` (UTC) so the two
+ * can be differenced into a real end-to-end sync latency.
+ *
+ * DST-correct: the offset is derived from Intl for the specific date, so
+ * EDT (−04:00) and EST (−05:00) are handled automatically. Returns null
+ * on a malformed value so a bad field never blocks a sync write.
+ */
+function parseExecUtc(dateTime: string | undefined | null): string | null {
+  if (!dateTime) return null;
+  const m = /^(\d{4})(\d{2})(\d{2})[;\s](\d{2})(\d{2})(\d{2})$/.exec(dateTime.trim());
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s] = m.map(Number) as unknown as number[];
+  // Interpret the wall-clock as if UTC, then subtract the Eastern offset
+  // at that instant to get the true UTC instant.
+  const naive = Date.UTC(y, mo - 1, d, h, mi, s);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(naive)).reduce<Record<string, string>>((a, p) => {
+    if (p.type !== 'literal') a[p.type] = p.value;
+    return a;
+  }, {});
+  const asET = Date.UTC(+parts.year, +parts.month - 1, +parts.day,
+                        +parts.hour % 24, +parts.minute, +parts.second);
+  const offset = asET - naive;              // ET offset (ms), e.g. −4h in EDT
+  return new Date(naive - offset).toISOString();
+}
+
 function inferOptionDirection(buySell: string, code: string): 'long' | 'short' {
   // O  = open: BUY→long, SELL→short
   // C  = close: BUY closes a short, SELL closes a long
@@ -884,6 +917,7 @@ async function upsertOption(
     expiry: ymdToDate(t.expiry!),
     source: 'ibkr_flex',
     ibkr_trade_id: t.tradeID,
+    executed_at: parseExecUtc(t.dateTime),
     last_synced_at: new Date().toISOString(),
     voided_at: null,
     note: isLifecycle ? `IBKR ${primaryCode} lifecycle event` : null,
@@ -969,6 +1003,7 @@ async function upsertStock(
       cost_per_share: Math.abs(Number(t.price)),
       source: 'ibkr_flex',
       ibkr_trade_id: t.tradeID,
+      executed_at: parseExecUtc(t.dateTime),
       last_synced_at: new Date().toISOString(),
       voided_at: null,
     };
@@ -1008,6 +1043,7 @@ async function upsertStock(
     trade_date: ymdToDate(t.tradeDate),
     source: 'ibkr_flex',
     ibkr_trade_id: t.tradeID,
+    executed_at: parseExecUtc(t.dateTime),
     last_synced_at: new Date().toISOString(),
     voided_at: null,
     realized_pl: 0,
