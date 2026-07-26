@@ -23,9 +23,11 @@ struct NewsHeadline: Decodable, Sendable, Identifiable {
 
 enum Tone: Sendable { case pos, neg, neon, warn, fg1, fg3 }
 
-/// One editorial row + its detail sheet.
+/// One card + its detail sheet. `grp` marks the start of a swipe group
+/// (Income / Position / Calendar); nil continues the previous group.
 struct NVRow: Identifiable, Sendable {
     let k: String            // viz + sheet key
+    let grp: String?
     let cat: String
     let num: String
     let unit: String
@@ -33,6 +35,18 @@ struct NVRow: Identifiable, Sendable {
     let name: String
     let sub: String
     var id: String { k }
+}
+
+/// A 5-session price-path card (NVDA and the reference tapes SMH / QQQ).
+struct RefSeries: Identifiable, Sendable {
+    let tk: String
+    let sub: String
+    let last: Double
+    let days: [NVSession]    // oldest → newest, 5
+    let net: Double          // compounded 5-day %
+    let avg: Double          // avg absolute daily %
+    let priced: Double       // options-implied day = iv/√252
+    var id: String { tk }
 }
 
 struct SheetRow: Sendable { let name: String; let sub: String; let val: String; let tone: Tone }
@@ -123,6 +137,7 @@ struct NVDAToday: Sendable {
 
     let items: [NVRow]
     let sheets: [String: NVSheet]
+    let refSeries: [RefSeries]    // NVDA + SMH + QQQ 5-session cards
 
     static func build(store: PortfolioStore, today: Date = Date()) -> NVDAToday? {
         let ticker = "NVDA"
@@ -246,28 +261,36 @@ struct NVDAToday: Sendable {
             .min { $0.report_date < $1.report_date }
         let erDays = earn.flatMap { AppDates.daysUntil($0.report_date, from: today) }
 
-        // ── the 5 editorial rows ──
+        // ── the five things, grouped Income → Position → Calendar ──
+        let kNum = fmtK(premWeek).replacingOccurrences(of: "+$", with: "").replacingOccurrences(of: "$", with: "")
         var items: [NVRow] = [
-            NVRow(k: "basis", cat: "Break-even", num: fmtMoney(overBE, sign: true, decimals: 2), unit: "per share", tone: overBE >= 0 ? .pos : .neg,
-                      name: overBE >= 0 ? "Above break-even" : "Below break-even",
-                      sub: "now \(fmtMoney(price, decimals: 2)) · break-even \(fmtMoney(basisEff, decimals: 2))"),
-            NVRow(k: "prem", cat: "Premium", num: fmtK(premWeek).replacingOccurrences(of: "+$", with: "").replacingOccurrences(of: "$", with: ""), unit: "this week", tone: .pos,
-                      name: "Premium by week",
-                      sub: vsLast > 0 ? "\(fmtMoney(premPrev)) last week · \(fmtDec(vsLast))×" : "\(fmtMoney(premLife)) lifetime"),
-            NVRow(k: "prot", cat: "Protection", num: String(format: "%.1f%%", protectPct), unit: "cushion", tone: .pos,
-                      name: "Downside protection",
-                      sub: "\(fmtMoney(premPerShare, decimals: 2))/sh off your cost · \(fmtMoney(premLife)) lifetime"),
+            NVRow(k: "prem", grp: "Income", cat: "Premium", num: kNum, unit: "this week", tone: .pos,
+                  name: "Premium by week",
+                  sub: vsLast > 0 ? "vs \(fmtMoney(premPrev).replacingOccurrences(of: "+", with: "")) last week" : "\(fmtMoney(premLife)) lifetime"),
+            NVRow(k: "prot", grp: "Position", cat: "Protection", num: String(format: "%.1f%%", protectPct), unit: "cushion", tone: .pos,
+                  name: "Downside protection", sub: "\(fmtMoney(premPerShare, decimals: 2))/sh off your cost"),
+            NVRow(k: "basis", grp: nil, cat: "Break-even", num: fmtMoney(overBE, sign: true, decimals: 2), unit: "per share",
+                  tone: overBE >= 0 ? .pos : .neg, name: overBE >= 0 ? "Above break-even" : "Below break-even",
+                  sub: "break-even \(fmtMoney(basisEff, decimals: 2))"),
         ]
         if let fd = fedDays, let fw = fedWhen {
-            items.append(NVRow(k: "fed", cat: "Events", num: "\(fd)d", unit: "until Fed", tone: .fg1,
-                                   name: "Fed rate decision", sub: "\(fw) · the next real vol in the name"))
+            items.append(NVRow(k: "fed", grp: "Calendar", cat: "Events", num: "\(fd)d", unit: "until Fed", tone: .fg1,
+                               name: "Fed rate decision", sub: "\(fw) · the next real vol in the name"))
         }
         if strike > 0 {
-            let erLabel = erDays.map { $0 <= 0 ? "confirmed" : "\(Int((Double($0) / 7).rounded()))w" } ?? "~4w"
-            items.append(NVRow(k: "er", cat: "Earnings", num: erDays == nil ? "~4w" : erLabel, unit: "until ER",
-                                   tone: .warn, name: erDays == nil ? "Earnings not yet scheduled" : "Earnings ahead",
-                                   sub: "expected move ±\(String(format: "%.0f", erMove))% · \(fmtStrike(strike))c sits inside it"))
+            let erLabel = erDays.map { $0 <= 0 ? "confirmed" : "~\(Int((Double($0) / 7).rounded()))w" } ?? "~4w"
+            items.append(NVRow(k: "er", grp: fedDays == nil ? "Calendar" : nil, cat: "Earnings",
+                               num: erDays == nil ? "~4w" : erLabel, unit: "until ER", tone: .warn,
+                               name: erDays == nil ? "Earnings not scheduled" : "Earnings ahead",
+                               sub: "±\(String(format: "%.0f", erMove))% move · \(fmtStrike(strike))c inside it"))
         }
+
+        // ── 5-session reference cards: NVDA (position) + SMH + QQQ ──
+        let refSeries: [RefSeries] = [
+            makeSeries(store: store, ticker: ticker, sub: "your position", today: today),
+            makeSeries(store: store, ticker: "SMH", sub: "semis etf", today: today),
+            makeSeries(store: store, ticker: "QQQ", sub: "nasdaq 100", today: today),
+        ].compactMap { $0 }
 
         let sheets = buildSheets(ticker: ticker, price: price, chgPct: chgPct, chgAbs: chgAbs, todayPL: todayPL,
                                  shares: shares, basisOrig: basisOrig, basisEff: basisEff, premPerShare: premPerShare,
@@ -288,13 +311,41 @@ struct NVDAToday: Sendable {
             days: days, dayMax: dayMax, avgAbs: avgAbs, week5: week5, pricedDay: pricedDay,
             iv: iv, ivLow: ivLow, ivHigh: ivHigh, hv30: hv30, ivr: ivr, ivWindowDays: ivWindowDays, spread: spread, score: score, zone: zone,
             erMove: erMove, erLow: erLow, erHigh: erHigh, fedDays: fedDays, fedWhen: fedWhen, erDays: erDays,
-            items: items, sheets: sheets)
+            items: items, sheets: sheets, refSeries: refSeries)
     }
 
     // ── helpers ──
     private static func friendlyName(_ n: String?, ticker: String) -> String {
         let s = n ?? ""
         return (s.isEmpty || s.uppercased() == ticker) ? "NVIDIA" : s
+    }
+
+    /// A 5-session price-path from real daily closes. nil if we don't have
+    /// at least 5 sessions for the ticker (so unwired refs simply drop out).
+    private static func makeSeries(store: PortfolioStore, ticker: String, sub: String, today: Date) -> RefSeries? {
+        let hist = store.dailyCloses.filter { $0.ticker.uppercased() == ticker.uppercased() }
+            .sorted { $0.date > $1.date }
+        guard hist.count >= 5 else { return nil }
+        let recent = Array(hist.prefix(5))                       // newest → oldest
+        let ordered = recent.reversed().map { $0 }               // oldest → newest
+        var days: [NVSession] = []
+        for i in ordered.indices {
+            let c = ordered[i].close_price
+            let prev = i > 0 ? ordered[i - 1].close_price
+                             : (hist.count > 5 ? hist[5].close_price : c)
+            let pct = prev > 0 ? (c / prev - 1) * 100 : 0
+            let df = DateFormatter(); df.dateFormat = "EEE"
+            df.timeZone = TimeZone(identifier: "America/New_York")
+            days.append(NVSession(label: AppDates.weekdayShort(ordered[i].date),
+                                  close: c, pct: pct, today: i == ordered.count - 1))
+        }
+        let last = ordered.last?.close_price ?? 0
+        let net = days.reduce(1.0) { $0 * (1 + $1.pct / 100) } - 1
+        let avg = days.isEmpty ? 0 : days.map { abs($0.pct) }.reduce(0, +) / Double(days.count)
+        let iv = (store.allIvSummaries.first { $0.ticker.uppercased() == ticker.uppercased() }?.current_iv ?? 0) * 100
+        let priced = iv > 0 ? iv / (252.0).squareRoot() : 0
+        return RefSeries(tk: ticker.uppercased(), sub: sub, last: last, days: days,
+                         net: net * 100, avg: avg, priced: priced)
     }
     private static func sessionLabel(_ iso: String, df: DateFormatter) -> String {
         "\(AppDates.weekdayShort(iso)) \(String(iso.suffix(2)))"
