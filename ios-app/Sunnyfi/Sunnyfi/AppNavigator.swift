@@ -40,17 +40,13 @@ final class AppNavigator {
     func handlePush(category: String?, ticker: String?) {
         guard let category else { return }
         switch category {
-        // Hedge-related — all of these are theta / put alerts; the
-        // user wants to land on the Hedge tab and see the affected
-        // ticker.
-        case "theta_cliff", "theta_critical", "long_put_itm":
-            requestedTab = .hedge
-            requestedTickerSheet = ticker
-
-        // Trades-related — assignment / short-call ITM / earnings
-        // map to the active-positions surface.
-        case "short_call_itm", "assignment", "earnings_day_before":
-            requestedTab = .trades
+        // Theta / put alerts and assignment / short-call ITM / earnings.
+        // The Hedge and Trades tabs were dropped in the handoff-6 nav, so
+        // land on Covered Call (the positions surface) and open the
+        // affected ticker sheet — the ticker sheet is the useful payload.
+        case "theta_cliff", "theta_critical", "long_put_itm",
+             "short_call_itm", "assignment", "earnings_day_before":
+            requestedTab = .coveredCall
             requestedTickerSheet = ticker
 
         // Critical pipeline alerts already render via the global

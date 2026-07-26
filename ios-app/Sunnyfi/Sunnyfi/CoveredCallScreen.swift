@@ -11,6 +11,7 @@ import SwiftUI
 
 struct CoveredCallScreen: View {
     let store: PortfolioStore
+    @Environment(\.navBarChrome) private var navChrome
     @State private var sheetKey: String?
     @State private var showPlanner = false
     @State private var railPos: [String: String] = [:]
@@ -67,6 +68,7 @@ struct CoveredCallScreen: View {
             }
         }
         .background(Color.theme.page)
+        .reportsNavScroll(navChrome)
         .sheet(item: Binding(get: { sheetKey.map { Keyed(id: $0) } }, set: { sheetKey = $0?.id })) { keyed in
             if let d, let sh = d.sheets[keyed.id] {
                 detailSheet(sh).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)

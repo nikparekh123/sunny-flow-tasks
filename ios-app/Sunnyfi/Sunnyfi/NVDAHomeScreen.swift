@@ -12,6 +12,7 @@ import SwiftUI
 
 struct NVDAHomeScreen: View {
     var store: PortfolioStore
+    @Environment(\.navBarChrome) private var navChrome
     @State private var news: [NewsHeadline] = []
     @State private var newsLoaded = false
     @State private var sheetKey: String?
@@ -75,6 +76,7 @@ struct NVDAHomeScreen: View {
             }
         }
         .background(Color.theme.page)
+        .reportsNavScroll(navChrome)
         .task {
             guard !newsLoaded else { return }
             newsLoaded = true

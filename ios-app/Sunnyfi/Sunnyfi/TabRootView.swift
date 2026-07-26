@@ -12,36 +12,33 @@
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Hashable {
-    case home, trades, coveredCall, hedge, performance, account
+    // Handoff 6 — the app is a 4-tab NVDA command center. Trades and
+    // Hedge were dropped from navigation (screens kept on disk for a
+    // future re-add). Order here IS the tab-bar order: Today · Covered
+    // Call · Perf · You.
+    case home, coveredCall, performance, account
 
     var label: String {
         switch self {
-        // Home tab is now the "Today" landing — ranked digest of the
+        // Home tab is the "Today" landing — ranked digest of the
         // N things that matter today. See design_handoff_today_homepage.
         case .home:        return "Today"
-        case .trades:      return "Trades"
-        // Wheel-style cycle monitoring, one tab per ticker. Supersedes
-        // the short-lived Trades → Income segment.
+        // Wheel-style cycle monitoring. The primary positions surface.
         case .coveredCall: return "Covered Call"
-        case .hedge:       return "Hedge"
-        // 5-tab layout — "Performance" shortens to "Perf" so the
-        // labels don't crowd. Per package 4 of the design handoff.
         case .performance: return "Perf"
         case .account:     return "You"
         }
     }
 
+    /// SF Symbol. Outline (non-`.fill`) variants to match the handoff's
+    /// stroked tab icons; the active tab renders white on a neon circle.
     var symbol: String {
         switch self {
-        case .home:        return "sun.max.fill"
-        case .trades:      return "chart.line.uptrend.xyaxis"
+        case .home:        return "sun.max"
         // The wheel: buy → sell call → assigned → repeat.
         case .coveredCall: return "arrow.triangle.2.circlepath"
-        // Shield = "protect the book". Hedge tab is the awareness
-        // surface — not transactional like Trades.
-        case .hedge:       return "shield.lefthalf.filled"
-        case .performance: return "chart.bar.fill"
-        case .account:     return "person.fill"
+        case .performance: return "chart.bar"
+        case .account:     return "person"
         }
     }
 }
@@ -52,6 +49,9 @@ struct TabRootView: View {
     let prefs: NotificationPrefs
     @State private var store = PortfolioStore()
     @State private var reach = Reachability()
+    /// Drives the floating tab bar's scroll-shrink. Screens feed their
+    /// scroll offset in via the `\.navBarChrome` environment.
+    @State private var navChrome = NavBarChrome()
     // Today landing rebuilt per design_handoff_today_homepage — the
     // app now opens to it. Hedge is still rebuilding (hidden in the
     // tab bar) but the Home/Today tab is live.
@@ -89,22 +89,22 @@ struct TabRootView: View {
                     // Single-ticker NVDA command center (was the generic
                     // multi-ticker TodayScreen digest, kept for reference).
                     case .home:        NVDAHomeScreen(store: store)
-                    case .trades:      TradesScreen(store: store, auth: auth)
                     case .coveredCall: CoveredCallScreen(store: store)
-                    case .hedge:       HedgeScreen(store: store, auth: auth)
                     case .performance: PerformanceScreen(store: store, auth: auth)
                     case .account:     AccountScreen(auth: auth, lock: lock, prefs: prefs, store: store)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Screens report their scroll offset here so the floating
+                // tab bar can shrink to its `.mini` state while scrolling.
+                .environment(\.navBarChrome, navChrome)
             }
             .background(Color.theme.page.ignoresSafeArea())
 
-            // Docked tab bar — full-width, solid surface, top hairline.
-            // Replaces the prior floating glass capsule per Handoff 2
-            // §9. Sits flush against the bottom safe area; the safe-area
-            // inset handles home-indicator clearance automatically.
-            DockedTabBar(active: $tab)
+            // Floating glass tab bar (handoff 6) — a translucent pill
+            // that hovers above the bottom, icon-only, active tab a
+            // neon-filled circle. Shrinks to `.mini` while scrolling.
+            FloatingTabBar(active: $tab, minimized: navChrome.minimized)
         }
         .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)
         .task {
@@ -187,70 +187,89 @@ private struct TickerWrapper: Identifiable {
 }
 
 
-// MARK: - Docked tab bar
+// MARK: - Floating glass tab bar (handoff 6)
 
-/// Full-width, surface-filled, top-hairline tab bar — replaces the
-/// floating glass capsule per Handoff 2 §9. No background blur, no
-/// rounded corners; sits flush against the bottom safe area. The
-/// active tab tints with `--neon`; inactive tabs read in `fg3`.
-private struct DockedTabBar: View {
+/// A translucent liquid-glass pill that floats above the bottom safe
+/// area, hugging its four icon-only tabs. The active tab is a
+/// neon-filled circle with a white icon; inactive tabs are `fg3`
+/// strokes. Shrinks to a `.mini` state (scale .85, nudged down, faded)
+/// while the active screen scrolls, then springs back — see
+/// `NavBarChrome`.
+private struct FloatingTabBar: View {
     @Binding var active: AppTab
-
-    /// Tabs we actually render. Hedge is still rebuilding, and Trades is
-    /// hidden now that Covered Call is the primary surface — both enum
-    /// cases are kept for push deep-links / routing. Home is the live
-    /// Today landing tab — visible and default.
-    private var visibleTabs: [AppTab] {
-        AppTab.allCases.filter { $0 != .hedge && $0 != .trades }
-    }
+    var minimized: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(visibleTabs, id: \.self) { t in
+        HStack(spacing: 4) {
+            ForEach(AppTab.allCases, id: \.self) { t in
                 Button {
                     withAnimation(Motion.overshoot) { active = t }
                 } label: {
-                    tabButton(for: t)
+                    Image(systemName: t.symbol)
+                        .font(.system(size: 21, weight: .medium))
+                        .foregroundStyle(active == t ? .white : Color.theme.fg3)
+                        .frame(width: 44, height: 44)
+                        .background {
+                            if active == t {
+                                Circle().fill(Color.theme.neon)
+                                    .transition(.scale.combined(with: .opacity))
+                            }
+                        }
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.pressable)
+                .accessibilityLabel(t.label)
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 6)
-        .padding(.bottom, 4)        // safe-area inset handles the rest
-        // iOS 26 liquid glass — translucent material that picks up
-        // and softly blurs whatever's scrolling behind it, instead of
-        // the prior opaque white slab. Matches the SegmentedToggle's
-        // glassEffect treatment so the bar feels native to the OS.
-        .background {
-            Rectangle()
-                .fill(.clear)
-                .glassEffect(.regular, in: .rect)
-                .ignoresSafeArea(edges: .bottom)
-                .overlay(
-                    Color.theme.borderBright.opacity(0.35)
-                        .frame(height: 0.5),
-                    alignment: .top
-                )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        // iOS 26 liquid glass, clipped to a pill.
+        .glassEffect(.regular, in: .capsule)
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.55), lineWidth: 1))
+        .shadow(color: Color(hex: 0x18281e).opacity(0.14), radius: 12, x: 0, y: 8)
+        // `.mini` while scrolling.
+        .scaleEffect(minimized ? 0.85 : 1, anchor: .bottom)
+        .offset(y: minimized ? 6 : 0)
+        .opacity(minimized ? 0.8 : 1)
+        .animation(Motion.standard, value: minimized)
+        .padding(.bottom, 18)
+    }
+}
+
+// MARK: - Scroll-shrink plumbing
+
+/// Shared chrome state the floating tab bar reads. A screen's root
+/// ScrollView reports its vertical offset via `.reportsNavScroll`; the
+/// bar minimizes past a small threshold and auto-restores ~0.65s after
+/// scrolling stops (mirrors the handoff's scrollTop>10 + 650ms tail).
+@MainActor
+@Observable
+final class NavBarChrome {
+    var minimized = false
+    @ObservationIgnored private var resetTask: Task<Void, Never>?
+
+    func report(offset: CGFloat) {
+        minimized = offset > 10
+        resetTask?.cancel()
+        resetTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(650))
+            guard !Task.isCancelled else { return }
+            self?.minimized = false
         }
     }
+}
 
-    @ViewBuilder
-    private func tabButton(for t: AppTab) -> some View {
-        let isActive = active == t
-        VStack(spacing: 3) {
-            Image(systemName: t.symbol)
-                .font(.system(size: 22, weight: .medium))
-            Text(t.label)
-                .font(.ui(size: 10, weight: isActive ? .semibold : .regular))
-                // "Covered Call" is the longest label — keep every tab
-                // on one line rather than letting it wrap the bar.
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+extension EnvironmentValues {
+    @Entry var navBarChrome: NavBarChrome? = nil
+}
+
+extension View {
+    /// Attach to a screen's root ScrollView so it drives the floating
+    /// tab bar's scroll-shrink. No-op if the environment chrome is absent.
+    func reportsNavScroll(_ chrome: NavBarChrome?) -> some View {
+        onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y } action: { _, y in
+            chrome?.report(offset: y)
         }
-        .foregroundStyle(isActive ? Color.theme.neon : Color.theme.fg3)
-        .frame(maxWidth: .infinity, minHeight: 48)
-        .contentShape(Rectangle())
     }
 }
 

@@ -13,6 +13,7 @@ import SwiftUI
 struct PerformanceScreen: View {
     let store: PortfolioStore
     let auth: AuthStore
+    @Environment(\.navBarChrome) private var navChrome
 
     @State private var pid = "week"
     @State private var on: [PerfSource: Bool] = [.shares: true, .calls: true]
@@ -68,6 +69,7 @@ struct PerformanceScreen: View {
             }
         }
         .background(Color.theme.page)
+        .reportsNavScroll(navChrome)
         .sheet(item: Binding(get: { sheetKey.map { Keyed(id: $0) } }, set: { sheetKey = $0?.id })) { keyed in
             if let d, let sh = d.sheets[keyed.id] {
                 detailSheet(sh).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
