@@ -37,7 +37,7 @@ struct PerformanceScreen: View {
     private let inkText = Color(hex: 0xf2eee5)
     private let limeInk = Color(hex: 0x1c260a)
     private var lime: Color { Color.theme.lime }
-    private let cardW: CGFloat = 292
+    private let cardW: CGFloat = 320
 
     private func tc(_ t: Tone) -> Color {
         switch t {
@@ -336,10 +336,10 @@ struct PerformanceScreen: View {
                         .background(Capsule().fill(s.empty ? Color.theme.tintMuted : (pos ? Color.theme.tintPos : Color.theme.tintNeg)))
                 }
                 // Handoff: .kc-num is always --fg1 on non-ink cards (empty keeps its muted intent).
-                Text(s.empty ? "—" : fmtMoney(s.today, sign: true)).font(.mono(size: 28, weight: .bold)).tracking(-0.9)
+                Text(s.empty ? "—" : fmtMoney(s.today, sign: true)).font(.mono(size: 34, weight: .bold)).tracking(-0.9)
                     .foregroundStyle(s.empty ? Color.theme.fg4 : Color.theme.fg1).padding(.top, 16)
                 Text("PERFORMANCE AS OF TODAY").font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
-                Text(s.name).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
+                Text(s.name).font(.system(size: 21, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(s.sub).font(.system(size: 12)).foregroundStyle(Color.theme.fg3).padding(.top, 8).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -350,7 +350,7 @@ struct PerformanceScreen: View {
                 .padding(.top, 16).padding(.top, 14)
                 .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1).padding(.top, 16) }
             }
-            .padding(17).frame(width: cardW, height: 258, alignment: .top)
+            .padding(17).frame(width: cardW, height: 365, alignment: .top)
             .background(RoundedRectangle(cornerRadius: Radius.lg).fill(Color.theme.elevated))
             .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(Color.theme.hair, lineWidth: 1))
         }.buttonStyle(.plain)

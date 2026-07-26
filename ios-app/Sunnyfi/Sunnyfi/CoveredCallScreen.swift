@@ -36,7 +36,7 @@ struct CoveredCallScreen: View {
     private let inkText = Color(hex: 0xf2eee5)
     private let limeInk = Color(hex: 0x1c260a)
     private var lime: Color { Color.theme.lime }
-    private let cardW: CGFloat = 292
+    private let cardW: CGFloat = 320
 
     private func tc(_ t: Tone) -> Color {
         switch t {
@@ -230,15 +230,15 @@ struct CoveredCallScreen: View {
                     else if it.k == "uncov" { chip("\(d.dte)d cycle", .fg1) }
                 }
                 // Handoff: .kc-num is always --fg1 on non-ink cards.
-                Text(it.num).font(.mono(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(Color.theme.fg1).padding(.top, 16)
+                Text(it.num).font(.mono(size: 34, weight: .bold)).tracking(-0.9).foregroundStyle(Color.theme.fg1).padding(.top, 16)
                 Text(it.unit.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
-                Text(it.name).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
+                Text(it.name).font(.system(size: 21, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(it.sub).font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                 Spacer(minLength: 0)
                 posViz(it.viz, d: d).padding(.top, 20)
             }
-            .padding(17).frame(width: cardW, height: 266, alignment: .top)
+            .padding(17).frame(width: cardW, height: 365, alignment: .top)
             .background(RoundedRectangle(cornerRadius: Radius.lg).fill(Color.theme.elevated))
             .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(Color.theme.hair, lineWidth: 1))
         }

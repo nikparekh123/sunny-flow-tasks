@@ -44,7 +44,7 @@ struct NVDAHomeScreen: View {
     private let inkText = Color(hex: 0xf2eee5)
     private let limeInk = Color(hex: 0x1c260a)
     private var lime: Color { Color.theme.lime }
-    private let cardW: CGFloat = 292
+    private let cardW: CGFloat = 320
 
     private func tc(_ t: Tone) -> Color {
         switch t {
@@ -174,12 +174,12 @@ struct NVDAHomeScreen: View {
                     Spacer()
                     ivTag(d.zone.verdict, key: d.zone.key, onInk: true)
                 }
-                Text(String(format: "%.1f%%", d.iv)).font(.mono(size: 28, weight: .bold)).tracking(-0.9)
+                Text(String(format: "%.1f%%", d.iv)).font(.mono(size: 34, weight: .bold)).tracking(-0.9)
                     .foregroundStyle(lime).padding(.top, 16)
                 Text("IMPLIED VOL").font(.mono(size: 9, weight: .medium)).tracking(0.8)
                     .foregroundStyle(inkText.opacity(0.5)).padding(.top, 9)
                 Text(d.zone.sub.prefix(1).uppercased() + d.zone.sub.dropFirst())
-                    .font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color(hex: 0xf4f1e8)).padding(.top, 15)
+                    .font(.system(size: 21, weight: .bold)).tracking(-0.3).foregroundStyle(Color(hex: 0xf4f1e8)).padding(.top, 15)
                 Text("rank \(d.ivr) · realized \(String(format: "%.0f", d.iv - (d.spread ?? 0)))%")
                     .font(.mono(size: 12, weight: .regular)).foregroundStyle(inkText.opacity(0.6)).padding(.top, 8)
                 HStack(spacing: 12) {
@@ -198,7 +198,7 @@ struct NVDAHomeScreen: View {
             }
             .padding(17)
             .frame(maxHeight: .infinity, alignment: .top)
-            .frame(height: 330)
+            .frame(height: 365)
             .background(RoundedRectangle(cornerRadius: Radius.lg).fill(inkBG))
             .contentShape(RoundedRectangle(cornerRadius: Radius.lg))
         }
@@ -231,11 +231,11 @@ struct NVDAHomeScreen: View {
                         .background(Capsule().fill(Color.theme.tintMuted))
                 }
                 Text("\(down ? "−" : "+")\(String(format: "%.1f", abs(s.net)))%")
-                    .font(.mono(size: 28, weight: .bold)).tracking(-0.9)
+                    .font(.mono(size: 34, weight: .bold)).tracking(-0.9)
                     .foregroundStyle(Color.theme.fg1).padding(.top, 16)
                 Text(s.sub.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8)
                     .foregroundStyle(Color.theme.fg4).padding(.top, 9)
-                Text(verdict).font(.system(size: 17, weight: .bold)).tracking(-0.3)
+                Text(verdict).font(.system(size: 21, weight: .bold)).tracking(-0.3)
                     .foregroundStyle(Color.theme.fg1).padding(.top, 15)
                 Text("avg \(String(format: "%.1f", s.avg))%/day · priced \(String(format: "%.1f", s.priced))%")
                     .font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
@@ -255,7 +255,7 @@ struct NVDAHomeScreen: View {
                 .padding(.top, 6)
             }
             .padding(17)
-            .frame(height: 330, alignment: .top)
+            .frame(height: 365, alignment: .top)
             .background(RoundedRectangle(cornerRadius: Radius.lg).fill(Color.theme.elevated))
             .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(Color.theme.hair, lineWidth: 1))
         }
@@ -330,9 +330,9 @@ struct NVDAHomeScreen: View {
                 }
                 // Handoff: .kc-num is always --fg1 on non-ink cards (sentiment
                 // lives in the viz + sub, not the headline number).
-                Text(it.num).font(.mono(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(Color.theme.fg1).padding(.top, 16)
+                Text(it.num).font(.mono(size: 34, weight: .bold)).tracking(-0.9).foregroundStyle(Color.theme.fg1).padding(.top, 16)
                 Text(it.unit.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
-                Text(it.name).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
+                Text(it.name).font(.system(size: 21, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                     .padding(.top, 15).fixedSize(horizontal: false, vertical: true)
                 Text(it.sub).font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                     .fixedSize(horizontal: false, vertical: true)
@@ -340,7 +340,7 @@ struct NVDAHomeScreen: View {
                 rowViz(it.k).padding(.top, 20)
             }
             .padding(17)
-            .frame(width: cardW, height: 266, alignment: .top)
+            .frame(width: cardW, height: 365, alignment: .top)
             .background(RoundedRectangle(cornerRadius: Radius.lg).fill(Color.theme.elevated))
             .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(Color.theme.hair, lineWidth: 1))
         }
