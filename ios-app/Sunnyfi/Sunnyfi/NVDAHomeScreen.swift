@@ -181,7 +181,7 @@ struct NVDAHomeScreen: View {
                 Text(d.zone.sub.prefix(1).uppercased() + d.zone.sub.dropFirst())
                     .font(.system(size: 21, weight: .bold)).tracking(-0.3).foregroundStyle(Color(hex: 0xf4f1e8)).padding(.top, 15)
                 Text("rank \(d.ivr) · realized \(String(format: "%.0f", d.iv - (d.spread ?? 0)))%")
-                    .font(.mono(size: 12, weight: .regular)).foregroundStyle(inkText.opacity(0.6)).padding(.top, 8)
+                    .font(.mono(size: 14, weight: .regular)).foregroundStyle(inkText.opacity(0.6)).padding(.top, 8)
                 HStack(spacing: 12) {
                     inkStat("\(d.ivWindowDays >= 220 ? "52w" : "\(d.ivWindowDays)d") IV range", String(format: "%.0f–%.0f%%", d.ivLow, d.ivHigh))
                     inkStat("Implied − realized", (d.spread ?? 0) >= 0 ? "+\(String(format: "%.1f", d.spread ?? 0))" : String(format: "%.1f", d.spread ?? 0), divider: true)
@@ -238,7 +238,7 @@ struct NVDAHomeScreen: View {
                 Text(verdict).font(.system(size: 21, weight: .bold)).tracking(-0.3)
                     .foregroundStyle(Color.theme.fg1).padding(.top, 15)
                 Text("avg \(String(format: "%.1f", s.avg))%/day · priced \(String(format: "%.1f", s.priced))%")
-                    .font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
+                    .font(.mono(size: 14, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                 Spacer(minLength: 0)
                 sparkline(s).frame(height: 82).padding(.top, 20)
                 HStack(spacing: 0) {
@@ -334,7 +334,7 @@ struct NVDAHomeScreen: View {
                 Text(it.unit.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
                 Text(it.name).font(.system(size: 21, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                     .padding(.top, 15).fixedSize(horizontal: false, vertical: true)
-                Text(it.sub).font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
+                Text(it.sub).font(.mono(size: 14, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 rowViz(it.k).padding(.top, 20)

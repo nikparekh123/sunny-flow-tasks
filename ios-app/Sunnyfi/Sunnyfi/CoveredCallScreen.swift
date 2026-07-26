@@ -238,7 +238,7 @@ struct CoveredCallScreen: View {
                 Text(it.unit.uppercased()).font(.mono(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
                 Text(it.name).font(.system(size: 21, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(it.sub).font(.mono(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
+                Text(it.sub).font(.mono(size: 14, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
                 Spacer(minLength: 0)
                 posViz(it.viz, d: d).padding(.top, 20)
             }
