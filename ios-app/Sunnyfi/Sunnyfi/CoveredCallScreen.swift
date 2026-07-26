@@ -2,1094 +2,427 @@
 //  CoveredCallScreen.swift
 //  Sunnyfi
 //
-//  Covered Call — per-ticker position detail, built to "Position Detail
-//  v2". Top to bottom:
-//
-//    • Ticker switcher + last-updated / refresh
-//    • HERO (dark) — lifetime premium harvested, cost basis → adjusted
-//    • Your position — tabs: Shares / Calls sold / Puts / Long calls
-//    • Where premium lands — realized premium by expiry weekday
-//    • How close each call sat — strike vs share price at expiry
-//    • What the strategy earned — premium + capital split, yield
-//    • History — legs as they close
-//
-//  All math comes from CoveredCallData (same engine Performance uses).
+//  NVDA Position (Covered Call tab) — handoff 6. Rich-black premium-
+//  harvested hero, the position swipe rail, premium-by-week, what it
+//  earned, history, and the Call Planner sheet. Data from PosData.
 //
 
-import Combine
 import SwiftUI
 
 struct CoveredCallScreen: View {
     let store: PortfolioStore
-    @State private var selected: String?
-    @State private var refreshing = false
-    @State private var tick = 0
-    private let timer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    @State private var sheetKey: String?
+    @State private var showPlanner = false
 
-    private var tickers: [String] { CoveredCallData.tickers(store: store) }
-    private var active: String? {
-        if let selected, tickers.contains(selected) { return selected }
-        return tickers.first
+    private let inkBG = Color(hex: 0x18241c)
+    private let inkText = Color(hex: 0xf2eee5)
+    private let limeInk = Color(hex: 0x1c260a)
+    private var lime: Color { Color.theme.lime }
+    private let cardW: CGFloat = 290
+
+    private func tc(_ t: Tone) -> Color {
+        switch t {
+        case .pos: return Color.theme.pos
+        case .neg: return Color.theme.neg
+        case .neon: return Color.theme.neon
+        case .warn: return Color.theme.warn
+        case .fg1: return Color.theme.fg1
+        case .fg3: return Color.theme.fg3
+        }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            if tickers.isEmpty {
-                emptyState
-            } else {
-                ScrollView {
-                    if let t = active, let data = CoveredCallData.build(store: store, ticker: t) {
-                        PositionDetail(data: data, store: store)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 110)
-                            .id(t)
-                    }
+        let d = PosData.build(store: store)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let d {
+                    header(d)
+                    tickerRow(d).padding(.horizontal, 22)
+                    lifetimeCard(d).padding(.horizontal, 22).padding(.top, 12)
+                    positionRail(d)
+                    weeksPanel(d).padding(.horizontal, 22).padding(.top, 12)
+                    earnedPanel(d).padding(.horizontal, 22).padding(.top, 12)
+                    historyPanel(d).padding(.horizontal, 22).padding(.top, 12)
+                } else {
+                    Text("No NVDA position yet.").font(.system(size: 14)).foregroundStyle(Color.theme.fg3).padding(40)
                 }
+                Color.clear.frame(height: 112)
             }
         }
         .background(Color.theme.page)
-        .onReceive(timer) { _ in tick &+= 1 }
-    }
-
-    private var topBar: some View {
-        _ = tick
-        return HStack(alignment: .center) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(tickers, id: \.self) { t in
-                        let on = active == t
-                        Button {
-                            withAnimation(Motion.standard) { selected = t }
-                        } label: {
-                            Text(t)
-                                .font(.system(size: 14, weight: .bold)).tracking(0.2)
-                                .foregroundStyle(on ? Color.theme.page : Color.theme.fg3)
-                                .padding(.horizontal, 16).frame(minHeight: 34)
-                                .background(Capsule().fill(on ? Color.theme.fg1 : Color.theme.page2))
-                        }
-                        .buttonStyle(.pressable)
-                    }
-                }
+        .sheet(item: Binding(get: { sheetKey.map { Keyed(id: $0) } }, set: { sheetKey = $0?.id })) { keyed in
+            if let d, let sh = d.sheets[keyed.id] {
+                detailSheet(sh).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+                    .presentationBackground(Color.theme.elevated)
             }
-            Spacer(minLength: 8)
-            Text(lastUpdatedText)
-                .font(.numeric(size: 11, weight: .medium)).monospacedDigit()
-                .foregroundStyle(isStale ? Color.theme.fg4 : Color.theme.fg3).lineLimit(1)
-            Button {
-                guard !refreshing else { return }
-                refreshing = true
-                Task { await store.fetchAll(); refreshing = false }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 13, weight: .bold)).foregroundStyle(Color.theme.pos)
-                    .rotationEffect(.degrees(refreshing ? 360 : 0))
-                    .animation(refreshing ? .linear(duration: 0.9).repeatForever(autoreverses: false)
-                                          : .default, value: refreshing)
-                    .frame(width: 28, height: 28).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).disabled(refreshing)
-        }
-        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 8)
-    }
-
-    private var lastUpdatedText: String {
-        guard let f = store.freshness else { return "Updated —" }
-        return "Updated " + Self.hms.string(from: f)
-    }
-    private var isStale: Bool {
-        _ = tick
-        guard let f = store.freshness else { return true }
-        return -f.timeIntervalSinceNow > 15 * 60
-    }
-    private static let hms: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f
-    }()
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Spacer()
-            Text("No covered-call positions")
-                .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.theme.fg2)
-            Text("A ticker appears here once you hold shares and sell a call against them.")
-                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
-                .multilineTextAlignment(.center).padding(.horizontal, 44)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-// MARK: - Position detail (one ticker)
-
-private enum PosTab: String, CaseIterable, Identifiable {
-    case shares = "Shares", calls = "Calls sold", puts = "Puts", longCalls = "Long calls"
-    var id: String { rawValue }
-    var isLong: Bool { self != .calls }
-}
-
-private struct PositionDetail: View {
-    let data: CoveredCallTicker
-    var store: PortfolioStore? = nil
-    @State private var showPlanner = false
-    @State private var tab: PosTab = .shares
-    /// Group → whether the legs list is expanded, and which leg is drilled into.
-    @State private var expanded: Set<PosTab> = []
-    @State private var openLeg: [PosTab: Int] = [:]
-    @State private var premRange: PremRange = .all
-    @State private var selectedDay: String? = nil
-    @State private var showAllHistory = false
-    @State private var openSleeves: Set<String> = []
-
-    private var cycle: CoveredCallCycle? { data.current }
-    private let lime = Color(hex: 0xD7EE53)
-    private let limeInk = Color(hex: 0x1C260A)
-
-    var body: some View {
-        VStack(spacing: 14) {
-            hero
-            if store != nil { planEntry }
-            positionCard
-            optionsInsightsCard
-            returnCard
-            historyCard
         }
         .sheet(isPresented: $showPlanner) {
-            if let store {
-                CoveredCallPlanner(
-                    model: PlannerModel(store: store, data: data),
-                    onClose: { showPlanner = false }
-                )
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+            if let data = CoveredCallData.build(store: store, ticker: "NVDA") {
+                CoveredCallPlanner(model: PlannerModel(store: store, data: data), onClose: { showPlanner = false })
+                    .presentationDetents([.large]).presentationDragIndicator(.visible)
             }
         }
     }
 
-    // ── Plan premium entry ──
-    private var planEntry: some View {
-        Button { showPlanner = true } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "chart.bar.xaxis")
-                    .font(.system(size: 20, weight: .bold)).foregroundStyle(limeInk)
-                    .frame(width: 46, height: 46)
-                    .background(RoundedRectangle(cornerRadius: 14).fill(lime.opacity(0.35)))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Plan next week's premium")
-                        .font(.system(size: 16, weight: .heavy)).tracking(-0.2)
-                        .foregroundStyle(Color.theme.fg1)
-                    Text("Pick expiries & strikes · see what you'd collect")
-                        .font(.system(size: 12)).foregroundStyle(Color.theme.fg3)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(Color.theme.fg4)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 26).fill(Color.theme.surface))
+    private struct Keyed: Identifiable { let id: String }
+
+    // ── header ──
+    private func header(_ d: PosData) -> some View {
+        HStack(spacing: 7) {
+            Text(d.ticker).font(.numeric(size: 12, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg1)
+            Circle().fill(Color.theme.lime).frame(width: 6, height: 6)
+            Spacer()
+            Text("COVERED CALL · \(d.contractsWritten) OF \(d.contractsTotal) WRITTEN")
+                .font(.numeric(size: 9.5, weight: .semibold)).tracking(0.5).foregroundStyle(Color.theme.fg4)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 22).padding(.top, 8)
     }
 
-    // ── HERO ──
-    private var hero: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Circle().fill(lime).frame(width: 6, height: 6)
-                Text("TOTAL MADE · LIFETIME")
-                    .font(.system(size: 10, weight: .heavy)).tracking(1.6)
-                    .foregroundStyle(lime)
-            }
-            // Everything banked plus everything unrealized, with open
-            // calls at their mark — a loss has to be unmistakable, so it
-            // flips to coral rather than staying white.
-            Text(fmtMoney(data.realizedBanked, sign: true))
-                .font(.system(size: 52, weight: .heavy)).tracking(-2.2)
-                .monospacedDigit()
-                .foregroundStyle(data.realizedBanked < 0 ? Color(hex: 0xF0664F) : .white)
-                .minimumScaleFactor(0.5).lineLimit(1)
-                .padding(.top, 14)
-            Text("\(fmtMoney(data.premiumIncome, sign: true)) premium collected + \(fmtMoney(data.realizedCapital, sign: true)) shares realized · cash banked, won't move on price")
-                .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.6))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 9)
-
-            // The realized (closed) slice — the broker's "realized P&L"
-            // concept. Below the cash-collected hero so you see both.
-            HStack(spacing: 8) {
-                Text("REALIZED").font(.system(size: 9, weight: .heavy)).tracking(1.2)
-                    .foregroundStyle(.white.opacity(0.45))
-                Text(fmtMoney(data.realizedPnL, sign: true))
-                    .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                    .foregroundStyle(.white.opacity(0.92))
-                Text("closed calls + shares")
-                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.4))
-            }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(Capsule().fill(.white.opacity(0.06)))
-            .overlay(Capsule().strokeBorder(.white.opacity(0.10), lineWidth: 1))
-            .padding(.top, 13)
-
-            if cycle != nil {
-                HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("CURRENT AVERAGE").font(.system(size: 9, weight: .heavy)).tracking(1.1)
-                            .foregroundStyle(.white.opacity(0.45))
-                        Text(fmtMoney(data.currentAverage, decimals: 2).replacingOccurrences(of: "$", with: ""))
-                            .font(.numeric(size: 24, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(lime)
-                    }
+    // ── ticker row + planner button ──
+    private func tickerRow(_ d: PosData) -> some View {
+        HStack(spacing: 10) {
+            Button { sheetKey = "shares" } label: {
+                HStack(spacing: 8) {
+                    Text(d.ticker).font(.numeric(size: 11, weight: .medium)).tracking(1.4).foregroundStyle(Color.theme.fg2)
+                    Text(fmtMoney(d.price, decimals: 2)).font(.numeric(size: 13, weight: .medium)).foregroundStyle(Color.theme.fg1)
+                    Text(fmtPct(d.chgPct)).font(.numeric(size: 11.5, weight: .medium)).foregroundStyle(Color.signed(d.chgPct))
                     Spacer(minLength: 0)
-                    VStack(alignment: .trailing, spacing: 6) {
-                        Text("CURRENT PRICE").font(.system(size: 9, weight: .heavy)).tracking(1.1)
-                            .foregroundStyle(.white.opacity(0.45))
-                        Text(fmtMoney(data.currentPrice, decimals: 2).replacingOccurrences(of: "$", with: ""))
-                            .font(.numeric(size: 24, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(.white)
-                    }
                 }
-                .padding(16)
-                .background(RoundedRectangle(cornerRadius: 18).fill(.white.opacity(0.07)))
-                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(.white.opacity(0.09), lineWidth: 1))
-                .padding(.top, 20)
-            }
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 26).fill(
-                RadialGradient(colors: [Color(hex: 0x25392C), Color(hex: 0x16241B), Color(hex: 0x101A13)],
-                               center: .init(x: 0.85, y: -0.1), startRadius: 10, endRadius: 420)
-            )
-        )
-    }
-
-    // ── YOUR POSITION — cards → aggregate → legs → leg detail ──
-    private func legs(_ t: PosTab) -> [OpenLegDetail] {
-        switch t {
-        case .shares:    return []
-        case .calls:     return data.callLegs
-        case .puts:      return data.putLegs
-        case .longCalls: return data.longCallLegs
-        }
-    }
-
-    private var positionCard: some View {
-        card {
-            Text("Your position").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
-                .foregroundStyle(Color.theme.fg1)
-            Text(posMeta).font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
-                .padding(.top, 6)
-
-            posCards
-
-            if tab == .shares {
-                sharesView
-            } else if let i = openLeg[tab], i < legs(tab).count {
-                legDetailView(legs(tab)[i])
-            } else {
-                aggregateView
-            }
-        }
-    }
-
-    /// Horizontally-scrolling selector cards, one per position group.
-    private var posCards: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
-                ForEach(PosTab.allCases) { t in
-                    let on = tab == t
-                    Button {
-                        withAnimation(Motion.standard) { tab = t; openLeg[t] = nil }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(t.rawValue.uppercased())
-                                .font(.system(size: 10.5, weight: .heavy)).tracking(0.3)
-                                .foregroundStyle(Color.theme.fg4)
-                            Text(cardValue(t))
-                                .font(.numeric(size: 19, weight: .heavy)).tracking(-0.5)
-                                .monospacedDigit().foregroundStyle(cardTone(t))
-                                .lineLimit(1).minimumScaleFactor(0.6)
-                                .padding(.top, 10)
-                            Text(cardSub(t))
-                                .font(.numeric(size: 11, weight: .bold)).monospacedDigit()
-                                .foregroundStyle(Color.theme.fg4).padding(.top, 4)
-                        }
-                        .padding(13)
-                        .frame(width: 134, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 16)
-                            .fill(on ? Color.theme.surface : Color.theme.page2))
-                        .overlay(RoundedRectangle(cornerRadius: 16)
-                            .strokeBorder(on ? Color.theme.fg1 : Color.clear, lineWidth: 1.5))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .padding(.top, 16)
-    }
-
-    private func cardValue(_ t: PosTab) -> String {
-        if t == .shares { return fmtMoney(data.shares * data.currentPrice) }
-        return fmtMoney(legs(t).reduce(0) { $0 + $1.pnl }, sign: true)
-    }
-    private func cardTone(_ t: PosTab) -> Color {
-        if t == .shares { return Color.theme.fg1 }
-        return Color.signed(legs(t).reduce(0) { $0 + $1.pnl })
-    }
-    private func cardSub(_ t: PosTab) -> String {
-        if t == .shares { return "\(Int(data.shares).formatted()) sh" }
-        let n = Int(legs(t).reduce(0) { $0 + $1.contracts })
-        return "\(n) contract\(n == 1 ? "" : "s")"
-    }
-
-    /// 2-column key/value grid used by every position view.
-    private func kvGrid(_ rows: [(String, String, Color, String?)]) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible(), alignment: .topLeading),
-                            GridItem(.flexible(), alignment: .topLeading)],
-                  alignment: .leading, spacing: 20) {
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(r.0).font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.theme.fg3)
-                    Text(r.1).font(.numeric(size: 21, weight: .heavy)).tracking(-0.5)
-                        .monospacedDigit().foregroundStyle(r.2)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                    if let s = r.3, !s.isEmpty {
-                        Text(s).font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
-                            .foregroundStyle(r.2 == Color.theme.fg1 ? Color.theme.fg4 : r.2)
-                    }
-                }
-            }
-        }
-        .padding(.top, 22)
-    }
-
-    @ViewBuilder
-    private var aggregateView: some View {
-        let ls = legs(tab)
-        if ls.isEmpty {
-            Text("Nothing open here.").font(.system(size: 13))
-                .foregroundStyle(Color.theme.fg4).padding(.top, 22)
-        } else {
-            let qty = ls.reduce(0.0) { $0 + $1.contracts }
-            let basis = ls.reduce(0.0) { $0 + $1.basis }
-            let mv = ls.reduce(0.0) { $0 + $1.marketValue }
-            let pnl = ls.reduce(0.0) { $0 + $1.pnl }
-            let tv = ls.reduce(0.0) { $0 + $1.timeValue }
-            let th = ls.reduce(0.0) { $0 + $1.theta }
-            let sold = (tab == .calls)
-            kvGrid([
-                ("Contracts", "\(Int(qty)) \(sold ? "sold" : "long")", Color.theme.fg1, nil),
-                (sold ? "Premium in" : "Cost basis", fmtMoney(basis),
-                 sold ? Color.theme.pos : Color.theme.fg1, nil),
-                (sold ? "Cost to close" : "Market value", fmtMoney(mv), Color.theme.fg1, nil),
-                ("Open P&L", fmtMoney(pnl, sign: true), Color.signed(pnl), nil),
-                ("Time value", fmtMoney(tv), Color.theme.fg1, nil),
-                ("Theta", fmtMoney(th, sign: true) + "/day", Color.signed(th), nil),
-            ])
-
-            if expanded.contains(tab) {
-                Text("LEGS").font(.system(size: 10.5, weight: .heavy)).tracking(1.4)
-                    .foregroundStyle(Color.theme.fg4).padding(.top, 24)
-                ForEach(Array(ls.enumerated()), id: \.element.id) { i, leg in
-                    legRow(leg, index: i)
-                }
-            } else {
-                Button {
-                    withAnimation(Motion.standard) { _ = expanded.insert(tab) }
-                } label: {
-                    HStack(spacing: 3) {
-                        Text("Tap for leg details")
-                            .font(.system(size: 13, weight: .heavy)).tracking(-0.1)
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .heavy))
-                    }
-                    .foregroundStyle(Color.theme.pos)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 22)
-            }
-        }
-    }
-
-    private func legRow(_ leg: OpenLegDetail, index: Int) -> some View {
-        let mny = moneyness(leg)
-        return Button {
-            withAnimation(Motion.standard) { openLeg[tab] = index }
-        } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("\(AppDates.shortMonthDay(leg.expiry)) · \(fmtStrike(leg.strike))\(leg.isCall ? "c" : "p")")
-                        .font(.system(size: 15, weight: .heavy)).tracking(-0.3)
-                        .foregroundStyle(Color.theme.fg1)
-                    Text("×\(Int(leg.contracts)) · \(leg.dte) DTE")
-                        .font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
-                        .foregroundStyle(Color.theme.fg4)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(fmtMoney(leg.pnl, sign: true))
-                        .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                        .foregroundStyle(Color.signed(leg.pnl))
-                    Text(mny.0).font(.numeric(size: 10.5, weight: .heavy)).monospacedDigit()
-                        .foregroundStyle(mny.1)
-                }
-                Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color.theme.fg4)
-            }
-            .padding(.vertical, 16)
-            .contentShape(Rectangle())
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder
-    private func legDetailView(_ leg: OpenLegDetail) -> some View {
-        let sold = !leg.isLong
-        let mny = moneyness(leg)
-        Button {
-            withAnimation(Motion.standard) { openLeg[tab] = nil }
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "chevron.left").font(.system(size: 12, weight: .heavy))
-                Text(tab.rawValue).font(.system(size: 12.5, weight: .heavy)).tracking(-0.1)
-            }
-            .foregroundStyle(Color.theme.fg3)
-        }
-        .buttonStyle(.plain)
-        .padding(.top, 18)
-
-        Text("\(AppDates.shortMonthDay(leg.expiry)) · $\(fmtStrike(leg.strike)) \(leg.isCall ? "call" : "put")")
-            .font(.system(size: 20, weight: .heavy)).tracking(-0.5)
-            .foregroundStyle(Color.theme.fg1).padding(.top, 12)
-        Text("×\(Int(leg.contracts)) \(sold ? "sold" : "long") · \(leg.dte) day\(leg.dte == 1 ? "" : "s") to expiry")
-            .font(.numeric(size: 12, weight: .bold)).monospacedDigit()
-            .foregroundStyle(Color.theme.fg4).padding(.top, 6)
-
-        kvGrid(sold ? [
-            ("Contracts", "\(Int(leg.contracts)) sold", Color.theme.fg1, nil),
-            ("Strike", fmtStrike(leg.strike), Color.theme.fg1, nil),
-            ("Premium in", fmtMoney(leg.basis), Color.theme.pos, nil),
-            ("Time value", fmtMoney(leg.timeValue), Color.theme.fg1, nil),
-            ("Theta", fmtMoney(leg.theta, sign: true) + "/day", Color.signed(leg.theta), nil),
-            ("Moneyness", mny.0, mny.1, nil),
-            ("Open P&L", fmtMoney(leg.pnl, sign: true), Color.signed(leg.pnl), nil),
-        ] : [
-            ("Contracts", "\(Int(leg.contracts)) long", Color.theme.fg1, nil),
-            ("Strike", fmtStrike(leg.strike), Color.theme.fg1, nil),
-            ("Cost basis", fmtMoney(leg.basis), Color.theme.fg1, nil),
-            ("Market value", fmtMoney(leg.marketValue), Color.theme.fg1, nil),
-            ("Intrinsic", fmtMoney(leg.intrinsic), Color.theme.fg1, nil),
-            ("Time value", fmtMoney(leg.timeValue), Color.theme.fg1, nil),
-            ("Theta", fmtMoney(leg.theta, sign: true) + "/day", Color.signed(leg.theta), nil),
-            ("Open P&L", fmtMoney(leg.pnl, sign: true), Color.signed(leg.pnl), nil),
-        ])
-    }
-
-    private func moneyness(_ leg: OpenLegDetail) -> (String, Color) {
-        let px = data.currentPrice
-        guard px > 0 else { return ("—", Color.theme.fg3) }
-        if leg.isCall {
-            let m = (leg.strike - px) / px * 100
-            let tone: Color = m >= 0.8 ? Color.theme.pos : (m <= -0.2 ? Color.theme.neg : Color.theme.warn)
-            let lab = m >= 0.8 ? "OTM" : (m <= -0.2 ? "ITM" : "ATM")
-            return ("\(lab) \(m >= 0 ? "+" : "−")\(String(format: "%.1f", abs(m)))%", tone)
-        }
-        return ("\(String(format: "%.0f", (px - leg.strike) / px * 100))% below", Color.theme.fg3)
-    }
-
-    private var posMeta: String {
-        switch tab {
-        case .shares:
-            return "\(Int(data.shares).formatted()) shares · covered"
-        case .calls:
-            let n = Int(data.openCallContracts)
-            return "\(n) contract\(n == 1 ? "" : "s") open · \(data.callLegs.count) expir\(data.callLegs.count == 1 ? "y" : "ies")"
-        case .puts:
-            let n = Int(data.putContracts)
-            return "\(n) protective put\(n == 1 ? "" : "s")"
-        case .longCalls:
-            let n = Int(data.longCallLegs.reduce(0) { $0 + $1.contracts })
-            return "\(n) long call\(n == 1 ? "" : "s") · LEAP overlay"
-        }
-    }
-
-    private var sharesView: some View {
-        let c = cycle
-        return kvGrid([
-            ("Shares", Int(data.shares).formatted(), Color.theme.fg1, nil),
-            ("Market value", fmtMoney(data.shares * data.currentPrice), Color.theme.fg1, nil),
-            ("Cost basis", fmtMoney(c?.entryPrice ?? 0, decimals: 2), Color.theme.fg1, nil),
-            ("Adjusted basis", fmtMoney(c?.adjustedBasis ?? 0, decimals: 2), Color.theme.pos,
-             c.map { $0.entryPrice > 0 ? String(format: "%.1f%% via premium", -$0.premiumPerShare / $0.entryPrice * 100) : "" }),
-            ("Today's return", fmtMoney(data.todayPL, sign: true), Color.signed(data.todayPL), fmtPct(data.dayPct)),
-            ("Total return", fmtMoney(data.totalReturn, sign: true), Color.signed(data.totalReturn),
-             c.map { $0.entryPrice * $0.shares > 0 ? fmtPct(data.totalReturn / ($0.entryPrice * $0.shares) * 100) : "" }),
-        ])
-    }
-
-    // ── Cushion gauge — updated v2: thin rail, tall "now" tick with the
-    // label above it, strike dot labelled below, large moneyness pill.
-    private func gaugeLeg(expiry: String, strike: Double, contracts: Double,
-                          price: Double, foot: String, footColor: Color) -> some View {
-        let m = price > 0 ? (strike - price) / price * 100 : 0
-        let tone: Color = m >= 0.8 ? Color.theme.pos : (m <= -0.2 ? Color.theme.neg : Color.theme.warn)
-        let label = m >= 0.8 ? "OTM" : (m <= -0.2 ? "ITM" : "ATM")
-        let pxL: CGFloat = 0.40
-        let kL: CGFloat = max(0.09, min(0.91, pxL + CGFloat(m / 6.5) * 0.44))
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("\(AppDates.shortMonthDay(expiry)) · \(fmtStrike(strike)) call")
-                        .font(.system(size: 15, weight: .heavy)).tracking(-0.3)
-                        .foregroundStyle(Color.theme.fg1)
-                    Text("×\(Int(contracts)) · \(foot)")
-                        .font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
-                        .foregroundStyle(footColor)
-                }
-                Spacer(minLength: 0)
-                Text("\(label) \(m >= 0 ? "+" : "−")\(String(format: "%.1f", abs(m)))%")
-                    .font(.numeric(size: 13, weight: .heavy)).monospacedDigit()
-                    .foregroundStyle(tone)
-                    .padding(.horizontal, 15).padding(.vertical, 8)
-                    .background(Capsule().fill(tone.opacity(0.13)))
-                    .fixedSize()
-            }
-
-            GeometryReader { geo in
-                let w = geo.size.width
-                ZStack(alignment: .topLeading) {
-                    // rail + cushion zone
-                    Capsule().fill(Color.theme.page2)
-                        .frame(width: w, height: 3).position(x: w / 2, y: 22)
-                    Capsule().fill(tone.opacity(0.45))
-                        .frame(width: abs(kL - pxL) * w, height: 3)
-                        .position(x: (min(pxL, kL) + abs(kL - pxL) / 2) * w, y: 22)
-                    // "now" tick, label above
-                    VStack(spacing: 3) {
-                        Text("now \(String(format: "%.2f", price))")
-                            .font(.numeric(size: 10.5, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(Color.theme.fg1).fixedSize()
-                        RoundedRectangle(cornerRadius: 2).fill(Color.theme.fg1)
-                            .frame(width: 3, height: 28)
-                    }
-                    .position(x: pxL * w, y: 24)
-                    // strike dot, label below
-                    VStack(spacing: 6) {
-                        Circle().fill(tone).frame(width: 16, height: 16)
-                        Text("$\(fmtStrike(strike))")
-                            .font(.numeric(size: 11, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(tone).fixedSize()
-                    }
-                    .position(x: kL * w, y: 31)
-                }
-            }
-            .frame(height: 58)
-            .padding(.top, 22)
-        }
-        .padding(.top, 20).padding(.bottom, 30)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
-    }
-
-    // ── WHERE PREMIUM LANDS — daily, scrub to reveal (Robinhood-style) ──
-    private var premiumCard: some View {
-        let series = data.premiumByDay(premRange)
-        let total = series.reduce(0) { $0 + $1.amount }
-        let sel = series.first { $0.id == selectedDay }
-        let maxAbs = max(series.map { abs($0.amount) }.max() ?? 1, 1)
-        return card {
-            Text("Where premium lands").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
-                .foregroundStyle(Color.theme.fg1)
-
-            // Readout — the scrubbed day, or the range total.
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(fmtMoney(sel?.amount ?? total, sign: true))
-                    .font(.numeric(size: 30, weight: .heavy)).tracking(-1)
-                    .monospacedDigit().foregroundStyle(Color.signed(sel?.amount ?? total))
-                Text(sel.map { fullDate($0.date) } ?? "\(series.count) day\(series.count == 1 ? "" : "s") · net")
-                    .font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Color.theme.fg3)
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 10)
-
-            Text(sel?.pending == true
-                 ? "Collected on an open expiry — not yet resolved."
-                 : "Net premium by expiry day. Sums to your premium income.")
-                .font(.system(size: 12)).foregroundStyle(Color.theme.fg4)
-                .padding(.top, 5)
-
-            if series.isEmpty {
-                Text("No premium in this range.")
-                    .font(.system(size: 13)).foregroundStyle(Color.theme.fg4).padding(.top, 24)
-            } else {
-                dailyBars(series, maxAbs: maxAbs).padding(.top, 18)
-                HStack(spacing: 16) {
-                    legendSwatch(lime, "realized")
-                    HStack(spacing: 6) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .strokeBorder(lime, lineWidth: 2).frame(width: 11, height: 11)
-                        Text("open (pending)").font(.system(size: 11)).foregroundStyle(Color.theme.fg3)
-                    }
-                }
-                .frame(maxWidth: .infinity).padding(.top, 14)
-            }
-
-            segmented(PremRange.allCases, selection: $premRange) { $0.rawValue }
-                .padding(.top, 18)
-                .onChange(of: premRange) { _, _ in selectedDay = nil }
-        }
-    }
-
-    private func legendSwatch(_ c: Color, _ t: String) -> some View {
-        HStack(spacing: 6) {
-            RoundedRectangle(cornerRadius: 3).fill(c).frame(width: 11, height: 11)
-            Text(t).font(.system(size: 11)).foregroundStyle(Color.theme.fg3)
-        }
-    }
-
-    private func dailyBars(_ series: [PremiumDay], maxAbs: Double) -> some View {
-        // Zero baseline in the middle: positive up (lime), negative down
-        // (coral). Tap a bar to scrub it; tap again to clear.
-        let half: CGFloat = 46
-        return HStack(alignment: .center, spacing: 6) {
-            ForEach(series) { d in
-                let on = selectedDay == d.id
-                let frac = d.amount / maxAbs
-                let h = max(4, CGFloat(abs(frac)) * half)
-                Button {
-                    withAnimation(Motion.standard) { selectedDay = on ? nil : d.id }
-                } label: {
-                    VStack(spacing: 6) {
-                        ZStack {
-                            Rectangle().fill(Color.theme.hair).frame(height: 1)   // baseline
-                            // Pending (open) expiries read as a hollow
-                            // outline; realized are solid.
-                            Group {
-                                if d.pending {
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .strokeBorder(d.amount >= 0 ? lime : Color.theme.neg, lineWidth: 2)
-                                } else {
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .fill(d.amount >= 0 ? lime : Color.theme.neg)
-                                }
-                            }
-                            .opacity(selectedDay == nil || on ? 1 : 0.35)
-                            .frame(width: 22, height: h)
-                            .offset(y: frac >= 0 ? -h / 2 : h / 2)
-                        }
-                        .frame(height: half * 2)
-                        Text(d.label).font(.system(size: 9.5, weight: on ? .heavy : .medium))
-                            .foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
-                            .fixedSize()
-                    }
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func fullDate(_ d: Date) -> String {
-        let f = DateFormatter(); f.dateFormat = "EEE, MMM d"
-        f.timeZone = TimeZone(identifier: "America/New_York")
-        return f.string(from: d)
-    }
-
-    // ── HOW CLOSE EACH CALL SAT ──
-    private var cushionCard: some View {
-        card {
-            Text("How close each call sits").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
-                .foregroundStyle(Color.theme.fg1)
-            Text("Your open strikes against the current price. The dot's distance from the black tick is the cushion.")
-                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
-                .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
-
-            if data.cushions.isEmpty {
-                Text("No calls open right now.").font(.system(size: 13)).foregroundStyle(Color.theme.fg4)
-                    .padding(.top, 18)
-            } else {
-                ForEach(data.cushions) { c in
-                    gaugeLeg(expiry: c.expiry, strike: c.strike, contracts: c.contracts,
-                             price: c.priceAtExpiry, foot: footLabel(c.status),
-                             footColor: footColor(c.status))
-                }
-            }
-        }
-    }
-
-    private func footLabel(_ s: CallLegStatus) -> String {
-        switch s {
-        case .open: return "open"
-        case .assigned: return "assigned"
-        case .rolled: return "rolled"
-        case .expired: return "kept"
-        }
-    }
-    private func footColor(_ s: CallLegStatus) -> Color {
-        switch s {
-        case .open: return Color.theme.fg3
-        case .assigned: return Color.theme.gold
-        case .rolled: return Color.theme.fg3
-        case .expired: return Color.theme.pos
-        }
-    }
-
-    // ── OPTIONS INSIGHTS — one collapsible sleeve per option group, each
-    // showing where its strikes sit vs the share price (Position Detail v3). ──
-    private struct SleeveGroup: Identifiable {
-        let id: String
-        let name: String
-        let isCall: Bool
-        let isLong: Bool          // holder's side: false = sold, true = long
-        let legs: [OpenLegDetail]
-    }
-    private enum Moneyness { case itm, atm, otm }
-
-    private var sleeveGroups: [SleeveGroup] {
-        [
-            SleeveGroup(id: "csold",   name: "Calls sold",   isCall: true,  isLong: false, legs: data.callLegs),
-            SleeveGroup(id: "pbought", name: "Puts bought",  isCall: false, isLong: true,  legs: data.putLegs),
-            SleeveGroup(id: "cbought", name: "Calls bought", isCall: true,  isLong: true,  legs: data.longCallLegs),
-            SleeveGroup(id: "psold",   name: "Puts sold",    isCall: false, isLong: false, legs: []),
-        ]
-    }
-
-    private func mnyPct(_ strike: Double) -> Double {
-        data.currentPrice > 0 ? (strike - data.currentPrice) / data.currentPrice * 100 : 0
-    }
-    private func moneyness(_ strike: Double, isCall: Bool) -> Moneyness {
-        let m = mnyPct(strike)
-        if isCall { return m >= 0.8 ? .otm : (m <= -0.2 ? .itm : .atm) }
-        return m <= -0.8 ? .otm : (m >= 0.2 ? .itm : .atm)
-    }
-    /// Colour reads from the holder's side — sold legs want OTM (green),
-    /// long legs want ITM (green). Off-side long legs mute to grey.
-    private func mnyColor(_ c: Moneyness, isLong: Bool) -> Color {
-        let tone: Moneyness?
-        if isLong { tone = c == .itm ? .otm : (c == .atm ? .atm : nil) }
-        else      { tone = c }
-        switch tone {
-        case .otm:  return Color.theme.pos
-        case .itm:  return Color.theme.neg
-        case .atm:  return Color.theme.warn
-        case .none: return Color.theme.fg3
-        }
-    }
-    private func mnyLabel(_ c: Moneyness) -> String {
-        switch c { case .otm: return "OTM"; case .itm: return "ITM"; case .atm: return "ATM" }
-    }
-    private func nearestStrike(_ legs: [OpenLegDetail]) -> Double {
-        legs.map(\.strike).min(by: { abs($0 - data.currentPrice) < abs($1 - data.currentPrice) }) ?? data.currentPrice
-    }
-    private func sleeveDomain(_ ks: [Double]) -> (Double, Double) {
-        let vals = ks + [data.currentPrice]
-        let lo = vals.min() ?? 0, hi = vals.max() ?? 0
-        let pad = max((hi - lo) * 0.24, data.currentPrice * 0.022)
-        return (lo - pad, hi + pad)
-    }
-
-    private var optionsInsightsCard: some View {
-        card {
-            Text("Options insights").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
-                .foregroundStyle(Color.theme.fg1)
-            Text("Where each open contract sits against the \(fmtMoney(data.currentPrice, decimals: 2)) share price. Tap a sleeve for its strikes.")
-                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
-                .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
-            VStack(spacing: 0) {
-                ForEach(sleeveGroups) { sleeve($0) }
-            }
-            .padding(.top, 8)
-        }
-    }
-
-    @ViewBuilder
-    private func sleeve(_ g: SleeveGroup) -> some View {
-        if g.legs.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(g.name).font(.system(size: 15.5, weight: .heavy)).tracking(-0.3)
-                    .foregroundStyle(Color.theme.fg3)
-                Text("none open").font(.numeric(size: 11.5, weight: .semibold))
-                    .foregroundStyle(Color.theme.fg4)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 18)
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
-        } else {
-            let near = nearestStrike(g.legs)
-            let nearC = moneyness(near, isCall: g.isCall)
-            let nearCol = mnyColor(nearC, isLong: g.isLong)
-            let qty = Int(g.legs.reduce(0) { $0 + $1.contracts }.rounded())
-            let isOpen = openSleeves.contains(g.id)
-            Button {
-                withAnimation(Motion.standard) {
-                    if isOpen { openSleeves.remove(g.id) } else { openSleeves.insert(g.id) }
-                }
-            } label: {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(g.name).font(.system(size: 15.5, weight: .heavy)).tracking(-0.3)
-                                .foregroundStyle(Color.theme.fg1)
-                            Text("\(qty) contracts").font(.numeric(size: 11.5, weight: .semibold))
-                                .foregroundStyle(Color.theme.fg4)
-                        }
-                        Spacer(minLength: 0)
-                        Text("\(mnyLabel(nearC)) \(String(format: "%.1f", abs(mnyPct(near))))%")
-                            .font(.numeric(size: 13, weight: .heavy)).foregroundStyle(nearCol)
-                            .padding(.horizontal, 13).padding(.vertical, 7)
-                            .background(Capsule().fill(nearCol.opacity(0.14)))
-                            .fixedSize()
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .heavy))
-                            .foregroundStyle(Color.theme.fg4)
-                            .rotationEffect(.degrees(isOpen ? 90 : 0))
-                            .padding(.top, 6)
-                    }
-                    sleeveTrack(g).padding(.top, 16)
-                    if isOpen {
-                        VStack(spacing: 3) {
-                            ForEach(g.legs) { strikeRow(g, $0) }
-                        }
-                        .padding(.top, 14)
-                    }
-                }
-                .contentShape(Rectangle())
+                .padding(.vertical, 12).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.vertical, 18)
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+            Button { showPlanner = true } label: {
+                Image(systemName: "chart.bar.xaxis").font(.system(size: 16, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 36, height: 36).background(Circle().fill(Color.theme.neon))
+            }
+            .buttonStyle(.plain)
         }
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+        .padding(.top, 6)
     }
 
-    private func sleeveTrack(_ g: SleeveGroup) -> some View {
-        let ks = g.legs.map(\.strike)
-        let (d0, d1) = sleeveDomain(ks)
-        let lo = ks.min() ?? 0, hi = ks.max() ?? 0
-        let zoneCol = mnyColor(moneyness(nearestStrike(g.legs), isCall: g.isCall), isLong: g.isLong)
-        func frac(_ v: Double) -> CGFloat {
-            guard d1 > d0 else { return 0.5 }
-            return CGFloat(min(0.96, max(0.04, (v - d0) / (d1 - d0))))
-        }
-        return GeometryReader { geo in
-            let w = geo.size.width
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.theme.page2).frame(height: 2).offset(y: 6)
-                if hi > lo {
-                    Capsule().fill(zoneCol.opacity(0.45))
-                        .frame(width: max(2, (frac(hi) - frac(lo)) * w), height: 2)
-                        .offset(x: frac(lo) * w, y: 6)
+    // ── rich-black premium harvested hero ──
+    private func lifetimeCard(_ d: PosData) -> some View {
+        var run = 0.0
+        let cum: [(String, Double, Double)] = d.weeks.map { run += $0.v; return ($0.w, $0.v, run) }
+        let maxC = max(d.premLife, 1)
+        return Button { sheetKey = "prem" } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("PREMIUM HARVESTED").font(.numeric(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(inkText.opacity(0.58))
+                    Spacer()
+                    Text("\(String(format: "%.1f", d.protectPct))% CUSHION").font(.numeric(size: 8, weight: .semibold)).tracking(1)
+                        .foregroundStyle(limeInk).padding(.horizontal, 9).padding(.vertical, 5).background(Capsule().fill(lime))
                 }
-                RoundedRectangle(cornerRadius: 1).fill(Color.theme.fg1)
-                    .frame(width: 2, height: 14).offset(x: frac(data.currentPrice) * w - 1)
-                ForEach(g.legs) { l in
-                    Circle().fill(mnyColor(moneyness(l.strike, isCall: g.isCall), isLong: g.isLong))
-                        .frame(width: 10, height: 10)
-                        .overlay(Circle().strokeBorder(Color.theme.surface, lineWidth: 2.5))
-                        .offset(x: frac(l.strike) * w - 5, y: 2)
+                HStack(alignment: .firstTextBaseline, spacing: 11) {
+                    Text(fmtMoney(d.premLife, sign: true)).font(.numeric(size: 42, weight: .bold)).tracking(-1.6).foregroundStyle(lime)
+                    Text("LIFETIME").font(.numeric(size: 9, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.5))
                 }
-            }
-        }
-        .frame(height: 14)
-    }
-
-    private func strikeRow(_ g: SleeveGroup, _ l: OpenLegDetail) -> some View {
-        let c = moneyness(l.strike, isCall: g.isCall)
-        let col = mnyColor(c, isLong: g.isLong)
-        return HStack(spacing: 10) {
-            Text("\(fmtStrike(l.strike))\(g.isCall ? "c" : "p")")
-                .font(.numeric(size: 12.5, weight: .heavy)).foregroundStyle(Color.theme.fg1)
-                .frame(width: 52, alignment: .leading)
-            Text("\(AppDates.shortMonthDay(l.expiry)) · ×\(Int(l.contracts))")
-                .font(.numeric(size: 11.5, weight: .semibold)).foregroundStyle(Color.theme.fg4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("\(String(format: "%.1f", abs(mnyPct(l.strike))))%")
-                .font(.numeric(size: 12, weight: .heavy)).foregroundStyle(col)
-        }
-        .padding(.horizontal, 13).padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 11).fill(Color.theme.page2))
-    }
-
-    // ── WHAT THE STRATEGY EARNED ──
-    private var returnCard: some View {
-        let prem = data.premiumIncome         // premium COLLECTED in cash (incl open)
-        let realizedSh = data.realizedCapital // realized share P&L
-        let banked = data.realizedBanked      // = prem + realizedSh (the hero)
-        let closedPrem = data.realizedPremium // locked from closed calls
-        let openPrem = data.openPremium       // still riding on open calls
-        let unreal = data.exitSharesPL        // unrealized shares — moves with price
-        let denom = max(abs(prem) + abs(realizedSh), 1)
-        // Sub-line under premium: how much is locked (closed) vs still working.
-        let premSplit = "\(fmtMoney(closedPrem, sign: true)) locked (closed) · \(fmtMoney(openPrem, sign: true)) on calls still open"
-        // Spell out the paper P&L: shares × (spot − raw cost). Explains the sign.
-        let rawAvg = data.current?.entryPrice ?? 0
-        let shareStr = Int(data.shares.rounded()).formatted(.number.grouping(.automatic))
-        let unrealBreakdown = "\(shareStr) sh × (\(fmtMoney(data.currentPrice, decimals: 2)) − \(fmtMoney(rawAvg, decimals: 2))) · moves with price"
-        return card {
-            Text("What the strategy earned").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
-                .foregroundStyle(Color.theme.fg1)
-            Text("Banked = premium you've collected in cash + realized share gains. It only changes when you trade, never on price.")
-                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3)
-                .fixedSize(horizontal: false, vertical: true).padding(.top, 6)
-
-            HStack(spacing: 3) {
-                RoundedRectangle(cornerRadius: 3).fill(Color.theme.fg1)
-                    .frame(width: max(4, CGFloat(abs(prem) / denom) * 300))
-                RoundedRectangle(cornerRadius: 3).fill(lime)
-                    .frame(width: max(4, CGFloat(abs(realizedSh) / denom) * 300))
-            }
-            .frame(height: 24).frame(maxWidth: .infinity, alignment: .leading)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .padding(.top, 20)
-
-            // Premium collected (cash), with the locked-vs-open split underneath.
-            VStack(alignment: .leading, spacing: 4) {
-                splitRow(Color.theme.fg1, "Premium collected", prem)
-                Text(premSplit).font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(Color.theme.fg4).padding(.leading, 22)
-            }
-            splitRow(lime, "Shares realized", realizedSh)
-
-            HStack {
-                Text("Banked").font(.system(size: 16, weight: .heavy)).tracking(-0.3)
-                    .foregroundStyle(Color.theme.fg1)
-                Spacer()
-                Text(fmtMoney(banked, sign: true))
-                    .font(.numeric(size: 21, weight: .heavy)).tracking(-0.5)
-                    .monospacedDigit().foregroundStyle(Color.signed(banked))
-            }
-            .padding(.top, 16)
-
-            // ── Unrealized shares — separate, never touches Banked ──
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Unrealized shares").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.theme.fg2)
-                    Text(unrealBreakdown).font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(Color.theme.fg4)
+                .padding(.top, 18)
+                Text("Write weeks on \(Int(d.shares).formatted(.number.grouping(.automatic))) shares. Week of \(d.bigWeekLabel) carried \(d.bigWeekPct)% of it.")
+                    .font(.system(size: 12)).foregroundStyle(inkText.opacity(0.6)).padding(.top, 12).fixedSize(horizontal: false, vertical: true)
+                // cumulative harvest columns
+                HStack(alignment: .bottom, spacing: 10) {
+                    ForEach(Array(cum.enumerated()), id: \.offset) { i, c in
+                        let on = i == cum.count - 1
+                        VStack(spacing: 7) {
+                            Text(c.2 > 0 ? (c.2 >= 1000 ? "$\(String(format: "%.1f", c.2 / 1000))K" : "$\(Int(c.2))") : "—")
+                                .font(.numeric(size: 9.5, weight: .semibold)).foregroundStyle(on ? lime : inkText.opacity(0.5))
+                            RoundedRectangle(cornerRadius: 4).fill(on ? lime : lime.opacity(0.28))
+                                .frame(height: max(4, CGFloat(c.2 / maxC) * 58))
+                                .overlay { if c.1 <= 0 { RoundedRectangle(cornerRadius: 4).stroke(inkText.opacity(0.12), style: .init(lineWidth: 1, dash: [3, 3])) } }
+                            Text(c.0).font(.numeric(size: 8, weight: .semibold)).tracking(0.6).foregroundStyle(inkText.opacity(on ? 0.7 : 0.42)).textCase(.uppercase)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
                 }
-                Spacer()
-                Text(fmtMoney(unreal, sign: true))
-                    .font(.numeric(size: 15, weight: .bold)).monospacedDigit()
-                    .foregroundStyle(Color.signed(unreal))
+                .frame(height: 98, alignment: .bottom).padding(.top, 22)
+                HStack(spacing: 14) {
+                    inkStat("Per share", "−" + fmtMoney(d.premPerShare, decimals: 2))
+                    inkStat("On position value", String(format: "%.2f%%", d.premYield), divider: true)
+                }
+                .padding(.top, 20).padding(.top, 16)
+                .overlay(alignment: .top) { Rectangle().fill(inkText.opacity(0.12)).frame(height: 1).padding(.top, 20) }
+                // basis strip
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("COST BASIS").font(.numeric(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
+                        Text(String(format: "%.2f", d.basisOrig)).font(.numeric(size: 19, weight: .bold)).tracking(-0.5).foregroundStyle(Color(hex: 0xf4f1e8))
+                    }
+                    VStack(spacing: 7) {
+                        Text("−\(String(format: "%.2f", d.premPerShare))").font(.numeric(size: 10, weight: .bold)).foregroundStyle(limeInk)
+                            .padding(.horizontal, 9).padding(.vertical, 3).background(Capsule().fill(lime))
+                        Rectangle().fill(LinearGradient(colors: [inkText.opacity(0.16), lime], startPoint: .leading, endPoint: .trailing)).frame(height: 2)
+                    }
+                    .frame(maxWidth: .infinity)
+                    VStack(alignment: .trailing, spacing: 7) {
+                        Text("BREAK-EVEN").font(.numeric(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
+                        Text(String(format: "%.2f", d.basisEff)).font(.numeric(size: 19, weight: .bold)).tracking(-0.5).foregroundStyle(lime)
+                    }
+                }
+                .padding(14).padding(.top, 20)
+                .background(RoundedRectangle(cornerRadius: Radius.lg).fill(Color.white.opacity(0.06)).overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(inkText.opacity(0.1), lineWidth: 1)))
             }
-            .padding(.vertical, 13)
-            .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
-            .padding(.top, 8)
+            .padding(18)
+            .background(RoundedRectangle(cornerRadius: Radius.xl).fill(inkBG))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.xl))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func inkStat(_ label: String, _ value: String, divider: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label.uppercased()).font(.numeric(size: 8, weight: .semibold)).tracking(1.2).foregroundStyle(inkText.opacity(0.45))
+            Text(value).font(.numeric(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color(hex: 0xf4f1e8))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, divider ? 14 : 0)
+        .overlay(alignment: .leading) { if divider { Rectangle().fill(inkText.opacity(0.12)).frame(width: 1) } }
+    }
+
+    // ── the position rail ──
+    private func positionRail(_ d: PosData) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("THE POSITION").font(.numeric(size: 9, weight: .semibold)).tracking(2.2).foregroundStyle(Color.theme.fg4)
+                .padding(.horizontal, 22).padding(.top, 20)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 11) {
+                    ForEach(d.cards) { posCard($0, d: d) }
+                }
+                .padding(.horizontal, 22).padding(.vertical, 10).scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.viewAligned)
         }
     }
 
-    private func splitRow(_ sw: Color, _ label: String, _ v: Double) -> some View {
+    private func posCard(_ it: PosCardModel, d: PosData) -> some View {
+        Button { sheetKey = it.k } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text(it.cat.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(1.6).foregroundStyle(Color.theme.fg3)
+                    Spacer()
+                    if it.k == "calls", d.strike > 0 { chip("OTM +\(String(format: "%.1f", d.strikeDist))%", .pos) }
+                    else if it.k == "shares" { chip(fmtMoney(d.price, decimals: 2), .fg1) }
+                    else if it.k == "uncov" { chip("\(d.dte)d cycle", .fg1) }
+                }
+                Text(it.num).font(.numeric(size: 28, weight: .bold)).tracking(-0.9).foregroundStyle(tc(it.tone)).padding(.top, 16)
+                Text(it.unit.uppercased()).font(.numeric(size: 9, weight: .medium)).tracking(0.8).foregroundStyle(Color.theme.fg4).padding(.top, 9)
+                Text(it.name).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1).padding(.top, 15)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(it.sub).font(.numeric(size: 12, weight: .regular)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
+                Spacer(minLength: 0)
+                posViz(it.viz, d: d).padding(.top, 20)
+            }
+            .padding(17).frame(width: cardW, height: 266, alignment: .top)
+            .background(RoundedRectangle(cornerRadius: Radius.lg).fill(Color.theme.elevated))
+            .overlay(RoundedRectangle(cornerRadius: Radius.lg).strokeBorder(Color.theme.hair, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func chip(_ t: String, _ tone: Tone) -> some View {
+        Text(t).font(.system(size: 10, weight: .semibold)).foregroundStyle(tone == .pos ? Color.theme.pos : Color.theme.fg2)
+            .padding(.horizontal, 9).padding(.vertical, 4).background(Capsule().fill(tone == .pos ? Color.theme.tintPos : Color.theme.tintMuted))
+    }
+
+    @ViewBuilder
+    private func posViz(_ kind: String, d: PosData) -> some View {
+        switch kind {
+        case "basis":
+            let lo = d.basisEff - 3, hi = d.basisOrig + 1
+            trackViz(loBE: (d.basisEff - lo) / (hi - lo), hiPx: (d.price - lo) / (hi - lo),
+                     dim: (d.basisEff - lo) / (hi - lo),
+                     scale: ("BE \(fmtMoney(d.basisEff, decimals: 2))", "\(fmtMoney(d.overBE, sign: true, decimals: 2))/sh", "now \(fmtMoney(d.price, decimals: 2))"))
+        case "cover":
+            let lo = d.price * 0.97, hi = max(d.strike, d.price) * 1.02
+            trackViz(loBE: (d.price - lo) / (hi - lo), hiPx: (d.strike - lo) / (hi - lo),
+                     dim: (d.strike - lo) / (hi - lo),
+                     scale: ("now \(fmtMoney(d.price, decimals: 2))", "+\(String(format: "%.1f", d.strikeDist))%", "strike \(fmtStrike(d.strike))"), markPrice: (d.price - lo) / (hi - lo))
+        default:
+            VStack(spacing: 11) {
+                HStack(spacing: 3) {
+                    ForEach(0..<10, id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 2).fill(Double(i) < Double(d.coveredPct) / 10 ? Color.theme.tintNeon : Color.theme.tintPos.opacity(0.35))
+                            .frame(height: 11)
+                    }
+                }
+                scaleRow("\(d.coveredPct)% covered", "", "\((d.uncovered * 100).formatted(.number.grouping(.automatic))) sh free")
+            }
+        }
+    }
+
+    private func trackViz(loBE: Double, hiPx: Double, dim: Double, scale: (String, String, String), markPrice: Double? = nil) -> some View {
+        VStack(spacing: 11) {
+            GeometryReader { g in
+                let w = g.size.width
+                let a = min(loBE, hiPx), b = max(loBE, hiPx)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.theme.page2).frame(height: 11)
+                    Capsule().fill(Color.theme.tintNeon).frame(width: max(2, CGFloat(b - a) * w), height: 11).offset(x: CGFloat(a) * w)
+                    mark(Color.theme.fg4, x: CGFloat(dim) * w)
+                    mark(Color.theme.neon, x: CGFloat(markPrice ?? hiPx) * w, tall: true)
+                }
+            }.frame(height: 21)
+            scaleRow(scale.0, scale.1, scale.2)
+        }
+    }
+
+    private func mark(_ c: Color, x: CGFloat, tall: Bool = false) -> some View {
+        RoundedRectangle(cornerRadius: 2).fill(c).frame(width: 3, height: tall ? 23 : 21).offset(x: x - 1.5, y: tall ? -1 : 0)
+    }
+    private func scaleRow(_ a: String, _ b: String, _ c: String) -> some View {
         HStack {
-            HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 4).fill(sw).frame(width: 12, height: 12)
-                Text(label).font(.system(size: 14, weight: .semibold)).foregroundStyle(Color.theme.fg2)
+            Text(a).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
+            Spacer()
+            if !b.isEmpty { Text(b).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4); Spacer() }
+            Text(c).font(.numeric(size: 8.5, weight: .medium)).foregroundStyle(Color.theme.fg4)
+        }
+    }
+
+    // ── where premium lands ──
+    private func weeksPanel(_ d: PosData) -> some View {
+        let maxV = max(d.weeks.map(\.v).max() ?? 1, 1)
+        return panel {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Where premium lands").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
+                Spacer()
+                Text(fmtMoney(d.premLife, sign: true)).font(.numeric(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
+            }
+            Text("Premium collected per write week, newest at the right.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
+            HStack(alignment: .bottom, spacing: 9) {
+                ForEach(d.weeks) { wk in
+                    let on = wk.w == (d.weeks.last?.w ?? "")
+                    VStack(spacing: 8) {
+                        Text(wk.v > 0 ? "$\(String(format: "%.1f", wk.v / 1000))K" : "—").font(.numeric(size: 9.5, weight: .semibold)).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4)
+                        RoundedRectangle(cornerRadius: 5).fill(on ? Color.theme.neon : Color.theme.page2)
+                            .frame(height: max(5, CGFloat(wk.v / maxV) * 104))
+                            .overlay { if wk.v <= 0 { RoundedRectangle(cornerRadius: 5).stroke(Color.theme.dusk, style: .init(lineWidth: 1, dash: [3, 3])) } }
+                        Text(wk.w).font(.numeric(size: 8.5, weight: .semibold)).tracking(0.6).foregroundStyle(on ? Color.theme.fg1 : Color.theme.fg4).textCase(.uppercase)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .frame(height: 150, alignment: .bottom).padding(.top, 20)
+            Text("Week of \(d.bigWeekLabel) carried \(fmtMoney(d.bigWeekVal)) of \(fmtMoney(d.premLife)) — \(d.bigWeekPct)% of everything collected.")
+                .font(.system(size: 11.5)).foregroundStyle(Color.theme.fg2).lineSpacing(2)
+                .padding(13).background(RoundedRectangle(cornerRadius: Radius.md).fill(Color.theme.tintNeon)).padding(.top, 18)
+                .fixedSize(horizontal: false, vertical: true)
+            Button { sheetKey = "prem" } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("All write weeks").font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.theme.fg1)
+                        Text("\(d.weeks.count) weeks · \(d.weeks.filter { $0.v > 0 }.count) with writes").font(.numeric(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
+                    }
+                    Spacer()
+                    Text(fmtMoney(d.premLife, sign: true)).font(.numeric(size: 14, weight: .semibold)).foregroundStyle(Color.theme.pos)
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.theme.fg5)
+                }
+                .padding(.vertical, 15).contentShape(Rectangle())
+                .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+            }
+            .buttonStyle(.plain).padding(.top, 4)
+        }
+    }
+
+    // ── what the position earned ──
+    private func earnedPanel(_ d: PosData) -> some View {
+        let tot = d.premLife + abs(d.sharesPL)
+        return panel {
+            HStack(alignment: .firstTextBaseline) {
+                Text("What the position earned").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
+                Spacer()
+                Text(fmtMoney(d.netPL, sign: true)).font(.numeric(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
+            }
+            Text("Premium against unrealized share loss, since the first write.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
+            HStack(spacing: 3) {
+                RoundedRectangle(cornerRadius: 3).fill(Color.theme.neon).frame(width: max(2, CGFloat(d.premLife / tot) * 300))
+                RoundedRectangle(cornerRadius: 3).fill(Color.theme.tintNeg).frame(width: max(2, CGFloat(abs(d.sharesPL) / tot) * 300))
+            }
+            .frame(height: 20).frame(maxWidth: .infinity, alignment: .leading).clipShape(RoundedRectangle(cornerRadius: 4)).padding(.top, 18)
+            Button { sheetKey = "earned" } label: {
+                earnedRow("Premium income", "lifetime", fmtMoney(d.premLife, sign: true), .pos, chevron: true)
+            }.buttonStyle(.plain)
+            earnedRow("Shares", "unrealized vs \(fmtMoney(d.basisOrig, decimals: 2))", fmtMoney(d.sharesPL, sign: true), .neg, chevron: false)
+            HStack {
+                Text(String(format: "%.2f%%", d.premYield)).font(.numeric(size: 32, weight: .bold)).tracking(-1.2).foregroundStyle(Color.theme.fg1)
+                Spacer()
+                Text("Premium collected against position value").font(.system(size: 11)).foregroundStyle(Color.theme.fg3)
+                    .multilineTextAlignment(.trailing).frame(maxWidth: 160)
+            }
+            .padding(15).background(RoundedRectangle(cornerRadius: Radius.lg).fill(Color.theme.page2)).padding(.top, 16)
+        }
+    }
+
+    private func earnedRow(_ a: String, _ b: String, _ v: String, _ tone: Tone, chevron: Bool) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(a).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.theme.fg1)
+                Text(b).font(.numeric(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
             }
             Spacer()
-            Text(fmtMoney(v, sign: true))
-                .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                .foregroundStyle(Color.signed(v))
+            Text(v).font(.numeric(size: 14, weight: .semibold)).foregroundStyle(tone == .pos ? Color.theme.pos : Color.theme.neg)
+            if chevron { Image(systemName: "chevron.right").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.theme.fg5) }
         }
-        .padding(.vertical, 13)
-        .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
+        .padding(.vertical, 15).overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
     }
 
-    // ── HISTORY ──
-    private var historyCard: some View {
-        // One row per resolved strike, NET of buybacks (a rolled strike
-        // can read negative), so it reconciles with the total above.
-        let resolved = data.allRollups
-            .filter { $0.status != .open }
-            .sorted { $0.expiry > $1.expiry }
-        let shown = showAllHistory ? resolved : Array(resolved.prefix(5))
-        return card {
-            Text("History").font(.system(size: 19, weight: .heavy)).tracking(-0.5)
-                .foregroundStyle(Color.theme.fg1)
-            Text("Each strike as it resolved, net of buybacks.")
-                .font(.system(size: 12.5)).foregroundStyle(Color.theme.fg3).padding(.top, 6)
-
-            if resolved.isEmpty {
-                Text("Nothing closed yet.").font(.system(size: 13))
-                    .foregroundStyle(Color.theme.fg4).padding(.top, 18)
+    // ── history ──
+    private func historyPanel(_ d: PosData) -> some View {
+        panel {
+            Text("History").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
+            Text("Legs as they were written and closed.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
+            if d.hist.isEmpty {
+                Text("Nothing closed yet.").font(.system(size: 13)).foregroundStyle(Color.theme.fg4).padding(.top, 14)
             } else {
-                ForEach(shown) { r in
+                ForEach(d.hist) { h in
                     HStack {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("\(AppDates.shortMonthDay(r.expiry)) · \(fmtStrike(r.strike)) call ×\(Int(r.contracts))")
-                                .font(.system(size: 14.5, weight: .heavy)).tracking(-0.3)
-                                .foregroundStyle(Color.theme.fg1)
-                            Text(historySub(r.status) + (r.buyback > 0 ? " · \(fmtMoney(r.buyback)) bought back" : ""))
-                                .font(.numeric(size: 11.5, weight: .bold)).monospacedDigit()
-                                .foregroundStyle(Color.theme.fg4)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(h.w).font(.system(size: 14.5, weight: .semibold)).foregroundStyle(Color.theme.fg3)
+                            Text(h.note).font(.numeric(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg4)
                         }
                         Spacer()
-                        Text(fmtMoney(r.net, sign: true))
-                            .font(.numeric(size: 15, weight: .heavy)).monospacedDigit()
-                            .foregroundStyle(Color.signed(r.net))
+                        Text(fmtMoney(h.v, sign: true)).font(.numeric(size: 14, weight: .semibold)).foregroundStyle(Color.theme.pos)
                     }
-                    .padding(.vertical, 16)
-                    .overlay(alignment: .bottom) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
-                }
-                if resolved.count > 5 {
-                    Button {
-                        withAnimation(Motion.standard) { showAllHistory.toggle() }
-                    } label: {
-                        Text(showAllHistory ? "Show less" : "Show more")
-                            .font(.system(size: 13, weight: .heavy))
-                            .foregroundStyle(Color.theme.fg1)
-                            .padding(.horizontal, 22).frame(minHeight: 40)
-                            .background(Capsule().fill(Color.theme.page2))
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 16)
+                    .padding(.vertical, 15).overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
                 }
             }
         }
     }
 
-    private func historySub(_ s: CallLegStatus) -> String {
-        switch s {
-        case .assigned: return "assigned · called away"
-        case .rolled:   return "rolled"
-        case .expired:  return "expired OTM · kept"
-        case .open:     return "working"
-        }
-    }
-
-    // ── chrome ──
-    @ViewBuilder
-    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+    // ── shared ──
+    private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) { content() }
-            .padding(22)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 26).fill(Color.theme.surface))
-            .shadow(color: Color(hex: 0x121E16, alpha: 0.06), radius: 16, x: 0, y: 6)
+            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: Radius.xl).fill(Color.theme.surface))
+            .overlay(RoundedRectangle(cornerRadius: Radius.xl).strokeBorder(Color.theme.hair, lineWidth: 1))
     }
 
-    /// Pill segmented control — dark active thumb, matching v2.
-    private func segmented<T: Hashable & Identifiable>(
-        _ items: [T], selection: Binding<T>, label: @escaping (T) -> String
-    ) -> some View {
-        HStack(spacing: 4) {
-            ForEach(items) { item in
-                let on = selection.wrappedValue == item
-                Button {
-                    withAnimation(Motion.standard) { selection.wrappedValue = item }
-                } label: {
-                    Text(label(item))
-                        .font(.system(size: 11.5, weight: .bold)).tracking(-0.1)
-                        .foregroundStyle(on ? Color.theme.page : Color.theme.fg3)
-                        .lineLimit(1).minimumScaleFactor(0.75)
-                        .frame(maxWidth: .infinity).frame(minHeight: 36)
-                        .background(Capsule().fill(on ? Color.theme.fg1 : Color.clear))
-                }
-                .buttonStyle(.plain)
-            }
+    private func detailSheet(_ sh: NVSheet) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(sh.cat.uppercased()).font(.numeric(size: 9, weight: .semibold)).tracking(1.8).foregroundStyle(Color.theme.neon)
+                Text(sh.title).font(.system(size: 25, weight: .bold)).tracking(-0.6).foregroundStyle(Color.theme.fg1).padding(.top, 7)
+                Text(sh.sub).font(.system(size: 10.5)).foregroundStyle(Color.theme.fg3).padding(.top, 8)
+                HStack(alignment: .firstTextBaseline, spacing: 11) {
+                    Text(sh.hero).font(.numeric(size: 44, weight: .bold)).tracking(-1.4).foregroundStyle(Color.theme.fg1)
+                    Text(sh.heroUnit).font(.system(size: 10.5)).foregroundStyle(Color.theme.fg3)
+                }.padding(.top, 17)
+                Text(sh.line).font(.system(size: 12.5)).foregroundStyle(Color.theme.fg2).lineSpacing(3).padding(.top, 14)
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(spacing: 0) {
+                    ForEach(Array(sh.rows.enumerated()), id: \.offset) { i, r in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(r.name).font(.system(size: 14, weight: .medium)).foregroundStyle(Color.theme.fg1)
+                                Text(r.sub).font(.system(size: 10)).foregroundStyle(Color.theme.fg3)
+                            }
+                            Spacer()
+                            Text(r.val).font(.numeric(size: 15, weight: .medium)).foregroundStyle(tc(r.tone))
+                        }
+                        .padding(.vertical, 12).overlay(alignment: .top) { if i > 0 { Rectangle().fill(Color.theme.hair).frame(height: 1) } }
+                    }
+                }.padding(.top, 8)
+            }.padding(22)
         }
-        .padding(4)
-        .background(Capsule().fill(Color.theme.page2))
     }
 }
