@@ -127,6 +127,70 @@ final class PortfolioStore {
         return fresh
     }
 
+    // MARK: - Derived-model memoization (handoff-6 screens)
+    //
+    // The Today / Position / Performance screens each run the CoveredCall
+    // engine (a multi-pass walk over every trade + FIFO lot match) plus a
+    // screen-model assembly. SwiftUI re-runs those bodies on every state
+    // change — including the swipe-rail scroll position that drives the
+    // `.dots` indicator — so, called inline in `body`, each scroll frame
+    // re-walked the whole trade history on the main thread. And Today's
+    // rowViz rebuilt its entire model once per group card.
+    //
+    // These caches key off `summariesVersion` (same invalidation domain as
+    // cachedSummaries()/fifoLedger()), so a real data change is the only
+    // thing that recomputes; every other body re-run is an O(1) hit.
+    // @ObservationIgnored so writing the cache never itself triggers a body.
+
+    @ObservationIgnored private var ccCache: [String: CoveredCallTicker] = [:]
+    @ObservationIgnored private var ccCacheVersion = -1
+    /// Memoized CoveredCall engine, shared by all three screens + the
+    /// planner. This is the heavy one — everything else derives from it.
+    func cachedCoveredCall(ticker: String) -> CoveredCallTicker? {
+        if ccCacheVersion != summariesVersion { ccCache.removeAll(); ccCacheVersion = summariesVersion }
+        if let hit = ccCache[ticker] { return hit }
+        guard let v = CoveredCallData.build(store: self, ticker: ticker) else { return nil }
+        ccCache[ticker] = v
+        return v
+    }
+
+    @ObservationIgnored private var todayCache: (version: Int, value: NVDAToday?)?
+    /// Memoized Today (Home) screen model.
+    func cachedToday() -> NVDAToday? {
+        if let c = todayCache, c.version == summariesVersion { return c.value }
+        let v = NVDAToday.build(store: self)
+        todayCache = (summariesVersion, v)
+        return v
+    }
+
+    @ObservationIgnored private var posCache: (version: Int, value: PosData?)?
+    /// Memoized Position (Covered Call) screen model.
+    func cachedPosition() -> PosData? {
+        if let c = posCache, c.version == summariesVersion { return c.value }
+        let v = PosData.build(store: self)
+        posCache = (summariesVersion, v)
+        return v
+    }
+
+    @ObservationIgnored private var perfCache: (version: Int, value: PerfData?)?
+    /// Memoized Performance screen model.
+    func cachedPerformance() -> PerfData? {
+        if let c = perfCache, c.version == summariesVersion { return c.value }
+        let v = PerfData.build(store: self)
+        perfCache = (summariesVersion, v)
+        return v
+    }
+
+    /// Warm the derived-model caches off the render path, right after a
+    /// fetch lands, so the first paint of each tab is a cache hit instead
+    /// of a main-thread engine walk. NVDA-only app → one ticker.
+    func prewarmDerivedModels() {
+        _ = cachedCoveredCall(ticker: "NVDA")
+        _ = cachedToday()
+        _ = cachedPosition()
+        _ = cachedPerformance()
+    }
+
     private let client = SupabaseService.client
 
     init() {
@@ -490,6 +554,10 @@ final class PortfolioStore {
         // Invalidate memoized summaries — cachedSummaries() will
         // recompute on next read instead of every body invocation.
         summariesVersion &+= 1
+        // Warm the Today/Position/Performance model caches now, while we're
+        // already off the render path, so the first paint of each tab is a
+        // cache hit rather than a main-thread engine walk.
+        prewarmDerivedModels()
         Perf.end("fetchAll.join", perfJoin)
         // Only overwrite the freshness timestamp when we actually
         // received fresh greeks/quotes — otherwise we'd reset it to

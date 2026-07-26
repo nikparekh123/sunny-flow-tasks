@@ -57,7 +57,7 @@ struct NVDAHomeScreen: View {
     }
 
     var body: some View {
-        let data = NVDAToday.build(store: store)
+        let data = store.cachedToday()
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 brandRow.padding(.horizontal, 22).padding(.top, 8)
@@ -348,7 +348,7 @@ struct NVDAHomeScreen: View {
     // ── signature visuals ──
     @ViewBuilder
     private func rowViz(_ k: String) -> some View {
-        if let d = NVDAToday.build(store: store) {
+        if let d = store.cachedToday() {
             switch k {
             case "prem":  premViz(d)
             case "prot":  protViz(d)

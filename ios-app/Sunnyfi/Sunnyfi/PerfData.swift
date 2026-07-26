@@ -73,7 +73,7 @@ struct PerfData: Sendable {
 
     static func build(store: PortfolioStore, today: Date = Date()) -> PerfData? {
         let ticker = "NVDA"
-        guard let cc = CoveredCallData.build(store: store, ticker: ticker) else { return nil }
+        guard let cc = store.cachedCoveredCall(ticker: ticker) else { return nil }
         let shares = cc.shares
         let price = cc.currentPrice
         let basisOrig = cc.current?.entryPrice ?? 0

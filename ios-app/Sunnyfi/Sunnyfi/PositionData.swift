@@ -76,7 +76,7 @@ struct PosData: Sendable {
 
     static func build(store: PortfolioStore, today: Date = Date()) -> PosData? {
         let ticker = "NVDA"
-        guard let cc = CoveredCallData.build(store: store, ticker: ticker) else { return nil }
+        guard let cc = store.cachedCoveredCall(ticker: ticker) else { return nil }
         let company = store.companies.first { $0.ticker.uppercased() == ticker }
 
         let price = cc.currentPrice

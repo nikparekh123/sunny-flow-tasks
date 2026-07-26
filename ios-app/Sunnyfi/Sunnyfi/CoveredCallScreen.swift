@@ -49,7 +49,7 @@ struct CoveredCallScreen: View {
     }
 
     var body: some View {
-        let d = PosData.build(store: store)
+        let d = store.cachedPosition()
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let d {
@@ -74,7 +74,7 @@ struct CoveredCallScreen: View {
             }
         }
         .sheet(isPresented: $showPlanner) {
-            if let data = CoveredCallData.build(store: store, ticker: "NVDA") {
+            if let data = store.cachedCoveredCall(ticker: "NVDA") {
                 CoveredCallPlanner(model: PlannerModel(store: store, data: data), onClose: { showPlanner = false })
                     .presentationDetents([.large]).presentationDragIndicator(.visible)
             }

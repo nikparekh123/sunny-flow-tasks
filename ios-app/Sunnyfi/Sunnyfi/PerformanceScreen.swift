@@ -52,7 +52,7 @@ struct PerformanceScreen: View {
     private func srcColor(_ s: PerfSource) -> Color { s == .shares ? Color.theme.neon : Color.theme.oi }
 
     var body: some View {
-        let d = PerfData.build(store: store)
+        let d = store.cachedPerformance()
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let d {
