@@ -18,6 +18,7 @@ struct AccountScreen: View {
     let lock:  AppLock
     let prefs: NotificationPrefs
     let store: PortfolioStore
+    @Environment(\.navBarChrome) private var navChrome
     @State private var showPrivacy: Bool = false
     @State private var showSignOutConfirm: Bool = false
     private let appPrefs = AppPrefs.shared
@@ -71,6 +72,7 @@ struct AccountScreen: View {
             .padding(.vertical, 14)
         }
         .background(Color.theme.page)
+        .reportsNavScroll(navChrome)
         .sheet(isPresented: $showPrivacy) { PrivacyPolicyView() }
         .confirmationDialog("Sign out?", isPresented: $showSignOutConfirm) {
             Button("Sign out", role: .destructive) {
