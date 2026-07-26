@@ -106,8 +106,9 @@ struct NVDAToday: Sendable {
     let iv: Double                       // percent, e.g. 40.3
     let ivLow: Double
     let ivHigh: Double
-    let hv30: Double?                    // nil when the feed hasn't supplied it
+    let hv30: Double?                    // nil when we can't compute realized vol
     let ivr: Int
+    let ivWindowDays: Int                // how deep the IV-rank history goes
     let spread: Double?
     let score: Int
     let zone: VolZone
@@ -208,15 +209,23 @@ struct NVDAToday: Sendable {
         let iv = (iv0?.current_iv ?? 0) * 100
         let ivLow = (iv0?.iv_low ?? 0) * 100
         let ivHigh = (iv0?.iv_high ?? 0) * 100
-        let hvRaw = (iv0?.current_hv30 ?? 0) * 100
-        let hv30: Double? = hvRaw > 0 ? hvRaw : nil
+        let ivWindowDays = iv0?.iv_window_days ?? 0
+        // HV30 computed in-app from daily closes — the stored feed value is
+        // unreliable (often 0). Annualized stdev of up to 30 daily log
+        // returns (oldest→newest), with today's spot as the latest point.
+        let closesAsc = hist.reversed().map(\.close_price) + [price]
+        let hvApp = realizedVol(closesAsc)
+        let hvFeed = (iv0?.current_hv30).map { $0 * 100 }.flatMap { $0 > 0 ? $0 : nil }
+        let hv30: Double? = hvApp ?? hvFeed
         let ivr = ivHigh > ivLow ? Int((((iv - ivLow) / (ivHigh - ivLow)) * 100).rounded()) : 0
         let spread: Double? = hv30.map { iv - $0 }
         let pricedDay = iv > 0 ? iv / (252.0).squareRoot() : 0
-        // Seller score: IVR 60% + normalized spread 40% (spread −20…+30 → 0…100).
-        let nSpread = spread.map { max(0, min(100, (($0 + 20) / 50) * 100)) } ?? 40
-        let score = Int((Double(ivr) * 0.6 + nSpread * 0.4).rounded())
-        let zone = zoneFor(score: score, iv: iv, hv30: hv30)
+        // The verdict leans on the REAL signal we can compute today: the
+        // implied-minus-realized spread. IV rank is only ~ivWindowDays deep,
+        // so it's a secondary nudge. spread normalized −20…+30 → 0…100.
+        let nSpread = spread.map { max(0, min(100, (($0 + 20) / 50) * 100)) }
+        let score: Int = nSpread.map { Int(($0 * 0.65 + Double(ivr) * 0.35).rounded()) } ?? ivr
+        let zone = zoneFor(score: score, iv: iv, hv30: hv30, spread: spread)
 
         // ── expected move for the working expiry (1-SD, IV-implied) ──
         let erMove = iv > 0 && dte > 0 ? (iv / 100 * (Double(dte) / 365).squareRoot() * 100) : max(6, iv / 5)
@@ -265,7 +274,7 @@ struct NVDAToday: Sendable {
                                  overBE: overBE, cushionPct: cushionPct, netPL: netPL, premWeek: premWeek,
                                  premLife: premLife, premPrev: premPrev, vsLast: vsLast, weeks: weeks,
                                  protectPct: protectPct, strike: strike, expiry: expiry, iv: iv, ivLow: ivLow,
-                                 ivHigh: ivHigh, hv30: hv30, ivr: ivr, spread: spread, zone: zone, week5: week5,
+                                 ivHigh: ivHigh, hv30: hv30, ivr: ivr, ivWindowDays: ivWindowDays, spread: spread, zone: zone, week5: week5,
                                  avgAbs: avgAbs, erMove: erMove, erLow: erLow, erHigh: erHigh, fedDays: fedDays,
                                  fedWhen: fedWhen)
 
@@ -277,7 +286,7 @@ struct NVDAToday: Sendable {
             premPrev: premPrev, vsLast: vsLast, weeks: writeWeeks.isEmpty ? weeks : writeWeeks, protectPct: protectPct,
             strike: strike, expiry: expiry, dte: dte, contractsWritten: contractsWritten, contractsTotal: contractsTotal,
             days: days, dayMax: dayMax, avgAbs: avgAbs, week5: week5, pricedDay: pricedDay,
-            iv: iv, ivLow: ivLow, ivHigh: ivHigh, hv30: hv30, ivr: ivr, spread: spread, score: score, zone: zone,
+            iv: iv, ivLow: ivLow, ivHigh: ivHigh, hv30: hv30, ivr: ivr, ivWindowDays: ivWindowDays, spread: spread, score: score, zone: zone,
             erMove: erMove, erLow: erLow, erHigh: erHigh, fedDays: fedDays, fedWhen: fedWhen, erDays: erDays,
             items: items, sheets: sheets)
     }
@@ -290,18 +299,35 @@ struct NVDAToday: Sendable {
     private static func sessionLabel(_ iso: String, df: DateFormatter) -> String {
         "\(AppDates.weekdayShort(iso)) \(String(iso.suffix(2)))"
     }
-    private static func zoneFor(score: Int, iv: Double, hv30: Double?) -> VolZone {
+    private static func zoneFor(score: Int, iv: Double, hv30: Double?, spread: Double?) -> VolZone {
+        let edge = (hv30 != nil && spread != nil)
+            ? String(format: " IV %.0f%% vs realized %.0f%% (%@%.0f).", iv, iv - spread!, spread! >= 0 ? "+" : "−", abs(spread!))
+            : ""
         if score >= 75 { return VolZone(key: "caution", verdict: "Caution", sub: "vol is extreme",
-            read: "Premiums are fat because something is coming. Check the catalyst before you size up.") }
+            read: "Premiums are fat because something is coming. Check the catalyst before you size up.\(edge)") }
         if score >= 55 { return VolZone(key: "sell", verdict: "Write", sub: "vol is rich",
-            read: "The sweet spot. Options are pricing more movement than the stock has been delivering — sell into it.") }
+            read: "Options are pricing more movement than the stock has delivered — the sweet spot to sell into.\(edge)") }
         if score >= 35 { return VolZone(key: "neutral", verdict: "Neutral", sub: "no edge either way",
-            read: "Fair pricing. Write only if the income is needed this month, and stay wide of the strike.") }
-        let hvNote = hv30.map { String(format: "IV %.1f%% sits under 30-day realized %.0f%% — ", iv, $0) } ?? ""
+            read: "Fair pricing. Write only if the income is needed, and stay wide of the strike.\(edge)") }
         return VolZone(key: "hold", verdict: "Hold", sub: "vol is cheap",
-            read: "\(hvNote)writing here undercompensates you for the movement. Wait for IV rank above 50.")
+            read: "The stock is moving about as much as options imply, so writing here undercompensates you.\(edge)")
     }
     private static func fmtDec(_ v: Double) -> String { String(format: "%.1f", v) }
+
+    /// HV30 — annualized stdev of up to 30 daily log returns from a
+    /// close series (oldest→newest). nil when the series is too short.
+    private static func realizedVol(_ closes: [Double]) -> Double? {
+        guard closes.count >= 8 else { return nil }
+        let recent = Array(closes.suffix(31))       // ≤ 31 closes → ≤ 30 returns
+        var rets: [Double] = []
+        for i in 1..<recent.count where recent[i - 1] > 0 && recent[i] > 0 {
+            rets.append(Foundation.log(recent[i] / recent[i - 1]))
+        }
+        guard rets.count >= 5 else { return nil }
+        let mean = rets.reduce(0, +) / Double(rets.count)
+        let variance = rets.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(rets.count - 1)
+        return variance.squareRoot() * (252.0).squareRoot() * 100
+    }
 
     // Detail sheets — real, derivable rows only (no fabricated ticks/probabilities).
     private static func buildSheets(
@@ -309,23 +335,26 @@ struct NVDAToday: Sendable {
         basisOrig: Double, basisEff: Double, premPerShare: Double, overBE: Double, cushionPct: Double, netPL: Double,
         premWeek: Double, premLife: Double, premPrev: Double, vsLast: Double, weeks: [(String, Double)],
         protectPct: Double, strike: Double, expiry: String, iv: Double, ivLow: Double, ivHigh: Double,
-        hv30: Double?, ivr: Int, spread: Double?, zone: VolZone, week5: Double, avgAbs: Double,
+        hv30: Double?, ivr: Int, ivWindowDays: Int, spread: Double?, zone: VolZone, week5: Double, avgAbs: Double,
         erMove: Double, erLow: Double, erHigh: Double, fedDays: Int?, fedWhen: String?
     ) -> [String: NVSheet] {
         let shN = Int(shares.rounded()).formatted(.number.grouping(.automatic))
         var s: [String: NVSheet] = [:]
 
+        // The rank window is only as deep as the daily IV snapshot has run.
+        let rankWin = ivWindowDays >= 220 ? "52-week" : "\(ivWindowDays)-day"
         var volRows: [SheetRow] = [
-            SheetRow(name: "IV rank", sub: "recent range", val: "\(ivr)/100", tone: .fg1),
             SheetRow(name: "Implied vol", sub: "front month", val: String(format: "%.1f%%", iv), tone: .fg1),
         ]
         if let hv = hv30 {
             volRows.append(SheetRow(name: "Realized vol", sub: "30-day actual", val: String(format: "%.0f%%", hv), tone: .fg1))
-            if let sp = spread { volRows.append(SheetRow(name: "Implied − realized", sub: "seller edge", val: (sp >= 0 ? "+" : "−") + String(format: "%.0f", abs(sp)), tone: sp >= 0 ? .pos : .neg)) }
+            if let sp = spread { volRows.append(SheetRow(name: "Implied − realized", sub: "seller edge (the real signal)", val: (sp >= 0 ? "+" : "−") + String(format: "%.0f", abs(sp)), tone: sp >= 0 ? .pos : .neg)) }
         }
-        volRows.append(SheetRow(name: "IV range", sub: "low · high", val: String(format: "%.0f–%.0f%%", ivLow, ivHigh), tone: .fg3))
+        volRows.append(SheetRow(name: "IV rank", sub: "\(rankWin) range", val: "\(ivr)/100", tone: .fg3))
+        volRows.append(SheetRow(name: "IV range", sub: "\(rankWin) low · high", val: String(format: "%.0f–%.0f%%", ivLow, ivHigh), tone: .fg3))
         s["vol"] = NVSheet(cat: "Volatility", title: "Should you write?", sub: "\(ticker) · 30-day options",
-            hero: String(format: "%.1f%%", iv), heroUnit: "implied vol · rank \(ivr) of 100", line: zone.read, rows: volRows, isVol: true)
+            hero: String(format: "%.1f%%", iv), heroUnit: hv30 != nil ? "implied vol · realized \(String(format: "%.0f", iv - (spread ?? 0)))%" : "implied vol · rank \(ivr)/100",
+            line: zone.read, rows: volRows, isVol: true)
 
         var premRows: [SheetRow] = weeks.reversed().map {
             SheetRow(name: "Week of \($0.0)", sub: $0.1 > 0 ? "calls written" : "no writes",
