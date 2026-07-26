@@ -15,7 +15,7 @@ struct PerformanceScreen: View {
     let auth: AuthStore
     @Environment(\.navBarChrome) private var navChrome
 
-    @State private var pid = "week"
+    @State private var monthIdx: Int?   // Gains & losses month rail (nil = latest)
     @State private var on: [PerfSource: Bool] = [.shares: true, .calls: true]
     @State private var sel: Int?
     @State private var sheetKey: String?
@@ -59,8 +59,7 @@ struct PerformanceScreen: View {
                 if let d {
                     header(d)
                     netCard(d).padding(.horizontal, 22).padding(.top, 12)
-                    gainsPanel(d).padding(.horizontal, 22).padding(.top, 12)
-                    expiryPanel(d).padding(.horizontal, 22).padding(.top, 12)
+                    monthChart(d).padding(.horizontal, 22).padding(.top, 12)
                     sourceRail(d)
                 } else {
                     Text("No NVDA position yet.").font(.system(size: 14)).foregroundStyle(Color.theme.fg3).padding(40)
@@ -132,116 +131,111 @@ struct PerformanceScreen: View {
         .overlay(alignment: .leading) { if divider { Rectangle().fill(inkText.opacity(0.12)).frame(width: 1) } }
     }
 
-    // ── gains & losses ──
-    private func gainsPanel(_ d: PerfData) -> some View {
-        let p = d.periods.first { $0.id == pid } ?? d.periods[0]
-        let gains = p.bars.map { gainOf($0) }, losses = p.bars.map { abs(lossOf($0)) }
-        let maxUp = max(1, gains.max() ?? 1), maxDn = max(1, losses.max() ?? 1)
-        let H: CGFloat = 170
-        let upH = H * CGFloat(maxUp / (maxUp + maxDn))
-        let sc = H / CGFloat(maxUp + maxDn)
-        let t = totals(p.bars)
-        let dense = p.bars.count > 14
+    // ── gains & losses · one month at a time (handoff 7) ──
+    private struct LegendItem: Identifiable { let label: String; let colorKey: String; let source: PerfSource?; var id: String { label } }
+    private var legendItems: [LegendItem] {
+        [.init(label: "Shares", colorKey: "neon", source: .shares),
+         .init(label: "Calls sold", colorKey: "oi", source: .calls),
+         .init(label: "Calls bought", colorKey: "earnings", source: nil),
+         .init(label: "Puts sold", colorKey: "gold", source: nil),
+         .init(label: "Puts bought", colorKey: "note", source: nil)]
+    }
+
+    private func barGain(_ b: PerfBar) -> Double { PerfSource.allCases.reduce(0) { $0 + (((on[$1] ?? true) && b.val($1) > 0) ? b.val($1) : 0) } }
+    private func barLoss(_ b: PerfBar) -> Double { PerfSource.allCases.reduce(0) { $0 + (((on[$1] ?? true) && b.val($1) < 0) ? b.val($1) : 0) } }
+    private func monthNet(_ bars: [PerfBar]) -> Double { bars.reduce(0) { $0 + barGain($1) + barLoss($1) } }
+    private func barSegs(_ b: PerfBar) -> [SBCSeg] {
+        PerfSource.allCases.compactMap { s in
+            guard (on[s] ?? true), b.val(s) != 0 else { return nil }
+            return SBCSeg(v: b.val(s), color: srcColor(s))
+        }
+    }
+    private func compactSigned(_ v: Double) -> String {
+        let s = v > 0 ? "+" : v < 0 ? "−" : ""
+        let a = abs(v)
+        if a >= 1000 { return s + "$" + String(format: a >= 10000 ? "%.0f" : "%.1f", a / 1000) + "K" }
+        return s + "$" + String(format: "%.0f", a)
+    }
+
+    private func monthChart(_ d: PerfData) -> some View {
+        let mIdx = d.months.isEmpty ? 0 : min(monthIdx ?? (d.months.count - 1), d.months.count - 1)
+        let bars = d.months.indices.contains(mIdx) ? d.months[mIdx].bars : []
+        let net = monthNet(bars)
         return panel {
             HStack(alignment: .firstTextBaseline) {
                 Text("Gains & losses").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
                 Spacer()
-                Text(fmtMoney(t.net, sign: true)).font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.signed(t.net))
+                Text(fmtMoney(net, sign: true)).font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.signed(net))
             }
             Text("Daily, split into stock and written calls. Tap a bar.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
-            // period switch
-            HStack(spacing: 7) {
-                ForEach(d.periods) { per in
-                    let active = per.id == pid
-                    Button { withAnimation(Motion.standard) { pid = per.id; sel = nil } } label: {
-                        Text(per.label).font(.system(size: 12, weight: .semibold)).foregroundStyle(active ? Color.theme.page : Color.theme.fg3)
-                            .frame(maxWidth: .infinity, minHeight: 32).background(Capsule().fill(active ? Color.theme.fg1 : Color.theme.page2))
-                    }.buttonStyle(.plain)
-                }
-            }.padding(.top, 10)
-            // chart
-            GeometryReader { g in
-                let w = g.size.width
-                let bw = (w - CGFloat(p.bars.count - 1) * (dense ? 1.5 : 3)) / CGFloat(p.bars.count)
-                ZStack(alignment: .topLeading) {
-                    Rectangle().fill(Color(hex: 0x19372a, alpha: 0.3)).frame(height: 1.5).offset(y: upH)
-                    HStack(alignment: .top, spacing: dense ? 1.5 : 3) {
-                        ForEach(Array(p.bars.enumerated()), id: \.offset) { i, bar in
-                            Button { withAnimation(Motion.standard) { sel = (sel == i ? nil : i) } } label: {
-                                VStack(spacing: 0) {
-                                    Spacer(minLength: 0)
-                                    VStack(spacing: 0) {   // gains (up)
-                                        ForEach(PerfSource.allCases, id: \.self) { s in
-                                            if (on[s] ?? true), bar.val(s) > 0 {
-                                                Rectangle().fill(srcColor(s)).frame(height: CGFloat(bar.val(s)) * sc)
-                                            }
-                                        }
-                                    }
-                                    .frame(height: CGFloat(gains[i]) * sc, alignment: .bottom)
-                                    Color.clear.frame(height: 0)
-                                    VStack(spacing: 0) {   // losses (down)
-                                        ForEach(PerfSource.allCases, id: \.self) { s in
-                                            if (on[s] ?? true), bar.val(s) < 0 {
-                                                Rectangle().fill(srcColor(s).opacity(0.55)).frame(height: CGFloat(abs(bar.val(s))) * sc)
-                                            }
-                                        }
-                                    }
-                                    .frame(height: CGFloat(losses[i]) * sc, alignment: .top)
-                                    Spacer(minLength: 0)
-                                }
-                                .frame(width: bw, height: H)
-                                .opacity(sel == nil || sel == i ? 1 : 0.34)
-                                .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                        }
+            // month rail
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(d.months.enumerated()), id: \.element.id) { i, mm in
+                        let active = i == mIdx
+                        Button { withAnimation(Motion.standard) { monthIdx = i; sel = nil } } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(mm.short.uppercased()).font(.mono(size: 12, weight: .bold)).tracking(0.4)
+                                    .foregroundStyle(active ? Color.theme.page : Color.theme.fg2)
+                                Text(compactSigned(monthNet(mm.bars))).font(.mono(size: 11, weight: .semibold))
+                                    .foregroundStyle(active ? Color.theme.lime : Color.theme.fg4)
+                            }
+                            .frame(minWidth: 76, alignment: .leading).padding(.horizontal, 13).padding(.vertical, 9)
+                            .background(RoundedRectangle(cornerRadius: Radius.lg).fill(active ? Color.theme.fg1 : Color.theme.page2))
+                        }.buttonStyle(.plain)
                     }
                 }
+                .padding(.vertical, 2)
             }
-            .frame(height: H).padding(.top, 18)
-            // x axis
-            HStack(spacing: dense ? 1.5 : 3) {
-                ForEach(Array(p.bars.enumerated()), id: \.offset) { i, bar in
-                    Text(p.ticks != nil ? (p.ticks?[i] ?? (sel == i ? bar.label : "")) : bar.label)
-                        .font(.mono(size: 9, weight: sel == i ? .semibold : .regular))
-                        .foregroundStyle(sel == i ? Color.theme.neon : Color.theme.fg4)
-                        .frame(maxWidth: .infinity).lineLimit(1)
-                }
-            }.padding(.top, 9)
+            .padding(.horizontal, -16).padding(.top, 14)
+            // the one bar-chart vocabulary
+            SunnyBarChart(
+                bars: bars.enumerated().map { i, bar in SBCBar(key: "\(i)", label: bar.label, sub: bar.sub, segs: barSegs(bar)) },
+                height: 180, sel: sel, onSel: { sel = $0 }, topLabel: "Gain", bottomLabel: "Loss")
             // readout
-            readout(p, gains: gains, losses: losses, t: t).padding(.top, 14).padding(.top, 13)
+            readout(bars: bars).padding(.top, 14).padding(.top, 13)
                 .overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
-            // legend
-            HStack(spacing: 7) {
-                ForEach(PerfSource.allCases, id: \.self) { s in
-                    let v = p.bars.reduce(0.0) { $0 + $1.val(s) }
-                    let isOn = on[s] ?? true
-                    Button { on[s] = !isOn } label: {
-                        HStack(spacing: 7) {
-                            RoundedRectangle(cornerRadius: 2).fill(srcColor(s)).frame(width: 9, height: 9)
-                            Text(s == .shares ? "Shares" : "Calls sold").font(.mono(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg1)
-                            Text(fmtMoney(v, sign: true)).font(.mono(size: 10, weight: .regular)).foregroundStyle(Color.signed(v))
-                        }
-                        .padding(.horizontal, 11).padding(.vertical, 8)
-                        .background(Capsule().fill(isOn ? Color.theme.elevated : Color.theme.page2))
-                        .overlay(Capsule().strokeBorder(isOn ? Color.theme.borderBright : Color.theme.dusk, style: .init(lineWidth: 1, dash: isOn ? [] : [3, 2])))
-                        .opacity(isOn ? 1 : 0.42)
-                    }.buttonStyle(.plain)
-                }
-                Spacer(minLength: 0)
-            }.padding(.top, 16)
+            // five-source legend (shares + calls sold live; the rest honest empties)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) { ForEach(legendItems) { legendChip($0, bars: bars) } }
+            }
+            .padding(.horizontal, -16).padding(.top, 16)
         }
     }
 
+    private func legendChip(_ item: LegendItem, bars: [PerfBar]) -> some View {
+        let disabled = item.source == nil
+        let isOn = item.source.map { on[$0] ?? true } ?? false
+        let v = item.source.map { s in bars.reduce(0.0) { $0 + $1.val(s) } } ?? 0
+        let live = isOn && !disabled
+        return Button {
+            if let s = item.source { on[s] = !(on[s] ?? true) }
+        } label: {
+            HStack(spacing: 7) {
+                RoundedRectangle(cornerRadius: 2).fill(srcColor(item.colorKey)).frame(width: 9, height: 9)
+                Text(item.label).font(.mono(size: 10.5, weight: .regular)).foregroundStyle(Color.theme.fg1)
+                Text(disabled ? "—" : fmtMoney(v, sign: true)).font(.mono(size: 10, weight: .regular))
+                    .foregroundStyle(disabled ? Color.theme.fg4 : Color.signed(v))
+            }
+            .padding(.horizontal, 11).padding(.vertical, 8)
+            .background(Capsule().fill(live ? Color.theme.elevated : Color.theme.page2))
+            .overlay(Capsule().strokeBorder(live ? Color.theme.borderBright : Color.theme.dusk, style: .init(lineWidth: 1, dash: live ? [] : [3, 2])))
+            .opacity(live ? 1 : 0.5)
+        }
+        .buttonStyle(.plain).disabled(disabled)
+    }
+
     @ViewBuilder
-    private func readout(_ p: PerfPeriodModel, gains: [Double], losses: [Double], t: (gains: Double, losses: Double, net: Double)) -> some View {
-        if let i = sel {
-            let b = p.bars[i]
+    private func readout(bars: [PerfBar]) -> some View {
+        if let i = sel, bars.indices.contains(i) {
+            let b = bars[i]
+            let g = barGain(b), l = barLoss(b)
             HStack(spacing: 10) {
                 Text(b.sub).font(.mono(size: 11, weight: .semibold)).foregroundStyle(Color.theme.fg1)
-                Text("↑\(fmtMoney(gainOf(b)).replacingOccurrences(of: "+", with: "")) · ↓\(fmtMoney(abs(lossOf(b))))")
+                Text("↑\(fmtMoney(g).replacingOccurrences(of: "+", with: "")) · ↓\(fmtMoney(abs(l)))")
                     .font(.mono(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg3).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(fmtMoney(gainOf(b) + lossOf(b), sign: true)).font(.mono(size: 11, weight: .semibold)).foregroundStyle(Color.signed(gainOf(b) + lossOf(b)))
+                Text(fmtMoney(g + l, sign: true)).font(.mono(size: 11, weight: .semibold)).foregroundStyle(Color.signed(g + l))
                 Button { withAnimation { sel = nil } } label: {
                     Text("CLEAR").font(.mono(size: 9.5, weight: .semibold)).tracking(0.6).foregroundStyle(Color.theme.neon)
                         .padding(.horizontal, 10).padding(.vertical, 5).background(Capsule().fill(Color.theme.tintNeon))
@@ -249,55 +243,9 @@ struct PerformanceScreen: View {
             }
         } else {
             HStack {
-                Text("\(p.bars.count) sessions · tap for a day").font(.mono(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg3)
+                Text("\(bars.count) sessions · tap for a day").font(.mono(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg3)
                 Spacer()
-                Text(fmtMoney(t.net, sign: true)).font(.mono(size: 11, weight: .semibold)).foregroundStyle(Color.signed(t.net))
-            }
-        }
-    }
-
-    // ── premium by expiry ledger ──
-    private func expiryPanel(_ d: PerfData) -> some View {
-        let maxUp = max(1, d.expiries.map(\.prem).max() ?? 1)
-        let maxDn = max(1, d.expiries.map(\.cost).max() ?? 1)
-        let H: CGFloat = 150
-        let upH = H * CGFloat(maxUp / (maxUp + maxDn)), sc = H / CGFloat(maxUp + maxDn)
-        return panel {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Premium by expiry").font(.system(size: 16, weight: .bold)).tracking(-0.3).foregroundStyle(Color.theme.fg1)
-                Spacer()
-                Text(fmtMoney(d.expNet, sign: true)).font(.mono(size: 15, weight: .bold)).foregroundStyle(Color.theme.pos)
-            }
-            Text("Credit taken up, cost to close down.").font(.system(size: 11.5)).foregroundStyle(Color.theme.fg3).padding(.top, 7)
-            HStack(alignment: .top, spacing: 6) {
-                ForEach(d.expiries) { e in
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        RoundedRectangle(cornerRadius: 2).fill(Color.theme.oi).frame(height: CGFloat(e.prem) * sc)
-                        Rectangle().fill(Color.clear).frame(height: 0)
-                        if e.cost > 0 { RoundedRectangle(cornerRadius: 2).fill(Color.theme.neg.opacity(0.55)).frame(height: CGFloat(e.cost) * sc) }
-                        Spacer(minLength: 0)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: H, alignment: upH > 0 ? .center : .top)
-                    .overlay(alignment: .top) { Rectangle().fill(Color(hex: 0x19372a, alpha: 0.3)).frame(height: 1).offset(y: upH) }
-                }
-            }
-            .frame(height: H).padding(.top, 16)
-            HStack(spacing: 6) {
-                ForEach(d.expiries) { e in Text(e.ex).font(.mono(size: 9, weight: .regular)).foregroundStyle(Color.theme.fg4).frame(maxWidth: .infinity) }
-            }.padding(.top, 9)
-            ForEach(Array(d.expiries.reversed().enumerated()), id: \.element.id) { i, e in
-                Button { sheetKey = "exp-\(e.ex)" } label: {
-                    HStack(spacing: 11) {
-                        Text("\(d.expiries.count - i)").font(.mono(size: 11, weight: .regular)).foregroundStyle(Color.theme.fg4).frame(width: 16)
-                        Text(e.ex).font(.system(size: 14.5, weight: .bold)).tracking(-0.2).foregroundStyle(Color.theme.fg1).frame(width: 50, alignment: .leading)
-                        Text("\(fmtStrike(e.strike))c ×\(e.qty) · \(e.status)").font(.mono(size: 9.5, weight: .regular)).foregroundStyle(Color.theme.fg4).lineLimit(1)
-                        Spacer(minLength: 0)
-                        Text(fmtMoney(e.net, sign: true)).font(.mono(size: 13, weight: .semibold)).foregroundStyle(Color.signed(e.net))
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.theme.fg5)
-                    }
-                    .padding(.vertical, 14).contentShape(Rectangle()).overlay(alignment: .top) { Rectangle().fill(Color.theme.hair).frame(height: 1) }
-                }.buttonStyle(.plain)
+                Text(fmtMoney(monthNet(bars), sign: true)).font(.mono(size: 11, weight: .semibold)).foregroundStyle(Color.signed(monthNet(bars)))
             }
         }
     }

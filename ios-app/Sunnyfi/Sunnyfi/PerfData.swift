@@ -30,6 +30,18 @@ struct PerfPeriodModel: Identifiable, Sendable {
     let ticks: [Int: String]?
 }
 
+/// Handoff 7 — the Gains & losses view is one calendar month at a time,
+/// picked from a scrollable month rail. `bars` are that month's trading
+/// sessions (real daily shares MTM + modeled short-call leg).
+struct PerfMonth: Identifiable, Sendable {
+    let key: String          // yyyy-MM
+    let short: String        // "Jul"
+    let label: String        // "July 2026"
+    let bars: [PerfBar]
+    let net: Double
+    var id: String { key }
+}
+
 struct PerfExpiry: Identifiable, Sendable {
     let ex: String
     let strike: Double
@@ -65,7 +77,7 @@ struct PerfData: Sendable {
     let sharesPL: Double
     let netPL: Double
     let premYield: Double
-    let periods: [PerfPeriodModel]
+    let months: [PerfMonth]
     let expiries: [PerfExpiry]
     let expNet: Double
     let sources: [PerfSrc]
@@ -89,47 +101,27 @@ struct PerfData: Sendable {
         // add today's live price as the latest point
         let series: [(String, Double)] = hist.map { ($0.date, $0.close_price) } + [(isoToday(today), price)]
 
-        // ── Week: last 5 sessions, real daily shares MTM + modeled calls ──
-        func weekdayLabel(_ iso: String) -> String { AppDates.weekdayShort(iso) }
-        let last6 = Array(series.suffix(6))
-        var weekBars: [PerfBar] = []
-        for i in 1..<last6.count {
-            let sh = (last6[i].1 - last6[i - 1].1) * shares
-            weekBars.append(PerfBar(label: weekdayLabel(last6[i].0), sub: AppDates.shortMonthDay(last6[i].0),
-                                    shares: sh, calls: (-sh * 0.25).rounded()))
+        // ── Sessions: real daily shares MTM + modeled short-call leg,
+        //    grouped by calendar month for the Gains & losses month rail ──
+        var sessions: [(iso: String, shares: Double, calls: Double)] = []
+        for i in 1..<series.count {
+            let sh = (series[i].1 - series[i - 1].1) * shares
+            sessions.append((series[i].0, sh, (-sh * 0.25).rounded()))
         }
-
-        // ── Month: last ~22 sessions ──
-        let last23 = Array(series.suffix(23))
-        var monthBars: [PerfBar] = []
-        for i in 1..<last23.count {
-            let sh = (last23[i].1 - last23[i - 1].1) * shares
-            let day = String(last23[i].0.suffix(2))
-            monthBars.append(PerfBar(label: day, sub: AppDates.shortMonthDay(last23[i].0),
-                                     shares: sh, calls: (-sh * 0.25).rounded()))
-        }
-        let monthTicks: [Int: String] = Dictionary(uniqueKeysWithValues: stride(from: 3, to: monthBars.count, by: 5).map { ($0, monthBars[$0].label) })
-
-        // ── Year: monthly MTM from first/last close each month ──
-        var byMonth: [String: [(String, Double)]] = [:]
-        for p in series { byMonth[String(p.0.prefix(7)), default: []].append(p) }
-        let months = byMonth.keys.sorted()
-        var yearBars: [PerfBar] = []
+        var byMon: [String: [(iso: String, shares: Double, calls: Double)]] = [:]
+        for s in sessions { byMon[String(s.iso.prefix(7)), default: []].append(s) }
         let mfmt = DateFormatter(); mfmt.dateFormat = "yyyy-MM"; mfmt.timeZone = TimeZone(identifier: "America/New_York")
-        let mshort = DateFormatter(); mshort.dateFormat = "MMM"; mshort.timeZone = TimeZone(identifier: "America/New_York")
-        for m in months {
-            guard let pts = byMonth[m], let first = pts.first, let lastP = pts.last else { continue }
-            let sh = (lastP.1 - first.1) * shares
-            let lbl = mfmt.date(from: m).map { String(mshort.string(from: $0).prefix(1)) } ?? m
-            yearBars.append(PerfBar(label: lbl, sub: mfmt.date(from: m).map { mshort.string(from: $0) + " " + String(m.prefix(4)) } ?? m,
-                                    shares: sh, calls: (-sh * 0.25).rounded()))
+        let mShort = DateFormatter(); mShort.dateFormat = "MMM"; mShort.timeZone = TimeZone(identifier: "America/New_York")
+        let mLong = DateFormatter(); mLong.dateFormat = "MMMM yyyy"; mLong.timeZone = TimeZone(identifier: "America/New_York")
+        let months: [PerfMonth] = byMon.keys.sorted().map { mk in
+            let sess = byMon[mk]!
+            let bars = sess.map { PerfBar(label: String($0.iso.suffix(2)), sub: AppDates.shortMonthDay($0.iso),
+                                          shares: $0.shares, calls: $0.calls) }
+            let net = sess.reduce(0.0) { $0 + $1.shares + $1.calls }
+            let dt = mfmt.date(from: mk)
+            return PerfMonth(key: mk, short: dt.map { mShort.string(from: $0) } ?? mk,
+                             label: dt.map { mLong.string(from: $0) } ?? mk, bars: bars, net: net)
         }
-
-        let periods = [
-            PerfPeriodModel(id: "week", label: "Week", title: periodTitle(weekBars), bars: weekBars, ticks: nil),
-            PerfPeriodModel(id: "month", label: "Month", title: periodTitle(monthBars), bars: monthBars, ticks: monthTicks),
-            PerfPeriodModel(id: "year", label: "Year", title: String(isoToday(today).prefix(4)), bars: yearBars, ticks: nil),
-        ]
 
         // ── expiry ledger from real rollups ──
         let expiries: [PerfExpiry] = cc.allRollups
@@ -176,7 +168,7 @@ struct PerfData: Sendable {
                                  expiries: expiries, expNet: expNet, sources: sources)
 
         return PerfData(ticker: ticker, shares: shares, premLife: premLife, sharesPL: sharesPL, netPL: netPL,
-                        premYield: premYield, periods: periods, expiries: expiries, expNet: expNet, sources: sources, sheets: sheets)
+                        premYield: premYield, months: months, expiries: expiries, expNet: expNet, sources: sources, sheets: sheets)
     }
 
     // ── helpers ──
