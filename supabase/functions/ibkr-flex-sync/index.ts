@@ -143,38 +143,19 @@ Deno.serve(async (req) => {
   // Skipped runs do NOT write an ibkr_sync_runs row — keeps the
   // audit log focused on actual attempts.
   const slot = etSlotInfo(new Date());
-  if (trigger === 'cron') {
-    if (!slot.inWindow) {
-      return jsonText(200, JSON.stringify({
-        ok: true, skipped: 'out-of-window',
-        et: slot.etStamp,
-      }));
-    }
-    if (slot.isRetrySlot && !slot.isPrimarySlot) {
-      // Retry slot: peek at the most recent run. Only proceed if it
-      // failed. `partial` and `success` both mean "primary slot did
-      // its job" — no retry needed.
-      const { data: lastRun } = await supabase
-        .from('ibkr_sync_runs')
-        .select('status')
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (lastRun?.status !== 'failed') {
-        return jsonText(200, JSON.stringify({
-          ok: true, skipped: 'retry-not-needed',
-          last_status: lastRun?.status ?? 'none',
-          et: slot.etStamp,
-        }));
-      }
-    } else if (!slot.isPrimarySlot && !slot.isRetrySlot) {
-      // Cron fires only on /15s, so this branch is defensive: if a
-      // human re-triggers cron off-rhythm, no-op cleanly.
-      return jsonText(200, JSON.stringify({
-        ok: true, skipped: 'off-slot',
-        et: slot.etStamp,
-      }));
-    }
+  // Every in-window cron tick runs. The previous :00/:30-primary +
+  // :15/:45-retry throttle was tuned for a 15-min cron and produced a
+  // 30-min effective cadence — so a fill could wait up to ~30 min even
+  // though IBKR publishes it in ~4. With the 5-min cron (and an
+  // idempotent upsert-by-ibkr_trade_id) we simply run each in-window
+  // tick, giving a ~5-min effective cadence. IBKR tolerates 5-min
+  // polling of the "Today" TCF query; dial the cron back to */10 if it
+  // ever rate-limits.
+  if (trigger === 'cron' && !slot.inWindow) {
+    return jsonText(200, JSON.stringify({
+      ok: true, skipped: 'out-of-window',
+      et: slot.etStamp,
+    }));
   }
 
   // ── 1. Validate secrets ─────────────────────────────────────
@@ -548,7 +529,10 @@ function etSlotInfo(now: Date): {
 
   const isWeekday = !(weekday === 'Sat' || weekday === 'Sun');
   const minsOfDay = hour * 60 + minute;
-  const inWindow = isWeekday && minsOfDay >= (10 * 60) && minsOfDay < (16 * 60 + 30);
+  // 9:30 ET (regular-session open) → 16:30 ET (post-close sweep). Widened
+  // from 10:00 so opening-bell fills sync in the first window instead of
+  // waiting to 10:00.
+  const inWindow = isWeekday && minsOfDay >= (9 * 60 + 30) && minsOfDay < (16 * 60 + 30);
 
   const isPrimarySlot = (minute < 5) || (minute >= 30 && minute < 35);
   const isRetrySlot   = (minute >= 15 && minute < 20) || (minute >= 45 && minute < 50);
