@@ -83,7 +83,8 @@ private struct RootView: View {
             } else if lock.biometricEnabled && lock.isLocked {
                 BiometricGate(lock: lock, auth: auth)
             } else {
-                TabRootView(auth: auth, lock: lock, prefs: prefs)
+                // Ink rebuild root (replaces TabRootView).
+                InkRoot(auth: auth, lock: lock, prefs: prefs)
             }
         }
     }
