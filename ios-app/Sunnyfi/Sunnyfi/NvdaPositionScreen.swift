@@ -46,9 +46,9 @@ struct NvdaPositionScreen: View {
 
     private func items(_ p: NvPosition) -> [RailItem] {
         var out: [RailItem] = [
-            .init(id: "summary", label: "Overview", glyph: nil, count: nil, card: AnyView(summaryCard(p).inkEntrance(0))),
+            .init(id: "summary", label: "Overview", glyph: nil, count: 2, card: AnyView(summaryCard(p).inkEntrance(0))),
             .init(id: "total", label: nil, glyph: nil, count: nil, card: AnyView(totalCard(p).inkEntrance(1))),
-            .init(id: "shares", label: "Shares", glyph: "○", count: nil, card: AnyView(sharesCard(p).inkEntrance(2))),
+            .init(id: "shares", label: "Shares", glyph: "○", count: 1, card: AnyView(sharesCard(p).inkEntrance(2))),
         ]
         for g in p.groups {
             for (i, s) in g.strikes.enumerated() {
