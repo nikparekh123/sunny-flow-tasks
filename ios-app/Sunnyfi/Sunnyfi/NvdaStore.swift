@@ -14,6 +14,10 @@ import Supabase
 @Observable
 final class NvdaStore {
     var position: NvPosition?
+    var perf: NvPerf?
+    var insights: NvInsights?
+    var peers: NvPeers?
+    var history: NvHistory?
     var isLoading = true
     var lastError: String?
 
@@ -29,16 +33,34 @@ final class NvdaStore {
                 .select("id,qty_remaining,cost_per_share,voided_at")
                 .is("voided_at", value: nil)
                 .execute().value
+            async let sells: [NvShareSell] = client.from("nvda_share_sells")
+                .select("id,quantity,price,realized_pl,voided_at")
+                .is("voided_at", value: nil)
+                .execute().value
             async let quotes: [NvQuote] = client.from("nvda_quote")
                 .select("ticker,spot,day_change_pct,prev_close,captured_at")
-                .eq("ticker", value: "NVDA")
                 .execute().value
             async let marks: [NvOptionMark] = client.from("nvda_option_marks")
                 .select("option_trade_id,mark,delta,gamma,theta,vega,iv,captured_at")
                 .execute().value
+            async let closes: [NvDailyClose] = client.from("nvda_daily_closes")
+                .select("ticker,date,close_price")
+                .order("date", ascending: false)
+                .limit(120)
+                .execute().value
+            async let eod: [NvOptionMarkEod] = client.from("nvda_option_marks_eod")
+                .select("option_trade_id,date,mark,delta,theta")
+                .order("date", ascending: false)
+                .limit(600)
+                .execute().value
 
-            let (t, l, q, m) = try await (trades, lots, quotes, marks)
-            position = NvDerive.position(trades: t, lots: l, quote: q.first, marks: m)
+            let (t, l, sl, q, m, c, e) = try await (trades, lots, sells, quotes, marks, closes, eod)
+            let nvda = q.first { $0.ticker == "NVDA" }
+            position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
+            perf      = NvDerive.performance(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
+            insights  = NvDerive.insights(trades: t, lots: l, marks: m, quote: nvda, closes: c)
+            peers     = NvDerive.peers(quotes: q, closes: c)
+            history   = NvDerive.history(eod: e, closes: c, trades: t, lots: l)
             isLoading = false
             lastError = nil
         } catch {
