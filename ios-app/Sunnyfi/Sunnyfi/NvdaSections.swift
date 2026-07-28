@@ -131,11 +131,16 @@ struct NvdaPerformanceScreen: View {
                 InkSpacer()
             }
             InkFoot(compact: true) {
-                Text("Net · realized + unrealized".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                // New average = cost basis − premium collected per share (the effective
+                // basis). Cushion (spot over it) + % move to the right, above the %.
+                Text("New average · after premium".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 HStack(alignment: .firstTextBaseline) {
-                    InkDelta(value: inkUsd(abs(g?.net ?? p.realized)), good: (g?.net ?? 0) >= 0, size: 28, weight: .light)
+                    Text("$\(nv2Dec(p.breakEven, 2))").font(InkFont.mono(28, .light)).tracking(28 * -0.03).foregroundStyle(Ink.text)
                     Spacer(minLength: 0)
-                    Text("open \(inkUsd(g?.unrealized ?? 0))").font(InkFont.mono(11.5)).foregroundStyle(Ink.dim)
+                    VStack(alignment: .trailing, spacing: 3) {
+                        InkDelta(value: "$\(nv2Dec(abs(p.cushion), 2))", good: p.cushion >= 0, size: 14)
+                        Text("\(nv2Pct(p.cushionPct))").font(InkFont.mono(11)).foregroundStyle(Ink.dim)
+                    }
                 }
             }
             InkStamp(state: .delayed, text: "End of day · booked at close", compact: true)
