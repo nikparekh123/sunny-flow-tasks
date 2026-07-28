@@ -83,23 +83,26 @@ Deno.serve(async (req) => {
     if (!error) quotes++;
   }
 
-  // 2 · distinct open option contracts → their trade ids
+  // 2 · net-OPEN contracts only (open − close ≠ 0) → their open trade ids
   const { data: trades, error: tErr } = await admin
     .from('nvda_option_trades')
-    .select('id, option_type, strike, expiry')
-    .is('voided_at', null).eq('action', 'open');
+    .select('id, action, option_type, strike, expiry, contracts')
+    .is('voided_at', null);
   if (tErr) return json(500, { ok: false, error: tErr.message });
 
-  const contracts = new Map<string, { occ: string; ids: string[] }>();
+  const byContract = new Map<string, { occ: string; net: number; ids: string[] }>();
   for (const t of trades ?? []) {
     const occ = occSymbol(t.option_type, Number(t.strike), t.expiry);
-    if (!contracts.has(occ)) contracts.set(occ, { occ, ids: [] });
-    contracts.get(occ)!.ids.push(t.id);
+    const e = byContract.get(occ) ?? { occ, net: 0, ids: [] };
+    e.net += (t.action === 'open' ? 1 : -1) * Number(t.contracts);
+    if (t.action === 'open') e.ids.push(t.id);
+    byContract.set(occ, e);
   }
+  const contracts = [...byContract.values()].filter((c) => Math.abs(c.net) > 1e-6);
 
-  // 3 · one Polygon snapshot per distinct contract → mark row per open trade
+  // 3 · one Polygon snapshot per open contract → mark row per open trade of it
   let marked = 0;
-  for (const c of contracts.values()) {
+  for (const c of contracts) {
     const snap = await fetchOption(c.occ, key);
     if (!snap) continue;
     for (const id of c.ids) {
@@ -111,5 +114,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return json(200, { ok: true, captured_at: now, quotes, contracts: contracts.size, marks: marked });
+  return json(200, { ok: true, captured_at: now, quotes, contracts: contracts.length, marks: marked });
 });
