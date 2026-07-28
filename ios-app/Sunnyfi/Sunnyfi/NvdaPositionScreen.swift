@@ -242,24 +242,27 @@ struct NvdaPositionScreen: View {
                         else { InkBand(skin: s.moneyness == "ITM" ? .mod : .low, text: s.moneyness) }
                     }
                 }
-                // identity line
-                (Text("$\(nvDec(s.strike, s.strike == s.strike.rounded() ? 0 : 1))").foregroundStyle(Ink.text).underline(true, color: Ink.hair)
-                    + Text(" · \(s.expiry) · \(s.dte)").foregroundStyle(Ink.dim))
-                    .font(InkFont.mono(9)).tracking(9 * 0.1).padding(.top, 20)
-                // hero: mark (or strike when expired)
-                if s.expired || s.mark == nil {
-                    InkHero(value: "$" + nvDec(s.strike, s.strike == s.strike.rounded() ? 0 : 1), unit: "\(s.expiry) · no live mark")
-                        .padding(.top, -8)
-                } else {
-                    HStack(alignment: .center, spacing: 14) {
-                        InkRoll(text: "$" + nvDec(s.mark ?? 0, 2), font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
-                        Text(s.good == nil ? "·" : (entry > 0 ? "\((s.mark ?? 0) >= entry ? "+" : "−")\(nvDec(abs(((s.mark ?? 0) - entry) / entry * 100), 1))%" : ""))
-                            .font(InkFont.mono(12)).foregroundStyle(Ink.signed(s.good))
-                    }
-                    .padding(.top, 16)
-                    Text("MARK NOW · \(short ? "SOLD AT" : "PAID") $\(nvDec(entry, 2))")
+                // hero: the STRIKE (clearer than the mark); the live mark + % vs
+                // entry sit on the caption line right under it.
+                VStack(alignment: .leading, spacing: 0) {
+                    InkRoll(text: "$" + nvDec(s.strike, s.strike == s.strike.rounded() ? 0 : 1),
+                            font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
+                    Text("\(s.kind == "call" ? "Call" : "Put") \(short ? "sold" : "bought") · \(s.expiry) · \(s.dte)".uppercased())
                         .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 12)
+                    if !s.expired, let mk = s.mark {
+                        let pct = entry > 0 ? (mk - entry) / entry * 100 : 0
+                        (Text("MARK ").foregroundStyle(Ink.dim)
+                            + Text("$\(nvDec(mk, 2))").foregroundStyle(Ink.text)
+                            + Text("  ").foregroundStyle(Ink.dim)
+                            + Text(s.good == nil ? "·" : "\(pct >= 0 ? "+" : "−")\(nvDec(abs(pct), 1))%").foregroundStyle(Ink.signed(s.good))
+                            + Text(" vs \(short ? "sold" : "paid") $\(nvDec(entry, 2))").foregroundStyle(Ink.dim))
+                            .font(InkFont.mono(9.5)).tracking(9.5 * 0.02).padding(.top, 10)
+                    } else {
+                        Text("No live mark").font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
+                            .foregroundStyle(Ink.dim).padding(.top, 10)
+                    }
                 }
+                .padding(.top, 20)
                 InkBullets(items: s.expired
                     ? ["Assigned in all likelihood", "Reconcile before it skews the sleeve"]
                     : ["Spot $\(nvDec(p.spot, 2)) · $\(nvDec(abs(gap), 2)) \(gap >= 0 ? "below" : "above") strike",
