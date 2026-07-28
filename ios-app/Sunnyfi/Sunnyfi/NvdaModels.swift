@@ -93,6 +93,7 @@ struct NvStrike: Identifiable, Sendable {
     let moneyness: String         // ITM | OTM
     let delta: Double?
     let theta: Double?
+    var isNew: Bool = false        // opened within the last day → "NEW" tag
     var id: String { "\(kind)-\(side)-\(strike)-\(expiry)" }
     /// Semantic direction for the hue: a rising mark is against a short, for a long.
     var good: Bool? {
@@ -273,12 +274,14 @@ enum NvDerive {
         var net: [Key: Double] = [:]
         var openBasis: [Key: Double] = [:]
         var anyOpenId: [Key: String] = [:]
+        var openedAt: [Key: String] = [:]           // most-recent open date, for the NEW tag
         for t in live {
             let k = Key(side: t.direction, kind: t.option_type, strike: t.strike, expiry: t.expiry)
             net[k, default: 0] += (t.action == "open" ? 1 : -1) * t.contracts
             if t.action == "open" {
                 openBasis[k, default: 0] += t.premium * t.contracts * 100
                 if anyOpenId[k] == nil { anyOpenId[k] = t.id }
+                if openedAt[k] == nil || t.trade_date > openedAt[k]! { openedAt[k] = t.trade_date }
             }
         }
 
@@ -295,7 +298,8 @@ enum NvDerive {
                 side: k.side, kind: k.kind, strike: k.strike, expiry: displayExpiry(k.expiry),
                 dte: expired ? "expired" : "\(daysTo(k.expiry, now: now)) DTE", expired: expired,
                 ct: ct, basis: basis, current: current, mark: mkNow,
-                moneyness: itm ? "ITM" : "OTM", delta: m?.delta, theta: m?.theta))
+                moneyness: itm ? "ITM" : "OTM", delta: m?.delta, theta: m?.theta,
+                isNew: !expired && openedWithinADay(openedAt[k], now: now)))
         }
 
         // ── position Greeks (per leg × 100 × sign) ──
@@ -647,6 +651,13 @@ enum NvDerive {
         let f = DateFormatter(); f.dateFormat = "MMM d ''yy"; f.timeZone = TimeZone(identifier: "America/New_York"); return f
     }()
 
+    /// True when the leg was opened today or yesterday (the "NEW" tag lifetime).
+    private static func openedWithinADay(_ date: String?, now: Date) -> Bool {
+        guard let date, let d = iso.date(from: date) else { return false }
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: d), to: cal.startOfDay(for: now)).day ?? 99
+        return days >= 0 && days <= 1
+    }
     private static func isExpired(_ expiry: String, now: Date) -> Bool { daysTo(expiry, now: now) < 0 }
     private static func daysTo(_ expiry: String, now: Date) -> Int {
         guard let e = iso.date(from: expiry) else { return 0 }

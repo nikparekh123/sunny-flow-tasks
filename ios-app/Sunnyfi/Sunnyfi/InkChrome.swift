@@ -123,6 +123,41 @@ struct InkGroup<Content: View>: View {
     }
 }
 
+// MARK: - Sticky-left group column (design: grp-h position:sticky;left:0)
+
+/// A rail group: a left-sticky header over a row of cards. The header stays at
+/// the rail's left gutter (16pt in the "inkRail" coordinate space) while the
+/// group's cards scroll under it, then slides off with the group's right edge.
+struct InkStickyGroup<Content: View>: View {
+    let label: String
+    var glyph: String? = nil
+    let count: Int
+    let groupWidth: CGFloat
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            header.frame(height: 12, alignment: .leading)
+            HStack(alignment: .top, spacing: 10) { content }
+        }
+    }
+
+    private var header: some View {
+        GeometryReader { geo in
+            let minX = geo.frame(in: .named("inkRail")).minX      // header x vs rail viewport
+            let headerW: CGFloat = 130
+            let off = max(0, min(16 - minX, groupWidth - headerW)) // stick at the 16pt gutter, clamp to group
+            HStack(spacing: 9) {
+                if let glyph { Text(glyph).font(InkFont.mono(11)).foregroundStyle(Ink.text) }
+                Text(label.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.2).foregroundStyle(Ink.dim)
+                Text("\(count)").font(InkFont.mono(9.5)).tracking(9.5 * 0.1).foregroundStyle(Ink.text)
+            }
+            .fixedSize()
+            .offset(x: off)
+        }
+    }
+}
+
 // MARK: - Floating glass tab bar (selection is inversion, never a hue)
 
 struct InkTabBar: View {

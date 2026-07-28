@@ -40,21 +40,19 @@ struct NvdaPositionScreen: View {
 
     private func cardCount(_ p: NvPosition) -> Int { 3 + p.groups.reduce(0) { $0 + $1.strikes.count } }
 
-    // Flat card rail: every card is a scroll-snap target (16px inset), with the
-    // group label pinned above each group's first card.
-    private struct RailItem: Identifiable { let id: String; let label: String?; let glyph: String?; let count: Int?; let card: AnyView }
+    // Grouped rail (design: grp-h is position:sticky;left:0). Each group's header
+    // sticks to the left gutter while the group's cards scroll under it.
+    private struct RailGroup: Identifiable { let id: String; let label: String; let glyph: String?; let count: Int; let cards: [AnyView] }
 
-    private func items(_ p: NvPosition) -> [RailItem] {
-        var out: [RailItem] = [
-            .init(id: "summary", label: "Overview", glyph: nil, count: 2, card: AnyView(summaryCard(p).inkEntrance(0))),
-            .init(id: "total", label: nil, glyph: nil, count: nil, card: AnyView(totalCard(p).inkEntrance(1))),
-            .init(id: "shares", label: "Shares", glyph: "○", count: 1, card: AnyView(sharesCard(p).inkEntrance(2))),
+    private func groups(_ p: NvPosition) -> [RailGroup] {
+        var out: [RailGroup] = [
+            .init(id: "overview", label: "Overview", glyph: nil, count: 2,
+                  cards: [AnyView(summaryCard(p).inkEntrance(0)), AnyView(totalCard(p).inkEntrance(1))]),
+            .init(id: "shares", label: "Shares", glyph: "○", count: 1, cards: [AnyView(sharesCard(p).inkEntrance(2))]),
         ]
         for g in p.groups {
-            for (i, s) in g.strikes.enumerated() {
-                out.append(.init(id: s.id, label: i == 0 ? g.label : nil, glyph: i == 0 ? g.glyph : nil,
-                                 count: i == 0 ? g.strikes.count : nil, card: AnyView(strikeCard(p, s).inkEntrance(min(i, 4)))))
-            }
+            out.append(.init(id: g.label, label: g.label, glyph: g.glyph, count: g.strikes.count,
+                             cards: g.strikes.enumerated().map { AnyView(strikeCard(p, $0.element).inkEntrance(min($0.offset, 4))) }))
         }
         return out
     }
@@ -62,25 +60,16 @@ struct NvdaPositionScreen: View {
     private func rail(_ p: NvPosition) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 10) {
-                ForEach(items(p)) { it in
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 9) {
-                            if let label = it.label {
-                                if let g = it.glyph { Text(g).font(InkFont.mono(11)).foregroundStyle(Ink.text) }
-                                Text(label.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.2).foregroundStyle(Ink.dim)
-                                if let c = it.count { Text("\(c)").font(InkFont.mono(9.5)).tracking(9.5 * 0.1).foregroundStyle(Ink.text) }
-                            }
-                        }
-                        .frame(height: 20, alignment: .leading)   // reserved so cards align
-                        it.card
+                ForEach(groups(p)) { g in
+                    InkStickyGroup(label: g.label, glyph: g.glyph, count: g.count,
+                                   groupWidth: CGFloat(g.cards.count) * 348 + CGFloat(max(0, g.cards.count - 1)) * 10) {
+                        ForEach(Array(g.cards.enumerated()), id: \.offset) { $0.element }
                     }
-                    .frame(width: 348)
                 }
             }
             .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
-            .scrollTargetLayout()
         }
-        .scrollTargetBehavior(.viewAligned)
+        .coordinateSpace(name: "inkRail")
     }
 
     private func quiet(_ title: String, _ body: String) -> some View {
@@ -243,8 +232,11 @@ struct NvdaPositionScreen: View {
             InkBody {
                 InkEyebrow(n: "", cat: "\(s.kind == "call" ? "Call" : "Put") \(short ? "sold" : "bought")",
                            glyph: s.kind == "call" ? (short ? "▲" : "△") : (short ? "▼" : "▽")) {
-                    if s.expired { InkBand(skin: .hue(Ink.loss), text: "Expired \(s.moneyness)") }
-                    else { InkBand(skin: s.moneyness == "ITM" ? .mod : .low, text: s.moneyness) }
+                    HStack(spacing: 6) {
+                        if s.isNew { InkBand(skin: .hue(Ink.gain), text: "New") }
+                        if s.expired { InkBand(skin: .hue(Ink.loss), text: "Expired \(s.moneyness)") }
+                        else { InkBand(skin: s.moneyness == "ITM" ? .mod : .low, text: s.moneyness) }
+                    }
                 }
                 // identity line
                 (Text("$\(nvDec(s.strike, s.strike == s.strike.rounded() ? 0 : 1))").foregroundStyle(Ink.text).underline(true, color: Ink.hair)
