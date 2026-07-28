@@ -349,8 +349,18 @@ enum NvDerive {
             }
             return total
         }
-        // Position delta is share-equivalents: 1 delta per share, plus the option legs.
-        let delta = shares + greekSum { $0.delta }
+        // Delta must NEVER drop a leg — Polygon returns null greeks for thin
+        // (deep-ITM) contracts intermittently, and dropping them made the total
+        // jump by thousands. When a leg has no live delta, estimate it from
+        // moneyness so the sum stays stable. Share delta = 1 per share.
+        var deltaTotal = shares
+        for (k, ct) in net where ct > 0.0001 {
+            if isExpired(k.expiry, now: now) { continue }
+            let live = anyOpenId[k].flatMap { markByTrade[$0]?.delta }
+            let d = live ?? estimateDelta(kind: k.kind, strike: k.strike, spot: spot)
+            deltaTotal += d * ct * 100 * (k.side == "long" ? 1 : -1)
+        }
+        let delta = deltaTotal
         let gamma = greekSum { $0.gamma }
         let theta = greekSum { $0.theta }
 
@@ -756,6 +766,14 @@ enum NvDerive {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
         let days = cal.dateComponents([.day], from: cal.startOfDay(for: d), to: cal.startOfDay(for: now)).day ?? 99
         return days >= 0 && days <= 1
+    }
+    /// Rough delta from moneyness — ONLY a fallback when Polygon returns no live
+    /// greek, so a leg is never dropped from the position delta (keeps it stable).
+    private static func estimateDelta(kind: String, strike: Double, spot: Double) -> Double {
+        guard spot > 0, strike > 0 else { return 0 }
+        let m = (spot - strike) / strike                 // call moneyness; + = ITM call
+        if kind == "call" { return min(0.99, max(0.01, 0.5 + m * 4)) }
+        return max(-0.99, min(-0.01, -0.5 + m * 4))      // put: negative, deep-ITM → ≈ −1
     }
     static func isoDay(_ d: Date) -> String { iso.string(from: d) }
     private static func isExpired(_ expiry: String, now: Date) -> Bool { daysTo(expiry, now: now) < 0 }
