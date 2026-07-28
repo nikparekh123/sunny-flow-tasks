@@ -28,31 +28,59 @@ struct NvdaPositionScreen: View {
         if let p = store.position {
             VStack(alignment: .leading, spacing: 0) {
                 InkSectionHead(title: "Current position", count: "\(cardCount(p)) cards")
-                InkRail {
-                    InkGroup(label: "Overview") {
-                        summaryCard(p).inkEntrance(0)
-                        totalCard(p).inkEntrance(1)
-                    }
-                    InkGroup(label: "Shares", glyph: "○") {
-                        sharesCard(p).inkEntrance(0)
-                    }
-                    ForEach(Array(p.groups.enumerated()), id: \.element.id) { _, g in
-                        InkGroup(label: g.label, glyph: g.glyph, count: g.strikes.count) {
-                            ForEach(Array(g.strikes.enumerated()), id: \.element.id) { i, s in
-                                strikeCard(p, s).inkEntrance(i)
-                            }
-                        }
-                    }
-                }
+                rail(p)
             }
         } else if store.isLoading {
             quiet("Loading NVDA", "Pulling the live position…")
         } else {
-            quiet("No data", store.lastError ?? "The NVDA store returned nothing.")
+            quiet("No data", store.lastError ?? "Waiting for live market data.")
         }
     }
 
     private func cardCount(_ p: NvPosition) -> Int { 3 + p.groups.reduce(0) { $0 + $1.strikes.count } }
+
+    // Flat card rail: every card is a scroll-snap target (16px inset), with the
+    // group label pinned above each group's first card.
+    private struct RailItem: Identifiable { let id: String; let label: String?; let glyph: String?; let count: Int?; let card: AnyView }
+
+    private func items(_ p: NvPosition) -> [RailItem] {
+        var out: [RailItem] = [
+            .init(id: "summary", label: "Overview", glyph: nil, count: nil, card: AnyView(summaryCard(p).inkEntrance(0))),
+            .init(id: "total", label: nil, glyph: nil, count: nil, card: AnyView(totalCard(p).inkEntrance(1))),
+            .init(id: "shares", label: "Shares", glyph: "○", count: nil, card: AnyView(sharesCard(p).inkEntrance(2))),
+        ]
+        for g in p.groups {
+            for (i, s) in g.strikes.enumerated() {
+                out.append(.init(id: s.id, label: i == 0 ? g.label : nil, glyph: i == 0 ? g.glyph : nil,
+                                 count: i == 0 ? g.strikes.count : nil, card: AnyView(strikeCard(p, s).inkEntrance(min(i, 4)))))
+            }
+        }
+        return out
+    }
+
+    private func rail(_ p: NvPosition) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(items(p)) { it in
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 9) {
+                            if let label = it.label {
+                                if let g = it.glyph { Text(g).font(InkFont.mono(11)).foregroundStyle(Ink.text) }
+                                Text(label.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.2).foregroundStyle(Ink.dim)
+                                if let c = it.count { Text("\(c)").font(InkFont.mono(9.5)).tracking(9.5 * 0.1).foregroundStyle(Ink.text) }
+                            }
+                        }
+                        .frame(height: 20, alignment: .leading)   // reserved so cards align
+                        it.card
+                    }
+                    .frame(width: 348)
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.viewAligned)
+    }
 
     private func quiet(_ title: String, _ body: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {

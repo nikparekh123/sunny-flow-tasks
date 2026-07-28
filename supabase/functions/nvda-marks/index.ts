@@ -33,8 +33,10 @@ async function fetchSpot(tk: string, key: string) {
     if (!r.ok) return null;
     const t = (await r.json())?.ticker;
     if (!t) return null;
+    // Truthy fallback (||, not ??): pre-open the last trade can be 0, which must
+    // fall through to the day/previous close rather than write a zero spot.
     return {
-      spot: t.lastTrade?.p ?? t.day?.c ?? t.prevDay?.c ?? null,
+      spot: t.lastTrade?.p || t.day?.c || t.prevDay?.c || null,
       prev: t.prevDay?.c ?? null,
       chg: t.todaysChangePerc ?? null,
     };
@@ -75,7 +77,7 @@ Deno.serve(async (req) => {
   let quotes = 0;
   for (const tk of PEERS) {
     const s = await fetchSpot(tk, key);
-    if (!s || s.spot == null) continue;
+    if (!s || !s.spot) continue;   // skip null or zero
     const { error } = await admin.from('nvda_quote').upsert(
       { ticker: tk, spot: s.spot, day_change_pct: s.chg, prev_close: s.prev, captured_at: now },
       { onConflict: 'ticker' },

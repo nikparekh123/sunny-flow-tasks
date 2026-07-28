@@ -127,7 +127,9 @@ enum NvDerive {
 
     static func position(trades: [NvOptionTrade], lots: [NvShareLot], quote: NvQuote?,
                          marks: [NvOptionMark], now: Date = Date()) -> NvPosition? {
-        guard let spot = quote?.spot else { return nil }
+        // A non-positive spot is bad market data (e.g. a pre-open zero trade),
+        // not a real price — don't derive garbage P&L off it.
+        guard let spot = quote?.spot, spot > 0 else { return nil }
 
         // ── shares ──
         let openLots = lots.filter { $0.voided_at == nil }
@@ -180,7 +182,8 @@ enum NvDerive {
             }
             return total
         }
-        let delta = greekSum { $0.delta }
+        // Position delta is share-equivalents: 1 delta per share, plus the option legs.
+        let delta = shares + greekSum { $0.delta }
         let gamma = greekSum { $0.gamma }
         let theta = greekSum { $0.theta }
 

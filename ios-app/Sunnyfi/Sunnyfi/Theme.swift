@@ -67,8 +67,10 @@ extension Color {
         // Semantic
         // neon: brand lime in dark, deep teal-green in light (lime is
         // illegible on paper; deep teal AA-passes as text + fill).
-        static let neon         = Color.dyn(light: UIColor(hex: 0x0c6a4e), dark: UIColor(hex: 0xd2e632))
-        static let neonDark     = Color.dyn(light: UIColor(hex: 0x0a5742), dark: UIColor(hex: 0xc8d820))
+        // Ink rebuild: the brand green is retired — the remaining legacy auth/
+        // lock/onboarding screens now read this as ink/paper (no hue, Law 1).
+        static let neon         = Color.dyn(light: UIColor(hex: 0x121211), dark: UIColor(hex: 0xF5F3ED))
+        static let neonDark     = Color.dyn(light: UIColor(hex: 0x000000), dark: UIColor(hex: 0xEBE9E2))
         static let pos          = Color.dyn(light: UIColor(hex: 0x2a7249), dark: UIColor(hex: 0xa8d4a0))
         static let neg          = Color.dyn(light: UIColor(hex: 0xb04a34), dark: UIColor(hex: 0xe87060))
         static let warn         = Color.dyn(light: UIColor(hex: 0x846114), dark: UIColor(hex: 0xe0c060))
@@ -87,7 +89,7 @@ extension Color {
         // segmented control thumbs, etc.). In light the neon is deep
         // teal so white reads cleanly; in dark the neon is lime so
         // near-black (#0a1f12) sits over it per the HTML spec.
-        static let onNeon       = Color.dyn(light: UIColor.white, dark: UIColor(hex: 0x0a1f12))
+        static let onNeon       = Color.dyn(light: UIColor.white, dark: UIColor(hex: 0x121211))
 
         // Source-leg palette — the 5 colors that paint the Performance
         // diverging stacked bar chart, one per source bucket. Shares
