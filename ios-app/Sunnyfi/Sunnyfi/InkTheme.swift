@@ -99,17 +99,43 @@ enum InkMotion {
 // back to the system face at the correct size/weight, so nothing breaks.
 
 enum InkFont {
-    /// Prose / labels — Inter (variable; weight drives the wght axis).
-    static func display(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
-        .custom("Inter", size: size).weight(weight)
+    // Inter and Newsreader ship as VARIABLE fonts (wght + opsz axes). SwiftUI's
+    // `.custom(...).weight()` does not drive a bundled variable font's axes, so we
+    // build the UIFont with explicit variation values — otherwise everything renders
+    // at the 400 default (CSS uses 300 for prose, 500 for nav, etc.). CSS
+    // `font-optical-sizing: auto` == opsz follows the point size, so we mirror that.
+    private static let wghtAxis = 0x77676874   // 'wght'
+    private static let opszAxis = 0x6F70737A   // 'opsz'
+
+    private static func wghtValue(_ w: Font.Weight) -> CGFloat {
+        switch w {
+        case .ultraLight: return 100; case .thin: return 200; case .light: return 300
+        case .medium: return 500; case .semibold: return 600; case .bold: return 700
+        case .heavy: return 800; case .black: return 900; default: return 400
+        }
     }
-    /// Editorial section / sheet headings — Newsreader (variable serif).
+    private static func variable(_ name: String, _ size: CGFloat, wght: CGFloat, opszRange: ClosedRange<CGFloat>) -> Font {
+        guard let base = UIFont(name: name, size: size) else { return .system(size: size) }
+        let opsz = min(max(size, opszRange.lowerBound), opszRange.upperBound)
+        let desc = base.fontDescriptor.addingAttributes([
+            UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"): [wghtAxis: wght, opszAxis: opsz],
+        ])
+        return Font(UIFont(descriptor: desc, size: size))
+    }
+
+    /// Prose / labels — Inter (opsz 14–32). Default weight 300, matching the design.
+    static func display(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
+        variable("Inter", size, wght: wghtValue(weight), opszRange: 14...32)
+    }
+    /// Editorial headings — Newsreader (opsz 6–72), the PostScript face resolves the family.
     static func serif(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .custom("Newsreader", size: size).weight(weight)
+        variable("Newsreader16pt-Regular", size, wght: wghtValue(weight), opszRange: 6...72)
     }
     /// Every number — IBM Plex Mono. Static faces, so map the weight to the exact
-    /// PostScript name (no `.weight()` on a static face).
-    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+    /// PostScript name (no `.weight()` on a static face). Default is LIGHT (300) —
+    /// the design's mono chrome (eyebrows, counts, bands, stamps) is all 300; only
+    /// Band3 values (400) and net figures (500) go heavier and pass a weight.
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
         let face: String
         switch weight {
         case .ultraLight, .thin, .light: face = "IBMPlexMono-Light"

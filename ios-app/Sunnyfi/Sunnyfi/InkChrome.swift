@@ -68,10 +68,10 @@ struct InkSectionHead: View {
                 .foregroundStyle(Ink.text).lineLimit(1).fixedSize()
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 5) {
-                Text(count.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.16).foregroundStyle(Ink.dim)
+                Text(count).font(InkFont.mono(10.5)).tracking(10.5 * 0.16).foregroundStyle(Ink.dim)
                 if let action {
                     Button { onAction?() } label: {
-                        Text(action.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.16)
+                        Text(action).font(InkFont.mono(10.5)).tracking(10.5 * 0.16)
                             .foregroundStyle(Ink.text).underline(true, color: Ink.hair)
                     }
                     .buttonStyle(.plain)

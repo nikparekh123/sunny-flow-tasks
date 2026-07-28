@@ -301,7 +301,7 @@ struct InkBand3: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(items[i].k.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.14)
                         .foregroundStyle(Ink.dim).lineLimit(1)
-                    InkRoll(text: items[i].v, font: InkFont.mono(17), tracking: 17 * -0.02, color: Ink.text, delay: 0.12)
+                    InkRoll(text: items[i].v, font: InkFont.mono(17, .regular), tracking: 17 * -0.02, color: Ink.text, delay: 0.12)
                         .padding(.top, 10)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
