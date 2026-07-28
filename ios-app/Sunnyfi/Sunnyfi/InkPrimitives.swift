@@ -347,9 +347,15 @@ struct InkFoot<Content: View>: View {
     var height: CGFloat? = nil
     @ViewBuilder var content: Content
     var body: some View {
+        // Match the design's border-box foot (padding 18/22, content centred) so
+        // the content always sits a consistent distance from the top border and
+        // the stamp below — regardless of how tall the content is.
+        let h = height ?? (compact ? 96 : 132)
+        let vpad: CGFloat = compact ? 14 : 18
         VStack(alignment: .leading, spacing: compact ? 10 : 14) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: height ?? (compact ? 96 : 132))
+            .frame(height: max(0, h - vpad * 2))
+            .padding(.vertical, vpad)
             .padding(.horizontal, compact ? 18 : 22)
             .overlay(alignment: .top) { if !flat { Rectangle().fill(Ink.hair).frame(height: 1) } }
     }
