@@ -226,6 +226,36 @@ struct NvHistory: Sendable {
     let fresh: NvFresh
 }
 
+/// The one canonical P&L result. Every screen reads these named fields — see
+/// docs/PNL_GLOSSARY.md. Do NOT reinterpret realized/unrealized elsewhere.
+struct NvPnL: Sendable {
+    // 1 · REALIZED (closed only)
+    let realized: Double
+    let realizedStock: Double
+    let premiumRealized: Double      // closed/expired short premium (net buybacks)
+    let longRealized: Double         // proceeds − cost on closed/expired longs
+    let dividends: Double
+    // 2 · UNREALIZED (open, marked)
+    let unrealized: Double
+    let sharesUnrealized: Double
+    let openShortValue: Double        // cost to close open shorts (a liability)
+    let openLongValue: Double
+    let longCostBasis: Double
+    // 3 · NET
+    let net: Double
+    // 4 · PREMIUM (calls sold + puts sold)
+    let premiumUnrealized: Double
+    let premiumTotal: Double
+    // 5 · COST (calls bought + puts bought)
+    let costRealized: Double
+    let costUnrealized: Double
+    let costTotal: Double
+    // context
+    let shares: Double
+    let avgBuy: Double
+    let spot: Double
+}
+
 struct NvPosition: Sendable {
     let spot: Double
     let dayChangePct: Double
@@ -425,6 +455,61 @@ enum NvDerive {
         return NvPerf(realized: banked, lifetime: premLifetime, perShare: perShare,
                       perSharePct: avgBuy > 0 ? perShare / avgBuy * 100 : 0, costBasis: avgBuy, breakEven: breakEven,
                       cushion: cushion, cushionPct: breakEven > 0 ? cushion / breakEven * 100 : 0, sleeves: sleeves)
+    }
+
+    // MARK: - Canonical P&L (docs/PNL_GLOSSARY.md — the ONE implementation)
+
+    static func pnl(trades: [NvOptionTrade], lots: [NvShareLot], sells: [NvShareSell],
+                    quote: NvQuote?, marks: [NvOptionMark], now: Date = Date()) -> NvPnL? {
+        guard let spot = quote?.spot, spot > 0 else { return nil }
+        let live = trades.filter { $0.voided_at == nil }
+        let openLots = lots.filter { $0.voided_at == nil }
+        let shares = openLots.reduce(0) { $0 + $1.qty_remaining }
+        let avgBuy = shares > 0 ? openLots.reduce(0) { $0 + $1.qty_remaining * $1.cost_per_share } / shares : 0
+        let markByTrade = Dictionary(marks.map { ($0.option_trade_id, $0) }, uniquingKeysWith: { a, _ in a })
+        let realizedStock = sells.filter { $0.voided_at == nil }.reduce(0.0) { $0 + ($1.realized_pl ?? 0) }
+
+        struct Key: Hashable { let kind, dir: String; let strike: Double; let expiry: String }
+        struct Agg { var openCt = 0.0, closeCt = 0.0, openPrem = 0.0, closePrem = 0.0; var markId: String? }
+        var byKey: [Key: Agg] = [:]
+        for t in live {
+            let k = Key(kind: t.option_type, dir: t.direction, strike: t.strike, expiry: t.expiry)
+            var a = byKey[k] ?? Agg()
+            if t.action == "open" { a.openCt += t.contracts; a.openPrem += t.premium * t.contracts * 100; if a.markId == nil { a.markId = t.id } }
+            else { a.closeCt += t.contracts; a.closePrem += t.premium * t.contracts * 100 }
+            byKey[k] = a
+        }
+
+        var premiumRealized = 0.0, premiumUnrealized = 0.0, openShortValue = 0.0
+        var longRealized = 0.0, costRealized = 0.0, costUnrealized = 0.0, openLongValue = 0.0, longCostBasis = 0.0
+        for (k, a) in byKey {
+            let netCt = a.openCt - a.closeCt
+            let avg = a.openCt > 0 ? a.openPrem / a.openCt : 0        // premium/contract (×100 already in)
+            let expired = isExpired(k.expiry, now: now)
+            let mark = a.markId.flatMap { markByTrade[$0]?.mark } ?? 0
+            if k.dir == "short" {
+                premiumRealized += (a.closeCt * avg - a.closePrem) + (expired ? netCt * avg : 0)
+                if !expired { premiumUnrealized += netCt * avg; openShortValue += mark * netCt * 100 }
+            } else {
+                longRealized += (a.closePrem - a.closeCt * avg) + (expired ? -netCt * avg : 0)
+                costRealized += a.closeCt * avg + (expired ? netCt * avg : 0)
+                if !expired { costUnrealized += netCt * avg; openLongValue += mark * netCt * 100; longCostBasis += netCt * avg }
+            }
+        }
+
+        let dividends = 0.0
+        let realized = realizedStock + premiumRealized + longRealized + dividends
+        let sharesUnrealized = (spot - avgBuy) * shares
+        let unrealized = sharesUnrealized - openShortValue + (openLongValue - longCostBasis)
+        return NvPnL(
+            realized: realized, realizedStock: realizedStock, premiumRealized: premiumRealized,
+            longRealized: longRealized, dividends: dividends,
+            unrealized: unrealized, sharesUnrealized: sharesUnrealized, openShortValue: openShortValue,
+            openLongValue: openLongValue, longCostBasis: longCostBasis,
+            net: realized + unrealized,
+            premiumUnrealized: premiumUnrealized, premiumTotal: premiumRealized + premiumUnrealized,
+            costRealized: costRealized, costUnrealized: costUnrealized, costTotal: costRealized + costUnrealized,
+            shares: shares, avgBuy: avgBuy, spot: spot)
     }
 
     // MARK: - Section 3 · insights (protection + volatility)

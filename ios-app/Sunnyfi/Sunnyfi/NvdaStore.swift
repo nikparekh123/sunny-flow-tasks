@@ -14,6 +14,7 @@ import Supabase
 @Observable
 final class NvdaStore {
     var position: NvPosition?
+    var pnl: NvPnL?            // canonical glossary P&L (docs/PNL_GLOSSARY.md)
     var perf: NvPerf?
     var insights: NvInsights?
     var peers: NvPeers?
@@ -52,6 +53,7 @@ final class NvdaStore {
             let (t, l, sl, q, m, c) = try await (trades, lots, sells, quotes, marks, closes)
             let nvda = q.first { $0.ticker == "NVDA" }
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
+            pnl       = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             perf      = NvDerive.performance(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             insights  = NvDerive.insights(trades: t, lots: l, marks: m, quote: nvda, closes: c)
             peers     = NvDerive.peers(quotes: q, closes: c)
