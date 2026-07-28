@@ -136,7 +136,10 @@ struct NvdaPerformanceScreen: View {
 
     private func sleeveCard(_ s: NvPerfSleeve) -> some View {
         let sold = s.name.contains("sold")
-        let net = s.realized + s.unrealized
+        // This section is REALIZED performance — the headline is realized only.
+        // Open mark gains (e.g. unclosed long puts) are shown separately as
+        // "Open · unrealised" so they never read as booked profit.
+        let realizedZero = abs(s.realized) < 1
         return InkCard(relevance: s.empty ? .r3 : .r1, spine: sold ? .short : .long, compact: true) {
             InkBody(compact: true) {
                 InkEyebrow(cat: s.name, glyph: s.glyph) {
@@ -147,8 +150,9 @@ struct NvdaPerformanceScreen: View {
                     InkBullets(items: ["No \(s.name.lowercased()) on the book"])
                     InkSpacer()
                 } else {
-                    NvCompactHero(value: nv2Money(net), unit: "\(s.name.lowercased()) · net",
-                                  size: 34, color: Ink.signed(net >= 0))
+                    NvCompactHero(value: realizedZero ? "$0" : nv2Money(s.realized),
+                                  unit: realizedZero ? "nothing realised yet" : "realised · booked",
+                                  size: 34, color: realizedZero ? Ink.dim : Ink.signed(s.realized >= 0))
                     InkBullets(items: ["\(s.basisLabel) \(inkUsd(s.basis)) across \(s.total) ct"])
                     InkSpacer()
                     InkBand3(items: [(s.basisLabel, inkUsd(s.basis)), ("Contracts", "\(s.total)")])
@@ -159,7 +163,7 @@ struct NvdaPerformanceScreen: View {
                     Text("Sleeve appears once a leg is written.")
                         .font(InkFont.display(12, .light)).foregroundStyle(Ink.dim)
                 } else {
-                    NvLedger2(a: ("Realised", s.realized), b: ("Unrealised", s.unrealized))
+                    NvLedger2(a: ("Realised", s.realized), b: ("Open · unrealised", s.unrealized))
                 }
             }
             InkStamp(state: .delayed, text: "End of day · booked at close", compact: true)
