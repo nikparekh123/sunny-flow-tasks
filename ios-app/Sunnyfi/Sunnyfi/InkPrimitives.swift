@@ -120,6 +120,45 @@ func inkFig(_ s: String) -> Text {
     return out
 }
 
+// MARK: - Gauge (Ink radial: 9px arc, hair track, score centred in mono)
+
+private struct InkArc: Shape {
+    var frac: Double
+    var animatableData: Double { get { frac } set { frac = newValue } }
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let c = CGPoint(x: r.midX, y: r.maxY - 4)
+        let radius = max(1, min(r.width / 2, r.height) - 6)
+        p.addArc(center: c, radius: radius, startAngle: .degrees(180),
+                 endAngle: .degrees(180 + 180 * max(0, min(1, frac))), clockwise: false)
+        return p
+    }
+}
+
+/// Semicircular gauge — the value arc grows from the left over `InkMotion.countUp`.
+struct InkGauge: View {
+    var value: Double          // 0…100
+    var suffix: String = ""
+    @State private var t: Double = 0
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    var body: some View {
+        let building = value < 0
+        let v = building ? 0 : value * (reduce ? 1 : t)
+        ZStack(alignment: .bottom) {
+            InkArc(frac: 1).stroke(Ink.hair, style: .init(lineWidth: 9, lineCap: .round))
+            if !building {
+                InkArc(frac: max(0.0001, v / 100)).stroke(Ink.text, style: .init(lineWidth: 9, lineCap: .round))
+            }
+            Text(building ? "—" : "\(Int(v.rounded()))\(suffix)")
+                .font(InkFont.mono(34, .light)).tracking(34 * -0.03)
+                .foregroundStyle(building ? Ink.dim : Ink.text)
+                .padding(.bottom, 2)
+        }
+        .frame(width: 150, height: 82)
+        .onAppear { guard !reduce else { return }; withAnimation(.easeOut(duration: InkMotion.countUp).delay(0.12)) { t = 1 } }
+    }
+}
+
 // MARK: - 11 · Delta (a signed figure + its arrow)
 
 struct InkDelta: View {

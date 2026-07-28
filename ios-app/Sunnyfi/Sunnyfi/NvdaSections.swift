@@ -177,113 +177,92 @@ struct NvdaInsightsScreen: View {
     var body: some View {
         if let ins = store.insights {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Insights", count: "2 reads")
+                InkSectionHead(title: "Insights", count: "2 cards")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
-                        protectionCard(ins).inkEntrance(0)
-                        volatilityCard(ins).inkEntrance(1)
+                        volatilityCard(ins.vol).inkEntrance(0)
+                        protectionCard(ins.protection).inkEntrance(1)
                     }
                     .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
                     .scrollTargetLayout()
                 }
                 .scrollTargetBehavior(.viewAligned)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if !store.isLoading {
             nvQuiet("Insights", "Waiting for live marks.")
         }
     }
 
-    private func protectionCard(_ ins: NvInsights) -> some View {
-        let pr = ins.protection
-        let covered = min(pr.coveredPct, 100)
-        return InkCard {
-            InkBody {
-                InkEyebrow(n: "01", cat: "Downside protection", glyph: "▽") {
-                    InkBand(skin: pr.empty ? .low : .mod, text: pr.empty ? "Unhedged" : "\(pr.putContracts) puts")
+    // 01 · Volatility — hero is the Seller-Score gauge (sell zone ≥ 70)
+    private func volatilityCard(_ v: NvVol) -> some View {
+        InkCard(compact: true, height: 452) {
+            InkBody(compact: true) {
+                InkEyebrow(n: "01", cat: "Volatility") {
+                    InkBand(skin: .mod, text: v.verdict)
                 }
-                if pr.empty {
-                    InkHero(value: "0%", unit: "of shares hedged")
-                    InkBullets(items: ["No long puts on the book", "Shares carry full downside"])
-                    InkSpacer()
-                } else {
-                    InkHero(value: "\(Int(covered.rounded()))%", unit: "of shares hedged · by delta")
-                    InkBullets(items: [
-                        "Floor near $\(nv2Dec(pr.floorHigh, 0)) · \(pr.putContracts) ct of puts",
-                        "$\(nv2Dec(abs(pr.cushion), 2)) \(pr.cushion >= 0 ? "above" : "below") the top floor",
-                    ])
-                    InkSpacer()
-                    InkBand3(items: [
-                        ("Contracts", "\(pr.putContracts)"),
-                        ("Top floor", "$" + nv2Dec(pr.floorHigh, 0)),
-                        ("Covered", "\(Int(covered.rounded()))%"),
-                    ])
-                }
-            }
-            InkFoot {
-                InkBars(leftK: "Shares", leftV: pr.shares, rightK: "Covered", rightV: pr.coveredShares,
-                        hue: Ink.gain) {
-                    InkDelta(value: "\(Int(covered.rounded()))%", good: covered >= 50, size: 17)
-                }
-            }
-            InkStamp(state: stamp2(ins.fresh), text: freshText(ins.fresh))
-        }
-    }
-
-    private func volatilityCard(_ ins: NvInsights) -> some View {
-        let v = ins.vol
-        let building = v.ratio == nil
-        return InkCard {
-            InkBody {
-                InkEyebrow(n: "02", cat: "Volatility", glyph: "◇") {
-                    InkBand(skin: bandSkin(v.verdict), text: v.verdict)
-                }
-                if let iv = v.iv {
-                    InkHero(value: "\(Int((iv * 100).rounded()))%", unit: "implied · open legs")
-                } else {
-                    InkHero(value: "—", unit: "no live implied yet")
-                }
-                InkBullets(items: building
-                    ? ["Realised vol needs ≥6 closes — \(v.sampleDays) so far",
-                       "Reads settle once the tape fills in"]
-                    : ["Implied \(pct(v.iv)) vs realised \(pct(v.hv30))",
-                       "Options look \(v.verdict) to sell here"])
+                InkGauge(value: v.building ? -1 : v.score).frame(maxWidth: .infinity).padding(.top, 14)
+                gaugeCaption("Seller score · sell zone ≥ 70")
+                InkBullets(items: v.building
+                    ? ["Seller score needs the IV feed — realised \(pctStr(v.hv30)) so far",
+                       "IV rank + 52-week range land once the feed is live"]
+                    : ["Implied \(pctStr(v.iv)) under realised \(pctStr(v.hv30))",
+                       "IV rank \(v.ivr.map { nv2Int($0) } ?? "—") · 52w \(pctStr(v.iv52Low))–\(pctStr(v.iv52High))"])
                 InkSpacer()
-                InkBand3(items: [
-                    ("Implied", pct(v.iv)),
-                    ("Realised", pct(v.hv30)),
-                    ("Ratio", v.ratio.map { nv2Dec($0, 2) + "×" } ?? "—"),
-                ])
             }
-            InkFoot {
-                if let iv = v.iv, let hv = v.hv30 {
-                    InkBars(leftK: "Realised", leftV: hv * 100, rightK: "Implied", rightV: iv * 100,
-                            hue: iv >= hv ? Ink.gain : Ink.loss) {
-                        InkDelta(value: nv2Dec((v.ratio ?? 1), 2) + "×", good: iv >= hv, size: 17)
+            InkFoot(compact: true, height: 132) {
+                footLabel("Implied − realised")
+                Group {
+                    if let s = v.spread {
+                        InkDelta(value: "\(nv2Dec(abs(s), 1)) pts", good: s >= 0, size: 24, weight: .light)
+                    } else {
+                        Text("—").font(InkFont.mono(24, .light)).foregroundStyle(Ink.dim)
                     }
-                } else {
-                    Text("Volatility reads build as the daily closes accumulate.")
-                        .font(InkFont.display(12.5, .light)).foregroundStyle(Ink.dim)
-                        .frame(maxHeight: .infinity, alignment: .center)
                 }
+                footNote(v.spread.map { $0 >= 0
+                    ? "Seller edge is positive — you are paid more than the stock has moved."
+                    : "Seller edge is negative — you are paid less than the stock has been moving." }
+                    ?? "Edge settles once implied vol is streaming.")
             }
-            InkStamp(state: building ? .stale : .delayed,
-                     text: building ? "Building · \(v.sampleDays) sessions" : "End of day · realised vol")
+            InkStamp(state: .delayed, text: v.building ? "Building · IV feed pending" : "Updated · next at close", compact: true)
         }
     }
 
-    private func pct(_ v: Double?) -> String { v.map { "\(Int(($0 * 100).rounded()))%" } ?? "—" }
-    private func bandSkin(_ verdict: String) -> InkBand.Skin {
-        switch verdict {
-        case "rich":  return .hue(Ink.gain)
-        case "cheap": return .hue(Ink.loss)
-        case "fair":  return .mod
-        default:      return .low
+    // 02 · Protection — gauge is % of shares floored by puts
+    private func protectionCard(_ p: NvProtection) -> some View {
+        InkCard(compact: true, height: 452) {
+            InkBody(compact: true) {
+                InkEyebrow(n: "02", cat: "Protection") {
+                    InkBand(skin: p.empty ? .low : .mod, text: p.empty ? "Unhedged" : "\(p.putContracts) puts")
+                }
+                InkGauge(value: p.empty ? 0 : p.coveredPct, suffix: "%").frame(maxWidth: .infinity).padding(.top, 14)
+                gaugeCaption("Shares floored by puts")
+                InkBullets(items: p.empty
+                    ? ["No long puts on the book", "\(nv2Int(p.shares)) sh carry full downside"]
+                    : ["\(nv2Int(p.covered)) of \(nv2Int(p.shares)) sh have a floor",
+                       "Strikes $\(nv2Dec(p.floorLow, 0))–$\(nv2Dec(p.floorHigh, 0)) · \(nv2Int(p.uncovered)) sh open"])
+                InkSpacer()
+            }
+            InkFoot(compact: true, height: 132) {
+                footLabel("Cushion · spot over break-even")
+                InkDelta(value: "$" + nv2Dec(abs(p.cushion), 2), good: p.cushion >= 0, size: 24, weight: .light)
+                footNote("Spot sits \(nv2Dec(abs(p.cushionPct), 1))% \(p.cushion >= 0 ? "over" : "under") break-even — the puts floor the rest.")
+            }
+            InkStamp(state: .delayed, text: "Updated 16:00 · next at close", compact: true)
         }
     }
-    private func freshText(_ f: NvFresh) -> String {
-        switch f { case .live: return "Updated now · streaming"
-        case .delayed: return "Updated recently"; case .stale: return "Stale · next at market open" }
+
+    private func gaugeCaption(_ s: String) -> some View {
+        Text(s.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16)
+            .foregroundStyle(Ink.dim).frame(maxWidth: .infinity, alignment: .center).padding(.top, 14)
     }
+    private func footLabel(_ s: String) -> some View {
+        Text(s.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+    }
+    private func footNote(_ s: String) -> some View {
+        inkFig(s).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+    }
+    private func pctStr(_ v: Double?) -> String { v.map { "\(Int($0.rounded()))%" } ?? "—" }
 }
 
 // MARK: - Section 4 · Peers & ETFs

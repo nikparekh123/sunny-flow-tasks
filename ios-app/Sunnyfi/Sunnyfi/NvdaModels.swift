@@ -145,24 +145,29 @@ struct NvPerf: Sendable {
     let sleeves: [NvPerfSleeve]
 }
 
-// Section 3 · insights
+// Section 3 · insights — matches the Ink design's Volatility + Protection gauge cards.
 struct NvProtection: Sendable {
     let putContracts: Int
     let shares: Double
-    let coveredShares: Double      // Σ(−putΔ × ct × 100), delta-weighted
-    let coveredPct: Double
+    let covered: Double            // shares floored (delta-weighted), rounded for display
+    let coveredPct: Double         // 0…100, the gauge value
     let floorLow: Double           // lowest open long-put strike
     let floorHigh: Double          // highest open long-put strike (best floor)
-    let cushion: Double            // spot − floorHigh
-    let cushionPct: Double
+    let uncovered: Double          // shares with no floor
+    let cushion: Double            // spot − break-even, in $
+    let cushionPct: Double         // % over break-even
     let empty: Bool
 }
 struct NvVol: Sendable {
-    let iv: Double?                // representative open-leg IV (proxy)
-    let hv30: Double?             // realized vol from daily closes
-    let ratio: Double?           // iv / hv30
-    let verdict: String          // rich | fair | cheap | building
-    let sampleDays: Int
+    let score: Double              // seller score 0…100 (the gauge); sell zone ≥ 70
+    let verdict: String            // sell | caution | hold | building
+    let iv: Double?                // implied vol, % (nil until the IV feed lands)
+    let hv30: Double?             // realized vol, %
+    let ivr: Double?              // IV rank 0…100
+    let iv52Low: Double?
+    let iv52High: Double?
+    let spread: Double?           // implied − realized, in vol points
+    let building: Bool             // true when the IV feed hasn't populated yet
 }
 struct NvInsights: Sendable {
     let protection: NvProtection
@@ -393,8 +398,17 @@ enum NvDerive {
                          quote: NvQuote?, closes: [NvDailyClose], now: Date = Date()) -> NvInsights {
         let spot = quote?.spot ?? 0
         let live = trades.filter { $0.voided_at == nil }
-        let shares = lots.filter { $0.voided_at == nil }.reduce(0) { $0 + $1.qty_remaining }
+        let openLots = lots.filter { $0.voided_at == nil }
+        let shares = openLots.reduce(0) { $0 + $1.qty_remaining }
+        let avgBuy = shares > 0 ? openLots.reduce(0) { $0 + $1.qty_remaining * $1.cost_per_share } / shares : 0
         let markByTrade = Dictionary(marks.map { ($0.option_trade_id, $0) }, uniquingKeysWith: { a, _ in a })
+
+        // effective break-even = cost − lifetime short-call premium / share (same as §1)
+        let shortCallPrem = live.filter { $0.option_type == "call" && $0.direction == "short" }
+            .reduce(0.0) { $0 + ($1.action == "open" ? 1 : -1) * $1.premium * $1.contracts * 100 }
+        let breakEven = avgBuy - (shares > 0 ? shortCallPrem / shares : 0)
+        let cushion = spot > 0 ? spot - breakEven : 0
+        let cushionPct = breakEven > 0 ? cushion / breakEven * 100 : 0
 
         // ── protection: net-open LONG puts, delta-weighted coverage ──
         struct PKey: Hashable { let strike: Double; let expiry: String }
@@ -409,24 +423,26 @@ enum NvDerive {
             ct += c; floors.append(k.strike)
             if let d = anyId[k].flatMap({ markByTrade[$0]?.delta }) { covered += -d * c * 100 }
         }
-        let floorHigh = floors.max() ?? 0, floorLow = floors.min() ?? 0
-        let cushion = spot > 0 ? spot - floorHigh : 0
+        let coveredR = covered.rounded()
         let protection = NvProtection(
-            putContracts: Int(ct.rounded()), shares: shares, coveredShares: covered,
-            coveredPct: shares > 0 ? covered / shares * 100 : 0,
-            floorLow: floorLow, floorHigh: floorHigh, cushion: cushion,
-            cushionPct: floorHigh > 0 ? cushion / floorHigh * 100 : 0, empty: ct < 0.5)
+            putContracts: Int(ct.rounded()), shares: shares, covered: coveredR,
+            coveredPct: shares > 0 ? min(100, covered / shares * 100) : 0,
+            floorLow: floors.min() ?? 0, floorHigh: floors.max() ?? 0,
+            uncovered: max(0, shares - coveredR), cushion: cushion, cushionPct: cushionPct,
+            empty: ct < 0.5)
 
-        // ── volatility: realized (HV) from NVDA closes vs a live-IV proxy ──
+        // ── volatility · seller score. Needs the IV feed (IVR + 52w) to be live;
+        //    until then we surface realized vol + an IV proxy and flag "building". ──
         let nvCloses = closes.filter { $0.ticker == "NVDA" }
             .compactMap { c in c.close_price.map { (c.date, $0) } }
             .sorted { $0.0 < $1.0 }.map { $0.1 }
-        let hv = realizedVol(nvCloses)
+        let hv = realizedVol(nvCloses).map { $0 * 100 }
         let ivs = live.compactMap { markByTrade[$0.id]?.iv }.filter { $0 > 0 }.sorted()
-        let iv: Double? = ivs.isEmpty ? nil : ivs[ivs.count / 2]
-        let ratio: Double? = (iv != nil && (hv ?? 0) > 0) ? iv! / hv! : nil
-        let verdict = ratio == nil ? "building" : (ratio! > 1.15 ? "rich" : ratio! < 0.9 ? "cheap" : "fair")
-        let vol = NvVol(iv: iv, hv30: hv, ratio: ratio, verdict: verdict, sampleDays: nvCloses.count)
+        let iv: Double? = ivs.isEmpty ? nil : ivs[ivs.count / 2] * 100
+        let spread: Double? = (iv != nil && hv != nil) ? iv! - hv! : nil
+        // No IVR / 52w IV history yet → score can't be computed honestly.
+        let vol = NvVol(score: 0, verdict: "building", iv: iv, hv30: hv, ivr: nil,
+                        iv52Low: nil, iv52High: nil, spread: spread, building: true)
 
         return NvInsights(protection: protection, vol: vol, fresh: freshness(quote?.captured_at, now: now).0)
     }
