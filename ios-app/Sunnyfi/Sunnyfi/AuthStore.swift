@@ -80,10 +80,8 @@ final class AuthStore {
         } catch {
             print("[AuthStore] sign-out error: \(error)")
         }
-        // Drop the on-disk portfolio cache so a different user signing
-        // in next doesn't see the previous user's data flash on cold
-        // launch before fetchAll lands.
-        PortfolioSnapshotStore.clear()
+        // The Ink rebuild keeps no on-disk portfolio cache (NvdaStore is
+        // memory-only), so there's nothing to clear on sign-out.
     }
 
     // MARK: - Errors

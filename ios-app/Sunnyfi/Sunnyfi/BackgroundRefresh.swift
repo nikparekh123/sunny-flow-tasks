@@ -20,6 +20,7 @@
 
 import BackgroundTasks
 import Foundation
+import Supabase
 import SwiftUI
 
 enum BackgroundRefresh {
@@ -76,15 +77,15 @@ enum BackgroundRefresh {
         #endif
     }
 
-    /// Called by the system. We have ~30s of wall time — spin up a
-    /// PortfolioStore, run one refresh, then re-schedule.
+    /// Called by the system. We have ~30s of wall time — nudge the NVDA
+    /// marks feed so fresh spot + greeks are waiting on the next launch,
+    /// then re-schedule.
     private static func handle(task: BGAppRefreshTask) {
-        let store = PortfolioStore()
         let work = Task {
-            // Refresh server-side data + re-fetch into the in-memory store.
-            // The result is discarded — the next foreground launch will
-            // surface the updated freshness pill.
-            await store.refresh()
+            // Trigger the server-side 60s feed once. The result is discarded —
+            // the next foreground launch re-fetches into NvdaStore.
+            _ = try? await SupabaseService.client.functions
+                .invoke("nvda-marks", options: FunctionInvokeOptions(body: [String: String]())) as Data
         }
         task.expirationHandler = {
             // System reclaiming time — cancel the in-flight refresh.

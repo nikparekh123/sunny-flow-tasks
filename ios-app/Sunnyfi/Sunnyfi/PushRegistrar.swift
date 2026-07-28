@@ -134,20 +134,14 @@ extension PushAppDelegate: UNUserNotificationCenterDelegate {
         return [.banner, .sound, .badge]
     }
 
-    /// User tapped a notification — route through AppNavigator so the
-    /// active SwiftUI hierarchy snaps to the relevant tab + opens
-    /// the relevant ticker modal. If the app is currently locked or
-    /// on the sign-in screen, the request is buffered and applied
-    /// once the user clears those gates.
+    /// User tapped a notification. The Ink rebuild is a single NVDA
+    /// surface, so a tap just brings the app to the foreground on the
+    /// portfolio — there's no multi-ticker tab to route to. (Deep-link
+    /// routing into a specific section can be re-added here once the
+    /// Ink nav model needs it.)
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
-        let userInfo = response.notification.request.content.userInfo
-        // Extract the Sendable bits before hopping to MainActor —
-        // [AnyHashable: Any] isn't Sendable, so we can't carry it
-        // across the boundary directly.
-        let category = userInfo["category"] as? String
-        let ticker   = userInfo["ticker"]   as? String
-        await AppNavigator.shared.handlePush(category: category, ticker: ticker)
+        // no-op: opening the app is the whole action for now
     }
 }
 
