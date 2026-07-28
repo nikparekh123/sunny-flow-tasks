@@ -179,10 +179,16 @@ struct InkTabBar: View {
         }
         .padding(.horizontal, 20).padding(.vertical, 5)
         .background(.ultraThinMaterial, in: Capsule())
+        // liquid-glass sheen: a bright top edge fading out, over a hairline rim
+        .overlay(
+            Capsule().stroke(
+                LinearGradient(colors: [Color.white.opacity(0.55), Color.white.opacity(0.05), .clear],
+                               startPoint: .top, endPoint: .bottom), lineWidth: 0.9)
+        )
         .overlay(Capsule().strokeBorder(Ink.hair, lineWidth: 1))
-        .shadow(color: .black.opacity(0.3), radius: 11, x: 0, y: 6)
-        .scaleEffect(dimmed ? 0.86 : 1, anchor: .bottom)
-        .opacity(dimmed ? 0.5 : 1)
+        .shadow(color: .black.opacity(dimmed ? 0.16 : 0.28), radius: dimmed ? 6 : 12, x: 0, y: dimmed ? 3 : 6)
+        .scaleEffect(dimmed ? 0.8 : 1, anchor: .bottom)   // smaller when scrolling
+        .opacity(dimmed ? 0.45 : 1)                        // more transparent when scrolling
         .animation(InkMotion.mid, value: dimmed)
         .animation(InkMotion.fast, value: selection)
     }

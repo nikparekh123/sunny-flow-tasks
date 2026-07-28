@@ -124,11 +124,12 @@ func inkFig(_ s: String) -> Text {
 
 private struct InkArc: Shape {
     var frac: Double
+    var inset: CGFloat = 0
     var animatableData: Double { get { frac } set { frac = newValue } }
     func path(in r: CGRect) -> Path {
         var p = Path()
         let c = CGPoint(x: r.midX, y: r.maxY - 4)
-        let radius = max(1, min(r.width / 2, r.height) - 6)
+        let radius = max(1, min(r.width / 2, r.height) - 6 - inset)
         p.addArc(center: c, radius: radius, startAngle: .degrees(180),
                  endAngle: .degrees(180 + 180 * max(0, min(1, frac))), clockwise: false)
         return p
@@ -136,9 +137,11 @@ private struct InkArc: Shape {
 }
 
 /// Semicircular gauge — the value arc grows from the left over `InkMotion.countUp`.
+/// `previous` draws a thinner, dimmer inner arc showing the prior close.
 struct InkGauge: View {
     var value: Double          // 0…100
     var suffix: String = ""
+    var previous: Double? = nil
     @State private var t: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
@@ -146,6 +149,11 @@ struct InkGauge: View {
         let v = building ? 0 : value * (reduce ? 1 : t)
         ZStack(alignment: .bottom) {
             InkArc(frac: 1).stroke(Ink.hair, style: .init(lineWidth: 9, lineCap: .round))
+            if let prev = previous, prev >= 0 {
+                InkArc(frac: 1, inset: 12).stroke(Ink.hair.opacity(0.6), style: .init(lineWidth: 4, lineCap: .round))
+                InkArc(frac: max(0.0001, prev / 100), inset: 12)
+                    .stroke(Ink.text.opacity(0.42), style: .init(lineWidth: 4, lineCap: .round))
+            }
             if !building {
                 InkArc(frac: max(0.0001, v / 100)).stroke(Ink.text, style: .init(lineWidth: 9, lineCap: .round))
             }

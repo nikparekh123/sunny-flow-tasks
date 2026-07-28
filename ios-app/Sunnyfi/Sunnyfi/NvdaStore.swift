@@ -53,9 +53,14 @@ final class NvdaStore {
             let (t, l, sl, q, m, c) = try await (trades, lots, sells, quotes, marks, closes)
             let nvda = q.first { $0.ticker == "NVDA" }
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
+            // Daily IV snapshot — non-fatal: if the table isn't there yet, [] (no 2nd gauge arc).
+            let ivDaily: [NvIvDaily] = (try? await client.from("nvda_iv_daily")
+                .select("ticker,date,iv").eq("ticker", value: "NVDA")
+                .order("date", ascending: false).limit(10).execute().value) ?? []
+
             pnl       = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             perf      = NvDerive.performance(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
-            insights  = NvDerive.insights(trades: t, lots: l, marks: m, quote: nvda, closes: c)
+            insights  = NvDerive.insights(trades: t, lots: l, marks: m, quote: nvda, closes: c, ivDaily: ivDaily)
             peers     = NvDerive.peers(quotes: q, closes: c)
             history   = NvDerive.history(trades: t, sells: sl)
             isLoading = false

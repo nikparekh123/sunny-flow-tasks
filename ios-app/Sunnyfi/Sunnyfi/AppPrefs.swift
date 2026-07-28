@@ -42,12 +42,13 @@ final class AppPrefs {
     /// Auto = follow the system; Light = always light; Dark = always
     /// dark. Each Color.theme token resolves dynamically against the
     /// active trait, so the choice flows through the whole app.
-    var appearance: Appearance {
-        get {
-            let raw = UserDefaults.standard.string(forKey: "prefs.appearance") ?? Appearance.dark.rawValue
-            return Appearance(rawValue: raw) ?? .dark
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "prefs.appearance") }
+    var appearance: Appearance = {
+        let raw = UserDefaults.standard.string(forKey: "prefs.appearance") ?? Appearance.dark.rawValue
+        return Appearance(rawValue: raw) ?? .dark
+    }() {
+        // Stored + @Observable so views (the Profile segmented control, InkRoot's
+        // preferredColorScheme) re-render and animate when it changes; didSet persists.
+        didSet { UserDefaults.standard.set(appearance.rawValue, forKey: "prefs.appearance") }
     }
 
     /// Whether iOS should silently pull market data while the app is

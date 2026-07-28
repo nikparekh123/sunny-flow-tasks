@@ -211,8 +211,9 @@ struct NvdaInsightsScreen: View {
                 InkEyebrow(n: "01", cat: "Volatility") {
                     InkBand(skin: .mod, text: v.verdict)
                 }
-                InkGauge(value: v.building ? -1 : (v.iv ?? 0), suffix: "%").frame(maxWidth: .infinity).padding(.top, 14)
-                gaugeCaption("Implied volatility · annualised")
+                InkGauge(value: v.building ? -1 : (v.iv ?? 0), suffix: "%", previous: v.ivPrev)
+                    .frame(maxWidth: .infinity).padding(.top, 14)
+                gaugeCaption(v.ivPrev != nil ? "Implied vol · faint arc = last close" : "Implied volatility · annualised")
                 InkBullets(items: v.building
                     ? ["Implied vol streams from the option chain — not live yet",
                        "Realised \(pctStr(v.hv30)) over the last month"]
@@ -221,18 +222,26 @@ struct NvdaInsightsScreen: View {
                 InkSpacer()
             }
             InkFoot(compact: true, height: 132) {
-                footLabel("Implied − realised")
-                Group {
-                    if let s = v.spread {
-                        InkDelta(value: "\(nv2Dec(abs(s), 1)) pts", good: s >= 0, size: 24, weight: .light)
-                    } else {
-                        Text("—").font(InkFont.mono(24, .light)).foregroundStyle(Ink.dim)
+                if let iv = v.iv, let prev = v.ivPrev {
+                    // user: show what IV was + how much it changed
+                    let chg = iv - prev
+                    footLabel("IV vs last close")
+                    InkDelta(value: "\(nv2Dec(abs(chg), 1)) pts", good: chg >= 0, size: 24, weight: .light)
+                    footNote("\(pctStr(prev)) → \(pctStr(iv)) · options \(chg >= 0 ? "richer" : "cheaper") than yesterday")
+                } else {
+                    footLabel("Implied − realised")
+                    Group {
+                        if let s = v.spread {
+                            InkDelta(value: "\(nv2Dec(abs(s), 1)) pts", good: s >= 0, size: 24, weight: .light)
+                        } else {
+                            Text("—").font(InkFont.mono(24, .light)).foregroundStyle(Ink.dim)
+                        }
                     }
+                    footNote(v.spread.map { $0 >= 0
+                        ? "Seller edge is positive — you are paid more than the stock has moved."
+                        : "Seller edge is negative — you are paid less than the stock has been moving." }
+                        ?? "Edge settles once implied vol is streaming.")
                 }
-                footNote(v.spread.map { $0 >= 0
-                    ? "Seller edge is positive — you are paid more than the stock has moved."
-                    : "Seller edge is negative — you are paid less than the stock has been moving." }
-                    ?? "Edge settles once implied vol is streaming.")
             }
             InkStamp(state: .delayed, text: v.building ? "Building · IV feed pending" : "Updated · next at close", compact: true)
         }

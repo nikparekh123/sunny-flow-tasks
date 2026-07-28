@@ -242,24 +242,31 @@ struct NvdaPositionScreen: View {
                         else { InkBand(skin: s.moneyness == "ITM" ? .mod : .low, text: s.moneyness) }
                     }
                 }
-                // hero: the STRIKE (clearer than the mark); the live mark + % vs
-                // entry sit on the caption line right under it.
+                // hero row: STRIKE big on the left, the live mark + % + entry as a
+                // prominent block on the right (not buried in a caption).
                 VStack(alignment: .leading, spacing: 0) {
-                    InkRoll(text: "$" + nvDec(s.strike, s.strike == s.strike.rounded() ? 0 : 1),
-                            font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        InkRoll(text: "$" + nvDec(s.strike, s.strike == s.strike.rounded() ? 0 : 1),
+                                font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
+                        Spacer(minLength: 0)
+                        if !s.expired, let mk = s.mark {
+                            let pct = entry > 0 ? (mk - entry) / entry * 100 : 0
+                            VStack(alignment: .trailing, spacing: 5) {
+                                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                    Text("$\(nvDec(mk, 2))").font(InkFont.mono(22, .light)).tracking(22 * -0.03).foregroundStyle(Ink.text)
+                                    Text(s.good == nil ? "·" : "\(pct >= 0 ? "+" : "−")\(nvDec(abs(pct), 1))%")
+                                        .font(InkFont.mono(12)).foregroundStyle(Ink.signed(s.good))
+                                }
+                                Text("\(short ? "sold" : "paid") $\(nvDec(entry, 2))".uppercased())
+                                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.14).foregroundStyle(Ink.dim)
+                            }
+                        }
+                    }
                     Text("\(s.kind == "call" ? "Call" : "Put") \(short ? "sold" : "bought") · \(s.expiry) · \(s.dte)".uppercased())
                         .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 12)
-                    if !s.expired, let mk = s.mark {
-                        let pct = entry > 0 ? (mk - entry) / entry * 100 : 0
-                        (Text("MARK ").foregroundStyle(Ink.dim)
-                            + Text("$\(nvDec(mk, 2))").foregroundStyle(Ink.text)
-                            + Text("  ").foregroundStyle(Ink.dim)
-                            + Text(s.good == nil ? "·" : "\(pct >= 0 ? "+" : "−")\(nvDec(abs(pct), 1))%").foregroundStyle(Ink.signed(s.good))
-                            + Text(" vs \(short ? "sold" : "paid") $\(nvDec(entry, 2))").foregroundStyle(Ink.dim))
-                            .font(InkFont.mono(9.5)).tracking(9.5 * 0.02).padding(.top, 10)
-                    } else {
+                    if s.expired || s.mark == nil {
                         Text("No live mark").font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
-                            .foregroundStyle(Ink.dim).padding(.top, 10)
+                            .foregroundStyle(Ink.dim).padding(.top, 8)
                     }
                 }
                 .padding(.top, 20)

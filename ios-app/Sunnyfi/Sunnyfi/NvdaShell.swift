@@ -424,7 +424,7 @@ struct NvdaProfileScreen: View {
     private var display: some View {
         panel("Display") {
             row(icon: "circle.lefthalf.filled", label: "Appearance") {
-                InkSegment(selection: Binding(get: { appPrefs.appearance }, set: { appPrefs.appearance = $0 }))
+                InkSegment()
             }
             hair
             toggleRow(icon: "eye.slash", label: "Hide P&L amounts",
@@ -506,20 +506,25 @@ struct NvdaProfileScreen: View {
 }
 
 private struct InkSegment: View {
-    @Binding var selection: AppPrefs.Appearance
+    @Namespace private var ns
     var body: some View {
-        HStack(spacing: 0) {
+        let prefs = AppPrefs.shared
+        let sel = prefs.appearance          // stored @Observable → tracked, so the thumb re-renders
+        return HStack(spacing: 0) {
             ForEach(AppPrefs.Appearance.allCases) { a in
-                let on = a == selection
-                Button { selection = a } label: {
+                let on = a == sel
+                Button { prefs.appearance = a } label: {
                     Text(a.rawValue.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.1)
                         .foregroundStyle(on ? Ink.invertText : Ink.dim)
-                        .padding(.horizontal, 11).padding(.vertical, 7)
-                        .background { if on { Capsule().fill(Ink.invertBg) } }
+                        .frame(maxWidth: .infinity).padding(.vertical, 7)
+                        .background {
+                            if on { Capsule().fill(Ink.invertBg).matchedGeometryEffect(id: "segThumb", in: ns) }
+                        }
                 }.buttonStyle(.plain)
             }
         }
+        .frame(width: 186)
         .padding(2).background(Capsule().fill(Ink.text.opacity(0.06)))
-        .animation(InkMotion.fast, value: selection)
+        .animation(InkMotion.fast, value: sel)
     }
 }

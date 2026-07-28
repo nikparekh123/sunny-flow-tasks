@@ -66,6 +66,12 @@ struct NvOptionMarkEod: Codable, Sendable {
     let theta: Double?
 }
 
+struct NvIvDaily: Codable, Sendable {
+    let ticker: String
+    let date: String
+    let iv: Double?               // ATM/representative IV that session (decimal)
+}
+
 struct NvOptionMark: Codable, Sendable {
     let option_trade_id: String
     let mark: Double?
@@ -164,6 +170,7 @@ struct NvVol: Sendable {
     let score: Double              // seller score 0…100 (the gauge); sell zone ≥ 70
     let verdict: String            // sell | caution | hold | building
     let iv: Double?                // implied vol, % (nil until the IV feed lands)
+    let ivPrev: Double?           // previous close IV, % (the second gauge arc)
     let hv30: Double?             // realized vol, %
     let ivr: Double?              // IV rank 0…100
     let iv52Low: Double?
@@ -515,7 +522,8 @@ enum NvDerive {
     // MARK: - Section 3 · insights (protection + volatility)
 
     static func insights(trades: [NvOptionTrade], lots: [NvShareLot], marks: [NvOptionMark],
-                         quote: NvQuote?, closes: [NvDailyClose], now: Date = Date()) -> NvInsights {
+                         quote: NvQuote?, closes: [NvDailyClose], ivDaily: [NvIvDaily] = [],
+                         now: Date = Date()) -> NvInsights {
         let spot = quote?.spot ?? 0
         let live = trades.filter { $0.voided_at == nil }
         let openLots = lots.filter { $0.voided_at == nil }
@@ -563,8 +571,14 @@ enum NvDerive {
         let building = iv == nil                     // no live implied vol yet
         let verdict = building ? "building"
             : ((spread ?? 0) > 2 ? "rich" : (spread ?? 0) < -2 ? "cheap" : "fair")
+        // previous close IV — from the daily IV snapshot; nil until that feed
+        // accumulates (see the nvda_iv_daily SQL). Then it draws the 2nd gauge arc.
+        let ivPrev: Double? = ivDaily
+            .filter { $0.date < Self.isoDay(now) }
+            .max(by: { $0.date < $1.date })
+            .flatMap { d in d.iv.map { $0 * 100 } }
         // Gauge shows implied vol directly (user: use IV, not a seller score).
-        let vol = NvVol(score: iv ?? 0, verdict: verdict, iv: iv, hv30: hv, ivr: nil,
+        let vol = NvVol(score: iv ?? 0, verdict: verdict, iv: iv, ivPrev: ivPrev, hv30: hv, ivr: nil,
                         iv52Low: nil, iv52High: nil, spread: spread, building: building)
 
         return NvInsights(protection: protection, vol: vol, fresh: freshness(quote?.captured_at, now: now).0)
@@ -743,6 +757,7 @@ enum NvDerive {
         let days = cal.dateComponents([.day], from: cal.startOfDay(for: d), to: cal.startOfDay(for: now)).day ?? 99
         return days >= 0 && days <= 1
     }
+    static func isoDay(_ d: Date) -> String { iso.string(from: d) }
     private static func isExpired(_ expiry: String, now: Date) -> Bool { daysTo(expiry, now: now) < 0 }
     private static func daysTo(_ expiry: String, now: Date) -> Int {
         guard let e = iso.date(from: expiry) else { return 0 }
