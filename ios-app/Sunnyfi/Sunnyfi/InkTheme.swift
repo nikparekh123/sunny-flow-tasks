@@ -99,16 +99,23 @@ enum InkMotion {
 // back to the system face at the correct size/weight, so nothing breaks.
 
 enum InkFont {
-    /// Prose / labels.
+    /// Prose / labels — Inter (variable; weight drives the wght axis).
     static func display(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
         .custom("Inter", size: size).weight(weight)
     }
-    /// Editorial section / sheet headings.
+    /// Editorial section / sheet headings — Newsreader (variable serif).
     static func serif(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .custom("Newsreader", size: size).weight(weight)
     }
-    /// Every number — prices, counts, deltas, dates, percentages, tickers.
+    /// Every number — IBM Plex Mono. Static faces, so map the weight to the exact
+    /// PostScript name (no `.weight()` on a static face).
     static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .custom("IBMPlexMono", size: size).weight(weight)
+        let face: String
+        switch weight {
+        case .ultraLight, .thin, .light: face = "IBMPlexMono-Light"
+        case .medium, .semibold, .bold, .heavy, .black: face = "IBMPlexMono-Medium"
+        default: face = "IBMPlexMono-Regular"
+        }
+        return .custom(face, size: size)
     }
 }
