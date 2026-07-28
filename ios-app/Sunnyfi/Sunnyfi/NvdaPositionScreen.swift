@@ -98,9 +98,13 @@ struct NvdaPositionScreen: View {
             InkFoot {
                 HStack(alignment: .bottom, spacing: 14) {
                     VStack(alignment: .leading, spacing: 0) {
+                        // Glossary: this is UNREALIZED (open, marked). See PNL_GLOSSARY.md.
+                        let u = store.pnl?.unrealized ?? p.pnl
+                        let sh = store.pnl?.sharesUnrealized ?? p.sharesPL
+                        let opt = (store.pnl.map { $0.unrealized - $0.sharesUnrealized }) ?? p.optionsPL
                         Text("CURRENT P&L · UNREALIZED").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
-                        InkDelta(value: inkUsd(abs(p.pnl)), good: p.pnl >= 0, size: 30, weight: .light).padding(.top, 10)
-                        Text("Shares \(inkUsd(abs(p.sharesPL))) · options \(inkUsd(abs(p.optionsPL)))")
+                        InkDelta(value: inkUsd(abs(u)), good: u >= 0, size: 30, weight: .light).padding(.top, 10)
+                        Text("Shares \(inkUsd(abs(sh))) · options \(inkUsd(abs(opt)))")
                             .font(InkFont.mono(10)).tracking(10 * 0.04).foregroundStyle(Ink.dim).padding(.top, 9)
                     }
                     Spacer(minLength: 0)

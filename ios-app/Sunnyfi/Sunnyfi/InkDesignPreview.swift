@@ -39,6 +39,11 @@ enum InkPreviewData {
                        iv52Low: 34, iv52High: 71, spread: 6, building: false),
             fresh: .delayed)
 
+        s.pnl = NvPnL(realized: 23467, realizedStock: -1526, premiumRealized: 24993, longRealized: 0, dividends: 0,
+                      unrealized: -51464, sharesUnrealized: -60995, openShortValue: 200, openLongValue: 704160, longCostBasis: 694629,
+                      net: -27997, premiumUnrealized: 8526, premiumTotal: 33519,
+                      costRealized: 21840, costUnrealized: 694629, costTotal: 716469,
+                      shares: 5601, avgBuy: 208.39, spot: 197.5)
         s.perf = NvPerf(realized: 21492, lifetime: 21492, perShare: 2.12, perSharePct: 1.0,
                         costBasis: 209.18, breakEven: 207.06, cushion: -12.49, cushionPct: -6.0, sleeves: [
             NvPerfSleeve(name: "Calls sold", glyph: "▲", total: 47, basisLabel: "Collected", basis: 8310, realized: 3067, unrealized: 1200, empty: false),

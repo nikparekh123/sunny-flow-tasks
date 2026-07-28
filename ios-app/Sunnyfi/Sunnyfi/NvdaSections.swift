@@ -106,28 +106,36 @@ struct NvdaPerformanceScreen: View {
         .scrollTargetBehavior(.viewAligned)
     }
 
+    // Glossary: REALIZED is the hero (closed only); PREMIUM/COST are breakdowns;
+    // NET (= realized + unrealized) in the foot. See PNL_GLOSSARY.md.
     private func profitCard(_ p: NvPerf) -> some View {
-        InkCard(compact: true) {
+        let g = store.pnl
+        let realized = g?.realized ?? p.realized
+        return InkCard(compact: true) {
             InkBody(compact: true) {
-                InkEyebrow(n: "01", cat: "Total profit") { InkBand(skin: .mod, text: "Lifetime") }
+                InkEyebrow(n: "01", cat: "Realized") { InkBand(skin: .mod, text: "Closed") }
                 VStack(alignment: .leading, spacing: 0) {
-                    InkRoll(text: inkUsd(p.realized), font: InkFont.mono(38, .light), tracking: 38 * -0.04, color: Ink.text)
-                    Text("Realized · options & shares".uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
+                    InkRoll(text: inkUsd(realized), font: InkFont.mono(38, .light), tracking: 38 * -0.04,
+                            color: realized >= 0 ? Ink.text : Ink.loss)
+                    Text("Realized · closed only".uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
                         .foregroundStyle(Ink.dim).padding(.top, 11)
                 }
                 .padding(.top, 22)
-                InkBullets(items: [
-                    "\(inkUsd(p.lifetime)) with open premium · $\(nv2Dec(p.perShare, 2)) a share (\(nv2Dec(p.perSharePct, 1))%)",
+                InkBullets(items: g.map { g in [
+                    "Premium \(inkUsd(g.premiumTotal)) · \(inkUsd(g.premiumRealized)) realised, \(inkUsd(g.premiumUnrealized)) open",
+                    "Hedge cost \(inkUsd(g.costTotal)) · break-even $\(nv2Dec(p.breakEven, 2))",
+                ] } ?? [
+                    "$\(nv2Dec(p.perShare, 2)) a share collected, calls only",
                     "Cost basis $\(nv2Dec(p.costBasis, 2)) → break-even $\(nv2Dec(p.breakEven, 2))",
                 ])
                 InkSpacer()
             }
             InkFoot(compact: true) {
-                Text("Cushion · spot over break-even".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                Text("Net · realized + unrealized".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 HStack(alignment: .firstTextBaseline) {
-                    InkDelta(value: "$" + nv2Dec(abs(p.cushion), 2), good: p.cushion >= 0, size: 28, weight: .light)
+                    InkDelta(value: inkUsd(abs(g?.net ?? p.realized)), good: (g?.net ?? 0) >= 0, size: 28, weight: .light)
                     Spacer(minLength: 0)
-                    Text("\(nv2Pct(p.cushionPct))").font(InkFont.mono(11.5)).foregroundStyle(Ink.dim)
+                    Text("open \(inkUsd(g?.unrealized ?? 0))").font(InkFont.mono(11.5)).foregroundStyle(Ink.dim)
                 }
             }
             InkStamp(state: .delayed, text: "End of day · booked at close", compact: true)
