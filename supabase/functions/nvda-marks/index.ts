@@ -102,14 +102,21 @@ Deno.serve(async (req) => {
   }
   const contracts = [...byContract.values()].filter((c) => Math.abs(c.net) > 1e-6);
 
-  // 3 · one Polygon snapshot per open contract → mark row per open trade of it
+  // 3 · one Polygon snapshot per open contract → mark row per open trade of it.
+  //     Only write NON-NULL fields. Polygon returns null greeks for thin,
+  //     deep-ITM contracts intermittently; writing that null wiped the last good
+  //     delta and made the app's position delta jump by thousands between polls.
+  //     Omitting nulls keeps the last-known value (on-conflict updates only the
+  //     provided columns).
   let marked = 0;
   for (const c of contracts) {
     const snap = await fetchOption(c.occ, key);
     if (!snap) continue;
+    const fresh: Record<string, unknown> = { captured_at: now };
+    for (const [k, v] of Object.entries(snap)) if (v !== null && v !== undefined) fresh[k] = v;
     for (const id of c.ids) {
       const { error } = await admin.from('nvda_option_marks').upsert(
-        { option_trade_id: id, ...snap, captured_at: now },
+        { option_trade_id: id, ...fresh },
         { onConflict: 'option_trade_id' },
       );
       if (!error) marked++;
