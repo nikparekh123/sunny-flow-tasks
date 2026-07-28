@@ -31,41 +31,35 @@ struct InkRoot: View {
             InkTabBar(selection: $tab).padding(.bottom, 6)
         }
         .task { await store.poll(seconds: 60) }
-        .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)   // Auto=system, or the Profile override
+        .preferredColorScheme(nil)   // follow system (design device defaults dark; no Profile override yet)
     }
 
     @ViewBuilder private var content: some View {
         switch tab {
         case 0:
             if sym == "Nvidia" {
+                // One vertical scroll of the five sections — the design has NO
+                // dividers between them; each section's head (26px top) is the gap.
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 0) {
                         NvdaPositionScreen(store: store)
-                        sectionRule
                         NvdaPerformanceScreen(store: store)
-                        sectionRule
                         NvdaInsightsScreen(store: store)
-                        sectionRule
                         NvdaPeersScreen(store: store)
-                        sectionRule
                         NvdaHistoryScreen(store: store)
-                        Color.clear.frame(height: 120)   // clear the floating tab bar
+                        Color.clear.frame(height: 104)   // design tailpad, clears the floating tab bar
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)   // pin content to screen width
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity)
             } else {
                 quiet("No position", "Nothing held or written in \(sym) — watchlist only.")
             }
         case 1:
-            NvdaEventsScreen(store: store)
+            NvdaEventsScreen()
         default:
-            NvdaProfileScreen(auth: auth, lock: lock, prefs: prefs)
+            NvdaProfileScreen()
         }
-    }
-
-    private var sectionRule: some View {
-        Rectangle().fill(Ink.hair).frame(height: 1).padding(.horizontal, 16).padding(.vertical, 10)
     }
 
     private func quiet(_ title: String, _ body: String) -> some View {

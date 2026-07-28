@@ -14,6 +14,23 @@ enum InkPreviewData {
     static func store() -> NvdaStore {
         let s = NvdaStore()
         s.isLoading = false
+        s.position = NvPosition(
+            spot: 194.57, dayChangePct: -1.12, shares: 5001, avgBuy: 209.18, sharesPaid: 1046116,
+            sharesValue: 973183, sharesPL: -77380, premiumPerShare: 2.12, breakEven: 207.06,
+            delta: 3914, gamma: 42, theta: -285, optionsPL: 6194, pnl: -45254, contractsOpen: 70,
+            sleeves: [
+                NvSleeve(name: "Calls sold", side: "short", kind: "call", qty: 10, basisLabel: "collected", basis: 8310),
+                NvSleeve(name: "Puts bought", side: "long", kind: "put", qty: 50, basisLabel: "paid", basis: 541989),
+            ],
+            groups: [
+                NvGroup(label: "Calls sold", glyph: "▲", strikes: [
+                    NvStrike(side: "short", kind: "call", strike: 220, expiry: "Aug 15 '26", dte: "18 DTE", expired: false,
+                             ct: 10, basis: 8310, current: 2800, mark: 2.80, moneyness: "OTM", delta: 0.32, theta: -0.12)]),
+                NvGroup(label: "Puts bought", glyph: "▽", strikes: [
+                    NvStrike(side: "long", kind: "put", strike: 200, expiry: "Jan 16 '27", dte: "172 DTE", expired: false,
+                             ct: 10, basis: 120000, current: 98000, mark: 9.80, moneyness: "ITM", delta: -0.42, theta: -0.03)]),
+            ],
+            fresh: .live, freshText: "Updated now · streaming")
         s.insights = NvInsights(
             protection: NvProtection(putContracts: 50, shares: 5001, covered: 3200, coveredPct: 64,
                                      floorLow: 200, floorHigh: 400, uncovered: 1801,
@@ -62,16 +79,20 @@ struct InkDesignPreview: View {
     var body: some View {
         ZStack {
             Ink.canvas.ignoresSafeArea()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    NvdaInsightsScreen(store: store)
-                    Rectangle().fill(Ink.hair).frame(height: 1).padding(.horizontal, 16).padding(.vertical, 10)
-                    NvdaPeersScreen(store: store)
-                    Rectangle().fill(Ink.hair).frame(height: 1).padding(.horizontal, 16).padding(.vertical, 10)
-                    NvdaHistoryScreen(store: store)
-                    Color.clear.frame(height: 60)
+            if ProcessInfo.processInfo.arguments.contains("-inkEvents") {
+                NvdaEventsScreen()
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        NvdaPositionScreen(store: store)
+                        NvdaPerformanceScreen(store: store)
+                        NvdaInsightsScreen(store: store)
+                        NvdaPeersScreen(store: store)
+                        NvdaHistoryScreen(store: store)
+                        Color.clear.frame(height: 60)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .preferredColorScheme(.dark)
