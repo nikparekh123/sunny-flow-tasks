@@ -14,6 +14,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - shared formatting
 
@@ -272,12 +273,27 @@ struct NvdaPeersScreen: View {
 
     var body: some View {
         if let pe = store.peers, pe.tapes.contains(where: { $0.last != nil }) {
+            let shares = store.position?.shares ?? 0
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Peers & ETFs", count: "\(pe.tapes.count) names")
+                InkSectionHead(title: "Peers & ETFs", count: "\(pe.tapes.count) cards")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
-                        ForEach(Array(pe.tapes.enumerated()), id: \.element.id) { i, t in
-                            tapeCard(t, fresh: pe.fresh).inkEntrance(min(i, 4))
+                        ForEach(["self", "ETFs", "Peers"], id: \.self) { g in
+                            let list = pe.tapes.filter { $0.group == g }
+                            VStack(alignment: .leading, spacing: 14) {
+                                HStack(spacing: 9) {
+                                    Text((g == "self" ? "NVDA" : g).uppercased())
+                                        .font(InkFont.mono(9.5)).tracking(9.5 * 0.2).foregroundStyle(Ink.dim)
+                                    Text("\(list.count)").font(InkFont.mono(9.5)).tracking(9.5 * 0.1).foregroundStyle(Ink.text)
+                                }
+                                .frame(height: 20, alignment: .leading)
+                                HStack(alignment: .top, spacing: 10) {
+                                    ForEach(Array(list.enumerated()), id: \.element.id) { i, t in
+                                        TapeCardView(t: t, n: peerIndex(pe.tapes, t), shares: shares, fresh: pe.fresh)
+                                            .inkEntrance(min(i, 4))
+                                    }
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
@@ -285,68 +301,96 @@ struct NvdaPeersScreen: View {
                 }
                 .scrollTargetBehavior(.viewAligned)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if !store.isLoading {
             nvQuiet("Peers & ETFs", "Waiting for the tape.")
         }
     }
 
-    private func tapeCard(_ t: NvPeerTape, fresh: NvFresh) -> some View {
-        let hue = Ink.signed(t.good)
-        let hasTape = t.closes.count >= 2
-        return InkCard(relevance: t.ticker == "NVDA" ? .r1 : .r2, compact: true) {
+    private func peerIndex(_ all: [NvPeerTape], _ t: NvPeerTape) -> String {
+        String(format: "%02d", (all.firstIndex(where: { $0.id == t.id }) ?? 0) + 1)
+    }
+}
+
+/// One peer tape — big live price, a tappable 5-session dot strip, and a
+/// sleeve/gap foot. Matches the design's TapeCard (compact, 392 tall).
+private struct TapeCardView: View {
+    let t: NvPeerTape
+    let n: String
+    let shares: Double
+    let fresh: NvFresh
+    @State private var day: Int? = nil
+
+    var body: some View {
+        let sel = day.flatMap { t.days.indices.contains($0) ? t.days[$0] : nil }
+        let price = sel?.close ?? t.last
+        let pct = sel?.pct ?? t.net
+        let up = pct.map { $0 >= 0 }
+        return InkCard(compact: true, height: 392) {
             InkBody(compact: true) {
-                InkEyebrow(cat: t.ticker) {
-                    InkBand(skin: t.dayPct == nil ? .low : .hue(hue), text: t.dayPct.map { nv2Pct($0) } ?? "—")
+                InkEyebrow(n: n, cat: t.ticker) { InkBand(skin: .low, text: t.name) }
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(price.map { "$" + nv2Dec($0, 2) } ?? "—")
+                        .font(InkFont.mono(32, .light)).tracking(32 * -0.04).foregroundStyle(Ink.text)
+                    if let pct { InkDelta(value: nv2Dec(abs(pct), 1) + "%", good: up, size: 17) }
                 }
-                NvCompactHero(value: t.last.map { "$" + nv2Dec($0, 2) } ?? "—", unit: "last", size: 32)
-                if hasTape {
-                    sparkline(t.closes, hue: hue).frame(height: 52).padding(.top, 18)
-                } else {
-                    Text("5-session tape builds after the close.")
-                        .font(InkFont.display(12, .light)).foregroundStyle(Ink.dim)
-                        .frame(height: 52, alignment: .leading).padding(.top, 18)
-                }
+                .padding(.top, 20)
+                Text((sel.map { $0.label + " close" } ?? "Last · five sessions").uppercased())
+                    .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 10)
                 InkSpacer()
+                dotStrip
             }
-            InkFoot(compact: true) {
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text("5-SESSION").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
-                        InkDelta(value: t.windowPct.map { nv2Dec(abs($0), 1) + "%" } ?? "—",
-                                 good: t.windowPct.map { $0 >= 0 }, size: 22, weight: .light)
-                    }
-                    Spacer(minLength: 0)
-                    if t.closes.count >= 2 {
-                        Text("$\(nv2Dec(t.closes.min() ?? 0, 0))–\(nv2Dec(t.closes.max() ?? 0, 0))")
-                            .font(InkFont.mono(11)).foregroundStyle(Ink.dim)
-                    }
+            InkFoot(compact: true, height: 112) {
+                if t.group == "self" {
+                    footLine("Five sessions · your sleeve",
+                             value: (t.net).map { inkUsd(abs(shares * (t.last ?? 0) * $0 / 100)) },
+                             good: (t.net).map { $0 >= 0 }, trailing: "\(nv2Int(shares)) shares")
+                } else {
+                    footLine("Gap to NVDA",
+                             value: t.vsNvda.map { nv2Dec(abs($0), 1) + " pts" },
+                             good: t.vsNvda.map { $0 >= 0 },
+                             trailing: (t.vsNvda.map { $0 >= 0 ? "ahead of you" : "behind you" }) ?? "")
                 }
             }
-            InkStamp(state: stamp2(fresh), text: t.ticker == "NVDA" ? "Streaming" : "Delayed 15 min", compact: true)
+            InkStamp(state: stamp2(fresh), text: "Updated now · streaming", compact: true, flat: true)
         }
     }
 
-    private func sparkline(_ closes: [Double], hue: Color) -> some View {
-        GeometryReader { g in
-            let lo = closes.min() ?? 0, hi = closes.max() ?? 1
-            let span = max(hi - lo, 0.0001)
-            let pt: (Int, Double) -> CGPoint = { i, c in
-                let x = closes.count <= 1 ? 0 : CGFloat(i) / CGFloat(closes.count - 1) * g.size.width
-                let y = g.size.height - CGFloat((c - lo) / span) * (g.size.height - 4) - 2
-                return CGPoint(x: x, y: y)
-            }
-            ZStack {
-                Path { p in
-                    for (i, c) in closes.enumerated() {
-                        let q = pt(i, c)
-                        if i == 0 { p.move(to: q) } else { p.addLine(to: q) }
+    private var dotStrip: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(t.days.prefix(5).enumerated()), id: \.element.id) { i, d in
+                Button {
+                    day = (day == i) ? nil : i
+                } label: {
+                    VStack(spacing: 10) {
+                        Text(d.label.uppercased()).font(InkFont.mono(8)).tracking(8 * 0.1)
+                            .foregroundStyle(Ink.dim).lineLimit(1)
+                        Circle()
+                            .fill(d.pct == 0 ? Color.clear : (d.pct < 0 ? Ink.loss : Ink.text))
+                            .overlay { if d.pct == 0 { Circle().strokeBorder(Ink.dim, lineWidth: 1.5) } }
+                            .frame(width: 9, height: 9)
+                        Text((d.pct < 0 ? "−" : "+") + nv2Dec(abs(d.pct), 1))
+                            .font(InkFont.mono(10.5)).foregroundStyle(d.pct < 0 ? Ink.loss : Ink.text)
                     }
+                    .frame(maxWidth: .infinity)
+                    .inkRelevance(day == nil || day == i ? .r1 : .r3)
                 }
-                .stroke(hue, style: .init(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                if let last = closes.indices.last {
-                    Circle().fill(hue).frame(width: 5, height: 5)
-                        .position(pt(last, closes[last]))
-                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 18).padding(.bottom, 2)
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+        .padding(.top, 14)
+    }
+
+    private func footLine(_ label: String, value: String?, good: Bool?, trailing: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(label.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+            HStack(alignment: .firstTextBaseline) {
+                if let value { InkDelta(value: value, good: good, size: 24, weight: .light) }
+                else { Text("—").font(InkFont.mono(24, .light)).foregroundStyle(Ink.dim) }
+                Spacer(minLength: 0)
+                Text(trailing).font(InkFont.mono(10.5)).foregroundStyle(Ink.dim)
             }
         }
     }
@@ -358,70 +402,215 @@ struct NvdaHistoryScreen: View {
     let store: NvdaStore
 
     var body: some View {
-        if let h = store.history, !h.bars.isEmpty {
+        if let h = store.history, h.months.contains(where: { !$0.bars.isEmpty }) {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Historical performance", count: "\(h.sessions) sessions")
+                InkSectionHead(title: "Historical performance", count: "1 card")
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 10) { chartCard(h).inkEntrance(0) }
+                    HStack(alignment: .top, spacing: 10) { HistoryCardView(h: h).inkEntrance(0) }
                         .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
                         .scrollTargetLayout()
                 }
                 .scrollTargetBehavior(.viewAligned)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if !store.isLoading {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Gains and losses, by session", count: "Building")
+                InkSectionHead(title: "Historical performance", count: "Building")
                 nvQuiet("History builds nightly",
                         "Each session's shares- and options-P&L is booked at the close. The chart fills in as the days accumulate.")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
 
-    private func chartCard(_ h: NvHistory) -> some View {
-        InkCard(height: 530) {
+/// The gains-up / losses-down session chart with a month rail and per-source
+/// filter chips — the design's single History card (348 × 540).
+private struct HistoryCardView: View {
+    let h: NvHistory
+    @State private var mi: Int
+    @State private var pick: Int? = nil
+    @State private var on: [String: Bool]
+    private let barH: CGFloat = 52
+
+    init(h: NvHistory) {
+        self.h = h
+        _mi = State(initialValue: max(0, h.months.count - 1))
+        var d: [String: Bool] = [:]
+        for s in h.sources { d[s.key] = !s.empty && s.key != "putsSold" }
+        _on = State(initialValue: d)
+    }
+
+    private var m: NvHistMonth { h.months[min(mi, h.months.count - 1)] }
+    private func gain(_ b: NvHistBar) -> Double { h.sources.reduce(0) { a, s in a + ((on[s.key] ?? false) && (b.vals[s.key] ?? 0) > 0 ? b.vals[s.key]! : 0) } }
+    private func loss(_ b: NvHistBar) -> Double { h.sources.reduce(0) { a, s in a + ((on[s.key] ?? false) && (b.vals[s.key] ?? 0) < 0 ? b.vals[s.key]! : 0) } }
+    private var peak: Double {
+        max(h.months.flatMap { $0.bars }.map { max(gain($0), -loss($0)) }.max() ?? 1, 1)
+    }
+
+    var body: some View {
+        let bars = m.bars
+        let gains = bars.reduce(0) { $0 + gain($1) }
+        let losses = bars.reduce(0) { $0 + loss($1) }
+        let net = gains + losses
+        let done = bars.filter { !$0.pending }.count
+        let sel = pick.flatMap { bars.indices.contains($0) ? bars[$0] : nil }
+        return InkCard(height: 540) {
             InkBody {
-                InkEyebrow(n: "01", cat: "Net by session") {
-                    InkBand(skin: .hue(h.net >= 0 ? Ink.gain : Ink.loss), text: nv2Money(h.net))
-                }
-                InkHero(value: nv2Money(h.net), unit: "net across \(h.sessions) sessions")
-                barChart(h).frame(height: 148).padding(.top, 22)
+                InkEyebrow(n: "01", cat: "Gains & losses") { InkBand(skin: .mod, text: m.label) }
+                InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 36, weight: .light).padding(.top, 16)
+                Text("Net · \(m.label) · \(done) of \(bars.count) sessions".uppercased())
+                    .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 9)
+                chart(bars).padding(.top, 16)
                 InkSpacer()
-                InkBand3(items: [
-                    ("Best day", nv2Money(h.bestDay)),
-                    ("Worst day", nv2Money(h.worstDay)),
-                    ("Sessions", "\(h.sessions)"),
-                ])
+                monthRail.padding(.top, 12)
+                sourceRail.padding(.top, 4)
             }
             InkFoot {
-                Text("Blue is a winning session, orange a losing one — shares and options combined.")
-                    .font(InkFont.display(12.5, .light)).foregroundStyle(Ink.dim)
-                    .frame(maxHeight: .infinity, alignment: .center)
+                if let sel { sessionFoot(sel) } else { totalsFoot(gains, losses) }
             }
-            InkStamp(state: .delayed, text: "End of day · per-session book")
+            InkStamp(state: .delayed, text: "Updated 16:00 · next at close")
         }
     }
 
+    // dual bars: gains grow up from the midline, losses down
     @State private var grow = false
-    private func barChart(_ h: NvHistory) -> some View {
-        let maxMag = max(h.bars.map { abs($0.total) }.max() ?? 1, 1)
-        return GeometryReader { g in
-            let n = max(h.bars.count, 1)
-            let gap: CGFloat = 5
-            let bw = max(3, (g.size.width - gap * CGFloat(n - 1)) / CGFloat(n))
-            let midY = g.size.height / 2
-            ZStack(alignment: .topLeading) {
-                Rectangle().fill(Ink.hair).frame(height: 1).offset(y: midY)
-                ForEach(Array(h.bars.enumerated()), id: \.element.id) { i, b in
-                    let mag = CGFloat(abs(b.total) / maxMag) * (midY - 4) * (grow ? 1 : 0)
-                    let up = b.total >= 0
-                    Capsule()
-                        .fill(up ? Ink.gain : Ink.loss)
-                        .frame(width: bw, height: max(2, mag))
-                        .position(x: CGFloat(i) * (bw + gap) + bw / 2,
-                                  y: up ? midY - mag / 2 : midY + mag / 2)
+    private func chart(_ bars: [NvHistBar]) -> some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(Array(bars.enumerated()), id: \.element.id) { i, b in
+                    Button { pick = (pick == i) ? nil : i } label: {
+                        VStack(spacing: 0) {
+                            VStack(spacing: 0) { Spacer(minLength: 0)
+                                Rectangle().fill(b.pending ? Ink.hair : Ink.text)
+                                    .frame(height: max(1, gain(b) / peak * barH * (grow ? 1 : 0)))
+                                    .clipShape(RoundedCorner(radius: 2, corners: [.topLeft, .topRight]))
+                            }.frame(height: barH)
+                            VStack(spacing: 0)  {
+                                Rectangle().fill(b.pending ? Ink.hair : Ink.loss)
+                                    .frame(height: max(1, -loss(b) / peak * barH * (grow ? 1 : 0)))
+                                    .clipShape(RoundedCorner(radius: 2, corners: [.bottomLeft, .bottomRight]))
+                                Spacer(minLength: 0)
+                            }.frame(height: barH)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .inkRelevance(pick == nil || pick == i ? .r1 : .r3)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
+            .overlay(alignment: .center) { Rectangle().fill(Ink.hair).frame(height: 1) }
+            HStack {
+                Text("\(m.short) \(bars.first?.label ?? "")").font(InkFont.mono(8)).tracking(8 * 0.1).foregroundStyle(Ink.dim)
+                Spacer()
+                Text("\(m.short) \(bars.last?.label ?? "")").font(InkFont.mono(8)).tracking(8 * 0.1).foregroundStyle(Ink.dim)
+            }
         }
+        .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
+    }
+
+    private var monthRail: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(h.months.enumerated()), id: \.element.id) { i, mo in
+                    let selp = i == mi
+                    Button { mi = i; pick = nil } label: {
+                        Text(mo.short.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.14)
+                            .foregroundStyle(selp ? Ink.invertText : Ink.dim)
+                            .padding(.horizontal, 11).frame(minHeight: 26)
+                            .background(RoundedRectangle(cornerRadius: Ink.radiusElement).fill(selp ? Ink.invertBg : .clear))
+                            .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement).strokeBorder(selp ? .clear : Ink.hair, lineWidth: 1))
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+        .padding(.top, 14)
+    }
+
+    private var sourceRail: some View {
+        let live = h.sources.filter { !$0.empty }
+        let all = live.allSatisfy { on[$0.key] ?? false }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                Button {
+                    for s in h.sources { on[s.key] = s.empty ? false : !all }
+                } label: { chip("All", nil, active: all, dashed: false) }
+                    .buttonStyle(.plain)
+                Rectangle().fill(Ink.hair).frame(width: 1, height: 18)
+                ForEach(h.sources.sorted { ($0.empty ? 1 : 0) < ($1.empty ? 1 : 0) }) { s in
+                    Button { if !s.empty { on[s.key]?.toggle() } } label: {
+                        chip(s.label, s.glyph, active: (on[s.key] ?? false) && !s.empty, dashed: s.empty)
+                    }
+                    .buttonStyle(.plain).disabled(s.empty)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func chip(_ label: String, _ glyph: String?, active: Bool, dashed: Bool) -> some View {
+        HStack(spacing: 5) {
+            if let glyph { Text(glyph).font(.system(size: 9)) }
+            Text(label.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.08)
+        }
+        .foregroundStyle(active ? Ink.invertText : Ink.dim)
+        .padding(.horizontal, 9).frame(minHeight: 26)
+        .background(RoundedRectangle(cornerRadius: Ink.radiusElement).fill(active ? Ink.invertBg : .clear))
+        .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement)
+            .strokeBorder(active ? Color.clear : Ink.hair, style: .init(lineWidth: 1, dash: dashed ? [3, 3] : [])))
+    }
+
+    private func totalsFoot(_ gains: Double, _ losses: Double) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("GAINS VS LOSSES").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                Spacer()
+                Text("TAP A SESSION").font(InkFont.mono(10)).tracking(10 * 0.1).foregroundStyle(Ink.dim)
+            }
+            HStack(spacing: 22) {
+                col("Gains", inkUsd(gains), Ink.text)
+                col("Losses", inkUsd(abs(losses)), Ink.loss)
+            }
+        }
+    }
+    private func sessionFoot(_ b: NvHistBar) -> some View {
+        let total = gain(b) + loss(b)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(b.sub.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.text)
+                Spacer()
+                InkDelta(value: inkUsd(abs(total)), good: total >= 0, size: 16)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 14) {
+                    ForEach(h.sources.filter { (on[$0.key] ?? false) && (b.vals[$0.key] ?? 0) != 0 }) { s in
+                        let v = b.vals[s.key] ?? 0
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("\(s.glyph) \(s.label)".uppercased()).font(InkFont.mono(8)).tracking(8 * 0.1)
+                                .foregroundStyle(Ink.dim).lineLimit(1)
+                            Text((v < 0 ? "−" : "+") + inkUsd(abs(v)))
+                                .font(InkFont.mono(15)).foregroundStyle(v < 0 ? Ink.loss : Ink.text)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    private func col(_ k: String, _ v: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(k.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim)
+            Text(v).font(InkFont.mono(22, .light)).foregroundStyle(color)
+        }
+    }
+}
+
+/// Rounded-corner clip for the history bars (top-only / bottom-only radii).
+private struct RoundedCorner: Shape {
+    var radius: CGFloat
+    var corners: UIRectCorner
+    func path(in rect: CGRect) -> Path {
+        Path(UIBezierPath(roundedRect: rect, byRoundingCorners: corners,
+                          cornerRadii: CGSize(width: radius, height: radius)).cgPath)
     }
 }

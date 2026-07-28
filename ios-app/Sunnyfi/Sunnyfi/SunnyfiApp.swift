@@ -60,6 +60,15 @@ private struct RootView: View {
     let prefs: NotificationPrefs
 
     var body: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-inkPreview") {
+            return AnyView(InkDesignPreview())
+        }
+        #endif
+        return AnyView(routed)
+    }
+
+    @ViewBuilder private var routed: some View {
         switch auth.state {
         case .loading:
             ZStack {

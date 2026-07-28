@@ -175,14 +175,21 @@ struct NvInsights: Sendable {
     let fresh: NvFresh
 }
 
-// Section 4 · peers & ETFs
+// Section 4 · peers & ETFs — 5-session tape, grouped NVDA / ETFs / Peers.
+struct NvPeerDay: Identifiable, Sendable {
+    let label: String             // "Jul 24"
+    let close: Double
+    let pct: Double               // day-over-day %
+    var id: String { label }
+}
 struct NvPeerTape: Identifiable, Sendable {
     let ticker: String
+    let name: String              // "S&P 500", "Broadcom", …
+    let group: String             // "self" | "ETFs" | "Peers"
     let last: Double?
-    let dayPct: Double?
-    let closes: [Double]          // recent session closes, oldest→newest (≤6)
-    let windowPct: Double?        // % across the window
-    let good: Bool?
+    let net: Double?              // % across the shown sessions
+    let days: [NvPeerDay]
+    let vsNvda: Double?           // net − NVDA net, in points
     var id: String { ticker }
 }
 struct NvPeers: Sendable {
@@ -190,20 +197,30 @@ struct NvPeers: Sendable {
     let fresh: NvFresh
 }
 
-// Section 5 · historical performance
+// Section 5 · historical performance — per-session P&L split by source, by month.
+struct NvHistSource: Identifiable, Sendable {
+    let key: String               // shares | callsSold | callsBought | putsSold | putsBought
+    let label: String
+    let glyph: String             // ○ ▲ △ ▼ ▽
+    let empty: Bool               // no data for this source anywhere → disabled chip
+    var id: String { key }
+}
 struct NvHistBar: Identifiable, Sendable {
-    let label: String             // "Jul 24"
-    let sharesPL: Double
-    let optionsPL: Double
-    var total: Double { sharesPL + optionsPL }
-    var id: String { label }
+    let label: String             // "24"
+    let sub: String               // "Jul 24"
+    let pending: Bool
+    let vals: [String: Double]    // keyed by source key
+    var id: String { sub }
+}
+struct NvHistMonth: Identifiable, Sendable {
+    let label: String             // "July"
+    let short: String             // "Jul"
+    let bars: [NvHistBar]
+    var id: String { short }
 }
 struct NvHistory: Sendable {
-    let bars: [NvHistBar]         // recent sessions, oldest→newest
-    let bestDay: Double
-    let worstDay: Double
-    let net: Double               // sum across the window
-    let sessions: Int
+    let months: [NvHistMonth]
+    let sources: [NvHistSource]
     let fresh: NvFresh
 }
 
@@ -450,19 +467,33 @@ enum NvDerive {
     // MARK: - Section 4 · peers & ETFs (5-session tape)
 
     static func peers(quotes: [NvQuote], closes: [NvDailyClose], now: Date = Date()) -> NvPeers {
-        let order = ["NVDA", "QQQ", "SPY", "SMH", "AVGO", "AMD", "ARM", "INTC"]
+        let meta: [(tk: String, name: String, group: String)] = [
+            ("NVDA", "NVIDIA", "self"), ("QQQ", "Nasdaq 100", "ETFs"), ("SPY", "S&P 500", "ETFs"),
+            ("SMH", "Semis", "ETFs"), ("AVGO", "Broadcom", "Peers"), ("AMD", "AMD", "Peers"),
+            ("ARM", "Arm", "Peers"), ("INTC", "Intel", "Peers"),
+        ]
         let qByT = Dictionary(quotes.map { ($0.ticker, $0) }, uniquingKeysWith: { a, _ in a })
-        var closesByT: [String: [Double]] = [:]
+        var closesByT: [String: [(String, Double)]] = [:]
         for c in closes.sorted(by: { $0.date < $1.date }) {
-            if let p = c.close_price { closesByT[c.ticker, default: []].append(p) }
+            if let p = c.close_price { closesByT[c.ticker, default: []].append((c.date, p)) }
         }
-        let tapes: [NvPeerTape] = order.map { tk in
-            let q = qByT[tk]
-            let cs = Array((closesByT[tk] ?? []).suffix(6))
-            let win: Double? = (cs.first ?? 0) > 0 && cs.count >= 2 ? (cs.last! / cs.first! - 1) * 100 : nil
-            let day = q?.day_change_pct
-            return NvPeerTape(ticker: tk, last: q?.spot, dayPct: day, closes: cs, windowPct: win,
-                              good: day == nil ? nil : day! >= 0)
+        func build(_ tk: String) -> (days: [NvPeerDay], net: Double?) {
+            let cs = Array((closesByT[tk] ?? []).suffix(6))   // up to 6 → 5 day-changes
+            guard cs.count >= 2 else { return ([], nil) }
+            var days: [NvPeerDay] = []
+            for i in 1..<cs.count where cs[i - 1].1 > 0 {
+                days.append(NvPeerDay(label: shortDate(cs[i].0), close: cs[i].1,
+                                      pct: (cs[i].1 / cs[i - 1].1 - 1) * 100))
+            }
+            let net = cs.first!.1 > 0 ? (cs.last!.1 / cs.first!.1 - 1) * 100 : nil
+            return (days, net)
+        }
+        let nvdaNet = build("NVDA").net
+        let tapes: [NvPeerTape] = meta.map { m in
+            let q = qByT[m.tk]; let b = build(m.tk)
+            let vs: Double? = (b.net != nil && nvdaNet != nil && m.group != "self") ? b.net! - nvdaNet! : nil
+            return NvPeerTape(ticker: m.tk, name: m.name, group: m.group, last: q?.spot,
+                              net: b.net, days: b.days, vsNvda: vs)
         }
         return NvPeers(tapes: tapes, fresh: freshness(qByT["NVDA"]?.captured_at, now: now).0)
     }
@@ -473,6 +504,12 @@ enum NvDerive {
                         lots: [NvShareLot], now: Date = Date()) -> NvHistory {
         let shares = lots.filter { $0.voided_at == nil }.reduce(0) { $0 + $1.qty_remaining }
         let live = trades.filter { $0.voided_at == nil }
+        // each option leg → its source bucket + signed contract multiplier
+        func bucket(_ t: NvOptionTrade) -> String {
+            t.option_type == "call" ? (t.direction == "short" ? "callsSold" : "callsBought")
+                                    : (t.direction == "short" ? "putsSold" : "putsBought")
+        }
+        let srcById = Dictionary(live.map { ($0.id, bucket($0)) }, uniquingKeysWith: { a, _ in a })
         let signById = Dictionary(live.map { ($0.id, $0.direction == "short" ? -1.0 : 1.0) }, uniquingKeysWith: { a, _ in a })
         let ctById = Dictionary(live.map { ($0.id, $0.contracts) }, uniquingKeysWith: { a, _ in a })
 
@@ -483,29 +520,52 @@ enum NvDerive {
         for m in eod { if let mk = m.mark { marksByDate[m.date, default: [:]][m.option_trade_id] = mk } }
 
         let dates = Array(Set(closeByDate.keys).union(marksByDate.keys)).sorted()
-        var bars: [NvHistBar] = []
+        let keys = ["shares", "callsSold", "callsBought", "putsSold", "putsBought"]
+        var seen: Set<String> = []
+        var rawBars: [(date: String, vals: [String: Double])] = []
         var prevClose: Double?
         var prevMarks: [String: Double] = [:]
         for d in dates {
-            var sharesPL = 0.0
-            if let c = closeByDate[d] { if let p = prevClose { sharesPL = (c - p) * shares }; prevClose = c }
-            var optPL = 0.0
+            var vals = Dictionary(uniqueKeysWithValues: keys.map { ($0, 0.0) })
+            if let c = closeByDate[d] {
+                if let p = prevClose { vals["shares"] = (c - p) * shares; if vals["shares"] != 0 { seen.insert("shares") } }
+                prevClose = c
+            }
             if let m = marksByDate[d] {
                 for (id, mk) in m {
-                    if let pm = prevMarks[id] {
-                        optPL += (mk - pm) * (ctById[id] ?? 1) * 100 * (signById[id] ?? 1)
+                    if let pm = prevMarks[id], let src = srcById[id] {
+                        let pl = (mk - pm) * (ctById[id] ?? 1) * 100 * (signById[id] ?? 1)
+                        vals[src, default: 0] += pl
+                        if pl != 0 { seen.insert(src) }
                     }
                     prevMarks[id] = mk
                 }
             }
-            bars.append(NvHistBar(label: shortDate(d), sharesPL: sharesPL, optionsPL: optPL))
+            rawBars.append((d, vals))
         }
-        // drop the leading reference-only session(s) that have no prior to diff against
-        let trimmed = Array(bars.drop(while: { $0.sharesPL == 0 && $0.optionsPL == 0 }))
-        let recent = Array(trimmed.suffix(12))
-        let totals = recent.map { $0.total }
-        return NvHistory(bars: recent, bestDay: totals.max() ?? 0, worstDay: totals.min() ?? 0,
-                         net: totals.reduce(0, +), sessions: recent.count, fresh: recent.isEmpty ? .stale : .delayed)
+        // drop leading reference-only sessions (nothing to diff against yet)
+        let trimmed = Array(rawBars.drop(while: { $0.vals.values.allSatisfy { $0 == 0 } }))
+
+        // group by calendar month
+        var monthsMap: [String: [NvHistBar]] = [:]
+        var order: [String] = []
+        for b in trimmed {
+            let mk = String(b.date.prefix(7))              // "2026-07"
+            if monthsMap[mk] == nil { order.append(mk) }
+            monthsMap[mk, default: []].append(NvHistBar(
+                label: dayNum(b.date), sub: shortDate(b.date), pending: false, vals: b.vals))
+        }
+        let months = order.map { mk in
+            NvHistMonth(label: monthLong(mk), short: monthShort(mk), bars: monthsMap[mk] ?? [])
+        }
+        let sources: [NvHistSource] = [
+            .init(key: "shares", label: "Shares", glyph: "○", empty: !seen.contains("shares")),
+            .init(key: "callsSold", label: "Calls sold", glyph: "▲", empty: !seen.contains("callsSold")),
+            .init(key: "callsBought", label: "Calls bought", glyph: "△", empty: !seen.contains("callsBought")),
+            .init(key: "putsSold", label: "Puts sold", glyph: "▼", empty: !seen.contains("putsSold")),
+            .init(key: "putsBought", label: "Puts bought", glyph: "▽", empty: !seen.contains("putsBought")),
+        ]
+        return NvHistory(months: months, sources: sources, fresh: months.isEmpty ? .stale : .delayed)
     }
 
     // MARK: helpers
@@ -526,6 +586,18 @@ enum NvDerive {
     }()
     private static func shortDate(_ ymd: String) -> String {
         iso.date(from: ymd).map { shortDisp.string(from: $0) } ?? ymd
+    }
+    private static func dayNum(_ ymd: String) -> String {
+        String(Int(ymd.split(separator: "-").last ?? "0") ?? 0)
+    }
+    private static let monthNames = ["", "January", "February", "March", "April", "May", "June",
+                                     "July", "August", "September", "October", "November", "December"]
+    private static func monthLong(_ ym: String) -> String {   // "2026-07" → "July"
+        let m = Int(ym.split(separator: "-").last ?? "0") ?? 0
+        return monthNames.indices.contains(m) ? monthNames[m] : ym
+    }
+    private static func monthShort(_ ym: String) -> String {
+        String(monthLong(ym).prefix(3))
     }
 
     private static func buildSleeves(live: [NvOptionTrade]) -> [NvSleeve] {
