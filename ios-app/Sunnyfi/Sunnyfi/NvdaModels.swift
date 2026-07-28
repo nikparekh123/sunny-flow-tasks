@@ -457,9 +457,12 @@ enum NvDerive {
         let ivs = live.compactMap { markByTrade[$0.id]?.iv }.filter { $0 > 0 }.sorted()
         let iv: Double? = ivs.isEmpty ? nil : ivs[ivs.count / 2] * 100
         let spread: Double? = (iv != nil && hv != nil) ? iv! - hv! : nil
-        // No IVR / 52w IV history yet → score can't be computed honestly.
-        let vol = NvVol(score: 0, verdict: "building", iv: iv, hv30: hv, ivr: nil,
-                        iv52Low: nil, iv52High: nil, spread: spread, building: true)
+        let building = iv == nil                     // no live implied vol yet
+        let verdict = building ? "building"
+            : ((spread ?? 0) > 2 ? "rich" : (spread ?? 0) < -2 ? "cheap" : "fair")
+        // Gauge shows implied vol directly (user: use IV, not a seller score).
+        let vol = NvVol(score: iv ?? 0, verdict: verdict, iv: iv, hv30: hv, ivr: nil,
+                        iv52Low: nil, iv52High: nil, spread: spread, building: building)
 
         return NvInsights(protection: protection, vol: vol, fresh: freshness(quote?.captured_at, now: now).0)
     }

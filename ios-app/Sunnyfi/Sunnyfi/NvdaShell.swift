@@ -12,6 +12,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - Event model + data (design's calendar model)
 
@@ -375,15 +376,150 @@ private struct EventRowView: View {
     }
 }
 
-// MARK: - Profile tab (design stub — "not built in this prototype")
+// MARK: - Profile tab (functional; Ink-styled, no Claude Design mockup yet)
 
 struct NvdaProfileScreen: View {
+    let auth: AuthStore
+    let lock: AppLock
+    let prefs: NotificationPrefs
+    private let appPrefs = AppPrefs.shared
+    @State private var showSignOut = false
+
+    private var email: String {
+        if case .signedIn(let e) = auth.state { return e }
+        return "—"
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Profile".uppercased()).font(InkFont.mono(10)).tracking(10 * 0.16).foregroundStyle(Ink.dim)
-            Text("Not built in this prototype.").font(InkFont.display(13, .light)).foregroundStyle(Ink.dim)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                InkSectionHead(title: "Account", count: "sunnyfi")
+                header.padding(.horizontal, 16)
+                display
+                security
+                account
+                version
+                Color.clear.frame(height: 120)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.horizontal, 16).padding(.top, 120)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .confirmationDialog("Sign out of Sunnyfi?", isPresented: $showSignOut, titleVisibility: .visible) {
+            Button("Sign out", role: .destructive) { Task { await auth.signOut(); lock.onboardingDone = false } }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("You'll need the 10-digit code to sign back in.") }
+    }
+
+    private var header: some View {
+        HStack(spacing: 16) {
+            Text("NP").font(InkFont.mono(20, .medium)).foregroundStyle(Ink.invertText)
+                .frame(width: 60, height: 60).background(Circle().fill(Ink.invertBg))
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Niket Parekh").font(InkFont.serif(20)).foregroundStyle(Ink.text)
+                Text(email).font(InkFont.mono(11)).foregroundStyle(Ink.dim)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var display: some View {
+        panel("Display") {
+            row(icon: "circle.lefthalf.filled", label: "Appearance") {
+                InkSegment(selection: Binding(get: { appPrefs.appearance }, set: { appPrefs.appearance = $0 }))
+            }
+            hair
+            toggleRow(icon: "eye.slash", label: "Hide P&L amounts",
+                      on: Binding(get: { appPrefs.hidePnL }, set: { appPrefs.hidePnL = $0 }))
+        }
+    }
+
+    private var security: some View {
+        panel("Security") {
+            toggleRow(icon: lock.biometricKind.icon, label: lock.biometricKind.label,
+                      on: Binding(get: { lock.biometricEnabled }, set: { newVal in
+                          Task {
+                              if newVal { if await lock.authenticate(reason: "Enable lock") { lock.biometricEnabled = true } }
+                              else { lock.biometricEnabled = false }
+                          }
+                      }))
+            hair
+            toggleRow(icon: "icloud.and.arrow.down", label: "Background refresh",
+                      on: Binding(get: { appPrefs.backgroundRefresh }, set: { appPrefs.backgroundRefresh = $0 }))
+        }
+    }
+
+    private var account: some View {
+        panel("Account & data") {
+            Link(destination: URL(string: "https://nikparekh123.github.io/sunny-flow-tasks/privacy")!) {
+                rowBody(icon: "lock.shield", label: "Privacy & data", tint: Ink.text) {
+                    Image(systemName: "arrow.up.right").font(.system(size: 11)).foregroundStyle(Ink.dim)
+                }
+            }.buttonStyle(.plain)
+            hair
+            Link(destination: URL(string: "mailto:support@sunnyfi.co")!) {
+                rowBody(icon: "envelope", label: "Help & support", tint: Ink.text) {
+                    Image(systemName: "arrow.up.right").font(.system(size: 11)).foregroundStyle(Ink.dim)
+                }
+            }.buttonStyle(.plain)
+            hair
+            Button(role: .destructive) { showSignOut = true } label: {
+                rowBody(icon: "rectangle.portrait.and.arrow.right", label: "Sign out", tint: Ink.loss) { EmptyView() }
+            }.buttonStyle(.plain)
+        }
+    }
+
+    private var version: some View {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
+        return HStack {
+            Spacer()
+            Text("Sunnyfi v\(v) · build \(b)").font(InkFont.mono(10)).tracking(10 * 0.06).foregroundStyle(Ink.dim)
+            Spacer()
+        }
+    }
+
+    @ViewBuilder private func panel<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.leading, 20)
+            VStack(spacing: 0) { content() }
+                .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).fill(Ink.surface))
+                .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).strokeBorder(Ink.hair, lineWidth: 1))
+                .padding(.horizontal, 16)
+        }
+    }
+    private var hair: some View { Rectangle().fill(Ink.hair).frame(height: 1).padding(.leading, 54) }
+    @ViewBuilder private func row<T: View>(icon: String, label: String, @ViewBuilder trailing: () -> T) -> some View {
+        rowBody(icon: icon, label: label, tint: Ink.text, trailing: trailing)
+    }
+    @ViewBuilder private func toggleRow(icon: String, label: String, on: Binding<Bool>) -> some View {
+        rowBody(icon: icon, label: label, tint: Ink.text) { Toggle("", isOn: on).labelsHidden().tint(Ink.invertBg) }
+    }
+    @ViewBuilder private func rowBody<T: View>(icon: String, label: String, tint: Color, @ViewBuilder trailing: () -> T) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon).font(.system(size: 13, weight: .regular)).foregroundStyle(tint)
+                .frame(width: 30, height: 30).background(RoundedRectangle(cornerRadius: 8).fill(Ink.text.opacity(0.06)))
+            Text(label).font(InkFont.display(14, .regular)).foregroundStyle(tint)
+            Spacer(minLength: 0)
+            trailing()
+        }
+        .padding(.horizontal, 12).padding(.vertical, 12)
+    }
+}
+
+private struct InkSegment: View {
+    @Binding var selection: AppPrefs.Appearance
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppPrefs.Appearance.allCases) { a in
+                let on = a == selection
+                Button { selection = a } label: {
+                    Text(a.rawValue.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.1)
+                        .foregroundStyle(on ? Ink.invertText : Ink.dim)
+                        .padding(.horizontal, 11).padding(.vertical, 7)
+                        .background { if on { Capsule().fill(Ink.invertBg) } }
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(2).background(Capsule().fill(Ink.text.opacity(0.06)))
+        .animation(InkMotion.fast, value: selection)
     }
 }

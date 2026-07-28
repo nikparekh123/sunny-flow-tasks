@@ -2,12 +2,17 @@
 //  InkRoot.swift
 //  Sunnyfi — Ink rebuild · app shell
 //
-//  Ticker nav + three tabs (portfolio / events / profile) + floating tab bar,
-//  on the Ink canvas. NVDA renders the real position; other tickers get an
-//  honest quiet state. Sections 2–5, events, planner and profile fill in next.
+//  Ticker nav (portfolio tab only) + three tabs + floating tab bar, on the Ink
+//  canvas. NVDA renders the real position; other tickers get an honest quiet
+//  state. The tab bar shrinks + fades as the page scrolls.
 //
 
 import SwiftUI
+
+private struct InkScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
 
 struct InkRoot: View {
     let auth: AuthStore
@@ -17,40 +22,51 @@ struct InkRoot: View {
     @State private var store = NvdaStore()
     @State private var tab = 0
     @State private var sym = "Nvidia"
+    @State private var scrollY: CGFloat = 0
     private let symbols = ["Nvidia", "Google", "Tesla"]
+
+    private var scrolled: Bool { scrollY < -24 }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             Ink.canvas.ignoresSafeArea()
             VStack(spacing: 0) {
-                InkTickerNav(symbols: symbols, selected: $sym)
+                if tab == 0 {
+                    InkTickerNav(symbols: symbols, selected: $sym)   // only on the portfolio page
+                }
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity)   // clamp to screen so a wide rail can't shift the shell left
-            InkTabBar(selection: $tab).padding(.bottom, 6)
+            .frame(maxWidth: .infinity)
+            InkTabBar(selection: $tab, dimmed: scrolled)
+                .padding(.bottom, 6)
         }
         .task { await store.poll(seconds: 60) }
-        .preferredColorScheme(nil)   // follow system (design device defaults dark; no Profile override yet)
+        .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)   // Auto=system, or the Profile override
     }
 
     @ViewBuilder private var content: some View {
         switch tab {
         case 0:
             if sym == "Nvidia" {
-                // One vertical scroll of the five sections — the design has NO
-                // dividers between them; each section's head (26px top) is the gap.
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        Color.clear.frame(height: 0)
+                            .background(GeometryReader { g in
+                                Color.clear.preference(key: InkScrollOffsetKey.self,
+                                                       value: g.frame(in: .named("inkScroll")).minY)
+                            })
                         NvdaPositionScreen(store: store)
                         NvdaPerformanceScreen(store: store)
                         NvdaInsightsScreen(store: store)
                         NvdaPeersScreen(store: store)
                         NvdaHistoryScreen(store: store)
-                        Color.clear.frame(height: 104)   // design tailpad, clears the floating tab bar
+                        Color.clear.frame(height: 104)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .coordinateSpace(name: "inkScroll")
+                .onPreferenceChange(InkScrollOffsetKey.self) { scrollY = $0 }
                 .frame(maxWidth: .infinity)
             } else {
                 quiet("No position", "Nothing held or written in \(sym) — watchlist only.")
@@ -58,7 +74,7 @@ struct InkRoot: View {
         case 1:
             NvdaEventsScreen()
         default:
-            NvdaProfileScreen()
+            NvdaProfileScreen(auth: auth, lock: lock, prefs: prefs)
         }
     }
 

@@ -127,6 +127,7 @@ struct InkGroup<Content: View>: View {
 
 struct InkTabBar: View {
     @Binding var selection: Int      // 0 portfolio · 1 events · 2 profile
+    var dimmed: Bool = false          // shrink + fade while the page is scrolled
     private let icons = ["briefcase", "clock.arrow.circlepath", "person"]
     var body: some View {
         HStack(spacing: 18) {
@@ -145,6 +146,9 @@ struct InkTabBar: View {
         .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Ink.hair, lineWidth: 1))
         .shadow(color: .black.opacity(0.3), radius: 11, x: 0, y: 6)
+        .scaleEffect(dimmed ? 0.86 : 1, anchor: .bottom)
+        .opacity(dimmed ? 0.5 : 1)
+        .animation(InkMotion.mid, value: dimmed)
         .animation(InkMotion.fast, value: selection)
     }
 }

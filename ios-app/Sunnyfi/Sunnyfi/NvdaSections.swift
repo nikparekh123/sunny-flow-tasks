@@ -202,13 +202,13 @@ struct NvdaInsightsScreen: View {
                 InkEyebrow(n: "01", cat: "Volatility") {
                     InkBand(skin: .mod, text: v.verdict)
                 }
-                InkGauge(value: v.building ? -1 : v.score).frame(maxWidth: .infinity).padding(.top, 14)
-                gaugeCaption("Seller score · sell zone ≥ 70")
+                InkGauge(value: v.building ? -1 : (v.iv ?? 0), suffix: "%").frame(maxWidth: .infinity).padding(.top, 14)
+                gaugeCaption("Implied volatility · annualised")
                 InkBullets(items: v.building
-                    ? ["Seller score needs the IV feed — realised \(pctStr(v.hv30)) so far",
-                       "IV rank + 52-week range land once the feed is live"]
-                    : ["Implied \(pctStr(v.iv)) under realised \(pctStr(v.hv30))",
-                       "IV rank \(v.ivr.map { nv2Int($0) } ?? "—") · 52w \(pctStr(v.iv52Low))–\(pctStr(v.iv52High))"])
+                    ? ["Implied vol streams from the option chain — not live yet",
+                       "Realised \(pctStr(v.hv30)) over the last month"]
+                    : ["Implied \(pctStr(v.iv)) vs realised \(pctStr(v.hv30))",
+                       "Options are \(v.verdict) versus how NVDA has moved"])
                 InkSpacer()
             }
             InkFoot(compact: true, height: 132) {
@@ -297,9 +297,7 @@ struct NvdaPeersScreen: View {
                         }
                     }
                     .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
-                    .scrollTargetLayout()
                 }
-                .scrollTargetBehavior(.viewAligned)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if !store.isLoading {
@@ -405,12 +403,11 @@ struct NvdaHistoryScreen: View {
         if let h = store.history, h.months.contains(where: { !$0.bars.isEmpty }) {
             VStack(alignment: .leading, spacing: 0) {
                 InkSectionHead(title: "Historical performance", count: "1 card")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 10) { HistoryCardView(h: h).inkEntrance(0) }
-                        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
-                        .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.viewAligned)
+                // Single card — render directly (no horizontal scroll) so its
+                // internal month/source chip rails receive taps.
+                HistoryCardView(h: h).inkEntrance(0)
+                    .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } else if !store.isLoading {
