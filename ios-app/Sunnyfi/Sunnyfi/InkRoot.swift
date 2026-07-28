@@ -27,6 +27,7 @@ struct InkRoot: View {
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+            .frame(maxWidth: .infinity)   // clamp to screen so a wide rail can't shift the shell left
             InkTabBar(selection: $tab).padding(.bottom, 6)
         }
         .task { await store.poll(seconds: 60) }
@@ -38,7 +39,7 @@ struct InkRoot: View {
         case 0:
             if sym == "Nvidia" {
                 ScrollView {
-                    VStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 6) {
                         NvdaPositionScreen(store: store)
                         sectionRule
                         NvdaPerformanceScreen(store: store)
@@ -50,7 +51,9 @@ struct InkRoot: View {
                         NvdaHistoryScreen(store: store)
                         Color.clear.frame(height: 120)   // clear the floating tab bar
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)   // pin content to screen width
                 }
+                .frame(maxWidth: .infinity)
             } else {
                 quiet("No position", "Nothing held or written in \(sym) — watchlist only.")
             }

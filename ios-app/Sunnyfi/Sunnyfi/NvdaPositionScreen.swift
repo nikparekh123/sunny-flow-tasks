@@ -27,9 +27,10 @@ struct NvdaPositionScreen: View {
     var body: some View {
         if let p = store.position {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Current position", count: "\(cardCount(p)) cards")
+                InkSectionHead(title: "Positions", count: "\(cardCount(p)) cards")
                 rail(p)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         } else if store.isLoading {
             quiet("Loading NVDA", "Pulling the live position…")
         } else {

@@ -177,7 +177,7 @@ struct NvdaInsightsScreen: View {
     var body: some View {
         if let ins = store.insights {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "What the position says", count: "2 reads")
+                InkSectionHead(title: "Insights", count: "2 reads")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
                         protectionCard(ins).inkEntrance(0)
@@ -294,7 +294,7 @@ struct NvdaPeersScreen: View {
     var body: some View {
         if let pe = store.peers, pe.tapes.contains(where: { $0.last != nil }) {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "How the neighbours moved", count: "\(pe.tapes.count) names")
+                InkSectionHead(title: "Peers & ETFs", count: "\(pe.tapes.count) names")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
                         ForEach(Array(pe.tapes.enumerated()), id: \.element.id) { i, t in
@@ -381,7 +381,7 @@ struct NvdaHistoryScreen: View {
     var body: some View {
         if let h = store.history, !h.bars.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Gains and losses, by session", count: "\(h.sessions) sessions")
+                InkSectionHead(title: "Historical performance", count: "\(h.sessions) sessions")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) { chartCard(h).inkEntrance(0) }
                         .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
