@@ -37,6 +37,7 @@ struct NvShareLot: Codable, Sendable {
 
 struct NvShareSell: Codable, Sendable {
     let id: String
+    let trade_date: String
     let quantity: Double
     let price: Double
     let realized_pl: Double?
@@ -380,12 +381,25 @@ enum NvDerive {
             return s
         }
 
-        let premLifetime = netPrem("call", "short")
+        // ── the settled covered-call model (do NOT re-derive; see memory) ──
+        // Banked = lifetime short-call premium collected in CASH (incl still-open
+        // calls, net of buybacks; never marked) + realized share P&L. This is the
+        // hero and it is positive for a roller. §1's break-even uses the same
+        // per-share premium, so the two reconcile.
+        let premLifetime = netPrem("call", "short")           // net short-call cash
+        // premium collected on the contracts that are STILL open (per key, no double-count)
         var openShortPrem = 0.0
-        for (k, c) in net where c > 0.0001 && k.kind == "call" && k.side == "short" { openShortPrem += (c / max(c, 1)) * openPrem("call", "short") }
+        for (k, c) in net where c > 0.0001 && k.kind == "call" && k.side == "short" {
+            let opens = live.filter { $0.direction == "short" && $0.option_type == "call"
+                && $0.strike == k.strike && $0.expiry == k.expiry && $0.action == "open" }
+            let openCt = opens.reduce(0.0) { $0 + $1.contracts }
+            let openPremK = opens.reduce(0.0) { $0 + $1.premium * $1.contracts * 100 }
+            let perContract = openCt > 0 ? openPremK / openCt : 0
+            openShortPrem += c * perContract                  // c = net-open contracts
+        }
         let realizedShares = sells.filter { $0.voided_at == nil }.reduce(0.0) { $0 + ($1.realized_pl ?? 0) }
-        let realizedOptions = premLifetime - openShortPrem
-        let realized = realizedOptions + realizedShares
+        let realizedClosedCalls = premLifetime - openShortPrem   // premium on closed short calls
+        let banked = premLifetime + realizedShares               // hero
         let perShare = shares > 0 ? premLifetime / shares : 0
         let breakEven = avgBuy - perShare
         let cushion = spot - breakEven
@@ -396,7 +410,7 @@ enum NvDerive {
         let pbCt = netOpenCt("put", "long"), pbPaid = openPrem("put", "long")
         let sleeves: [NvPerfSleeve] = [
             .init(name: "Calls sold", glyph: "▲", total: csCt, basisLabel: "Collected", basis: csColl,
-                  realized: realizedOptions, unrealized: openShortPrem - sleeveMTM("call", "short"), empty: csCt == 0 && csColl == 0),
+                  realized: realizedClosedCalls, unrealized: openShortPrem - sleeveMTM("call", "short"), empty: csCt == 0 && csColl == 0),
             .init(name: "Calls bought", glyph: "△", total: cbCt, basisLabel: "Paid", basis: cbPaid,
                   realized: 0, unrealized: sleeveMTM("call", "long") - cbPaid, empty: cbCt == 0),
             .init(name: "Puts sold", glyph: "▼", total: psCt, basisLabel: "Collected", basis: openPrem("put", "short"),
@@ -404,7 +418,7 @@ enum NvDerive {
             .init(name: "Puts bought", glyph: "▽", total: pbCt, basisLabel: "Paid", basis: pbPaid,
                   realized: 0, unrealized: sleeveMTM("put", "long") - pbPaid, empty: pbCt == 0),
         ]
-        return NvPerf(realized: realized, lifetime: premLifetime, perShare: perShare,
+        return NvPerf(realized: banked, lifetime: premLifetime, perShare: perShare,
                       perSharePct: avgBuy > 0 ? perShare / avgBuy * 100 : 0, costBasis: avgBuy, breakEven: breakEven,
                       cushion: cushion, cushionPct: breakEven > 0 ? cushion / breakEven * 100 : 0, sleeves: sleeves)
     }
@@ -503,60 +517,57 @@ enum NvDerive {
 
     // MARK: - Section 5 · historical performance (per-session, by source)
 
-    static func history(eod: [NvOptionMarkEod], closes: [NvDailyClose], trades: [NvOptionTrade],
-                        lots: [NvShareLot], now: Date = Date()) -> NvHistory {
-        let shares = lots.filter { $0.voided_at == nil }.reduce(0) { $0 + $1.qty_remaining }
+    // REALIZED P&L per session (not unrealized marks) — reconciles with §2:
+    //   Σ callsSold  = net short-call premium (= §2 lifetime premium)
+    //   Σ shares     = realized share sells (= §2 realized shares)
+    // Short legs book cash on open(+)/buyback(−); long legs book realized only
+    // when CLOSED (proceeds − avg open cost) — an open hedge is unrealized, so it
+    // never shows here. Bucketed by the trade's own date.
+    static func history(trades: [NvOptionTrade], sells: [NvShareSell], now: Date = Date()) -> NvHistory {
         let live = trades.filter { $0.voided_at == nil }
-        // each option leg → its source bucket + signed contract multiplier
-        func bucket(_ t: NvOptionTrade) -> String {
-            t.option_type == "call" ? (t.direction == "short" ? "callsSold" : "callsBought")
-                                    : (t.direction == "short" ? "putsSold" : "putsBought")
+        func bucket(_ kind: String, _ dir: String) -> String {
+            kind == "call" ? (dir == "short" ? "callsSold" : "callsBought")
+                           : (dir == "short" ? "putsSold" : "putsBought")
         }
-        let srcById = Dictionary(live.map { ($0.id, bucket($0)) }, uniquingKeysWith: { a, _ in a })
-        let signById = Dictionary(live.map { ($0.id, $0.direction == "short" ? -1.0 : 1.0) }, uniquingKeysWith: { a, _ in a })
-        let ctById = Dictionary(live.map { ($0.id, $0.contracts) }, uniquingKeysWith: { a, _ in a })
+        struct Key: Hashable { let kind, dir: String; let strike: Double; let expiry: String }
+        var openCt: [Key: Double] = [:]; var openPrem: [Key: Double] = [:]
+        for t in live where t.action == "open" {
+            let k = Key(kind: t.option_type, dir: t.direction, strike: t.strike, expiry: t.expiry)
+            openCt[k, default: 0] += t.contracts
+            openPrem[k, default: 0] += t.premium * t.contracts * 100
+        }
+        func avgOpenPerContract(_ k: Key) -> Double { (openCt[k] ?? 0) > 0 ? openPrem[k]! / openCt[k]! : 0 }
 
-        let closeByDate = Dictionary(
-            closes.filter { $0.ticker == "NVDA" }.compactMap { c in c.close_price.map { (c.date, $0) } },
-            uniquingKeysWith: { a, _ in a })
-        var marksByDate: [String: [String: Double]] = [:]
-        for m in eod { if let mk = m.mark { marksByDate[m.date, default: [:]][m.option_trade_id] = mk } }
-
-        let dates = Array(Set(closeByDate.keys).union(marksByDate.keys)).sorted()
         let keys = ["shares", "callsSold", "callsBought", "putsSold", "putsBought"]
+        var byDate: [String: [String: Double]] = [:]
         var seen: Set<String> = []
-        var rawBars: [(date: String, vals: [String: Double])] = []
-        var prevClose: Double?
-        var prevMarks: [String: Double] = [:]
-        for d in dates {
-            var vals = Dictionary(uniqueKeysWithValues: keys.map { ($0, 0.0) })
-            if let c = closeByDate[d] {
-                if let p = prevClose { vals["shares"] = (c - p) * shares; if vals["shares"] != 0 { seen.insert("shares") } }
-                prevClose = c
-            }
-            if let m = marksByDate[d] {
-                for (id, mk) in m {
-                    if let pm = prevMarks[id], let src = srcById[id] {
-                        let pl = (mk - pm) * (ctById[id] ?? 1) * 100 * (signById[id] ?? 1)
-                        vals[src, default: 0] += pl
-                        if pl != 0 { seen.insert(src) }
-                    }
-                    prevMarks[id] = mk
-                }
-            }
-            rawBars.append((d, vals))
+        func add(_ date: String, _ src: String, _ v: Double) {
+            guard v != 0 else { return }
+            byDate[date, default: [:]][src, default: 0] += v
+            seen.insert(src)
         }
-        // drop leading reference-only sessions (nothing to diff against yet)
-        let trimmed = Array(rawBars.drop(while: { $0.vals.values.allSatisfy { $0 == 0 } }))
+        for t in live {
+            let src = bucket(t.option_type, t.direction)
+            let amt = t.premium * t.contracts * 100
+            if t.direction == "short" {
+                add(t.trade_date, src, t.action == "open" ? amt : -amt)     // collect on open, pay to buy back
+            } else if t.action == "close" {
+                let k = Key(kind: t.option_type, dir: t.direction, strike: t.strike, expiry: t.expiry)
+                add(t.trade_date, src, amt - avgOpenPerContract(k) * t.contracts)   // proceeds − cost
+            }
+        }
+        for s in sells where s.voided_at == nil { add(s.trade_date, "shares", s.realized_pl ?? 0) }
 
         // group by calendar month
         var monthsMap: [String: [NvHistBar]] = [:]
         var order: [String] = []
-        for b in trimmed {
-            let mk = String(b.date.prefix(7))              // "2026-07"
+        for date in byDate.keys.sorted() {
+            let mk = String(date.prefix(7))                // "2026-07"
             if monthsMap[mk] == nil { order.append(mk) }
+            var vals = Dictionary(uniqueKeysWithValues: keys.map { ($0, 0.0) })
+            for (src, v) in byDate[date]! { vals[src] = v }
             monthsMap[mk, default: []].append(NvHistBar(
-                label: dayNum(b.date), sub: shortDate(b.date), pending: false, vals: b.vals))
+                label: dayNum(date), sub: shortDate(date), pending: false, vals: vals))
         }
         let months = order.map { mk in
             NvHistMonth(label: monthLong(mk), short: monthShort(mk), bars: monthsMap[mk] ?? [])

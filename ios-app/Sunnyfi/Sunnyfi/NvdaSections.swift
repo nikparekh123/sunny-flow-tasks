@@ -109,28 +109,25 @@ struct NvdaPerformanceScreen: View {
     private func profitCard(_ p: NvPerf) -> some View {
         InkCard(compact: true) {
             InkBody(compact: true) {
-                InkEyebrow(n: "01", cat: "Profit made") { InkBand(skin: .mod, text: "Lifetime") }
-                NvCompactHero(value: nv2Money(p.realized), unit: "realised · booked",
-                              size: 34, color: Ink.signed(p.realized >= 0))
+                InkEyebrow(n: "01", cat: "Total profit") { InkBand(skin: .mod, text: "Lifetime") }
+                VStack(alignment: .leading, spacing: 0) {
+                    InkRoll(text: inkUsd(p.realized), font: InkFont.mono(38, .light), tracking: 38 * -0.04, color: Ink.text)
+                    Text("Realized · options & shares".uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
+                        .foregroundStyle(Ink.dim).padding(.top, 11)
+                }
+                .padding(.top, 22)
                 InkBullets(items: [
-                    "$\(nv2Dec(p.perShare, 2)) a share collected, calls only",
-                    "Break-even now $\(nv2Dec(p.breakEven, 2))",
+                    "\(inkUsd(p.lifetime)) with open premium · $\(nv2Dec(p.perShare, 2)) a share (\(nv2Dec(p.perSharePct, 1))%)",
+                    "Cost basis $\(nv2Dec(p.costBasis, 2)) → break-even $\(nv2Dec(p.breakEven, 2))",
                 ])
                 InkSpacer()
-                InkBand3(items: [
-                    ("Collected", inkUsd(p.lifetime)),
-                    ("Per share", "$" + nv2Dec(p.perShare, 2)),
-                    ("Cushion", nv2Pct(p.cushionPct)),
-                ])
             }
             InkFoot(compact: true) {
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text("SPOT VS BREAK-EVEN").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
-                        InkDelta(value: "$" + nv2Dec(abs(p.cushion), 2), good: p.cushion >= 0, size: 24, weight: .light)
-                    }
+                Text("Cushion · spot over break-even".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                HStack(alignment: .firstTextBaseline) {
+                    InkDelta(value: "$" + nv2Dec(abs(p.cushion), 2), good: p.cushion >= 0, size: 28, weight: .light)
                     Spacer(minLength: 0)
-                    Text("\(nv2Pct(p.cushionPct))").font(InkFont.mono(13)).foregroundStyle(Ink.signed(p.cushion >= 0))
+                    Text("\(nv2Pct(p.cushionPct))").font(InkFont.mono(11.5)).foregroundStyle(Ink.dim)
                 }
             }
             InkStamp(state: .delayed, text: "End of day · booked at close", compact: true)

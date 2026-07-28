@@ -34,7 +34,7 @@ final class NvdaStore {
                 .is("voided_at", value: nil)
                 .execute().value
             async let sells: [NvShareSell] = client.from("nvda_share_sells")
-                .select("id,quantity,price,realized_pl,voided_at")
+                .select("id,trade_date,quantity,price,realized_pl,voided_at")
                 .is("voided_at", value: nil)
                 .execute().value
             async let quotes: [NvQuote] = client.from("nvda_quote")
@@ -48,19 +48,14 @@ final class NvdaStore {
                 .order("date", ascending: false)
                 .limit(120)
                 .execute().value
-            async let eod: [NvOptionMarkEod] = client.from("nvda_option_marks_eod")
-                .select("option_trade_id,date,mark,delta,theta")
-                .order("date", ascending: false)
-                .limit(600)
-                .execute().value
 
-            let (t, l, sl, q, m, c, e) = try await (trades, lots, sells, quotes, marks, closes, eod)
+            let (t, l, sl, q, m, c) = try await (trades, lots, sells, quotes, marks, closes)
             let nvda = q.first { $0.ticker == "NVDA" }
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
             perf      = NvDerive.performance(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             insights  = NvDerive.insights(trades: t, lots: l, marks: m, quote: nvda, closes: c)
             peers     = NvDerive.peers(quotes: q, closes: c)
-            history   = NvDerive.history(eod: e, closes: c, trades: t, lots: l)
+            history   = NvDerive.history(trades: t, sells: sl)
             isLoading = false
             lastError = nil
         } catch {
