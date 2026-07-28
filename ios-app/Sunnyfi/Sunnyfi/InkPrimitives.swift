@@ -35,13 +35,67 @@ private struct InkVLine: Shape {
 }
 
 /// Live-dot pulse: opacity 1 → .35, scale 1 → .7, forever.
-private struct InkPulse: ViewModifier {
+struct InkPulse: ViewModifier {
     @State private var on = false
     func body(content: Content) -> some View {
         content
             .opacity(on ? 0.35 : 1).scaleEffect(on ? 0.7 : 1)
             .animation(.easeInOut(duration: InkMotion.pulse).repeatForever(autoreverses: true), value: on)
             .onAppear { on = true }
+    }
+}
+extension View { func inkPulse() -> some View { modifier(InkPulse()) } }
+
+// MARK: - Count-up (the prototype `Roll`: prices roll from 96%, integers from 0)
+
+/// Interpolate every numeric token in a string toward its target by `t` (0…1).
+func inkRolled(_ s: String, _ t: Double) -> String {
+    if t >= 1 { return s }
+    let pattern = try! NSRegularExpression(pattern: #"\d[\d,]*(?:\.\d+)?"#)
+    let ns = s as NSString
+    var out = ""; var last = 0
+    for m in pattern.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
+        if m.range.location > last { out += ns.substring(with: NSRange(location: last, length: m.range.location - last)) }
+        let raw = ns.substring(with: m.range)
+        let grouped = raw.contains(",")
+        let dec: Int = raw.firstIndex(of: ".").map { raw.distance(from: raw.index(after: $0), to: raw.endIndex) } ?? 0
+        let target = Double(raw.replacingOccurrences(of: ",", with: "")) ?? 0
+        let from = (dec == 2 && target >= 50) ? target * 0.96 : 0
+        let v = from + (target - from) * t
+        out += grouped
+            ? v.formatted(.number.precision(.fractionLength(dec)).grouping(.automatic))
+            : String(format: "%.\(dec)f", v)
+        last = m.range.location + m.range.length
+    }
+    if last < ns.length { out += ns.substring(from: last) }
+    return out
+}
+
+private struct InkRollMod: AnimatableModifier {
+    var t: Double
+    let text: String; let font: Font; let tracking: CGFloat; let color: Color
+    var animatableData: Double { get { t } set { t = newValue } }
+    func body(content: Content) -> some View {
+        Text(inkRolled(text, t)).font(font).tracking(tracking).foregroundStyle(color)
+    }
+}
+
+/// A number (inside any string) that counts up on mount. Respects reduced motion.
+struct InkRoll: View {
+    let text: String
+    var font: Font = InkFont.mono(44, .light)
+    var tracking: CGFloat = 0
+    var color: Color = Ink.text
+    var delay: Double = 0
+    @State private var t: Double = 0
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    var body: some View {
+        Text("").modifier(InkRollMod(t: reduce ? 1 : t, text: text, font: font, tracking: tracking, color: color))
+            .onAppear {
+                guard !reduce else { return }
+                t = 0
+                withAnimation(.easeOut(duration: InkMotion.countUp).delay(delay)) { t = 1 }
+            }
     }
 }
 
@@ -75,10 +129,10 @@ struct InkDelta: View {
     var weight: Font.Weight = .regular
     var body: some View {
         HStack(spacing: size > 24 ? 9 : 6) {
-            Text(value).font(InkFont.mono(size, weight))
+            InkRoll(text: value, font: InkFont.mono(size, weight), color: Ink.signed(good))
             Text(good == nil ? "·" : (good! ? "↑" : "↓")).font(InkFont.mono(size * 0.82))
+                .foregroundStyle(Ink.signed(good))
         }
-        .foregroundStyle(Ink.signed(good))
     }
 }
 
@@ -165,7 +219,7 @@ struct InkHero: View {
     var unit: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(value).font(InkFont.mono(44, .light)).tracking(44 * -0.04).foregroundStyle(Ink.text)
+            InkRoll(text: value, font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
             if let unit {
                 Text(unit.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
                     .foregroundStyle(Ink.dim).padding(.top, 12)
@@ -208,8 +262,8 @@ struct InkBand3: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(items[i].k.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.14)
                         .foregroundStyle(Ink.dim).lineLimit(1)
-                    Text(items[i].v).font(InkFont.mono(17)).tracking(17 * -0.02)
-                        .foregroundStyle(Ink.text).padding(.top, 10)
+                    InkRoll(text: items[i].v, font: InkFont.mono(17), tracking: 17 * -0.02, color: Ink.text, delay: 0.12)
+                        .padding(.top, 10)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, i == 0 ? 0 : 12).padding(.trailing, 12)
@@ -321,7 +375,7 @@ struct InkBars<Net: View>: View {
                 }
             }
             .frame(height: 7)
-            Text(inkUsd(v)).font(InkFont.mono(12)).foregroundStyle(strong ? Ink.text : hue)
+            InkRoll(text: inkUsd(v), font: InkFont.mono(12), color: strong ? Ink.text : hue, delay: 0.14)
                 .frame(minWidth: 74, alignment: .trailing).lineLimit(1)
         }
     }
