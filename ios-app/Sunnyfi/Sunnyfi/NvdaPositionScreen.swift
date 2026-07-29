@@ -16,7 +16,6 @@ import SwiftUI
 private func nvInt(_ v: Double) -> String { Int(v.rounded()).formatted(.number.grouping(.automatic)) }
 private func nvSigned(_ v: Double) -> String { (v > 0 ? "+" : v < 0 ? "−" : "") + nvInt(abs(v)) }
 private func nvDec(_ v: Double, _ d: Int) -> String { String(format: "%.\(d)f", v) }
-private func nvMoneySigned(_ v: Double) -> String { (v >= 0 ? "+" : "−") + inkUsd(abs(v)) }
 private func nvStrike(_ v: Double) -> String { "$" + (v == v.rounded() ? nvDec(v, 0) : nvDec(v, 1)) }
 
 private func stampState(_ f: NvFresh) -> InkStamp.FreshState {
@@ -129,6 +128,10 @@ private struct TotalPositionCard: View {
         return rows
     }
     private var newAvg: Double { p.breakEven }
+    private var optBought: Double { p.sleeves.filter { $0.side == "long" }.reduce(0) { $0 + $1.basis } }
+    private var optSold: Double { p.sleeves.filter { $0.side == "short" }.reduce(0) { $0 + $1.basis } }
+    private var committed: Double { p.sharesPaid + optBought - optSold }   // capital at work
+    private var premTotal: Double { p.premiumPerShare * p.shares }         // lifetime short-call premium
 
     var body: some View {
         InkCard {
@@ -183,27 +186,36 @@ private struct TotalPositionCard: View {
     @ViewBuilder private var hero: some View {
         switch mode {
         case .position:
-            InkHero(value: nvInt(p.shares), unit: "shares held · \(p.contractsOpen) contracts open")
+            InkHero(value: "$" + nvInt(committed), unit: "at work · \(nvInt(p.shares)) sh + \(p.contractsOpen) ct")
         case .average:
-            InkHero(value: "$" + nvDec(newAvg, 2), unit: "new average · was $\(nvDec(p.avgBuy, 2))")
+            heroSplit(big: "$" + nvDec(newAvg, 2), bigUnit: "new average · per share",
+                      side: "−$" + nvDec(p.premiumPerShare, 2), sideUnit: "cut · by premium", sideColor: Ink.gain)
         case .delta:
-            HStack(alignment: .bottom, spacing: 14) {
-                VStack(alignment: .leading, spacing: 0) {
-                    InkRoll(text: nvSigned(p.delta), font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
-                    Text("NET DELTA · SHARE EQUIV").font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
-                        .foregroundStyle(Ink.dim).padding(.top, 12)
-                }
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 0) {
-                    Text(nvSigned(p.gamma)).font(InkFont.mono(20, .light)).tracking(20 * -0.03).foregroundStyle(Ink.text)
-                    Text("GAMMA · PER $1").font(InkFont.mono(8.5)).tracking(8.5 * 0.12)
-                        .foregroundStyle(Ink.dim).padding(.top, 8).fixedSize()
-                }
-                .padding(.leading, 14)
-                .overlay(alignment: .leading) { Rectangle().fill(Ink.hair).frame(width: 1) }
-            }
-            .padding(.top, 24)
+            heroSplit(big: nvSigned(p.delta), bigUnit: "net delta · share equiv",
+                      side: nvSigned(p.gamma), sideUnit: "gamma · per $1", sideColor: Ink.text)
         }
+    }
+
+    // Big figure on the left, a single secondary stat across a hairline on the right.
+    private func heroSplit(big: String, bigUnit: String, side: String, sideUnit: String, sideColor: Color) -> some View {
+        HStack(alignment: .bottom, spacing: 14) {
+            VStack(alignment: .leading, spacing: 0) {
+                InkRoll(text: big, font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
+                    .fixedSize()
+                Text(bigUnit.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
+                    .foregroundStyle(Ink.dim).padding(.top, 12).lineLimit(1)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 0)
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(side).font(InkFont.mono(20, .light)).tracking(20 * -0.03).foregroundStyle(sideColor).fixedSize()
+                Text(sideUnit.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.12)
+                    .foregroundStyle(Ink.dim).padding(.top, 8).fixedSize()
+            }
+            .padding(.leading, 14)
+            .overlay(alignment: .leading) { Rectangle().fill(Ink.hair).frame(width: 1) }
+        }
+        .padding(.top, 24)
     }
 
     // MARK: ledger
@@ -241,23 +253,29 @@ private struct TotalPositionCard: View {
         .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
     }
 
+    // The break-even as a small waterfall: what you paid, less premium taken in,
+    // equals what you effectively own it at.
     private var averageLedger: some View {
         VStack(spacing: 0) {
-            avgRow("Average buy", "$" + nvDec(p.avgBuy, 2), "\(nvInt(p.shares)) sh · what you paid", strong: false)
-            avgRow("New average", "$" + nvDec(newAvg, 2), "cost after premium collected", strong: true)
+            avgRow("○", "Bought", "$\(nvDec(p.avgBuy, 2)) · sh", "$" + nvInt(p.sharesPaid), Ink.text, strong: false)
+            avgRow("▲", "Premium in", "$\(nvDec(p.premiumPerShare, 2)) · sh", "−$" + nvInt(premTotal), Ink.gain, strong: false)
+            avgRow("◆", "Own at", "$\(nvDec(newAvg, 2)) · sh", "$" + nvInt(p.sharesPaid - premTotal), Ink.text, strong: true)
         }
     }
 
-    private func avgRow(_ k: String, _ v: String, _ sub: String, strong: Bool) -> some View {
+    private func avgRow(_ g: String, _ k: String, _ sub: String, _ v: String, _ hue: Color, strong: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(k).font(InkFont.display(13.5, strong ? .regular : .light)).foregroundStyle(Ink.text)
-                Text(sub.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1).foregroundStyle(Ink.dim)
+            HStack(spacing: 9) {
+                Text(g).font(.system(size: 11)).foregroundStyle(Ink.text)
+                Text(k).font(InkFont.display(13.5, strong ? .regular : .light)).foregroundStyle(Ink.text).lineLimit(1)
             }
             Spacer(minLength: 0)
-            Text(v).font(InkFont.mono(strong ? 16 : 13)).tracking(16 * -0.02).foregroundStyle(Ink.text)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(sub).font(InkFont.mono(12)).foregroundStyle(Ink.dim).fixedSize()
+                Text(v).font(InkFont.mono(12)).foregroundStyle(hue).frame(minWidth: 84, alignment: .trailing).fixedSize()
+            }
         }
-        .padding(.vertical, 11)
+        .padding(.vertical, 13)
         .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
     }
 
@@ -306,17 +324,11 @@ private struct TotalPositionCard: View {
     @ViewBuilder private var foot: some View {
         switch mode {
         case .position:
-            let optBought = p.sleeves.filter { $0.side == "long" }.reduce(0) { $0 + $1.basis }
-            let optSold = p.sleeves.filter { $0.side == "short" }.reduce(0) { $0 + $1.basis }
-            Bars3(label: "Where the position sits", net: p.sharesPaid + optBought - optSold, rows: [
-                ("Shares", p.sharesPaid, false),
-                ("Options bought", optBought, false),
-                ("Options sold", optSold, true),
-            ])
+            ValueFoot(committed: committed, shares: p.sharesPL, options: p.optionsPL)
         case .delta:
             ExposureFoot(net: p.delta, block: p.shares)
         case .average:
-            PriceLadder(spot: p.spot, marks: [(k: "New avg", v: newAvg, strong: true), (k: "Buy avg", v: p.avgBuy, strong: false)])
+            AvgFoot(spot: p.spot, newAvg: newAvg, buyAvg: p.avgBuy)
         }
     }
 }
@@ -386,81 +398,79 @@ private struct ExposureFoot: View {
     }
 }
 
-// MARK: - price ladder (average view)
+// MARK: - value foot (position view: worth now = committed + P&L)
 
-private struct PriceLadder: View {
-    let spot: Double
-    let marks: [(k: String, v: Double, strong: Bool)]
+private struct ValueFoot: View {
+    let committed: Double; let shares: Double; let options: Double
     @State private var grow = false
+    private func money(_ v: Double) -> String { (v >= 0 ? "+$" : "−$") + nvInt(abs(v)) }
     var body: some View {
-        let all = marks.map { $0.v } + [spot]
-        let lo = (all.min() ?? spot) - 0.9, hi = (all.max() ?? spot) + 0.9
-        let span = max(hi - lo, 0.01)
-        func at(_ v: Double) -> CGFloat { CGFloat((v - lo) / span) }
-        let base = marks.map { $0.v }.min() ?? spot
-        return VStack(alignment: .leading, spacing: 2) {
+        let pnl = shares + options
+        let worth = committed + pnl
+        let mag = max(abs(shares) + abs(options), 1)
+        let pct = committed != 0 ? pnl / committed * 100 : 0
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text("SPOT AGAINST YOUR AVERAGES").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                Text("WORTH NOW").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 Spacer()
-                Text("$" + nvDec(spot, 2)).font(InkFont.mono(17, .medium)).tracking(17 * -0.02).foregroundStyle(Ink.text)
+                InkRoll(text: "$" + nvInt(worth), font: InkFont.mono(22, .light), tracking: 22 * -0.03, color: Ink.text)
             }
             GeometryReader { g in
-                let W = g.size.width
-                ZStack(alignment: .topLeading) {
-                    Rectangle().fill(Ink.hair).frame(height: 1).offset(y: 15)
-                    Rectangle().fill(Ink.gain.opacity(0.5))
-                        .frame(width: max(0, (at(spot) - at(base)) * W) * (grow ? 1 : 0), height: 3)
-                        .offset(x: at(base) * W, y: 14)
-                    ForEach(marks.indices, id: \.self) { i in
-                        let m = marks[i]
-                        VStack(spacing: 5) {
-                            Rectangle().fill(m.strong ? Ink.text : Ink.dim).frame(width: m.strong ? 2 : 1, height: 19)
-                            Text(m.k.uppercased()).font(InkFont.mono(8)).tracking(8 * 0.08)
-                                .foregroundStyle(m.strong ? Ink.text : Ink.dim).fixedSize()
-                            Text(nvDec(m.v, 2)).font(InkFont.mono(9.5)).foregroundStyle(m.strong ? Ink.text : Ink.dim).fixedSize()
-                        }
-                        .frame(width: 60)
-                        .offset(x: at(m.v) * W - 30, y: 6)
-                    }
-                    Circle().fill(Ink.text).frame(width: 9, height: 9)
-                        .overlay(Circle().strokeBorder(Ink.surface, lineWidth: 2))
-                        .offset(x: at(spot) * W - 4.5, y: 10)
+                HStack(spacing: 0) {
+                    Rectangle().fill(shares >= 0 ? Ink.gain : Ink.loss)
+                        .frame(width: CGFloat(abs(shares) / mag) * g.size.width * (grow ? 1 : 0))
+                    Rectangle().fill((options >= 0 ? Ink.gain : Ink.loss).opacity(0.5))
+                        .frame(width: CGFloat(abs(options) / mag) * g.size.width * (grow ? 1 : 0))
+                    Spacer(minLength: 0)
                 }
+                .background(Ink.hair)
             }
-            .frame(height: 48)
+            .frame(height: 9).clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            HStack(spacing: 10) {
+                Text("SHARES \(money(shares)) · OPTIONS \(money(options))")
+                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim).lineLimit(1)
+                Spacer(minLength: 0)
+                Text("\(pnl >= 0 ? "+" : "−")\(nvDec(abs(pct), 2))% ON COST")
+                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(pnl >= 0 ? Ink.gain : Ink.loss).fixedSize()
+            }
         }
         .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
     }
 }
 
-// MARK: - Bars3 (position foot: where the capital sits)
+// MARK: - average foot (average view: spot vs your averages)
 
-private struct Bars3: View {
-    let label: String; let net: Double; let rows: [(String, Double, Bool)]
+private struct AvgFoot: View {
+    let spot: Double; let newAvg: Double; let buyAvg: Double
     @State private var grow = false
     var body: some View {
-        let maxV = max(rows.map(\.1).max() ?? 1, 1)
-        return VStack(alignment: .leading, spacing: 8) {
+        let span = max(abs(buyAvg - spot), 1)
+        let gap = newAvg - spot
+        let cut = buyAvg - newAvg
+        let under = gap > 0
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text(label.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                Text("SPOT VS YOUR AVERAGES").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 Spacer()
-                Text(nvMoneySigned(net)).font(InkFont.mono(17, .medium)).tracking(17 * -0.02).foregroundStyle(Ink.text)
+                InkRoll(text: "$" + nvDec(spot, 2), font: InkFont.mono(22, .light), tracking: 22 * -0.03, color: Ink.text)
             }
-            ForEach(rows.indices, id: \.self) { i in
-                let r = rows[i]
-                HStack(spacing: 10) {
-                    Text(r.0.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1).foregroundStyle(Ink.dim)
-                        .frame(width: 86, alignment: .leading)
-                    GeometryReader { g in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Ink.hair)
-                            Capsule().fill(r.2 ? Ink.gain : Ink.dim)
-                                .frame(width: max(2, CGFloat(r.1 / maxV) * g.size.width * (grow ? 1 : 0)))
-                        }
-                    }.frame(height: 7)
-                    Text((r.2 ? "+" : "") + inkUsd(r.1)).font(InkFont.mono(12)).foregroundStyle(r.2 ? Ink.gain : Ink.text)
-                        .frame(minWidth: 66, alignment: .trailing)
+            GeometryReader { g in
+                HStack(spacing: 0) {
+                    Rectangle().fill(under ? Ink.loss : Ink.gain)
+                        .frame(width: CGFloat(abs(gap) / span) * g.size.width * (grow ? 1 : 0))
+                    Rectangle().fill(Ink.dim.opacity(0.55))
+                        .frame(width: CGFloat(abs(cut) / span) * g.size.width * (grow ? 1 : 0))
+                    Spacer(minLength: 0)
                 }
+                .background(Ink.hair)
+            }
+            .frame(height: 9).clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            HStack(spacing: 10) {
+                Text("NEW AVG \(nvDec(newAvg, 2)) · BUY AVG \(nvDec(buyAvg, 2))")
+                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim).lineLimit(1)
+                Spacer(minLength: 0)
+                Text("$\(nvDec(abs(gap), 2)) \(under ? "UNDER" : "OVER")")
+                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(under ? Ink.loss : Ink.gain).fixedSize()
             }
         }
         .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
