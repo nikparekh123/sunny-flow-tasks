@@ -403,7 +403,11 @@ private struct ExposureFoot: View {
 private struct ValueFoot: View {
     let committed: Double; let shares: Double; let options: Double
     @State private var grow = false
-    private func money(_ v: Double) -> String { (v >= 0 ? "+$" : "−$") + nvInt(abs(v)) }
+    // Compact ($77.4K, not $77,380) so the caption never truncates at large P&L.
+    private func money(_ v: Double) -> String { (v >= 0 ? "+" : "−") + inkK(abs(v)) }
+    private func inkK(_ v: Double) -> String {
+        v >= 1000 ? "$" + (v / 1000).formatted(.number.precision(.fractionLength(1))) + "K" : "$" + nvInt(v)
+    }
     var body: some View {
         let pnl = shares + options
         let worth = committed + pnl
@@ -430,7 +434,7 @@ private struct ValueFoot: View {
                 Text("SHARES \(money(shares)) · OPTIONS \(money(options))")
                     .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim).lineLimit(1)
                 Spacer(minLength: 0)
-                Text("\(pnl >= 0 ? "+" : "−")\(nvDec(abs(pct), 2))% ON COST")
+                Text("\(pnl >= 0 ? "+" : "−")\(nvDec(abs(pct), 2))%")
                     .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(pnl >= 0 ? Ink.gain : Ink.loss).fixedSize()
             }
         }
