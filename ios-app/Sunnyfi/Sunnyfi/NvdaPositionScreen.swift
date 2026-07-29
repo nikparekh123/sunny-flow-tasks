@@ -34,7 +34,7 @@ struct NvdaPositionScreen: View {
     var body: some View {
         if let p = store.position {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Portfolio", count: "\(1 + p.groups.count) cards")
+                InkSectionHead(title: "Portfolio", count: "\(1 + sleeveCardCount(p)) cards")
                 rail(p)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -49,21 +49,35 @@ struct NvdaPositionScreen: View {
     // alone under "Position"; the sleeve cards stack under "Contracts".
     private struct RailGroup: Identifiable { let id: String; let label: String; let glyph: String?; let count: Int; let cards: [AnyView] }
 
+    // A sleeve card holds the design's fixed 530 height → at most STRIKES_PER_CARD
+    // ledger rows fit above the foot. Sleeves with more split across sibling cards
+    // ("Puts bought · 1/2", "· 2/2"); the hero + foot on each page carry the whole
+    // sleeve total, so either page read alone still summarises the sleeve.
+    private static let strikesPerCard = 3
+
+    private func sleeveCardCount(_ p: NvPosition) -> Int {
+        p.groups.reduce(0) { $0 + max(1, Int(ceil(Double($1.strikes.count) / Double(Self.strikesPerCard)))) }
+    }
+
     private func groups(_ p: NvPosition) -> [RailGroup] {
         var out: [RailGroup] = [
             .init(id: "position", label: "Position", glyph: nil, count: 1,
                   cards: [AnyView(TotalPositionCard(p: p).inkEntrance(0))]),
         ]
-        // A sleeve card must fit its whole strike ledger + the foot. The design's
-        // 530 holds ~2 strikes; each extra strike adds a ledger row, so grow the
-        // card and give EVERY Contracts card the tallest height so the row stays
-        // even (they sit in one horizontal group).
-        let maxStrikes = p.groups.map(\.strikes.count).max() ?? 0
-        let sleeveH = max(530, 530 + CGFloat(max(0, maxStrikes - 2)) * 64)
-        let cards: [AnyView] = p.groups.enumerated().map { idx, g in
-            AnyView(SleeveGroupCard(leg: g, n: String(format: "%02d", idx + 2), spot: p.spot,
-                                    fresh: p.fresh, freshText: p.freshText, cardHeight: sleeveH)
-                .inkEntrance(min(idx + 1, 4)))
+        var cards: [AnyView] = []
+        var entrance = 1
+        for g in p.groups {
+            let pages = stride(from: 0, to: max(1, g.strikes.count), by: Self.strikesPerCard).map { start in
+                Array(g.strikes[start ..< min(start + Self.strikesPerCard, g.strikes.count)])
+            }
+            for (pi, slice) in pages.enumerated() {
+                let num = String(format: "%02d", cards.count + 2)
+                cards.append(AnyView(
+                    SleeveGroupCard(leg: g, pageStrikes: slice, page: pi, pageCount: pages.count,
+                                    n: num, spot: p.spot, fresh: p.fresh, freshText: p.freshText)
+                        .inkEntrance(min(entrance, 4))))
+                entrance += 1
+            }
         }
         if !cards.isEmpty {
             out.append(.init(id: "contracts", label: "Contracts", glyph: "△", count: cards.count, cards: cards))
@@ -456,12 +470,14 @@ private struct Bars3: View {
 // MARK: - Sleeve group card (one per leg type)
 
 private struct SleeveGroupCard: View {
-    let leg: NvGroup
+    let leg: NvGroup                 // whole sleeve — hero + foot totals read from this
+    let pageStrikes: [NvStrike]      // this card's slice of the ledger
+    var page: Int = 0
+    var pageCount: Int = 1
     let n: String
     let spot: Double
     let fresh: NvFresh
     let freshText: String
-    var cardHeight: CGFloat = 530
     @State private var open: Int? = nil
 
     var body: some View {
@@ -471,9 +487,10 @@ private struct SleeveGroupCard: View {
         let cur = leg.strikes.reduce(0) { $0 + $1.current }
         let net = short ? basis - cur : cur - basis
         let soonest = leg.strikes.map { $0.expired ? 0 : (Int($0.dte.prefix(while: \.isNumber)) ?? 999) }.min() ?? 999
-        return InkCard(spine: short ? .short : .long, height: cardHeight) {
+        let cat = pageCount > 1 ? "\(leg.label) · \(page + 1)/\(pageCount)" : leg.label
+        return InkCard(spine: short ? .short : .long) {
             InkBody {
-                InkEyebrow(n: n, cat: leg.label, glyph: leg.glyph) {
+                InkEyebrow(n: n, cat: cat, glyph: leg.glyph) {
                     InkBand(skin: .low, text: "\(leg.strikes.count) strike\(leg.strikes.count == 1 ? "" : "s")")
                 }
                 VStack(alignment: .leading, spacing: 10) {
@@ -483,10 +500,10 @@ private struct SleeveGroupCard: View {
                 }
                 .padding(.top, 18)
                 VStack(spacing: 0) {
-                    if let i = open, i < leg.strikes.count {
-                        LegDetail(leg: leg, s: leg.strikes[i], spot: spot) { withAnimation(InkMotion.ease(0.28)) { open = nil } }
+                    if let i = open, i < pageStrikes.count {
+                        LegDetail(leg: leg, s: pageStrikes[i], spot: spot) { withAnimation(InkMotion.ease(0.28)) { open = nil } }
                     } else {
-                        ForEach(Array(leg.strikes.enumerated()), id: \.offset) { idx, s in
+                        ForEach(Array(pageStrikes.enumerated()), id: \.offset) { idx, s in
                             Button { withAnimation(InkMotion.ease(0.28)) { open = idx } } label: {
                                 LedgerRow(s: s)
                             }
