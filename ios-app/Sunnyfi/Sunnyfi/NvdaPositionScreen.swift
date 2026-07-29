@@ -2,9 +2,11 @@
 //  NvdaPositionScreen.swift
 //  Sunnyfi — Ink rebuild · Section 1 · Current position
 //
-//  The six card species composed from the Ink primitives, driven by NvDerive.
-//  Overview (summary + total) · Shares · then a group per option sleeve, one
-//  card per net-open strike.
+//  Consolidated to leg-type cards (design: "Current Position - Cards"). One
+//  Total-position card (a position / delta / average switch) then ONE card per
+//  option sleeve — calls sold, puts bought, calls bought — each a ledger of its
+//  strikes that drills into a single strike in place. No per-strike cards, no
+//  summary card, no shares card.
 //
 
 import SwiftUI
@@ -15,9 +17,14 @@ private func nvInt(_ v: Double) -> String { Int(v.rounded()).formatted(.number.g
 private func nvSigned(_ v: Double) -> String { (v > 0 ? "+" : v < 0 ? "−" : "") + nvInt(abs(v)) }
 private func nvDec(_ v: Double, _ d: Int) -> String { String(format: "%.\(d)f", v) }
 private func nvMoneySigned(_ v: Double) -> String { (v >= 0 ? "+" : "−") + inkUsd(abs(v)) }
+private func nvStrike(_ v: Double) -> String { "$" + (v == v.rounded() ? nvDec(v, 0) : nvDec(v, 1)) }
 
 private func stampState(_ f: NvFresh) -> InkStamp.FreshState {
     switch f { case .live: return .live; case .delayed: return .delayed; case .stale: return .stale }
+}
+
+private func glyph(_ kind: String, _ side: String) -> String {
+    kind == "call" ? (side == "short" ? "▲" : "△") : (side == "short" ? "▼" : "▽")
 }
 
 struct NvdaPositionScreen: View {
@@ -27,7 +34,7 @@ struct NvdaPositionScreen: View {
     var body: some View {
         if let p = store.position {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Portfolio", count: "\(cardCount(p)) cards")
+                InkSectionHead(title: "Portfolio", count: "\(1 + p.groups.count) cards")
                 rail(p)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -38,21 +45,22 @@ struct NvdaPositionScreen: View {
         }
     }
 
-    private func cardCount(_ p: NvPosition) -> Int { 3 + p.groups.reduce(0) { $0 + $1.strikes.count } }
-
-    // Grouped rail (design: grp-h is position:sticky;left:0). Each group's header
-    // sticks to the left gutter while the group's cards scroll under it.
+    // Grouped rail (design: grp-h is position:sticky;left:0). The total card sits
+    // alone under "Position"; the sleeve cards stack under "Contracts".
     private struct RailGroup: Identifiable { let id: String; let label: String; let glyph: String?; let count: Int; let cards: [AnyView] }
 
     private func groups(_ p: NvPosition) -> [RailGroup] {
         var out: [RailGroup] = [
-            .init(id: "overview", label: "Overview", glyph: nil, count: 2,
-                  cards: [AnyView(summaryCard(p).inkEntrance(0)), AnyView(totalCard(p).inkEntrance(1))]),
-            .init(id: "shares", label: "Shares", glyph: "○", count: 1, cards: [AnyView(sharesCard(p).inkEntrance(2))]),
+            .init(id: "position", label: "Position", glyph: nil, count: 1,
+                  cards: [AnyView(TotalPositionCard(p: p).inkEntrance(0))]),
         ]
-        for g in p.groups {
-            out.append(.init(id: g.label, label: g.label, glyph: g.glyph, count: g.strikes.count,
-                             cards: g.strikes.enumerated().map { AnyView(strikeCard(p, $0.element).inkEntrance(min($0.offset, 4))) }))
+        let cards: [AnyView] = p.groups.enumerated().map { idx, g in
+            AnyView(SleeveGroupCard(leg: g, n: String(format: "%02d", idx + 2), spot: p.spot,
+                                    fresh: p.fresh, freshText: p.freshText)
+                .inkEntrance(min(idx + 1, 4)))
+        }
+        if !cards.isEmpty {
+            out.append(.init(id: "contracts", label: "Contracts", glyph: "△", count: cards.count, cards: cards))
         }
         return out
     }
@@ -79,82 +87,128 @@ struct NvdaPositionScreen: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.top, 120)
     }
+}
 
-    // MARK: 01 · summary
+// MARK: - Total position (position · delta · average switch)
 
-    private func summaryCard(_ p: NvPosition) -> some View {
-        let hedge = p.groups.filter { $0.strikes.first?.side == "long" }.reduce(0) { $0 + $1.strikes.count }
-        return InkCard {
+private struct TotalPositionCard: View {
+    let p: NvPosition
+    enum Mode: String, CaseIterable { case position, delta, average }
+    @State private var mode: Mode = .position
+    @State private var openLeg: String? = nil     // drilled sleeve (delta view)
+
+    // one delta row per option sleeve (+ shares), summed from the engine's per-leg estimate
+    private struct DeltaRow: Identifiable { let name, glyph, side: String; let delta: Double; let parts: [NvStrike]; var id: String { name } }
+    private var deltaRows: [DeltaRow] {
+        var rows = [DeltaRow(name: "Shares", glyph: "○", side: "long", delta: p.shares, parts: [])]
+        for g in p.groups {
+            let side = g.strikes.first?.side ?? "long"
+            rows.append(DeltaRow(name: g.label, glyph: g.glyph, side: side,
+                                 delta: g.strikes.reduce(0) { $0 + $1.deltaEst }, parts: g.strikes))
+        }
+        return rows
+    }
+    private var newAvg: Double { p.breakEven }
+
+    var body: some View {
+        InkCard {
             InkBody {
-                InkEyebrow(n: "01", cat: "Summary") { InkBand(skin: .mod, text: p.delta >= 0 ? "Net long" : "Net short") }
-                InkHero(value: nvSigned(p.delta), unit: "delta")
-                InkBullets(items: [
-                    "Calls + puts hedge \(nvInt(p.shares)) sh",
-                    "\(hedge) hedge legs · \(p.contractsOpen) contracts open",
-                ])
-                InkSpacer()
-                InkBand3(items: [("Gamma", nvSigned(p.gamma)), ("Theta", nvMoneySigned(p.theta)), ("Spot", "$" + nvDec(p.spot, 2))])
-            }
-            InkFoot {
-                HStack(alignment: .bottom, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // Glossary: this is UNREALIZED (open, marked). See PNL_GLOSSARY.md.
-                        let u = store.pnl?.unrealized ?? p.pnl
-                        let sh = store.pnl?.sharesUnrealized ?? p.sharesPL
-                        let opt = (store.pnl.map { $0.unrealized - $0.sharesUnrealized }) ?? p.optionsPL
-                        Text("CURRENT P&L · UNREALIZED").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
-                        InkDelta(value: inkUsd(abs(u)), good: u >= 0, size: 30, weight: .light).padding(.top, 10)
-                        Text("Shares \(inkUsd(abs(sh))) · options \(inkUsd(abs(opt)))")
-                            .font(InkFont.mono(10)).tracking(10 * 0.04).foregroundStyle(Ink.dim).padding(.top, 9)
-                    }
-                    Spacer(minLength: 0)
-                    Button(action: onPlan) {
-                        Image(systemName: "arrow.up.arrow.down").font(.system(size: 17, weight: .regular))
-                            .frame(width: 44, height: 44)
-                            .background(RoundedRectangle(cornerRadius: Ink.radiusElement).fill(Ink.invertBg))
-                            .foregroundStyle(Ink.invertText)
-                    }
-                    .buttonStyle(.plain)
+                InkEyebrow(n: "01", cat: "Total position")
+                switcher
+                hero
+                if mode == .delta && openLeg == nil {
+                    ledger.padding(.top, 26)
+                    InkSpacer()
+                } else {
+                    InkSpacer()
+                    ledger
                 }
             }
-            InkStamp(state: stampState(p.fresh), text: p.freshText)
+            InkFoot { foot }
+            InkStamp(state: stampState(p.fresh), text: stampText)
         }
     }
 
-    // MARK: 02 · total position
-
-    private func totalCard(_ p: NvPosition) -> some View {
-        let optBought = p.sleeves.filter { $0.side == "long" && $0.kind != "shares" }.reduce(0) { $0 + $1.basis }
-        let optSold = p.sleeves.filter { $0.side == "short" }.reduce(0) { $0 + $1.basis }
-        let capital = p.sharesPaid + optBought - optSold
-        return InkCard {
-            InkBody {
-                InkEyebrow(n: "02", cat: "Total position") { InkBand(skin: .low, text: "\(p.sleeves.count) sleeves") }
-                InkHero(value: nvInt(p.shares), unit: "shares held · \(p.contractsOpen) contracts open")
-                InkSpacer()
-                VStack(spacing: 0) {
-                    sleeveRow("Shares", "○", nvInt(p.shares) + " sh", inkUsd(p.sharesPaid))
-                    ForEach(p.sleeves) { s in
-                        sleeveRow(s.name, s.kind == "call" ? (s.side == "short" ? "▲" : "△") : (s.side == "short" ? "▼" : "▽"),
-                                  "\(s.qty) ct", inkUsd(s.basis))
-                    }
-                }
-            }
-            InkFoot {
-                bars3("Where the capital sits", capital, [
-                    ("Shares", p.sharesPaid, false),
-                    ("Options bought", optBought, false),
-                    ("Options sold", optSold, true),
-                ])
-            }
-            InkStamp(state: stampState(p.fresh), text: p.freshText)
+    private var stampText: String {
+        switch mode {
+        case .average: return "Updated now · average recomputed per fill"
+        case .delta:   return "Updated now · delta from live chain"
+        case .position: return p.freshText
         }
     }
 
-    private func sleeveRow(_ name: String, _ glyph: String, _ qty: String, _ basis: String) -> some View {
+    // MARK: switcher
+
+    private var switcher: some View {
+        HStack(spacing: 4) {
+            ForEach(Mode.allCases, id: \.self) { m in
+                let on = mode == m
+                Button { withAnimation(InkMotion.ease(0.32)) { mode = m; openLeg = nil } } label: {
+                    Text(m.rawValue.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.14)
+                        .foregroundStyle(on ? Ink.invertText : Ink.dim)
+                        .frame(maxWidth: .infinity).frame(height: 30)
+                        .background(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous)
+                            .fill(on ? Ink.invertBg : .clear))
+                        .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous)
+                            .strokeBorder(on ? Ink.text : Ink.hair, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 14)
+    }
+
+    // MARK: hero
+
+    @ViewBuilder private var hero: some View {
+        switch mode {
+        case .position:
+            InkHero(value: nvInt(p.shares), unit: "shares held · \(p.contractsOpen) contracts open")
+        case .average:
+            InkHero(value: "$" + nvDec(newAvg, 2), unit: "new average · was $\(nvDec(p.avgBuy, 2))")
+        case .delta:
+            HStack(alignment: .bottom, spacing: 14) {
+                VStack(alignment: .leading, spacing: 0) {
+                    InkRoll(text: nvSigned(p.delta), font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
+                    Text("NET DELTA · SHARE EQUIV").font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
+                        .foregroundStyle(Ink.dim).padding(.top, 12)
+                }
+                Spacer(minLength: 0)
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(nvSigned(p.gamma)).font(InkFont.mono(20, .light)).tracking(20 * -0.03).foregroundStyle(Ink.text)
+                    Text("GAMMA · PER $1").font(InkFont.mono(8.5)).tracking(8.5 * 0.12)
+                        .foregroundStyle(Ink.dim).padding(.top, 8).fixedSize()
+                }
+                .padding(.leading, 14)
+                .overlay(alignment: .leading) { Rectangle().fill(Ink.hair).frame(width: 1) }
+            }
+            .padding(.top, 24)
+        }
+    }
+
+    // MARK: ledger
+
+    @ViewBuilder private var ledger: some View {
+        switch mode {
+        case .position: positionLedger
+        case .average:  averageLedger
+        case .delta:    if let name = openLeg, let row = deltaRows.first(where: { $0.name == name }) { deltaDrill(row) } else { deltaLedger }
+        }
+    }
+
+    private var positionLedger: some View {
+        VStack(spacing: 0) {
+            sleeveRow("Shares", "○", nvInt(p.shares) + " sh", inkUsd(p.sharesPaid))
+            ForEach(p.sleeves) { s in
+                sleeveRow(s.name, glyph(s.kind, s.side), "\(s.qty) ct", inkUsd(s.basis))
+            }
+        }
+    }
+
+    private func sleeveRow(_ name: String, _ g: String, _ qty: String, _ basis: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             HStack(spacing: 9) {
-                Text(glyph).font(.system(size: 11)).foregroundStyle(Ink.text)
+                Text(g).font(.system(size: 11)).foregroundStyle(Ink.text)
                 Text(name).font(InkFont.display(13.5, .light)).foregroundStyle(Ink.text)
             }
             Spacer(minLength: 0)
@@ -167,8 +221,204 @@ struct NvdaPositionScreen: View {
         .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
     }
 
-    @State private var barsGrow = false
-    private func bars3(_ label: String, _ net: Double, _ rows: [(String, Double, Bool)]) -> some View {
+    private var averageLedger: some View {
+        VStack(spacing: 0) {
+            avgRow("Average buy", "$" + nvDec(p.avgBuy, 2), "\(nvInt(p.shares)) sh · what you paid", strong: false)
+            avgRow("New average", "$" + nvDec(newAvg, 2), "cost after premium collected", strong: true)
+        }
+    }
+
+    private func avgRow(_ k: String, _ v: String, _ sub: String, strong: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(k).font(InkFont.display(13.5, strong ? .regular : .light)).foregroundStyle(Ink.text)
+                Text(sub.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1).foregroundStyle(Ink.dim)
+            }
+            Spacer(minLength: 0)
+            Text(v).font(InkFont.mono(strong ? 16 : 13)).tracking(16 * -0.02).foregroundStyle(Ink.text)
+        }
+        .padding(.vertical, 11)
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+    }
+
+    private var deltaLedger: some View {
+        let maxD = max(deltaRows.map { abs($0.delta) }.max() ?? 1, 1)
+        return VStack(spacing: 0) {
+            ForEach(deltaRows) { r in
+                Button { if !r.parts.isEmpty { withAnimation(InkMotion.ease(0.28)) { openLeg = r.name } } } label: {
+                    DeltaLedgerRow(glyph: r.glyph, name: r.name, delta: r.delta, maxD: maxD)
+                }
+                .buttonStyle(.plain).disabled(r.parts.isEmpty)
+            }
+        }
+    }
+
+    private func deltaDrill(_ row: DeltaRow) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { withAnimation(InkMotion.ease(0.28)) { openLeg = nil } } label: {
+                HStack(spacing: 9) {
+                    Text("←").font(InkFont.mono(11)).foregroundStyle(Ink.dim)
+                    Text(row.name).font(InkFont.display(13.5, .light)).foregroundStyle(Ink.text)
+                    Spacer(minLength: 0)
+                    Text(nvSigned(row.delta) + " Δ").font(InkFont.mono(12)).foregroundStyle(Ink.signed(row.delta >= 0))
+                }
+                .padding(.vertical, 11)
+                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 9) {
+                ForEach(row.parts) { s in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("\(nvStrike(s.strike)) · \(s.expiry)".uppercased())
+                            .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim)
+                        Spacer(minLength: 0)
+                        Text(s.expired ? "EXPIRED · 0" : nvSigned(s.deltaEst))
+                            .font(InkFont.mono(11.5)).foregroundStyle(s.expired ? Ink.dim : Ink.signed(s.deltaEst >= 0))
+                    }
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    // MARK: foot
+
+    @ViewBuilder private var foot: some View {
+        switch mode {
+        case .position:
+            let optBought = p.sleeves.filter { $0.side == "long" }.reduce(0) { $0 + $1.basis }
+            let optSold = p.sleeves.filter { $0.side == "short" }.reduce(0) { $0 + $1.basis }
+            Bars3(label: "Where the position sits", net: p.sharesPaid + optBought - optSold, rows: [
+                ("Shares", p.sharesPaid, false),
+                ("Options bought", optBought, false),
+                ("Options sold", optSold, true),
+            ])
+        case .delta:
+            ExposureFoot(net: p.delta, block: p.shares)
+        case .average:
+            PriceLadder(spot: p.spot, marks: [(k: "New avg", v: newAvg, strong: true), (k: "Buy avg", v: p.avgBuy, strong: false)])
+        }
+    }
+}
+
+// MARK: - delta ledger row (centred contribution bar)
+
+private struct DeltaLedgerRow: View {
+    let glyph: String; let name: String; let delta: Double; let maxD: Double
+    @State private var grow = false
+    var body: some View {
+        HStack(spacing: 9) {
+            Text(glyph).font(.system(size: 11)).foregroundStyle(Ink.text)
+            Text(name).font(InkFont.display(13.5, .light)).foregroundStyle(Ink.text).lineLimit(1)
+            Spacer(minLength: 0)
+            GeometryReader { g in
+                let half = g.size.width / 2
+                let w = max(1, CGFloat(abs(delta) / maxD) * half * (grow ? 1 : 0))
+                ZStack {
+                    Capsule().fill(Ink.hair)
+                    Rectangle().fill(delta >= 0 ? Ink.gain : Ink.loss)
+                        .frame(width: w).clipShape(Capsule())
+                        .offset(x: delta >= 0 ? w / 2 : -w / 2)
+                    Rectangle().fill(Ink.dim.opacity(0.6)).frame(width: 1, height: 12)
+                }
+                .frame(width: g.size.width, height: 6)
+            }
+            .frame(width: 84, height: 6)
+            Text(nvSigned(delta)).font(InkFont.mono(12)).foregroundStyle(delta >= 0 ? Ink.gain : Ink.loss)
+                .frame(width: 62, alignment: .trailing)
+        }
+        .padding(.vertical, 12)
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+        .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
+    }
+}
+
+// MARK: - exposure foot (delta view)
+
+private struct ExposureFoot: View {
+    let net: Double; let block: Double
+    @State private var grow = false
+    var body: some View {
+        let exposed = min(abs(net), block)
+        let hedgedPct = block > 0 ? Int(((1 - exposed / block) * 100).rounded()) : 0
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("STILL EXPOSED").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                Spacer()
+                InkDelta(value: nvInt(abs(net)), good: net >= 0, size: 22, weight: .light)
+            }
+            GeometryReader { g in
+                let ew = block > 0 ? CGFloat(exposed / block) * g.size.width : 0
+                HStack(spacing: 0) {
+                    Rectangle().fill(Ink.dim.opacity(0.55))
+                    Rectangle().fill(net >= 0 ? Ink.gain : Ink.loss).frame(width: ew * (grow ? 1 : 0))
+                }
+                .clipShape(Capsule())
+            }
+            .frame(height: 9)
+            HStack {
+                Text("HEDGED \(hedgedPct)% · \(nvInt(block)) SH").font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim)
+                Spacer()
+                Text(net >= 0 ? "NET LONG" : "NET SHORT").font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim)
+            }
+        }
+        .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
+    }
+}
+
+// MARK: - price ladder (average view)
+
+private struct PriceLadder: View {
+    let spot: Double
+    let marks: [(k: String, v: Double, strong: Bool)]
+    @State private var grow = false
+    var body: some View {
+        let all = marks.map { $0.v } + [spot]
+        let lo = (all.min() ?? spot) - 0.9, hi = (all.max() ?? spot) + 0.9
+        let span = max(hi - lo, 0.01)
+        func at(_ v: Double) -> CGFloat { CGFloat((v - lo) / span) }
+        let base = marks.map { $0.v }.min() ?? spot
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("SPOT AGAINST YOUR AVERAGES").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                Spacer()
+                Text("$" + nvDec(spot, 2)).font(InkFont.mono(17, .medium)).tracking(17 * -0.02).foregroundStyle(Ink.text)
+            }
+            GeometryReader { g in
+                let W = g.size.width
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(Ink.hair).frame(height: 1).offset(y: 15)
+                    Rectangle().fill(Ink.gain.opacity(0.5))
+                        .frame(width: max(0, (at(spot) - at(base)) * W) * (grow ? 1 : 0), height: 3)
+                        .offset(x: at(base) * W, y: 14)
+                    ForEach(marks.indices, id: \.self) { i in
+                        let m = marks[i]
+                        VStack(spacing: 5) {
+                            Rectangle().fill(m.strong ? Ink.text : Ink.dim).frame(width: m.strong ? 2 : 1, height: 19)
+                            Text(m.k.uppercased()).font(InkFont.mono(8)).tracking(8 * 0.08)
+                                .foregroundStyle(m.strong ? Ink.text : Ink.dim).fixedSize()
+                            Text(nvDec(m.v, 2)).font(InkFont.mono(9.5)).foregroundStyle(m.strong ? Ink.text : Ink.dim).fixedSize()
+                        }
+                        .frame(width: 60)
+                        .offset(x: at(m.v) * W - 30, y: 6)
+                    }
+                    Circle().fill(Ink.text).frame(width: 9, height: 9)
+                        .overlay(Circle().strokeBorder(Ink.surface, lineWidth: 2))
+                        .offset(x: at(spot) * W - 4.5, y: 10)
+                }
+            }
+            .frame(height: 48)
+        }
+        .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
+    }
+}
+
+// MARK: - Bars3 (position foot: where the capital sits)
+
+private struct Bars3: View {
+    let label: String; let net: Double; let rows: [(String, Double, Bool)]
+    @State private var grow = false
+    var body: some View {
         let maxV = max(rows.map(\.1).max() ?? 1, 1)
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
@@ -185,7 +435,7 @@ struct NvdaPositionScreen: View {
                         ZStack(alignment: .leading) {
                             Capsule().fill(Ink.hair)
                             Capsule().fill(r.2 ? Ink.gain : Ink.dim)
-                                .frame(width: max(2, CGFloat(r.1 / maxV) * g.size.width * (barsGrow ? 1 : 0)))
+                                .frame(width: max(2, CGFloat(r.1 / maxV) * g.size.width * (grow ? 1 : 0)))
                         }
                     }.frame(height: 7)
                     Text((r.2 ? "+" : "") + inkUsd(r.1)).font(InkFont.mono(12)).foregroundStyle(r.2 ? Ink.gain : Ink.text)
@@ -193,96 +443,140 @@ struct NvdaPositionScreen: View {
                 }
             }
         }
-        .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { barsGrow = true } }
+        .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
     }
+}
 
-    // MARK: 03 · shares
+// MARK: - Sleeve group card (one per leg type)
 
-    private func sharesCard(_ p: NvPosition) -> some View {
-        let diff = p.avgBuy > 0 ? (p.spot - p.avgBuy) / p.avgBuy * 100 : 0
-        return InkCard {
-            InkBody {
-                InkEyebrow(n: "03", cat: "Shares · long") {
-                    InkBand(skin: .hue(diff >= 0 ? Ink.gain : Ink.loss), text: "\(nvDec(abs(diff), 2))% vs avg")
-                }
-                InkHero(value: "$" + nvDec(p.spot, 2), unit: "live spot · nvda")
-                InkBullets(items: [
-                    "Break-even $\(nvDec(p.breakEven, 2)) after premium",
-                    "$\(nvDec(p.premiumPerShare, 2)) a share collected, calls only",
-                ])
-                InkSpacer()
-                InkBand3(items: [("Average buy", "$" + nvDec(p.avgBuy, 2)), ("New average", "$" + nvDec(p.breakEven, 2)), ("Quantity", nvInt(p.shares))])
-            }
-            InkFoot {
-                InkBars(leftK: "Paid", leftV: p.sharesPaid, rightK: "Value now", rightV: p.sharesValue,
-                        hue: p.sharesPL >= 0 ? Ink.gain : Ink.loss) {
-                    InkDelta(value: inkUsd(abs(p.sharesPL)), good: p.sharesPL >= 0, size: 17)
-                }
-            }
-            InkStamp(state: stampState(p.fresh), text: p.freshText)
-        }
-    }
+private struct SleeveGroupCard: View {
+    let leg: NvGroup
+    let n: String
+    let spot: Double
+    let fresh: NvFresh
+    let freshText: String
+    @State private var open: Int? = nil
 
-    // MARK: 04/05/06 · a strike (short / long / expired)
-
-    private func strikeCard(_ p: NvPosition, _ s: NvStrike) -> some View {
-        let short = s.side == "short"
-        let basisK = short ? "Collected" : "Paid"
-        let curK = short ? "To close" : "Value now"
-        let net = short ? s.basis - s.current : s.current - s.basis
-        let entry = s.ct > 0 ? s.basis / (s.ct * 100) : 0
-        let gap = s.strike - p.spot
+    var body: some View {
+        let short = leg.strikes.first?.side == "short"
+        let ct = leg.strikes.reduce(0) { $0 + $1.ct }
+        let basis = leg.strikes.reduce(0) { $0 + $1.basis }
+        let cur = leg.strikes.reduce(0) { $0 + $1.current }
+        let net = short ? basis - cur : cur - basis
+        let soonest = leg.strikes.map { $0.expired ? 0 : (Int($0.dte.prefix(while: \.isNumber)) ?? 999) }.min() ?? 999
         return InkCard(spine: short ? .short : .long) {
             InkBody {
-                InkEyebrow(n: "", cat: "\(s.kind == "call" ? "Call" : "Put") \(short ? "sold" : "bought")",
-                           glyph: s.kind == "call" ? (short ? "▲" : "△") : (short ? "▼" : "▽")) {
-                    HStack(spacing: 6) {
-                        if s.isNew { InkBand(skin: .hue(Ink.gain), text: "New") }
-                        if s.expired { InkBand(skin: .hue(Ink.loss), text: "Expired \(s.moneyness)") }
-                        else { InkBand(skin: s.moneyness == "ITM" ? .mod : .low, text: s.moneyness) }
-                    }
+                InkEyebrow(n: n, cat: leg.label, glyph: leg.glyph) {
+                    InkBand(skin: .low, text: "\(leg.strikes.count) strike\(leg.strikes.count == 1 ? "" : "s")")
                 }
-                // hero row: STRIKE big on the left, the live mark + % + entry as a
-                // prominent block on the right (not buried in a caption).
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        InkRoll(text: "$" + nvDec(s.strike, s.strike == s.strike.rounded() ? 0 : 1),
-                                font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
-                        Spacer(minLength: 0)
-                        if !s.expired, let mk = s.mark {
-                            let pct = entry > 0 ? (mk - entry) / entry * 100 : 0
-                            VStack(alignment: .trailing, spacing: 5) {
-                                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                                    Text("$\(nvDec(mk, 2))").font(InkFont.mono(22, .light)).tracking(22 * -0.03).foregroundStyle(Ink.text)
-                                    Text(s.good == nil ? "·" : "\(pct >= 0 ? "+" : "−")\(nvDec(abs(pct), 1))%")
-                                        .font(InkFont.mono(12)).foregroundStyle(Ink.signed(s.good))
-                                }
-                                Text("\(short ? "sold" : "paid") $\(nvDec(entry, 2))".uppercased())
-                                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.14).foregroundStyle(Ink.dim)
+                VStack(alignment: .leading, spacing: 10) {
+                    InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 40, weight: .light)
+                    Text("\(net >= 0 ? "open gain" : "open cost") · \(Int(ct.rounded())) ct across \(leg.strikes.count)".uppercased())
+                        .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim)
+                }
+                .padding(.top, 18)
+                VStack(spacing: 0) {
+                    if let i = open, i < leg.strikes.count {
+                        LegDetail(leg: leg, s: leg.strikes[i], spot: spot) { withAnimation(InkMotion.ease(0.28)) { open = nil } }
+                    } else {
+                        ForEach(Array(leg.strikes.enumerated()), id: \.offset) { idx, s in
+                            Button { withAnimation(InkMotion.ease(0.28)) { open = idx } } label: {
+                                LedgerRow(s: s)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
-                    Text("\(s.kind == "call" ? "Call" : "Put") \(short ? "sold" : "bought") · \(s.expiry) · \(s.dte)".uppercased())
-                        .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 12)
-                    if s.expired || s.mark == nil {
-                        Text("No live mark").font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
-                            .foregroundStyle(Ink.dim).padding(.top, 8)
-                    }
                 }
-                .padding(.top, 20)
-                InkBullets(items: s.expired
-                    ? ["Assigned in all likelihood", "Reconcile before it skews the sleeve"]
-                    : ["Spot $\(nvDec(p.spot, 2)) · $\(nvDec(abs(gap), 2)) \(gap >= 0 ? "below" : "above") strike",
-                       "\(Int(s.ct)) ct × $\(nvDec(s.mark ?? 0, 2)) = \(inkUsd(s.current)) \(short ? "to close" : "of value")"])
+                .padding(.top, 18)
                 InkSpacer()
-                InkBand3(items: [("Contracts", "\(Int(s.ct))"), ("Delta", s.delta.map { nvDec($0, 3) } ?? "—"), ("Theta", s.theta.map { nvDec($0, 3) } ?? "—")])
             }
             InkFoot {
-                InkBars(leftK: basisK, leftV: s.basis, rightK: curK, rightV: s.current, hue: net >= 0 ? Ink.gain : Ink.loss) {
+                InkBars(leftK: short ? "Collected" : "Paid", leftV: basis,
+                        rightK: short ? "To close" : "Value now", rightV: cur,
+                        hue: net >= 0 ? Ink.gain : Ink.loss) {
                     InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 17)
                 }
             }
-            InkStamp(state: s.expired ? .stale : stampState(p.fresh), text: s.expired ? "Stale · next at broker sync" : p.freshText)
+            InkStamp(state: stampState(fresh), text: soonest <= 1 ? "Updated now · nearest leg expires today" : freshText)
+        }
+    }
+}
+
+// MARK: - ledger row (a strike inside a sleeve card)
+
+private struct LedgerRow: View {
+    let s: NvStrike
+    var body: some View {
+        let short = s.side == "short"
+        let entry = s.ct > 0 ? s.basis / (s.ct * 100) : 0
+        let now = s.mark ?? 0
+        let pct = entry > 0 ? (now - entry) / entry * 100 : 0
+        let days = s.expired ? 0 : (Int(s.dte.prefix(while: \.isNumber)) ?? 999)
+        let rank: InkRelevance = (s.expired || days <= 7) ? .r1 : days <= 200 ? .r2 : .r3
+        return HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(nvStrike(s.strike)).font(InkFont.mono(14.5)).tracking(14.5 * -0.01).foregroundStyle(Ink.text)
+                        .overlay(alignment: .bottom) { Rectangle().fill(Ink.hair).frame(height: 1).offset(y: 2) }
+                    Text("\(Int(s.ct)) CT").font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(Ink.dim)
+                }
+                Text((s.expired ? "Expired \(s.moneyness) · \(s.expiry)" : "\(s.expiry) · \(s.dte) · \(s.moneyness)").uppercased())
+                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.1).foregroundStyle(Ink.dim)
+            }
+            Spacer(minLength: 0)
+            VStack(alignment: .trailing, spacing: 5) {
+                Text(s.mark == nil ? "—" : "$\(nvDec(now, 2))").font(InkFont.mono(14.5)).tracking(14.5 * -0.02).foregroundStyle(Ink.text)
+                Text(s.expired || s.mark == nil ? "—" : "\(pct >= 0 ? "+" : "−")\(nvDec(abs(pct), 1))%")
+                    .font(InkFont.mono(9)).foregroundStyle(s.good == nil ? Ink.dim : Ink.signed(s.good))
+            }
+        }
+        .frame(minHeight: 46)
+        .padding(.vertical, 9)
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+        .inkRelevance(rank)
+    }
+}
+
+// MARK: - leg detail (drill-in, replaces the ledger)
+
+private struct LegDetail: View {
+    let leg: NvGroup
+    let s: NvStrike
+    let spot: Double
+    let onBack: () -> Void
+    var body: some View {
+        let short = s.side == "short"
+        let entry = s.ct > 0 ? s.basis / (s.ct * 100) : 0
+        let gap = s.strike - spot
+        let rows: [(String, String)] = [
+            (short ? "Sold at" : "Paid", "$" + nvDec(entry, 2)),
+            (short ? "To close" : "Value now", inkUsd(s.current)),
+            ("Spot gap", "$" + nvDec(abs(gap), 2) + (gap >= 0 ? " below" : " above")),
+            ("Delta · theta", "\(s.delta.map { nvDec($0, 2) } ?? "—") · \(s.theta.map { nvDec($0, 2) } ?? "—")"),
+        ]
+        return VStack(alignment: .leading, spacing: 0) {
+            Button(action: onBack) {
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Text("←").font(InkFont.mono(11)).foregroundStyle(Ink.dim)
+                    Text(nvStrike(s.strike)).font(InkFont.mono(14.5)).tracking(14.5 * -0.01).foregroundStyle(Ink.text)
+                    Text("\(s.expiry) · \(s.dte)".uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1).foregroundStyle(Ink.dim)
+                    Spacer(minLength: 0)
+                    Text("\(Int(s.ct)) ct").font(InkFont.mono(12)).foregroundStyle(Ink.dim)
+                }
+                .padding(.vertical, 11)
+                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 9) {
+                ForEach(rows.indices, id: \.self) { i in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(rows[i].0.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim)
+                        Spacer()
+                        Text(rows[i].1).font(InkFont.mono(11.5)).foregroundStyle(Ink.text)
+                    }
+                }
+            }
+            .padding(.top, 3)
         }
     }
 }

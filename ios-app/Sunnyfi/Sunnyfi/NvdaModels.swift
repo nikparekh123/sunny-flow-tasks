@@ -99,6 +99,7 @@ struct NvStrike: Identifiable, Sendable {
     let moneyness: String         // ITM | OTM
     let delta: Double?
     let theta: Double?
+    var deltaEst: Double = 0       // signed share-equiv delta (live greek or estimate) × ct × 100
     var isNew: Bool = false        // opened within the last day → "NEW" tag
     var id: String { "\(kind)-\(side)-\(strike)-\(expiry)" }
     /// Semantic direction for the hue: a rising mark is against a short, for a long.
@@ -331,11 +332,18 @@ enum NvDerive {
             // per-contract basis reflects the OPEN legs of this net position
             let basis = openBasis[k] ?? 0
             let itm = k.kind == "call" ? spot >= k.strike : spot <= k.strike
+            // Signed share-equivalent delta for this leg — same formula as the
+            // position total: live greek, or a moneyness estimate when Polygon
+            // drops it, × 100 × contracts × sign. Expired legs contribute 0.
+            let dEst = expired ? 0
+                : (m?.delta ?? estimateDelta(kind: k.kind, strike: k.strike, spot: spot))
+                  * ct * 100 * (k.side == "long" ? 1 : -1)
             strikes.append(NvStrike(
                 side: k.side, kind: k.kind, strike: k.strike, expiry: displayExpiry(k.expiry),
                 dte: expired ? "expired" : "\(daysTo(k.expiry, now: now)) DTE", expired: expired,
                 ct: ct, basis: basis, current: current, mark: mkNow,
                 moneyness: itm ? "ITM" : "OTM", delta: m?.delta, theta: m?.theta,
+                deltaEst: dEst,
                 isNew: !expired && openedWithinADay(openedAt[k], now: now)))
         }
 

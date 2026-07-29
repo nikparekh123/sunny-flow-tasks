@@ -25,10 +25,14 @@ enum InkPreviewData {
             groups: [
                 NvGroup(label: "Calls sold", glyph: "▲", strikes: [
                     NvStrike(side: "short", kind: "call", strike: 220, expiry: "Aug 15 '26", dte: "18 DTE", expired: false,
-                             ct: 10, basis: 8310, current: 2800, mark: 2.80, moneyness: "OTM", delta: 0.32, theta: -0.12)]),
+                             ct: 10, basis: 8310, current: 2800, mark: 2.80, moneyness: "OTM", delta: 0.32, theta: -0.12, deltaEst: -320),
+                    NvStrike(side: "short", kind: "call", strike: 240, expiry: "Sep 19 '26", dte: "53 DTE", expired: false,
+                             ct: 5, basis: 3100, current: 1500, mark: 3.00, moneyness: "OTM", delta: 0.18, theta: -0.08, deltaEst: -90)]),
                 NvGroup(label: "Puts bought", glyph: "▽", strikes: [
                     NvStrike(side: "long", kind: "put", strike: 200, expiry: "Jan 16 '27", dte: "172 DTE", expired: false,
-                             ct: 10, basis: 120000, current: 98000, mark: 9.80, moneyness: "ITM", delta: -0.42, theta: -0.03)]),
+                             ct: 10, basis: 120000, current: 98000, mark: 9.80, moneyness: "ITM", delta: -0.42, theta: -0.03, deltaEst: -420),
+                    NvStrike(side: "long", kind: "put", strike: 180, expiry: "Jan 16 '27", dte: "172 DTE", expired: false,
+                             ct: 40, basis: 421989, current: 360000, mark: 9.00, moneyness: "OTM", delta: -0.30, theta: -0.02, deltaEst: -1200)]),
             ],
             fresh: .live, freshText: "Updated now · streaming")
         s.insights = NvInsights(
