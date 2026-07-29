@@ -54,9 +54,15 @@ struct NvdaPositionScreen: View {
             .init(id: "position", label: "Position", glyph: nil, count: 1,
                   cards: [AnyView(TotalPositionCard(p: p).inkEntrance(0))]),
         ]
+        // A sleeve card must fit its whole strike ledger + the foot. The design's
+        // 530 holds ~2 strikes; each extra strike adds a ledger row, so grow the
+        // card and give EVERY Contracts card the tallest height so the row stays
+        // even (they sit in one horizontal group).
+        let maxStrikes = p.groups.map(\.strikes.count).max() ?? 0
+        let sleeveH = max(530, 530 + CGFloat(max(0, maxStrikes - 2)) * 64)
         let cards: [AnyView] = p.groups.enumerated().map { idx, g in
             AnyView(SleeveGroupCard(leg: g, n: String(format: "%02d", idx + 2), spot: p.spot,
-                                    fresh: p.fresh, freshText: p.freshText)
+                                    fresh: p.fresh, freshText: p.freshText, cardHeight: sleeveH)
                 .inkEntrance(min(idx + 1, 4)))
         }
         if !cards.isEmpty {
@@ -455,6 +461,7 @@ private struct SleeveGroupCard: View {
     let spot: Double
     let fresh: NvFresh
     let freshText: String
+    var cardHeight: CGFloat = 530
     @State private var open: Int? = nil
 
     var body: some View {
@@ -464,7 +471,7 @@ private struct SleeveGroupCard: View {
         let cur = leg.strikes.reduce(0) { $0 + $1.current }
         let net = short ? basis - cur : cur - basis
         let soonest = leg.strikes.map { $0.expired ? 0 : (Int($0.dte.prefix(while: \.isNumber)) ?? 999) }.min() ?? 999
-        return InkCard(spine: short ? .short : .long) {
+        return InkCard(spine: short ? .short : .long, height: cardHeight) {
             InkBody {
                 InkEyebrow(n: n, cat: leg.label, glyph: leg.glyph) {
                     InkBand(skin: .low, text: "\(leg.strikes.count) strike\(leg.strikes.count == 1 ? "" : "s")")

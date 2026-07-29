@@ -29,10 +29,14 @@ enum InkPreviewData {
                     NvStrike(side: "short", kind: "call", strike: 240, expiry: "Sep 19 '26", dte: "53 DTE", expired: false,
                              ct: 5, basis: 3100, current: 1500, mark: 3.00, moneyness: "OTM", delta: 0.18, theta: -0.08, deltaEst: -90)]),
                 NvGroup(label: "Puts bought", glyph: "▽", strikes: [
-                    NvStrike(side: "long", kind: "put", strike: 200, expiry: "Jan 16 '27", dte: "172 DTE", expired: false,
-                             ct: 10, basis: 120000, current: 98000, mark: 9.80, moneyness: "ITM", delta: -0.42, theta: -0.03, deltaEst: -420),
-                    NvStrike(side: "long", kind: "put", strike: 180, expiry: "Jan 16 '27", dte: "172 DTE", expired: false,
-                             ct: 40, basis: 421989, current: 360000, mark: 9.00, moneyness: "OTM", delta: -0.30, theta: -0.02, deltaEst: -1200)]),
+                    NvStrike(side: "long", kind: "put", strike: 190, expiry: "Sep 18 '26", dte: "51 DTE", expired: false,
+                             ct: 5, basis: 5384, current: 4690, mark: 9.38, moneyness: "OTM", delta: -0.28, theta: -0.03, deltaEst: -140),
+                    NvStrike(side: "long", kind: "put", strike: 200, expiry: "Jan 15 '27", dte: "170 DTE", expired: false,
+                             ct: 10, basis: 20250, current: 22680, mark: 22.68, moneyness: "ITM", delta: -0.42, theta: -0.03, deltaEst: -420),
+                    NvStrike(side: "long", kind: "put", strike: 300, expiry: "Jan 15 '27", dte: "170 DTE", expired: false,
+                             ct: 3, basis: 26130, current: 30924, mark: 103.08, moneyness: "ITM", delta: -0.88, theta: -0.02, deltaEst: -264),
+                    NvStrike(side: "long", kind: "put", strike: 400, expiry: "Dec 15 '28", dte: "870 DTE", expired: false,
+                             ct: 31, basis: 608700, current: 629300, mark: 203.00, moneyness: "ITM", delta: -0.95, theta: -0.01, deltaEst: -2945)]),
             ],
             fresh: .live, freshText: "Updated now · streaming")
         s.insights = NvInsights(
