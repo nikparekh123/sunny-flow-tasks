@@ -148,27 +148,29 @@ struct NvdaPerformanceScreen: View {
     }
 
     private func sleeveCard(_ s: NvPerfSleeve) -> some View {
-        let sold = s.name.contains("sold")
         // This section is REALIZED performance — the headline is realized only.
         // Open mark gains (e.g. unclosed long puts) are shown separately as
         // "Open · unrealised" so they never read as booked profit.
         let realizedZero = abs(s.realized) < 1
+        let isShares = s.name == "Shares"
+        let unit = isShares ? "sh" : "ct"
+        let qtyLabel = isShares ? "Quantity" : "Contracts"
         return InkCard(relevance: s.empty ? .r3 : .r1, compact: true) {
             InkBody(compact: true) {
                 InkEyebrow(cat: s.name, glyph: s.glyph) {
-                    InkBand(skin: s.empty ? .low : .mod, text: s.empty ? "None open" : "\(s.total) ct")
+                    InkBand(skin: s.empty ? .low : .mod, text: s.empty ? (isShares ? "None held" : "None open") : "\(s.total) \(unit)")
                 }
                 if s.empty {
-                    NvCompactHero(value: "—", unit: "nothing written", size: 34, color: Ink.dim)
+                    NvCompactHero(value: "—", unit: isShares ? "no shares held" : "nothing written", size: 34, color: Ink.dim)
                     InkBullets(items: ["No \(s.name.lowercased()) on the book"])
                     InkSpacer()
                 } else {
                     NvCompactHero(value: realizedZero ? "$0" : nv2Money(s.realized),
                                   unit: realizedZero ? "nothing realised yet" : "realised · booked",
                                   size: 34, color: realizedZero ? Ink.dim : Ink.signed(s.realized >= 0))
-                    InkBullets(items: ["\(s.basisLabel) \(inkUsd(s.basis)) across \(s.total) ct"])
+                    InkBullets(items: ["\(s.basisLabel) \(inkUsd(s.basis)) across \(s.total) \(unit)"])
                     InkSpacer()
-                    InkBand3(items: [(s.basisLabel, inkUsd(s.basis)), ("Contracts", "\(s.total)")])
+                    InkBand3(items: [(s.basisLabel, inkUsd(s.basis)), (qtyLabel, "\(s.total)")])
                 }
             }
             InkFoot(compact: true) {

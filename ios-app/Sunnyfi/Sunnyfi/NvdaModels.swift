@@ -501,7 +501,11 @@ enum NvDerive {
         let cbCt = netOpenCt("call", "long"), cbPaid = openPrem("call", "long")
         let psCt = netOpenCt("put", "short")
         let pbCt = netOpenCt("put", "long"), pbPaid = openPrem("put", "long")
+        let sharesPaidPerf = shares * avgBuy
+        let sharesUnrealPerf = (spot - avgBuy) * shares
         let sleeves: [NvPerfSleeve] = [
+            .init(name: "Shares", glyph: "○", total: Int(shares.rounded()), basisLabel: "Paid", basis: sharesPaidPerf,
+                  realized: realizedShares, unrealized: sharesUnrealPerf, empty: shares == 0),
             .init(name: "Calls sold", glyph: "▲", total: csCt, basisLabel: "Collected", basis: csColl,
                   realized: realizedClosedCalls, unrealized: openShortPrem - sleeveMTM("call", "short"), empty: csCt == 0 && csColl == 0),
             .init(name: "Calls bought", glyph: "△", total: cbCt, basisLabel: "Paid", basis: cbPaid,

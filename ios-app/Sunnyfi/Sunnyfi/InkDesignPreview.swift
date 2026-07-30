@@ -54,6 +54,7 @@ enum InkPreviewData {
                       shares: 5601, avgBuy: 208.39, spot: 197.5)
         s.perf = NvPerf(realized: 21492, lifetime: 21492, perShare: 2.12, perSharePct: 1.0,
                         costBasis: 209.18, breakEven: 207.06, cushion: -12.49, cushionPct: -6.0, sleeves: [
+            NvPerfSleeve(name: "Shares", glyph: "○", total: 5001, basisLabel: "Paid", basis: 1046116, realized: 10037, unrealized: -77380, empty: false),
             NvPerfSleeve(name: "Calls sold", glyph: "▲", total: 47, basisLabel: "Collected", basis: 8310, realized: 3067, unrealized: 1200, empty: false),
             NvPerfSleeve(name: "Calls bought", glyph: "△", total: 5, basisLabel: "Paid", basis: 35600, realized: 1480, unrealized: 1400, empty: false),
             NvPerfSleeve(name: "Puts bought", glyph: "▽", total: 50, basisLabel: "Paid", basis: 541989, realized: -3210, unrealized: 20000, empty: false),
