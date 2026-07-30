@@ -153,19 +153,33 @@ async function backfill(admin: ReturnType<typeof createClient>, key: string, fro
     const asOf = new Date(bar.date + 'T16:00:00Z');
     try {
       const cands = await contractsAsOf('NVDA', bar.close, bar.date, key);
-      const picked = pickAtm(cands, bar.close, asOf);
-      if (!picked) { out.push({ date: bar.date, iv: null, note: 'no contract' }); continue; }
-      // The ATM strike may not trade every day (esp. older cycles), so pull a
-      // short window ending on D and take the nearest available close.
+      // Rank ALL in-window ATM calls; a single strike is often illiquid, so we
+      // walk candidates closest-to-ATM first and use the first that actually
+      // traded (has a daily bar) near D. NVDA is liquid enough that one of the
+      // top few always has a close.
+      const ranked = cands
+        .filter((c) => c.contract_type === 'call')
+        .map((c) => {
+          const dte = Math.round((new Date(c.expiration_date + 'T16:00:00Z').getTime() - asOf.getTime()) / 86400000);
+          const sd = Math.abs(c.strike_price - bar.close) / bar.close;
+          return { c, dte, sd, score: Math.abs(dte - TARGET_DTE) * 2 + sd * 100 };
+        })
+        .filter((x) => x.dte >= DTE_LO && x.dte <= DTE_HI && x.sd <= STRIKE_PCT)
+        .sort((a, b) => a.score - b.score);
+      if (ranked.length === 0) { out.push({ date: bar.date, iv: null, note: 'no contract' }); continue; }
+
       const from6 = ymd(addDays(asOf, -6));
-      const oc = await fetch(`${POLY}/v2/aggs/ticker/${picked.ticker}/range/1/day/${from6}/${bar.date}?adjusted=true&sort=desc&limit=6&apiKey=${key}`);
-      const optBars = oc.ok ? (((await oc.json())?.results ?? []) as { t: number; c: number }[]) : [];
-      if (optBars.length === 0) { out.push({ date: bar.date, iv: null, note: 'no opt close' }); continue; }
-      const optClose = optBars[0].c;                       // most recent ≤ D
-      const optDate = new Date(optBars[0].t);              // its date, for T
-      const T = (new Date(picked.expiration_date + 'T16:00:00Z').getTime() - optDate.getTime()) / (365 * 86400000);
-      const iv = impliedVol(optClose, bar.close, picked.strike_price, T);
-      if (iv == null) { out.push({ date: bar.date, iv: null, note: 'iv unsolved' }); continue; }
+      let iv: number | null = null;
+      for (const { c } of ranked.slice(0, 8)) {
+        const oc = await fetch(`${POLY}/v2/aggs/ticker/${c.ticker}/range/1/day/${from6}/${bar.date}?adjusted=true&sort=desc&limit=6&apiKey=${key}`);
+        const ob = oc.ok ? (((await oc.json())?.results ?? []) as { t: number; c: number }[]) : [];
+        if (ob.length === 0) continue;
+        const optDate = new Date(ob[0].t);
+        const T = (new Date(c.expiration_date + 'T16:00:00Z').getTime() - optDate.getTime()) / (365 * 86400000);
+        const solved = impliedVol(ob[0].c, bar.close, c.strike_price, T);
+        if (solved != null) { iv = solved; break; }
+      }
+      if (iv == null) { out.push({ date: bar.date, iv: null, note: 'no liquid close' }); continue; }
       await upsertIv(admin, bar.date, iv, 'backfill');
       out.push({ date: bar.date, iv: Math.round(iv * 10000) / 10000 });
     } catch (e) {
