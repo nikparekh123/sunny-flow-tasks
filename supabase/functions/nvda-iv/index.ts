@@ -152,14 +152,18 @@ async function backfill(admin: ReturnType<typeof createClient>, key: string, fro
     processed++;
     const asOf = new Date(bar.date + 'T16:00:00Z');
     try {
-      const cands = await contractsAsOf('NVDA', bar.close, bar.date, key, true);
+      const cands = await contractsAsOf('NVDA', bar.close, bar.date, key);
       const picked = pickAtm(cands, bar.close, asOf);
       if (!picked) { out.push({ date: bar.date, iv: null, note: 'no contract' }); continue; }
-      // that contract's close on day D
-      const oc = await fetch(`${POLY}/v2/aggs/ticker/${picked.ticker}/range/1/day/${bar.date}/${bar.date}?adjusted=true&apiKey=${key}`);
-      const optClose = oc.ok ? ((await oc.json())?.results?.[0]?.c ?? null) : null;
-      if (optClose == null) { out.push({ date: bar.date, iv: null, note: 'no opt close' }); continue; }
-      const T = (new Date(picked.expiration_date + 'T16:00:00Z').getTime() - asOf.getTime()) / (365 * 86400000);
+      // The ATM strike may not trade every day (esp. older cycles), so pull a
+      // short window ending on D and take the nearest available close.
+      const from6 = ymd(addDays(asOf, -6));
+      const oc = await fetch(`${POLY}/v2/aggs/ticker/${picked.ticker}/range/1/day/${from6}/${bar.date}?adjusted=true&sort=desc&limit=6&apiKey=${key}`);
+      const optBars = oc.ok ? (((await oc.json())?.results ?? []) as { t: number; c: number }[]) : [];
+      if (optBars.length === 0) { out.push({ date: bar.date, iv: null, note: 'no opt close' }); continue; }
+      const optClose = optBars[0].c;                       // most recent ≤ D
+      const optDate = new Date(optBars[0].t);              // its date, for T
+      const T = (new Date(picked.expiration_date + 'T16:00:00Z').getTime() - optDate.getTime()) / (365 * 86400000);
       const iv = impliedVol(optClose, bar.close, picked.strike_price, T);
       if (iv == null) { out.push({ date: bar.date, iv: null, note: 'iv unsolved' }); continue; }
       await upsertIv(admin, bar.date, iv, 'backfill');
