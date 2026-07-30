@@ -79,19 +79,31 @@ function pickAtm(cands: Contract[], spot: number, asOf: Date): Contract | null {
   return best;
 }
 
-async function contractsAsOf(tk: string, spot: number, asOf: string, key: string, expired: boolean): Promise<Contract[]> {
+async function fetchContracts(tk: string, spot: number, asOf: string, key: string, expired: boolean): Promise<Contract[]> {
   const lo = (spot * (1 - STRIKE_PCT)).toFixed(2), hi = (spot * (1 + STRIKE_PCT)).toFixed(2);
   const expFrom = ymd(addDays(new Date(asOf + 'T00:00:00Z'), DTE_LO));
   const expTo = ymd(addDays(new Date(asOf + 'T00:00:00Z'), DTE_HI));
-  // `expired=true` for historical as-of days (those contracts have since
-  // expired); `false` for today's live ATM contract (still active).
+  // No `as_of`: the expiration window + strike window already pinpoint the
+  // ATM-30d contract for day D. We DON'T know if that contract is expired yet
+  // (recent days' 30-DTE contracts are still active), so the caller queries
+  // BOTH expired and active and merges.
   const url = `${POLY}/v3/reference/options/contracts?underlying_ticker=${tk}`
-    + `&as_of=${asOf}&contract_type=call&expired=${expired}`
+    + `&contract_type=call&expired=${expired}`
     + `&expiration_date.gte=${expFrom}&expiration_date.lte=${expTo}`
     + `&strike_price.gte=${lo}&strike_price.lte=${hi}&limit=250&apiKey=${key}`;
   const r = await fetch(url);
   if (!r.ok) return [];
   return ((await r.json())?.results ?? []) as Contract[];
+}
+/** Candidate ATM-30d calls for `asOf`, robust to whether they've expired yet. */
+async function contractsAsOf(tk: string, spot: number, asOf: string, key: string): Promise<Contract[]> {
+  const [exp, act] = await Promise.all([
+    fetchContracts(tk, spot, asOf, key, true),
+    fetchContracts(tk, spot, asOf, key, false),
+  ]);
+  const seen = new Set<string>(); const out: Contract[] = [];
+  for (const c of [...act, ...exp]) if (!seen.has(c.ticker)) { seen.add(c.ticker); out.push(c); }
+  return out;
 }
 
 /** Upsert one NVDA IV row. iv stored as a decimal (0.48 = 48%). `date` is the PK. */
