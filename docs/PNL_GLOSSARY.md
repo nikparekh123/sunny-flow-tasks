@@ -64,6 +64,14 @@ COST_TOTAL      = COST_REALIZED + COST_UNREALIZED
 
 - **Exercised = REALIZED** (position closed).
 - **Expired options = REALIZED** (transaction complete).
+- **Assigned short call → premium is NOT re-realized on the option.** When a short
+  call is assigned, the shares are sold *at the strike* and that stock sale carries
+  the realized P&L (IBKR's convention — matches its `fifoPnlRealized`). Counting the
+  assigned call's premium *again* on the option side double-books it. So REALIZED
+  and PREMIUM_REALIZED **exclude** the premium of assigned-away calls. (Detection:
+  a ≈$0 short-call close with a same-day share sell at the strike — an *expiry*,
+  which keeps its premium, has no such share sale.) Established 2026-07-30 during
+  the IBKR reconciliation; see [[project_realized_pnl_reconcile]].
 - **Open = UNREALIZED** (nothing else). Nothing open is ever in REALIZED.
 - **Options SOLD = PREMIUM** (calls sold + puts sold).
 - **Options BOUGHT = COST** (calls bought + puts bought).

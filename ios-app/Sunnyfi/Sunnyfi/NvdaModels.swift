@@ -504,16 +504,31 @@ enum NvDerive {
         let shares = openLots.reduce(0) { $0 + $1.qty_remaining }
         let avgBuy = shares > 0 ? openLots.reduce(0) { $0 + $1.qty_remaining * $1.cost_per_share } / shares : 0
         let markByTrade = Dictionary(marks.map { ($0.option_trade_id, $0) }, uniquingKeysWith: { a, _ in a })
-        let realizedStock = sells.filter { $0.voided_at == nil }.reduce(0.0) { $0 + ($1.realized_pl ?? 0) }
+        let openSells = sells.filter { $0.voided_at == nil }
+        let realizedStock = openSells.reduce(0.0) { $0 + ($1.realized_pl ?? 0) }
+        // Assignment signature — a short call assigned sells shares AT the strike
+        // on the trade date. Matching (date, strike) lets us tell an ASSIGNMENT
+        // (premium is NOT re-realized on the option; it's already captured in the
+        // stock sale at strike — IBKR's convention, see PNL_GLOSSARY) apart from an
+        // EXPIRY (premium kept) or a normal buyback (premium > 0).
+        let assignSig = Set(openSells.map { "\($0.trade_date)|\(Int($0.price.rounded()))" })
 
         struct Key: Hashable { let kind, dir: String; let strike: Double; let expiry: String }
-        struct Agg { var openCt = 0.0, closeCt = 0.0, openPrem = 0.0, closePrem = 0.0; var markId: String? }
+        struct Agg { var openCt = 0.0, closeCt = 0.0, openPrem = 0.0, closePrem = 0.0, assignedCt = 0.0; var markId: String? }
         var byKey: [Key: Agg] = [:]
         for t in live {
             let k = Key(kind: t.option_type, dir: t.direction, strike: t.strike, expiry: t.expiry)
             var a = byKey[k] ?? Agg()
             if t.action == "open" { a.openCt += t.contracts; a.openPrem += t.premium * t.contracts * 100; if a.markId == nil { a.markId = t.id } }
-            else { a.closeCt += t.contracts; a.closePrem += t.premium * t.contracts * 100 }
+            else {
+                a.closeCt += t.contracts; a.closePrem += t.premium * t.contracts * 100
+                // Assigned short call (premium ≈ 0 close + a same-day share sell at
+                // the strike): its collected premium stays OUT of realized P&L.
+                if t.direction == "short", t.option_type == "call", t.premium < 0.01,
+                   assignSig.contains("\(t.trade_date)|\(Int(t.strike.rounded()))") {
+                    a.assignedCt += t.contracts
+                }
+            }
             byKey[k] = a
         }
 
@@ -525,7 +540,9 @@ enum NvDerive {
             let expired = isExpired(k.expiry, now: now)
             let mark = a.markId.flatMap { markByTrade[$0]?.mark } ?? 0
             if k.dir == "short" {
-                premiumRealized += (a.closeCt * avg - a.closePrem) + (expired ? netCt * avg : 0)
+                // Assigned contracts' premium is excluded (− assignedCt·avg): it is
+                // captured in the stock sale at strike, not double-booked here.
+                premiumRealized += (a.closeCt * avg - a.closePrem) - a.assignedCt * avg + (expired ? netCt * avg : 0)
                 if !expired { premiumUnrealized += netCt * avg; openShortValue += mark * netCt * 100 }
             } else {
                 longRealized += (a.closePrem - a.closeCt * avg) + (expired ? -netCt * avg : 0)
