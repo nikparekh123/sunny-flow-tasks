@@ -139,14 +139,23 @@ private struct InkArc: Shape {
 /// Semicircular gauge — the value arc grows from the left over `InkMotion.countUp`.
 /// `previous` draws a thinner, dimmer inner arc showing the prior close.
 struct InkGauge: View {
-    var value: Double          // 0…100
+    var value: Double          // within `range`
     var suffix: String = ""
     var previous: Double? = nil
+    // Ranged / decimal / hued variant (seller score, etc). Defaults keep the
+    // original 0…100 integer-percent gauge unchanged. `building` (or a value
+    // below the range floor) renders a dim "—".
+    var range: ClosedRange<Double> = 0...100
+    var decimals: Int = 0
+    var tint: Color = Ink.text
     @State private var t: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
-        let building = value < 0
-        let v = building ? 0 : value * (reduce ? 1 : t)
+        let lo = range.lowerBound, hi = range.upperBound
+        let building = value < lo
+        let v = building ? lo : lo + (value - lo) * (reduce ? 1 : t)
+        let frac = max(0.0001, min(1, (v - lo) / (hi - lo)))
+        let center = decimals > 0 ? String(format: "%.\(decimals)f", v) : "\(Int(v.rounded()))\(suffix)"
         ZStack(alignment: .bottom) {
             InkArc(frac: 1).stroke(Ink.hair, style: .init(lineWidth: 9, lineCap: .round))
             if let prev = previous, prev >= 0 {
@@ -155,9 +164,9 @@ struct InkGauge: View {
                     .stroke(Ink.text.opacity(0.42), style: .init(lineWidth: 4, lineCap: .round))
             }
             if !building {
-                InkArc(frac: max(0.0001, v / 100)).stroke(Ink.text, style: .init(lineWidth: 9, lineCap: .round))
+                InkArc(frac: frac).stroke(tint, style: .init(lineWidth: 9, lineCap: .round))
             }
-            Text(building ? "—" : "\(Int(v.rounded()))\(suffix)")
+            Text(building ? "—" : center)
                 .font(InkFont.mono(34, .light)).tracking(34 * -0.03)
                 .foregroundStyle(building ? Ink.dim : Ink.text)
                 .padding(.bottom, 2)

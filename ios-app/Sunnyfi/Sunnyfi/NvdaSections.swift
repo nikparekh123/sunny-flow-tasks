@@ -209,46 +209,50 @@ struct NvdaInsightsScreen: View {
         }
     }
 
-    // 01 · Volatility — hero is the Seller-Score gauge (sell zone ≥ 70)
+    // 01 · Volatility — hero is the SELLER SCORE gauge (IV/HV30 × IV-percentile factor)
+    private func zoneTint(_ v: NvVol) -> Color {
+        if v.building { return Ink.dim }
+        switch NvSellZone.tintName(v.score) {
+        case "gain": return Ink.gain; case "delayed": return Ink.delayed; case "loss": return Ink.loss; default: return Ink.dim
+        }
+    }
     private func volatilityCard(_ v: NvVol) -> some View {
-        InkCard(compact: true, height: 452) {
+        let tint = zoneTint(v)
+        return InkCard(compact: true, height: 452) {
             InkBody(compact: true) {
                 InkEyebrow(n: "01", cat: "Volatility") {
-                    InkBand(skin: .mod, text: v.verdict)
+                    InkBand(skin: v.building ? .low : .hue(tint), text: v.building ? "Building" : v.verdict)
                 }
-                InkGauge(value: v.building ? -1 : (v.iv ?? 0), suffix: "%", previous: v.ivPrev)
+                InkGauge(value: v.building ? 0 : v.score, range: 0.80...1.30, decimals: 2, tint: tint)
                     .frame(maxWidth: .infinity).padding(.top, 14)
-                gaugeCaption(v.ivPrev != nil ? "Implied vol · faint arc = last close" : "Implied volatility · annualised")
+                gaugeCaption(v.building ? "Seller score · IV feed pending" : "Seller score · \(v.verdict) · sell")
+                InkBand3(items: [
+                    ("IV", pctStr(v.iv)),
+                    ("HV30", pctStr(v.hv30)),
+                    ("IV %ile", v.ivr.map { "\(Int($0.rounded()))" } ?? "—"),
+                ])
                 InkBullets(items: v.building
                     ? ["Implied vol streams from the option chain — not live yet",
                        "Realised \(pctStr(v.hv30)) over the last month"]
                     : ["Implied \(pctStr(v.iv)) vs realised \(pctStr(v.hv30))",
-                       "Options are \(v.verdict) versus how NVDA has moved"])
+                       v.ivr != nil
+                          ? "IV in the \(Int((v.ivr ?? 0).rounded()))th %ile → ×\(nv2Dec(v.factor ?? 1, 1)) factor"
+                          : "Percentile builds as IV history accrues"])
                 InkSpacer()
             }
-            InkFoot(compact: true, height: 132) {
-                if let iv = v.iv, let prev = v.ivPrev {
-                    // user: show what IV was + how much it changed
-                    let chg = iv - prev
-                    footLabel("IV vs last close")
-                    InkDelta(value: "\(nv2Dec(abs(chg), 1)) pts", good: chg >= 0, size: 24, weight: .light)
-                    footNote("\(pctStr(prev)) → \(pctStr(iv)) · options \(chg >= 0 ? "richer" : "cheaper") than yesterday")
-                } else {
-                    footLabel("Implied − realised")
-                    Group {
-                        if let s = v.spread {
-                            InkDelta(value: "\(nv2Dec(abs(s), 1)) pts", good: s >= 0, size: 24, weight: .light)
-                        } else {
-                            Text("—").font(InkFont.mono(24, .light)).foregroundStyle(Ink.dim)
-                        }
-                    }
-                    footNote(v.spread.map { $0 >= 0
-                        ? "Seller edge is positive — you are paid more than the stock has moved."
-                        : "Seller edge is negative — you are paid less than the stock has been moving." }
-                        ?? "Edge settles once implied vol is streaming.")
-                }
+            InkFoot(compact: true) {
+                footLabel("Now · sell timing")
+                Text(v.building ? "—" : v.verdict.capitalized)
+                    .font(InkFont.mono(24, .light)).tracking(24 * -0.02).foregroundStyle(tint)
+                    .lineLimit(1).fixedSize()
+                footNote(v.building
+                    ? "Score turns on once implied vol is streaming from the chain."
+                    : (v.spread.map { "IV \(nv2Dec(abs($0), 0)) pts \($0 >= 0 ? "over" : "under") realised · " } ?? "")
+                        + (v.score >= 1.0
+                            ? "options rich, favourable to sell calls."
+                            : "options cheap — reduce or skip this cycle."))
             }
-            InkStamp(state: .delayed, text: v.building ? "Building · IV feed pending" : "Updated · next at close", compact: true)
+            InkStamp(state: .delayed, text: v.building ? "Building · IV feed pending" : "Updated · every 30 min", compact: true)
         }
     }
 

@@ -43,7 +43,7 @@ enum InkPreviewData {
             protection: NvProtection(putContracts: 50, shares: 5001, covered: 3200, coveredPct: 64,
                                      floorLow: 200, floorHigh: 400, uncovered: 1801,
                                      cushion: 12.40, cushionPct: 6.4, empty: false),
-            vol: NvVol(score: 63, verdict: "caution", iv: 48, ivPrev: 42, hv30: 42, ivr: 58,
+            vol: NvVol(score: 1.09, verdict: "favorable", iv: 48, ivPrev: 42, hv30: 42, ivr: 58, factor: 1.0,
                        iv52Low: 34, iv52High: 71, spread: 6, building: false),
             fresh: .delayed)
 

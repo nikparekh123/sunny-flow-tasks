@@ -168,16 +168,28 @@ struct NvProtection: Sendable {
     let empty: Bool
 }
 struct NvVol: Sendable {
-    let score: Double              // seller score 0…100 (the gauge); sell zone ≥ 70
-    let verdict: String            // sell | caution | hold | building
-    let iv: Double?                // implied vol, % (nil until the IV feed lands)
-    let ivPrev: Double?           // previous close IV, % (the second gauge arc)
-    let hv30: Double?             // realized vol, %
-    let ivr: Double?              // IV rank 0…100
+    let score: Double              // SELLER SCORE = (IV / HV30) × IV-percentile factor (the gauge). ~0.8–1.3
+    let verdict: String            // zone: rich | favorable | neutral | cheap | very cheap | building
+    let iv: Double?                // ATM implied vol, % (nil until the IV feed lands)
+    let ivPrev: Double?           // previous close IV, %
+    let hv30: Double?             // realized (historical) vol, % — StdDev(log rets, 30d) × √252
+    let ivr: Double?              // IV percentile 0…100 (rank vs the stock's own 1-yr IV history)
+    let factor: Double?           // IV-percentile factor: >70 → 1.2, 30–70 → 1.0, <30 → 0.8
     let iv52Low: Double?
     let iv52High: Double?
     let spread: Double?           // implied − realized, in vol points
     let building: Bool             // true when the IV feed hasn't populated yet
+}
+
+/// Seller-score zone from the score value (docs: > 1.20 rich … < 0.80 very cheap).
+enum NvSellZone {
+    static func label(_ s: Double) -> String {
+        s > 1.20 ? "rich" : s >= 1.00 ? "favorable" : s >= 0.90 ? "neutral" : s >= 0.80 ? "cheap" : "very cheap"
+    }
+    /// Law-1 hue: opportunity (sell) = flood/gain blue; cheap/skip = severe→fire.
+    static func tintName(_ s: Double) -> String {
+        s >= 1.00 ? "gain" : s >= 0.90 ? "dim" : s >= 0.80 ? "delayed" : "loss"
+    }
 }
 struct NvInsights: Sendable {
     let protection: NvProtection
@@ -582,21 +594,38 @@ enum NvDerive {
         let nvCloses = closes.filter { $0.ticker == "NVDA" }
             .compactMap { c in c.close_price.map { (c.date, $0) } }
             .sorted { $0.0 < $1.0 }.map { $0.1 }
+        // ── SELLER SCORE = (IV / HV30) × IV-percentile factor ──
+        // HV30: StdDev(daily log returns, ~30 sessions) × √252 (realizedVol).
         let hv = realizedVol(nvCloses).map { $0 * 100 }
-        let ivs = live.compactMap { markByTrade[$0.id]?.iv }.filter { $0 > 0 }.sorted()
-        let iv: Double? = ivs.isEmpty ? nil : ivs[ivs.count / 2] * 100
+        // Current ATM IV: prefer today's daily snapshot (the backend writes ATM
+        // call+put avg IV, refreshed every 30 min); else fall back to the median
+        // IV of the open legs so the card still reads before the feed lands.
+        let today = Self.isoDay(now)
+        let ivHist = ivDaily.compactMap { $0.iv }.filter { $0 > 0 }.map { $0 * 100 }
+        let todaySnapIV = ivDaily.first(where: { $0.date == today })?.iv.map { $0 * 100 }
+        let legIVs = live.compactMap { markByTrade[$0.id]?.iv }.filter { $0 > 0 }.sorted()
+        let legMedianIV = legIVs.isEmpty ? nil : legIVs[legIVs.count / 2] * 100
+        let iv: Double? = todaySnapIV ?? legMedianIV
         let spread: Double? = (iv != nil && hv != nil) ? iv! - hv! : nil
-        let building = iv == nil                     // no live implied vol yet
-        let verdict = building ? "building"
-            : ((spread ?? 0) > 2 ? "rich" : (spread ?? 0) < -2 ? "cheap" : "fair")
-        // previous close IV — from the daily IV snapshot; nil until that feed
-        // accumulates (see the nvda_iv_daily SQL). Then it draws the 2nd gauge arc.
+        // IV percentile — rank of current IV in the stock's own history. Needs a
+        // meaningful window (≥ ~1 month); until the 1-yr backfill lands the factor
+        // stays neutral (1.0) and the percentile reads "—".
+        let ivPercentile: Double? = {
+            guard let cur = iv, ivHist.count >= 20 else { return nil }
+            let below = ivHist.filter { $0 < cur }.count
+            return Double(below) / Double(ivHist.count) * 100
+        }()
+        let factor: Double = ivPercentile.map { $0 > 70 ? 1.2 : ($0 < 30 ? 0.8 : 1.0) } ?? 1.0
+        let ratio: Double? = (iv != nil && (hv ?? 0) > 0) ? iv! / hv! : nil
+        let sellerScore: Double? = ratio.map { $0 * factor }
+        let building = iv == nil || hv == nil
+        let verdict = building ? "building" : NvSellZone.label(sellerScore ?? 0)
         let ivPrev: Double? = ivDaily
-            .filter { $0.date < Self.isoDay(now) }
+            .filter { $0.date < today }
             .max(by: { $0.date < $1.date })
             .flatMap { d in d.iv.map { $0 * 100 } }
-        // Gauge shows implied vol directly (user: use IV, not a seller score).
-        let vol = NvVol(score: iv ?? 0, verdict: verdict, iv: iv, ivPrev: ivPrev, hv30: hv, ivr: nil,
+        let vol = NvVol(score: sellerScore ?? 0, verdict: verdict, iv: iv, ivPrev: ivPrev, hv30: hv,
+                        ivr: ivPercentile, factor: ivPercentile != nil ? factor : nil,
                         iv52Low: nil, iv52High: nil, spread: spread, building: building)
 
         return NvInsights(protection: protection, vol: vol, fresh: freshness(quote?.captured_at, now: now).0)
