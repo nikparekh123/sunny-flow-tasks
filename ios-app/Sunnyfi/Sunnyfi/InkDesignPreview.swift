@@ -45,6 +45,11 @@ enum InkPreviewData {
                                      cushion: 12.40, cushionPct: 6.4, empty: false),
             vol: NvVol(score: 1.09, verdict: "favorable", iv: 48, ivPrev: 42, hv30: 42, ivr: 58, factor: 1.0,
                        iv52Low: 34, iv52High: 71, spread: 6, building: false),
+            vega: NvVega(iv: 43, avg30: 46, lo: 28, hi: 74, net: 3934, stance: "long vega", daysToEarnings: 12, legs: [
+                NvVegaLeg(name: "Calls sold", kind: "call", side: "short", ct: 15, v: -420),
+                NvVegaLeg(name: "Calls bought", kind: "call", side: "long", ct: 5, v: 260),
+                NvVegaLeg(name: "Puts bought", kind: "put", side: "long", ct: 50, v: 4094),
+            ]),
             fresh: .delayed)
 
         s.pnl = NvPnL(realized: 23467, realizedStock: -1526, premiumRealized: 24993, longRealized: 0, dividends: 0,

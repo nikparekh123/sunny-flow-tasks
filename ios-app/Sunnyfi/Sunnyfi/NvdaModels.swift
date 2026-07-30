@@ -191,9 +191,31 @@ enum NvSellZone {
         s >= 1.00 ? "gain" : s >= 0.90 ? "dim" : s >= 0.80 ? "delayed" : "loss"
     }
 }
+struct NvVegaLeg: Identifiable, Sendable {
+    let name: String              // Calls sold | Puts bought | …
+    let kind: String              // call | put
+    let side: String              // long | short
+    let ct: Int
+    let v: Double                 // signed $ per IV point for this sleeve
+    var id: String { name }
+}
+
+struct NvVega: Sendable {
+    let iv: Double                // current ATM IV, %
+    let avg30: Double             // 30-day average IV, %
+    let lo: Double                // scrubber floor, %
+    let hi: Double                // scrubber ceiling, %
+    let net: Double               // total signed $ per IV point
+    let stance: String            // long vega | short vega | vega-flat
+    let daysToEarnings: Int?      // next NVDA earnings, nil if unknown
+    let legs: [NvVegaLeg]
+    var empty: Bool { legs.isEmpty }
+}
+
 struct NvInsights: Sendable {
     let protection: NvProtection
     let vol: NvVol
+    let vega: NvVega?
     let fresh: NvFresh
 }
 
@@ -693,7 +715,42 @@ enum NvDerive {
                         ivr: ivPercentile, factor: ivPercentile != nil ? factor : nil,
                         iv52Low: nil, iv52High: nil, spread: spread, building: building)
 
-        return NvInsights(protection: protection, vol: vol, fresh: freshness(quote?.captured_at, now: now).0)
+        // ── vega: signed $ per IV point, aggregated by sleeve; the card lets you
+        //    scrub IV and reads each leg's linear impact (vega × points). ──
+        struct VKey: Hashable { let side, kind: String; let strike: Double; let expiry: String }
+        var vnet: [VKey: Double] = [:]; var vAnyId: [VKey: String] = [:]
+        for t in live {
+            let k = VKey(side: t.direction, kind: t.option_type, strike: t.strike, expiry: t.expiry)
+            vnet[k, default: 0] += (t.action == "open" ? 1 : -1) * t.contracts
+            if t.action == "open", vAnyId[k] == nil { vAnyId[k] = t.id }
+        }
+        let vegaNames: [(kind: String, side: String, name: String)] = [
+            ("call", "short", "Calls sold"), ("call", "long", "Calls bought"),
+            ("put", "short", "Puts sold"), ("put", "long", "Puts bought"),
+        ]
+        var vLegs: [NvVegaLeg] = []; var vTotal = 0.0
+        for m in vegaNames {
+            var lct = 0.0, lv = 0.0
+            for (k, c) in vnet where c > 0.0001 && k.kind == m.kind && k.side == m.side && !isExpired(k.expiry, now: now) {
+                let vg = vAnyId[k].flatMap { markByTrade[$0]?.vega } ?? 0
+                lct += c
+                lv += vg * 100 * c * (m.side == "long" ? 1 : -1)   // $ per 1 IV point, signed
+            }
+            if lct > 0.0001 { vLegs.append(NvVegaLeg(name: m.name, kind: m.kind, side: m.side, ct: Int(lct.rounded()), v: lv)); vTotal += lv }
+        }
+        let vega: NvVega? = {
+            guard !vLegs.isEmpty, let ivNow = iv else { return nil }
+            let last30 = Array(ivHist.suffix(30))
+            let avg30 = last30.isEmpty ? ivNow : last30.reduce(0, +) / Double(last30.count)
+            let allIV = ivHist + [ivNow, avg30]
+            let lo = max(1, ((allIV.min() ?? ivNow - 10) - 3).rounded(.down))
+            let hi = ((allIV.max() ?? ivNow + 10) + 3).rounded(.up)
+            let stance = abs(vTotal) < 1 ? "vega-flat" : (vTotal >= 0 ? "long vega" : "short vega")
+            return NvVega(iv: ivNow, avg30: avg30, lo: lo, hi: hi, net: vTotal, stance: stance,
+                          daysToEarnings: nil, legs: vLegs)
+        }()
+
+        return NvInsights(protection: protection, vol: vol, vega: vega, fresh: freshness(quote?.captured_at, now: now).0)
     }
 
     // MARK: - Section 4 · peers & ETFs (5-session tape)

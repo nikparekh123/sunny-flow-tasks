@@ -124,10 +124,8 @@ struct NvdaPerformanceScreen: View {
                 .padding(.top, 22)
                 InkBullets(items: g.map { g in [
                     "Premium \(inkUsd(g.premiumTotal)) · \(inkUsd(g.premiumRealized)) realised, \(inkUsd(g.premiumUnrealized)) open",
-                    "Hedge cost \(inkUsd(g.costTotal)) paid for downside",
                 ] } ?? [
                     "$\(nv2Dec(p.perShare, 2)) a share collected, calls only",
-                    "Cost basis $\(nv2Dec(p.costBasis, 2)) → break-even $\(nv2Dec(p.breakEven, 2))",
                 ])
                 InkSpacer()
             }
@@ -169,7 +167,6 @@ struct NvdaPerformanceScreen: View {
                     NvCompactHero(value: realizedZero ? "$0" : nv2Money(s.realized),
                                   unit: realizedZero ? "nothing realised yet" : "realised · booked",
                                   size: 34, color: realizedZero ? Ink.dim : Ink.signed(s.realized >= 0))
-                    InkBullets(items: ["\(s.basisLabel) \(inkUsd(s.basis)) across \(s.total) \(unit)"])
                     InkSpacer()
                     InkBand3(items: [(s.basisLabel, inkUsd(s.basis)), (qtyLabel, "\(s.total)")])
                 }
@@ -194,12 +191,14 @@ struct NvdaInsightsScreen: View {
 
     var body: some View {
         if let ins = store.insights {
+            let hasVega = ins.vega?.empty == false
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Insights", count: "2 cards")
+                InkSectionHead(title: "Insights", count: "\(hasVega ? 3 : 2) cards")
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
                         volatilityCard(ins.vol).inkEntrance(0)
                         protectionCard(ins.protection).inkEntrance(1)
+                        if let vg = ins.vega, !vg.empty { VegaCardView(g: vg).inkEntrance(2) }
                     }
                     .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
                     .scrollTargetLayout()
@@ -294,6 +293,136 @@ struct NvdaInsightsScreen: View {
         inkFig(s).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
     }
     private func pctStr(_ v: Double?) -> String { v.map { "\(Int($0.rounded()))%" } ?? "—" }
+}
+
+// MARK: - 03 · Vega (scrubbable IV impact)
+
+private func nvVegaMoney(_ v: Double) -> String {
+    (v >= 0 ? "+$" : "−$") + Int(abs(v).rounded()).formatted(.number.grouping(.automatic))
+}
+
+private struct VegaCardView: View {
+    let g: NvVega
+    @State private var iv: Double = -1                 // set to avg30 on appear
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        let curIv = iv < 0 ? g.avg30 : iv
+        let d = curIv - g.iv
+        let total = g.net * d
+        let flat = abs(d) < 0.05
+        let maxImpact = max(g.legs.map { abs($0.v * d) }.max() ?? 1, 1)
+        return InkCard(compact: true, height: 452) {
+            InkBody(compact: true) {
+                InkEyebrow(n: "03", cat: "Vega") { InkBand(skin: .mod, text: g.stance) }
+
+                // hero: what a move does · the coefficient
+                HStack(alignment: .bottom, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(nvVegaMoney(total)).font(InkFont.mono(30, .light)).tracking(30 * -0.04)
+                            .foregroundStyle(flat ? Ink.dim : (total >= 0 ? Ink.gain : Ink.loss)).lineLimit(1)
+                        Text((flat ? "IV unchanged" : "if IV \(d > 0 ? "rises to" : "falls to") \(nv2Dec(curIv, 1))%").uppercased())
+                            .font(InkFont.mono(8.5)).tracking(8.5 * 0.14).foregroundStyle(Ink.dim).padding(.top, 9).lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(nvVegaMoney(g.net)).font(InkFont.mono(15, .light)).tracking(15 * -0.03).foregroundStyle(Ink.text)
+                        Text("PER IV POINT").font(InkFont.mono(7.5)).tracking(7.5 * 0.12).foregroundStyle(Ink.dim).padding(.top, 6).fixedSize()
+                    }
+                    .padding(.leading, 12).overlay(alignment: .leading) { Rectangle().fill(Ink.hair).frame(width: 1) }
+                }
+                .padding(.top, 16)
+
+                // per-leg impact
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("What each leg does".uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.16)
+                        .foregroundStyle(Ink.dim).padding(.bottom, 5)
+                    ForEach(g.legs) { leg in vegaLeg(leg, leg.v * d, maxImpact) }
+                }
+                .padding(.top, 13)
+                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1).padding(.top, -6) }
+                InkSpacer()
+            }
+            InkFoot(compact: true) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Implied volatility".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                    Spacer()
+                    Text("\(nv2Dec(curIv, 1))%").font(InkFont.mono(22, .light)).tracking(22 * -0.03).foregroundStyle(Ink.text)
+                }
+                scrubber(curIv)
+                inkFig("Now \(nv2Dec(g.iv, 1))% · 30-day average \(nv2Dec(g.avg30, 1))%"
+                    + (g.daysToEarnings.map { " · earnings in \($0) days." } ?? "."))
+                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+            }
+            InkStamp(state: .delayed, text: "Updated · streams with the chain", compact: true)
+        }
+        .onAppear { if iv < 0 { iv = g.avg30 } }
+    }
+
+    private func vegaLeg(_ leg: NvVegaLeg, _ impact: Double, _ maxImpact: Double) -> some View {
+        let pos = impact >= 0
+        let c: Color = abs(impact) < 1 ? Ink.dim : (pos ? Ink.gain : Ink.loss)
+        return HStack(spacing: 9) {
+            Text(glyphFor(leg.kind, leg.side)).font(.system(size: 10)).foregroundStyle(Ink.dim).frame(width: 11, alignment: .leading)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(leg.name).font(InkFont.display(12.5, .light)).foregroundStyle(Ink.text)
+                Text("\(leg.ct) ct").font(InkFont.mono(8)).tracking(8 * 0.1).foregroundStyle(Ink.dim)
+            }.frame(width: 104, alignment: .leading).lineLimit(1)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Ink.hair)
+                    Capsule().fill(c).frame(width: min(geo.size.width, CGFloat(abs(impact) / maxImpact) * geo.size.width))
+                }
+            }.frame(height: 6)
+            Text(nvVegaMoney(impact)).font(InkFont.mono(11.5)).foregroundStyle(c)
+                .frame(width: 62, alignment: .trailing).lineLimit(1)
+        }
+        .frame(height: 26)
+    }
+
+    private func glyphFor(_ kind: String, _ side: String) -> String {
+        kind == "call" ? (side == "short" ? "▲" : "△") : (side == "short" ? "▼" : "▽")
+    }
+
+    // Drag anywhere on the track; the two marks (now, 30-day avg) snap on tap.
+    private func scrubber(_ curIv: Double) -> some View {
+        let span = max(g.hi - g.lo, 0.01)
+        return GeometryReader { geo in
+            let W = geo.size.width
+            let at: (Double) -> CGFloat = { CGFloat(($0 - g.lo) / span) * W }
+            let up = curIv >= g.iv
+            let a = min(at(g.iv), at(curIv)), b = max(at(g.iv), at(curIv))
+            ZStack(alignment: .topLeading) {
+                Capsule().fill(Ink.hair).frame(width: W, height: 6).offset(y: 8)
+                Capsule().fill(up ? Ink.gain : Ink.loss).frame(width: max(0, b - a), height: 6).offset(x: a, y: 8)
+                scrubTag("now", at(g.iv), strong: true) { setIv(g.iv) }
+                scrubTag("30d avg", at(g.avg30), strong: false) { setIv(g.avg30) }
+                Circle().fill(Ink.text).frame(width: 12, height: 12)
+                    .overlay(Circle().strokeBorder(Ink.surface, lineWidth: 2))
+                    .offset(x: at(curIv) - 6, y: 5)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { val in
+                let frac = min(1, max(0, val.location.x / max(W, 1)))
+                iv = (g.lo + frac * span).rounded()
+            })
+        }
+        .frame(height: 52)
+    }
+
+    private func scrubTag(_ label: String, _ x: CGFloat, strong: Bool, _ tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            VStack(spacing: 5) {
+                Rectangle().fill(strong ? Ink.text : Ink.dim).frame(width: 1, height: 7)
+                Text(label.uppercased()).font(InkFont.mono(7.5)).tracking(7.5 * 0.1)
+                    .foregroundStyle(strong ? Ink.text : Ink.dim).fixedSize()
+            }
+        }
+        .buttonStyle(.plain)
+        .offset(x: x - 20, y: 19).frame(width: 40)
+    }
+
+    private func setIv(_ v: Double) { withAnimation(reduce ? nil : InkMotion.ease(0.2)) { iv = v } }
 }
 
 // MARK: - Section 4 · Peers & ETFs
