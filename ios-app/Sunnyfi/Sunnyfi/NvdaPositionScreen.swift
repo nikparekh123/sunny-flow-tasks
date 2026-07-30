@@ -502,7 +502,7 @@ private struct SleeveGroupCard: View {
         let net = short ? basis - cur : cur - basis
         let soonest = leg.strikes.map { $0.expired ? 0 : (Int($0.dte.prefix(while: \.isNumber)) ?? 999) }.min() ?? 999
         let cat = pageCount > 1 ? "\(leg.label) · \(page + 1)/\(pageCount)" : leg.label
-        return InkCard(spine: short ? .short : .long) {
+        return InkCard {
             InkBody {
                 InkEyebrow(n: n, cat: cat, glyph: leg.glyph) {
                     InkBand(skin: .low, text: "\(leg.strikes.count) strike\(leg.strikes.count == 1 ? "" : "s")")

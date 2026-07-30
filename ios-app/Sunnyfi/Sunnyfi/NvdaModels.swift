@@ -451,6 +451,28 @@ enum NvDerive {
             }
             return s
         }
+        // Realized P&L on CLOSED / expired LONG options of a kind (proceeds on
+        // the sold portion − its cost; expired-worthless loses the cost). This is
+        // what the Calls-bought / Puts-bought sleeves book — it was hardcoded 0.
+        func longRealized(_ kind: String) -> Double {
+            struct A { var openCt = 0.0, closeCt = 0.0, openPrem = 0.0, closePrem = 0.0 }
+            var byKey: [Key: A] = [:]
+            for t in live where t.option_type == kind && t.direction == "long" {
+                let k = Key(side: "long", kind: kind, strike: t.strike, expiry: t.expiry)
+                var a = byKey[k] ?? A()
+                if t.action == "open" { a.openCt += t.contracts; a.openPrem += t.premium * t.contracts * 100 }
+                else { a.closeCt += t.contracts; a.closePrem += t.premium * t.contracts * 100 }
+                byKey[k] = a
+            }
+            var r = 0.0
+            for (k, a) in byKey {
+                let avg = a.openCt > 0 ? a.openPrem / a.openCt : 0
+                let netCt = a.openCt - a.closeCt
+                let expired = isExpired(k.expiry, now: now)
+                r += (a.closePrem - a.closeCt * avg) + (expired ? -netCt * avg : 0)
+            }
+            return r
+        }
 
         // ── the settled covered-call model (do NOT re-derive; see memory) ──
         // Banked = lifetime short-call premium collected in CASH (incl still-open
@@ -483,11 +505,13 @@ enum NvDerive {
             .init(name: "Calls sold", glyph: "▲", total: csCt, basisLabel: "Collected", basis: csColl,
                   realized: realizedClosedCalls, unrealized: openShortPrem - sleeveMTM("call", "short"), empty: csCt == 0 && csColl == 0),
             .init(name: "Calls bought", glyph: "△", total: cbCt, basisLabel: "Paid", basis: cbPaid,
-                  realized: 0, unrealized: sleeveMTM("call", "long") - cbPaid, empty: cbCt == 0),
+                  realized: longRealized("call"), unrealized: sleeveMTM("call", "long") - cbPaid,
+                  empty: writtenCt("call", "long") == 0),
             .init(name: "Puts sold", glyph: "▼", total: psCt, basisLabel: "Collected", basis: openPrem("put", "short"),
                   realized: 0, unrealized: 0, empty: psCt == 0),
             .init(name: "Puts bought", glyph: "▽", total: pbCt, basisLabel: "Paid", basis: pbPaid,
-                  realized: 0, unrealized: sleeveMTM("put", "long") - pbPaid, empty: pbCt == 0),
+                  realized: longRealized("put"), unrealized: sleeveMTM("put", "long") - pbPaid,
+                  empty: writtenCt("put", "long") == 0),
         ]
         return NvPerf(realized: banked, lifetime: premLifetime, perShare: perShare,
                       perSharePct: avgBuy > 0 ? perShare / avgBuy * 100 : 0, costBasis: avgBuy, breakEven: breakEven,

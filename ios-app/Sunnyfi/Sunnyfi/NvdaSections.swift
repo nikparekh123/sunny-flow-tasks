@@ -153,7 +153,7 @@ struct NvdaPerformanceScreen: View {
         // Open mark gains (e.g. unclosed long puts) are shown separately as
         // "Open · unrealised" so they never read as booked profit.
         let realizedZero = abs(s.realized) < 1
-        return InkCard(relevance: s.empty ? .r3 : .r1, spine: sold ? .short : .long, compact: true) {
+        return InkCard(relevance: s.empty ? .r3 : .r1, compact: true) {
             InkBody(compact: true) {
                 InkEyebrow(cat: s.name, glyph: s.glyph) {
                     InkBand(skin: s.empty ? .low : .mod, text: s.empty ? "None open" : "\(s.total) ct")
