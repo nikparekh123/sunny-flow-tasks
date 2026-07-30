@@ -491,7 +491,25 @@ enum NvDerive {
             openShortPrem += c * perContract                  // c = net-open contracts
         }
         let realizedShares = sells.filter { $0.voided_at == nil }.reduce(0.0) { $0 + ($1.realized_pl ?? 0) }
-        let realizedClosedCalls = premLifetime - openShortPrem   // premium on closed short calls
+        // Assigned-call premium is EXCLUDED (captured in the share sale at strike,
+        // per IBKR — same rule as NvDerive.pnl()), so the Calls-sold sleeve
+        // reconciles to the Realized total. Assignment = ≈$0 short-call close with
+        // a same-day share sell at the strike.
+        let assignSig = Set(sells.filter { $0.voided_at == nil }.map { "\($0.trade_date)|\(Int($0.price.rounded()))" })
+        var assignedCallPrem = 0.0
+        do {
+            struct CA { var openCt = 0.0, openPrem = 0.0, assignedCt = 0.0 }
+            var byCall: [Key: CA] = [:]
+            for t in live where t.option_type == "call" && t.direction == "short" {
+                let k = Key(side: "short", kind: "call", strike: t.strike, expiry: t.expiry)
+                var a = byCall[k] ?? CA()
+                if t.action == "open" { a.openCt += t.contracts; a.openPrem += t.premium * t.contracts * 100 }
+                else if t.premium < 0.01, assignSig.contains("\(t.trade_date)|\(Int(t.strike.rounded()))") { a.assignedCt += t.contracts }
+                byCall[k] = a
+            }
+            for (_, a) in byCall { assignedCallPrem += (a.openCt > 0 ? a.openPrem / a.openCt : 0) * a.assignedCt }
+        }
+        let realizedClosedCalls = premLifetime - openShortPrem - assignedCallPrem   // premium on closed short calls (ex-assigned)
         let banked = premLifetime + realizedShares               // hero
         let perShare = shares > 0 ? premLifetime / shares : 0
         let breakEven = avgBuy - perShare

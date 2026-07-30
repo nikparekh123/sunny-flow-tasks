@@ -51,8 +51,9 @@ private struct NvLedger2: View {
     let a: (k: String, v: Double); let b: (k: String, v: Double)
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            cell(a.k, a.v)
-            cell(b.k, b.v).overlay(alignment: .leading) { Rectangle().fill(Ink.hair).frame(width: 1) }.padding(.leading, 12)
+            cell(a.k, a.v).padding(.trailing, 14)
+            Rectangle().fill(Ink.hair).frame(width: 1)
+            cell(b.k, b.v).padding(.leading, 14)
         }
     }
     private func cell(_ k: String, _ v: Double) -> some View {
@@ -123,7 +124,7 @@ struct NvdaPerformanceScreen: View {
                 .padding(.top, 22)
                 InkBullets(items: g.map { g in [
                     "Premium \(inkUsd(g.premiumTotal)) · \(inkUsd(g.premiumRealized)) realised, \(inkUsd(g.premiumUnrealized)) open",
-                    "Hedge cost \(inkUsd(g.costTotal)) · break-even $\(nv2Dec(p.breakEven, 2))",
+                    "Hedge cost \(inkUsd(g.costTotal)) paid for downside",
                 ] } ?? [
                     "$\(nv2Dec(p.perShare, 2)) a share collected, calls only",
                     "Cost basis $\(nv2Dec(p.costBasis, 2)) → break-even $\(nv2Dec(p.breakEven, 2))",
@@ -135,11 +136,11 @@ struct NvdaPerformanceScreen: View {
                 // basis). Cushion (spot over it) + % move to the right, above the %.
                 Text("New average · after premium".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 HStack(alignment: .firstTextBaseline) {
-                    Text("$\(nv2Dec(p.breakEven, 2))").font(InkFont.mono(28, .light)).tracking(28 * -0.03).foregroundStyle(Ink.text)
+                    Text("$\(nv2Dec(p.breakEven, 2))").font(InkFont.mono(24, .light)).tracking(24 * -0.03).foregroundStyle(Ink.text)
                     Spacer(minLength: 0)
-                    VStack(alignment: .trailing, spacing: 3) {
-                        InkDelta(value: "$\(nv2Dec(abs(p.cushion), 2))", good: p.cushion >= 0, size: 14)
-                        Text("\(nv2Pct(p.cushionPct))").font(InkFont.mono(11)).foregroundStyle(Ink.dim)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        InkDelta(value: "$\(nv2Dec(abs(p.cushion), 2))", good: p.cushion >= 0, size: 13)
+                        Text("\(nv2Pct(p.cushionPct))").font(InkFont.mono(10.5)).foregroundStyle(Ink.dim)
                     }
                 }
             }
