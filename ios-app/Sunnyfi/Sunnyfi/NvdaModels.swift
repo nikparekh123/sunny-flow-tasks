@@ -612,8 +612,10 @@ enum NvDerive {
             .compactMap { c in c.close_price.map { (c.date, $0) } }
             .sorted { $0.0 < $1.0 }.map { $0.1 }
         // ── SELLER SCORE = (IV / HV30) × IV-percentile factor ──
-        // HV30: StdDev(daily log returns, ~30 sessions) × √252 (realizedVol).
-        let hv = realizedVol(nvCloses).map { $0 * 100 }
+        // HV30: StdDev(daily log returns over the last 30 trading days) × √252.
+        // Cap to the trailing 31 closes so it's a true 30-day window, not
+        // "however many closes we happen to hold" (per docs/PNL spec).
+        let hv = realizedVol(Array(nvCloses.suffix(31))).map { $0 * 100 }
         // Current ATM IV: prefer today's daily snapshot (the backend writes ATM
         // call+put avg IV, refreshed every 30 min); else fall back to the median
         // IV of the open legs so the card still reads before the feed lands.
