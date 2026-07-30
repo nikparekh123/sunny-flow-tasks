@@ -81,6 +81,12 @@ interface TradeConfirm {
   netCash: string;
   commission: string;
   code: string;              // O | C | A | Ex | Ep | (combinations)
+  // IBKR's own realized P&L for this fill (Activity/Daily Flex only;
+  // TCF omits it). When present on a SELL it is authoritative — we book
+  // it straight to share_sells.realized_pl instead of recomputing FIFO
+  // ourselves (our reconcile can't reconstruct the basis of shares that
+  // were already sold, e.g. assignment call-aways).
+  fifoPnlRealized?: string;
   // Raw Activity Flex source fields, preserved for dry-run
   // verification. Not used downstream — `code` is the canonical
   // post-translation value.
@@ -273,6 +279,7 @@ Deno.serve(async (req) => {
           expiry: t.expiry,
           putCall: t.putCall,
           code: t.code,
+          fifoPnlRealized: t.fifoPnlRealized,
           // Raw Activity Flex fields for review — confirms the
           // translation from (openCloseIndicator, notes) → code
           // landed correctly.
@@ -791,6 +798,11 @@ function parseTradeConfirms(xml: string): TradeConfirm[] {
       proceeds: a.proceeds ?? '',
       netCash: a.netCash ?? '',
       commission: a.ibCommission ?? a.commission ?? '',
+      // IBKR's realized P&L for this fill. Activity/Daily Flex exposes it
+      // as `fifoPnlRealized` (requires the "FIFO P/L Realized" column in
+      // the Flex query's Trades section). Absent → we fall back to our
+      // own reconcile.
+      fifoPnlRealized: a.fifoPnlRealized ?? a.realizedPnl ?? '',
       code,
       _rawNotes: note,
       _rawOC: oc,
@@ -1015,11 +1027,20 @@ async function upsertStock(
     return 'inserted';
   }
 
-  // SELL → share_sells. realized_pl is left 0 here and filled in by
-  // public.reconcile_share_fifo(), which consumes share_lots FIFO and
-  // books the realized P&L (nightly cron at 09:30 UTC, idempotent via
-  // share_sells.fifo_reconciled_at). See migration
-  // 20260722120000_share_fifo_reconcile.sql.
+  // SELL → share_sells.
+  //
+  // Realized P&L: prefer IBKR's OWN `fifoPnlRealized` when the report
+  // carries it (Activity/Daily Flex). It is authoritative and exact,
+  // and — crucially — it is the only correct source for shares that were
+  // already sold (assignment call-aways), whose cost basis our local
+  // reconcile can't reconstruct because the consumed lots are gone. When
+  // it's present we stamp `fifo_reconciled_at` so reconcile_share_fifo()
+  // leaves the row alone. When absent (intraday TCF), fall back to the
+  // old path: realized_pl 0, filled later by reconcile_share_fifo().
+  const ibkrPnlRaw = t.fifoPnlRealized ?? '';
+  const ibkrPnl = ibkrPnlRaw !== '' ? Number(ibkrPnlRaw) : NaN;
+  const hasIbkrPnl = Number.isFinite(ibkrPnl);
+
   const row = {
     ticker: t.underlyingSymbol,
     quantity: Math.abs(Number(t.quantity)),
@@ -1030,8 +1051,11 @@ async function upsertStock(
     executed_at: parseExecUtc(t.dateTime),
     last_synced_at: new Date().toISOString(),
     voided_at: null,
-    realized_pl: 0,
-    note: 'IBKR sync — realized_pl set by reconcile_share_fifo()',
+    realized_pl: hasIbkrPnl ? ibkrPnl : 0,
+    fifo_reconciled_at: hasIbkrPnl ? new Date().toISOString() : null,
+    note: hasIbkrPnl
+      ? 'IBKR sync — realized_pl from fifoPnlRealized'
+      : 'IBKR sync — realized_pl set by reconcile_share_fifo()',
   };
 
   const { data: existing } = await supabase
@@ -1041,11 +1065,16 @@ async function upsertStock(
     .maybeSingle();
 
   if (existing) {
-    // Only update fields IBKR controls. realized_pl is owned by
-    // reconcile_share_fifo() — re-syncing (the nightly Daily Flex
-    // re-walks 5 business days) must NOT reset it to 0 and orphan the
-    // already-consumed lots.
-    const { realized_pl: _rp, ...amend } = row;
+    // When IBKR gives us realized P&L directly, it is authoritative —
+    // write it (this is what corrects the stuck-at-0 rows). Otherwise
+    // leave realized_pl / fifo_reconciled_at to reconcile_share_fifo():
+    // re-syncing (the nightly Daily Flex re-walks 5 business days) must
+    // NOT reset an already-reconciled row to 0 and orphan its lots.
+    let amend: Record<string, unknown> = row;
+    if (!hasIbkrPnl) {
+      const { realized_pl: _rp, fifo_reconciled_at: _fr, ...rest } = row;
+      amend = rest;
+    }
     const { error } = await supabase
       .from('share_sells')
       .update(amend)
