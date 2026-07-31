@@ -39,7 +39,7 @@ enum Ink {
     static let canvas     = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
     static let surface    = inkDyn(UIColor(inkHex: 0x1A1A19), UIColor(inkHex: 0xFFFFFF))
     static let text       = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
-    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.66), UIColor(inkHex: 0x6E6B63))
+    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.78), UIColor(inkHex: 0x5C594F))
     static let hair       = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.07), UIColor(inkHex: 0xEBE9E2))
     static let invertBg   = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
     static let invertText = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
