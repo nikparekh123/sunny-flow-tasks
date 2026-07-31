@@ -1,10 +1,10 @@
 //
 //  NvdaPlannerPreview.swift
-//  Sunnyfi — DEBUG-only visual harness for the Planner.
+//  Sunnyfi — DEBUG-only visual harness for the rev-2 Planner.
 //
-//  Renders the Planner sections against a hand-built PlannerState (numbers taken
-//  from the Claude Design mockup screens) so the layout can be screenshotted
-//  without the edge function or a sign-in. Launch with `-inkPlanner`.
+//  Renders the stepped cards against a hand-built PlannerState (numbers from the
+//  planner_final mockup + the rev2/addendum fixtures) so the layout can be
+//  screenshotted without the edge function or a sign-in. Launch with `-inkPlanner`.
 //
 
 #if DEBUG
@@ -12,87 +12,34 @@ import SwiftUI
 
 extension PlannerState {
     static var mock: PlannerState {
-        let gate = PGate(
-            spot: 206.84, iv: 40.3, ivPct: 19, pctFactor: 0.8,
-            hv20: 46.2, hv30: 45, hv60: 41.8, hv90: 39.2,
-            hvTrend: "expanding", hvGap: 5.8, score: 0.72,
-            scorePass: false, earningsPass: true, capacityPass: true, blocked: true,
-            daysToEarnings: 27, earnings: "Aug 23",
-            wash: PWash(hit: true, on: "Jul 14", amount: 3120, daysLeft: 17),
-            flags: [
-                PFlag(key: "score", level: "block", head: "Skip this cycle",
-                      body: "Options underpriced against realized. Seller Score 0.72, implied 40.3% sits under 45% realized, and IV percentile 19 discounts it further."),
-                PFlag(key: "wash", level: "note", head: "Wash-sale window open",
-                      body: "Loss of $3,120 realized Jul 14, 17 days left. Assignment at a loss plus a next-day rebuy disallows it and rolls it into new basis."),
-            ])
-        let book = PBook(
-            shares: 5001, buyAvg: 208.39, realizedPremium: 22300, netDelta: 1217, longTheta: 324,
-            shortCallDelta: -270, shortCallCt: 38, longCallCt: 20, wall: 210,
-            committedShares: 3800, freeShares: 1201, capacity: 12, basis: 203.93)
+        let gate = PGate(spot: 206.84, iv: 40.3, ivPct: 55, pctFactor: 1.0, hv20: 46.2, hv30: 45, hv60: 41.8, hv90: 39.2,
+            hvTrend: "expanding", hvGap: 5.8, score: 0.90, scorePass: true, earningsPass: true, capacityPass: true, blocked: false,
+            daysToEarnings: 26, earnings: "Aug 26", wash: PWash(hit: true, on: "Jul 14", amount: 3120, daysLeft: 17), flags: [])
+        let book = PBook(shares: 5001, buyAvg: 208.39, realizedPremium: 22300, netDelta: 1217, longTheta: 324,
+            shortCallDelta: -270, shortCallCt: 38, longCallCt: 20, wall: 210, committedShares: 3800, freeShares: 1201, capacity: 50, basis: 203.93)
+        let tech = PTech(high52: 243, low52: 130, ma50: 204.79, ma200: 200.82, rsi14: 41, ath: 243, athDate: "2026-01-07", updatedAt: nil)
 
-        func exp(_ key: String, _ label: String, _ dow: String, _ cal: Int, _ td: Int, _ we: Int, _ vd: Double,
-                 _ prem: Double, _ assign: Double, _ edge: Double) -> PExpiry {
-            PExpiry(key: key, iso: key, label: label, dow: dow, cal: cal, td: td, we: we, volDays: vd,
-                    T: vd / 252, prem: prem, perDay: prem / Double(max(td, 1)), credit: prem * 100 * 12, assign: assign, edge: edge)
-        }
-        let expiries = [
-            exp("2026-07-29", "Jul 29", "Wed", 2, 2, 0, 2.0, 2.68, 0.46, -34),
-            exp("2026-07-31", "Jul 31", "Fri", 4, 4, 0, 4.0, 3.79, 0.47, -41),
-            exp("2026-08-03", "Aug 3", "Mon", 7, 5, 2, 5.6, 4.52, 0.47, -52),
-            exp("2026-08-05", "Aug 5", "Wed", 9, 7, 2, 7.6, 5.28, 0.48, -60),
-        ]
-
-        func rung(_ k: Double, _ prem: Double, _ assign: Double, _ edge: Double, _ edgePct: Double,
-                  _ hi: Double, _ lo: Double, _ nda: Double, _ vsB: Double, _ side: String, _ adv: Double, _ sell: Bool) -> PRung {
-            PRung(strike: k, prem: prem, fair: prem - edge / 100, sellable: sell,
-                  edge: edge, edgePct: edgePct, edgeHi: hi, edgeLo: lo,
-                  edgePctHi: hi / (prem * 100), edgePctLo: lo / (prem * 100), edgeCrosses: hi > 0 && lo < 0,
-                  assign: assign, delta: assign + 0.03, netDeltaAfter: nda, pctLong: nda / 5001,
-                  effective: k + prem, vsBasis: vsB, side: side, advCost: adv, affected: adv > 0 ? 12 : 0)
+        func rung(_ k: Double, _ prem: Double, _ assign: Double, _ edge: Double, _ edgePct: Double, _ hi: Double, _ lo: Double, _ delta: Double, _ side: String, _ adv: Double) -> PRung {
+            let intr = max(0, 206.84 - k)
+            return PRung(strike: k, prem: prem, fair: prem - edge / 100, sellable: prem >= 0.05,
+                intrinsic: intr, ext: prem - intr, extPct: prem > 0 ? (prem - intr) / prem : 0,
+                edge: edge, edgePct: edgePct, edgeHi: hi, edgeLo: lo, edgePctHi: hi / (prem * 100), edgePctLo: lo / (prem * 100), edgeCrosses: hi > 0 && lo < 0,
+                assign: assign, delta: delta, effective: k + prem, vsBasis: k + prem - 203.93, side: side, advCost: adv, affected: adv > 0 ? 20 : 0)
         }
         let chain = [
-            rung(200, 7.58, 0.82, -23, -0.03, 5, -29, 1892, 1.54, "adverse", 12000, true),
-            rung(202.5, 5.65, 0.72, -29, -0.05, 7, -37, 2013, 2.11, "adverse", 9000, true),
-            rung(205, 4.00, 0.60, -33, -0.08, 8, -43, 2140, 2.57, "adverse", 6000, true),
-            rung(207.5, 2.68, 0.46, -34, -0.13, 8, -43, 2320, 3.24, "adverse", 3000, true),
-            rung(210, 1.72, 0.33, -30, -0.17, 8, -40, 2450, 4.31, "matched", 0, true),
-            rung(212.5, 1.05, 0.22, -25, -0.24, 6, -34, 2560, 5.28, "favorable", 0, true),
-            rung(215, 0.61, 0.13, -19, -0.31, 5, -27, 2650, 6.19, "favorable", 0, true),
-            rung(220, 0.18, 0.04, 8, 0.44, 19, 4, 2790, 8.30, "favorable", 0, true),
-            rung(227.5, 0.01, 0.00, -2, -1.0, 0, -3, 2886, 21.47, "favorable", 0, false),
+            rung(200, 7.58, 0.82, -23, -0.03, 5, -29, 0.85, "adverse", 12000),
+            rung(202.5, 5.65, 0.72, -29, -0.05, 7, -37, 0.72, "adverse", 9000),
+            rung(205, 4.00, 0.60, -33, -0.08, 8, -43, 0.60, "adverse", 6000),
+            rung(207.5, 2.68, 0.46, -34, -0.13, 8, -43, 0.48, "adverse", 3000),
+            rung(210, 1.69, 0.33, -30, -0.17, 8, -40, 0.34, "matched", 0),
+            rung(212.5, 1.05, 0.22, -25, -0.24, 6, -34, 0.23, "favorable", 0),
         ]
-        let signals = chain.map { r in
-            PSignalSet(strike: r.strike, signals: [
-                PSignal(k: "gate", ok: false, label: "Gate"),
-                PSignal(k: "edge", ok: r.edge > 0, label: "Edge at HV30"),
-                PSignal(k: "span", ok: r.edgeHi > 0 && r.edgeLo > 0, label: "Edge across lookbacks"),
-                PSignal(k: "pair", ok: r.advCost == 0, label: "Long-call pairing"),
-                PSignal(k: "assign", ok: r.assign <= 0.375, label: "Assignment vs your rate"),
-                PSignal(k: "delta", ok: r.netDeltaAfter >= 500, label: "Net delta after"),
-            ])
+        func exp(_ iso: String, _ label: String, _ dow: String, _ td: Int, _ we: Int, _ vd: Double) -> PExpiry {
+            PExpiry(key: iso, iso: iso, label: label, dow: dow, cal: td + we, td: td, we: we, volDays: vd, T: vd / 252, chain: chain)
         }
-        let rec = PRec(none: false, strike: 207.5, blocked: true,
-                       why: "Lowest strike the guardrails allow, so the most premium they allow. 46% assign, −13% of premium in edge, +2,320 delta left on the book.")
-
-        let steps: [Double] = [-5, -3, -2, -1, -0.5, 0, 0.5, 1, 2, 3, 5]
-        let scenSteps = steps.map { p -> PScenStep in
-            let s = 206.84 * (1 + p / 100)
-            let opt = p == 0 ? 0.0 : max(0, s - 207.5)
-            let shortPl = (2.68 - opt) * 100 * 12
-            let sharePl = (s - 206.84) * 5001
-            return PScenStep(p: p, s: s, ivUsed: max(8, 40.3 + (p < 0 ? abs(p) * 1.05 : p * -0.62)),
-                             opt: opt, shortPl: shortPl.rounded(), sharePl: sharePl.rounded(), combined: (sharePl + shortPl).rounded())
-        }
-        let top = scenSteps.last!
-        let scenario = PScenario(
-            conv: "expiry", ivSource: "nvda",
-            source: PIvSource(label: "NVDA · 2y regression", down: 1.05, up: -0.62, note: "504 sessions, R² 0.61"),
-            T2: 0, steps: scenSteps, givenUp: top.sharePl - top.combined, topPct: 5)
-
-        return PlannerState(
-            ok: true, asOf: nil, gate: gate, book: book, settings: .default, refStrike: 207.5,
-            expiries: expiries, selExpiry: "2026-07-29", chain: chain, signals: signals,
-            recommendation: rec, selStrike: 207.5, scenario: scenario)
+        return PlannerState(ok: true, asOf: nil, gate: gate, book: book, technicals: tech, refStrike: 207.5, weekendVol: 0.3,
+            expiries: [exp("2026-07-29", "Jul 29", "Wed", 2, 0, 2.0), exp("2026-07-31", "Jul 31", "Fri", 4, 0, 4.0),
+                       exp("2026-08-03", "Aug 3", "Mon", 5, 2, 5.6), exp("2026-08-05", "Aug 5", "Wed", 7, 2, 7.6)])
     }
 }
 
@@ -101,43 +48,54 @@ struct InkPlannerPreview: View {
         let p = PlannerStore()
         p.state = .mock
         p.isLoading = false
+        p.ct = 12
+        p.selExpiry = "2026-07-31"
+        p.selStrike = 207.5
+        p.legs = PlannerLegs(longCalls: [(strike: 210, ct: 20)], shortCalls: [], buyAvg: 208.39, realizedPremium: 22300, shares: 5001)
         return p
     }()
 
-    private var anchor: String? {
-        let a = ProcessInfo.processInfo.arguments
-        if a.contains("-sec2") { return "expiry" }
-        if a.contains("-sec3") { return "ladder" }
-        if a.contains("-sec4") { return "scenario" }
-        if a.contains("-sec5") { return "calibration" }
-        return nil
-    }
-
     var body: some View {
-        ZStack(alignment: .bottom) {
+        NvdaPlannerScreenPreviewHost(planner: planner)
+            .preferredColorScheme(.dark)
+    }
+}
+
+/// Renders the same card stack as NvdaPlannerScreen but against the injected store.
+private struct NvdaPlannerScreenPreviewHost: View {
+    @Bindable var planner: PlannerStore
+    var body: some View {
+        ZStack {
             Ink.canvas.ignoresSafeArea()
             if let s = planner.state {
+                let up = PlannerEngine.upside(s.technicals, spot: s.gate.spot, planner.settings)
+                let levels = planner.legs.map { PlannerEngine.levels($0, spot: s.gate.spot, candidateExpiry: planner.selExpiryDate) } ?? []
+                let pick = PlannerEngine.select(planner.selExpiryObj?.chain ?? [], planner.settings, s.book, ct: planner.ct,
+                    targetStrike: up.targetStrike, upsideScore: up.score, blocked: s.gate.blocked, legs: planner.legs, levels: levels, spot: s.gate.spot)
+                let legsE = planner.legs ?? PlannerLegs(longCalls: [], shortCalls: [], buyAvg: s.book.buyAvg, realizedPremium: s.book.realizedPremium, shares: s.book.shares)
+                let ts = up.targetStrike
+                let chain = planner.selExpiryObj?.chain ?? []
+                let nearest = ts.flatMap { t in chain.min { abs($0.strike - t) < abs($1.strike - t) }?.strike }
+                let d = PlannerDerived(spot: s.gate.spot, book: s.book, gate: s.gate, expiry: planner.selExpiryObj, upside: up, levels: levels,
+                    pick: pick, ct: planner.ct, settings: planner.settings, histAssign: planner.histAssign, selStrike: planner.selStrike,
+                    legsOrEmpty: legsE, isOnTarget: { k in nearest.map { abs($0 - k) < 1e-6 } ?? false })
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            GateSectionView(s: s).id("gate")
-                            GuardrailsView(planner: planner)
-                            ExpirySectionView(planner: planner, s: s).id("expiry")
-                            LadderSectionView(planner: planner, s: s).id("ladder")
-                            ScenarioSectionView(planner: planner, s: s).id("scenario")
-                            CalibrationSectionView(log: planner.log).id("calibration")
-                            Color.clear.frame(height: 300)
-                        }
-                        .padding(.horizontal, 16)
+                        VStack(spacing: 14) {
+                            ScoreCardV(d: d).id("c1"); GuardCardV(planner: planner, d: d).id("c2"); UpsideCardV(planner: planner, d: d).id("c3")
+                            SizeCardV(planner: planner, d: d).id("c4"); ExpiryCardV(planner: planner, d: d).id("c5"); StrikeCardV(planner: planner, d: d).id("c6")
+                            OutlookCardV(planner: planner, d: d).id("c7"); PlanCardV(d: d).id("c8")
+                            Color.clear.frame(height: 40)
+                        }.padding(16)
                     }
-                    .onAppear { if let anchor { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo(anchor, anchor: .top) } } }
-                }
-                if !ProcessInfo.processInfo.arguments.contains("-noCommit") {
-                    CommitBarView(planner: planner, s: s)
+                    .onAppear {
+                        let a = ProcessInfo.processInfo.arguments
+                        let target = a.contains("-c3") ? "c3" : a.contains("-c5") ? "c5" : a.contains("-c6") ? "c6" : a.contains("-c7") ? "c7" : a.contains("-c8") ? "c8" : nil
+                        if let target { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { proxy.scrollTo(target, anchor: .top) } }
+                    }
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 }
 #endif
