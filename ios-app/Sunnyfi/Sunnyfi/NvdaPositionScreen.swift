@@ -172,7 +172,7 @@ private struct TotalPositionCard: View {
             ForEach(Mode.allCases, id: \.self) { m in
                 let on = mode == m
                 Button { withAnimation(InkMotion.ease(0.32)) { mode = m; openLeg = nil } } label: {
-                    Text(m.rawValue.uppercased()).font(InkFont.mono(9, .medium)).tracking(9 * 0.14)
+                    Text(m.rawValue.uppercased()).font(InkFont.mono(9.5, .medium)).tracking(9.5 * 0.14)
                         .foregroundStyle(on ? Ink.invertText : Ink.dim)
                         .frame(maxWidth: .infinity).frame(height: 30)
                         .background(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous)
