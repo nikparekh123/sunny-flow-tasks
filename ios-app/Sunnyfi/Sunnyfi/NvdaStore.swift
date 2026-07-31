@@ -22,6 +22,23 @@ final class NvdaStore {
     var isLoading = true
     var lastError: String?
 
+    /// NVDA daily closes, oldest→newest — kept so the Planner can compute HV over
+    /// arbitrary windows (HV20/60/90) with the same estimator as the Seller Score.
+    private(set) var nvCloses: [Double] = []
+
+    /// Annualised realized vol over the last `window` trading days, in percent.
+    /// Same estimator as NvDerive.realizedVol (sample stdev of log returns × √252).
+    func hv(_ window: Int) -> Double? {
+        let w = Array(nvCloses.suffix(window + 1))
+        guard w.count >= 6 else { return nil }
+        var rets: [Double] = []
+        for i in 1..<w.count where w[i - 1] > 0 { rets.append(log(w[i] / w[i - 1])) }
+        guard rets.count >= 5 else { return nil }
+        let mean = rets.reduce(0, +) / Double(rets.count)
+        let varc = rets.reduce(0) { $0 + pow($1 - mean, 2) } / Double(rets.count - 1)
+        return sqrt(varc) * sqrt(252) * 100
+    }
+
     private let client = SupabaseService.client
 
     func fetch() async {
@@ -52,6 +69,9 @@ final class NvdaStore {
 
             let (t, l, sl, q, m, c) = try await (trades, lots, sells, quotes, marks, closes)
             let nvda = q.first { $0.ticker == "NVDA" }
+            nvCloses = c.filter { $0.ticker == "NVDA" }
+                .compactMap { row in row.close_price.map { (row.date, $0) } }
+                .sorted { $0.0 < $1.0 }.map { $0.1 }
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
             // Daily IV snapshot — non-fatal: if the table isn't there yet, [] (no 2nd gauge arc).
             let ivDaily: [NvIvDaily] = (try? await client.from("nvda_iv_daily")
