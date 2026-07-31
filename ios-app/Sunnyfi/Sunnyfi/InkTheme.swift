@@ -39,13 +39,13 @@ enum Ink {
     static let canvas     = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
     static let surface    = inkDyn(UIColor(inkHex: 0x1A1A19), UIColor(inkHex: 0xFFFFFF))
     static let text       = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
-    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.55), UIColor(inkHex: 0x8B8880))
+    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.66), UIColor(inkHex: 0x6E6B63))
     static let hair       = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.07), UIColor(inkHex: 0xEBE9E2))
     static let invertBg   = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
     static let invertText = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
     /// Inside card footers and sheet docks, dim is re-derived at 70% ink so small
     /// mono labels stay legible on the raised surface (the `.ink-footzone` rule).
-    static let footDim    = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.70), UIColor(inkHex: 0x121211, alpha: 0.70))
+    static let footDim    = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.80), UIColor(inkHex: 0x121211, alpha: 0.70))
 
     // MARK: - Data hues (Law 1 — ONLY on a number, bar fill or data band)
     /// Moving AGAINST you — loss, cost to close, debit. (peril "fire")

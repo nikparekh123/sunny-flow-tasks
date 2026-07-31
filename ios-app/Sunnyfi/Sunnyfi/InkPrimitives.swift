@@ -275,7 +275,7 @@ struct InkHero: View {
     var unit: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            InkRoll(text: value, font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
+            InkRoll(text: value, font: InkFont.mono(40, .bold), tracking: 40 * -0.04, color: Ink.text)
             if let unit {
                 Text(unit.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
                     .foregroundStyle(Ink.dim).padding(.top, 12)
