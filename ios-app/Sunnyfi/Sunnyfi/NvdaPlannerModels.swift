@@ -458,7 +458,11 @@ final class PlannerStore {
             scenario: .init(conv: conv, ivSource: ivSource),
             histAssign: log.calStats.assignRate, spot: ctx.spot)
         do {
-            let data = try await client.functions.invoke("nvda-planner", options: FunctionInvokeOptions(body: req)) as Data
+            // Use the raw-Data closure overload — a plain `as Data` cast resolves to the
+            // Decodable overload and tries to decode `Data` itself from JSON (base64),
+            // which fails on an object with "expected String, found dictionary".
+            let data = try await client.functions.invoke(
+                "nvda-planner", options: FunctionInvokeOptions(body: req), decode: { data, _ in data })
             let decoded = try JSONDecoder().decode(PlannerState.self, from: data)
             guard g == gen else { return }               // a newer request superseded this one
             if decoded.ok { state = decoded; lastError = nil } else { lastError = "planner unavailable" }
