@@ -122,8 +122,12 @@ struct NvdaPerformanceScreen: View {
                         .foregroundStyle(Ink.dim).padding(.top, 11)
                 }
                 .padding(.top, 22)
+                // Break the hero into what it's actually made of, so it reconciles
+                // on the card: shares + options = realized. No "open" number here —
+                // this card is closed-only; open premium lives on its sleeve.
                 InkBullets(items: g.map { g in [
-                    "Premium \(inkUsd(g.premiumTotal)) · \(inkUsd(g.premiumRealized)) realised, \(inkUsd(g.premiumUnrealized)) open",
+                    "Shares \(nv2Money(g.realizedStock)) · options \(nv2Money(g.realized - g.realizedStock))",
+                    "Closed only · open P&L shows on Portfolio",
                 ] } ?? [
                     "$\(nv2Dec(p.perShare, 2)) a share collected, calls only",
                 ])
