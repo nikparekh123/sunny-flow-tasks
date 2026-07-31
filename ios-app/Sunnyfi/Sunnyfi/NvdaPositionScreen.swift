@@ -41,7 +41,7 @@ struct NvdaPositionScreen: View {
     var body: some View {
         if let p = store.position {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Portfolio", count: "\(1 + sleeveCardCount(p)) cards")
+                InkSectionHead(title: "Portfolio")
                 rail(p)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -142,7 +142,7 @@ private struct TotalPositionCard: View {
     var body: some View {
         InkCard {
             InkBody {
-                InkEyebrow(n: "01", cat: "Total position")
+                InkEyebrow(cat: "Total position")
                 switcher
                 hero
                 if mode == .delta && openLeg == nil {
@@ -172,7 +172,7 @@ private struct TotalPositionCard: View {
             ForEach(Mode.allCases, id: \.self) { m in
                 let on = mode == m
                 Button { withAnimation(InkMotion.ease(0.32)) { mode = m; openLeg = nil } } label: {
-                    Text(m.rawValue.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.14)
+                    Text(m.rawValue.uppercased()).font(InkFont.mono(9, .medium)).tracking(9 * 0.14)
                         .foregroundStyle(on ? Ink.invertText : Ink.dim)
                         .frame(maxWidth: .infinity).frame(height: 30)
                         .background(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous)
@@ -191,7 +191,7 @@ private struct TotalPositionCard: View {
     @ViewBuilder private var hero: some View {
         switch mode {
         case .position:
-            InkHero(value: nvUsd(committed), unit: "at work · \(nvInt(p.shares)) sh + \(p.contractsOpen) ct")
+            InkHero(value: nvUsd(committed))
         case .delta:
             heroSplit(big: nvSigned(p.delta), bigUnit: "net delta · share equiv",
                       side: nvSigned(p.gamma), sideUnit: "gamma · per $1", sideColor: Ink.text)

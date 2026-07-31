@@ -58,7 +58,7 @@ struct InkTickerNav: View {
 
 struct InkSectionHead: View {
     let title: String
-    var count: String
+    var count: String? = nil
     var action: String? = nil
     var onAction: (() -> Void)? = nil
 
@@ -68,7 +68,9 @@ struct InkSectionHead: View {
                 .foregroundStyle(Ink.text).lineLimit(1).fixedSize()
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 5) {
-                Text(count).font(InkFont.mono(10.5)).tracking(10.5 * 0.16).foregroundStyle(Ink.dim)
+                if let count, !count.isEmpty {
+                    Text(count).font(InkFont.mono(10.5)).tracking(10.5 * 0.16).foregroundStyle(Ink.dim)
+                }
                 if let action {
                     Button { onAction?() } label: {
                         Text(action).font(InkFont.mono(10.5)).tracking(10.5 * 0.16)
@@ -150,7 +152,6 @@ struct InkStickyGroup<Content: View>: View {
             HStack(spacing: 9) {
                 if let glyph { Text(glyph).font(InkFont.mono(11)).foregroundStyle(Ink.text) }
                 Text(label.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.2).foregroundStyle(Ink.dim)
-                Text("\(count)").font(InkFont.mono(9.5)).tracking(9.5 * 0.1).foregroundStyle(Ink.text)
             }
             .fixedSize()
             .offset(x: off)
