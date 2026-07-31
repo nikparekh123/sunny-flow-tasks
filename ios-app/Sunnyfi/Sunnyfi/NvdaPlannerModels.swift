@@ -278,6 +278,99 @@ extension Array where Element == PlannerCycle {
 /// Normal-approximation 95% half-width, matching the mockup's `ci(p, n)`.
 func plannerCI(_ p: Double, _ n: Int) -> Double { n == 0 ? 0 : 1.96 * (p * (1 - p) / Double(n)).squareRoot() }
 
+// MARK: - Wash-sale detector
+
+enum PlannerWash {
+    private static let iso: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "America/New_York"); return f
+    }()
+    private static let disp: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMM d"; f.timeZone = TimeZone(identifier: "America/New_York"); return f
+    }()
+    private static func days(_ a: Date, _ b: Date) -> Int {
+        Calendar(identifier: .gregorian).dateComponents([.day], from: a, to: b).day ?? 0
+    }
+
+    /// Heuristic wash-sale note: a short call bought back at a loss within the last
+    /// 30 days, with a replacement short call sold inside the 30-day window. A NOTE,
+    /// not a block. (Assignment-triggered washes need a share-sell cross-reference —
+    /// not covered yet.)
+    static func detect(_ trades: [NvOptionTrade], now: Date = Date()) -> PlannerReq.Wash? {
+        let shorts = trades.filter { $0.voided_at == nil && $0.option_type == "call" && $0.direction == "short" }
+        guard !shorts.isEmpty else { return nil }
+        struct Key: Hashable { let strike: Double; let expiry: String }
+        var byLeg: [Key: [NvOptionTrade]] = [:]
+        for t in shorts { byLeg[Key(strike: t.strike, expiry: t.expiry), default: []].append(t) }
+
+        var best: (date: Date, amount: Double)?
+        for (_, ts) in byLeg {
+            let netCt = ts.reduce(0.0) { $0 + ($1.action == "open" ? 1 : -1) * $1.contracts }
+            let closes = ts.filter { $0.action != "open" }
+            guard abs(netCt) < 0.001, !closes.isEmpty else { continue }               // fully closed leg
+            let realized = ts.reduce(0.0) { $0 + ($1.action == "open" ? 1 : -1) * $1.premium * $1.contracts * 100 }
+            guard realized < 0 else { continue }                                        // closed at a loss
+            guard let cd = closes.compactMap({ iso.date(from: $0.trade_date) }).max(),
+                  days(cd, now) >= 0, days(cd, now) <= 30 else { continue }             // within 30 days
+            if best == nil || cd > best!.date { best = (cd, -realized) }
+        }
+        guard let loss = best else { return nil }
+        // Replacement: a short call sold on or after the loss, inside the 30-day window.
+        let replaced = shorts.contains { t in
+            guard t.action == "open", let d = iso.date(from: t.trade_date) else { return false }
+            return d >= loss.date && days(loss.date, d) <= 30
+        }
+        guard replaced else { return nil }
+        return PlannerReq.Wash(hit: true, on: disp.string(from: loss.date),
+                               amount: loss.amount.rounded(), daysLeft: max(0, 30 - days(loss.date, now)))
+    }
+}
+
+// MARK: - Persistence rows (Supabase: planner_settings / planner_intents)
+
+/// Data columns only — `user_id` is filled server-side by `default auth.uid()`, so
+/// it is never encoded (sending an explicit null would defeat the default).
+struct PlannerSettingsRow: Codable, Sendable {
+    let min_net_delta, max_assign, edge_floor, weekend_vol: Double
+    let edge_lookback: String
+    init(_ s: PlannerSettings) {
+        min_net_delta = s.minNetDelta; max_assign = s.maxAssign; edge_floor = s.edgeFloor
+        weekend_vol = s.weekendVol; edge_lookback = s.edgeLookback
+    }
+    var settings: PlannerSettings {
+        PlannerSettings(minNetDelta: min_net_delta, maxAssign: max_assign, edgeFloor: edge_floor,
+                        weekendVol: weekend_vol, edgeLookback: edge_lookback)
+    }
+}
+
+struct PlannerIntentRow: Codable, Sendable {
+    let id: String
+    let ts: String
+    let expiry: String?
+    let strike, ct, mid, fill, p_assign: Double?
+    let assigned: Bool?
+    let implied_move, realized_move: Double?
+    let settled: Bool
+
+    private static let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
+    }()
+    private static let isoPlain = ISO8601DateFormatter()
+    private static func parse(_ s: String) -> Date { isoFrac.date(from: s) ?? isoPlain.date(from: s) ?? Date(timeIntervalSince1970: 0) }
+
+    init(_ c: PlannerCycle) {
+        id = c.id; ts = Self.isoPlain.string(from: Date(timeIntervalSince1970: c.ts / 1000))
+        expiry = c.expiry; strike = c.strike; ct = c.ct; mid = c.mid; fill = c.fill
+        p_assign = c.pAssign; assigned = c.assigned; implied_move = c.impliedMove
+        realized_move = c.realizedMove; settled = c.settled
+    }
+    var cycle: PlannerCycle {
+        PlannerCycle(id: id, ts: Self.parse(ts).timeIntervalSince1970 * 1000, expiry: expiry ?? "",
+                     strike: strike ?? 0, ct: ct ?? 0, mid: mid ?? 0, fill: fill ?? 0, pAssign: p_assign ?? 0,
+                     assigned: assigned ?? false, impliedMove: implied_move ?? 0, realizedMove: realized_move ?? 0,
+                     settled: settled)
+    }
+}
+
 // MARK: - Store
 
 @MainActor
@@ -311,11 +404,44 @@ final class PlannerStore {
         let spot: Double
     }
 
-    /// Build the request context from the store's already-derived position, then run.
+    /// Build the request context from the store's already-derived position, load the
+    /// user's persisted settings + calibration log, then run.
     func load(from store: NvdaStore) async {
-        if ctx == nil { ctx = buildContext(from: store) }
+        await loadPersisted()
+        if ctx == nil { ctx = await buildContext(from: store) }
         guard ctx != nil else { isLoading = false; lastError = "position not ready"; return }
         await run()
+    }
+
+    /// Guardrails + calibration log from Supabase (per-user, RLS-scoped). Missing
+    /// tables or an empty log fall through to defaults / the local seeded demo.
+    private func loadPersisted() async {
+        if let rows: [PlannerSettingsRow] = try? await client.from("planner_settings")
+            .select().limit(1).execute().value, let r = rows.first {
+            settings = r.settings
+        }
+        if let rows: [PlannerIntentRow] = try? await client.from("planner_intents")
+            .select().order("ts", ascending: false).execute().value, !rows.isEmpty {
+            log = rows.map { $0.cycle }
+        }
+    }
+
+    private func saveSettings() {
+        let row = PlannerSettingsRow(settings)
+        Task { try? await client.from("planner_settings").upsert(row, onConflict: "user_id").execute() }
+    }
+
+    /// Record a sold cycle to the calibration log (for a future commit trigger), then
+    /// refresh from the server so the Calibration section reflects it.
+    func logCycle(_ c: PlannerCycle) {
+        let row = PlannerIntentRow(c)
+        Task {
+            try? await client.from("planner_intents").upsert(row, onConflict: "user_id,id").execute()
+            if let rows: [PlannerIntentRow] = try? await client.from("planner_intents")
+                .select().order("ts", ascending: false).execute().value, !rows.isEmpty {
+                log = rows.map { $0.cycle }
+            }
+        }
     }
 
     func apply() { Task { await run() } }
@@ -344,7 +470,15 @@ final class PlannerStore {
         }
     }
 
-    private func buildContext(from store: NvdaStore) -> PlannerContext? {
+    /// Fetch the trade history and detect a wash-sale window (a NOTE on the gate).
+    private func fetchWash() async -> PlannerReq.Wash? {
+        guard let trades: [NvOptionTrade] = try? await client.from("nvda_option_trades")
+            .select("id,trade_date,action,option_type,direction,contracts,strike,premium,expiry,voided_at")
+            .is("voided_at", value: nil).execute().value else { return nil }
+        return PlannerWash.detect(trades)
+    }
+
+    private func buildContext(from store: NvdaStore) async -> PlannerContext? {
         guard let pos = store.position, let pnl = store.pnl, let ins = store.insights else { return nil }
         let strikes = pos.groups.flatMap { $0.strikes }
         let openShorts = strikes.filter { $0.side == "short" && $0.kind == "call" && !$0.expired }
@@ -366,7 +500,8 @@ final class PlannerStore {
             hv20: store.hv(20) ?? (ins.vol.hv30 ?? 0), hv30: ins.vol.hv30 ?? 0,
             hv60: store.hv(60) ?? (ins.vol.hv30 ?? 0), hv90: store.hv(90) ?? (ins.vol.hv30 ?? 0))
 
-        return PlannerContext(book: book, vol: vol, wash: nil, spot: pos.spot)
+        let wash = await fetchWash()
+        return PlannerContext(book: book, vol: vol, wash: wash, spot: pos.spot)
     }
 
     // MARK: interactions (mutate a selection, then re-call)
@@ -376,6 +511,6 @@ final class PlannerStore {
     func setRef(_ k: Double) { refStrike = k; apply() }
     func setConv(_ c: String) { conv = c; apply() }
     func toggleSource() { ivSource = ivSource == "nvda" ? "generic" : "nvda"; apply() }
-    func setSetting(_ mutate: (inout PlannerSettings) -> Void) { mutate(&settings); apply() }
-    func resetSettings() { settings = .default; apply() }
+    func setSetting(_ mutate: (inout PlannerSettings) -> Void) { mutate(&settings); saveSettings(); apply() }
+    func resetSettings() { settings = .default; saveSettings(); apply() }
 }
