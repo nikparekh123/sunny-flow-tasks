@@ -275,9 +275,9 @@ struct GateSectionView: View {
                 M("Contracts", 9, 0.16); Spacer(minLength: 0); N("\(Int(b.capacity)) ct", 20)
             }
             HStack(spacing: 10) {
-                M("\(grp(b.shares)) sh · \(Int(b.shortCallCt)) ct written", 8, 0.1)
+                M("\(grp(b.shares)) sh ÷ 100", 8, 0.1)
                 Spacer(minLength: 0)
-                M("\(grp(b.freeShares)) sh free", 8, 0.1, Ink.text)
+                M("\(Int(b.shortCallCt)) ct written · rolls into the next sale", 8, 0.1, Ink.text)
             }
         }
         .padding(EdgeInsets(top: 15, leading: 16, bottom: 16, trailing: 16))

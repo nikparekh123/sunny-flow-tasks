@@ -172,7 +172,10 @@ Deno.serve(async (req) => {
     wall: longCallsIn.length ? Math.min(...longCallsIn.map((l) => l.strike)) : Infinity,
     committedShares: shortCallCt * 100,
     freeShares: shares - shortCallCt * 100,
-    capacity: Math.max(0, Math.floor((shares - shortCallCt * 100) / 100)),
+    // Coverable contracts = ALL shares ÷ 100. This is a planning tool for the next
+    // sale/roll, so it plans against the whole share base (the open shorts get rolled),
+    // not just the uncommitted lots.
+    capacity: Math.max(0, Math.floor(shares / 100)),
     basis: 0,
   };
   book.basis = book.buyAvg - book.realizedPremium / (book.shares || 1);
