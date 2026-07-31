@@ -191,7 +191,13 @@ private struct TotalPositionCard: View {
     @ViewBuilder private var hero: some View {
         switch mode {
         case .position:
-            InkHero(value: nvUsd(committed))
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                InkRoll(text: nvUsd(committed), font: InkFont.mono(40, .medium), tracking: 40 * -0.04, color: Ink.text)
+                let pnl = p.sharesPL + p.optionsPL
+                let pct = committed != 0 ? pnl / committed * 100 : 0
+                InkDelta(value: nvDec(abs(pct), 2) + "%", good: pnl >= 0, size: 18)
+            }
+            .padding(.top, 24)
         case .delta:
             heroSplit(big: nvSigned(p.delta), bigUnit: "net delta · share equiv",
                       side: nvSigned(p.gamma), sideUnit: "gamma · per $1", sideColor: Ink.text)
@@ -202,7 +208,7 @@ private struct TotalPositionCard: View {
     private func heroSplit(big: String, bigUnit: String, side: String, sideUnit: String, sideColor: Color) -> some View {
         HStack(alignment: .bottom, spacing: 14) {
             VStack(alignment: .leading, spacing: 0) {
-                InkRoll(text: big, font: InkFont.mono(44, .light), tracking: 44 * -0.04, color: Ink.text)
+                InkRoll(text: big, font: InkFont.mono(44, .medium), tracking: 44 * -0.04, color: Ink.text)
                     .fixedSize()
                 Text(bigUnit.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
                     .foregroundStyle(Ink.dim).padding(.top, 12).lineLimit(1)
@@ -352,7 +358,7 @@ private struct ExposureFoot: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("STILL EXPOSED").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 Spacer()
-                InkDelta(value: nvInt(abs(net)), good: net >= 0, size: 22, weight: .light)
+                InkDelta(value: nvInt(abs(net)), good: net >= 0, size: 22, weight: .medium)
             }
             GeometryReader { g in
                 let ew = block > 0 ? CGFloat(exposed / block) * g.size.width : 0
@@ -382,12 +388,11 @@ private struct ValueFoot: View {
         let pnl = shares + options
         let worth = committed + pnl
         let mag = max(abs(shares) + abs(options), 1)
-        let pct = committed != 0 ? pnl / committed * 100 : 0
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 Text("WORTH NOW").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 Spacer()
-                InkRoll(text: nvUsd(worth), font: InkFont.mono(22, .light), tracking: 22 * -0.03, color: Ink.text)
+                InkRoll(text: nvUsd(worth), font: InkFont.mono(22, .medium), tracking: 22 * -0.03, color: Ink.text)
             }
             GeometryReader { g in
                 HStack(spacing: 0) {
@@ -400,11 +405,6 @@ private struct ValueFoot: View {
                 .background(Ink.hair)
             }
             .frame(height: 9).clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-            HStack(spacing: 10) {
-                Spacer(minLength: 0)
-                Text("\(pnl >= 0 ? "+" : "−")\(nvDec(abs(pct), 2))%")
-                    .font(InkFont.mono(11, .medium)).tracking(11 * 0.12).foregroundStyle(pnl >= 0 ? Ink.gain : Ink.loss).fixedSize()
-            }
         }
         .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
     }
@@ -437,7 +437,7 @@ private struct SleeveGroupCard: View {
                     InkBand(skin: .low, text: "\(leg.strikes.count) strike\(leg.strikes.count == 1 ? "" : "s")")
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 40, weight: .light)
+                    InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 40, weight: .medium)
                     Text("\(net >= 0 ? "open gain" : "open cost") · \(Int(ct.rounded())) ct across \(leg.strikes.count)".uppercased())
                         .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim)
                 }

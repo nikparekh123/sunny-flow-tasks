@@ -116,7 +116,7 @@ struct NvdaPerformanceScreen: View {
             InkBody(compact: true) {
                 InkEyebrow(n: "01", cat: "Realized") { InkBand(skin: .mod, text: "Closed") }
                 VStack(alignment: .leading, spacing: 0) {
-                    InkRoll(text: inkUsd(realized), font: InkFont.mono(38, .light), tracking: 38 * -0.04,
+                    InkRoll(text: inkUsd(realized), font: InkFont.mono(38, .medium), tracking: 38 * -0.04,
                             color: realized >= 0 ? Ink.text : Ink.loss)
                     Text("Realized · closed only".uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
                         .foregroundStyle(Ink.dim).padding(.top, 11)
@@ -138,7 +138,7 @@ struct NvdaPerformanceScreen: View {
                 // basis). Cushion (spot over it) + % move to the right, above the %.
                 Text("New average · after premium".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 HStack(alignment: .firstTextBaseline) {
-                    Text("$\(nv2Dec(p.breakEven, 2))").font(InkFont.mono(24, .light)).tracking(24 * -0.03).foregroundStyle(Ink.text)
+                    Text("$\(nv2Dec(p.breakEven, 2))").font(InkFont.mono(24, .medium)).tracking(24 * -0.03).foregroundStyle(Ink.text)
                     Spacer(minLength: 0)
                     VStack(alignment: .trailing, spacing: 2) {
                         InkDelta(value: "$\(nv2Dec(abs(p.cushion), 2))", good: p.cushion >= 0, size: 13)
@@ -249,7 +249,7 @@ struct NvdaInsightsScreen: View {
             InkFoot(compact: true) {
                 footLabel("Now · sell timing")
                 Text(v.building ? "—" : v.verdict.capitalized)
-                    .font(InkFont.mono(24, .light)).tracking(24 * -0.02).foregroundStyle(tint)
+                    .font(InkFont.mono(24, .medium)).tracking(24 * -0.02).foregroundStyle(tint)
                     .lineLimit(1).fixedSize()
                 footNote(v.building
                     ? "Score turns on once implied vol is streaming from the chain."
@@ -279,7 +279,7 @@ struct NvdaInsightsScreen: View {
             }
             InkFoot(compact: true, height: 132) {
                 footLabel("Cushion · spot over break-even")
-                InkDelta(value: "$" + nv2Dec(abs(p.cushion), 2), good: p.cushion >= 0, size: 24, weight: .light)
+                InkDelta(value: "$" + nv2Dec(abs(p.cushion), 2), good: p.cushion >= 0, size: 24, weight: .medium)
                 footNote("Spot sits \(nv2Dec(abs(p.cushionPct), 1))% \(p.cushion >= 0 ? "over" : "under") break-even — the puts floor the rest.")
             }
             InkStamp(state: .delayed, text: "Updated 16:00 · next at close", compact: true)
@@ -323,7 +323,7 @@ private struct VegaCardView: View {
                 // hero: what a move does · the coefficient
                 HStack(alignment: .bottom, spacing: 12) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(nvVegaMoney(total)).font(InkFont.mono(30, .light)).tracking(30 * -0.04)
+                        Text(nvVegaMoney(total)).font(InkFont.mono(30, .medium)).tracking(30 * -0.04)
                             .foregroundStyle(flat ? Ink.dim : (total >= 0 ? Ink.gain : Ink.loss)).lineLimit(1)
                         Text((flat ? "IV unchanged" : "if IV \(d > 0 ? "rises to" : "falls to") \(nv2Dec(curIv, 1))%").uppercased())
                             .font(InkFont.mono(8.5)).tracking(8.5 * 0.14).foregroundStyle(Ink.dim).padding(.top, 9).lineLimit(1)
@@ -351,7 +351,7 @@ private struct VegaCardView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Implied volatility".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                     Spacer()
-                    Text("\(nv2Dec(curIv, 1))%").font(InkFont.mono(22, .light)).tracking(22 * -0.03).foregroundStyle(Ink.text)
+                    Text("\(nv2Dec(curIv, 1))%").font(InkFont.mono(22, .medium)).tracking(22 * -0.03).foregroundStyle(Ink.text)
                 }
                 scrubber(curIv)
                 inkFig("Now \(nv2Dec(g.iv, 1))% · 30-day average \(nv2Dec(g.avg30, 1))%"
@@ -492,7 +492,7 @@ private struct TapeCardView: View {
                 InkEyebrow(n: n, cat: t.ticker) { InkBand(skin: .low, text: t.name) }
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(price.map { "$" + nv2Dec($0, 2) } ?? "—")
-                        .font(InkFont.mono(32, .light)).tracking(32 * -0.04).foregroundStyle(Ink.text)
+                        .font(InkFont.mono(32, .medium)).tracking(32 * -0.04).foregroundStyle(Ink.text)
                     if let pct { InkDelta(value: nv2Dec(abs(pct), 1) + "%", good: up, size: 17) }
                 }
                 .padding(.top, 20)
@@ -548,8 +548,8 @@ private struct TapeCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(label.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
             HStack(alignment: .firstTextBaseline) {
-                if let value { InkDelta(value: value, good: good, size: 24, weight: .light) }
-                else { Text("—").font(InkFont.mono(24, .light)).foregroundStyle(Ink.dim) }
+                if let value { InkDelta(value: value, good: good, size: 24, weight: .medium) }
+                else { Text("—").font(InkFont.mono(24, .medium)).foregroundStyle(Ink.dim) }
                 Spacer(minLength: 0)
                 Text(trailing).font(InkFont.mono(10.5)).foregroundStyle(Ink.dim)
             }
@@ -618,7 +618,7 @@ private struct HistoryCardView: View {
         return InkCard(height: 540) {
             InkBody {
                 InkEyebrow(n: "01", cat: "Gains & losses") { InkBand(skin: .mod, text: m.label) }
-                InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 36, weight: .light).padding(.top, 16)
+                InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 36, weight: .medium).padding(.top, 16)
                 Text("Net · \(m.label) · \(done) of \(bars.count) sessions".uppercased())
                     .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 9)
                 chart(bars).padding(.top, 16)
@@ -760,7 +760,7 @@ private struct HistoryCardView: View {
     private func col(_ k: String, _ v: String, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(k.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim)
-            Text(v).font(InkFont.mono(22, .light)).foregroundStyle(color)
+            Text(v).font(InkFont.mono(22, .medium)).foregroundStyle(color)
         }
     }
 }

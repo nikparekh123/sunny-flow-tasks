@@ -167,7 +167,7 @@ struct InkGauge: View {
                 InkArc(frac: frac).stroke(tint, style: .init(lineWidth: 9, lineCap: .round))
             }
             Text(building ? "—" : center)
-                .font(InkFont.mono(34, .light)).tracking(34 * -0.03)
+                .font(InkFont.mono(34, .medium)).tracking(34 * -0.03)
                 .foregroundStyle(building ? Ink.dim : Ink.text)
                 .padding(.bottom, 2)
         }
