@@ -142,7 +142,7 @@ struct NvdaPerformanceScreen: View {
                     Spacer(minLength: 0)
                     VStack(alignment: .trailing, spacing: 2) {
                         InkDelta(value: "$\(nv2Dec(abs(p.cushion), 2))", good: p.cushion >= 0, size: 13)
-                        Text("\(nv2Pct(p.cushionPct))").font(InkFont.mono(10.5)).foregroundStyle(Ink.dim)
+                        Text("\(nv2Pct(p.cushionPct))").font(InkFont.mono(11, .medium)).foregroundStyle(p.cushionPct >= 0 ? Ink.gain : Ink.loss)
                     }
                 }
             }
@@ -531,7 +531,7 @@ private struct TapeCardView: View {
                             .overlay { if d.pct == 0 { Circle().strokeBorder(Ink.dim, lineWidth: 1.5) } }
                             .frame(width: 9, height: 9)
                         Text((d.pct < 0 ? "−" : "+") + nv2Dec(abs(d.pct), 1))
-                            .font(InkFont.mono(10.5)).foregroundStyle(d.pct < 0 ? Ink.loss : Ink.text)
+                            .font(InkFont.mono(11, .medium)).foregroundStyle(d.pct < 0 ? Ink.loss : Ink.text)
                     }
                     .frame(maxWidth: .infinity)
                     .inkRelevance(day == nil || day == i ? .r1 : .r3)
