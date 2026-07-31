@@ -179,11 +179,12 @@ Deno.serve(async (req) => {
       const span = LOOKBACKS.map((L) => (prem - bsCall(spot, k, T, HV[L] / 100)) * 100);
       const edgeHi = Math.max(...span), edgeLo = Math.min(...span);
       const belowWall = k < wall;
+      const fin = (x: number) => (Number.isFinite(x) ? x : 0);        // never emit NaN/Infinity → JSON null
       chain.push({
         strike: +k.toFixed(2), prem, fair, sellable: prem >= .05,
         intrinsic, ext: prem - intrinsic, extPct: prem > 0 ? (prem - intrinsic) / prem : 0,
-        edge: (prem - fair) * 100, edgePct: (prem - fair) / prem,
-        edgeHi, edgeLo, edgePctHi: edgeHi / (prem * 100), edgePctLo: edgeLo / (prem * 100), edgeCrosses: edgeHi > 0 && edgeLo < 0,
+        edge: (prem - fair) * 100, edgePct: prem > 0 ? (prem - fair) / prem : 0,
+        edgeHi, edgeLo, edgePctHi: prem > 0 ? fin(edgeHi / (prem * 100)) : 0, edgePctLo: prem > 0 ? fin(edgeLo / (prem * 100)) : 0, edgeCrosses: edgeHi > 0 && edgeLo < 0,
         assign: bsAssign(spot, k, T, iv / 100), delta: d1,
         effective: k + prem, vsBasis: k + prem - book.basis,
         side: belowWall ? 'adverse' : k === wall ? 'matched' : 'favorable',

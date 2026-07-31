@@ -59,6 +59,31 @@ struct PRung: Decodable, Sendable, Identifiable {
     let side: String
     let advCost, affected: Double
     var id: Double { strike }
+
+    enum CodingKeys: String, CodingKey {
+        case strike, prem, fair, sellable, intrinsic, ext, extPct, edge, edgePct, edgeHi, edgeLo, edgePctHi, edgePctLo, edgeCrosses, assign, delta, effective, vsBasis, side, advCost, affected
+    }
+    init(strike: Double, prem: Double, fair: Double, sellable: Bool, intrinsic: Double, ext: Double, extPct: Double,
+         edge: Double, edgePct: Double, edgeHi: Double, edgeLo: Double, edgePctHi: Double, edgePctLo: Double,
+         edgeCrosses: Bool, assign: Double, delta: Double, effective: Double, vsBasis: Double, side: String, advCost: Double, affected: Double) {
+        self.strike = strike; self.prem = prem; self.fair = fair; self.sellable = sellable; self.intrinsic = intrinsic
+        self.ext = ext; self.extPct = extPct; self.edge = edge; self.edgePct = edgePct; self.edgeHi = edgeHi; self.edgeLo = edgeLo
+        self.edgePctHi = edgePctHi; self.edgePctLo = edgePctLo; self.edgeCrosses = edgeCrosses; self.assign = assign
+        self.delta = delta; self.effective = effective; self.vsBasis = vsBasis; self.side = side; self.advCost = advCost; self.affected = affected
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // Zero-premium strikes make the edge emit null (NaN) for the ratio fields;
+        // default any missing/null Double to 0 so decoding never fails.
+        func d(_ k: CodingKeys) -> Double { ((try? c.decodeIfPresent(Double.self, forKey: k)) ?? nil) ?? 0 }
+        func b(_ k: CodingKeys) -> Bool { ((try? c.decodeIfPresent(Bool.self, forKey: k)) ?? nil) ?? false }
+        strike = d(.strike); prem = d(.prem); fair = d(.fair); sellable = b(.sellable)
+        intrinsic = d(.intrinsic); ext = d(.ext); extPct = d(.extPct); edge = d(.edge); edgePct = d(.edgePct)
+        edgeHi = d(.edgeHi); edgeLo = d(.edgeLo); edgePctHi = d(.edgePctHi); edgePctLo = d(.edgePctLo)
+        edgeCrosses = b(.edgeCrosses); assign = d(.assign); delta = d(.delta); effective = d(.effective); vsBasis = d(.vsBasis)
+        side = (try? c.decode(String.self, forKey: .side)) ?? "favorable"
+        advCost = d(.advCost); affected = d(.affected)
+    }
 }
 
 struct PExpiry: Decodable, Sendable, Identifiable {
