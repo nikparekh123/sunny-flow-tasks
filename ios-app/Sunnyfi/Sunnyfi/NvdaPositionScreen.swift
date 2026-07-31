@@ -403,7 +403,7 @@ private struct ValueFoot: View {
             HStack(spacing: 10) {
                 Spacer(minLength: 0)
                 Text("\(pnl >= 0 ? "+" : "−")\(nvDec(abs(pct), 2))%")
-                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(pnl >= 0 ? Ink.gain : Ink.loss).fixedSize()
+                    .font(InkFont.mono(9.5, .medium)).tracking(9.5 * 0.12).foregroundStyle(pnl >= 0 ? Ink.gain : Ink.loss).fixedSize()
             }
         }
         .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
