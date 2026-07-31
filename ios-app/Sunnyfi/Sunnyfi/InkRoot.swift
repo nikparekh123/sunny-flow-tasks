@@ -83,11 +83,11 @@ struct InkRoot: View {
                                                        value: g.frame(in: .named("inkScroll")).minY)
                             })
                         NvdaPositionScreen(store: store)
+                        plannerOpen.padding(.top, 4).padding(.bottom, 8)
                         NvdaPerformanceScreen(store: store)
                         NvdaInsightsScreen(store: store)
                         NvdaPeersScreen(store: store)
                         NvdaHistoryScreen(store: store)
-                        plannerOpen.padding(.top, 8)
                         Color.clear.frame(height: 104)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
