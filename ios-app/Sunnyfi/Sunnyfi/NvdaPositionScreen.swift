@@ -246,8 +246,8 @@ private struct TotalPositionCard: View {
             }
             Spacer(minLength: 0)
             HStack(spacing: 12) {
-                Text(qty).font(InkFont.mono(12)).foregroundStyle(Ink.dim)
-                Text(basis).font(InkFont.mono(12)).foregroundStyle(Ink.text).frame(minWidth: 84, alignment: .trailing)
+                Text(qty).font(InkFont.mono(12)).foregroundStyle(Ink.text)
+                Text(basis).font(InkFont.mono(12, .medium)).foregroundStyle(Ink.text).frame(minWidth: 84, alignment: .trailing)
             }
         }
         .padding(.vertical, 13)
