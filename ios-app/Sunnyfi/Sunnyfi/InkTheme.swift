@@ -39,7 +39,7 @@ enum Ink {
     static let canvas     = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
     static let surface    = inkDyn(UIColor(inkHex: 0x1A1A19), UIColor(inkHex: 0xFFFFFF))
     static let text       = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
-    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.78), UIColor(inkHex: 0x5C594F))
+    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.84), UIColor(inkHex: 0x4A473F))
     static let hair       = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.07), UIColor(inkHex: 0xEBE9E2))
     static let invertBg   = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
     static let invertText = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
@@ -71,7 +71,9 @@ enum Ink {
 // MARK: - Relevance (Law 2 — opacity is relevance)
 
 enum InkRelevance: Double {
-    case r1 = 1.0, r2 = 0.68, r3 = 0.42, r4 = 0.26
+    // Floors raised for readability — secondary content stays legible rather than
+    // fading to near-invisible. Hierarchy is still present, just gentler.
+    case r1 = 1.0, r2 = 0.88, r3 = 0.74, r4 = 0.6
 }
 
 extension View {
