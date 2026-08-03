@@ -36,7 +36,7 @@ private struct NvCompactHero: View {
     var color: Color = Ink.text
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            InkRoll(text: value, font: InkFont.mono(size, .light), tracking: size * -0.03, color: color)
+            InkRoll(text: value, font: InkFont.mono(size, .medium), tracking: size * -0.03, color: color)
             if let unit {
                 Text(unit.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16)
                     .foregroundStyle(Ink.dim).padding(.top, 10)
@@ -81,7 +81,7 @@ struct NvdaPerformanceScreen: View {
     var body: some View {
         if let p = store.perf {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "How it has performed", count: "\(p.sleeves.count + 1) cards")
+                InkSectionHead(title: "How it has performed", count: "\(p.sleeves.filter { !$0.empty }.count + 1) cards")
                 rail(p)
             }
         } else if !store.isLoading {
@@ -90,10 +90,8 @@ struct NvdaPerformanceScreen: View {
     }
 
     private func rail(_ p: NvPerf) -> some View {
-        // empty sleeves drift to the back at r3
-        let sleeves = p.sleeves.enumerated().sorted {
-            ($0.element.empty ? 1 : 0, $0.offset) < ($1.element.empty ? 1 : 0, $1.offset)
-        }.map { $0.element }
+        // Empty sleeves (e.g. Puts sold with no short puts) are hidden entirely.
+        let sleeves = p.sleeves.filter { !$0.empty }
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 10) {
                 profitCard(p).inkEntrance(0)
@@ -115,13 +113,9 @@ struct NvdaPerformanceScreen: View {
         return InkCard(compact: true) {
             InkBody(compact: true) {
                 InkEyebrow(n: "01", cat: "Realized") { InkBand(skin: .mod, text: "Closed") }
-                VStack(alignment: .leading, spacing: 0) {
-                    InkRoll(text: inkUsd(realized), font: InkFont.mono(38, .medium), tracking: 38 * -0.04,
-                            color: realized >= 0 ? Ink.text : Ink.loss)
-                    Text("Realized · closed only".uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
-                        .foregroundStyle(Ink.dim).padding(.top, 11)
-                }
-                .padding(.top, 22)
+                InkRoll(text: inkUsd(realized), font: InkFont.mono(38, .medium), tracking: 38 * -0.04,
+                        color: realized >= 0 ? Ink.text : Ink.loss)
+                    .padding(.top, 22)
                 // Break the hero into what it's actually made of, so it reconciles
                 // on the card: shares + options = realized. No "open" number here —
                 // this card is closed-only; open premium lives on its sleeve.
@@ -169,7 +163,6 @@ struct NvdaPerformanceScreen: View {
                     InkSpacer()
                 } else {
                     NvCompactHero(value: realizedZero ? "$0" : nv2Money(s.realized),
-                                  unit: realizedZero ? "nothing realised yet" : "realised · booked",
                                   size: 34, color: realizedZero ? Ink.dim : Ink.signed(s.realized >= 0))
                     InkSpacer()
                     InkBand3(items: [(s.basisLabel, inkUsd(s.basis)), (qtyLabel, "\(s.total)")])
@@ -370,7 +363,7 @@ private struct VegaCardView: View {
             Text(glyphFor(leg.kind, leg.side)).font(.system(size: 10)).foregroundStyle(Ink.dim).frame(width: 11, alignment: .leading)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(leg.name).font(InkFont.display(12.5, .light)).foregroundStyle(Ink.text)
-                Text("\(leg.ct) ct").font(InkFont.mono(8)).tracking(8 * 0.1).foregroundStyle(Ink.dim)
+                Text("\(leg.ct) ct").font(InkFont.mono(8)).tracking(8 * 0.1).foregroundStyle(Ink.text)
             }.frame(width: 104, alignment: .leading).lineLimit(1)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -712,7 +705,7 @@ private struct HistoryCardView: View {
     private func chip(_ label: String, _ glyph: String?, active: Bool, dashed: Bool) -> some View {
         HStack(spacing: 5) {
             if let glyph { Text(glyph).font(.system(size: 9)) }
-            Text(label.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.08)
+            Text(label.uppercased()).font(InkFont.mono(9.5, .medium)).tracking(9.5 * 0.08)
         }
         .foregroundStyle(active ? Ink.invertText : Ink.dim)
         .padding(.horizontal, 9).frame(minHeight: 26)

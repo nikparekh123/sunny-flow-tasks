@@ -253,7 +253,7 @@ struct NvdaEventsScreen: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Ink.hair).frame(height: 1) }
     }
     private func chip(_ text: String, on: Bool) -> some View {
-        Text(text.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.14)
+        Text(text.uppercased()).font(InkFont.mono(9.5, .medium)).tracking(9.5 * 0.14)
             .foregroundStyle(on ? Ink.invertText : Ink.dim)
             .padding(.horizontal, 12).frame(minHeight: 28)
             .background(RoundedRectangle(cornerRadius: Ink.radiusElement).fill(on ? Ink.invertBg : .clear))
@@ -514,7 +514,7 @@ private struct InkSegment: View {
             ForEach(AppPrefs.Appearance.allCases) { a in
                 let on = a == sel
                 Button { prefs.appearance = a } label: {
-                    Text(a.rawValue.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.1)
+                    Text(a.rawValue.uppercased()).font(InkFont.mono(9.5, .medium)).tracking(9.5 * 0.1)
                         .foregroundStyle(on ? Ink.invertText : Ink.dim)
                         .frame(maxWidth: .infinity).padding(.vertical, 7)
                         .background {

@@ -528,7 +528,7 @@ private struct LegDetail: View {
                     Text(nvStrike(s.strike)).font(InkFont.mono(14.5)).tracking(14.5 * -0.01).foregroundStyle(Ink.text)
                     Text("\(s.expiry) · \(s.dte)".uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1).foregroundStyle(Ink.dim)
                     Spacer(minLength: 0)
-                    Text("\(Int(s.ct)) ct").font(InkFont.mono(12)).foregroundStyle(Ink.dim)
+                    Text("\(Int(s.ct)) ct").font(InkFont.mono(12)).foregroundStyle(Ink.text)
                 }
                 .padding(.vertical, 11)
                 .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }

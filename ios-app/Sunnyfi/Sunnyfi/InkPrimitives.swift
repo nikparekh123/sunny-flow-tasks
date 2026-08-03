@@ -15,15 +15,13 @@ import SwiftUI
 
 // MARK: - Formatting (display only)
 
-/// Compact USD, matching the prototype `usd()`: $X.XXM for millions, else $rounded.
+/// Compact USD: $1.85M for millions, $100K / $12.3K for thousands, else grouped.
 func inkUsd(_ n: Double) -> String {
-    let a = abs(n)
-    if a >= 1_000_000 {
-        let m = n / 1_000_000
-        return "$" + String(format: a >= 10_000_000 ? "%.1f" : "%.2f", m)
-            .replacingOccurrences(of: #"\.0+$"#, with: "", options: .regularExpression) + "M"
-    }
-    return "$" + Int(n.rounded()).formatted(.number.grouping(.automatic))
+    let a = abs(n), sign = n < 0 ? "−" : ""
+    func trim(_ s: String) -> String { s.replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression) }
+    if a >= 1_000_000 { return sign + "$" + trim(String(format: a >= 10_000_000 ? "%.1f" : "%.2f", a / 1_000_000)) + "M" }
+    if a >= 1_000 { return sign + "$" + trim(String(format: a >= 100_000 ? "%.0f" : "%.1f", a / 1_000)) + "K" }
+    return sign + "$" + Int(a.rounded()).formatted(.number.grouping(.automatic))
 }
 
 // MARK: - Small shapes / modifiers
@@ -180,15 +178,13 @@ struct InkGauge: View {
 
 struct InkDelta: View {
     var value: String
-    var good: Bool?                 // nil = flat → renders `·`
+    var good: Bool?                 // nil = flat (dim), else gain/loss colour — no arrow
     var size: CGFloat = 17
     var weight: Font.Weight = .regular
+    // Colour alone carries P&L direction; arrows are intentionally omitted so every
+    // hero number reads the same way (white = value, green/red = P&L).
     var body: some View {
-        HStack(spacing: size > 24 ? 9 : 6) {
-            InkRoll(text: value, font: InkFont.mono(size, weight), color: Ink.signed(good))
-            Text(good == nil ? "·" : (good! ? "↑" : "↓")).font(InkFont.mono(size * 0.82))
-                .foregroundStyle(Ink.signed(good))
-        }
+        InkRoll(text: value, font: InkFont.mono(size, weight), color: Ink.signed(good))
     }
 }
 
