@@ -60,13 +60,22 @@ struct InkSectionHead: View {
     let title: String
     var count: String? = nil
     var action: String? = nil
+    var icon: String? = nil                 // SF Symbol → circular action button on the right
     var onAction: (() -> Void)? = nil
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             Text(title).font(InkFont.serif(29)).tracking(29 * -0.01)
                 .foregroundStyle(Ink.text).lineLimit(1).fixedSize()
             Spacer(minLength: 0)
+            if let icon {
+                Button { onAction?() } label: {
+                    Image(systemName: icon).font(.system(size: 15, weight: .regular)).foregroundStyle(Ink.text)
+                        .frame(width: 34, height: 34)
+                        .overlay(Circle().strokeBorder(Ink.hair, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
             VStack(alignment: .trailing, spacing: 5) {
                 if let count, !count.isEmpty {
                     Text(count).font(InkFont.mono(10.5)).tracking(10.5 * 0.16).foregroundStyle(Ink.dim)

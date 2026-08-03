@@ -41,7 +41,7 @@ struct NvdaPositionScreen: View {
     var body: some View {
         if let p = store.position {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Portfolio")
+                InkSectionHead(title: "Portfolio", icon: "scope", onAction: onPlan)
                 rail(p)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

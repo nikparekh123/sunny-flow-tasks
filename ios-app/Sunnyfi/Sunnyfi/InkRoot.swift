@@ -49,28 +49,6 @@ struct InkRoot: View {
         }
     }
 
-    /// "Plan the next sale" — the entry card into the full-screen Planner.
-    private var plannerOpen: some View {
-        Button { showPlanner = true } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("Plan the next sale").font(InkFont.serif(17)).tracking(17 * -0.01).foregroundStyle(Ink.text)
-                    Text("NVDA · NEXT SHORT CALL · GATE → STRIKE → COMMIT")
-                        .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .regular)).foregroundStyle(Ink.dim)
-            }
-            .padding(EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16))
-            .background(RoundedRectangle(cornerRadius: Ink.radiusCard).fill(Ink.surface))
-            .overlay(alignment: .leading) { Rectangle().fill(Ink.text).frame(width: 2) }
-            .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard).strokeBorder(Ink.hair, lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: Ink.radiusCard))
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-    }
-
     @ViewBuilder private var content: some View {
         switch tab {
         case 0:
@@ -82,8 +60,7 @@ struct InkRoot: View {
                                 Color.clear.preference(key: InkScrollOffsetKey.self,
                                                        value: g.frame(in: .named("inkScroll")).minY)
                             })
-                        NvdaPositionScreen(store: store)
-                        plannerOpen.padding(.top, 4).padding(.bottom, 8)
+                        NvdaPositionScreen(store: store, onPlan: { showPlanner = true })
                         NvdaPerformanceScreen(store: store)
                         NvdaInsightsScreen(store: store)
                         NvdaPeersScreen(store: store)
