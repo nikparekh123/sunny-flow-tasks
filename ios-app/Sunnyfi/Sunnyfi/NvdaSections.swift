@@ -110,21 +110,12 @@ struct NvdaPerformanceScreen: View {
     private func profitCard(_ p: NvPerf) -> some View {
         let g = store.pnl
         let realized = g?.realized ?? p.realized
-        return InkCard(compact: true, stamp: (.delayed, "End of day · booked at close")) {
+        return InkCard(compact: true, height: 236, stamp: (.delayed, "End of day · booked at close")) {
             InkBody(compact: true) {
                 InkEyebrow(n: "01", cat: "Realized") { InkBand(skin: .mod, text: "Closed") }
                 InkRoll(text: inkUsd(realized), font: InkFont.mono(38, .medium), tracking: 38 * -0.04,
                         color: realized >= 0 ? Ink.text : Ink.loss)
                     .padding(.top, 22)
-                // Break the hero into what it's actually made of, so it reconciles
-                // on the card: shares + options = realized. No "open" number here —
-                // this card is closed-only; open premium lives on its sleeve.
-                InkBullets(items: g.map { g in [
-                    "Shares \(nv2Money(g.realizedStock)) · options \(nv2Money(g.realized - g.realizedStock))",
-                    "Closed only · open P&L shows on Portfolio",
-                ] } ?? [
-                    "$\(nv2Dec(p.perShare, 2)) a share collected, calls only",
-                ])
                 InkSpacer()
             }
             InkFoot(compact: true) {
@@ -143,37 +134,19 @@ struct NvdaPerformanceScreen: View {
         }
     }
 
+    // Minimal sleeve card: name + qty pill + realized hero. Empty sleeves are
+    // filtered out upstream, so only live sleeves render here.
     private func sleeveCard(_ s: NvPerfSleeve) -> some View {
-        // This section is REALIZED performance — the headline is realized only.
-        // Open mark gains (e.g. unclosed long puts) are shown separately as
-        // "Open · unrealised" so they never read as booked profit.
         let realizedZero = abs(s.realized) < 1
-        let isShares = s.name == "Shares"
-        let unit = isShares ? "sh" : "ct"
-        let qtyLabel = isShares ? "Quantity" : "Contracts"
-        return InkCard(relevance: s.empty ? .r3 : .r1, compact: true, stamp: (.delayed, "End of day · booked at close")) {
+        let unit = s.name == "Shares" ? "sh" : "ct"
+        return InkCard(compact: true, height: 236, stamp: (.delayed, "End of day · booked at close")) {
             InkBody(compact: true) {
                 InkEyebrow(cat: s.name, glyph: s.glyph) {
-                    InkBand(skin: s.empty ? .low : .mod, text: s.empty ? (isShares ? "None held" : "None open") : "\(s.total) \(unit)")
+                    InkBand(skin: .mod, text: "\(s.total) \(unit)")
                 }
-                if s.empty {
-                    NvCompactHero(value: "—", unit: isShares ? "no shares held" : "nothing written", size: 34, color: Ink.dim)
-                    InkBullets(items: ["No \(s.name.lowercased()) on the book"])
-                    InkSpacer()
-                } else {
-                    NvCompactHero(value: realizedZero ? "$0" : nv2Money(s.realized),
-                                  size: 34, color: realizedZero ? Ink.dim : Ink.signed(s.realized >= 0))
-                    InkSpacer()
-                    InkBand3(items: [(s.basisLabel, inkUsd(s.basis)), (qtyLabel, "\(s.total)")])
-                }
-            }
-            InkFoot(compact: true) {
-                if s.empty {
-                    Text("Sleeve appears once a leg is written.")
-                        .font(InkFont.display(12, .light)).foregroundStyle(Ink.dim)
-                } else {
-                    NvLedger2(a: ("Realised", s.realized), b: ("Open · unrealised", s.unrealized))
-                }
+                NvCompactHero(value: realizedZero ? "$0" : nv2Money(s.realized),
+                              size: 34, color: realizedZero ? Ink.dim : Ink.signed(s.realized >= 0))
+                InkSpacer()
             }
         }
     }
