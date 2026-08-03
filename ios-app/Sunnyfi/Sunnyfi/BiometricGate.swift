@@ -18,22 +18,22 @@ struct BiometricGate: View {
 
     var body: some View {
         ZStack {
-            Color.theme.page.ignoresSafeArea()
+            Ink.canvas.ignoresSafeArea()
 
             VStack(spacing: 24) {
                 Spacer()
 
                 Image(systemName: lock.biometricKind.icon)
                     .font(.system(size: 64, weight: .regular))
-                    .foregroundStyle(Color.theme.neon)
+                    .foregroundStyle(Ink.text)
 
                 Text("Sunnyfi is locked")
-                    .font(.ui(size: 22, weight: .bold))
-                    .foregroundStyle(Color.theme.fg1)
+                    .font(InkFont.serif(22)).tracking(22 * -0.01)
+                    .foregroundStyle(Ink.text)
 
                 Text("Unlock with \(lock.biometricKind.label).")
-                    .font(.ui(size: 13))
-                    .foregroundStyle(Color.theme.fg3)
+                    .font(InkFont.display(13, .light))
+                    .foregroundStyle(Ink.dim)
 
                 Spacer()
 
@@ -42,24 +42,24 @@ struct BiometricGate: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: lock.biometricKind.icon)
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 16, weight: .semibold))
                         Text("Unlock")
-                            .font(.ui(size: 15, weight: .bold))
+                            .font(InkFont.mono(13, .medium)).tracking(13 * 0.08)
                     }
-                    .foregroundStyle(Color.theme.onNeon)
+                    .foregroundStyle(Ink.invertText)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Capsule().fill(Color.theme.neon))
+                    .padding(.vertical, 16)
+                    .background(Capsule().fill(Ink.invertBg))
                 }
-                .buttonStyle(.pressable)
+                .buttonStyle(.plain)
                 .padding(.horizontal, 24)
 
                 Button {
                     showPincodeFallback = true
                 } label: {
                     Text("Use 10-digit code instead")
-                        .font(.ui(size: 12, weight: .semibold))
-                        .foregroundStyle(Color.theme.fg3)
+                        .font(InkFont.mono(11, .medium)).tracking(11 * 0.1)
+                        .foregroundStyle(Ink.dim)
                 }
                 .padding(.bottom, 30)
             }
@@ -113,8 +113,8 @@ private struct PincodeFallback: View {
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(Color.theme.fg2)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Ink.text)
                     .padding(12)
             }
             .padding(.top, 8)
