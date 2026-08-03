@@ -389,16 +389,19 @@ struct InkStamp: View {
     var text: String
     var compact: Bool = false
     var flat: Bool = false
+    // Bright briefly on a fresh render, then settles to a minimally-visible grey.
+    @State private var settled = false
 
     var body: some View {
         HStack(spacing: 8) {
             dot
             Text(text.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1)
-                .foregroundStyle(Ink.dim).lineLimit(1).truncationMode(.tail)
+                .foregroundStyle(Ink.text.opacity(settled ? 0.4 : 0.72)).lineLimit(1).truncationMode(.tail)
         }
         .frame(height: 30).frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, compact ? 18 : 22)
         .overlay(alignment: .top) { if !flat { Rectangle().fill(Ink.hair).frame(height: 1) } }
+        .onAppear { settled = false; withAnimation(.easeInOut(duration: 2.5).delay(6)) { settled = true } }
     }
 
     @ViewBuilder private var dot: some View {
