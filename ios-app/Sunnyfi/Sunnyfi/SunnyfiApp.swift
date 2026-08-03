@@ -75,8 +75,8 @@ private struct RootView: View {
         switch auth.state {
         case .loading:
             ZStack {
-                Color.theme.page.ignoresSafeArea()
-                ProgressView().tint(.theme.neon)
+                Ink.canvas.ignoresSafeArea()
+                ProgressView().tint(Ink.dim)
             }
             .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)
 
