@@ -196,18 +196,33 @@ struct InkCard<Content: View>: View {
     var spine: Spine? = nil
     var compact: Bool = false
     var height: CGFloat? = nil
+    /// Freshness line, rendered as a caption BELOW the card surface (not inside it).
+    var stamp: (state: InkStamp.FreshState, text: String)? = nil
     @ViewBuilder var content: Content
 
+    private var w: CGFloat { compact ? 306 : 348 }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            surface
+            if let stamp {
+                InkStamp(state: stamp.state, text: stamp.text, compact: compact, flat: true)
+                    .frame(width: w, alignment: .leading)
+            }
+        }
+        .frame(width: w, alignment: .leading)
+        .inkRelevance(relevance)
+    }
+
+    private var surface: some View {
         ZStack(alignment: .leading) {
             Ink.surface
             spineView
             VStack(spacing: 0) { content }
         }
-        .frame(width: compact ? 306 : 348, height: height ?? (compact ? 374 : 530), alignment: .top)
+        .frame(width: w, height: height ?? (compact ? 374 : 530), alignment: .top)
         .clipShape(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).strokeBorder(Ink.hair, lineWidth: 1))
-        .inkRelevance(relevance)
     }
 
     @ViewBuilder private var spineView: some View {

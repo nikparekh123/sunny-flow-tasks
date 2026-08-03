@@ -140,7 +140,7 @@ private struct TotalPositionCard: View {
     private var committed: Double { p.sharesPaid + optBought - optSold }   // capital at work
 
     var body: some View {
-        InkCard {
+        InkCard(stamp: (stampState(p.fresh), stampText)) {
             InkBody {
                 InkEyebrow(cat: "Total position")
                 switcher
@@ -154,7 +154,6 @@ private struct TotalPositionCard: View {
                 }
             }
             InkFoot { foot }
-            InkStamp(state: stampState(p.fresh), text: stampText)
         }
     }
 
@@ -431,7 +430,7 @@ private struct SleeveGroupCard: View {
         let net = short ? basis - cur : cur - basis
         let soonest = leg.strikes.map { $0.expired ? 0 : (Int($0.dte.prefix(while: \.isNumber)) ?? 999) }.min() ?? 999
         let cat = pageCount > 1 ? "\(leg.label) · \(page + 1)/\(pageCount)" : leg.label
-        return InkCard {
+        return InkCard(stamp: (stampState(fresh), soonest <= 1 ? "Updated now · nearest leg expires today" : freshText)) {
             InkBody {
                 InkEyebrow(n: n, cat: cat, glyph: leg.glyph) {
                     InkBand(skin: .low, text: "\(leg.strikes.count) strike\(leg.strikes.count == 1 ? "" : "s")")
@@ -464,7 +463,6 @@ private struct SleeveGroupCard: View {
                     InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 17)
                 }
             }
-            InkStamp(state: stampState(fresh), text: soonest <= 1 ? "Updated now · nearest leg expires today" : freshText)
         }
     }
 }

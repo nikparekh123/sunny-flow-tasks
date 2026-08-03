@@ -110,7 +110,7 @@ struct NvdaPerformanceScreen: View {
     private func profitCard(_ p: NvPerf) -> some View {
         let g = store.pnl
         let realized = g?.realized ?? p.realized
-        return InkCard(compact: true) {
+        return InkCard(compact: true, stamp: (.delayed, "End of day · booked at close")) {
             InkBody(compact: true) {
                 InkEyebrow(n: "01", cat: "Realized") { InkBand(skin: .mod, text: "Closed") }
                 InkRoll(text: inkUsd(realized), font: InkFont.mono(38, .medium), tracking: 38 * -0.04,
@@ -140,7 +140,6 @@ struct NvdaPerformanceScreen: View {
                     }
                 }
             }
-            InkStamp(state: .delayed, text: "End of day · booked at close", compact: true)
         }
     }
 
@@ -152,7 +151,7 @@ struct NvdaPerformanceScreen: View {
         let isShares = s.name == "Shares"
         let unit = isShares ? "sh" : "ct"
         let qtyLabel = isShares ? "Quantity" : "Contracts"
-        return InkCard(relevance: s.empty ? .r3 : .r1, compact: true) {
+        return InkCard(relevance: s.empty ? .r3 : .r1, compact: true, stamp: (.delayed, "End of day · booked at close")) {
             InkBody(compact: true) {
                 InkEyebrow(cat: s.name, glyph: s.glyph) {
                     InkBand(skin: s.empty ? .low : .mod, text: s.empty ? (isShares ? "None held" : "None open") : "\(s.total) \(unit)")
@@ -176,7 +175,6 @@ struct NvdaPerformanceScreen: View {
                     NvLedger2(a: ("Realised", s.realized), b: ("Open · unrealised", s.unrealized))
                 }
             }
-            InkStamp(state: .delayed, text: "End of day · booked at close", compact: true)
         }
     }
 }
@@ -217,7 +215,7 @@ struct NvdaInsightsScreen: View {
     }
     private func volatilityCard(_ v: NvVol) -> some View {
         let tint = zoneTint(v)
-        return InkCard(compact: true, height: 452) {
+        return InkCard(compact: true, height: 452, stamp: (.delayed, v.building ? "Building · IV feed pending" : "Updated · every 30 min")) {
             InkBody(compact: true) {
                 InkEyebrow(n: "01", cat: "Volatility") {
                     InkBand(skin: v.building ? .low : .hue(tint), text: v.building ? "Building" : v.verdict)
@@ -251,13 +249,12 @@ struct NvdaInsightsScreen: View {
                             ? "options rich, favourable to sell calls."
                             : "options cheap — reduce or skip this cycle."))
             }
-            InkStamp(state: .delayed, text: v.building ? "Building · IV feed pending" : "Updated · every 30 min", compact: true)
         }
     }
 
     // 02 · Protection — gauge is % of shares floored by puts
     private func protectionCard(_ p: NvProtection) -> some View {
-        InkCard(compact: true, height: 452) {
+        InkCard(compact: true, height: 452, stamp: (.delayed, "Updated 16:00 · next at close")) {
             InkBody(compact: true) {
                 InkEyebrow(n: "02", cat: "Protection") {
                     InkBand(skin: p.empty ? .low : .mod, text: p.empty ? "Unhedged" : "\(p.putContracts) puts")
@@ -275,7 +272,6 @@ struct NvdaInsightsScreen: View {
                 InkDelta(value: "$" + nv2Dec(abs(p.cushion), 2), good: p.cushion >= 0, size: 24, weight: .medium)
                 footNote("Spot sits \(nv2Dec(abs(p.cushionPct), 1))% \(p.cushion >= 0 ? "over" : "under") break-even — the puts floor the rest.")
             }
-            InkStamp(state: .delayed, text: "Updated 16:00 · next at close", compact: true)
         }
     }
 
@@ -309,7 +305,7 @@ private struct VegaCardView: View {
         let total = g.net * d
         let flat = abs(d) < 0.05
         let maxImpact = max(g.legs.map { abs($0.v * d) }.max() ?? 1, 1)
-        return InkCard(compact: true, height: 452) {
+        return InkCard(compact: true, height: 452, stamp: (.delayed, "Updated · streams with the chain")) {
             InkBody(compact: true) {
                 InkEyebrow(n: "03", cat: "Vega") { InkBand(skin: .mod, text: g.stance) }
 
@@ -351,7 +347,6 @@ private struct VegaCardView: View {
                     + (g.daysToEarnings.map { " · earnings in \($0) days." } ?? "."))
                     .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
             }
-            InkStamp(state: .delayed, text: "Updated · streams with the chain", compact: true)
         }
         .onAppear { if iv < 0 { iv = g.avg30 } }
     }
@@ -480,7 +475,7 @@ private struct TapeCardView: View {
         let price = sel?.close ?? t.last
         let pct = sel?.pct ?? t.net
         let up = pct.map { $0 >= 0 }
-        return InkCard(compact: true, height: 392) {
+        return InkCard(compact: true, height: 392, stamp: (stamp2(fresh), "Updated now · streaming")) {
             InkBody(compact: true) {
                 InkEyebrow(n: n, cat: t.ticker) { InkBand(skin: .low, text: t.name) }
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -506,7 +501,6 @@ private struct TapeCardView: View {
                              trailing: (t.vsNvda.map { $0 >= 0 ? "ahead of you" : "behind you" }) ?? "")
                 }
             }
-            InkStamp(state: stamp2(fresh), text: "Updated now · streaming", compact: true, flat: true)
         }
     }
 
@@ -608,7 +602,7 @@ private struct HistoryCardView: View {
         let net = gains + losses
         let done = bars.filter { !$0.pending }.count
         let sel = pick.flatMap { bars.indices.contains($0) ? bars[$0] : nil }
-        return InkCard(height: 540) {
+        return InkCard(height: 540, stamp: (.delayed, "Updated 16:00 · next at close")) {
             InkBody {
                 InkEyebrow(n: "01", cat: "Gains & losses") { InkBand(skin: .mod, text: m.label) }
                 InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 36, weight: .medium).padding(.top, 16)
@@ -622,7 +616,6 @@ private struct HistoryCardView: View {
             InkFoot {
                 if let sel { sessionFoot(sel) } else { totalsFoot(gains, losses) }
             }
-            InkStamp(state: .delayed, text: "Updated 16:00 · next at close")
         }
     }
 
