@@ -88,11 +88,12 @@ struct InkRoll: View {
     @State private var t: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
-        // Numbers hold one line — never a lone "−" wrapped above the figure. (No
-        // minimumScaleFactor here: it fought the count-up's changing width and
-        // shrank rolled integers. Compact K/M keeps figures inside their column.)
+        // Numbers render at their ideal width — never wrapped (a lone "−" above the
+        // figure), truncated ("$71…"), or shrunk. fixedSize beats the column's space
+        // distribution; compact K/M keeps every figure inside its card.
         Text("").modifier(InkRollMod(t: reduce ? 1 : t, text: text, font: font, tracking: tracking, color: color))
             .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .onAppear {
                 guard !reduce else { return }
                 t = 0
