@@ -50,6 +50,7 @@ struct NvdaPositionScreen: View {
     let store: NvdaStore
     var onPlan: () -> Void = {}
     var showPlan: Bool = true          // the planner entry is NVDA-only
+    @State private var avgDown = false // Average-down pull-out, lifted so it's its own snap target
 
     var body: some View {
         if let p = store.position {
@@ -87,11 +88,17 @@ struct NvdaPositionScreen: View {
     }
 
     private func groups(_ p: NvPosition) -> [RailGroup] {
+        var sharesCards: [AnyView] = [
+            AnyView(SharesCard(p: p, perShare: store.perf?.perShare ?? 0, open: avgDown,
+                               onToggle: { withAnimation(InkMotion.ease(0.3)) { avgDown.toggle() } }).inkEntrance(1)),
+        ]
+        if avgDown {
+            sharesCards.append(AnyView(AverageDownCard(p: p, high52: store.high52).inkEntrance(2)))
+        }
         var out: [RailGroup] = [
             .init(id: "overview", label: "Overview", glyph: nil, count: 1, width: 348,
                   cards: [AnyView(SummaryCard(p: p, pnl: store.pnl).inkEntrance(0))]),
-            .init(id: "shares", label: "Shares", glyph: "○", count: 1, width: 348,
-                  cards: [AnyView(SharesGroupView(p: p, perShare: store.perf?.perShare ?? 0, high52: store.high52).inkEntrance(1))]),
+            .init(id: "shares", label: "Shares", glyph: "○", count: sharesCards.count, width: 348, cards: sharesCards),
         ]
         var cards: [AnyView] = []
         var entrance = 2
@@ -279,28 +286,13 @@ private struct SplitFoot: View {
 
 // MARK: - Shares card + Average-down pull-out
 
-private struct SharesGroupView: View {
-    let p: NvPosition
-    let perShare: Double
-    let high52: Double?
-    @State private var open = false
-    var body: some View {
-        HStack(alignment: .top, spacing: open ? 1 : 0) {
-            SharesCard(p: p, perShare: perShare, open: open) {
-                withAnimation(InkMotion.ease(0.3)) { open.toggle() }
-            }
-            if open { AverageDownCard(p: p, high52: high52) }
-        }
-    }
-}
-
 private struct SharesCard: View {
     let p: NvPosition
     let perShare: Double
     let open: Bool
     let onToggle: () -> Void
     var body: some View {
-        InkCard(join: open ? .start : nil, stamp: (stampState(p.fresh), p.freshText)) {
+        InkCard(stamp: (stampState(p.fresh), p.freshText)) {
             InkBody {
                 InkEyebrow(cat: "Shares · long") {
                     Button(action: onToggle) {
@@ -356,7 +348,7 @@ private struct AverageDownCard: View {
             let price = p.spot * (1 - Double(pc) / 100)
             return (pc, price, (qty * p.avgBuy + Double(lot) * price) / (qty + Double(lot)))
         }
-        return InkCard(join: .end) {
+        return InkCard(stamp: (.live, "Priced off live spot")) {
             InkBody {
                 InkEyebrow(cat: "Average down") { InkBand(skin: .mod, text: "\(lot) sh") }
                 HeroSplit {

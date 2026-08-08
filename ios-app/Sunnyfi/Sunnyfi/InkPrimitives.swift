@@ -238,7 +238,7 @@ struct InkCard<Content: View>: View {
             spineView
             VStack(spacing: 0) { content }
         }
-        .frame(width: w, height: height ?? (compact ? 374 : 530), alignment: .top)
+        .frame(width: w, height: height ?? (compact ? 374 : 496), alignment: .top)
         .clipShape(UnevenRoundedRectangle(cornerRadii: corners, style: .continuous))
     }
 
@@ -388,16 +388,13 @@ struct InkFoot<Content: View>: View {
     var height: CGFloat? = nil
     @ViewBuilder var content: Content
     var body: some View {
-        // The foot HUGS its content with a fixed vertical pad, so the stamp is
-        // ALWAYS the same distance below the foot content on every card — no more
-        // varying gaps from a fixed-height zone centring content differently.
-        // (The flex Body absorbs the height difference.) `height` is kept for
-        // source compatibility but no longer forces a fixed zone.
-        let vpad: CGFloat = compact ? 14 : 16
-        return VStack(alignment: .leading, spacing: compact ? 10 : 14) { content }
+        // Fixed-height foot (spec: 120 large · 96 small), content vertically
+        // centred — so every card in a rail ends on the same baseline (the flex
+        // Body absorbs the difference). `height` overrides for the other sections.
+        VStack(alignment: .leading, spacing: compact ? 10 : 14) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, vpad)
             .padding(.horizontal, compact ? 18 : 22)
+            .frame(height: height ?? (compact ? 96 : 120))
             .overlay(alignment: .top) { if !flat { Rectangle().fill(Ink.hair).frame(height: 1) } }
     }
 }
