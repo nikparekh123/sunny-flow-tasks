@@ -234,8 +234,8 @@ private struct SummaryCard: View {
                     LedgerLine(k: "New average", sub: "buy average $\(nvDec(p.avgBuy, 2))", v: "$\(nvDec(p.breakEven, 2))")
                     LedgerLine(k: "Net delta", sub: "share equivalent", v: nvSigned(p.delta))
                 }
-                .padding(.top, 20)
-                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }   // divider at row top…
+                .padding(.top, 20)                                                           // …with the 20pt gap above it
             }
             InkFoot { SplitFoot(shares: p.sharesPL, options: p.optionsPL, cost: cost) }
         }
