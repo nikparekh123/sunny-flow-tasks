@@ -160,6 +160,32 @@ Deno.serve(async (req) => {
   if (!gate.scorePass) gate.flags.push({ key: 'score', level: 'block', head: 'Skip this cycle', body: `Options underpriced against realized. Seller Score ${score.toFixed(2)}, implied ${iv}% sits under ${HV.hv30}% realized, and IV percentile ${ivPct} discounts it further.` });
   if (!gate.earningsPass) gate.flags.push({ key: 'earnings', level: 'block', head: 'Earnings inside 5 days', body: `Earnings ${gate.earnings}. Short-dated premium is event premium, not edge.` });
   if (wash?.hit) gate.flags.push({ key: 'wash', level: 'note', head: 'Wash-sale window open', body: `Loss of $${wash.amount.toLocaleString()} realized ${wash.on}, ${wash.daysLeft} days left. Assignment at a loss plus a next-day rebuy disallows it and rolls it into new basis.` });
+
+  // ── assignment exposure ──
+  // Calls are written against the share block, but the put hedge is sized to the
+  // WHOLE block. So if the calls are assigned the shares leave and the hedge stays,
+  // and a book that is long by construction can end up short by arithmetic.
+  // Puts aren't in the request body; derive their delta from the identity
+  //   netDelta = shares + longCallΔ − shortCallΔ + putΔ
+  // (longCallΔ is not sent either — with no long calls on the book it drops out).
+  const netDeltaSent = bookIn.netDelta != null;
+  const putDelta = Number(bookIn.putDelta ?? (netDeltaSent ? book.netDelta - shares + book.shortCallDelta : 0));
+  const sharesAfterAssign = shares - book.shortCallCt * 100;
+  const deltaAfterAssign = sharesAfterAssign + putDelta;
+  const assignFloor = shares * 0.15;
+  const assignment = {
+    sharesAfter: sharesAfterAssign, putDelta, deltaAfter: deltaAfterAssign,
+    coveredPct: shares > 0 ? (book.shortCallCt * 100) / shares : 0,
+    netShort: deltaAfterAssign < 0, thin: deltaAfterAssign < assignFloor,
+    known: netDeltaSent || bookIn.putDelta != null,
+  };
+  if (assignment.known && assignment.netShort) {
+    gate.flags.push({ key: 'assign', level: 'block', head: 'Assignment would leave you net short',
+      body: `${book.shortCallCt} contracts cover ${(book.shortCallCt * 100).toLocaleString()} of ${shares.toLocaleString()} shares. If they are all called away you keep ${sharesAfterAssign.toLocaleString()} shares against a put hedge carrying ${Math.round(putDelta).toLocaleString()} delta — a net ${Math.round(deltaAfterAssign).toLocaleString()}. The hedge is sized to the whole block and does not leave with the shares.` });
+  } else if (assignment.known && assignment.thin) {
+    gate.flags.push({ key: 'assign', level: 'note', head: 'Thin after assignment',
+      body: `Full assignment leaves ${Math.round(deltaAfterAssign).toLocaleString()} delta against a ${Math.round(assignFloor).toLocaleString()} floor. Writing more here shrinks it further.` });
+  }
   gate.blocked = gate.flags.some((f) => f.level === 'block');
 
   // ── expiries + priced chains (per-contract, ct-independent; the app scales) ──
@@ -200,7 +226,7 @@ Deno.serve(async (req) => {
   return json(200, {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
-    gate, book, technicals, refStrike, weekendVol: wv, expiries,
+    gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
     meta: { STRIKE_STEP, RIP, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
   });
 });
