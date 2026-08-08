@@ -196,24 +196,27 @@ Deno.serve(async (req) => {
   if (supaUrl && supaKey) {
     const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
     const soon = ymd(new Date(Date.now() + 120 * 86400000));
-    const grab = async (table: string, dateCol: string, nameCol: string) => {
+    // Each table names its own date column — earnings_events is keyed on report_date
+    // and scoped by ticker, macro_events on event_date and global.
+    const grab = async (table: string, dateCol: string, nameCol: string, extra = '', labelAs = '') => {
       try {
-        const r = await fetch(`${supaUrl}/rest/v1/${table}?select=*&${dateCol}=gte.${nowISO}&${dateCol}=lte.${soon}&order=${dateCol}.asc&limit=40`, { headers: h });
+        const r = await fetch(`${supaUrl}/rest/v1/${table}?select=*&${dateCol}=gte.${nowISO}&${dateCol}=lte.${soon}${extra}&order=${dateCol}.asc&limit=40`, { headers: h });
         if (!r.ok) return;
         for (const row of (await r.json()) as Record<string, unknown>[]) {
           const d = String(row[dateCol] ?? '').slice(0, 10);
           if (!d) continue;
-          const label = String(row[nameCol] ?? row.title ?? row.name ?? table);
+          const label = labelAs || String(row[nameCol] ?? row.title ?? row.name ?? table);
           cats.push({ key: table, label, date: d, sev: severityOf(label),
             days: Math.round((parseISO(d).getTime() - parseISO(nowISO).getTime()) / 86400000) });
         }
         calSources.push(table);
       } catch { /* a missing table just means a thinner calendar */ }
     };
-    const tables: [string, string, string][] = TICKER === 'TLT'
-      ? [['tlt_macro_events', 'event_date', 'label']]
-      : [['earnings_events', 'event_date', 'label'], ['macro_events', 'event_date', 'label']];
-    await Promise.all(tables.map(([t, d, n]) => grab(t, d, n)));
+    const tables: [string, string, string, string, string][] = TICKER === 'TLT'
+      ? [['tlt_macro_events', 'event_date', 'label', '', '']]
+      : [['earnings_events', 'report_date', 'company_name', `&ticker=eq.${TICKER}`, `${TICKER} earnings`],
+         ['macro_events', 'event_date', 'label', '', '']];
+    await Promise.all(tables.map(([t, d, n, x, l]) => grab(t, d, n, x, l)));
   }
   cats.sort((x, y) => x.days - y.days);
 
