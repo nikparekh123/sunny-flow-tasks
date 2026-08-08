@@ -156,6 +156,54 @@ enum TLTBook {
     // The next scheduled evidence the September question is judged against.
     static let evidence = (label: "CPI", inDays: 4)
 
+    // ── macro calendar (the long-end's scheduled events) ──
+    struct MacroLast { let label: String; let what: String; let move: Double }
+    struct MacroDate: Identifiable { let d: String; let label: String; let tag: String; let last: MacroLast?
+        var inDays: Int = 0; var id: String { d + label } }
+    struct MacroClass: Identifiable { let key: String; let name: String; let cat: String; let last: MacroLast
+        var dates: [MacroDate]; var id: String { key } }
+
+    /// Days from the book's "today" (Aug 8 2026, matching the published calendar).
+    private static func daysTo(_ iso: String) -> Int {
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "America/New_York")!
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = cal.timeZone
+        let today = cal.date(from: DateComponents(year: 2026, month: 8, day: 8)) ?? Date()
+        guard let d = f.date(from: iso) else { return 0 }
+        return cal.dateComponents([.day], from: cal.startOfDay(for: today), to: cal.startOfDay(for: d)).day ?? 0
+    }
+
+    static let macro: [MacroClass] = {
+        var m: [MacroClass] = [
+            MacroClass(key: "fomc", name: "FOMC", cat: "Rate decisions",
+                       last: MacroLast(label: "Jul 29", what: "Held · no cut signalled", move: 0.8), dates: [
+                MacroDate(d: "2026-09-16", label: "Sep 15–16", tag: "SEP · projections", last: nil),
+                MacroDate(d: "2026-10-28", label: "Oct 27–28", tag: "statement only", last: MacroLast(label: "Sep 16", what: "Projections revised up", move: -0.9)),
+                MacroDate(d: "2026-12-09", label: "Dec 8–9", tag: "SEP · projections", last: MacroLast(label: "Oct 28", what: "Statement held, no dots", move: 0.3)),
+            ]),
+            MacroClass(key: "prints", name: "Inflation prints", cat: "CPI and PCE",
+                       last: MacroLast(label: "Jul 15", what: "Core hotter by 0.1", move: -1.4), dates: [
+                MacroDate(d: "2026-08-12", label: "Aug 12", tag: "CPI · July", last: nil),
+                MacroDate(d: "2026-08-28", label: "Aug 28", tag: "Core PCE · July", last: MacroLast(label: "Jun 26", what: "Core PCE in line", move: 0.5)),
+                MacroDate(d: "2026-09-10", label: "Sep 10", tag: "CPI · August", last: nil),
+                MacroDate(d: "2026-10-13", label: "Oct 13", tag: "CPI · September", last: MacroLast(label: "Jul 15", what: "Core hotter by 0.1", move: -1.4)),
+            ]),
+            MacroClass(key: "auctions", name: "Auctions", cat: "Long-end supply",
+                       last: MacroLast(label: "Jul 10", what: "30-year tailed 1.2bp", move: -0.6), dates: [
+                MacroDate(d: "2026-08-13", label: "Aug 13", tag: "30-year · reopening", last: nil),
+                MacroDate(d: "2026-08-19", label: "Aug 19", tag: "20-year · new issue", last: MacroLast(label: "Jul 22", what: "20-year stopped through", move: 0.4)),
+                MacroDate(d: "2026-08-20", label: "Aug 20", tag: "30-year TIPS", last: MacroLast(label: "Jun 18", what: "TIPS bid thin, breakevens widened", move: -0.2)),
+                MacroDate(d: "2026-09-10", label: "Sep 10", tag: "30-year · new issue", last: MacroLast(label: "Aug 13", what: "30-year reopening tailed", move: -0.6)),
+            ]),
+            MacroClass(key: "refunding", name: "Refunding", cat: "Quarterly announcement",
+                       last: MacroLast(label: "Aug 5", what: "Coupon sizes unchanged", move: 1.1), dates: [
+                MacroDate(d: "2026-11-04", label: "Nov 4", tag: "Q4 refunding", last: nil),
+                MacroDate(d: "2027-02-03", label: "Feb 3 '27", tag: "Q1 refunding", last: MacroLast(label: "Nov 4", what: "Q4 sizes unchanged", move: 1.1)),
+            ]),
+        ]
+        for i in m.indices { for j in m[i].dates.indices { m[i].dates[j].inDays = daysTo(m[i].dates[j].d) } }
+        return m
+    }()
+
     /// An NvdaStore filled with the TLT fixture — the section screens read it
     /// exactly as they read the live NVDA store.
     @MainActor static func store() -> NvdaStore {

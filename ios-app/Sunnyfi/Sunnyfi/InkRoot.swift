@@ -86,7 +86,7 @@ struct InkRoot: View {
                 NvdaHistoryScreen(store: st)
                 if !isNvda {
                     TLTVoterBlocScreen()
-                    // TLT macro events calendar lands next.
+                    TLTEventsScreen()
                 }
                 Color.clear.frame(height: 104)
             }
