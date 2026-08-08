@@ -117,6 +117,17 @@ struct InkDesignPreview: View {
                 NvdaEventsScreen()
             } else if ProcessInfo.processInfo.arguments.contains("-inkHist") {
                 ScrollView { NvdaHistoryScreen(store: store) }
+            } else if ProcessInfo.processInfo.arguments.contains("-inkTLT") {
+                let tlt = TLTBook.store()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        NvdaPositionScreen(store: tlt, showPlan: false)
+                        NvdaInsightsScreen(store: tlt)
+                        NvdaPeersScreen(store: tlt)
+                        NvdaHistoryScreen(store: tlt)
+                        Color.clear.frame(height: 60)
+                    }
+                }
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {

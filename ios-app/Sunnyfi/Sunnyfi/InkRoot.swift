@@ -20,11 +20,12 @@ struct InkRoot: View {
     let prefs: NotificationPrefs
 
     @State private var store = NvdaStore()
+    @State private var tltStore = TLTBook.store()
     @State private var tab = 0
     @State private var sym = "Nvidia"
     @State private var scrollY: CGFloat = 0
     @State private var showPlanner = false
-    private let symbols = ["Nvidia", "Google", "Tesla"]
+    private let symbols = ["Nvidia", "TLT"]
 
     private var scrolled: Bool { scrollY < -24 }
 
@@ -52,33 +53,42 @@ struct InkRoot: View {
     @ViewBuilder private var content: some View {
         switch tab {
         case 0:
-            if sym == "Nvidia" {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Color.clear.frame(height: 0)
-                            .background(GeometryReader { g in
-                                Color.clear.preference(key: InkScrollOffsetKey.self,
-                                                       value: g.frame(in: .named("inkScroll")).minY)
-                            })
-                        NvdaPositionScreen(store: store, onPlan: { showPlanner = true })
-                        NvdaInsightsScreen(store: store)
-                        NvdaPeersScreen(store: store)
-                        NvdaHistoryScreen(store: store)
-                        Color.clear.frame(height: 104)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .coordinateSpace(name: "inkScroll")
-                .onPreferenceChange(InkScrollOffsetKey.self) { scrollY = $0 }
-                .frame(maxWidth: .infinity)
-            } else {
-                quiet("No position", "Nothing held or written in \(sym) — watchlist only.")
+            switch sym {
+            case "Nvidia": portfolioScroll(store, isNvda: true)
+            case "TLT":    portfolioScroll(tltStore, isNvda: false)
+            default:       quiet("No position", "Nothing held or written in \(sym) — watchlist only.")
             }
         case 1:
             NvdaEventsScreen()
         default:
             NvdaProfileScreen(auth: auth, lock: lock, prefs: prefs)
         }
+    }
+
+    // The portfolio scroll — four handoff sections, read from whichever book is
+    // selected. TLT rides the same screens on its fixture; NVDA is live and owns
+    // the planner entry.
+    private func portfolioScroll(_ st: NvdaStore, isNvda: Bool) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Color.clear.frame(height: 0)
+                    .background(GeometryReader { g in
+                        Color.clear.preference(key: InkScrollOffsetKey.self,
+                                               value: g.frame(in: .named("inkScroll")).minY)
+                    })
+                NvdaPositionScreen(store: st, onPlan: { showPlanner = true }, showPlan: isNvda)
+                NvdaInsightsScreen(store: st)
+                NvdaPeersScreen(store: st)
+                NvdaHistoryScreen(store: st)
+                // TLT-only surfaces (hike odds · rates & range · vol & engine ·
+                // voter bloc · macro calendar) land in the next commits.
+                Color.clear.frame(height: 104)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .coordinateSpace(name: "inkScroll")
+        .onPreferenceChange(InkScrollOffsetKey.self) { scrollY = $0 }
+        .frame(maxWidth: .infinity)
     }
 
     private func quiet(_ title: String, _ body: String) -> some View {

@@ -49,11 +49,12 @@ private func legIntExt(kind: String, strike: Double, mark: Double?, ct: Double, 
 struct NvdaPositionScreen: View {
     let store: NvdaStore
     var onPlan: () -> Void = {}
+    var showPlan: Bool = true          // the planner entry is NVDA-only
 
     var body: some View {
         if let p = store.position {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Current position", icon: "scope", onAction: onPlan)
+                InkSectionHead(title: "Current position", icon: showPlan ? "scope" : nil, onAction: onPlan)
                 rail(p)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

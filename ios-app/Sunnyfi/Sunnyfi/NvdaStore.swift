@@ -30,6 +30,9 @@ final class NvdaStore {
     /// Drives the Average-down card's "below the high". nil until closes load.
     var high52: Double? { Array(nvCloses.suffix(252)).max() }
 
+    /// Seed the close series directly — fixtures/preview only (the TLT book, etc.).
+    func seedCloses(_ c: [Double]) { nvCloses = c.sorted() }
+
     /// Annualised realized vol over the last `window` trading days, in percent.
     /// Same estimator as NvDerive.realizedVol (sample stdev of log returns × √252).
     func hv(_ window: Int) -> Double? {
