@@ -121,8 +121,8 @@ struct InkDesignPreview: View {
                 let tlt = TLTBook.store()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        TLTInsightsScreen()
                         NvdaPositionScreen(store: tlt, showPlan: false)
-                        NvdaInsightsScreen(store: tlt)
                         NvdaPeersScreen(store: tlt)
                         NvdaHistoryScreen(store: tlt)
                         Color.clear.frame(height: 60)

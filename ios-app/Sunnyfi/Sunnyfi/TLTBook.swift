@@ -130,6 +130,29 @@ enum TLTBook {
         ], fresh: .delayed)
     }
 
+    // ── TLT-only insight fixtures (the three bond cards) ──
+    struct Hike { let meeting: String; let odds: Int; let trend: String
+        let series: [Double]; let next: [(d: String, p: Int)]; let rule: String }
+    struct Rates { let y10: Double; let y30: Double; let cycleHigh: Double; let sma25: Double
+        let exit: Double; let assign: Double; let rule: String }
+    struct Engine { let iv: Double; let hv20: Double; let move: Int
+        let sold: String; let price: Double; let premium: Int; let expires: String; let restrike: String
+        var spread: Double { (iv - hv20 * 10).rounded() / 10 }
+        var verdict: String { spread >= 4 ? "Sell hard" : spread >= 1 ? "Sell normal" : "Ease off" } }
+
+    static let hike = Hike(
+        meeting: "Sep 16", odds: 31, trend: "rising · 3 weeks",
+        series: [17, 18, 18, 16, 19, 21, 20, 22, 21, 23, 22, 24, 26, 25, 27, 26, 28, 27, 29, 28, 30, 29, 28, 30, 31, 30, 32, 31, 30, 31],
+        next: [(d: "Oct 28", p: 44), (d: "Dec 9", p: 52)],
+        rule: "Crosses 50% and I stop selling calls into FOMC week — the hike wing goes live.")
+    static let rates = Rates(
+        y10: 4.58, y30: 5.12, cycleHigh: 4.62, sma25: 92.6, exit: 78, assign: 92,
+        rule: "A September hike and a close under 78 ends it — stop buying floors, wind the sleeve down.")
+    static let engine = Engine(
+        iv: 13.8, hv20: 11.7, move: 92, sold: "−7 · Aug 10 '26 · 83 C", price: 0.41, premium: 287,
+        expires: "Monday · settles before CPI",
+        restrike: "Tuesday · CPI week, so it is a conscious decision")
+
     /// An NvdaStore filled with the TLT fixture — the section screens read it
     /// exactly as they read the live NVDA store.
     @MainActor static func store() -> NvdaStore {

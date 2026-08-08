@@ -77,11 +77,14 @@ struct InkRoot: View {
                                                value: g.frame(in: .named("inkScroll")).minY)
                     })
                 NvdaPositionScreen(store: st, onPlan: { showPlanner = true }, showPlan: isNvda)
-                NvdaInsightsScreen(store: st)
+                if isNvda {
+                    NvdaInsightsScreen(store: st)
+                } else {
+                    TLTInsightsScreen()          // hike odds · rates & range · vol & engine
+                }
                 NvdaPeersScreen(store: st)
                 NvdaHistoryScreen(store: st)
-                // TLT-only surfaces (hike odds · rates & range · vol & engine ·
-                // voter bloc · macro calendar) land in the next commits.
+                // TLT-only voter bloc + macro calendar land in the next commits.
                 Color.clear.frame(height: 104)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
