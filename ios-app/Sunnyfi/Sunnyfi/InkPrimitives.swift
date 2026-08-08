@@ -19,10 +19,10 @@ import SwiftUI
 func inkUsd(_ n: Double) -> String {
     let a = abs(n), sign = n < 0 ? "−" : ""
     func trim(_ s: String) -> String { s.replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression) }
-    if a >= 1_000_000 { return sign + "$" + trim(String(format: a >= 10_000_000 ? "%.1f" : "%.2f", a / 1_000_000)) + "M" }
-    // Whole thousands from $10K up — $96.9K reads as $97K. Below that the tenth
-    // still carries information ($8.6K), so it stays.
-    if a >= 1_000 { return sign + "$" + trim(String(format: a >= 10_000 ? "%.0f" : "%.1f", a / 1_000)) + "K" }
+    // Millions keep one decimal — whole millions would be far too coarse ($1.9M,
+    // not $2M). Thousands are always whole: $15K, $30K, $97K, never $15.2K.
+    if a >= 1_000_000 { return sign + "$" + trim(String(format: "%.1f", a / 1_000_000)) + "M" }
+    if a >= 1_000 { return sign + "$" + String(format: "%.0f", a / 1_000) + "K" }
     return sign + "$" + Int(a.rounded()).formatted(.number.grouping(.automatic))
 }
 
