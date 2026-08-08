@@ -46,7 +46,9 @@ struct InkRoot: View {
         .task { await store.poll(seconds: 60) }
         .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)   // Auto=system, or the Profile override
         .fullScreenCover(isPresented: $showPlanner) {
-            NvdaPlannerScreen(store: store, onClose: { showPlanner = false })
+            NvdaPlannerV2Screen(store: sym == "TLT" ? tltStore : store,
+                                ticker: sym == "TLT" ? "TLT" : "NVDA",
+                                onBack: { showPlanner = false })
         }
     }
 
@@ -76,7 +78,7 @@ struct InkRoot: View {
                         Color.clear.preference(key: InkScrollOffsetKey.self,
                                                value: g.frame(in: .named("inkScroll")).minY)
                     })
-                NvdaPositionScreen(store: st, onPlan: { showPlanner = true }, showPlan: isNvda)
+                NvdaPositionScreen(store: st, onPlan: { showPlanner = true }, showPlan: true)
                 if isNvda {
                     // NVDA: position · insights · peers · history
                     NvdaInsightsScreen(store: st)

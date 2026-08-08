@@ -47,8 +47,14 @@ const json = (s: number, b: unknown) =>
 
 const POLY = 'https://api.polygon.io';
 const PL_R = 0.045;
-const STRIKE_STEP = 2.5;
 const RIP = 0.15;
+
+// Per-instrument constants. Everything else in this function is symbol-agnostic —
+// adding a book is an entry here, not a code change.
+const INSTRUMENT: Record<string, { step: number; floorPct: number }> = {
+  NVDA: { step: 2.5, floorPct: 0.15 },
+  TLT:  { step: 0.5, floorPct: 0.10 },
+};
 
 // ── Black-Scholes (single clock, fixture-exact) ──
 function ncdf(x: number): number {
@@ -113,17 +119,17 @@ interface Cell {
 
 // ── Polygon: spot + expiry calendar ──
 interface Snap { underlying_asset?: { price?: number }; }
-async function nearestSpot(key: string): Promise<number | null> {
+async function nearestSpot(key: string, tk: string): Promise<number | null> {
   try {
-    const r = await fetch(`${POLY}/v3/snapshot/options/NVDA?limit=1&apiKey=${key}`);
+    const r = await fetch(`${POLY}/v3/snapshot/options/${tk}?limit=1&apiKey=${key}`);
     if (!r.ok) return null;
     const j = await r.json();
     return ((j?.results ?? [])[0] as Snap | undefined)?.underlying_asset?.price ?? null;
   } catch { return null; }
 }
-async function callExpiries(fromISO: string, key: string): Promise<string[]> {
+async function callExpiries(fromISO: string, key: string, tk: string): Promise<string[]> {
   try {
-    const r = await fetch(`${POLY}/v3/reference/options/contracts?underlying_ticker=NVDA&contract_type=call`
+    const r = await fetch(`${POLY}/v3/reference/options/contracts?underlying_ticker=${tk}&contract_type=call`
       + `&expiration_date.gte=${fromISO}&expired=false&limit=1000&sort=expiration_date&order=asc&apiKey=${key}`);
     if (!r.ok) return [];
     const j = await r.json();
@@ -163,8 +169,13 @@ Deno.serve(async (req) => {
   if (bookIn.shares == null || volIn.iv == null) return json(400, { ok: false, error: 'book.shares and vol.iv are required' });
 
   const wv = Number(b.weekendVol ?? 0.3);
+  const TICKER = String(b.ticker ?? 'NVDA').toUpperCase();
+  const INST = INSTRUMENT[TICKER] ?? INSTRUMENT.NVDA;
+  const STRIKE_STEP = INST.step;
   const nowISO = ymd(new Date());
-  const [polySpot, polyExpiries] = key ? await Promise.all([nearestSpot(key), callExpiries(nowISO, key)]) : [null, [] as string[]];
+  const [polySpot, polyExpiries] = key
+    ? await Promise.all([nearestSpot(key, TICKER), callExpiries(nowISO, key, TICKER)])
+    : [null, [] as string[]];
   const spot = (b.spot as number) ?? polySpot ?? 0;
   if (!spot) return json(200, { ok: false, error: 'no spot' });
 
@@ -172,7 +183,7 @@ Deno.serve(async (req) => {
   let ts: Record<string, number | string | null> = {};
   if (supaUrl && supaKey) {
     try {
-      const r = await fetch(`${supaUrl}/rest/v1/ticker_stats?ticker=eq.NVDA&select=*`, { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` } });
+      const r = await fetch(`${supaUrl}/rest/v1/ticker_stats?ticker=eq.${TICKER}&select=*`, { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` } });
       if (r.ok) ts = ((await r.json()) as Record<string, number | string | null>[])[0] ?? {};
     } catch { /* leave empty → app degrades the card */ }
   }
@@ -181,6 +192,7 @@ Deno.serve(async (req) => {
   // so density (severity summed over a horizon) is what the week score reads.
   type Cat = { key: string; label: string; date: string; days: number; sev: number };
   const cats: Cat[] = [];
+  const calSources: string[] = [];
   if (supaUrl && supaKey) {
     const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
     const soon = ymd(new Date(Date.now() + 120 * 86400000));
@@ -195,12 +207,13 @@ Deno.serve(async (req) => {
           cats.push({ key: table, label, date: d, sev: severityOf(label),
             days: Math.round((parseISO(d).getTime() - parseISO(nowISO).getTime()) / 86400000) });
         }
+        calSources.push(table);
       } catch { /* a missing table just means a thinner calendar */ }
     };
-    await Promise.all([
-      grab('earnings_events', 'event_date', 'label'),
-      grab('macro_events', 'event_date', 'label'),
-    ]);
+    const tables: [string, string, string][] = TICKER === 'TLT'
+      ? [['tlt_macro_events', 'event_date', 'label']]
+      : [['earnings_events', 'event_date', 'label'], ['macro_events', 'event_date', 'label']];
+    await Promise.all(tables.map(([t, d, n]) => grab(t, d, n)));
   }
   cats.sort((x, y) => x.days - y.days);
 
@@ -275,7 +288,7 @@ Deno.serve(async (req) => {
   const sharesAfterAssign = shares - book.shortCallCt * 100;          // tail: all called
   const deltaAfterWorst = sharesAfterAssign + putDelta;
   const deltaAfterAssign = shares - expectedCalled + putDelta;        // expected path
-  const assignFloor = shares * 0.15;
+  const assignFloor = shares * INST.floorPct;
   const assignment = {
     sharesAfter: sharesAfterAssign, putDelta,
     expectedCalled: Math.round(expectedCalled),
@@ -339,7 +352,7 @@ Deno.serve(async (req) => {
   if (state === 'WASHOUT') push('washout', 1.25, "under its mean — don't cap the bounce");
   if (state === 'STRETCH') push('stretch', 0.85, 'extended — fine to cap here');
   if (spot < book.buyAvg) push('under_basis', 1.20, 'spot under your average — assignment books a loss');
-  const floorBase = shares * 0.15;
+  const floorBase = shares * INST.floorPct;
   const floor = Math.round(clamp(floorBase * floorMult, shares * 0.08, shares * 0.40));
   const headroom = upsideDelta - floor;
 
@@ -517,7 +530,7 @@ Deno.serve(async (req) => {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
-    week, posture, events, refLots,
-    meta: { STRIKE_STEP, RIP, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
+    week, posture, events, refLots, ticker: TICKER,
+    meta: { STRIKE_STEP, RIP, calSources, floorPct: INST.floorPct, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
   });
 });

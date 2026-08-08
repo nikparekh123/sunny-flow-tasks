@@ -44,6 +44,7 @@ struct PV2Req: Encodable, Sendable {
     let book: Book; let vol: Vol; let earnings: Earn
     let weekendVol: Double
     let spot: Double
+    var ticker: String = "NVDA"
 }
 
 // MARK: - Response
@@ -157,7 +158,7 @@ final class PlanV2Store {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "America/New_York"); return f
     }()
 
-    func load(from store: NvdaStore) async {
+    func load(from store: NvdaStore, ticker: String = "NVDA") async {
         guard let pos = store.position, let pnl = store.pnl, let ins = store.insights else {
             isLoading = false; lastError = "position not ready"; return
         }
@@ -191,8 +192,10 @@ final class PlanV2Store {
                              hv20: store.hv(20) ?? (ins.vol.hv30 ?? 0), hv30: ins.vol.hv30 ?? 0,
                              hv60: store.hv(60) ?? (ins.vol.hv30 ?? 0), hv90: store.hv(90) ?? (ins.vol.hv30 ?? 0))
         let req = PV2Req(book: book, vol: vol,
-                         earnings: .init(date: Self.earnings.date, label: Self.earnings.label),
-                         weekendVol: 0.3, spot: pos.spot)
+                         earnings: ticker == "NVDA"
+                             ? .init(date: Self.earnings.date, label: Self.earnings.label)
+                             : .init(date: "", label: ""),
+                         weekendVol: 0.3, spot: pos.spot, ticker: ticker)
         do {
             let data = try await client.functions.invoke("nvda-planner",
                 options: FunctionInvokeOptions(body: req), decode: { data, _ in data })
@@ -755,6 +758,7 @@ private struct PVSend: View {
 
 struct NvdaPlannerV2Screen: View {
     let store: NvdaStore
+    var ticker: String = "NVDA"
     var onBack: () -> Void = {}
     /// DEBUG fixture injection — renders without a network round-trip.
     var injected: PV2? = nil
@@ -768,9 +772,28 @@ struct NvdaPlannerV2Screen: View {
     var body: some View {
         ZStack {
             Ink.canvas.ignoresSafeArea()
+            VStack(spacing: 0) {
+            // Presented full-screen, so the dismiss has to live on the screen itself.
+            HStack(spacing: 13) {
+                Button(action: onBack) {
+                    Image(systemName: "arrow.left")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(Ink.text)
+                        .frame(width: 36, height: 36)
+                        .overlay(Circle().strokeBorder(Ink.hair, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Back")
+                Text("Plan the next sale")
+                    .font(InkFont.serif(27, .regular)).foregroundStyle(Ink.text)
+                Spacer(minLength: 0)
+                Text(ticker).font(InkFont.mono(11.5)).tracking(11.5 * 0.12).foregroundStyle(Ink.dim)
+            }
+            .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 16)
+            .overlay(alignment: .bottom) { Rectangle().fill(Ink.hair).frame(height: 1) }
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    InkSectionHead(title: "Plan the next sale")
                     if let s = plan.state, s.ok {
                         content(s)
                     } else if plan.isLoading {
@@ -782,10 +805,11 @@ struct NvdaPlannerV2Screen: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            }
         }
         .task {
             if let injected { plan.state = injected; plan.isLoading = false; return }
-            await plan.load(from: store)
+            await plan.load(from: store, ticker: ticker)
         }
     }
 
