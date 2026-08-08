@@ -238,7 +238,11 @@ struct InkCard<Content: View>: View {
             spineView
             VStack(spacing: 0) { content }
         }
-        .frame(width: w, height: height ?? (compact ? 374 : 496), alignment: .top)
+        // 524, not 496: at the design's own body/foot insets the Average-down and
+        // Summary bodies are ~390pt, which overflowed 496 − 120 = 376 and got
+        // CLIPPED — silently eating a different slice of each foot's bottom padding.
+        // Every rail card shares this one height, so all feet still end level.
+        .frame(width: w, height: height ?? (compact ? 374 : 524), alignment: .top)
         .clipShape(UnevenRoundedRectangle(cornerRadii: corners, style: .continuous))
     }
 
@@ -259,12 +263,17 @@ struct InkBody<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            // Design insets: 20 / 22 / 20 (large) · 20 / 18 / 22 (small). 22px is the
-            // standard horizontal gutter; foot + stamp match it.
-            .padding(EdgeInsets(top: 20, leading: compact ? 18 : 22,
-                                bottom: compact ? 22 : 20, trailing: compact ? 18 : 22))
+            // One gutter on every side, on every card — large and compact alike.
+            // The body's own bottom inset is the gap above the foot hairline.
+            .padding(EdgeInsets(top: 20, leading: InkPad.gutter,
+                                bottom: InkPad.gutter, trailing: InkPad.gutter))
     }
 }
+
+/// The single gutter every card zone uses — body, foot and stamp all inset by
+/// this on the left and right, and the foot/body by the same amount at the
+/// bottom. One number, so no card can drift out of alignment with another.
+enum InkPad { static let gutter: CGFloat = 22 }
 
 /// The flex:1 spacer that aligns bands across cards of equal height.
 struct InkSpacer: View { var body: some View { Spacer(minLength: 0) } }
@@ -388,13 +397,15 @@ struct InkFoot<Content: View>: View {
     var height: CGFloat? = nil
     @ViewBuilder var content: Content
     var body: some View {
-        // Fixed-height foot (spec: 120 large · 96 small), content vertically
-        // centred — so every card in a rail ends on the same baseline (the flex
-        // Body absorbs the difference). `height` overrides for the other sections.
+        // Fixed-height foot (spec: 120 large · 96 small) so the hairline never
+        // drifts card-to-card. Content is anchored to the BOTTOM with the SAME
+        // gutter as the sides, so every card carries one uniform padding on its
+        // left, right, and bottom edges regardless of how tall its foot content is.
+        let gutter = InkPad.gutter
         VStack(alignment: .leading, spacing: compact ? 10 : 14) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, compact ? 18 : 22)
-            .frame(height: height ?? (compact ? 96 : 120))
+            .padding(EdgeInsets(top: 0, leading: gutter, bottom: gutter, trailing: gutter))
+            .frame(height: height ?? (compact ? 96 : 120), alignment: .bottom)
             .overlay(alignment: .top) { if !flat { Rectangle().fill(Ink.hair).frame(height: 1) } }
     }
 }
@@ -417,7 +428,7 @@ struct InkStamp: View {
                 .foregroundStyle(Ink.text.opacity(settled ? 0.32 : 0.8)).lineLimit(1).truncationMode(.tail)
         }
         .frame(height: 30).frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, compact ? 18 : 22)
+        .padding(.horizontal, InkPad.gutter)
         .overlay(alignment: .top) { if !flat { Rectangle().fill(Ink.hair).frame(height: 1) } }
         .onAppear { settled = false; withAnimation(.easeInOut(duration: 2.5).delay(6)) { settled = true } }
     }

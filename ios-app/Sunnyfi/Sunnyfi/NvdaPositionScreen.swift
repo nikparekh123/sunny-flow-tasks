@@ -183,7 +183,11 @@ private struct LedgerLine: View {
             Spacer(minLength: 0)
             InkRoll(text: v, font: InkFont.mono(16, .regular), tracking: 16 * -0.02, color: hue, delay: 0.1)
         }
-        .padding(.vertical, 13)
+        // 9, not 13: three ledger rows + the lot chips overflowed the fixed 496 card
+        // on Average-down, and the overflow was clipped off the BOTTOM of the foot
+        // (eating its padding). Cards with slack absorb this in their InkSpacer, so
+        // the rhythm stays identical across the rail.
+        .padding(.vertical, 9)
         .overlay(alignment: .top) { if !first { Rectangle().fill(Ink.hair).frame(height: 1) } }
     }
 }
@@ -336,7 +340,7 @@ private struct SharesCard: View {
 private struct AverageDownCard: View {
     let p: NvPosition
     let high52: Double?
-    @State private var lot = 200
+    @State private var lot = 500
     var body: some View {
         let qty = p.shares
         let avg = qty + Double(lot) > 0 ? (qty * p.avgBuy + Double(lot) * p.spot) / (qty + Double(lot)) : p.avgBuy
@@ -360,7 +364,7 @@ private struct AverageDownCard: View {
                         .foregroundStyle(Ink.dim).padding(.top, 8).fixedSize()
                 }
                 HStack(spacing: 4) {
-                    ForEach([100, 200, 300, 500], id: \.self) { n in
+                    ForEach([500, 1000, 1500, 2000], id: \.self) { n in
                         let on = lot == n
                         Button { withAnimation(InkMotion.fast) { lot = n } } label: {
                             Text("\(n)").font(InkFont.mono(11.5)).tracking(11.5 * -0.01)
@@ -515,6 +519,24 @@ private struct LedgerRow: View {
 }
 
 #if DEBUG
+/// Renders the Shares + Average-down pair standalone so their body/foot padding
+/// is measurable without driving the rail. -inkAvg.
+struct NvdaAvgDownPreviewHarness: View {
+    let store: NvdaStore
+    var body: some View {
+        if let p = store.position {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    InkSectionHead(title: "Average down")
+                    AverageDownCard(p: p, high52: store.high52).padding(.horizontal, 16)
+                    SharesCard(p: p, perShare: store.perf?.perShare ?? 0, open: false, onToggle: {})
+                        .padding(.horizontal, 16).padding(.top, 24)
+                }
+            }
+        }
+    }
+}
+
 /// Renders one sleeve card standalone so the ledger (where the double-hairline
 /// lived) is visible for QA. -inkSleeve.
 struct NvdaSleevePreviewHarness: View {

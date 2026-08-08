@@ -35,8 +35,11 @@ struct InkTickerNav: View {
                 HStack(spacing: 18) {
                     ForEach(symbols, id: \.self) { s in
                         Button { selected = s } label: {
-                            Text(s).font(InkFont.display(15, .medium)).foregroundStyle(Ink.text)
-                                .inkRelevance(s == selected ? .r1 : .r3)
+                            // Selection is legible at a glance: the live book is full
+                            // ink and medium, the other clearly dimmed back.
+                            Text(s)
+                                .font(InkFont.display(15, s == selected ? .medium : .regular))
+                                .foregroundStyle(s == selected ? Ink.text : Ink.text.opacity(0.34))
                         }
                         .buttonStyle(.plain)
                     }
