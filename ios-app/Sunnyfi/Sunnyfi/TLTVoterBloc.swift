@@ -9,6 +9,7 @@
 //
 
 import SwiftUI
+import Supabase
 
 // MARK: - model
 
@@ -29,11 +30,11 @@ struct BlocSeat: Identifiable, Codable {
 
     var seats: [BlocSeat]
     var need: Int
-    let verified = "Aug 6"
-    let reverifyBy = "Aug 27"
-    let swingWindow = "All four move on CPI Aug 12 → PCE Aug 28."
+    var verified = "Aug 6"
+    var reverifyBy = "Aug 27"
+    var swingWindow = "All four move on CPI Aug 12 → PCE Aug 28."
 
-    private static let key = "tlt.bloc.v2"
+    private let client = SupabaseService.client
 
     private static let fixture: [BlocSeat] = [
         .init(code: "HAM", name: "Hammack", seat: "Cleveland", lean: 2, seen: "Jul 30"),
@@ -53,7 +54,7 @@ struct BlocSeat: Identifiable, Codable {
     private init() {
         seats = BlocStore.fixture
         need = 7
-        load()
+        Task { await load() }
     }
 
     // derived tally — never stored
@@ -63,23 +64,48 @@ struct BlocSeat: Identifiable, Codable {
     var secured: Int { committed.count + leaning.count }
     var short: Int { max(0, need - secured) }
 
-    private struct Saved: Codable { var need: Int; var seats: [Lean]; struct Lean: Codable { var code: String; var name: String; var lean: Int } }
-
-    func save() {
-        let s = Saved(need: need, seats: seats.map { .init(code: $0.code, name: $0.name, lean: $0.lean) })
-        if let d = try? JSONEncoder().encode(s) { UserDefaults.standard.set(d, forKey: Self.key) }
+    // ── Supabase rows (tlt_voter_bloc · tlt_bloc_meta) ──
+    private struct SeatRow: Codable {
+        let code: String; var name: String; let seat: String; var lean: Int
+        var seen: String?; var note: String?; var chair: Bool?; var moved: String?; let sort: Int
     }
-    private func load() {
-        guard let d = UserDefaults.standard.data(forKey: Self.key),
-              let s = try? JSONDecoder().decode(Saved.self, from: d) else { return }
-        need = s.need
-        for row in s.seats {
-            if let i = seats.firstIndex(where: { $0.code == row.code }) {
-                seats[i].lean = row.lean; seats[i].name = row.name
-            }
+    private struct MetaRow: Codable { let id: Int; var need: Int; let verified: String?; let reverify_by: String?; let swing_window: String? }
+
+    /// Read the committee off the DB — device-independent. Falls back to the
+    /// seeded fixture if the table is unreachable.
+    func load() async {
+        if let rows: [SeatRow] = try? await client.from("tlt_voter_bloc").select().order("sort").execute().value, !rows.isEmpty {
+            seats = rows.map { BlocSeat(code: $0.code, name: $0.name, seat: $0.seat, lean: $0.lean,
+                                        seen: $0.seen ?? "—", note: $0.note, chair: $0.chair ?? false, moved: $0.moved) }
+        }
+        if let metas: [MetaRow] = try? await client.from("tlt_bloc_meta").select().eq("id", value: 1).execute().value, let m = metas.first {
+            need = m.need
+            verified = m.verified ?? verified; reverifyBy = m.reverify_by ?? reverifyBy; swingWindow = m.swing_window ?? swingWindow
         }
     }
-    func reset() { UserDefaults.standard.removeObject(forKey: Self.key); seats = Self.fixture; need = 7 }
+
+    func writeSeat(_ i: Int) {
+        guard seats.indices.contains(i) else { return }
+        let s = seats[i]
+        let row = SeatRow(code: s.code, name: s.name, seat: s.seat, lean: s.lean,
+                          seen: s.seen, note: s.note, chair: s.chair, moved: s.moved, sort: i)
+        Task { try? await client.from("tlt_voter_bloc").upsert(row, onConflict: "code").execute() }
+    }
+    func writeNeed() {
+        let row = MetaRow(id: 1, need: need, verified: verified, reverify_by: reverifyBy, swing_window: swingWindow)
+        Task { try? await client.from("tlt_bloc_meta").upsert(row, onConflict: "id").execute() }
+    }
+    func reset() {
+        seats = Self.fixture; need = 7
+        Task {
+            for (i, s) in seats.enumerated() {
+                let row = SeatRow(code: s.code, name: s.name, seat: s.seat, lean: s.lean,
+                                  seen: s.seen, note: s.note, chair: s.chair, moved: s.moved, sort: i)
+                try? await client.from("tlt_voter_bloc").upsert(row, onConflict: "code").execute()
+            }
+        }
+        writeNeed()
+    }
 }
 
 private enum Lean {
@@ -301,7 +327,7 @@ private struct BlocEditor: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("VOTES NEEDED TO HIKE").font(InkFont.mono(11.5)).tracking(11.5 * 0.06).foregroundStyle(Ink.dim)
                             HStack(spacing: 0) {
-                                ForEach([6, 7, 8], id: \.self) { n in seg("\(n)", on: b.need == n) { b.need = n; b.save() } }
+                                ForEach([6, 7, 8], id: \.self) { n in seg("\(n)", on: b.need == n) { b.need = n; b.writeNeed() } }
                             }
                             .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement).strokeBorder(Ink.hair, lineWidth: 1))
                             .clipShape(RoundedRectangle(cornerRadius: Ink.radiusElement))
@@ -323,11 +349,11 @@ private struct BlocEditor: View {
         let k = s.lean > 0 ? "hawk" : s.lean < 0 ? "dove" : "undecided"
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                TextField("name", text: Binding(get: { b.seats[i].name }, set: { b.seats[i].name = $0; b.save() }))
+                TextField("name", text: Binding(get: { b.seats[i].name }, set: { b.seats[i].name = $0; b.writeSeat(i) }))
                     .font(InkFont.display(15, .regular)).foregroundStyle(Ink.text)
                     .padding(.horizontal, 12).padding(.vertical, 10)
                     .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement).strokeBorder(Ink.hair, lineWidth: 1))
-                TextField("seen", text: Binding(get: { b.seats[i].seen }, set: { b.seats[i].seen = $0; b.save() }))
+                TextField("seen", text: Binding(get: { b.seats[i].seen }, set: { b.seats[i].seen = $0; b.writeSeat(i) }))
                     .font(InkFont.mono(13)).foregroundStyle(Ink.text).frame(width: 84)
                     .padding(.horizontal, 12).padding(.vertical, 10)
                     .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement).strokeBorder(Ink.hair, lineWidth: 1))
@@ -364,11 +390,11 @@ private struct BlocEditor: View {
     private func setStance(_ i: Int, _ k: String) {
         let cur = b.seats[i].lean
         b.seats[i].lean = k == "undecided" ? 0 : k == "hawk" ? (abs(cur) == 1 ? 1 : 2) : (abs(cur) == 1 ? -1 : -2)
-        b.save()
+        b.writeSeat(i)
     }
     private func setFirm(_ i: Int, _ firm: Bool) {
         let cur = b.seats[i].lean
         b.seats[i].lean = cur == 0 ? 0 : (cur > 0 ? 1 : -1) * (firm ? 2 : 1)
-        b.save()
+        b.writeSeat(i)
     }
 }

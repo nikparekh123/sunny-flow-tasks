@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import Supabase
 
 private func evMove(_ label: String, _ last: TLTBook.MacroLast) -> some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -109,7 +110,9 @@ private struct DateCard: View {
 
 struct TLTEventsScreen: View {
     @State private var byDate = false
-    private let macro = TLTBook.macro
+    @State private var adding = false
+    private let store = EventsStore.shared
+    private var macro: [TLTBook.MacroClass] { store.classes }
 
     private var flatDates: [(m: TLTBook.MacroClass, x: TLTBook.MacroDate)] {
         macro.flatMap { m in m.dates.map { (m, $0) } }
@@ -119,7 +122,7 @@ struct TLTEventsScreen: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            InkSectionHead(title: "Events calendar", count: "\(flatDates.count) ahead")
+            InkSectionHead(title: "Events calendar", count: "\(flatDates.count) ahead", icon: "plus", onAction: { adding = true })
             HStack(spacing: 6) {
                 chip("By event", on: !byDate) { byDate = false }
                 chip("By date", on: byDate) { byDate = true }
@@ -143,6 +146,7 @@ struct TLTEventsScreen: View {
             .scrollTargetBehavior(.viewAligned)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .sheet(isPresented: $adding) { AddEventSheet(store: store) }
     }
 
     private func chip(_ label: String, on: Bool, _ tap: @escaping () -> Void) -> some View {
@@ -153,5 +157,157 @@ struct TLTEventsScreen: View {
                 .background(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous).fill(on ? Ink.invertBg : .clear))
                 .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous).strokeBorder(on ? .clear : Ink.hair, lineWidth: 1))
         }.buttonStyle(.plain)
+    }
+}
+
+// MARK: - store (Supabase tlt_macro_events)
+
+@MainActor @Observable final class EventsStore {
+    static let shared = EventsStore()
+    var rows: [Row] = []
+    private let client = SupabaseService.client
+    private init() { Task { await load() } }
+
+    struct Row: Codable, Identifiable {
+        var id: String; var class_key: String; var class_name: String; var class_cat: String
+        var event_date: String; var label: String; var tag: String?; var outcome: String?; var tlt_move: Double?
+    }
+    struct NewRow: Codable {
+        var class_key: String; var class_name: String; var class_cat: String
+        var event_date: String; var label: String; var tag: String?
+    }
+
+    func load() async {
+        rows = (try? await client.from("tlt_macro_events").select().order("event_date").execute().value) ?? []
+    }
+    func add(_ r: NewRow) { Task { try? await client.from("tlt_macro_events").insert(r).execute(); await load() } }
+
+    /// Group the flat rows into the calendar's classes: future dates ahead, and
+    /// each class's most recent settled print as its "last time".
+    var classes: [TLTBook.MacroClass] {
+        let today = Self.todayISO
+        var order: [String] = []; var byKey: [String: [Row]] = [:]
+        for r in rows { if byKey[r.class_key] == nil { order.append(r.class_key) }; byKey[r.class_key, default: []].append(r) }
+        return order.compactMap { key in
+            let rs = (byKey[key] ?? []).sorted { $0.event_date < $1.event_date }
+            guard let first = rs.first else { return nil }
+            let past = rs.filter { $0.event_date < today && $0.outcome != nil }
+            let last = past.last.map { TLTBook.MacroLast(label: $0.label, what: $0.outcome ?? "", move: $0.tlt_move ?? 0) }
+                ?? TLTBook.MacroLast(label: "—", what: "No prior print on file.", move: 0)
+            let future = rs.filter { $0.event_date >= today }.map {
+                TLTBook.MacroDate(d: $0.event_date, label: $0.label, tag: $0.tag ?? "", last: nil, inDays: Self.daysTo($0.event_date))
+            }
+            return TLTBook.MacroClass(key: key, name: first.class_name, cat: first.class_cat, last: last, dates: future)
+        }
+    }
+    var classOptions: [(key: String, name: String, cat: String)] { classes.map { (key: $0.key, name: $0.name, cat: $0.cat) } }
+
+    private static var cal: Calendar { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "America/New_York")!; return c }
+    static let fmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "America/New_York"); return f }()
+    static var todayISO: String { fmt.string(from: Date()) }
+    static func daysTo(_ iso: String) -> Int {
+        guard let d = fmt.date(from: iso) else { return 0 }
+        return cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: d)).day ?? 0
+    }
+}
+
+// MARK: - add event
+
+private struct AddEventSheet: View {
+    let store: EventsStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var classSel = ""          // class_key; "" = a new class
+    @State private var newName = ""
+    @State private var newCat = ""
+    @State private var date = Date()
+    @State private var label = ""
+    @State private var tag = ""
+
+    private var canAdd: Bool { !label.isEmpty && (!classSel.isEmpty || (!newName.isEmpty && !newCat.isEmpty)) }
+
+    var body: some View {
+        let opts = store.classOptions
+        return ZStack {
+            Ink.canvas.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Add event").font(InkFont.serif(25)).tracking(25 * -0.01).foregroundStyle(Ink.text)
+                    Spacer()
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark").font(.system(size: 14)).foregroundStyle(Ink.text)
+                            .frame(width: 34, height: 34).overlay(Circle().strokeBorder(Ink.hair, lineWidth: 1))
+                    }.buttonStyle(.plain)
+                }
+                .padding(EdgeInsets(top: 18, leading: 20, bottom: 16, trailing: 20))
+                .overlay(alignment: .bottom) { Rectangle().fill(Ink.hair).frame(height: 1) }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        labelled("Class") {
+                            Menu {
+                                ForEach(opts, id: \.key) { o in Button(o.name) { classSel = o.key } }
+                                Button("New class…") { classSel = "" }
+                            } label: {
+                                HStack {
+                                    Text(classSel.isEmpty ? "New class…" : (opts.first { $0.key == classSel }?.name ?? classSel))
+                                        .font(InkFont.display(15, .regular)).foregroundStyle(Ink.text)
+                                    Spacer()
+                                    Image(systemName: "chevron.down").font(.system(size: 12)).foregroundStyle(Ink.dim)
+                                }
+                                .padding(.horizontal, 12).padding(.vertical, 11)
+                                .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement).strokeBorder(Ink.hair, lineWidth: 1))
+                            }
+                        }
+                        if classSel.isEmpty {
+                            field("Class name (e.g. Jobs)", $newName)
+                            field("Category (e.g. Labour)", $newCat)
+                        }
+                        labelled("Date") {
+                            DatePicker("", selection: $date, displayedComponents: .date).labelsHidden().tint(Ink.text)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        field("Label (e.g. Sep 15–16)", $label)
+                        field("Tag (e.g. SEP · projections)", $tag)
+                    }
+                    .padding(20)
+                }
+
+                Button { add() } label: {
+                    Text("ADD EVENT").font(InkFont.mono(11)).tracking(11 * 0.08)
+                        .foregroundStyle(canAdd ? Ink.invertText : Ink.dim)
+                        .frame(maxWidth: .infinity).frame(minHeight: 46)
+                        .background(RoundedRectangle(cornerRadius: Ink.radiusElement).fill(canAdd ? Ink.invertBg : Ink.hair))
+                }
+                .buttonStyle(.plain).disabled(!canAdd)
+                .padding(EdgeInsets(top: 14, leading: 20, bottom: 30, trailing: 20))
+                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationBackground(Ink.canvas)
+    }
+
+    private func add() {
+        let key = classSel.isEmpty ? newName.lowercased().replacingOccurrences(of: " ", with: "-") : classSel
+        let name = classSel.isEmpty ? newName : (store.classOptions.first { $0.key == classSel }?.name ?? newName)
+        let cat = classSel.isEmpty ? newCat : (store.classOptions.first { $0.key == classSel }?.cat ?? newCat)
+        store.add(.init(class_key: key, class_name: name, class_cat: cat,
+                        event_date: EventsStore.fmt.string(from: date), label: label, tag: tag.isEmpty ? nil : tag))
+        dismiss()
+    }
+
+    @ViewBuilder private func labelled<C: View>(_ k: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(k.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.06).foregroundStyle(Ink.dim)
+            content()
+        }
+    }
+    private func field(_ placeholder: String, _ text: Binding<String>) -> some View {
+        labelled(placeholder.components(separatedBy: " (").first ?? placeholder) {
+            TextField(placeholder, text: text)
+                .font(InkFont.display(15, .regular)).foregroundStyle(Ink.text)
+                .padding(.horizontal, 12).padding(.vertical, 11)
+                .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement).strokeBorder(Ink.hair, lineWidth: 1))
+        }
     }
 }
