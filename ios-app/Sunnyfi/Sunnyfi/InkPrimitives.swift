@@ -88,7 +88,11 @@ struct InkRoll: View {
     @State private var t: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
+        // Numbers never wrap (a lone "−" on its own line) or truncate ("$96…") —
+        // they hold one line and scale down only if the column is too tight.
         Text("").modifier(InkRollMod(t: reduce ? 1 : t, text: text, font: font, tracking: tracking, color: color))
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
             .onAppear {
                 guard !reduce else { return }
                 t = 0
@@ -99,7 +103,7 @@ struct InkRoll: View {
 
 /// Numbers in prose go mono at full ink; the surrounding prose is Inter-light dim
 /// (the Ink `Fig` treatment). Returns a concatenated Text.
-func inkFig(_ s: String) -> Text {
+func inkFig(_ s: String, size: CGFloat = 12.5, weight: Font.Weight = .light, prose: Color = Ink.dim) -> Text {
     let pattern = try! NSRegularExpression(pattern: #"\$?\d[\d,.–−\-]*%?(?:\s(?:ct|sh|pts))?"#)
     let ns = s as NSString
     var out = Text("")
@@ -107,13 +111,13 @@ func inkFig(_ s: String) -> Text {
     for m in pattern.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
         if m.range.location > last {
             out = out + Text(ns.substring(with: NSRange(location: last, length: m.range.location - last)))
-                .font(InkFont.display(12.5, .light)).foregroundStyle(Ink.dim)
+                .font(InkFont.display(size, weight)).foregroundStyle(prose)
         }
-        out = out + Text(ns.substring(with: m.range)).font(InkFont.mono(12.5)).foregroundStyle(Ink.text)
+        out = out + Text(ns.substring(with: m.range)).font(InkFont.mono(size)).foregroundStyle(Ink.text)
         last = m.range.location + m.range.length
     }
     if last < ns.length {
-        out = out + Text(ns.substring(from: last)).font(InkFont.display(12.5, .light)).foregroundStyle(Ink.dim)
+        out = out + Text(ns.substring(from: last)).font(InkFont.display(size, weight)).foregroundStyle(prose)
     }
     return out
 }
@@ -235,7 +239,6 @@ struct InkCard<Content: View>: View {
         }
         .frame(width: w, height: height ?? (compact ? 374 : 530), alignment: .top)
         .clipShape(UnevenRoundedRectangle(cornerRadii: corners, style: .continuous))
-        .overlay(UnevenRoundedRectangle(cornerRadii: corners, style: .continuous).strokeBorder(Ink.hair, lineWidth: 1))
     }
 
     @ViewBuilder private var spineView: some View {
@@ -272,17 +275,18 @@ struct InkEyebrow<Right: View>: View {
     @ViewBuilder var right: Right
 
     var body: some View {
+        // Design's Eyebrow: the category in Inter 14 · weight 400 · dim · sentence
+        // case, with its glyph. No "01·" number (the design's Eyebrow drops `n`).
         HStack(spacing: 10) {
-            HStack(spacing: 8) {
-                if let glyph { Text(glyph).font(.system(size: 12)).foregroundStyle(Ink.text) }
-                Text(([n, cat].compactMap { $0 }.joined(separator: " · ")).uppercased())
-                    .font(InkFont.mono(9.5)).tracking(9.5 * 0.18).foregroundStyle(Ink.dim)
+            HStack(spacing: 9) {
+                if let glyph { Text(glyph).font(.system(size: 13)).foregroundStyle(Ink.dim) }
+                Text(cat).font(InkFont.display(14, .regular)).tracking(14 * -0.005).foregroundStyle(Ink.dim)
                     .lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: 0)
             right
         }
-        .frame(minHeight: 24)
+        .frame(minHeight: 26)
     }
 }
 
@@ -299,9 +303,9 @@ struct InkHero: View {
     var unit: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            InkRoll(text: value, font: InkFont.mono(40, .bold), tracking: 40 * -0.04, color: Ink.text)
+            InkRoll(text: value, font: InkFont.mono(40, .medium), tracking: 40 * -0.04, color: Ink.text)
             if let unit {
-                Text(unit.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
+                Text(unit.uppercased()).font(InkFont.mono(11.5, .medium)).tracking(11.5 * 0.05)
                     .foregroundStyle(Ink.dim).padding(.top, 12)
             }
         }
@@ -317,9 +321,9 @@ struct InkBand: View {
     var text: String
 
     var body: some View {
-        Text(text.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.14)
+        Text(text.uppercased()).font(InkFont.mono(10)).tracking(10 * 0.07)
             .foregroundStyle(fg)
-            .padding(.horizontal, 11).padding(.vertical, 5)
+            .padding(.horizontal, 10).padding(.vertical, 4)
             .background(Capsule().fill(bg))
             .overlay { if case .mod = skin { Capsule().strokeBorder(Ink.dim, lineWidth: 1) } }
             .fixedSize()
@@ -340,9 +344,9 @@ struct InkBand3: View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(items.indices, id: \.self) { i in
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(items[i].k.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.14)
+                    Text(items[i].k.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.07)
                         .foregroundStyle(Ink.dim).lineLimit(1)
-                    InkRoll(text: items[i].v, font: InkFont.mono(17, .medium), tracking: 17 * -0.02, color: Ink.text, delay: 0.12)
+                    InkRoll(text: items[i].v, font: InkFont.mono(17, .regular), tracking: 17 * -0.02, color: Ink.text, delay: 0.12)
                         .padding(.top, 10)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -364,7 +368,8 @@ struct InkBullets: View {
             ForEach(items, id: \.self) { t in
                 HStack(alignment: .firstTextBaseline, spacing: 9) {
                     Circle().fill(Ink.dim).frame(width: 4, height: 4).offset(y: -3)
-                    inkFig(t).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                    inkFig(t, size: 14, weight: .regular, prose: Ink.text)
+                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -408,8 +413,8 @@ struct InkStamp: View {
     var body: some View {
         HStack(spacing: 8) {
             dot
-            Text(text.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1)
-                .foregroundStyle(Ink.text.opacity(settled ? 0.4 : 0.72)).lineLimit(1).truncationMode(.tail)
+            Text(text.uppercased()).font(InkFont.mono(10)).tracking(10 * 0.06)
+                .foregroundStyle(Ink.text.opacity(settled ? 0.32 : 0.8)).lineLimit(1).truncationMode(.tail)
         }
         .frame(height: 30).frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, compact ? 18 : 22)
@@ -441,7 +446,7 @@ struct InkBars<Net: View>: View {
         let maxV = max(leftV, rightV, 1)
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .firstTextBaseline) {
-                Text("\(leftK) vs \(rightK)".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16)
+                Text("\(leftK) vs \(rightK)".uppercased()).font(InkFont.mono(11)).tracking(11 * 0.08)
                     .foregroundStyle(Ink.dim)
                 Spacer(minLength: 0)
                 net
@@ -454,7 +459,7 @@ struct InkBars<Net: View>: View {
 
     private func barLine(_ k: String, _ v: Double, strong: Bool, maxV: Double) -> some View {
         HStack(spacing: 10) {
-            Text(k.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1)
+            Text(k.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.1)
                 .foregroundStyle(Ink.dim).frame(width: 62, alignment: .leading)
             GeometryReader { g in
                 ZStack(alignment: .leading) {
@@ -464,7 +469,7 @@ struct InkBars<Net: View>: View {
                 }
             }
             .frame(height: 7)
-            InkRoll(text: inkUsd(v), font: InkFont.mono(12, .medium), color: strong ? Ink.text : hue, delay: 0.14)
+            InkRoll(text: inkUsd(v), font: InkFont.mono(13, .regular), color: strong ? Ink.text : hue, delay: 0.14)
                 .frame(minWidth: 74, alignment: .trailing).lineLimit(1)
         }
     }

@@ -146,10 +146,10 @@ private struct LedgerLine: View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(k).font(InkFont.display(14, .regular)).foregroundStyle(Ink.text)
-                if let sub { Text(sub.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim) }
+                if let sub { Text(sub.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.06).foregroundStyle(Ink.dim) }
             }
             Spacer(minLength: 0)
-            InkRoll(text: v, font: InkFont.mono(16, .medium), tracking: 16 * -0.02, color: hue, delay: 0.1)
+            InkRoll(text: v, font: InkFont.mono(16, .regular), tracking: 16 * -0.02, color: hue, delay: 0.1)
         }
         .padding(.vertical, 13)
         .overlay(alignment: .top) { if !first { Rectangle().fill(Ink.hair).frame(height: 1) } }
@@ -173,7 +173,8 @@ private struct HeroSplit<Big: View, Side: View>: View {
 }
 
 private func unitLabel(_ s: String) -> some View {
-    Text(s.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 12).lineLimit(1)
+    Text(s.uppercased()).font(InkFont.mono(11.5, .medium)).tracking(11.5 * 0.05)
+        .foregroundStyle(Ink.dim).padding(.top, 12).lineLimit(1).minimumScaleFactor(0.7)
 }
 
 // MARK: - Summary card
@@ -198,7 +199,7 @@ private struct SummaryCard: View {
                 } side: {
                     InkDelta(value: nvUsdS(today), good: today >= 0, size: 20)
                     Text("today · \(p.dayChangePct >= 0 ? "+" : "−")\(nvDec(abs(p.dayChangePct), 2))%".uppercased())
-                        .font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim).padding(.top, 8).fixedSize()
+                        .font(InkFont.mono(10.5)).tracking(10.5 * 0.06).foregroundStyle(Ink.dim).padding(.top, 8).fixedSize()
                 }
                 InkSpacer()
                 VStack(spacing: 0) {
@@ -329,7 +330,7 @@ private struct AverageDownCard: View {
                     unitLabel("new average")
                 } side: {
                     InkDelta(value: "−$\(nvDec(cut, 2))", good: true, size: 20)
-                    Text("off $\(nvDec(p.avgBuy, 2))".uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.12)
+                    Text("off $\(nvDec(p.avgBuy, 2))".uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.06)
                         .foregroundStyle(Ink.dim).padding(.top, 8).fixedSize()
                 }
                 HStack(spacing: 4) {
@@ -406,8 +407,7 @@ private struct SleeveGroupCard: View {
         let sub = realized != 0 ? "\(nvUsd(realized)) realized"
             : (page == 0 ? "nothing realized yet" : "this expiry group")
 
-        return InkCard(spine: short ? .short : .long,
-                       stamp: (stampState(fresh), soonest <= 1 ? "Updated now · nearest leg expires today" : freshText)) {
+        return InkCard(stamp: (stampState(fresh), soonest <= 1 ? "Updated now · nearest leg expires today" : freshText)) {
             InkBody {
                 InkEyebrow(n: n, cat: cat, glyph: leg.glyph) {
                     InkBand(skin: .low, text: "\(Int(ct.rounded())) ct")
@@ -415,15 +415,15 @@ private struct SleeveGroupCard: View {
                 HStack(alignment: .bottom, spacing: 14) {
                     VStack(alignment: .leading, spacing: 0) {
                         InkDelta(value: nvUsdS(total), good: total >= 0, size: 40, weight: .medium)
-                        Text(sub.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16)
+                        Text(sub.uppercased()).font(InkFont.mono(11.5, .medium)).tracking(11.5 * 0.05)
                             .foregroundStyle(Ink.dim).padding(.top, 12).lineLimit(1)
                     }
                     .layoutPriority(1)
                     Spacer(minLength: 0)
                     Button { withAnimation(InkMotion.fast) { intrinsic.toggle() } } label: {
                         VStack(alignment: .trailing, spacing: 0) {
-                            InkRoll(text: nvUsd(intrinsic ? ie.int : ie.ext), font: InkFont.mono(20, .light), tracking: 20 * -0.03, color: Ink.text)
-                            Text(intrinsic ? "intrinsic" : "extrinsic left").font(InkFont.mono(8.5)).tracking(8.5 * 0.12)
+                            InkRoll(text: nvUsd(intrinsic ? ie.int : ie.ext), font: InkFont.mono(20, .regular), tracking: 20 * -0.03, color: Ink.text)
+                            Text(intrinsic ? "intrinsic" : "extrinsic left").font(InkFont.mono(10.5)).tracking(10.5 * 0.06)
                                 .foregroundStyle(Ink.dim).underline(true, color: Ink.hair).padding(.top, 8).fixedSize()
                         }
                         .padding(.leading, 14)
@@ -467,19 +467,20 @@ private struct LedgerRow: View {
         let x = legIntExt(kind: s.kind, strike: s.strike, mark: s.mark, ct: s.ct, spot: spot)
         let value = x.map { intrinsic ? $0.int : $0.ext }
         let pct = x.map { Int((intrinsic ? 100 - $0.extPct : $0.extPct).rounded()) }
+        let whenStr = s.expired ? "Expired" : (days == 0 ? "Today" : days == 1 ? "Tomorrow" : s.expiry)
         return HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(nvStrike(s.strike)).font(InkFont.mono(14.5)).tracking(14.5 * -0.01).foregroundStyle(Ink.text)
-                    Text("\(Int(s.ct)) CT").font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(Ink.dim)
+                    Text(nvStrike(s.strike)).font(InkFont.mono(15.5)).tracking(15.5 * -0.01).foregroundStyle(Ink.text)
+                    Text("\(Int(s.ct)) CT").font(InkFont.mono(10.5)).tracking(10.5 * 0.06).foregroundStyle(Ink.dim)
                 }
-                Text((s.expired ? "Expired \(s.moneyness) · \(s.expiry)" : "\(s.expiry) · \(s.dte) · \(s.moneyness)").uppercased())
-                    .font(InkFont.mono(8.5)).tracking(8.5 * 0.1).foregroundStyle(Ink.dim)
+                Text("\(whenStr) · \(s.moneyness)".uppercased())
+                    .font(InkFont.mono(10.5)).tracking(10.5 * 0.06).foregroundStyle(Ink.dim)
             }
             Spacer(minLength: 0)
-            VStack(alignment: .trailing, spacing: 5) {
-                Text(value == nil ? "—" : nvUsd(value!)).font(InkFont.mono(14.5)).tracking(14.5 * -0.02).foregroundStyle(Ink.text)
-                Text(pct == nil ? "no mark" : "\(pct!)% of mark").font(InkFont.mono(8.5)).tracking(8.5 * 0.06).foregroundStyle(Ink.dim)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(value == nil ? "—" : nvUsd(value!)).font(InkFont.mono(15.5)).tracking(15.5 * -0.02).foregroundStyle(Ink.text)
+                Text(pct == nil ? "no mark" : "\(pct!)% of mark").font(InkFont.mono(10.5)).tracking(10.5 * 0.06).foregroundStyle(Ink.dim)
             }
         }
         .frame(minHeight: 46)

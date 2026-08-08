@@ -39,13 +39,15 @@ enum Ink {
     static let canvas     = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
     static let surface    = inkDyn(UIColor(inkHex: 0x1A1A19), UIColor(inkHex: 0xFFFFFF))
     static let text       = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
-    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.84), UIColor(inkHex: 0x4A473F))
+    // dim / relevance track the NVDA·TLT pages' `.device` values exactly (the app
+    // lifts the DS defaults): dim 80%, foot-dim 84%, relevance .96/.88/.82.
+    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.80), UIColor(inkHex: 0x8B8880))
     static let hair       = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.07), UIColor(inkHex: 0xEBE9E2))
     static let invertBg   = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
     static let invertText = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
-    /// Inside card footers and sheet docks, dim is re-derived at 70% ink so small
-    /// mono labels stay legible on the raised surface (the `.ink-footzone` rule).
-    static let footDim    = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.80), UIColor(inkHex: 0x121211, alpha: 0.70))
+    /// Card footers / sheet docks lift dim to 84% (the `.cardfoot` override) so the
+    /// small mono labels stay legible on the raised surface.
+    static let footDim    = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.84), UIColor(inkHex: 0x121211, alpha: 0.84))
 
     // MARK: - Data hues (Law 1 — ONLY on a number, bar fill or data band)
     /// Moving AGAINST you — loss, cost to close, debit. (peril "fire")
@@ -71,9 +73,9 @@ enum Ink {
 // MARK: - Relevance (Law 2 — opacity is relevance)
 
 enum InkRelevance: Double {
-    // Floors raised for readability — secondary content stays legible rather than
-    // fading to near-invisible. Hierarchy is still present, just gentler.
-    case r1 = 1.0, r2 = 0.88, r3 = 0.74, r4 = 0.6
+    // The NVDA·TLT pages' relevance ladder (the app lifts the DS defaults of
+    // .68/.42/.26 to near-opaque — "we removed the transparency").
+    case r1 = 1.0, r2 = 0.96, r3 = 0.88, r4 = 0.82
 }
 
 extension View {
