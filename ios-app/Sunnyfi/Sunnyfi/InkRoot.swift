@@ -78,15 +78,17 @@ struct InkRoot: View {
                     })
                 NvdaPositionScreen(store: st, onPlan: { showPlanner = true }, showPlan: isNvda)
                 if isNvda {
+                    // NVDA: position · insights · peers · history
                     NvdaInsightsScreen(store: st)
+                    NvdaPeersScreen(store: st)
+                    NvdaHistoryScreen(store: st)
                 } else {
-                    TLTInsightsScreen()          // hike odds · rates & range · vol & engine
-                }
-                NvdaPeersScreen(store: st)
-                NvdaHistoryScreen(store: st)
-                if !isNvda {
-                    TLTVoterBlocScreen()
+                    // TLT: position · events · insights · voter bloc · history · peers
                     TLTEventsScreen()
+                    TLTInsightsScreen()          // hike odds · rates & range · vol & engine
+                    TLTVoterBlocScreen()
+                    NvdaHistoryScreen(store: st)
+                    NvdaPeersScreen(store: st)
                 }
                 Color.clear.frame(height: 104)
             }
