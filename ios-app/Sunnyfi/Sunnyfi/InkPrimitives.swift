@@ -259,9 +259,10 @@ struct InkBody<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            // One uniform inset on every side (foot + stamp use the same horizontal
-            // pad, so a card's content column is a single consistent gutter).
-            .padding(compact ? 18 : 22)
+            // Design insets: 20 / 22 / 20 (large) · 20 / 18 / 22 (small). 22px is the
+            // standard horizontal gutter; foot + stamp match it.
+            .padding(EdgeInsets(top: 20, leading: compact ? 18 : 22,
+                                bottom: compact ? 22 : 20, trailing: compact ? 18 : 22))
     }
 }
 
@@ -392,7 +393,7 @@ struct InkFoot<Content: View>: View {
         // varying gaps from a fixed-height zone centring content differently.
         // (The flex Body absorbs the height difference.) `height` is kept for
         // source compatibility but no longer forces a fixed zone.
-        let vpad: CGFloat = compact ? 14 : 18
+        let vpad: CGFloat = compact ? 14 : 16
         return VStack(alignment: .leading, spacing: compact ? 10 : 14) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, vpad)

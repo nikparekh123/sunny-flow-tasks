@@ -115,17 +115,42 @@ struct NvdaPositionScreen: View {
         return out
     }
 
+    private struct RailItem: Identifiable {
+        let id: String; let label: String?; let glyph: String?; let count: Int?; let card: AnyView
+    }
+    private func railItems(_ p: NvPosition) -> [RailItem] {
+        var out: [RailItem] = []
+        for g in groups(p) {
+            for (i, card) in g.cards.enumerated() {
+                out.append(RailItem(id: "\(g.id)-\(i)", label: i == 0 ? g.label : nil,
+                                    glyph: i == 0 ? g.glyph : nil, count: i == 0 ? g.count : nil, card: card))
+            }
+        }
+        return out
+    }
+
+    // Flat card rail (like Insights/History): every card is a snap target, so each
+    // one rests at the same 16pt gutter — never edge-to-edge. The group label rides
+    // above its first card; other cards carry an equal-height spacer to keep tops level.
     private func rail(_ p: NvPosition) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 10) {
-                ForEach(groups(p)) { g in
-                    InkStickyGroup(label: g.label, glyph: g.glyph, count: g.count, groupWidth: g.width) {
-                        ForEach(Array(g.cards.enumerated()), id: \.offset) { $0.element }
+                ForEach(railItems(p)) { item in
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 9) {
+                            if let g = item.glyph { Text(g).font(InkFont.mono(11)).foregroundStyle(Ink.text) }
+                            if let l = item.label { Text(l.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.2).foregroundStyle(Ink.dim) }
+                            if let c = item.count, c > 1 { Text("\(c)").font(InkFont.mono(9.5)).tracking(9.5 * 0.1).foregroundStyle(Ink.text) }
+                        }
+                        .frame(height: 12, alignment: .leading)
+                        item.card
                     }
                 }
             }
             .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
+            .scrollTargetLayout()
         }
+        .scrollTargetBehavior(.viewAligned)
         .coordinateSpace(name: "inkRail")
     }
 
@@ -203,7 +228,7 @@ private struct SummaryCard: View {
                 }
                 InkSpacer()
                 VStack(spacing: 0) {
-                    LedgerLine(k: "Premium realized", sub: "lifetime", v: nvUsd(perf?.realized ?? 0), hue: Ink.gain, first: true)
+                    LedgerLine(k: "Total realized so far", sub: "lifetime", v: nvUsd(perf?.realized ?? 0), hue: Ink.gain, first: true)
                     LedgerLine(k: "New average", sub: "buy average $\(nvDec(p.avgBuy, 2))", v: "$\(nvDec(p.breakEven, 2))")
                     LedgerLine(k: "Net delta", sub: "share equivalent", v: nvSigned(p.delta))
                 }
