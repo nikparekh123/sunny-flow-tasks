@@ -21,7 +21,8 @@ private func nvUsd(_ v: Double) -> String {
     let a = abs(v), sign = v < 0 ? "−" : ""
     func trim(_ s: String) -> String { s.replacingOccurrences(of: #"\.?0+$"#, with: "", options: .regularExpression) }
     if a >= 1_000_000 { return sign + "$" + trim(String(format: a >= 10_000_000 ? "%.1f" : "%.2f", a / 1_000_000)) + "M" }
-    if a >= 1_000 { return sign + "$" + trim(String(format: a >= 100_000 ? "%.0f" : "%.1f", a / 1_000)) + "K" }
+    // Whole thousands from $10K up (matches inkUsd) — $96.9K reads as $97K.
+    if a >= 1_000 { return sign + "$" + trim(String(format: a >= 10_000 ? "%.0f" : "%.1f", a / 1_000)) + "K" }
     return sign + "$" + nvInt(a)
 }
 /// Signed compact USD — "+$1.85M" / "−$17.9K" — for P&L heroes.

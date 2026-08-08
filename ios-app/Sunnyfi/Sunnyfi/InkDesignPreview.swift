@@ -117,6 +117,10 @@ struct InkDesignPreview: View {
                 NvdaEventsScreen()
             } else if ProcessInfo.processInfo.arguments.contains("-inkHist") {
                 ScrollView { NvdaHistoryScreen(store: store) }
+            } else if ProcessInfo.processInfo.arguments.contains("-inkIns") {
+                ScrollView { NvdaInsightsScreen(store: store) }
+            } else if ProcessInfo.processInfo.arguments.contains("-inkPeers") {
+                ScrollView { NvdaPeersScreen(store: store) }
             } else if ProcessInfo.processInfo.arguments.contains("-inkAvg") {
                 NvdaAvgDownPreviewHarness(store: store)
             } else if ProcessInfo.processInfo.arguments.contains("-inkSleeve") {

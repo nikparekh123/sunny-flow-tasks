@@ -210,7 +210,9 @@ struct NvdaInsightsScreen: View {
                           : "Percentile builds as IV history accrues"])
                 InkSpacer()
             }
-            InkFoot(compact: true) {
+            // 132, matching Protection: a label + 24pt verdict + a two-line note needs
+            // ~123pt, so at the compact default of 96 the label rode up over the rule.
+            InkFoot(compact: true, height: 132) {
                 footLabel("Now · sell timing")
                 Text(v.building ? "—" : v.verdict.capitalized)
                     .font(InkFont.mono(24, .medium)).tracking(24 * -0.02).foregroundStyle(tint)
@@ -309,7 +311,8 @@ private struct VegaCardView: View {
                 .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1).padding(.top, -6) }
                 InkSpacer()
             }
-            InkFoot(compact: true) {
+            // The scrubber alone is 52pt; with its header and note the foot needs ~134.
+            InkFoot(compact: true, height: 160) {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Implied volatility".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                     Spacer()
@@ -610,7 +613,9 @@ private struct HistoryCardView: View {
         let best = ps.max { $0.net < $1.net } ?? p
         let worst = ps.min { $0.net < $1.net } ?? p
         let parts = Array(p.vals.filter { $0.value != 0 }.sorted { abs($0.value) > abs($1.value) }.prefix(3))
-        return InkCard(height: 560, stamp: (.delayed, "Updated 16:00 · next at close")) {
+        // 584: at 560 the body ran ~24pt long, so the foot rendered ~100 of its 120
+        // and the BEST/WORST line was clipped in half at the card edge.
+        return InkCard(height: 584, stamp: (.delayed, "Updated 16:00 · next at close")) {
             InkBody {
                 InkEyebrow(cat: "Gains & losses") { InkBand(skin: .mod, text: mode == .month ? "By month" : "By week") }
                 toggle
