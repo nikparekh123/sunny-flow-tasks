@@ -382,7 +382,7 @@ Deno.serve(async (req) => {
     rows: [['30d IV', `${iv.toFixed(1)}%`], ['30d realized', `${HV.hv30.toFixed(1)}%`], ['trend', hvTrend]],
     push: iv > HV.hv30 ? `implied over realized by ${(iv - HV.hv30).toFixed(1)} — paid for movement that isn't there` : 'realized over implied — underpaid for this tape' });
   wf.push({ key: 'event', name: 'EVENT CLOCK', w: .23, score: sDecay(events.daysToHeavy - 7),
-    rows: [['next heavy', heavy ? `${heavy.label} ${heavy.days}d` : '—'], ['density 14d', String(density)], ['earnings', `${daysToEarnings}d`]],
+    rows: [['next heavy', heavy ? `${heavy.label} ${heavy.days}d` : 'none'], ['density 14d', String(density)], ['earnings', `${daysToEarnings}d`]],
     push: events.daysToHeavy <= 7 ? 'a print lands inside the week — short-dated premium is event premium' : `clear of the print by ${events.daysToHeavy - 7}d` });
   wf.push({ key: 'trend', name: 'TREND', w: .13, score: trendUp ? -trendStrength * 40 : trendStrength * 30,
     rows: [['50 vs 200', `${(trendRaw * 100).toFixed(1)}%`], ['strength', trendStrength.toFixed(2)], ['direction', trendUp ? 'up' : 'down/flat']],
@@ -391,10 +391,10 @@ Deno.serve(async (req) => {
     rows: [['vs 50-day', `${dev > 0 ? '+' : ''}${dev}σ`], ['state', state], ['damped by trend', `×${(1 - .8 * trendStrength).toFixed(2)}`]],
     push: state === 'STRETCH' ? 'extended — reversion pays the seller' : state === 'WASHOUT' ? "under its mean — don't cap the bounce" : 'mid-range — no regime edge' });
   wf.push({ key: 'rsi', name: 'RSI', w: .05, score: technicals.rsi14 != null ? sPct(technicals.rsi14) : 0,
-    rows: [['RSI 14', technicals.rsi14 != null ? technicals.rsi14.toFixed(0) : '—'], ['52w high', technicals.high52?.toFixed(2) ?? '—'], ['52w low', technicals.low52?.toFixed(2) ?? '—']],
+    rows: [['RSI 14', technicals.rsi14 != null ? technicals.rsi14.toFixed(0) : 'none'], ['52w high', technicals.high52?.toFixed(2) ?? 'none'], ['52w low', technicals.low52?.toFixed(2) ?? 'none']],
     push: (technicals.rsi14 ?? 50) >= 70 ? 'overbought — the tape is stretched with you' : (technicals.rsi14 ?? 50) <= 30 ? 'oversold — a bounce would run into your strikes' : 'neutral' });
   wf.push({ key: 'freeroll', name: 'FREEROLL', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
-    rows: [['banked premium', `$${Math.round(banked).toLocaleString()}`], ['structural risk', maxLoss > 0 ? `$${Math.round(maxLoss).toLocaleString()}` : '—'], ['regime', freerollRegime]],
+    rows: [['banked premium', `$${Math.round(banked).toLocaleString()}`], ['structural risk', maxLoss > 0 ? `$${Math.round(maxLoss).toLocaleString()}` : 'none'], ['regime', freerollRegime]],
     push: freerollRegime === 'insurance' ? 'floor sits above basis — premium only has the hedge to pay for' : freeroll >= 100 ? 'the corridor is paid for' : `${100 - freeroll}% of the corridor still open` });
   wf.push({ key: 'headroom', name: 'HEADROOM', w: .05, score: floor > 0 ? sTanh(headroom / floor) : 0,
     rows: [['upside Δ', Math.round(upsideDelta).toLocaleString()], ['floor', floor.toLocaleString()], ['headroom', Math.round(headroom).toLocaleString()]],
