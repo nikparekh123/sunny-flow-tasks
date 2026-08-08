@@ -430,8 +430,7 @@ private struct SleeveGroupCard: View {
         let ct = pageStrikes.reduce(0) { $0 + $1.ct }
         let basis = pageStrikes.reduce(0) { $0 + $1.basis }
         let cur = pageStrikes.reduce(0) { $0 + $1.current }
-        let net = short ? basis - cur : cur - basis
-        let total = realized + net
+        let net = short ? basis - cur : cur - basis     // unrealized (open) P&L for this page
         let ie = pageStrikes.reduce((int: 0.0, ext: 0.0)) { acc, s in
             guard let x = legIntExt(kind: s.kind, strike: s.strike, mark: s.mark, ct: s.ct, spot: spot) else { return acc }
             return (acc.int + x.int, acc.ext + x.ext)
@@ -448,9 +447,9 @@ private struct SleeveGroupCard: View {
                 }
                 HStack(alignment: .bottom, spacing: 14) {
                     VStack(alignment: .leading, spacing: 0) {
-                        InkDelta(value: nvUsdS(total), good: total >= 0, size: 40, weight: .medium)
+                        InkDelta(value: nvUsdS(net), good: net >= 0, size: 40, weight: .medium)   // unrealized
                         Text(sub.uppercased()).font(InkFont.mono(11.5, .medium)).tracking(11.5 * 0.05)
-                            .foregroundStyle(Ink.dim).padding(.top, 12).lineLimit(1)
+                            .foregroundStyle(Ink.dim).padding(.top, 12).lineLimit(1)              // realized
                     }
                     .layoutPriority(1)
                     Spacer(minLength: 0)
