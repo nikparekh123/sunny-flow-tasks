@@ -61,7 +61,6 @@ struct InkRoot: View {
                                                        value: g.frame(in: .named("inkScroll")).minY)
                             })
                         NvdaPositionScreen(store: store, onPlan: { showPlanner = true })
-                        NvdaPerformanceScreen(store: store)
                         NvdaInsightsScreen(store: store)
                         NvdaPeersScreen(store: store)
                         NvdaHistoryScreen(store: store)

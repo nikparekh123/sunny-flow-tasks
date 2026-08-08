@@ -525,7 +525,7 @@ struct NvdaHistoryScreen: View {
     var body: some View {
         if let h = store.history, h.months.contains(where: { !$0.bars.isEmpty }) {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Historical performance", count: "1 card")
+                InkSectionHead(title: "Historical performance")
                 // Single card — render directly (no horizontal scroll) so its
                 // internal month/source chip rails receive taps.
                 HistoryCardView(h: h).inkEntrance(0)
@@ -544,182 +544,192 @@ struct NvdaHistoryScreen: View {
     }
 }
 
-/// The gains-up / losses-down session chart with a month rail and per-source
-/// filter chips — the design's single History card (348 × 540).
+/// The gains-up / losses-down chart, one bar per PERIOD — monthly or weekly.
+/// Tap a bar to make it the hero; the top-three sources for that period read
+/// below, and the foot carries the range total with its best and worst period.
 private struct HistoryCardView: View {
     let h: NvHistory
-    @State private var mi: Int
+    enum Mode: String, CaseIterable { case month, week }
+    @State private var mode: Mode = .month
     @State private var pick: Int? = nil
-    @State private var on: [String: Bool]
-    private let barH: CGFloat = 52
+    @State private var grow = false
 
-    init(h: NvHistory) {
-        self.h = h
-        _mi = State(initialValue: max(0, h.months.count - 1))
-        var d: [String: Bool] = [:]
-        for s in h.sources { d[s.key] = !s.empty && s.key != "putsSold" }
-        _on = State(initialValue: d)
+    private struct Period: Identifiable {
+        let id: String; let label: String; let sub: String; let n: Int; let net: Double; let vals: [String: Double]
     }
 
-    private var m: NvHistMonth { h.months[min(mi, h.months.count - 1)] }
-    private func gain(_ b: NvHistBar) -> Double { h.sources.reduce(0) { a, s in a + ((on[s.key] ?? false) && (b.vals[s.key] ?? 0) > 0 ? b.vals[s.key]! : 0) } }
-    private func loss(_ b: NvHistBar) -> Double { h.sources.reduce(0) { a, s in a + ((on[s.key] ?? false) && (b.vals[s.key] ?? 0) < 0 ? b.vals[s.key]! : 0) } }
-    private var peak: Double {
-        max(h.months.flatMap { $0.bars }.map { max(gain($0), -loss($0)) }.max() ?? 1, 1)
+    private static let cal: Calendar = { var c = Calendar(identifier: .gregorian); c.timeZone = TimeZone(identifier: "America/New_York")!; return c }()
+    private static let isoFmt: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "America/New_York"); return f }()
+    private static let monShort = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    private static let monLong = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
+    private var sessions: [(date: Date, vals: [String: Double])] {
+        h.months.flatMap { $0.bars }.filter { !$0.pending }
+            .compactMap { b in Self.isoFmt.date(from: b.iso).map { ($0, b.vals) } }
+            .sorted { $0.0 < $1.0 }
     }
 
-    var body: some View {
-        let bars = m.bars
-        let gains = bars.reduce(0) { $0 + gain($1) }
-        let losses = bars.reduce(0) { $0 + loss($1) }
-        let net = gains + losses
-        let done = bars.filter { !$0.pending }.count
-        let sel = pick.flatMap { bars.indices.contains($0) ? bars[$0] : nil }
-        return InkCard(height: 540, stamp: (.delayed, "Updated 16:00 · next at close")) {
+    private func periods() -> [Period] {
+        let cal = Self.cal
+        var map: [String: Period] = [:]; var order: [String] = []
+        for s in sessions {
+            let key: String, label: String, sub: String
+            if mode == .month {
+                let c = cal.dateComponents([.year, .month], from: s.date)
+                key = String(format: "%04d-%02d", c.year ?? 0, c.month ?? 1)
+                label = Self.monShort[(c.month ?? 1) - 1]
+                sub = "\(Self.monLong[(c.month ?? 1) - 1]) \(c.year ?? 0)"
+            } else {
+                let back = (cal.component(.weekday, from: s.date) + 5) % 7        // days since Monday
+                let mon = cal.date(byAdding: .day, value: -back, to: cal.startOfDay(for: s.date)) ?? s.date
+                let c = cal.dateComponents([.month, .day], from: mon)
+                key = Self.isoFmt.string(from: mon)
+                label = "\(c.day ?? 0)"
+                sub = "Week of \(Self.monShort[(c.month ?? 1) - 1]) \(c.day ?? 0)"
+            }
+            if map[key] == nil { order.append(key); map[key] = Period(id: key, label: label, sub: sub, n: 0, net: 0, vals: [:]) }
+            let cur = map[key]!
+            var vals = cur.vals; var net = cur.net
+            for (k, v) in s.vals { vals[k, default: 0] += v; net += v }
+            map[key] = Period(id: key, label: cur.label, sub: cur.sub, n: cur.n + 1, net: net, vals: vals)
+        }
+        let all = order.compactMap { map[$0] }
+        return mode == .week ? Array(all.suffix(12)) : all
+    }
+
+    @ViewBuilder var body: some View {
+        let ps = periods()
+        if ps.isEmpty { EmptyView() } else { card(ps) }
+    }
+
+    private func card(_ ps: [Period]) -> some View {
+        let idx = min(pick ?? ps.count - 1, ps.count - 1)
+        let p = ps[idx]
+        let peak = max(ps.map { abs($0.net) }.max() ?? 1, 1)
+        let total = ps.reduce(0) { $0 + $1.net }
+        let best = ps.max { $0.net < $1.net } ?? p
+        let worst = ps.min { $0.net < $1.net } ?? p
+        let parts = Array(p.vals.filter { $0.value != 0 }.sorted { abs($0.value) > abs($1.value) }.prefix(3))
+        return InkCard(height: 560, stamp: (.delayed, "Updated 16:00 · next at close")) {
             InkBody {
-                InkEyebrow(n: "01", cat: "Gains & losses") { InkBand(skin: .mod, text: m.label) }
-                InkDelta(value: inkUsd(abs(net)), good: net >= 0, size: 36, weight: .medium).padding(.top, 16)
-                Text("Net · \(m.label) · \(done) of \(bars.count) sessions".uppercased())
-                    .font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 9)
-                chart(bars).padding(.top, 16)
+                InkEyebrow(cat: "Gains & losses") { InkBand(skin: .mod, text: mode == .month ? "By month" : "By week") }
+                toggle
+                heroRow(p)
+                chart(ps, idx: idx, peak: peak)
                 InkSpacer()
-                monthRail.padding(.top, 12)
-                sourceRail.padding(.top, 4)
+                sourceRows(parts)
             }
-            InkFoot {
-                if let sel { sessionFoot(sel) } else { totalsFoot(gains, losses) }
-            }
+            InkFoot { footView(total: total, best: best, worst: worst) }
         }
     }
 
-    // dual bars: gains grow up from the midline, losses down
-    @State private var grow = false
-    private func chart(_ bars: [NvHistBar]) -> some View {
-        VStack(spacing: 8) {
-            HStack(alignment: .center, spacing: 2) {
-                ForEach(Array(bars.enumerated()), id: \.element.id) { i, b in
-                    Button { pick = (pick == i) ? nil : i } label: {
+    private var toggle: some View {
+        HStack(spacing: 4) {
+            ForEach(Mode.allCases, id: \.self) { md in
+                let on = mode == md
+                Button { withAnimation(InkMotion.fast) { mode = md; pick = nil } } label: {
+                    Text((md == .month ? "Monthly" : "Weekly").uppercased()).font(InkFont.mono(10.5, .medium)).tracking(10.5 * 0.07)
+                        .foregroundStyle(on ? Ink.invertText : Ink.dim)
+                        .frame(maxWidth: .infinity).frame(minHeight: 32)
+                        .background(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous).fill(on ? Ink.invertBg : .clear))
+                        .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous).strokeBorder(on ? Ink.text : Ink.hair, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 14)
+    }
+
+    private func heroRow(_ p: Period) -> some View {
+        HStack(alignment: .bottom, spacing: 14) {
+            VStack(alignment: .leading, spacing: 0) {
+                InkDelta(value: nv2Money(p.net), good: p.net >= 0, size: 40, weight: .medium)
+                Text(p.sub.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.16).foregroundStyle(Ink.dim).padding(.top, 12).lineLimit(1)
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 0)
+            VStack(alignment: .trailing, spacing: 0) {
+                Text("\(p.n)").font(InkFont.mono(20)).tracking(20 * -0.03).foregroundStyle(Ink.text)
+                Text("SESSIONS").font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim).padding(.top, 8)
+            }
+            .padding(.leading, 14).overlay(alignment: .leading) { Rectangle().fill(Ink.hair).frame(width: 1) }
+        }
+        .padding(.top, 18)
+    }
+
+    private func chart(_ ps: [Period], idx: Int, peak: Double) -> some View {
+        let H: CGFloat = 48
+        return VStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(Array(ps.enumerated()), id: \.element.id) { i, x in
+                    let up = x.net >= 0
+                    let hgt = max(2, CGFloat(abs(x.net) / peak) * H * (grow ? 1 : 0))
+                    Button { pick = i } label: {
                         VStack(spacing: 0) {
                             VStack(spacing: 0) { Spacer(minLength: 0)
-                                Rectangle().fill(b.pending ? Ink.hair : Ink.text)
-                                    .frame(height: max(1, gain(b) / peak * barH * (grow ? 1 : 0)))
-                                    .clipShape(RoundedCorner(radius: 2, corners: [.topLeft, .topRight]))
-                            }.frame(height: barH)
-                            VStack(spacing: 0)  {
-                                Rectangle().fill(b.pending ? Ink.hair : Ink.loss)
-                                    .frame(height: max(1, -loss(b) / peak * barH * (grow ? 1 : 0)))
-                                    .clipShape(RoundedCorner(radius: 2, corners: [.bottomLeft, .bottomRight]))
+                                if up {
+                                    Rectangle().fill(i == idx ? Ink.text : Ink.dim).frame(height: hgt)
+                                        .clipShape(RoundedCorner(radius: 3, corners: [.topLeft, .topRight]))
+                                }
+                            }.frame(height: H)
+                            VStack(spacing: 0) {
+                                if !up {
+                                    Rectangle().fill(Ink.loss).opacity(i == idx ? 1 : 0.55).frame(height: hgt)
+                                        .clipShape(RoundedCorner(radius: 3, corners: [.bottomLeft, .bottomRight]))
+                                }
                                 Spacer(minLength: 0)
-                            }.frame(height: barH)
+                            }.frame(height: H)
                         }
                         .frame(maxWidth: .infinity)
-                        .inkRelevance(pick == nil || pick == i ? .r1 : .r3)
+                        .inkRelevance(i == idx ? .r1 : .r3)
                     }
                     .buttonStyle(.plain)
                 }
             }
             .overlay(alignment: .center) { Rectangle().fill(Ink.hair).frame(height: 1) }
-            HStack {
-                Text("\(m.short) \(bars.first?.label ?? "")").font(InkFont.mono(8)).tracking(8 * 0.1).foregroundStyle(Ink.dim)
-                Spacer()
-                Text("\(m.short) \(bars.last?.label ?? "")").font(InkFont.mono(8)).tracking(8 * 0.1).foregroundStyle(Ink.dim)
-            }
-        }
-        .onAppear { withAnimation(InkMotion.ease(0.9).delay(0.14)) { grow = true } }
-    }
-
-    private var monthRail: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(Array(h.months.enumerated()), id: \.element.id) { i, mo in
-                    let selp = i == mi
-                    Button { mi = i; pick = nil } label: {
-                        Text(mo.short.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.14)
-                            .foregroundStyle(selp ? Ink.invertText : Ink.dim)
-                            .padding(.horizontal, 11).frame(minHeight: 26)
-                            .background(RoundedRectangle(cornerRadius: Ink.radiusElement).fill(selp ? Ink.invertBg : .clear))
-                            .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement).strokeBorder(selp ? .clear : Ink.hair, lineWidth: 1))
-                    }.buttonStyle(.plain)
+            HStack(spacing: 3) {
+                ForEach(Array(ps.enumerated()), id: \.element.id) { i, x in
+                    Text(x.label).font(InkFont.mono(10)).foregroundStyle(i == idx ? Ink.text : Ink.dim)
+                        .frame(maxWidth: .infinity).lineLimit(1).inkRelevance(i == idx ? .r1 : .r3)
                 }
             }
         }
-        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+        .padding(.top, 18)
+        .onAppear { withAnimation(InkMotion.ease(0.7).delay(0.1)) { grow = true } }
+    }
+
+    private func sourceRows(_ parts: [Dictionary<String, Double>.Element]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(parts.enumerated()), id: \.offset) { i, e in
+                let src = h.sources.first { $0.key == e.key }
+                HStack(spacing: 10) {
+                    Text(src?.glyph ?? "·").font(.system(size: 12)).foregroundStyle(Ink.dim)
+                    Text(src?.label ?? e.key).font(InkFont.display(14, .regular)).foregroundStyle(Ink.text).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Text((e.value >= 0 ? "+" : "−") + inkUsd(abs(e.value)))
+                        .font(InkFont.mono(14.5)).tracking(14.5 * -0.02).foregroundStyle(e.value >= 0 ? Ink.text : Ink.loss)
+                }
+                .padding(.vertical, 8)
+                .overlay(alignment: .top) { if i > 0 { Rectangle().fill(Ink.hair).frame(height: 1) } }
+            }
+        }
         .padding(.top, 14)
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
     }
 
-    private var sourceRail: some View {
-        let live = h.sources.filter { !$0.empty }
-        let all = live.allSatisfy { on[$0.key] ?? false }
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                Button {
-                    for s in h.sources { on[s.key] = s.empty ? false : !all }
-                } label: { chip("All", nil, active: all, dashed: false) }
-                    .buttonStyle(.plain)
-                Rectangle().fill(Ink.hair).frame(width: 1, height: 18)
-                ForEach(h.sources.sorted { ($0.empty ? 1 : 0) < ($1.empty ? 1 : 0) }) { s in
-                    Button { if !s.empty { on[s.key]?.toggle() } } label: {
-                        chip(s.label, s.glyph, active: (on[s.key] ?? false) && !s.empty, dashed: s.empty)
-                    }
-                    .buttonStyle(.plain).disabled(s.empty)
-                }
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    private func chip(_ label: String, _ glyph: String?, active: Bool, dashed: Bool) -> some View {
-        HStack(spacing: 5) {
-            if let glyph { Text(glyph).font(.system(size: 9)) }
-            Text(label.uppercased()).font(InkFont.mono(9.5, .medium)).tracking(9.5 * 0.08)
-        }
-        .foregroundStyle(active ? Ink.invertText : Ink.dim)
-        .padding(.horizontal, 9).frame(minHeight: 26)
-        .background(RoundedRectangle(cornerRadius: Ink.radiusElement).fill(active ? Ink.invertBg : .clear))
-        .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement)
-            .strokeBorder(active ? Color.clear : Ink.hair, style: .init(lineWidth: 1, dash: dashed ? [3, 3] : [])))
-    }
-
-    private func totalsFoot(_ gains: Double, _ losses: Double) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("GAINS VS LOSSES").font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+    private func footView(total: Double, best: Period, worst: Period) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text((mode == .month ? "Year to date" : "Last 12 weeks").uppercased())
+                    .font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 Spacer()
-                Text("TAP A SESSION").font(InkFont.mono(10)).tracking(10 * 0.1).foregroundStyle(Ink.dim)
+                InkDelta(value: nv2Money(total), good: total >= 0, size: 20, weight: .medium)
             }
-            HStack(spacing: 22) {
-                col("Gains", inkUsd(gains), Ink.text)
-                col("Losses", inkUsd(abs(losses)), Ink.loss)
-            }
-        }
-    }
-    private func sessionFoot(_ b: NvHistBar) -> some View {
-        let total = gain(b) + loss(b)
-        return VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text(b.sub.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.text)
+                Text("BEST \(best.label) \(nv2Money(best.net))").font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(Ink.dim)
                 Spacer()
-                InkDelta(value: inkUsd(abs(total)), good: total >= 0, size: 16)
+                Text("WORST \(worst.label) \(nv2Money(worst.net))").font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(Ink.dim)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    ForEach(h.sources.filter { (on[$0.key] ?? false) && (b.vals[$0.key] ?? 0) != 0 }) { s in
-                        let v = b.vals[s.key] ?? 0
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text("\(s.glyph) \(s.label)".uppercased()).font(InkFont.mono(8)).tracking(8 * 0.1)
-                                .foregroundStyle(Ink.dim).lineLimit(1)
-                            Text((v < 0 ? "−" : "+") + inkUsd(abs(v)))
-                                .font(InkFont.mono(15)).foregroundStyle(v < 0 ? Ink.loss : Ink.text)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    private func col(_ k: String, _ v: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(k.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.12).foregroundStyle(Ink.dim)
-            Text(v).font(InkFont.mono(22, .medium)).foregroundStyle(color)
         }
     }
 }

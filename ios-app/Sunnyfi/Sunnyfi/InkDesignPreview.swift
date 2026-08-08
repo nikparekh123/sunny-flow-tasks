@@ -79,16 +79,23 @@ enum InkPreviewData {
                               day("Jul 24", 1635, 2.2), day("Jul 25", 1650, 0.9)], vsNvda: 0.8),
         ], fresh: .live)
 
-        func bar(_ label: String, _ sub: String, _ v: [String: Double]) -> NvHistBar {
-            NvHistBar(label: label, sub: sub, pending: false, vals: v)
+        func bar(_ iso: String, _ label: String, _ sub: String, _ v: [String: Double]) -> NvHistBar {
+            NvHistBar(iso: iso, label: label, sub: sub, pending: false, vals: v)
         }
         s.history = NvHistory(months: [
+            NvHistMonth(label: "June", short: "Jun", bars: [
+                bar("2026-06-15", "15", "Jun 15", ["shares": 3100, "callsSold": 700]),
+                bar("2026-06-22", "22", "Jun 22", ["shares": -2400, "putsBought": -300]),
+                bar("2026-06-29", "29", "Jun 29", ["shares": 4400, "callsSold": 500]),
+            ]),
             NvHistMonth(label: "July", short: "Jul", bars: [
-                bar("21", "Jul 21", ["shares": 4200, "callsSold": 800]),
-                bar("22", "Jul 22", ["shares": -3100, "putsBought": -400]),
-                bar("23", "Jul 23", ["shares": 5200, "callsSold": 600, "callsBought": 300]),
-                bar("24", "Jul 24", ["shares": -1200]),
-                bar("25", "Jul 25", ["shares": 2600, "callsSold": 900]),
+                bar("2026-07-06", "06", "Jul 6", ["shares": 1800, "callsSold": 650]),
+                bar("2026-07-13", "13", "Jul 13", ["shares": -900, "callsBought": 200]),
+                bar("2026-07-21", "21", "Jul 21", ["shares": 4200, "callsSold": 800]),
+                bar("2026-07-22", "22", "Jul 22", ["shares": -3100, "putsBought": -400]),
+                bar("2026-07-23", "23", "Jul 23", ["shares": 5200, "callsSold": 600, "callsBought": 300]),
+                bar("2026-07-24", "24", "Jul 24", ["shares": -1200]),
+                bar("2026-07-25", "25", "Jul 25", ["shares": 2600, "callsSold": 900]),
             ]),
         ], sources: [
             NvHistSource(key: "shares", label: "Shares", glyph: "○", empty: false),
@@ -108,11 +115,12 @@ struct InkDesignPreview: View {
             Ink.canvas.ignoresSafeArea()
             if ProcessInfo.processInfo.arguments.contains("-inkEvents") {
                 NvdaEventsScreen()
+            } else if ProcessInfo.processInfo.arguments.contains("-inkHist") {
+                ScrollView { NvdaHistoryScreen(store: store) }
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         NvdaPositionScreen(store: store)
-                        NvdaPerformanceScreen(store: store)
                         NvdaInsightsScreen(store: store)
                         NvdaPeersScreen(store: store)
                         NvdaHistoryScreen(store: store)

@@ -250,11 +250,12 @@ struct NvHistSource: Identifiable, Sendable {
     var id: String { key }
 }
 struct NvHistBar: Identifiable, Sendable {
+    let iso: String               // "2026-07-24" — the session date, for week grouping
     let label: String             // "24"
     let sub: String               // "Jul 24"
     let pending: Bool
     let vals: [String: Double]    // keyed by source key
-    var id: String { sub }
+    var id: String { iso }
 }
 struct NvHistMonth: Identifiable, Sendable {
     let label: String             // "July"
@@ -839,7 +840,7 @@ enum NvDerive {
             var vals = Dictionary(uniqueKeysWithValues: keys.map { ($0, 0.0) })
             for (src, v) in byDate[date]! { vals[src] = v }
             monthsMap[mk, default: []].append(NvHistBar(
-                label: dayNum(date), sub: shortDate(date), pending: false, vals: vals))
+                iso: date, label: dayNum(date), sub: shortDate(date), pending: false, vals: vals))
         }
         let months = order.map { mk in
             NvHistMonth(label: monthLong(mk), short: monthShort(mk), bars: monthsMap[mk] ?? [])
