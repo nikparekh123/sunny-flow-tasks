@@ -288,7 +288,14 @@ private struct SharesCard: View {
                     }
                     .buttonStyle(.plain)
                 }
-                InkHero(value: "$\(nvDec(p.spot, 2))", unit: "live spot · nvda")
+                HeroSplit {
+                    InkDelta(value: nvUsdS(p.sharesPL), good: p.sharesPL >= 0, size: 40, weight: .medium)
+                    unitLabel("open · shares")
+                } side: {
+                    InkRoll(text: "$\(nvDec(p.spot, 2))", font: InkFont.mono(20, .regular), tracking: 20 * -0.03, color: Ink.text)
+                    Text("LIVE SPOT").font(InkFont.mono(10.5)).tracking(10.5 * 0.06)
+                        .foregroundStyle(Ink.dim).padding(.top, 8).fixedSize()
+                }
                 if perShare > 0 {
                     InkBullets(items: ["$\(nvDec(perShare, 2)) a share collected — calls only"])
                 }

@@ -259,8 +259,9 @@ struct InkBody<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(EdgeInsets(top: compact ? 20 : 22, leading: compact ? 18 : 22,
-                                bottom: compact ? 22 : 24, trailing: compact ? 18 : 22))
+            // One uniform inset on every side (foot + stamp use the same horizontal
+            // pad, so a card's content column is a single consistent gutter).
+            .padding(compact ? 18 : 22)
     }
 }
 
@@ -460,8 +461,9 @@ struct InkBars<Net: View>: View {
 
     private func barLine(_ k: String, _ v: Double, strong: Bool, maxV: Double) -> some View {
         HStack(spacing: 10) {
-            Text(k.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.1)
-                .foregroundStyle(Ink.dim).frame(width: 62, alignment: .leading)
+            Text(k.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.08)
+                .foregroundStyle(Ink.dim).lineLimit(1).fixedSize()
+                .frame(width: 74, alignment: .leading)
             GeometryReader { g in
                 ZStack(alignment: .leading) {
                     Capsule().fill(Ink.hair)
