@@ -153,6 +153,9 @@ enum TLTBook {
         expires: "Monday · settles before CPI",
         restrike: "Tuesday · CPI week, so it is a conscious decision")
 
+    // The next scheduled evidence the September question is judged against.
+    static let evidence = (label: "CPI", inDays: 4)
+
     /// An NvdaStore filled with the TLT fixture — the section screens read it
     /// exactly as they read the live NVDA store.
     @MainActor static func store() -> NvdaStore {

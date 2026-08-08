@@ -84,7 +84,10 @@ struct InkRoot: View {
                 }
                 NvdaPeersScreen(store: st)
                 NvdaHistoryScreen(store: st)
-                // TLT-only voter bloc + macro calendar land in the next commits.
+                if !isNvda {
+                    TLTVoterBlocScreen()
+                    // TLT macro events calendar lands next.
+                }
                 Color.clear.frame(height: 104)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

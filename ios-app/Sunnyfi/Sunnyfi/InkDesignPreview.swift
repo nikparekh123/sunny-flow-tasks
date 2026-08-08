@@ -121,6 +121,7 @@ struct InkDesignPreview: View {
                 let tlt = TLTBook.store()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        TLTVoterBlocScreen()
                         TLTInsightsScreen()
                         NvdaPositionScreen(store: tlt, showPlan: false)
                         NvdaPeersScreen(store: tlt)
