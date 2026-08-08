@@ -117,6 +117,8 @@ struct InkDesignPreview: View {
                 NvdaEventsScreen()
             } else if ProcessInfo.processInfo.arguments.contains("-inkHist") {
                 ScrollView { NvdaHistoryScreen(store: store) }
+            } else if ProcessInfo.processInfo.arguments.contains("-inkSleeve") {
+                NvdaSleevePreviewHarness(store: store)
             } else if ProcessInfo.processInfo.arguments.contains("-inkTLT") {
                 let tlt = TLTBook.store()
                 ScrollView {

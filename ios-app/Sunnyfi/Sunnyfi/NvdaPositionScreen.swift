@@ -89,7 +89,7 @@ struct NvdaPositionScreen: View {
     private func groups(_ p: NvPosition) -> [RailGroup] {
         var out: [RailGroup] = [
             .init(id: "overview", label: "Overview", glyph: nil, count: 1, width: 348,
-                  cards: [AnyView(SummaryCard(p: p, perf: store.perf).inkEntrance(0))]),
+                  cards: [AnyView(SummaryCard(p: p, pnl: store.pnl).inkEntrance(0))]),
             .init(id: "shares", label: "Shares", glyph: "○", count: 1, width: 348,
                   cards: [AnyView(SharesGroupView(p: p, perShare: store.perf?.perShare ?? 0, high52: store.high52).inkEntrance(1))]),
         ]
@@ -206,7 +206,7 @@ private func unitLabel(_ s: String) -> some View {
 
 private struct SummaryCard: View {
     let p: NvPosition
-    let perf: NvPerf?
+    let pnl: NvPnL?
 
     private var openPnl: Double { p.sharesPL + p.optionsPL }
     private var todayStep: Double { p.spot - p.spot / (1 + p.dayChangePct / 100) }
@@ -228,7 +228,9 @@ private struct SummaryCard: View {
                 }
                 InkSpacer()
                 VStack(spacing: 0) {
-                    LedgerLine(k: "Total realized so far", sub: "lifetime", v: nvUsd(perf?.realized ?? 0), hue: Ink.gain, first: true)
+                    let realized = pnl?.realized ?? 0
+                    LedgerLine(k: "Total realized so far", sub: "closed positions", v: nvUsd(realized),
+                               hue: Ink.signed(realized >= 0), first: true)
                     LedgerLine(k: "New average", sub: "buy average $\(nvDec(p.avgBuy, 2))", v: "$\(nvDec(p.breakEven, 2))")
                     LedgerLine(k: "Net delta", sub: "share equivalent", v: nvSigned(p.delta))
                 }
@@ -455,7 +457,7 @@ private struct SleeveGroupCard: View {
                     Button { withAnimation(InkMotion.fast) { intrinsic.toggle() } } label: {
                         VStack(alignment: .trailing, spacing: 0) {
                             InkRoll(text: nvUsd(intrinsic ? ie.int : ie.ext), font: InkFont.mono(20, .regular), tracking: 20 * -0.03, color: Ink.text)
-                            Text(intrinsic ? "intrinsic" : "extrinsic left").font(InkFont.mono(10.5)).tracking(10.5 * 0.06)
+                            Text((intrinsic ? "intrinsic" : "extrinsic left").uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.06)
                                 .foregroundStyle(Ink.dim).underline(true, color: Ink.hair).padding(.top, 8).fixedSize()
                         }
                         .padding(.leading, 14)
@@ -472,8 +474,7 @@ private struct SleeveGroupCard: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.top, 18)
-                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+                .padding(.top, 20)   // each row draws its own top hairline; no container rule
                 InkSpacer()
             }
             InkFoot {
@@ -521,3 +522,23 @@ private struct LedgerRow: View {
         .inkRelevance(rank)
     }
 }
+
+#if DEBUG
+/// Renders one sleeve card standalone so the ledger (where the double-hairline
+/// lived) is visible for QA. -inkSleeve.
+struct NvdaSleevePreviewHarness: View {
+    let store: NvdaStore
+    var body: some View {
+        if let p = store.position, let g = p.groups.first {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    InkSectionHead(title: "Sleeve card")
+                    SleeveGroupCard(leg: g, pageStrikes: Array(g.strikes.prefix(3)), page: 0, pageCount: 1,
+                                    n: "01", spot: p.spot, fresh: p.fresh, freshText: p.freshText, realized: 15700)
+                        .padding(.horizontal, 16)
+                }
+            }
+        }
+    }
+}
+#endif
