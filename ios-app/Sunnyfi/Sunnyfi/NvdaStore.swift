@@ -26,6 +26,10 @@ final class NvdaStore {
     /// arbitrary windows (HV20/60/90) with the same estimator as the Seller Score.
     private(set) var nvCloses: [Double] = []
 
+    /// True 52-week high: the max close over the trailing ~252 trading sessions.
+    /// Drives the Average-down card's "below the high". nil until closes load.
+    var high52: Double? { Array(nvCloses.suffix(252)).max() }
+
     /// Annualised realized vol over the last `window` trading days, in percent.
     /// Same estimator as NvDerive.realizedVol (sample stdev of log returns × √252).
     func hv(_ window: Int) -> Double? {
@@ -66,12 +70,24 @@ final class NvdaStore {
                 .order("date", ascending: false)
                 .limit(120)
                 .execute().value
+            // A dedicated NVDA-only pull, a year deep — the shared `closes` above is
+            // capped at 120 rows across every peer ticker, far too few NVDA sessions
+            // for a real 52-week high or a stable HV window.
+            async let nvCloseRows: [NvDailyClose] = client.from("nvda_daily_closes")
+                .select("ticker,date,close_price")
+                .eq("ticker", value: "NVDA")
+                .order("date", ascending: false)
+                .limit(300)
+                .execute().value
 
-            let (t, l, sl, q, m, c) = try await (trades, lots, sells, quotes, marks, closes)
+            let (t, l, sl, q, m, c, nvc) = try await (trades, lots, sells, quotes, marks, closes, nvCloseRows)
             let nvda = q.first { $0.ticker == "NVDA" }
-            nvCloses = c.filter { $0.ticker == "NVDA" }
+            nvCloses = nvc
                 .compactMap { row in row.close_price.map { (row.date, $0) } }
                 .sorted { $0.0 < $1.0 }.map { $0.1 }
+            // Peers/insights read a merged series: the deep NVDA history plus the
+            // shared peer closes (deduped of the shared feed's shallow NVDA rows).
+            let mergedCloses = c.filter { $0.ticker != "NVDA" } + nvc
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
             // Daily IV snapshot — non-fatal: if the table isn't there yet, [] (no 2nd gauge arc).
             let ivDaily: [NvIvDaily] = (try? await client.from("nvda_iv_daily")
@@ -80,8 +96,8 @@ final class NvdaStore {
 
             pnl       = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             perf      = NvDerive.performance(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
-            insights  = NvDerive.insights(trades: t, lots: l, marks: m, quote: nvda, closes: c, ivDaily: ivDaily)
-            peers     = NvDerive.peers(quotes: q, closes: c)
+            insights  = NvDerive.insights(trades: t, lots: l, marks: m, quote: nvda, closes: mergedCloses, ivDaily: ivDaily)
+            peers     = NvDerive.peers(quotes: q, closes: mergedCloses)
             history   = NvDerive.history(trades: t, sells: sl)
             isLoading = false
             lastError = nil

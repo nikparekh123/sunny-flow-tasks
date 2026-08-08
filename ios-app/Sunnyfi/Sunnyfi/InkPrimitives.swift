@@ -192,15 +192,28 @@ struct InkDelta: View {
 
 struct InkCard<Content: View>: View {
     enum Spine { case short, long }   // solid text = sold/short · dashed dim = bought/long
+    /// When a sleeve/shares card pulls out a paired panel, the two square their
+    /// inner corners and share a 1px seam so the pair reads as one long card.
+    enum Join { case start, end, middle }
     var relevance: InkRelevance = .r1
     var spine: Spine? = nil
     var compact: Bool = false
     var height: CGFloat? = nil
+    var join: Join? = nil
     /// Freshness line, rendered as a caption BELOW the card surface (not inside it).
     var stamp: (state: InkStamp.FreshState, text: String)? = nil
     @ViewBuilder var content: Content
 
     private var w: CGFloat { compact ? 306 : 348 }
+    private var corners: RectangleCornerRadii {
+        let r = Ink.radiusCard
+        switch join {
+        case .start:  return .init(topLeading: r, bottomLeading: r, bottomTrailing: 0, topTrailing: 0)
+        case .end:    return .init(topLeading: 0, bottomLeading: 0, bottomTrailing: r, topTrailing: r)
+        case .middle: return .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 0, topTrailing: 0)
+        case nil:     return .init(topLeading: r, bottomLeading: r, bottomTrailing: r, topTrailing: r)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -221,8 +234,8 @@ struct InkCard<Content: View>: View {
             VStack(spacing: 0) { content }
         }
         .frame(width: w, height: height ?? (compact ? 374 : 530), alignment: .top)
-        .clipShape(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).strokeBorder(Ink.hair, lineWidth: 1))
+        .clipShape(UnevenRoundedRectangle(cornerRadii: corners, style: .continuous))
+        .overlay(UnevenRoundedRectangle(cornerRadii: corners, style: .continuous).strokeBorder(Ink.hair, lineWidth: 1))
     }
 
     @ViewBuilder private var spineView: some View {
