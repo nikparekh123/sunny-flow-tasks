@@ -865,13 +865,56 @@ Deno.serve(async (req) => {
       pickStrike: pick?.strike ?? null, chain };
   });
 
+  // ── split packages ───────────────────────────────────────────────────────────
+  // The normal trade is the nearest expiry AND the one after — from a Monday, both
+  // Wednesday and Friday. Two ladders side by side cannot express that: the legs
+  // share ONE delta budget and ONE pool of covered lots, so a 30/30 split spends
+  // what 60 on a single date spends while spreading the assignment across two.
+  interface Split {
+    legs: { iso: string; label: string; strike: number; ct: number; income: number; delta: number }[];
+    ct: number; income: number; deltaSold: number; coversPct: number; days: number;
+    normalIncome: number | null; ivPremium: number | null;
+  }
+  const splits: Split[] = [];
+  if (expiries.length >= 2 && budget > 0) {
+    const [e1, e2] = expiries;
+    // Selling into the later date implies buying back anything expiring before it,
+    // so the pool is the further expiry's capacity, shared by both legs.
+    const pool = Math.max(0, e2.capacityCt ?? 0);
+    const best = (e: typeof e1) =>
+      e.chain.filter((c) => !c.blocks?.length && c.delta > 0.05).sort((x, y) => (y.fit ?? 0) - (x.fit ?? 0)).slice(0, 3);
+    for (const a of best(e1)) {
+      for (const b of best(e2)) {
+        const ctA = clamp(Math.round((budget / 2) / (a.delta * 100)), 1, pool);
+        const ctB = clamp(Math.round((budget / 2) / (b.delta * 100)), 1, pool - ctA);
+        if (ctB < 1) continue;
+        const incA = a.ext * ctA * 100, incB = b.ext * ctB * 100;
+        const days = Math.max(e1.cal, e2.cal);
+        const nA = ivMedian != null ? Math.max(0, bsCall(spot, a.strike, e1.T, ivMedian / 100) - Math.max(0, spot - a.strike)) * ctA * 100 : null;
+        const nB = ivMedian != null ? Math.max(0, bsCall(spot, b.strike, e2.T, ivMedian / 100) - Math.max(0, spot - b.strike)) * ctB * 100 : null;
+        const norm = nA != null && nB != null ? nA + nB : null;
+        splits.push({
+          legs: [{ iso: e1.iso, label: e1.label, strike: a.strike, ct: ctA, income: Math.round(incA), delta: a.delta },
+                 { iso: e2.iso, label: e2.label, strike: b.strike, ct: ctB, income: Math.round(incB), delta: b.delta }],
+          ct: ctA + ctB, income: Math.round(incA + incB),
+          deltaSold: Math.round(a.delta * ctA * 100 + b.delta * ctB * 100),
+          coversPct: hedgeCarry > 0 ? Math.round(((incA + incB) / (hedgeCarry * days)) * 100) : 100,
+          days, normalIncome: norm == null ? null : Math.round(norm),
+          ivPremium: norm == null ? null : Math.round(incA + incB - norm),
+        });
+      }
+    }
+    splits.sort((x, y) => y.income - x.income);
+    splits.length = Math.min(3, splits.length);
+  }
+
   const refStrike = (b.refStrike as number) ?? Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
 
   return json(200, {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
-    week, posture, events, refLots, ticker: TICKER, ivMedian,
+    week, posture, events, refLots, ticker: TICKER, ivMedian, splits,
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     regime: { name: regime, why: regimeWhy, keepPct, keepDelta, keepWhy,
