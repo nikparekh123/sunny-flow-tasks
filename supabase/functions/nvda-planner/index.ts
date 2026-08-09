@@ -429,7 +429,14 @@ Deno.serve(async (req) => {
     hv60: Number(volIn.hv60 ?? volIn.hv30 ?? 0), hv90: Number(volIn.hv90 ?? volIn.hv30 ?? 0),
   };
   const earnings = (b.earnings ?? {}) as { date?: string; label?: string };
-  const daysToEarnings = earnings.date ? Math.max(0, Math.round((parseISO(earnings.date).getTime() - parseISO(nowISO).getTime()) / 86400000)) : Number((b.daysToEarnings as number) ?? 99);
+  // The clock, resolved once. It used to read b.earnings and fall through to 99 when
+  // the caller left it out, which silently switched off every factor keyed to the
+  // print — the record scored 0 while the observer had it as the top line. The table
+  // knows the date; the engine should not depend on being told.
+  const printRow = cats.find((c) => c.key === 'earnings_events') ?? null;
+  const daysToEarnings = earnings.date
+    ? Math.max(0, Math.round((parseISO(earnings.date).getTime() - parseISO(nowISO).getTime()) / 86400000))
+    : printRow ? printRow.days : Number((b.daysToEarnings as number) ?? 99);
   const wash = (b.wash ?? null) as { hit: boolean; on: string; amount: number; daysLeft: number } | null;
   const iv = Number(volIn.iv), ivPct = Number(volIn.ivPct ?? 50);
   const pctFactor = ivPct > 70 ? 1.2 : ivPct < 30 ? .8 : 1.0;
@@ -705,12 +712,19 @@ Deno.serve(async (req) => {
     const nextMacro = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3)[0] ?? null;
     const macroOnFile = calSources.some((x) => /^macro_events:\d+$/.test(x));
     wf.push({ key: 'macro', family: 'THE CALENDAR', name: 'THE ECONOMY', w: .05,
-      score: !macroOnFile ? 0 : nextMacro ? sDecay(nextMacro.days - 2) : 30,
+      // sDecay alone asked "is it more than two days out", which scored CPI landing
+      // ON the 12 Aug book as mildly safe to sell. The real question is whether it
+      // lands inside an expiry you would write now, and if it does the sign flips.
+      score: !macroOnFile ? 0 : !nextMacro ? 30
+           : (expiryDates[1] && nextMacro.date <= expiryDates[1])
+             ? clamp(-45 + nextMacro.days * 4, -45, -10)
+             : sDecay(nextMacro.days - 2),
       rows: [['next print', nextMacro ? nextMacro.label : macroOnFile ? 'none in range' : 'not on file'],
              ['days away', nextMacro ? String(nextMacro.days) : '-'],
              ['calendar', macroOnFile ? 'on file' : 'missing']],
       push: !macroOnFile ? 'No economic calendar on file, so this is sitting neutral.'
-          : nextMacro && nextMacro.days <= 3 ? `${nextMacro.label} lands in ${nextMacro.days}d, inside what you would be writing.`
+          : nextMacro && expiryDates[1] && nextMacro.date <= expiryDates[1]
+            ? `${nextMacro.label} lands in ${nextMacro.days}d, inside what you would be writing.`
           : 'Nothing scheduled close enough to move the week.' });
   }
 
@@ -1174,7 +1188,7 @@ Deno.serve(async (req) => {
     if (daysSincePrint <= 30 && bandStats) {
       say(true, { domain: 'record', tag: 'The record', seen: seenRecord, note: .90,
         text: `After ${bandStats.band} prints this has run ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% inside 30 sessions, on ${bandStats.n} observation${bandStats.n === 1 ? '' : 's'}.` });
-    } else if ((earnings.date ? daysToPrint : (cats.find((c) => c.key === 'earnings_events')?.days ?? daysToPrint)) <= 21) {
+    } else if (daysToPrint <= 21) {
       say(true, { domain: 'record', tag: 'The record', seen: seenRecord, note: .75,
         text: `${record.survived} of the last ${record.n} prints landed better than -8%, median ${record.med > 0 ? '+' : ''}${record.med}%. Capping upside into that record has been the losing side of it.` });
     } else {
@@ -1188,9 +1202,8 @@ Deno.serve(async (req) => {
   // daysToPrint keys off b.earnings, which the APP supplies. The table knows the
   // date too, and an observer that goes silent because the caller left a field out
   // is reporting on the request rather than on the world.
-  const printCat = cats.find((c) => c.key === 'earnings_events') ?? null;
-  const eDate = earnings.date ?? printCat?.date ?? null;
-  const dPrint = earnings.date ? daysToPrint : (printCat?.days ?? daysToPrint);
+  const eDate = earnings.date ?? printRow?.date ?? null;
+  const dPrint = daysToPrint;
   if (eDate) {
     const before = expiryDates.filter((d) => d < eDate).length;
     const seen = seenBy('event');
