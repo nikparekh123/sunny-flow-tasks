@@ -118,10 +118,15 @@ const REGIME_WEIGHTS: Record<string, Record<string, number>> = {
   // out was invisible behind a severity-5 earnings date sixteen days out. Split
   // three ways, each date keeps its own clock and nothing can mask anything else.
   //
+  // KEYS MUST MATCH the wf.push keys exactly. Lookup is `rw[f.key] ?? 0.01`, so a
+  // mismatch does not throw — it silently pins that factor at 1% in every regime.
+  // Writing `print:` here while the factor is keyed 'event' gave THE PRINT one
+  // percent of the weight during earnings week, and the score barely moved for it.
+  //
   // `record` and `relative` are new to the score. The print record previously moved
   // keepPct and nothing else, so the number on the card never reflected the one
   // thing measured over 159 observations.
-  'EARNINGS WEEK':        { print: .24, iv_pctile: .18, iv_spread: .15, record: .13,
+  'EARNINGS WEEK':        { event: .24, iv_pctile: .18, iv_spread: .15, record: .13,
                             assignment: .08, peers: .06, headroom: .04, macro: .03,
                             trend: .03, freeroll: .02, stretch: .02, relative: .01, rsi: .01 },
 
@@ -129,19 +134,19 @@ const REGIME_WEIGHTS: Record<string, Record<string, number>> = {
   // tape is resetting, and what this name did next is measured rather than guessed.
   'JUST AFTER THE PRINT': { record: .20, iv_spread: .18, stretch: .15, trend: .12,
                             assignment: .10, headroom: .07, relative: .06, iv_pctile: .04,
-                            peers: .03, freeroll: .02, macro: .02, rsi: .01, print: .01 },
+                            peers: .03, freeroll: .02, macro: .02, rsi: .01, event: .01 },
 
   'BEATEN DOWN':          { stretch: .20, rsi: .13, trend: .12, record: .12, headroom: .12,
                             relative: .08, iv_pctile: .08, iv_spread: .07, assignment: .04,
-                            macro: .02, peers: .01, freeroll: .01, print: .01 },
+                            macro: .02, peers: .01, freeroll: .01, event: .01 },
 
   'EXTENDED RUN':         { stretch: .20, trend: .17, iv_pctile: .12, relative: .08, rsi: .08,
                             assignment: .08, macro: .06, record: .06, headroom: .06,
-                            iv_spread: .05, peers: .03, print: .02, freeroll: .01 },
+                            iv_spread: .05, peers: .03, event: .02, freeroll: .01 },
 
   'RANGE':                { iv_pctile: .22, iv_spread: .14, freeroll: .12, headroom: .10,
                             macro: .09, stretch: .08, assignment: .07, record: .05,
-                            relative: .05, peers: .04, print: .03, trend: .03, rsi: .02 },
+                            relative: .05, peers: .04, event: .03, trend: .03, rsi: .02 },
 };
 
 
