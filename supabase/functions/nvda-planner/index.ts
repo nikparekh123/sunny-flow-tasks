@@ -227,6 +227,8 @@ Deno.serve(async (req) => {
   const cats: Cat[] = [];
   const calSources: string[] = [];
   let lastPrintISO: string | null = null;
+  let lastReaction: { band: string; move_pct: number; report_date: string } | null = null;
+  let bandStats: { band: string; n: number; d30: number } | null = null;
   if (supaUrl && supaKey) {
     const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
     const soon = ymd(new Date(Date.now() + 120 * 86400000));
@@ -295,6 +297,29 @@ Deno.serve(async (req) => {
         }
       }
     } catch { /* no history yet just means no comparison */ }
+  }
+
+  // What this stock actually did after prints like the last one. NVDA's own record
+  // only — the peers say the opposite about bad prints (they stay down, NVDA
+  // recovers), so falling back to them would mislead in the one band that differs
+  // most. Used at whatever sample exists, with the count carried through so a number
+  // resting on four observations can be read as such.
+  if (supaUrl && supaKey && TICKER !== 'TLT') {
+    const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
+    try {
+      const r = await fetch(`${supaUrl}/rest/v1/earnings_reactions`
+        + `?select=band,move_pct,report_date,d30_pct&ticker=eq.${TICKER}&order=report_date.desc&limit=200`,
+        { headers: h });
+      if (r.ok) {
+        const rows = (await r.json()) as { band: string; move_pct: number; report_date: string; d30_pct: number }[];
+        if (rows.length) {
+          lastReaction = { band: rows[0].band, move_pct: Number(rows[0].move_pct), report_date: rows[0].report_date };
+          const same = rows.filter((x) => x.band === rows[0].band).map((x) => Number(x.d30_pct))
+            .filter(Number.isFinite).sort((a, b) => a - b);
+          if (same.length) bandStats = { band: rows[0].band, n: same.length, d30: +same[Math.floor(same.length / 2)].toFixed(2) };
+        }
+      }
+    } catch { /* no record yet just means the hand-set numbers stand */ }
   }
 
   const num = (v: unknown) => (v == null ? null : Number(v));
@@ -519,6 +544,21 @@ Deno.serve(async (req) => {
   if (ivPct >= 70) { keepPct = Math.max(20, keepPct - 5); keepWhy.push('premium is rich, so take more of it'); }
   if (ivPct <= 30) { keepPct = Math.min(50, keepPct + 5); keepWhy.push('premium is thin, so hold back'); }
   if (regime === 'JUST AFTER THE PRINT') { keepPct = Math.max(10, keepPct - 8); keepWhy.push('vol crushed, little left to wait for'); }
+
+  // Measured history overrides the guess. After a print, what matters is what this
+  // stock has actually done next: if it recovers, keep more and be in it; if it
+  // stays down, there is less upside to protect. NVDA's own record says it recovers
+  // ~6% within thirty days of a bad print, which is the opposite of the assumption
+  // the placeholder encoded.
+  let measured: { band: string; n: number; d30: number; applied: boolean } | null = null;
+  if (bandStats && daysSincePrint <= 30) {
+    const lift = clamp(bandStats.d30 * 2, -15, 25);
+    keepPct = clamp(keepPct + lift, 10, 60);
+    keepWhy.push(`after ${bandStats.band} prints this has run ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% in 30 days (${bandStats.n} on record)`);
+    measured = { ...bandStats, applied: true };
+  } else if (bandStats) {
+    measured = { ...bandStats, applied: false };
+  }
 
   // The floor and the calls are one decision, and this is where they meet. Whatever
   // sits between spot and the put strike is unprotected, and call premium is the only
@@ -967,6 +1007,7 @@ Deno.serve(async (req) => {
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     regime: { name: regime, why: regimeWhy, keepPct, keepDelta, keepWhy,
+              measured, lastReaction,
               floorGapPct: floorGapPct == null ? null : +floorGapPct.toFixed(1),
               drawdown: drawdown == null ? null : +drawdown.toFixed(1), haveHigh,
               daysToPrint, daysSincePrint, lastPrint: lastPrintISO },
