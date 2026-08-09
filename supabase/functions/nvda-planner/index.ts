@@ -139,7 +139,7 @@ interface Cell {
   side: string; advCost: number; affected: number;
   perDay?: number; deltaSold?: number; freeAfter?: number; afterAssign?: number; em?: number;
   calledPerCt?: number; clearsBy?: number; calledShares?: number; calledCost?: number; calledPL?: number; calledAvg?: number; suggestCt?: number; wantCt?: number; cappedBy?: string | null;
-  credit?: number; income?: number; paidPerDelta?: number; upsideAfterMove?: number; deltaAfterMove?: number;
+  credit?: number; income?: number; paidPerDelta?: number; normalIncome?: number | null; ivPremium?: number | null; upsideAfterMove?: number; deltaAfterMove?: number;
   netCarry?: number; rank?: number; perDayPkg?: number; coversPct?: number; requiredHere?: number;
   warns?: string[]; blocks?: string[]; fit?: number; isPick?: boolean;
   fitParts?: { k: string; w: number; s: number; contribution: number }[];
@@ -268,6 +268,23 @@ Deno.serve(async (req) => {
     await Promise.all(tables.map(([t, d, n, x, l]) => grab(t, d, n, x, l)));
   }
   cats.sort((x, y) => x.days - y.days);
+
+  // A year of implied vol, so "rich" can be stated in dollars rather than as a
+  // ratio nobody can act on. Median, not mean: a single earnings spike should not
+  // define normal.
+  let ivMedian: number | null = null;
+  if (supaUrl && supaKey) {
+    try {
+      const r = await fetch(`${supaUrl}/rest/v1/${TICKER === 'TLT' ? 'tlt' : 'nvda'}_iv_daily`
+        + `?select=iv&ticker=eq.${TICKER}&order=date.desc&limit=252`,
+        { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` } });
+      if (r.ok) {
+        const xs = ((await r.json()) as { iv?: number }[])
+          .map((x) => Number(x.iv)).filter((x) => Number.isFinite(x) && x > 0).sort((a, b) => a - b);
+        if (xs.length >= 30) ivMedian = xs[Math.floor(xs.length / 2)];
+      }
+    } catch { /* no history yet just means no comparison */ }
+  }
 
   const num = (v: unknown) => (v == null ? null : Number(v));
   const technicals = {
@@ -746,6 +763,12 @@ Deno.serve(async (req) => {
       // gross made deep-in-the-money strikes look like the best earners on the
       // board, when they are really a discount on the shares.
       const income = c.ext * suggestCt * 100;
+      // The same package priced at the year's median implied vol. The gap is what
+      // today's vol is worth in cash — the sentence "normally $18K, today $43K".
+      const normalIncome = ivMedian != null
+        ? Math.max(0, bsCall(spot, c.strike, T, ivMedian / 100) - Math.max(0, spot - c.strike)) * suggestCt * 100
+        : null;
+      const ivPremium = normalIncome != null ? income - normalIncome : null;
       const paidPerDelta = deltaSold > 0 ? income / deltaSold : 0;
       // Gamma, as a scenario rather than a Greek: the budget says 2,145 of upside
       // sold, but only while nothing moves. One expected move up and a package can
@@ -788,6 +811,8 @@ Deno.serve(async (req) => {
         perDay, deltaSold, freeAfter, afterAssign, warns, blocks,
         em: emMove > 0 ? (c.strike - spot) / emMove : 0,
         suggestCt, wantCt, credit, income, paidPerDelta, rollable: rollableHere, capHere,
+        normalIncome: normalIncome == null ? null : Math.round(normalIncome),
+        ivPremium: ivPremium == null ? null : Math.round(ivPremium),
         upsideAfterMove: Math.round(upsideAfterMove), deltaAfterMove: Math.round(deltaAfterMove),
         perDayPkg: Math.round(perDayPkg), netCarry: Math.round(netCarry),
         coversPct, requiredHere: Math.round(requiredHere),
@@ -840,7 +865,7 @@ Deno.serve(async (req) => {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
-    week, posture, events, refLots, ticker: TICKER,
+    week, posture, events, refLots, ticker: TICKER, ivMedian,
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     regime: { name: regime, why: regimeWhy, keepPct, keepDelta, keepWhy,
