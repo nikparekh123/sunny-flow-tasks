@@ -67,7 +67,15 @@ struct PV2: Decodable, Sendable {
     var refLots: Int?
     var hedgeCarry: Double?
     var ivMedian: Double?
+    var splits: [Split]?
     var regime: Regime?
+    struct Split: Decodable, Sendable, Identifiable {
+        let legs: [Leg]
+        let ct: Int, income: Double, deltaSold: Double, coversPct: Int, days: Int
+        var normalIncome: Double?; var ivPremium: Double?
+        var id: String { legs.map { "\($0.iso)-\($0.strike)-\($0.ct)" }.joined() }
+        struct Leg: Decodable, Sendable { let iso, label: String; let strike: Double; let ct: Int; let income, delta: Double }
+    }
     var budget: Budget?
     struct Regime: Decodable, Sendable {
         let name: String
@@ -825,6 +833,65 @@ private struct PVStyle: View {
     }
 }
 
+/// Two expiries as one trade. Shown against the best single-expiry package on the
+/// same budget, because splitting is not free: a near leg with little time left
+/// spends half the budget on extrinsic that barely exists.
+private struct PVSplits: View {
+    let splits: [PV2.Split]
+    let bestSingle: (label: String, ct: Int, strike: Double, income: Double)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(splits) { sp in card(sp) }
+                }
+                .padding(.horizontal, 16).padding(.bottom, 8)
+            }
+            if let b = bestSingle, let top = splits.first {
+                let gap = top.income - b.income
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(gap >= 0 ? "Splitting earns" : "Splitting costs")
+                        .font(InkFont.display(13.5, .regular)).foregroundStyle(Ink.dim)
+                    Text((gap >= 0 ? "+" : "−") + pvUsd(abs(gap)))
+                        .font(InkFont.mono(15, .medium)).foregroundStyle(gap >= 0 ? Ink.gain : Ink.loss)
+                    Text("against \(b.ct) at \(pvDec(b.strike, b.strike == b.strike.rounded() ? 0 : 1)) on \(b.label) alone")
+                        .font(InkFont.display(13.5, .regular)).foregroundStyle(Ink.dim)
+                }
+                .padding(.horizontal, 16).padding(.top, 4)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func card(_ sp: PV2.Split) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(sp.legs.enumerated()), id: \.offset) { i, l in
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text("\(l.ct)").font(InkFont.mono(22, .medium)).tracking(22 * -0.03)
+                        .foregroundStyle(Ink.text)
+                    Text(" at ").font(InkFont.display(14, .regular)).foregroundStyle(Ink.dim)
+                    Text(pvDec(l.strike, l.strike == l.strike.rounded() ? 0 : 1))
+                        .font(InkFont.mono(18, .medium)).foregroundStyle(Ink.text)
+                    Spacer(minLength: 8)
+                    Text(l.label).font(InkFont.mono(10)).foregroundStyle(Ink.dim).fixedSize()
+                }
+                .padding(.top, i == 0 ? 0 : 10)
+            }
+            Spacer(minLength: 12)
+            Text(pvUsd(sp.income)).font(InkFont.mono(24, .medium)).tracking(24 * -0.03)
+                .foregroundStyle(Ink.gain)
+            Text("\(sp.ct) CONTRACTS · \(pvInt(sp.deltaSold))Δ · COVERS \(sp.coversPct)%")
+                .font(InkFont.mono(9.5)).tracking(9.5 * 0.08).foregroundStyle(Ink.dim)
+                .padding(.top, 8).lineLimit(1)
+        }
+        .padding(EdgeInsets(top: 16, leading: 17, bottom: 15, trailing: 17))
+        .frame(width: 250, height: 186, alignment: .topLeading)
+        .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
+            .strokeBorder(Ink.hair, lineWidth: 1))
+    }
+}
+
 // MARK: - 05 · why
 
 /// Each force is its own card: what it says, what it is worth, and the one figure
@@ -1163,11 +1230,16 @@ struct NvdaPlannerV2Screen: View {
         }
 
         if let c = cur, let w = s.week {
-            PVSectionLabel(n: "05", t: "Why \(pvDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))", right: "Tap for detail")
+            if let sp = s.splits, sp.count >= 1 {
+            PVSectionLabel(n: "05", t: "Or split it across two dates", right: "\(sp.count)")
+            PVSplits(splits: sp, bestSingle: bestSingle(s))
+        }
+
+        PVSectionLabel(n: "06", t: "Why \(pvDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))", right: "Tap for detail")
             PVWhy(forces: w.forceList, score: w.score, caption: w.caption,
                   priorNote: w.prior.map { "OF 100 · WAS \($0.score)" })
 
-            PVSectionLabel(n: "06", t: "If you place it")
+            PVSectionLabel(n: "07", t: "If you place it")
             let closing = rollSel.flatMap { groups.byIso[$0] } ?? []
             PVSend(cell: c,
                    closeCt: Int(closing.reduce(0) { $0 + $1.ct }),
@@ -1187,6 +1259,20 @@ struct NvdaPlannerV2Screen: View {
     private func replan(_ current: PV2) {
         plan.style = style
         Task { await plan.load(from: store, ticker: ticker) }
+    }
+
+    /// The best single-expiry package on the same budget — the thing a split has to
+    /// beat, and usually does not when the near leg has no time left in it.
+    private func bestSingle(_ s: PV2) -> (label: String, ct: Int, strike: Double, income: Double)? {
+        var best: (String, Int, Double, Double)? = nil
+        for e in s.exps.prefix(2) {
+            for c in e.cells where c.rank == 1 {
+                if best == nil || (c.income ?? 0) > best!.3 {
+                    best = (e.label, c.suggestCt ?? 0, c.strike, c.income ?? 0)
+                }
+            }
+        }
+        return best.map { (label: $0.0, ct: $0.1, strike: $0.2, income: $0.3) }
     }
 
     /// Open short calls, grouped by expiry — the unit the decision is actually made in.
