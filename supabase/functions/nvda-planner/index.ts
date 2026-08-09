@@ -229,6 +229,11 @@ Deno.serve(async (req) => {
   let lastPrintISO: string | null = null;
   let lastReaction: { band: string; move_pct: number; report_date: string } | null = null;
   let bandStats: { band: string; n: number; d30: number } | null = null;
+  let record: { n: number; survived: number; med: number } | null = null;
+  type Peer = { ticker: string; date: string; days: number; confirmed: boolean };
+  let peers: Peer[] = [];
+  let peersKnown = false;
+  let relStrength: { vs: string; self: number; ref: number; gap: number; days: number } | null = null;
   if (supaUrl && supaKey) {
     const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
     const soon = ymd(new Date(Date.now() + 120 * 86400000));
@@ -317,9 +322,69 @@ Deno.serve(async (req) => {
           const same = rows.filter((x) => x.band === rows[0].band).map((x) => Number(x.d30_pct))
             .filter(Number.isFinite).sort((a, b) => a - b);
           if (same.length) bandStats = { band: rows[0].band, n: same.length, d30: +same[Math.floor(same.length / 2)].toFixed(2) };
+          // The whole distribution, not just the matching band. "36 of the last 40
+          // landed better than -8%" is a claim about the world; the band median is a
+          // claim about one situation. The card wants both, at different moments.
+          const moves = rows.map((x) => Number(x.move_pct)).filter(Number.isFinite).sort((a, b) => a - b);
+          if (moves.length >= 8) {
+            record = { n: moves.length, survived: moves.filter((m) => m > -8).length,
+                       med: +moves[Math.floor(moves.length / 2)].toFixed(1) };
+          }
         }
       }
     } catch { /* no record yet just means the hand-set numbers stand */ }
+  }
+
+  // ── the neighbourhood ──
+  // The domain the card had nothing for. A semi that printed six days ago or reports
+  // next week is context about the position that the position cannot supply. The
+  // window reaches backwards as well as forwards: a print just behind is as
+  // informative as one just ahead.
+  if (supaUrl && supaKey && TICKER !== 'TLT') {
+    const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
+    const from = ymd(new Date(parseISO(nowISO).getTime() - 12 * 86400000));
+    const to = ymd(new Date(parseISO(nowISO).getTime() + 45 * 86400000));
+    try {
+      const r = await fetch(`${supaUrl}/rest/v1/earnings_events`
+        + `?select=ticker,report_date,notes&scope_tag=eq.peer&report_date=gte.${from}`
+        + `&report_date=lte.${to}&order=report_date.asc&limit=20`, { headers: h });
+      if (r.ok) {
+        // peersKnown is set on a successful READ, not on a non-empty one. An empty
+        // table and a failed fetch are different states: the first lets the card say
+        // "no chip earnings", the second must leave it silent.
+        peersKnown = true;
+        peers = ((await r.json()) as { ticker: string; report_date: string; notes?: string }[]).map((x) => {
+          const d = String(x.report_date).slice(0, 10);
+          return { ticker: x.ticker, date: d,
+            days: Math.round((parseISO(d).getTime() - parseISO(nowISO).getTime()) / 86400000),
+            // "AVGO reports Wednesday" and "AVGO probably reports Wednesday" are
+            // different claims, and the card must never blur them.
+            confirmed: !/estimat/i.test(String(x.notes ?? '')) };
+        });
+      }
+    } catch { /* no read, no claim */ }
+
+    // Where the money is going inside the sector. Both legs use the same window, so
+    // a missing session on either side shortens the comparison rather than skewing it.
+    try {
+      const back = ymd(new Date(parseISO(nowISO).getTime() - 45 * 86400000));
+      const r = await fetch(`${supaUrl}/rest/v1/daily_closes`
+        + `?select=ticker,date,close_price&ticker=in.(${TICKER},SMH)&date=gte.${back}`
+        + `&order=date.desc&limit=200`, { headers: h });
+      if (r.ok) {
+        const rows = (await r.json()) as { ticker: string; date: string; close_price: number }[];
+        const series = (tk: string) => rows.filter((x) => x.ticker === tk)
+          .sort((a, b) => (a.date < b.date ? 1 : -1))
+          .map((x) => Number(x.close_price)).filter((v) => Number.isFinite(v) && v > 0);
+        const a = series(TICKER), r2 = series('SMH');
+        const n = Math.min(a.length, r2.length, 21);
+        if (n >= 10) {
+          const pa = ((a[0] - a[n - 1]) / a[n - 1]) * 100;
+          const pr = ((r2[0] - r2[n - 1]) / r2[n - 1]) * 100;
+          relStrength = { vs: 'SMH', self: +pa.toFixed(1), ref: +pr.toFixed(1), gap: +(pa - pr).toFixed(1), days: n };
+        }
+      }
+    } catch { /* no reference series, no claim */ }
   }
 
   const num = (v: unknown) => (v == null ? null : Number(v));
@@ -997,13 +1062,183 @@ Deno.serve(async (req) => {
     };
   })();
 
+  // ── the observer ────────────────────────────────────────────────────────────
+  // Deliberately NOT the score's top contributors. That version collapsed into
+  // chart-and-options every single week, because six of the nine week factors read
+  // price or option pricing: a scoring model describing itself back to you.
+  //
+  // An observation is a claim about the WORLD with a measured number behind it.
+  // Six domains, each with its own rule and its own data, and a domain may
+  // contribute AT MOST ONE line. That cap is the entire mechanism. It is what stops
+  // the chart taking the list on a week when the chart happens to be loud.
+  //
+  // Three states, not two:
+  //   loud   — notable, goes to "what matters"
+  //   quiet  — measured and unremarkable, goes to "what won't matter"
+  //   silent — no data, so the domain says NOTHING at all. "No chip earnings this
+  //            week" drawn from an empty peer table is a lie about the world, and
+  //            silence is the only honest alternative to it.
+  //
+  // Every observation also carries what the SCORE makes of it. `blind` is the one
+  // worth reading: the observer saw something the number cannot.
+  type Obs = {
+    domain: string; tag: string; text: string;
+    kind: 'measured' | 'read';                       // read = from headlines, never scored
+    seen: 'priced' | 'underweighted' | 'blind';
+    note: number;                                    // 0..1, ranks the loud list
+  };
+  const loud: Obs[] = [], calm: Obs[] = [];
+  const RW = REGIME_WEIGHTS[regime] ?? REGIME_WEIGHTS.RANGE;
+  const seenBy = (...keys: string[]): Obs['seen'] => {
+    const w = keys.reduce((a, k) => a + (RW[k] ?? 0), 0);
+    return w === 0 ? 'blind' : w < 0.10 ? 'underweighted' : 'priced';
+  };
+  const say = (isLoud: boolean, o: Omit<Obs, 'kind'>) =>
+    (isLoud ? loud : calm).push({ kind: 'measured', ...o });
+  const dayStr = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
+
+  // THE RECORD — what this name has done in this situation before. Not in the score
+  // at all today: it moves keepPct and nothing else, so the number never reflects it.
+  if (record && record.n >= 8) {
+    if (daysSincePrint <= 30 && bandStats) {
+      say(true, { domain: 'record', tag: 'The record', seen: 'blind', note: .90,
+        text: `After ${bandStats.band} prints this has run ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% inside 30 sessions, on ${bandStats.n} observation${bandStats.n === 1 ? '' : 's'}.` });
+    } else if (daysToPrint <= 21) {
+      say(true, { domain: 'record', tag: 'The record', seen: 'blind', note: .75,
+        text: `${record.survived} of the last ${record.n} prints landed better than -8%, median ${record.med > 0 ? '+' : ''}${record.med}%. Capping upside into that record has been the losing side of it.` });
+    } else {
+      say(false, { domain: 'record', tag: 'The record', seen: 'blind', note: .10,
+        text: `Nothing in ${record.n} prints on file says this week is unusual.` });
+    }
+  }
+
+  // THE WINDOW — how much room is left before the print, counted in expiries you
+  // could actually write rather than in days.
+  const eDate = earnings.date ?? null;
+  if (eDate) {
+    const before = expiryDates.filter((d) => d < eDate).length;
+    const seen = seenBy('event');
+    if (daysToPrint <= 3) {
+      say(true, { domain: 'window', tag: 'The window', seen, note: 1.0,
+        text: `The print is ${dayStr(daysToPrint)} out. Everything you write now carries it.` });
+    } else if (daysToPrint <= 21) {
+      say(true, { domain: 'window', tag: 'The window', seen, note: .60,
+        text: `${before} expir${before === 1 ? 'y' : 'ies'} left before the ${eDate} print. Anything written past them carries the event.` });
+    } else {
+      say(false, { domain: 'window', tag: 'The window', seen, note: .10,
+        text: `The print is ${dayStr(daysToPrint)} out, past everything you would write this week.` });
+    }
+  }
+
+  // THE NEIGHBOURHOOD — peers and where this name sits inside the group. Nothing in
+  // the score reads either, so every line here is blind to the number.
+  if (peersKnown) {
+    const behind = peers.filter((p) => p.days < 0).sort((a, b) => b.days - a.days)[0];
+    const ahead = peers.filter((p) => p.days >= 0).sort((a, b) => a.days - b.days)[0];
+    const nextExp = expiryDates[0];
+    const rel = relStrength;
+    const est = (p: Peer) => (p.confirmed ? '' : ', though that date is an estimate');
+    if (ahead && nextExp && ahead.date <= nextExp) {
+      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .95,
+        text: `${ahead.ticker} reports ${ahead.days === 0 ? 'today' : `in ${dayStr(ahead.days)}`}, inside this expiry${est(ahead)}. Semis move as a bloc through it.` });
+    } else if (behind && behind.days >= -7) {
+      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .70,
+        text: `${behind.ticker} printed ${dayStr(-behind.days)} ago${rel ? `, and ${TICKER} has run ${rel.gap > 0 ? '+' : ''}${rel.gap}% against SMH over ${rel.days} sessions` : ''}.` });
+    } else if (rel && Math.abs(rel.gap) >= 5) {
+      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .65,
+        text: `${TICKER} has run ${rel.gap > 0 ? '+' : ''}${rel.gap}% against SMH over ${rel.days} sessions, so it is ${rel.gap > 0 ? 'leading' : 'lagging'} the group.` });
+    } else if (ahead) {
+      say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .10,
+        text: `No chip earnings before this expiry. ${ahead.ticker} is next, ${dayStr(ahead.days)} out.` });
+    } else {
+      say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .05,
+        text: 'No chip earnings on the calendar.' });
+    }
+  }
+
+  // THE CALENDAR — macro only; the print has its own domain above.
+  const macroKnown = calSources.some((x) => /^macro_events:\d+$/.test(x));
+  if (macroKnown) {
+    const hits = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3);
+    const nextExp = expiryDates[0];
+    const m = hits[0] ?? null;
+    // The score keys its calendar factor off `heavy`, which needs severity 4 or more.
+    // A CPI print scores 3, so the number looks straight past it to the earnings date.
+    // Until the calendar factor is split three ways, macro inside the window is
+    // something the score genuinely cannot see, and the tag has to say so.
+    const seen: Obs['seen'] = m && m.sev < 4 ? 'blind' : seenBy('event');
+    if (m && nextExp && m.date <= nextExp) {
+      say(true, { domain: 'macro', tag: 'The calendar', seen, note: .92,
+        text: `${m.label} lands ${m.days === 0 ? 'today' : `in ${dayStr(m.days)}`}, inside your ${nextExp} expiry.` });
+    } else if (m && m.days <= 14) {
+      say(true, { domain: 'macro', tag: 'The calendar', seen, note: .50,
+        text: `${m.label} in ${dayStr(m.days)}, just past this expiry.` });
+    } else if (m) {
+      say(false, { domain: 'macro', tag: 'The calendar', seen, note: .10,
+        text: `Nothing before ${m.label}, ${dayStr(m.days)} out.` });
+    } else {
+      say(false, { domain: 'macro', tag: 'The calendar', seen: 'priced', note: .05,
+        text: 'Nothing scheduled inside the window.' });
+    }
+  }
+
+  // WHAT YOU ARE PAID — stated against this name's own year, not an absolute level.
+  if (ivMedian != null && Number.isFinite(iv) && ivMedian > 0) {
+    const extra = (iv / ivMedian - 1) * 100;
+    const seen = seenBy('iv_pctile', 'iv_spread');
+    if (Math.abs(extra) >= 12) {
+      say(true, { domain: 'paid', tag: 'What you are paid', seen, note: .85,
+        text: `${iv.toFixed(0)}% implied against a ${ivMedian.toFixed(0)}% normal, so you are paid ${Math.abs(extra).toFixed(0)}% ${extra > 0 ? 'over' : 'under'} the usual price.` });
+    } else {
+      say(false, { domain: 'paid', tag: 'What you are paid', seen, note: .10,
+        text: `${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal. There is no premium argument this week.` });
+    }
+  }
+
+  // THE CHART — one line, and capped at .60 notability on purpose. The chart is the
+  // best-covered domain in the score and the one that used to eat the whole list, so
+  // it should lose ties against anything the number cannot already see.
+  if (technicals.ma50 != null) {
+    const rsi = technicals.rsi14;
+    const seen = seenBy('trend', 'stretch', 'rsi');
+    const hot = rsi != null && rsi >= 70, cold = rsi != null && rsi <= 30;
+    const deep = drawdown != null && drawdown >= 12;
+    const stretched = Math.abs(dev) >= 1.5;
+    const text = stretched
+      ? `${dev > 0 ? '+' : ''}${dev} normal days from its 50-day${drawdown != null ? `, and ${drawdown.toFixed(0)}% off the high` : ''}.`
+      : hot ? `RSI ${rsi!.toFixed(0)}. Buyers are in charge and the run is stretched alongside you.`
+      : cold ? `RSI ${rsi!.toFixed(0)}, the most washed out end of its range.`
+      : deep ? `${drawdown!.toFixed(0)}% off the high, which is where its own record starts to disagree with the tape.`
+      : `Sitting mid-range, ${dev > 0 ? '+' : ''}${dev} from its 50-day.`;
+    say(stretched || hot || cold || deep, { domain: 'chart', tag: 'The chart', seen,
+      note: Math.min(.60, Math.abs(dev) / 5), text });
+  }
+
+  // SENTIMENT is deliberately absent rather than omitted. It stays OUT of the score
+  // by design, and it is not wired yet, so it reports as silent — which is the card
+  // telling you what it does not know instead of quietly not having it.
+  const DOMAINS = ['record', 'window', 'neighbourhood', 'macro', 'paid', 'chart', 'sentiment'];
+  const rank = (o: Obs) => DOMAINS.indexOf(o.domain);
+  // Loud is capped at three. Four domains firing is ordinary once the calendar is
+  // real, and a six-line list is the thing this redesign exists to remove. The cut is
+  // by notability, NOT by domain order, so a CPI print two days out beats a chart
+  // that merely happens to be stretched.
+  const matters = [...loud].sort((a, b) => b.note - a.note).slice(0, 3).sort((a, b) => rank(a) - rank(b));
+  const spoke = new Set([...loud, ...calm].map((o) => o.domain));
+  const observations = {
+    matters,
+    quiet: [...calm].sort((a, b) => rank(a) - rank(b)).slice(0, 3),
+    dropped: loud.filter((o) => !matters.includes(o)).map((o) => o.domain),
+    silent: DOMAINS.filter((d) => !spoke.has(d)),
+  };
+
   const refStrike = (b.refStrike as number) ?? Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
 
   return json(200, {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
-    week, posture, events, refLots, ticker: TICKER, ivMedian, splits, floorAdvice,
+    week, posture, events, refLots, ticker: TICKER, ivMedian, splits, floorAdvice, observations,
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     regime: { name: regime, why: regimeWhy, keepPct, keepDelta, keepWhy,
