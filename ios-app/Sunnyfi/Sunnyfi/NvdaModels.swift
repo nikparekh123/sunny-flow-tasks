@@ -33,6 +33,10 @@ struct NvShareLot: Codable, Sendable {
     let qty_remaining: Double
     let cost_per_share: Double
     let voided_at: String?
+    /// Consumption order. Shares called away leave oldest-first, so the gain on an
+    /// assignment is measured against these lots, not against the book average.
+    var fifo_order: Int? = nil
+    var acquired_date: String? = nil
 }
 
 struct NvShareSell: Codable, Sendable {

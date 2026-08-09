@@ -28,6 +28,9 @@ final class NvdaStore {
 
     /// True 52-week high: the max close over the trailing ~252 trading sessions.
     /// Drives the Average-down card's "below the high". nil until closes load.
+    /// Open lots oldest first — the order shares actually leave in.
+    private(set) var shareLotsFIFO: [NvShareLot] = []
+
     var high52: Double? { Array(nvCloses.suffix(252)).max() }
 
     /// Seed the close series directly — fixtures/preview only (the TLT book, etc.).
@@ -55,8 +58,9 @@ final class NvdaStore {
                 .is("voided_at", value: nil)
                 .execute().value
             async let lots: [NvShareLot] = client.from("nvda_share_lots")
-                .select("id,qty_remaining,cost_per_share,voided_at")
+                .select("id,qty_remaining,cost_per_share,voided_at,fifo_order,acquired_date")
                 .is("voided_at", value: nil)
+                .order("fifo_order", ascending: true)
                 .execute().value
             async let sells: [NvShareSell] = client.from("nvda_share_sells")
                 .select("id,trade_date,quantity,price,realized_pl,voided_at")
@@ -92,6 +96,9 @@ final class NvdaStore {
             // shared peer closes (deduped of the shared feed's shallow NVDA rows).
             let mergedCloses = c.filter { $0.ticker != "NVDA" } + nvc
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
+            // Kept in consumption order: an assignment takes the oldest lots, so the
+            // gain it books is measured against those, not the book average.
+            shareLotsFIFO = l.sorted { ($0.fifo_order ?? .max) < ($1.fifo_order ?? .max) }
             // Daily IV snapshot — non-fatal: if the table isn't there yet, [] (no 2nd gauge arc).
             let ivDaily: [NvIvDaily] = (try? await client.from("nvda_iv_daily")
                 .select("ticker,date,iv").eq("ticker", value: "NVDA")

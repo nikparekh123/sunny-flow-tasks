@@ -113,7 +113,7 @@ interface Cell {
   assign: number; delta: number; effective: number; vsBasis: number;
   side: string; advCost: number; affected: number;
   perDay?: number; deltaSold?: number; freeAfter?: number; afterAssign?: number; em?: number;
-  calledPerCt?: number; suggestCt?: number; wantCt?: number; cappedBy?: string | null;
+  calledPerCt?: number; calledShares?: number; calledCost?: number; calledPL?: number; calledAvg?: number; suggestCt?: number; wantCt?: number; cappedBy?: string | null;
   credit?: number; income?: number; paidPerDelta?: number; upsideAfterMove?: number; deltaAfterMove?: number;
   netCarry?: number; rank?: number; perDayPkg?: number;
   warns?: string[]; blocks?: string[]; fit?: number; isPick?: boolean;
@@ -299,6 +299,22 @@ Deno.serve(async (req) => {
   // What the put floor costs to keep, every day, whatever the stock does. Sitting
   // out is not free, and a small sale can easily fail to cover it.
   const hedgeCarry = Math.abs(Number(bookIn.longTheta ?? 0));
+
+  // Shares leave oldest-first, so an assignment books the cost of THOSE lots. The
+  // book average is only a stand-in, and on a position built up over time it can be
+  // well off. Falls back to the average when no lots are supplied.
+  const lotsIn = (bookIn.lots ?? []) as { qty: number; cost: number }[];
+  function fifoCost(n: number): number {
+    if (!lotsIn.length) return n * book.buyAvg;
+    let left = n, cost = 0;
+    for (const l of lotsIn) {
+      if (left <= 0) break;
+      const take = Math.min(left, l.qty);
+      cost += take * l.cost; left -= take;
+    }
+    if (left > 0) cost += left * book.buyAvg;     // more called than we hold lots for
+    return cost;
+  }
   const legOdds = (openShortCalls as { strike: number; ct: number; expiry?: string }[])
     .map((l) => ({ expiry: l.expiry ?? '', shares: bsAssign(spot, l.strike, legT(l.expiry), iv / 100) * l.ct * 100 }));
   const expectedCalled = legOdds.reduce((a, l) => a + l.shares, 0);
@@ -672,9 +688,12 @@ Deno.serve(async (req) => {
         upsideAfterMove: Math.round(upsideAfterMove), deltaAfterMove: Math.round(deltaAfterMove),
         perDayPkg: Math.round(perDayPkg), netCarry: Math.round(netCarry),
         cappedBy: wantCt > capHere ? 'covered shares' : null,
-        // What one contract's worth of shares books if it is called away here:
-        // sale price less the average actually paid. Per contract, so the app
-        // scales it by the lot count the same way it scales the credit.
+        // What the shares book if this package is called away: sale proceeds less
+        // the cost of the specific lots that leave, oldest first.
+        calledShares: suggestCt * 100,
+        calledCost: +fifoCost(suggestCt * 100).toFixed(2),
+        calledPL: +(c.strike * suggestCt * 100 - fifoCost(suggestCt * 100)).toFixed(2),
+        calledAvg: suggestCt > 0 ? +(fifoCost(suggestCt * 100) / (suggestCt * 100)).toFixed(2) : 0,
         calledPerCt: (c.strike - book.buyAvg) * 100,
         fitParts: parts.map((p) => ({ ...p, s: +p.s.toFixed(1), contribution: +(p.w * p.s).toFixed(1) })),
         fit: Math.round(Math.max(0, raw - warns.reduce((a, w) => a + (PEN[w] ?? 8), 0))),

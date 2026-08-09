@@ -39,7 +39,10 @@ struct PV2Req: Encodable, Sendable {
         var putDelta: Double = 0
         var putFloor: Double = 0
         var putCost: Double = 0
+        /// Oldest first. The edge walks these to price an assignment.
+        var lots: [Lot] = []
     }
+    struct Lot: Encodable, Sendable { let qty: Double; let cost: Double }
     struct Vol: Encodable, Sendable { let iv, ivPct, hv20, hv30, hv60, hv90: Double }
     struct Earn: Encodable, Sendable { let date, label: String }
     let book: Book; let vol: Vol; let earnings: Earn
@@ -152,6 +155,7 @@ struct PV2: Decodable, Sendable {
         var fit: Int?; var isPick: Bool?; var rank: Int?
         var suggestCt: Int?; var credit: Double?; var income: Double?
         var netCarry: Double?; var upsideAfterMove: Double?; var perDayPkg: Double?
+        var calledShares: Double?; var calledPL: Double?; var calledAvg: Double?
         var cappedBy: String?
         var fitParts: [FitPart]?
         var id: Double { strike }
@@ -215,7 +219,8 @@ final class PlanV2Store {
             rollingCt: rollingCt,
             putDelta: longPuts.reduce(0.0) { $0 + $1.deltaEst },
             putFloor: putFloor,
-            putCost: longPuts.reduce(0.0) { $0 + $1.basis })
+            putCost: longPuts.reduce(0.0) { $0 + $1.basis },
+            lots: store.shareLotsFIFO.map { .init(qty: $0.qty_remaining, cost: $0.cost_per_share) })
 
         let vol = PV2Req.Vol(iv: ins.vol.iv ?? 0, ivPct: ins.vol.ivr ?? 50,
                              hv20: store.hv(20) ?? (ins.vol.hv30 ?? 0), hv30: ins.vol.hv30 ?? 0,
@@ -880,16 +885,22 @@ private struct PVWhy: View {
 private struct PVSend: View {
     let cell: PV2.Cell
     let closeCt: Int
-    let closeCost: Double
+    let closeCost: Double        // cash to buy them back
+    let closeCollected: Double   // what you were paid to write them
     let buyAvg: Double
     let floor: Double
 
     var body: some View {
         let openCt = cell.suggestCt ?? 0
         let credit = cell.prem * Double(openCt) * 100
-        let sharesCalled = Double(openCt) * 100
-        let sharesPL = (cell.strike - buyAvg) * sharesCalled
-        let total = credit - closeCost + sharesPL
+        // Buying a call back is not a loss of the whole cash cost — you were paid to
+        // write it. What the leg actually books is collected less the cost to close.
+        let closePL = closeCollected - closeCost
+        let sharesCalled = cell.calledShares ?? Double(openCt) * 100
+        // Oldest lots leave first, so this is their cost, not the book average.
+        let sharesPL = cell.calledPL ?? ((cell.strike - buyAvg) * sharesCalled)
+        let calledAvg = cell.calledAvg ?? buyAvg
+        let total = closePL + credit + sharesPL
 
         return VStack(alignment: .leading, spacing: 0) {
             Text(pvUsd(total)).font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
@@ -899,10 +910,12 @@ private struct PVSend: View {
                 .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 10).lineLimit(1)
 
             VStack(spacing: 11) {
-                leg("close \(closeCt)", -closeCost)
-                leg("open \(openCt) at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))", credit)
+                leg("close \(closeCt)", closePL,
+                    sub: "\(pvUsd(closeCollected)) collected, \(pvUsd(closeCost)) to buy back")
+                leg("open \(openCt) at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))", credit,
+                    sub: "premium, if it expires worthless")
                 leg("\(pvInt(sharesCalled)) shares sold at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))", sharesPL,
-                    sub: "you paid \(pvDec(buyAvg, 2))")
+                    sub: "oldest lots first, cost \(pvDec(calledAvg, 2))")
             }
             .padding(.top, 18)
             .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
@@ -1062,6 +1075,7 @@ struct NvdaPlannerV2Screen: View {
             PVSend(cell: c,
                    closeCt: Int(closing.reduce(0) { $0 + $1.ct }),
                    closeCost: closing.reduce(0) { $0 + $1.current },
+                   closeCollected: closing.reduce(0) { $0 + $1.basis },
                    buyAvg: s.book?.buyAvg ?? 0,
                    floor: s.posture?.floor ?? 0)
         } else if exp != nil {
