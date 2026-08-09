@@ -874,34 +874,40 @@ private struct PVWhy: View {
 
 // MARK: - 06 · if you send it
 
+/// The whole trade on one page: what you close, what you open, and what the shares
+/// book if the new calls are exercised. Three lines and a total, because that is
+/// how the decision is actually weighed.
 private struct PVSend: View {
     let cell: PV2.Cell
-    let lots: Int
+    let closeCt: Int
     let closeCost: Double
-    let floor: Double
     let buyAvg: Double
+    let floor: Double
+
     var body: some View {
-        let ct = cell.suggestCt ?? lots
-        let credit = cell.prem * Double(ct) * 100
-        let net = credit - closeCost
-        let paying = net < 0
+        let openCt = cell.suggestCt ?? 0
+        let credit = cell.prem * Double(openCt) * 100
+        let sharesCalled = Double(openCt) * 100
+        let sharesPL = (cell.strike - buyAvg) * sharesCalled
+        let total = credit - closeCost + sharesPL
+
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .bottom, spacing: 12) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(pvUsd(abs(net))).font(InkFont.mono(34, .medium)).tracking(34 * -0.04)
-                        .foregroundStyle(Ink.invertText)
-                    Text(paying ? "YOU PAY, TO CLOSE MORE THAN YOU WRITE" : "YOU COLLECT, AFTER BUYING BACK")
-                        .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
-                        .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 10).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("−" + pvUsd(closeCost) + " to close").font(InkFont.mono(11))
-                        .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
-                    Text("+" + pvUsd(credit) + " for \(ct)").font(InkFont.mono(11))
-                        .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
-                }
+            Text(pvUsd(total)).font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
+                .foregroundStyle(Ink.invertText).lineLimit(1)
+            Text("IF THE NEW CALLS ARE EXERCISED AT \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
+                .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 10).lineLimit(1)
+
+            VStack(spacing: 11) {
+                leg("close \(closeCt)", -closeCost)
+                leg("open \(openCt) at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))", credit)
+                leg("\(pvInt(sharesCalled)) shares sold at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))", sharesPL,
+                    sub: "you paid \(pvDec(buyAvg, 2))")
             }
+            .padding(.top, 18)
+            .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
+            .padding(.top, 18)
+
             HStack(spacing: 0) {
                 sendFig("upside given up", "−" + pvInt(cell.deltaSold ?? 0))
                 sendFig("upside left", pvInt(cell.freeAfter ?? 0), sub: "min \(pvInt(floor))")
@@ -910,45 +916,34 @@ private struct PVSend: View {
             .padding(.top, 16)
             .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
             .padding(.top, 18)
-
-            // The decision usually turns on this: being called away is not a loss,
-            // it is a sale at the strike. Shown against what the shares actually
-            // cost, with the premium kept either way.
-            if let perCt = cell.calledPerCt {
-                let sharesPL = perCt * Double(ct)
-                let total = sharesPL + net
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("IF THEY ARE CALLED AWAY AT \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
-                        .font(InkFont.mono(9)).tracking(9 * 0.14)
-                        .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(pvUsd(total)).font(InkFont.mono(26, .medium)).tracking(26 * -0.04)
-                            .foregroundStyle(Ink.invertText)
-                        Text("YOU BOOK IN TOTAL").font(InkFont.mono(9)).tracking(9 * 0.12)
-                            .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
-                    }
-                    .padding(.top, 12)
-                    HStack(spacing: 0) {
-                        sendFig("shares sold", pvInt(Double(ct) * 100))
-                        sendFig("gain on shares", pvUsd(sharesPL), sub: "paid \(pvDec(buyAvg, 2))")
-                        sendFig(paying ? "premium paid" : "premium kept", pvUsd(net))
-                    }
-                    .padding(.top, 16)
-                }
-                .padding(.top, 16)
-                .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
-                .padding(.top, 18)
-            }
         }
         .padding(EdgeInsets(top: 18, leading: 17, bottom: 17, trailing: 17))
         .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).fill(Ink.invertBg))
         .padding(.horizontal, 16)
     }
 
+    private func leg(_ k: String, _ v: Double, sub: String? = nil) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(k.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                    .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
+                if let sub {
+                    Text(sub.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1)
+                        .foregroundStyle(Ink.invertText.opacity(0.45)).lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            Text((v >= 0 ? "+" : "−") + pvUsd(abs(v)))
+                .font(InkFont.mono(18, .regular)).tracking(18 * -0.03)
+                .foregroundStyle(Ink.invertText).lineLimit(1)
+        }
+    }
+
     private func sendFig(_ k: String, _ v: String, sub: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(v).font(InkFont.mono(16, .regular)).tracking(16 * -0.03).foregroundStyle(Ink.invertText).lineLimit(1)
+                Text(v).font(InkFont.mono(16, .regular)).tracking(16 * -0.03)
+                    .foregroundStyle(Ink.invertText).lineLimit(1)
                 if let sub { Text(sub).font(InkFont.mono(10)).foregroundStyle(Ink.invertText.opacity(0.65)) }
             }
             Text(k.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.1)
@@ -1063,10 +1058,12 @@ struct NvdaPlannerV2Screen: View {
                   priorNote: w.prior.map { "OF 100 · WAS \($0.score)" })
 
             PVSectionLabel(n: "06", t: "If you place it")
-            PVSend(cell: c, lots: max(w.lots.base, 1),
-                   closeCost: rollSel.flatMap { groups.byIso[$0] }?.reduce(0) { $0 + $1.current } ?? 0,
-                   floor: s.posture?.floor ?? 0,
-                   buyAvg: s.book?.buyAvg ?? 0)
+            let closing = rollSel.flatMap { groups.byIso[$0] } ?? []
+            PVSend(cell: c,
+                   closeCt: Int(closing.reduce(0) { $0 + $1.ct }),
+                   closeCost: closing.reduce(0) { $0 + $1.current },
+                   buyAvg: s.book?.buyAvg ?? 0,
+                   floor: s.posture?.floor ?? 0)
         } else if exp != nil {
             Text("Nothing on this date is worth selling — try another date.")
                 .font(InkFont.display(13, .regular)).foregroundStyle(Ink.delayed)
