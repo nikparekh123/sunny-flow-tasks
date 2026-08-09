@@ -196,6 +196,7 @@ Deno.serve(async (req) => {
   type Cat = { key: string; label: string; date: string; days: number; sev: number };
   const cats: Cat[] = [];
   const calSources: string[] = [];
+  let lastPrintISO: string | null = null;
   if (supaUrl && supaKey) {
     const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
     const soon = ymd(new Date(Date.now() + 120 * 86400000));
@@ -226,6 +227,19 @@ Deno.serve(async (req) => {
       ? [['tlt_macro_events', 'event_date', 'label', '', '']]
       : [['earnings_events', 'report_date', 'company_name', `&ticker=eq.${TICKER}`, `${TICKER} earnings`],
          ['macro_events', 'event_date', 'label', '', '']];
+    // The last print matters as much as the next one: IV crush and how the tape
+    // absorbed the news define the weeks after it.
+    if (TICKER !== 'TLT') {
+      try {
+        const back = ymd(new Date(parseISO(nowISO).getTime() - 45 * 86400000));
+        const r = await fetch(`${supaUrl}/rest/v1/earnings_events?select=report_date&ticker=eq.${TICKER}`
+          + `&report_date=gte.${back}&report_date=lt.${nowISO}&order=report_date.desc&limit=1`, { headers: h });
+        if (r.ok) {
+          const rows = (await r.json()) as { report_date?: string }[];
+          if (rows[0]?.report_date) lastPrintISO = String(rows[0].report_date).slice(0, 10);
+        }
+      } catch { /* no past print on record is a normal state */ }
+    }
     await Promise.all(tables.map(([t, d, n, x, l]) => grab(t, d, n, x, l)));
   }
   cats.sort((x, y) => x.days - y.days);
@@ -493,11 +507,56 @@ Deno.serve(async (req) => {
   // The old model picked one of four buckets, so 46 and 64 gave identical orders.
   // Aggression is continuous now: how much of the room above the hard floor this
   // week justifies selling. That is the score's actual job.
-  const AGG_TOP = Number(b.aggressionTop ?? 0.90);      // share of room at score 95
-  const hardFloor = Math.round(shares * 0.08);
+  // ── which week is this? ──────────────────────────────────────────────────────
+  // Blending nine factors every week produces the average answer. The situation
+  // decides which handful matter, and how much upside is worth giving up.
+  const daysSincePrint = lastPrintISO
+    ? Math.round((parseISO(nowISO).getTime() - parseISO(lastPrintISO).getTime()) / 86400000) : 999;
+  // Without a 52-week high there is no drawdown to measure, and defaulting it to
+  // zero would classify every week as EXTENDED RUN — a silent wrong answer rather
+  // than an honest missing one.
+  const high = Number(b.high52 ?? technicals.high52 ?? 0);
+  const haveHigh = high > 0;
+  const drawdown = haveHigh ? ((high - spot) / high) * 100 : null;
+  const daysToPrint = daysToEarnings ?? 99;
+  const dd = drawdown ?? 0;
+
+  const regime =
+      daysToPrint <= 7    ? 'EARNINGS WEEK'
+    : daysSincePrint <= 5  ? 'JUST AFTER THE PRINT'
+    : (haveHigh && dd >= 12) ? 'BEATEN DOWN'
+    : (dev >= 1.5 || (haveHigh && dd <= 3)) ? 'EXTENDED RUN'
+    : 'RANGE';
+
+  const regimeWhy =
+      regime === 'EARNINGS WEEK'         ? `Earnings in ${daysToPrint}d. Premium is event premium; what matters is how far above normal it is.`
+    : regime === 'JUST AFTER THE PRINT'  ? `${daysSincePrint}d past the print. Implied vol has collapsed and the tape is still absorbing it.`
+    : regime === 'BEATEN DOWN'           ? `${dd.toFixed(0)}% off the high. A bounce is worth being part of.`
+    : regime === 'EXTENDED RUN'          ? (haveHigh
+        ? `${dd.toFixed(0)}% off the high, ${dev > 0 ? '+' : ''}${dev} from its 50-day. Run up, no event in the way.`
+        : `${dev > 0 ? '+' : ''}${dev} from its 50-day. Run up, no event in the way.`)
+    : haveHigh                           ? 'No event near, sitting mid-range.'
+    :                                      'No event near. No 52-week high on file, so the drawdown is unknown.';
+
+  // How much upside to KEEP, not how much to sell. Rises when the stock is beaten
+  // down — a bounce is worth joining — and falls when the premium on offer is
+  // exceptional. The old model paid you more the more you held back, which had it
+  // exactly backwards: it never asked what you were being offered to give it up.
+  // No drawdown known -> sit at the neutral 30% rather than the aggressive floor.
+  let keepPct = haveHigh ? clamp(20 + dd * 2, 20, 50) : 30;
+  const keepWhy: string[] = [haveHigh ? `${dd.toFixed(0)}% off the high` : 'drawdown unknown, using a neutral keep'];
+  if (ivPct >= 70) { keepPct = Math.max(20, keepPct - 5); keepWhy.push('premium is rich, so take more of it'); }
+  if (ivPct <= 30) { keepPct = Math.min(50, keepPct + 5); keepWhy.push('premium is thin, so hold back'); }
+  if (regime === 'JUST AFTER THE PRINT') { keepPct = Math.max(10, keepPct - 8); keepWhy.push('vol crushed, little left to wait for'); }
+
+  // Keep is a share of the SHARE BLOCK, which is how you actually think about it:
+  // "keep 1,500 shares uncovered". The budget is whatever upside sits above that.
+  keepPct = Math.round(keepPct);
+  const keepDelta = Math.round(shares * keepPct / 100);
+  const hardFloor = keepDelta;
   const room = Math.max(0, upsideDelta - hardFloor);
-  const aggression = clamp((weekScore - 25) / 70 * AGG_TOP, 0, AGG_TOP);
-  const budget = Math.round(room * aggression);
+  const budget = Math.round(room);
+  const aggression = upsideDelta > 0 ? budget / upsideDelta : 0;
 
   // Capacity in CONTRACTS, not delta. Anything being bought back frees its lots,
   // which is why "65 contracts" is reachable on a roll and not otherwise.
@@ -750,6 +809,9 @@ Deno.serve(async (req) => {
     week, posture, events, refLots, ticker: TICKER,
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
+    regime: { name: regime, why: regimeWhy, keepPct, keepDelta, keepWhy,
+              drawdown: drawdown == null ? null : +drawdown.toFixed(1), haveHigh,
+              daysToPrint, daysSincePrint, lastPrint: lastPrintISO },
     meta: { STRIKE_STEP, RIP, calSources, snapshot: snapNote, floorPct: INST.floorPct, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
   });
 });
