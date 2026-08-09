@@ -557,7 +557,7 @@ Deno.serve(async (req) => {
     if (s.expiry) loadByExpiry[s.expiry] = (loadByExpiry[s.expiry] ?? 0) + s.ct;
   }
   const refLots = Math.max(1, week.lots.base || 1);
-  const STYLE_SHIFT: Record<string, number> = { closer: 0.10, balanced: 0, further: -0.08 };
+  const STYLE_SHIFT: Record<string, number> = { closer: 0.16, balanced: 0, further: -0.13 };
   const style = String(b.style ?? 'balanced');
   const bandMid = clamp((prescription.deltaLo + prescription.deltaHi) / 2 + (STYLE_SHIFT[style] ?? 0), .10, .60);
   const bandHalf = (prescription.deltaHi - prescription.deltaLo) / 2;
@@ -641,13 +641,13 @@ Deno.serve(async (req) => {
       const perDayPkg = income / Math.max(s.cal, 1);
       const netCarry = perDayPkg - hedgeCarry;
       const parts = [
-        { k: 'paid_per_delta', w: .25, s: 0 },   // filled in below, needs the whole ladder
-        { k: 'holds_a_move',   w: .20, s: floor > 0 ? sTanh((upsideAfterMove - floor) / floor) : 0 },
-        { k: 'covers_carry',   w: .15, s: hedgeCarry > 0 ? sTanh(netCarry / hedgeCarry) : (netCarry > 0 ? 30 : 0) },
-        { k: 'headroom',       w: .12, s: floor > 0 ? sTanh((freeAfter - floor) / floor) : 0 },
-        { k: 'assignment',     w: .12, s: floor > 0 ? sTanh(afterAssign / floor) : 0 },
-        { k: 'in_band',        w: .08, s: clamp(50 - bandDist * 500, -50, 50) },
-        { k: 'over_basis',     w: .05, s: sTanh(((c.strike - book.basis) / (book.basis || 1)) * 20) },
+        { k: 'paid_per_delta', w: .20, s: 0 },   // filled in below, needs the whole ladder
+        { k: 'holds_a_move',   w: .18, s: floor > 0 ? sTanh((upsideAfterMove - floor) / floor) : 0 },
+        { k: 'in_band',        w: .18, s: clamp(50 - bandDist * 500, -50, 50) },
+        { k: 'covers_carry',   w: .13, s: hedgeCarry > 0 ? sTanh(netCarry / hedgeCarry) : (netCarry > 0 ? 30 : 0) },
+        { k: 'assignment',     w: .11, s: floor > 0 ? sTanh(afterAssign / floor) : 0 },
+        { k: 'headroom',       w: .10, s: floor > 0 ? sTanh((freeAfter - floor) / floor) : 0 },
+        { k: 'over_basis',     w: .07, s: sTanh(((c.strike - book.basis) / (book.basis || 1)) * 20) },
         { k: 'expiry_load',    w: .03, s: clamp(50 - load * 1.5, -50, 50) },
       ];
       const warns: string[] = [];
