@@ -507,7 +507,7 @@ private struct PVRolling: View {
         let cost = legs.reduce(0.0) { $0 + $1.current }
         let collected = legs.reduce(0.0) { $0 + $1.basis }
         let onLeg = collected - cost
-        let dim = on ? Ink.invertText.opacity(0.65) : Ink.dim
+        let dim = on ? Ink.invertText.opacity(0.86) : Ink.dim
         let ink = on ? Ink.invertText : Ink.text
         return VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
@@ -592,12 +592,12 @@ private struct PVLadder: View {
         return Button { withAnimation(InkMotion.fast) { ti = i; pick = nil } } label: {
             VStack(alignment: .leading, spacing: 7) {
                 Text(e.dow.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
-                    .foregroundStyle(on ? Ink.invertText.opacity(0.65) : Ink.dim)
+                    .foregroundStyle(on ? Ink.invertText.opacity(0.86) : Ink.dim)
                 Text(e.label).font(InkFont.mono(15, .regular)).tracking(15 * -0.02)
                     .foregroundStyle(on ? Ink.invertText : Ink.text)
                 Text(e.eventInside != nil ? (e.eventInside?.label.uppercased() ?? "") : (e.loadCt > 0 ? "\(e.loadCt) SOLD" : "\(e.cal) DAYS"))
                     .font(InkFont.mono(9)).tracking(9 * 0.1)
-                    .foregroundStyle(e.eventInside != nil ? Ink.delayed : (on ? Ink.invertText.opacity(0.65) : Ink.dim))
+                    .foregroundStyle(e.eventInside != nil ? Ink.delayed : (on ? Ink.invertText.opacity(0.86) : Ink.dim))
                     .lineLimit(1)
             }
             .frame(minWidth: 78, alignment: .leading)
@@ -641,7 +641,7 @@ private struct PVLadder: View {
     private func ordinal(_ n: Int) -> String { n == 1 ? "1ST" : n == 2 ? "2ND" : "3RD" }
 
     private func liveCard(_ c: PV2.Cell, on: Bool, days: Int) -> some View {
-        let dim = on ? Ink.invertText.opacity(0.62) : Ink.dim
+        let dim = on ? Ink.invertText.opacity(0.86) : Ink.dim
         let ink = on ? Ink.invertText : Ink.text
         let ct = c.suggestCt ?? 0
         return VStack(alignment: .leading, spacing: 0) {
@@ -919,7 +919,7 @@ private struct PVSend: View {
                 .foregroundStyle(Ink.invertText).lineLimit(1)
             Text("YOUR WHOLE NVDA P&L, IF CALLED AT \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
                 .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
-                .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 10).lineLimit(1)
+                .foregroundStyle(Ink.invertText.opacity(0.86)).padding(.top, 10).lineLimit(1)
 
             VStack(spacing: 11) {
                 leg("where you stand today", bookNet, sub: "realized and open, all of it")
@@ -933,7 +933,7 @@ private struct PVSend: View {
 
             Text("WHAT THE TRADE ITSELF BOOKS  \(pvUsd(bookedByTrade))")
                 .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
-                .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 20).lineLimit(1)
+                .foregroundStyle(Ink.invertText.opacity(0.86)).padding(.top, 20).lineLimit(1)
 
             VStack(spacing: 11) {
                 leg("close \(closeCt)", closePL,
@@ -965,10 +965,10 @@ private struct PVSend: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(k.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
-                    .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
+                    .foregroundStyle(Ink.invertText.opacity(0.86)).lineLimit(1)
                 if let sub {
                     Text(sub.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1)
-                        .foregroundStyle(Ink.invertText.opacity(0.45)).lineLimit(1)
+                        .foregroundStyle(Ink.invertText.opacity(0.72)).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
@@ -983,10 +983,10 @@ private struct PVSend: View {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(v).font(InkFont.mono(16, .regular)).tracking(16 * -0.03)
                     .foregroundStyle(Ink.invertText).lineLimit(1)
-                if let sub { Text(sub).font(InkFont.mono(10)).foregroundStyle(Ink.invertText.opacity(0.65)) }
+                if let sub { Text(sub).font(InkFont.mono(10)).foregroundStyle(Ink.invertText.opacity(0.86)) }
             }
             Text(k.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.1)
-                .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
+                .foregroundStyle(Ink.invertText.opacity(0.86)).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

@@ -427,7 +427,7 @@ struct InkStamp: View {
         HStack(spacing: 8) {
             dot
             Text(text.uppercased()).font(InkFont.mono(10)).tracking(10 * 0.06)
-                .foregroundStyle(Ink.text.opacity(settled ? 0.32 : 0.8)).lineLimit(1).truncationMode(.tail)
+                .foregroundStyle(Ink.text.opacity(settled ? 0.66 : 0.92)).lineLimit(1).truncationMode(.tail)
         }
         .frame(height: 30).frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, InkPad.gutter)

@@ -207,14 +207,12 @@ enum TLTBook {
     /// An NvdaStore filled with the TLT fixture — the section screens read it
     /// exactly as they read the live NVDA store.
     @MainActor static func store() -> NvdaStore {
+        // No invented trades. The tlt_* tables exist but nothing reads them yet, so
+        // the honest state is "no position" rather than a plausible-looking fake —
+        // a planner quoting made-up contracts is worse than one quoting nothing.
         let s = NvdaStore()
         s.isLoading = false
-        s.position = position
-        s.perf = perf
-        s.insights = insights
-        s.peers = peers
-        s.history = history
-        s.seedCloses([high52, high52 * 0.98, spot])   // so high52 resolves for Average-down
+        s.lastError = "No TLT trades yet. The tables are ready, the sync is not."
         return s
     }
 }
