@@ -71,12 +71,19 @@ struct PV2: Decodable, Sendable {
         let lots: Lots
         var forces: [Force]?
         var caption: String?
+        var prior: Prior?
+        struct Prior: Decodable, Sendable {
+            let score: Int; let stance: String; let takenOn: String
+            let change: Int; let daysAgo: Int
+        }
         var forceList: [Force] { forces ?? [] }
         struct Rx: Decodable, Sendable { let deltaLo, deltaHi, sizePct: Double; let tenor: String }
         struct Lots: Decodable, Sendable { let base, max: Int; var byFloor: Int?; var byAssignment: Int?; var free: Double? }
     }
     struct Force: Decodable, Sendable, Identifiable {
         let key: String; let name: String; let w: Double; let score: Double
+        var family: String?          // what KIND of input this is
+        var change: Double?          // vs the same factor a week ago
         var rows: [[String]]?; var push: String?; var contribution: Double?
         var rowList: [[String]] { rows ?? [] }
         var pushText: String { push ?? "" }
@@ -363,7 +370,13 @@ private struct PVWeek: View {
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 5) {
                     InkRoll(text: "\(w.score)", font: InkFont.mono(24, .medium), tracking: 24 * -0.03, color: Ink.text)
-                    Text("WEEK SCORE").font(InkFont.mono(8.5)).tracking(8.5 * 0.14).foregroundStyle(Ink.dim)
+                    if let p = w.prior {
+                        Text("\(p.change >= 0 ? "+" : "−")\(abs(p.change)) VS \(p.daysAgo)D AGO")
+                            .font(InkFont.mono(8.5)).tracking(8.5 * 0.12)
+                            .foregroundStyle(p.change >= 0 ? Ink.gain : Ink.loss).fixedSize()
+                    } else {
+                        Text("WEEK SCORE").font(InkFont.mono(8.5)).tracking(8.5 * 0.14).foregroundStyle(Ink.dim)
+                    }
                 }
             }
             // Why the number is not the whole story: capacity can override the score.
@@ -475,10 +488,11 @@ private struct PVRolling: View {
                     Text(legs.first?.expiry.uppercased() ?? iso).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
                         .foregroundStyle(dim)
                     Spacer(minLength: 0)
-                    Text(legs.first?.dte.uppercased() ?? "").font(InkFont.mono(9)).tracking(9 * 0.12)
+                    Text((legs.first?.dte ?? "").replacingOccurrences(of: "DTE", with: "DAYS").uppercased())
+                        .font(InkFont.mono(9)).tracking(9 * 0.12)
                         .foregroundStyle(dim)
                 }
-                Text("\(Int(ct)) CT")
+                Text("\(Int(ct)) SOLD")
                     .font(InkFont.mono(26, .medium)).tracking(26 * -0.045)
                     .foregroundStyle(ink).padding(.top, 12).lineLimit(1)
                 Text(legs.map { pvDec($0.strike, $0.strike == $0.strike.rounded() ? 0 : 1) }.joined(separator: " · "))
@@ -548,7 +562,7 @@ private struct PVLadder: View {
                     .foregroundStyle(on ? Ink.invertText.opacity(0.65) : Ink.dim)
                 Text(e.label).font(InkFont.mono(15, .regular)).tracking(15 * -0.02)
                     .foregroundStyle(on ? Ink.invertText : Ink.text)
-                Text(e.eventInside != nil ? (e.eventInside?.label.uppercased() ?? "") : (e.loadCt > 0 ? "\(e.loadCt) CT" : "\(e.cal)D"))
+                Text(e.eventInside != nil ? (e.eventInside?.label.uppercased() ?? "") : (e.loadCt > 0 ? "\(e.loadCt) SOLD" : "\(e.cal) DAYS"))
                     .font(InkFont.mono(9)).tracking(9 * 0.1)
                     .foregroundStyle(e.eventInside != nil ? Ink.delayed : (on ? Ink.invertText.opacity(0.65) : Ink.dim))
                     .lineLimit(1)
@@ -593,7 +607,7 @@ private struct PVLadder: View {
     private func liveCard(_ c: PV2.Cell, on: Bool, days: Int) -> some View {
         let dim = on ? Ink.invertText.opacity(0.62) : Ink.dim
         let ink = on ? Ink.invertText : Ink.text
-        let called = max(2, Int((1 / max(c.assign, 0.01)).rounded()))
+        let calledPct = Int((c.assign * 100).rounded())
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(strikeLabel(c.strike))
@@ -605,7 +619,7 @@ private struct PVLadder: View {
                         .foregroundStyle(dim).lineLimit(1)
                 }
             }
-            Text("\(Int((c.delta * 100).rounded()))Δ · CALLED 1 IN \(called)")
+            Text("\(Int((c.delta * 100).rounded()))Δ · \(calledPct)% CHANCE CALLED")
                 .font(InkFont.mono(11)).tracking(11 * 0.06).foregroundStyle(dim)
                 .padding(.top, 11).lineLimit(1)
 
@@ -630,7 +644,7 @@ private struct PVLadder: View {
                             .frame(width: g.size.width * min(Double(c.fit ?? 0) / 100, 1))
                     }
                 }
-                .frame(width: 64, height: 4)
+                .frame(width: 48, height: 4)
                 Spacer(minLength: 0)
                 Text("\(c.fit ?? 0)").font(InkFont.mono(15, .regular)).tracking(15 * -0.02)
                     .foregroundStyle(ink).fixedSize()
@@ -672,8 +686,17 @@ private struct PVForceCard: View {
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(f.name).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
-                    .foregroundStyle(Ink.dim).lineLimit(1)
+                HStack(spacing: 8) {
+                    Text(f.name).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                        .foregroundStyle(Ink.dim).lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let fam = f.family {
+                        Text(fam).font(InkFont.mono(8.5)).tracking(8.5 * 0.1)
+                            .foregroundStyle(Ink.dim).lineLimit(1)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .overlay(Capsule().strokeBorder(Ink.hair, lineWidth: 1))
+                    }
+                }
 
                 Text(f.pushText.isEmpty ? "—" : f.pushText)
                     .font(InkFont.display(14.5, .regular)).foregroundStyle(Ink.text)
@@ -683,8 +706,15 @@ private struct PVForceCard: View {
 
                 Spacer(minLength: 12)
 
-                InkRoll(text: (f.contrib >= 0 ? "+" : "−") + pvDec(abs(f.contrib), 1),
-                        font: InkFont.mono(30, .medium), tracking: 30 * -0.04, color: hue)
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    InkRoll(text: (f.contrib >= 0 ? "+" : "−") + pvDec(abs(f.contrib), 1),
+                            font: InkFont.mono(30, .medium), tracking: 30 * -0.04, color: hue)
+                    if let ch = f.change, abs(ch) >= 0.1 {
+                        Text("\(ch >= 0 ? "+" : "−")\(pvDec(abs(ch), 1)) VS LAST WEEK")
+                            .font(InkFont.mono(9)).tracking(9 * 0.1)
+                            .foregroundStyle(Ink.dim).lineLimit(1)
+                    }
+                }
 
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
@@ -728,6 +758,7 @@ private struct PVWhy: View {
     let forces: [PV2.Force]
     let score: Int
     let caption: String?
+    var priorNote: String? = nil
     @State private var open: String?
 
     var body: some View {
@@ -737,8 +768,8 @@ private struct PVWhy: View {
                 VStack(alignment: .leading, spacing: 5) {
                     InkRoll(text: "\(score)", font: InkFont.mono(44, .medium),
                             tracking: 44 * -0.045, color: Ink.text)
-                    Text("OF 100").font(InkFont.mono(9.5)).tracking(9.5 * 0.14)
-                        .foregroundStyle(Ink.dim)
+                    Text(priorNote ?? "OF 100").font(InkFont.mono(9.5)).tracking(9.5 * 0.14)
+                        .foregroundStyle(Ink.dim).fixedSize()
                 }
                 if let caption {
                     Text(caption.prefix(1).uppercased() + caption.dropFirst() + ".")
@@ -897,12 +928,13 @@ struct NvdaPlannerV2Screen: View {
             PVRolling(expiries: groups.byIso, order: groups.order, sel: $rollSel)
         }
 
-        PVSectionLabel(n: "04", t: "What to sell", right: s.week.map { "\($0.lots.base) lots" })
+        PVSectionLabel(n: "04", t: "What to sell", right: s.week.map { "\($0.lots.base) contracts" })
         PVLadder(s: s, lots: max(s.week?.lots.base ?? 1, 1), ti: $ti, pick: $pick)
 
         if let c = cur, let w = s.week {
             PVSectionLabel(n: "05", t: "Why \(pvDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))", right: "Tap for detail")
-            PVWhy(forces: w.forceList, score: w.score, caption: w.caption)
+            PVWhy(forces: w.forceList, score: w.score, caption: w.caption,
+                  priorNote: w.prior.map { "OF 100 · WAS \($0.score)" })
 
             PVSectionLabel(n: "06", t: "If you place it")
             PVSend(cell: c, lots: max(w.lots.base, 1),

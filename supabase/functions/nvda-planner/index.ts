@@ -384,63 +384,73 @@ Deno.serve(async (req) => {
   // Named and worded for a reader, not a desk. Every label answers a question a
   // person would actually ask, and every push line is a sentence rather than a
   // term of art. The maths is unchanged.
-  const wf: { key: string; name: string; w: number; score: number; rows: [string, string][]; push: string }[] = [];
-  wf.push({ key: 'iv_pctile', name: 'OPTION PRICING', w: .16, score: sPct(ivPct),
+  const wf: { key: string; family: string; name: string; w: number; score: number; rows: [string, string][]; push: string }[] = [];
+  wf.push({ key: 'iv_pctile', family: 'OPTION PRICES', name: 'OPTION PRICING', w: .16, score: sPct(ivPct),
     rows: [['vs the past year', `${Math.round(ivPct)} out of 100`], ['option pricing now', `${iv.toFixed(1)}%`], ['size multiplier', pctFactor.toFixed(2)]],
     push: ivPct >= 60 ? 'Options cost more than they usually do, which makes this a good week to be the seller.'
         : ivPct <= 30 ? 'Options are cheap against their own year, so sell small and keep it short.'
         : 'Option pricing is middling, so the level on its own gives you no edge.' });
 
-  wf.push({ key: 'iv_spread', name: 'PAY VS MOVEMENT', w: .11, score: sTanh(((iv - HV.hv30) / (HV.hv30 || 1)) * 2.5),
+  wf.push({ key: 'iv_spread', family: 'OPTION PRICES', name: 'PAY VS MOVEMENT', w: .11, score: sTanh(((iv - HV.hv30) / (HV.hv30 || 1)) * 2.5),
     rows: [['buyers are paying for', `${iv.toFixed(1)}%`], ['it is actually moving', `${HV.hv30.toFixed(1)}%`], ['movement is', hvTrend === 'expanding' ? 'picking up' : hvTrend === 'compressing' ? 'settling down' : 'steady']],
     push: iv > HV.hv30
       ? `You are paid for ${(iv - HV.hv30).toFixed(1)} points more movement than the stock is making.`
       : 'The stock is moving more than buyers are paying for, so you are underpaid this week.' });
 
-  wf.push({ key: 'event', name: 'THE CALENDAR', w: .23, score: sDecay(events.daysToHeavy - 7),
+  wf.push({ key: 'event', family: 'EVENTS', name: 'THE CALENDAR', w: .23, score: sDecay(events.daysToHeavy - 7),
     rows: [['next big one', heavy ? `${heavy.label}, ${heavy.days}d` : 'none'], ['how busy, 2 weeks', String(density)], ['earnings', `${daysToEarnings}d away`]],
     push: events.daysToHeavy <= 7
       ? 'A market-moving date lands inside this week, so that premium is paying for the event rather than for you.'
       : `Nothing big for ${events.daysToHeavy - 7} days after this expiry, so the week is clear.` });
 
-  wf.push({ key: 'trend', name: 'THE TREND', w: .13, score: trendUp ? -trendStrength * 40 : trendStrength * 30,
+  wf.push({ key: 'trend', family: 'PRICE CHART', name: 'THE TREND', w: .13, score: trendUp ? -trendStrength * 40 : trendStrength * 30,
     rows: [['50-day vs 200-day', `${(trendRaw * 100).toFixed(1)}%`], ['how strong', trendStrength >= .66 ? 'strong' : trendStrength >= .33 ? 'moderate' : 'weak'], ['direction', trendUp ? 'rising' : 'flat or falling']],
     push: trendUp
       ? 'It is climbing, so selling tight here caps the run you own the shares for.'
       : 'No climb to cap right now, so you can write with a freer hand.' });
 
-  wf.push({ key: 'stretch', name: 'THE RUN-UP', w: .09, score: clamp(dev * 18, -35, 35) * (1 - .8 * trendStrength),
+  wf.push({ key: 'stretch', family: 'PRICE CHART', name: 'THE RUN-UP', w: .09, score: clamp(dev * 18, -35, 35) * (1 - .8 * trendStrength),
     rows: [['above its 50-day', `${dev > 0 ? '+' : ''}${dev} normal days`], ['reading', state === 'STRETCH' ? 'run up hard' : state === 'WASHOUT' ? 'beaten down' : state === 'TREND' ? 'drifting' : 'mid-range'], ['trimmed for the trend', `x${(1 - .8 * trendStrength).toFixed(2)}`]],
     push: state === 'STRETCH' ? 'It has run well past its average, so a pullback from here pays you.'
         : state === 'WASHOUT' ? 'It is well below its average, so do not cap the bounce back.'
         : 'Sitting near its average, with no real edge either way.' });
 
-  wf.push({ key: 'rsi', name: 'MOMENTUM', w: .05, score: technicals.rsi14 != null ? sPct(technicals.rsi14) : 0,
+  wf.push({ key: 'rsi', family: 'PRICE CHART', name: 'MOMENTUM', w: .05, score: technicals.rsi14 != null ? sPct(technicals.rsi14) : 0,
     rows: [['momentum, 0 to 100', technicals.rsi14 != null ? technicals.rsi14.toFixed(0) : 'none'], ['high this year', technicals.high52 != null ? `$${technicals.high52.toFixed(2)}` : 'none'], ['low this year', technicals.low52 != null ? `$${technicals.low52.toFixed(2)}` : 'none']],
     push: (technicals.rsi14 ?? 50) >= 70 ? 'Buyers are in charge, and the run is stretched alongside you.'
         : (technicals.rsi14 ?? 50) <= 30 ? 'Sellers are in charge, and a bounce would run straight into your strikes.'
         : 'Balanced, with neither side pushing hard.' });
 
-  wf.push({ key: 'freeroll', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
+  wf.push({ key: 'freeroll', family: 'WHAT YOU HOLD', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
     rows: [['premium banked', `$${Math.round(banked).toLocaleString()}`], ['what it has to cover', maxLoss > 0 ? `$${Math.round(maxLoss).toLocaleString()}` : 'none'], ['covered so far', `${freeroll}%`]],
     push: freerollRegime === 'insurance'
       ? 'Your put floor sits above what you paid for the shares, so premium only has the insurance left to pay for.'
       : freeroll >= 100 ? 'Premium collected already covers the whole downside gap.'
       : `${100 - freeroll}% of the downside gap is still uncovered.` });
 
-  wf.push({ key: 'headroom', name: 'ROOM TO RISE', w: .05, score: floor > 0 ? sTanh(headroom / floor) : 0,
+  wf.push({ key: 'headroom', family: 'WHAT YOU HOLD', name: 'ROOM TO RISE', w: .05, score: floor > 0 ? sTanh(headroom / floor) : 0,
     rows: [['upside you still own', `${Math.round(upsideDelta).toLocaleString()} shares`], ['least you will keep', `${floor.toLocaleString()} shares`], ['spare', `${Math.round(headroom).toLocaleString()} shares`]],
     push: headroom <= 0
       ? 'You are already at the least upside you said you would keep.'
       : `About ${Math.round(headroom).toLocaleString()} shares of upside above your own minimum.` });
 
-  wf.push({ key: 'assignment', name: 'BEING CALLED AWAY', w: .10, score: floor > 0 ? sTanh(deltaAfterAssign / floor) : 0,
+  wf.push({ key: 'assignment', family: 'WHAT YOU HOLD', name: 'BEING CALLED AWAY', w: .10, score: floor > 0 ? sTanh(deltaAfterAssign / floor) : 0,
     rows: [['likely called away', `${Math.round(expectedCalled).toLocaleString()} shares`], ['hedge that stays', `${Math.round(putDelta).toLocaleString()}`], ['upside left after', `${Math.round(deltaAfterAssign).toLocaleString()}`]],
     push: deltaAfterAssign < 0
       ? 'If these calls get exercised the shares go but the put hedge stays, and you end up betting against the stock. Write nothing more until that changes.'
       : `About ${Math.round(deltaAfterAssign).toLocaleString()} shares of upside survives if the calls get exercised.` });
 
   const weekScore = Math.round(clamp(50 + wf.reduce((a, f) => a + f.w * f.score, 0), 0, 100));
+
+  // A score means little on its own — 68 reads differently if last week was 61.
+  // One snapshot per ticker per day, idempotent, so opening the planner repeatedly
+  // does not litter the series. Comparison is on CONTRIBUTION rather than raw score,
+  // because that is what the screen shows and a weight change would otherwise read
+  // as a market change.
+  type Snap = { taken_on: string; score: number; stance: string; factors: Record<string, number> };
+  let prior: Snap | null = null;
+  const nowContrib: Record<string, number> = {};
+  for (const f of wf) nowContrib[f.key] = +(f.w * f.score).toFixed(1);
   const stance = weekScore >= 65 ? 'SELL HARD' : weekScore >= 45 ? 'SELL NORMAL' : weekScore >= 30 ? 'SELL LIGHT' : 'SIT OUT';
   const prescription = {
     'SELL HARD':   { deltaLo: .30, deltaHi: .35, sizePct: 1.0,  tenor: 'take the date that pays more' },
@@ -460,11 +470,39 @@ Deno.serve(async (req) => {
         ? 'No room to write. If what you already hold gets called away, you end up betting against the stock.'
         : 'No room to write. You are already at the least upside you said you would keep.')
     : null;
+  if (supaUrl && supaKey) {
+    const sh = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json' };
+    const backTo = ymd(new Date(parseISO(nowISO).getTime() - 5 * 86400000));
+    try {
+      const r = await fetch(`${supaUrl}/rest/v1/planner_week_snapshots?ticker=eq.${TICKER}&taken_on=lte.${backTo}`
+        + `&select=taken_on,score,stance,factors&order=taken_on.desc&limit=1`, { headers: sh });
+      if (r.ok) prior = ((await r.json()) as Snap[])[0] ?? null;
+    } catch { /* no history yet is a normal state, not an error */ }
+    try {
+      await fetch(`${supaUrl}/rest/v1/planner_week_snapshots?on_conflict=ticker,taken_on`, {
+        method: 'POST',
+        headers: { ...sh, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ ticker: TICKER, taken_on: nowISO, score: weekScore, stance: effStance,
+          factors: nowContrib,
+          posture: { floor, upsideDelta, freeroll, headroom } }),
+      });
+    } catch { /* the snapshot is a nicety; never fail the plan over it */ }
+  }
+
   const week = {
     score: weekScore, stance: effStance, rawStance: stance, stanceReason, binding, prescription,
     lots: { base: Math.max(0, Math.round(maxLots * prescription.sizePct)), max: maxLots,
             byFloor: Math.max(0, maxLotsFloor), byAssignment: Math.max(0, maxLotsAssign), free: book.freeShares / 100 },
-    forces: wf.map((f) => ({ ...f, contribution: +(f.w * f.score).toFixed(1) })),
+    forces: wf.map((f) => ({
+      ...f,
+      contribution: nowContrib[f.key],
+      change: prior ? +(nowContrib[f.key] - (prior.factors?.[f.key] ?? 0)).toFixed(1) : null,
+    })),
+    prior: prior ? {
+      score: prior.score, stance: prior.stance, takenOn: prior.taken_on,
+      change: weekScore - prior.score,
+      daysAgo: Math.round((parseISO(nowISO).getTime() - parseISO(prior.taken_on).getTime()) / 86400000),
+    } : null,
     caption: (() => {
       const sorted = wf.slice().sort((x, y) => y.w * y.score - x.w * x.score);
       const up = sorted.filter((f) => f.score > 0), dn = sorted.filter((f) => f.score < 0);
