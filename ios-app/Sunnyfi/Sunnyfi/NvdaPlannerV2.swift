@@ -889,6 +889,8 @@ private struct PVSend: View {
     let closeCollected: Double   // what you were paid to write them
     let buyAvg: Double
     let floor: Double
+    let spot: Double
+    let bookNet: Double          // NvPnL.net — where the whole position stands today
 
     var body: some View {
         let openCt = cell.suggestCt ?? 0
@@ -900,14 +902,34 @@ private struct PVSend: View {
         // Oldest lots leave first, so this is their cost, not the book average.
         let sharesPL = cell.calledPL ?? ((cell.strike - buyAvg) * sharesCalled)
         let calledAvg = cell.calledAvg ?? buyAvg
-        let total = closePL + credit + sharesPL
+        let bookedByTrade = closePL + credit + sharesPL
+        // Most of the share gain is already in your open P&L — the shares are worth
+        // spot today. Being called at the strike only ADDS the difference, so the
+        // overall figure moves by that plus the new premium. Adding the whole share
+        // gain would count the paper gain you already hold twice.
+        let aboveToday = (cell.strike - spot) * sharesCalled
+        let overall = bookNet + credit + aboveToday
 
         return VStack(alignment: .leading, spacing: 0) {
-            Text(pvUsd(total)).font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
+            Text(pvUsd(overall)).font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
                 .foregroundStyle(Ink.invertText).lineLimit(1)
-            Text("IF THE NEW CALLS ARE EXERCISED AT \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
+            Text("YOUR WHOLE NVDA P&L, IF CALLED AT \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
                 .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
                 .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 10).lineLimit(1)
+
+            VStack(spacing: 11) {
+                leg("where you stand today", bookNet, sub: "realized and open, all of it")
+                leg("new premium", credit, sub: "yours either way")
+                leg("shares sold above today's price", aboveToday,
+                    sub: "\(pvDec(cell.strike, 2)) against \(pvDec(spot, 2)) now")
+            }
+            .padding(.top, 18)
+            .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
+            .padding(.top, 18)
+
+            Text("WHAT THE TRADE ITSELF BOOKS  \(pvUsd(bookedByTrade))")
+                .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 20).lineLimit(1)
 
             VStack(spacing: 11) {
                 leg("close \(closeCt)", closePL,
@@ -1077,7 +1099,9 @@ struct NvdaPlannerV2Screen: View {
                    closeCost: closing.reduce(0) { $0 + $1.current },
                    closeCollected: closing.reduce(0) { $0 + $1.basis },
                    buyAvg: s.book?.buyAvg ?? 0,
-                   floor: s.posture?.floor ?? 0)
+                   floor: s.posture?.floor ?? 0,
+                   spot: s.gate?.spot ?? 0,
+                   bookNet: store.pnl?.net ?? 0)
         } else if exp != nil {
             Text("Nothing on this date is worth selling — try another date.")
                 .font(InkFont.display(13, .regular)).foregroundStyle(Ink.delayed)
