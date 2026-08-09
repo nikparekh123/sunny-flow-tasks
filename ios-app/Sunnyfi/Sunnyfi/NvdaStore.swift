@@ -102,7 +102,7 @@ final class NvdaStore {
             // Daily IV snapshot — non-fatal: if the table isn't there yet, [] (no 2nd gauge arc).
             let ivDaily: [NvIvDaily] = (try? await client.from("nvda_iv_daily")
                 .select("ticker,date,iv").eq("ticker", value: "NVDA")
-                .order("date", ascending: false).limit(10).execute().value) ?? []
+                .order("date", ascending: false).limit(252).execute().value) ?? []
 
             pnl       = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             perf      = NvDerive.performance(trades: t, lots: l, sells: sl, quote: nvda, marks: m)

@@ -183,6 +183,15 @@ struct NvVol: Sendable {
     let iv52High: Double?
     let spread: Double?           // implied − realized, in vol points
     let building: Bool             // true when the IV feed hasn't populated yet
+    /// The stock's own typical implied vol — median of the last year, so a single
+    /// earnings spike doesn't define "normal".
+    var ivTypical: Double? = nil
+    /// How much more an at-the-money option pays at today's vol than at that median.
+    /// ATM extrinsic runs close to linear in vol, so the ratio is the uplift.
+    var extraPct: Double? {
+        guard let iv, let t = ivTypical, t > 0 else { return nil }
+        return (iv / t - 1) * 100
+    }
 }
 
 /// Seller-score zone from the score value (docs: > 1.20 rich … < 0.80 very cheap).
@@ -716,9 +725,14 @@ enum NvDerive {
             .filter { $0.date < today }
             .max(by: { $0.date < $1.date })
             .flatMap { d in d.iv.map { $0 * 100 } }
-        let vol = NvVol(score: sellerScore ?? 0, verdict: verdict, iv: iv, ivPrev: ivPrev, hv30: hv,
+        // The stock's own typical level. Median, so one earnings spike doesn't
+        // become "normal" — and thirty observations before it is worth quoting.
+        let ivSorted = ivHist.sorted()
+        let ivTypical: Double? = ivSorted.count >= 30 ? ivSorted[ivSorted.count / 2] : nil
+        var vol = NvVol(score: sellerScore ?? 0, verdict: verdict, iv: iv, ivPrev: ivPrev, hv30: hv,
                         ivr: ivPercentile, factor: ivPercentile != nil ? factor : nil,
                         iv52Low: nil, iv52High: nil, spread: spread, building: building)
+        vol.ivTypical = ivTypical
 
         // ── vega: signed $ per IV point, aggregated by sleeve; the card lets you
         //    scrub IV and reads each leg's linear impact (vega × points). ──

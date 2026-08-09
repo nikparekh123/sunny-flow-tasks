@@ -193,21 +193,39 @@ struct NvdaInsightsScreen: View {
                 InkEyebrow(n: "01", cat: "Volatility") {
                     InkBand(skin: v.building ? .low : .hue(tint), text: v.building ? "Building" : v.verdict)
                 }
-                InkGauge(value: v.building ? 0 : v.score, range: 0.80...1.30, decimals: 2, tint: tint)
-                    .frame(maxWidth: .infinity).padding(.top, 14)
-                gaugeCaption(v.building ? "Seller score · IV feed pending" : "Seller score · \(v.verdict) · sell")
-                InkBand3(items: [
-                    ("IV", pctStr(v.iv)),
-                    ("HV30", pctStr(v.hv30)),
-                    ("IV %ile", v.ivr.map { "\(Int($0.rounded()))" } ?? "—"),
-                ])
-                InkBullets(items: v.building
+                // Two levels and the gap between them, rather than a composite score.
+                // "45% now against a typical 40%, so about 12% more premium" is a
+                // sentence you can act on; 1.07 is not.
+                if let extra = v.extraPct, let typical = v.ivTypical, let now = v.iv {
+                    VStack(alignment: .leading, spacing: 0) {
+                        InkRoll(text: "\(extra >= 0 ? "+" : "")\(nv2Dec(extra, 0))%",
+                                font: InkFont.mono(40, .medium), tracking: 40 * -0.04,
+                                color: extra >= 0 ? Ink.gain : Ink.loss)
+                        Text("MORE PREMIUM THAN USUAL").font(InkFont.mono(9)).tracking(9 * 0.16)
+                            .foregroundStyle(Ink.dim).padding(.top, 10)
+                        Text("\(nv2Dec(now, 0))% NOW · \(nv2Dec(typical, 0))% TYPICAL")
+                            .font(InkFont.mono(10)).tracking(10 * 0.1)
+                            .foregroundStyle(Ink.dim).padding(.top, 14)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18)
+                } else {
+                    InkGauge(value: v.building ? 0 : v.score, range: 0.80...1.30, decimals: 2, tint: tint)
+                        .frame(maxWidth: .infinity).padding(.top, 14)
+                    gaugeCaption(v.building ? "Seller score · IV feed pending" : "Seller score · \(v.verdict) · sell")
+                }
+                // Why it is elevated, not just that it is. Earnings is the usual
+                // answer for this name; a wide gap over realised is the other. Said
+                // plainly so the number has a cause attached to it.
+                if v.extraPct != nil {
+                    InkBullets(items: [volWhy(v, extra: v.extraPct ?? 0, daysToEarnings: store.insights?.vega?.daysToEarnings)])
+                }
+                if v.extraPct == nil { InkBullets(items: v.building
                     ? ["Implied vol streams from the option chain — not live yet",
                        "Realised \(pctStr(v.hv30)) over the last month"]
                     : ["Implied \(pctStr(v.iv)) vs realised \(pctStr(v.hv30))",
                        v.ivr != nil
                           ? "IV in the \(Int((v.ivr ?? 0).rounded()))th %ile → ×\(nv2Dec(v.factor ?? 1, 1)) factor"
-                          : "Percentile builds as IV history accrues"])
+                          : "Percentile builds as IV history accrues"]) }
                 InkSpacer()
             }
             // 132, matching Protection: a label + 24pt verdict + a two-line note needs
@@ -248,6 +266,26 @@ struct NvdaInsightsScreen: View {
                 footNote("Spot sits \(nv2Dec(abs(p.cushionPct), 1))% \(p.cushion >= 0 ? "over" : "under") break-even — the puts floor the rest.")
             }
         }
+    }
+
+    /// The cause behind the level, not just the level. Ordered so the claim can
+    /// never outrun the number: if implied is sitting on its own normal, no story
+    /// gets told, however close the print is. A reason line that says "buyers are
+    /// paying up" while the reading is +1% is worse than no reason line at all.
+    private func volWhy(_ v: NvVol, extra: Double, daysToEarnings: Int?) -> String {
+        let gap = (v.iv ?? 0) - (v.hv30 ?? 0)
+        if extra <= -4 { return "Cheaper than usual, so there is less to collect for the same risk" }
+        if extra <  4 {
+            if let d = daysToEarnings, d <= 21 {
+                return "Sitting on its own normal, with earnings \(d) days out and not yet in the price"
+            }
+            return "Sitting on its own normal, so nothing is being priced in"
+        }
+        if let d = daysToEarnings, d <= 21 {
+            return "Earnings in \(d) days, and buyers are paying up for the print"
+        }
+        if gap >= 5 { return "Implied sits \(nv2Dec(gap, 0)) points over what the stock is actually moving" }
+        return "Buyers are paying up, with no single event behind it"
     }
 
     private func gaugeCaption(_ s: String) -> some View {
