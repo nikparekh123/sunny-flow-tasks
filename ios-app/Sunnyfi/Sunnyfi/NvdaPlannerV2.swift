@@ -918,7 +918,7 @@ private struct PVSend: View {
             Text(pvUsd(overall)).font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
                 .foregroundStyle(Ink.invertText).lineLimit(1)
             Text("Your whole NVDA P&L, if called at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
-                .font(InkFont.mono(9.5, .medium))
+                .font(InkFont.mono(12, .medium))
                 .foregroundStyle(Ink.invertDim).padding(.top, 10).lineLimit(1)
 
             VStack(spacing: 11) {
@@ -932,7 +932,7 @@ private struct PVSend: View {
             .padding(.top, 18)
 
             Text("What the trade itself books  \(pvUsd(bookedByTrade))")
-                .font(InkFont.mono(9.5, .medium))
+                .font(InkFont.mono(12, .medium))
                 .foregroundStyle(Ink.invertDim).padding(.top, 20).lineLimit(1)
 
             VStack(spacing: 11) {
@@ -964,16 +964,16 @@ private struct PVSend: View {
     private func leg(_ k: String, _ v: Double, sub: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(k).font(InkFont.mono(9.5, .medium))
+                Text(k).font(InkFont.mono(12, .medium))
                     .foregroundStyle(Ink.invertDim).lineLimit(1)
                 if let sub {
-                    Text(sub).font(InkFont.mono(9, .medium))
+                    Text(sub).font(InkFont.mono(11, .medium))
                         .foregroundStyle(Ink.invertDim).lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
             Text((v >= 0 ? "+" : "−") + pvUsd(abs(v)))
-                .font(InkFont.mono(18, .regular)).tracking(18 * -0.03)
+                .font(InkFont.mono(20, .regular)).tracking(18 * -0.03)
                 .foregroundStyle(Ink.invertText).lineLimit(1)
         }
     }
@@ -981,11 +981,11 @@ private struct PVSend: View {
     private func sendFig(_ k: String, _ v: String, sub: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(v).font(InkFont.mono(16, .regular)).tracking(16 * -0.03)
+                Text(v).font(InkFont.mono(20, .regular)).tracking(16 * -0.03)
                     .foregroundStyle(Ink.invertText).lineLimit(1)
-                if let sub { Text(sub).font(InkFont.mono(10, .medium)).foregroundStyle(Ink.invertDim) }
+                if let sub { Text(sub).font(InkFont.mono(12, .medium)).foregroundStyle(Ink.invertDim) }
             }
-            Text(k).font(InkFont.mono(9.5, .medium))
+            Text(k).font(InkFont.mono(12, .medium))
                 .foregroundStyle(Ink.invertDim).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

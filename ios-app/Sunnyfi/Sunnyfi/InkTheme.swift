@@ -44,16 +44,20 @@ enum Ink {
     // and reported as such three times. Rank is still carried by size, weight and
     // position — opacity is no longer asked to do it alone. Light mode also moves
     // from 0x8B8880 to a properly dark grey, which was the worst of it.
-    static let dim        = inkDyn(UIColor(inkHex: 0xDCD9D2), UIColor(inkHex: 0x3A3835))
+    // Same ink as `text`. Measured at #DCD9D2 there was no transparency left, but a
+    // dimmer colour still reads as faded, and it was reported as such four times.
+    // Labels and values now share one colour; rank is carried entirely by size,
+    // weight and position.
+    static let dim        = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
     static let hair       = inkDyn(UIColor(inkHex: 0xF5F3ED, alpha: 0.07), UIColor(inkHex: 0xEBE9E2))
     static let invertBg   = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
     static let invertText = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
     /// Captions on an inverted surface. Solid, never alpha — fading near-black text
     /// on a cream card is what turned labels into grey mush.
-    static let invertDim  = inkDyn(UIColor(inkHex: 0x2E2C29), UIColor(inkHex: 0xDCD9D2))
+    static let invertDim  = inkDyn(UIColor(inkHex: 0x121211), UIColor(inkHex: 0xF5F3ED))
     /// Card footers / sheet docks lift dim to 84% (the `.cardfoot` override) so the
     /// small mono labels stay legible on the raised surface.
-    static let footDim    = inkDyn(UIColor(inkHex: 0xE6E3DC), UIColor(inkHex: 0x2A2825))
+    static let footDim    = inkDyn(UIColor(inkHex: 0xF5F3ED), UIColor(inkHex: 0x121211))
 
     // MARK: - Data hues (Law 1 — ONLY on a number, bar fill or data band)
     /// Moving AGAINST you — loss, cost to close, debit. (peril "fire")
