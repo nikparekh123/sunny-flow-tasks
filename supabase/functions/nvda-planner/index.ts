@@ -673,6 +673,8 @@ Deno.serve(async (req) => {
   // Named and worded for a reader, not a desk. Every label answers a question a
   // person would actually ask, and every push line is a sentence rather than a
   // term of art. The maths is unchanged.
+  const expiryDates = (polyExpiries.length ? polyExpiries : fallbackExpiries(nowISO)).slice(0, 6);
+
   const wf: { key: string; family: string; name: string; w: number; score: number; rows: [string, string][]; push: string }[] = [];
   wf.push({ key: 'iv_pctile', family: 'OPTIONS MARKET', name: 'OPTION PRICING', w: .16, score: sPct(ivPct),
     rows: [['vs the past year', `${Math.round(ivPct)} out of 100`], ['option pricing now', `${iv.toFixed(1)}%`], ['size multiplier', pctFactor.toFixed(2)]],
@@ -895,7 +897,6 @@ Deno.serve(async (req) => {
   };
 
   // ── expiries + priced chains (per-contract, ct-independent; the app scales) ──
-  const expiryDates = (polyExpiries.length ? polyExpiries : fallbackExpiries(nowISO)).slice(0, 6);
   const lo = Math.ceil((spot * .96) / STRIKE_STEP) * STRIKE_STEP;
   const hi = Math.floor((spot * 1.12) / STRIKE_STEP) * STRIKE_STEP;
   const affected = book.longCallCt;
