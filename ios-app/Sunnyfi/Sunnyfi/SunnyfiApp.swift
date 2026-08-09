@@ -61,9 +61,6 @@ private struct RootView: View {
 
     var body: some View {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-inkPlanner") {
-            return AnyView(InkPlannerPreview())
-        }
         if ProcessInfo.processInfo.arguments.contains("-inkPreview") {
             return AnyView(InkDesignPreview())
         }

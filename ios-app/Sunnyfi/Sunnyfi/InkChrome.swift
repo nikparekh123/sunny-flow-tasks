@@ -39,7 +39,7 @@ struct InkTickerNav: View {
                             // ink and medium, the other clearly dimmed back.
                             Text(s)
                                 .font(InkFont.display(15, s == selected ? .medium : .regular))
-                                .foregroundStyle(s == selected ? Ink.text : Ink.text.opacity(0.34))
+                                .foregroundStyle(s == selected ? Ink.text : Ink.dim)
                         }
                         .buttonStyle(.plain)
                     }
