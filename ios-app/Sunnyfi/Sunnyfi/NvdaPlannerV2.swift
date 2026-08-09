@@ -66,7 +66,18 @@ struct PV2: Decodable, Sendable {
     var expiries: [Expiry]?
     var refLots: Int?
     var hedgeCarry: Double?
+    var regime: Regime?
     var budget: Budget?
+    struct Regime: Decodable, Sendable {
+        let name: String
+        var why: String?
+        let keepPct: Int
+        var keepDelta: Double?
+        var keepWhy: [String]?
+        var drawdown: Double?
+        var daysToPrint: Int?
+        var daysSincePrint: Int?
+    }
     struct Budget: Decodable, Sendable {
         let room, hardFloor, delta: Double
         let aggression: Double
@@ -369,6 +380,7 @@ private struct PVWeek: View {
         let p = s.posture
         let ev = s.events
         VStack(alignment: .leading, spacing: 0) {
+            if let r = s.regime { regimeCard(r) }
             if let w { stanceCard(w) }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 10) {
@@ -395,6 +407,37 @@ private struct PVWeek: View {
                 .padding(.horizontal, 16).padding(.bottom, 8)
             }
         }
+    }
+
+    /// What kind of week this is, and how much upside it says to hold back. This
+    /// drives the weights and the budget, so it is stated plainly enough to disagree
+    /// with rather than left to reshape the numbers silently.
+    private func regimeCard(_ r: PV2.Regime) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(r.name).font(InkFont.mono(15, .medium)).tracking(15 * 0.06)
+                    .foregroundStyle(Ink.text).lineLimit(1)
+                Spacer(minLength: 0)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(r.keepPct)%").font(InkFont.mono(20, .medium)).tracking(20 * -0.03)
+                        .foregroundStyle(Ink.text)
+                    Text("KEPT BACK").font(InkFont.mono(9)).tracking(9 * 0.12).foregroundStyle(Ink.dim)
+                }
+            }
+            if let why = r.why {
+                Text(why).font(InkFont.display(13.5, .regular)).foregroundStyle(Ink.dim)
+                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true).padding(.top, 10)
+            }
+            if let kd = r.keepDelta {
+                Text("KEEP \(pvInt(kd)) SHARES OF UPSIDE · SELL THE REST")
+                    .font(InkFont.mono(9)).tracking(9 * 0.12).foregroundStyle(Ink.dim)
+                    .padding(.top, 12).lineLimit(1)
+            }
+        }
+        .padding(EdgeInsets(top: 16, leading: 18, bottom: 15, trailing: 18))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).fill(Ink.surface))
+        .padding(.horizontal, 16).padding(.bottom, 10)
     }
 
     private func stanceCard(_ w: PV2.Week) -> some View {
