@@ -89,10 +89,14 @@ struct PV2: Decodable, Sendable {
         var why: String?
         let keepPct: Int
         var keepDelta: Double?
-        var keepWhy: [String]?
         var drawdown: Double?
         var daysToPrint: Int?
         var daysSincePrint: Int?
+        var keepWhy: [String]?
+        var measured: Measured?
+        struct Measured: Decodable, Sendable {
+            let band: String; let n: Int; let d30: Double; let applied: Bool
+        }
     }
     struct Budget: Decodable, Sendable {
         let room, hardFloor, delta: Double
@@ -467,6 +471,25 @@ private struct PVWeek: View {
                 Text("KEEP \(pvInt(kd)) SHARES OF UPSIDE · SELL THE REST")
                     .font(InkFont.mono(9)).tracking(9 * 0.12).foregroundStyle(Ink.dim)
                     .padding(.top, 12).lineLimit(1)
+            }
+            // What the keep rests on. A number derived from four prints must not read
+            // with the confidence of one derived from forty, so the sample travels
+            // with it rather than being buried in the response.
+            if let m = r.measured {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(m.applied ? "MEASURED" : "ON RECORD")
+                        .font(InkFont.mono(8.5)).tracking(8.5 * 0.14)
+                        .foregroundStyle(m.applied ? Ink.gain : Ink.dim)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .overlay(Capsule().strokeBorder(m.applied ? Ink.gain : Ink.hair, lineWidth: 1))
+                    Text("after \(m.band) prints it ran \(m.d30 >= 0 ? "+" : "")\(pvDec(m.d30, 1))% in 30 days")
+                        .font(InkFont.display(12.5, .regular)).foregroundStyle(Ink.dim)
+                    Spacer(minLength: 0)
+                    Text("\(m.n) on record")
+                        .font(InkFont.mono(10)).foregroundStyle(m.n < 8 ? Ink.delayed : Ink.dim).fixedSize()
+                }
+                .padding(.top, 12)
+                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1).offset(y: -6) }
             }
         }
         .padding(EdgeInsets(top: 16, leading: 18, bottom: 15, trailing: 18))
