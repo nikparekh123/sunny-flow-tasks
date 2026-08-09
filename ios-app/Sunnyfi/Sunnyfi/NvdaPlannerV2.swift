@@ -68,7 +68,14 @@ struct PV2: Decodable, Sendable {
     var hedgeCarry: Double?
     var ivMedian: Double?
     var splits: [Split]?
+    var floorAdvice: FloorAdvice?
     var regime: Regime?
+    struct FloorAdvice: Decodable, Sendable {
+        let stale: Bool
+        let gapPct, floor, target: Double
+        let nowValue, newCost, rollCost: Double
+        var why: String?
+    }
     struct Split: Decodable, Sendable, Identifiable {
         let legs: [Leg]
         let ct: Int, income: Double, deltaSold: Double, coversPct: Int, days: Int
@@ -399,6 +406,7 @@ private struct PVWeek: View {
         let ev = s.events
         VStack(alignment: .leading, spacing: 0) {
             if let r = s.regime { regimeCard(r) }
+            if let f = s.floorAdvice { floorCard(f) }
             if let w { stanceCard(w) }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 10) {
@@ -462,6 +470,39 @@ private struct PVWeek: View {
             }
         }
         .padding(EdgeInsets(top: 16, leading: 18, bottom: 15, trailing: 18))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).fill(Ink.surface))
+        .padding(.horizontal, 16).padding(.bottom, 10)
+    }
+
+    /// The floor and the calls are one decision, so the floor's state belongs beside
+    /// the week rather than out of sight: it is what sets how much upside you keep.
+    private func floorCard(_ f: PV2.FloorAdvice) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(f.stale ? "Roll the floor" : "Floor is holding")
+                    .font(InkFont.mono(13, .medium)).tracking(13 * 0.06)
+                    .foregroundStyle(f.stale ? Ink.delayed : Ink.text).lineLimit(1)
+                Spacer(minLength: 0)
+                Text("\(pvDec(f.gapPct, 1))% under spot")
+                    .font(InkFont.mono(11)).foregroundStyle(Ink.dim).fixedSize()
+            }
+            if let why = f.why {
+                Text(why).font(InkFont.display(13, .regular)).foregroundStyle(Ink.dim)
+                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true).padding(.top, 9)
+            }
+            if f.stale {
+                HStack(spacing: 0) {
+                    PVFig(k: "floor now", v: pvDec(f.floor, 0), size: 15)
+                    PVFig(k: "move to", v: pvDec(f.target, 0), size: 15)
+                    PVFig(k: "costs", v: pvUsd(f.rollCost), size: 15)
+                }
+                .padding(.top, 14)
+                .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+                .padding(.top, 14)
+            }
+        }
+        .padding(EdgeInsets(top: 15, leading: 18, bottom: 14, trailing: 18))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).fill(Ink.surface))
         .padding(.horizontal, 16).padding(.bottom, 10)
