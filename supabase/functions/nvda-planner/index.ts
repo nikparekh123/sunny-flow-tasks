@@ -784,7 +784,11 @@ Deno.serve(async (req) => {
       : freeroll >= 100 ? 'Premium collected already covers the whole downside gap.'
       : `${100 - freeroll}% of the downside gap is still uncovered.` });
 
-  wf.push({ key: 'headroom', family: 'THE POSITION', name: 'ROOM TO RISE', w: .05, score: floor > 0 ? sTanh(headroom / floor) : 0,
+  wf.push({ key: 'headroom', family: 'THE POSITION', name: 'ROOM TO RISE', w: .05, // Scaled against the SHARE BLOCK, not against the floor. Dividing spare room by
+      // the same floor it sits above made the ratio six-ish and tanh flattened it: the
+      // factor pinned at +50 and stopped being a reading at all. Half the block of
+      // spare upside now scores ~38, the whole block ~46, so it uses its range.
+      score: shares > 0 ? sTanh(headroom / (shares * 0.5)) : 0,
     rows: [['upside you still own', `${Math.round(upsideDelta).toLocaleString()} shares`], ['least you will keep', `${floor.toLocaleString()} shares`], ['spare', `${Math.round(headroom).toLocaleString()} shares`]],
     push: headroom <= 0
       ? 'You are already at the least upside you said you would keep.'
