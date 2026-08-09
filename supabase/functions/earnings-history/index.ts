@@ -61,7 +61,44 @@ Deno.serve(async (req) => {
   const supaKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   if (!key || !supaUrl || !supaKey) return json(500, { ok: false, error: 'missing env' });
 
-  const body = await req.json().catch(() => ({})) as { tickers?: string[]; limit?: number };
+  const body = await req.json().catch(() => ({})) as { tickers?: string[]; limit?: number; stats?: boolean };
+
+  // ── stats mode ───────────────────────────────────────────────────────────────
+  // What the planner actually consumes: per band, the median path after the print.
+  // Median rather than mean, because one -30% quarter should not define the rule.
+  // NVDA's own record is kept apart from the pooled peers so a keep-percentage
+  // driven by a handful of prints never reads like one driven by sixty.
+  if (body.stats) {
+    const r = await fetch(`${supaUrl}/rest/v1/earnings_reactions`
+      + `?select=ticker,band,move_pct,d5_pct,d10_pct,d30_pct&limit=2000`,
+      { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` } });
+    if (!r.ok) return json(200, { ok: false, error: `HTTP${r.status}` });
+    const all = (await r.json()) as Record<string, number | string>[];
+    const med = (xs: number[]) => {
+      if (!xs.length) return null;
+      const s2 = xs.slice().sort((a, b) => a - b);
+      return +s2[Math.floor(s2.length / 2)].toFixed(2);
+    };
+    const summarise = (rows: typeof all) => {
+      const out: Record<string, unknown> = {};
+      for (const band of ['bad', 'flat', 'good']) {
+        const g = rows.filter((x) => x.band === band);
+        out[band] = {
+          n: g.length,
+          move: med(g.map((x) => Number(x.move_pct))),
+          d5: med(g.map((x) => Number(x.d5_pct))),
+          d10: med(g.map((x) => Number(x.d10_pct))),
+          d30: med(g.map((x) => Number(x.d30_pct))),
+        };
+      }
+      return out;
+    };
+    return json(200, {
+      ok: true, band: BAND, total: all.length,
+      nvda: summarise(all.filter((x) => x.ticker === 'NVDA')),
+      peers: summarise(all.filter((x) => x.ticker !== 'NVDA')),
+    });
+  }
   const tickers = body.tickers?.length ? body.tickers : DEFAULT_TICKERS;
   const limit = Math.min(Math.max(Number(body.limit ?? 40), 1), 100);
 
