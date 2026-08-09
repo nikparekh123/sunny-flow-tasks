@@ -127,7 +127,7 @@ struct PV2: Decodable, Sendable {
     }
     struct Cell: Decodable, Sendable, Identifiable {
         let strike, prem, delta, assign, effective, vsBasis: Double
-        var perDay: Double?; var deltaSold: Double?; var freeAfter: Double?; var afterAssign: Double?
+        var perDay: Double?; var deltaSold: Double?; var freeAfter: Double?; var afterAssign: Double?; var em: Double?
         var warns: [String]?; var blocks: [String]?
         var fit: Int?; var isPick: Bool?
         var fitParts: [FitPart]?
@@ -231,6 +231,23 @@ private func pvUsd(_ v: Double) -> String {
 }
 private func pvDec(_ v: Double, _ d: Int) -> String { String(format: "%.\(d)f", v) }
 
+/// The model's own vocabulary, said the way a person would say it.
+private func runLabel(_ state: String) -> String {
+    switch state {
+    case "STRETCH": return "run up hard"
+    case "WASHOUT": return "beaten down"
+    case "TREND":   return "drifting"
+    default:        return "mid-range"
+    }
+}
+private func bindingLabel(_ b: String?) -> String {
+    switch b {
+    case "assignment": return "Called away"
+    case "floor":      return "Your minimum"
+    default:           return "—"
+    }
+}
+
 private func stanceHue(_ s: String) -> Color {
     switch s {
     case "SELL HARD":   return Ink.gain
@@ -313,21 +330,21 @@ private struct PVWeek: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 10) {
                     if let g = s.gate {
-                        PVChip(k: "Seller score", v: pvDec(g.score, 2),
-                               sub: g.score >= 1 ? "options rich" : "options cheap",
+                        PVChip(k: "Option pricing", v: pvDec(g.score, 2),
+                               sub: g.score >= 1 ? "richer than usual" : "cheaper than usual",
                                hue: g.score >= 1 ? Ink.gain : Ink.dim)
-                        PVChip(k: "Implied vol", v: "\(Int(g.iv.rounded()))%", sub: "\(Int(g.ivPct.rounded()))th %ile")
+                        PVChip(k: "Expected swing", v: "\(Int(g.iv.rounded()))%", sub: "\(Int(g.ivPct.rounded())) of 100 this year")
                     }
                     if let p {
-                        PVChip(k: "Momentum", v: "\(p.dev > 0 ? "+" : "")\(pvDec(p.dev, 1))σ", sub: p.state.lowercased())
-                        PVChip(k: "Free delta", v: pvInt(p.upsideDelta), sub: "floor \(pvInt(p.floor))",
+                        PVChip(k: "How far it has run", v: "\(p.dev > 0 ? "+" : "")\(pvDec(p.dev, 1))", sub: runLabel(p.state))
+                        PVChip(k: "Upside you own", v: pvInt(p.upsideDelta), sub: "keep at least \(pvInt(p.floor))",
                                hue: p.upsideDelta < p.floor ? Ink.delayed : Ink.text)
-                        PVChip(k: "Freeroll", v: "\(Int(p.freeroll ?? 0))%",
-                               sub: p.freerollRegime == "insurance" ? "hedge paid for" : "of the corridor",
+                        PVChip(k: "Hedge covered", v: "\(Int(p.freeroll ?? 0))%",
+                               sub: p.freerollRegime == "insurance" ? "of the insurance" : "of the downside",
                                hue: (p.freeroll ?? 0) >= 100 ? Ink.gain : Ink.text)
                     }
                     if let ev {
-                        PVChip(k: "Catalyst", v: ev.heavy.map { "\($0.days)d" } ?? "clear",
+                        PVChip(k: "Next big date", v: ev.heavy.map { "\($0.days)d" } ?? "clear",
                                sub: ev.heavy?.label ?? "nothing scheduled",
                                hue: (ev.daysToHeavy ?? 99) <= 7 ? Ink.delayed : Ink.text)
                     }
@@ -353,14 +370,15 @@ private struct PVWeek: View {
             if let reason = w.stanceReason {
                 Text(reason).font(InkFont.display(13, .regular)).foregroundStyle(Ink.delayed)
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
-            } else if let c = w.caption {
-                Text(c).font(InkFont.display(13, .regular)).foregroundStyle(Ink.dim)
+            } else if let c = w.caption, !c.isEmpty {
+                Text(c.prefix(1).uppercased() + c.dropFirst() + ".")
+                    .font(InkFont.display(13, .regular)).foregroundStyle(Ink.dim)
                     .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
             }
             HStack(spacing: 0) {
-                PVFig(k: "lots", v: "\(w.lots.base)", sub: w.lots.max > 0 ? "of \(w.lots.max)" : nil)
-                PVFig(k: "delta band", v: "\(Int(w.prescription.deltaLo * 100))–\(Int(w.prescription.deltaHi * 100))Δ")
-                PVFig(k: "binding", v: (w.binding ?? "—").capitalized,
+                PVFig(k: "contracts", v: "\(w.lots.base)", sub: w.lots.max > 0 ? "of \(w.lots.max)" : nil)
+                PVFig(k: "aim for", v: "\(Int(w.prescription.deltaLo * 100))–\(Int(w.prescription.deltaHi * 100))Δ")
+                PVFig(k: "what limits it", v: bindingLabel(w.binding),
                       hue: w.binding == "assignment" ? Ink.delayed : Ink.text)
             }
             .padding(.top, 18)
@@ -388,7 +406,7 @@ private struct PVAssignment: View {
                 VStack(alignment: .leading, spacing: 0) {
                     InkRoll(text: pvSigned(after), font: InkFont.mono(34, .medium), tracking: 34 * -0.04,
                             color: bad ? Ink.loss : after < p.floor ? Ink.delayed : Ink.text)
-                    Text("DELTA LEFT ON THE EXPECTED PATH").font(InkFont.mono(9)).tracking(9 * 0.14)
+                    Text("UPSIDE LEFT IF THEY GO").font(InkFont.mono(9)).tracking(9 * 0.14)
                         .foregroundStyle(Ink.dim).padding(.top, 10).lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -403,15 +421,15 @@ private struct PVAssignment: View {
             }
             HStack(spacing: 0) {
                 PVFig(k: "called away", v: pvInt(a.expectedCalled ?? 0), sub: "sh")
-                PVFig(k: "hedge holds", v: pvSigned(a.putDelta))
-                PVFig(k: "floor", v: pvInt(p.floor))
+                PVFig(k: "hedge stays", v: pvSigned(a.putDelta))
+                PVFig(k: "minimum", v: pvInt(p.floor))
             }
             .padding(.top, 16)
             .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
             .padding(.top, 16)
             Text(bad
-                 ? "The hedge is sized to the whole share block and does not leave when the shares do — on these odds the book turns short."
-                 : "The hedge covers the whole block, so every call assigned leaves the puts behind. This is what survives.")
+                 ? "Your puts cover every share, so they stay behind when the shares are called away. On these odds that leaves you pointing the wrong way."
+                 : "Your puts cover every share and stay behind when the shares go. This is the upside that survives.")
                 .font(InkFont.display(13, .regular)).foregroundStyle(Ink.dim)
                 .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 14)
@@ -472,14 +490,14 @@ private struct PVRolling: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("−" + pvUsd(cost)).font(InkFont.mono(17, .regular)).tracking(17 * -0.03)
                         .foregroundStyle(on ? Ink.invertText : Ink.loss).lineLimit(1)
-                    Text("TO CLOSE").font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(dim)
+                    Text("TO BUY BACK").font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(dim)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .leading, spacing: 7) {
                     Text(pvSigned(onLeg).replacingOccurrences(of: pvInt(abs(onLeg)), with: pvUsd(abs(onLeg)).replacingOccurrences(of: "$", with: "$")))
                         .font(InkFont.mono(17, .regular)).tracking(17 * -0.03)
                         .foregroundStyle(on ? Ink.invertText : (onLeg >= 0 ? Ink.gain : Ink.loss)).lineLimit(1)
-                    Text("ON THE LEGS").font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(dim)
+                    Text("MADE SO FAR").font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(dim)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -547,101 +565,161 @@ private struct PVLadder: View {
 
     private func strikeCard(_ c: PV2.Cell, days: Int) -> some View {
         let on = pick == c.strike || (pick == nil && c.isPick == true)
-        let dim = on ? Ink.invertText.opacity(0.65) : Ink.dim
         return Group {
             if c.blocked {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(pvDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))
-                        .font(InkFont.mono(26, .medium)).tracking(26 * -0.04).foregroundStyle(Ink.text)
-                    Text("BLOCKED").font(InkFont.mono(9)).tracking(9 * 0.12)
-                        .foregroundStyle(Ink.dim).padding(.top, 13)
-                    Text(c.blockList[0]).font(InkFont.display(12.5, .regular)).foregroundStyle(Ink.dim)
-                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true).padding(.top, 11)
+                    Text(strikeLabel(c.strike))
+                        .font(InkFont.mono(30, .medium)).tracking(30 * -0.04).foregroundStyle(Ink.text)
+                    Text("BLOCKED").font(InkFont.mono(9.5)).tracking(9.5 * 0.12)
+                        .foregroundStyle(Ink.dim).padding(.top, 12)
+                    Text(c.blockList[0]).font(InkFont.display(13.5, .regular)).foregroundStyle(Ink.dim)
+                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
                     Spacer(minLength: 0)
                 }
-                .padding(EdgeInsets(top: 15, leading: 15, bottom: 14, trailing: 15))
-                .frame(width: 164, height: 214, alignment: .topLeading)
+                .padding(EdgeInsets(top: 17, leading: 18, bottom: 16, trailing: 18))
+                .frame(width: 236, height: 180, alignment: .topLeading)
                 .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3])).foregroundStyle(Ink.hair))
                 .opacity(0.42)
             } else {
-                Button { withAnimation(InkMotion.fast) { pick = c.strike } } label: { liveCard(c, on: on, dim: dim, days: days) }
+                Button { withAnimation(InkMotion.fast) { pick = c.strike } } label: { liveCard(c, on: on, days: days) }
                     .buttonStyle(.plain)
             }
         }
     }
 
-    private func liveCard(_ c: PV2.Cell, on: Bool, dim: Color, days: Int) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(pvDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))
-                    .font(InkFont.mono(26, .medium)).tracking(26 * -0.04)
-                    .foregroundStyle(on ? Ink.invertText : Ink.text)
+    private func strikeLabel(_ v: Double) -> String { pvDec(v, v == v.rounded() ? 0 : 1) }
+
+    private func liveCard(_ c: PV2.Cell, on: Bool, days: Int) -> some View {
+        let dim = on ? Ink.invertText.opacity(0.62) : Ink.dim
+        let ink = on ? Ink.invertText : Ink.text
+        let called = max(2, Int((1 / max(c.assign, 0.01)).rounded()))
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(strikeLabel(c.strike))
+                    .font(InkFont.mono(30, .medium)).tracking(30 * -0.04).foregroundStyle(ink)
                 Spacer(minLength: 0)
-                if c.isPick == true {
-                    Text("PICK").font(InkFont.mono(9)).tracking(9 * 0.12).foregroundStyle(dim)
+                if let em = c.em {
+                    Text("\(pvDec(abs(em), 1))× A NORMAL MOVE").font(InkFont.mono(11)).foregroundStyle(dim).fixedSize()
                 }
             }
-            Text(pvUsd(c.perDay ?? 0) + "/d").font(InkFont.mono(19, .regular)).tracking(19 * -0.03)
-                .foregroundStyle(on ? Ink.invertText : Ink.gain).padding(.top, 13).lineLimit(1)
-            Text("\(pvUsd(c.prem * Double(lots) * 100)) OVER \(days)D")
-                .font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(dim).padding(.top, 8).lineLimit(1)
-            Spacer(minLength: 0)
-            VStack(spacing: 8) {
-                line("delta", "\(Int((c.delta * 100).rounded()))Δ", dim: dim, on: on)
-                line("called", "1 in \(max(2, Int((1 / max(c.assign, 0.01)).rounded())))", dim: dim, on: on)
-                line("fit", "\(c.fit ?? 0)", dim: dim, on: on)
+            Text("\(Int((c.delta * 100).rounded()))Δ · CALLED 1 IN \(called)")
+                .font(InkFont.mono(11)).tracking(11 * 0.06).foregroundStyle(dim)
+                .padding(.top, 11).lineLimit(1)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    Text(pvUsd(c.perDay ?? 0)).font(InkFont.mono(26, .medium)).tracking(26 * -0.04)
+                        .foregroundStyle(on ? Ink.invertText : Ink.gain)
+                    Text("/d").font(InkFont.mono(13)).foregroundStyle(dim)
+                }
+                Text("\(pvUsd(c.prem * Double(lots) * 100)) · \(days)D")
+                    .font(InkFont.mono(11)).foregroundStyle(dim).lineLimit(1)
             }
-            .padding(.top, 12)
+            .padding(.top, 16)
+
+            Spacer(minLength: 12)
+
+            HStack(alignment: .center, spacing: 12) {
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(on ? Ink.invertText.opacity(0.22) : Ink.hair)
+                        Capsule().fill(ink)
+                            .frame(width: g.size.width * min(Double(c.fit ?? 0) / 100, 1))
+                    }
+                }
+                .frame(width: 64, height: 4)
+                Spacer(minLength: 0)
+                Text("\(c.fit ?? 0)").font(InkFont.mono(15, .regular)).tracking(15 * -0.02)
+                    .foregroundStyle(ink).fixedSize()
+                if let w = c.warnList.first {
+                    Text(w).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                        .foregroundStyle(on ? dim : Ink.delayed)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+            }
+            .padding(.top, 14)
             .overlay(alignment: .top) {
-                Rectangle().fill(on ? Ink.invertText.opacity(0.18) : Ink.hair).frame(height: 1)
+                Rectangle().fill(on ? Ink.invertText.opacity(0.18) : Ink.hair).frame(height: 1).offset(y: -14)
             }
-            Text((c.warnList.first ?? "").uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1)
-                .foregroundStyle(on ? dim : Ink.delayed).padding(.top, 11).lineLimit(1)
         }
-        .padding(EdgeInsets(top: 15, leading: 15, bottom: 14, trailing: 15))
-        .frame(width: 164, height: 214, alignment: .topLeading)
+        .padding(EdgeInsets(top: 17, leading: 18, bottom: 16, trailing: 18))
+        .frame(width: 236, height: 180, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
             .fill(on ? Ink.invertBg : .clear))
         .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
             .strokeBorder(on ? .clear : Ink.hair, lineWidth: 1))
     }
 
-    private func line(_ k: String, _ v: String, dim: Color, on: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(k.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(dim)
-            Spacer(minLength: 0)
-            Text(v).font(InkFont.mono(12)).tracking(12 * -0.02)
-                .foregroundStyle(on ? Ink.invertText : Ink.text)
-        }
-    }
 }
 
 // MARK: - 05 · why
 
-/// The bar draws CONTRIBUTION (weight × score), not the raw score — otherwise a
-/// .05-weight force at +45 outdraws a .23-weight force at +20 while mattering a
-/// third as much.
-private struct PVForceBar: View {
-    let contribution: Double
-    /// Largest absolute contribution on the card — the bars read against each other,
-    /// which is the only comparison that means anything inside one week.
+/// Each force is its own card: what it says, what it is worth, and the one figure
+/// behind it. The number is CONTRIBUTION (weight × score), not the raw score —
+/// otherwise a .05-weight force at +45 outshouts a .23-weight force at +20 while
+/// mattering a third as much. Tapping opens the rest of its rows.
+private struct PVForceCard: View {
+    let f: PV2.Force
     let peak: Double
+    let open: Bool
+    let onTap: () -> Void
+
+    private var hue: Color { f.contrib >= 0 ? Ink.gain : Ink.loss }
+
     var body: some View {
-        GeometryReader { g in
-            let half = g.size.width / 2
-            let frac = min(abs(contribution) / max(peak, 0.1), 1)
-            ZStack(alignment: .leading) {
-                Capsule().fill(Ink.hair)
-                Rectangle().fill(Ink.dim.opacity(0.5)).frame(width: 1).offset(x: half - 0.5)
-                Capsule()
-                    .fill(contribution >= 0 ? Ink.gain : Ink.loss)
-                    .frame(width: half * frac)
-                    .offset(x: contribution >= 0 ? half : half - half * frac)
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(f.name).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                    .foregroundStyle(Ink.dim).lineLimit(1)
+
+                Text(f.pushText.isEmpty ? "—" : f.pushText)
+                    .font(InkFont.display(14.5, .regular)).foregroundStyle(Ink.text)
+                    .lineSpacing(3).multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 14)
+
+                Spacer(minLength: 12)
+
+                InkRoll(text: (f.contrib >= 0 ? "+" : "−") + pvDec(abs(f.contrib), 1),
+                        font: InkFont.mono(30, .medium), tracking: 30 * -0.04, color: hue)
+
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Ink.hair)
+                        Capsule().fill(hue)
+                            .frame(width: g.size.width * min(abs(f.contrib) / max(peak, 0.1), 1))
+                    }
+                }
+                .frame(height: 4)
+                .padding(.top, 14)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(rowsShown.enumerated()), id: \.offset) { _, r in
+                        if r.count >= 2 {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(r[0].uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                                    .foregroundStyle(Ink.dim).lineLimit(1)
+                                Text(r[1]).font(InkFont.mono(11)).foregroundStyle(Ink.text).lineLimit(1)
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 14)
             }
+            .padding(EdgeInsets(top: 17, leading: 17, bottom: 16, trailing: 17))
+            .frame(width: 248, height: open ? 300 : 248, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
+                .fill(open ? Ink.text.opacity(0.05) : .clear))
+            .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
+                .strokeBorder(Ink.hair, lineWidth: 1))
         }
-        .frame(height: 8)
+        .buttonStyle(.plain)
     }
+
+    /// Collapsed shows only the headline figure; tapping brings the rest.
+    private var rowsShown: [[String]] { open ? f.rowList : Array(f.rowList.prefix(1)) }
 }
 
 private struct PVWhy: View {
@@ -649,55 +727,37 @@ private struct PVWhy: View {
     let score: Int
     let caption: String?
     @State private var open: String?
+
     var body: some View {
+        let peak = forces.map { abs($0.contrib) }.max() ?? 1
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(forces) { f in
-                VStack(alignment: .leading, spacing: 0) {
-                    Button { withAnimation(InkMotion.fast) { open = open == f.key ? nil : f.key } } label: {
-                        HStack(spacing: 12) {
-                            Text(f.name).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
-                                .foregroundStyle(open == f.key ? Ink.text : Ink.dim)
-                                .frame(width: 108, alignment: .leading).lineLimit(1)
-                            PVForceBar(contribution: f.contrib, peak: forces.map { abs($0.contrib) }.max() ?? 1)
-                            Text("\(f.contrib >= 0 ? "+" : "−")\(pvDec(abs(f.contrib), 1))")
-                                .font(InkFont.mono(12)).foregroundStyle(f.contrib >= 0 ? Ink.text : Ink.loss)
-                                .frame(width: 34, alignment: .trailing)
-                        }
-                        .padding(.vertical, 12).padding(.horizontal, 13)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    if open == f.key {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(alignment: .top, spacing: 0) {
-                                ForEach(Array(f.rowList.enumerated()), id: \.offset) { _, r in
-                                    if r.count >= 2 { PVFig(k: r[0], v: r[1], size: 14) }
-                                }
-                            }
-                            Text("→ " + f.pushText).font(InkFont.display(12.5, .regular))
-                                .foregroundStyle(Ink.delayed).lineSpacing(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.horizontal, 13).padding(.bottom, 15)
-                    }
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 5) {
+                    InkRoll(text: "\(score)", font: InkFont.mono(44, .medium),
+                            tracking: 44 * -0.045, color: Ink.text)
+                    Text("OF 100").font(InkFont.mono(9.5)).tracking(9.5 * 0.14)
+                        .foregroundStyle(Ink.dim)
                 }
-                .background(open == f.key ? Ink.text.opacity(0.05) : .clear)
-                .clipShape(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous))
-            }
-            HStack(alignment: .bottom, spacing: 16) {
-                Text("\(score)").font(InkFont.mono(40, .medium)).tracking(40 * -0.045)
-                    .foregroundStyle(Ink.text)
                 if let caption {
-                    Text(caption).font(InkFont.mono(9.5)).tracking(9.5 * 0.06)
-                        .foregroundStyle(Ink.dim).multilineTextAlignment(.trailing)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    Text(caption.prefix(1).uppercased() + caption.dropFirst() + ".")
+                        .font(InkFont.display(15, .regular)).foregroundStyle(Ink.text)
+                        .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
                 }
+                Spacer(minLength: 0)
             }
-            .padding(.top, 15)
-            .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
-            .padding(.top, 14).padding(.horizontal, 13)
+            .padding(EdgeInsets(top: 18, leading: 17, bottom: 0, trailing: 17))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(forces) { f in
+                        PVForceCard(f: f, peak: peak, open: open == f.key) {
+                            withAnimation(InkMotion.fast) { open = open == f.key ? nil : f.key }
+                        }
+                    }
+                }
+                .padding(.horizontal, 17).padding(.top, 18).padding(.bottom, 17)
+            }
         }
-        .padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).fill(Ink.surface))
         .padding(.horizontal, 16)
     }
@@ -718,7 +778,7 @@ private struct PVSend: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(pvUsd(net)).font(InkFont.mono(34, .medium)).tracking(34 * -0.04)
                         .foregroundStyle(Ink.invertText)
-                    Text("NET CREDIT · CLOSE AND REWRITE").font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                    Text("YOU COLLECT, AFTER BUYING BACK").font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
                         .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 10).lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -728,9 +788,9 @@ private struct PVSend: View {
                 }
             }
             HStack(spacing: 0) {
-                sendFig("delta sold", "−" + pvInt(cell.deltaSold ?? 0))
-                sendFig("free Δ after", pvInt(cell.freeAfter ?? 0), sub: "→\(pvInt(floor))")
-                sendFig("after assignment", pvSigned(cell.afterAssign ?? 0))
+                sendFig("upside given up", "−" + pvInt(cell.deltaSold ?? 0))
+                sendFig("upside left", pvInt(cell.freeAfter ?? 0), sub: "min \(pvInt(floor))")
+                sendFig("if they get called", pvSigned(cell.afterAssign ?? 0))
             }
             .padding(.top, 16)
             .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
@@ -797,7 +857,7 @@ struct NvdaPlannerV2Screen: View {
                     if let s = plan.state, s.ok {
                         content(s)
                     } else if plan.isLoading {
-                        quiet("Pricing the chain", "Reading the book and the calendar…")
+                        quiet("Working it out", "Reading your position and the calendar…")
                     } else {
                         quiet("Planner unavailable", plan.lastError ?? "No response from the model.")
                     }
@@ -824,30 +884,30 @@ struct NvdaPlannerV2Screen: View {
             PVWeek(s: s)
 
             if let a = s.assignment, let p = s.posture, a.known == true {
-                PVSectionLabel(n: "02", t: "If they're assigned")
+                PVSectionLabel(n: "02", t: "If they get called away")
                 PVAssignment(a: a, p: p, shortCallCt: s.book?.shortCallCt ?? 0)
             }
         }
 
         let groups = rollingGroups()
         if !groups.order.isEmpty {
-            PVSectionLabel(n: "03", t: "What you're rolling", right: "\(groups.order.count) dates")
+            PVSectionLabel(n: "03", t: "What you already sold", right: "\(groups.order.count) dates")
             PVRolling(expiries: groups.byIso, order: groups.order, sel: $rollSel)
         }
 
-        PVSectionLabel(n: "04", t: "Sell into", right: s.week.map { "\($0.lots.base) lots" })
+        PVSectionLabel(n: "04", t: "What to sell", right: s.week.map { "\($0.lots.base) lots" })
         PVLadder(s: s, lots: max(s.week?.lots.base ?? 1, 1), ti: $ti, pick: $pick)
 
         if let c = cur, let w = s.week {
-            PVSectionLabel(n: "05", t: "Why \(pvDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))")
+            PVSectionLabel(n: "05", t: "Why \(pvDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))", right: "Tap for detail")
             PVWhy(forces: w.forceList, score: w.score, caption: w.caption)
 
-            PVSectionLabel(n: "06", t: "If you send it")
+            PVSectionLabel(n: "06", t: "If you place it")
             PVSend(cell: c, lots: max(w.lots.base, 1),
                    closeCost: rollSel.flatMap { groups.byIso[$0] }?.reduce(0) { $0 + $1.current } ?? 0,
                    floor: s.posture?.floor ?? 0)
         } else if exp != nil {
-            Text("Every strike at this expiry is blocked.")
+            Text("Nothing on this date is worth selling — try another date.")
                 .font(InkFont.display(13, .regular)).foregroundStyle(Ink.delayed)
                 .padding(.horizontal, 16).padding(.top, 16)
         }
