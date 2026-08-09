@@ -70,6 +70,27 @@ struct PV2: Decodable, Sendable {
     var splits: [Split]?
     var floorAdvice: FloorAdvice?
     var regime: Regime?
+    var observations: Obs?
+    /// The observer. Six domains, one line each, and a `silent` list naming the
+    /// domains that had no data — which the card shows rather than hides.
+    struct Obs: Decodable, Sendable {
+        var matters: [Line]?
+        var quiet: [Line]?
+        var silent: [String]?
+        var dropped: [String]?
+        var mattersList: [Line] { matters ?? [] }
+        var quietList: [Line] { quiet ?? [] }
+        var silentList: [String] { silent ?? [] }
+        struct Line: Decodable, Sendable, Identifiable {
+            let domain, tag, text: String
+            var kind: String?          // measured | read
+            var seen: String?          // priced | underweighted | blind
+            var note: Double?
+            var id: String { domain }
+            /// The score cannot see this at all. The one tag worth surfacing.
+            var isBlind: Bool { seen == "blind" }
+        }
+    }
     struct FloorAdvice: Decodable, Sendable {
         let stale: Bool
         let gapPct, floor, target: Double

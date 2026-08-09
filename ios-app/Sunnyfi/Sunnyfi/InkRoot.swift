@@ -46,9 +46,12 @@ struct InkRoot: View {
         .task { await store.poll(seconds: 60) }
         .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)   // Auto=system, or the Profile override
         .fullScreenCover(isPresented: $showPlanner) {
-            NvdaPlannerV2Screen(store: sym == "TLT" ? tltStore : store,
-                                ticker: sym == "TLT" ? "TLT" : "NVDA",
-                                onBack: { showPlanner = false })
+            // The morning card replaces the seven-section planner. NvdaPlannerV2Screen
+            // is left in the target: it still holds the force cards and the split
+            // ladder, which the card links out to rather than reproduces.
+            NvdaMorningCardScreen(store: sym == "TLT" ? tltStore : store,
+                                  ticker: sym == "TLT" ? "TLT" : "NVDA",
+                                  onBack: { showPlanner = false })
         }
     }
 
