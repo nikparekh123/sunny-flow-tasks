@@ -1103,7 +1103,7 @@ Deno.serve(async (req) => {
     if (daysSincePrint <= 30 && bandStats) {
       say(true, { domain: 'record', tag: 'The record', seen: 'blind', note: .90,
         text: `After ${bandStats.band} prints this has run ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% inside 30 sessions, on ${bandStats.n} observation${bandStats.n === 1 ? '' : 's'}.` });
-    } else if (daysToPrint <= 21) {
+    } else if ((earnings.date ? daysToPrint : (cats.find((c) => c.key === 'earnings_events')?.days ?? daysToPrint)) <= 21) {
       say(true, { domain: 'record', tag: 'The record', seen: 'blind', note: .75,
         text: `${record.survived} of the last ${record.n} prints landed better than -8%, median ${record.med > 0 ? '+' : ''}${record.med}%. Capping upside into that record has been the losing side of it.` });
     } else {
@@ -1114,19 +1114,24 @@ Deno.serve(async (req) => {
 
   // THE WINDOW — how much room is left before the print, counted in expiries you
   // could actually write rather than in days.
-  const eDate = earnings.date ?? null;
+  // daysToPrint keys off b.earnings, which the APP supplies. The table knows the
+  // date too, and an observer that goes silent because the caller left a field out
+  // is reporting on the request rather than on the world.
+  const printCat = cats.find((c) => c.key === 'earnings_events') ?? null;
+  const eDate = earnings.date ?? printCat?.date ?? null;
+  const dPrint = earnings.date ? daysToPrint : (printCat?.days ?? daysToPrint);
   if (eDate) {
     const before = expiryDates.filter((d) => d < eDate).length;
     const seen = seenBy('event');
-    if (daysToPrint <= 3) {
+    if (dPrint <= 3) {
       say(true, { domain: 'window', tag: 'The window', seen, note: 1.0,
-        text: `The print is ${dayStr(daysToPrint)} out. Everything you write now carries it.` });
-    } else if (daysToPrint <= 21) {
+        text: `The print is ${dayStr(dPrint)} out. Everything you write now carries it.` });
+    } else if (dPrint <= 21) {
       say(true, { domain: 'window', tag: 'The window', seen, note: .60,
         text: `${before} expir${before === 1 ? 'y' : 'ies'} left before the ${eDate} print. Anything written past them carries the event.` });
     } else {
       say(false, { domain: 'window', tag: 'The window', seen, note: .10,
-        text: `The print is ${dayStr(daysToPrint)} out, past everything you would write this week.` });
+        text: `The print is ${dayStr(dPrint)} out, past everything you would write this week.` });
     }
   }
 
@@ -1160,19 +1165,24 @@ Deno.serve(async (req) => {
   const macroKnown = calSources.some((x) => /^macro_events:\d+$/.test(x));
   if (macroKnown) {
     const hits = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3);
-    const nextExp = expiryDates[0];
     const m = hits[0] ?? null;
     // The score keys its calendar factor off `heavy`, which needs severity 4 or more.
     // A CPI print scores 3, so the number looks straight past it to the earnings date.
     // Until the calendar factor is split three ways, macro inside the window is
     // something the score genuinely cannot see, and the tag has to say so.
     const seen: Obs['seen'] = m && m.sev < 4 ? 'blind' : seenBy('event');
-    if (m && nextExp && m.date <= nextExp) {
+    // Not "is it before the next expiry" — that reads CPI landing squarely on the
+    // 12 Aug book as "just past this expiry" because the 10th happens to expire
+    // first. What matters is which expiry it lands INSIDE, and whether that is one
+    // you are about to write.
+    const covering = m ? expiryDates.find((d) => d >= m.date) ?? null : null;
+    const near = covering ? expiryDates.indexOf(covering) <= 1 : false;
+    if (m && near && covering) {
       say(true, { domain: 'macro', tag: 'The calendar', seen, note: .92,
-        text: `${m.label} lands ${m.days === 0 ? 'today' : `in ${dayStr(m.days)}`}, inside your ${nextExp} expiry.` });
+        text: `${m.label} lands ${m.days === 0 ? 'today' : `in ${dayStr(m.days)}`}, inside your ${covering} expiry.` });
     } else if (m && m.days <= 14) {
       say(true, { domain: 'macro', tag: 'The calendar', seen, note: .50,
-        text: `${m.label} in ${dayStr(m.days)}, just past this expiry.` });
+        text: `${m.label} in ${dayStr(m.days)}, past the expiries you would write now.` });
     } else if (m) {
       say(false, { domain: 'macro', tag: 'The calendar', seen, note: .10,
         text: `Nothing before ${m.label}, ${dayStr(m.days)} out.` });
