@@ -148,7 +148,11 @@ enum InkFont {
     /// PostScript name (no `.weight()` on a static face). Default is LIGHT (300) —
     /// the design's mono chrome (eyebrows, counts, bands, stamps) is all 300; only
     /// Band3 values (400) and net figures (500) go heavier and pass a weight.
-    static func mono(_ size: CGFloat, _ weight: Font.Weight = .light) -> Font {
+    /// Default weight is REGULAR, not the design's 300. Small uppercase mono at
+    /// weight 300 renders as thin grey strokes however dark the colour is — measured
+    /// glyph cores at #2E2C29 still read as washed out, because most of each glyph
+    /// is partial coverage. Density, not darkness, is what makes small type legible.
+    static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         let face: String
         switch weight {
         case .ultraLight, .thin, .light: face = "IBMPlexMono-Light"

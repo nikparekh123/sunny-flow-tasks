@@ -106,7 +106,7 @@ struct InkRoll: View {
 
 /// Numbers in prose go mono at full ink; the surrounding prose is Inter-light dim
 /// (the Ink `Fig` treatment). Returns a concatenated Text.
-func inkFig(_ s: String, size: CGFloat = 12.5, weight: Font.Weight = .light, prose: Color = Ink.dim) -> Text {
+func inkFig(_ s: String, size: CGFloat = 12.5, weight: Font.Weight = .regular, prose: Color = Ink.dim) -> Text {
     let pattern = try! NSRegularExpression(pattern: #"\$?\d[\d,.–−\-]*%?(?:\s(?:ct|sh|pts))?"#)
     let ns = s as NSString
     var out = Text("")
