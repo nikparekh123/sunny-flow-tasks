@@ -113,15 +113,28 @@ Deno.serve(async (req) => {
       const day = new Date(d + 'T00:00:00Z');
       // A window wide enough to hold the session before and 30 sessions after,
       // with slack for weekends and holidays.
-      const from = ymd(new Date(day.getTime() - 10 * 86400000));
-      const to = ymd(new Date(day.getTime() + 60 * 86400000));
+      // Reach back before the filing, since the release precedes it, and far enough
+      // forward to hold 30 sessions after whatever day turns out to be the reaction.
+      const from = ymd(new Date(day.getTime() - 45 * 86400000));
+      const to = ymd(new Date(day.getTime() + 70 * 86400000));
       const bars = await dailyBars(ticker, from, to, key);
-      if (bars.length < 35) continue;
+      if (bars.length < 45) continue;
 
-      // The reaction is the first session ON or AFTER the filing date; the one
-      // before it is the reference close.
-      const i = bars.findIndex((b) => ymd(new Date(b.t)) >= d);
-      if (i < 1 || i + 30 >= bars.length) continue;
+      // The filing date is NOT the earnings date. A 10-Q lands days or weeks after
+      // the release, so anchoring on it measured ordinary sessions: NVDA came back
+      // 40 of 40 "flat" with a median move of +0.0%, which is what random days look
+      // like on a stock that routinely gaps 8-15% on a print.
+      //
+      // The reaction is found in the prices instead: within the window, the single
+      // largest close-to-close move. On a mega-cap the biggest day of a quarter is
+      // almost always the print. Anything under 3% is not a reaction worth calling
+      // one, so the quarter is skipped rather than guessed at.
+      let i = -1, biggest = 0;
+      for (let k = 1; k < bars.length - 30; k++) {
+        const mv = Math.abs((bars[k].c - bars[k - 1].c) / bars[k - 1].c) * 100;
+        if (mv > biggest) { biggest = mv; i = k; }
+      }
+      if (i < 1 || biggest < 3) continue;
 
       const before = bars[i - 1].c, after = bars[i].c;
       if (!(before > 0) || !(after > 0)) continue;
