@@ -113,7 +113,8 @@ interface Cell {
   assign: number; delta: number; effective: number; vsBasis: number;
   side: string; advCost: number; affected: number;
   perDay?: number; deltaSold?: number; freeAfter?: number; afterAssign?: number; em?: number;
-  calledPerCt?: number;
+  calledPerCt?: number; suggestCt?: number; wantCt?: number; cappedBy?: string | null;
+  credit?: number; paidPerDelta?: number;
   warns?: string[]; blocks?: string[]; fit?: number; isPick?: boolean;
   fitParts?: { k: string; w: number; s: number; contribution: number }[];
 }
@@ -294,8 +295,9 @@ Deno.serve(async (req) => {
     const sp = spanTo(nowISO, parseISO(exp));
     return Math.max(sp.td + wv * sp.we, .25) / 252;
   };
-  const expectedCalled = (openShortCalls as { strike: number; ct: number; expiry?: string }[])
-    .reduce((a, l) => a + bsAssign(spot, l.strike, legT(l.expiry), iv / 100) * l.ct * 100, 0);
+  const legOdds = (openShortCalls as { strike: number; ct: number; expiry?: string }[])
+    .map((l) => ({ expiry: l.expiry ?? '', shares: bsAssign(spot, l.strike, legT(l.expiry), iv / 100) * l.ct * 100 }));
+  const expectedCalled = legOdds.reduce((a, l) => a + l.shares, 0);
   const sharesAfterAssign = shares - book.shortCallCt * 100;          // tail: all called
   const deltaAfterWorst = sharesAfterAssign + putDelta;
   const deltaAfterAssign = shares - expectedCalled + putDelta;        // expected path
@@ -460,9 +462,24 @@ Deno.serve(async (req) => {
     'SELL LIGHT':  { deltaLo: .18, deltaHi: .25, sizePct: 0.5,  tenor: 'keep it short' },
     'SIT OUT':     { deltaLo: .15, deltaHi: .22, sizePct: 0.0,  tenor: 'sitting this one out is the answer' },
   }[stance]!;
+  // ── the score buys a DELTA BUDGET, and the ladder spends it ──────────────────
+  // The old model picked one of four buckets, so 46 and 64 gave identical orders.
+  // Aggression is continuous now: how much of the room above the hard floor this
+  // week justifies selling. That is the score's actual job.
+  const AGG_TOP = Number(b.aggressionTop ?? 0.90);      // share of room at score 95
+  const hardFloor = Math.round(shares * 0.08);
+  const room = Math.max(0, upsideDelta - hardFloor);
+  const aggression = clamp((weekScore - 25) / 70 * AGG_TOP, 0, AGG_TOP);
+  const budget = Math.round(room * aggression);
+
+  // Capacity in CONTRACTS, not delta. Anything being bought back frees its lots,
+  // which is why "65 contracts" is reachable on a roll and not otherwise.
+  const rollingCt = Number(bookIn.rollingCt ?? 0);
+  const capacityCt = Math.max(0, Math.floor(shares / 100) - book.shortCallCt + rollingCt);
+
   const maxLotsFloor = Math.floor((upsideDelta - floor) / 100);
   const maxLotsAssign = Math.floor((shares - expectedCalled + putDelta) / 100);
-  const maxLots = Math.max(0, Math.min(maxLotsFloor, maxLotsAssign));
+  const maxLots = Math.max(0, Math.min(maxLotsFloor, maxLotsAssign, capacityCt));
   const binding = maxLots === 0 ? (maxLotsAssign <= maxLotsFloor ? 'assignment' : 'floor')
     : maxLotsAssign < maxLotsFloor ? 'assignment' : 'floor';
   // A rich week you cannot act on is not a sell signal. Capacity overrides the score.
@@ -536,13 +553,31 @@ Deno.serve(async (req) => {
     if (s.expiry) loadByExpiry[s.expiry] = (loadByExpiry[s.expiry] ?? 0) + s.ct;
   }
   const refLots = Math.max(1, week.lots.base || 1);
-  const bandMid = (prescription.deltaLo + prescription.deltaHi) / 2;
+  const STYLE_SHIFT: Record<string, number> = { closer: 0.10, balanced: 0, further: -0.08 };
+  const style = String(b.style ?? 'balanced');
+  const bandMid = clamp((prescription.deltaLo + prescription.deltaHi) / 2 + (STYLE_SHIFT[style] ?? 0), .10, .60);
   const bandHalf = (prescription.deltaHi - prescription.deltaLo) / 2;
 
   const expiries = expiryDates.map((iso) => {
     const dt = parseISO(iso); const s = spanTo(nowISO, dt); const volDays = s.td + wv * s.we; const T = Math.max(volDays, .25) / 252;
     const load = loadByExpiry[iso] ?? 0;
     const eventInside = cats.filter((c) => c.sev >= 4 && c.days <= s.cal)[0] ?? null;
+    // You are normally rolling: contracts expiring on or before this date get
+    // bought back, which hands their lots back to you. Only calls dated PAST this
+    // expiry genuinely tie shares up.
+    // Default: you are normally rolling, so anything expiring on or before this
+    // date gets bought back and hands its lots back. If you have actually picked
+    // legs to close, that choice wins outright — never both, or the lots
+    // double-count.
+    const autoRollable = (openShortCalls as { ct: number; expiry?: string }[])
+      .reduce((a, l) => a + (l.expiry && l.expiry <= iso ? l.ct : 0), 0);
+    const rollableHere = rollingCt > 0 ? rollingCt : autoRollable;
+    const capHere = Math.max(0, Math.floor(shares / 100) - book.shortCallCt + rollableHere);
+    // Legs being closed cannot be called away. Counting them against the new sale
+    // made every near-the-money package look like it turned the book short.
+    const keptCalled = rollingCt > 0
+      ? Math.max(0, expectedCalled * (1 - rollingCt / Math.max(book.shortCallCt, 1)))
+      : legOdds.reduce((a, l) => a + (l.expiry && l.expiry <= iso ? 0 : l.shares), 0);
     const chain: Cell[] = [];
     for (let k = lo; k <= hi + 1e-9; k += STRIKE_STEP) {
       const prem = bsCall(spot, k, T, iv / 100);
@@ -574,13 +609,22 @@ Deno.serve(async (req) => {
     const emMove = spot * (iv / 100) * Math.sqrt(T);
     for (const c of chain) {
       const perDay = (c.prem * 100) / Math.max(s.cal, 1);
-      const deltaSold = c.delta * refLots * 100;
-      const freeAfter = upsideDelta - deltaSold;
-      const afterAssign = shares - expectedCalled - c.delta * refLots * 100 + putDelta;
       const bandDist = Math.max(0, Math.abs(c.delta - bandMid) - bandHalf);
+      // The concrete instruction: at this strike, this many contracts spends the
+      // week's budget. Further out means a smaller delta each, so more of them —
+      // which is why the same budget reads as 25 near the money and 65 far out.
+      const wantCt = c.delta > 0 ? Math.round(budget / (c.delta * 100)) : 0;
+      const floorCt = c.delta > 0 ? Math.floor((upsideDelta - floor) / (c.delta * 100)) : capHere;
+      const suggestCt = Math.max(0, Math.min(wantCt, capHere, floorCt));
+      const useCt = suggestCt > 0 ? suggestCt : refLots;
+      const deltaSold = c.delta * useCt * 100;
+      const freeAfter = upsideDelta - deltaSold;
+      const afterAssign = shares - keptCalled - deltaSold + putDelta;
+      const credit = c.prem * suggestCt * 100;
+      const paidPerDelta = deltaSold > 0 ? credit / deltaSold : 0;
       const parts = [
-        { k: 'per_day', w: .25, s: sTanh(2 * (perDay / bestPerDay - .75)) },
-        { k: 'in_band', w: .25, s: clamp(50 - bandDist * 500, -50, 50) },
+        { k: 'paid_per_delta', w: .35, s: 0 },   // filled in below, needs the whole ladder
+        { k: 'in_band', w: .15, s: clamp(50 - bandDist * 500, -50, 50) },
         { k: 'headroom', w: .20, s: floor > 0 ? sTanh((freeAfter - floor) / floor) : 0 },
         { k: 'assignment', w: .15, s: floor > 0 ? sTanh(afterAssign / floor) : 0 },
         { k: 'over_basis', w: .10, s: sTanh(((c.strike - book.basis) / (book.basis || 1)) * 20) },
@@ -589,7 +633,7 @@ Deno.serve(async (req) => {
       const warns: string[] = [];
       if (c.delta > .45) warns.push('NEAR THE MONEY');
       if (c.prem < .12) warns.push('BARELY PAYS');
-      if (perDay < bestPerDay * .75) warns.push('SLOW EARNER');
+      if (paidPerDelta > 0 && credit < 50) warns.push('BARELY WORTH IT');
       if (state === 'STRETCH' && c.delta > .35) warns.push('TOO TIGHT');
       if (state === 'WASHOUT' && c.delta > .30) warns.push('CAPS THE BOUNCE');
       const blocks: string[] = [];
@@ -602,6 +646,8 @@ Deno.serve(async (req) => {
       Object.assign(c, {
         perDay, deltaSold, freeAfter, afterAssign, warns, blocks,
         em: emMove > 0 ? (c.strike - spot) / emMove : 0,
+        suggestCt, wantCt, credit, paidPerDelta, rollable: rollableHere, capHere,
+        cappedBy: wantCt > capHere ? 'covered shares' : null,
         // What one contract's worth of shares books if it is called away here:
         // sale price less the average actually paid. Per contract, so the app
         // scales it by the lot count the same way it scales the credit.
@@ -610,12 +656,27 @@ Deno.serve(async (req) => {
         fit: Math.round(Math.max(0, raw - warns.reduce((a, w) => a + (PEN[w] ?? 8), 0))),
       });
     }
+    // paid-per-delta only means something against the rest of the ladder, so it is
+    // scored once every package exists, then folded into the fit.
+    const bestPPD = Math.max(...chain.map((c) => c.paidPerDelta ?? 0), 0.0001);
+    const PEN2: Record<string, number> = { 'BARELY WORTH IT': 14, 'NEAR THE MONEY': 10, 'BARELY PAYS': 14, 'TOO TIGHT': 10, 'CAPS THE BOUNCE': 10 };
+    for (const c of chain) {
+      const p = c.fitParts?.find((x) => x.k === 'paid_per_delta');
+      if (!p) continue;
+      p.s = +sTanh(2 * ((c.paidPerDelta ?? 0) / bestPPD - .7)).toFixed(1);
+      p.contribution = +(p.w * p.s).toFixed(1);
+      const raw = clamp(50 + (c.fitParts ?? []).reduce((a, x) => a + x.w * x.s, 0), 0, 100);
+      c.fit = Math.round(Math.max(0, raw - (c.warns ?? []).reduce((a, w) => a + (PEN2[w] ?? 8), 0)));
+    }
     const live = chain.filter((c) => !c.blocks?.length);
     const pick = live.slice().sort((x, y) => (y.fit ?? 0) - (x.fit ?? 0))[0] ?? null;
     if (pick) pick.isPick = true;
 
     return { key: iso, iso, label: `${MONTHS[dt.getUTCMonth()]} ${dt.getUTCDate()}`, dow: DOW[dt.getUTCDay()], cal: s.cal, td: s.td, we: s.we, volDays: +volDays.toFixed(1), T,
-      load, eventInside, pickStrike: pick?.strike ?? null, chain };
+      load, eventInside, rollable: rollableHere, rollSource: rollingCt > 0 ? 'selected' : 'auto',
+      keptCalled: Math.round(keptCalled),
+      capacityCt: capHere,
+      pickStrike: pick?.strike ?? null, chain };
   });
 
   const refStrike = (b.refStrike as number) ?? Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
@@ -625,6 +686,7 @@ Deno.serve(async (req) => {
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
     week, posture, events, refLots, ticker: TICKER,
+    budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     meta: { STRIKE_STEP, RIP, calSources, snapshot: snapNote, floorPct: INST.floorPct, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
   });
 });
