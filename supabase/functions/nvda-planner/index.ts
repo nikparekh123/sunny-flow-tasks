@@ -449,6 +449,7 @@ Deno.serve(async (req) => {
   // as a market change.
   type Snap = { taken_on: string; score: number; stance: string; factors: Record<string, number> };
   let prior: Snap | null = null;
+  let snapNote = 'skipped';
   const nowContrib: Record<string, number> = {};
   for (const f of wf) nowContrib[f.key] = +(f.w * f.score).toFixed(1);
   const stance = weekScore >= 65 ? 'SELL HARD' : weekScore >= 45 ? 'SELL NORMAL' : weekScore >= 30 ? 'SELL LIGHT' : 'SIT OUT';
@@ -479,14 +480,17 @@ Deno.serve(async (req) => {
       if (r.ok) prior = ((await r.json()) as Snap[])[0] ?? null;
     } catch { /* no history yet is a normal state, not an error */ }
     try {
-      await fetch(`${supaUrl}/rest/v1/planner_week_snapshots?on_conflict=ticker,taken_on`, {
+      const wr = await fetch(`${supaUrl}/rest/v1/planner_week_snapshots?on_conflict=ticker,taken_on`, {
         method: 'POST',
         headers: { ...sh, Prefer: 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify({ ticker: TICKER, taken_on: nowISO, score: weekScore, stance: effStance,
           factors: nowContrib,
           posture: { floor, upsideDelta, freeroll, headroom } }),
       });
-    } catch { /* the snapshot is a nicety; never fail the plan over it */ }
+      // Reported, not swallowed: a write that fails quietly means the comparison
+      // simply never starts, and you would not find out for a week.
+      snapNote = wr.ok ? 'written' : `HTTP${wr.status}: ${(await wr.text()).slice(0, 120)}`;
+    } catch (e) { snapNote = `ERR ${e}`; }
   }
 
   const week = {
@@ -616,6 +620,6 @@ Deno.serve(async (req) => {
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
     week, posture, events, refLots, ticker: TICKER,
-    meta: { STRIKE_STEP, RIP, calSources, floorPct: INST.floorPct, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
+    meta: { STRIKE_STEP, RIP, calSources, snapshot: snapNote, floorPct: INST.floorPct, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
   });
 });
