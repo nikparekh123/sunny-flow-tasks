@@ -917,40 +917,40 @@ private struct PVSend: View {
         return VStack(alignment: .leading, spacing: 0) {
             Text(pvUsd(overall)).font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
                 .foregroundStyle(Ink.invertText).lineLimit(1)
-            Text("YOUR WHOLE NVDA P&L, IF CALLED AT \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
-                .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+            Text("Your whole NVDA P&L, if called at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
+                .font(InkFont.mono(9.5, .medium))
                 .foregroundStyle(Ink.invertDim).padding(.top, 10).lineLimit(1)
 
             VStack(spacing: 11) {
-                leg("where you stand today", bookNet, sub: "realized and open, all of it")
-                leg("new premium", credit, sub: "yours either way")
-                leg("shares sold above today's price", aboveToday,
+                leg("Where you stand today", bookNet, sub: "Realized and open, all of it")
+                leg("New premium", credit, sub: "Yours either way")
+                leg("Shares sold above today's price", aboveToday,
                     sub: "\(pvDec(cell.strike, 2)) against \(pvDec(spot, 2)) now")
             }
             .padding(.top, 18)
             .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
             .padding(.top, 18)
 
-            Text("WHAT THE TRADE ITSELF BOOKS  \(pvUsd(bookedByTrade))")
-                .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+            Text("What the trade itself books  \(pvUsd(bookedByTrade))")
+                .font(InkFont.mono(9.5, .medium))
                 .foregroundStyle(Ink.invertDim).padding(.top, 20).lineLimit(1)
 
             VStack(spacing: 11) {
-                leg("close \(closeCt)", closePL,
+                leg("Close \(closeCt)", closePL,
                     sub: "\(pvUsd(closeCollected)) collected, \(pvUsd(closeCost)) to buy back")
-                leg("open \(openCt) at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))", credit,
-                    sub: "premium, if it expires worthless")
+                leg("Open \(openCt) at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))", credit,
+                    sub: "Premium, if it expires worthless")
                 leg("\(pvInt(sharesCalled)) shares sold at \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))", sharesPL,
-                    sub: "oldest lots first, cost \(pvDec(calledAvg, 2))")
+                    sub: "Oldest lots first, cost \(pvDec(calledAvg, 2))")
             }
             .padding(.top, 18)
             .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
             .padding(.top, 18)
 
             HStack(spacing: 0) {
-                sendFig("upside given up", "−" + pvInt(cell.deltaSold ?? 0))
-                sendFig("upside left", pvInt(cell.freeAfter ?? 0), sub: "min \(pvInt(floor))")
-                sendFig("if called", pvSigned(cell.afterAssign ?? 0))
+                sendFig("Upside given up", "−" + pvInt(cell.deltaSold ?? 0))
+                sendFig("Upside left", pvInt(cell.freeAfter ?? 0), sub: "min \(pvInt(floor))")
+                sendFig("If called", pvSigned(cell.afterAssign ?? 0))
             }
             .padding(.top, 16)
             .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
@@ -964,10 +964,10 @@ private struct PVSend: View {
     private func leg(_ k: String, _ v: Double, sub: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(k.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                Text(k).font(InkFont.mono(9.5, .medium))
                     .foregroundStyle(Ink.invertDim).lineLimit(1)
                 if let sub {
-                    Text(sub.uppercased()).font(InkFont.mono(8.5)).tracking(8.5 * 0.1)
+                    Text(sub).font(InkFont.mono(9, .medium))
                         .foregroundStyle(Ink.invertDim).lineLimit(1)
                 }
             }
@@ -983,9 +983,9 @@ private struct PVSend: View {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(v).font(InkFont.mono(16, .regular)).tracking(16 * -0.03)
                     .foregroundStyle(Ink.invertText).lineLimit(1)
-                if let sub { Text(sub).font(InkFont.mono(10)).foregroundStyle(Ink.invertDim) }
+                if let sub { Text(sub).font(InkFont.mono(10, .medium)).foregroundStyle(Ink.invertDim) }
             }
-            Text(k.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.1)
+            Text(k).font(InkFont.mono(9.5, .medium))
                 .foregroundStyle(Ink.invertDim).lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
