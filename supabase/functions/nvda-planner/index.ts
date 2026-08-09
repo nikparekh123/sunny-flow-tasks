@@ -201,16 +201,23 @@ Deno.serve(async (req) => {
     const grab = async (table: string, dateCol: string, nameCol: string, extra = '', labelAs = '') => {
       try {
         const r = await fetch(`${supaUrl}/rest/v1/${table}?select=*&${dateCol}=gte.${nowISO}&${dateCol}=lte.${soon}${extra}&order=${dateCol}.asc&limit=40`, { headers: h });
-        if (!r.ok) return;
-        for (const row of (await r.json()) as Record<string, unknown>[]) {
+        if (!r.ok) { calSources.push(`${table}:HTTP${r.status}`); return; }
+        const rows = (await r.json()) as Record<string, unknown>[];
+        for (const row of rows) {
           const d = String(row[dateCol] ?? '').slice(0, 10);
           if (!d) continue;
           const label = labelAs || String(row[nameCol] ?? row.title ?? row.name ?? table);
-          cats.push({ key: table, label, date: d, sev: severityOf(label),
+          // Severity is judged on what the event IS, which is not always what the
+          // row is labelled. tlt_macro_events puts the date in `label` ("Aug 12")
+          // and the kind in class_name/tag ("Inflation prints", "CPI · July") — read
+          // on `label` alone, a CPI print scored the same as a Fed speaker.
+          const kind = [row.class_name, row.class_key, row.tag, row.company_name, label]
+            .filter(Boolean).join(' ');
+          cats.push({ key: table, label, date: d, sev: severityOf(kind),
             days: Math.round((parseISO(d).getTime() - parseISO(nowISO).getTime()) / 86400000) });
         }
-        calSources.push(table);
-      } catch { /* a missing table just means a thinner calendar */ }
+        calSources.push(`${table}:${rows.length}`);
+      } catch (e) { calSources.push(`${table}:ERR`); }
     };
     const tables: [string, string, string, string, string][] = TICKER === 'TLT'
       ? [['tlt_macro_events', 'event_date', 'label', '', '']]
