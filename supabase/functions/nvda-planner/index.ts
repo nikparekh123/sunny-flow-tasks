@@ -113,6 +113,7 @@ interface Cell {
   assign: number; delta: number; effective: number; vsBasis: number;
   side: string; advCost: number; affected: number;
   perDay?: number; deltaSold?: number; freeAfter?: number; afterAssign?: number; em?: number;
+  calledPerCt?: number;
   warns?: string[]; blocks?: string[]; fit?: number; isPick?: boolean;
   fitParts?: { k: string; w: number; s: number; contribution: number }[];
 }
@@ -385,13 +386,13 @@ Deno.serve(async (req) => {
   // person would actually ask, and every push line is a sentence rather than a
   // term of art. The maths is unchanged.
   const wf: { key: string; family: string; name: string; w: number; score: number; rows: [string, string][]; push: string }[] = [];
-  wf.push({ key: 'iv_pctile', family: 'OPTION PRICES', name: 'OPTION PRICING', w: .16, score: sPct(ivPct),
+  wf.push({ key: 'iv_pctile', family: 'OPTIONS MARKET', name: 'OPTION PRICING', w: .16, score: sPct(ivPct),
     rows: [['vs the past year', `${Math.round(ivPct)} out of 100`], ['option pricing now', `${iv.toFixed(1)}%`], ['size multiplier', pctFactor.toFixed(2)]],
     push: ivPct >= 60 ? 'Options cost more than they usually do, which makes this a good week to be the seller.'
         : ivPct <= 30 ? 'Options are cheap against their own year, so sell small and keep it short.'
         : 'Option pricing is middling, so the level on its own gives you no edge.' });
 
-  wf.push({ key: 'iv_spread', family: 'OPTION PRICES', name: 'PAY VS MOVEMENT', w: .11, score: sTanh(((iv - HV.hv30) / (HV.hv30 || 1)) * 2.5),
+  wf.push({ key: 'iv_spread', family: 'OPTIONS MARKET', name: 'PAY VS MOVEMENT', w: .11, score: sTanh(((iv - HV.hv30) / (HV.hv30 || 1)) * 2.5),
     rows: [['buyers are paying for', `${iv.toFixed(1)}%`], ['it is actually moving', `${HV.hv30.toFixed(1)}%`], ['movement is', hvTrend === 'expanding' ? 'picking up' : hvTrend === 'compressing' ? 'settling down' : 'steady']],
     push: iv > HV.hv30
       ? `You are paid for ${(iv - HV.hv30).toFixed(1)} points more movement than the stock is making.`
@@ -403,38 +404,38 @@ Deno.serve(async (req) => {
       ? 'A market-moving date lands inside this week, so that premium is paying for the event rather than for you.'
       : `Nothing big for ${events.daysToHeavy - 7} days after this expiry, so the week is clear.` });
 
-  wf.push({ key: 'trend', family: 'PRICE CHART', name: 'THE TREND', w: .13, score: trendUp ? -trendStrength * 40 : trendStrength * 30,
+  wf.push({ key: 'trend', family: 'CHART', name: 'THE TREND', w: .13, score: trendUp ? -trendStrength * 40 : trendStrength * 30,
     rows: [['50-day vs 200-day', `${(trendRaw * 100).toFixed(1)}%`], ['how strong', trendStrength >= .66 ? 'strong' : trendStrength >= .33 ? 'moderate' : 'weak'], ['direction', trendUp ? 'rising' : 'flat or falling']],
     push: trendUp
       ? 'It is climbing, so selling tight here caps the run you own the shares for.'
       : 'No climb to cap right now, so you can write with a freer hand.' });
 
-  wf.push({ key: 'stretch', family: 'PRICE CHART', name: 'THE RUN-UP', w: .09, score: clamp(dev * 18, -35, 35) * (1 - .8 * trendStrength),
+  wf.push({ key: 'stretch', family: 'CHART', name: 'THE RUN-UP', w: .09, score: clamp(dev * 18, -35, 35) * (1 - .8 * trendStrength),
     rows: [['above its 50-day', `${dev > 0 ? '+' : ''}${dev} normal days`], ['reading', state === 'STRETCH' ? 'run up hard' : state === 'WASHOUT' ? 'beaten down' : state === 'TREND' ? 'drifting' : 'mid-range'], ['trimmed for the trend', `x${(1 - .8 * trendStrength).toFixed(2)}`]],
     push: state === 'STRETCH' ? 'It has run well past its average, so a pullback from here pays you.'
         : state === 'WASHOUT' ? 'It is well below its average, so do not cap the bounce back.'
         : 'Sitting near its average, with no real edge either way.' });
 
-  wf.push({ key: 'rsi', family: 'PRICE CHART', name: 'MOMENTUM', w: .05, score: technicals.rsi14 != null ? sPct(technicals.rsi14) : 0,
+  wf.push({ key: 'rsi', family: 'CHART', name: 'MOMENTUM', w: .05, score: technicals.rsi14 != null ? sPct(technicals.rsi14) : 0,
     rows: [['momentum, 0 to 100', technicals.rsi14 != null ? technicals.rsi14.toFixed(0) : 'none'], ['high this year', technicals.high52 != null ? `$${technicals.high52.toFixed(2)}` : 'none'], ['low this year', technicals.low52 != null ? `$${technicals.low52.toFixed(2)}` : 'none']],
     push: (technicals.rsi14 ?? 50) >= 70 ? 'Buyers are in charge, and the run is stretched alongside you.'
         : (technicals.rsi14 ?? 50) <= 30 ? 'Sellers are in charge, and a bounce would run straight into your strikes.'
         : 'Balanced, with neither side pushing hard.' });
 
-  wf.push({ key: 'freeroll', family: 'WHAT YOU HOLD', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
+  wf.push({ key: 'freeroll', family: 'YOUR POSITION', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
     rows: [['premium banked', `$${Math.round(banked).toLocaleString()}`], ['what it has to cover', maxLoss > 0 ? `$${Math.round(maxLoss).toLocaleString()}` : 'none'], ['covered so far', `${freeroll}%`]],
     push: freerollRegime === 'insurance'
       ? 'Your put floor sits above what you paid for the shares, so premium only has the insurance left to pay for.'
       : freeroll >= 100 ? 'Premium collected already covers the whole downside gap.'
       : `${100 - freeroll}% of the downside gap is still uncovered.` });
 
-  wf.push({ key: 'headroom', family: 'WHAT YOU HOLD', name: 'ROOM TO RISE', w: .05, score: floor > 0 ? sTanh(headroom / floor) : 0,
+  wf.push({ key: 'headroom', family: 'YOUR POSITION', name: 'ROOM TO RISE', w: .05, score: floor > 0 ? sTanh(headroom / floor) : 0,
     rows: [['upside you still own', `${Math.round(upsideDelta).toLocaleString()} shares`], ['least you will keep', `${floor.toLocaleString()} shares`], ['spare', `${Math.round(headroom).toLocaleString()} shares`]],
     push: headroom <= 0
       ? 'You are already at the least upside you said you would keep.'
       : `About ${Math.round(headroom).toLocaleString()} shares of upside above your own minimum.` });
 
-  wf.push({ key: 'assignment', family: 'WHAT YOU HOLD', name: 'BEING CALLED AWAY', w: .10, score: floor > 0 ? sTanh(deltaAfterAssign / floor) : 0,
+  wf.push({ key: 'assignment', family: 'YOUR POSITION', name: 'BEING CALLED AWAY', w: .10, score: floor > 0 ? sTanh(deltaAfterAssign / floor) : 0,
     rows: [['likely called away', `${Math.round(expectedCalled).toLocaleString()} shares`], ['hedge that stays', `${Math.round(putDelta).toLocaleString()}`], ['upside left after', `${Math.round(deltaAfterAssign).toLocaleString()}`]],
     push: deltaAfterAssign < 0
       ? 'If these calls get exercised the shares go but the put hedge stays, and you end up betting against the stock. Write nothing more until that changes.'
@@ -601,6 +602,10 @@ Deno.serve(async (req) => {
       Object.assign(c, {
         perDay, deltaSold, freeAfter, afterAssign, warns, blocks,
         em: emMove > 0 ? (c.strike - spot) / emMove : 0,
+        // What one contract's worth of shares books if it is called away here:
+        // sale price less the average actually paid. Per contract, so the app
+        // scales it by the lot count the same way it scales the credit.
+        calledPerCt: (c.strike - book.buyAvg) * 100,
         fitParts: parts.map((p) => ({ ...p, s: +p.s.toFixed(1), contribution: +(p.w * p.s).toFixed(1) })),
         fit: Math.round(Math.max(0, raw - warns.reduce((a, w) => a + (PEN[w] ?? 8), 0))),
       });

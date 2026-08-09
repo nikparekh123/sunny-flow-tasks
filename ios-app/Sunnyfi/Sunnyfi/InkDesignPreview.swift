@@ -119,7 +119,8 @@ struct InkDesignPreview: View {
                 ScrollView { NvdaHistoryScreen(store: store) }
             } else if ProcessInfo.processInfo.arguments.contains("-inkPlan2") {
                 NvdaPlannerV2Screen(store: store, injected: PlannerV2Fixture.state(),
-                                    lowerOnly: ProcessInfo.processInfo.arguments.contains("-lower"))
+                                    lowerOnly: ProcessInfo.processInfo.arguments.contains("-lower"),
+                                    tailOnly: ProcessInfo.processInfo.arguments.contains("-tail"))
             } else if ProcessInfo.processInfo.arguments.contains("-inkIns") {
                 ScrollView { NvdaInsightsScreen(store: store) }
             } else if ProcessInfo.processInfo.arguments.contains("-inkPeers") {

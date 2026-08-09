@@ -134,7 +134,7 @@ struct PV2: Decodable, Sendable {
     }
     struct Cell: Decodable, Sendable, Identifiable {
         let strike, prem, delta, assign, effective, vsBasis: Double
-        var perDay: Double?; var deltaSold: Double?; var freeAfter: Double?; var afterAssign: Double?; var em: Double?
+        var perDay: Double?; var deltaSold: Double?; var freeAfter: Double?; var afterAssign: Double?; var em: Double?; var calledPerCt: Double?
         var warns: [String]?; var blocks: [String]?
         var fit: Int?; var isPick: Bool?
         var fitParts: [FitPart]?
@@ -803,6 +803,7 @@ private struct PVSend: View {
     let lots: Int
     let closeCost: Double
     let floor: Double
+    let buyAvg: Double
     var body: some View {
         let credit = cell.prem * Double(lots) * 100
         let net = credit - closeCost
@@ -823,11 +824,40 @@ private struct PVSend: View {
             HStack(spacing: 0) {
                 sendFig("upside given up", "−" + pvInt(cell.deltaSold ?? 0))
                 sendFig("upside left", pvInt(cell.freeAfter ?? 0), sub: "min \(pvInt(floor))")
-                sendFig("if they get called", pvSigned(cell.afterAssign ?? 0))
+                sendFig("if called", pvSigned(cell.afterAssign ?? 0))
             }
             .padding(.top, 16)
             .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
             .padding(.top, 18)
+
+            // The decision usually turns on this: being called away is not a loss,
+            // it is a sale at the strike. Shown against what the shares actually
+            // cost, with the premium kept either way.
+            if let perCt = cell.calledPerCt {
+                let sharesPL = perCt * Double(lots)
+                let total = sharesPL + net
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("IF THEY ARE CALLED AWAY AT \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
+                        .font(InkFont.mono(9)).tracking(9 * 0.14)
+                        .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(pvUsd(total)).font(InkFont.mono(26, .medium)).tracking(26 * -0.04)
+                            .foregroundStyle(Ink.invertText)
+                        Text("YOU BOOK IN TOTAL").font(InkFont.mono(9)).tracking(9 * 0.12)
+                            .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
+                    }
+                    .padding(.top, 12)
+                    HStack(spacing: 0) {
+                        sendFig("shares sold", pvInt(Double(lots) * 100))
+                        sendFig("gain on shares", pvUsd(sharesPL), sub: "paid \(pvDec(buyAvg, 2))")
+                        sendFig("premium kept", pvUsd(net))
+                    }
+                    .padding(.top, 16)
+                }
+                .padding(.top, 16)
+                .overlay(alignment: .top) { Rectangle().fill(Ink.invertText.opacity(0.18)).frame(height: 1) }
+                .padding(.top, 18)
+            }
         }
         .padding(EdgeInsets(top: 18, leading: 17, bottom: 17, trailing: 17))
         .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).fill(Ink.invertBg))
@@ -857,6 +887,8 @@ struct NvdaPlannerV2Screen: View {
     var injected: PV2? = nil
     /// DEBUG: start at layer 03, so the lower half can be screenshotted without a swipe.
     var lowerOnly: Bool = false
+    /// DEBUG: only the last two layers.
+    var tailOnly: Bool = false
     @State private var plan = PlanV2Store()
     @State private var ti = 0
     @State private var pick: Double?
@@ -912,7 +944,7 @@ struct NvdaPlannerV2Screen: View {
             e.cells.first { pick == $0.strike && !$0.blocked } ?? e.cells.first { $0.isPick == true }
         }
 
-        if !lowerOnly {
+        if !lowerOnly && !tailOnly {
             PVSectionLabel(n: "01", t: "What kind of week is it")
             PVWeek(s: s)
 
@@ -923,13 +955,15 @@ struct NvdaPlannerV2Screen: View {
         }
 
         let groups = rollingGroups()
-        if !groups.order.isEmpty {
+        if !groups.order.isEmpty && !tailOnly {
             PVSectionLabel(n: "03", t: "What you already sold", right: "\(groups.order.count) dates")
             PVRolling(expiries: groups.byIso, order: groups.order, sel: $rollSel)
         }
 
-        PVSectionLabel(n: "04", t: "What to sell", right: s.week.map { "\($0.lots.base) contracts" })
-        PVLadder(s: s, lots: max(s.week?.lots.base ?? 1, 1), ti: $ti, pick: $pick)
+        if !tailOnly {
+            PVSectionLabel(n: "04", t: "What to sell", right: s.week.map { "\($0.lots.base) contracts" })
+            PVLadder(s: s, lots: max(s.week?.lots.base ?? 1, 1), ti: $ti, pick: $pick)
+        }
 
         if let c = cur, let w = s.week {
             PVSectionLabel(n: "05", t: "Why \(pvDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))", right: "Tap for detail")
@@ -939,7 +973,8 @@ struct NvdaPlannerV2Screen: View {
             PVSectionLabel(n: "06", t: "If you place it")
             PVSend(cell: c, lots: max(w.lots.base, 1),
                    closeCost: rollSel.flatMap { groups.byIso[$0] }?.reduce(0) { $0 + $1.current } ?? 0,
-                   floor: s.posture?.floor ?? 0)
+                   floor: s.posture?.floor ?? 0,
+                   buyAvg: s.book?.buyAvg ?? 0)
         } else if exp != nil {
             Text("Nothing on this date is worth selling — try another date.")
                 .font(InkFont.display(13, .regular)).foregroundStyle(Ink.delayed)
