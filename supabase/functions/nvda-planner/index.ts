@@ -113,25 +113,37 @@ function severityOf(name: string): number {
 // average answer every time. Rows are normalised at use, so they need only be
 // proportions rather than exact fractions.
 const REGIME_WEIGHTS: Record<string, Record<string, number>> = {
-  // Premium is event premium; how far above normal it sits is the whole question.
-  'EARNINGS WEEK':        { event: .30, iv_pctile: .25, iv_spread: .20, assignment: .10,
-                            headroom: .05, freeroll: .05, trend: .03, stretch: .01, rsi: .01 },
-  // Implied has already collapsed, so its level says little. What the tape did with
-  // the news, and what it is still doing, says everything.
-  'JUST AFTER THE PRINT': { iv_spread: .25, stretch: .20, trend: .15, assignment: .15,
-                            headroom: .10, iv_pctile: .05, freeroll: .05, event: .03, rsi: .02 },
-  // A bounce is the live risk, not a melt-up. Where it sits and how oversold it is
-  // carry it; the calendar is noise next to that.
-  'BEATEN DOWN':          { stretch: .25, rsi: .15, trend: .15, headroom: .15, iv_pctile: .10,
-                            iv_spread: .10, assignment: .05, freeroll: .03, event: .02 },
-  // Exhaustion and how far it has run from its mean.
-  'EXTENDED RUN':         { stretch: .25, trend: .20, iv_pctile: .15, rsi: .10, assignment: .10,
-                            headroom: .08, iv_spread: .07, event: .03, freeroll: .02 },
-  // Nothing is happening, so the question is simply whether you are paid enough to
-  // carry the floor.
-  'RANGE':                { iv_pctile: .25, iv_spread: .15, freeroll: .15, headroom: .12,
-                            stretch: .10, event: .08, assignment: .08, trend: .05, rsi: .02 },
+  // Thirteen factors, five families. The calendar used to be ONE factor keyed on
+  // the heaviest event in the window, which meant a severity-3 CPI print two days
+  // out was invisible behind a severity-5 earnings date sixteen days out. Split
+  // three ways, each date keeps its own clock and nothing can mask anything else.
+  //
+  // `record` and `relative` are new to the score. The print record previously moved
+  // keepPct and nothing else, so the number on the card never reflected the one
+  // thing measured over 159 observations.
+  'EARNINGS WEEK':        { print: .24, iv_pctile: .18, iv_spread: .15, record: .13,
+                            assignment: .08, peers: .06, headroom: .04, macro: .03,
+                            trend: .03, freeroll: .02, stretch: .02, relative: .01, rsi: .01 },
+
+  // After the print the record is the sharpest thing available: vol is crushed, the
+  // tape is resetting, and what this name did next is measured rather than guessed.
+  'JUST AFTER THE PRINT': { record: .20, iv_spread: .18, stretch: .15, trend: .12,
+                            assignment: .10, headroom: .07, relative: .06, iv_pctile: .04,
+                            peers: .03, freeroll: .02, macro: .02, rsi: .01, print: .01 },
+
+  'BEATEN DOWN':          { stretch: .20, rsi: .13, trend: .12, record: .12, headroom: .12,
+                            relative: .08, iv_pctile: .08, iv_spread: .07, assignment: .04,
+                            macro: .02, peers: .01, freeroll: .01, print: .01 },
+
+  'EXTENDED RUN':         { stretch: .20, trend: .17, iv_pctile: .12, relative: .08, rsi: .08,
+                            assignment: .08, macro: .06, record: .06, headroom: .06,
+                            iv_spread: .05, peers: .03, print: .02, freeroll: .01 },
+
+  'RANGE':                { iv_pctile: .22, iv_spread: .14, freeroll: .12, headroom: .10,
+                            macro: .09, stretch: .08, assignment: .07, record: .05,
+                            relative: .05, peers: .04, print: .03, trend: .03, rsi: .02 },
 };
+
 
 // One priced strike. The first block is the original pricing payload; the second is
 // what the fit pass adds once the week's prescription is known.
@@ -667,44 +679,102 @@ Deno.serve(async (req) => {
       ? `You are paid for ${(iv - HV.hv30).toFixed(1)} points more movement than the stock is making.`
       : 'The stock is moving more than buyers are paying for, so you are underpaid this week.' });
 
-  wf.push({ key: 'event', family: 'EVENTS', name: 'THE CALENDAR', w: .23, score: sDecay(events.daysToHeavy - 7),
-    rows: [['next big one', heavy ? `${heavy.label}, ${heavy.days}d` : 'none'], ['how busy, 2 weeks', String(density)], ['earnings', `${daysToEarnings}d away`]],
-    push: events.daysToHeavy <= 7
-      ? 'A market-moving date lands inside this week, so that premium is paying for the event rather than for you.'
-      : `Nothing big for ${events.daysToHeavy - 7} days after this expiry, so the week is clear.` });
+  // THE CALENDAR, split three ways. Each date gets its own clock, so none can hide
+  // behind another. The key stays 'event' so a week of stored snapshots still lines up.
+  wf.push({ key: 'event', family: 'THE CALENDAR', name: 'THE PRINT', w: .23, score: sDecay(daysToEarnings - 7),
+    rows: [['next print', earnings.date ?? 'none'], ['days away', String(daysToEarnings)], ['how busy, 2 weeks', String(density)]],
+    push: daysToEarnings <= 7
+      ? `The print is ${daysToEarnings}d away, so do not get capped into a gap.`
+      : `Nothing from this name for ${daysToEarnings - 7} days after this expiry, so the week is clear of it.` });
 
-  wf.push({ key: 'trend', family: 'CHART', name: 'THE TREND', w: .13, score: trendUp ? -trendStrength * 40 : trendStrength * 30,
+  {
+    const nextPeer = peers.filter((x) => x.days >= 0).sort((x, y) => x.days - y.days)[0] ?? null;
+    wf.push({ key: 'peers', family: 'THE CALENDAR', name: 'THE NEIGHBOURHOOD', w: .04,
+      // Unknown is NOT clear. With no peer table the factor sits neutral rather than
+      // claiming a clear runway it never checked.
+      score: !peersKnown ? 0 : nextPeer ? sDecay(nextPeer.days - 3) : 30,
+      rows: [['next chip print', nextPeer ? `${nextPeer.ticker}, ${nextPeer.days}d` : peersKnown ? 'none in range' : 'not on file'],
+             ['confirmed', nextPeer ? (nextPeer.confirmed ? 'yes' : 'estimated') : '-'],
+             ['vs SMH', relStrength ? `${relStrength.gap > 0 ? '+' : ''}${relStrength.gap}% / ${relStrength.days}d` : 'no series']],
+      push: !peersKnown ? 'No peer calendar on file, so this is sitting neutral rather than guessing.'
+          : nextPeer && nextPeer.days <= 3 ? `${nextPeer.ticker} reports in ${nextPeer.days}d and semis move together, so the gap risk is not only NVDA's.`
+          : 'No chip print close enough to drag the group around this week.' });
+  }
+
+  {
+    const nextMacro = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3)[0] ?? null;
+    const macroOnFile = calSources.some((x) => /^macro_events:\d+$/.test(x));
+    wf.push({ key: 'macro', family: 'THE CALENDAR', name: 'THE ECONOMY', w: .05,
+      score: !macroOnFile ? 0 : nextMacro ? sDecay(nextMacro.days - 2) : 30,
+      rows: [['next print', nextMacro ? nextMacro.label : macroOnFile ? 'none in range' : 'not on file'],
+             ['days away', nextMacro ? String(nextMacro.days) : '-'],
+             ['calendar', macroOnFile ? 'on file' : 'missing']],
+      push: !macroOnFile ? 'No economic calendar on file, so this is sitting neutral.'
+          : nextMacro && nextMacro.days <= 3 ? `${nextMacro.label} lands in ${nextMacro.days}d, inside what you would be writing.`
+          : 'Nothing scheduled close enough to move the week.' });
+  }
+
+  wf.push({ key: 'trend', family: 'THE TAPE', name: 'THE TREND', w: .13, score: trendUp ? -trendStrength * 40 : trendStrength * 30,
     rows: [['50-day vs 200-day', `${(trendRaw * 100).toFixed(1)}%`], ['how strong', trendStrength >= .66 ? 'strong' : trendStrength >= .33 ? 'moderate' : 'weak'], ['direction', trendUp ? 'rising' : 'flat or falling']],
     push: trendUp
       ? 'It is climbing, so selling tight here caps the run you own the shares for.'
       : 'No climb to cap right now, so you can write with a freer hand.' });
 
-  wf.push({ key: 'stretch', family: 'CHART', name: 'THE RUN-UP', w: .09, score: clamp(dev * 18, -35, 35) * (1 - .8 * trendStrength),
+  wf.push({ key: 'stretch', family: 'THE TAPE', name: 'THE RUN-UP', w: .09, score: clamp(dev * 18, -35, 35) * (1 - .8 * trendStrength),
     rows: [['above its 50-day', `${dev > 0 ? '+' : ''}${dev} normal days`], ['reading', state === 'STRETCH' ? 'run up hard' : state === 'WASHOUT' ? 'beaten down' : state === 'TREND' ? 'drifting' : 'mid-range'], ['trimmed for the trend', `x${(1 - .8 * trendStrength).toFixed(2)}`]],
     push: state === 'STRETCH' ? 'It has run well past its average, so a pullback from here pays you.'
         : state === 'WASHOUT' ? 'It is well below its average, so do not cap the bounce back.'
         : 'Sitting near its average, with no real edge either way.' });
 
-  wf.push({ key: 'rsi', family: 'CHART', name: 'MOMENTUM', w: .05, score: technicals.rsi14 != null ? sPct(technicals.rsi14) : 0,
+  wf.push({ key: 'rsi', family: 'THE TAPE', name: 'MOMENTUM', w: .05, score: technicals.rsi14 != null ? sPct(technicals.rsi14) : 0,
     rows: [['momentum, 0 to 100', technicals.rsi14 != null ? technicals.rsi14.toFixed(0) : 'none'], ['high this year', technicals.high52 != null ? `$${technicals.high52.toFixed(2)}` : 'none'], ['low this year', technicals.low52 != null ? `$${technicals.low52.toFixed(2)}` : 'none']],
     push: (technicals.rsi14 ?? 50) >= 70 ? 'Buyers are in charge, and the run is stretched alongside you.'
         : (technicals.rsi14 ?? 50) <= 30 ? 'Sellers are in charge, and a bounce would run straight into your strikes.'
         : 'Balanced, with neither side pushing hard.' });
 
-  wf.push({ key: 'freeroll', family: 'YOUR POSITION', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
+  wf.push({ key: 'relative', family: 'THE TAPE', name: 'AGAINST THE GROUP', w: .06,
+    // Outperformance is a stretch measure, so it carries the same sign as the run-up:
+    // leading the group is a better moment to sell upside, lagging it is a worse one.
+    score: relStrength ? clamp(relStrength.gap * 3, -35, 35) : 0,
+    rows: [['this name', relStrength ? `${relStrength.self > 0 ? '+' : ''}${relStrength.self}%` : 'no series'],
+           ['SMH', relStrength ? `${relStrength.ref > 0 ? '+' : ''}${relStrength.ref}%` : '-'],
+           ['sessions compared', relStrength ? String(relStrength.days) : '-']],
+    push: !relStrength ? 'No reference series, so the group comparison is sitting out.'
+        : relStrength.gap >= 5 ? `Running ${relStrength.gap}% ahead of the group, which is a better moment to sell upside than a worse one.`
+        : relStrength.gap <= -5 ? `Lagging the group by ${Math.abs(relStrength.gap)}%, so there is catch-up you would be capping.`
+        : 'Moving with the group, so nothing here argues either way.' });
+
+  // THE RECORD — measured, not assumed. Rising into and through prints argues
+  // AGAINST capping upside, hence the negative sign. It only speaks when a print is
+  // actually in play; the rest of the year it has nothing to say about one week.
+  {
+    const after = daysSincePrint <= 30 && bandStats;
+    const before = daysToEarnings <= 21 && record;
+    const sc = after ? -clamp(bandStats!.d30 * 3, -40, 40)
+             : before ? -clamp(record!.med * 4, -40, 40) : 0;
+    wf.push({ key: 'record', family: 'THE RECORD', name: 'WHAT IT DID LAST TIME', w: .08, score: sc,
+      rows: [['prints on file', record ? String(record.n) : 'none'],
+             ['landed better than -8%', record ? `${record.survived} of ${record.n}` : '-'],
+             ['after the last one', bandStats ? `${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% by day 30, n=${bandStats.n}` : 'no band match']],
+      push: after ? `After ${bandStats!.band} prints this has run ${bandStats!.d30 > 0 ? '+' : ''}${bandStats!.d30}% inside 30 sessions, on ${bandStats!.n}. Capping that costs you.`
+          : before ? `${record!.survived} of ${record!.n} prints landed better than -8%, median ${record!.med > 0 ? '+' : ''}${record!.med}%. Its record argues against capping into one.`
+          : 'No print close enough for its record to say anything about this week.' });
+  }
+
+  wf.push({ key: 'freeroll', family: 'THE POSITION', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
     rows: [['premium banked', `$${Math.round(banked).toLocaleString()}`], ['what it has to cover', maxLoss > 0 ? `$${Math.round(maxLoss).toLocaleString()}` : 'none'], ['covered so far', `${freeroll}%`]],
     push: freerollRegime === 'insurance'
       ? 'Your put floor sits above what you paid for the shares, so premium only has the insurance left to pay for.'
       : freeroll >= 100 ? 'Premium collected already covers the whole downside gap.'
       : `${100 - freeroll}% of the downside gap is still uncovered.` });
 
-  wf.push({ key: 'headroom', family: 'YOUR POSITION', name: 'ROOM TO RISE', w: .05, score: floor > 0 ? sTanh(headroom / floor) : 0,
+  wf.push({ key: 'headroom', family: 'THE POSITION', name: 'ROOM TO RISE', w: .05, score: floor > 0 ? sTanh(headroom / floor) : 0,
     rows: [['upside you still own', `${Math.round(upsideDelta).toLocaleString()} shares`], ['least you will keep', `${floor.toLocaleString()} shares`], ['spare', `${Math.round(headroom).toLocaleString()} shares`]],
     push: headroom <= 0
       ? 'You are already at the least upside you said you would keep.'
       : `About ${Math.round(headroom).toLocaleString()} shares of upside above your own minimum.` });
 
-  wf.push({ key: 'assignment', family: 'YOUR POSITION', name: 'BEING CALLED AWAY', w: .10, score: floor > 0 ? sTanh(deltaAfterAssign / floor) : 0,
+  wf.push({ key: 'assignment', family: 'THE POSITION', name: 'BEING CALLED AWAY', w: .10, score: floor > 0 ? sTanh(deltaAfterAssign / floor) : 0,
     rows: [['likely called away', `${Math.round(expectedCalled).toLocaleString()} shares`], ['hedge that stays', `${Math.round(putDelta).toLocaleString()}`], ['upside left after', `${Math.round(deltaAfterAssign).toLocaleString()}`]],
     push: deltaAfterAssign < 0
       ? 'If these calls get exercised the shares go but the put hedge stays, and you end up betting against the stock. Write nothing more until that changes.'
@@ -1099,15 +1169,16 @@ Deno.serve(async (req) => {
 
   // THE RECORD — what this name has done in this situation before. Not in the score
   // at all today: it moves keepPct and nothing else, so the number never reflects it.
+  const seenRecord = seenBy('record');
   if (record && record.n >= 8) {
     if (daysSincePrint <= 30 && bandStats) {
-      say(true, { domain: 'record', tag: 'The record', seen: 'blind', note: .90,
+      say(true, { domain: 'record', tag: 'The record', seen: seenRecord, note: .90,
         text: `After ${bandStats.band} prints this has run ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% inside 30 sessions, on ${bandStats.n} observation${bandStats.n === 1 ? '' : 's'}.` });
     } else if ((earnings.date ? daysToPrint : (cats.find((c) => c.key === 'earnings_events')?.days ?? daysToPrint)) <= 21) {
-      say(true, { domain: 'record', tag: 'The record', seen: 'blind', note: .75,
+      say(true, { domain: 'record', tag: 'The record', seen: seenRecord, note: .75,
         text: `${record.survived} of the last ${record.n} prints landed better than -8%, median ${record.med > 0 ? '+' : ''}${record.med}%. Capping upside into that record has been the losing side of it.` });
     } else {
-      say(false, { domain: 'record', tag: 'The record', seen: 'blind', note: .10,
+      say(false, { domain: 'record', tag: 'The record', seen: seenRecord, note: .10,
         text: `Nothing in ${record.n} prints on file says this week is unusual.` });
     }
   }
@@ -1143,20 +1214,21 @@ Deno.serve(async (req) => {
     const nextExp = expiryDates[0];
     const rel = relStrength;
     const est = (p: Peer) => (p.confirmed ? '' : ', though that date is an estimate');
+    const seenHood = seenBy('peers', 'relative');
     if (ahead && nextExp && ahead.date <= nextExp) {
-      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .95,
+      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .95,
         text: `${ahead.ticker} reports ${ahead.days === 0 ? 'today' : `in ${dayStr(ahead.days)}`}, inside this expiry${est(ahead)}. Semis move as a bloc through it.` });
     } else if (behind && behind.days >= -7) {
-      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .70,
+      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .70,
         text: `${behind.ticker} printed ${dayStr(-behind.days)} ago${rel ? `, and ${TICKER} has run ${rel.gap > 0 ? '+' : ''}${rel.gap}% against SMH over ${rel.days} sessions` : ''}.` });
     } else if (rel && Math.abs(rel.gap) >= 5) {
-      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .65,
+      say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .65,
         text: `${TICKER} has run ${rel.gap > 0 ? '+' : ''}${rel.gap}% against SMH over ${rel.days} sessions, so it is ${rel.gap > 0 ? 'leading' : 'lagging'} the group.` });
     } else if (ahead) {
-      say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .10,
+      say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .10,
         text: `No chip earnings before this expiry. ${ahead.ticker} is next, ${dayStr(ahead.days)} out.` });
     } else {
-      say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: 'blind', note: .05,
+      say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .05,
         text: 'No chip earnings on the calendar.' });
     }
   }
@@ -1166,11 +1238,9 @@ Deno.serve(async (req) => {
   if (macroKnown) {
     const hits = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3);
     const m = hits[0] ?? null;
-    // The score keys its calendar factor off `heavy`, which needs severity 4 or more.
-    // A CPI print scores 3, so the number looks straight past it to the earnings date.
-    // Until the calendar factor is split three ways, macro inside the window is
-    // something the score genuinely cannot see, and the tag has to say so.
-    const seen: Obs['seen'] = m && m.sev < 4 ? 'blind' : seenBy('event');
+    // Macro has its own factor now, on its own clock, so the tag reads straight off
+    // the regime weight rather than working around the old severity threshold.
+    const seen = seenBy('macro');
     // Not "is it before the next expiry" — that reads CPI landing squarely on the
     // 12 Aug book as "just past this expiry" because the 10th happens to expire
     // first. What matters is which expiry it lands INSIDE, and whether that is one
