@@ -881,20 +881,25 @@ private struct PVSend: View {
     let floor: Double
     let buyAvg: Double
     var body: some View {
-        let credit = cell.prem * Double(lots) * 100
+        let ct = cell.suggestCt ?? lots
+        let credit = cell.prem * Double(ct) * 100
         let net = credit - closeCost
+        let paying = net < 0
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(pvUsd(net)).font(InkFont.mono(34, .medium)).tracking(34 * -0.04)
+                    Text(pvUsd(abs(net))).font(InkFont.mono(34, .medium)).tracking(34 * -0.04)
                         .foregroundStyle(Ink.invertText)
-                    Text("YOU COLLECT, AFTER BUYING BACK").font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
+                    Text(paying ? "YOU PAY, TO CLOSE MORE THAN YOU WRITE" : "YOU COLLECT, AFTER BUYING BACK")
+                        .font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
                         .foregroundStyle(Ink.invertText.opacity(0.65)).padding(.top, 10).lineLimit(1)
                 }
                 Spacer(minLength: 0)
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text("−" + pvUsd(closeCost)).font(InkFont.mono(11)).foregroundStyle(Ink.invertText.opacity(0.65))
-                    Text("+" + pvUsd(credit)).font(InkFont.mono(11)).foregroundStyle(Ink.invertText.opacity(0.65))
+                    Text("−" + pvUsd(closeCost) + " to close").font(InkFont.mono(11))
+                        .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
+                    Text("+" + pvUsd(credit) + " for \(ct)").font(InkFont.mono(11))
+                        .foregroundStyle(Ink.invertText.opacity(0.65)).lineLimit(1)
                 }
             }
             HStack(spacing: 0) {
@@ -910,7 +915,7 @@ private struct PVSend: View {
             // it is a sale at the strike. Shown against what the shares actually
             // cost, with the premium kept either way.
             if let perCt = cell.calledPerCt {
-                let sharesPL = perCt * Double(lots)
+                let sharesPL = perCt * Double(ct)
                 let total = sharesPL + net
                 VStack(alignment: .leading, spacing: 0) {
                     Text("IF THEY ARE CALLED AWAY AT \(pvDec(cell.strike, cell.strike == cell.strike.rounded() ? 0 : 1))")
@@ -924,9 +929,9 @@ private struct PVSend: View {
                     }
                     .padding(.top, 12)
                     HStack(spacing: 0) {
-                        sendFig("shares sold", pvInt(Double(lots) * 100))
+                        sendFig("shares sold", pvInt(Double(ct) * 100))
                         sendFig("gain on shares", pvUsd(sharesPL), sub: "paid \(pvDec(buyAvg, 2))")
-                        sendFig("premium kept", pvUsd(net))
+                        sendFig(paying ? "premium paid" : "premium kept", pvUsd(net))
                     }
                     .padding(.top, 16)
                 }
