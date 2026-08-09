@@ -66,6 +66,7 @@ struct PV2: Decodable, Sendable {
     var expiries: [Expiry]?
     var refLots: Int?
     var hedgeCarry: Double?
+    var ivMedian: Double?
     var regime: Regime?
     var budget: Budget?
     struct Regime: Decodable, Sendable {
@@ -167,6 +168,7 @@ struct PV2: Decodable, Sendable {
         var fit: Int?; var isPick: Bool?; var rank: Int?
         var suggestCt: Int?; var credit: Double?; var income: Double?
         var netCarry: Double?; var upsideAfterMove: Double?; var perDayPkg: Double?
+        var normalIncome: Double?; var ivPremium: Double?
         var calledShares: Double?; var calledPL: Double?; var calledAvg: Double?; var clearsBy: Double?
         var cappedBy: String?
         var fitParts: [FitPart]?
@@ -375,6 +377,14 @@ private struct PVSectionLabel: View {
 
 private struct PVWeek: View {
     let s: PV2
+
+    /// The most substantial ranked package across the expiries. Taking the first one
+    /// meant the nearest expiry, which on a one-day tenor collects almost nothing and
+    /// made the headline read $351 against $3,207 on the trade actually worth doing.
+    private func topPackage(_ s: PV2) -> PV2.Cell? {
+        s.exps.compactMap { $0.cells.first(where: { $0.rank == 1 }) }
+              .max { ($0.income ?? 0) < ($1.income ?? 0) }
+    }
     var body: some View {
         let w = s.week
         let p = s.posture
@@ -385,9 +395,18 @@ private struct PVWeek: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 10) {
                     if let g = s.gate {
-                        PVChip(k: "Option pricing", v: pvDec(g.score, 2),
-                               sub: g.score >= 1 ? "richer than usual" : "cheaper than usual",
-                               hue: g.score >= 1 ? Ink.gain : Ink.dim)
+                        // What today's vol is worth in money on a package actually on
+                        // the table, rather than a ratio you cannot act on.
+                        if let top = topPackage(s), let extra = top.ivPremium, let med = s.ivMedian {
+                            PVChip(k: "IV is worth",
+                                   v: (extra >= 0 ? "+" : "−") + pvUsd(abs(extra)),
+                                   sub: "\(Int(g.iv.rounded()))% vs \(Int(med.rounded())) normal",
+                                   hue: extra > 0 ? Ink.gain : Ink.dim)
+                        } else {
+                            PVChip(k: "Option pricing", v: pvDec(g.score, 2),
+                                   sub: g.score >= 1 ? "richer than usual" : "cheaper than usual",
+                                   hue: g.score >= 1 ? Ink.gain : Ink.dim)
+                        }
                         PVChip(k: "Expected swing", v: "\(Int(g.iv.rounded()))%", sub: "\(Int(g.ivPct.rounded())) of 100 this year")
                     }
                     if let p {
