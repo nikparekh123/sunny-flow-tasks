@@ -114,7 +114,8 @@ interface Cell {
   side: string; advCost: number; affected: number;
   perDay?: number; deltaSold?: number; freeAfter?: number; afterAssign?: number; em?: number;
   calledPerCt?: number; suggestCt?: number; wantCt?: number; cappedBy?: string | null;
-  credit?: number; paidPerDelta?: number;
+  credit?: number; income?: number; paidPerDelta?: number; upsideAfterMove?: number; deltaAfterMove?: number;
+  netCarry?: number; rank?: number; perDayPkg?: number;
   warns?: string[]; blocks?: string[]; fit?: number; isPick?: boolean;
   fitParts?: { k: string; w: number; s: number; contribution: number }[];
 }
@@ -295,6 +296,9 @@ Deno.serve(async (req) => {
     const sp = spanTo(nowISO, parseISO(exp));
     return Math.max(sp.td + wv * sp.we, .25) / 252;
   };
+  // What the put floor costs to keep, every day, whatever the stock does. Sitting
+  // out is not free, and a small sale can easily fail to cover it.
+  const hedgeCarry = Math.abs(Number(bookIn.longTheta ?? 0));
   const legOdds = (openShortCalls as { strike: number; ct: number; expiry?: string }[])
     .map((l) => ({ expiry: l.expiry ?? '', shares: bsAssign(spot, l.strike, legT(l.expiry), iv / 100) * l.ct * 100 }));
   const expectedCalled = legOdds.reduce((a, l) => a + l.shares, 0);
@@ -620,20 +624,38 @@ Deno.serve(async (req) => {
       const deltaSold = c.delta * useCt * 100;
       const freeAfter = upsideDelta - deltaSold;
       const afterAssign = shares - keptCalled - deltaSold + putDelta;
-      const credit = c.prem * suggestCt * 100;
-      const paidPerDelta = deltaSold > 0 ? credit / deltaSold : 0;
+      const credit = c.prem * suggestCt * 100;          // cash received, incl. intrinsic
+      // Only EXTRINSIC value is income. A strike below spot pays a big "premium"
+      // that is mostly your own stock's value being handed back — scoring on the
+      // gross made deep-in-the-money strikes look like the best earners on the
+      // board, when they are really a discount on the shares.
+      const income = c.ext * suggestCt * 100;
+      const paidPerDelta = deltaSold > 0 ? income / deltaSold : 0;
+      // Gamma, as a scenario rather than a Greek: the budget says 2,145 of upside
+      // sold, but only while nothing moves. One expected move up and a package can
+      // have sold everything you own.
+      const deltaAfterMove = bsDelta(spot + emMove, c.strike, T, iv / 100) * suggestCt * 100;
+      const upsideAfterMove = upsideDelta - deltaAfterMove;
+      // Theta, at the level that matters: does this week's premium out-earn the
+      // daily bleed on the hedge?
+      const perDayPkg = income / Math.max(s.cal, 1);
+      const netCarry = perDayPkg - hedgeCarry;
       const parts = [
-        { k: 'paid_per_delta', w: .35, s: 0 },   // filled in below, needs the whole ladder
-        { k: 'in_band', w: .15, s: clamp(50 - bandDist * 500, -50, 50) },
-        { k: 'headroom', w: .20, s: floor > 0 ? sTanh((freeAfter - floor) / floor) : 0 },
-        { k: 'assignment', w: .15, s: floor > 0 ? sTanh(afterAssign / floor) : 0 },
-        { k: 'over_basis', w: .10, s: sTanh(((c.strike - book.basis) / (book.basis || 1)) * 20) },
-        { k: 'expiry_load', w: .05, s: clamp(50 - load * 1.5, -50, 50) },
+        { k: 'paid_per_delta', w: .25, s: 0 },   // filled in below, needs the whole ladder
+        { k: 'holds_a_move',   w: .20, s: floor > 0 ? sTanh((upsideAfterMove - floor) / floor) : 0 },
+        { k: 'covers_carry',   w: .15, s: hedgeCarry > 0 ? sTanh(netCarry / hedgeCarry) : (netCarry > 0 ? 30 : 0) },
+        { k: 'headroom',       w: .12, s: floor > 0 ? sTanh((freeAfter - floor) / floor) : 0 },
+        { k: 'assignment',     w: .12, s: floor > 0 ? sTanh(afterAssign / floor) : 0 },
+        { k: 'in_band',        w: .08, s: clamp(50 - bandDist * 500, -50, 50) },
+        { k: 'over_basis',     w: .05, s: sTanh(((c.strike - book.basis) / (book.basis || 1)) * 20) },
+        { k: 'expiry_load',    w: .03, s: clamp(50 - load * 1.5, -50, 50) },
       ];
       const warns: string[] = [];
       if (c.delta > .45) warns.push('NEAR THE MONEY');
       if (c.prem < .12) warns.push('BARELY PAYS');
-      if (paidPerDelta > 0 && credit < 50) warns.push('BARELY WORTH IT');
+      if (income < 50) warns.push('BARELY WORTH IT');
+      if (hedgeCarry > 0 && netCarry < 0) warns.push('DOES NOT COVER THE HEDGE');
+      if (upsideAfterMove < 0) warns.push('SOLD OUT ON A MOVE');
       if (state === 'STRETCH' && c.delta > .35) warns.push('TOO TIGHT');
       if (state === 'WASHOUT' && c.delta > .30) warns.push('CAPS THE BOUNCE');
       const blocks: string[] = [];
@@ -646,7 +668,9 @@ Deno.serve(async (req) => {
       Object.assign(c, {
         perDay, deltaSold, freeAfter, afterAssign, warns, blocks,
         em: emMove > 0 ? (c.strike - spot) / emMove : 0,
-        suggestCt, wantCt, credit, paidPerDelta, rollable: rollableHere, capHere,
+        suggestCt, wantCt, credit, income, paidPerDelta, rollable: rollableHere, capHere,
+        upsideAfterMove: Math.round(upsideAfterMove), deltaAfterMove: Math.round(deltaAfterMove),
+        perDayPkg: Math.round(perDayPkg), netCarry: Math.round(netCarry),
         cappedBy: wantCt > capHere ? 'covered shares' : null,
         // What one contract's worth of shares books if it is called away here:
         // sale price less the average actually paid. Per contract, so the app
@@ -659,7 +683,8 @@ Deno.serve(async (req) => {
     // paid-per-delta only means something against the rest of the ladder, so it is
     // scored once every package exists, then folded into the fit.
     const bestPPD = Math.max(...chain.map((c) => c.paidPerDelta ?? 0), 0.0001);
-    const PEN2: Record<string, number> = { 'BARELY WORTH IT': 14, 'NEAR THE MONEY': 10, 'BARELY PAYS': 14, 'TOO TIGHT': 10, 'CAPS THE BOUNCE': 10 };
+    const PEN2: Record<string, number> = { 'BARELY WORTH IT': 14, 'NEAR THE MONEY': 10, 'BARELY PAYS': 14,
+      'TOO TIGHT': 10, 'CAPS THE BOUNCE': 10, 'DOES NOT COVER THE HEDGE': 16, 'SOLD OUT ON A MOVE': 14 };
     for (const c of chain) {
       const p = c.fitParts?.find((x) => x.k === 'paid_per_delta');
       if (!p) continue;
@@ -669,7 +694,9 @@ Deno.serve(async (req) => {
       c.fit = Math.round(Math.max(0, raw - (c.warns ?? []).reduce((a, w) => a + (PEN2[w] ?? 8), 0)));
     }
     const live = chain.filter((c) => !c.blocks?.length);
-    const pick = live.slice().sort((x, y) => (y.fit ?? 0) - (x.fit ?? 0))[0] ?? null;
+    const ordered = live.slice().sort((x, y) => (y.fit ?? 0) - (x.fit ?? 0));
+    ordered.forEach((c, i) => { if (i < 3) c.rank = i + 1; });
+    const pick = ordered[0] ?? null;
     if (pick) pick.isPick = true;
 
     return { key: iso, iso, label: `${MONTHS[dt.getUTCMonth()]} ${dt.getUTCDate()}`, dow: DOW[dt.getUTCDay()], cal: s.cal, td: s.td, we: s.we, volDays: +volDays.toFixed(1), T,
@@ -685,7 +712,7 @@ Deno.serve(async (req) => {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
-    week, posture, events, refLots, ticker: TICKER,
+    week, posture, events, refLots, ticker: TICKER, hedgeCarry,
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     meta: { STRIKE_STEP, RIP, calSources, snapshot: snapNote, floorPct: INST.floorPct, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
   });
