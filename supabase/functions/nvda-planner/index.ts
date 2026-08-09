@@ -113,41 +113,43 @@ function severityOf(name: string): number {
 // average answer every time. Rows are normalised at use, so they need only be
 // proportions rather than exact fractions.
 const REGIME_WEIGHTS: Record<string, Record<string, number>> = {
-  // Thirteen factors, five families. The calendar used to be ONE factor keyed on
-  // the heaviest event in the window, which meant a severity-3 CPI print two days
-  // out was invisible behind a severity-5 earnings date sixteen days out. Split
-  // three ways, each date keeps its own clock and nothing can mask anything else.
+  // TEN factors, and every one of them describes the WORLD. The position no longer
+  // scores.
+  //
+  // It used to. assignment + headroom + freeroll carried ~20% of the weight, and
+  // because both of the first two pin high whenever the book has room, they pushed
+  // the score UP on exactly the days there was least worth selling. Run NVDA at 190,
+  // 224 and 275 after a print and the old score came back 59 / 53 / 52, all SELL
+  // NORMAL, all 25-30 delta: capacity was drowning out the world.
+  //
+  // Capacity did not disappear, it moved to where it belongs. The world decides
+  // WHETHER to sell (this score, the stance, the delta band). The book decides HOW
+  // MUCH (keepPct, budget, capacityCt) and can still veto down to zero. One question
+  // per mechanism.
   //
   // KEYS MUST MATCH the wf.push keys exactly. Lookup is `rw[f.key] ?? 0.01`, so a
   // mismatch does not throw — it silently pins that factor at 1% in every regime.
-  // Writing `print:` here while the factor is keyed 'event' gave THE PRINT one
-  // percent of the weight during earnings week, and the score barely moved for it.
-  //
-  // `record` and `relative` are new to the score. The print record previously moved
-  // keepPct and nothing else, so the number on the card never reflected the one
-  // thing measured over 159 observations.
-  'EARNINGS WEEK':        { event: .24, iv_pctile: .18, iv_spread: .15, record: .13,
-                            assignment: .08, peers: .06, headroom: .04, macro: .03,
-                            trend: .03, freeroll: .02, stretch: .02, relative: .01, rsi: .01 },
+  'EARNINGS WEEK':        { event: .26, iv_pctile: .20, iv_spread: .17, record: .15,
+                            peers: .07, macro: .04, trend: .04, stretch: .03,
+                            relative: .02, rsi: .02 },
 
-  // After the print the record is the sharpest thing available: vol is crushed, the
-  // tape is resetting, and what this name did next is measured rather than guessed.
-  'JUST AFTER THE PRINT': { record: .20, iv_spread: .18, stretch: .15, trend: .12,
-                            assignment: .10, headroom: .07, relative: .06, iv_pctile: .04,
-                            peers: .03, freeroll: .02, macro: .02, rsi: .01, event: .01 },
+  'JUST AFTER THE PRINT': { record: .24, iv_spread: .21, stretch: .17, trend: .14,
+                            relative: .07, iv_pctile: .05, peers: .04, macro: .03,
+                            rsi: .03, event: .02 },
 
-  'BEATEN DOWN':          { stretch: .20, rsi: .13, trend: .12, record: .12, headroom: .12,
-                            relative: .08, iv_pctile: .08, iv_spread: .07, assignment: .04,
-                            macro: .02, peers: .01, freeroll: .01, event: .01 },
+  'BEATEN DOWN':          { stretch: .24, record: .15, rsi: .15, trend: .14,
+                            relative: .10, iv_pctile: .09, iv_spread: .08, macro: .03,
+                            peers: .01, event: .01 },
 
-  'EXTENDED RUN':         { stretch: .20, trend: .17, iv_pctile: .12, relative: .08, rsi: .08,
-                            assignment: .08, macro: .06, record: .06, headroom: .06,
-                            iv_spread: .05, peers: .03, event: .02, freeroll: .01 },
+  'EXTENDED RUN':         { stretch: .24, trend: .20, iv_pctile: .14, relative: .10,
+                            rsi: .09, macro: .07, record: .07, iv_spread: .06,
+                            peers: .02, event: .01 },
 
-  'RANGE':                { iv_pctile: .22, iv_spread: .14, freeroll: .12, headroom: .10,
-                            macro: .09, stretch: .08, assignment: .07, record: .05,
-                            relative: .05, peers: .04, event: .03, trend: .03, rsi: .02 },
+  'RANGE':                { iv_pctile: .27, iv_spread: .17, macro: .11, stretch: .10,
+                            record: .07, relative: .07, trend: .06, peers: .05,
+                            rsi: .05, event: .05 },
 };
+
 
 
 // One priced strike. The first block is the original pricing payload; the second is
@@ -548,9 +550,19 @@ Deno.serve(async (req) => {
   const dailySig = (spot * (HV.hv30 / 100)) / Math.sqrt(252);
   const mean = technicals.ma50 ?? spot;
   const dev = dailySig > 0 ? +((spot - mean) / dailySig).toFixed(2) : 0;
-  const trendRaw = technicals.ma50 != null && technicals.ma200 != null && technicals.ma200 !== 0
+// The 50/200 spread alone is frozen over a two-day horizon: after a 15% gap the
+  // averages have not moved, so trend reported the identical -32.3 whether NVDA sat
+  // at 224 or 275. Blend the spread with where PRICE sits against the 200-day, which
+  // reprices instantly. Half each: the averages carry the regime, price carries the
+  // shock.
+  const maSpread = technicals.ma50 != null && technicals.ma200 != null && technicals.ma200 !== 0
     ? (technicals.ma50 - technicals.ma200) / technicals.ma200 : 0;
-  const trendStrength = clamp(Math.abs(trendRaw) * 12, 0, 1);          // 0…1
+  const priceVs200 = technicals.ma200 != null && technicals.ma200 !== 0
+    ? (spot - technicals.ma200) / technicals.ma200 : 0;
+  const trendRaw = 0.5 * maSpread + 0.5 * priceVs200;
+  // x12 saturated at an 8% spread, which NVDA clears in a normal quarter. x5 needs
+  // 20% before it pins, so a strong trend and an extreme one read differently.
+  const trendStrength = clamp(Math.abs(trendRaw) * 5, 0, 1);
   const trendUp = trendRaw > 0 && spot > mean;
   const state = Math.abs(dev) <= 1 ? 'RANGE' : dev > 2 ? 'STRETCH' : dev < -2 ? 'WASHOUT' : 'TREND';
 
@@ -741,7 +753,10 @@ Deno.serve(async (req) => {
       ? 'It is climbing, so selling tight here caps the run you own the shares for.'
       : 'No climb to cap right now, so you can write with a freer hand.' });
 
-  wf.push({ key: 'stretch', family: 'THE TAPE', name: 'THE RUN-UP', w: .09, score: clamp(dev * 18, -35, 35) * (1 - .8 * trendStrength),
+  wf.push({ key: 'stretch', family: 'THE TAPE', name: 'THE RUN-UP', w: .09, // clamp(dev * 18, +-35) pinned at 1.94 sigma. Today's dev is 3.59 and a 275 print
+    // would be 7.65, so fair value and 23%-above both reported the same +35. tanh over
+    // a 4-sigma scale keeps them apart without ever running away.
+    score: sTanh(dev / 4) * (1 - .8 * trendStrength),
     rows: [['above its 50-day', `${dev > 0 ? '+' : ''}${dev} normal days`], ['reading', state === 'STRETCH' ? 'run up hard' : state === 'WASHOUT' ? 'beaten down' : state === 'TREND' ? 'drifting' : 'mid-range'], ['trimmed for the trend', `x${(1 - .8 * trendStrength).toFixed(2)}`]],
     push: state === 'STRETCH' ? 'It has run well past its average, so a pullback from here pays you.'
         : state === 'WASHOUT' ? 'It is well below its average, so do not cap the bounce back.'
@@ -782,14 +797,19 @@ Deno.serve(async (req) => {
           : 'No print close enough for its record to say anything about this week.' });
   }
 
-  wf.push({ key: 'freeroll', family: 'THE POSITION', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
+  // CAPACITY, not score. Same shape as a force so the app can render it the same
+  // way, but it is summed nowhere: these three answer "how much can you sell", which
+  // keepPct, budget and capacityCt already enforce. Scoring them as well meant the
+  // book voted twice, and it voted loudest exactly when it had least left to sell.
+  const cap: typeof wf = [];
+  cap.push({ key: 'freeroll', family: 'THE POSITION', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
     rows: [['premium banked', `$${Math.round(banked).toLocaleString()}`], ['what it has to cover', maxLoss > 0 ? `$${Math.round(maxLoss).toLocaleString()}` : 'none'], ['covered so far', `${freeroll}%`]],
     push: freerollRegime === 'insurance'
       ? 'Your put floor sits above what you paid for the shares, so premium only has the insurance left to pay for.'
       : freeroll >= 100 ? 'Premium collected already covers the whole downside gap.'
       : `${100 - freeroll}% of the downside gap is still uncovered.` });
 
-  wf.push({ key: 'headroom', family: 'THE POSITION', name: 'ROOM TO RISE', w: .05, // Scaled against the SHARE BLOCK, not against the floor. Dividing spare room by
+  cap.push({ key: 'headroom', family: 'THE POSITION', name: 'ROOM TO RISE', w: .05, // Scaled against the SHARE BLOCK, not against the floor. Dividing spare room by
       // the same floor it sits above made the ratio six-ish and tanh flattened it: the
       // factor pinned at +50 and stopped being a reading at all. Half the block of
       // spare upside now scores ~38, the whole block ~46, so it uses its range.
@@ -799,7 +819,7 @@ Deno.serve(async (req) => {
       ? 'You are already at the least upside you said you would keep.'
       : `About ${Math.round(headroom).toLocaleString()} shares of upside above your own minimum.` });
 
-  wf.push({ key: 'assignment', family: 'THE POSITION', name: 'BEING CALLED AWAY', w: .10, score: floor > 0 ? sTanh(deltaAfterAssign / floor) : 0,
+  cap.push({ key: 'assignment', family: 'THE POSITION', name: 'BEING CALLED AWAY', w: .10, score: floor > 0 ? sTanh(deltaAfterAssign / floor) : 0,
     rows: [['likely called away', `${Math.round(expectedCalled).toLocaleString()} shares`], ['hedge that stays', `${Math.round(putDelta).toLocaleString()}`], ['upside left after', `${Math.round(deltaAfterAssign).toLocaleString()}`]],
     push: deltaAfterAssign < 0
       ? 'If these calls get exercised the shares go but the put hedge stays, and you end up betting against the stock. Write nothing more until that changes.'
@@ -1342,6 +1362,7 @@ Deno.serve(async (req) => {
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
     week, posture, events, refLots, ticker: TICKER, ivMedian, splits, floorAdvice, observations,
+    capacity: cap.map((f) => ({ key: f.key, family: f.family, name: f.name, score: +f.score.toFixed(1), rows: f.rows, push: f.push })),
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     regime: { name: regime, why: regimeWhy, keepPct, keepDelta, keepWhy,
