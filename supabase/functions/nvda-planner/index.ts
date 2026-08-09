@@ -520,6 +520,22 @@ Deno.serve(async (req) => {
   if (ivPct <= 30) { keepPct = Math.min(50, keepPct + 5); keepWhy.push('premium is thin, so hold back'); }
   if (regime === 'JUST AFTER THE PRINT') { keepPct = Math.max(10, keepPct - 8); keepWhy.push('vol crushed, little left to wait for'); }
 
+  // The floor and the calls are one decision, and this is where they meet. Whatever
+  // sits between spot and the put strike is unprotected, and call premium is the only
+  // thing cushioning it. A floor tucked close underneath means you are already
+  // covered, so you can afford to keep more upside and sell fewer calls. A floor left
+  // far below means the premium is doing that work, and you need more of it.
+  const floorGapPct = putFloor > 0 ? ((spot - putFloor) / spot) * 100 : null;
+  if (floorGapPct != null) {
+    if (floorGapPct <= 3) {
+      keepPct = Math.min(60, keepPct + 8);
+      keepWhy.push(`floor only ${floorGapPct.toFixed(0)}% under spot, so you are covered without selling as much`);
+    } else if (floorGapPct >= 10) {
+      keepPct = Math.max(15, keepPct - 6);
+      keepWhy.push(`floor ${floorGapPct.toFixed(0)}% under spot, so premium is carrying the downside`);
+    }
+  }
+
   // Keep is a share of the SHARE BLOCK, which is how you actually think about it:
   // "keep 1,500 shares uncovered". The budget is whatever upside sits above that.
   keepPct = Math.round(keepPct);
@@ -951,6 +967,7 @@ Deno.serve(async (req) => {
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     regime: { name: regime, why: regimeWhy, keepPct, keepDelta, keepWhy,
+              floorGapPct: floorGapPct == null ? null : +floorGapPct.toFixed(1),
               drawdown: drawdown == null ? null : +drawdown.toFixed(1), haveHigh,
               daysToPrint, daysSincePrint, lastPrint: lastPrintISO },
     meta: { STRIKE_STEP, RIP, calSources, snapshot: snapNote, floorPct: INST.floorPct, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
