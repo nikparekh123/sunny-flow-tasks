@@ -155,7 +155,7 @@ struct PV2: Decodable, Sendable {
         var fit: Int?; var isPick: Bool?; var rank: Int?
         var suggestCt: Int?; var credit: Double?; var income: Double?
         var netCarry: Double?; var upsideAfterMove: Double?; var perDayPkg: Double?
-        var calledShares: Double?; var calledPL: Double?; var calledAvg: Double?
+        var calledShares: Double?; var calledPL: Double?; var calledAvg: Double?; var clearsBy: Double?
         var cappedBy: String?
         var fitParts: [FitPart]?
         var id: Double { strike }
@@ -626,7 +626,7 @@ private struct PVLadder: View {
                     Spacer(minLength: 0)
                 }
                 .padding(EdgeInsets(top: 17, leading: 18, bottom: 16, trailing: 18))
-                .frame(width: 236, height: 214, alignment: .topLeading)
+                .frame(width: 236, height: 236, alignment: .topLeading)
                 .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3])).foregroundStyle(Ink.hair))
                 .opacity(0.42)
@@ -677,6 +677,10 @@ private struct PVLadder: View {
                         good: (c.netCarry ?? 0) >= 0, on: on, dim: dim)
                 pkgLine("upside after a move", pvInt(c.upsideAfterMove ?? 0),
                         good: (c.upsideAfterMove ?? 0) > 0, on: on, dim: dim)
+                if let cb = c.clearsBy {
+                    pkgLine(cb >= 0 ? "clears break-even by" : "under break-even by",
+                            "$" + pvDec(abs(cb), 2), good: cb >= 0, on: on, dim: dim)
+                }
             }
             .padding(.top, 12)
             .overlay(alignment: .top) {
@@ -701,7 +705,7 @@ private struct PVLadder: View {
             .padding(.top, 12)
         }
         .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
-        .frame(width: 236, height: 214, alignment: .topLeading)
+        .frame(width: 236, height: 236, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
             .fill(on ? Ink.invertBg : .clear))
         .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)

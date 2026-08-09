@@ -113,7 +113,7 @@ interface Cell {
   assign: number; delta: number; effective: number; vsBasis: number;
   side: string; advCost: number; affected: number;
   perDay?: number; deltaSold?: number; freeAfter?: number; afterAssign?: number; em?: number;
-  calledPerCt?: number; calledShares?: number; calledCost?: number; calledPL?: number; calledAvg?: number; suggestCt?: number; wantCt?: number; cappedBy?: string | null;
+  calledPerCt?: number; clearsBy?: number; calledShares?: number; calledCost?: number; calledPL?: number; calledAvg?: number; suggestCt?: number; wantCt?: number; cappedBy?: string | null;
   credit?: number; income?: number; paidPerDelta?: number; upsideAfterMove?: number; deltaAfterMove?: number;
   netCarry?: number; rank?: number; perDayPkg?: number;
   warns?: string[]; blocks?: string[]; fit?: number; isPick?: boolean;
@@ -695,6 +695,11 @@ Deno.serve(async (req) => {
         calledPL: +(c.strike * suggestCt * 100 - fifoCost(suggestCt * 100)).toFixed(2),
         calledAvg: suggestCt > 0 ? +(fifoCost(suggestCt * 100) / (suggestCt * 100)).toFixed(2) : 0,
         calledPerCt: (c.strike - book.buyAvg) * 100,
+        // How far the strike clears the break-even the whole position is measured
+        // against (purchase average adjusted for option results). Strike alone, not
+        // strike-plus-premium: the premium is already its own line, and folding it in
+        // here would flatter every strike by the amount you are paid to take it.
+        clearsBy: +(c.strike - book.basis).toFixed(2),
         fitParts: parts.map((p) => ({ ...p, s: +p.s.toFixed(1), contribution: +(p.w * p.s).toFixed(1) })),
         fit: Math.round(Math.max(0, raw - warns.reduce((a, w) => a + (PEN[w] ?? 8), 0))),
       });
