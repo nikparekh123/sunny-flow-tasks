@@ -115,7 +115,7 @@ interface Cell {
   perDay?: number; deltaSold?: number; freeAfter?: number; afterAssign?: number; em?: number;
   calledPerCt?: number; clearsBy?: number; calledShares?: number; calledCost?: number; calledPL?: number; calledAvg?: number; suggestCt?: number; wantCt?: number; cappedBy?: string | null;
   credit?: number; income?: number; paidPerDelta?: number; upsideAfterMove?: number; deltaAfterMove?: number;
-  netCarry?: number; rank?: number; perDayPkg?: number;
+  netCarry?: number; rank?: number; perDayPkg?: number; coversPct?: number; requiredHere?: number;
   warns?: string[]; blocks?: string[]; fit?: number; isPick?: boolean;
   fitParts?: { k: string; w: number; s: number; contribution: number }[];
 }
@@ -298,7 +298,14 @@ Deno.serve(async (req) => {
   };
   // What the put floor costs to keep, every day, whatever the stock does. Sitting
   // out is not free, and a small sale can easily fail to cover it.
-  const hedgeCarry = Math.abs(Number(bookIn.longTheta ?? 0));
+  // The floor is ROLLED, not held to decay, so its cost is the premium paid each
+  // cycle rather than theta. Theta said ~$1,100/day; a monthly roll of this book is
+  // nearer $3,000. Understating the largest expense by 3x is what made far-OTM
+  // lottery tickets look free — nothing in the model knew there was a bill to pay.
+  const putSpend = Number(bookIn.putCost ?? 0);          // premium paid for the floor
+  const putDays  = Math.max(1, Number(bookIn.putDays ?? 30));   // days of cover bought
+  const hedgeCarry = putSpend > 0 ? putSpend / putDays : Math.abs(Number(bookIn.longTheta ?? 0));
+  const requiredWeekly = hedgeCarry * 7;
 
   // Shares leave oldest-first, so an assignment books the cost of THOSE lots. The
   // book average is only a stand-in, and on a position built up over time it can be
@@ -656,11 +663,14 @@ Deno.serve(async (req) => {
       // daily bleed on the hedge?
       const perDayPkg = income / Math.max(s.cal, 1);
       const netCarry = perDayPkg - hedgeCarry;
+      // What share of the floor's cost this package pays for over its own life.
+      const requiredHere = hedgeCarry * s.cal;
+      const coversPct = requiredHere > 0 ? Math.round((income / requiredHere) * 100) : 100;
       const parts = [
         { k: 'paid_per_delta', w: .20, s: 0 },   // filled in below, needs the whole ladder
         { k: 'holds_a_move',   w: .18, s: floor > 0 ? sTanh((upsideAfterMove - floor) / floor) : 0 },
         { k: 'in_band',        w: .18, s: clamp(50 - bandDist * 500, -50, 50) },
-        { k: 'covers_carry',   w: .13, s: hedgeCarry > 0 ? sTanh(netCarry / hedgeCarry) : (netCarry > 0 ? 30 : 0) },
+        { k: 'covers_carry',   w: .13, s: clamp((coversPct - 100) / 2, -50, 50) },
         { k: 'assignment',     w: .11, s: floor > 0 ? sTanh(afterAssign / floor) : 0 },
         { k: 'headroom',       w: .10, s: floor > 0 ? sTanh((freeAfter - floor) / floor) : 0 },
         { k: 'over_basis',     w: .07, s: sTanh(((c.strike - book.basis) / (book.basis || 1)) * 20) },
@@ -670,7 +680,7 @@ Deno.serve(async (req) => {
       if (c.delta > .45) warns.push('NEAR THE MONEY');
       if (c.prem < .12) warns.push('BARELY PAYS');
       if (income < 50) warns.push('BARELY WORTH IT');
-      if (hedgeCarry > 0 && netCarry < 0) warns.push('DOES NOT COVER THE HEDGE');
+      if (coversPct < 60) warns.push(`ONLY ${coversPct}% OF THE HEDGE`);
       if (upsideAfterMove < 0) warns.push('SOLD OUT ON A MOVE');
       if (state === 'STRETCH' && c.delta > .35) warns.push('TOO TIGHT');
       if (state === 'WASHOUT' && c.delta > .30) warns.push('CAPS THE BOUNCE');
@@ -687,6 +697,7 @@ Deno.serve(async (req) => {
         suggestCt, wantCt, credit, income, paidPerDelta, rollable: rollableHere, capHere,
         upsideAfterMove: Math.round(upsideAfterMove), deltaAfterMove: Math.round(deltaAfterMove),
         perDayPkg: Math.round(perDayPkg), netCarry: Math.round(netCarry),
+        coversPct, requiredHere: Math.round(requiredHere),
         cappedBy: wantCt > capHere ? 'covered shares' : null,
         // What the shares book if this package is called away: sale proceeds less
         // the cost of the specific lots that leave, oldest first.
@@ -736,7 +747,8 @@ Deno.serve(async (req) => {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
-    week, posture, events, refLots, ticker: TICKER, hedgeCarry,
+    week, posture, events, refLots, ticker: TICKER,
+    hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     meta: { STRIKE_STEP, RIP, calSources, snapshot: snapNote, floorPct: INST.floorPct, lookbacks: LOOKBACKS, ivSources: { nvda: { label: 'NVDA · 2y regression', down: 1.05, up: -.62, note: '504 sessions, R² 0.61' }, generic: { label: 'Generic equity skew', down: .80, up: -.50, note: 'default, uncalibrated' } } },
   });

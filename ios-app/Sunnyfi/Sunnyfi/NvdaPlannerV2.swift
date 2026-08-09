@@ -39,6 +39,7 @@ struct PV2Req: Encodable, Sendable {
         var putDelta: Double = 0
         var putFloor: Double = 0
         var putCost: Double = 0
+        var putDays: Double = 30
         /// Oldest first. The edge walks these to price an assignment.
         var lots: [Lot] = []
     }
@@ -220,6 +221,14 @@ final class PlanV2Store {
             putDelta: longPuts.reduce(0.0) { $0 + $1.deltaEst },
             putFloor: putFloor,
             putCost: longPuts.reduce(0.0) { $0 + $1.basis },
+            // Days of cover actually bought, weighted by size. The floor is rolled,
+            // so its cost is premium per cycle — not theta.
+            putDays: {
+                let ct = longPuts.reduce(0.0) { $0 + $1.ct }
+                guard ct > 0 else { return 30 }
+                let d = longPuts.reduce(0.0) { $0 + Double(Int($1.dte.prefix(while: \.isNumber)) ?? 30) * $1.ct }
+                return max(1, d / ct)
+            }(),
             lots: store.shareLotsFIFO.map { .init(qty: $0.qty_remaining, cost: $0.cost_per_share) })
 
         let vol = PV2Req.Vol(iv: ins.vol.iv ?? 0, ivPct: ins.vol.ivr ?? 50,
