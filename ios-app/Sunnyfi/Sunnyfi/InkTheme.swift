@@ -146,6 +146,12 @@ enum InkFont {
         case .medium, .semibold, .bold, .heavy, .black: face = "IBMPlexMono-Medium"
         default: face = "IBMPlexMono-Regular"
         }
-        return .custom(face, size: size)
+        // fixedSize, not size: `.custom(_:size:)` scales with Dynamic Type while
+        // display() and serif() go through UIFont and do not. Ink cards are fixed
+        // geometry (348x496, a 120 foot), so a figure that grows inside a box that
+        // cannot is guaranteed to truncate — on a large text setting the strike on a
+        // planner card collapsed to an ellipsis. Numbers hold their size; prose was
+        // already doing so.
+        return .custom(face, fixedSize: size)
     }
 }

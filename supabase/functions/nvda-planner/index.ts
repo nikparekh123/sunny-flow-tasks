@@ -267,10 +267,10 @@ Deno.serve(async (req) => {
   const gate = {
     spot, iv, ivPct, pctFactor, hv20: HV.hv20, hv30: HV.hv30, hv60: HV.hv60, hv90: HV.hv90,
     hvTrend, hvGap, score, scorePass: score >= .80, earningsPass: daysToEarnings >= 5, capacityPass: book.capacity > 0,
-    daysToEarnings, earnings: earnings.label ?? earnings.date ?? '—', wash, blocked: false,
+    daysToEarnings, earnings: earnings.label ?? earnings.date ?? 'none', wash, blocked: false,
     flags: [] as { key: string; level: string; head: string; body: string }[],
   };
-  if (!gate.scorePass) gate.flags.push({ key: 'score', level: 'block', head: 'Not worth selling this week', body: `Options are cheaper than the stock's own movement — buyers pay for ${iv}% while it actually moves ${HV.hv30}%. You would be underpaid.` });
+  if (!gate.scorePass) gate.flags.push({ key: 'score', level: 'block', head: 'Not worth selling this week', body: `Options are cheaper than the stock's own movement. Buyers pay for ${iv}% while it actually moves ${HV.hv30}%, so you would be underpaid.` });
   if (!gate.earningsPass) gate.flags.push({ key: 'earnings', level: 'block', head: 'Earnings is too close', body: `Earnings lands ${gate.earnings}. What you would collect is payment for that event, not for your patience.` });
   if (wash?.hit) gate.flags.push({ key: 'wash', level: 'note', head: 'A tax window is open', body: `You booked a $${wash.amount.toLocaleString()} loss on ${wash.on} and ${wash.daysLeft} days remain. Being called away at a loss and buying back straight after cancels that deduction.` });
 
@@ -310,11 +310,11 @@ Deno.serve(async (req) => {
   };
   if (assignment.known && assignment.netShort) {
     gate.flags.push({ key: 'assign', level: 'block', head: 'You would end up betting against it',
-      body: `On current odds about ${Math.round(expectedCalled).toLocaleString()} of your ${shares.toLocaleString()} shares get called away. Your puts cover the whole block and stay behind when the shares go, which leaves you ${Math.round(deltaAfterAssign).toLocaleString()} — pointing the wrong way.` });
+      body: `On current odds about ${Math.round(expectedCalled).toLocaleString()} of your ${shares.toLocaleString()} shares get called away. Your puts cover the whole block and stay behind when the shares go, which leaves you ${Math.round(deltaAfterAssign).toLocaleString()}, pointing the wrong way.` });
   } else if (assignment.known && (assignment.thin || assignment.worstNetShort)) {
     gate.flags.push({ key: 'assign', level: 'note', head: 'Not much left if they go',
       body: `About ${Math.round(expectedCalled).toLocaleString()} shares would be called away, leaving ${Math.round(deltaAfterAssign).toLocaleString()} of upside against the ${Math.round(assignFloor).toLocaleString()} you said you would keep.`
-        + (assignment.worstNetShort ? ` If all ${book.shortCallCt} went, it would be ${Math.round(deltaAfterWorst).toLocaleString()} — the wrong way round.` : '') });
+        + (assignment.worstNetShort ? ` If all ${book.shortCallCt} went, it would be ${Math.round(deltaAfterWorst).toLocaleString()}, the wrong way round.` : '') });
   }
   gate.blocked = gate.flags.some((f) => f.level === 'block');
 
@@ -358,10 +358,10 @@ Deno.serve(async (req) => {
   const floorParts: { k: string; mult: number; why: string }[] = [];
   let floorMult = 1;
   const push = (k: string, mult: number, why: string) => { floorMult *= mult; floorParts.push({ k, mult, why }); };
-  if (events.daysToHeavy <= HORIZON) push('event', 1.40, `${heavy?.label ?? 'print'} in ${events.daysToHeavy}d — don't be capped into a gap`);
-  if (state === 'WASHOUT') push('washout', 1.25, "under its mean — don't cap the bounce");
-  if (state === 'STRETCH') push('stretch', 0.85, 'extended — fine to cap here');
-  if (spot < book.buyAvg) push('under_basis', 1.20, 'spot under your average — assignment books a loss');
+  if (events.daysToHeavy <= HORIZON) push('event', 1.40, `${heavy?.label ?? 'a print'} in ${events.daysToHeavy}d, so do not get capped into a gap`);
+  if (state === 'WASHOUT') push('washout', 1.25, "below its average, so do not cap the bounce");
+  if (state === 'STRETCH') push('stretch', 0.85, 'run up hard, so capping here is fine');
+  if (spot < book.buyAvg) push('under_basis', 1.20, 'price is under your average, so being called away books a loss');
   const floorBase = shares * INST.floorPct;
   const floor = Math.round(clamp(floorBase * floorMult, shares * 0.08, shares * 0.40));
   const headroom = upsideDelta - floor;
@@ -387,39 +387,39 @@ Deno.serve(async (req) => {
   const wf: { key: string; name: string; w: number; score: number; rows: [string, string][]; push: string }[] = [];
   wf.push({ key: 'iv_pctile', name: 'OPTION PRICING', w: .16, score: sPct(ivPct),
     rows: [['vs the past year', `${Math.round(ivPct)} out of 100`], ['option pricing now', `${iv.toFixed(1)}%`], ['size multiplier', pctFactor.toFixed(2)]],
-    push: ivPct >= 60 ? 'Options cost more than they usually do — a good week to be the seller.'
-        : ivPct <= 30 ? 'Options are cheap against their own year — sell small and short-dated.'
-        : 'Option pricing is middling — no edge from the level on its own.' });
+    push: ivPct >= 60 ? 'Options cost more than they usually do, which makes this a good week to be the seller.'
+        : ivPct <= 30 ? 'Options are cheap against their own year, so sell small and keep it short.'
+        : 'Option pricing is middling, so the level on its own gives you no edge.' });
 
   wf.push({ key: 'iv_spread', name: 'PAY VS MOVEMENT', w: .11, score: sTanh(((iv - HV.hv30) / (HV.hv30 || 1)) * 2.5),
     rows: [['buyers are paying for', `${iv.toFixed(1)}%`], ['it is actually moving', `${HV.hv30.toFixed(1)}%`], ['movement is', hvTrend === 'expanding' ? 'picking up' : hvTrend === 'compressing' ? 'settling down' : 'steady']],
     push: iv > HV.hv30
       ? `You are paid for ${(iv - HV.hv30).toFixed(1)} points more movement than the stock is making.`
-      : 'The stock is moving more than buyers are paying for — you are underpaid this week.' });
+      : 'The stock is moving more than buyers are paying for, so you are underpaid this week.' });
 
   wf.push({ key: 'event', name: 'THE CALENDAR', w: .23, score: sDecay(events.daysToHeavy - 7),
     rows: [['next big one', heavy ? `${heavy.label}, ${heavy.days}d` : 'none'], ['how busy, 2 weeks', String(density)], ['earnings', `${daysToEarnings}d away`]],
     push: events.daysToHeavy <= 7
-      ? 'A market-moving date lands inside this week — that premium is paying for the event, not for you.'
-      : `Nothing big for ${events.daysToHeavy - 7} days after this expiry — the week is clear.` });
+      ? 'A market-moving date lands inside this week, so that premium is paying for the event rather than for you.'
+      : `Nothing big for ${events.daysToHeavy - 7} days after this expiry, so the week is clear.` });
 
   wf.push({ key: 'trend', name: 'THE TREND', w: .13, score: trendUp ? -trendStrength * 40 : trendStrength * 30,
     rows: [['50-day vs 200-day', `${(trendRaw * 100).toFixed(1)}%`], ['how strong', trendStrength >= .66 ? 'strong' : trendStrength >= .33 ? 'moderate' : 'weak'], ['direction', trendUp ? 'rising' : 'flat or falling']],
     push: trendUp
-      ? 'It is climbing — selling tight here caps the run you own the shares for.'
+      ? 'It is climbing, so selling tight here caps the run you own the shares for.'
       : 'No climb to cap right now, so you can write with a freer hand.' });
 
   wf.push({ key: 'stretch', name: 'THE RUN-UP', w: .09, score: clamp(dev * 18, -35, 35) * (1 - .8 * trendStrength),
     rows: [['above its 50-day', `${dev > 0 ? '+' : ''}${dev} normal days`], ['reading', state === 'STRETCH' ? 'run up hard' : state === 'WASHOUT' ? 'beaten down' : state === 'TREND' ? 'drifting' : 'mid-range'], ['trimmed for the trend', `x${(1 - .8 * trendStrength).toFixed(2)}`]],
-    push: state === 'STRETCH' ? 'It has run well past its average — a pullback from here pays you.'
-        : state === 'WASHOUT' ? 'It is well below its average — do not cap the bounce back.'
-        : 'Sitting near its average — no real edge either way.' });
+    push: state === 'STRETCH' ? 'It has run well past its average, so a pullback from here pays you.'
+        : state === 'WASHOUT' ? 'It is well below its average, so do not cap the bounce back.'
+        : 'Sitting near its average, with no real edge either way.' });
 
   wf.push({ key: 'rsi', name: 'MOMENTUM', w: .05, score: technicals.rsi14 != null ? sPct(technicals.rsi14) : 0,
     rows: [['momentum, 0 to 100', technicals.rsi14 != null ? technicals.rsi14.toFixed(0) : 'none'], ['high this year', technicals.high52 != null ? `$${technicals.high52.toFixed(2)}` : 'none'], ['low this year', technicals.low52 != null ? `$${technicals.low52.toFixed(2)}` : 'none']],
-    push: (technicals.rsi14 ?? 50) >= 70 ? 'Buyers are in charge — the run is stretched alongside you.'
-        : (technicals.rsi14 ?? 50) <= 30 ? 'Sellers are in charge — a bounce would run straight into your strikes.'
-        : 'Balanced — neither side is pushing hard.' });
+    push: (technicals.rsi14 ?? 50) >= 70 ? 'Buyers are in charge, and the run is stretched alongside you.'
+        : (technicals.rsi14 ?? 50) <= 30 ? 'Sellers are in charge, and a bounce would run straight into your strikes.'
+        : 'Balanced, with neither side pushing hard.' });
 
   wf.push({ key: 'freeroll', name: 'THE HEDGE', w: .08, score: clamp((freeroll - 100) / 2, -30, 30),
     rows: [['premium banked', `$${Math.round(banked).toLocaleString()}`], ['what it has to cover', maxLoss > 0 ? `$${Math.round(maxLoss).toLocaleString()}` : 'none'], ['covered so far', `${freeroll}%`]],
@@ -457,8 +457,8 @@ Deno.serve(async (req) => {
   const effStance = maxLots === 0 ? 'SIT OUT' : stance;
   const stanceReason = maxLots === 0
     ? (binding === 'assignment'
-        ? 'No room to write — if what you already hold gets called away, you end up betting against the stock'
-        : 'No room to write — you are already at the least upside you said you would keep')
+        ? 'No room to write. If what you already hold gets called away, you end up betting against the stock.'
+        : 'No room to write. You are already at the least upside you said you would keep.')
     : null;
   const week = {
     score: weekScore, stance: effStance, rawStance: stance, stanceReason, binding, prescription,
@@ -544,17 +544,17 @@ Deno.serve(async (req) => {
         { k: 'expiry_load', w: .05, s: clamp(50 - load * 1.5, -50, 50) },
       ];
       const warns: string[] = [];
-      if (c.delta > .45) warns.push('CLOSE TO THE MONEY');
+      if (c.delta > .45) warns.push('NEAR THE MONEY');
       if (c.prem < .12) warns.push('BARELY PAYS');
       if (perDay < bestPerDay * .75) warns.push('SLOW EARNER');
-      if (state === 'STRETCH' && c.delta > .35) warns.push('TOO TIGHT FOR THE RUN-UP');
+      if (state === 'STRETCH' && c.delta > .35) warns.push('TOO TIGHT');
       if (state === 'WASHOUT' && c.delta > .30) warns.push('CAPS THE BOUNCE');
       const blocks: string[] = [];
       if (c.strike < book.basis) blocks.push(`Below the $${book.basis.toFixed(2)} you paid`);
       if (freeAfter < floor) blocks.push(`Leaves ${Math.round(freeAfter).toLocaleString()} upside, under your ${floor.toLocaleString()} minimum`);
       if (afterAssign < 0) blocks.push('Being called away here would leave you short');
       if (eventInside) blocks.push(`${eventInside.label} lands before this expiry`);
-      const PEN: Record<string, number> = { 'SLOW EARNER': 12, 'CLOSE TO THE MONEY': 10, 'BARELY PAYS': 14, 'TOO TIGHT FOR THE RUN-UP': 10, 'CAPS THE BOUNCE': 10 };
+      const PEN: Record<string, number> = { 'SLOW EARNER': 12, 'NEAR THE MONEY': 10, 'BARELY PAYS': 14, 'TOO TIGHT': 10, 'CAPS THE BOUNCE': 10 };
       const raw = clamp(50 + parts.reduce((a, p) => a + p.w * p.s, 0), 0, 100);
       Object.assign(c, {
         perDay, deltaSold, freeAfter, afterAssign, warns, blocks,

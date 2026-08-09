@@ -598,9 +598,11 @@ private struct PVLadder: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(strikeLabel(c.strike))
                     .font(InkFont.mono(30, .medium)).tracking(30 * -0.04).foregroundStyle(ink)
+                    .lineLimit(1).fixedSize()
                 Spacer(minLength: 0)
                 if let em = c.em {
-                    Text("\(pvDec(abs(em), 1))× A NORMAL MOVE").font(InkFont.mono(11)).foregroundStyle(dim).fixedSize()
+                    Text("\(pvDec(abs(em), 1))× MOVE").font(InkFont.mono(11))
+                        .foregroundStyle(dim).lineLimit(1)
                 }
             }
             Text("\(Int((c.delta * 100).rounded()))Δ · CALLED 1 IN \(called)")
