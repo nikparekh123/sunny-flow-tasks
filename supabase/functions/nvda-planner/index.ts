@@ -74,6 +74,11 @@ function bsCall(S: number, K: number, T: number, v: number): number {
   const [d1, d2] = bsD(S, K, T, v);
   return S * ncdf(d1) - K * Math.exp(-PL_R * T) * ncdf(d2);
 }
+function bsPut(S: number, K: number, T: number, v: number): number {
+  if (T <= 0 || v <= 0) return Math.max(K - S, 0);
+  const [d1, d2] = bsD(S, K, T, v);
+  return K * Math.exp(-PL_R * T) * ncdf(-d2) - S * ncdf(-d1);
+}
 function bsAssign(S: number, K: number, T: number, v: number): number { return T <= 0 ? (S > K ? 1 : 0) : ncdf(bsD(S, K, T, v)[1]); }
 
 // ── scoring primitives ──
@@ -364,6 +369,7 @@ Deno.serve(async (req) => {
   // cycle rather than theta. Theta said ~$1,100/day; a monthly roll of this book is
   // nearer $3,000. Understating the largest expense by 3x is what made far-OTM
   // lottery tickets look free — nothing in the model knew there was a bill to pay.
+  const putCt = Number(bookIn.putCt ?? 0) || Math.max(1, Math.round(Math.abs(Number(bookIn.putDelta ?? 0)) / 40));
   const putSpend = Number(bookIn.putCost ?? 0);          // premium paid for the floor
   const putDays  = Math.max(1, Number(bookIn.putDays ?? 30));   // days of cover bought
   const hedgeCarry = putSpend > 0 ? putSpend / putDays : Math.abs(Number(bookIn.longTheta ?? 0));
@@ -908,13 +914,40 @@ Deno.serve(async (req) => {
     splits.length = Math.min(3, splits.length);
   }
 
+  // ── the floor ────────────────────────────────────────────────────────────────
+  // Calls and puts are one decision. A floor left where it was while the stock ran
+  // away protects a price you are well above, and forces the call side to sell
+  // deeper than it should to make up the difference. This says whether the floor has
+  // fallen behind and what moving it would cost.
+  const floorAdvice = (() => {
+    if (!putFloor || !putSpend) return null;
+    const gapPct = ((spot - putFloor) / spot) * 100;        // how far spot sits above the floor
+    const T = Math.max(putDays, 1) / 365;
+    const nowValue = bsPut(spot, putFloor, T, iv / 100) * putCt * 100;
+    // Roll to a floor the same distance below spot as the book was originally set at,
+    // defaulting to 2% under — close enough to matter, far enough to stay OTM.
+    const target = Math.round((spot * 0.98) / INST.step) * INST.step;
+    const newCost = bsPut(spot, target, T, iv / 100) * putCt * 100;
+    const rollCost = newCost - nowValue;
+    const stale = gapPct >= 6 && target > putFloor;
+    return {
+      stale, gapPct: +gapPct.toFixed(1), floor: putFloor, target,
+      nowValue: Math.round(nowValue), newCost: Math.round(newCost), rollCost: Math.round(rollCost),
+      // Raising the floor lifts the whole downside, which is what buys the freedom to
+      // sell fewer, further-out calls rather than reaching for depth.
+      why: stale
+        ? `Spot is ${gapPct.toFixed(0)}% above the ${putFloor} floor. Rolling to ${target} costs ${Math.round(rollCost).toLocaleString()} and lifts the whole floor with it.`
+        : `The ${putFloor} floor is ${gapPct.toFixed(0)}% below spot, still close enough to be doing its job.`,
+    };
+  })();
+
   const refStrike = (b.refStrike as number) ?? Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
 
   return json(200, {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
-    week, posture, events, refLots, ticker: TICKER, ivMedian, splits,
+    week, posture, events, refLots, ticker: TICKER, ivMedian, splits, floorAdvice,
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
     regime: { name: regime, why: regimeWhy, keepPct, keepDelta, keepWhy,
