@@ -103,6 +103,31 @@ function severityOf(name: string): number {
   return SEVERITY.other;
 }
 
+// What decides the week depends on the week. A fixed allocation gives the calendar
+// 23% in a quiet week and 23% in earnings week, which is how you end up with the
+// average answer every time. Rows are normalised at use, so they need only be
+// proportions rather than exact fractions.
+const REGIME_WEIGHTS: Record<string, Record<string, number>> = {
+  // Premium is event premium; how far above normal it sits is the whole question.
+  'EARNINGS WEEK':        { event: .30, iv_pctile: .25, iv_spread: .20, assignment: .10,
+                            headroom: .05, freeroll: .05, trend: .03, stretch: .01, rsi: .01 },
+  // Implied has already collapsed, so its level says little. What the tape did with
+  // the news, and what it is still doing, says everything.
+  'JUST AFTER THE PRINT': { iv_spread: .25, stretch: .20, trend: .15, assignment: .15,
+                            headroom: .10, iv_pctile: .05, freeroll: .05, event: .03, rsi: .02 },
+  // A bounce is the live risk, not a melt-up. Where it sits and how oversold it is
+  // carry it; the calendar is noise next to that.
+  'BEATEN DOWN':          { stretch: .25, rsi: .15, trend: .15, headroom: .15, iv_pctile: .10,
+                            iv_spread: .10, assignment: .05, freeroll: .03, event: .02 },
+  // Exhaustion and how far it has run from its mean.
+  'EXTENDED RUN':         { stretch: .25, trend: .20, iv_pctile: .15, rsi: .10, assignment: .10,
+                            headroom: .08, iv_spread: .07, event: .03, freeroll: .02 },
+  // Nothing is happening, so the question is simply whether you are paid enough to
+  // carry the floor.
+  'RANGE':                { iv_pctile: .25, iv_spread: .15, freeroll: .15, headroom: .12,
+                            stretch: .10, event: .08, assignment: .08, trend: .05, rsi: .02 },
+};
+
 // One priced strike. The first block is the original pricing payload; the second is
 // what the fit pass adds once the week's prescription is known.
 interface Cell {
@@ -424,6 +449,57 @@ Deno.serve(async (req) => {
   const freeroll = maxLoss > 0 ? Math.round((banked / maxLoss) * 100) : 100;
   const freerollRegime = maxLoss <= 0 ? 'unknown' : corridor === 0 ? 'insurance' : 'corridor';
 
+  // ── which week is this? ──────────────────────────────────────────────────────
+  // Blending nine factors every week produces the average answer. The situation
+  // decides which handful matter, and how much upside is worth giving up.
+  const daysSincePrint = lastPrintISO
+    ? Math.round((parseISO(nowISO).getTime() - parseISO(lastPrintISO).getTime()) / 86400000) : 999;
+  // Without a 52-week high there is no drawdown to measure, and defaulting it to
+  // zero would classify every week as EXTENDED RUN — a silent wrong answer rather
+  // than an honest missing one.
+  const high = Number(b.high52 ?? technicals.high52 ?? 0);
+  const haveHigh = high > 0;
+  const drawdown = haveHigh ? ((high - spot) / high) * 100 : null;
+  const daysToPrint = daysToEarnings ?? 99;
+  const dd = drawdown ?? 0;
+
+  const regime =
+      daysToPrint <= 7    ? 'EARNINGS WEEK'
+    : daysSincePrint <= 5  ? 'JUST AFTER THE PRINT'
+    : (haveHigh && dd >= 12) ? 'BEATEN DOWN'
+    : (dev >= 1.5 || (haveHigh && dd <= 3)) ? 'EXTENDED RUN'
+    : 'RANGE';
+
+  const regimeWhy =
+      regime === 'EARNINGS WEEK'         ? `Earnings in ${daysToPrint}d. Premium is event premium; what matters is how far above normal it is.`
+    : regime === 'JUST AFTER THE PRINT'  ? `${daysSincePrint}d past the print. Implied vol has collapsed and the tape is still absorbing it.`
+    : regime === 'BEATEN DOWN'           ? `${dd.toFixed(0)}% off the high. A bounce is worth being part of.`
+    : regime === 'EXTENDED RUN'          ? (haveHigh
+        ? `${dd.toFixed(0)}% off the high, ${dev > 0 ? '+' : ''}${dev} from its 50-day. Run up, no event in the way.`
+        : `${dev > 0 ? '+' : ''}${dev} from its 50-day. Run up, no event in the way.`)
+    : haveHigh                           ? 'No event near, sitting mid-range.'
+    :                                      'No event near. No 52-week high on file, so the drawdown is unknown.';
+
+  // How much upside to KEEP, not how much to sell. Rises when the stock is beaten
+  // down — a bounce is worth joining — and falls when the premium on offer is
+  // exceptional. The old model paid you more the more you held back, which had it
+  // exactly backwards: it never asked what you were being offered to give it up.
+  // No drawdown known -> sit at the neutral 30% rather than the aggressive floor.
+  let keepPct = haveHigh ? clamp(20 + dd * 2, 20, 50) : 30;
+  const keepWhy: string[] = [haveHigh ? `${dd.toFixed(0)}% off the high` : 'drawdown unknown, using a neutral keep'];
+  if (ivPct >= 70) { keepPct = Math.max(20, keepPct - 5); keepWhy.push('premium is rich, so take more of it'); }
+  if (ivPct <= 30) { keepPct = Math.min(50, keepPct + 5); keepWhy.push('premium is thin, so hold back'); }
+  if (regime === 'JUST AFTER THE PRINT') { keepPct = Math.max(10, keepPct - 8); keepWhy.push('vol crushed, little left to wait for'); }
+
+  // Keep is a share of the SHARE BLOCK, which is how you actually think about it:
+  // "keep 1,500 shares uncovered". The budget is whatever upside sits above that.
+  keepPct = Math.round(keepPct);
+  const keepDelta = Math.round(shares * keepPct / 100);
+  const hardFloor = keepDelta;
+  const room = Math.max(0, upsideDelta - hardFloor);
+  const budget = Math.round(room);
+  const aggression = upsideDelta > 0 ? budget / upsideDelta : 0;
+
   // ── the week's forces ──
   // Named and worded for a reader, not a desk. Every label answers a question a
   // person would actually ask, and every push line is a sentence rather than a
@@ -484,6 +560,15 @@ Deno.serve(async (req) => {
       ? 'If these calls get exercised the shares go but the put hedge stays, and you end up betting against the stock. Write nothing more until that changes.'
       : `About ${Math.round(deltaAfterAssign).toLocaleString()} shares of upside survives if the calls get exercised.` });
 
+  // Swap the fixed weights for the regime's, then normalise so the composite stays
+  // on the same 0-100 scale however the rows are written.
+  const rw = REGIME_WEIGHTS[regime];
+  if (rw) {
+    for (const f of wf) f.w = rw[f.key] ?? 0.01;
+    const tot = wf.reduce((a, f) => a + f.w, 0) || 1;
+    for (const f of wf) f.w = +(f.w / tot).toFixed(4);
+  }
+
   const weekScore = Math.round(clamp(50 + wf.reduce((a, f) => a + f.w * f.score, 0), 0, 100));
 
   // A score means little on its own — 68 reads differently if last week was 61.
@@ -507,57 +592,6 @@ Deno.serve(async (req) => {
   // The old model picked one of four buckets, so 46 and 64 gave identical orders.
   // Aggression is continuous now: how much of the room above the hard floor this
   // week justifies selling. That is the score's actual job.
-  // ── which week is this? ──────────────────────────────────────────────────────
-  // Blending nine factors every week produces the average answer. The situation
-  // decides which handful matter, and how much upside is worth giving up.
-  const daysSincePrint = lastPrintISO
-    ? Math.round((parseISO(nowISO).getTime() - parseISO(lastPrintISO).getTime()) / 86400000) : 999;
-  // Without a 52-week high there is no drawdown to measure, and defaulting it to
-  // zero would classify every week as EXTENDED RUN — a silent wrong answer rather
-  // than an honest missing one.
-  const high = Number(b.high52 ?? technicals.high52 ?? 0);
-  const haveHigh = high > 0;
-  const drawdown = haveHigh ? ((high - spot) / high) * 100 : null;
-  const daysToPrint = daysToEarnings ?? 99;
-  const dd = drawdown ?? 0;
-
-  const regime =
-      daysToPrint <= 7    ? 'EARNINGS WEEK'
-    : daysSincePrint <= 5  ? 'JUST AFTER THE PRINT'
-    : (haveHigh && dd >= 12) ? 'BEATEN DOWN'
-    : (dev >= 1.5 || (haveHigh && dd <= 3)) ? 'EXTENDED RUN'
-    : 'RANGE';
-
-  const regimeWhy =
-      regime === 'EARNINGS WEEK'         ? `Earnings in ${daysToPrint}d. Premium is event premium; what matters is how far above normal it is.`
-    : regime === 'JUST AFTER THE PRINT'  ? `${daysSincePrint}d past the print. Implied vol has collapsed and the tape is still absorbing it.`
-    : regime === 'BEATEN DOWN'           ? `${dd.toFixed(0)}% off the high. A bounce is worth being part of.`
-    : regime === 'EXTENDED RUN'          ? (haveHigh
-        ? `${dd.toFixed(0)}% off the high, ${dev > 0 ? '+' : ''}${dev} from its 50-day. Run up, no event in the way.`
-        : `${dev > 0 ? '+' : ''}${dev} from its 50-day. Run up, no event in the way.`)
-    : haveHigh                           ? 'No event near, sitting mid-range.'
-    :                                      'No event near. No 52-week high on file, so the drawdown is unknown.';
-
-  // How much upside to KEEP, not how much to sell. Rises when the stock is beaten
-  // down — a bounce is worth joining — and falls when the premium on offer is
-  // exceptional. The old model paid you more the more you held back, which had it
-  // exactly backwards: it never asked what you were being offered to give it up.
-  // No drawdown known -> sit at the neutral 30% rather than the aggressive floor.
-  let keepPct = haveHigh ? clamp(20 + dd * 2, 20, 50) : 30;
-  const keepWhy: string[] = [haveHigh ? `${dd.toFixed(0)}% off the high` : 'drawdown unknown, using a neutral keep'];
-  if (ivPct >= 70) { keepPct = Math.max(20, keepPct - 5); keepWhy.push('premium is rich, so take more of it'); }
-  if (ivPct <= 30) { keepPct = Math.min(50, keepPct + 5); keepWhy.push('premium is thin, so hold back'); }
-  if (regime === 'JUST AFTER THE PRINT') { keepPct = Math.max(10, keepPct - 8); keepWhy.push('vol crushed, little left to wait for'); }
-
-  // Keep is a share of the SHARE BLOCK, which is how you actually think about it:
-  // "keep 1,500 shares uncovered". The budget is whatever upside sits above that.
-  keepPct = Math.round(keepPct);
-  const keepDelta = Math.round(shares * keepPct / 100);
-  const hardFloor = keepDelta;
-  const room = Math.max(0, upsideDelta - hardFloor);
-  const budget = Math.round(room);
-  const aggression = upsideDelta > 0 ? budget / upsideDelta : 0;
-
   // Capacity in CONTRACTS, not delta. Anything being bought back frees its lots,
   // which is why "65 contracts" is reachable on a roll and not otherwise.
   const rollingCt = Number(bookIn.rollingCt ?? 0);
