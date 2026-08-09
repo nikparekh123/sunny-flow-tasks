@@ -35,6 +35,7 @@ struct PV2Req: Encodable, Sendable {
         let openShortCalls: [Leg]; let longCalls: [Leg]
         // rev 3: the hedge, so assignment and the freeroll corridor can be priced
         var longCallDelta: Double = 0
+        var rollingCt: Double = 0
         var putDelta: Double = 0
         var putFloor: Double = 0
         var putCost: Double = 0
@@ -45,6 +46,7 @@ struct PV2Req: Encodable, Sendable {
     let weekendVol: Double
     let spot: Double
     var ticker: String = "NVDA"
+    var style: String = "balanced"
 }
 
 // MARK: - Response
@@ -59,6 +61,13 @@ struct PV2: Decodable, Sendable {
     var gate: Gate?
     var expiries: [Expiry]?
     var refLots: Int?
+    var hedgeCarry: Double?
+    var budget: Budget?
+    struct Budget: Decodable, Sendable {
+        let room, hardFloor, delta: Double
+        let aggression: Double
+        var capacityCt: Int?; var style: String?; var rollingCt: Int?
+    }
     var exps: [Expiry] { expiries ?? [] }
 
     struct Week: Decodable, Sendable {
@@ -125,6 +134,10 @@ struct PV2: Decodable, Sendable {
         let iso, label, dow: String
         let cal, td: Int
         var load: Int?
+        var rollable: Int?
+        var capacityCt: Int?
+        var rollSource: String?
+        var keptCalled: Double?
         var eventInside: Events.Cat?
         var pickStrike: Double?
         var chain: [Cell]?
@@ -136,7 +149,10 @@ struct PV2: Decodable, Sendable {
         let strike, prem, delta, assign, effective, vsBasis: Double
         var perDay: Double?; var deltaSold: Double?; var freeAfter: Double?; var afterAssign: Double?; var em: Double?; var calledPerCt: Double?
         var warns: [String]?; var blocks: [String]?
-        var fit: Int?; var isPick: Bool?
+        var fit: Int?; var isPick: Bool?; var rank: Int?
+        var suggestCt: Int?; var credit: Double?; var income: Double?
+        var netCarry: Double?; var upsideAfterMove: Double?; var perDayPkg: Double?
+        var cappedBy: String?
         var fitParts: [FitPart]?
         var id: Double { strike }
         var warnList: [String] { warns ?? [] }
@@ -165,6 +181,11 @@ final class PlanV2Store {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "America/New_York"); return f
     }()
 
+    var style = "balanced"
+    var rollingCt: Double = 0
+
+    func reload(from store: NvdaStore, ticker: String) async { await load(from: store, ticker: ticker) }
+
     func load(from store: NvdaStore, ticker: String = "NVDA") async {
         guard let pos = store.position, let pnl = store.pnl, let ins = store.insights else {
             isLoading = false; lastError = "position not ready"; return
@@ -191,6 +212,7 @@ final class PlanV2Store {
             openShortCalls: shorts.map { .init(strike: $0.strike, ct: $0.ct, expiry: Self.iso($0.expiry)) },
             longCalls: longCalls.map { .init(strike: $0.strike, ct: $0.ct, expiry: Self.iso($0.expiry)) },
             longCallDelta: longCalls.reduce(0.0) { $0 + $1.deltaEst },
+            rollingCt: rollingCt,
             putDelta: longPuts.reduce(0.0) { $0 + $1.deltaEst },
             putFloor: putFloor,
             putCost: longPuts.reduce(0.0) { $0 + $1.basis })
@@ -202,7 +224,7 @@ final class PlanV2Store {
                          earnings: ticker == "NVDA"
                              ? .init(date: Self.earnings.date, label: Self.earnings.label)
                              : .init(date: "", label: ""),
-                         weekendVol: 0.3, spot: pos.spot, ticker: ticker)
+                         weekendVol: 0.3, spot: pos.spot, ticker: ticker, style: style)
         do {
             let data = try await client.functions.invoke("nvda-planner",
                 options: FunctionInvokeOptions(body: req), decode: { data, _ in data })
@@ -546,12 +568,18 @@ private struct PVLadder: View {
             if exps.indices.contains(ti) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 10) {
-                        ForEach(exps[ti].cells) { c in strikeCard(c, days: exps[ti].cal) }
+                        ForEach(ranked(exps[ti])) { c in strikeCard(c, days: exps[ti].cal) }
                     }
                     .padding(.horizontal, 16).padding(.bottom, 8)
                 }
             }
         }
+    }
+
+    /// Ranked packages first, then everything else so the blocked ones stay visible.
+    private func ranked(_ e: PV2.Expiry) -> [PV2.Cell] {
+        let top = e.cells.filter { $0.rank != nil }.sorted { ($0.rank ?? 9) < ($1.rank ?? 9) }
+        return top + e.cells.filter { $0.rank == nil }
     }
 
     private func tenor(_ e: PV2.Expiry, _ i: Int) -> some View {
@@ -577,21 +605,23 @@ private struct PVLadder: View {
         .buttonStyle(.plain)
     }
 
+    /// A package, not a strike: the instruction is "sell N at K", and the three
+    /// best are ranked. Blocked strikes stay visible with their reason.
     private func strikeCard(_ c: PV2.Cell, days: Int) -> some View {
         let on = pick == c.strike || (pick == nil && c.isPick == true)
         return Group {
             if c.blocked {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(strikeLabel(c.strike))
-                        .font(InkFont.mono(30, .medium)).tracking(30 * -0.04).foregroundStyle(Ink.text)
-                    Text("BLOCKED").font(InkFont.mono(9.5)).tracking(9.5 * 0.12)
+                        .font(InkFont.mono(26, .medium)).tracking(26 * -0.04).foregroundStyle(Ink.text)
+                    Text("NOT WORTH IT").font(InkFont.mono(9.5)).tracking(9.5 * 0.12)
                         .foregroundStyle(Ink.dim).padding(.top, 12)
                     Text(c.blockList[0]).font(InkFont.display(13.5, .regular)).foregroundStyle(Ink.dim)
                         .lineSpacing(2).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
                     Spacer(minLength: 0)
                 }
                 .padding(EdgeInsets(top: 17, leading: 18, bottom: 16, trailing: 18))
-                .frame(width: 236, height: 180, alignment: .topLeading)
+                .frame(width: 236, height: 214, alignment: .topLeading)
                 .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3])).foregroundStyle(Ink.hair))
                 .opacity(0.42)
@@ -603,70 +633,116 @@ private struct PVLadder: View {
     }
 
     private func strikeLabel(_ v: Double) -> String { pvDec(v, v == v.rounded() ? 0 : 1) }
+    private func ordinal(_ n: Int) -> String { n == 1 ? "1ST" : n == 2 ? "2ND" : "3RD" }
 
     private func liveCard(_ c: PV2.Cell, on: Bool, days: Int) -> some View {
         let dim = on ? Ink.invertText.opacity(0.62) : Ink.dim
         let ink = on ? Ink.invertText : Ink.text
-        let calledPct = Int((c.assign * 100).rounded())
+        let ct = c.suggestCt ?? 0
         return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(strikeLabel(c.strike))
-                    .font(InkFont.mono(30, .medium)).tracking(30 * -0.04).foregroundStyle(ink)
-                    .lineLimit(1).fixedSize()
-                Spacer(minLength: 0)
-                if let em = c.em {
-                    Text("\(pvDec(abs(em), 1))× MOVE").font(InkFont.mono(11))
-                        .foregroundStyle(dim).lineLimit(1)
-                }
-            }
-            Text("\(Int((c.delta * 100).rounded()))Δ · \(calledPct)% CHANCE CALLED")
-                .font(InkFont.mono(11)).tracking(11 * 0.06).foregroundStyle(dim)
-                .padding(.top, 11).lineLimit(1)
-
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    Text(pvUsd(c.perDay ?? 0)).font(InkFont.mono(26, .medium)).tracking(26 * -0.04)
-                        .foregroundStyle(on ? Ink.invertText : Ink.gain)
-                    Text("/d").font(InkFont.mono(13)).foregroundStyle(dim)
+                if let r = c.rank {
+                    Text(ordinal(r)).font(InkFont.mono(9.5, .medium)).tracking(9.5 * 0.14)
+                        .foregroundStyle(r == 1 ? (on ? Ink.invertText : Ink.gain) : dim)
                 }
-                Text("\(pvUsd(c.prem * Double(lots) * 100)) · \(days)D")
-                    .font(InkFont.mono(11)).foregroundStyle(dim).lineLimit(1)
+                Spacer(minLength: 0)
+                Text("\(Int((c.delta * 100).rounded()))Δ · \(Int((c.assign * 100).rounded()))% CALLED")
+                    .font(InkFont.mono(9.5)).tracking(9.5 * 0.06).foregroundStyle(dim).lineLimit(1)
             }
-            .padding(.top, 16)
 
-            Spacer(minLength: 12)
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text("sell ").font(InkFont.display(17, .regular)).foregroundStyle(dim)
+                Text("\(ct)").font(InkFont.mono(30, .medium)).tracking(30 * -0.04)
+                    .foregroundStyle(ink).lineLimit(1).fixedSize()
+                Text(" at ").font(InkFont.display(17, .regular)).foregroundStyle(dim)
+                Text(strikeLabel(c.strike)).font(InkFont.mono(22, .medium)).tracking(22 * -0.03)
+                    .foregroundStyle(ink).lineLimit(1).fixedSize()
+            }
+            .padding(.top, 10)
 
-            HStack(alignment: .center, spacing: 12) {
+            Text("\(pvUsd(c.income ?? 0)) INCOME OVER \(days)D")
+                .font(InkFont.mono(9.5)).tracking(9.5 * 0.1).foregroundStyle(dim)
+                .padding(.top, 9).lineLimit(1)
+
+            Spacer(minLength: 10)
+
+            VStack(spacing: 7) {
+                pkgLine("carries the hedge", (c.netCarry ?? 0) >= 0
+                        ? "+\(pvUsd(c.netCarry ?? 0))/d" : "−\(pvUsd(abs(c.netCarry ?? 0)))/d",
+                        good: (c.netCarry ?? 0) >= 0, on: on, dim: dim)
+                pkgLine("upside after a move", pvInt(c.upsideAfterMove ?? 0),
+                        good: (c.upsideAfterMove ?? 0) > 0, on: on, dim: dim)
+            }
+            .padding(.top, 12)
+            .overlay(alignment: .top) {
+                Rectangle().fill(on ? Ink.invertText.opacity(0.18) : Ink.hair).frame(height: 1).offset(y: -12)
+            }
+
+            HStack(alignment: .center, spacing: 10) {
                 GeometryReader { g in
                     ZStack(alignment: .leading) {
                         Capsule().fill(on ? Ink.invertText.opacity(0.22) : Ink.hair)
-                        Capsule().fill(ink)
-                            .frame(width: g.size.width * min(Double(c.fit ?? 0) / 100, 1))
+                        Capsule().fill(ink).frame(width: g.size.width * min(Double(c.fit ?? 0) / 100, 1))
                     }
                 }
                 .frame(width: 48, height: 4)
                 Spacer(minLength: 0)
-                Text("\(c.fit ?? 0)").font(InkFont.mono(15, .regular)).tracking(15 * -0.02)
-                    .foregroundStyle(ink).fixedSize()
+                Text("\(c.fit ?? 0)").font(InkFont.mono(15, .regular)).foregroundStyle(ink).fixedSize()
                 if let w = c.warnList.first {
-                    Text(w).font(InkFont.mono(9.5)).tracking(9.5 * 0.1)
-                        .foregroundStyle(on ? dim : Ink.delayed)
-                        .lineLimit(1).truncationMode(.tail)
+                    Text(w).font(InkFont.mono(9)).tracking(9 * 0.08)
+                        .foregroundStyle(on ? dim : Ink.delayed).lineLimit(1).truncationMode(.tail)
                 }
             }
-            .padding(.top, 14)
-            .overlay(alignment: .top) {
-                Rectangle().fill(on ? Ink.invertText.opacity(0.18) : Ink.hair).frame(height: 1).offset(y: -14)
-            }
+            .padding(.top, 12)
         }
-        .padding(EdgeInsets(top: 17, leading: 18, bottom: 16, trailing: 18))
-        .frame(width: 236, height: 180, alignment: .topLeading)
+        .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
+        .frame(width: 236, height: 214, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
             .fill(on ? Ink.invertBg : .clear))
         .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
             .strokeBorder(on ? .clear : Ink.hair, lineWidth: 1))
     }
 
+    private func pkgLine(_ k: String, _ v: String, good: Bool, on: Bool, dim: Color) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(k.uppercased()).font(InkFont.mono(9)).tracking(9 * 0.1).foregroundStyle(dim)
+            Spacer(minLength: 0)
+            Text(v).font(InkFont.mono(12)).tracking(12 * -0.02)
+                .foregroundStyle(on ? Ink.invertText : (good ? Ink.text : Ink.loss))
+        }
+    }
+}
+
+/// How you like your upside packaged. A standing preference, not a weekly call:
+/// it shifts which strike the ladder leans toward, never how much gets sold.
+private struct PVStyle: View {
+    @Binding var style: String
+    var onChange: () -> Void
+    private let opts: [(String, String)] = [
+        ("closer", "Fewer, closer"), ("balanced", "Balanced"), ("further", "More, further"),
+    ]
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(opts, id: \.0) { key, label in
+                let on = style == key
+                Button {
+                    guard !on else { return }
+                    withAnimation(InkMotion.fast) { style = key }
+                    onChange()
+                } label: {
+                    Text(label.uppercased()).font(InkFont.mono(9.5, .medium)).tracking(9.5 * 0.08)
+                        .foregroundStyle(on ? Ink.invertText : Ink.dim)
+                        .frame(maxWidth: .infinity).frame(minHeight: 34)
+                        .background(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous)
+                            .fill(on ? Ink.invertBg : .clear))
+                        .overlay(RoundedRectangle(cornerRadius: Ink.radiusElement, style: .continuous)
+                            .strokeBorder(on ? .clear : Ink.hair, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
 }
 
 // MARK: - 05 · why
@@ -893,6 +969,7 @@ struct NvdaPlannerV2Screen: View {
     @State private var ti = 0
     @State private var pick: Double?
     @State private var rollSel: String?
+    @State private var style = "balanced"
 
     var body: some View {
         ZStack {
@@ -958,10 +1035,20 @@ struct NvdaPlannerV2Screen: View {
         if !groups.order.isEmpty && !tailOnly {
             PVSectionLabel(n: "03", t: "What you already sold", right: "\(groups.order.count) dates")
             PVRolling(expiries: groups.byIso, order: groups.order, sel: $rollSel)
+                .onChange(of: rollSel) { _, new in
+                    // Picking legs to close hands their lots back, so capacity and
+                    // every package count change. Clearing it returns to the default
+                    // assumption that you are rolling whatever expires first.
+                    plan.rollingCt = new.flatMap { groups.byIso[$0] }?.reduce(0) { $0 + $1.ct } ?? 0
+                    replan(s)
+                }
         }
 
         if !tailOnly {
-            PVSectionLabel(n: "04", t: "What to sell", right: s.week.map { "\($0.lots.base) contracts" })
+            PVSectionLabel(n: "04", t: "What to sell",
+                           right: s.budget.map { "sell \(pvInt($0.delta)) upside" })
+            PVStyle(style: $style) { replan(s) }
+                .padding(.bottom, 12)
             PVLadder(s: s, lots: max(s.week?.lots.base ?? 1, 1), ti: $ti, pick: $pick)
         }
 
@@ -980,6 +1067,11 @@ struct NvdaPlannerV2Screen: View {
                 .font(InkFont.display(13, .regular)).foregroundStyle(Ink.delayed)
                 .padding(.horizontal, 16).padding(.top, 16)
         }
+    }
+
+    private func replan(_ current: PV2) {
+        plan.style = style
+        Task { await plan.load(from: store, ticker: ticker) }
     }
 
     /// Open short calls, grouped by expiry — the unit the decision is actually made in.
