@@ -281,7 +281,13 @@ Deno.serve(async (req) => {
       if (r.ok) {
         const xs = ((await r.json()) as { iv?: number }[])
           .map((x) => Number(x.iv)).filter((x) => Number.isFinite(x) && x > 0).sort((a, b) => a - b);
-        if (xs.length >= 30) ivMedian = xs[Math.floor(xs.length / 2)];
+        if (xs.length >= 30) {
+          const m = xs[Math.floor(xs.length / 2)];
+          // nvda_iv_daily stores implied vol as a FRACTION (0.40) while the rest of
+          // this function speaks percent (40). Priced raw, "normal" came out at 0.4%
+          // vol and every dollar of income read as IV premium.
+          ivMedian = m < 1.5 ? m * 100 : m;
+        }
       }
     } catch { /* no history yet just means no comparison */ }
   }
