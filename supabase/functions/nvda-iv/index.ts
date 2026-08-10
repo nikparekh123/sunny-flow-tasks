@@ -223,10 +223,12 @@ async function crush(admin: ReturnType<typeof createClient>) {
     prints.some((p) => Math.abs((Date.parse(d) - Date.parse(p)) / 86400000) <= 5);
 
   const med = (xs: number[]) => { const a = xs.slice().sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
-  const out: { thresh: number; n: number; sessions: number[]; unresolved: number; withPrint: number }[] = [];
+  const out: { thresh: number; n: number; sessions: number[]; halves: number[]; unresolved: number;
+               withPrint: number; atN: (number | null)[]; months: number[] }[] = [];
 
   for (const thresh of [15, 25, 40]) {
-    const sessions: number[] = []; let unresolved = 0, withPrint = 0;
+    const sessions: number[] = [], halves: number[] = [], months: number[] = [];
+    const curve: (number | null)[][] = []; let unresolved = 0, withPrint = 0;
     let armed = true;
     for (let i = 60; i < rows.length; i++) {
       const base = med(rows.slice(i - 60, i).map((r) => r.iv));
@@ -235,14 +237,38 @@ async function crush(admin: ReturnType<typeof createClient>) {
       if (!armed) continue;                       // still inside the same spike
       armed = false;
       if (nearPrint(rows[i].date)) withPrint++;
+      // THREE different things get called "the crush" and they are not close to each
+      // other. A spike from 40 to 55 can shed most of its excess in two sessions and
+      // still take another eighteen to grind the last points off. Measuring only full
+      // reversion saw the tail and missed the collapse.
+      const excess0 = rows[i].iv / base - 1;
+      const leftAt = (n: number) => {
+        const k = i + n;
+        if (k >= rows.length || excess0 <= 0) return null;
+        const b2 = med(rows.slice(Math.max(0, k - 60), k).map((r) => r.iv));
+        return +(((rows[k].iv / b2 - 1) / excess0) * 100).toFixed(0);   // % of the spike still there
+      };
+      let half = -1;
+      for (let k = i + 1; k < rows.length; k++) {
+        const b2 = med(rows.slice(Math.max(0, k - 60), k).map((r) => r.iv));
+        if (rows[k].iv / b2 - 1 <= excess0 / 2) { half = k - i; break; }
+      }
       let back = -1;
       for (let k = i + 1; k < rows.length; k++) {
         const b2 = med(rows.slice(Math.max(0, k - 60), k).map((r) => r.iv));
         if (rows[k].iv <= b2 * 1.05) { back = k - i; break; }
       }
+      if (half > 0) halves.push(half);
+      curve.push([1, 2, 3, 5, 10].map(leftAt));
+      months.push(Number(rows[i].date.slice(5, 7)));
       if (back < 0) unresolved++; else sessions.push(back);
     }
-    out.push({ thresh, n: sessions.length + unresolved, sessions, unresolved, withPrint });
+    // Median of what is left of the spike n sessions on, across every spike in the band.
+    const atN = [0, 1, 2, 3, 4].map((idx) => {
+      const xs = curve.map((c) => c[idx]).filter((v): v is number => v != null);
+      return xs.length ? med(xs) : null;
+    });
+    out.push({ thresh, n: sessions.length + unresolved, sessions, halves, unresolved, withPrint, atN, months });
   }
 
   return json(200, {
@@ -251,9 +277,13 @@ async function crush(admin: ReturnType<typeof createClient>) {
     bands: out.map((b) => ({
       overMedianPct: b.thresh, spikes: b.n, resolved: b.sessions.length, unresolved: b.unresolved,
       aroundAPrint: b.withPrint,
-      sessionsToDecay: b.sessions.length
+      // halfLife is the collapse; fullReversion is the grind back to normal.
+      halfLife: b.halves.length ? med(b.halves) : null,
+      pctOfSpikeLeftAfter: { d1: b.atN[0], d2: b.atN[1], d3: b.atN[2], d5: b.atN[3], d10: b.atN[4] },
+      fullReversion: b.sessions.length
         ? { median: med(b.sessions), fastest: Math.min(...b.sessions), slowest: Math.max(...b.sessions) }
         : null,
+      byMonth: b.months.sort((x, y) => x - y),
     })),
   });
 }
