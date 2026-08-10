@@ -194,6 +194,34 @@ async function callExpiries(fromISO: string, key: string, tk: string): Promise<s
 // ── dates ──
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** Real quotes for one expiry across a strike window. The planner priced every pick
+ *  with Black-Scholes, which is fine for ranking and wrong for an order: a theoretical
+ *  is not a price you can hit. Mid of bid/ask, never `last` — last can be hours stale
+ *  on a strike nobody has touched today.
+ *
+ *  A strike with no bid is quoted but not tradeable, so it falls back to the model and
+ *  says so rather than showing a mid nobody will pay. */
+type Quote = { strike: number; bid: number; ask: number; mid: number; delta: number | null; oi: number };
+async function chainQuotes(tk: string, expiry: string, lo: number, hi: number, key: string): Promise<Map<number, Quote>> {
+  const out = new Map<number, Quote>();
+  try {
+    const r = await fetch(`${POLY}/v3/snapshot/options/${tk}?expiration_date=${expiry}`
+      + `&contract_type=call&strike_price.gte=${lo}&strike_price.lte=${hi}&limit=60&apiKey=${key}`);
+    if (!r.ok) return out;
+    const j = await r.json();
+    for (const row of ((j?.results ?? []) as Record<string, Record<string, number>>[])) {
+      const k = Number(row?.details?.strike_price);
+      if (!Number.isFinite(k)) continue;
+      const bid = Number(row?.last_quote?.bid ?? 0), ask = Number(row?.last_quote?.ask ?? 0);
+      const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : 0;
+      const dl = Number(row?.greeks?.delta);
+      out.set(k, { strike: k, bid, ask, mid, delta: Number.isFinite(dl) && dl > 0 ? dl : null,
+                   oi: Number(row?.open_interest ?? 0) });
+    }
+  } catch { /* no quotes just means the model prices it, and the pick says so */ }
+  return out;
+}
+
 function ymd(d: Date): string { return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`; }
 function parseISO(s: string): Date { const [y, m, dd] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd)); }
 function spanTo(nowISO: string, target: Date): { cal: number; td: number; we: number } {
@@ -786,6 +814,10 @@ Deno.serve(async (req) => {
   // Contract count is arithmetic. Covered calls cannot sell unlimited delta — 75 of them
   // at 3% out reach only ~2,200 — so when the target is out of reach the pick REPORTS the
   // shortfall rather than silently pulling the strike closer to hide it.
+  // Two strikes either side of target, which is exactly the span the three picks use.
+  const quotes = key && nextExp
+    ? await chainQuotes(TICKER, nextExp, targetStrike - STRIKE_STEP * 2, targetStrike + STRIKE_STEP * 2, key)
+    : new Map<number, Quote>();
   const planT = Math.max(expDays, .25) / 252;
   const maxCt = Math.floor(shares / 100);
   // THE HEDGE FLOOR. The puts cost real money every day and the calls have to carry
@@ -798,11 +830,14 @@ Deno.serve(async (req) => {
   const tradeCal = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).cal) : 2;
   const hedgeNeeds = Math.round(carryPerDay * tradeCal * HEDGE_MARGIN);
   const mkPick = (k: number) => {
-    const d = bsDelta(spot, k, planT, iv / 100);
+    const q = quotes.get(k);
+    const tradeable = !!q && q.mid > 0 && q.bid > 0;
+    // Delta from the market when it is quoting one; the model only fills gaps.
+    const d = tradeable && q!.delta != null ? q!.delta : bsDelta(spot, k, planT, iv / 100);
     const want = ((100 - keepTarget) / 100) * shares;
     const rawCt = d > 0 ? want / (d * 100) : 0;
     const wantCt = Math.max(0, Math.min(Math.round(rawCt), maxCt));
-    const prem = bsCall(spot, k, planT, iv / 100);
+    const prem = tradeable ? q!.mid : bsCall(spot, k, planT, iv / 100);
     // When the floor binds, the achieved keep will NOT be what conviction asked for.
     // Both numbers are reported: hiding the gap would repeat the exact failure this
     // whole rebuild removed.
@@ -816,6 +851,10 @@ Deno.serve(async (req) => {
              capped: Math.round(rawCt) > maxCt,
              keptPct: shares > 0 ? +(((shares - ct * d * 100) / shares) * 100).toFixed(0) : 0,
              prem: +prem.toFixed(2), income,
+             // Which of these you are looking at matters more than the number itself.
+             priced: tradeable ? 'market' : 'model',
+             bid: q ? +q.bid.toFixed(2) : null, ask: q ? +q.ask.toFixed(2) : null,
+             oi: q ? q.oi : null,
              assign: +bsAssign(spot, k, planT, iv / 100).toFixed(2) };
   };
   const plan = {
@@ -829,6 +868,7 @@ Deno.serve(async (req) => {
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
     // at 40% IV over two sessions a strike 2.8% out sits INSIDE one sigma.
     expectedMove: +(spot * (iv / 100) * Math.sqrt(expDays / 252)).toFixed(2),
+    quotes: { source: quotes.size > 0 ? 'polygon' : 'none', strikes: quotes.size },
     grade, gradeDecay: +gDecay.toFixed(2),
     picks: [targetStrike, targetStrike - STRIKE_STEP, targetStrike + STRIKE_STEP].map(mkPick),
   };
