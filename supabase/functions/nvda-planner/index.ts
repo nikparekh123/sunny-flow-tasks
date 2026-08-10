@@ -879,8 +879,21 @@ Deno.serve(async (req) => {
   //                           400k hedge. This is what pace is measured against.
   //   AIM       up to 18,000 in favourable weeks. Overshoot banks as cushion.
   //   LEAN      down to zero when conviction is poor AND the cushion can carry it.
-  const WEEKLY_INCOME = Number(b.weeklyIncome ?? 12700);
-  const WEEKLY_AIM_MAX = Number(b.weeklyAim ?? 18000);
+  // A YIELD, not a dollar figure. $12,700 a week is right for 7,500 shares and absurd
+  // for 3,000 — cut the position before a print and a hard number would have you selling
+  // twice the delta to chase it. 0.76% of position value per week is the same ask at any
+  // size, and it self-adjusts the moment the book changes.
+  //
+  //   0.76%/wk on 7,500 x 222.95 = $12,700   ·   ~39% a year gross
+  //   the same yield on 3,000 shares         =  $5,083
+  const posValue = shares * spot;
+  const WEEKLY_YIELD = Number(b.weeklyYieldPct ?? 0.76);          // % of position value
+  const WEEKLY_INCOME = b.weeklyIncome != null
+    ? Number(b.weeklyIncome)                                       // explicit override
+    : Math.round((posValue * WEEKLY_YIELD) / 100);
+  const WEEKLY_AIM_MAX = b.weeklyAim != null
+    ? Number(b.weeklyAim)
+    : Math.round(WEEKLY_INCOME * 1.42);                            // the stretch week
 
   // Period-to-date, supplied by the app from its own P&L. GROSS for now: net is the
   // honest number but nothing has measured the buyback drag yet, so aiming at it would
@@ -979,6 +992,8 @@ Deno.serve(async (req) => {
              needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
     income: {
       required: WEEKLY_INCOME, aim: weeklyAim, aimMult: +aimMult.toFixed(2), aimMax: WEEKLY_AIM_MAX,
+      yieldPctWk: WEEKLY_YIELD, yieldPctYr: +(WEEKLY_YIELD * 52).toFixed(1),
+      positionValue: Math.round(posValue),
       rollsPerWeek: Number(b.rollsPerWeek ?? (expDays <= 3 ? 3 : 5 / expDays)),
       perTrade: Math.round(weeklyAim / Number(b.rollsPerWeek ?? (expDays <= 3 ? 3 : 5 / expDays))),
       // Pace, and the drag that will eventually make gross the wrong number to chase.
