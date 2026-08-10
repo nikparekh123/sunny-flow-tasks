@@ -410,6 +410,7 @@ Deno.serve(async (req) => {
   let peers: Peer[] = [];
   let peersKnown = false;
   let relStrength: { vs: string; self: number; ref: number; gap: number; days: number } | null = null;
+  let sectorHealth: { pctAbove200: number; norm: number; dev: number; n: number } | null = null;
   let peerPrints: { ticker: string; days: number; move: number; band: string }[] = [];
   if (supaUrl && supaKey) {
     const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
@@ -445,7 +446,8 @@ Deno.serve(async (req) => {
     // absorbed the news define the weeks after it.
     if (TICKER !== 'TLT') {
       try {
-        const back = ymd(new Date(parseISO(nowISO).getTime() - 45 * 86400000));
+        // Deep enough for SMH's own 200-day AND a norm to compare it against.
+      const back = ymd(new Date(parseISO(nowISO).getTime() - 640 * 86400000));
         const r = await fetch(`${supaUrl}/rest/v1/earnings_events?select=report_date&ticker=eq.${TICKER}`
           + `&report_date=gte.${back}&report_date=lt.${nowISO}&order=report_date.desc&limit=1`, { headers: h });
         if (r.ok) {
@@ -566,7 +568,7 @@ Deno.serve(async (req) => {
       const back = ymd(new Date(parseISO(nowISO).getTime() - 45 * 86400000));
       const r = await fetch(`${supaUrl}/rest/v1/daily_closes`
         + `?select=ticker,date,close_price&ticker=in.(${TICKER},SMH)&date=gte.${back}`
-        + `&order=date.desc&limit=200`, { headers: h });
+        + `&order=date.desc&limit=1200`, { headers: h });
       if (r.ok) {
         const rows = (await r.json()) as { ticker: string; date: string; close_price: number }[];
         const series = (tk: string) => rows.filter((x) => x.ticker === tk)
@@ -578,6 +580,31 @@ Deno.serve(async (req) => {
           const pa = ((a[0] - a[n - 1]) / a[n - 1]) * 100;
           const pr = ((r2[0] - r2[n - 1]) / r2[n - 1]) * 100;
           relStrength = { vs: 'SMH', self: +pa.toFixed(1), ref: +pr.toFixed(1), gap: +(pa - pr).toFixed(1), days: n };
+        }
+
+        // SECTOR HEALTH. `relative` asks whether NVDA is beating SMH; this asks whether
+        // SMH itself is any good. Outperforming a sector that is rolling over is a
+        // different situation from outperforming one that is climbing, and nothing in
+        // the model could tell them apart.
+        //
+        // Measured as a DEVIATION from SMH's own norm, never as an absolute. "Above its
+        // 200-day" is true most weeks of a bull market; scored raw it would add points
+        // to almost every reading and discriminate nothing.
+        if (r2.length >= 250) {
+          const pctAbove = (i: number) => {
+            const win = r2.slice(i, i + 200);
+            const ma = win.reduce((x, y) => x + y, 0) / win.length;
+            return ma > 0 ? ((r2[i] / ma) - 1) * 100 : 0;
+          };
+          const hist: number[] = [];
+          for (let i = 0; i + 200 < r2.length; i += 5) hist.push(pctAbove(i));
+          if (hist.length >= 8) {
+            const sorted = hist.slice().sort((x, y) => x - y);
+            const norm = sorted[Math.floor(sorted.length / 2)];
+            const now = pctAbove(0);
+            sectorHealth = { pctAbove200: +now.toFixed(1), norm: +norm.toFixed(1),
+                             dev: +(now - norm).toFixed(1), n: hist.length };
+          }
         }
       }
     } catch { /* no reference series, no claim */ }
@@ -940,6 +967,9 @@ Deno.serve(async (req) => {
   cv.stretch = -clamp(Math.abs(dev) >= 1.5 ? (Math.abs(dev) - 1.5) * 5 : 0, 0, 12) * (dev > 0 ? 1 : 0.4);
   cv.record = record && record.n >= 8 ? clamp((record.survived / record.n - 0.7) * 25, -8, 8) : 0;
   cv.relative = relStrength ? clamp(relStrength.gap * 0.6, -6, 6) : 0;
+  // A sector stronger than its own norm is a reason to hold more upside; one rolling
+  // over is a reason to hold less. Zero when the history cannot support it.
+  cv.sector = sectorHealth ? clamp(sectorHealth.dev * 0.5, -8, 8) : 0;
   // PEER PRINTS. Recency-weighted mean of how the neighbours' own reports landed. A
   // print from last week still colours how this one gets read; one from ten weeks ago
   // has been absorbed. Empty table means zero, which is silence rather than optimism.
@@ -1095,7 +1125,7 @@ Deno.serve(async (req) => {
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
     baseline: BASE_KEEP[evState], modifiers: mods, modRaw, readings, gradeMod,
-    conviction, convictionParts: cv, peerPrints,
+    conviction, convictionParts: cv, peerPrints, sectorHealth,
     hedge: { carryPerDay: Math.round(carryPerDay), tradeCal, margin: HEDGE_MARGIN,
              needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
     // Reported, never used to size.
