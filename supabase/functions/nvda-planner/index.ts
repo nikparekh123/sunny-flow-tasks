@@ -257,6 +257,80 @@ Deno.serve(async (req) => {
   const [polySpot, polyExpiries] = key
     ? await Promise.all([nearestSpot(key, TICKER), callExpiries(nowISO, key, TICKER)])
     : [null, [] as string[]];
+  // ── score ─────────────────────────────────────────────────────────────────
+  // Resolves every commit whose expiry has passed. Scores ALL THREE picks, not just
+  // the one taken — the taken one measures which way NVDA went, which the tool does
+  // not control; the other two are the only way to ask whether the RANKING was any
+  // good, and that is the actual question about the model.
+  //
+  // The measure is what the call trade added or cost AGAINST SIMPLY HOLDING. Below the
+  // strike a call is pure premium; above it you keep the premium and hand back the
+  // difference. Doing nothing scores exactly zero, which is what makes a declined week
+  // comparable to a traded one instead of missing from the record.
+  if (b.score === true && supaUrl && supaKey) {
+    const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
+    const rows = await (async () => {
+      try {
+        const r = await fetch(`${supaUrl}/rest/v1/planner_commits?select=*&scored_at=is.null`
+          + `&expiry=lt.${nowISO}&order=expiry.asc&limit=50`, { headers: h });
+        return r.ok ? (await r.json()) as Record<string, unknown>[] : [];
+      } catch { return []; }
+    })();
+
+    const closeOn = async (d: string): Promise<number | null> => {
+      if (!key) return null;
+      try {
+        const r = await fetch(`${POLY}/v2/aggs/ticker/${TICKER}/range/1/day/${d}/${d}?adjusted=true&apiKey=${key}`);
+        if (!r.ok) return null;
+        const c = Number(((await r.json())?.results ?? [])[0]?.c);
+        return Number.isFinite(c) ? c : null;
+      } catch { return null; }
+    };
+
+    const done: unknown[] = [];
+    for (const row of rows) {
+      const expiry = String(row.expiry ?? '');
+      const close = expiry ? await closeOn(expiry) : null;
+      // No close yet is not a zero. Leave it unscored and try again tomorrow.
+      if (close == null) { done.push({ id: row.id, expiry, skipped: 'no close on file' }); continue; }
+
+      const picks = (row.picks ?? []) as Record<string, number>[];
+      const outs = picks.map((p, i) => {
+        const ct = Number(p.ct ?? 0), strike = Number(p.strike ?? 0), income = Number(p.income ?? 0);
+        const overBy = Math.max(0, close - strike);
+        const givenUp = overBy * ct * 100;
+        return { pick: i + 1, strike, ct, income,
+                 assigned: close > strike, calledShares: close > strike ? ct * 100 : 0,
+                 givenUp: Math.round(givenUp),
+                 // vs holding the shares and writing nothing
+                 pl: Math.round(income - givenUp) };
+      });
+      const best = outs.reduce((a2, x) => (x.pl > a2.pl ? x : a2), outs[0] ?? { pl: 0, pick: 0 });
+      const chosen = row.chosen == null ? null : Number(row.chosen);
+      const tookPl = chosen == null ? 0 : (outs[chosen - 1]?.pl ?? 0);
+      // Was the order the tool offered the order the market produced? The headline
+      // question, and it is answerable at n=1 in a way "was the trade good" is not.
+      const rankedRight = outs.length >= 2 && outs.every((x, i) => i === 0 || outs[i - 1].pl >= x.pl);
+
+      const patch = {
+        underlying_close: close, scored_at: new Date().toISOString(),
+        outcomes: { close, picks: outs, best: best.pick, took: chosen, tookPl,
+                    regret: Math.round((best.pl ?? 0) - tookPl), rankedRight,
+                    declined: chosen == null },
+      };
+      try {
+        await fetch(`${supaUrl}/rest/v1/planner_commits?id=eq.${row.id}`, {
+          method: 'PATCH',
+          headers: { ...h, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify(patch),
+        });
+      } catch { /* retried on the next run, since scored_at stays null */ }
+      done.push({ id: row.id, expiry, close, took: chosen, tookPl,
+                  best: best.pick, regret: Math.round((best.pl ?? 0) - tookPl), rankedRight });
+    }
+    return json(200, { ok: true, found: rows.length, scored: done.length, results: done });
+  }
+
   // ── commit ────────────────────────────────────────────────────────────────
   // Records a decision. The plan block is echoed back verbatim rather than
   // recomputed, because a decision has to be stored as it was READ — recomputing it
