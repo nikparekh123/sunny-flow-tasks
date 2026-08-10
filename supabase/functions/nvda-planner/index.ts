@@ -864,6 +864,15 @@ Deno.serve(async (req) => {
   // meaning "sell nothing" and starts meaning "sell the minimum that pays for the
   // hedge, at the furthest strike that still clears it".
   const HEDGE_MARGIN = Number(b.hedgeMargin ?? 1.5);   // 1.0 = break even, no income
+  // THE INCOME TARGET. Set 2026-08-10 from the yield Nik wants net of the hedge:
+  // 15-20% on a $1.56M block is $234k-$312k, the puts cost $400k a year, so net premium
+  // has to run $634k-$712k — about $12,700 a week.
+  //
+  // This is what makes rich IV mean something. Sizing off delta alone, a 60-vol week
+  // sells the same contract count as a 40-vol week and simply collects more. Sizing off
+  // INCOME, the same money needs fewer contracts, and the delta you did not have to sell
+  // stays yours. Selling less for the same cheque is the whole point.
+  const WEEKLY_INCOME = Number(b.weeklyIncome ?? 12700);
   const carryPerDay = putSpend > 0 && putDays > 0 ? putSpend / putDays : 0;
   const tradeCal = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).cal) : 2;
   const hedgeNeeds = Math.round(carryPerDay * tradeCal * HEDGE_MARGIN);
@@ -880,7 +889,16 @@ Deno.serve(async (req) => {
     // Both numbers are reported: hiding the gap would repeat the exact failure this
     // whole rebuild removed.
     const minCt = prem > 0 && hedgeNeeds > 0 ? Math.min(maxCt, Math.ceil(hedgeNeeds / (prem * 100))) : 0;
-    const ct = Math.max(wantCt, minCt);
+    // Three constraints, in plain terms: the hedge sets a floor you cannot go under,
+    // conviction sets a ceiling you should not go over, and the income target sits
+    // between them. The floor outranks the ceiling — an unpaid hedge is not a choice.
+    const perTrade = rollsWk > 0 ? WEEKLY_INCOME / rollsWk : WEEKLY_INCOME;
+    const targetCt = prem > 0 ? Math.ceil(perTrade / (prem * 100)) : 0;
+    const ceiling = Math.max(wantCt, minCt);
+    const ct = Math.min(Math.max(targetCt, minCt), ceiling, maxCt);
+    const boundBy = ct === minCt && minCt > targetCt ? 'hedge floor'
+      : ct === ceiling && targetCt > ceiling ? 'conviction'
+      : ct === maxCt && targetCt > maxCt ? 'capacity' : 'income';
     const income = Math.round(prem * 100 * ct);
     // BREAK-EVEN IS THE STRIKE PLUS WHAT YOU COLLECTED, and you collect again every
     // roll. The model priced each trade standalone, so a 0.5% strike read as a 0.5%
@@ -900,7 +918,8 @@ Deno.serve(async (req) => {
     const weeksToCover = income > 0 ? gapCost / (income * rollsWk) : null;
     return { strike: k, otmPct: +(((k - spot) / spot) * 100).toFixed(2),
              delta: Math.round(d * 100), ct, wantCt, minCt,
-             floorBinds: minCt > wantCt,
+             floorBinds: minCt > wantCt, boundBy, targetCt,
+             perTradeTarget: Math.round(perTrade),
              covers: hedgeNeeds > 0 ? +(income / hedgeNeeds).toFixed(1) : null,
              capped: Math.round(rawCt) > maxCt,
              keptPct: shares > 0 ? +(((shares - ct * d * 100) / shares) * 100).toFixed(0) : 0,
@@ -923,6 +942,7 @@ Deno.serve(async (req) => {
     conviction, convictionParts: cv, peerPrints,
     hedge: { carryPerDay: Math.round(carryPerDay), tradeCal, margin: HEDGE_MARGIN,
              needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
+    income: { weekly: WEEKLY_INCOME, perTrade: Math.round(WEEKLY_INCOME / (expDays > 0 ? 5 / expDays : 2.5)) },
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
     otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
