@@ -112,20 +112,24 @@ Deno.serve(async (req) => {
   async function seededDates(ticker: string): Promise<string[]> {
     try {
       const since = ymd(new Date(Date.now() - 400 * 86400000));
-      const r = await fetch(`${supaUrl}/rest/v1/earnings_events?select=report_date&ticker=eq.${ticker}`
+      const r = await fetch(`${supaUrl}/rest/v1/earnings_events?select=report_date,report_time&ticker=eq.${ticker}`
         + `&report_date=gte.${since}&report_date=lte.${ymd(new Date())}&order=report_date.desc&limit=12`,
         { headers: { apikey: supaKey!, Authorization: `Bearer ${supaKey}` } });
       if (!r.ok) return [];
-      return ((await r.json()) as { report_date: string }[]).map((x) => String(x.report_date).slice(0, 10));
+      return ((await r.json()) as { report_date: string; report_time?: string }[])
+        .map((x) => `${String(x.report_date).slice(0, 10)}|${x.report_time ?? 'tba'}`);
     } catch { return []; }
   }
 
   for (const ticker of tickers) {
     const [filed, seeded] = await Promise.all([filingDates(ticker, key, limit), seededDates(ticker)]);
-    const dates = [...new Set([...seeded, ...filed])];
+    const dates = [...new Set([...seeded, ...filed.filter((f) => !seeded.some((x) => x.startsWith(f)))])];
     report[ticker] = { prints: dates.length, measured: 0, seeded: seeded.length };
 
-    for (const d of dates) {
+    for (const entry of dates) {
+      // Seeded entries carry '|amc' or '|bmo'. Filing dates do not, and still get guessed.
+      const [d, rtime] = entry.split('|');
+      const seenAt = rtime ? { date: d, time: rtime } : null;
       const day = new Date(d + 'T00:00:00Z');
       // A window wide enough to hold the session before and 30 sessions after,
       // with slack for weekends and holidays.
@@ -149,15 +153,30 @@ Deno.serve(async (req) => {
       // largest close-to-close move. On a mega-cap the biggest day of a quarter is
       // almost always the print. Anything under 3% is not a reaction worth calling
       // one, so the quarter is skipped rather than guessed at.
+      //
+      // A CONFIRMED report date needs no guessing at all. Guessing where we already knew
+      // got AMD's 5 Aug 2026 print exactly backwards: the search picked a +13% session
+      // when the stock actually fell ~5% on the print, and that sign error fed +5.6 into
+      // the planner's conviction. A heuristic belongs where there is no better
+      // information, never where there is.
       let i = -1, biggest = 0;
-      // Also was `- 30`, for the same reason: it refused to look at any session that
-      // did not already have thirty behind it. The reaction is measurable the day after
-      // it happens; the PATHS are what need time, and those are now nullable.
-      for (let k = 1; k < bars.length; k++) {
+      if (seenAt) {
+        // AMC prints reprice the NEXT session; BMO prints reprice the same day.
+        const day = bars.findIndex((x) => ymd(new Date(x.t)) >= seenAt.date);
+        const hit = day >= 0 ? day + (seenAt.time === 'amc' ? 1 : 0) : -1;
+        if (hit >= 1 && hit < bars.length) {
+          i = hit;
+          biggest = Math.abs((bars[i].c - bars[i - 1].c) / bars[i - 1].c) * 100;
+        }
+      }
+      // The search only runs when the date was a guess to begin with.
+      for (let k = 1; i < 0 && k < bars.length; k++) {
         const mv = Math.abs((bars[k].c - bars[k - 1].c) / bars[k - 1].c) * 100;
         if (mv > biggest) { biggest = mv; i = k; }
       }
-      if (i < 1 || biggest < 3) continue;
+      // A confirmed date is measured whatever the move was: a 1% reaction to a print is
+      // a fact about that print. Only a GUESSED date needs a floor to stay credible.
+      if (i < 1 || (!seenAt && biggest < 3)) continue;
 
       const before = bars[i - 1].c, after = bars[i].c;
       if (!(before > 0) || !(after > 0)) continue;
