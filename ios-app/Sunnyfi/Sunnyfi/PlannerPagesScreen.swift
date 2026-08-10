@@ -100,6 +100,7 @@ struct PlannerPagesScreen: View {
                     .background(PP.lossHue.opacity(0.9), in: Capsule())
                     .padding(.leading, PP.pagePadX)
                     .padding(.top, 46)
+                    .safeAreaPadding(.top)
             }
 
             Button(action: onBack) {
@@ -109,8 +110,9 @@ struct PlannerPagesScreen: View {
             }
             .foregroundStyle(.white)
             .blendMode(.difference)          // one control, both grounds
-            .padding(.leading, PP.pagePadX - 14)
-            .padding(.top, 14)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.trailing, PP.pagePadX - 14)
+            .safeAreaPadding(.top)
         }
         .task {
             await plan.load(from: store, ticker: ticker)

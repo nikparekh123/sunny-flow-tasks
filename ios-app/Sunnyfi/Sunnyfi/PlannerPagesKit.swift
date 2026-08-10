@@ -104,7 +104,10 @@ struct PPPage<Head: View, Base: View>: View {
         .padding(.top, PP.pagePadTop)
         .padding(.horizontal, PP.pagePadX)
         .padding(.bottom, PP.pagePadBottom)
-        .background(PP.background(ground))
+        // The design's 56pt top padding assumes a device frame with no status bar.
+        // On a real phone that put the date under the clock and the close control.
+        .safeAreaPadding(.top)
+        .background(PP.background(ground).ignoresSafeArea())
         .foregroundStyle(PP.text(ground))
     }
 }
@@ -126,12 +129,19 @@ struct PPNum: View {
                 .font(PP.disp(size, .semibold))
                 .tracking(size * -0.055)
                 .monospacedDigit()
+                .lineLimit(1)
+                // 110pt with negative tracking overflows a 390pt screen at four
+                // glyphs. Shrinking is the only acceptable failure here: wrapping
+                // turned 220 into "22" over "0", which reads as a different number.
+                .minimumScaleFactor(0.45)
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(hue ?? PP.text(ground))
             if let unit {
                 Text(unit)
                     .font(PP.disp(24))
                     .foregroundStyle(PP.dim(ground))
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
             }
         }
         // line-height .86 in the design: the hero is meant to sit tight to its
