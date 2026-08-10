@@ -229,6 +229,7 @@ Deno.serve(async (req) => {
     ? await Promise.all([nearestSpot(key, TICKER), callExpiries(nowISO, key, TICKER)])
     : [null, [] as string[]];
   const spot = (b.spot as number) ?? polySpot ?? 0;
+  const expiryDates = (polyExpiries.length ? polyExpiries : fallbackExpiries(nowISO)).slice(0, 6);
   if (!spot) return json(200, { ok: false, error: 'no spot' });
 
   // ── ticker_stats (technicals for Upside Room) ──
@@ -680,6 +681,97 @@ Deno.serve(async (req) => {
   // Keep is a share of the SHARE BLOCK, which is how you actually think about it:
   // "keep 1,500 shares uncovered". The budget is whatever upside sits above that.
   keepPct = Math.round(keepPct);
+  // ── the keep model ──────────────────────────────────────────────────────────
+  // docs/PLANNER_KEEP_MODEL.md. Keep is measured in DELTA, not shares. Nik's three
+  // pre-earnings answers were 32/50/20% of SHARES and all landed on ~77% of delta —
+  // he varied count and strike in opposite directions and they cancelled. The share
+  // number was the route; delta was the destination he was actually steering to.
+  //
+  // So the baseline is ONE number per event state and price state does not appear in
+  // it at all. Price decides the distance, distance decides the delta per contract,
+  // and the count falls out of the arithmetic.
+  const evState = daysToEarnings <= 7 ? 'PRE' : daysSincePrint <= 5 ? 'POST' : 'CLEAR';
+  const reactMove = lastReaction ? Number(lastReaction.move_pct) : null;
+  const pxMove = evState === 'POST' && reactMove != null ? reactMove : (relStrength?.self ?? 0);
+  const pxState = pxMove <= -8 ? 'down' : pxMove >= 8 ? 'up' : 'flat';
+
+  const BASE_KEEP: Record<string, number> = { PRE: 77, CLEAR: 68, POST: 59 };
+  const BASE_OTM: Record<string, number> = {
+    'PRE|down': 1.5, 'PRE|flat': 0.0, 'PRE|up': 2.5,
+    'CLEAR|down': 1.5, 'CLEAR|flat': 1.5, 'CLEAR|up': 2.0,
+    'POST|down': 0.5, 'POST|flat': 1.5, 'POST|up': 2.0 };
+  // Every modifier measures DEVIATION from what the cell already implies. Absolute
+  // readings double-count: "SMH above its 200-day" is true most weeks of a bull market
+  // and, scored raw, quietly added points to every single reading.
+  const RSI_EXP: Record<string, number> = { down: 30, flat: 50, up: 70 };
+  const GRADE_EXP: Record<string, number> = { down: 2, flat: 5, up: 9 };
+  const REL_EXP: Record<string, number> = { down: -8, flat: 0, up: 12 };
+  const DK = 1 / 2.8;                         // share-points -> delta-points
+
+  // The grade is the one input no feed supplies: was that actually a good quarter?
+  // Only meaningful inside the post-print window, and it decays out over 60 sessions.
+  const grade = b.earningsGrade != null ? Number(b.earningsGrade) : null;
+  const gDecay = clamp((60 - daysSincePrint) / 50, 0, 1);
+  const nextExp = expiryDates[0] ?? null, secondExp = expiryDates[1] ?? null;
+  const macroHit = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3)[0] ?? null;
+  const peerHit = peers.filter((x) => x.days >= 0).sort((x, y) => x.days - y.days)[0] ?? null;
+  const inWindow = (d: string) => (nextExp && d <= nextExp ? 2 : secondExp && d <= secondExp ? 1 : 0);
+
+  const mods: Record<string, number> = {
+    iv:     clamp(-4 * (ivPct - 50) / 50, -4, 4) * DK,
+    grade:  grade != null ? clamp((grade - GRADE_EXP[pxState]) * 2.5 * gDecay, -10, 10) * DK : 0,
+    rel:    relStrength ? clamp((relStrength.gap - REL_EXP[pxState]) * 0.4, -5, 5) * DK : 0,
+    // Needs SMH against its OWN 200-day and its own norm. daily_closes holds ~12 rows
+    // for SMH, so this reads zero rather than guessing. Silence, not a fabricated zero.
+    sector: 0,
+    rsi:    technicals.rsi14 != null ? clamp((technicals.rsi14 - RSI_EXP[pxState]) * 0.15, -4, 4) * DK : 0,
+    macro:  macroHit ? [0, 2, 4][inWindow(macroHit.date)] * DK : 0,
+    peer:   peerHit ? [0, 1.5, 3][inWindow(peerHit.date)] * DK : 0,
+  };
+  const modRaw = +Object.values(mods).reduce((a, v) => a + v, 0).toFixed(2);
+  const keepTarget = clamp(BASE_KEEP[evState] + clamp(modRaw, -5, 5), 55, 95);
+
+  // Distance, scaled by sqrt(time). A fixed % OTM does not hold its delta across expiry
+  // lengths: 1.5% out is 36 delta on a four-day and 30 on a two-day. NVDA expires Mon,
+  // Wed and Fri, so this is not an edge case.
+  const expDays = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).td) : 2;
+  const tScale = Math.sqrt(expDays / 4);
+  const otmTarget = clamp((BASE_OTM[`${evState}|${pxState}`] + clamp((ivPct - 50) / 50, -.5, 1)) * tScale, 0, 4);
+  const targetStrike = Math.round(spot * (1 + otmTarget / 100) / STRIKE_STEP) * STRIKE_STEP;
+
+  // Contract count is arithmetic. Covered calls cannot sell unlimited delta — 75 of them
+  // at 3% out reach only ~2,200 — so when the target is out of reach the pick REPORTS the
+  // shortfall rather than silently pulling the strike closer to hide it.
+  const planT = Math.max(expDays, .25) / 252;
+  const maxCt = Math.floor(shares / 100);
+  const mkPick = (k: number) => {
+    const d = bsDelta(spot, k, planT, iv / 100);
+    const want = ((100 - keepTarget) / 100) * shares;
+    const rawCt = d > 0 ? want / (d * 100) : 0;
+    const ct = Math.max(0, Math.min(Math.round(rawCt), maxCt));
+    const prem = bsCall(spot, k, planT, iv / 100);
+    return { strike: k, otmPct: +(((k - spot) / spot) * 100).toFixed(2),
+             delta: Math.round(d * 100), ct, capped: Math.round(rawCt) > maxCt,
+             keptPct: shares > 0 ? +(((shares - ct * d * 100) / shares) * 100).toFixed(0) : 0,
+             prem: +prem.toFixed(2), income: Math.round(prem * 100 * ct),
+             assign: +bsAssign(spot, k, planT, iv / 100).toFixed(2) };
+  };
+  const plan = {
+    event: evState, price: pxState, priceMove: +pxMove.toFixed(1),
+    baseline: BASE_KEEP[evState], modifiers: mods, modRaw,
+    keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
+    otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
+    // One sigma over the life of the trade. Without it "out of the money" reads as safe:
+    // at 40% IV over two sessions a strike 2.8% out sits INSIDE one sigma.
+    expectedMove: +(spot * (iv / 100) * Math.sqrt(expDays / 252)).toFixed(2),
+    grade, gradeDecay: +gDecay.toFixed(2),
+    picks: [targetStrike, targetStrike - STRIKE_STEP, targetStrike + STRIKE_STEP].map(mkPick),
+  };
+  // The old drawdown/IV/measured chain no longer decides this. It stays computed above
+  // because keepWhy still reads well, but the number itself now comes from the model.
+  keepPct = plan.keepPct;
+  keepWhy.unshift(`${evState.toLowerCase()} week, baseline ${BASE_KEEP[evState]}% of delta`);
+
   const keepDelta = Math.round(shares * keepPct / 100);
   const hardFloor = keepDelta;
   const room = Math.max(0, upsideDelta - hardFloor);
@@ -690,8 +782,6 @@ Deno.serve(async (req) => {
   // Named and worded for a reader, not a desk. Every label answers a question a
   // person would actually ask, and every push line is a sentence rather than a
   // term of art. The maths is unchanged.
-  const expiryDates = (polyExpiries.length ? polyExpiries : fallbackExpiries(nowISO)).slice(0, 6);
-
   const wf: { key: string; family: string; name: string; w: number; score: number; rows: [string, string][]; push: string }[] = [];
   wf.push({ key: 'iv_pctile', family: 'OPTIONS MARKET', name: 'OPTION PRICING', w: .16, score: sPct(ivPct),
     rows: [['vs the past year', `${Math.round(ivPct)} out of 100`], ['option pricing now', `${iv.toFixed(1)}%`], ['size multiplier', pctFactor.toFixed(2)]],
@@ -1361,7 +1451,7 @@ Deno.serve(async (req) => {
     ok: true, asOf: new Date().toISOString(),
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
-    week, posture, events, refLots, ticker: TICKER, ivMedian, splits, floorAdvice, observations,
+    week, posture, events, refLots, ticker: TICKER, ivMedian, splits, floorAdvice, observations, plan,
     capacity: cap.map((f) => ({ key: f.key, family: f.family, name: f.name, score: +f.score.toFixed(1), rows: f.rows, push: f.push })),
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },
     budget: { room, hardFloor, aggression: +aggression.toFixed(3), delta: budget, capacityCt, style, rollingCt },
