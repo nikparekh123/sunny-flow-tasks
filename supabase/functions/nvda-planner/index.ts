@@ -747,7 +747,18 @@ Deno.serve(async (req) => {
     : evState === 'POST' && reactMove != null ? reactMove : (relStrength?.self ?? 0);
   const pxState = pxMove <= -8 ? 'down' : pxMove >= 8 ? 'up' : 'flat';
 
-  const BASE_KEEP: Record<string, number> = { PRE: 77, CLEAR: 68, POST: 59 };
+  // CLEAR was 68, extrapolated rather than calibrated — it was the one cell Nik never
+  // gave an answer for. He has now: 60-70% of 75 contracts on an ordinary week, which
+  // is a keep near 71% and a baseline of 65.
+  //
+  // The reasoning behind it matters more than the number. ROLLING DEFEATS DRIFT; IT DOES
+  // NOT DEFEAT GAPS. A grind from 224 to 250 gets rolled up the whole way and you keep
+  // nearly all of it. A gap there in one session you eat. Since a clear week's only real
+  // risk is drift, caution belongs in PRE and POST, where the gap lives, not here.
+  //
+  // The arithmetic: a 10% gap costs about $78k against the cap, and three rolls a week
+  // collect about $34k. Roughly 2.3 weeks of premium pays for one gap.
+  const BASE_KEEP: Record<string, number> = { PRE: 77, CLEAR: 65, POST: 59 };
   const BASE_OTM: Record<string, number> = {
     'PRE|down': 1.5, 'PRE|flat': 0.0, 'PRE|up': 2.5,
     'CLEAR|down': 1.5, 'CLEAR|flat': 1.5, 'CLEAR|up': 2.0,
@@ -817,7 +828,11 @@ Deno.serve(async (req) => {
   // as the one direct keep modifier. Rich premium is a reason to sell, not to be bearish.
   const mods: Record<string, number> = {
     conviction: (conviction - 50) * 0.25,
-    iv: clamp(-4 * (ivPct - 50) / 50, -4, 4) * DK,
+    // Was capped at +-4 pre-scaling, so +-1.4 points of keep: about four contracts
+    // across the ENTIRE range from cheapest to richest options of the year. For a
+    // strategy whose whole income is selling volatility, that is no say at all.
+    // Now +-11, so roughly +-4 points, which can lean in without outvoting conviction.
+    iv: clamp(-11 * (ivPct - 50) / 50, -11, 11) * DK,
   };
   const modRaw = +Object.values(mods).reduce((a, v) => a + v, 0).toFixed(2);
   const readings = mods.iv, gradeMod = cv.grade;
@@ -880,7 +895,7 @@ Deno.serve(async (req) => {
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
     baseline: BASE_KEEP[evState], modifiers: mods, modRaw, readings, gradeMod,
-    conviction, convictionParts: cv,
+    conviction, convictionParts: cv, peerPrints,
     hedge: { carryPerDay: Math.round(carryPerDay), tradeCal, margin: HEDGE_MARGIN,
              needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
