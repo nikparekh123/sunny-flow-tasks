@@ -77,10 +77,11 @@ struct PPSellPage: View {
         PPPage(ground: .paper) {
             HStack(alignment: .firstTextBaseline) {
                 PPKicker(text: "what to sell", ground: .paper)
+                    .foregroundStyle(PP.paperText)
                 Spacer()
                 Text("\(Self.today()) · \(f2(spot))".uppercased())
                     .font(PP.mono(10.5)).tracking(10.5 * 0.08)
-                    .foregroundStyle(PP.dim(.paper))
+                    .foregroundStyle(PP.paperText)
             }
             // What is being rolled out of. Without it the expiry choice has no anchor.
             PPFine(text: {
@@ -158,16 +159,16 @@ private struct PPOptionPanel: View {
                 Spacer()
                 Text(([chain.expDays.map { "\($0)d to run" }, chain.event]
                     .compactMap { $0 }.joined(separator: " · ")).uppercased())
-                    .foregroundStyle(PP.dim(.paper))
+                    .foregroundStyle(PP.paperText)
             }
             .font(PP.mono(9.5)).tracking(9.5 * 0.14)
             .lineLimit(1).minimumScaleFactor(0.75)
 
             // The tier is the option's NAME, not a label — it reads first, as a word.
             Text((pick.tier ?? "").prefix(1).uppercased() + (pick.tier ?? "").dropFirst())
-                .font(PP.disp(30, .semibold))
+                .font(PP.disp(34, .semibold))
             if let st = pick.stance {
-                Text(st).font(PP.disp(15)).lineSpacing(15 * 0.35)
+                Text(st).font(PP.disp(18)).lineSpacing(18 * 0.3)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -181,10 +182,12 @@ private struct PPOptionPanel: View {
                   pick.iv.map { "iv \(f1($0))" },
                   pick.otmPct.map { "\(f1($0))% out" }]
                 .compactMap { $0 }.joined(separator: " · ").uppercased())
-                .font(PP.mono(10)).tracking(10 * 0.06)
-                .foregroundStyle(PP.dim(.paper))
+                .font(PP.mono(11.5)).tracking(11.5 * 0.06)
+                .foregroundStyle(PP.paperText)
             if let note = chain.note {
-                PPFine(text: note, ground: .paper, topPad: 0)
+                Text(note).font(PP.disp(15)).lineSpacing(15 * 0.4)
+                    .foregroundStyle(PP.paperText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             // The whole story: above the strike, between, below.
@@ -194,10 +197,10 @@ private struct PPOptionPanel: View {
                     ForEach(Array(ws.enumerated()), id: \.offset) { _, w in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text((w.when ?? "").uppercased())
-                                .font(PP.mono(9.5)).tracking(9.5 * 0.04)
-                                .foregroundStyle(PP.dim(.paper))
-                                .frame(width: 88, alignment: .leading)
-                            Text(w.then ?? "").font(PP.disp(14)).lineSpacing(14 * 0.3)
+                                .font(PP.mono(11)).tracking(11 * 0.04)
+                                .foregroundStyle(PP.paperText)
+                                .frame(width: 100, alignment: .leading)
+                            Text(w.then ?? "").font(PP.disp(17)).lineSpacing(17 * 0.28)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
@@ -212,29 +215,18 @@ private struct PPOptionPanel: View {
             let credit = pick.income ?? ((pick.prem ?? 0) * Double(pick.ct ?? 0) * 100)
             PPNum(value: pick.label ?? usdK(credit),
                   unit: pick.creditPerDayLabel.map { "credit · \($0)" } ?? "credit",
-                  size: 68, ground: .paper)
+                  size: 88, ground: .paper)
             if let be = pick.be {
-                PPFine(text: "\(f2(pick.prem ?? 0)) a share, breakeven \(f2(be))"
-                       + (pick.beBasisPct.map { " — \(f1($0))% over your \(f2(r.book?.buyAvg ?? 0)) basis" } ?? "")
-                       + ".", ground: .paper)
+                // No em dash: a comma reads as one continuous sentence, which is
+                // what this is.
+                Text("\(f2(pick.prem ?? 0)) a share, breakeven \(f2(be))"
+                     + (pick.beBasisPct.map { ", \(f1($0))% over your \(f2(r.book?.buyAvg ?? 0)) basis" } ?? "")
+                     + ".")
+                    .font(PP.disp(15)).lineSpacing(15 * 0.4)
+                    .foregroundStyle(PP.paperText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 9)
             }
-            if let out = pick.out {
-                Text(("if called at \(f2(pick.strike ?? 0))"
-                      + (r.outcome?.realisedLabel.map { " · includes \($0) realised" } ?? "")).uppercased())
-                    .font(PP.mono(9.5)).tracking(9.5 * 0.08)
-                    .foregroundStyle(PP.dim(.paper))
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .padding(.top, 12)
-                HStack(alignment: .top, spacing: 10) {
-                    trio(out.opt, "options")
-                    trio(out.stockOpt, "stock + options")
-                    // Null when realised P&L was not sent — an em dash, never a zero.
-                    trio(out.all, "all-in")
-                }
-                .padding(.top, 10)
-                .overlay(alignment: .top) { Rectangle().fill(PP.hairline(.paper)).frame(height: 1) }
-            }
-
             PPConfirm(pick: pick, chain: chain, tier: pick.tier ?? "",
                       isLive: isLive, hasCommit: commit != nil,
                       onLabel: commit?.onLabel, ticked: $ticked) {
@@ -253,19 +245,9 @@ private struct PPOptionPanel: View {
     }
 
     @ViewBuilder private func pill(_ t: String) -> some View {
-        Text(t).font(PP.mono(11))
-            .padding(.horizontal, 12).frame(minHeight: 28)
+        Text(t).font(PP.mono(13))
+            .padding(.horizontal, 14).frame(minHeight: 34)
             .overlay(Capsule().strokeBorder(PP.paperText.opacity(0.22), lineWidth: 1))
-    }
-    @ViewBuilder private func trio(_ value: String?, _ label: String) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(value ?? "—").font(PP.mono(16)).monospacedDigit()
-                .foregroundStyle(PP.paperText).lineLimit(1).minimumScaleFactor(0.7)
-            Text(label.uppercased()).font(PP.mono(9.5)).tracking(9.5 * 0.1)
-                .foregroundStyle(PP.dim(.paper))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -289,7 +271,7 @@ private struct PPConfirm: View {
                 HStack(alignment: .top, spacing: 11) {
                     box(true)
                     Text("Executed \(line)." + (onLabel.map { " Logged \($0)." } ?? ""))
-                        .font(PP.disp(12)).fixedSize(horizontal: false, vertical: true)
+                        .font(PP.disp(14)).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.top, 13)
             } else {
@@ -297,7 +279,7 @@ private struct PPConfirm: View {
                     HStack(alignment: .top, spacing: 11) {
                         box(ticked)
                         Text("This is what is executed: \(line).")
-                            .font(PP.disp(12)).multilineTextAlignment(.leading)
+                            .font(PP.disp(14)).multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -309,7 +291,7 @@ private struct PPConfirm: View {
                         Spacer()
                         Text(tier.uppercased()).opacity(0.6).font(PP.mono(9.2))
                     }
-                    .font(PP.mono(11.5)).tracking(11.5 * 0.06)
+                    .font(PP.mono(13)).tracking(13 * 0.06)
                     .foregroundStyle(ticked ? PP.paperMid : PP.paperText.opacity(0.45))
                     .padding(.vertical, 15).padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -348,7 +330,7 @@ private struct PPOptRail: View {
             }
             Spacer()
             Text("\(idx + 1) / \(count)").font(PP.mono(9.5)).tracking(9.5 * 0.12)
-                .foregroundStyle(PP.dim(.paper))
+                .foregroundStyle(PP.paperText)
         }
         .padding(.top, 14)
     }

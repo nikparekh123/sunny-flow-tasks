@@ -1406,7 +1406,7 @@ Deno.serve(async (req) => {
     // Null on a clear week. A string here is a consequence, not a label: it is why
     // this week's count is smaller than the one beside it.
     note: x.printInside && printISO
-      ? `The ${fmtDay(printISO)} print lands inside this expiry — conviction sizes it down.`
+      ? `The ${fmtDay(printISO)} print lands inside this expiry, and conviction sizes it down.`
       : null,
     keepPct: +x.keepTarget.toFixed(0),
     // The neutral-50 sale for this week, so "conviction cut this from 45 lots to 15"
@@ -1425,14 +1425,16 @@ Deno.serve(async (req) => {
          the app because it has to name real figures, and a sentence assembled from
          numbers the client re-derived is a sentence that can contradict them. */
       const stance = isRec && !x.printInside
-        ? `The size conviction sized. Caps the top of the expected move and nothing below it.`
+        // Nothing. "Conviction sized this" is already in the row above, and saying
+        // it twice in different words was the weakest sentence on the page.
+        ? null
         : tier === 'conservative'
         // "Caps almost nothing" was an assumption about the furthest tier, and on a
         // two-day expiry it was flatly wrong: 75 lots at 2.7% out covers EVERY share.
         // Read what is actually left uncapped instead of asserting a shape.
         ? (free > 0
-            ? `The furthest of the three at ${pk.otmPct.toFixed(1)}% out. ${pk.ct} lots, and ${free.toLocaleString('en-US')} shares still run free.`
-            : `${pk.ct} lots at ${pk.otmPct.toFixed(1)}% out — the furthest strike on offer, but it covers every share you hold.`)
+            ? `Caps almost nothing. ${pk.ct} lots, ${pk.otmPct.toFixed(1)}% out, so if the run comes you are still in it.`
+            : `${pk.ct} lots at ${pk.otmPct.toFixed(1)}% out, the furthest strike on offer, but it covers every share you hold.`)
         : tier === 'balanced'
         ? (x.printInside
             ? `Sells the print at ${pk.otmPct.toFixed(1)}% out. Conviction cut this from ${pk.wasCt} lots to ${pk.ct}.`
@@ -1446,10 +1448,12 @@ Deno.serve(async (req) => {
           then: onBasis != null && tier !== 'conservative'
             ? `${calledSh.toLocaleString('en-US')} called at ${pk.strike.toFixed(2)}, ${fmtUsd(onBasis, true)} on basis.`
             : `${calledSh.toLocaleString('en-US')} called. ${free.toLocaleString('en-US')} shares run free.` },
-        { when: `${Math.round(spot)} to ${pk.strike}`,
-          then: `Nothing called. ${fmtUsd(pk.income)} kept${x.expDays <= 3 ? ` in ${days}` : ''}.` },
+        // The middle row — "nothing called, the credit is yours" — is what BOTH
+        // other rows already imply, and it was the one nobody read.
         { when: `under ${Math.round(spot)}`,
-          then: `${pk.prem.toFixed(2)} a share of cushion, then the floor.` },
+          then: tier === 'aggressive'
+            ? `${pk.prem.toFixed(2)} of cushion, the deepest of the three.`
+            : `${pk.prem.toFixed(2)} a share of cushion, then the floor.` },
       ];
       return { ...pk, tier, rec: isRec, stance, worlds,
                // The design prints this verbatim; a number here would be re-formatted

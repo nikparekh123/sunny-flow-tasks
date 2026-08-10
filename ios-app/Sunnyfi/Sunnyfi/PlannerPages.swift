@@ -204,7 +204,7 @@ struct PPFloorPage: View {
             }
             if let pay = fl?.payoff, let pts = pay.points, pts.count >= 3 {
                 PPFloorChart(pay: pay, fl: fl, shares: r.book?.shares ?? 0)
-                PPFine(text: "Below \(Int(fl?.floor ?? 0)) the line keeps falling — the floor covers "
+                PPFine(text: "Below \(Int(fl?.floor ?? 0)) the line keeps falling: the floor covers "
                        + "\(grouped(fl?.covers ?? 0)) shares, not the book. What it buys is the "
                        + "shallower slope, not a flat one.", ground: .ink, topPad: 0)
             }
@@ -375,7 +375,7 @@ struct PPGradePage: View {
                 PPSay(text: "No quarter to grade yet.", ground: .ink)
                 PPFine(text: "A print becomes gradeable the morning after it lands"
                        + (q?.nextPrint.map { ". The next one is \(Self.shortDate($0))" } ?? "")
-                       + ". Nothing is backfilled — a grade given months late is not the "
+                       + ". Nothing is backfilled: a grade given months late is not the "
                        + "one you would have given at the time.", ground: .ink)
             }
         } base: {
