@@ -877,6 +877,7 @@ Deno.serve(async (req) => {
   const tradeCal = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).cal) : 2;
   const hedgeNeeds = Math.round(carryPerDay * tradeCal * HEDGE_MARGIN);
   const mkPick = (k: number) => {
+    const rollsWk = expDays > 0 ? 5 / expDays : 2.5;
     const q = quotes.get(k);
     const tradeable = !!q && q.mid > 0 && q.bid > 0;
     // Delta from the market when it is quoting one; the model only fills gaps.
@@ -905,7 +906,6 @@ Deno.serve(async (req) => {
     // cap — when in practice the cushion compounds three times a week while the strike
     // ratchets up behind the stock. Rolling defeats DRIFT. It is gaps it cannot defeat,
     // which is why this cushion is quoted next to the gap test rather than alone.
-    const rollsWk = expDays > 0 ? 5 / expDays : 2.5;
     const cushWk = prem * rollsWk, cushMo = cushWk * 4.3;
 
     // What the cap actually costs on a jump, against what you collect waiting for one.
