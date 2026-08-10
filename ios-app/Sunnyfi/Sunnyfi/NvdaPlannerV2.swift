@@ -71,6 +71,33 @@ struct PV2: Decodable, Sendable {
     var floorAdvice: FloorAdvice?
     var regime: Regime?
     var observations: Obs?
+    var plan: Plan?
+    /// The keep model. Conviction is a view on the stock; keep is what follows from it
+    /// plus the event state; the hedge floor can override both.
+    struct Plan: Decodable, Sendable {
+        var event, price: String?
+        var conviction, keepPct, baseline: Double?
+        var keepDelta, targetStrike, otmTarget, expectedMove: Double?
+        var expiry: String?
+        var expDays: Double?
+        var grade: Double?
+        var convictionParts: [String: Double]?
+        var hedge: Hedge?
+        var picks: [Pick]?
+        var pickList: [Pick] { picks ?? [] }
+        struct Hedge: Decodable, Sendable {
+            var carryPerDay, tradeCal, needs, quarterRunRate, margin: Double?
+        }
+        // Every numeric optional on purpose: a field the edge stops sending must degrade
+        // the card, never fail the whole decode. Learned the hard way from `load`.
+        struct Pick: Decodable, Sendable, Identifiable {
+            var strike, otmPct, prem, assign, covers: Double?
+            var delta, ct, wantCt, minCt, keptPct, income: Double?
+            var floorBinds, capped: Bool?
+            var id: Double { strike ?? 0 }
+            var binds: Bool { floorBinds ?? false }
+        }
+    }
     /// The observer. Six domains, one line each, and a `silent` list naming the
     /// domains that had no data — which the card shows rather than hides.
     struct Obs: Decodable, Sendable {

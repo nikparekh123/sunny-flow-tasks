@@ -25,16 +25,8 @@ struct NvdaMorningCard: View {
     let shares: Double
     let buyAvg: Double
     let realized: Double          // closed P&L to date, options + shares
+    var iv: Double? = nil
     var ticker: String = "NVDA"
-
-    private var picks: [PV2.Cell] {
-        // Top three across the two nearest expiries. `fit` is strike-varying, so it is
-        // the right ranking here; the week score sizes the trade, it does not choose.
-        let pool = pv.expiries?.prefix(2).flatMap(\.cells) ?? []
-        return Array(pool.filter { ($0.blocks ?? []).isEmpty }
-            .sorted { ($0.fit ?? 0) > ($1.fit ?? 0) }
-            .prefix(3))
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,9 +39,11 @@ struct NvdaMorningCard: View {
                 if !o.mattersList.isEmpty { divider; list("What matters this week", o.mattersList) }
                 if !o.quietList.isEmpty { divider; list("What won't matter this week", o.quietList) }
             }
+            // The floor is rolled FIRST, as its own decision, so it is read before the
+            // sell decision rather than after it.
+            if let f = pv.floorAdvice { divider; floor(f) }
             divider
             whatToSell
-            if let f = pv.floorAdvice { divider; floor(f) }
             divider
             pnl
         }
@@ -96,27 +90,52 @@ struct NvdaMorningCard: View {
         }
     }
 
+    /// Conviction is a view on the STOCK. Keep is what follows from it plus the event
+    /// state. They are shown apart so a disagreement can be about one and not the other.
     private var scoreAndStory: some View {
-        section("Score and story") {
-            HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("\(pv.week?.score ?? 0)")
-                        .font(InkFont.mono(42, .medium)).tracking(42 * -0.04)
-                    Text("OF 100").font(InkFont.mono(9)).tracking(9 * 0.17).foregroundStyle(Ink.dim)
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(pv.regime?.name ?? "").font(InkFont.mono(15)).tracking(15 * 0.04)
-                    if let r = pv.regime {
-                        Text("KEEP \(Int(r.keepDelta ?? 0).formatted()) SHARES OF UPSIDE · \(r.keepPct)%")
-                            .font(InkFont.mono(10)).tracking(10 * 0.13).foregroundStyle(Ink.dim)
+        section("Where this sits") {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top, spacing: 26) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(Int(pv.plan?.conviction ?? 0))")
+                            .font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
+                        Text("CONVICTION").font(InkFont.mono(9)).tracking(9 * 0.17).foregroundStyle(Ink.dim)
                     }
-                    if let why = pv.regime?.why {
-                        Text(why).font(.system(size: 14.5)).padding(.top, 4)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(paidLabel).font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
+                        Text("PAID VS NORMAL").font(InkFont.mono(9)).tracking(9 * 0.17).foregroundStyle(Ink.dim)
+                    }
+                    Spacer(minLength: 0)
+                }
+                if let p = pv.plan {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("KEEP \(Int(p.keepPct ?? 0))% · \(Int(p.keepDelta ?? 0).formatted()) OF \(Int(shares).formatted()) DELTA")
+                            .font(InkFont.mono(11)).tracking(11 * 0.12)
+                        Text("\((p.event ?? "").replacingOccurrences(of: "CLEAR", with: "CLEAR WEEK")) · \((p.price ?? "").uppercased())")
+                            .font(InkFont.mono(10)).tracking(10 * 0.13).foregroundStyle(Ink.dim)
+                        if let why = pv.regime?.why {
+                            Text(why).font(.system(size: 14.5)).padding(.top, 2)
+                        }
+                        // How far the tool moved you from your own default, and which part
+                        // was instruments versus your own read. The audit line.
+                        Text("BASELINE \(Int(p.baseline ?? 0)) · CONVICTION MOVED IT \(moved)")
+                            .font(InkFont.mono(9)).tracking(9 * 0.15).foregroundStyle(Ink.dim).padding(.top, 4)
                     }
                 }
             }
             .foregroundStyle(Ink.text)
         }
+    }
+
+    private var paidLabel: String {
+        guard let m = pv.ivMedian, m > 0, let now = iv else { return "—" }
+        let x = (now / m - 1) * 100
+        return "\(x >= 0 ? "+" : "")\(mcDec(x, 0))%"
+    }
+    private var moved: String {
+        guard let p = pv.plan, let k = p.keepPct, let b = p.baseline else { return "—" }
+        let d = k - b
+        return "\(d >= 0 ? "+" : "")\(mcDec(d, 0))"
     }
 
     private func list(_ title: String, _ lines: [PV2.Obs.Line]) -> some View {
@@ -142,30 +161,29 @@ struct NvdaMorningCard: View {
     }
 
     private var whatToSell: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            eyebrow("What to sell", right: picks.isEmpty ? nil : "\(picks.count) picks")
-                .foregroundStyle(Ink.invertText)
+        let picks = pv.plan?.pickList ?? []
+        return VStack(alignment: .leading, spacing: 0) {
+            eyebrow("What to sell", right: expiryLabel).foregroundStyle(Ink.invertText)
             if picks.isEmpty {
-                // A card that always produces an order becomes a treadmill that writes
-                // calls in weeks that do not pay for the floor. Declining is an answer.
                 Text("Nothing worth selling").font(InkFont.mono(20)).foregroundStyle(Ink.invertText)
-                Text("Every strike on the board is blocked or fails to cover the floor's carry.")
+                Text("Nothing on the board pays for the hedge.")
                     .font(.system(size: 14.5)).foregroundStyle(Ink.invertText).padding(.top, 10)
             } else {
                 ForEach(Array(picks.enumerated()), id: \.element.id) { i, c in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("\(i + 1)").font(InkFont.mono(12)).frame(width: 14, alignment: .leading)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("sell \(c.suggestCt ?? 0) at \(mcDec(c.strike, c.strike == c.strike.rounded() ? 0 : 1))")
-                                .font(InkFont.mono(17))
-                            Text("\(Int((c.delta * 100).rounded()))\u{0394} · \(Int((c.assign * 100).rounded()))% CALLED")
+                            Text("\(Int(c.ct ?? 0)) at \(mcDec(c.strike ?? 0, 2))").font(InkFont.mono(17))
+                            // Delta KEPT, not just delta sold. Without it the three picks are
+                            // not comparable and this is only a list of prices.
+                            Text("\(mcDec(c.otmPct ?? 0, 2))% OUT · \(Int(c.delta ?? 0))\u{0394} · KEPT \(Int(c.keptPct ?? 0))%")
                                 .font(InkFont.mono(10)).tracking(10 * 0.09).foregroundStyle(Ink.invertDim)
                         }
                         Spacer(minLength: 8)
                         VStack(alignment: .trailing, spacing: 3) {
-                            Text(inkUsd(c.income ?? (c.prem * 100 * Double(c.suggestCt ?? 0))))
-                                .font(InkFont.mono(17))
-                            Text("INCOME").font(InkFont.mono(9)).tracking(9 * 0.14).foregroundStyle(Ink.invertDim)
+                            Text(inkUsd(c.income ?? 0)).font(InkFont.mono(17))
+                            Text("\(Int((c.assign ?? 0) * 100))% CALLED")
+                                .font(InkFont.mono(9)).tracking(9 * 0.14).foregroundStyle(Ink.invertDim)
                         }
                     }
                     .foregroundStyle(Ink.invertText)
@@ -174,11 +192,30 @@ struct NvdaMorningCard: View {
                         if i > 0 { Rectangle().fill(Ink.invertText.opacity(0.14)).frame(height: 1) }
                     }
                 }
+                // When the hedge floor binds you do not get the keep conviction asked for.
+                // Saying both numbers is the point; hiding the gap is the failure this
+                // whole rebuild removed.
+                if let top = picks.first, top.binds {
+                    Text("Conviction wants \(Int(top.wantCt ?? 0)). The hedge needs \(Int(top.minCt ?? 0)) to pay for itself.")
+                        .font(.system(size: 13.5)).foregroundStyle(Ink.invertText)
+                        .padding(.top, 12)
+                } else if let h = pv.plan?.hedge, let needs = h.needs, needs > 0,
+                          let cov = picks.first?.covers {
+                    Text("Covers the \(inkUsd(needs)) hedge \(mcDec(cov, 1))x")
+                        .font(InkFont.mono(10)).tracking(10 * 0.1)
+                        .foregroundStyle(Ink.invertDim).padding(.top, 12)
+                }
             }
         }
         .padding(.horizontal, 20).padding(.vertical, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Ink.text)
+    }
+
+    private var expiryLabel: String? {
+        guard let p = pv.plan, let e = p.expiry else { return nil }
+        let sig = p.expectedMove.map { " · ±\(mcDec($0, 2))" } ?? ""
+        return "\(e.suffix(5)) · \(Int(p.expDays ?? 0))d\(sig)"
     }
 
     private func floor(_ f: PV2.FloorAdvice) -> some View {
@@ -199,18 +236,18 @@ struct NvdaMorningCard: View {
     }
 
     private var pnl: some View {
-        // Three numbers, in the order they compound. Share profit measures against the
-        // BUY AVERAGE, not oldest-lot cost — the planner and the position screen have to
-        // agree or the card starts arguing with itself.
-        let top = picks.first
-        let ct = Double(top?.suggestCt ?? 0)
+        // Share profit measures against the BUY AVERAGE, never oldest-lot cost, so the
+        // planner and the position screen can never disagree.
+        let top = pv.plan?.pickList.first
         let options = top?.income ?? 0
-        let called = min(ct * 100, shares)
-        let withStock = options + (top.map { ($0.strike - buyAvg) * called } ?? 0)
+        let called = min((top?.ct ?? 0) * 100, shares)
+        let withStock = options + (top.map { (($0.strike ?? 0) - buyAvg) * called } ?? 0)
         return section("If this goes through") {
             VStack(spacing: 0) {
                 ledger("Options", "What you collect", options, first: true)
-                ledger("With the stock", top.map { "If called at \(mcDec($0.strike, 0)), against \(mcDec(buyAvg, 2))" } ?? "-", withStock)
+                ledger("With the stock",
+                       top.map { "If called at \(mcDec($0.strike ?? 0, 0)), against \(mcDec(buyAvg, 2))" } ?? "-",
+                       withStock)
                 ledger("All in", "After the \(inkUsd(realized)) already realised", withStock + realized)
             }
         }
@@ -291,6 +328,7 @@ struct NvdaMorningCardScreen: View {
                         shares: store.position?.shares ?? 0,
                         buyAvg: store.position?.avgBuy ?? 0,
                         realized: store.pnl?.realized ?? 0,
+                        iv: store.insights?.vol.iv,
                         ticker: ticker)
                     if let silent = pv.observations?.silentList, !silent.isEmpty {
                         // Naming what the card does not know beats quietly not having it.
