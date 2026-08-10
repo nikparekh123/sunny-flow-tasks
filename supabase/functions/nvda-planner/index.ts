@@ -1189,7 +1189,12 @@ Deno.serve(async (req) => {
              bid: q ? +q.bid.toFixed(2) : null, ask: q ? +q.ask.toFixed(2) : null,
              oi: q ? q.oi : null,
              assign: +bsAssign(spot, k, planT, iv / 100).toFixed(2),
-             wasCt: ctNeutral };
+             wasCt: ctNeutral,
+             // Breakeven against what the shares actually cost, not against spot.
+             // Strike plus premium says where the call stops paying; this says what
+             // that is worth on a book carried at buyAvg, which is the only version
+             // that answers "is this a good place to be called away".
+             beBasisPct: book.buyAvg > 0 ? +(((k + prem) / book.buyAvg - 1) * 100).toFixed(2) : null };
   };
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
