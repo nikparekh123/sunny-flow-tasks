@@ -282,6 +282,7 @@ Deno.serve(async (req) => {
   let peers: Peer[] = [];
   let peersKnown = false;
   let relStrength: { vs: string; self: number; ref: number; gap: number; days: number } | null = null;
+  let peerPrints: { ticker: string; days: number; move: number; band: string }[] = [];
   if (supaUrl && supaKey) {
     const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
     const soon = ymd(new Date(Date.now() + 120 * 86400000));
@@ -781,10 +782,13 @@ Deno.serve(async (req) => {
   cv.stretch = -clamp(Math.abs(dev) >= 1.5 ? (Math.abs(dev) - 1.5) * 5 : 0, 0, 12) * (dev > 0 ? 1 : 0.4);
   cv.record = record && record.n >= 8 ? clamp((record.survived / record.n - 0.7) * 25, -8, 8) : 0;
   cv.relative = relStrength ? clamp(relStrength.gap * 0.6, -6, 6) : 0;
-  // PEER PRINTS. Not relative price — how peers' own reports actually LANDED. AMD
-  // dropping hard after its print says something about the trade that a price ratio
-  // cannot. Bands come straight from earnings_reactions.
-  cv.peers = 0;
+  // PEER PRINTS. Recency-weighted mean of how the neighbours' own reports landed. A
+  // print from last week still colours how this one gets read; one from ten weeks ago
+  // has been absorbed. Empty table means zero, which is silence rather than optimism.
+  cv.peers = peerPrints.length
+    ? clamp(peerPrints.reduce((a, x) => a + clamp(x.move, -15, 15) * ((75 - x.days) / 75), 0)
+            / peerPrints.length * 0.8, -8, 8)
+    : 0;
   // The grade is a bullishness input, so it belongs here rather than moving keep directly.
   cv.grade = grade != null ? clamp((grade - 5) * 2 * gDecay, -8, 8) : 0;
   // Sticky inflation and a live conflict are conditions, not release dates, so no feed
@@ -1463,8 +1467,12 @@ Deno.serve(async (req) => {
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .95,
         text: `${ahead.ticker} reports ${when(ahead.date, ahead.days)}, inside the expiry you would be writing${ahead.confirmed ? '' : ', though that date is still an estimate'}. Semis move together through these, so the gap risk is not only NVDA's.` });
     } else if (behind && behind.days >= -7) {
+      const landed = peerPrints.filter((x) => x.ticker === behind.ticker).sort((x, y) => x.days - y.days)[0];
+      const how = landed
+        ? `${landed.move <= -8 ? 'dropped' : landed.move >= 8 ? 'jumped' : 'moved'} ${Math.abs(landed.move).toFixed(0)}% on it`
+        : 'reported';
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .70,
-        text: `${behind.ticker} reported ${dayStr(-behind.days)} ago${rel ? `, and NVDA is ${rel.gap > 0 ? '+' : ''}${rel.gap}% against the group over ${rel.days} sessions. The tape has not punished it for the read-across` : ''}.` });
+        text: `${behind.ticker} ${how} ${dayStr(-behind.days)} ago${rel ? `, and NVDA is ${rel.gap > 0 ? '+' : ''}${rel.gap}% against the group since. The read-across has not stuck` : ''}.` });
     } else if (rel && Math.abs(rel.gap) >= 5) {
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .65,
         text: rel.gap > 0
