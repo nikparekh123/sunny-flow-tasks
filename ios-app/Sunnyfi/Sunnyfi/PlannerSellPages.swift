@@ -113,7 +113,7 @@ struct PPSellPage: View {
                        + "\(f2(p.prem ?? 0)) a share on \(p.ct ?? 0) contracts."
                        + (p.wasCt.map { " At a neutral 50 this tier was \($0)." } ?? "")
                        + (r.plan?.hedgeNote.map { " \($0)." } ?? ""), ground: .paper)
-                if let be = p.breakeven {
+                if let be = p.be {
                     PPFine(text: "Breakeven \(f2(be)): the \(f2(p.strike ?? 0)) strike plus the "
                            + "\(f2(p.prem ?? 0)) you were paid"
                            + (p.beBasisPct.map { ", \(f1($0))% above your \(f2(r.book?.buyAvg ?? 0)) basis" } ?? "")

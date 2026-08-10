@@ -30,10 +30,21 @@ struct PPBook: Decodable { var shares: Double?; var buyAvg: Double? }
 
 struct PPExpiry: Decodable {
     var iso: String?
-    /// Pre-cased on the server ("60 sold for Aug 12"). Never re-case it — the
-    /// month goes with it.
-    var load: String?
+    var label: String?
+    /// A CONTRACT COUNT, not a sentence. The design's prototype carried a
+    /// pre-cased string here; the engine sends a number, and a String? property
+    /// throws on it — an optional tolerates a missing key, never a wrong type.
+    /// That single mismatch was enough to fail the whole decode.
+    var load: Double?
+    var rollable: Double?
     var verdict: String?
+
+    /// "60 sold for Aug 12, 60 rollable" — built here rather than on the server.
+    var line: String? {
+        guard let l = load, l > 0, let lab = label else { return nil }
+        let rollTxt = rollable.map { $0 > 0 ? ", \(Int($0)) rollable" : "" } ?? ""
+        return "\(Int(l)) sold for \(lab)\(rollTxt)"
+    }
 }
 
 struct PPPlan: Decodable {
@@ -79,13 +90,19 @@ struct PPPick: Decodable {
     var gamma: Double?
     var iv: Double?
     var prem: Double?
+    /// The engine spells it breakEven; the design's sample spelled it breakeven.
+    /// Both are accepted so neither an old nor a new response loses the line.
+    var breakEven: Double?
     var breakeven: Double?
+    var otmPct: Double?
     /// Breakeven measured against what the shares cost, not against spot.
     var beBasisPct: Double?
     var income: Double?
     var assign: Double?
     var blocked: String?
     var priced: String?
+
+    var be: Double? { breakEven ?? breakeven }
 }
 
 struct PPGradeQuarter: Decodable {
@@ -110,7 +127,15 @@ struct PPObservations: Decodable {
     var quiet: [PPNote]?
 }
 
-struct PPNote: Decodable { var lede: String?; var text: String? }
+struct PPNote: Decodable {
+    /// The engine calls it `tag`; the design's sample called it `lede`.
+    var tag: String?
+    var lede: String?
+    var text: String?
+    var domain: String?
+    var seen: String?
+    var heading: String { lede ?? tag ?? "" }
+}
 
 struct PPFloor: Decodable {
     var floor: Double?

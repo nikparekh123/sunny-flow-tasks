@@ -34,6 +34,7 @@ struct PlannerPagesScreen: View {
 
     @State private var plan = PlanV2Store()
     @State private var parsed: PPResponse?
+    @State private var decodeError: String?
     @State private var commit: PPCommit? = PPCommitStore.load()
     @State private var index = 0
     @State private var grade = PlannerDials.shared.grade ?? 5
@@ -82,9 +83,9 @@ struct PlannerPagesScreen: View {
             } else {
                 PP.background(.ink).ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 10) {
-                    PPKicker(text: plan.lastError == nil ? "reading the week" : "planner unavailable",
-                             ground: .ink)
-                    if let e = plan.lastError {
+                    PPKicker(text: (plan.lastError ?? decodeError) == nil
+                             ? "reading the week" : "planner unavailable", ground: .ink)
+                    if let e = plan.lastError ?? decodeError {
                         Text(e).font(PP.disp(13)).foregroundStyle(PP.dim(.ink))
                     }
                 }
@@ -122,7 +123,11 @@ struct PlannerPagesScreen: View {
     /// the loading state up with the error visible — never a half-drawn deck of
     /// pages showing zeroes for everything it failed to read.
     private func decode() {
-        guard let raw = plan.lastRaw else { return }
-        parsed = try? JSONDecoder().decode(PPResponse.self, from: raw)
+        guard let raw = plan.lastRaw else { decodeError = "no response body"; return }
+        do { parsed = try JSONDecoder().decode(PPResponse.self, from: raw); decodeError = nil }
+        // Named, not swallowed. A silent `try?` here is what turned one wrong
+        // field type into a screen that read "reading the week" forever, with
+        // nothing anywhere saying why.
+        catch { decodeError = String(describing: error).prefix(400).description }
     }
 }

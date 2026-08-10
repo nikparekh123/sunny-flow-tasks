@@ -123,9 +123,13 @@ struct PPDecisionPage: View {
         PPPage(ground: .ink) {
             PPKicker(text: "the decision", ground: .ink)
             // Pre-cased on the server. Never re-case it.
-            PPFine(text: (r.expiries ?? []).compactMap { e in
-                [e.load, e.verdict].compactMap { $0 }.joined(separator: ", ")
-            }.joined(separator: ". ").appendingPeriod(), ground: .ink, topPad: 0)
+            // Only expiries that actually carry something. An empty book has
+            // nothing to say here and should say nothing, not "0 sold".
+            PPFine(text: {
+                let lines = (r.expiries ?? []).compactMap { $0.line }
+                return lines.isEmpty ? "Nothing open. This would be a new position."
+                                     : lines.joined(separator: ". ").appendingPeriod()
+            }(), ground: .ink, topPad: 0)
         } base: {
             PPNum(value: "\(size?.sold ?? 0)",
                   unit: "of \(size?.full ?? 0) contracts", ground: .ink)
@@ -181,7 +185,7 @@ private struct PPNoteList: View {
                 HStack(alignment: .top, spacing: 12) {
                     Text("\(i + 1)").font(PP.mono(12))
                         .foregroundStyle(PP.dim(.ink)).frame(width: 13, alignment: .leading)
-                    (Text(n.lede ?? "").font(PP.disp(quiet ? 15 : 16, .semibold))
+                    (Text(n.heading).font(PP.disp(quiet ? 15 : 16, .semibold))
                         .foregroundStyle(PP.inkText)
                      + Text(" " + (n.text ?? "")).font(PP.disp(quiet ? 15 : 16))
                         .foregroundStyle(PP.dim(.ink)))
