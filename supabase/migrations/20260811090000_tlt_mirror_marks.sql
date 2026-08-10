@@ -56,14 +56,21 @@ begin
      price = excluded.price;
 
   -- TLT plus the bond complex the peers row compares it against.
+  --
+  -- distinct on is load-bearing, not tidiness: ticker_quotes keeps more
+  -- than one row per ticker, and tlt_quote is keyed on ticker alone, so
+  -- an undeduped select offers the same key twice in one statement and
+  -- Postgres rejects the whole command. Newest captured_at wins.
   insert into public.tlt_quote (ticker, spot, day_change_pct, prev_close, captured_at)
-  select q.ticker, q.spot, q.day_change_pct,
+  select distinct on (q.ticker)
+         q.ticker, q.spot, q.day_change_pct,
          case when q.day_change_pct is null or q.day_change_pct <= -100 then null
               else q.spot / (1 + q.day_change_pct / 100.0) end,
          q.captured_at
   from public.ticker_quotes q
   where q.ticker in ('TLT','IEF','SHY','TLH','AGG','LQD')
     and q.spot is not null
+  order by q.ticker, q.captured_at desc nulls last
   on conflict (ticker) do update set
      spot = excluded.spot, day_change_pct = excluded.day_change_pct,
      prev_close = excluded.prev_close, captured_at = excluded.captured_at;
@@ -72,10 +79,12 @@ begin
   -- preserves, so the join needs no translation.
   insert into public.tlt_option_marks
     (option_trade_id, mark, delta, gamma, theta, vega, iv, open_interest, volume, captured_at)
-  select g.option_trade_id, g.last_mark, g.delta, g.gamma, g.theta, g.vega,
+  select distinct on (g.option_trade_id)
+         g.option_trade_id, g.last_mark, g.delta, g.gamma, g.theta, g.vega,
          g.iv, g.open_interest, g.volume, g.captured_at
   from public.option_greeks g
   join public.tlt_option_trades t on t.id = g.option_trade_id
+  order by g.option_trade_id, g.captured_at desc nulls last
   on conflict (option_trade_id) do update set
      mark = excluded.mark, delta = excluded.delta, gamma = excluded.gamma,
      theta = excluded.theta, vega = excluded.vega, iv = excluded.iv,
