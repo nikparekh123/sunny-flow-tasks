@@ -39,8 +39,6 @@ begin
 
   -- Shares will arrive by assignment rather than purchase — the 82 and 82.50 puts
   -- expire 12 Aug with TLT around 82 — so the lots table matters from Wednesday.
-  -- Shares will arrive by assignment rather than purchase — the 82 and 82.50 puts
-  -- expire 12 Aug with TLT around 82 — so the lots table matters from Wednesday.
   --
   -- Columns are listed explicitly and NOT copied from the NVDA mirror: the legacy
   -- share tables and the tlt_* ones do not share a shape. share_lots has no
@@ -62,6 +60,15 @@ begin
   on conflict (id) do update set
      quantity = excluded.quantity,
      price = excluded.price;
+end $$;
+
+do $$
+begin
+  if exists (select 1 from cron.job where jobname = 'tlt-mirror-3min') then
+    perform cron.unschedule('tlt-mirror-3min');
+  end if;
+  -- Same cadence and window as the NVDA mirror.
+  perform cron.schedule('tlt-mirror-3min', '*/3 13-22 * * 1-5', 'select public.tlt_mirror()');
 end $$;
 
 -- Run once now so the store is current immediately rather than in three minutes.
