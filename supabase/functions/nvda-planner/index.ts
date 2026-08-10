@@ -246,6 +246,17 @@ Deno.serve(async (req) => {
 
   const bookIn = (b.book ?? {}) as Record<string, unknown>;
   const volIn = (b.vol ?? {}) as Record<string, number>;
+  if (b.commit == null && (bookIn.shares == null || volIn.iv == null))
+    return json(400, { ok: false, error: 'book.shares and vol.iv are required' });
+
+  const wv = Number(b.weekendVol ?? 0.3);
+  const TICKER = String(b.ticker ?? 'NVDA').toUpperCase();
+  const INST = INSTRUMENT[TICKER] ?? INSTRUMENT.NVDA;
+  const STRIKE_STEP = INST.step;
+  const nowISO = ymd(new Date());
+  const [polySpot, polyExpiries] = key
+    ? await Promise.all([nearestSpot(key, TICKER), callExpiries(nowISO, key, TICKER)])
+    : [null, [] as string[]];
   // ── commit ────────────────────────────────────────────────────────────────
   // Records a decision. The plan block is echoed back verbatim rather than
   // recomputed, because a decision has to be stored as it was READ — recomputing it
@@ -281,16 +292,6 @@ Deno.serve(async (req) => {
     return json(r.ok ? 200 : 500, { ok: r.ok, saved: r.ok, status: r.status, detail: body.slice(0, 400) });
   }
 
-  if (bookIn.shares == null || volIn.iv == null) return json(400, { ok: false, error: 'book.shares and vol.iv are required' });
-
-  const wv = Number(b.weekendVol ?? 0.3);
-  const TICKER = String(b.ticker ?? 'NVDA').toUpperCase();
-  const INST = INSTRUMENT[TICKER] ?? INSTRUMENT.NVDA;
-  const STRIKE_STEP = INST.step;
-  const nowISO = ymd(new Date());
-  const [polySpot, polyExpiries] = key
-    ? await Promise.all([nearestSpot(key, TICKER), callExpiries(nowISO, key, TICKER)])
-    : [null, [] as string[]];
   const spot = (b.spot as number) ?? polySpot ?? 0;
   const expiryDates = (polyExpiries.length ? polyExpiries : fallbackExpiries(nowISO)).slice(0, 6);
   if (!spot) return json(200, { ok: false, error: 'no spot' });
