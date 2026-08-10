@@ -861,7 +861,13 @@ Deno.serve(async (req) => {
   // at 3% out reach only ~2,200 — so when the target is out of reach the pick REPORTS the
   // shortfall rather than silently pulling the strike closer to hide it.
   // Two strikes either side of target, which is exactly the span the three picks use.
-  const quotes = key && nextExp
+  // Live quotes replace both premium AND delta, which is right for trading and useless
+  // for testing: feeding the model IV 30 against IV 80 changed nothing downstream
+  // because the market answered both times. dryQuotes forces the Black-Scholes path so
+  // an input sweep actually reaches the output. Never for a real card — the response
+  // says `dry` so a modelled number can never be mistaken for a quoted one.
+  const dryQuotes = b.dryQuotes === true;
+  const quotes = !dryQuotes && key && nextExp
     ? await chainQuotes(TICKER, nextExp, targetStrike - STRIKE_STEP * 2, targetStrike + STRIKE_STEP * 2, key)
     : new Map<number, Quote>();
   const planT = Math.max(expDays, .25) / 252;
@@ -971,7 +977,7 @@ Deno.serve(async (req) => {
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
     // at 40% IV over two sessions a strike 2.8% out sits INSIDE one sigma.
     expectedMove: +(spot * (iv / 100) * Math.sqrt(expDays / 252)).toFixed(2),
-    quotes: { source: quotes.size > 0 ? 'polygon' : 'none', strikes: quotes.size },
+    quotes: { source: dryQuotes ? 'dry' : quotes.size > 0 ? 'polygon' : 'none', strikes: quotes.size, dry: dryQuotes },
     grade, gradeDecay: +gDecay.toFixed(2),
     picks: [targetStrike, targetStrike - STRIKE_STEP, targetStrike + STRIKE_STEP].map(mkPick),
   };
