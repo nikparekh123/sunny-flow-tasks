@@ -1039,6 +1039,11 @@ Deno.serve(async (req) => {
   const modRaw = +Object.values(mods).reduce((a, v) => a + v, 0).toFixed(2);
   const readings = mods.iv, gradeMod = cv.grade;
   const keepTarget = clamp(BASE_KEEP[evState] + mods.conviction + mods.iv, 55, 95);
+  // The same rule with conviction switched off. Page 01's hero is a comparison —
+  // "22 of 60 contracts" — and the 60 has to be a real second run of the sizing,
+  // not a guess. Only mods.conviction is removed: the event state, the IV lean and
+  // the hedge floor are not opinions about the stock and stay exactly as they are.
+  const keepNeutral = clamp(BASE_KEEP[evState] + mods.iv, 55, 95);
 
   // Distance, scaled by sqrt(time). A fixed % OTM does not hold its delta across expiry
   // lengths: 1.5% out is 36 delta on a four-day and 30 on a two-day. NVDA expires Mon,
@@ -1117,6 +1122,11 @@ Deno.serve(async (req) => {
     // model and the whole calibration stopped touching the answer. The hedge floor is
     // the one thing allowed to override, because an unpaid hedge is not a preference.
     const ct = Math.min(Math.max(wantCt, minCt), maxCt);
+    // What THIS tier would have sold at a neutral 50. Same strike, same delta, same
+    // floor — the only thing that differs is the keep conviction bought. Anything
+    // else varying would make the comparison dishonest.
+    const rawCtN = d > 0 ? (((100 - keepNeutral) / 100) * shares) / (d * 100) : 0;
+    const ctNeutral = Math.min(Math.max(Math.max(0, Math.min(Math.round(rawCtN), maxCt)), minCt), maxCt);
     // wantCt is ALREADY capped at maxCt, so `wantCt > maxCt` could never be true and a
     // capacity-limited pick reported itself as conviction-limited. Compare the uncapped
     // figure. Capacity first: it is a physical limit, not a judgement.
@@ -1161,7 +1171,8 @@ Deno.serve(async (req) => {
              priced: tradeable ? 'market' : 'model',
              bid: q ? +q.bid.toFixed(2) : null, ask: q ? +q.ask.toFixed(2) : null,
              oi: q ? q.oi : null,
-             assign: +bsAssign(spot, k, planT, iv / 100).toFixed(2) };
+             assign: +bsAssign(spot, k, planT, iv / 100).toFixed(2),
+             wasCt: ctNeutral };
   };
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
@@ -1179,7 +1190,26 @@ Deno.serve(async (req) => {
     quotes: { source: dryQuotes ? 'dry' : quotes.size > 0 ? 'polygon' : 'none', strikes: quotes.size, dry: dryQuotes },
     grade, gradeDecay: +gDecay.toFixed(2),
     picks: [targetStrike, targetStrike - STRIKE_STEP, targetStrike + STRIKE_STEP].map(mkPick),
+    keepNeutral: +keepNeutral.toFixed(0),
   };
+  /* ── what conviction did to the size ──────────────────────────────────────
+     ONE HONEST NOTE, because the card must not overstate the model: conviction
+     moves the COUNT, not the strike. otmTarget is BASE_OTM[event|price] scaled by
+     sqrt(time) — conviction is not a term in it, so the three tiers sit at the
+     same strikes at 91 as they would at 50. A sentence reading "22 at 227.50, not
+     60 at 222.50" would be claiming a strike shift the engine does not make.
+
+     So: same strike, different size. If conviction should move the strike too,
+     that is a change to the model, not a missing field.
+     ── */
+  {
+    const rec = plan.picks[0];
+    (plan as Record<string, unknown>).size = {
+      sold: rec.ct, full: rec.wasCt,
+      strike: rec.strike, fullStrike: rec.strike,
+      strikeMoves: false,
+    };
+  }
   // The old drawdown/IV/measured chain no longer decides this. It stays computed above
   // because keepWhy still reads well, but the number itself now comes from the model.
   keepPct = plan.keepPct;
@@ -1895,8 +1925,50 @@ Deno.serve(async (req) => {
 
   const refStrike = (b.refStrike as number) ?? Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
 
+  /* ── the daily series ───────────────────────────────────────────────────
+     Conviction only means something against what it read yesterday, and until
+     now nothing kept that. planner_commits holds the parts, but only on days a
+     pick was committed — a trail drawn from it would skip every day you did not
+     trade and still label the gap "yesterday".
+
+     Written on every full compute, upserted on (ticker, date), so the last read
+     of the day is the one that stands. Fire-and-forget on purpose: a history
+     table failing to write must never take down the plan the user is waiting on.
+     ── */
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const cvParts: Record<string, number> = {};
+  for (const [k, v] of Object.entries(cv as Record<string, number>)) {
+    // The engine keys these cv.trend / cv.macro; the page speaks in family names.
+    cvParts[k.replace(/^cv\./, '')] = typeof v === 'number' ? +v.toFixed(1) : v;
+  }
+  let trail: Array<{ date: string; conviction: number; parts: Record<string, number> }> = [];
+  if (supaUrl && supaKey) {
+    const hdr = { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json' };
+    try {
+      await fetch(`${supaUrl}/rest/v1/planner_factor_daily?on_conflict=ticker,date`, {
+        method: 'POST',
+        headers: { ...hdr, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ ticker: TICKER, date: todayIso, conviction, parts: cvParts,
+                               spot, event_state: evState, captured_at: new Date().toISOString() }),
+      });
+    } catch { /* history is a nicety; the plan is not */ }
+    try {
+      // Three readings INCLUDING today, newest first, then reversed — so the trail
+      // reads left to right the way it is drawn. Earlier readings are whatever days
+      // actually exist: on a Monday the middle value is Friday, and calling that
+      // "yesterday" in the copy would be a lie the data cannot support.
+      const r = await fetch(
+        `${supaUrl}/rest/v1/planner_factor_daily?select=date,conviction,parts` +
+        `&ticker=eq.${TICKER}&order=date.desc&limit=3`, { headers: hdr });
+      if (r.ok) trail = ((await r.json()) as typeof trail).reverse();
+    } catch { /* an empty trail renders as one reading, which is honest */ }
+  }
+
   return json(200, {
     ok: true, asOf: new Date().toISOString(),
+    // The series the conviction page is built on: the hero's trail, each family's
+    // own history, and the "what moved" sentence all read from here.
+    history: { trail, today: { date: todayIso, conviction, parts: cvParts } },
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
     week, posture, events, refLots, ticker: TICKER, ivMedian, splits, floorAdvice, observations, plan,
