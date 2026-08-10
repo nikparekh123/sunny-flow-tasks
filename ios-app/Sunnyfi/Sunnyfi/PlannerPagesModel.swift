@@ -57,6 +57,28 @@ struct PPPlan: Decodable {
     var keepNeutral: Double?
     var event: String?
     var price: String?
+    var priceMove: Double?
+
+    /// PRE / CLEAR / POST and down / flat / up are how the ENGINE reasons. Printed
+    /// straight onto the card they read as "CLEAR. flat." — a debug line, not a
+    /// sentence. Mapped here rather than in the view so both pages say it the same.
+    var eventPhrase: String? {
+        switch (event ?? "").uppercased() {
+        case "PRE":   return "Into the print"
+        case "CLEAR": return "A clear week"
+        case "POST":  return "After the print"
+        default:      return event
+        }
+    }
+    var pricePhrase: String? {
+        let move = priceMove.map { String(format: "%.1f%%", abs($0)) }
+        switch (price ?? "").lowercased() {
+        case "down": return move.map { "down \($0) from the high" } ?? "price is down"
+        case "up":   return move.map { "up \($0)" } ?? "price is up"
+        case "flat": return move.map { "\($0) off the high" } ?? "price is flat"
+        default:     return price
+        }
+    }
     var why: String?
     var paidVsNormal: Double?
     var expiry: String?
@@ -139,9 +161,29 @@ struct PPNote: Decodable {
 
 struct PPFloor: Decodable {
     var floor: Double?
+    /// Positive = spot sits ABOVE the floor, which is the normal case. Negative
+    /// means price has come back through it, so the unit cannot read "under spot"
+    /// in both directions.
     var gapPct: Double?
+    /// The engine's sentence. The design's sample called this `head` and carried a
+    /// short verdict; the engine writes the whole reason. Both accepted.
+    var why: String?
     var head: String?
+    var target: Double?
     var stale: Bool?
+
+    var gapLine: String? {
+        guard let g = gapPct else { return nil }
+        return String(format: "%.1f%% %@ spot", abs(g), g >= 0 ? "under" : "above")
+    }
+    /// A verdict in a few words, since the engine only supplies the long form.
+    var verdict: String {
+        if let h = head { return h }
+        guard let g = gapPct else { return "No floor set" }
+        if stale == true { return "The floor has drifted from spot" }
+        if g < 0 { return "Price has come back through the floor" }
+        return "The floor is doing its job"
+    }
 }
 
 struct PPHistory: Decodable {

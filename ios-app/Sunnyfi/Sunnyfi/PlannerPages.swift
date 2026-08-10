@@ -138,7 +138,7 @@ struct PPDecisionPage: View {
                   + "\(size?.sold ?? 0), not \(size?.full ?? 0), at \(f2(size?.strike ?? 0)). "
                   + "Keep \(Int(p?.keepPct ?? 0))%, \(grouped(p?.keepDelta ?? 0)) of "
                   + "\(grouped(r.book?.shares ?? 0)) delta.", ground: .ink)
-            PPFine(text: [p?.event?.capitalizedFirst, p?.price,
+            PPFine(text: [p?.eventPhrase, p?.pricePhrase,
                           p?.paidVsNormal.map { "Paid \(sgn($0))% against normal" }, p?.why]
                 .compactMap { $0 }.joined(separator: ". ").appendingPeriod(), ground: .ink)
             Button { toGrade?() } label: {
@@ -207,10 +207,12 @@ struct PPFloorPage: View {
             PPKicker(text: "put floor", ground: .ink)
         } base: {
             PPNum(value: fl?.floor.map { String(Int($0)) } ?? "—",
-                  unit: fl?.gapPct.map { "\(f1($0))% under spot" }, ground: .ink)
-            PPSay(text: (fl?.head ?? "No floor reading").appendingPeriod(), ground: .ink)
-            PPFine(text: "The floor is rolled first, as its own decision. "
-                   + "Nothing gets written against an unprotected book.", ground: .ink)
+                  unit: fl?.gapLine, ground: .ink)
+            PPSay(text: (fl?.verdict ?? "No floor set").appendingPeriod(), ground: .ink)
+            PPFine(text: [fl?.why,
+                          "The floor is rolled first, as its own decision. "
+                          + "Nothing gets written against an unprotected book."]
+                .compactMap { $0 }.joined(separator: " "), ground: .ink)
         }
     }
 }
