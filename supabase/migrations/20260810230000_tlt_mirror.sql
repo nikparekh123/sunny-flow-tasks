@@ -39,30 +39,29 @@ begin
 
   -- Shares will arrive by assignment rather than purchase — the 82 and 82.50 puts
   -- expire 12 Aug with TLT around 82 — so the lots table matters from Wednesday.
+  -- Shares will arrive by assignment rather than purchase — the 82 and 82.50 puts
+  -- expire 12 Aug with TLT around 82 — so the lots table matters from Wednesday.
+  --
+  -- Columns are listed explicitly and NOT copied from the NVDA mirror: the legacy
+  -- share tables and the tlt_* ones do not share a shape. share_lots has no
+  -- executed_at/last_synced_at/voided_at, and share_sells uses trade_date/quantity/
+  -- price where the mirror template expected sell_date/qty/price_per_share.
   insert into public.tlt_share_lots
-    (id,acquired_date,fifo_order,qty_original,qty_remaining,cost_per_share,source,ibkr_trade_id,executed_at,last_synced_at,voided_at)
-  select id,acquired_date,fifo_order,qty_original,qty_remaining,cost_per_share,source,ibkr_trade_id,executed_at,last_synced_at,voided_at
+    (id, acquired_date, fifo_order, qty_original, qty_remaining, cost_per_share, source)
+  select id, acquired_date, fifo_order, qty_original, qty_remaining, cost_per_share, source
   from public.share_lots where ticker = 'TLT'
   on conflict (id) do update set
-     qty_remaining=excluded.qty_remaining, cost_per_share=excluded.cost_per_share,
-     executed_at=excluded.executed_at, last_synced_at=excluded.last_synced_at, voided_at=excluded.voided_at;
+     qty_remaining = excluded.qty_remaining,
+     cost_per_share = excluded.cost_per_share,
+     fifo_order = excluded.fifo_order;
 
   insert into public.tlt_share_sells
-    (id,sell_date,qty,price_per_share,realized_pl,source,ibkr_trade_id,executed_at,last_synced_at,voided_at)
-  select id,sell_date,qty,price_per_share,realized_pl,source,ibkr_trade_id,executed_at,last_synced_at,voided_at
+    (id, trade_date, quantity, price, source)
+  select id, trade_date, quantity, price, source
   from public.share_sells where ticker = 'TLT'
   on conflict (id) do update set
-     qty=excluded.qty, price_per_share=excluded.price_per_share, realized_pl=excluded.realized_pl,
-     executed_at=excluded.executed_at, last_synced_at=excluded.last_synced_at, voided_at=excluded.voided_at;
-end $$;
-
-do $$
-begin
-  if exists (select 1 from cron.job where jobname = 'tlt-mirror-3min') then
-    perform cron.unschedule('tlt-mirror-3min');
-  end if;
-  -- Same cadence and window as the NVDA mirror.
-  perform cron.schedule('tlt-mirror-3min', '*/3 13-22 * * 1-5', 'select public.tlt_mirror()');
+     quantity = excluded.quantity,
+     price = excluded.price;
 end $$;
 
 -- Run once now so the store is current immediately rather than in three minutes.
