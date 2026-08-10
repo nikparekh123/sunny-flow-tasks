@@ -126,6 +126,11 @@ Deno.serve(async (req) => {
     const dates = [...new Set([...seeded, ...filed.filter((f) => !seeded.some((x) => x.startsWith(f)))])];
     report[ticker] = { prints: dates.length, measured: 0, seeded: seeded.length };
 
+    // One print, one row. A seeded report date and a filing date a few days later are
+    // the same event, and both used to be written — two rows, same reaction, double
+    // weight in any average that reads them. Seeded entries sort first, so the accurate
+    // measurement wins and the guess is dropped.
+    const seenReactions = new Set<string>();
     for (const entry of dates) {
       // Seeded entries carry '|amc' or '|bmo'. Filing dates do not, and still get guessed.
       const [d, rtime] = entry.split('|');
@@ -184,6 +189,10 @@ Deno.serve(async (req) => {
       // Null, not zero, when the session has not happened yet. A missing path and a
       // flat path are different facts and the median must not confuse them.
       const at = (n: number) => (bars[i + n] ? +(((bars[i + n].c - after) / after) * 100).toFixed(2) : null);
+
+      const rd = ymd(new Date(bars[i].t));
+      if (seenReactions.has(rd)) continue;
+      seenReactions.add(rd);
 
       rows.push({
         ticker,
