@@ -206,13 +206,13 @@ enum TLTBook {
 
     /// An NvdaStore filled with the TLT fixture — the section screens read it
     /// exactly as they read the live NVDA store.
+    /// Reads the real book. The tlt_mirror cron forwards ticker='TLT' out of the legacy
+    /// tables into tlt_*, so this is the same store NVDA uses pointed at a different
+    /// prefix. Fills arrive split across executions — five contracts as 1+3+1 — and the
+    /// store pools them by strike and expiry, which is why this cannot just list rows.
     @MainActor static func store() -> NvdaStore {
-        // No invented trades. The tlt_* tables exist but nothing reads them yet, so
-        // the honest state is "no position" rather than a plausible-looking fake —
-        // a planner quoting made-up contracts is worse than one quoting nothing.
-        let s = NvdaStore()
-        s.isLoading = false
-        s.lastError = "No TLT trades yet. The tables are ready, the sync is not."
+        let s = NvdaStore(prefix: "tlt")
+        Task { await s.fetch() }
         return s
     }
 }

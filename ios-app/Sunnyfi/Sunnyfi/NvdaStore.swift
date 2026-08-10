@@ -31,6 +31,14 @@ final class NvdaStore {
     /// Open lots oldest first — the order shares actually leave in.
     private(set) var shareLotsFIFO: [NvShareLot] = []
 
+    /// Which per-ticker store to read. The nvda_* and tlt_* tables are the same shape
+    /// by design — one mirror per ticker off the same legacy book — so the only thing
+    /// that differs is the prefix. Duplicating this class for TLT would mean every fix
+    /// landing twice, and the second one getting forgotten.
+    let prefix: String
+    init(prefix: String = "nvda") { self.prefix = prefix }
+    private func tbl(_ name: String) -> String { "\(prefix)_\(name)" }
+
     var high52: Double? { Array(nvCloses.suffix(252)).max() }
 
     /// Seed the close series directly — fixtures/preview only (the TLT book, etc.).
@@ -53,26 +61,26 @@ final class NvdaStore {
 
     func fetch() async {
         do {
-            async let trades: [NvOptionTrade] = client.from("nvda_option_trades")
+            async let trades: [NvOptionTrade] = client.from(tbl("option_trades"))
                 .select("id,trade_date,action,option_type,direction,contracts,strike,premium,expiry,voided_at")
                 .is("voided_at", value: nil)
                 .execute().value
-            async let lots: [NvShareLot] = client.from("nvda_share_lots")
+            async let lots: [NvShareLot] = client.from(tbl("share_lots"))
                 .select("id,qty_remaining,cost_per_share,voided_at,fifo_order,acquired_date")
                 .is("voided_at", value: nil)
                 .order("fifo_order", ascending: true)
                 .execute().value
-            async let sells: [NvShareSell] = client.from("nvda_share_sells")
+            async let sells: [NvShareSell] = client.from(tbl("share_sells"))
                 .select("id,trade_date,quantity,price,realized_pl,voided_at")
                 .is("voided_at", value: nil)
                 .execute().value
-            async let quotes: [NvQuote] = client.from("nvda_quote")
+            async let quotes: [NvQuote] = client.from(tbl("quote"))
                 .select("ticker,spot,day_change_pct,prev_close,captured_at")
                 .execute().value
-            async let marks: [NvOptionMark] = client.from("nvda_option_marks")
+            async let marks: [NvOptionMark] = client.from(tbl("option_marks"))
                 .select("option_trade_id,mark,delta,gamma,theta,vega,iv,captured_at")
                 .execute().value
-            async let closes: [NvDailyClose] = client.from("nvda_daily_closes")
+            async let closes: [NvDailyClose] = client.from(tbl("daily_closes"))
                 .select("ticker,date,close_price")
                 .order("date", ascending: false)
                 .limit(120)
@@ -80,7 +88,7 @@ final class NvdaStore {
             // A dedicated NVDA-only pull, a year deep — the shared `closes` above is
             // capped at 120 rows across every peer ticker, far too few NVDA sessions
             // for a real 52-week high or a stable HV window.
-            async let nvCloseRows: [NvDailyClose] = client.from("nvda_daily_closes")
+            async let nvCloseRows: [NvDailyClose] = client.from(tbl("daily_closes"))
                 .select("ticker,date,close_price")
                 .eq("ticker", value: "NVDA")
                 .order("date", ascending: false)
@@ -100,7 +108,7 @@ final class NvdaStore {
             // gain it books is measured against those, not the book average.
             shareLotsFIFO = l.sorted { ($0.fifo_order ?? .max) < ($1.fifo_order ?? .max) }
             // Daily IV snapshot — non-fatal: if the table isn't there yet, [] (no 2nd gauge arc).
-            let ivDaily: [NvIvDaily] = (try? await client.from("nvda_iv_daily")
+            let ivDaily: [NvIvDaily] = (try? await client.from(tbl("iv_daily"))
                 .select("ticker,date,iv").eq("ticker", value: "NVDA")
                 .order("date", ascending: false).limit(252).execute().value) ?? []
 
