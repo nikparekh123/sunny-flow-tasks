@@ -46,6 +46,10 @@ struct NvdaMorningCard: View {
             whatToSell
             divider
             pnl
+            // The judgements sit at the FOOT, not the head. They are things you set
+            // occasionally, not things you read every morning, and putting an input
+            // above the answer makes the card feel like a form.
+            if showGrade || PlannerDials.shared.macroIsStale { divider; dials }
         }
         .background(Ink.surface)
         .clipShape(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous))
@@ -249,6 +253,27 @@ struct NvdaMorningCard: View {
                        top.map { "If called at \(mcDec($0.strike ?? 0, 0)), against \(mcDec(buyAvg, 2))" } ?? "-",
                        withStock)
                 ledger("All in", "After the \(inkUsd(realized)) already realised", withStock + realized)
+            }
+        }
+    }
+
+    /// Only in the post-print window. Outside it the question has no answer worth giving.
+    private var showGrade: Bool {
+        (pv.plan?.event ?? "") == "POST" || (pv.plan?.grade == nil && (pv.plan?.event ?? "") == "POST")
+    }
+
+    private var dials: some View {
+        section("Your read") {
+            VStack(alignment: .leading, spacing: 20) {
+                if showGrade { GradeDial() }
+                MacroDial()
+                if PlannerDials.shared.macroIsStale {
+                    // An unset dial is not neutral, it is optimistic: the tool reads about
+                    // ten points more bullish without it. Worth saying rather than
+                    // letting a default masquerade as a reading.
+                    Text("UNSET, SO CONVICTION IS RUNNING ABOUT 10 POINTS HIGH")
+                        .font(InkFont.mono(9)).tracking(9 * 0.15).foregroundStyle(Ink.delayed)
+                }
             }
         }
     }

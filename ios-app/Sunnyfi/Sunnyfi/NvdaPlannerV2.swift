@@ -51,6 +51,9 @@ struct PV2Req: Encodable, Sendable {
     let spot: Double
     var ticker: String = "NVDA"
     var style: String = "balanced"
+    // The two judgements. Sent every request; the edge decays the grade itself.
+    var earningsGrade: Double? = nil
+    var macroBackdrop: Double? = nil
 }
 
 // MARK: - Response
@@ -318,7 +321,9 @@ final class PlanV2Store {
                          earnings: ticker == "NVDA"
                              ? .init(date: Self.earnings.date, label: Self.earnings.label)
                              : .init(date: "", label: ""),
-                         weekendVol: 0.3, spot: pos.spot, ticker: ticker, style: style)
+                         weekendVol: 0.3, spot: pos.spot, ticker: ticker, style: style,
+                         earningsGrade: PlannerDials.shared.grade.map(Double.init),
+                         macroBackdrop: Double(PlannerDials.shared.macro))
         do {
             let data = try await client.functions.invoke("nvda-planner",
                 options: FunctionInvokeOptions(body: req), decode: { data, _ in data })
