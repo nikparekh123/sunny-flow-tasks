@@ -54,6 +54,10 @@ struct PV2Req: Encodable, Sendable {
     // The two judgements. Sent every request; the edge decays the grade itself.
     var earningsGrade: Double? = nil
     var macroBackdrop: Double? = nil
+    /// ISO date. Nil means "the nearest live one" — what the planner has always
+    /// done. Set when the user picks a week to roll into. The engine validates it
+    /// against the live list and falls back rather than pricing a dead contract.
+    var plannedExpiry: String? = nil
 }
 
 // MARK: - Response
@@ -284,7 +288,7 @@ final class PlanV2Store {
 
     func reload(from store: NvdaStore, ticker: String) async { await load(from: store, ticker: ticker) }
 
-    func load(from store: NvdaStore, ticker: String = "NVDA") async {
+    func load(from store: NvdaStore, ticker: String = "NVDA", expiry: String? = nil) async {
         guard let pos = store.position, let pnl = store.pnl, let ins = store.insights else {
             isLoading = false; lastError = "position not ready"; return
         }
@@ -333,7 +337,8 @@ final class PlanV2Store {
                              : .init(date: "", label: ""),
                          weekendVol: 0.3, spot: pos.spot, ticker: ticker, style: style,
                          earningsGrade: PlannerDials.shared.grade.map(Double.init),
-                         macroBackdrop: Double(PlannerDials.shared.macro))
+                         macroBackdrop: Double(PlannerDials.shared.macro),
+                         plannedExpiry: expiry)
         do {
             let data = try await client.functions.invoke("nvda-planner",
                 options: FunctionInvokeOptions(body: req), decode: { data, _ in data })

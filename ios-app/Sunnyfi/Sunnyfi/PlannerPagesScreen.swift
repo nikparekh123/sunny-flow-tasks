@@ -35,6 +35,12 @@ struct PlannerPagesScreen: View {
     @State private var plan = PlanV2Store()
     @State private var parsed: PPResponse?
     @State private var decodeError: String?
+    /// The week being planned. Nil = the nearest live one, which is the default
+    /// and what the planner has always done. Setting it re-plans: the strikes,
+    /// the sizing and the whole rail are per-expiry, so this cannot be a filter
+    /// applied to a plan already computed.
+    @State private var expiry: String?
+    @State private var replanning = false
     @State private var commit: PPCommit? = PPCommitStore.load()
     @State private var index = 0
     @State private var grade = PlannerDials.shared.grade ?? 5
@@ -118,11 +124,29 @@ struct PlannerPagesScreen: View {
                 }
         )
         .task {
-            await plan.load(from: store, ticker: ticker)
+            await plan.load(from: store, ticker: ticker, expiry: expiry)
             decode()
+        }
+        .onChange(of: expiry) { _, new in
+            Task {
+                replanning = true
+                await plan.load(from: store, ticker: ticker, expiry: new)
+                decode()
+                replanning = false
+            }
         }
         .onChange(of: grade) { _, new in PlannerDials.shared.grade = new }
     }
+
+    /// Every week that can actually be written, newest request's answer first.
+    /// Empty until the first response — the picker has nothing real to offer
+    /// before then and should not invent dates from a calendar.
+    var expiryOptions: [String] { parsed?.plan?.expiryOptions ?? [] }
+
+    /// True when a chosen week was rejected and the nearest priced instead. The
+    /// UI must surface this rather than showing the requested date: the whole
+    /// rail belongs to the expiry the ENGINE used.
+    var expiryFellBack: Bool { parsed?.plan?.expiryHonoured == false }
 
     /// Decoding is deliberately non-fatal. A response the app cannot parse leaves
     /// the loading state up with the error visible — never a half-drawn deck of

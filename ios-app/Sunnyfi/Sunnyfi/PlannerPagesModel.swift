@@ -82,6 +82,14 @@ struct PPPlan: Decodable {
     var why: String?
     var paidVsNormal: Double?
     var expiry: String?
+    /// The weeks that can actually be written. The picker must offer these and
+    /// nothing else — an expiry the engine will not price is not a choice.
+    var expiryOptions: [String]?
+    var expiryAsked: String?
+    /// False when a requested expiry was rejected and the nearest used instead.
+    /// The UI has to say so: silently showing the asked-for week would put a
+    /// contract on screen that cannot be sold.
+    var expiryHonoured: Bool?
     var expDays: Int?
     var expectedMove: Double?
     var picks: [PPPick]?

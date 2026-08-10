@@ -996,7 +996,19 @@ Deno.serve(async (req) => {
   // today's on any expiry morning, and NVDA has one every Mon, Wed and Fri — so a
   // third of the time the model was pricing a zero-day option and calling it the plan.
   const liveExps = expiryDates.filter((d) => spanTo(nowISO, parseISO(d)).td >= 1);
-  const nextExp = liveExps[0] ?? null, secondExp = liveExps[1] ?? null;
+  // The planner has always written the nearest live expiry. Rolling is the norm,
+  // and the week you roll INTO is a real choice — into the print or past it, before
+  // CPI or after — so the caller may name one.
+  //
+  // Validated against liveExps rather than trusted: an expiry that has already
+  // expired, or one this underlying does not list, must fall back to the nearest
+  // rather than price a contract that cannot be sold. A silent fallback is right
+  // here; the response reports which expiry was actually used, and the app reads
+  // that rather than assuming its request was honoured.
+  const askedExp = typeof b.plannedExpiry === 'string' ? String(b.plannedExpiry).slice(0, 10)
+                 : typeof b.expiry === 'string' ? String(b.expiry).slice(0, 10) : null;
+  const nextExp = (askedExp && liveExps.includes(askedExp) ? askedExp : liveExps[0]) ?? null;
+  const secondExp = liveExps.find((e) => e !== nextExp) ?? null;
   const macroHit = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3)[0] ?? null;
   const peerHit = peers.filter((x) => x.days >= 0).sort((x, y) => x.days - y.days)[0] ?? null;
   const inWindow = (d: string) => (nextExp && d <= nextExp ? 2 : secondExp && d <= secondExp ? 1 : 0);
@@ -1206,6 +1218,13 @@ Deno.serve(async (req) => {
     pace: { collected, boughtBack, drag },
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
     otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
+    // What the caller asked for against what was actually priced. The app must read
+    // expiry, never assume its ask was honoured — a stale or unlisted date falls
+    // back to the nearest, and silently showing the requested one would put a
+    // contract on screen that cannot be sold.
+    expiryAsked: askedExp, expiryHonoured: askedExp == null || askedExp === nextExp,
+    // The weeks that can actually be written, so the picker offers only real ones.
+    expiryOptions: liveExps.slice(0, 6),
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
     // at 40% IV over two sessions a strike 2.8% out sits INSIDE one sigma.
     expectedMove: +(spot * (iv / 100) * Math.sqrt(expDays / 252)).toFixed(2),
