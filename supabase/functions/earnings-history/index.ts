@@ -118,7 +118,11 @@ Deno.serve(async (req) => {
       const from = ymd(new Date(day.getTime() - 45 * 86400000));
       const to = ymd(new Date(day.getTime() + 70 * 86400000));
       const bars = await dailyBars(ticker, from, to, key);
-      if (bars.length < 45) continue;
+      // Was 45, which silently skipped the MOST RECENT quarter of every ticker: a
+      // print from last week has nowhere near 45 bars behind its filing date. The
+      // planner's peer factor cares about exactly those prints, so the floor is now
+      // whatever is needed to see the reaction itself.
+      if (bars.length < 8) continue;
 
       // The filing date is NOT the earnings date. A 10-Q lands days or weeks after
       // the release, so anchoring on it measured ordinary sessions: NVDA came back
@@ -130,7 +134,10 @@ Deno.serve(async (req) => {
       // almost always the print. Anything under 3% is not a reaction worth calling
       // one, so the quarter is skipped rather than guessed at.
       let i = -1, biggest = 0;
-      for (let k = 1; k < bars.length - 30; k++) {
+      // Also was `- 30`, for the same reason: it refused to look at any session that
+      // did not already have thirty behind it. The reaction is measurable the day after
+      // it happens; the PATHS are what need time, and those are now nullable.
+      for (let k = 1; k < bars.length; k++) {
         const mv = Math.abs((bars[k].c - bars[k - 1].c) / bars[k - 1].c) * 100;
         if (mv > biggest) { biggest = mv; i = k; }
       }
@@ -139,7 +146,9 @@ Deno.serve(async (req) => {
       const before = bars[i - 1].c, after = bars[i].c;
       if (!(before > 0) || !(after > 0)) continue;
       const move = ((after - before) / before) * 100;
-      const at = (n: number) => ((bars[i + n].c - after) / after) * 100;
+      // Null, not zero, when the session has not happened yet. A missing path and a
+      // flat path are different facts and the median must not confuse them.
+      const at = (n: number) => (bars[i + n] ? +(((bars[i + n].c - after) / after) * 100).toFixed(2) : null);
 
       rows.push({
         ticker,
@@ -148,9 +157,9 @@ Deno.serve(async (req) => {
         close_before: +before.toFixed(4),
         close_after: +after.toFixed(4),
         move_pct: +move.toFixed(2),
-        d5_pct: +at(5).toFixed(2),
-        d10_pct: +at(10).toFixed(2),
-        d30_pct: +at(30).toFixed(2),
+        d5_pct: at(5),
+        d10_pct: at(10),
+        d30_pct: at(30),
         band: move <= -BAND ? 'bad' : move >= BAND ? 'good' : 'flat',
         source: 'polygon',
       });
