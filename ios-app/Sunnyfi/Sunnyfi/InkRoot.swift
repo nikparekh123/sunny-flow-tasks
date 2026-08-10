@@ -49,9 +49,13 @@ struct InkRoot: View {
             // The morning card replaces the seven-section planner. NvdaPlannerV2Screen
             // is left in the target: it still holds the force cards and the split
             // ladder, which the card links out to rather than reproduces.
-            NvdaMorningCardScreen(store: sym == "TLT" ? tltStore : store,
-                                  ticker: sym == "TLT" ? "TLT" : "NVDA",
-                                  onBack: { showPlanner = false })
+            // The seven snap pages replace the morning card. NvdaMorningCardScreen
+            // and NvdaPlannerV2Screen both stay in the target: the pages read
+            // PlanV2Store, and the older screens still hold the force cards and
+            // the split ladder that nothing has rebuilt yet.
+            PlannerPagesScreen(store: sym == "TLT" ? tltStore : store,
+                               ticker: sym == "TLT" ? "TLT" : "NVDA",
+                               onBack: { showPlanner = false })
         }
     }
 

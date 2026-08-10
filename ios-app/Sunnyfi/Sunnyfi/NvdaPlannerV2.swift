@@ -262,7 +262,7 @@ final class PlanV2Store {
     /// The raw response, kept so a commit can echo the plan back VERBATIM. Re-encoding
     /// from the decoded model would archive whatever the Swift structs happen to carry,
     /// not what the engine actually said — and the record has to be the latter.
-    private var lastRaw: Data?
+    private(set) var lastRaw: Data?
     var committedIndex: Int??          // nil = untouched · .some(nil) = declined
     var committing = false
     var commitError: String?
