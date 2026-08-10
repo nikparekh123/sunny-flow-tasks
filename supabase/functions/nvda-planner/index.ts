@@ -287,9 +287,25 @@ Deno.serve(async (req) => {
       body: JSON.stringify(row),
     });
     const body = await r.text();
-    // Reported, never swallowed. A commit that silently fails is a decision lost, and
-    // the whole point of this table is that decisions cannot be recovered later.
-    return json(r.ok ? 200 : 500, { ok: r.ok, saved: r.ok, status: r.status, detail: body.slice(0, 400) });
+    // A receipt, not an echo. The caller does not need the row back — it needs to know
+    // WHAT was captured, because the failure that matters here is a row that saves
+    // with the picks or the conviction parts missing. Echoing and truncating hid that.
+    if (!r.ok) return json(500, { ok: false, saved: false, status: r.status, detail: body.slice(0, 400) });
+    let stored: Record<string, unknown> = {};
+    try { stored = (JSON.parse(body) as Record<string, unknown>[])[0] ?? {}; } catch { /* receipt degrades, row is safe */ }
+    const obs = (stored.observations ?? {}) as Record<string, unknown[]>;
+    return json(200, {
+      ok: true, saved: true, id: stored.id ?? null,
+      takenOn: stored.taken_on ?? null, expiry: stored.expiry ?? null,
+      chosen: stored.chosen ?? null,
+      captured: {
+        picks: ((stored.picks ?? []) as unknown[]).length,
+        convictionParts: Object.keys((stored.conviction_parts ?? {}) as Record<string, unknown>).length,
+        observerMatters: (obs.matters ?? []).length,
+        conviction: stored.conviction ?? null, keepPct: stored.keep_pct ?? null,
+        quotes: stored.quotes_source ?? null,
+      },
+    });
   }
 
   const spot = (b.spot as number) ?? polySpot ?? 0;
