@@ -872,12 +872,47 @@ Deno.serve(async (req) => {
   // sells the same contract count as a 40-vol week and simply collects more. Sizing off
   // INCOME, the same money needs fewer contracts, and the delta you did not have to sell
   // stays yours. Selling less for the same cheque is the whole point.
+  // Not a weekly quota. A long-term rental charges the same every month; this is closer
+  // to an Airbnb — more at Christmas, empty in February, judged over the year.
+  //
+  //   REQUIRED  12,700/wk  =  660k a year  =  the 15-20% net Nik asked for after the
+  //                           400k hedge. This is what pace is measured against.
+  //   AIM       up to 18,000 in favourable weeks. Overshoot banks as cushion.
+  //   LEAN      down to zero when conviction is poor AND the cushion can carry it.
   const WEEKLY_INCOME = Number(b.weeklyIncome ?? 12700);
+  const WEEKLY_AIM_MAX = Number(b.weeklyAim ?? 18000);
+
+  // Period-to-date, supplied by the app from its own P&L. GROSS for now: net is the
+  // honest number but nothing has measured the buyback drag yet, so aiming at it would
+  // be aiming at something invisible. The drag is reported alongside instead.
+  const collected = Number(b.premiumCollected ?? 0);
+  const boughtBack = Number(b.premiumPaid ?? 0);
+  const periodStart = (b.periodStart as string) ?? null;
+  const weeksIn = periodStart
+    ? Math.max(0.2, (parseISO(nowISO).getTime() - parseISO(periodStart).getTime()) / (7 * 86400000)) : 0;
+  const owed = Math.round(weeksIn * WEEKLY_INCOME);
+  const ahead = collected > 0 ? Math.round(collected - owed) : 0;
+  const cushionWeeks = +(ahead / WEEKLY_INCOME).toFixed(1);
+  const drag = collected > 0 ? +(boughtBack / collected).toFixed(2) : null;
+
+  // What this week is worth aiming at. Rich premium and a clean run earn the stretch;
+  // a broken tape with money in the bank earns the right to sit out.
+  const ivRich = ivMedian != null && ivMedian > 0 ? (iv / ivMedian - 1) * 100 : 0;
+  const eventInside = macroHit != null && nextExp != null && macroHit.date <= nextExp;
+  const aimMult =
+      (conviction <= 40 && cushionWeeks >= 1) ? 0
+    : (conviction <= 50 || eventInside)       ? 0.6
+    : (ivRich >= 15 && conviction >= 65)      ? WEEKLY_AIM_MAX / WEEKLY_INCOME
+    : (cushionWeeks >= 3)                     ? 0.7
+    : 1.0;
+  const weeklyAim = Math.round(WEEKLY_INCOME * aimMult);
   const carryPerDay = putSpend > 0 && putDays > 0 ? putSpend / putDays : 0;
   const tradeCal = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).cal) : 2;
   const hedgeNeeds = Math.round(carryPerDay * tradeCal * HEDGE_MARGIN);
   const mkPick = (k: number) => {
-    const rollsWk = expDays > 0 ? 5 / expDays : 2.5;
+    // NVDA expires Mon, Wed and Fri, so a week is THREE rolls, not five sessions divided
+    // by the expiry length. The old 2.5 asked each roll to carry too much.
+    const rollsWk = Number(b.rollsPerWeek ?? (expDays <= 3 ? 3 : 5 / expDays));
     const q = quotes.get(k);
     const tradeable = !!q && q.mid > 0 && q.bid > 0;
     // Delta from the market when it is quoting one; the model only fills gaps.
@@ -893,7 +928,7 @@ Deno.serve(async (req) => {
     // Three constraints, in plain terms: the hedge sets a floor you cannot go under,
     // conviction sets a ceiling you should not go over, and the income target sits
     // between them. The floor outranks the ceiling — an unpaid hedge is not a choice.
-    const perTrade = rollsWk > 0 ? WEEKLY_INCOME / rollsWk : WEEKLY_INCOME;
+    const perTrade = rollsWk > 0 ? weeklyAim / rollsWk : weeklyAim;
     const targetCt = prem > 0 ? Math.ceil(perTrade / (prem * 100)) : 0;
     const ceiling = Math.max(wantCt, minCt);
     const ct = Math.min(Math.max(targetCt, minCt), ceiling, maxCt);
@@ -942,7 +977,17 @@ Deno.serve(async (req) => {
     conviction, convictionParts: cv, peerPrints,
     hedge: { carryPerDay: Math.round(carryPerDay), tradeCal, margin: HEDGE_MARGIN,
              needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
-    income: { weekly: WEEKLY_INCOME, perTrade: Math.round(WEEKLY_INCOME / (expDays > 0 ? 5 / expDays : 2.5)) },
+    income: {
+      required: WEEKLY_INCOME, aim: weeklyAim, aimMult: +aimMult.toFixed(2), aimMax: WEEKLY_AIM_MAX,
+      rollsPerWeek: Number(b.rollsPerWeek ?? (expDays <= 3 ? 3 : 5 / expDays)),
+      perTrade: Math.round(weeklyAim / Number(b.rollsPerWeek ?? (expDays <= 3 ? 3 : 5 / expDays))),
+      // Pace, and the drag that will eventually make gross the wrong number to chase.
+      collected, boughtBack, owed, ahead, cushionWeeks, drag,
+      why: aimMult === 0 ? 'conviction is poor and the cushion can carry a blank week'
+        : aimMult > 1 ? 'premium is rich and the run is clean, so bank the overshoot'
+        : aimMult < 1 ? (eventInside ? 'an event lands inside this expiry' : 'aiming light')
+        : 'ordinary week, run rate',
+    },
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
     otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
