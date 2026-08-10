@@ -192,6 +192,68 @@ async function backfill(admin: ReturnType<typeof createClient>, key: string, fro
   return json(200, { ok: true, from, to, processed, solved, next_to, sample: out.slice(0, 8) });
 }
 
+
+// ── crush: how long an IV spike actually takes to decay ─────────────────────────
+// Nik's read is that a rise from 40 to 55 is worth WAITING through rather than selling
+// into, because the crush follows. That is a testable claim and we hold a year of
+// readings, so it gets measured rather than assumed.
+//
+// A spike is an onset — the first session IV crosses `thresh` above its trailing
+// 60-session median after being below it. Decay is the count of sessions until IV is
+// back within 5% of that median. Spikes still elevated at the end of the series are
+// reported separately as unresolved, never folded in as though they had decayed.
+async function crush(admin: ReturnType<typeof createClient>) {
+  const { data } = await admin.from('nvda_iv_daily')
+    .select('date,iv').eq('ticker', 'NVDA').order('date', { ascending: true }).limit(400);
+  const rows = ((data ?? []) as { date: string; iv: number }[])
+    // Stored as a fraction (0.40) on some rows and a percent (40) on others.
+    .map((r) => ({ date: String(r.date).slice(0, 10), iv: Number(r.iv) < 1.5 ? Number(r.iv) * 100 : Number(r.iv) }))
+    .filter((r) => Number.isFinite(r.iv) && r.iv > 0);
+  if (rows.length < 90) return json(200, { ok: false, error: `only ${rows.length} sessions on file` });
+
+  // Prints, so an earnings crush can be told apart from a spike with no event behind it.
+  const { data: ev } = await admin.from('earnings_events')
+    .select('report_date').eq('ticker', 'NVDA').order('report_date', { ascending: true }).limit(40);
+  const prints = ((ev ?? []) as { report_date: string }[]).map((x) => String(x.report_date).slice(0, 10));
+  const nearPrint = (d: string) =>
+    prints.some((p) => Math.abs((Date.parse(d) - Date.parse(p)) / 86400000) <= 5);
+
+  const med = (xs: number[]) => { const a = xs.slice().sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
+  const out: { thresh: number; n: number; sessions: number[]; unresolved: number; withPrint: number }[] = [];
+
+  for (const thresh of [15, 25, 40]) {
+    const sessions: number[] = []; let unresolved = 0, withPrint = 0;
+    let armed = true;
+    for (let i = 60; i < rows.length; i++) {
+      const base = med(rows.slice(i - 60, i).map((r) => r.iv));
+      const over = (rows[i].iv / base - 1) * 100;
+      if (over < thresh) { armed = true; continue; }
+      if (!armed) continue;                       // still inside the same spike
+      armed = false;
+      if (nearPrint(rows[i].date)) withPrint++;
+      let back = -1;
+      for (let k = i + 1; k < rows.length; k++) {
+        const b2 = med(rows.slice(Math.max(0, k - 60), k).map((r) => r.iv));
+        if (rows[k].iv <= b2 * 1.05) { back = k - i; break; }
+      }
+      if (back < 0) unresolved++; else sessions.push(back);
+    }
+    out.push({ thresh, n: sessions.length + unresolved, sessions, unresolved, withPrint });
+  }
+
+  return json(200, {
+    ok: true, sessionsOnFile: rows.length, from: rows[0].date, to: rows[rows.length - 1].date,
+    medianIv: +med(rows.map((r) => r.iv)).toFixed(1),
+    bands: out.map((b) => ({
+      overMedianPct: b.thresh, spikes: b.n, resolved: b.sessions.length, unresolved: b.unresolved,
+      aroundAPrint: b.withPrint,
+      sessionsToDecay: b.sessions.length
+        ? { median: med(b.sessions), fastest: Math.min(...b.sessions), slowest: Math.max(...b.sessions) }
+        : null,
+    })),
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   const url = Deno.env.get('SUPABASE_URL')!;
@@ -200,7 +262,8 @@ Deno.serve(async (req) => {
   if (!key) return json(500, { ok: false, error: 'POLYGON_API_KEY not set' });
   const admin = createClient(url, svc, { auth: { autoRefreshToken: false, persistSession: false } });
 
-  const body = await req.json().catch(() => ({})) as { trigger?: string; from?: string; to?: string };
+  const body = await req.json().catch(() => ({})) as { trigger?: string; from?: string; to?: string; crush?: boolean };
+  if (body.crush) return crush(admin);
   if (body.trigger === 'backfill') {
     const to = body.to ?? ymd(new Date());
     const from = body.from ?? ymd(addDays(new Date(), -365));
