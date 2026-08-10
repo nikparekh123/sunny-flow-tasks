@@ -411,6 +411,9 @@ Deno.serve(async (req) => {
   let peersKnown = false;
   let relStrength: { vs: string; self: number; ref: number; gap: number; days: number } | null = null;
   let sectorHealth: { pctAbove200: number; norm: number; dev: number; n: number } | null = null;
+  // How many rows each series actually returned. A factor that reads zero because the
+  // data is thin looks identical to one that reads zero because the world is neutral.
+  let closesSeen: { self: number; smh: number } | null = null;
   let peerPrints: { ticker: string; days: number; move: number; band: string }[] = [];
   if (supaUrl && supaKey) {
     const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
@@ -575,6 +578,7 @@ Deno.serve(async (req) => {
           .sort((a, b) => (a.date < b.date ? 1 : -1))
           .map((x) => Number(x.close_price)).filter((v) => Number.isFinite(v) && v > 0);
         const a = series(TICKER), r2 = series('SMH');
+        closesSeen = { self: a.length, smh: r2.length };
         const n = Math.min(a.length, r2.length, 21);
         if (n >= 10) {
           const pa = ((a[0] - a[n - 1]) / a[n - 1]) * 100;
@@ -1125,7 +1129,7 @@ Deno.serve(async (req) => {
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
     baseline: BASE_KEEP[evState], modifiers: mods, modRaw, readings, gradeMod,
-    conviction, convictionParts: cv, peerPrints, sectorHealth,
+    conviction, convictionParts: cv, peerPrints, sectorHealth, closesSeen,
     hedge: { carryPerDay: Math.round(carryPerDay), tradeCal, margin: HEDGE_MARGIN,
              needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
     // Reported, never used to size.
