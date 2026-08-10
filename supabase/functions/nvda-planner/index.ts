@@ -1053,10 +1053,29 @@ Deno.serve(async (req) => {
   const cv: Record<string, number> = {};
   const ma50 = technicals.ma50, ma200 = technicals.ma200, peak = technicals.ath ?? technicals.high52;
   // TREND, capped +22. Above the averages, and how close to the high.
-  cv.trend = Math.min(22,
-    (ma50 != null && spot > ma50 ? 8 : ma50 != null ? -8 : 0) +
-    (ma200 != null && spot > ma200 ? 10 : ma200 != null ? -10 : 0) +
-    (peak ? clamp(8 - ((peak - spot) / peak) * 100 * 0.8, -6, 8) : 0));
+  /* TREND, graded by distance rather than switched on it.
+     Both moving-average terms used to be binary: +8 above the 50-day, −8 below,
+     with nothing in between, and the same for ±10 on the 200-day. Two consequences,
+     both bad, and both visible in one scenario.
+
+     NUMB: NVDA at 220 falling 5% to 209 stays above both averages, so 18 of trend's
+     20 points do not move at all. A 5% day moved the whole score by 3.
+
+     THEN A CLIFF: at 205 it crosses the 50-day and that term swings +8 to −8 — a
+     16-point lurch in the score on one dollar of price. Nearly blind across the
+     range, violently sensitive at one point.
+
+     Proportional fixes both. The scalars are set so TODAY's reading is preserved
+     (6.8% above the 50-day still saturates at 8, 14% above the 200-day reaches
+     ~9.8 against the old 10) — this is a sensitivity change, not a recalibration,
+     and the caps and the meaning are untouched. The same 5% drop now takes trend
+     from ~19.7 to ~6.4, and a break of the average is a slope rather than a step. */
+  const pctAbove = (v: number, ref: number) => ((v - ref) / ref) * 100;
+  const t50 = ma50 != null ? clamp(pctAbove(spot, ma50) * 1.2, -8, 8) : 0;
+  const t200 = ma200 != null ? clamp(pctAbove(spot, ma200) * 0.7, -10, 10) : 0;
+  const tHigh = peak ? clamp(8 - ((peak - spot) / peak) * 100 * 0.8, -6, 8) : 0;
+  const trendParts = { ma50: +t50.toFixed(1), ma200: +t200.toFixed(1), high: +tHigh.toFixed(1) };
+  cv.trend = Math.min(22, t50 + t200 + tHigh);
   // CATALYST. The print itself is the reason to be bullish into it — Nik's own words:
   // everything usually looks positive before the print.
   cv.catalyst = daysToEarnings <= 7 ? 12 : daysToEarnings <= 21 ? 10 : daysToEarnings <= 40 ? 4 : 0;
@@ -1302,7 +1321,7 @@ Deno.serve(async (req) => {
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
     baseline: BASE_KEEP[evState], modifiers: mods, modRaw, readings, gradeMod,
-    conviction, convictionParts: cv, peerPrints, sectorHealth, closesSeen,
+    conviction, convictionParts: cv, trendParts, peerPrints, sectorHealth, closesSeen,
     hedge: { carryPerDay: Math.round(carryPerDay), tradeCal, margin: HEDGE_MARGIN,
              needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
     // Reported, never used to size.
