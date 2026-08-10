@@ -1535,6 +1535,10 @@ Deno.serve(async (req) => {
     kind: 'measured' | 'read';                       // read = from headlines, never scored
     seen: 'priced' | 'underweighted' | 'blind';
     note: number;                                    // 0..1, ranks the loud list
+    // Which way this argues about SELLING. The composer joins on direction alone and
+    // never on causation — "against that" claims two facts are in tension, which is a
+    // relationship the tool can see. "because of" would be one it cannot.
+    lean?: 'for' | 'against' | 'block';              // block = an event in the way
   };
   const loud: Obs[] = [], calm: Obs[] = [];
   const RW = REGIME_WEIGHTS[regime] ?? REGIME_WEIGHTS.RANGE;
@@ -1568,13 +1572,13 @@ Deno.serve(async (req) => {
   if (record && record.n >= 8) {
     if (daysSincePrint <= 30 && bandStats) {
       say(true, { domain: 'record', tag: 'The record', seen: seenBy('record'), note: .90,
-        text: `NVDA has come back ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% within thirty sessions of prints that landed like the last one. On ${bandStats.n} of them${bandStats.n < 8 ? ', so treat it as a lean rather than a law' : ''}.` });
+        lean: 'against', text: `NVDA has come back ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% within thirty sessions of prints that landed like the last one. On ${bandStats.n} of them${bandStats.n < 8 ? ', so treat it as a lean rather than a law' : ''}.` });
     } else if (dPrint <= 21) {
       say(true, { domain: 'record', tag: 'The record', seen: seenBy('record'), note: .75,
-        text: `This name has landed better than -8% in ${record.survived} of its last ${record.n} prints. Selling upside into that record has been the losing side of it.` });
+        lean: 'against', text: `This name has landed better than -8% in ${record.survived} of its last ${record.n} prints. Selling upside into that record has been the losing side of it.` });
     } else {
       say(false, { domain: 'record', tag: 'The record', seen: seenBy('record'), note: .10,
-        text: `${record.n} prints on file and none of them make this week look unusual.` });
+        lean: 'for', text: `${record.n} prints on file and none of them make this week look unusual.` });
     }
   }
 
@@ -1583,13 +1587,13 @@ Deno.serve(async (req) => {
     const seen = seenBy('event');
     if (dPrint <= 3) {
       say(true, { domain: 'window', tag: 'The window', seen, note: 1.0,
-        text: `The print is ${dayStr(dPrint)} away. Everything you write now carries it.` });
+        lean: 'block', text: `The print is ${dayStr(dPrint)} away. Everything you write now carries it.` });
     } else if (dPrint <= 21) {
       say(true, { domain: 'window', tag: 'The window', seen, note: .60,
-        text: `Earnings in ${dayStr(dPrint)}, with ${before} clean ${before === 1 ? 'expiry' : 'expiries'} before it. Anything past those is an earnings trade whether you meant it or not.` });
+        lean: 'block', text: `Earnings in ${dayStr(dPrint)}, with ${before} clean ${before === 1 ? 'expiry' : 'expiries'} before it. Anything past those is an earnings trade whether you meant it or not.` });
     } else {
       say(false, { domain: 'window', tag: 'The window', seen, note: .10,
-        text: `The next print is ${dayStr(dPrint)} out, past anything you would write this week.` });
+        lean: 'for', text: `The next print is ${dayStr(dPrint)} out, past anything you would write this week.` });
     }
   }
 
@@ -1601,7 +1605,7 @@ Deno.serve(async (req) => {
     const rel = relStrength;
     if (ahead && nextExp && ahead.date <= nextExp) {
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .95,
-        text: `${ahead.ticker} reports ${when(ahead.date, ahead.days)}, inside the expiry you would be writing${ahead.confirmed ? '' : ', though that date is still an estimate'}. Semis move together through these, so the gap risk is not only NVDA's.` });
+        lean: 'block', text: `${ahead.ticker} reports ${when(ahead.date, ahead.days)}, inside the expiry you would be writing${ahead.confirmed ? '' : ', though that date is still an estimate'}. Semis move together through these, so the gap risk is not only NVDA's.` });
     } else if (behind && behind.days >= -7) {
       const landed = peerPrints.filter((x) => x.ticker === behind.ticker).sort((x, y) => x.days - y.days)[0];
       // Direction words keyed at +-8, the band cut, so a -7% print came out as "moved 7%"
@@ -1611,7 +1615,7 @@ Deno.serve(async (req) => {
         ? `${landed.move <= -2 ? 'dropped' : landed.move >= 2 ? 'jumped' : 'went nowhere'} ${Math.abs(landed.move) >= 2 ? `${Math.abs(landed.move).toFixed(0)}% ` : ''}on it`
         : 'reported';
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .70,
-        text: `${behind.ticker} ${how} ${dayStr(-behind.days)} ago${rel ? `, and NVDA is ${rel.gap > 0 ? '+' : ''}${rel.gap}% against the group since. The read-across has not stuck` : ''}.` });
+        lean: 'against', text: `${behind.ticker} ${how} ${dayStr(-behind.days)} ago${rel ? `, and NVDA is ${rel.gap > 0 ? '+' : ''}${rel.gap}% against the group since. The read-across has not stuck` : ''}.` });
     } else if (rel && Math.abs(rel.gap) >= 5) {
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .65,
         text: rel.gap > 0
@@ -1619,7 +1623,7 @@ Deno.serve(async (req) => {
           : `NVDA is ${Math.abs(rel.gap)}% behind the group over ${rel.days} sessions. There is catch-up here you would be capping.` });
     } else if (ahead) {
       say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .10,
-        text: `No chip earnings before this expiry. ${ahead.ticker} is next, ${dayStr(ahead.days)} out.` });
+        lean: 'for', text: `No chip earnings before this expiry. ${ahead.ticker} is next, ${dayStr(ahead.days)} out.` });
     } else {
       say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .05,
         text: 'Nothing from the neighbours on the calendar.' });
@@ -1635,13 +1639,13 @@ Deno.serve(async (req) => {
     const near = covering ? expiryDates.indexOf(covering) <= 1 : false;
     if (m && near) {
       say(true, { domain: 'macro', tag: 'The calendar', seen, note: .92,
-        text: `${m.label.replace(/\s*\([^)]*\)/, '')} lands ${when(m.date, m.days)}, inside the expiry you would be writing.` });
+        lean: 'block', text: `${m.label.replace(/\s*\([^)]*\)/, '')} lands ${when(m.date, m.days)}, inside the expiry you would be writing.` });
     } else if (m && m.days <= 14) {
       say(true, { domain: 'macro', tag: 'The calendar', seen, note: .50,
         text: `${m.label.replace(/\s*\([^)]*\)/, '')} ${when(m.date, m.days)}, just past what you would write now.` });
     } else if (m) {
       say(false, { domain: 'macro', tag: 'The calendar', seen, note: .10,
-        text: `Nothing on the economic calendar until ${m.label.replace(/\s*\([^)]*\)/, '')}, ${dayStr(m.days)} out.` });
+        lean: 'for', text: `Nothing on the economic calendar until ${m.label.replace(/\s*\([^)]*\)/, '')}, ${dayStr(m.days)} out.` });
     } else {
       say(false, { domain: 'macro', tag: 'The calendar', seen: 'priced', note: .05,
         text: 'Nothing scheduled inside the window.' });
@@ -1658,7 +1662,7 @@ Deno.serve(async (req) => {
           : `You are paid ${(-extra).toFixed(0)}% under the usual price, ${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal. Thin premium for the same risk.` });
     } else {
       say(false, { domain: 'paid', tag: 'What you are paid', seen, note: .10,
-        text: `An ordinary price. ${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal, so there is no premium argument for doing this beyond the roll you were making anyway.` });
+        lean: 'against', text: `An ordinary price. ${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal, so there is no premium argument for doing this beyond the roll you were making anyway.` });
     }
   }
 
@@ -1689,8 +1693,28 @@ Deno.serve(async (req) => {
   // that merely happens to be stretched.
   const matters = [...loud].sort((a, b) => b.note - a.note).slice(0, 3).sort((a, b) => rank(a) - rank(b));
   const spoke = new Set([...loud, ...calm].map((o) => o.domain));
+  // Three bullets are a list; a list makes the reader assemble the argument. Joining on
+  // direction gives it an arc — the case, the turn, the obstacle — using only relations
+  // the tool can actually see. Deliberately dumb: it never says "because".
+  const story = (() => {
+    const xs = matters;
+    if (xs.length === 0) return null;
+    const trim = (t: string) => t.replace(/\.$/, '');
+    const parts: string[] = [];
+    let turned = false;
+    xs.forEach((o, i) => {
+      if (i === 0) { parts.push(trim(o.text)); return; }
+      const prev = xs[i - 1].lean;
+      const opposed = o.lean && prev && o.lean !== prev && o.lean !== 'block' && prev !== 'block';
+      if (o.lean === 'block') parts.push(`The one thing in the way is that ${trim(o.text).replace(/^./, (c) => c.toLowerCase())}`);
+      else if (opposed && !turned) { turned = true; parts.push(`Against that, ${trim(o.text).replace(/^./, (c) => c.toLowerCase())}`); }
+      else parts.push(trim(o.text));
+    });
+    return parts.join('. ') + '.';
+  })();
+
   const observations = {
-    matters,
+    matters, story,
     quiet: [...calm].sort((a, b) => rank(a) - rank(b)).slice(0, 3),
     dropped: loud.filter((o) => !matters.includes(o)).map((o) => o.domain),
     silent: DOMAINS.filter((d) => !spoke.has(d)),
