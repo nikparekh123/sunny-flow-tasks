@@ -126,8 +126,6 @@ struct NvdaMorningCard: View {
                         if let why = pv.regime?.why {
                             Text(why).font(.system(size: 14.5)).padding(.top, 2)
                         }
-                        Text("BASELINE \(Int(p.baseline ?? 0)) · CONVICTION MOVED IT \(moved)")
-                            .font(InkFont.mono(9)).tracking(9 * 0.15).foregroundStyle(Ink.dim).padding(.top, 4)
                     }
                 }
             }
@@ -139,11 +137,6 @@ struct NvdaMorningCard: View {
         guard let m = pv.ivMedian, m > 0, let now = iv else { return "—" }
         let x = (now / m - 1) * 100
         return "\(x >= 0 ? "+" : "")\(mcDec(x, 0))%"
-    }
-    private var moved: String {
-        guard let p = pv.plan, let k = p.keepPct, let b = p.baseline else { return "—" }
-        let d = k - b
-        return "\(d >= 0 ? "+" : "")\(mcDec(d, 0))"
     }
 
     private func list(_ title: String, _ lines: [PV2.Obs.Line]) -> some View {

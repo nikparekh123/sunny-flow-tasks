@@ -846,7 +846,15 @@ Deno.serve(async (req) => {
   // Wed and Fri, so this is not an edge case.
   const expDays = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).td) : 2;
   const tScale = Math.sqrt(expDays / 4);
-  const otmTarget = clamp((BASE_OTM[`${evState}|${pxState}`] + clamp((ivPct - 50) / 50, -.5, 1)) * tScale, 0, 4);
+  // No IV term. It was here on the reasoning that rich premium lets you sell the same
+  // money further out — true if you size by premium, wrong when you size by DELTA. At
+  // IV 60 it pushed the strike a step out, delta fell 32 to 20, and 75 contracts of a
+  // 20-delta strike collected LESS than 70 of a 32-delta one. Being paid a third more
+  // made the model take a third less.
+  //
+  // Without it, rich IV does the right thing unaided: the same strike carries a higher
+  // delta, so fewer contracts reach the same exposure and each one pays more.
+  const otmTarget = clamp(BASE_OTM[`${evState}|${pxState}`] * tScale, 0, 4);
   const targetStrike = Math.round(spot * (1 + otmTarget / 100) / STRIKE_STEP) * STRIKE_STEP;
 
   // Contract count is arithmetic. Covered calls cannot sell unlimited delta — 75 of them
