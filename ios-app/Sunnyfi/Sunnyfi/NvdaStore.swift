@@ -37,6 +37,9 @@ final class NvdaStore {
     /// landing twice, and the second one getting forgotten.
     let prefix: String
     init(prefix: String = "nvda") { self.prefix = prefix }
+    /// The underlying this store is about. The tables are prefixed lowercase,
+    /// the ticker columns inside them are uppercase.
+    private var ticker: String { prefix.uppercased() }
     private func tbl(_ name: String) -> String { "\(prefix)_\(name)" }
 
     var high52: Double? { Array(nvCloses.suffix(252)).max() }
@@ -90,27 +93,29 @@ final class NvdaStore {
             // for a real 52-week high or a stable HV window.
             async let nvCloseRows: [NvDailyClose] = client.from(tbl("daily_closes"))
                 .select("ticker,date,close_price")
-                .eq("ticker", value: "NVDA")
+                .eq("ticker", value: ticker)
                 .order("date", ascending: false)
                 .limit(300)
                 .execute().value
 
             let (t, l, sl, q, m, c, nvc) = try await (trades, lots, sells, quotes, marks, closes, nvCloseRows)
-            let nvda = q.first { $0.ticker == "NVDA" }
+            let nvda = q.first { $0.ticker == ticker }
             nvCloses = nvc
                 .compactMap { row in row.close_price.map { (row.date, $0) } }
                 .sorted { $0.0 < $1.0 }.map { $0.1 }
             // Peers/insights read a merged series: the deep NVDA history plus the
             // shared peer closes (deduped of the shared feed's shallow NVDA rows).
-            let mergedCloses = c.filter { $0.ticker != "NVDA" } + nvc
+            let mergedCloses = c.filter { $0.ticker != ticker } + nvc
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
             // Kept in consumption order: an assignment takes the oldest lots, so the
             // gain it books is measured against those, not the book average.
             shareLotsFIFO = l.sorted { ($0.fifo_order ?? .max) < ($1.fifo_order ?? .max) }
             // Daily IV snapshot — non-fatal: if the table isn't there yet, [] (no 2nd gauge arc).
-            let ivDaily: [NvIvDaily] = (try? await client.from(tbl("iv_daily"))
-                .select("ticker,date,iv").eq("ticker", value: "NVDA")
-                .order("date", ascending: false).limit(252).execute().value) ?? []
+            let ivDaily: [NvIvDaily] = prefix == "nvda"
+                ? ((try? await client.from(tbl("iv_daily"))
+                    .select("ticker,date,iv").eq("ticker", value: ticker)
+                    .order("date", ascending: false).limit(252).execute().value) ?? [])
+                : []
 
             pnl       = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             perf      = NvDerive.performance(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
