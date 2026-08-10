@@ -180,23 +180,168 @@ private struct PPNoteList: View {
     }
 }
 
-// MARK: - 03 · Put floor (ink)
+// MARK: - 02 · Put floor (ink)
 
+/// The floor is a SLEEVE, not a blanket. It covers 2,500 of 7,500 shares, so below
+/// it the position keeps falling — just more slowly. The chart exists to make that
+/// unmistakable: the kink is where protection starts, and the gap between the two
+/// slopes is what the premium bought. Calling this book "protected" would be the
+/// most dangerous thing the page could imply.
 struct PPFloorPage: View {
     let r: PPResponse
+
     var body: some View {
         let fl = r.floorAdvice
         PPPage(ground: .ink) {
-            PPKicker(text: "put floor", ground: .ink)
+            HStack(alignment: .firstTextBaseline) {
+                PPKicker(text: "put floor", ground: .ink)
+                Spacer()
+                if let d = fl?.days, let e = fl?.expiry {
+                    Text("\(d)d to \(e)".uppercased())
+                        .font(PP.mono(10.5)).tracking(10.5 * 0.08)
+                        .foregroundStyle(PP.dim(.ink))
+                }
+            }
+            if let pay = fl?.payoff, let pts = pay.points, pts.count >= 3 {
+                PPFloorChart(pay: pay, fl: fl, shares: r.book?.shares ?? 0)
+                PPFine(text: "Below \(Int(fl?.floor ?? 0)) the line keeps falling — the floor covers "
+                       + "\(grouped(fl?.covers ?? 0)) shares, not the book. What it buys is the "
+                       + "shallower slope, not a flat one.", ground: .ink, topPad: 0)
+            }
         } base: {
             PPNum(value: fl?.floor.map { String(Int($0)) } ?? "—",
-                  unit: fl?.gapLine, ground: .ink)
+                  unit: fl?.gapLine, size: 92, ground: .ink)
             PPSay(text: (fl?.verdict ?? "No floor set").appendingPeriod(), ground: .ink)
-            PPFine(text: [fl?.why,
-                          "The floor is rolled first, as its own decision. "
-                          + "Nothing gets written against an unprotected book."]
-                .compactMap { $0 }.joined(separator: " "), ground: .ink)
+            PPFine(text: "The floor is rolled first, as its own decision. "
+                   + "Nothing gets written against an unprotected book.", ground: .ink)
+            if let st = fl?.stress, let to = st.to, let drop = st.dropPct {
+                // The stress price is STATED, never implied — the saved figure is
+                // meaningless without knowing which fall it was measured in.
+                Text("at \(f2(to)), \(Int(drop))% down".uppercased())
+                    .font(PP.mono(9.5)).tracking(9.5 * 0.08)
+                    .foregroundStyle(PP.dim(.ink))
+                    .padding(.top, 15)
+                HStack(alignment: .top, spacing: 10) {
+                    pair(fl?.costLabel, "the floor costs")
+                    pair(st.savedLabel, st.unhedgedLabel.map { "it saves vs \($0)" } ?? "it saves")
+                }
+                .padding(.top, 10)
+                .overlay(alignment: .top) { Rectangle().fill(PP.hairline(.ink)).frame(height: 1) }
+            }
         }
+    }
+
+    @ViewBuilder private func pair(_ value: String?, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(value ?? "—").font(PP.mono(17)).monospacedDigit()
+                .foregroundStyle(PP.inkText).lineLimit(1).minimumScaleFactor(0.7)
+            Text(label.uppercased()).font(PP.mono(10)).tracking(10 * 0.1)
+                .foregroundStyle(PP.dim(.ink)).fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Three points, connected. The engine computed them — this view only maps price
+/// and P&L onto the box, so the drawn line cannot disagree with the figures beside
+/// it. Hue appears on the loss region and nowhere else.
+private struct PPFloorChart: View {
+    let pay: PPPayoffLine
+    let fl: PPFloor?
+    let shares: Double
+
+    // ViewBuilder closures take expressions, not declarations, so the mapping lives
+    // on the struct. It is also the honest place for it: these are the only
+    // calculations this page performs, and they map numbers onto a box — they do
+    // not produce any.
+    private var pts: [(px: Double, pl: Double)] {
+        (pay.points ?? []).compactMap { p in
+            guard let px = p.px, let pl = p.pl else { return nil }
+            return (px, pl)
+        }
+    }
+    private var lo: Double { pay.lo ?? pts.first?.px ?? 0 }
+    private var hi: Double { pay.hi ?? pts.last?.px ?? 1 }
+    private var vLo: Double { pts.map(\.pl).min() ?? -1 }
+    private var vHi: Double { pts.map(\.pl).max() ?? 1 }
+    private func X(_ v: Double, _ W: Double) -> Double { (v - lo) / max(hi - lo, 0.0001) * W }
+    private func Y(_ v: Double, _ H: Double) -> Double { H - (v - vLo) / max(vHi - vLo, 0.0001) * H }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text("\(grouped(fl?.covers ?? 0)) of \(grouped(shares)) shares floored".uppercased())
+                Spacer()
+                if let n = fl?.puts, let e = fl?.expiry {
+                    Text("\(n) puts · \(e)".uppercased())
+                }
+            }
+            .font(PP.mono(9.5)).tracking(9.5 * 0.08)
+            .foregroundStyle(PP.dim(.ink))
+            .lineLimit(1).minimumScaleFactor(0.75)
+
+            GeometryReader { geo in
+                ZStack {
+                    // Everything below flat — the region the floor is bought for, and
+                    // with the conviction discs the only colour in the app.
+                    Path { p in
+                        p.move(to: .init(x: 0, y: Y(0, geo.size.height)))
+                        p.addLine(to: .init(x: geo.size.width, y: Y(0, geo.size.height)))
+                        p.addLine(to: .init(x: geo.size.width, y: geo.size.height))
+                        p.addLine(to: .init(x: 0, y: geo.size.height))
+                        p.closeSubpath()
+                    }.fill(PP.lossHue.opacity(0.20))
+
+                    Path { p in
+                        p.move(to: .init(x: 0, y: Y(0, geo.size.height)))
+                        p.addLine(to: .init(x: geo.size.width, y: Y(0, geo.size.height)))
+                    }.stroke(PP.inkText.opacity(0.30), lineWidth: 1)
+
+                    Path { p in
+                        p.move(to: .init(x: X(pay.spot ?? lo, geo.size.width), y: 0))
+                        p.addLine(to: .init(x: X(pay.spot ?? lo, geo.size.width), y: geo.size.height))
+                    }.stroke(PP.inkText.opacity(0.20),
+                             style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
+
+                    // The position: two slopes meeting at the floor. That kink is the
+                    // whole point of the page.
+                    Path { p in
+                        for (n, pt) in pts.enumerated() {
+                            let point = CGPoint(x: X(pt.px, geo.size.width),
+                                                y: Y(pt.pl, geo.size.height))
+                            if n == 0 { p.move(to: point) } else { p.addLine(to: point) }
+                        }
+                    }.stroke(PP.inkText, style: StrokeStyle(lineWidth: 2.5, lineJoin: .round))
+
+                    if pts.count >= 2 {
+                        Circle().fill(PP.inkText).frame(width: 9, height: 9)
+                            .position(x: X(pts[1].px, geo.size.width),
+                                      y: Y(pts[1].pl, geo.size.height))
+                    }
+                    if let be = fl?.breakeven {
+                        Circle().strokeBorder(PP.inkText, lineWidth: 1.5)
+                            .frame(width: 8, height: 8)
+                            .position(x: X(be, geo.size.width), y: Y(0, geo.size.height))
+                    }
+                }
+            }
+            .frame(height: 124)
+
+            HStack {
+                Text("\(Int(lo)) · \(fl?.stress?.hedgedLabel ?? "—")".uppercased())
+                Spacer()
+                Text("floor \(Int(pay.floor ?? 0))".uppercased())
+                Spacer()
+                Text("breakeven \(f2(fl?.breakeven ?? 0))".uppercased())
+            }
+            .font(PP.mono(9.5)).tracking(9.5 * 0.08)
+            .foregroundStyle(PP.dim(.ink))
+            .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .padding(EdgeInsets(top: 15, leading: 15, bottom: 13, trailing: 15))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .strokeBorder(PP.inkText.opacity(0.12), lineWidth: 1))
+        .padding(.top, 26)
     }
 }
 

@@ -397,6 +397,11 @@ Deno.serve(async (req) => {
       chosen: c.chosen ?? null, declined_why: c.declinedWhy ?? null,
       observations: c.observations ?? null,
       quotes_source: (pl.quotes as Record<string, unknown> | undefined)?.source ?? null,
+      // WHICH WEEK the picks belong to. `chosen` alone names a tier, and the same
+      // tier exists in both chains — storing one without the other records the
+      // right decision against the wrong expiry, which the scorer then resolves
+      // against a close that was never relevant to it.
+      chosen_chain: c.chosenChain ?? 0,
       shares: (c.book as Record<string, unknown> | undefined)?.shares ?? null,
       book: c.book ?? null,
       expiry: pl.expiry ?? null,
@@ -2258,6 +2263,10 @@ Deno.serve(async (req) => {
     history: { trail, today: { date: todayIso, conviction, parts: cvParts } },
     source: { spot: polySpot != null ? 'polygon' : 'request', expiries: polyExpiries.length ? 'polygon' : 'fallback', technicals: technicals.ath != null ? 'ticker_stats' : 'missing' },
     gate, book, technicals, assignment, refStrike, weekendVol: wv, expiries,
+    // What "all-in" folds in, so the caption can name it rather than the app
+    // reaching for a number it was never given.
+    outcome: realisedPL == null ? null
+      : { realised: realisedPL, realisedLabel: fmtUsd(realisedPL) },
     week, posture, events, refLots, ticker: TICKER, ivMedian, splits, floorAdvice, observations, plan,
     capacity: cap.map((f) => ({ key: f.key, family: f.family, name: f.name, score: +f.score.toFixed(1), rows: f.rows, push: f.push })),
     hedge: { spend: putSpend, days: putDays, perDay: Math.round(hedgeCarry), requiredWeekly: Math.round(requiredWeekly) },

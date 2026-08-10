@@ -51,7 +51,12 @@ struct PlannerPagesScreen: View {
     /// position belongs to the expiry being planned. A commit left over from a
     /// closed week is history, not something to monitor.
     private var liveCommit: PPCommit? {
-        guard let c = commit, let e = parsed?.plan?.expiry, c.expiry == e else { return nil }
+        // Match against ANY chain being planned, not just the first. A sale written
+        // on the second expiry is every bit as live as one on the nearest, and
+        // checking only plan.expiry would have hidden the monitoring page for it.
+        guard let c = commit,
+              (parsed?.plan?.chains ?? []).contains(where: { $0.expiry == c.expiry })
+        else { return nil }
         return c
     }
 
@@ -74,7 +79,12 @@ struct PlannerPagesScreen: View {
                         // NVDA went, which the tool does not control. Storing all
                         // three measures whether the RANKING was any good.
                         Task {
-                            await plan.commit(c.engineIndex.map { $0 + 1 },   // the edge is 1-based
+                            // BOTH indices. The edge is 1-based within a chain, and
+                            // without the chain the record would name the same tier
+                            // in the wrong week — the identical class of error as
+                            // committing by rail position.
+                            await plan.commit(c.engineIndex.map { $0 + 1 },
+                                              chainIndex: c.chainIndex ?? 0,
                                               store: store, ticker: ticker)
                         }
                     }.pp_page(3)

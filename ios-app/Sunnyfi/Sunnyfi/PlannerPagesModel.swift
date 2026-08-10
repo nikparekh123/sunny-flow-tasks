@@ -24,7 +24,12 @@ struct PPResponse: Decodable {
     var floorAdvice: PPFloor?
     var history: PPHistory?
     var expiries: [PPExpiry]?
+    /// The P&L already banked this year, which is what the all-in figure folds in.
+    /// Pre-formatted by the engine off NvPerf.realized — the glossary's definition.
+    var outcome: PPOutcome?
 }
+
+struct PPOutcome: Decodable { var realised: Double?; var realisedLabel: String? }
 
 struct PPBook: Decodable { var shares: Double?; var buyAvg: Double? }
 
@@ -93,6 +98,9 @@ struct PPPlan: Decodable {
     var expDays: Int?
     var expectedMove: Double?
     var picks: [PPPick]?
+    /// The next two expiries, each fully priced. Not four, not "the first one past
+    /// the print" — the two weeks that actually get written.
+    var chains: [PPChain]?
     var hedgeNote: String?
     var tierNote: String?
     var grade: Int?
@@ -109,6 +117,23 @@ struct PPSize: Decodable {
     /// strike. otmTarget has no conviction term.
     var strikeMoves: Bool?
 }
+
+/// One expiry, with its own event state, keep and three tiers. Two of these.
+struct PPChain: Decodable {
+    var expiry: String?
+    var chip: String?
+    var expCode: String?
+    var expDays: Int?
+    /// "print inside" or nil — what this week resolves to, which moves its sizing.
+    var event: String?
+    var note: String?
+    var keepPct: Double?
+    var size: PPSize?
+    var picks: [PPPick]?
+}
+
+/// Above the strike, between, below. Every covered call has exactly these three.
+struct PPWorld: Decodable { var when: String?; var then: String? }
 
 struct PPPick: Decodable {
     var strike: Double?
@@ -142,6 +167,12 @@ struct PPPick: Decodable {
     var out: PPOut?
     var tier: String?
     var rec: Bool?
+    /// What this tier DOES, in the server's words — it names figures, so it is not
+    /// assembled in the app where it could contradict them.
+    var stance: String?
+    var worlds: [PPWorld]?
+    /// "$1,034/day", pre-formatted. The number is also on creditPerDay.
+    var creditPerDayLabel: String?
 
     var be: Double? { breakEven ?? breakeven }
 }
@@ -186,6 +217,27 @@ struct PPNote: Decodable {
     var heading: String { lede ?? tag ?? "" }
 }
 
+/// What the floor is worth in the fall it was bought for. Hedged and unhedged are
+/// stated separately on purpose: one netted number hides which half is which.
+struct PPStress: Decodable {
+    var to: Double?
+    var dropPct: Double?
+    var hedgedLabel: String?
+    var unhedgedLabel: String?
+    var savedLabel: String?
+}
+
+/// Three points and the frame. The line is DRAWN in the app, never derived — this
+/// is the one chart whose shape could otherwise disagree with the figures beside it.
+struct PPPayoffLine: Decodable {
+    var lo: Double?
+    var hi: Double?
+    var floor: Double?
+    var spot: Double?
+    var points: [PPPayoffPoint]?
+}
+struct PPPayoffPoint: Decodable { var px: Double?; var pl: Double? }
+
 struct PPFloor: Decodable {
     var floor: Double?
     /// Positive = spot sits ABOVE the floor, which is the normal case. Negative
@@ -198,6 +250,17 @@ struct PPFloor: Decodable {
     var head: String?
     var target: Double?
     var stale: Bool?
+    // The sleeve: how much of the book is actually under the floor, and what it cost.
+    var puts: Int?
+    var covers: Double?
+    var prem: Double?
+    var days: Int?
+    var expiry: String?
+    var cost: Double?
+    var costLabel: String?
+    var breakeven: Double?
+    var stress: PPStress?
+    var payoff: PPPayoffLine?
 
     var gapLine: String? {
         guard let g = gapPct else { return nil }

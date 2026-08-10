@@ -367,12 +367,14 @@ final class PlanV2Store {
 
     /// Records the decision. `index` is 1-based; nil means the answer was to do nothing,
     /// which is a decision and gets stored and scored like any other.
-    func commit(_ index: Int?, why: String? = nil, store: NvdaStore, ticker: String = "NVDA") async {
+    func commit(_ index: Int?, why: String? = nil, chainIndex: Int = 0,
+                store: NvdaStore, ticker: String = "NVDA") async {
         guard let raw = lastRaw,
               let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
               let plan = obj["plan"] else { commitError = "nothing to commit"; return }
         committing = true; commitError = nil
-        var c: [String: Any] = ["plan": plan, "chosen": index as Any? ?? NSNull()]
+        var c: [String: Any] = ["plan": plan, "chosen": index as Any? ?? NSNull(),
+                                "chosenChain": chainIndex]
         if let o = obj["observations"] { c["observations"] = o }
         if let m = obj["ivMedian"] { c["ivMedian"] = m }
         if let w = why { c["declinedWhy"] = w }

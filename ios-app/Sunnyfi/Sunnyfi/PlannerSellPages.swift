@@ -1,17 +1,18 @@
 //
 //  PlannerSellPages.swift
-//  04 · what to sell — the page that acts.
-//  05 · what is running — exists only once a sale is confirmed.
+//  03 · what to sell — the page that acts.
+//  04 · what is running — exists only once a sale is confirmed.
 //
-//  These two are one story told twice: the rail is the choice, the chart is the
-//  room it leaves, and page 05 is the same trade read back against today's spot.
+//  There are no selector rows. An option is not a date and a strike to be
+//  assembled from two controls — it is one whole sale, so each one gets a whole
+//  panel and you swipe between them. Six panels: three tiers in each of the two
+//  expiries, and every panel states its own expiry rather than inheriting it
+//  from a control above.
 //
 //  Design source: docs/design/planner_pages/.
 //
 
 import SwiftUI
-
-private let TIERS = ["conservative", "balanced", "aggressive"]
 
 private func f2(_ v: Double) -> String { String(format: "%.2f", v) }
 private func f1(_ v: Double) -> String { String(format: "%.1f", v) }
@@ -19,40 +20,32 @@ private func grouped(_ v: Double) -> String {
     let fm = NumberFormatter(); fm.numberStyle = .decimal; fm.maximumFractionDigits = 0
     return fm.string(from: NSNumber(value: v)) ?? String(Int(v))
 }
-/// Credits read in whole thousands on the cards — the design's own compaction.
 private func usdK(_ v: Double) -> String {
-    let a = abs(v)
-    if a >= 1000 { return "$\(Int((v / 1000).rounded()))K" }
-    return "$\(Int(v.rounded()))"
+    abs(v) >= 1000 ? "$\(Int((v / 1000).rounded()))K" : "$\(Int(v.rounded()))"
 }
 
-/// What the committed sale is, stored as the TRADE and not as an index into
-/// today's rail. picks are recomputed every morning, so picks[1] tomorrow is a
-/// different strike, count and premium — an index would silently redraw the
-/// live position as whatever tomorrow's balanced tier happens to be.
+/// The committed sale, stored as the TRADE. Never an index into today's rail:
+/// picks are recomputed every morning, so an index would silently redraw your
+/// live position as whatever tomorrow's balanced tier happens to be. The two
+/// indices are kept only so the pager can reopen where you left it.
 struct PPCommit: Codable, Equatable {
-    /// Position in the ENGINE's picks array, not in the sorted rail. The rail is
-    /// ordered furthest-strike-first for reading; planner_commits is keyed on the
-    /// engine's own order, and confusing the two records the wrong tier against
-    /// the outcome — which would poison the record rather than just misdraw it.
-    /// Optional so a commit stored before this field existed still decodes.
+    var chainIndex: Int?
     var engineIndex: Int?
     var tier: String
     var strike: Double
     var ct: Int
     var prem: Double
     var expiry: String
+    var expCode: String?
     var soldSpot: Double
     var conviction: Int
-    /// Assignment probability AT THE SALE, 0–1. Carried rather than re-read from
-    /// today's rail: the odds that belong on the monitoring page are the ones the
-    /// decision was made on, and tomorrow's rail may not even contain this strike.
+    /// Assignment odds at the sale, 0–1 — the odds the decision was made on.
     var assign: Double?
     var onISO: String
     var onLabel: String
 }
 
-// MARK: - 04 · What to sell (paper)
+// MARK: - 03 · What to sell (paper)
 
 struct PPSellPage: View {
     let r: PPResponse
@@ -60,24 +53,24 @@ struct PPSellPage: View {
     let commit: PPCommit?
     let onCommit: (PPCommit) -> Void
 
-    @State private var sel: Int = 0
+    @State private var idx: Int = 0
     @State private var ticked = false
 
-    /// Furthest strike first: at high conviction the top of the rail is the
-    /// consistent end of it. A tier inside the put floor sorts last, priced but
-    /// unpickable.
-    private var ladder: [(pick: PPPick, tier: String, engineIndex: Int)] {
-        let picks = r.plan?.picks ?? []
-        let tagged = picks.enumerated().map { i, p in
-            (pick: p, tier: TIERS.indices.contains(i) ? TIERS[i] : "tier \(i + 1)", engineIndex: i)
-        }
-        return tagged.sorted {
-            ($0.pick.blocked == nil ? 0 : 1, -($0.pick.strike ?? 0))
-                < ($1.pick.blocked == nil ? 0 : 1, -($1.pick.strike ?? 0))
+    /// Every tier of every chain, flattened in reading order. The pager's unit is
+    /// one whole sale, so this is the list it walks.
+    private var opts: [(chain: PPChain, pick: PPPick, ci: Int, i: Int)] {
+        (r.plan?.chains ?? []).enumerated().flatMap { ci, ch in
+            (ch.picks ?? []).enumerated().map { i, p in (chain: ch, pick: p, ci: ci, i: i) }
         }
     }
-    private var chosen: (pick: PPPick, tier: String, engineIndex: Int)? {
-        ladder.indices.contains(sel) ? ladder[sel] : ladder.first
+    /// Open on the live position if there is one, otherwise on what conviction
+    /// sized — never on the biggest credit, which is where the eye goes anyway.
+    private var start: Int {
+        if let c = commit,
+           let k = opts.firstIndex(where: { $0.ci == (c.chainIndex ?? 0) && $0.i == (c.engineIndex ?? 0) }) {
+            return k
+        }
+        return opts.firstIndex { $0.pick.rec == true } ?? 0
     }
 
     var body: some View {
@@ -85,312 +78,271 @@ struct PPSellPage: View {
             HStack(alignment: .firstTextBaseline) {
                 PPKicker(text: "what to sell", ground: .paper)
                 Spacer()
-                Text("\(Self.todayShort()) → \(r.plan?.expiry ?? "—") · \(r.plan?.expDays ?? 0)d".uppercased())
+                Text("\(Self.today()) · \(f2(spot))".uppercased())
                     .font(PP.mono(10.5)).tracking(10.5 * 0.08)
                     .foregroundStyle(PP.dim(.paper))
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 9) {
-                    ForEach(Array(ladder.enumerated()), id: \.offset) { i, row in
-                        PPStrikeCard(pick: row.pick, tier: row.tier,
-                                     spot: spot, on: i == sel)
-                        .onTapGesture {
-                            guard row.pick.blocked == nil else { return }
-                            sel = i; ticked = false      // changing tier clears the tick
-                        }
-                    }
-                }
-                .padding(.horizontal, PP.pagePadX)
-            }
-            .padding(.horizontal, -PP.pagePadX)
-            // What is already open. This came off the deleted decision page, and it
-            // belongs here: the week you roll INTO is not a sensible choice without
-            // the week you are rolling OUT of.
+            // What is being rolled out of. Without it the expiry choice has no anchor.
             PPFine(text: {
                 let lines = (r.expiries ?? []).compactMap { $0.line }
                 return lines.isEmpty ? "Nothing open. This would be a new position."
                                      : lines.joined(separator: ". ") + "."
             }(), ground: .paper, topPad: 0)
-            if let c = chosen?.pick {
-                PPPayoff(pick: c, shares: r.book?.shares ?? 0, spot: spot,
-                         em: r.plan?.expectedMove ?? max(1, spot * 0.02))
-            }
         } base: {
-            if let row = chosen {
-                let p = row.pick
-                let credit = p.income ?? ((p.prem ?? 0) * Double(p.ct ?? 0) * 100)
-                PPNum(value: usdK(credit), unit: "credit at \(f2(p.strike ?? 0))",
-                      size: 84, ground: .paper)
-                PPFine(text: "\(row.tier.prefix(1).uppercased() + row.tier.dropFirst()), "
-                       + "\(f2(p.prem ?? 0)) a share on \(p.ct ?? 0) contracts."
-                       + (p.wasCt.map { " At a neutral 50 this tier was \($0)." } ?? "")
-                       + (r.plan?.hedgeNote.map { " \($0)." } ?? ""), ground: .paper)
-                if let be = p.be {
-                    PPFine(text: "Breakeven \(f2(be)): the \(f2(p.strike ?? 0)) strike plus the "
-                           + "\(f2(p.prem ?? 0)) you were paid"
-                           + (p.beBasisPct.map { ", \(f1($0))% above your \(f2(r.book?.buyAvg ?? 0)) basis" } ?? "")
-                           + ".", ground: .paper)
+            if opts.isEmpty {
+                PPSay(text: "No sellable expiry.", ground: .paper)
+            } else {
+                TabView(selection: $idx) {
+                    ForEach(Array(opts.enumerated()), id: \.offset) { n, o in
+                        PPOptionPanel(chain: o.chain, pick: o.pick, ci: o.ci, i: o.i, n: n,
+                                      r: r, spot: spot, commit: commit,
+                                      ticked: $ticked, onCommit: onCommit)
+                            .tag(n)
+                    }
                 }
-                PPConfirm(pick: p, tier: row.tier, expiry: r.plan?.expiry ?? "",
-                          commit: commit, ticked: $ticked) {
-                    onCommit(PPCommit(
-                        engineIndex: row.engineIndex,
-                        tier: row.tier, strike: p.strike ?? 0, ct: p.ct ?? 0,
-                        prem: p.prem ?? 0, expiry: r.plan?.expiry ?? "",
-                        soldSpot: spot, conviction: r.plan?.conviction ?? 0,
-                        assign: p.assign,
-                        onISO: ISO8601DateFormatter().string(from: Date()),
-                        onLabel: Self.today()))
-                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(height: 500)
+                // A swipe withdraws any claim made about the option just left.
+                .onChange(of: idx) { _, _ in ticked = false }
+
+                PPOptRail(count: opts.count, idx: $idx)
             }
         }
-        .onAppear {
-            // The rail is SORTED furthest-strike-first for reading, so its first
-            // entry is the conservative end — not the recommendation. Opening
-            // there quietly proposed a different trade than the one conviction
-            // sized: the engine's picks[0] is the target strike, and that is what
-            // the page must land on. Falls back to the first sellable tier only
-            // if the target is blocked by the floor.
-            if let i = ladder.firstIndex(where: { $0.engineIndex == 0 && $0.pick.blocked == nil })
-                ?? ladder.firstIndex(where: { $0.pick.blocked == nil }) { sel = i }
-        }
+        .onAppear { idx = start }
     }
 
     private static func today() -> String {
-        let fm = DateFormatter(); fm.dateFormat = "EEE d MMM"; return fm.string(from: Date())
-    }
-    /// The meta row reads as a span — from today, to the expiry, over N sessions.
-    private static func todayShort() -> String {
         let fm = DateFormatter(); fm.dateFormat = "d MMM"; return fm.string(from: Date())
     }
-}
-
-/// Selected is INVERSION, never a hue. A tier inside the floor is dashed at 50%
-/// with its strike struck through and the refusal in place of its size.
-private struct PPStrikeCard: View {
-    let pick: PPPick
-    let tier: String
-    let spot: Double
-    let on: Bool
-
-    private var otm: Double {
-        guard spot > 0, let k = pick.strike else { return 0 }
-        return (k / spot - 1) * 100
-    }
-    private var blocked: Bool { pick.blocked != nil }
-    private var fg: Color { on ? Color(red: 0.969, green: 0.969, blue: 0.957) : PP.paperText }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(tier.uppercased()).font(PP.mono(9)).tracking(9 * 0.16).opacity(0.58)
-            Text(f2(pick.strike ?? 0)).font(PP.mono(24))
-                .strikethrough(blocked, color: fg)
-            Text(blocked ? (pick.blocked ?? "")
-                 : "\(pick.ct ?? 0) contracts · \(f2(otm))% out")
-                .font(PP.mono(9.5)).tracking(9.5 * 0.06).opacity(0.62)
-                .fixedSize(horizontal: false, vertical: true)
-            Rectangle().fill(fg.opacity(0.22)).frame(height: 1).padding(.top, 2)
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
-                greek("iv", pick.iv.map { f1($0) })
-                greek("Δ", pick.delta.map { String(Int(($0 * (abs($0) <= 1 ? 100 : 1)).rounded())) })
-                greek("Γ", pick.gamma.map { String(format: "%.3f", $0) })
-            }
-            Text(usdK(pick.income ?? ((pick.prem ?? 0) * Double(pick.ct ?? 0) * 100)))
-                .font(PP.mono(19)).strikethrough(blocked, color: fg)
-        }
-        .padding(EdgeInsets(top: 13, leading: 15, bottom: 15, trailing: 15))
-        .frame(width: 152, alignment: .leading)
-        .foregroundStyle(fg)
-        .background(
-            RoundedRectangle(cornerRadius: 18)
-                .fill(on ? PP.paperText : .clear)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18).strokeBorder(
-                PP.paperText.opacity(on ? 1 : (blocked ? 0.20 : 0.16)),
-                style: StrokeStyle(lineWidth: 1, dash: blocked ? [4, 4] : []))
-        )
-        .opacity(blocked ? 0.5 : 1)
-        .animation(.easeInOut(duration: 0.18), value: on)
-    }
-
-    @ViewBuilder private func greek(_ label: String, _ value: String?) -> some View {
-        GridRow {
-            Text(label.uppercased()).font(PP.mono(9.5)).tracking(9.5 * 0.12).opacity(0.62)
-            Text(value ?? "—").font(PP.mono(12.5)).monospacedDigit()
-                .frame(maxWidth: .infinity, alignment: .trailing)
-        }
+    static func todayLabel() -> String {
+        let fm = DateFormatter(); fm.dateFormat = "EEE d MMM"; return fm.string(from: Date())
     }
 }
 
-/// The whole position from today — shares plus the call — not the option leg
-/// alone. It rises with the stock until the strike, then flattens to the
-/// uncovered shares; that kink IS the cap. Geometry only, no new figures.
-private struct PPPayoff: View {
+/// One whole sale. Its own expiry, its own story, its own confirm.
+private struct PPOptionPanel: View {
+    let chain: PPChain
     let pick: PPPick
-    let shares: Double
+    let ci: Int
+    let i: Int
+    let n: Int
+    let r: PPResponse
     let spot: Double
-    let em: Double
+    let commit: PPCommit?
+    @Binding var ticked: Bool
+    let onCommit: (PPCommit) -> Void
 
-    private var k: Double { pick.strike ?? spot }
-    private var credit: Double { pick.income ?? ((pick.prem ?? 0) * Double(pick.ct ?? 0) * 100) }
-    private var covered: Double { Double(pick.ct ?? 0) * 100 }
-    private var lo: Double { spot - em }
-    private var hi: Double { spot + em }
-    /// The position's own breakeven: where the credit stops covering the shares'
-    /// loss. Not the option's breakeven, which is the strike plus the premium.
-    private var be: Double { shares > 0 ? spot - credit / shares : spot }
-
-    private func pos(_ v: Double) -> Double {
-        shares * (v - spot) + credit - max(0, v - k) * covered
-    }
-    private var bounds: (top: Double, bot: Double) {
-        let vals = [pos(lo), pos(k), pos(hi)]
-        return ((vals.max() ?? 1) * 1.15, (vals.min() ?? -1) * 1.15)
-    }
-    private func X(_ v: Double, _ W: Double) -> Double { (v - lo) / max(hi - lo, 0.0001) * W }
-    private func Y(_ v: Double, _ H: Double) -> Double {
-        let b = bounds
-        return H - (v - b.bot) / max(b.top - b.bot, 0.0001) * H
+    private var isLive: Bool {
+        guard let c = commit else { return false }
+        return (c.chainIndex ?? 0) == ci && (c.engineIndex ?? 0) == i
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("\(grouped(shares)) shares + call".uppercased())
-                    .foregroundStyle(PP.dim(.paper))
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .firstTextBaseline) {
+                Text((pick.rec == true
+                      ? "conviction \(r.plan?.conviction ?? 0) sized this"
+                      : "option \(n + 1)").uppercased())
                 Spacer()
-                Text("\(grouped(max(0, shares - covered))) uncapped".uppercased())
-                    .foregroundStyle(PP.paperText)
+                Text(([chain.expDays.map { "\($0)d to run" }, chain.event]
+                    .compactMap { $0 }.joined(separator: " · ")).uppercased())
+                    .foregroundStyle(PP.dim(.paper))
             }
-            .font(PP.mono(9.5)).tracking(9.5 * 0.1)
+            .font(PP.mono(9.5)).tracking(9.5 * 0.14)
+            .lineLimit(1).minimumScaleFactor(0.75)
 
-            GeometryReader { geo in
-                ZStack {
-                    // The loss region — with the discs, the only colour in the app.
-                    Path { p in
-                        p.move(to: .init(x: X(lo, geo.size.width), y: Y(0, geo.size.height)))
-                        p.addLine(to: .init(x: X(lo, geo.size.width), y: Y(pos(lo), geo.size.height)))
-                        p.addLine(to: .init(x: X(be, geo.size.width), y: Y(0, geo.size.height)))
-                        p.closeSubpath()
-                    }.fill(PP.lossHue.opacity(0.20))
+            // The tier is the option's NAME, not a label — it reads first, as a word.
+            Text((pick.tier ?? "").prefix(1).uppercased() + (pick.tier ?? "").dropFirst())
+                .font(PP.disp(30, .semibold))
+            if let st = pick.stance {
+                Text(st).font(PP.disp(15)).lineSpacing(15 * 0.35)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-                    Path { p in
-                        p.move(to: .init(x: 0, y: Y(0, geo.size.height)))
-                        p.addLine(to: .init(x: geo.size.width, y: Y(0, geo.size.height)))
-                    }.stroke(PP.paperText, lineWidth: 1)
+            // Expiry, strike, quantity: the three facts that ARE the sale.
+            HStack(spacing: 6) {
+                pill(chain.expiry ?? "—")
+                pill(f2(pick.strike ?? 0))
+                pill("\(pick.ct ?? 0) lots")
+            }
+            Text([pick.delta.map { "\(Int($0))Δ" },
+                  pick.iv.map { "iv \(f1($0))" },
+                  pick.otmPct.map { "\(f1($0))% out" }]
+                .compactMap { $0 }.joined(separator: " · ").uppercased())
+                .font(PP.mono(10)).tracking(10 * 0.06)
+                .foregroundStyle(PP.dim(.paper))
+            if let note = chain.note {
+                PPFine(text: note, ground: .paper, topPad: 0)
+            }
 
-                    Path { p in
-                        p.move(to: .init(x: X(spot, geo.size.width), y: 16))
-                        p.addLine(to: .init(x: X(spot, geo.size.width), y: geo.size.height))
-                    }.stroke(PP.paperText.opacity(0.28), lineWidth: 1)
-
-                    // Shares plus the call: rises with the stock to the strike, then
-                    // flattens to the uncovered shares. That kink IS the cap.
-                    Path { p in
-                        p.move(to: .init(x: X(lo, geo.size.width), y: Y(pos(lo), geo.size.height)))
-                        p.addLine(to: .init(x: X(k, geo.size.width), y: Y(pos(k), geo.size.height)))
-                        p.addLine(to: .init(x: X(hi, geo.size.width), y: Y(pos(hi), geo.size.height)))
-                    }.stroke(PP.paperText, style: StrokeStyle(lineWidth: 2.5, lineJoin: .round))
-
-                    Circle().fill(PP.paperText).frame(width: 7, height: 7)
-                        .position(x: X(k, geo.size.width), y: Y(pos(k), geo.size.height))
-                    Circle().fill(PP.paperMid)
-                        .overlay(Circle().strokeBorder(PP.paperText, lineWidth: 2))
-                        .frame(width: 7, height: 7)
-                        .position(x: X(be, geo.size.width), y: Y(0, geo.size.height))
-
-                    Text("now \(f2(spot))".uppercased())
-                        .font(PP.mono(9)).tracking(9 * 0.1)
-                        .foregroundStyle(PP.paperText.opacity(0.72))
-                        .position(x: min(max(28, X(spot, geo.size.width)), geo.size.width - 30), y: 6)
-                    Text("capped \(f2(k))".uppercased())
-                        .font(PP.mono(9)).tracking(9 * 0.1)
-                        .foregroundStyle(PP.paperText.opacity(0.72))
-                        .position(x: min(X(k, geo.size.width) + 42, geo.size.width - 34),
-                                  y: Y(pos(k), geo.size.height) + 17)
+            // The whole story: above the strike, between, below.
+            if let ws = pick.worlds, !ws.isEmpty {
+                VStack(spacing: 0) {
+                    Rectangle().fill(PP.paperText.opacity(0.16)).frame(height: 1)
+                    ForEach(Array(ws.enumerated()), id: \.offset) { _, w in
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text((w.when ?? "").uppercased())
+                                .font(PP.mono(9.5)).tracking(9.5 * 0.04)
+                                .foregroundStyle(PP.dim(.paper))
+                                .frame(width: 88, alignment: .leading)
+                            Text(w.then ?? "").font(PP.disp(14)).lineSpacing(14 * 0.3)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 9)
+                        Rectangle().fill(PP.paperText.opacity(0.10)).frame(height: 1)
+                    }
                 }
             }
-            .frame(height: 150)
-            .padding(.top, 18)
+
+            Spacer(minLength: 0)
+
+            let credit = pick.income ?? ((pick.prem ?? 0) * Double(pick.ct ?? 0) * 100)
+            PPNum(value: pick.label ?? usdK(credit),
+                  unit: pick.creditPerDayLabel.map { "credit · \($0)" } ?? "credit",
+                  size: 68, ground: .paper)
+            if let be = pick.be {
+                PPFine(text: "\(f2(pick.prem ?? 0)) a share, breakeven \(f2(be))"
+                       + (pick.beBasisPct.map { " — \(f1($0))% over your \(f2(r.book?.buyAvg ?? 0)) basis" } ?? "")
+                       + ".", ground: .paper)
+            }
+            if let out = pick.out {
+                Text(("if called at \(f2(pick.strike ?? 0))"
+                      + (r.outcome?.realisedLabel.map { " · includes \($0) realised" } ?? "")).uppercased())
+                    .font(PP.mono(9.5)).tracking(9.5 * 0.08)
+                    .foregroundStyle(PP.dim(.paper))
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .padding(.top, 12)
+                HStack(alignment: .top, spacing: 10) {
+                    trio(out.opt, "options")
+                    trio(out.stockOpt, "stock + options")
+                    // Null when realised P&L was not sent — an em dash, never a zero.
+                    trio(out.all, "all-in")
+                }
+                .padding(.top, 10)
+                .overlay(alignment: .top) { Rectangle().fill(PP.hairline(.paper)).frame(height: 1) }
+            }
+
+            PPConfirm(pick: pick, chain: chain, tier: pick.tier ?? "",
+                      isLive: isLive, hasCommit: commit != nil,
+                      onLabel: commit?.onLabel, ticked: $ticked) {
+                onCommit(PPCommit(
+                    chainIndex: ci, engineIndex: i,
+                    tier: pick.tier ?? "", strike: pick.strike ?? 0, ct: pick.ct ?? 0,
+                    prem: pick.prem ?? 0, expiry: chain.expiry ?? "", expCode: chain.expCode,
+                    soldSpot: spot, conviction: r.plan?.conviction ?? 0,
+                    assign: pick.assign,
+                    onISO: ISO8601DateFormatter().string(from: Date()),
+                    onLabel: PPSellPage.todayLabel()))
+            }
         }
-        .padding(.top, 16)
+    }
+
+    @ViewBuilder private func pill(_ t: String) -> some View {
+        Text(t).font(PP.mono(11))
+            .padding(.horizontal, 12).frame(minHeight: 28)
+            .overlay(Capsule().strokeBorder(PP.paperText.opacity(0.22), lineWidth: 1))
+    }
+    @ViewBuilder private func trio(_ value: String?, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(value ?? "—").font(PP.mono(16)).monospacedDigit()
+                .foregroundStyle(PP.paperText).lineLimit(1).minimumScaleFactor(0.7)
+            Text(label.uppercased()).font(PP.mono(9.5)).tracking(9.5 * 0.1)
+                .foregroundStyle(PP.dim(.paper))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct PPConfirm: View {
     let pick: PPPick
+    let chain: PPChain
     let tier: String
-    let expiry: String
-    let commit: PPCommit?
+    let isLive: Bool
+    let hasCommit: Bool
+    let onLabel: String?
     @Binding var ticked: Bool
     let fire: () -> Void
 
-    private var isLive: Bool {
-        guard let c = commit else { return false }
-        return c.strike == pick.strike && c.ct == pick.ct && c.expiry == expiry
+    private var line: String {
+        "\(pick.ct ?? 0) at \(f2(pick.strike ?? 0)), \(chain.expCode ?? chain.expiry ?? "")"
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if isLive, let c = commit {
+            if isLive {
                 HStack(alignment: .top, spacing: 11) {
-                    box(checked: true)
-                    Text("Executed \(c.ct) at \(f2(c.strike)), \(expiry). Logged \(c.onLabel).")
-                        .font(PP.disp(12.5)).foregroundStyle(PP.paperText)
-                        .fixedSize(horizontal: false, vertical: true)
+                    box(true)
+                    Text("Executed \(line)." + (onLabel.map { " Logged \($0)." } ?? ""))
+                        .font(PP.disp(12)).fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.top, 18)
+                .padding(.top, 13)
             } else {
                 Button { ticked.toggle() } label: {
                     HStack(alignment: .top, spacing: 11) {
-                        box(checked: ticked)
-                        Text("This is what is executed: \(pick.ct ?? 0) at \(f2(pick.strike ?? 0)), \(expiry).")
-                            .font(PP.disp(12.5)).foregroundStyle(PP.paperText)
-                            .multilineTextAlignment(.leading)
+                        box(ticked)
+                        Text("This is what is executed: \(line).")
+                            .font(PP.disp(12)).multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 18)
+                .buttonStyle(.plain).padding(.top, 13)
 
                 Button(action: fire) {
                     HStack {
-                        Text((commit == nil ? "start monitoring" : "replace the position").uppercased())
+                        Text((hasCommit ? "replace the position" : "start monitoring").uppercased())
                         Spacer()
-                        Text(tier.uppercased()).opacity(0.6).font(PP.mono(9.6))
+                        Text(tier.uppercased()).opacity(0.6).font(PP.mono(9.2))
                     }
-                    .font(PP.mono(12)).tracking(12 * 0.06)
-                    .foregroundStyle(ticked ? Color(red: 0.969, green: 0.969, blue: 0.957)
-                                            : PP.paperText.opacity(0.45))
+                    .font(PP.mono(11.5)).tracking(11.5 * 0.06)
+                    .foregroundStyle(ticked ? PP.paperMid : PP.paperText.opacity(0.45))
                     .padding(.vertical, 15).padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(RoundedRectangle(cornerRadius: 14)
                         .fill(ticked ? PP.paperText : PP.paperText.opacity(0.16)))
                 }
-                .buttonStyle(.plain)
-                .disabled(!ticked)
-                .padding(.top, 16)
+                .buttonStyle(.plain).disabled(!ticked).padding(.top, 12)
             }
         }
     }
 
-    @ViewBuilder private func box(checked: Bool) -> some View {
+    @ViewBuilder private func box(_ on: Bool) -> some View {
         RoundedRectangle(cornerRadius: 6)
-            .fill(checked ? PP.paperText : .clear)
+            .fill(on ? PP.paperText : .clear)
             .frame(width: 21, height: 21)
             .overlay(RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(PP.paperText.opacity(checked ? 1 : 0.4), lineWidth: 1.5))
-            .overlay(checked
-                     ? Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(PP.paperMid) : nil)
+                .strokeBorder(PP.paperText.opacity(on ? 1 : 0.4), lineWidth: 1.5))
+            .overlay(on ? Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .bold)).foregroundStyle(PP.paperMid) : nil)
     }
 }
 
-// MARK: - 05 · The position you are running (ink)
+/// Dashes rather than dots: six dots stop being distinguishable, and a dash reads
+/// as "one of a series" where a dot reads as "a page".
+private struct PPOptRail: View {
+    let count: Int
+    @Binding var idx: Int
+    var body: some View {
+        HStack(spacing: 7) {
+            ForEach(0..<count, id: \.self) { n in
+                Capsule()
+                    .fill(n == idx ? PP.paperText : PP.paperText.opacity(0.20))
+                    .frame(width: 24, height: 3)
+                    .contentShape(Rectangle())
+                    .onTapGesture { withAnimation { idx = n } }
+            }
+            Spacer()
+            Text("\(idx + 1) / \(count)").font(PP.mono(9.5)).tracking(9.5 * 0.12)
+                .foregroundStyle(PP.dim(.paper))
+        }
+        .padding(.top, 14)
+    }
+}
 
-/// Reads the COMMITTED trade, never today's rail. The room bar is the only
-/// arithmetic: how far spot has travelled from the sale toward the cap.
+// MARK: - 04 · The position you are running (ink)
+
+/// Reads the COMMITTED trade, never today's rail.
 struct PPMonitorPage: View {
     let r: PPResponse
     let spot: Double
@@ -424,8 +376,7 @@ struct PPMonitorPage: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(PP.inkText.opacity(0.14))
-                        Capsule().fill(PP.inkText)
-                            .frame(width: max(3, geo.size.width * used))
+                        Capsule().fill(PP.inkText).frame(width: max(3, geo.size.width * used))
                     }
                 }
                 .frame(height: 6)
@@ -443,13 +394,13 @@ struct PPMonitorPage: View {
         } base: {
             PPNum(value: "\(f2(left))%", unit: "of room left", ground: .ink)
             PPSay(text: [commit.assign.map { "\(Int(($0 * 100).rounded()))% odds it gets called." },
-                         "\(r.plan?.expDays ?? 0) sessions to run."]
+                         (r.plan?.chains?.first?.expDays).map { "\($0) sessions to run." }]
                 .compactMap { $0 }.joined(separator: " "), ground: .ink)
             HStack(alignment: .top, spacing: 10) {
                 trio(usdK(credit), "collected")
                 trio(usdK((commit.strike - commit.soldSpot) * Double(commit.ct) * 100 + credit),
                      "if called at \(Int(commit.strike))")
-                trio("\(Int((r.plan?.keepPct ?? 0).rounded()))%", "delta kept")
+                trio("\(Int((r.plan?.chains?.first?.keepPct ?? 0).rounded()))%", "delta kept")
             }
             .padding(.top, 14)
             .overlay(alignment: .top) { Rectangle().fill(PP.hairline(.ink)).frame(height: 1) }
@@ -460,8 +411,7 @@ struct PPMonitorPage: View {
                     .foregroundStyle(PP.inkText)
                 Spacer()
                 Button(action: onStandDown) {
-                    Text("stand down".uppercased()).underline()
-                        .foregroundStyle(PP.dim(.ink))
+                    Text("stand down".uppercased()).underline().foregroundStyle(PP.dim(.ink))
                 }
                 .buttonStyle(.plain)
             }
@@ -478,8 +428,7 @@ struct PPMonitorPage: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(value).font(PP.mono(17)).foregroundStyle(PP.inkText).monospacedDigit()
             Text(label.uppercased()).font(PP.mono(10)).tracking(10 * 0.1)
-                .foregroundStyle(PP.dim(.ink))
-                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(PP.dim(.ink)).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
