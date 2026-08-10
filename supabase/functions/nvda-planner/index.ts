@@ -1389,7 +1389,14 @@ Deno.serve(async (req) => {
      better decision. When no print is in range there is one week, and the page
      should say so rather than pad the row.
      ── */
-  const tiers = ['balanced', 'conservative', 'aggressive'];   // picks[] order
+  /* TIER IS A FUNCTION OF STRIKE, NOT OF ARRAY POSITION.
+     picks are built [target, target − step, target + step], and naming them by
+     index put "conservative" on the strike one step CLOSER to spot — 0.4% out,
+     46% odds of being called — while the furthest strike was called aggressive.
+     Exactly backwards, and the stance sentence then repeated the inversion in
+     words: "caps almost nothing" on the pick most likely to be called away.
+     Sorted furthest-first, the names follow the meaning. */
+  const tiers = ['conservative', 'balanced', 'aggressive'];
   const chainFrom = (x: Ctx, picks: ReturnType<typeof mkPick>[]) => ({
     expiry: x.exp,
     chip: x.exp ? fmtDay(x.exp) : '—',
@@ -1407,6 +1414,9 @@ Deno.serve(async (req) => {
     size: { full: picks[0]?.wasCt ?? null, fullStrike: picks[0]?.strike ?? null },
     picks: picks.map((pk, i) => {
       const tier = tiers[i] ?? `tier ${i + 1}`;
+      // The recommendation is the TARGET strike, not a fixed slot: after sorting it
+      // is usually the middle, but a floor-blocked target can move it.
+      const isRec = Math.abs(pk.strike - x.targetStrike) < 1e-6;
       const calledSh = Math.min(pk.ct * 100, shares);
       const free = Math.max(0, shares - calledSh);
       const onBasis = book.buyAvg > 0 ? calledSh * (pk.strike - book.buyAvg) : null;
@@ -1414,8 +1424,15 @@ Deno.serve(async (req) => {
       /* STANCE — what this tier DOES, in one sentence. Written here rather than in
          the app because it has to name real figures, and a sentence assembled from
          numbers the client re-derived is a sentence that can contradict them. */
-      const stance = tier === 'conservative'
-        ? `Caps almost nothing. ${pk.ct} lots, ${pk.otmPct.toFixed(1)}% out — if the run comes you are still in it.`
+      const stance = isRec && !x.printInside
+        ? `The size conviction sized. Caps the top of the expected move and nothing below it.`
+        : tier === 'conservative'
+        // "Caps almost nothing" was an assumption about the furthest tier, and on a
+        // two-day expiry it was flatly wrong: 75 lots at 2.7% out covers EVERY share.
+        // Read what is actually left uncapped instead of asserting a shape.
+        ? (free > 0
+            ? `The furthest of the three at ${pk.otmPct.toFixed(1)}% out. ${pk.ct} lots, and ${free.toLocaleString('en-US')} shares still run free.`
+            : `${pk.ct} lots at ${pk.otmPct.toFixed(1)}% out — the furthest strike on offer, but it covers every share you hold.`)
         : tier === 'balanced'
         ? (x.printInside
             ? `Sells the print at ${pk.otmPct.toFixed(1)}% out. Conviction cut this from ${pk.wasCt} lots to ${pk.ct}.`
@@ -1434,7 +1451,7 @@ Deno.serve(async (req) => {
         { when: `under ${Math.round(spot)}`,
           then: `${pk.prem.toFixed(2)} a share of cushion, then the floor.` },
       ];
-      return { ...pk, tier, rec: i === 0, stance, worlds,
+      return { ...pk, tier, rec: isRec, stance, worlds,
                // The design prints this verbatim; a number here would be re-formatted
                // in the app and drift from the credit above it.
                creditPerDayLabel: `${fmtUsd(pk.creditPerDay)}/day` };
@@ -1445,16 +1462,20 @@ Deno.serve(async (req) => {
   // 19-day contract he would never sell. The print is a FLAG on whichever of these
   // two happens to span it, not the reason a week is on the list.
   const altExp = secondExp;
-  const chains = [chainFrom(ctx0, plan.picks)];
+  // Furthest strike first, so index order and tier order are the same thing and
+  // cannot drift apart. rec marks the target, wherever it lands in that order.
+  const byStrike = (ps: ReturnType<typeof mkPick>[]) =>
+    ps.slice().sort((x, y) => y.strike - x.strike);
+  const chains = [chainFrom(ctx0, byStrike(plan.picks))];
   if (altExp) {
     const cx = await mkCtxFor(altExp);
-    chains.push(chainFrom(cx, [cx.targetStrike, cx.targetStrike - STRIKE_STEP,
-                               cx.targetStrike + STRIKE_STEP].map((k) => mkPick(k, cx))));
+    chains.push(chainFrom(cx, byStrike([cx.targetStrike, cx.targetStrike - STRIKE_STEP,
+                                        cx.targetStrike + STRIKE_STEP].map((k) => mkPick(k, cx)))));
   }
   (plan as Record<string, unknown>).chains = chains;
 
   {
-    const rec = plan.picks[0];
+    const rec = plan.picks.find((k) => Math.abs(k.strike - targetStrike) < 1e-6) ?? plan.picks[0];
     (plan as Record<string, unknown>).size = {
       sold: rec.ct, full: rec.wasCt,
       strike: rec.strike, fullStrike: rec.strike,
