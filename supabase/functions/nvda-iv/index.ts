@@ -214,7 +214,10 @@ async function backfill(admin: ReturnType<typeof createClient>, key: string, fro
 // reported separately as unresolved, never folded in as though they had decayed.
 async function crush(admin: ReturnType<typeof createClient>) {
   const { data } = await admin.from('nvda_iv_daily')
-    .select('date,iv').eq('ticker', 'NVDA').order('date', { ascending: true }).limit(400);
+    // Ordered oldest-first, so a limit BELOW the row count silently drops the most
+    // recent sessions rather than the oldest. Polygon serves two years, so 800 is
+    // comfortably clear of the ceiling.
+    .select('date,iv').eq('ticker', 'NVDA').order('date', { ascending: true }).limit(800);
   const rows = ((data ?? []) as { date: string; iv: number }[])
     // Stored as a fraction (0.40) on some rows and a percent (40) on others.
     .map((r) => ({ date: String(r.date).slice(0, 10), iv: Number(r.iv) < 1.5 ? Number(r.iv) * 100 : Number(r.iv) }))
