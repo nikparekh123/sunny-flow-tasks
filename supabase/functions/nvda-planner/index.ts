@@ -246,7 +246,9 @@ Deno.serve(async (req) => {
 
   const bookIn = (b.book ?? {}) as Record<string, unknown>;
   const volIn = (b.vol ?? {}) as Record<string, number>;
-  if (b.commit == null && (bookIn.shares == null || volIn.iv == null))
+  // The guard screens PLANNING input. Neither a commit nor a scoring run carries a
+  // book, and both were being rejected for lacking fields they have no use for.
+  if (b.commit == null && b.score !== true && (bookIn.shares == null || volIn.iv == null))
     return json(400, { ok: false, error: 'book.shares and vol.iv are required' });
 
   const wv = Number(b.weekendVol ?? 0.3);
