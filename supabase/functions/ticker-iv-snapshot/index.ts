@@ -201,6 +201,14 @@ Deno.serve(async (req) => {
           const today = new Date().toISOString().slice(0, 10);
           out[tk] = rows.length;
           out[`${tk}_next`] = rows.filter((x) => x.ex_date >= today).map((x) => x.ex_date).sort()[0] ?? 'none declared';
+          // iShares declares TLT's ex-date only a day or two ahead, so "none declared"
+          // is the normal state rather than a fault. The cadence is what makes it
+          // predictable, so the recent rows come back to be read rather than trusted.
+          const recent = rows.filter((x) => x.ex_date < today).sort((x, y) => (x.ex_date < y.ex_date ? 1 : -1)).slice(0, 8);
+          out[`${tk}_recent`] = recent.map((x) => `${x.ex_date} $${x.cash_amount ?? '?'}`).join(' · ');
+          const paid12 = rows.filter((x) => x.ex_date < today).slice(0, 12)
+            .reduce((acc, x) => acc + Number(x.cash_amount ?? 0), 0);
+          out[`${tk}_trailing12`] = +paid12.toFixed(4);
         } catch { out[tk] = 'error'; }
       }
       return new Response(JSON.stringify({ ok: true, mode: 'dividends', written: out }),
