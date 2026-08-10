@@ -115,6 +115,48 @@ Deno.serve(async (req) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  // ── deep backfill of daily_closes ──────────────────────────────────────────
+  // The scheduled run fetches 120 calendar days, which is right for the 5-session
+  // chart and HV30 but leaves the planner's `relative` family comparing NVDA to SMH
+  // over whatever overlap happens to exist — twelve sessions today, against the
+  // twenty-one it is designed for. A short window is not wrong, it is just noisy, and
+  // one gap distorts it.
+  //
+  // Separate mode rather than a wider default: the nightly job should stay cheap.
+  {
+    const body = await req.json().catch(() => ({})) as
+      { backfillCloses?: { tickers?: string[]; days?: number } };
+    const bf = body.backfillCloses;
+    if (bf) {
+      const admin0 = createClient(supabaseUrl, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const tks = bf.tickers?.length ? bf.tickers : ['SMH', 'QQQ', 'NVDA'];
+      const days = Math.min(Math.max(Number(bf.days ?? 800), 30), 1500);
+      const to = new Date().toISOString().slice(0, 10);
+      const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+      const out: Record<string, number | string> = {};
+      for (const tk of tks) {
+        try {
+          // sort=asc, matching the call shape that works. desc returns 404 here.
+          const r = await fetch(`https://api.polygon.io/v2/aggs/ticker/${tk}/range/1/day/${from}/${to}`
+            + `?adjusted=true&sort=asc&limit=5000&apiKey=${polygonKey}`);
+          if (!r.ok) { out[tk] = `HTTP${r.status}`; continue; }
+          const bars = ((await r.json())?.results ?? []) as { t: number; c: number }[];
+          const rows = bars
+            .filter((x) => Number.isFinite(x.c) && x.c > 0)
+            .map((x) => ({ ticker: tk, date: new Date(x.t).toISOString().slice(0, 10), close_price: x.c }));
+          for (let i = 0; i < rows.length; i += 200) {
+            await admin0.from('daily_closes').upsert(rows.slice(i, i + 200), { onConflict: 'ticker,date' });
+          }
+          out[tk] = rows.length;
+        } catch { out[tk] = 'error'; }
+      }
+      return new Response(JSON.stringify({ ok: true, mode: 'backfillCloses', from, to, written: out }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+  }
+
   const startedAt = new Date();
   const snapshotDate = startedAt.toISOString().slice(0, 10);  // UTC date; market close is well within
   const results: SnapshotResult[] = [];
