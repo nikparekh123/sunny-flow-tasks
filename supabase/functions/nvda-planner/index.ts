@@ -720,7 +720,11 @@ Deno.serve(async (req) => {
   const grade = b.earningsGrade != null ? Number(b.earningsGrade)
     : bookIn.earningsGrade != null ? Number(bookIn.earningsGrade) : null;
   const gDecay = clamp((60 - sincePrint) / 50, 0, 1);
-  const nextExp = expiryDates[0] ?? null, secondExp = expiryDates[1] ?? null;
+  // An expiry with no sessions left is not something to write. expiryDates[0] is
+  // today's on any expiry morning, and NVDA has one every Mon, Wed and Fri — so a
+  // third of the time the model was pricing a zero-day option and calling it the plan.
+  const liveExps = expiryDates.filter((d) => spanTo(nowISO, parseISO(d)).td >= 1);
+  const nextExp = liveExps[0] ?? null, secondExp = liveExps[1] ?? null;
   const macroHit = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3)[0] ?? null;
   const peerHit = peers.filter((x) => x.days >= 0).sort((x, y) => x.days - y.days)[0] ?? null;
   const inWindow = (d: string) => (nextExp && d <= nextExp ? 2 : secondExp && d <= secondExp ? 1 : 0);
