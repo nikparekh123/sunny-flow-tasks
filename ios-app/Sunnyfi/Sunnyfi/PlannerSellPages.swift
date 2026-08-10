@@ -103,6 +103,14 @@ struct PPSellPage: View {
                 .padding(.horizontal, PP.pagePadX)
             }
             .padding(.horizontal, -PP.pagePadX)
+            // What is already open. This came off the deleted decision page, and it
+            // belongs here: the week you roll INTO is not a sensible choice without
+            // the week you are rolling OUT of.
+            PPFine(text: {
+                let lines = (r.expiries ?? []).compactMap { $0.line }
+                return lines.isEmpty ? "Nothing open. This would be a new position."
+                                     : lines.joined(separator: ". ") + "."
+            }(), ground: .paper, topPad: 0)
             if let c = chosen?.pick {
                 PPPayoff(pick: c, shares: r.book?.shares ?? 0, spot: spot,
                          em: r.plan?.expectedMove ?? max(1, spot * 0.02))

@@ -1,10 +1,16 @@
 //
 //  PlannerPages.swift
-//  Seven snap pages, one decision each, in the order a seller decides:
-//  how strong is the setup (00), what that means for size (01), what could
-//  break the week (02), is the floor intact (03), what to sell (04), what is
-//  running (05, only once a sale is confirmed), and the one input no feed
-//  provides (06).
+//  Six snap pages, one decision each, in the order a seller decides:
+//  how strong is the setup (00), what could break the week (01), is the floor
+//  intact (02), what to sell (03), what is running (04, only once a sale is
+//  confirmed), and the one input no feed provides (05).
+//
+//  There used to be a seventh — "the decision" — whose whole content was that
+//  conviction sized the sale to 44 where a neutral read would sell 62. A screen
+//  for one comparison against a hypothetical, and the comparison did not read.
+//  It is a clause on the tier it describes now. What it carried that mattered —
+//  the open position, and the grade footer — moved to the sell page and to
+//  conviction, where grade is one of the nine families anyway.
 //
 //  Every page is a PPPage. None of them positions its own hero — that is the
 //  layout law's job, stated once in PlannerPagesKit.
@@ -31,6 +37,7 @@ private func grouped(_ v: Double) -> String {
 /// away, dashed means the slot exists and the number does not.
 struct PPConvictionPage: View {
     let r: PPResponse
+    var toGrade: (() -> Void)? = nil
     @State private var selected: String? = nil
 
     private var discs: [PPDisc] { r.discsOrdered() }
@@ -65,6 +72,23 @@ struct PPConvictionPage: View {
                         ground: .paper)
                 PPSay(text: r.moversLine(), ground: .paper)
             }
+            VStack(spacing: 0) {
+                Rectangle().fill(PP.hairline(.paper)).frame(height: 1)
+                Button { toGrade?() } label: {
+                    HStack {
+                        // The neutral 50 the score is measured from — which is the
+                        // only thing that makes the grade beside it legible.
+                        Text("baseline 50".uppercased())
+                        Spacer()
+                        Text("your grade \(sgn(r.discs().first { $0.id == "grade" }?.today ?? 0))".uppercased())
+                    }
+                    .font(PP.mono(11)).tracking(11 * 0.14)
+                    .foregroundStyle(PP.dim(.paper))
+                }
+                .disabled(toGrade == nil)
+                .padding(.top, 13)
+            }
+            .padding(.top, 20)
         }
     }
 
@@ -108,62 +132,6 @@ private struct PPDiscView: View {
         .frame(maxWidth: 106)
         .overlay(selected ? Circle().strokeBorder(PP.paperText, lineWidth: 2) : nil)
         .animation(.easeInOut(duration: 0.3), value: selected)
-    }
-}
-
-// MARK: - 01 · The decision (ink)
-
-struct PPDecisionPage: View {
-    let r: PPResponse
-    var toGrade: (() -> Void)? = nil
-
-    var body: some View {
-        let p = r.plan
-        let size = p?.size
-        PPPage(ground: .ink) {
-            PPKicker(text: "the decision", ground: .ink)
-            // Pre-cased on the server. Never re-case it.
-            // Only expiries that actually carry something. An empty book has
-            // nothing to say here and should say nothing, not "0 sold".
-            PPFine(text: {
-                let lines = (r.expiries ?? []).compactMap { $0.line }
-                return lines.isEmpty ? "Nothing open. This would be a new position."
-                                     : lines.joined(separator: ". ").appendingPeriod()
-            }(), ground: .ink, topPad: 0)
-        } base: {
-            PPNum(value: "\(size?.sold ?? 0)",
-                  unit: "of \(size?.full ?? 0) contracts", ground: .ink)
-            // Conviction moves the count, not the strike — one strike, stated once.
-            PPSay(text: "Conviction \(p?.conviction ?? 0) shrinks the sale: "
-                  + "\(size?.sold ?? 0), not \(size?.full ?? 0), at \(f2(size?.strike ?? 0)). "
-                  + "Keep \(Int(p?.keepPct ?? 0))%, \(grouped(p?.keepDelta ?? 0)) of "
-                  + "\(grouped(r.book?.shares ?? 0)) delta.", ground: .ink)
-            PPFine(text: [p?.eventPhrase, p?.pricePhrase,
-                          p?.paidVsNormal.map { "Paid \(sgn($0))% against normal" }, p?.why]
-                .compactMap { $0 }.joined(separator: ". ").appendingPeriod(), ground: .ink)
-            // 50, always — the CONVICTION baseline the score is measured from, which
-            // is what makes "your grade +4" legible beside it. plan.baseline is
-            // BASE_KEEP[eventState] (65 on a clear week): a different baseline that
-            // happens to share the word. Reading it here put a wrong number on screen.
-            VStack(spacing: 0) {
-                Rectangle().fill(PP.hairline(.ink)).frame(height: 1)
-                Button { toGrade?() } label: {
-                    HStack {
-                        Text("baseline 50".uppercased())
-                        Spacer()
-                        Text("your grade \(sgn(r.discs().first { $0.id == "grade" }?.today ?? 0))".uppercased())
-                    }
-                    .font(PP.mono(11)).tracking(11 * 0.14)
-                    .foregroundStyle(PP.dim(.ink))
-                }
-                .disabled(toGrade == nil)
-                .padding(.top, 13)
-            }
-            // The hairline used to be an overlay on the button's own padded frame,
-            // so it drew straight through the fine print above it. It is a sibling
-            // now, with the design's 20 above and 13 below.
-            .padding(.top, 20)
-        }
     }
 }
 

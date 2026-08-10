@@ -1,6 +1,6 @@
 //
 //  PlannerPagesScreen.swift
-//  The container: fetches once, holds the commit, hosts the seven pages.
+//  The container: fetches once, holds the commit, hosts the six pages.
 //
 //  It decodes the SAME bytes PlanV2Store keeps for the commit echo, rather than
 //  issuing its own request. Two calls would mean the pages could show one plan
@@ -58,16 +58,16 @@ struct PlannerPagesScreen: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if let r = parsed {
-                PPStack(count: liveCommit == nil ? 6 : 7, index: $index) {
-                    PPConvictionPage(r: r).pp_page(0)
-                    PPDecisionPage(r: r, toGrade: { withAnimation { index = liveCommit == nil ? 5 : 6 } }).pp_page(1)
-                    PPWeekPage(r: r).pp_page(2)
-                    PPFloorPage(r: r).pp_page(3)
+                PPStack(count: liveCommit == nil ? 5 : 6, index: $index) {
+                    PPConvictionPage(r: r,
+                        toGrade: { withAnimation { index = liveCommit == nil ? 4 : 5 } }).pp_page(0)
+                    PPWeekPage(r: r).pp_page(1)
+                    PPFloorPage(r: r).pp_page(2)
                     PPSellPage(r: r, spot: spot, commit: commit) { c in
                         commit = c; PPCommitStore.save(c)
                         // Straight to the position it just created — the confirm is
                         // not finished until you can see what is running.
-                        withAnimation { index = 5 }
+                        withAnimation { index = 4 }
                         // And to the server, so the nightly scorer resolves it when
                         // the expiry passes. All three picks are archived, not just
                         // this one: scoring only the taken pick measures which way
@@ -77,14 +77,14 @@ struct PlannerPagesScreen: View {
                             await plan.commit(c.engineIndex.map { $0 + 1 },   // the edge is 1-based
                                               store: store, ticker: ticker)
                         }
-                    }.pp_page(4)
+                    }.pp_page(3)
                     if let c = liveCommit {
                         PPMonitorPage(r: r, spot: spot, commit: c) {
                             commit = nil; PPCommitStore.save(nil)
-                            withAnimation { index = 4 }
-                        }.pp_page(5)
+                            withAnimation { index = 3 }
+                        }.pp_page(4)
                     }
-                    PPGradePage(r: r, grade: $grade).pp_page(liveCommit == nil ? 5 : 6)
+                    PPGradePage(r: r, grade: $grade).pp_page(liveCommit == nil ? 4 : 5)
                 }
             } else {
                 PP.background(.ink).ignoresSafeArea()
