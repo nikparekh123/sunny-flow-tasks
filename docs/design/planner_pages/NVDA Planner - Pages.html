@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Planner Pages · one colour system</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" />
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#101312}
+body{display:flex;align-items:center;justify-content:center;padding:28px;min-height:100vh}
+a{color:#DAF1DE}a:hover{opacity:.7}
+.device{font-family:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;font-weight:400;-webkit-font-smoothing:antialiased;--mono:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+.screen{width:390px;height:844px;border-radius:46px;box-shadow:0 0 0 11px #000,0 0 0 13px #2b2b2b,0 34px 80px rgba(0,0,0,.6);overflow:hidden;position:relative;background:#05100F}
+.ios-status{position:absolute;top:0;left:0;right:0;z-index:20;display:flex;align-items:center;justify-content:space-between;padding:15px 26px 0;font-family:var(--mono);font-size:12.5px;letter-spacing:.03em;color:#fff;mix-blend-mode:difference;pointer-events:none}
+.screen::after{content:"";position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:130px;height:5px;border-radius:3px;background:#fff;opacity:.5;z-index:30;mix-blend-mode:difference}
+/* ── the stack. Edge to edge, one screen per decision, snap on release. ── */
+.pgs-wrap{position:absolute;inset:0}
+.pgs{height:100%;overflow-y:auto;scroll-snap-type:y mandatory;scroll-behavior:smooth}
+.pgs::-webkit-scrollbar{width:0}
+.pg{height:100%;scroll-snap-align:start;scroll-snap-stop:always;position:relative;overflow:hidden;color:var(--t);isolation:isolate}
+.pg::after{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(90% 55% at 82% 6%,var(--glow),transparent 68%)}
+.pg-in{position:relative;height:100%;display:flex;flex-direction:column;justify-content:space-between;gap:20px;padding:56px 26px 44px}
+/* soft gradients, one family per page, so the sequence is legible by colour alone */
+.pg.t0{--t:#0C0C0B;--d:rgba(12,12,11,.62);--glow:rgba(0,0,0,.03);background:linear-gradient(168deg,#FFFFFF 0%,#F7F7F4 62%,#F1F1ED 100%)}
+/* One colour system for the whole deck. Two light pages: the one you audit (the score) and
+   the one you act on (what to sell). Five dark pages you only read. Hue appears on data alone,
+   which is why the money figures on "if this goes through" are the only colour on ink. */
+.pg.t1,.pg.t2,.pg.t3,.pg.t5,.pg.t6{--t:#F4F4F2;--d:rgba(244,244,242,.55);--glow:rgba(255,255,255,.05);background:#0B0B0A}
+.pg.t4{--t:#0C0C0B;--d:rgba(12,12,11,.62);--glow:rgba(0,0,0,.03);background:linear-gradient(168deg,#FFFFFF 0%,#F7F7F4 62%,#F1F1ED 100%)}
+/* ── one layout law: content stacks from the top, the number sits bottom left ── */
+.pg-head{display:flex;flex-direction:column;gap:14px;min-height:0}
+.pg-base{flex:none;display:flex;flex-direction:column;align-items:flex-start}
+.pg-kick{font-family:var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--d)}
+.pg-date{font-family:var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--d)}
+.nb{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.nb .v{font-weight:600;letter-spacing:-.055em;line-height:.86;font-variant-numeric:tabular-nums}
+.nb .u{font-weight:400;letter-spacing:-.02em;color:var(--d);white-space:nowrap}
+.say{margin:16px 0 0;font-weight:500;letter-spacing:-.02em;line-height:1.3}
+.fine{margin:9px 0 0;color:var(--d);line-height:1.5;letter-spacing:-.005em;text-wrap:pretty}
+.pg-head .fine{margin:0}
+.trail{display:flex;align-items:baseline;gap:7px;font-family:var(--mono);color:var(--d);margin-top:14px;letter-spacing:.02em}
+.trail b{font-weight:400}
+.trail b.on{color:var(--t)}
+.trail i{opacity:.45;font-style:normal}
+.foot{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin-top:20px;padding:13px 0 0;border:none;border-top:1px solid color-mix(in oklab,var(--t) 18%,transparent);background:transparent;color:var(--d);font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase;text-align:left;cursor:pointer}
+.foot:disabled{cursor:default}
+.pg-row2{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.pg-row2 .meta{font-family:var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--d);white-space:nowrap}
+/* page 2 · the two lists, second one straight under the first */
+.pg-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
+.pg-items li{display:flex;gap:12px}
+.pg-items .n{font-family:var(--mono);color:var(--d);flex:none;width:13px;line-height:1.5}
+.pg-items p{margin:0;letter-spacing:-.012em;line-height:1.45;text-wrap:pretty}
+.pg-items .lead{font-weight:600}
+.pg-items .d{color:var(--d)}
+.pg-sub{margin-top:8px}
+/* page 4 · the chain, the breakeven axis, and what the choice is worth */
+.srail{flex:none;display:flex;gap:9px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;margin:0 -26px;padding:2px 26px 8px}
+.srail::-webkit-scrollbar{height:0}
+.scard{flex:none;width:152px;scroll-snap-align:start;display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:13px 15px 15px;border-radius:18px;border:1px solid color-mix(in oklab,var(--t) 16%,transparent);background:transparent;color:inherit;font-family:inherit;text-align:left;cursor:pointer;transition:background .18s ease,color .18s ease,border-color .18s ease}
+.scard.on{background:var(--t);color:#F7F7F4;border-color:var(--t)}
+.scard .tier{font-family:var(--mono);letter-spacing:.16em;text-transform:uppercase;opacity:.58;line-height:1}
+.scard .k{font-family:var(--mono);letter-spacing:-.04em;line-height:1}
+.scard .ct{font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;opacity:.62;line-height:1.4}
+.scard .gk{display:grid;grid-template-columns:auto 1fr;column-gap:12px;row-gap:5px;width:100%;padding-top:10px;border-top:1px solid color-mix(in oklab,currentColor 22%,transparent);font-family:var(--mono)}
+.scard .gk i{font-style:normal;letter-spacing:.12em;text-transform:uppercase;opacity:.62}
+.scard .gk b{font-weight:400;text-align:right;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.scard .cr{font-family:var(--mono);letter-spacing:-.04em;margin-top:2px}
+/* the sized pick carries a hairline mark; a strike inside the floor is refused, priced but struck */
+.scard.rec{border-color:color-mix(in oklab,var(--t) 42%,transparent)}
+.scard.no{border-style:dashed;border-color:color-mix(in oklab,var(--t) 20%,transparent);cursor:default;opacity:.5}
+.scard.no .k,.scard.no .cr{text-decoration:line-through;text-decoration-thickness:1px}
+.be{margin-top:16px}
+.be-top{display:flex;align-items:baseline;justify-content:space-between;gap:14px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--d);white-space:nowrap}
+.be-top .hi{color:var(--t)}
+.pl{display:block;margin-top:18px;overflow:visible}
+.pl .pos{fill:color-mix(in oklab,var(--t) 12%,transparent)}
+.pl .neg{fill:color-mix(in oklab,#C0503A 20%,transparent)}
+.pl .zero{stroke:var(--t);stroke-width:1}
+.pl .dash{stroke:color-mix(in oklab,var(--t) 30%,transparent);stroke-width:1;stroke-dasharray:2 4}
+.pl .now{stroke:color-mix(in oklab,var(--t) 28%,transparent);stroke-width:1}
+.pl .line{fill:none;stroke:var(--t);stroke-width:2.5;stroke-linejoin:round}
+.pl .leg{fill:none;stroke:color-mix(in oklab,var(--t) 34%,transparent);stroke-width:1.5;stroke-dasharray:4 3}
+.pl .dot.hollow{fill:#F7F7F4;stroke:var(--t);stroke-width:2}
+.pl .line.loss{stroke:#C0503A}
+.pl .dot{fill:var(--t)}
+.pl .tx{fill:color-mix(in oklab,var(--t) 72%,transparent);font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;margin-top:20px;padding-top:14px;border-top:1px solid color-mix(in oklab,var(--t) 18%,transparent);font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--d)}
+.trio span{display:flex;flex-direction:column;gap:5px}
+.trio b{white-space:nowrap;font-weight:400;letter-spacing:-.03em;color:var(--t);text-transform:none;font-variant-numeric:tabular-nums}
+/* page 4 · confirming the sale, and page 5 reading it back */
+.chk{display:flex;align-items:flex-start;gap:11px;margin-top:18px;letter-spacing:-.012em;line-height:1.4;cursor:pointer;text-wrap:pretty}
+.chk input{appearance:none;flex:none;width:21px;height:21px;margin:1px 0 0;border:1.5px solid color-mix(in oklab,var(--t) 40%,transparent);border-radius:6px;background:transparent;cursor:pointer;display:grid;place-items:center}
+.chk input:checked{background:var(--t) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23F7F7F4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 6.4l2.8 2.8L10 3.4'/%3E%3C/svg%3E") center/12px no-repeat;border-color:var(--t)}
+.cbar:disabled{background:color-mix(in oklab,var(--t) 16%,transparent);color:color-mix(in oklab,var(--t) 45%,transparent);cursor:default}
+.cbar:disabled .tk{opacity:.7}
+.cbar{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin-top:16px;padding:15px 18px;border-radius:14px;border:none;background:var(--t);color:#F7F7F4;font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;text-align:left;cursor:pointer}
+.cbar .tk{opacity:.6;font-size:.8em;white-space:nowrap}
+.cbar.on{background:transparent;color:var(--d);border:1px solid color-mix(in oklab,var(--t) 22%,transparent);cursor:default}
+.cbar.on>span{color:var(--t)}
+.cbar.on button{flex:none;padding:0;border:none;background:transparent;color:var(--d);font-family:inherit;font-size:1em;letter-spacing:.14em;text-transform:uppercase;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.cbar.on button:hover{color:var(--t)}
+.tick{font-family:var(--mono);letter-spacing:-.01em}
+.room{margin-top:6px;display:flex;flex-direction:column;gap:8px}
+.room-r{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-family:var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--d)}
+.room-bar{position:relative;height:6px;border-radius:99px;background:color-mix(in oklab,var(--t) 14%,transparent);overflow:hidden}
+.room-bar i{position:absolute;inset:0 auto 0 0;min-width:3px;border-radius:99px;background:var(--t)}
+.chk.done{cursor:default}
+.chk.done input{cursor:default}
+/* page 6 · the stepper */
+.pg-grade{display:flex;gap:10px;margin-top:20px}
+.pg-step{width:60px;height:60px;flex:none;border-radius:99px;border:1px solid color-mix(in oklab,var(--t) 28%,transparent);background:transparent;color:var(--t);font-family:var(--mono);font-size:24px;line-height:1;cursor:pointer}
+.pg-step:hover{background:var(--t);color:#0B0B0A}
+/* page 5 · every grade given since the first one */
+.gh{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;width:100%;margin-top:24px;padding-top:16px;border-top:1px solid color-mix(in oklab,var(--t) 18%,transparent)}
+.gh span{display:flex;flex-direction:column;align-items:stretch;gap:8px;color:var(--d)}
+.gh span.on{color:var(--t)}
+.gh b{font-family:var(--mono);font-weight:400;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.gh i{display:block;height:4px;min-width:2px;background:currentColor;border-radius:2px;opacity:.5}
+.gh span.on i{opacity:1;height:5px}
+.gh em{font-family:var(--mono);font-style:normal;letter-spacing:.1em;text-transform:uppercase}
+/* page 0 · eight equal circles. Colour depth is weight, solid adds, hollow takes away. */
+.sc-field{display:grid;grid-template-columns:repeat(3,1fr);justify-items:center;gap:12px 8px}
+.cw{position:relative;width:100%;max-width:106px;aspect-ratio:1;border-radius:50%;border:none;padding:0;background:color-mix(in oklab,var(--c) var(--p),#fff);font-family:inherit;cursor:pointer;display:grid;place-items:center;transition:background .3s ease,border-color .3s ease,box-shadow .2s ease}
+.cw .nm{font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--fg);opacity:0;transition:opacity .22s ease;pointer-events:none}
+.cw.sel .nm{opacity:1}
+.cw.neg{background:transparent;border:3px solid color-mix(in oklab,var(--c) var(--p),#fff)}
+.cw.zero{background:transparent;border:1.5px solid color-mix(in oklab,var(--c) 48%,#fff)}
+.cw.off{background:transparent;border:1.5px dashed color-mix(in oklab,var(--c) 55%,#fff)}
+.cw.sel{box-shadow:0 0 0 2px var(--t)}
+/* dots */
+.pg-dots{position:absolute;right:9px;top:50%;transform:translateY(-50%);z-index:22;display:flex;flex-direction:column;gap:7px}
+.pg-dots button{width:6px;height:6px;padding:0;border:none;border-radius:99px;background:#fff;opacity:.32;cursor:pointer;mix-blend-mode:difference;transition:height .2s ease,opacity .2s ease}
+.pg-dots button.on{height:18px;opacity:.95}
+/* host chrome, outside the design */
+.ctl{position:fixed;left:18px;top:18px;width:180px;z-index:60;padding:14px;border-radius:14px;background:rgba(8,10,10,.86);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.14);color:#f2f2ef;font-family:'IBM Plex Mono',monospace;display:flex;flex-direction:column;gap:13px}
+.ctl h4{margin:0;font-size:8.5px;letter-spacing:.2em;text-transform:uppercase;opacity:.5;font-weight:400}
+.ctl .grp{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.ctl button{min-height:26px;padding:0 10px;border:1px solid rgba(255,255,255,.2);border-radius:999px;background:transparent;color:#f2f2ef;font-family:inherit;font-size:9.5px;letter-spacing:.05em;cursor:pointer}
+.ctl button.on{background:#f2f2ef;color:#111;border-color:#f2f2ef}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" fill="#0E3A31"/>
+    <text x="50" y="60" font-family="Helvetica, Arial" font-weight="600" font-size="34" fill="#E4F3E7" text-anchor="middle">91</text>
+    <circle cx="88" cy="42" r="2.5" fill="#E4F3E7"/><circle cx="88" cy="52" r="2.5" fill="#E4F3E7" opacity=".4"/><circle cx="88" cy="62" r="2.5" fill="#E4F3E7" opacity=".4"/>
+  </svg>
+</template>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="planner-pages-data.jsx"></script>
+<script type="text/babel" src="ink-planner-pages.jsx"></script>
+<script type="text/babel">
+const Group = ({ label, value, options, set }) => (
+  <div><h4>{label}</h4><div className="grp">{options.map((o) => <button key={String(o.v)} className={value === o.v ? "on" : ""} onClick={() => set(o.v)}>{o.l}</button>)}</div></div>
+);
+const Host = () => {
+  const [t, set] = React.useState({ textScale: 1, gradeOn: true });
+  const on = (k) => (v) => set((p) => ({ ...p, [k]: v }));
+  return (
+    <React.Fragment>
+      <div className="ctl">
+        <Group label="Text size" value={t.textScale} options={[{ v: 1, l: "regular" }, { v: 1.1, l: "large" }, { v: 1.2, l: "larger" }]} set={on("textScale")} />
+        <Group label="Earnings grade page" value={t.gradeOn} options={[{ v: true, l: "shown" }, { v: false, l: "hidden" }]} set={on("gradeOn")} />
+      </div>
+      <div className="device">
+        <div className="screen">
+          <div className="ios-status">
+            <span>9:41</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              5G
+              <svg width="17" height="11" viewBox="0 0 17 11" fill="currentColor"><rect x="0" y="2" width="14" height="7" rx="2" fillOpacity=".3" /><rect x="1.4" y="3.4" width="9.6" height="4.2" rx="1.2" /><rect x="15.2" y="4" width="1.6" height="3" rx=".8" fillOpacity=".45" /></svg>
+            </span>
+          </div>
+          <window.PlannerPages textScale={t.textScale} gradeOn={t.gradeOn} />
+        </div>
+      </div>
+    </React.Fragment>
+  );
+};
+ReactDOM.createRoot(document.getElementById("root")).render(<Host />);
+</script>
+</body>
+</html>
