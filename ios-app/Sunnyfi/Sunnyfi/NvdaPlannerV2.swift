@@ -259,6 +259,13 @@ struct PV2: Decodable, Sendable {
 @Observable
 final class PlanV2Store {
     var state: PV2?
+    /// The raw response, kept so a commit can echo the plan back VERBATIM. Re-encoding
+    /// from the decoded model would archive whatever the Swift structs happen to carry,
+    /// not what the engine actually said — and the record has to be the latter.
+    private var lastRaw: Data?
+    var committedIndex: Int??          // nil = untouched · .some(nil) = declined
+    var committing = false
+    var commitError: String?
     var isLoading = true
     var lastError: String?
     private let client = SupabaseService.client
@@ -332,12 +339,40 @@ final class PlanV2Store {
                 options: FunctionInvokeOptions(body: req), decode: { data, _ in data })
             let decoded = try JSONDecoder().decode(PV2.self, from: data)
             guard g == gen else { return }
-            if decoded.ok { state = decoded; lastError = nil } else { lastError = "planner unavailable" }
+            if decoded.ok { state = decoded; lastRaw = data; lastError = nil; committedIndex = nil }
+            else { lastError = "planner unavailable" }
             isLoading = false
         } catch {
             guard g == gen else { return }
             lastError = String(describing: error); isLoading = false
         }
+    }
+
+    /// Records the decision. `index` is 1-based; nil means the answer was to do nothing,
+    /// which is a decision and gets stored and scored like any other.
+    func commit(_ index: Int?, why: String? = nil, store: NvdaStore, ticker: String = "NVDA") async {
+        guard let raw = lastRaw,
+              let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              let plan = obj["plan"] else { commitError = "nothing to commit"; return }
+        committing = true; commitError = nil
+        var c: [String: Any] = ["plan": plan, "chosen": index as Any? ?? NSNull()]
+        if let o = obj["observations"] { c["observations"] = o }
+        if let m = obj["ivMedian"] { c["ivMedian"] = m }
+        if let w = why { c["declinedWhy"] = w }
+        c["spot"] = store.position?.spot ?? 0
+        c["iv"] = store.insights?.vol.iv ?? 0
+        c["book"] = ["shares": store.position?.shares ?? 0, "buyAvg": store.position?.avgBuy ?? 0]
+        do {
+            let body = try JSONSerialization.data(withJSONObject: ["commit": c, "ticker": ticker])
+            let data = try await client.functions.invoke(
+                "nvda-planner", options: FunctionInvokeOptions(body: body), decode: { d, _ in d })
+            let ok = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["ok"] as? Bool ?? false
+            // Only claim it landed if the edge says it did. A decision that silently
+            // fails to save is worse than one that visibly fails, because you stop
+            // checking.
+            if ok { committedIndex = .some(index) } else { commitError = "did not save" }
+        } catch { commitError = String(describing: error) }
+        committing = false
     }
 
     /// NvStrike carries a display expiry ("Aug 15 '26"); the edge wants ISO.

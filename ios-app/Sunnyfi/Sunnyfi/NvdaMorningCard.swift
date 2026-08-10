@@ -27,6 +27,9 @@ struct NvdaMorningCard: View {
     let realized: Double          // closed P&L to date, options + shares
     var iv: Double? = nil
     var ticker: String = "NVDA"
+    var committed: Int?? = nil
+    var onCommit: ((Int) -> Void)? = nil
+    var onDecline: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -171,6 +174,7 @@ struct NvdaMorningCard: View {
                     .font(.system(size: 14.5)).foregroundStyle(Ink.invertText).padding(.top, 10)
             } else {
                 ForEach(Array(picks.enumerated()), id: \.element.id) { i, c in
+                    Button { onCommit?(i + 1) } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("\(i + 1)").font(InkFont.mono(12)).frame(width: 14, alignment: .leading)
                         VStack(alignment: .leading, spacing: 4) {
@@ -189,10 +193,27 @@ struct NvdaMorningCard: View {
                     }
                     .foregroundStyle(Ink.invertText)
                     .padding(.vertical, 11)
+                    .padding(.horizontal, committed == .some(i + 1) ? 10 : 0)
+                    .background(committed == .some(i + 1) ? Ink.invertText.opacity(0.08) : .clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
                     .overlay(alignment: .top) {
                         if i > 0 { Rectangle().fill(Ink.invertText.opacity(0.14)).frame(height: 1) }
                     }
+                    }.buttonStyle(.plain)
                 }
+                // Doing nothing is a decision. It has to be as easy to record as the
+                // other three, or the weeks you sat out never enter the measurement and
+                // the record quietly over-represents the weeks you traded.
+                Button { onDecline?() } label: {
+                    HStack {
+                        Text(committed == .some(nil) ? "Sat this one out" : "Not this week")
+                            .font(InkFont.mono(13))
+                        Spacer()
+                        if committed == .some(nil) { Text("RECORDED").font(InkFont.mono(9)).tracking(9 * 0.15) }
+                    }
+                    .foregroundStyle(Ink.invertDim)
+                    .padding(.top, 14)
+                }.buttonStyle(.plain)
                 // When the hedge floor binds you do not get the keep conviction asked for.
                 // Saying both numbers is the point; hiding the gap is the failure this
                 // whole rebuild removed.
@@ -366,7 +387,10 @@ struct NvdaMorningCardScreen: View {
                         buyAvg: store.position?.avgBuy ?? 0,
                         realized: store.pnl?.realized ?? 0,
                         iv: store.insights?.vol.iv,
-                        ticker: ticker)
+                        ticker: ticker,
+                        committed: plan.committedIndex,
+                        onCommit: { i in Task { await plan.commit(i, store: store, ticker: ticker) } },
+                        onDecline: { Task { await plan.commit(nil, why: "declined on the card", store: store, ticker: ticker) } })
                     if let silent = pv.observations?.silentList, !silent.isEmpty {
                         // Naming what the card does not know beats quietly not having it.
                         Text("NOT YET WIRED · \(silent.joined(separator: " · ").uppercased())")
