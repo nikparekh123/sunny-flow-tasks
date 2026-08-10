@@ -690,9 +690,16 @@ Deno.serve(async (req) => {
   // So the baseline is ONE number per event state and price state does not appear in
   // it at all. Price decides the distance, distance decides the delta per contract,
   // and the count falls out of the arithmetic.
-  const evState = daysToEarnings <= 7 ? 'PRE' : daysSincePrint <= 5 ? 'POST' : 'CLEAR';
+  const sincePrint = b.daysSincePrint != null ? Number(b.daysSincePrint) : daysSincePrint;
+  const evState = daysToEarnings <= 7 ? 'PRE' : sincePrint <= 5 ? 'POST' : 'CLEAR';
   const reactMove = lastReaction ? Number(lastReaction.move_pct) : null;
-  const pxMove = evState === 'POST' && reactMove != null ? reactMove : (relStrength?.self ?? 0);
+  // The caller may know these better than we do, and must be able to say so. pxMove
+  // otherwise reads relStrength off daily_closes, which holds ~12 rows for the
+  // reference series; sincePrint otherwise needs a past print already in the table.
+  // Neither is a reason for the model to be undrivable — the engine should accept the
+  // caller's knowledge when it is offered and fall back to its own when it is not.
+  const pxMove = b.priceMove != null ? Number(b.priceMove)
+    : evState === 'POST' && reactMove != null ? reactMove : (relStrength?.self ?? 0);
   const pxState = pxMove <= -8 ? 'down' : pxMove >= 8 ? 'up' : 'flat';
 
   const BASE_KEEP: Record<string, number> = { PRE: 77, CLEAR: 68, POST: 59 };
@@ -710,8 +717,9 @@ Deno.serve(async (req) => {
 
   // The grade is the one input no feed supplies: was that actually a good quarter?
   // Only meaningful inside the post-print window, and it decays out over 60 sessions.
-  const grade = b.earningsGrade != null ? Number(b.earningsGrade) : null;
-  const gDecay = clamp((60 - daysSincePrint) / 50, 0, 1);
+  const grade = b.earningsGrade != null ? Number(b.earningsGrade)
+    : bookIn.earningsGrade != null ? Number(bookIn.earningsGrade) : null;
+  const gDecay = clamp((60 - sincePrint) / 50, 0, 1);
   const nextExp = expiryDates[0] ?? null, secondExp = expiryDates[1] ?? null;
   const macroHit = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3)[0] ?? null;
   const peerHit = peers.filter((x) => x.days >= 0).sort((x, y) => x.days - y.days)[0] ?? null;
@@ -757,7 +765,7 @@ Deno.serve(async (req) => {
              assign: +bsAssign(spot, k, planT, iv / 100).toFixed(2) };
   };
   const plan = {
-    event: evState, price: pxState, priceMove: +pxMove.toFixed(1),
+    event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
     baseline: BASE_KEEP[evState], modifiers: mods, modRaw,
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
     otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
