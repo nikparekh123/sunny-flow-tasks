@@ -934,8 +934,39 @@ Deno.serve(async (req) => {
   // So the baseline is ONE number per event state and price state does not appear in
   // it at all. Price decides the distance, distance decides the delta per contract,
   // and the count falls out of the arithmetic.
+  // An expiry with no sessions left is not something to write. expiryDates[0] is
+  // today's on any expiry morning, and NVDA has one every Mon, Wed and Fri — so a
+  // third of the time the model was pricing a zero-day option and calling it the plan.
+  const liveExps = expiryDates.filter((d) => spanTo(nowISO, parseISO(d)).td >= 1);
+  // The planner has always written the nearest live expiry. Rolling is the norm,
+  // and the week you roll INTO is a real choice — into the print or past it, before
+  // CPI or after — so the caller may name one.
+  //
+  // Validated against liveExps rather than trusted: an expiry that has already
+  // expired, or one this underlying does not list, must fall back to the nearest
+  // rather than price a contract that cannot be sold. A silent fallback is right
+  // here; the response reports which expiry was actually used, and the app reads
+  // that rather than assuming its request was honoured.
+  const askedExp = typeof b.plannedExpiry === 'string' ? String(b.plannedExpiry).slice(0, 10)
+                 : typeof b.expiry === 'string' ? String(b.expiry).slice(0, 10) : null;
+  const nextExp = (askedExp && liveExps.includes(askedExp) ? askedExp : liveExps[0]) ?? null;
+  const secondExp = liveExps.find((e) => e !== nextExp) ?? null;
   const sincePrint = b.daysSincePrint != null ? Number(b.daysSincePrint) : daysSincePrint;
-  const evState = daysToEarnings <= 7 ? 'PRE' : sincePrint <= 5 ? 'POST' : 'CLEAR';
+  // Does the contract you are about to write actually CARRY the print?
+  //
+  // This used to ask "is there a print within 7 days", which is a fact about the
+  // calendar, not about your position. With the expiry a choice, that reads wrong
+  // in both directions: rolling deliberately PAST earnings still priced as PRE,
+  // and a two-day contract expiring before a print six days out was treated as
+  // carrying an event it would never see.
+  //
+  // Now it asks whether the print falls on or before the expiry being written.
+  // That is the thing the keep model should be reacting to, and it is why picking
+  // an expiry changes the judgement rather than only the price.
+  const printISO = earnings.date ? String(earnings.date).slice(0, 10) : null;
+  const printInside = !!(printISO && nextExp
+    && printISO > nowISO.slice(0, 10) && printISO <= nextExp);
+  const evState = printInside ? 'PRE' : sincePrint <= 5 ? 'POST' : 'CLEAR';
   const reactMove = lastReaction ? Number(lastReaction.move_pct) : null;
   // The caller may know these better than we do, and must be able to say so. pxMove
   // otherwise reads relStrength off daily_closes, which holds ~12 rows for the
@@ -992,23 +1023,6 @@ Deno.serve(async (req) => {
     : bookIn.earningsGrade != null ? Number(bookIn.earningsGrade)
     : gradeCur?.grade != null ? Number(gradeCur.grade) : null;
   const gDecay = clamp((60 - sincePrint) / 50, 0, 1);
-  // An expiry with no sessions left is not something to write. expiryDates[0] is
-  // today's on any expiry morning, and NVDA has one every Mon, Wed and Fri — so a
-  // third of the time the model was pricing a zero-day option and calling it the plan.
-  const liveExps = expiryDates.filter((d) => spanTo(nowISO, parseISO(d)).td >= 1);
-  // The planner has always written the nearest live expiry. Rolling is the norm,
-  // and the week you roll INTO is a real choice — into the print or past it, before
-  // CPI or after — so the caller may name one.
-  //
-  // Validated against liveExps rather than trusted: an expiry that has already
-  // expired, or one this underlying does not list, must fall back to the nearest
-  // rather than price a contract that cannot be sold. A silent fallback is right
-  // here; the response reports which expiry was actually used, and the app reads
-  // that rather than assuming its request was honoured.
-  const askedExp = typeof b.plannedExpiry === 'string' ? String(b.plannedExpiry).slice(0, 10)
-                 : typeof b.expiry === 'string' ? String(b.expiry).slice(0, 10) : null;
-  const nextExp = (askedExp && liveExps.includes(askedExp) ? askedExp : liveExps[0]) ?? null;
-  const secondExp = liveExps.find((e) => e !== nextExp) ?? null;
   const macroHit = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3)[0] ?? null;
   const peerHit = peers.filter((x) => x.days >= 0).sort((x, y) => x.days - y.days)[0] ?? null;
   const inWindow = (d: string) => (nextExp && d <= nextExp ? 2 : secondExp && d <= secondExp ? 1 : 0);
@@ -1223,6 +1237,9 @@ Deno.serve(async (req) => {
     // back to the nearest, and silently showing the requested one would put a
     // contract on screen that cannot be sold.
     expiryAsked: askedExp, expiryHonoured: askedExp == null || askedExp === nextExp,
+    // WHY the week reads as it does. evState drives BASE_KEEP, so when picking a
+    // different expiry changes the size, this is the line that explains it.
+    printInside, printDate: printISO,
     // The weeks that can actually be written, so the picker offers only real ones.
     expiryOptions: liveExps.slice(0, 6),
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
