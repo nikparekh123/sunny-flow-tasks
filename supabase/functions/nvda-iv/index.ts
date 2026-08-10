@@ -224,10 +224,10 @@ async function crush(admin: ReturnType<typeof createClient>) {
 
   const med = (xs: number[]) => { const a = xs.slice().sort((x, y) => x - y); return a[Math.floor(a.length / 2)]; };
   const out: { thresh: number; n: number; sessions: number[]; halves: number[]; unresolved: number;
-               withPrint: number; atN: (number | null)[]; months: number[] }[] = [];
+               withPrint: number; atN: (number | null)[]; months: number[]; lags: number[] }[] = [];
 
   for (const thresh of [15, 25, 40]) {
-    const sessions: number[] = [], halves: number[] = [], months: number[] = [];
+    const sessions: number[] = [], halves: number[] = [], months: number[] = [], lags: number[] = [];
     const curve: (number | null)[][] = []; let unresolved = 0, withPrint = 0;
     let armed = true;
     for (let i = 60; i < rows.length; i++) {
@@ -241,12 +241,27 @@ async function crush(admin: ReturnType<typeof createClient>) {
       // other. A spike from 40 to 55 can shed most of its excess in two sessions and
       // still take another eighteen to grind the last points off. Measuring only full
       // reversion saw the tail and missed the collapse.
-      const excess0 = rows[i].iv / base - 1;
+      // A crush is measured from the PEAK, not from the first threshold crossing. The
+      // crossing is the bottom of the rise: IV keeps climbing past it, so anchoring
+      // there reported spikes "growing" to 168% of themselves five sessions on and a
+      // half-life of twenty. Walk forward to the local maximum first, then decay from
+      // there. The +40% band was the only one landing near a real peak by accident, and
+      // it was the only one showing the fast collapse.
+      let pk = i, pkX = 0;
+      for (let k = i; k < Math.min(i + 15, rows.length); k++) {
+        const bk = med(rows.slice(Math.max(0, k - 60), k).map((r) => r.iv));
+        const xk = rows[k].iv / bk - 1;
+        if (xk > pkX) { pkX = xk; pk = k; }
+      }
+      const peakLag = pk - i;
+      i = pk;
+      const base2 = med(rows.slice(Math.max(0, i - 60), i).map((r) => r.iv));
+      const excess0 = rows[i].iv / base2 - 1;
       const leftAt = (n: number) => {
         const k = i + n;
         if (k >= rows.length || excess0 <= 0) return null;
         const b2 = med(rows.slice(Math.max(0, k - 60), k).map((r) => r.iv));
-        return +(((rows[k].iv / b2 - 1) / excess0) * 100).toFixed(0);   // % of the spike still there
+        return +(((rows[k].iv / b2 - 1) / excess0) * 100).toFixed(0);   // % of the peak spike still there
       };
       let half = -1;
       for (let k = i + 1; k < rows.length; k++) {
@@ -261,6 +276,7 @@ async function crush(admin: ReturnType<typeof createClient>) {
       if (half > 0) halves.push(half);
       curve.push([1, 2, 3, 5, 10].map(leftAt));
       months.push(Number(rows[i].date.slice(5, 7)));
+      lags.push(peakLag);
       if (back < 0) unresolved++; else sessions.push(back);
     }
     // Median of what is left of the spike n sessions on, across every spike in the band.
@@ -268,7 +284,7 @@ async function crush(admin: ReturnType<typeof createClient>) {
       const xs = curve.map((c) => c[idx]).filter((v): v is number => v != null);
       return xs.length ? med(xs) : null;
     });
-    out.push({ thresh, n: sessions.length + unresolved, sessions, halves, unresolved, withPrint, atN, months });
+    out.push({ thresh, n: sessions.length + unresolved, sessions, halves, unresolved, withPrint, atN, months, lags });
   }
 
   return json(200, {
@@ -284,6 +300,8 @@ async function crush(admin: ReturnType<typeof createClient>) {
         ? { median: med(b.sessions), fastest: Math.min(...b.sessions), slowest: Math.max(...b.sessions) }
         : null,
       byMonth: b.months.sort((x, y) => x - y),
+      // Sessions from the first crossing to the peak — how long the build takes.
+      sessionsToPeak: b.lags.length ? med(b.lags) : null,
     })),
   });
 }
