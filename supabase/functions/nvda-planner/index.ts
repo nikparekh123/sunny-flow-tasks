@@ -193,6 +193,11 @@ async function callExpiries(fromISO: string, key: string, tk: string): Promise<s
 
 // ── dates ──
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** '2026-08-12' → 'Aug 12'. Chips and notes read as dates, never as ISO strings. */
+const fmtDay = (iso: string) => {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  return y && m && d ? `${MONTHS[m - 1]} ${d}` : String(iso);
+};
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** Real quotes for one expiry across a strike window. The planner priced every pick
  *  with Black-Scholes, which is fine for ranking and wrong for an order: a theoretical
@@ -1141,7 +1146,47 @@ Deno.serve(async (req) => {
   const carryPerDay = putSpend > 0 && putDays > 0 ? putSpend / putDays : 0;
   const tradeCal = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).cal) : 2;
   const hedgeNeeds = Math.round(carryPerDay * tradeCal * HEDGE_MARGIN);
-  const mkPick = (k: number) => {
+  /* ── one week's worth of context ──────────────────────────────────────────
+     Everything that changes when the expiry changes, and nothing that does not.
+     Conviction, the observer, the floor and the book are identical across weeks —
+     only the clock and whether the contract carries the print differ. So a second
+     week is a small recompute, not a second plan.
+
+     The primary expiry's values already exist above (evState and keepTarget follow
+     nextExp), so ctx0 reuses them rather than computing them twice: two code paths
+     for the same week is how they drift apart.
+     ── */
+  type Ctx = {
+    exp: string; expDays: number; evState: string; printInside: boolean;
+    keepTarget: number; keepNeutral: number; otmTarget: number; targetStrike: number;
+    quotes: Map<number, Quote>; planT: number; tradeCal: number; hedgeNeeds: number;
+  };
+  const ctx0: Ctx = { exp: nextExp ?? '', expDays, evState, printInside,
+                      keepTarget, keepNeutral, otmTarget, targetStrike,
+                      quotes, planT, tradeCal, hedgeNeeds };
+
+  const mkCtxFor = async (exp: string): Promise<Ctx> => {
+    const days = Math.max(1, spanTo(nowISO, parseISO(exp)).td);
+    const cal = Math.max(1, spanTo(nowISO, parseISO(exp)).cal);
+    const ts = Math.sqrt(days / 4);
+    // The same test the primary uses: does THIS contract carry the print.
+    const pi = !!(printISO && printISO > nowISO.slice(0, 10) && printISO <= exp);
+    const ev = pi ? 'PRE' : sincePrint <= 5 ? 'POST' : 'CLEAR';
+    const kt = clamp(BASE_KEEP[ev] + mods.conviction + mods.iv, 55, 95);
+    const kn = clamp(BASE_KEEP[ev] + mods.iv, 55, 95);
+    const otm = clamp(BASE_OTM[`${ev}|${pxState}`] * ts, 0, 4);
+    const tgt = Math.round(spot * (1 + otm / 100) / STRIKE_STEP) * STRIKE_STEP;
+    const qs = !dryQuotes && key
+      ? await chainQuotes(TICKER, exp, tgt - STRIKE_STEP * 2, tgt + STRIKE_STEP * 2, key)
+      : new Map<number, Quote>();
+    return { exp, expDays: days, evState: ev, printInside: pi,
+             keepTarget: kt, keepNeutral: kn, otmTarget: otm, targetStrike: tgt,
+             quotes: qs, planT: Math.max(days, .25) / 252, tradeCal: cal,
+             hedgeNeeds: Math.round(carryPerDay * cal * HEDGE_MARGIN) };
+  };
+
+  const mkPick = (k: number, x: Ctx = ctx0) => {
+    const { expDays, quotes, planT, keepTarget, keepNeutral, hedgeNeeds, tradeCal } = x;
     // NVDA expires Mon, Wed and Fri, so a week is THREE rolls, not five sessions divided
     // by the expiry length. The old 2.5 asked each roll to carry too much.
     const rollsWk = Number(b.rollsPerWeek ?? (expDays <= 3 ? 3 : 5 / expDays));
@@ -1261,7 +1306,8 @@ Deno.serve(async (req) => {
       q: g.quarter, on: g.reported_on, g: g.grade,
       current: gradeCur ? g.quarter === gradeCur.quarter : false,
     })),
-    picks: [targetStrike, targetStrike - STRIKE_STEP, targetStrike + STRIKE_STEP].map(mkPick),
+    picks: [targetStrike, targetStrike - STRIKE_STEP, targetStrike + STRIKE_STEP]
+      .map((k) => mkPick(k)),
     keepNeutral: +keepNeutral.toFixed(0),
   };
   /* ── what conviction did to the size ──────────────────────────────────────
@@ -1274,6 +1320,42 @@ Deno.serve(async (req) => {
      So: same strike, different size. If conviction should move the strike too,
      that is a change to the model, not a missing field.
      ── */
+  /* ── the weeks on offer ───────────────────────────────────────────────────
+     TWO, not four, and chosen by MEANING rather than by count. The nearest live
+     expiry is the default — it is what gets written most weeks. The second is the
+     first expiry that crosses the next print, because that is the only choice
+     that changes the KIND of answer rather than its length: it flips evState to
+     PRE, which raises BASE_KEEP, which sizes the sale down.
+     Three weeks of the same answer at different lengths is a longer list, not a
+     better decision. When no print is in range there is one week, and the page
+     should say so rather than pad the row.
+     ── */
+  const tiers = ['balanced', 'conservative', 'aggressive'];   // picks[] order
+  const chainFrom = (x: Ctx, picks: ReturnType<typeof mkPick>[]) => ({
+    expiry: x.exp,
+    chip: x.exp ? fmtDay(x.exp) : '—',
+    expCode: x.exp.slice(5),
+    expDays: x.expDays,
+    evState: x.evState,
+    // Null on a clear week. A string here is a consequence, not a label: it is why
+    // this week's count is smaller than the one beside it.
+    note: x.printInside && printISO
+      ? `The ${fmtDay(printISO)} print lands inside this expiry — conviction sizes it down.`
+      : null,
+    keepPct: +x.keepTarget.toFixed(0),
+    picks: picks.map((pk, i) => ({ ...pk, tier: tiers[i] ?? `tier ${i + 1}`, rec: i === 0 })),
+  });
+  const altExp = printISO && nextExp
+    ? liveExps.find((e) => e > nextExp && printISO > nowISO.slice(0, 10) && printISO <= e) ?? null
+    : null;
+  const chains = [chainFrom(ctx0, plan.picks)];
+  if (altExp) {
+    const cx = await mkCtxFor(altExp);
+    chains.push(chainFrom(cx, [cx.targetStrike, cx.targetStrike - STRIKE_STEP,
+                               cx.targetStrike + STRIKE_STEP].map((k) => mkPick(k, cx))));
+  }
+  (plan as Record<string, unknown>).chains = chains;
+
   {
     const rec = plan.picks[0];
     (plan as Record<string, unknown>).size = {
