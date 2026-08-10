@@ -131,8 +131,27 @@ struct PPPick: Decodable {
     var assign: Double?
     var blocked: String?
     var priced: String?
+    /// Assignment odds as a percent — the page states them, never recomputes them.
+    var called: Int?
+    var uncovered: Double?
+    /// Pre-formatted so three figures that must agree cannot round apart.
+    var label: String?
+    /// Credit per calendar day. The only figure that makes two expiries comparable:
+    /// totals flatter the longer week, rates do not.
+    var creditPerDay: Double?
+    var out: PPOut?
+    var tier: String?
+    var rec: Bool?
 
     var be: Double? { breakEven ?? breakeven }
+}
+
+/// The same outcome in three widening frames. Strings from the server.
+/// `all` is nil when realised P&L was not sent — omitted, never guessed.
+struct PPOut: Decodable {
+    var opt: String?
+    var stockOpt: String?
+    var all: String?
 }
 
 struct PPGradeQuarter: Decodable {

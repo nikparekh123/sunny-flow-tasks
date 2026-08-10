@@ -58,6 +58,10 @@ struct PV2Req: Encodable, Sendable {
     /// done. Set when the user picks a week to roll into. The engine validates it
     /// against the live list and falls back rather than pricing a dead contract.
     var plannedExpiry: String? = nil
+    /// Closed P&L, options and shares — NvPerf.realized, which docs/PNL_GLOSSARY.md
+    /// makes the single definition of REALISED. Sent rather than re-derived on the
+    /// edge, so the all-in figure on the sell page cannot disagree with Performance.
+    var realisedPL: Double? = nil
 }
 
 // MARK: - Response
@@ -338,7 +342,8 @@ final class PlanV2Store {
                          weekendVol: 0.3, spot: pos.spot, ticker: ticker, style: style,
                          earningsGrade: PlannerDials.shared.grade.map(Double.init),
                          macroBackdrop: Double(PlannerDials.shared.macro),
-                         plannedExpiry: expiry)
+                         plannedExpiry: expiry,
+                         realisedPL: store.perf?.realized)
         do {
             let data = try await client.functions.invoke("nvda-planner",
                 options: FunctionInvokeOptions(body: req), decode: { data, _ in data })

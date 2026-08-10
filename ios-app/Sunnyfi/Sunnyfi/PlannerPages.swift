@@ -130,6 +130,11 @@ private struct PPDiscView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .frame(maxWidth: 106)
+        // A stroked circle's hit area is the STROKE — a 1.5pt ring, and nothing
+        // inside it. So the four families drawn as outlines (negative, zero, and
+        // the no-feed dashed one) could only be tapped by hitting the line itself,
+        // while the solid ones worked everywhere. Same shape, same target.
+        .contentShape(Circle())
         .overlay(selected ? Circle().strokeBorder(PP.paperText, lineWidth: 2) : nil)
         .animation(.easeInOut(duration: 0.3), value: selected)
     }

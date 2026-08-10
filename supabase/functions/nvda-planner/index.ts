@@ -194,6 +194,14 @@ async function callExpiries(fromISO: string, key: string, tk: string): Promise<s
 // ── dates ──
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** '2026-08-12' → 'Aug 12'. Chips and notes read as dates, never as ISO strings. */
+/** 2068 → "$2K" · −59758 → "−$60K". Pre-formatted server-side so three figures
+ *  that must agree cannot disagree by rounding in two places. */
+const fmtUsd = (v: number, signed = false) => {
+  const sign = v < 0 ? '\u2212' : signed ? '+' : '';
+  const a = Math.abs(v);
+  if (a >= 1000) return `${sign}$${Math.round(a / 1000)}K`;
+  return `${sign}$${Math.round(a)}`;
+};
 const fmtDay = (iso: string) => {
   const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
   return y && m && d ? `${MONTHS[m - 1]} ${d}` : String(iso);
@@ -1118,6 +1126,10 @@ Deno.serve(async (req) => {
   // because the market answered both times. dryQuotes forces the Black-Scholes path so
   // an input sweep actually reaches the output. Never for a real card — the response
   // says `dry` so a modelled number can never be mistaken for a quoted one.
+  // From the app's NvPnL — docs/PNL_GLOSSARY.md is the authority on what REALISED
+  // means, and re-deriving it here would create a second definition. Null when not
+  // sent, and the all-in figure is then omitted rather than guessed at.
+  const realisedPL = b.realisedPL != null ? Number(b.realisedPL) : null;
   const dryQuotes = b.dryQuotes === true;
   const quotes = !dryQuotes && key && nextExp
     ? await chainQuotes(TICKER, nextExp, targetStrike - STRIKE_STEP * 2, targetStrike + STRIKE_STEP * 2, key)
@@ -1265,7 +1277,27 @@ Deno.serve(async (req) => {
              // Strike plus premium says where the call stops paying; this says what
              // that is worth on a book carried at buyAvg, which is the only version
              // that answers "is this a good place to be called away".
-             beBasisPct: book.buyAvg > 0 ? +(((k + prem) / book.buyAvg - 1) * 100).toFixed(2) : null };
+             beBasisPct: book.buyAvg > 0 ? +(((k + prem) / book.buyAvg - 1) * 100).toFixed(2) : null,
+             // Assignment odds as a percent, which is how the page states them.
+             called: Math.round(bsAssign(spot, k, planT, iv / 100) * 100),
+             uncovered: Math.max(0, shares - called),
+             label: fmtUsd(income),
+             // THE COMPARABILITY NUMBER. $2K over 2 days and $4K over 26 are not
+             // comparable as totals — they are $1,000 a day against $154. Without
+             // this the expiry choice reads as "more money" when it is usually less.
+             creditPerDay: tradeCal > 0 ? Math.round(income / tradeCal) : income,
+             // What this goes on to be worth, in three widening frames. Strings, not
+             // numbers: the app prints them, and three figures that must agree cannot
+             // be rounded independently in two places.
+             //   opt      — the credit, which is yours either way
+             //   stockOpt — plus what the called shares realise against their cost
+             //   all      — plus the P&L already banked this year
+             out: {
+               opt: fmtUsd(income, true),
+               stockOpt: fmtUsd(income + called * (k - book.buyAvg), true),
+               all: realisedPL == null ? null
+                 : fmtUsd(income + called * (k - book.buyAvg) + realisedPL, true),
+             } };
   };
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
