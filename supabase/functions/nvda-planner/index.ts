@@ -248,7 +248,7 @@ Deno.serve(async (req) => {
   const volIn = (b.vol ?? {}) as Record<string, number>;
   // The guard screens PLANNING input. Neither a commit nor a scoring run carries a
   // book, and both were being rejected for lacking fields they have no use for.
-  if (b.commit == null && b.score !== true && (bookIn.shares == null || volIn.iv == null))
+  if (b.commit == null && b.score !== true && b.holdings == null && (bookIn.shares == null || volIn.iv == null))
     return json(400, { ok: false, error: 'book.shares and vol.iv are required' });
 
   const wv = Number(b.weekendVol ?? 0.3);
@@ -259,6 +259,38 @@ Deno.serve(async (req) => {
   const [polySpot, polyExpiries] = key
     ? await Promise.all([nearestSpot(key, TICKER), callExpiries(nowISO, key, TICKER)])
     : [null, [] as string[]];
+  // ── holdings ──────────────────────────────────────────────────────────────
+  // Reads the per-ticker store with the service role. The anon key sees zero rows
+  // through RLS on every one of these tables, so "empty" and "no permission" look
+  // identical from outside and neither can be ruled out.
+  if (b.holdings != null && supaUrl && supaKey) {
+    const tk = String(b.holdings).toUpperCase();
+    const pre = tk === 'TLT' ? 'tlt' : 'nvda';
+    const h = { apikey: supaKey, Authorization: `Bearer ${supaKey}` };
+    const grab = async (t: string, sel: string) => {
+      try {
+        const r = await fetch(`${supaUrl}/rest/v1/${t}?select=${sel}&voided_at=is.null&limit=200`, { headers: h });
+        return r.ok ? (await r.json()) as Record<string, unknown>[] : [{ error: `HTTP${r.status}` }];
+      } catch { return [{ error: 'fetch failed' }]; }
+    };
+    const [opts, lots, legacy] = await Promise.all([
+      grab(`${pre}_option_trades`, 'trade_date,action,option_type,direction,contracts,strike,premium,expiry'),
+      grab(`${pre}_share_lots`, 'acquired_date,qty_remaining,cost_per_share'),
+      // The legacy table is where ibkr-flex-sync actually writes; comparing the two
+      // says whether the problem is the sync or the mirror that feeds the store.
+      (async () => {
+        try {
+          const r = await fetch(`${supaUrl}/rest/v1/option_trades?select=trade_date,option_type,direction,contracts,strike,expiry`
+            + `&ticker=eq.${tk}&limit=200`, { headers: h });
+          return r.ok ? (await r.json()) as Record<string, unknown>[] : [{ error: `HTTP${r.status}` }];
+        } catch { return [{ error: 'fetch failed' }]; }
+      })(),
+    ]);
+    return json(200, { ok: true, ticker: tk,
+      store: { optionTrades: opts.length, shareLots: lots.length, legs: opts },
+      legacy: { optionTrades: legacy.length, legs: legacy } });
+  }
+
   // ── score ─────────────────────────────────────────────────────────────────
   // Resolves every commit whose expiry has passed. Scores ALL THREE picks, not just
   // the one taken — the taken one measures which way NVDA went, which the tool does
