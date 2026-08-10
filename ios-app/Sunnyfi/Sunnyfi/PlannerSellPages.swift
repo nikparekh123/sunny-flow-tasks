@@ -31,6 +31,12 @@ private func usdK(_ v: Double) -> String {
 /// different strike, count and premium — an index would silently redraw the
 /// live position as whatever tomorrow's balanced tier happens to be.
 struct PPCommit: Codable, Equatable {
+    /// Position in the ENGINE's picks array, not in the sorted rail. The rail is
+    /// ordered furthest-strike-first for reading; planner_commits is keyed on the
+    /// engine's own order, and confusing the two records the wrong tier against
+    /// the outcome — which would poison the record rather than just misdraw it.
+    /// Optional so a commit stored before this field existed still decodes.
+    var engineIndex: Int?
     var tier: String
     var strike: Double
     var ct: Int
@@ -56,17 +62,17 @@ struct PPSellPage: View {
     /// Furthest strike first: at high conviction the top of the rail is the
     /// consistent end of it. A tier inside the put floor sorts last, priced but
     /// unpickable.
-    private var ladder: [(pick: PPPick, tier: String)] {
+    private var ladder: [(pick: PPPick, tier: String, engineIndex: Int)] {
         let picks = r.plan?.picks ?? []
         let tagged = picks.enumerated().map { i, p in
-            (pick: p, tier: TIERS.indices.contains(i) ? TIERS[i] : "tier \(i + 1)")
+            (pick: p, tier: TIERS.indices.contains(i) ? TIERS[i] : "tier \(i + 1)", engineIndex: i)
         }
         return tagged.sorted {
             ($0.pick.blocked == nil ? 0 : 1, -($0.pick.strike ?? 0))
                 < ($1.pick.blocked == nil ? 0 : 1, -($1.pick.strike ?? 0))
         }
     }
-    private var chosen: (pick: PPPick, tier: String)? {
+    private var chosen: (pick: PPPick, tier: String, engineIndex: Int)? {
         ladder.indices.contains(sel) ? ladder[sel] : ladder.first
     }
 
@@ -116,6 +122,7 @@ struct PPSellPage: View {
                 PPConfirm(pick: p, tier: row.tier, expiry: r.plan?.expiry ?? "",
                           commit: commit, ticked: $ticked) {
                     onCommit(PPCommit(
+                        engineIndex: row.engineIndex,
                         tier: row.tier, strike: p.strike ?? 0, ct: p.ct ?? 0,
                         prem: p.prem ?? 0, expiry: r.plan?.expiry ?? "",
                         soldSpot: spot, conviction: r.plan?.conviction ?? 0,

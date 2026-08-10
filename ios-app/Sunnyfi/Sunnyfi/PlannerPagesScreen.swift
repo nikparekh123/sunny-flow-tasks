@@ -61,6 +61,15 @@ struct PlannerPagesScreen: View {
                         // Straight to the position it just created — the confirm is
                         // not finished until you can see what is running.
                         withAnimation { index = 5 }
+                        // And to the server, so the nightly scorer resolves it when
+                        // the expiry passes. All three picks are archived, not just
+                        // this one: scoring only the taken pick measures which way
+                        // NVDA went, which the tool does not control. Storing all
+                        // three measures whether the RANKING was any good.
+                        Task {
+                            await plan.commit(c.engineIndex.map { $0 + 1 },   // the edge is 1-based
+                                              store: store, ticker: ticker)
+                        }
                     }.tag(4)
                     if let c = liveCommit {
                         PPMonitorPage(r: r, spot: spot, commit: c) {
@@ -80,6 +89,16 @@ struct PlannerPagesScreen: View {
                     }
                 }
                 .padding(PP.pagePadX).padding(.top, PP.pagePadTop)
+            }
+
+            if let e = plan.commitError {
+                Text("not recorded — \(e)")
+                    .font(PP.mono(10)).tracking(10 * 0.1)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(PP.lossHue.opacity(0.9), in: Capsule())
+                    .padding(.leading, PP.pagePadX)
+                    .padding(.top, 46)
             }
 
             Button(action: onBack) {
