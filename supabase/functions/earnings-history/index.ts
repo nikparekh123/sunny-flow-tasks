@@ -103,11 +103,27 @@ Deno.serve(async (req) => {
   const limit = Math.min(Math.max(Number(body.limit ?? 40), 1), 100);
 
   const rows: Record<string, unknown>[] = [];
-  const report: Record<string, { prints: number; measured: number }> = {};
+  const report: Record<string, { prints: number; measured: number; seeded: number }> = {};
+
+  /** Confirmed report dates we already hold. Polygon's financials endpoint only knows a
+   *  print once the 10-Q is filed AND indexed, which lags the report by a week or more —
+   *  so the newest quarter, the one the planner's peer factor actually cares about, was
+   *  invisible. earnings_events has the real dates because they were seeded by hand. */
+  async function seededDates(ticker: string): Promise<string[]> {
+    try {
+      const since = ymd(new Date(Date.now() - 400 * 86400000));
+      const r = await fetch(`${supaUrl}/rest/v1/earnings_events?select=report_date&ticker=eq.${ticker}`
+        + `&report_date=gte.${since}&report_date=lte.${ymd(new Date())}&order=report_date.desc&limit=12`,
+        { headers: { apikey: supaKey!, Authorization: `Bearer ${supaKey}` } });
+      if (!r.ok) return [];
+      return ((await r.json()) as { report_date: string }[]).map((x) => String(x.report_date).slice(0, 10));
+    } catch { return []; }
+  }
 
   for (const ticker of tickers) {
-    const dates = await filingDates(ticker, key, limit);
-    report[ticker] = { prints: dates.length, measured: 0 };
+    const [filed, seeded] = await Promise.all([filingDates(ticker, key, limit), seededDates(ticker)]);
+    const dates = [...new Set([...seeded, ...filed])];
+    report[ticker] = { prints: dates.length, measured: 0, seeded: seeded.length };
 
     for (const d of dates) {
       const day = new Date(d + 'T00:00:00Z');
