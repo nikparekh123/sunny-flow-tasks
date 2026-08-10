@@ -115,6 +115,13 @@ Deno.serve(async (req) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  // A Request body reads ONCE. Two modes each calling req.json() meant the first
+  // consumed it and the second fell through to the normal snapshot without a word.
+  const reqBody = await req.json().catch(() => ({})) as {
+    backfillCloses?: { tickers?: string[]; days?: number };
+    dividends?: { tickers?: string[]; limit?: number };
+  };
+
   // ── deep backfill of daily_closes ──────────────────────────────────────────
   // The scheduled run fetches 120 calendar days, which is right for the 5-session
   // chart and HV30 but leaves the planner's `relative` family comparing NVDA to SMH
@@ -124,9 +131,7 @@ Deno.serve(async (req) => {
   //
   // Separate mode rather than a wider default: the nightly job should stay cheap.
   {
-    const body = await req.json().catch(() => ({})) as
-      { backfillCloses?: { tickers?: string[]; days?: number } };
-    const bf = body.backfillCloses;
+    const bf = reqBody.backfillCloses;
     if (bf) {
       const admin0 = createClient(supabaseUrl, serviceKey, {
         auth: { autoRefreshToken: false, persistSession: false },
@@ -163,9 +168,7 @@ Deno.serve(async (req) => {
   // known mechanical drop, not a surprise. Past rows are kept so the yield can be
   // measured from what was actually paid rather than annualised off one month.
   {
-    const body2 = await req.json().catch(() => ({})) as
-      { dividends?: { tickers?: string[]; limit?: number } };
-    const dv = body2.dividends;
+    const dv = reqBody.dividends;
     if (dv) {
       const admin1 = createClient(supabaseUrl, serviceKey, {
         auth: { autoRefreshToken: false, persistSession: false },
