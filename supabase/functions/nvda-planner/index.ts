@@ -1570,7 +1570,7 @@ Deno.serve(async (req) => {
     : `in ${dayStr(days)}`;
 
   if (record && record.n >= 8) {
-    if (daysSincePrint <= 30 && bandStats) {
+    if (sincePrint <= 30 && bandStats) {
       say(true, { domain: 'record', tag: 'The record', seen: seenBy('record'), note: .90,
         lean: 'against', text: `NVDA has come back ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% within thirty sessions of prints that landed like the last one. On ${bandStats.n} of them${bandStats.n < 8 ? ', so treat it as a lean rather than a law' : ''}.` });
     } else if (dPrint <= 21) {
@@ -1657,6 +1657,7 @@ Deno.serve(async (req) => {
     const seen = seenBy('iv_pctile', 'iv_spread');
     if (Math.abs(extra) >= 12) {
       say(true, { domain: 'paid', tag: 'What you are paid', seen, note: .85,
+        lean: extra > 0 ? 'for' : 'against',
         text: extra > 0
           ? `You are paid ${extra.toFixed(0)}% over the usual price for this name, ${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal. That is the argument for doing this today.`
           : `You are paid ${(-extra).toFixed(0)}% under the usual price, ${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal. Thin premium for the same risk.` });
@@ -1679,6 +1680,8 @@ Deno.serve(async (req) => {
       : deep ? `${drawdown!.toFixed(0)}% off the high, which is where this name's own record starts to disagree with the tape.`
       : `Mid-range and going nowhere in particular, ${dev > 0 ? '+' : ''}${dev} from the 50-day.`;
     say(stretched || hot || cold || deep, { domain: 'chart', tag: 'The chart', seen,
+      // Extension argues for keeping upside; a washed-out tape argues the same way.
+      lean: 'against',
       note: Math.min(.60, Math.abs(dev) / 5), text });
   }
 
@@ -1700,14 +1703,16 @@ Deno.serve(async (req) => {
     const xs = matters;
     if (xs.length === 0) return null;
     const trim = (t: string) => t.replace(/\.$/, '');
+    // "CPI" must not become "cPI". Only lower a leading word that is not an acronym.
+    const lower = (t: string) => (/^[A-Z]{2,}/.test(t) ? t : t.replace(/^./, (c) => c.toLowerCase()));
     const parts: string[] = [];
     let turned = false;
     xs.forEach((o, i) => {
       if (i === 0) { parts.push(trim(o.text)); return; }
       const prev = xs[i - 1].lean;
       const opposed = o.lean && prev && o.lean !== prev && o.lean !== 'block' && prev !== 'block';
-      if (o.lean === 'block') parts.push(`The one thing in the way is that ${trim(o.text).replace(/^./, (c) => c.toLowerCase())}`);
-      else if (opposed && !turned) { turned = true; parts.push(`Against that, ${trim(o.text).replace(/^./, (c) => c.toLowerCase())}`); }
+      if (o.lean === 'block') parts.push(`The one thing in the way is that ${lower(trim(o.text))}`);
+      else if (opposed && !turned) { turned = true; parts.push(`Against that, ${lower(trim(o.text))}`); }
       else parts.push(trim(o.text));
     });
     return parts.join('. ') + '.';
