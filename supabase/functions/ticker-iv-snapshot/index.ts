@@ -157,6 +157,54 @@ Deno.serve(async (req) => {
     }
   }
 
+  // ── dividends ─────────────────────────────────────────────────────────────
+  // Polygon carries declared FUTURE ex-dates as well as history, which is the whole
+  // point: an ex-date already on the calendar inside the expiry you are writing is a
+  // known mechanical drop, not a surprise. Past rows are kept so the yield can be
+  // measured from what was actually paid rather than annualised off one month.
+  {
+    const body2 = await req.json().catch(() => ({})) as
+      { dividends?: { tickers?: string[]; limit?: number } };
+    const dv = body2.dividends;
+    if (dv) {
+      const admin1 = createClient(supabaseUrl, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const tks = dv.tickers?.length ? dv.tickers : ['TLT'];
+      const lim = Math.min(Math.max(Number(dv.limit ?? 40), 1), 200);
+      const out: Record<string, number | string> = {};
+      for (const tk of tks) {
+        try {
+          const r = await fetch(`https://api.polygon.io/v3/reference/dividends?ticker=${tk}`
+            + `&limit=${lim}&order=desc&sort=ex_dividend_date&apiKey=${polygonKey}`);
+          if (!r.ok) { out[tk] = `HTTP${r.status}`; continue; }
+          const res = ((await r.json())?.results ?? []) as Record<string, string | number>[];
+          const rows = res
+            .filter((x) => x.ex_dividend_date)
+            .map((x) => ({
+              ticker: tk,
+              ex_date: String(x.ex_dividend_date).slice(0, 10),
+              pay_date: x.pay_date ? String(x.pay_date).slice(0, 10) : null,
+              record_date: x.record_date ? String(x.record_date).slice(0, 10) : null,
+              declared_on: x.declaration_date ? String(x.declaration_date).slice(0, 10) : null,
+              cash_amount: Number(x.cash_amount ?? 0) || null,
+              frequency: Number(x.frequency ?? 0) || null,
+              dividend_type: x.dividend_type ? String(x.dividend_type) : null,
+              source: 'polygon',
+            }));
+          for (let i = 0; i < rows.length; i += 100) {
+            await admin1.from('dividends').upsert(rows.slice(i, i + 100), { onConflict: 'ticker,ex_date' });
+          }
+          const today = new Date().toISOString().slice(0, 10);
+          out[tk] = rows.length;
+          out[`${tk}_next`] = rows.filter((x) => x.ex_date >= today).map((x) => x.ex_date).sort()[0] ?? 'none declared';
+        } catch { out[tk] = 'error'; }
+      }
+      return new Response(JSON.stringify({ ok: true, mode: 'dividends', written: out }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+  }
+
   const startedAt = new Date();
   const snapshotDate = startedAt.toISOString().slice(0, 10);  // UTC date; market close is well within
   const results: SnapshotResult[] = [];
