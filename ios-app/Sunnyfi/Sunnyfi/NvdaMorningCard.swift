@@ -94,34 +94,38 @@ struct NvdaMorningCard: View {
         }
     }
 
-    /// Conviction is a view on the STOCK. Keep is what follows from it plus the event
-    /// state. They are shown apart so a disagreement can be about one and not the other.
+    /// Delta is what the model CONTROLS, but the count is what gets typed into IBKR and
+    /// what the number gets judged by. So the count leads and delta reads as its
+    /// consequence — the same fact, ordered the way it is actually used.
     private var scoreAndStory: some View {
-        section("Where this sits") {
+        let top = pv.plan?.pickList.first
+        return section("What to do") {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .top, spacing: 26) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(Int(pv.plan?.conviction ?? 0))")
-                            .font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
-                        Text("CONVICTION").font(InkFont.mono(9)).tracking(9 * 0.17).foregroundStyle(Ink.dim)
+                        Text("\(Int(top?.ct ?? 0))")
+                            .font(InkFont.mono(42, .medium)).tracking(42 * -0.04)
+                        Text("CONTRACTS").font(InkFont.mono(9)).tracking(9 * 0.17).foregroundStyle(Ink.dim)
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(paidLabel).font(InkFont.mono(38, .medium)).tracking(38 * -0.04)
-                        Text("PAID VS NORMAL").font(InkFont.mono(9)).tracking(9 * 0.17).foregroundStyle(Ink.dim)
+                        Text(top.map { mcDec($0.strike ?? 0, 2) } ?? "—")
+                            .font(InkFont.mono(42, .medium)).tracking(42 * -0.04)
+                        Text("STRIKE").font(InkFont.mono(9)).tracking(9 * 0.17).foregroundStyle(Ink.dim)
                     }
                     Spacer(minLength: 0)
                 }
                 if let p = pv.plan {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("KEEP \(Int(p.keepPct ?? 0))% · \(Int(p.keepDelta ?? 0).formatted()) OF \(Int(shares).formatted()) DELTA")
+                        // The count is the instruction; this is what it costs you.
+                        Text("KEEPS \(Int(top?.keptPct ?? p.keepPct ?? 0))% OF YOUR DELTA · \(Int(p.keepDelta ?? 0).formatted()) OF \(Int(shares).formatted())")
                             .font(InkFont.mono(11)).tracking(11 * 0.12)
+                        Text("CONVICTION \(Int(p.conviction ?? 0)) · PAID \(paidLabel) VS NORMAL")
+                            .font(InkFont.mono(10)).tracking(10 * 0.13).foregroundStyle(Ink.dim)
                         Text("\((p.event ?? "").replacingOccurrences(of: "CLEAR", with: "CLEAR WEEK")) · \((p.price ?? "").uppercased())")
                             .font(InkFont.mono(10)).tracking(10 * 0.13).foregroundStyle(Ink.dim)
                         if let why = pv.regime?.why {
                             Text(why).font(.system(size: 14.5)).padding(.top, 2)
                         }
-                        // How far the tool moved you from your own default, and which part
-                        // was instruments versus your own read. The audit line.
                         Text("BASELINE \(Int(p.baseline ?? 0)) · CONVICTION MOVED IT \(moved)")
                             .font(InkFont.mono(9)).tracking(9 * 0.15).foregroundStyle(Ink.dim).padding(.top, 4)
                     }
