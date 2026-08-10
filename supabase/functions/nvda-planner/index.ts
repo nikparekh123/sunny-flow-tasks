@@ -879,6 +879,22 @@ Deno.serve(async (req) => {
     const minCt = prem > 0 && hedgeNeeds > 0 ? Math.min(maxCt, Math.ceil(hedgeNeeds / (prem * 100))) : 0;
     const ct = Math.max(wantCt, minCt);
     const income = Math.round(prem * 100 * ct);
+    // BREAK-EVEN IS THE STRIKE PLUS WHAT YOU COLLECTED, and you collect again every
+    // roll. The model priced each trade standalone, so a 0.5% strike read as a 0.5%
+    // cap — when in practice the cushion compounds three times a week while the strike
+    // ratchets up behind the stock. Rolling defeats DRIFT. It is gaps it cannot defeat,
+    // which is why this cushion is quoted next to the gap test rather than alone.
+    const rollsWk = expDays > 0 ? 5 / expDays : 2.5;
+    const cushWk = prem * rollsWk, cushMo = cushWk * 4.3;
+
+    // What the cap actually costs on a jump, against what you collect waiting for one.
+    const GAP = 10;
+    const after = spot * (1 + GAP / 100);
+    const called = Math.min(ct * 100, shares);
+    const cappedGain = called * (k - spot) + income + (shares - called) * (after - spot);
+    const freeGain = shares * (after - spot);
+    const gapCost = Math.round(freeGain - cappedGain);
+    const weeksToCover = income > 0 ? gapCost / (income * rollsWk) : null;
     return { strike: k, otmPct: +(((k - spot) / spot) * 100).toFixed(2),
              delta: Math.round(d * 100), ct, wantCt, minCt,
              floorBinds: minCt > wantCt,
@@ -886,6 +902,12 @@ Deno.serve(async (req) => {
              capped: Math.round(rawCt) > maxCt,
              keptPct: shares > 0 ? +(((shares - ct * d * 100) / shares) * 100).toFixed(0) : 0,
              prem: +prem.toFixed(2), income,
+             breakEven: +(k + prem).toFixed(2),
+             cushionWeek: +((cushWk / spot) * 100).toFixed(1),
+             cushionMonth: +((cushMo / spot) * 100).toFixed(1),
+             beMonth: +(k + cushMo).toFixed(2),
+             gapPct: GAP, gapCost, weeksToCover: weeksToCover == null ? null : +weeksToCover.toFixed(1),
+             rollsPerWeek: +rollsWk.toFixed(1),
              // Which of these you are looking at matters more than the number itself.
              priced: tradeable ? 'market' : 'model',
              bid: q ? +q.bid.toFixed(2) : null, ask: q ? +q.ask.toFixed(2) : null,
@@ -1499,8 +1521,11 @@ Deno.serve(async (req) => {
         text: `${ahead.ticker} reports ${when(ahead.date, ahead.days)}, inside the expiry you would be writing${ahead.confirmed ? '' : ', though that date is still an estimate'}. Semis move together through these, so the gap risk is not only NVDA's.` });
     } else if (behind && behind.days >= -7) {
       const landed = peerPrints.filter((x) => x.ticker === behind.ticker).sort((x, y) => x.days - y.days)[0];
+      // Direction words keyed at +-8, the band cut, so a -7% print came out as "moved 7%"
+      // and lost its sign entirely. The band decides how the RECORD is classified; it has
+      // no business deciding whether a sentence says up or down.
       const how = landed
-        ? `${landed.move <= -8 ? 'dropped' : landed.move >= 8 ? 'jumped' : 'moved'} ${Math.abs(landed.move).toFixed(0)}% on it`
+        ? `${landed.move <= -2 ? 'dropped' : landed.move >= 2 ? 'jumped' : 'went nowhere'} ${Math.abs(landed.move) >= 2 ? `${Math.abs(landed.move).toFixed(0)}% ` : ''}on it`
         : 'reported';
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .70,
         text: `${behind.ticker} ${how} ${dayStr(-behind.days)} ago${rel ? `, and NVDA is ${rel.gap > 0 ? '+' : ''}${rel.gap}% against the group since. The read-across has not stuck` : ''}.` });
