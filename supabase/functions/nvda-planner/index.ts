@@ -736,8 +736,16 @@ Deno.serve(async (req) => {
     macro:  macroHit ? [0, 2, 4][inWindow(macroHit.date)] * DK : 0,
     peer:   peerHit ? [0, 1.5, 3][inWindow(peerHit.date)] * DK : 0,
   };
-  const modRaw = +Object.values(mods).reduce((a, v) => a + v, 0).toFixed(2);
-  const keepTarget = clamp(BASE_KEEP[evState] + clamp(modRaw, -5, 5), 55, 95);
+  // The grade sits OUTSIDE the aggregate clamp. Everything else is a reading; the
+  // grade is your judgement of the quarter, and it is the only input no feed supplies.
+  // Clamped together, readings that happened to agree (+3.7 before the grade spoke)
+  // ate it entirely: graded 2 and graded 8 came out one point apart. Your call should
+  // not be crowded out by the instruments.
+  const gradeMod = mods.grade;
+  const readings = +Object.entries(mods).filter(([k]) => k !== 'grade')
+    .reduce((a, [, v]) => a + v, 0).toFixed(2);
+  const modRaw = +(readings + gradeMod).toFixed(2);
+  const keepTarget = clamp(BASE_KEEP[evState] + clamp(readings, -5, 5) + gradeMod, 55, 95);
 
   // Distance, scaled by sqrt(time). A fixed % OTM does not hold its delta across expiry
   // lengths: 1.5% out is 36 delta on a four-day and 30 on a two-day. NVDA expires Mon,
@@ -766,7 +774,7 @@ Deno.serve(async (req) => {
   };
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
-    baseline: BASE_KEEP[evState], modifiers: mods, modRaw,
+    baseline: BASE_KEEP[evState], modifiers: mods, modRaw, readings, gradeMod,
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
     otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
