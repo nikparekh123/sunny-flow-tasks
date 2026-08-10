@@ -872,53 +872,11 @@ Deno.serve(async (req) => {
   // sells the same contract count as a 40-vol week and simply collects more. Sizing off
   // INCOME, the same money needs fewer contracts, and the delta you did not have to sell
   // stays yours. Selling less for the same cheque is the whole point.
-  // Not a weekly quota. A long-term rental charges the same every month; this is closer
-  // to an Airbnb — more at Christmas, empty in February, judged over the year.
-  //
-  //   REQUIRED  12,700/wk  =  660k a year  =  the 15-20% net Nik asked for after the
-  //                           400k hedge. This is what pace is measured against.
-  //   AIM       up to 18,000 in favourable weeks. Overshoot banks as cushion.
-  //   LEAN      down to zero when conviction is poor AND the cushion can carry it.
-  // A YIELD, not a dollar figure. $12,700 a week is right for 7,500 shares and absurd
-  // for 3,000 — cut the position before a print and a hard number would have you selling
-  // twice the delta to chase it. 0.76% of position value per week is the same ask at any
-  // size, and it self-adjusts the moment the book changes.
-  //
-  //   0.76%/wk on 7,500 x 222.95 = $12,700   ·   ~39% a year gross
-  //   the same yield on 3,000 shares         =  $5,083
-  const posValue = shares * spot;
-  const WEEKLY_YIELD = Number(b.weeklyYieldPct ?? 0.76);          // % of position value
-  const WEEKLY_INCOME = b.weeklyIncome != null
-    ? Number(b.weeklyIncome)                                       // explicit override
-    : Math.round((posValue * WEEKLY_YIELD) / 100);
-  const WEEKLY_AIM_MAX = b.weeklyAim != null
-    ? Number(b.weeklyAim)
-    : Math.round(WEEKLY_INCOME * 1.42);                            // the stretch week
-
-  // Period-to-date, supplied by the app from its own P&L. GROSS for now: net is the
-  // honest number but nothing has measured the buyback drag yet, so aiming at it would
-  // be aiming at something invisible. The drag is reported alongside instead.
+  // Period-to-date, for a PACE READOUT only. It reports where the sleeve stands; it
+  // does not size anything. Sizing is conviction and keep, with the hedge as a floor.
   const collected = Number(b.premiumCollected ?? 0);
   const boughtBack = Number(b.premiumPaid ?? 0);
-  const periodStart = (b.periodStart as string) ?? null;
-  const weeksIn = periodStart
-    ? Math.max(0.2, (parseISO(nowISO).getTime() - parseISO(periodStart).getTime()) / (7 * 86400000)) : 0;
-  const owed = Math.round(weeksIn * WEEKLY_INCOME);
-  const ahead = collected > 0 ? Math.round(collected - owed) : 0;
-  const cushionWeeks = +(ahead / WEEKLY_INCOME).toFixed(1);
   const drag = collected > 0 ? +(boughtBack / collected).toFixed(2) : null;
-
-  // What this week is worth aiming at. Rich premium and a clean run earn the stretch;
-  // a broken tape with money in the bank earns the right to sit out.
-  const ivRich = ivMedian != null && ivMedian > 0 ? (iv / ivMedian - 1) * 100 : 0;
-  const eventInside = macroHit != null && nextExp != null && macroHit.date <= nextExp;
-  const aimMult =
-      (conviction <= 40 && cushionWeeks >= 1) ? 0
-    : (conviction <= 50 || eventInside)       ? 0.6
-    : (ivRich >= 15 && conviction >= 65)      ? WEEKLY_AIM_MAX / WEEKLY_INCOME
-    : (cushionWeeks >= 3)                     ? 0.7
-    : 1.0;
-  const weeklyAim = Math.round(WEEKLY_INCOME * aimMult);
   const carryPerDay = putSpend > 0 && putDays > 0 ? putSpend / putDays : 0;
   const tradeCal = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).cal) : 2;
   const hedgeNeeds = Math.round(carryPerDay * tradeCal * HEDGE_MARGIN);
@@ -941,13 +899,12 @@ Deno.serve(async (req) => {
     // Three constraints, in plain terms: the hedge sets a floor you cannot go under,
     // conviction sets a ceiling you should not go over, and the income target sits
     // between them. The floor outranks the ceiling — an unpaid hedge is not a choice.
-    const perTrade = rollsWk > 0 ? weeklyAim / rollsWk : weeklyAim;
-    const targetCt = prem > 0 ? Math.ceil(perTrade / (prem * 100)) : 0;
-    const ceiling = Math.max(wantCt, minCt);
-    const ct = Math.min(Math.max(targetCt, minCt), ceiling, maxCt);
-    const boundBy = ct === minCt && minCt > targetCt ? 'hedge floor'
-      : ct === ceiling && targetCt > ceiling ? 'conviction'
-      : ct === maxCt && targetCt > maxCt ? 'capacity' : 'income';
+    // KEEP decides the size. A dollar target sat on top of this for a while and
+    // overrode it — every pick came back bound by the target, and conviction, the keep
+    // model and the whole calibration stopped touching the answer. The hedge floor is
+    // the one thing allowed to override, because an unpaid hedge is not a preference.
+    const ct = Math.min(Math.max(wantCt, minCt), maxCt);
+    const boundBy = minCt > wantCt ? 'hedge floor' : wantCt > maxCt ? 'capacity' : 'conviction';
     const income = Math.round(prem * 100 * ct);
     // BREAK-EVEN IS THE STRIKE PLUS WHAT YOU COLLECTED, and you collect again every
     // roll. The model priced each trade standalone, so a 0.5% strike read as a 0.5%
@@ -966,8 +923,7 @@ Deno.serve(async (req) => {
     const weeksToCover = income > 0 ? gapCost / (income * rollsWk) : null;
     return { strike: k, otmPct: +(((k - spot) / spot) * 100).toFixed(2),
              delta: Math.round(d * 100), ct, wantCt, minCt,
-             floorBinds: minCt > wantCt, boundBy, targetCt,
-             perTradeTarget: Math.round(perTrade),
+             floorBinds: minCt > wantCt, boundBy,
              covers: hedgeNeeds > 0 ? +(income / hedgeNeeds).toFixed(1) : null,
              capped: Math.round(rawCt) > maxCt,
              keptPct: shares > 0 ? +(((shares - ct * d * 100) / shares) * 100).toFixed(0) : 0,
@@ -990,19 +946,8 @@ Deno.serve(async (req) => {
     conviction, convictionParts: cv, peerPrints,
     hedge: { carryPerDay: Math.round(carryPerDay), tradeCal, margin: HEDGE_MARGIN,
              needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
-    income: {
-      required: WEEKLY_INCOME, aim: weeklyAim, aimMult: +aimMult.toFixed(2), aimMax: WEEKLY_AIM_MAX,
-      yieldPctWk: WEEKLY_YIELD, yieldPctYr: +(WEEKLY_YIELD * 52).toFixed(1),
-      positionValue: Math.round(posValue),
-      rollsPerWeek: Number(b.rollsPerWeek ?? (expDays <= 3 ? 3 : 5 / expDays)),
-      perTrade: Math.round(weeklyAim / Number(b.rollsPerWeek ?? (expDays <= 3 ? 3 : 5 / expDays))),
-      // Pace, and the drag that will eventually make gross the wrong number to chase.
-      collected, boughtBack, owed, ahead, cushionWeeks, drag,
-      why: aimMult === 0 ? 'conviction is poor and the cushion can carry a blank week'
-        : aimMult > 1 ? 'premium is rich and the run is clean, so bank the overshoot'
-        : aimMult < 1 ? (eventInside ? 'an event lands inside this expiry' : 'aiming light')
-        : 'ordinary week, run rate',
-    },
+    // Reported, never used to size.
+    pace: { collected, boughtBack, drag },
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
     otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
