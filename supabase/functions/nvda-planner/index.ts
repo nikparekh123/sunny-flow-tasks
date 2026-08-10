@@ -972,8 +972,25 @@ Deno.serve(async (req) => {
 
   // The grade is the one input no feed supplies: was that actually a good quarter?
   // Only meaningful inside the post-print window, and it decays out over 60 sessions.
+  // Read from planner_earnings_grade first: it is keyed by QUARTER, so a grade given
+  // for the May print stops applying the moment the August one lands rather than
+  // silently carrying over. The request body still wins when it carries one — the
+  // stepper has to show its own value immediately, before the write settles.
+  let gradeRows: Array<{ quarter: string; reported_on: string; grade: number | null }> = [];
+  if (supaUrl && supaKey) {
+    try {
+      const r = await fetch(
+        `${supaUrl}/rest/v1/planner_earnings_grade?select=quarter,reported_on,grade` +
+        `&ticker=eq.${TICKER}&order=reported_on.desc&limit=8`,
+        { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` } });
+      if (r.ok) gradeRows = await r.json();
+    } catch { /* the dial still works; only the history is missing */ }
+  }
+  // Newest print that has actually happened is the one being asked about.
+  const gradeCur = gradeRows[0] ?? null;
   const grade = b.earningsGrade != null ? Number(b.earningsGrade)
-    : bookIn.earningsGrade != null ? Number(bookIn.earningsGrade) : null;
+    : bookIn.earningsGrade != null ? Number(bookIn.earningsGrade)
+    : gradeCur?.grade != null ? Number(gradeCur.grade) : null;
   const gDecay = clamp((60 - sincePrint) / 50, 0, 1);
   // An expiry with no sessions left is not something to write. expiryDates[0] is
   // today's on any expiry morning, and NVDA has one every Mon, Wed and Fri — so a
@@ -1189,6 +1206,20 @@ Deno.serve(async (req) => {
     expectedMove: +(spot * (iv / 100) * Math.sqrt(expDays / 252)).toFixed(2),
     quotes: { source: dryQuotes ? 'dry' : quotes.size > 0 ? 'polygon' : 'none', strikes: quotes.size, dry: dryQuotes },
     grade, gradeDecay: +gDecay.toFixed(2),
+    // Which quarter the number answers for, and every grade given before it.
+    // sessionsAgo is the same trading-day count the decay uses, so the page cannot
+    // say "53 sessions ago" while the model fades on a different clock.
+    gradeQuarter: gradeCur ? {
+      label: gradeCur.quarter, reported: gradeCur.reported_on,
+      sessionsAgo: sincePrint, graded: gradeCur.grade != null,
+      nextPrint: printRow?.date ? String(printRow.date).slice(0, 10) : null,
+    } : null,
+    // Oldest first, so the strip reads left to right through time. `current` marks
+    // the one the stepper edits; a null grade is "not graded yet", never a zero.
+    gradeHistory: gradeRows.slice().reverse().map((g) => ({
+      q: g.quarter, on: g.reported_on, g: g.grade,
+      current: gradeCur ? g.quarter === gradeCur.quarter : false,
+    })),
     picks: [targetStrike, targetStrike - STRIKE_STEP, targetStrike + STRIKE_STEP].map(mkPick),
     keepNeutral: +keepNeutral.toFixed(0),
   };
