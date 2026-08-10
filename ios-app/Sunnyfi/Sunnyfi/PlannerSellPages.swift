@@ -90,7 +90,18 @@ struct PPSellPage: View {
             }(), ground: .paper, topPad: 0)
         } base: {
             if opts.isEmpty {
-                PPSay(text: "No sellable expiry.", ground: .paper)
+                // Two very different situations, and saying "no sellable expiry" for
+                // both sent me looking at the option calendar when the real cause was
+                // an engine that had never heard of chains. An absent key is a stale
+                // deploy; an empty array is a real answer about the market.
+                PPSay(text: r.plan?.chains == nil
+                      ? "This planner build needs a newer engine."
+                      : "No sellable expiry.", ground: .paper)
+                if r.plan?.chains == nil {
+                    PPFine(text: "The response carries no chains, which means the "
+                           + "deployed nvda-planner predates them. Redeploy the "
+                           + "function and this page fills in.", ground: .paper)
+                }
             } else {
                 TabView(selection: $idx) {
                     ForEach(Array(opts.enumerated()), id: \.offset) { n, o in
