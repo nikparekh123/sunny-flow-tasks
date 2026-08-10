@@ -196,6 +196,21 @@ struct NvdaMorningCard: View {
                 // When the hedge floor binds you do not get the keep conviction asked for.
                 // Saying both numbers is the point; hiding the gap is the failure this
                 // whole rebuild removed.
+                // The reframing, for the leading pick only. "Capped at 225" is true for two
+                // sessions; after a month of rolling the cap has moved 27 points higher.
+                // Shown once rather than per pick — three copies would bury it.
+                if let t = picks.first, let be = t.breakEven {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("BREAK-EVEN  \(mcDec(be, 2))  ·  \(t.beWeek.map { mcDec($0, 2) } ?? "—") AFTER A WEEK  ·  \(t.beMonth.map { mcDec($0, 2) } ?? "—") AFTER A MONTH")
+                            .font(InkFont.mono(10)).tracking(10 * 0.1)
+                        if let g = t.gapCost, let w = t.weeksToCover {
+                            Text("A 10% GAP COSTS \(inkUsd(g))  ·  \(mcDec(w, 1)) WEEKS OF PREMIUM COVERS IT")
+                                .font(InkFont.mono(10)).tracking(10 * 0.1)
+                        }
+                    }
+                    .foregroundStyle(Ink.invertDim)
+                    .padding(.top, 14)
+                }
                 if let top = picks.first, top.binds {
                     Text("Conviction wants \(Int(top.wantCt ?? 0)). The hedge needs \(Int(top.minCt ?? 0)) to pay for itself.")
                         .font(.system(size: 13.5)).foregroundStyle(Ink.invertText)

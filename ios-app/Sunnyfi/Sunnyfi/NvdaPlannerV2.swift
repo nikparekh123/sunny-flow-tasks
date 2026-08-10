@@ -95,6 +95,9 @@ struct PV2: Decodable, Sendable {
         // the card, never fail the whole decode. Learned the hard way from `load`.
         struct Pick: Decodable, Sendable, Identifiable {
             var strike, otmPct, prem, assign, covers: Double?
+            // Break-even is the strike PLUS what you collect, and you collect again every
+            // roll — so the cap you actually live with is the month figure, not the strike.
+            var breakEven, beWeek, beMonth, gapCost, weeksToCover: Double?
             var delta, ct, wantCt, minCt, keptPct, income: Double?
             var floorBinds, capped: Bool?
             var id: Double { strike ?? 0 }
