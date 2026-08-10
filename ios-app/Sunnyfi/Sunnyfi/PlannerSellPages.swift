@@ -44,6 +44,10 @@ struct PPCommit: Codable, Equatable {
     var expiry: String
     var soldSpot: Double
     var conviction: Int
+    /// Assignment probability AT THE SALE, 0–1. Carried rather than re-read from
+    /// today's rail: the odds that belong on the monitoring page are the ones the
+    /// decision was made on, and tomorrow's rail may not even contain this strike.
+    var assign: Double?
     var onISO: String
     var onLabel: String
 }
@@ -81,7 +85,7 @@ struct PPSellPage: View {
             HStack(alignment: .firstTextBaseline) {
                 PPKicker(text: "what to sell", ground: .paper)
                 Spacer()
-                Text("\(r.plan?.expiry ?? "—") · \(r.plan?.expDays ?? 0)d".uppercased())
+                Text("\(Self.todayShort()) → \(r.plan?.expiry ?? "—") · \(r.plan?.expDays ?? 0)d".uppercased())
                     .font(PP.mono(10.5)).tracking(10.5 * 0.08)
                     .foregroundStyle(PP.dim(.paper))
             }
@@ -126,16 +130,30 @@ struct PPSellPage: View {
                         tier: row.tier, strike: p.strike ?? 0, ct: p.ct ?? 0,
                         prem: p.prem ?? 0, expiry: r.plan?.expiry ?? "",
                         soldSpot: spot, conviction: r.plan?.conviction ?? 0,
+                        assign: p.assign,
                         onISO: ISO8601DateFormatter().string(from: Date()),
                         onLabel: Self.today()))
                 }
             }
         }
-        .onAppear { if let i = ladder.firstIndex(where: { $0.pick.blocked == nil }) { sel = i } }
+        .onAppear {
+            // The rail is SORTED furthest-strike-first for reading, so its first
+            // entry is the conservative end — not the recommendation. Opening
+            // there quietly proposed a different trade than the one conviction
+            // sized: the engine's picks[0] is the target strike, and that is what
+            // the page must land on. Falls back to the first sellable tier only
+            // if the target is blocked by the floor.
+            if let i = ladder.firstIndex(where: { $0.engineIndex == 0 && $0.pick.blocked == nil })
+                ?? ladder.firstIndex(where: { $0.pick.blocked == nil }) { sel = i }
+        }
     }
 
     private static func today() -> String {
         let fm = DateFormatter(); fm.dateFormat = "EEE d MMM"; return fm.string(from: Date())
+    }
+    /// The meta row reads as a span — from today, to the expiry, over N sessions.
+    private static func todayShort() -> String {
+        let fm = DateFormatter(); fm.dateFormat = "d MMM"; return fm.string(from: Date())
     }
 }
 
@@ -416,7 +434,9 @@ struct PPMonitorPage: View {
                    ground: .ink, topPad: 0)
         } base: {
             PPNum(value: "\(f2(left))%", unit: "of room left", ground: .ink)
-            PPSay(text: "\(r.plan?.expDays ?? 0) sessions to run.", ground: .ink)
+            PPSay(text: [commit.assign.map { "\(Int(($0 * 100).rounded()))% odds it gets called." },
+                         "\(r.plan?.expDays ?? 0) sessions to run."]
+                .compactMap { $0 }.joined(separator: " "), ground: .ink)
             HStack(alignment: .top, spacing: 10) {
                 trio(usdK(credit), "collected")
                 trio(usdK((commit.strike - commit.soldSpot) * Double(commit.ct) * 100 + credit),
