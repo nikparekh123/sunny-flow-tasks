@@ -330,14 +330,17 @@ Deno.serve(async (req) => {
   }
   cats.sort((x, y) => x.days - y.days);
 
-  // A year of implied vol, so "rich" can be stated in dollars rather than as a
+  // ALL the implied vol on file, not a year of it. The read was capped at 252 while the
+  // table held 537 sessions, so "normal" was measured against the most recent year only
+  // and came out at 40. Across the full history it is 44 — four points higher, which
+  // means every "you are paid an ordinary price" line was judging against too low a bar.
   // ratio nobody can act on. Median, not mean: a single earnings spike should not
   // define normal.
   let ivMedian: number | null = null;
   if (supaUrl && supaKey) {
     try {
       const r = await fetch(`${supaUrl}/rest/v1/${TICKER === 'TLT' ? 'tlt' : 'nvda'}_iv_daily`
-        + `?select=iv&ticker=eq.${TICKER}&order=date.desc&limit=252`,
+        + `?select=iv&ticker=eq.${TICKER}&order=date.desc&limit=800`,
         { headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}` } });
       if (r.ok) {
         const xs = ((await r.json()) as { iv?: number }[])
