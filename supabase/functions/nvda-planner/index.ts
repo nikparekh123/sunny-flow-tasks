@@ -1366,116 +1366,115 @@ Deno.serve(async (req) => {
     (isLoud ? loud : calm).push({ kind: 'measured', ...o });
   const dayStr = (n: number) => `${n} day${n === 1 ? '' : 's'}`;
 
-  // THE RECORD — what this name has done in this situation before. Not in the score
-  // at all today: it moves keepPct and nothing else, so the number never reflects it.
-  const seenRecord = seenBy('record');
+  // Copy register, agreed 2026-08-09. Five rules:
+  //   1. Lead with the fact in plain words. The domain label is a quiet eyebrow on the
+  //      card, never a bolded prefix, so every sentence has to stand on its own.
+  //   2. Attach the consequence. A line that ends on a measurement is not finished.
+  //   3. One or two numbers, only where they carry the argument. "2026-08-12" is
+  //      "Wednesday".
+  //   4. Second person when it touches the book: "the expiry you would be writing".
+  //   5. Say what it means for THIS decision.
+  // The tension in rule 2 is real: conclusions are where a tool overreaches. A line may
+  // explain the tool's own reasoning. It may never predict the stock.
+  // The table knows the print date even when the caller does not name it.
+  const eDate = earnings.date ?? printRow?.date ?? null;
+  const dPrint = daysToPrint;
+  const WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const when = (iso: string, days: number) =>
+    days === 0 ? 'today' : days === 1 ? 'tomorrow'
+    : days <= 6 ? `on ${WD[parseISO(iso).getUTCDay()]}`
+    : `in ${dayStr(days)}`;
+
   if (record && record.n >= 8) {
     if (daysSincePrint <= 30 && bandStats) {
-      say(true, { domain: 'record', tag: 'The record', seen: seenRecord, note: .90,
-        text: `After ${bandStats.band} prints this has run ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% inside 30 sessions, on ${bandStats.n} observation${bandStats.n === 1 ? '' : 's'}.` });
-    } else if (daysToPrint <= 21) {
-      say(true, { domain: 'record', tag: 'The record', seen: seenRecord, note: .75,
-        text: `${record.survived} of the last ${record.n} prints landed better than -8%, median ${record.med > 0 ? '+' : ''}${record.med}%. Capping upside into that record has been the losing side of it.` });
+      say(true, { domain: 'record', tag: 'The record', seen: seenBy('record'), note: .90,
+        text: `NVDA has come back ${bandStats.d30 > 0 ? '+' : ''}${bandStats.d30}% within thirty sessions of prints that landed like the last one. On ${bandStats.n} of them${bandStats.n < 8 ? ', so treat it as a lean rather than a law' : ''}.` });
+    } else if (dPrint <= 21) {
+      say(true, { domain: 'record', tag: 'The record', seen: seenBy('record'), note: .75,
+        text: `This name has landed better than -8% in ${record.survived} of its last ${record.n} prints. Selling upside into that record has been the losing side of it.` });
     } else {
-      say(false, { domain: 'record', tag: 'The record', seen: seenRecord, note: .10,
-        text: `Nothing in ${record.n} prints on file says this week is unusual.` });
+      say(false, { domain: 'record', tag: 'The record', seen: seenBy('record'), note: .10,
+        text: `${record.n} prints on file and none of them make this week look unusual.` });
     }
   }
 
-  // THE WINDOW — how much room is left before the print, counted in expiries you
-  // could actually write rather than in days.
-  // daysToPrint keys off b.earnings, which the APP supplies. The table knows the
-  // date too, and an observer that goes silent because the caller left a field out
-  // is reporting on the request rather than on the world.
-  const eDate = earnings.date ?? printRow?.date ?? null;
-  const dPrint = daysToPrint;
   if (eDate) {
     const before = expiryDates.filter((d) => d < eDate).length;
     const seen = seenBy('event');
     if (dPrint <= 3) {
       say(true, { domain: 'window', tag: 'The window', seen, note: 1.0,
-        text: `The print is ${dayStr(dPrint)} out. Everything you write now carries it.` });
+        text: `The print is ${dayStr(dPrint)} away. Everything you write now carries it.` });
     } else if (dPrint <= 21) {
       say(true, { domain: 'window', tag: 'The window', seen, note: .60,
-        text: `${before} expir${before === 1 ? 'y' : 'ies'} left before the ${eDate} print. Anything written past them carries the event.` });
+        text: `Earnings in ${dayStr(dPrint)}, with ${before} clean ${before === 1 ? 'expiry' : 'expiries'} before it. Anything past those is an earnings trade whether you meant it or not.` });
     } else {
       say(false, { domain: 'window', tag: 'The window', seen, note: .10,
-        text: `The print is ${dayStr(dPrint)} out, past everything you would write this week.` });
+        text: `The next print is ${dayStr(dPrint)} out, past anything you would write this week.` });
     }
   }
 
-  // THE NEIGHBOURHOOD — peers and where this name sits inside the group. Nothing in
-  // the score reads either, so every line here is blind to the number.
   if (peersKnown) {
-    const behind = peers.filter((p) => p.days < 0).sort((a, b) => b.days - a.days)[0];
-    const ahead = peers.filter((p) => p.days >= 0).sort((a, b) => a.days - b.days)[0];
+    const behind = peers.filter((x) => x.days < 0).sort((x, y) => y.days - x.days)[0];
+    const ahead = peers.filter((x) => x.days >= 0).sort((x, y) => x.days - y.days)[0];
     const nextExp = expiryDates[0];
-    const rel = relStrength;
-    const est = (p: Peer) => (p.confirmed ? '' : ', though that date is an estimate');
     const seenHood = seenBy('peers', 'relative');
+    const rel = relStrength;
     if (ahead && nextExp && ahead.date <= nextExp) {
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .95,
-        text: `${ahead.ticker} reports ${ahead.days === 0 ? 'today' : `in ${dayStr(ahead.days)}`}, inside this expiry${est(ahead)}. Semis move as a bloc through it.` });
+        text: `${ahead.ticker} reports ${when(ahead.date, ahead.days)}, inside the expiry you would be writing${ahead.confirmed ? '' : ', though that date is still an estimate'}. Semis move together through these, so the gap risk is not only NVDA's.` });
     } else if (behind && behind.days >= -7) {
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .70,
-        text: `${behind.ticker} printed ${dayStr(-behind.days)} ago${rel ? `, and ${TICKER} has run ${rel.gap > 0 ? '+' : ''}${rel.gap}% against SMH over ${rel.days} sessions` : ''}.` });
+        text: `${behind.ticker} reported ${dayStr(-behind.days)} ago${rel ? `, and NVDA is ${rel.gap > 0 ? '+' : ''}${rel.gap}% against the group over ${rel.days} sessions. The tape has not punished it for the read-across` : ''}.` });
     } else if (rel && Math.abs(rel.gap) >= 5) {
       say(true, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .65,
-        text: `${TICKER} has run ${rel.gap > 0 ? '+' : ''}${rel.gap}% against SMH over ${rel.days} sessions, so it is ${rel.gap > 0 ? 'leading' : 'lagging'} the group.` });
+        text: rel.gap > 0
+          ? `NVDA is ${rel.gap}% ahead of the group over ${rel.days} sessions. Leading is a better moment to sell upside than a worse one.`
+          : `NVDA is ${Math.abs(rel.gap)}% behind the group over ${rel.days} sessions. There is catch-up here you would be capping.` });
     } else if (ahead) {
       say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .10,
         text: `No chip earnings before this expiry. ${ahead.ticker} is next, ${dayStr(ahead.days)} out.` });
     } else {
       say(false, { domain: 'neighbourhood', tag: 'The neighbourhood', seen: seenHood, note: .05,
-        text: 'No chip earnings on the calendar.' });
+        text: 'Nothing from the neighbours on the calendar.' });
     }
   }
 
-  // THE CALENDAR — macro only; the print has its own domain above.
   const macroKnown = calSources.some((x) => /^macro_events:\d+$/.test(x));
   if (macroKnown) {
     const hits = cats.filter((c) => c.key === 'macro_events' && c.sev >= 3);
     const m = hits[0] ?? null;
-    // Macro has its own factor now, on its own clock, so the tag reads straight off
-    // the regime weight rather than working around the old severity threshold.
     const seen = seenBy('macro');
-    // Not "is it before the next expiry" — that reads CPI landing squarely on the
-    // 12 Aug book as "just past this expiry" because the 10th happens to expire
-    // first. What matters is which expiry it lands INSIDE, and whether that is one
-    // you are about to write.
     const covering = m ? expiryDates.find((d) => d >= m.date) ?? null : null;
     const near = covering ? expiryDates.indexOf(covering) <= 1 : false;
-    if (m && near && covering) {
+    if (m && near) {
       say(true, { domain: 'macro', tag: 'The calendar', seen, note: .92,
-        text: `${m.label} lands ${m.days === 0 ? 'today' : `in ${dayStr(m.days)}`}, inside your ${covering} expiry.` });
+        text: `${m.label.replace(/\s*\([^)]*\)/, '')} lands ${when(m.date, m.days)}, inside the expiry you would be writing.` });
     } else if (m && m.days <= 14) {
       say(true, { domain: 'macro', tag: 'The calendar', seen, note: .50,
-        text: `${m.label} in ${dayStr(m.days)}, past the expiries you would write now.` });
+        text: `${m.label.replace(/\s*\([^)]*\)/, '')} ${when(m.date, m.days)}, just past what you would write now.` });
     } else if (m) {
       say(false, { domain: 'macro', tag: 'The calendar', seen, note: .10,
-        text: `Nothing before ${m.label}, ${dayStr(m.days)} out.` });
+        text: `Nothing on the economic calendar until ${m.label.replace(/\s*\([^)]*\)/, '')}, ${dayStr(m.days)} out.` });
     } else {
       say(false, { domain: 'macro', tag: 'The calendar', seen: 'priced', note: .05,
         text: 'Nothing scheduled inside the window.' });
     }
   }
 
-  // WHAT YOU ARE PAID — stated against this name's own year, not an absolute level.
   if (ivMedian != null && Number.isFinite(iv) && ivMedian > 0) {
     const extra = (iv / ivMedian - 1) * 100;
     const seen = seenBy('iv_pctile', 'iv_spread');
     if (Math.abs(extra) >= 12) {
       say(true, { domain: 'paid', tag: 'What you are paid', seen, note: .85,
-        text: `${iv.toFixed(0)}% implied against a ${ivMedian.toFixed(0)}% normal, so you are paid ${Math.abs(extra).toFixed(0)}% ${extra > 0 ? 'over' : 'under'} the usual price.` });
+        text: extra > 0
+          ? `You are paid ${extra.toFixed(0)}% over the usual price for this name, ${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal. That is the argument for doing this today.`
+          : `You are paid ${(-extra).toFixed(0)}% under the usual price, ${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal. Thin premium for the same risk.` });
     } else {
       say(false, { domain: 'paid', tag: 'What you are paid', seen, note: .10,
-        text: `${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal. There is no premium argument this week.` });
+        text: `An ordinary price. ${iv.toFixed(0)}% against a ${ivMedian.toFixed(0)}% normal, so there is no premium argument for doing this beyond the roll you were making anyway.` });
     }
   }
 
-  // THE CHART — one line, and capped at .60 notability on purpose. The chart is the
-  // best-covered domain in the score and the one that used to eat the whole list, so
-  // it should lose ties against anything the number cannot already see.
   if (technicals.ma50 != null) {
     const rsi = technicals.rsi14;
     const seen = seenBy('trend', 'stretch', 'rsi');
@@ -1483,11 +1482,11 @@ Deno.serve(async (req) => {
     const deep = drawdown != null && drawdown >= 12;
     const stretched = Math.abs(dev) >= 1.5;
     const text = stretched
-      ? `${dev > 0 ? '+' : ''}${dev} normal days from its 50-day${drawdown != null ? `, and ${drawdown.toFixed(0)}% off the high` : ''}.`
-      : hot ? `RSI ${rsi!.toFixed(0)}. Buyers are in charge and the run is stretched alongside you.`
-      : cold ? `RSI ${rsi!.toFixed(0)}, the most washed out end of its range.`
-      : deep ? `${drawdown!.toFixed(0)}% off the high, which is where its own record starts to disagree with the tape.`
-      : `Sitting mid-range, ${dev > 0 ? '+' : ''}${dev} from its 50-day.`;
+      ? `${dev > 0 ? '+' : ''}${dev} normal days from the 50-day${drawdown != null ? `, ${drawdown.toFixed(0)}% off the high` : ''}. Extension argues for keeping more, not for selling more.`
+      : hot ? `Momentum at ${rsi!.toFixed(0)}. Buyers are in charge and the run is stretched alongside you.`
+      : cold ? `Momentum at ${rsi!.toFixed(0)}, the washed-out end of its range. Bounces from here run straight into your strikes.`
+      : deep ? `${drawdown!.toFixed(0)}% off the high, which is where this name's own record starts to disagree with the tape.`
+      : `Mid-range and going nowhere in particular, ${dev > 0 ? '+' : ''}${dev} from the 50-day.`;
     say(stretched || hot || cold || deep, { domain: 'chart', tag: 'The chart', seen,
       note: Math.min(.60, Math.abs(dev) / 5), text });
   }
