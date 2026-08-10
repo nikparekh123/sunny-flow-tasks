@@ -729,27 +729,51 @@ Deno.serve(async (req) => {
   const peerHit = peers.filter((x) => x.days >= 0).sort((x, y) => x.days - y.days)[0] ?? null;
   const inWindow = (d: string) => (nextExp && d <= nextExp ? 2 : secondExp && d <= secondExp ? 1 : 0);
 
+  // ── conviction ──────────────────────────────────────────────────────────────
+  // How bullish the tool is on the STOCK. Nothing to do with how many calls to sell.
+  // Keeping it separate is what lets Nik disagree with the view without disagreeing
+  // with the trade, and lets the tracking loop ask "does conviction predict the next
+  // ten sessions" — which is answerable, unlike "was keep 70% correct".
+  //
+  // Families are capped so five ways of saying "the stock is up" cannot stack. An
+  // additive model makes that double-count invisible: it looks like five independent
+  // confirmations. 50 is neutral. 80 needs a real reason and 90 a powerful one, so the
+  // tails stay rare rather than the whole thing sitting range-bound in the middle.
+  const cv: Record<string, number> = {};
+  const ma50 = technicals.ma50, ma200 = technicals.ma200, peak = technicals.ath ?? technicals.high52;
+  // TREND, capped +22. Above the averages, and how close to the high.
+  cv.trend = Math.min(22,
+    (ma50 != null && spot > ma50 ? 8 : ma50 != null ? -8 : 0) +
+    (ma200 != null && spot > ma200 ? 10 : ma200 != null ? -10 : 0) +
+    (peak ? clamp(8 - ((peak - spot) / peak) * 100 * 0.8, -6, 8) : 0));
+  // CATALYST. The print itself is the reason to be bullish into it — Nik's own words:
+  // everything usually looks positive before the print.
+  cv.catalyst = daysToEarnings <= 7 ? 12 : daysToEarnings <= 21 ? 10 : daysToEarnings <= 40 ? 4 : 0;
+  // STRETCHED, one-directional. Extension is a reason to be LESS bullish, never more.
+  cv.stretch = -clamp(Math.abs(dev) >= 1.5 ? (Math.abs(dev) - 1.5) * 5 : 0, 0, 12) * (dev > 0 ? 1 : 0.4);
+  cv.record = record && record.n >= 8 ? clamp((record.survived / record.n - 0.7) * 25, -8, 8) : 0;
+  cv.relative = relStrength ? clamp(relStrength.gap * 0.6, -6, 6) : 0;
+  // PEER PRINTS. Not relative price — how peers' own reports actually LANDED. AMD
+  // dropping hard after its print says something about the trade that a price ratio
+  // cannot. Bands come straight from earnings_reactions.
+  cv.peers = 0;
+  // The grade is a bullishness input, so it belongs here rather than moving keep directly.
+  cv.grade = grade != null ? clamp((grade - 5) * 2 * gDecay, -8, 8) : 0;
+  // Sticky inflation and a live conflict are conditions, not release dates, so no feed
+  // carries them. A manual dial, like the grade: the input nobody can fetch is the one
+  // worth asking for. Defaults to 0, not to optimism.
+  cv.macro = clamp(Number(b.macroBackdrop ?? 0), -12, 12);
+  const conviction = Math.round(clamp(50 + Object.values(cv).reduce((a, v) => a + v, 0), 0, 100));
+
+  // Conviction moves keep; IV does not belong in a bullishness read, so it stays here
+  // as the one direct keep modifier. Rich premium is a reason to sell, not to be bearish.
   const mods: Record<string, number> = {
-    iv:     clamp(-4 * (ivPct - 50) / 50, -4, 4) * DK,
-    grade:  grade != null ? clamp((grade - GRADE_EXP[pxState]) * 2.5 * gDecay, -10, 10) * DK : 0,
-    rel:    relStrength ? clamp((relStrength.gap - REL_EXP[pxState]) * 0.4, -5, 5) * DK : 0,
-    // Needs SMH against its OWN 200-day and its own norm. daily_closes holds ~12 rows
-    // for SMH, so this reads zero rather than guessing. Silence, not a fabricated zero.
-    sector: 0,
-    rsi:    technicals.rsi14 != null ? clamp((technicals.rsi14 - RSI_EXP[pxState]) * 0.15, -4, 4) * DK : 0,
-    macro:  macroHit ? [0, 2, 4][inWindow(macroHit.date)] * DK : 0,
-    peer:   peerHit ? [0, 1.5, 3][inWindow(peerHit.date)] * DK : 0,
+    conviction: (conviction - 50) * 0.25,
+    iv: clamp(-4 * (ivPct - 50) / 50, -4, 4) * DK,
   };
-  // The grade sits OUTSIDE the aggregate clamp. Everything else is a reading; the
-  // grade is your judgement of the quarter, and it is the only input no feed supplies.
-  // Clamped together, readings that happened to agree (+3.7 before the grade spoke)
-  // ate it entirely: graded 2 and graded 8 came out one point apart. Your call should
-  // not be crowded out by the instruments.
-  const gradeMod = mods.grade;
-  const readings = +Object.entries(mods).filter(([k]) => k !== 'grade')
-    .reduce((a, [, v]) => a + v, 0).toFixed(2);
-  const modRaw = +(readings + gradeMod).toFixed(2);
-  const keepTarget = clamp(BASE_KEEP[evState] + clamp(readings, -5, 5) + gradeMod, 55, 95);
+  const modRaw = +Object.values(mods).reduce((a, v) => a + v, 0).toFixed(2);
+  const readings = mods.iv, gradeMod = cv.grade;
+  const keepTarget = clamp(BASE_KEEP[evState] + mods.conviction + mods.iv, 55, 95);
 
   // Distance, scaled by sqrt(time). A fixed % OTM does not hold its delta across expiry
   // lengths: 1.5% out is 36 delta on a four-day and 30 on a two-day. NVDA expires Mon,
@@ -764,21 +788,42 @@ Deno.serve(async (req) => {
   // shortfall rather than silently pulling the strike closer to hide it.
   const planT = Math.max(expDays, .25) / 252;
   const maxCt = Math.floor(shares / 100);
+  // THE HEDGE FLOOR. The puts cost real money every day and the calls have to carry
+  // their share of it plus something on top. This is not a preference the score can
+  // outvote — it is a floor under the contract count. Being bullish therefore stops
+  // meaning "sell nothing" and starts meaning "sell the minimum that pays for the
+  // hedge, at the furthest strike that still clears it".
+  const HEDGE_MARGIN = Number(b.hedgeMargin ?? 1.5);   // 1.0 = break even, no income
+  const carryPerDay = putSpend > 0 && putDays > 0 ? putSpend / putDays : 0;
+  const tradeCal = nextExp ? Math.max(1, spanTo(nowISO, parseISO(nextExp)).cal) : 2;
+  const hedgeNeeds = Math.round(carryPerDay * tradeCal * HEDGE_MARGIN);
   const mkPick = (k: number) => {
     const d = bsDelta(spot, k, planT, iv / 100);
     const want = ((100 - keepTarget) / 100) * shares;
     const rawCt = d > 0 ? want / (d * 100) : 0;
-    const ct = Math.max(0, Math.min(Math.round(rawCt), maxCt));
+    const wantCt = Math.max(0, Math.min(Math.round(rawCt), maxCt));
     const prem = bsCall(spot, k, planT, iv / 100);
+    // When the floor binds, the achieved keep will NOT be what conviction asked for.
+    // Both numbers are reported: hiding the gap would repeat the exact failure this
+    // whole rebuild removed.
+    const minCt = prem > 0 && hedgeNeeds > 0 ? Math.min(maxCt, Math.ceil(hedgeNeeds / (prem * 100))) : 0;
+    const ct = Math.max(wantCt, minCt);
+    const income = Math.round(prem * 100 * ct);
     return { strike: k, otmPct: +(((k - spot) / spot) * 100).toFixed(2),
-             delta: Math.round(d * 100), ct, capped: Math.round(rawCt) > maxCt,
+             delta: Math.round(d * 100), ct, wantCt, minCt,
+             floorBinds: minCt > wantCt,
+             covers: hedgeNeeds > 0 ? +(income / hedgeNeeds).toFixed(1) : null,
+             capped: Math.round(rawCt) > maxCt,
              keptPct: shares > 0 ? +(((shares - ct * d * 100) / shares) * 100).toFixed(0) : 0,
-             prem: +prem.toFixed(2), income: Math.round(prem * 100 * ct),
+             prem: +prem.toFixed(2), income,
              assign: +bsAssign(spot, k, planT, iv / 100).toFixed(2) };
   };
   const plan = {
     event: evState, price: pxState, priceMove: +pxMove.toFixed(1), sincePrint,
     baseline: BASE_KEEP[evState], modifiers: mods, modRaw, readings, gradeMod,
+    conviction, convictionParts: cv,
+    hedge: { carryPerDay: Math.round(carryPerDay), tradeCal, margin: HEDGE_MARGIN,
+             needs: hedgeNeeds, quarterRunRate: Math.round(carryPerDay * 91) },
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
     otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
     // One sigma over the life of the trade. Without it "out of the money" reads as safe:
