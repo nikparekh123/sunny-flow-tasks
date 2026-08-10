@@ -212,9 +212,13 @@ async function crush(admin: ReturnType<typeof createClient>) {
   if (rows.length < 90) return json(200, { ok: false, error: `only ${rows.length} sessions on file` });
 
   // Prints, so an earnings crush can be told apart from a spike with no event behind it.
-  const { data: ev } = await admin.from('earnings_events')
-    .select('report_date').eq('ticker', 'NVDA').order('report_date', { ascending: true }).limit(40);
-  const prints = ((ev ?? []) as { report_date: string }[]).map((x) => String(x.report_date).slice(0, 10));
+  // earnings_events holds the NEXT print, not the past ones — matching against it
+  // returned "0 spikes near a print", which would mean IV has nothing to do with
+  // earnings. earnings_reactions is where the history actually lives.
+  const { data: ev } = await admin.from('earnings_reactions')
+    .select('reaction_date').eq('ticker', 'NVDA').order('reaction_date', { ascending: true }).limit(60);
+  const prints = ((ev ?? []) as { reaction_date: string }[])
+    .map((x) => String(x.reaction_date ?? '').slice(0, 10)).filter(Boolean);
   const nearPrint = (d: string) =>
     prints.some((p) => Math.abs((Date.parse(d) - Date.parse(p)) / 86400000) <= 5);
 
