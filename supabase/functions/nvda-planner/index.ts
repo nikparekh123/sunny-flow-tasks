@@ -934,7 +934,11 @@ Deno.serve(async (req) => {
              capped: Math.round(rawCt) > maxCt,
              keptPct: shares > 0 ? +(((shares - ct * d * 100) / shares) * 100).toFixed(0) : 0,
              prem: +prem.toFixed(2), income,
+             // Three break-evens: this roll alone, a week of rolling, a month of it. The
+             // first is what a single trade caps you at; the other two are what the
+             // position actually caps you at, because the cushion compounds.
              breakEven: +(k + prem).toFixed(2),
+             beWeek: +(k + cushWk).toFixed(2),
              cushionWeek: +((cushWk / spot) * 100).toFixed(1),
              cushionMonth: +((cushMo / spot) * 100).toFixed(1),
              beMonth: +(k + cushMo).toFixed(2),
