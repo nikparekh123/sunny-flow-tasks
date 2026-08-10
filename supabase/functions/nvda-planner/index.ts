@@ -256,6 +256,41 @@ Deno.serve(async (req) => {
   const [polySpot, polyExpiries] = key
     ? await Promise.all([nearestSpot(key, TICKER), callExpiries(nowISO, key, TICKER)])
     : [null, [] as string[]];
+  // ── commit ────────────────────────────────────────────────────────────────
+  // Records a decision. The plan block is echoed back verbatim rather than
+  // recomputed, because a decision has to be stored as it was READ — recomputing it
+  // an hour later against a different spot would archive a plan that never existed.
+  if (b.commit != null && supaUrl && supaKey) {
+    const c = b.commit as Record<string, unknown>;
+    const pl = (c.plan ?? {}) as Record<string, unknown>;
+    const row = {
+      ticker: TICKER, taken_on: nowISO,
+      spot: c.spot ?? null, iv: c.iv ?? null, iv_median: c.ivMedian ?? null,
+      event_state: pl.event ?? null, price_state: pl.price ?? null,
+      conviction: pl.conviction ?? null, conviction_parts: pl.convictionParts ?? null,
+      keep_pct: pl.keepPct ?? null, keep_delta: pl.keepDelta ?? null,
+      hedge_needs: (pl.hedge as Record<string, unknown> | undefined)?.needs ?? null,
+      picks: pl.picks ?? [],
+      // null is a real answer: doing nothing is a decision and gets scored like one.
+      chosen: c.chosen ?? null, declined_why: c.declinedWhy ?? null,
+      observations: c.observations ?? null,
+      quotes_source: (pl.quotes as Record<string, unknown> | undefined)?.source ?? null,
+      shares: (c.book as Record<string, unknown> | undefined)?.shares ?? null,
+      book: c.book ?? null,
+      expiry: pl.expiry ?? null,
+    };
+    const r = await fetch(`${supaUrl}/rest/v1/planner_commits?on_conflict=ticker,taken_on,expiry`, {
+      method: 'POST',
+      headers: { apikey: supaKey, Authorization: `Bearer ${supaKey}`, 'Content-Type': 'application/json',
+                 Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify(row),
+    });
+    const body = await r.text();
+    // Reported, never swallowed. A commit that silently fails is a decision lost, and
+    // the whole point of this table is that decisions cannot be recovered later.
+    return json(r.ok ? 200 : 500, { ok: r.ok, saved: r.ok, status: r.status, detail: body.slice(0, 400) });
+  }
+
   const spot = (b.spot as number) ?? polySpot ?? 0;
   const expiryDates = (polyExpiries.length ? polyExpiries : fallbackExpiries(nowISO)).slice(0, 6);
   if (!spot) return json(200, { ok: false, error: 'no spot' });
