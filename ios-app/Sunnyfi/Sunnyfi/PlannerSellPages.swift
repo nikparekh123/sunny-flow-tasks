@@ -88,6 +88,21 @@ struct PPSellPage: View {
                 return lines.isEmpty ? "Nothing open. This would be a new position."
                                      : lines.joined(separator: ". ") + "."
             }(), ground: .paper, topPad: 0)
+            if !opts.isEmpty {
+                TabView(selection: $idx) {
+                    ForEach(Array(opts.enumerated()), id: \.offset) { n, o in
+                        PPOptionPanel(chain: o.chain, pick: o.pick, ci: o.ci, i: o.i, n: n,
+                                      r: r, spot: spot, commit: commit,
+                                      ticked: $ticked, onCommit: onCommit)
+                            .tag(n)
+                    }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(maxHeight: .infinity)
+                // A swipe withdraws any claim made about the option just left.
+                .onChange(of: idx) { _, _ in ticked = false }
+                PPOptRail(count: opts.count, idx: $idx)
+            }
         } base: {
             if opts.isEmpty {
                 // Two very different situations, and saying "no sellable expiry" for
@@ -102,21 +117,6 @@ struct PPSellPage: View {
                            + "deployed nvda-planner predates them. Redeploy the "
                            + "function and this page fills in.", ground: .paper)
                 }
-            } else {
-                TabView(selection: $idx) {
-                    ForEach(Array(opts.enumerated()), id: \.offset) { n, o in
-                        PPOptionPanel(chain: o.chain, pick: o.pick, ci: o.ci, i: o.i, n: n,
-                                      r: r, spot: spot, commit: commit,
-                                      ticked: $ticked, onCommit: onCommit)
-                            .tag(n)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(height: 500)
-                // A swipe withdraws any claim made about the option just left.
-                .onChange(of: idx) { _, _ in ticked = false }
-
-                PPOptRail(count: opts.count, idx: $idx)
             }
         }
         .onAppear { idx = start }
@@ -149,6 +149,7 @@ private struct PPOptionPanel: View {
     }
 
     var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
         VStack(alignment: .leading, spacing: 11) {
             HStack(alignment: .firstTextBaseline) {
                 Text((pick.rec == true
@@ -172,7 +173,7 @@ private struct PPOptionPanel: View {
 
             // Expiry, strike, quantity: the three facts that ARE the sale.
             HStack(spacing: 6) {
-                pill(chain.expiry ?? "—")
+                pill(chain.chip ?? chain.expiry ?? "—")
                 pill(f2(pick.strike ?? 0))
                 pill("\(pick.ct ?? 0) lots")
             }
@@ -247,6 +248,8 @@ private struct PPOptionPanel: View {
                     onLabel: PPSellPage.todayLabel()))
             }
         }
+        }
+        .scrollBounceBehavior(.basedOnSize)
     }
 
     @ViewBuilder private func pill(_ t: String) -> some View {
