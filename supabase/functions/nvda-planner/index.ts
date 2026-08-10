@@ -413,6 +413,22 @@ Deno.serve(async (req) => {
       }
     } catch { /* no read, no claim */ }
 
+    // How the neighbours' own reports actually LANDED. A different signal from relative
+    // price: AMD dropping hard on its print says something about what the group is being
+    // told, which a price ratio cannot see.
+    try {
+      const since = ymd(new Date(parseISO(nowISO).getTime() - 75 * 86400000));
+      const r = await fetch(`${supaUrl}/rest/v1/earnings_reactions`
+        + `?select=ticker,reaction_date,move_pct,band&ticker=neq.${TICKER}`
+        + `&reaction_date=gte.${since}&order=reaction_date.desc&limit=12`, { headers: h });
+      if (r.ok) {
+        peerPrints = ((await r.json()) as { ticker: string; reaction_date: string; move_pct: number; band: string }[])
+          .map((x) => ({ ticker: x.ticker, band: x.band, move: Number(x.move_pct),
+            days: Math.round((parseISO(nowISO).getTime() - parseISO(String(x.reaction_date ?? '').slice(0, 10)).getTime()) / 86400000) }))
+          .filter((x) => Number.isFinite(x.move) && Number.isFinite(x.days) && x.days >= 0);
+      }
+    } catch { /* nothing on file means zero, which is silence rather than optimism */ }
+
     // Where the money is going inside the sector. Both legs use the same window, so
     // a missing session on either side shortens the comparison rather than skewing it.
     try {
