@@ -904,7 +904,13 @@ Deno.serve(async (req) => {
     // model and the whole calibration stopped touching the answer. The hedge floor is
     // the one thing allowed to override, because an unpaid hedge is not a preference.
     const ct = Math.min(Math.max(wantCt, minCt), maxCt);
-    const boundBy = minCt > wantCt ? 'hedge floor' : wantCt > maxCt ? 'capacity' : 'conviction';
+    // wantCt is ALREADY capped at maxCt, so `wantCt > maxCt` could never be true and a
+    // capacity-limited pick reported itself as conviction-limited. Compare the uncapped
+    // figure. Capacity first: it is a physical limit, not a judgement.
+    const wantedRaw = Math.max(0, Math.round(rawCt));
+    const boundBy = wantedRaw > maxCt ? 'capacity'
+      : minCt > wantCt ? 'hedge floor'
+      : 'conviction';
     const income = Math.round(prem * 100 * ct);
     // BREAK-EVEN IS THE STRIKE PLUS WHAT YOU COLLECTED, and you collect again every
     // roll. The model priced each trade standalone, so a 0.5% strike read as a 0.5%
@@ -923,7 +929,7 @@ Deno.serve(async (req) => {
     const weeksToCover = income > 0 ? gapCost / (income * rollsWk) : null;
     return { strike: k, otmPct: +(((k - spot) / spot) * 100).toFixed(2),
              delta: Math.round(d * 100), ct, wantCt, minCt,
-             floorBinds: minCt > wantCt, boundBy,
+             floorBinds: minCt > wantCt, boundBy, wantedRaw,
              covers: hedgeNeeds > 0 ? +(income / hedgeNeeds).toFixed(1) : null,
              capped: Math.round(rawCt) > maxCt,
              keptPct: shares > 0 ? +(((shares - ct * d * 100) / shares) * 100).toFixed(0) : 0,
