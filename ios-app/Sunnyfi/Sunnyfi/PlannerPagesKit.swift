@@ -204,28 +204,37 @@ struct PPTrail: View {
 // MARK: - The stack
 
 /// Vertical paging, one page per gesture, with the right-edge dot rail.
-/// The platform's own paging is the transition — the design specifies no custom
-/// animation anywhere, and adding one would be a deviation.
+///
+/// This was a rotated TabView — the usual trick for making a horizontal pager
+/// go vertical. It sized itself off UIScreen.main.bounds, which is not the
+/// container it actually lives in when presented as a sheet, so the pages
+/// rendered as a small rotated panel floating in black. ScrollView's own paging
+/// needs no rotation and no screen measurements: it fills whatever it is given.
+///
+/// The design specifies no custom animation, so the transition is the
+/// platform's scroll physics, untouched.
 struct PPStack<Content: View>: View {
     let count: Int
     @Binding var index: Int
     @ViewBuilder var content: Content
 
+    /// scrollPosition speaks in optional ids; the pages speak in an index.
+    private var scrolled: Binding<Int?> {
+        Binding(get: { index }, set: { if let v = $0 { index = v } })
+    }
+
     var body: some View {
-        ZStack(alignment: .trailing) {
-            TabView(selection: $index) { content }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .rotationEffect(.degrees(90))          // TabView pages horizontally;
-                .frame(width: UIScreen.main.bounds.height,   // rotating it gives the
-                       height: UIScreen.main.bounds.width)   // vertical snap the design
-                .rotationEffect(.degrees(-90))               // asks for, with the OS's
-                .offset(x: UIScreen.main.bounds.width)       // own physics intact.
-                .frame(width: UIScreen.main.bounds.width,
-                       height: UIScreen.main.bounds.height)
-            PPDots(count: count, index: $index)
-                .padding(.trailing, 9)
+        ScrollView(.vertical) {
+            LazyVStack(spacing: 0) { content }
+                .scrollTargetLayout()
         }
+        .scrollTargetBehavior(.paging)
+        .scrollIndicators(.hidden)
+        .scrollPosition(id: scrolled)
         .ignoresSafeArea()
+        .overlay(alignment: .trailing) {
+            PPDots(count: count, index: $index).padding(.trailing, 9)
+        }
     }
 }
 
@@ -246,5 +255,15 @@ struct PPDots: View {
         }
         .blendMode(.difference)
         .animation(.easeOut(duration: 0.2), value: index)
+    }
+}
+
+extension View {
+    /// One page of the stack: fills the scroll container exactly, and carries the
+    /// id scrollPosition reports back. Both are required — without the frame the
+    /// page collapses to its content and paging lands mid-page.
+    func pp_page(_ n: Int) -> some View {
+        self.containerRelativeFrame([.horizontal, .vertical])
+            .id(n)
     }
 }

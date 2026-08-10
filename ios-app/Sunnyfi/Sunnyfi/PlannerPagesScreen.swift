@@ -53,10 +53,10 @@ struct PlannerPagesScreen: View {
         ZStack(alignment: .topLeading) {
             if let r = parsed {
                 PPStack(count: liveCommit == nil ? 6 : 7, index: $index) {
-                    PPConvictionPage(r: r).tag(0)
-                    PPDecisionPage(r: r, toGrade: { withAnimation { index = liveCommit == nil ? 5 : 6 } }).tag(1)
-                    PPWeekPage(r: r).tag(2)
-                    PPFloorPage(r: r).tag(3)
+                    PPConvictionPage(r: r).pp_page(0)
+                    PPDecisionPage(r: r, toGrade: { withAnimation { index = liveCommit == nil ? 5 : 6 } }).pp_page(1)
+                    PPWeekPage(r: r).pp_page(2)
+                    PPFloorPage(r: r).pp_page(3)
                     PPSellPage(r: r, spot: spot, commit: commit) { c in
                         commit = c; PPCommitStore.save(c)
                         // Straight to the position it just created — the confirm is
@@ -71,14 +71,14 @@ struct PlannerPagesScreen: View {
                             await plan.commit(c.engineIndex.map { $0 + 1 },   // the edge is 1-based
                                               store: store, ticker: ticker)
                         }
-                    }.tag(4)
+                    }.pp_page(4)
                     if let c = liveCommit {
                         PPMonitorPage(r: r, spot: spot, commit: c) {
                             commit = nil; PPCommitStore.save(nil)
                             withAnimation { index = 4 }
-                        }.tag(5)
+                        }.pp_page(5)
                     }
-                    PPGradePage(r: r, grade: $grade).tag(liveCommit == nil ? 5 : 6)
+                    PPGradePage(r: r, grade: $grade).pp_page(liveCommit == nil ? 5 : 6)
                 }
             } else {
                 PP.background(.ink).ignoresSafeArea()
