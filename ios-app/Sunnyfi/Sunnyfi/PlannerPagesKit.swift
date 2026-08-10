@@ -42,11 +42,23 @@ enum PP {
     static func hairline(_ g: Ground) -> Color { text(g).opacity(0.18) }
 
     @ViewBuilder static func background(_ g: Ground) -> some View {
-        switch g {
-        case .ink: inkBG
-        case .paper:
-            LinearGradient(colors: [paperTop, paperMid, paperBot],
-                           startPoint: .top, endPoint: .bottom)
+        ZStack {
+            switch g {
+            case .ink: inkBG
+            case .paper:
+                LinearGradient(colors: [paperTop, paperMid, paperBot],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            // The page glow: radial, off-centre high and right. Faint enough to
+            // read as depth rather than as a shape, and the reason the dark pages
+            // in the mock are not flat black.
+            GeometryReader { geo in
+                RadialGradient(
+                    colors: [g == .ink ? .white.opacity(0.05) : .black.opacity(0.03), .clear],
+                    center: UnitPoint(x: 0.82, y: 0.06),
+                    startRadius: 0,
+                    endRadius: max(geo.size.width, geo.size.height) * 0.68)
+            }
         }
     }
 
@@ -75,12 +87,19 @@ enum PP {
     static let headBaseGap: CGFloat = 20
 
     // Type. Mono carries every number and every label; the display face carries
-    // prose. Both fall back to the system faces if the app has not bundled them.
+    // prose. These route to the app's BUNDLED Ink faces — IBM Plex Mono and Inter,
+    // already in the target with UIAppFonts — rather than to .system. Using
+    // .system was the whole of the "font looks different" gap: same sizes, same
+    // tracking, wrong typeface on every glyph.
+    //
+    // The design's README names Archivo for display. Ink names Inter, and Inter is
+    // what this app ships and every other screen already uses, so the planner
+    // matches the app rather than importing a ninth typeface for one deck.
     static func mono(_ size: CGFloat, _ w: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: w, design: .monospaced)
+        InkFont.mono(size, w)
     }
     static func disp(_ size: CGFloat, _ w: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: w)
+        InkFont.display(size, w)
     }
 }
 
