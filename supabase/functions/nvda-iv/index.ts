@@ -139,11 +139,21 @@ async function live(admin: ReturnType<typeof createClient>, key: string) {
 // ── backfill: reconstruct daily IV via Black-Scholes ────────────
 async function backfill(admin: ReturnType<typeof createClient>, key: string, from: string, to: string) {
   // one aggregates call for NVDA daily closes across the whole range
-  const aggUrl = `${POLY}/v2/aggs/ticker/NVDA/range/1/day/${from}/${to}?adjusted=true&sort=desc&limit=400&apiKey=${key}`;
+  // Matched to the call shape earnings-history uses successfully against the same
+  // endpoint: sort=asc, limit 200. The old desc/400 variant returned 404 for every
+  // range tried, including two months ago, so it was the request and not the history.
+  // Reversed in code afterwards, since the cap wants newest-first.
+  const aggUrl = `${POLY}/v2/aggs/ticker/NVDA/range/1/day/${from}/${to}?adjusted=true&sort=asc&limit=200&apiKey=${key}`;
   const ar = await fetch(aggUrl);
-  if (!ar.ok) return json(500, { ok: false, error: `NVDA aggs ${ar.status}` });
-  const bars = (((await ar.json())?.results ?? []) as { t: number; c: number }[])
-    .map((b) => ({ date: ymd(new Date(b.t)), close: b.c }));   // newest → oldest
+  if (!ar.ok) {
+    // Carry Polygon's own words. Two rounds went on guessing at a bare status code.
+    const why = await ar.text().catch(() => '');
+    return json(200, { ok: false, error: `NVDA aggs ${ar.status}`, from, to, polygon: why.slice(0, 300) });
+  }
+  const payload = await ar.json();
+  const bars = (((payload?.results ?? []) as { t: number; c: number }[])
+    .map((b) => ({ date: ymd(new Date(b.t)), close: b.c }))).reverse();   // newest → oldest
+  if (bars.length === 0) return json(200, { ok: false, error: 'no bars', from, to, polygon: JSON.stringify(payload).slice(0, 300) });
 
   const out: { date: string; iv: number | null; note?: string }[] = [];
   let processed = 0;
