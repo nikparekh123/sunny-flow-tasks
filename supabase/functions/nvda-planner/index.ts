@@ -746,6 +746,9 @@ Deno.serve(async (req) => {
   const putCt = Number(bookIn.putCt ?? 0) || Math.max(1, Math.round(Math.abs(Number(bookIn.putDelta ?? 0)) / 40));
   const putSpend = Number(bookIn.putCost ?? 0);          // premium paid for the floor
   const putDays  = Math.max(1, Number(bookIn.putDays ?? 30));   // days of cover bought
+  // The floor's own expiry. Sent rather than derived from putDays: adding a day count
+  // to today lands on a date no option actually expires on, and the page prints it.
+  const putExpISO = typeof bookIn.putExpiry === 'string' ? String(bookIn.putExpiry).slice(0, 10) : null;
   const hedgeCarry = putSpend > 0 ? putSpend / putDays : Math.abs(Number(bookIn.longTheta ?? 0));
   const requiredWeekly = hedgeCarry * 7;
 
@@ -1394,11 +1397,49 @@ Deno.serve(async (req) => {
       ? `The ${fmtDay(printISO)} print lands inside this expiry — conviction sizes it down.`
       : null,
     keepPct: +x.keepTarget.toFixed(0),
-    picks: picks.map((pk, i) => ({ ...pk, tier: tiers[i] ?? `tier ${i + 1}`, rec: i === 0 })),
+    // The neutral-50 sale for this week, so "conviction cut this from 45 lots to 15"
+    // has a source rather than being asserted.
+    size: { full: picks[0]?.wasCt ?? null, fullStrike: picks[0]?.strike ?? null },
+    picks: picks.map((pk, i) => {
+      const tier = tiers[i] ?? `tier ${i + 1}`;
+      const calledSh = Math.min(pk.ct * 100, shares);
+      const free = Math.max(0, shares - calledSh);
+      const onBasis = book.buyAvg > 0 ? calledSh * (pk.strike - book.buyAvg) : null;
+      const days = x.expDays === 1 ? 'a day' : `${x.expDays} days`;
+      /* STANCE — what this tier DOES, in one sentence. Written here rather than in
+         the app because it has to name real figures, and a sentence assembled from
+         numbers the client re-derived is a sentence that can contradict them. */
+      const stance = tier === 'conservative'
+        ? `Caps almost nothing. ${pk.ct} lots, ${pk.otmPct.toFixed(1)}% out — if the run comes you are still in it.`
+        : tier === 'balanced'
+        ? (x.printInside
+            ? `Sells the print at ${pk.otmPct.toFixed(1)}% out. Conviction cut this from ${pk.wasCt} lots to ${pk.ct}.`
+            : `The size conviction sized. Caps the top of the expected move and nothing below it.`)
+        : `${fmtUsd(pk.income)} in ${days}, and the next ${pk.otmPct.toFixed(1)}% is the price of it.`;
+      /* THE WORLDS — the sale's whole story in three rows: above the strike, between,
+         and below. Every covered call has exactly these three outcomes, and stating
+         them beats any single summary number. */
+      const worlds = [
+        { when: `above ${pk.strike}`,
+          then: onBasis != null && tier !== 'conservative'
+            ? `${calledSh.toLocaleString('en-US')} called at ${pk.strike.toFixed(2)}, ${fmtUsd(onBasis, true)} on basis.`
+            : `${calledSh.toLocaleString('en-US')} called. ${free.toLocaleString('en-US')} shares run free.` },
+        { when: `${Math.round(spot)} to ${pk.strike}`,
+          then: `Nothing called. ${fmtUsd(pk.income)} kept${x.expDays <= 3 ? ` in ${days}` : ''}.` },
+        { when: `under ${Math.round(spot)}`,
+          then: `${pk.prem.toFixed(2)} a share of cushion, then the floor.` },
+      ];
+      return { ...pk, tier, rec: i === 0, stance, worlds,
+               // The design prints this verbatim; a number here would be re-formatted
+               // in the app and drift from the credit above it.
+               creditPerDayLabel: `${fmtUsd(pk.creditPerDay)}/day` };
+    }),
   });
-  const altExp = printISO && nextExp
-    ? liveExps.find((e) => e > nextExp && printISO > nowISO.slice(0, 10) && printISO <= e) ?? null
-    : null;
+  // Literally the next two. Nik rolls every expiry — Mon, Wed, Fri — and does not
+  // write two or three weeks out, so a "first expiry past the print" rule offered a
+  // 19-day contract he would never sell. The print is a FLAG on whichever of these
+  // two happens to span it, not the reason a week is on the list.
+  const altExp = secondExp;
   const chains = [chainFrom(ctx0, plan.picks)];
   if (altExp) {
     const cx = await mkCtxFor(altExp);
@@ -1911,6 +1952,47 @@ Deno.serve(async (req) => {
       why: stale
         ? `Spot is ${gapPct.toFixed(0)}% above the ${putFloor} floor. Rolling to ${target} costs ${Math.round(rollCost).toLocaleString()} and lifts the whole floor with it.`
         : `The ${putFloor} floor is ${gapPct.toFixed(0)}% below spot, still close enough to be doing its job.`,
+
+      /* THE SLEEVE, not a blanket. The puts cover putCt × 100 shares out of the
+         book, so below the floor the position keeps falling — just more slowly.
+         Saying "protected" of a book that is 1/3 covered is the single most
+         dangerous thing this page could imply, so every figure here is scoped to
+         what is actually covered. */
+      puts: putCt, covers: Math.min(putCt * 100, shares), prem: +(putSpend / (putCt * 100)).toFixed(2),
+      days: putDays, expiry: putExpISO ? fmtDay(putExpISO) : null,
+      cost: -Math.round(putSpend), costLabel: fmtUsd(-putSpend),
+      // Where the whole position, puts included, gets back to flat.
+      breakeven: +(spot + putSpend / Math.max(shares, 1)).toFixed(2),
+
+      /* THE STRESS CASE, priced rather than implied. A floor is worth what it saves
+         in the fall it was bought for, and that number cannot be read off the chart.
+         25% down is stated out loud so the figure beside it is legible. */
+      stress: (() => {
+        const dropPct = 25;
+        const to = +(spot * (1 - dropPct / 100)).toFixed(2);
+        const cov = Math.min(putCt * 100, shares), unc = Math.max(0, shares - cov);
+        const unhedged = shares * (to - spot);
+        // Below the floor the covered sleeve stops falling; the rest does not.
+        const hedged = cov * (Math.max(to, putFloor) - spot) + unc * (to - spot) - putSpend;
+        return { to, dropPct,
+                 hedged: Math.round(hedged), unhedged: Math.round(unhedged),
+                 saved: Math.round(hedged - unhedged),
+                 hedgedLabel: fmtUsd(hedged), unhedgedLabel: fmtUsd(unhedged),
+                 savedLabel: fmtUsd(hedged - unhedged, true) };
+      })(),
+
+      /* The payoff line's three points, computed HERE. The design had the app derive
+         pl(p) from a formula the server never checked — the one place in the deck
+         where a drawn line could disagree with the figures printed beside it. Three
+         points is all a two-slope line needs. */
+      payoff: (() => {
+        const cov = Math.min(putCt * 100, shares), unc = Math.max(0, shares - cov);
+        const at = (px: number) => Math.round(
+          (px >= putFloor ? shares * (px - spot) : cov * (putFloor - spot) + unc * (px - spot)) - putSpend);
+        const lo = Math.round(spot * 0.72), hi = Math.round(spot * 1.21);
+        return { lo, hi, floor: putFloor, spot,
+                 points: [{ px: lo, pl: at(lo) }, { px: putFloor, pl: at(putFloor) }, { px: hi, pl: at(hi) }] };
+      })(),
     };
   })();
 

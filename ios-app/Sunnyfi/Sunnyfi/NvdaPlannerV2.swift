@@ -40,6 +40,9 @@ struct PV2Req: Encodable, Sendable {
         var putFloor: Double = 0
         var putCost: Double = 0
         var putDays: Double = 30
+        /// ISO. The floor page names the date the protection runs to, and deriving it
+        /// from putDays would land on a day no option expires on.
+        var putExpiry: String? = nil
         /// Oldest first. The edge walks these to price an assignment.
         var lots: [Lot] = []
     }
@@ -330,6 +333,10 @@ final class PlanV2Store {
                 let d = longPuts.reduce(0.0) { $0 + Double(Int($1.dte.prefix(while: \.isNumber)) ?? 30) * $1.ct }
                 return max(1, d / ct)
             }(),
+            // Earliest long put — the date the floor actually runs to. compactMap
+            // because iso() returns nil on a display string it cannot parse, and a
+            // nil in the middle would sort to the front as an empty date.
+            putExpiry: longPuts.compactMap { Self.iso($0.expiry) }.sorted().first,
             lots: store.shareLotsFIFO.map { .init(qty: $0.qty_remaining, cost: $0.cost_per_share) })
 
         let vol = PV2Req.Vol(iv: ins.vol.iv ?? 0, ivPct: ins.vol.ivr ?? 50,
