@@ -449,8 +449,10 @@ Deno.serve(async (req) => {
     // absorbed the news define the weeks after it.
     if (TICKER !== 'TLT') {
       try {
-        // Deep enough for SMH's own 200-day AND a norm to compare it against.
-      const back = ymd(new Date(parseISO(nowISO).getTime() - 640 * 86400000));
+        // 45 days: the LAST print, not any print. A wider window would return one from
+        // two years ago and call it recent, which would set daysSincePrint and put the
+        // whole model into POST on a random Tuesday.
+        const back = ymd(new Date(parseISO(nowISO).getTime() - 45 * 86400000));
         const r = await fetch(`${supaUrl}/rest/v1/earnings_events?select=report_date&ticker=eq.${TICKER}`
           + `&report_date=gte.${back}&report_date=lt.${nowISO}&order=report_date.desc&limit=1`, { headers: h });
         if (r.ok) {
@@ -568,7 +570,10 @@ Deno.serve(async (req) => {
     // Where the money is going inside the sector. Both legs use the same window, so
     // a missing session on either side shortens the comparison rather than skewing it.
     try {
-      const back = ymd(new Date(parseISO(nowISO).getTime() - 45 * 86400000));
+      // Deep enough for SMH's own 200-day AND a norm to compare it against. Two
+      // identically-worded windows in this file already sent one edit to the wrong
+      // fetch; this one is matched on its query, not on the line.
+      const back = ymd(new Date(parseISO(nowISO).getTime() - 640 * 86400000));
       const r = await fetch(`${supaUrl}/rest/v1/daily_closes`
         + `?select=ticker,date,close_price&ticker=in.(${TICKER},SMH)&date=gte.${back}`
         + `&order=date.desc&limit=1200`, { headers: h });
