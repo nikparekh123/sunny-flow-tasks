@@ -141,18 +141,28 @@ struct PPDecisionPage: View {
             PPFine(text: [p?.eventPhrase, p?.pricePhrase,
                           p?.paidVsNormal.map { "Paid \(sgn($0))% against normal" }, p?.why]
                 .compactMap { $0 }.joined(separator: ". ").appendingPeriod(), ground: .ink)
-            Button { toGrade?() } label: {
-                HStack {
-                    Text("baseline \(p?.baseline ?? 50)".uppercased())
-                    Spacer()
-                    Text("your grade \(sgn(r.discs().first { $0.id == "grade" }?.today ?? 0))".uppercased())
+            // 50, always — the CONVICTION baseline the score is measured from, which
+            // is what makes "your grade +4" legible beside it. plan.baseline is
+            // BASE_KEEP[eventState] (65 on a clear week): a different baseline that
+            // happens to share the word. Reading it here put a wrong number on screen.
+            VStack(spacing: 0) {
+                Rectangle().fill(PP.hairline(.ink)).frame(height: 1)
+                Button { toGrade?() } label: {
+                    HStack {
+                        Text("baseline 50".uppercased())
+                        Spacer()
+                        Text("your grade \(sgn(r.discs().first { $0.id == "grade" }?.today ?? 0))".uppercased())
+                    }
+                    .font(PP.mono(11)).tracking(11 * 0.14)
+                    .foregroundStyle(PP.dim(.ink))
                 }
-                .font(PP.mono(11)).tracking(11 * 0.14)
-                .foregroundStyle(PP.dim(.ink))
+                .disabled(toGrade == nil)
+                .padding(.top, 13)
             }
+            // The hairline used to be an overlay on the button's own padded frame,
+            // so it drew straight through the fine print above it. It is a sibling
+            // now, with the design's 20 above and 13 below.
             .padding(.top, 20)
-            .overlay(alignment: .top) { Rectangle().fill(PP.hairline(.ink)).frame(height: 1) }
-            .disabled(toGrade == nil)
         }
     }
 }

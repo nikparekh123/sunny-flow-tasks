@@ -103,17 +103,20 @@ struct PlannerPagesScreen: View {
                     .safeAreaPadding(.top)
             }
 
-            Button(action: onBack) {
-                Text("close".uppercased())
-                    .font(PP.mono(11)).tracking(11 * 0.14)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-            }
-            .foregroundStyle(.white)
-            .blendMode(.difference)          // one control, both grounds
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(.trailing, PP.pagePadX - 14)
-            .safeAreaPadding(.top)
         }
+        // Swipe horizontally to leave. The deck pages VERTICALLY, so the
+        // horizontal axis is free and costs no chrome — which is the point:
+        // the close button sat in the same corner every page puts its kicker,
+        // and a control that fights the content is worse than a gesture.
+        .gesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { g in
+                    guard abs(g.translation.width) > 80,
+                          abs(g.translation.width) > abs(g.translation.height) * 1.5
+                    else { return }
+                    onBack()
+                }
+        )
         .task {
             await plan.load(from: store, ticker: ticker)
             decode()
