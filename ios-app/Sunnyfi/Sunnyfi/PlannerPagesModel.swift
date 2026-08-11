@@ -101,6 +101,9 @@ struct PPPlan: Decodable {
     /// The next two expiries, each fully priced. Not four, not "the first one past
     /// the print" — the two weeks that actually get written.
     var chains: [PPChain]?
+    /// The whole answer, in two numbers. Everything else falls out of these once
+    /// a week is chosen.
+    var mechanism: PPMechanism?
     var hedgeNote: String?
     var tierNote: String?
     var grade: Int?
@@ -116,6 +119,30 @@ struct PPSize: Decodable {
     /// False, and the copy must respect it: conviction moves the count, not the
     /// strike. otmTarget has no conviction term.
     var strikeMoves: Bool?
+}
+
+/// How much exposure to keep, and how far out to sell it. Both numbers in both
+/// units, because they are one decision counted two ways: delta is what the model
+/// sizes on, shares is what actually gets called away.
+struct PPMechanism: Decodable {
+    /// What conviction asked for, against what the chain could deliver. They differ
+    /// when the hedge floor binds, and that gap must stay visible.
+    var keepPctTarget: Double?
+    var keepPct: Double?
+    var keepDelta: Double?
+    var soldDelta: Double?
+    var totalDelta: Double?
+    var contracts: Int?
+    var coveredShares: Double?
+    var freeShares: Double?
+    var otmPct: Double?
+    var strike: Double?
+    /// The distance measured in the move the market is pricing. Below 1.0 the
+    /// strike sits INSIDE one sigma, which reads as safely out and is not.
+    var sigmas: Double?
+    var expectedMove: Double?
+    var expiry: String?
+    var expDays: Int?
 }
 
 /// One expiry, with its own event state, keep and three tiers. Two of these.

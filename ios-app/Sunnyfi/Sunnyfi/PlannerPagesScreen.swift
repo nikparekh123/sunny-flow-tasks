@@ -68,25 +68,12 @@ struct PlannerPagesScreen: View {
                         toGrade: { withAnimation { index = liveCommit == nil ? 4 : 5 } }).pp_page(0)
                     PPWeekPage(r: r).pp_page(1)
                     PPFloorPage(r: r).pp_page(2)
-                    PPSellPage(r: r, spot: spot, commit: commit) { c in
+                    PPMechanismPage(r: r, spot: spot, commit: commit) { c in
                         commit = c; PPCommitStore.save(c)
-                        // Straight to the position it just created — the confirm is
-                        // not finished until you can see what is running.
                         withAnimation { index = 4 }
-                        // And to the server, so the nightly scorer resolves it when
-                        // the expiry passes. All three picks are archived, not just
-                        // this one: scoring only the taken pick measures which way
-                        // NVDA went, which the tool does not control. Storing all
-                        // three measures whether the RANKING was any good.
-                        Task {
-                            // BOTH indices. The edge is 1-based within a chain, and
-                            // without the chain the record would name the same tier
-                            // in the wrong week — the identical class of error as
-                            // committing by rail position.
-                            await plan.commit(c.engineIndex.map { $0 + 1 },
-                                              chainIndex: c.chainIndex ?? 0,
-                                              store: store, ticker: ticker)
-                        }
+                        // The record still carries the whole decision state; the
+                        // mechanism is one answer, so chain and tier indices are 0.
+                        Task { await plan.commit(1, chainIndex: 0, store: store, ticker: ticker) }
                     }.pp_page(3)
                     if let c = liveCommit {
                         PPMonitorPage(r: r, spot: spot, commit: c) {

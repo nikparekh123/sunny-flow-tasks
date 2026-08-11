@@ -1478,8 +1478,44 @@ Deno.serve(async (req) => {
   }
   (plan as Record<string, unknown>).chains = chains;
 
+  /* ── THE MECHANISM ────────────────────────────────────────────────────────
+     The planner's whole answer is two numbers: how much exposure to keep, and
+     how far out to sell it. Everything else — which expiry, which strike, how
+     many contracts — falls out of those two once a week is chosen, and Nik can
+     do that arithmetic faster than the tool can present six versions of it.
+
+     Both are reported in BOTH units, because they are the same decision counted
+     two ways and which one reads better depends on the day: delta is what the
+     model sizes on, shares is what actually gets called away.
+
+     The distance carries a sigma reading because a bare percentage is silent
+     about the thing that matters. At 43 vol over two sessions, one sigma is
+     about 2.4% — so "sell 2.4% out" and "sell at the edge of the expected move"
+     are the same sentence, and only one of them is legible.
+     ── */
   {
     const rec = plan.picks.find((k) => Math.abs(k.strike - targetStrike) < 1e-6) ?? plan.picks[0];
+    const covered = Math.min(rec.ct * 100, shares);
+    // rec.delta is already per-contract × 100, so ct × delta IS the delta sold.
+    const soldDelta = Math.round(rec.ct * rec.delta);
+    const em = spot * (iv / 100) * Math.sqrt(Math.max(expDays, 1) / 252);
+    (plan as Record<string, unknown>).mechanism = {
+      // what conviction asked for, and what the chain could actually deliver —
+      // the floor can bind, and hiding that gap is the failure this rebuild removed
+      keepPctTarget: +keepTarget.toFixed(0),
+      keepPct: shares > 0 ? +(((shares - soldDelta) / shares) * 100).toFixed(0) : null,
+      keepDelta: Math.max(0, shares - soldDelta),
+      soldDelta, totalDelta: shares,
+      contracts: rec.ct, coveredShares: covered, freeShares: Math.max(0, shares - covered),
+      otmPct: +rec.otmPct.toFixed(2),
+      strike: rec.strike,
+      // How far the distance sits in the move the market is pricing. Under 1.0
+      // means the strike is inside one sigma — which reads as "safely out" and
+      // is not.
+      sigmas: em > 0 ? +((rec.strike - spot) / em).toFixed(2) : null,
+      expectedMove: +em.toFixed(2),
+      expiry: nextExp, expDays,
+    };
     (plan as Record<string, unknown>).size = {
       sold: rec.ct, full: rec.wasCt,
       strike: rec.strike, fullStrike: rec.strike,
