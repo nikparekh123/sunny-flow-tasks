@@ -136,6 +136,9 @@ struct PPMechanism: Decodable {
     var coveredShares: Double?
     var freeShares: Double?
     var otmPct: Double?
+    /// True when the strike IS the money. The distance is a deliberate setting
+    /// now, so the page states it rather than warning that it sits inside a sigma.
+    var atTheMoney: Bool?
     var strike: Double?
     /// The distance measured in the move the market is pricing. Below 1.0 the
     /// strike sits INSIDE one sigma, which reads as safely out and is not.

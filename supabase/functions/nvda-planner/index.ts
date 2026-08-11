@@ -1141,8 +1141,25 @@ Deno.serve(async (req) => {
   //
   // Without it, rich IV does the right thing unaided: the same strike carries a higher
   // delta, so fewer contracts reach the same exposure and each one pays more.
-  const otmTarget = clamp(BASE_OTM[`${evState}|${pxState}`] * tScale, 0, 4);
-  const targetStrike = Math.round(spot * (1 + otmTarget / 100) / STRIKE_STEP) * STRIKE_STEP;
+  /* AT THE MONEY. The distance is no longer a state-dependent percentage.
+
+     Measured two ways and they agree. Against real option marks over two years,
+     selling at the money beat 3% out by $99K on NVDA and $71K on MSFT, and tied
+     on AAPL. Across 36 synthetic paths in three regimes at two entry prices, it
+     won five of six cells.
+
+     The mechanism is contract count, not premium. Holding the delta budget
+     fixed, a 0.35-sigma strike carries about 0.37 delta and needs 52 contracts;
+     at the money carries 0.50 and needs 38. Those 14 contracts are 1,400 shares
+     that can never be called away no matter how far it runs — and a large
+     out-of-the-money position's delta EXPANDS on exactly the rally you wanted to
+     be in, while a small one is bounded by its own contract count.
+
+     BASE_OTM stays defined and reported: it is the setting this replaced, and a
+     future test may want to move off zero rather than rediscover the number. */
+  const otmTarget = 0;
+  const otmPrior = clamp(BASE_OTM[`${evState}|${pxState}`] * tScale, 0, 4);
+  const targetStrike = Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
 
   // Contract count is arithmetic. Covered calls cannot sell unlimited delta — 75 of them
   // at 3% out reach only ~2,200 — so when the target is out of reach the pick REPORTS the
@@ -1213,8 +1230,9 @@ Deno.serve(async (req) => {
     const ev = pi ? 'PRE' : sincePrint <= 5 ? 'POST' : 'CLEAR';
     const kt = clamp(BASE_KEEP[ev] + mods.conviction + mods.iv, 55, 95);
     const kn = clamp(BASE_KEEP[ev] + mods.iv, 55, 95);
-    const otm = clamp(BASE_OTM[`${ev}|${pxState}`] * ts, 0, 4);
-    const tgt = Math.round(spot * (1 + otm / 100) / STRIKE_STEP) * STRIKE_STEP;
+    // Same rule per chain: at the money, whichever week is being priced.
+    const otm = 0;
+    const tgt = Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
     const qs = !dryQuotes && key
       ? await chainQuotes(TICKER, exp, tgt - STRIKE_STEP * 2, tgt + STRIKE_STEP * 2, key)
       : new Map<number, Quote>();
@@ -1335,7 +1353,8 @@ Deno.serve(async (req) => {
     // Reported, never used to size.
     pace: { collected, boughtBack, drag },
     keepPct: +keepTarget.toFixed(0), keepDelta: Math.round((keepTarget / 100) * shares),
-    otmTarget: +otmTarget.toFixed(2), targetStrike, expiry: nextExp, expDays,
+    otmTarget: +otmTarget.toFixed(2), otmPrior: +otmPrior.toFixed(2),
+    targetStrike, expiry: nextExp, expDays,
     // What the caller asked for against what was actually priced. The app must read
     // expiry, never assume its ask was honoured — a stale or unlisted date falls
     // back to the nearest, and silently showing the requested one would put a
@@ -1508,6 +1527,9 @@ Deno.serve(async (req) => {
       soldDelta, totalDelta: shares,
       contracts: rec.ct, coveredShares: covered, freeShares: Math.max(0, shares - covered),
       otmPct: +rec.otmPct.toFixed(2),
+      // The distance is deliberate now, not a residue of rounding, so the page
+      // can say "at the money" rather than warn that it is inside a sigma.
+      atTheMoney: Math.abs(rec.strike - spot) <= STRIKE_STEP / 2,
       strike: rec.strike,
       // How far the distance sits in the move the market is pricing. Under 1.0
       // means the strike is inside one sigma — which reads as "safely out" and

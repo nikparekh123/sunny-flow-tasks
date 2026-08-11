@@ -69,8 +69,9 @@ struct PPMechanismPage: View {
                 // The distance is the page's number. Keep is the other half and sits
                 // above it — one hero, per the layout law, and this is the one that
                 // decides where the cap lands.
-                PPNum(value: m.otmPct.map { "\(f1($0))%" } ?? "—",
-                      unit: "out of the money", size: 88, ground: .paper)
+                PPNum(value: m.atTheMoney == true ? "ATM" : (m.otmPct.map { "\(f1($0))%" } ?? "—"),
+                      unit: m.atTheMoney == true ? "at the money" : "out of the money",
+                      size: 88, ground: .paper)
                 PPSay(text: sigmaLine(m), ground: .paper)
                 Text([m.strike.map { "That is \(f2($0)) on the \(m.expiry.map(Self.day) ?? "next") expiry" },
                       m.contracts.map { "\($0) contracts" }]
@@ -113,8 +114,15 @@ struct PPMechanismPage: View {
     /// strike sits inside the move the market is already pricing, which reads as
     /// safely out and is not.
     private func sigmaLine(_ m: PPMechanism) -> String {
-        guard let s = m.sigmas else { return "Keep the rest." }
         let em = m.expectedMove.map { " One sigma is \(f2($0))." } ?? ""
+        // At the money is now the SETTING, not an accident of rounding, so saying
+        // "inside the expected move" here would read as a warning about a choice
+        // that was made on purpose. The reason belongs in its place.
+        if m.atTheMoney == true {
+            return "Selling the money means fewer contracts for the same exposure,"
+                 + " so less of the book can ever be called.\(em)"
+        }
+        guard let s = m.sigmas else { return "Keep the rest." }
         if s < 1 { return "That is \(f2(s)) sigma, inside the move being priced.\(em)" }
         if s < 1.5 { return "That is \(f2(s)) sigma, just past the expected move.\(em)" }
         return "That is \(f2(s)) sigma, clear of the expected move.\(em)"
