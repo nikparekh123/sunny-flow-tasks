@@ -69,7 +69,39 @@ were DeepSeek (−17.0%), the tariff pause (+18.7%) and the July 2024 rotation (
 against a worst earnings reaction of −8.5%. Protection has to be structural — size,
 floor, ceiling — not a date in the diary.
 
-## Calls: none, and the overwrite does not fund a floor
+## Calls: ATM on 30% of the block, and the rule is ROLL OR DIE
+
+Reversed 12 Aug 2026. The old "no calls" rule came from the TLT study, where calls
+cost money in a rally. NVDA's own data disagrees — but the thing that matters is not
+the strike, it is whether you roll.
+
+With the share path endogenous and assignment allowed
+(`research/nvda-tenor/nvda_calls_acc.py`, 38 windows x 72 weeks):
+
+| arm | median shares | called away | median basis |
+|---|---|---|---|
+| no calls | 14,100 | 0 | $138.13 |
+| calls, **rolled** | 14,100 | 0 | **$134.06** |
+| calls, **assigned** | **1,700** | **16,900** | $85.82 |
+
+**One skipped roll is the difference between 14,100 shares and 1,700.** Weekly calls
+on half a growing block, in a stock that trends, are in the money constantly; shares
+leave as fast as the puts deliver them and the accumulation simply churns. The
+overlay is only ever safe under a roll-always discipline the app can recommend and
+cannot enforce.
+
+**The structure is ATM at 30% coverage** — 15-20 calls on 5,000 shares, the rest
+uncapped. It ties 4%-out at 50% on basis (ATM wins 16 of 38 windows, medians 23c
+apart), leaves 70% of the block uncapped rather than 50%, and needs ~42 contracts
+rather than ~70. It costs about $94K more in roll debits over the horizon. That is a
+preference between cash and headroom, not a right answer, so both dials live in
+`nvda_planner_state` (`call_delta`, `call_coverage`, `calls_on`).
+
+**The roll debit is not covered by the $400K ceiling.** That ceiling sizes put
+assignment exposure. Roll cash is a second, separate call on capital, due in exactly
+the weeks NVDA has just rallied.
+
+## The overwrite does not fund a floor
 
 A 10% floor rolled quarterly costs **−$263,448** net over two years. The best overwrite
 tested returns **+$99,014**, and gets there by writing half the block at 4% out. Nothing

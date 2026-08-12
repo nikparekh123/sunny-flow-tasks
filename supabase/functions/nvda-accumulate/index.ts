@@ -100,7 +100,21 @@ function convFactor(score: number, weight: number): { f: number; band: string } 
 // phase that inherits NVDA's ATM result, because it is the only one where the
 // intention matches: monetising a block you are content to lose.
 //
-// ACCUMULATE is OFF, measured rather than assumed (research/tlt-strike-policy,
+// ACCUMULATE was off on the strength of the TLT study below. NVDA's own data says
+// otherwise, and the rule that replaced it is not about strike -- it is ROLL OR DIE.
+// research/nvda_calls_acc: with the share path endogenous and assignment allowed,
+// weekly calls on a growing block called away 16,900 shares and left 1,700 against a
+// 15,000 target. Rolled instead, the same overwrite is worth ~$4/share of basis at no
+// cost in shares. The overlay is therefore only ever safe while every in-the-money
+// call is rolled; one skipped roll is the difference between the two outcomes.
+//
+// ATM at 30% cover is Nik's structure and it ties 4%-out at 50% on basis (16 of 38
+// windows, medians 23c apart). It leaves 70% of the block uncapped for a run and
+// needs ~42 contracts rather than ~70; it costs ~$94K more in roll debits. That is a
+// preference, not an error, so it is the default and both dials live in state.
+//
+// The TLT finding, kept because it is why the phase table exists at all
+// (research/tlt-strike-policy,
 // 105 weekly rolls on real marks). Across the whole window calls looked worth
 // ~$40K — but that window fell 91.6 to 82.2, and the winning arms ended holding
 // 25-28% of what they bought. They were not earning premium, they were selling
@@ -110,8 +124,8 @@ function convFactor(score: number, weight: number): { f: number; band: string } 
 // trade is still a losing trade, so the old 0.15 delta / 20% setting is gone
 // rather than reduced.
 const PHASE_CALLS: Record<string, { enabled: boolean; delta: number; coverage: number; why: string }> = {
-  ACCUMULATE: { enabled: false, delta: 0, coverage: 0,
-                why: 'off — measured to cost money and shares in a rally while the block is being built' },
+  ACCUMULATE: { enabled: true, delta: 0.50, coverage: 0.30,
+                why: 'ATM on part of the block — worth ~$4/share of basis, but ONLY while every in-the-money call is rolled' },
   HOLD:       { enabled: true, delta: 0.25, coverage: 0.50, why: 'Income on a block that has stopped growing' },
   HARVEST:    { enabled: true, delta: 0.50, coverage: 1.00, why: 'Exit. Assignment is the point' },
 };
@@ -733,16 +747,27 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // Pending assignment is not coverage. Write calls against shares that have not
   // arrived and a rally leaves them naked: the puts expire worthless, the shares
   // never come, and the calls are uncovered into strength.
-  const cs = PHASE_CALLS[phase];
+  const cs = (() => {
+    const base = PHASE_CALLS[phase];
+    if (!base.enabled) return base;
+    return {
+      ...base,
+      enabled: st.calls_on == null ? base.enabled : !!st.calls_on,
+      delta: Number(st.call_delta ?? base.delta),
+      coverage: Number(st.call_coverage ?? base.coverage),
+    };
+  })();
   const coveredNow = shortCalls.reduce((s, l) => s + l.ct * 100, 0);
   const coverRoom = Math.max(0, Math.floor((shares * cs.coverage - coveredNow) / 100));
-  // In ACCUMULATE calls are the LAST lever — the first move is to write fewer
-  // puts. They only appear once the put side is at its floor and delta is still
-  // over, which in practice means after a run of assignments.
-  const deltaTarget = shares + sliceDelta;
-  const deltaOver = netDelta - deltaTarget;
-  const callsWarranted = !cs.enabled ? 0
-    : Math.min(coverRoom, Math.max(0, Math.floor((deltaOver > 0 ? deltaOver : shares * cs.coverage) / (cs.delta * 100))));
+  // Write up to the coverage target. This is a deliberate overwrite sized to a share
+  // of the block, not a delta-overflow valve — the old rule only fired after a run of
+  // assignments and so never wrote at all in the ordinary case.
+  const callsWarranted = !cs.enabled ? 0 : coverRoom;
+
+  // Everything above is premised on rolling. Surface any short call already in the
+  // money so the obligation is on the screen rather than in a comment.
+  const dueToRoll = shortCalls.filter((l) => spot! > l.strike);
+  const rollCost = dueToRoll.reduce((s, l) => s + (spot! - l.strike) * 100 * l.ct, 0);
 
   let callStrike: number | null = null, callMid = 0;
   if (callsWarranted > 0 && expiry) {
@@ -894,11 +919,25 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     } : null,
 
     calls: {
-      label: cs.enabled ? 'Calls' : 'No calls',
-      lines: cs.enabled
-        ? [[`^Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike ?? '\u2014'}^`, null]]
-        : [['^No calls while accumulating^', null], ['cost money and shares', 'in a rally']],
-      note: cs.enabled ? cs.why : 'Trim delta by *writing fewer puts*',
+      // The roll line comes FIRST when anything is in the money. Letting one assign is
+      // the difference between 14,100 shares and 1,700, so it outranks the new write.
+      label: !cs.enabled ? 'No calls' : dueToRoll.length ? 'Roll first' : 'Calls',
+      lines: !cs.enabled
+        ? [['^No calls while accumulating^', null], ['cost money and shares', 'in a rally']]
+        : [
+            ...(dueToRoll.length
+              ? [[`|Roll ${dueToRoll.reduce((n, l) => n + l.ct, 0)} call${dueToRoll.reduce((n, l) => n + l.ct, 0) === 1 ? '' : 's'}|`,
+                  `${fmtUsd(rollCost)} to keep the shares`] as [string, string | null]]
+              : []),
+            ...(callsWarranted > 0 && callStrike != null
+              ? [[`^Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}^`,
+                  `${Math.round(cs.coverage * 100)}% covered`] as [string, string | null]]
+              : [['^Nothing to write^', 'at the coverage target'] as [string, string | null]]),
+          ],
+      note: !cs.enabled ? 'Trim delta by *writing fewer puts*'
+        : dueToRoll.length
+          ? '*Never let one assign.* Assigned, the overwrite ends at ~1,700 shares of 15,000'
+          : cs.why,
     },
 
     why: {
