@@ -121,3 +121,36 @@ walk up.
 The `avg OTM` column exists because of these. A strike series that silently drifts
 toward the money is invisible in the P&L and obvious the moment you print where it
 actually struck.
+
+## Strike, filled in (1% and 3% added)
+
+| strike | ct/wk | shares | delivery | net basis | peak cash | total |
+|---|---|---|---|---|---|---|
+| ATM | 4.2 | 18,900 | 100% | 151.84 | $90K | $1,359,528 |
+| **OTM 1%** | **5.2** | **19,100** | **102%** | **148.95** | **$117K** | **$1,429,112** |
+| OTM 2% | 6.1 | 18,500 | 99% | 149.38 | $163K | $1,376,230 |
+| OTM 3% | 8.1 | 15,300 | 82% | 141.12 | $311K | $1,264,674 |
+| OTM 5% | 15.4 | 13,200 | 70% | 125.91 | $929K | $1,291,787 |
+
+**1% out is the optimum**, and it is not a coin flip against ATM the way 2% is:
++$69,583, MORE shares, a better basis, for only $27K more capital. The curve peaks
+there and falls away on both sides.
+
+Delivery over 100% is the tell. Near the money the stock's drift barely bites and
+realised assignment slightly BEAT what delta priced; past two sigma-fifths it
+collapses. That asymmetry is why the sweet spot sits just outside the money rather
+than at it.
+
+Weekly moves, last 12 months (49 weeks, sd 4.75%), which is what actually decides a
+weekly put — not the daily distribution:
+
+| strike | weeks assigned |
+|---|---|
+| ATM | 24 of 49 (49%) |
+| 1% OTM | 22 of 49 (45%) |
+| 2% OTM | 17 of 49 (35%) |
+| 3% OTM | 10 of 49 (20%) |
+| 5% OTM | 4 of 49 (8%) |
+
+Between 1% and 2% the assignment rate falls ten points for one point of strike. That
+is the edge of the cliff, and it is why 2% already costs shares.

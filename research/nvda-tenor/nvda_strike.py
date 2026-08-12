@@ -12,7 +12,7 @@ for i in range(21,len(days)):
 FRI=[d for d in days if datetime.date.fromisoformat(d).weekday()==4 and d in rv]
 
 # ATM by delta; the OTM arms by distance, which is how a person actually says it
-ARMS={"ATM":("delta",0.50),"OTM 2%":("pct",0.02),"OTM 5%":("pct",0.05)}
+ARMS={"ATM":("delta",0.50),"OTM 1%":("pct",0.01),"OTM 2%":("pct",0.02),"OTM 3%":("pct",0.03),"OTM 5%":("pct",0.05)}
 def strike(S,v,T,kind,val):
     if kind=="delta":
         d1=-N.inv_cdf(val); K=S*math.exp((R+v*v/2)*T-d1*v*math.sqrt(T))
@@ -97,7 +97,7 @@ for name in ARMS:
     print("%-8s %6.1f %8.0f %8.0f%% %9.0f %9.2f %11.0f %11.0f"%(
         name,r["ct"]/max(1,r["n"]),r["shares"],100*r["delivery"],r["prem"],r["basis"],r["maxout"],r["total"]))
 a=res["ATM"]
-for k in ("OTM 2%","OTM 5%"):
+for k in ("OTM 1%","OTM 2%","OTM 3%","OTM 5%"):
     d=res[k]
     print("\n%-7s vs ATM: shares %+.0f · basis %+.2f · peak cash %+.0f · TOTAL %+.0f"%(
         k,d["shares"]-a["shares"],d["basis"]-a["basis"],d["maxout"]-a["maxout"],d["total"]-a["total"]))
