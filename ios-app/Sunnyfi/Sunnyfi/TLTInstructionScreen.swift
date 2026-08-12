@@ -202,13 +202,14 @@ struct TLTInstructionScreen: View {
                 sources(s.sources)
                 Color.clear.frame(height: 56)
             }
-            // Clamped, and not optional. A VStack inside a ScrollView sizes to its
-            // widest child, so one over-wide row silently drags the WHOLE sheet off
-            // centre — the first build lost the "$" from $73,800 and two letters
-            // from the phase line. Nothing looked broken; everything was shifted.
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 17)
             .padding(.top, 62)
+            // containerRelativeFrame, NOT frame(maxWidth: .infinity). maxWidth only
+            // PROPOSES a width — a child that insists on being wider still overflows,
+            // and a vertical ScrollView then lets the whole sheet drift sideways.
+            // This pins the content to the scroll view's own width so every row has
+            // to compress into it. Same law the planner pages already run on.
+            .containerRelativeFrame(.horizontal)
         }
         .scrollIndicators(.hidden)
         .refreshable { await store.load() }
@@ -404,10 +405,16 @@ struct TLTInstructionScreen: View {
             Eyebrow(label: w.label)
             VStack(alignment: .leading, spacing: 9) {
                 ForEach(Array(w.chain.enumerated()), id: \.offset) { _, step in
+                    // The widest row on the sheet, and the one that was pushing
+                    // everything sideways: the chain string wants ~310pt on one line
+                    // and the result wants another 84, on a 359pt card. fixedSize
+                    // (flexible width, ideal height) lets it wrap instead of demand.
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(step.text).font(InkFont.mono(12)).foregroundStyle(Ink.dim)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 6)
                         Text(step.out).font(InkFont.mono(14, .medium)).monospacedDigit()
+                            .layoutPriority(1)
                     }
                 }
             }
