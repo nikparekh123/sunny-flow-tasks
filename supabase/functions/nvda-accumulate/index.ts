@@ -498,7 +498,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     ? Number(wi.shares)
     : (lotRows as Row[]).reduce((s, l) => s + fin(Number(l.qty_remaining)), 0);
   const qStart = quarterStart(today);
-  const sharesThisQuarter = (lotRows as Row[])
+  // Under what_if the real lots are not the hypothesis. Left unoverridden this row
+  // kept reporting the true 7,500 beside a hypothetical 1,500, which reads as a
+  // quarter already 306% delivered on a block that has not been bought yet.
+  const sharesThisQuarter = wi?.shares != null ? 0 : (lotRows as Row[])
     .filter((l) => String(l.acquired_date).slice(0, 10) >= ymd(qStart))
     .reduce((s, l) => s + fin(Number(l.qty_remaining)), 0);
 
