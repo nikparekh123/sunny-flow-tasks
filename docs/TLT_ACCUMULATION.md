@@ -201,7 +201,101 @@ TLT, so filter to 10-, 20- and 30-year.
 
 So all nine families have a source, and the seven-family fallback is dropped.
 
+## The nine rates families
+
+Same nine-family architecture as NVDA, entirely different content. On NVDA a family
+measures deviation from implied *volatility*, for someone selling it. Here it
+measures whether the rates evidence supports buying, for someone accumulating.
+
+**Conviction must not re-measure price.** The price multiplier already pays for
+cheapness in absolute terms — TLT under 75 buys faster, full stop. If conviction
+also rewarded a low price the two would compound and the programme would spend its
+whole budget in one drawdown. So every family below reads a *deviation*, a *rate of
+change*, or a *level in yield space* — never TLT's price. `real` and `stretch` are
+the two that come closest and both are defined against yields specifically to keep
+them independent.
+
+| family | measures | source | cap |
+|---|---|---|---|
+| `real` | 30y real yield vs own 5y percentile | FRED `DFII30` `DFII10` | 16 |
+| `curve` | slope, and **which end** is moving | FRED `T10Y2Y` `DGS30` `DGS2` | 16 |
+| `path` | cuts priced vs cuts not yet priced | FRED `DGS2` `FEDFUNDS` | 14 |
+| `print` | inflation delivered vs inflation priced | FRED `CPIAUCSL` `T10YIE` | 12 |
+| `stretch` | 30y yield vs its 100d mean, in σ | FRED `DGS30` | 12 |
+| `carry` | TLT yield minus cash | FRED `SOFR` + TLT distributions | 12 |
+| `supply` | long-end issuance and auction quality | Treasury Fiscal Data | 10 |
+| `bloc` | FOMC voter composition | hand table — no feed | 8 |
+| `calendar` | proximity to a known event | FOMC/BLS dates + Treasury | **−12** |
+
+Eight positives sum to 100. `calendar` is a **damper only** — it never adds.
+
+### The ones with a sign worth arguing about
+
+**`path` is contrarian, and that is deliberate.** It reads `DGS2 − FEDFUNDS`. Deeply
+negative means the market has *already* priced the cuts — the good news is in the
+bond, and buying now is buying after the move. So cuts-already-priced scores
+**low**, and cuts-not-yet-priced scores **high**. This is the family most likely to
+feel wrong in the moment: it will read weakest exactly when the rate-cut story is
+loudest on television.
+
+**`curve` must decompose, not just read slope.** Steepening is not one thing. A bull
+steepener — front end falling, long end steady — is the pre-cut TLT rally and scores
+high. A bear steepener — long end rising on term premium — is TLT bleeding and
+scores low. Both print as "curve steepened." The family computes each leg's change
+separately and scores the source of the move, not the move.
+
+**`real` is the best single cheapness read there is**, and better than price,
+because price conflates the real rate with inflation expectations. A 30-year real
+yield in the top decile of five years means bonds are genuinely generous in the way
+that survives inflation. This is the family that justifies buying at 80 in one
+regime and declining at 80 in another — something the price multiplier alone can
+never express.
+
+**`calendar` is a timing damper, and it is what thrice-weekly is for.** Near an
+FOMC, a CPI print, or a long-end auction, it cuts the week's remaining budget rather
+than its direction. It is how the tool gets to say *"write half of Wednesday's now,
+the rest Friday after CPI"* — a sentence a weekly cadence could not produce.
+
+**`supply` says don't step in front of the calendar.** Announced 10/20/30-year size
+against its trailing average, plus the last auction's bid-to-cover and tail against
+their own history. Heavy or badly-bid long-end supply scores low. Bills and the
+front end are ignored — they do not move TLT.
+
+**`bloc` is small on purpose.** Eight points, because it is slow, soft, and the only
+family with no feed. It needs a hand-seeded `fomc_voters` table; the regional-bank
+rotation is published a year ahead, so this is a once-a-year edit, not maintenance.
+
+### How conviction enters
+
+    weekly delta = (quarter budget ÷ 13) × price factor × conviction factor
+
+    conviction   0–30    0.7×
+                31–70    1.0×
+                71–100   1.3×
+
+Deliberately narrower than the price multiplier's 0.25×–2.5×. **Price is the driver,
+conviction is the trim** — that matches how Nik actually decides, and it stops a
+macro read from overriding an observed price. Note the top corner compounds past the
+ceiling: 2.5 × 1.3 at 11K a quarter is ~2,750 delta, roughly 61 contracts, about
+$460K — over the $400K limit. The ceiling binds and the trade is cut. That is the
+ceiling doing its job, not a miscalibration.
+
+### Two substitutions I made — veto either
+
+**`carry` replaces the `rate-view` family I first sketched.** `rate-view` was a dial
+for your own standing view, which the phase switch already carries — a second copy
+would just be a fudge factor able to overrule the evidence. `carry` answers the
+question that actually governs a 100-week accumulation: *what does it cost to be
+early?* TLT yielding 4.6% against 5.3% cash means paying to wait; against 3.5% cash
+means being paid to wait. Measurable, free, and orthogonal to everything else here.
+
+**`print` compares CPI to breakevens, not to consensus.** You asked for how CPI
+landed *against expectation*, and there is no free economist-consensus feed. FRED's
+`T10YIE` gives the market's priced inflation instead, which is a defensible
+substitute and arguably the better one — it is the expectation you are actually
+trading against, not the one a survey collected.
+
 ## Open before build
 
-- The rates conviction families themselves — caps and weights per family, drafted
-  separately against the sources above.
+- Whether HOLD and HARVEST re-weight the families or only flip signs. Several
+  invert: in HARVEST a high real yield means do **not** sell into cheapness.
