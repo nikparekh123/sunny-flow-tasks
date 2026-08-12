@@ -37,9 +37,18 @@ struct InkTickerNav: View {
                         Button { selected = s } label: {
                             // Selection is legible at a glance: the live book is full
                             // ink and medium, the other clearly dimmed back.
+                            //
+                            // The fade is opacity at the call site, NOT Ink.dim —
+                            // dim is deliberately the same ink as text (faded labels
+                            // were unreadable in daylight and reported four times), so
+                            // asking it to separate these two left both books the same
+                            // white. This is a different problem from label-vs-value
+                            // rank: two peers where one is inactive, which is what
+                            // opacity is for under Law 2.
                             Text(s)
                                 .font(InkFont.display(15, s == selected ? .medium : .regular))
-                                .foregroundStyle(s == selected ? Ink.text : Ink.dim)
+                                .foregroundStyle(Ink.text)
+                                .opacity(s == selected ? 1 : 0.45)
                         }
                         .buttonStyle(.plain)
                     }

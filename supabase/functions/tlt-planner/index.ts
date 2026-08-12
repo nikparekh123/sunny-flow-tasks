@@ -95,6 +95,14 @@ const PHASE_CALLS: Record<string, { delta: number; coverage: number; why: string
 // the weekend, and the weekend is when you cannot react.
 const SLICE: Record<number, number> = { 1: 0.40, 3: 0.40, 5: 0.20 };
 
+// No calls in ACCUMULATE below this many DELIVERED shares. Nik's call, 12 Aug.
+// Below it the 20% coverage cap allows one or two contracts of far-OTM premium —
+// single-digit dollars — against the risk of having shares called away that the
+// put side just paid to acquire. The trade is not worth the ticket, and the
+// instinct it feeds (assigned, so now write calls) is the wheel, which is the
+// opposite strategy to this one.
+const ACCUM_CALL_FLOOR = 5000;
+
 // ── Black-Scholes (single clock) ────────────────────────────────────────────
 function ncdf(x: number): number {
   const a1 = .254829592, a2 = -.284496736, a3 = 1.421413741, a4 = -1.453152027, a5 = 1.061405429, p = .3275911;
@@ -636,8 +644,9 @@ Deno.serve(async (req: Request) => {
   // over, which in practice means after a run of assignments.
   const deltaTarget = shares + sliceDelta;
   const deltaOver = netDelta - deltaTarget;
+  const belowCallFloor = phase === 'ACCUMULATE' && shares < ACCUM_CALL_FLOOR;
   const callsWarranted = phase === 'ACCUMULATE'
-    ? (putCt === 0 && deltaOver > 200 ? Math.min(coverRoom, Math.floor(deltaOver / (cs.delta * 100))) : 0)
+    ? (!belowCallFloor && putCt === 0 && deltaOver > 200 ? Math.min(coverRoom, Math.floor(deltaOver / (cs.delta * 100))) : 0)
     : Math.min(coverRoom, Math.max(0, Math.floor((deltaOver > 0 ? deltaOver : shares * cs.coverage) / (cs.delta * 100))));
 
   let callStrike: number | null = null, callMid = 0;
@@ -752,9 +761,13 @@ Deno.serve(async (req: Request) => {
         credit: Math.round(callMid * 100 * callsWarranted),
         coverageCap: cs.coverage,
         coveredNow,
+        floor: phase === 'ACCUMULATE' ? ACCUM_CALL_FLOOR : null,
+        belowFloor: belowCallFloor,
         say: callsWarranted > 0 && callStrike != null
           ? `Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}.`
-          : phase === 'ACCUMULATE' ? 'No calls — the put side is doing the work.' : 'No calls warranted.',
+          : belowCallFloor
+            ? `No calls until ${ACCUM_CALL_FLOOR.toLocaleString()} shares — ${shares.toLocaleString()} held.`
+            : phase === 'ACCUMULATE' ? 'No calls — the put side is doing the work.' : 'No calls warranted.',
       },
       netAfter: Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta),
     },

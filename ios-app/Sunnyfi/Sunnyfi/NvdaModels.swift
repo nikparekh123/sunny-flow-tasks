@@ -427,10 +427,15 @@ enum NvDerive {
         }
         let pnl = sharesPL + optionsPL
 
-        // ── lifetime short-call premium / share → effective break-even ──
-        let shortCallPrem = live.filter { $0.option_type == "call" && $0.direction == "short" }
+        // ── lifetime SOLD premium / share → effective break-even ──
+        // Calls sold AND puts sold. The glossary is explicit — "Options SOLD =
+        // PREMIUM (calls sold + puts sold)" — and this filtered to calls only, so
+        // on a book that sells puts the premium came out at zero and New average
+        // collapsed onto buy average. Long puts stay out: bought options are COST,
+        // which the glossary keeps as a separate figure from PREMIUM.
+        let soldPrem = live.filter { $0.direction == "short" }
             .reduce(0.0) { $0 + ($1.action == "open" ? 1 : -1) * $1.premium * $1.contracts * 100 }
-        let premPerShare = shares > 0 ? shortCallPrem / shares : 0
+        let premPerShare = shares > 0 ? soldPrem / shares : 0
         let breakEven = avgBuy - premPerShare
 
         // ── sleeves + groups ──
