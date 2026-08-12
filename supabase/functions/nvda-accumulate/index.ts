@@ -885,7 +885,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       label: 'Held back', action: `|${Math.abs(Math.round(calPenalty))} points|`,
       headline: (() => {
         if (!nextHeavy) return 'Event ahead';
-        const short = String(nextHeavy.tag ?? nextHeavy.class_name).split('\u00b7')[0].trim();
+        const short = String(nextHeavy.name ?? 'Event').split('\u00b7')[0].trim();
         const dd = daysBetween(today, parseISO(String(nextHeavy.event_date)));
         return dd <= 0 ? `${short} today` : dd === 1 ? `${short} tomorrow` : `${short} in ${dd} days`;
       })(),
@@ -982,7 +982,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       label: "What's coming",
       events: (eventRows as Row[]).slice(0, 6).map((e) => [
         fmtDay(String(e.event_date)),
-        String(e.tag ?? e.class_name ?? ''),
+        String(e.name ?? ''),
         String(e.event_date).slice(0, 10) === todayISO,
       ]),
     },
