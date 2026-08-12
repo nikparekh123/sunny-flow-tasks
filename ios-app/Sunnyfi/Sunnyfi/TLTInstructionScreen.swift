@@ -289,7 +289,10 @@ struct TLTInstructionScreen: View {
                 Color.clear.frame(height: 56)
             }
             .padding(.horizontal, 17)
-            .padding(.top, 62)
+            // No top padding here. The title bar is in the flow now, so the only
+            // space above ACCUMULATE PHASE is the sheet head's own 26, which is what
+            // the design asks for. A leftover 62 from when the bar floated was
+            // stacking on top of it.
             // containerRelativeFrame, NOT frame(maxWidth: .infinity). maxWidth only
             // PROPOSES a width — a child that insists on being wider still overflows,
             // and a vertical ScrollView then lets the whole sheet drift sideways.
