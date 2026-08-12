@@ -354,7 +354,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   if (!polyKey) return json(500, { ok: false, error: 'POLYGON_API_KEY not set' });
   if (!supaUrl || !supaKey) return json(500, { ok: false, error: 'SUPABASE_URL / SERVICE_ROLE_KEY not set' });
 
-  let body: { dry_run?: boolean; phase?: string; asof?: string } = {};
+  let body: { dry_run?: boolean; phase?: string; asof?: string; what_if?: { shares?: number; drop_calls?: boolean } } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is the normal case */ }
 
   const D = db(supaUrl, supaKey);
