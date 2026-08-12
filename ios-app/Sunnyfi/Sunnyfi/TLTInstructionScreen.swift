@@ -154,7 +154,11 @@ struct InkBoot: View {
     @State private var pulse = false
 
     var body: some View {
+        // bottomTrailing of the whole layer. Anchored to the stage list instead, the
+        // mark landed on top of the last line, because a VStack is only as tall as
+        // its content and the list is vertically centred in a much taller space.
         ZStack(alignment: .bottomTrailing) {
+            Color.clear
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(Array(stages.enumerated()), id: \.offset) { i, s in
                     Text(s)
@@ -178,7 +182,7 @@ struct InkBoot: View {
                     .allowsHitTesting(false)
             }
         }
-        .padding(EdgeInsets(top: 0, leading: 34, bottom: 40, trailing: 34))
+        .padding(EdgeInsets(top: 0, leading: 34, bottom: 40, trailing: 0))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Ink.canvas)
         .onAppear {
@@ -196,21 +200,23 @@ struct TLTInstructionScreen: View {
     @State private var expanded = false
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Ink.canvas.ignoresSafeArea()
-            VStack(spacing: 0) {
-                Color.clear.frame(height: 62)          // clears the title bar
-                if let s = store.sheet {
-                    sheetBody(s)
-                } else if store.booting {
-                    InkBoot(stages: store.stages, stage: store.stage,
-                            mark: store.sheet?.boot?.mark ?? "one moment")
-                } else {
-                    placeholder
-                }
-            }
+        // The title bar sits IN the flow rather than floating over it. Overlaying it
+        // meant every screen below had to reserve a guessed height, and the guess was
+        // wrong: 62pt of spacer plus the sheet head's own 26 left a gap the size of a
+        // card above "ACCUMULATE PHASE".
+        VStack(spacing: 0) {
             titleBar
+            if let s = store.sheet {
+                sheetBody(s)
+            } else if store.booting {
+                InkBoot(stages: store.stages, stage: store.stage,
+                        mark: store.sheet?.boot?.mark ?? "one moment")
+            } else {
+                placeholder
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Ink.canvas.ignoresSafeArea())
         // Swipe horizontally to leave, same as the NVDA deck. simultaneousGesture
         // rather than gesture: this sheet scrolls VERTICALLY, and an exclusive
         // gesture would fight the scroll for every drag. The axis guard means a
