@@ -154,3 +154,52 @@ weekly put — not the daily distribution:
 
 Between 1% and 2% the assignment rate falls ten points for one point of strike. That
 is the edge of the cliff, and it is why 2% already costs shares.
+
+## The reference for the speed dial (`nvda_trigger.py` builds on the same data)
+
+Does distance BELOW a moving reference predict the next 20 sessions? If not, that
+reference cannot drive a speed dial.
+
+| reference | days below | forward 20d: deep / mid / shallow | spread |
+|---|---|---|---|
+| **MA 100** | 90 | +15.2% / +10.5% / +2.5% | **+12.7 pts** |
+| EMA 100 | 74 | +17.4% / +9.2% / +6.6% | +10.8 |
+| MA 50 | 116 | +11.7% / +6.6% / +3.3% | +8.4 |
+| MA 200 | 48 | +18.4% / +14.9% / +12.5% | +5.9 |
+| 52w high | 297 | +9.3% / +1.1% / +3.8% | +5.5 |
+
+**MA 100.** Below it the next month averaged +9.4%, above it +2.6%. The 52-week high
+fails because NVDA sits below it 297 days of 330, so it barely discriminates; MA 200
+has the best absolute returns and almost no spread, on 48 observations.
+
+Caveat: one regime, and a violent uptrend, so every bucket is positive. The ORDERING
+is more trustworthy than the levels.
+
+## Dip-triggered cadence
+
+Strike held at 1% OTM and the same total delta deployed in every arm, so the only
+variable is WHEN.
+
+| cadence | entries | shares | delivery | richness | basis | peak cash | total |
+|---|---|---|---|---|---|---|---|
+| **every Friday** | 104 | **20,900** | **100%** | 0.1254 | 150.09 | **$126K** | **$1,540,078** |
+| drop > 0.5% | 204 | 20,800 | 100% | 0.1540 | 152.32 | $281K | $1,486,187 |
+| drop > 1% | 162 | 18,200 | 87% | 0.1604 | 147.05 | $335K | $1,396,373 |
+| drop > 2% | 98 | 16,700 | 80% | 0.1721 | 139.53 | $369K | $1,406,852 |
+
+**The premise is right and the conclusion is wrong.** Premium richness rises exactly
+as expected, +23% / +28% / +37%, so a dip really does pay more. Every dip arm still
+loses, and the deeper the trigger the worse: −$53,890, −$143,704, −$133,225.
+
+Two reasons, and neither is the premium.
+
+**Delivery falls.** 100% on Friday, 87% at the 1% trigger, 80% at 2%. Writing into a
+drop means writing into the one condition where the stock is most likely to bounce
+back above the strike, so fewer puts deliver shares. Richer premium, fewer shares.
+
+**Capital doubles.** $126K to $281K–$369K. Dips cluster, so the arm writes several
+entries in the same week and carries them all at once. The Friday cadence spreads
+the same delta across the calendar by construction.
+
+The dip is real. It is a better moment to be PAID and a worse moment to be DELIVERED,
+and this book is paid in shares.
