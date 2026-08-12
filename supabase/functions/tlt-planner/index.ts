@@ -382,7 +382,10 @@ Deno.serve(async (req: Request) => {
       D.get('tlt_voter_bloc?select=code,name,lean,chair&order=sort.asc'),
       D.get('tlt_bloc_meta?id=eq.1&select=*'),
       D.get(`tlt_macro_events?event_date=gte.${todayISO}&select=class_key,class_name,event_date,label,tag&order=event_date.asc&limit=12`),
-      D.get('tlt_option_trades?voided_at=is.null&select=id,action,option_type,direction,contracts,strike,premium,expiry,closes_trade_id'),
+      // trade_date and premium carry the per-leg assignment basis. Without them the
+      // Tonight card has no honest number: the ladder's basis belongs to a trade you
+      // would open TODAY at today's premium, not to a leg sold a week ago.
+      D.get('tlt_option_trades?voided_at=is.null&select=id,action,option_type,direction,contracts,strike,premium,expiry,closes_trade_id,trade_date,last_synced_at'),
       D.get('tlt_share_lots?voided_at=is.null&select=acquired_date,qty_remaining'),
       D.get('tlt_iv_daily?select=*&order=date.desc&limit=1'),
       spotOf(polyKey),
@@ -600,7 +603,10 @@ Deno.serve(async (req: Request) => {
     .filter((l) => String(l.acquired_date).slice(0, 10) >= ymd(qStart))
     .reduce((s, l) => s + fin(Number(l.qty_remaining)), 0);
 
-  type Leg = { type: string; dir: string; ct: number; strike: number; expiry: string; delta: number; shares: number };
+  type Leg = {
+    type: string; dir: string; ct: number; strike: number; expiry: string;
+    delta: number; shares: number; premium: number; soldOn: string; basis: number;
+  };
   const legs: Leg[] = open.map((t) => {
     const ct = fin(Number(t.contracts));
     const K = fin(Number(t.strike));
@@ -610,7 +616,15 @@ Deno.serve(async (req: Request) => {
     const mag = isPut ? putDeltaAbs(spot!, K, T, iv) : callDelta(spot!, K, T, iv);
     // short put = +delta · short call = −delta · long put (the floor) = −delta
     const signed = isPut ? (short ? mag : -mag) : (short ? -mag : mag);
-    return { type: String(t.option_type), dir: String(t.direction), ct, strike: K, expiry: String(t.expiry).slice(0, 10), delta: signed, shares: signed * ct * 100 };
+    const prem = fin(Number(t.premium));
+    return {
+      type: String(t.option_type), dir: String(t.direction), ct, strike: K,
+      expiry: String(t.expiry).slice(0, 10), delta: signed, shares: signed * ct * 100,
+      premium: prem, soldOn: String(t.trade_date ?? '').slice(0, 10),
+      // What this leg actually costs if it delivers: the strike it commits to, less
+      // the premium THAT leg was sold at. Never today's candidate premium.
+      basis: Math.round((K - prem) * 100) / 100,
+    };
   });
 
   const shortPuts = legs.filter((l) => l.type === 'put' && l.dir === 'short');
@@ -634,28 +648,43 @@ Deno.serve(async (req: Request) => {
   const openExps = legs.map((l) => l.expiry).sort();
   const nearestExp = openExps[0] ?? null;
   const expiringLegs = nearestExp ? legs.filter((l) => l.expiry === nearestExp) : [];
-  let arriving = 0, leaving = 0;
+  let arriving = 0, leaving = 0, basisWeighted = 0;
   const expiringDetail = expiringLegs.map((l) => {
     const itm = l.type === 'put' ? spot! < l.strike : spot! > l.strike;
     if (itm && l.dir === 'short') {
-      if (l.type === 'put') arriving += l.ct * 100;
+      if (l.type === 'put') { arriving += l.ct * 100; basisWeighted += l.basis * l.ct * 100; }
       else leaving += Math.min(shares, l.ct * 100);
     }
-    return { type: l.type, dir: l.dir, ct: l.ct, strike: l.strike, itm, moves: itm && l.dir === 'short' ? l.ct * 100 : 0 };
+    const away = Math.round(Math.abs(l.strike - spot!) * 100) / 100;
+    return {
+      type: l.type, dir: l.dir, ct: l.ct, strike: l.strike, itm,
+      moves: itm && l.dir === 'short' ? l.ct * 100 : 0,
+      premium: l.premium, soldOn: l.soldOn, basis: l.basis,
+      // Per leg, from the premium THAT leg was sold at.
+      say: l.dir !== 'short'
+        ? `${l.ct}× long put ${l.strike} — the floor, ${fmtDay(l.expiry)}`
+        : itm
+          ? `${l.ct}× short ${l.type} ${l.strike} — sold at *${l.premium.toFixed(2)}*`
+            + `${l.soldOn ? ` on ${fmtDay(l.soldOn)}` : ''} → basis *${l.basis.toFixed(2)}*`
+          : `${l.ct}× short ${l.type} ${l.strike} — ~${away.toFixed(2)} out of the money, expires~`,
+    };
   });
-  const expWhen = nearestExp === todayISO ? 'tomorrow' : `after ${fmtDay(nearestExp ?? todayISO)}`;
+  // Conditional, always. With hours of trading left assignment can flip, so the
+  // engine says "in the money now" and "likely" — never "assigns today".
+  const expWhen = nearestExp === todayISO ? 'likely tomorrow' : `likely after ${fmtDay(nearestExp ?? todayISO)}`;
   const itmShorts = expiringDetail.filter((e) => e.itm && e.dir === 'short');
   const otmShorts = expiringDetail.filter((e) => !e.itm && e.dir === 'short');
-  const strikeList = (xs: typeof expiringDetail) =>
-    xs.map((e) => `${e.ct}× ${e.strike}`).join(', ');
+  const avgBasis = arriving > 0 ? Math.round((basisWeighted / arriving) * 100) / 100 : 0;
+  const strikeSet = (xs: typeof expiringDetail) =>
+    [...new Set(xs.map((e) => String(e.strike)))].join(' and ');
   const expirySay = !nearestExp ? 'Nothing expiring.'
-    : arriving > 0 || leaving > 0
-      ? [
-          arriving > 0 ? `${arriving.toLocaleString()} shares arrive ${expWhen} — ${strikeList(itmShorts.filter((e) => e.type === 'put'))} in the money.` : '',
-          leaving > 0 ? `${leaving.toLocaleString()} shares called away — ${strikeList(itmShorts.filter((e) => e.type === 'call'))}.` : '',
-          otmShorts.length ? `${strikeList(otmShorts)} expire worthless.` : '',
-        ].filter(Boolean).join(' ')
-      : `Nothing in the money — ${strikeList(otmShorts) || 'all legs'} expire worthless.`;
+    : arriving > 0
+      ? `The ${strikeSet(itmShorts.filter((e) => e.type === 'put'))}s are *in the money now*`
+        + ` — ^${arriving.toLocaleString()} shares^ ${expWhen}`
+      : leaving > 0
+        ? `The ${strikeSet(itmShorts.filter((e) => e.type === 'call'))}s are *in the money now*`
+          + ` — ^${leaving.toLocaleString()} shares^ called away ${expWhen}`
+        : `Nothing in the money — ${otmShorts.length ? `${otmShorts.length} leg${otmShorts.length === 1 ? '' : 's'}` : 'everything'} expires worthless`;
 
   // ── sizing ───────────────────────────────────────────────────────────────
   const band = PRICE_BANDS.find(([hi]) => spot! < hi) ?? PRICE_BANDS[0];
@@ -815,15 +844,29 @@ Deno.serve(async (req: Request) => {
       isToday: nearestExp === todayISO,
       sharesArriving: arriving,
       sharesLeaving: leaving,
+      avgBasis,
       legs: expiringDetail,
       say: expirySay,
+      tag: 'per leg · from the premium sold',
+      foot: arriving > 0
+        ? `Average basis on the ${arriving.toLocaleString()} if they arrive · *${avgBasis.toFixed(2)}*`
+        : null,
     },
 
     ceiling: {
       limit: cashCeiling,
       outstanding: Math.round(outstanding),
       headroom: Math.round(headroom),
+      // The state AFTER the trade the page just recommended. Headroom before it
+      // answers a question the reader did not ask — they are about to commit more.
+      committedAfter: Math.round(outstanding + putStrike * 100 * putCt),
+      headroomAfter: Math.round(cashCeiling - (outstanding + putStrike * 100 * putCt)),
+      pctAfter: cashCeiling > 0
+        ? Math.round(((outstanding + putStrike * 100 * putCt) / cashCeiling) * 1000) / 1000 : 0,
       binds: ceilingBinds,
+      cut: ceilingBinds
+        ? `Wanted *${wantCt}*, wrote *${putCt}* — ~the ceiling took ${wantCt - putCt} contract${wantCt - putCt === 1 ? '' : 's'}~`
+        : null,
       note: ceilingBinds
         ? `Cut from ${wantCt} to ${putCt} — ${fmtUsd(headroom)} of room against ${fmtUsd(cashCeiling)}.`
         : `${fmtUsd(headroom)} of room.`,
