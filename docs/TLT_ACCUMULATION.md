@@ -146,8 +146,62 @@ worthless.
 **The model's:** the arithmetic, the evidence, and saying plainly when the evidence
 and the phase disagree.
 
+## The call side is a function of the phase, not the ticker
+
+It does **not** inherit NVDA's setting, because NVDA has one intention forever —
+hold the block, monetise it, assignment is fine because you roll. TLT's intention
+rotates: you want shares, then you keep shares, then you sell shares. The call
+setting follows the intention.
+
+| | ACCUMULATE | HOLD | HARVEST |
+|---|---|---|---|
+| calls exist to | **trim delta** | **earn income** | **exit the block** |
+| distance | far OTM, ≤ 0.15δ | OTM, ~0.25δ | **ATM, ~0.50δ** |
+| coverage cap | ≤ 20% of shares | ≤ 50% | up to 100% |
+| assignment | avoid — it undoes the accumulation | tolerable | **sought** |
+| sizing driver | net-delta gap only | income + delta | exit pace |
+
+**HARVEST is the only phase that inherits NVDA's ATM finding** — and it does so
+because that is the only phase where the intention finally matches: monetising a
+block you are content to have called away. Reading the ATM result as a property of
+covered calls rather than of intent would put ATM calls on a block being
+accumulated, which is the worst cell in the table.
+
+**In ACCUMULATE, calls are the last lever, not the first.** If net delta is too
+high, the correct first move is to write *fewer puts*. A call caps upside on shares
+you are actively paying to acquire. Calls only appear once the put side is already
+at its floor and delta is still over — which in practice means after a run of
+assignments. Expect the ACCUMULATE call side to be quiet for long stretches; that
+is the design working, not a bug.
+
+### Coverage counts delivered shares only
+
+Short puts pending assignment are **not** coverage. Writing calls against shares
+that have not arrived is a naked call in exactly the wrong tail: TLT rallies, the
+puts expire worthless, the shares never come, and the calls are uncovered into
+strength. The tool computes coverage against settled share count and nothing else.
+
+## Data — both free
+
+**FRED** covers `real` and the rate context. Key is free and instant, no approval:
+sign up at [fredaccount.stlouisfed.org/apikeys](https://fredaccount.stlouisfed.org/apikeys),
+then store it as Supabase secret `FRED_API_KEY`. 120 requests/min with a key (30
+without), which is far beyond a thrice-weekly planner.
+
+Series: `DFII10` and `DFII30` (10- and 30-year real yields), `T10YIE` (10-year
+breakeven), `DGS10`/`DGS30`/`DGS2` (nominals), `T10Y2Y` (curve), `FEDFUNDS`,
+`CPIAUCSL`, `SOFR`.
+
+**`supply` is no longer blocked.** The US Treasury Fiscal Data API needs **no key
+at all** — `api.fiscaldata.treasury.gov/services/api/fiscal_service/`. The
+*Treasury Securities Upcoming Auctions* dataset gives announced size and date for
+each auction, which is the actual supply signal; *Treasury Securities Auction Data*
+gives history including bid-to-cover. Long-end auction size and tail are what move
+TLT, so filter to 10-, 20- and 30-year.
+
+So all nine families have a source, and the seven-family fallback is dropped.
+
 ## Open before build
 
-- The rates conviction families (drafted separately). `supply` has no free feed;
-  `real` needs FRED. Seven families with wider caps is the fallback.
-- Whether HOLD and HARVEST need their own call-side settings or inherit NVDA's.
+- The rates conviction families themselves — caps and weights per family, drafted
+  separately against the sources above.
