@@ -9,7 +9,7 @@ import Foundation
 ///
 /// The engine owns every string here — including its emphasis markers. Nothing in
 /// the view formats, rounds, or assembles a sentence. See docs/TLT_ACCUMULATION.md.
-struct TLTSheet: Decodable {
+struct PlannerSheet: Decodable {
     let ticker: String
     let boot: Boot?
     let asOf: AsOf
@@ -166,9 +166,9 @@ private struct Progress: Decodable {
     let stage: Int?
 }
 
-private struct TLTPlannerResponse: Decodable {
+private struct PlannerResponse: Decodable {
     let ok: Bool?
-    let sheet: TLTSheet?
+    let sheet: PlannerSheet?
     let error: String?
 }
 
@@ -176,8 +176,15 @@ private struct TLTPlannerResponse: Decodable {
 
 @Observable
 @MainActor
-final class TLTSheetStore {
-    private(set) var sheet: TLTSheet?
+final class PlannerSheetStore {
+    /// Which edge function to read. NVDA and TLT return the SAME 17-section sheet —
+    /// verified field by field, no key differs — so one model and one screen serve
+    /// both and the ticker is the only thing that varies.
+    private let function: String
+
+    init(function: String) { self.function = function }
+
+    private(set) var sheet: PlannerSheet?
     private(set) var loading = false
     /// Named rather than swallowed. A blank screen that says nothing is the one
     /// failure mode that costs an afternoon — a decode mismatch should say which
@@ -198,7 +205,7 @@ final class TLTSheetStore {
         decodeError = nil
         stage = 0
 
-        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/tlt-planner") else {
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/\(function)") else {
             decodeError = "bad url"; return
         }
         var req = URLRequest(url: url)
@@ -227,7 +234,7 @@ final class TLTSheetStore {
                     if let n = p.stage { stage = n }
                     if p.stages != nil || p.stage != nil { continue }
                 }
-                let parsed = try dec.decode(TLTPlannerResponse.self, from: data)
+                let parsed = try dec.decode(PlannerResponse.self, from: data)
                 if let sh = parsed.sheet {
                     if stages.isEmpty, let b = sh.boot { stages = b.stages }
                     stage = max(stage, stages.count)

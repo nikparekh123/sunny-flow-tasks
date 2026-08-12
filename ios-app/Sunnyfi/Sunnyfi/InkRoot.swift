@@ -53,17 +53,20 @@ struct InkRoot: View {
             // and NvdaPlannerV2Screen both stay in the target: the pages read
             // PlanV2Store, and the older screens still hold the force cards and
             // the split ladder that nothing has rebuilt yet.
-            // TLT gets its own sheet. It used to open PlannerPagesScreen with a TLT
-            // store, which meant tapping TLT showed the NVDA week-score model — nine
-            // circles and a baseline of 50 — for a book that has neither. The two
-            // planners answer different questions: NVDA sells vol against a block it
-            // keeps, TLT accumulates one it does not have yet.
-            if sym == "TLT" {
-                TLTInstructionScreen(onBack: { showPlanner = false })
-            } else {
-                PlannerPagesScreen(store: store, ticker: "NVDA",
-                                   onBack: { showPlanner = false })
-            }
+            // Both tickers now run the accumulation model, so both get the same
+            // screen against a different engine. That is not a shortcut: the two
+            // sheets were compared key by key and are structurally identical — 17
+            // sections, no field in one that is missing from the other.
+            //
+            // NVDA used to open PlannerPagesScreen, the week-score covered-call
+            // planner. It answers the old question — how much vol to sell against a
+            // block being kept — and NVDA is now building a block instead. That view
+            // is still in the target, just no longer reachable from here; restoring
+            // it is this branch, unchanged.
+            InstructionScreen(
+                ticker: sym,
+                function: sym == "TLT" ? "tlt-planner" : "nvda-accumulate",
+                onBack: { showPlanner = false })
         }
     }
 

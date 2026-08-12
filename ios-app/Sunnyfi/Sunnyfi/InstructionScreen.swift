@@ -194,9 +194,16 @@ struct InkBoot: View {
 
 // MARK: - Screen
 
-struct TLTInstructionScreen: View {
+struct InstructionScreen: View {
+    let ticker: String
     let onBack: () -> Void
-    @State private var store = TLTSheetStore()
+    @State private var store: PlannerSheetStore
+
+    init(ticker: String, function: String, onBack: @escaping () -> Void) {
+        self.ticker = ticker
+        self.onBack = onBack
+        _store = State(initialValue: PlannerSheetStore(function: function))
+    }
     @State private var expanded = false
 
     var body: some View {
@@ -236,7 +243,7 @@ struct TLTInstructionScreen: View {
     private var titleBar: some View {
         HStack(alignment: .firstTextBaseline) {
             Button(action: onBack) {
-                Text("TLT").font(InkFont.display(18, .semibold)).foregroundStyle(Ink.text)
+                Text(ticker).font(InkFont.display(18, .semibold)).foregroundStyle(Ink.text)
             }
             .buttonStyle(.plain)
             Spacer()
@@ -269,7 +276,7 @@ struct TLTInstructionScreen: View {
     }
 
     @ViewBuilder
-    private func sheetBody(_ s: TLTSheet) -> some View {
+    private func sheetBody(_ s: PlannerSheet) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 15) {
                 sheetHead(s)
@@ -306,7 +313,7 @@ struct TLTInstructionScreen: View {
 
     // The phase belongs to the sheet, not the recommendation — it is the standing
     // intention the instruction is drawn from, so it sits on paper above the card.
-    private func sheetHead(_ s: TLTSheet) -> some View {
+    private func sheetHead(_ s: PlannerSheet) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(s.phase.uppercased())
                 .font(InkFont.mono(14)).tracking(14 * 0.1).foregroundStyle(Ink.dim)
@@ -320,7 +327,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 1 — the instruction
-    private func hero(_ i: TLTSheet.Instruction) -> some View {
+    private func hero(_ i: PlannerSheet.Instruction) -> some View {
         TSCard(kind: .ink) {
             ZStack(alignment: .topTrailing) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -391,7 +398,7 @@ struct TLTInstructionScreen: View {
 
     // MARK: 2 — why this strike
     @ViewBuilder
-    private func ladder(_ l: TLTSheet.Ladder) -> some View {
+    private func ladder(_ l: PlannerSheet.Ladder) -> some View {
         TSCard {
             if let f = l.fallback {
                 Eyebrow(label: l.label, right: f.state)
@@ -417,7 +424,7 @@ struct TLTInstructionScreen: View {
     /// Earned is identical across candidates almost every day, so it lives in the
     /// verdict; each row carries the ONE fact that separates it. The chosen row is
     /// full ink with a left rule INSIDE the card, not a dot hanging outside it.
-    private func ladderRow(_ r: TLTSheet.Ladder.Row, first: Bool) -> some View {
+    private func ladderRow(_ r: PlannerSheet.Ladder.Row, first: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(r.strike)
                 .font(InkFont.mono(18, r.chosen ? .medium : .regular)).monospacedDigit()
@@ -443,7 +450,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 3 — tonight
-    private func tonight(_ t: TLTSheet.Tonight) -> some View {
+    private func tonight(_ t: PlannerSheet.Tonight) -> some View {
         TSCard(kind: .fill) {
             Eyebrow(label: t.label, right: t.tag, rightMono: true)
             InkMark.text(t.headline, 23, .medium, dim: Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
@@ -468,7 +475,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 4 — held back (above sizing, because it changed the size)
-    private func holdback(_ h: TLTSheet.Holdback) -> some View {
+    private func holdback(_ h: PlannerSheet.Holdback) -> some View {
         TSCard {
             Eyebrow(label: h.label, right: h.action.replacingOccurrences(of: "|", with: ""))
             Text(h.headline)
@@ -480,7 +487,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 5 — no calls
-    private func callsAside(_ c: TLTSheet.Calls) -> some View {
+    private func callsAside(_ c: PlannerSheet.Calls) -> some View {
         TSCard(kind: .aside) {
             Eyebrow(label: c.label)
             VStack(alignment: .leading, spacing: 1) {
@@ -499,7 +506,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 6 — why this size
-    private func why(_ w: TLTSheet.Why) -> some View {
+    private func why(_ w: PlannerSheet.Why) -> some View {
         TSCard {
             Eyebrow(label: w.label)
             VStack(alignment: .leading, spacing: 9) {
@@ -524,7 +531,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 7 — where you are
-    private func whereYouAre(_ w: TLTSheet.Where) -> some View {
+    private func whereYouAre(_ w: PlannerSheet.Where) -> some View {
         TSCard(kind: .ink) {
             Eyebrow(label: w.label).foregroundStyle(Ink.invertText.opacity(0.78))
             InkMark.text(w.headline, 23, .medium, dim: Ink.invertText.opacity(0.62))
@@ -535,7 +542,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 8 — progress
-    private func progress(_ p: TLTSheet.Progress) -> some View {
+    private func progress(_ p: PlannerSheet.Progress) -> some View {
         TSCard {
             Eyebrow(label: p.label)
             VStack(alignment: .leading, spacing: 15) {
@@ -563,7 +570,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 9 — ceiling, the only thing allowed to say no
-    private func ceiling(_ c: TLTSheet.Ceiling) -> some View {
+    private func ceiling(_ c: PlannerSheet.Ceiling) -> some View {
         TSCard {
             Eyebrow(label: c.label, right: c.state.replacingOccurrences(of: "|", with: ""))
             VStack(alignment: .leading, spacing: 0) {
@@ -587,7 +594,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 10 — conviction, collapsed by design
-    private func conviction(_ v: TLTSheet.Conviction) -> some View {
+    private func conviction(_ v: PlannerSheet.Conviction) -> some View {
         let top = v.families.filter(\.isTop)
         let rest = v.families.filter { !$0.isTop }
         return TSCard {
@@ -625,7 +632,7 @@ struct TLTInstructionScreen: View {
         }
     }
 
-    private func familyRow(_ f: TLTSheet.Conviction.Family, first: Bool) -> some View {
+    private func familyRow(_ f: PlannerSheet.Conviction.Family, first: Bool) -> some View {
         let missing = f.down != nil
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
@@ -656,7 +663,7 @@ struct TLTInstructionScreen: View {
     }
 
     @ViewBuilder
-    private func familyTrack(_ f: TLTSheet.Conviction.Family, missing: Bool) -> some View {
+    private func familyTrack(_ f: PlannerSheet.Conviction.Family, missing: Bool) -> some View {
         GeometryReader { g in
             ZStack(alignment: f.isDamper ? .trailing : .leading) {
                 if missing {
@@ -678,7 +685,7 @@ struct TLTInstructionScreen: View {
     }
 
     // MARK: 11–13
-    private func coming(_ c: TLTSheet.Coming) -> some View {
+    private func coming(_ c: PlannerSheet.Coming) -> some View {
         TSCard {
             Eyebrow(label: c.label)
             VStack(spacing: 0) {
@@ -704,7 +711,7 @@ struct TLTInstructionScreen: View {
         }
     }
 
-    private func book(_ b: TLTSheet.Book) -> some View {
+    private func book(_ b: PlannerSheet.Book) -> some View {
         TSCard {
             Eyebrow(label: b.label)
             VStack(spacing: 0) {
@@ -728,7 +735,7 @@ struct TLTInstructionScreen: View {
 
     // Spot is live, FRED is daily, auctions are daily — the ages differ per source
     // and are shown per source, never as one page-level timestamp.
-    private func sources(_ s: TLTSheet.Sources) -> some View {
+    private func sources(_ s: PlannerSheet.Sources) -> some View {
         TSCard {
             Eyebrow(label: s.label)
             VStack(spacing: 0) {
