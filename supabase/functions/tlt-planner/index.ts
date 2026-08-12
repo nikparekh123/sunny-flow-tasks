@@ -874,11 +874,17 @@ Deno.serve(async (req: Request) => {
     },
 
     ladder: (() => {
-      const rows = pickBy === 'extrinsic'
-        ? [...putBand].sort((a, b) => b.extrinsic - a.extrinsic).slice(0, 2)
-        : [];
-      const chosen = rows.find((c) => c.strike === putStrike);
-      const other = rows.find((c) => c.strike !== putStrike);
+      // The ladder EXPLAINS the pick, so it must always show what the pick beat.
+      // Built from tradeable strikes WITHOUT the delta band: the band decides which
+      // strike is chosen, not which comparison is worth showing. Filtering the
+      // display by it left a one-row ladder and no verdict at all, on a day when the
+      // runner-up happened to sit just outside the band.
+      const pool = pickBy === 'extrinsic' ? cands.filter((c) => c.tradeable && c.extrinsic > 0) : [];
+      const chosen = pool.find((c) => c.strike === putStrike);
+      const other = pool.filter((c) => c.strike !== putStrike)
+        .sort((a, b) => Math.abs(a.strike - spot!) - Math.abs(b.strike - spot!))[0];
+      const rows = [chosen, other].filter((c): c is typeof cands[number] => !!c)
+        .sort((a, b) => b.strike - a.strike);
       // Earned is usually identical across candidates, so it belongs in the
       // verdict, not in a column of its own. Each row carries the ONE fact that
       // separates it: how much of its premium is not really premium.
@@ -1010,15 +1016,24 @@ Deno.serve(async (req: Request) => {
       ]),
     },
 
-    book: {
-      label: 'The book',
-      legs: legs.map((l) => ({
-        qty: `${l.ct}\u00d7`,
-        leg: `${l.strike} ${l.type}`,
-        when: l.dir === 'long' ? `${fmtDay(l.expiry)} \u00b7 the floor`
-          : (l.type === 'put' ? spot! < l.strike : spot! > l.strike) ? 'in the money' : 'OTM',
-      })),
-    },
+    book: (() => {
+      // Two positions can share a strike and differ only by expiry. Today the book
+      // listed "82 put" twice, one expiring tonight and one just written for Friday,
+      // with nothing to tell them apart. The date appears only when it IS the thing
+      // that distinguishes them.
+      const name = (l: typeof legs[number]) => `${l.strike} ${l.type}`;
+      const count = new Map<string, number>();
+      for (const l of legs) count.set(name(l), (count.get(name(l)) ?? 0) + 1);
+      return {
+        label: 'The book',
+        legs: legs.map((l) => ({
+          qty: `${l.ct}\u00d7`,
+          leg: (count.get(name(l)) ?? 0) > 1 ? `${name(l)} \u00b7 ${fmtDay(l.expiry)}` : name(l),
+          when: l.dir === 'long' ? `${fmtDay(l.expiry)} \u00b7 the floor`
+            : (l.type === 'put' ? spot! < l.strike : spot! > l.strike) ? 'in the money' : 'OTM',
+        })),
+      };
+    })(),
 
     sources: {
       label: 'Freshness',
