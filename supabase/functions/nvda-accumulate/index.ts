@@ -490,7 +490,13 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const open = (tradeRows as Row[]).filter((t) =>
     String(t.action) === 'open' && !closedIds.has(String(t.id)) && String(t.expiry).slice(0, 10) >= todayISO);
 
-  const shares = (lotRows as Row[]).reduce((s, l) => s + fin(Number(l.qty_remaining)), 0);
+  // what_if lets the plan be read against a position that does not exist yet -- the
+  // point being to see the post-reduction planner BEFORE committing to the reduction.
+  // It never writes the trail (forced below), so a hypothesis cannot become history.
+  const wi = (body.what_if ?? null) as { shares?: number; drop_calls?: boolean } | null;
+  const shares = wi?.shares != null
+    ? Number(wi.shares)
+    : (lotRows as Row[]).reduce((s, l) => s + fin(Number(l.qty_remaining)), 0);
   const qStart = quarterStart(today);
   const sharesThisQuarter = (lotRows as Row[])
     .filter((l) => String(l.acquired_date).slice(0, 10) >= ymd(qStart))
@@ -545,8 +551,13 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
 
   const shortPuts = legs.filter((l) => l.type === 'put' && l.dir === 'short');
   const longPuts = legs.filter((l) => l.type === 'put' && l.dir === 'long');
-  const shortCalls = legs.filter((l) => l.type === 'call' && l.dir === 'short');
-  const optDelta = legs.reduce((s, l) => s + l.shares, 0);
+  // drop_calls models closing the legacy overwrite as part of the reduction, which is
+  // the only safe way to sell the block: 65 short calls against 1,500 shares is 5,000
+  // shares of NAKED call, and that is the one position here with unbounded loss.
+  const shortCalls = wi?.drop_calls
+    ? [] : legs.filter((l) => l.type === 'call' && l.dir === 'short');
+  const optDelta = (wi?.drop_calls ? legs.filter((l) => !(l.type === 'call' && l.dir === 'short')) : legs)
+    .reduce((s, l) => s + l.shares, 0);
   const netDelta = shares + optDelta;
 
   // ── what today already did ───────────────────────────────────────────────
@@ -799,7 +810,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     weekToDate: Math.round(weekToDate), contractsToday,
     sliceLeft: Math.round(sliceLeft), sliceFilled,
   };
-  if (!body.dry_run) {
+  if (!body.dry_run && !wi) {
     await D.upsert('nvda_planner_factor_daily', [{
       taken_on: todayISO, spot, ma: ma100, vs_ma_pct: Math.round(vsMa * 100) / 100,
       conviction, families: F, sizing,
