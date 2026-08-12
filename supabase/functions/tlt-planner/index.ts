@@ -700,7 +700,7 @@ Deno.serve(async (req: Request) => {
       state: phase,
       calls: cs.why,
       note: phase === 'ACCUMULATE'
-        ? 'Puts do the work. Calls are the last lever, not the first.'
+        ? 'Puts do the work. Net delta is trimmed by writing fewer puts, not by selling calls.'
         : phase === 'HOLD' ? 'Stop adding. Keep the shares. Calls earn.'
         : 'Calls do the work. Assignment is the point.',
     },
