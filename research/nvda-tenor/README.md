@@ -81,3 +81,43 @@ Not earnings. The largest moves in the window are DeepSeek (−17.0%), the tarif
 pause (+18.7%), and the July 2024 rotation (+12.8%). The worst earnings reaction
 was −8.5%. Anything that hedges only the earnings calendar is guarding the wrong
 date.
+
+## Does the overwrite pay for the floor? (`nvda_collar2.py`)
+
+One share path (accumulation alone, 1,500 to 20,400) held fixed across every arm.
+Calls are ROLLED at expiry rather than assigned, so the block never leaves and the
+cost of keeping it is exactly what a roll debits, `max(0, S_exp − K)`.
+
+**Floor**, 10% OTM, rolled quarterly, sized to the block: paid $279,778, recovered
+$16,330, **net −$263,448** over two years. At 15% OTM it recovered nothing at all.
+
+**Overwrite**, net of roll costs, best case 0.30 delta at 50% coverage: **+$99,014**.
+
+**No combination funds the floor.** The closest is still $164,434 short, and it gets
+there by writing half the block at 4% out, which is a heavy overwrite on a position
+being accumulated.
+
+| call delta | avg OTM | rolls | net at 50% cover |
+|---|---|---|---|
+| 0.10 | 8.8% | 12/99 | +$32,002 |
+| 0.20 | 6.2% | 16/99 | +$38,654 |
+| 0.30 | 4.0% | 23/99 | +$99,014 |
+
+Closer to the money retains more, because a far call collects too little to matter
+while still being breached on the moves that count.
+
+### Two bugs this run caught, both invalidating earlier results
+
+**Call strike sign.** `K = S·exp((r+σ²/2)T + N⁻¹(δ)σ√T)` should be MINUS. With the
+plus, a "0.10 delta call" was struck 6.7% BELOW spot, i.e. deep in the money at
+about 0.90 delta. That is what called away 19,200 shares in the first collar run and
+what produced $5M of premium on a $4.5M block. Both earlier collar numbers were
+meaningless.
+
+**Fallback direction.** When a strike had no print the ladder tried K−2.5 before
+K+2.5. For a put that walks out of the money; for a call it walks INTO it. Calls now
+walk up.
+
+The `avg OTM` column exists because of these. A strike series that silently drifts
+toward the money is invisible in the P&L and obvious the moment you print where it
+actually struck.
