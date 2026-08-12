@@ -203,3 +203,42 @@ the same delta across the calendar by construction.
 
 The dip is real. It is a better moment to be PAID and a worse moment to be DELIVERED,
 and this book is paid in shares.
+
+## Do any conviction signals predict? (`nvda_signals.py`)
+
+62 weekly writes of a 1% OTM put, each scored on the option's own P&L per contract
+and on whether it delivered shares. Baseline **+1.22 per contract, 34% delivery, sd
+2.94**.
+
+| signal | P&L low / mid / high | spread |
+|---|---|---|
+| implied level | +0.73 / +1.09 / +1.78 | +1.05 |
+| 50 vs 200 day | +0.67 / +1.58 / +1.39 | +0.72 |
+| variance premium, IV−HV | +1.19 / +0.99 / +1.44 | +0.25 |
+| distance vs MA100 | +1.25 / +1.34 / +1.07 | −0.18 |
+| realised vol | +1.61 / +0.93 / +1.13 | −0.47 |
+| last week's move | +1.63 / +1.78 / +0.33 | **−1.29** |
+
+**Nothing clears the noise.** With 20 weeks a tertile and a weekly sd of 2.94, the
+standard error on a tertile mean is 0.66, so a difference needs roughly 1.9 to be
+worth acting on. The largest is 1.29, and it is negative: after a strong week the put
+does worse, which is mean reversion, not an edge to size on.
+
+This kills the thesis these families were built on. **Rich premium does not predict a
+better week** — the variance premium, the most defensible signal an option seller has,
+scores +0.25 on a 2.94 sd. It is consistent with the dip result: a richer option is
+compensation for a worse delivery, not a free lunch.
+
+**So NVDA should not ship nine conviction families.** A ±30% trim driven by signals
+that do not predict adds variance and subtracts nothing else. What ships is the part
+that IS measured: weekly, 1% out, an MA100 speed dial, the ceiling, no calls, play
+through earnings. Dampers and the liquidity gate stay, because they are risk
+management rather than prediction and need no backtest to justify.
+
+Conviction gets **computed and stored, but not weighted**, until the trail can test it.
+That is what the TLT trail exists for and NVDA should start one on day one.
+
+**MA100 survives** despite scoring −0.18 here, because this table asks a different
+question. MA100 predicts the STOCK over the next month (+9.4% below vs +2.6% above).
+It says nothing about whether this week's option pays, and the multiplier's job is to
+decide how many shares to accumulate, not how well the option prices.
