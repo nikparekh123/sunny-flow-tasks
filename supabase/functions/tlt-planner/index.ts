@@ -98,8 +98,8 @@ function convFactor(score: number): { f: number; band: string } {
 const PHASE_CALLS: Record<string, { enabled: boolean; delta: number; coverage: number; why: string }> = {
   ACCUMULATE: { enabled: false, delta: 0, coverage: 0,
                 why: 'off — measured to cost money and shares in a rally while the block is being built' },
-  HOLD:       { enabled: true, delta: 0.25, coverage: 0.50, why: 'earn income on a block that has stopped growing' },
-  HARVEST:    { enabled: true, delta: 0.50, coverage: 1.00, why: 'exit — assignment is the point' },
+  HOLD:       { enabled: true, delta: 0.25, coverage: 0.50, why: 'Income on a block that has stopped growing' },
+  HARVEST:    { enabled: true, delta: 0.50, coverage: 1.00, why: 'Exit. Assignment is the point' },
 };
 
 // Mon/Wed/Fri each write a slice of the week. Friday's is smallest: it carries
@@ -685,11 +685,11 @@ Deno.serve(async (req: Request) => {
       premium: l.premium, soldOn: l.soldOn, basis: l.basis,
       // Per leg, from the premium THAT leg was sold at.
       say: l.dir !== 'short'
-        ? `${l.ct}× long put ${l.strike} — the floor, ${fmtDay(l.expiry)}`
+        ? `${l.ct}× ${l.strike} ${l.type} · the floor, ${fmtDay(l.expiry)}`
         : itm
-          ? `${l.ct}× short ${l.type} ${l.strike} — sold at *${l.premium.toFixed(2)}*`
-            + `${l.soldOn ? ` on ${fmtDay(l.soldOn)}` : ''} → basis *${l.basis.toFixed(2)}*`
-          : `${l.ct}× short ${l.type} ${l.strike} — ~${away.toFixed(2)} out of the money, expires~`,
+          ? `${l.ct}× ${l.strike} ${l.type} · sold *${l.premium.toFixed(2)}*`
+            + `${l.soldOn ? ` ${fmtDay(l.soldOn)}` : ''} · basis *${l.basis.toFixed(2)}*`
+          : `${l.ct}× ${l.strike} ${l.type} · ~${away.toFixed(2)} OTM, expires~`,
     };
   });
   // Conditional, always. With hours of trading left assignment can flip, so the
@@ -700,14 +700,14 @@ Deno.serve(async (req: Request) => {
   const avgBasis = arriving > 0 ? Math.round((basisWeighted / arriving) * 100) / 100 : 0;
   const strikeSet = (xs: typeof expiringDetail) =>
     [...new Set(xs.map((e) => String(e.strike)))].join(' and ');
-  const expirySay = !nearestExp ? 'Nothing expiring.'
+  const expirySay = !nearestExp ? 'Nothing expiring'
     : arriving > 0
-      ? `The ${strikeSet(itmShorts.filter((e) => e.type === 'put'))}s are *in the money now*`
-        + ` — ^${arriving.toLocaleString()} shares^ ${expWhen}`
+      ? `${strikeSet(itmShorts.filter((e) => e.type === 'put'))}s *in the money*.`
+        + ` ^${arriving.toLocaleString()} shares^ likely`
       : leaving > 0
-        ? `The ${strikeSet(itmShorts.filter((e) => e.type === 'call'))}s are *in the money now*`
-          + ` — ^${leaving.toLocaleString()} shares^ called away ${expWhen}`
-        : `Nothing in the money — ${otmShorts.length ? `${otmShorts.length} leg${otmShorts.length === 1 ? '' : 's'}` : 'everything'} expires worthless`;
+        ? `${strikeSet(itmShorts.filter((e) => e.type === 'call'))}s *in the money*.`
+          + ` ^${leaving.toLocaleString()} shares^ called`
+        : 'Nothing in the money. All expire worthless';
 
   // ── sizing ───────────────────────────────────────────────────────────────
   const band = PRICE_BANDS.find(([hi]) => spot! < hi) ?? PRICE_BANDS[0];
@@ -725,21 +725,11 @@ Deno.serve(async (req: Request) => {
   // Wednesday 40%, the rest Friday" — but Friday is 20%, not the rest, and copy
   // that restates the mechanism from memory drifts away from it.
   const laterDows = [1, 3, 5].filter((x) => x > decisionDow);
-  // Calendar-aware: when a damping event lands today, the later slices are not
-  // merely "still to write" — they are deliberately held until after the print,
-  // which is the whole reason the damper cut the size.
-  const heldForEvent = calPenalty < 0 && nextHeavy
-    ? String(nextHeavy.class_key) === 'prints' ? 'after the print'
-      : String(nextHeavy.class_key) === 'auctions' ? 'after the auction'
-      : String(nextHeavy.class_key) === 'fomc' ? 'after the FOMC' : 'after the event'
-    : null;
   const sliceSay = laterDows.length
-    ? `${DOWN[decisionDow]}'s *${Math.round(sliceW * 100)}%* goes now · `
-      + `${laterDows.map((x) => `${DOWN[x]}'s *${Math.round(SLICE[x] * 100)}%*`).join(', ')}`
-      + (heldForEvent ? ` ~${heldForEvent}~` : ' ~later this week~')
-    : `${DOWN[decisionDow]}'s *${Math.round(sliceW * 100)}%* is the last of the week`;
+    ? `*${Math.round(sliceW * 100)}%* now · `
+      + laterDows.map((x) => `*${Math.round(SLICE[x] * 100)}%* ${DOWN[x]}`).join(' · ')
+    : `*${Math.round(sliceW * 100)}%* now, last of the week`;
 
-  // ── the put pick ─────────────────────────────────────────────────────────
   const expiries = await putExpiries(ymd(addDays(today, 2)), polyKey);
   const expiry = expiries[0] ?? null;
   let putQuotes: Quote[] = [];
@@ -859,108 +849,109 @@ Deno.serve(async (req: Request) => {
 
   const famPositives = F.filter((f) => f.key !== 'calendar');
   const topThree = [...famPositives].filter((f) => f.ok).sort((a, b) => b.score - a.score).slice(0, 3).map((f) => f.key);
-  const bookState = (l: typeof legs[number]) => {
-    if (l.dir === 'long') return `${fmtDay(l.expiry)} — the floor`;
-    const itm = l.type === 'put' ? spot! < l.strike : spot! > l.strike;
-    return itm ? 'in the money now' : 'out of the money';
-  };
   const lastFred = (fredOut.DGS30 ?? []).slice(-1)[0]?.date ?? null;
   const lastSync = (tradeRows as Row[]).map((t) => String(t.last_synced_at ?? '')).filter(Boolean).sort().pop() ?? null;
 
   const sheet = {
     ticker: TICKER,
-    asOf: { label: dayLabel, refresh: `${spot.toFixed(2)} · ${phase}` },
+    asOf: { label: dayLabel, refresh: `${spot.toFixed(2)} \u00b7 ${phase}` },
     phase: `${phase.charAt(0)}${phase.slice(1).toLowerCase()} phase`,
 
     instruction: {
       label: 'The instruction',
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}` : 'Nothing this slice',
-      meta: `${expiry ? `${DOWN[parseISO(expiry).getUTCDay()]} ${fmtDay(expiry)}` : 'no expiry'}`
-        + ` · ${putDelta.toFixed(2)} delta · ${pick?.modelled ? 'modelled' : 'real quotes'}`,
+      meta: `${expiry ? `${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
+        + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
       commit: [[usd0(putStrike * 100 * putCt), 'committed'], [String(putCt * 100), 'shares if assigned']],
       basis: { value: (putStrike - putMid).toFixed(2), label: 'basis if assigned' },
+      // One figure, one label. The old three-line earn column made a subordinate
+      // number look like a third tier of its own.
       earn: {
         value: cents(putExtrinsic),
-        label: putIntrinsic <= 0.005 ? 'all time value' : 'time value',
-        note: putIntrinsic <= 0.005 ? 'no intrinsic' : `${cents(putIntrinsic)} intrinsic`,
+        label: putIntrinsic <= 0.005 ? 'no intrinsic' : `${cents(putIntrinsic)} intrinsic`,
       },
       mark: putIntrinsic <= 0.005 ? 'all extrinsic' : null,
     },
 
-    ladder: {
-      label: 'Why this strike',
-      cols: ['', 'mid', 'intrinsic', 'earned', 'basis'],
-      rows: pickBy === 'extrinsic'
-        ? [...putBand].sort((a, b) => b.extrinsic - a.extrinsic).slice(0, 4).map((c) => ({
-            strike: String(c.strike), mid: c.mid.toFixed(2),
-            intrinsic: c.intrinsic <= 0.005 ? '—' : c.intrinsic.toFixed(2),
-            earned: c.extrinsic.toFixed(2), basis: (c.strike - c.mid).toFixed(2),
-            chosen: c.strike === putStrike,
-          }))
-        : [],
-      verdict: (() => {
-        const rows = [...putBand].sort((a, b) => b.extrinsic - a.extrinsic);
-        const other = rows.find((c) => c.strike !== putStrike);
-        if (!other || pickBy !== 'extrinsic') return null;
-        const dEarn = Math.abs(other.extrinsic - putExtrinsic);
+    ladder: (() => {
+      const rows = pickBy === 'extrinsic'
+        ? [...putBand].sort((a, b) => b.extrinsic - a.extrinsic).slice(0, 2)
+        : [];
+      const chosen = rows.find((c) => c.strike === putStrike);
+      const other = rows.find((c) => c.strike !== putStrike);
+      // Earned is usually identical across candidates, so it belongs in the
+      // verdict, not in a column of its own. Each row carries the ONE fact that
+      // separates it: how much of its premium is not really premium.
+      const verdict = (!chosen || !other) ? null : (() => {
         const dBasis = Math.abs((other.strike - other.mid) - (putStrike - putMid));
-        return `${dEarn <= 0.005 ? 'Identical earnings' : `${cents(dEarn)} less earned`}, _${cents(dBasis)} cheaper basis_`;
-      })(),
-      fallback: pickBy === 'extrinsic' ? null : {
-        state: 'delta fallback',
-        headline: 'No extrinsic ladder',
-        note: `Chain quotes missing for ${expiry ? fmtDay(expiry) : 'this expiry'} — the strike was picked on `
-          + `*${putDeltaTgt.toFixed(2)} delta* and ~the earnings split is unavailable~`,
-      },
-    },
+        const dEarn = Math.abs(other.extrinsic - chosen.extrinsic);
+        return dEarn <= 0.005
+          ? `Both earn ${cents(chosen.extrinsic)}. _${cents(dBasis)} cheaper_`
+          : `${chosen.strike} earns ${cents(dEarn)} less. _${cents(dBasis)} cheaper_`;
+      })();
+      return {
+        label: 'Why this strike',
+        rows: rows.map((c) => ({
+          strike: String(c.strike),
+          detail: c.intrinsic <= 0.005 ? 'no intrinsic' : `${c.intrinsic.toFixed(2)} intrinsic`,
+          basis: (c.strike - c.mid).toFixed(2),
+          chosen: c.strike === putStrike,
+        })),
+        verdict,
+        fallback: pickBy === 'extrinsic' ? null : {
+          state: 'delta fallback',
+          headline: 'No ladder',
+          note: `Chain quotes missing. Picked on *${putDeltaTgt.toFixed(2)} delta*`,
+        },
+      };
+    })(),
 
     tonight: nearestExp ? {
-      label: 'Tonight', tag: 'per leg · from the premium sold',
+      label: 'Tonight', tag: 'per leg',
       headline: expirySay,
       lines: expiringDetail.map((e) => e.say),
-      foot: arriving > 0
-        ? `Average basis on the ${arriving.toLocaleString()} if they arrive · *${avgBasis.toFixed(2)}*`
-        : null,
+      foot: arriving > 0 ? `Average basis *${avgBasis.toFixed(2)}*` : null,
     } : null,
 
     holdback: calPenalty < 0 ? {
       label: 'Held back', action: `|${Math.abs(Math.round(calPenalty))} points|`,
       headline: (() => {
         if (!nextHeavy) return 'Event ahead';
-        const short = String(nextHeavy.tag ?? nextHeavy.class_name).split('·')[0].trim();
+        const short = String(nextHeavy.tag ?? nextHeavy.class_name).split('\u00b7')[0].trim();
         const dd = daysBetween(today, parseISO(String(nextHeavy.event_date)));
         return dd <= 0 ? `${short} today` : dd === 1 ? `${short} tomorrow` : `${short} in ${dd} days`;
       })(),
-      cause: `Size held back *${Math.abs(Math.round(calPenalty))} points* — ~conviction ${Math.round(base)} → ${conviction}~`,
+      cause: `Conviction *${Math.round(base)} \u2192 ${conviction}*`,
       note: sliceSay,
     } : null,
 
     calls: {
       label: cs.enabled ? 'Calls' : 'No calls',
       lines: cs.enabled
-        ? [[`^Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike ?? '—'}^`, null]]
-        : [['^No calls while accumulating^', null], ['they cost money and shares', 'in a rally']],
-      note: cs.enabled ? cs.why
-        : 'Net delta is trimmed by *writing fewer puts*, ~not by selling calls~',
+        ? [[`^Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike ?? '\u2014'}^`, null]]
+        : [['^No calls while accumulating^', null], ['cost money and shares', 'in a rally']],
+      note: cs.enabled ? cs.why : 'Trim delta by *writing fewer puts*',
     },
 
     why: {
       label: 'Why this size',
       chain: [
-        { text: `${Math.round(quarterBudget / 13)}/wk × ${priceFactor} (${priceBand}) × ${cf.f} (conviction ${conviction})`, out: `${Math.round(weeklyDelta)} weekly` },
-        { text: `${DOWN[decisionDow]} takes ${Math.round(sliceW * 100)}% → ${Math.round(sliceDelta)} delta`, out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
+        { text: `${Math.round(quarterBudget / 13)}/wk \u00d7 ${priceFactor} (${priceBand}) \u00d7 ${cf.f} (conv ${conviction})`,
+          out: `${Math.round(weeklyDelta)} weekly` },
+        { text: `${DOWN[decisionDow].slice(0, 3)} takes ${Math.round(sliceW * 100)}% \u00b7 ${Math.round(sliceDelta)} delta`,
+          out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
       ],
       verdict: ceilingBinds
-        ? `wanted ${wantCt}, wrote ${putCt} — _the ceiling cut it_`
-        : `wanted ${wantCt}, got ${putCt} — _nothing clipped_`,
+        ? `*${putCt} of ${wantCt}*, _the ceiling cut it_`
+        : `*${putCt} of ${wantCt}*, _nothing clipped_`,
     },
 
     where: {
       label: 'Where you are',
-      headline: `*${shares.toLocaleString()} shares* · ${pendingShares.toLocaleString()} pending · ^${fullyAssigned.toLocaleString()} fully assigned^`,
+      headline: `*${shares.toLocaleString()} shares* \u00b7 ${pendingShares.toLocaleString()} pending \u00b7 ^${fullyAssigned.toLocaleString()} assigned^`,
       lines: [
-        `Net delta *${Math.round(netDelta)}* → \`${Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta)}\` ~after this trade~`,
-        `Floor coverage *${Math.round(floorCoverage * 100)}%* ~of the fully-assigned count, not shares held~`,
+        `Net delta *${Math.round(netDelta)}* \u2192 \`${Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta)}\``,
+        `Floor covers *${Math.round(floorCoverage * 100)}%*`,
       ],
     },
 
@@ -972,45 +963,41 @@ Deno.serve(async (req: Request) => {
           note: `*${Math.round((sharesThisQuarter / Math.max(1, quarterBudget)) * 100)}%* ~since ${fmtDay(ymd(qStart))}~` },
         { label: 'Horizon', value: `${shares.toLocaleString()} of ${targetShares.toLocaleString()}`,
           pct: targetShares > 0 ? Math.min(1, shares / targetShares) : 0,
-          note: `~week ${weeksElapsed} · projects to~ *${projectedTotal} weeks*` },
+          note: `~week ${weeksElapsed}, projects to~ *${projectedTotal}*` },
       ],
       standing: standing.toUpperCase(),
-      band: `band ${horizonLo}–${horizonHi}`,
+      band: `band ${horizonLo}\u2013${horizonHi}`,
     },
 
     ceiling: {
       label: 'Ceiling',
-      head: ceilingBinds ? 'committed after the cut' : 'committed after this trade',
+      head: ceilingBinds ? 'after the cut' : 'after this trade',
       value: usd0(outstanding + putStrike * 100 * putCt),
       of: `of ${usd0(cashCeiling)}`,
       pct: cashCeiling > 0 ? Math.min(1, (outstanding + putStrike * 100 * putCt) / cashCeiling) : 0,
-      room: `${ceilingBinds ? '|' : '*'}${usd0(cashCeiling - (outstanding + putStrike * 100 * putCt))}${ceilingBinds ? '|' : '*'} room after ${ceilingBinds ? 'the cut' : 'the trade'}`,
-      before: `${usd0(headroom)} before it`,
+      room: `${ceilingBinds ? '|' : '*'}${usd0(cashCeiling - (outstanding + putStrike * 100 * putCt))}${ceilingBinds ? '|' : '*'} room`,
+      before: `${usd0(headroom)} before`,
       state: ceilingBinds ? '|binding|' : 'not binding',
-      cut: ceilingBinds
-        ? `Wanted *${wantCt}*, wrote *${putCt}* — ~the ceiling took ${wantCt - putCt} contract${wantCt - putCt === 1 ? '' : 's'}~`
-        : null,
+      cut: ceilingBinds ? `Wanted *${wantCt}*, wrote *${putCt}*` : null,
     },
 
     conviction: {
       label: 'Conviction score',
       score: conviction, base: Math.round(base), calendar: Math.round(calPenalty),
       movers: 'largest contributors',
-      normalised: capSum < 100
-        ? `normalised over ${Math.round(capSum)} of 100 — ~${F.filter((f) => !f.ok).map((f) => f.key).join(', ')} dropped out~`
-        : null,
+      normalised: capSum < 100 ? `normalised over *${Math.round(capSum)}*` : null,
       families: [...F].sort((a, b) => {
         if (a.key === 'calendar') return 1;
         if (b.key === 'calendar') return -1;
         const at = topThree.includes(a.key) ? 1 : 0, bt = topThree.includes(b.key) ? 1 : 0;
         return bt - at || b.score - a.score;
       }).map((f) => ({
-        label: f.label, score: f.score.toFixed(1), cap: f.cap < 0 ? `−${Math.abs(f.cap)}` : String(f.cap),
+        label: f.label, score: f.score.toFixed(1), cap: f.cap < 0 ? `\u2212${Math.abs(f.cap)}` : String(f.cap),
         pct: f.cap !== 0 ? Math.min(1, Math.abs(f.score / f.cap)) : 0,
         read: f.note,
         top: topThree.includes(f.key) || undefined,
         damper: f.key === 'calendar' || undefined,
-        down: f.ok ? undefined : `${f.label} feed down — dropped from the denominator, not scored zero`,
+        down: f.ok ? undefined : 'Feed down, out of the denominator',
       })),
     },
 
@@ -1026,9 +1013,10 @@ Deno.serve(async (req: Request) => {
     book: {
       label: 'The book',
       legs: legs.map((l) => ({
-        qty: `${l.ct}×`,
-        leg: `${l.dir} ${l.type} ${l.strike}`,
-        when: bookState(l),
+        qty: `${l.ct}\u00d7`,
+        leg: `${l.strike} ${l.type}`,
+        when: l.dir === 'long' ? `${fmtDay(l.expiry)} \u00b7 the floor`
+          : (l.type === 'put' ? spot! < l.strike : spot! > l.strike) ? 'in the money' : 'OTM',
       })),
     },
 
