@@ -106,6 +106,26 @@ const PHASE_CALLS: Record<string, { enabled: boolean; delta: number; coverage: n
 // the weekend, and the weekend is when you cannot react.
 const SLICE: Record<number, number> = { 1: 0.40, 3: 0.40, 5: 0.20 };
 
+// ── the strike picker ───────────────────────────────────────────────────────
+// Intrinsic value is not income. Selling the 82.5 put with TLT at 82.31 collects
+// 19c of intrinsic and then hands it straight back at assignment: you buy a share
+// worth 82.31 for 82.50. Only the extrinsic is earned.
+//
+// That matters here more than it would on an income book, because this one WANTS
+// assignment. The case to optimise is therefore the ASSIGNED case, and in the
+// assigned case the extra strike is pure cost. On Nik's own chain the 82.5 and
+// the 82 were 2c apart on extrinsic and 29c apart on basis.
+//
+// So: rank by extrinsic, and when strikes are close on extrinsic take the LOWER
+// one — same income, cheaper basis. An income seller would break the tie the
+// other way; the objective differs, not the arithmetic. Nothing here is pinned to
+// moneyness, which is the point: the answer moves with where spot sits in the
+// grid that day.
+const DELTA_FLOOR = 0.25;   // below this the test showed accumulation stalls in a rally
+const DELTA_CEIL  = 0.70;   // above this the premium is mostly intrinsic, not earnings
+const TIE_ABS = 0.03;       // "three cents less" — Nik's own threshold
+const TIE_REL = 0.15;       // and scaled, so a 5-day expiry is not judged on 2-day ticks
+
 // The 5,000-share call floor that stood here is gone — superseded, not relaxed.
 // It existed to keep calls off while the block was small; the test then showed
 // calls lose money in a rally at ANY size, so ACCUMULATE turns them off outright
@@ -625,18 +645,41 @@ Deno.serve(async (req: Request) => {
   if (expiry) putQuotes = await chain('put', expiry, Math.floor(spot * 0.92), Math.ceil(spot * 1.04), polyKey);
 
   const Tput = expiry ? Math.max(daysBetween(today, parseISO(expiry)), 0) / 365 : 0;
-  const withDelta = putQuotes.map((q) => ({
-    ...q,
-    dAbs: q.delta != null ? Math.abs(q.delta) : putDeltaAbs(spot!, q.strike, Tput, iv),
-    modelled: q.delta == null,
-  }));
-  const pick = withDelta.length
-    ? withDelta.reduce((a, b) => Math.abs(a.dAbs - putDeltaTgt) <= Math.abs(b.dAbs - putDeltaTgt) ? a : b)
-    : null;
+  const cands = putQuotes.map((q) => {
+    const intrinsic = Math.max(0, q.strike - spot!);
+    return {
+      ...q,
+      dAbs: q.delta != null ? Math.abs(q.delta) : putDeltaAbs(spot!, q.strike, Tput, iv),
+      modelled: q.delta == null,
+      intrinsic,
+      // A strike with no bid is quoted but not tradeable, so its "mid" is not a
+      // price anyone will pay and it must not win on a phantom extrinsic.
+      extrinsic: q.mid > 0 ? Math.max(0, q.mid - intrinsic) : 0,
+      tradeable: q.mid > 0,
+    };
+  });
+
+  const putBand = cands.filter((c) => c.tradeable && c.extrinsic > 0 && c.dAbs >= DELTA_FLOOR && c.dAbs <= DELTA_CEIL);
+  let pick: typeof cands[number] | null = null;
+  let pickBy = 'none';
+  if (putBand.length) {
+    const best = Math.max(...putBand.map((c) => c.extrinsic));
+    const tie = Math.max(TIE_ABS, TIE_REL * best);
+    // lowest strike among those within a tie of the best extrinsic
+    pick = putBand.filter((c) => c.extrinsic >= best - tie).reduce((a, b) => (a.strike <= b.strike ? a : b));
+    pickBy = 'extrinsic';
+  } else if (cands.length) {
+    // Nothing tradeable in the band — fall back to the old delta target so the
+    // planner still answers, and say which rule produced the answer.
+    pick = cands.reduce((a, b) => (Math.abs(a.dAbs - putDeltaTgt) <= Math.abs(b.dAbs - putDeltaTgt) ? a : b));
+    pickBy = 'delta-fallback';
+  }
 
   const putStrike = pick?.strike ?? Math.round((spot * 0.99) / STRIKE_STEP) * STRIKE_STEP;
   const putDelta = pick?.dAbs ?? putDeltaTgt;
   const putMid = pick?.mid ?? 0;
+  const putIntrinsic = pick?.intrinsic ?? 0;
+  const putExtrinsic = pick?.extrinsic ?? 0;
 
   const wantCt = putDelta > 0 ? Math.max(0, Math.round(sliceDelta / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
@@ -759,6 +802,22 @@ Deno.serve(async (req: Request) => {
         commits: Math.round(putStrike * 100 * putCt),
         shares: putCt * 100,
         modelled: pick?.modelled ?? true,
+        // The split, surfaced rather than buried: only the extrinsic is earned.
+        intrinsic: Math.round(putIntrinsic * 100) / 100,
+        extrinsic: Math.round(putExtrinsic * 100) / 100,
+        basisIfAssigned: Math.round((putStrike - putMid) * 100) / 100,
+        pickedBy: pickBy,
+        premium: putMid <= 0 ? 'no bid — modelled'
+          : putIntrinsic <= 0.005
+            ? `${Math.round(putMid * 100)}¢, all time value`
+            : `${Math.round(putMid * 100)}¢, of which ${Math.round(putIntrinsic * 100)}¢ is intrinsic`,
+        ladder: [...putBand].sort((a, b) => b.extrinsic - a.extrinsic).slice(0, 4).map((c) => ({
+          strike: c.strike, delta: Math.round(c.dAbs * 100) / 100,
+          mid: c.mid, intrinsic: Math.round(c.intrinsic * 100) / 100,
+          extrinsic: Math.round(c.extrinsic * 100) / 100,
+          basis: Math.round((c.strike - c.mid) * 100) / 100,
+          chosen: c.strike === putStrike,
+        })),
         say: putCt > 0
           ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike} — ${fmtUsd(putStrike * 100 * putCt)} committed, ${putCt * 100} shares if assigned.`
           : ceilingBinds ? 'No room under the ceiling.' : 'Nothing this slice.',
