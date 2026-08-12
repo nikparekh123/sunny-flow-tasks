@@ -832,8 +832,210 @@ Deno.serve(async (req: Request) => {
     }], 'taken_on');
   }
 
+  // ── the sheet ────────────────────────────────────────────────────────────
+  // Every string the screen renders, assembled here. The view formats nothing,
+  // rounds nothing and writes no sentences — it maps fields to type.
+  //
+  // This is not tidiness. Copy that restates the mechanism from memory drifts
+  // away from it, and did twice in one day: a card printed an assignment basis
+  // borrowed from a candidate trade, and another said "the rest Friday" when
+  // Friday is 20%. Both were correct-looking and wrong. Emphasis travels inside
+  // the strings as *bold* ~thin~ ^thick^ _underline_ for the client's parser.
+  const nowTs = new Date();
+  const usd0 = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
+  const cents = (v: number) => `${Math.round(v * 100)}¢`;
+  const ageOf = (iso: string | null | undefined): string => {
+    if (!iso) return 'unknown';
+    const t = Date.parse(String(iso));
+    if (!Number.isFinite(t)) return 'unknown';
+    const s = Math.max(0, Math.round((nowTs.getTime() - t) / 1000));
+    if (s < 90) return `${s}s ago`;
+    if (s < 5400) return `${Math.round(s / 60)}m ago`;
+    if (s < 172800) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+  };
+  const dayLabel = `${DOWN[parseISO(todayISO).getUTCDay()]} ${parseISO(todayISO).getUTCDate()} `
+    + MONTHS[parseISO(todayISO).getUTCMonth()];
+
+  const famPositives = F.filter((f) => f.key !== 'calendar');
+  const topThree = [...famPositives].filter((f) => f.ok).sort((a, b) => b.score - a.score).slice(0, 3).map((f) => f.key);
+  const bookState = (l: typeof legs[number]) => {
+    if (l.dir === 'long') return `${fmtDay(l.expiry)} — the floor`;
+    const itm = l.type === 'put' ? spot! < l.strike : spot! > l.strike;
+    return itm ? 'in the money now' : 'out of the money';
+  };
+  const lastFred = (fredOut.DGS30 ?? []).slice(-1)[0]?.date ?? null;
+  const lastSync = (tradeRows as Row[]).map((t) => String(t.last_synced_at ?? '')).filter(Boolean).sort().pop() ?? null;
+
+  const sheet = {
+    ticker: TICKER,
+    asOf: { label: dayLabel, refresh: `${spot.toFixed(2)} · ${phase}` },
+    phase: `${phase.charAt(0)}${phase.slice(1).toLowerCase()} phase`,
+
+    instruction: {
+      label: 'The instruction',
+      verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}` : 'Nothing this slice',
+      meta: `${expiry ? fmtDay(expiry) : 'no expiry'} · ${putDelta.toFixed(2)} delta · ${pick?.modelled ? 'modelled' : 'real quotes'}`,
+      commit: [[usd0(putStrike * 100 * putCt), 'committed'], [String(putCt * 100), 'shares if assigned']],
+      basis: { value: (putStrike - putMid).toFixed(2), label: 'basis if assigned' },
+      earn: {
+        value: cents(putExtrinsic),
+        label: putIntrinsic <= 0.005 ? 'all time value' : 'time value',
+        note: putIntrinsic <= 0.005 ? 'no intrinsic' : `${cents(putIntrinsic)} intrinsic`,
+      },
+      mark: putIntrinsic <= 0.005 ? 'all extrinsic' : null,
+    },
+
+    ladder: {
+      label: 'Why this strike',
+      cols: ['', 'mid', 'intrinsic', 'earned', 'basis'],
+      rows: pickBy === 'extrinsic'
+        ? [...putBand].sort((a, b) => b.extrinsic - a.extrinsic).slice(0, 4).map((c) => ({
+            strike: String(c.strike), mid: c.mid.toFixed(2),
+            intrinsic: c.intrinsic <= 0.005 ? '—' : c.intrinsic.toFixed(2),
+            earned: c.extrinsic.toFixed(2), basis: (c.strike - c.mid).toFixed(2),
+            chosen: c.strike === putStrike,
+          }))
+        : [],
+      verdict: (() => {
+        const rows = [...putBand].sort((a, b) => b.extrinsic - a.extrinsic);
+        const other = rows.find((c) => c.strike !== putStrike);
+        if (!other || pickBy !== 'extrinsic') return null;
+        const dEarn = Math.abs(other.extrinsic - putExtrinsic);
+        const dBasis = Math.abs((other.strike - other.mid) - (putStrike - putMid));
+        return `${dEarn <= 0.005 ? 'Identical earnings' : `${cents(dEarn)} less earned`}, _${cents(dBasis)} cheaper basis_`;
+      })(),
+      fallback: pickBy === 'extrinsic' ? null : {
+        state: 'delta fallback',
+        headline: 'No extrinsic ladder',
+        note: `Chain quotes missing for ${expiry ? fmtDay(expiry) : 'this expiry'} — the strike was picked on `
+          + `*${putDeltaTgt.toFixed(2)} delta* and ~the earnings split is unavailable~`,
+      },
+    },
+
+    tonight: nearestExp ? {
+      label: 'Tonight', tag: 'per leg · from the premium sold',
+      headline: expirySay,
+      lines: expiringDetail.map((e) => e.say),
+      foot: arriving > 0
+        ? `Average basis on the ${arriving.toLocaleString()} if they arrive · *${avgBasis.toFixed(2)}*`
+        : null,
+    } : null,
+
+    holdback: calPenalty < 0 ? {
+      label: 'Held back', action: `|${Math.abs(Math.round(calPenalty))} points|`,
+      headline: nextHeavy ? String(nextHeavy.tag ?? nextHeavy.class_name) : 'Event ahead',
+      cause: `Size held back *${Math.abs(Math.round(calPenalty))} points* — ~conviction ${Math.round(base)} → ${conviction}~`,
+      note: sliceSay,
+    } : null,
+
+    calls: {
+      label: cs.enabled ? 'Calls' : 'No calls',
+      lines: cs.enabled
+        ? [[`^Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike ?? '—'}^`, null]]
+        : [['^No calls while accumulating^', null], ['they cost money and shares', 'in a rally']],
+      note: cs.enabled ? cs.why
+        : 'Net delta is trimmed by *writing fewer puts*, ~not by selling calls~',
+    },
+
+    why: {
+      label: 'Why this size',
+      chain: [
+        { text: `${Math.round(quarterBudget / 13)}/wk × ${priceFactor} (${priceBand}) × ${cf.f} (conviction ${conviction})`, out: `${Math.round(weeklyDelta)} weekly` },
+        { text: `${DOWN[decisionDow]} takes ${Math.round(sliceW * 100)}% → ${Math.round(sliceDelta)} delta`, out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
+      ],
+      verdict: ceilingBinds
+        ? `wanted ${wantCt}, wrote ${putCt} — _the ceiling cut it_`
+        : `wanted ${wantCt}, got ${putCt} — _nothing clipped_`,
+    },
+
+    where: {
+      label: 'Where you are',
+      headline: `*${shares.toLocaleString()} shares* · ${pendingShares.toLocaleString()} pending · ^${fullyAssigned.toLocaleString()} fully assigned^`,
+      lines: [
+        `Net delta *${Math.round(netDelta)}* → \`${Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta)}\` ~after this trade~`,
+        `Floor coverage *${Math.round(floorCoverage * 100)}%* ~of the fully-assigned count, not shares held~`,
+      ],
+    },
+
+    progress: {
+      label: 'Progress',
+      rows: [
+        { label: 'Quarter', value: `${sharesThisQuarter.toLocaleString()} of ${quarterBudget.toLocaleString()}`,
+          pct: quarterBudget > 0 ? Math.min(1, sharesThisQuarter / quarterBudget) : 0,
+          note: `*${Math.round((sharesThisQuarter / Math.max(1, quarterBudget)) * 100)}%* ~since ${fmtDay(ymd(qStart))}~` },
+        { label: 'Horizon', value: `${shares.toLocaleString()} of ${targetShares.toLocaleString()}`,
+          pct: targetShares > 0 ? Math.min(1, shares / targetShares) : 0,
+          note: `~week ${weeksElapsed} · projects to~ *${projectedTotal} weeks*` },
+      ],
+      standing: standing.toUpperCase(),
+      band: `band ${horizonLo}–${horizonHi}`,
+    },
+
+    ceiling: {
+      label: 'Ceiling',
+      head: ceilingBinds ? 'committed after the cut' : 'committed after this trade',
+      value: usd0(outstanding + putStrike * 100 * putCt),
+      of: `of ${usd0(cashCeiling)}`,
+      pct: cashCeiling > 0 ? Math.min(1, (outstanding + putStrike * 100 * putCt) / cashCeiling) : 0,
+      room: `${ceilingBinds ? '|' : '*'}${usd0(cashCeiling - (outstanding + putStrike * 100 * putCt))}${ceilingBinds ? '|' : '*'} room after ${ceilingBinds ? 'the cut' : 'the trade'}`,
+      before: `${usd0(headroom)} before it`,
+      state: ceilingBinds ? '|binding|' : 'not binding',
+      cut: ceilingBinds
+        ? `Wanted *${wantCt}*, wrote *${putCt}* — ~the ceiling took ${wantCt - putCt} contract${wantCt - putCt === 1 ? '' : 's'}~`
+        : null,
+    },
+
+    conviction: {
+      label: 'Conviction score',
+      score: conviction, base: Math.round(base), calendar: Math.round(calPenalty),
+      movers: 'largest contributors',
+      normalised: capSum < 100
+        ? `normalised over ${Math.round(capSum)} of 100 — ~${F.filter((f) => !f.ok).map((f) => f.key).join(', ')} dropped out~`
+        : null,
+      families: F.map((f) => ({
+        label: f.label, score: f.score.toFixed(1), cap: String(Math.abs(f.cap)),
+        pct: f.cap !== 0 ? Math.min(1, Math.abs(f.score / f.cap)) : 0,
+        read: f.note,
+        top: topThree.includes(f.key) || undefined,
+        damper: f.key === 'calendar' || undefined,
+        down: f.ok ? undefined : `${f.label} feed down — dropped from the denominator, not scored zero`,
+      })),
+    },
+
+    coming: {
+      label: "What's coming",
+      events: (eventRows as Row[]).slice(0, 6).map((e) => [
+        fmtDay(String(e.event_date)),
+        String(e.tag ?? e.class_name ?? ''),
+        String(e.event_date).slice(0, 10) === todayISO,
+      ]),
+    },
+
+    book: {
+      label: 'The book',
+      legs: legs.map((l) => ({
+        qty: `${l.ct}×`,
+        leg: `${l.dir} ${l.type} ${l.strike}`,
+        when: bookState(l),
+      })),
+    },
+
+    sources: {
+      label: 'Freshness',
+      rows: [
+        ['Spot', spotLive != null ? 'live' : 'cached', spotLive != null ? ageOf(nowTs.toISOString()) : ageOf(String(st.updated_at ?? ''))],
+        ['Chains', pick?.modelled ? 'modelled' : 'real quotes', expiry ? ageOf(nowTs.toISOString()) : 'no chain'],
+        ['FRED', 'daily', fredMissing.length ? 'feed down' : (lastFred ? fmtDay(lastFred) : 'unknown')],
+        ['Treasury', 'daily', auctions.length ? fmtDay(todayISO) : 'feed down'],
+        ['Book', 'on sync', ageOf(lastSync)],
+      ],
+    },
+  };
+
   return json(200, {
     ok: true,
+    sheet,
     asof: todayISO,
     day: DOWN[dow],
     isDecisionDay,
