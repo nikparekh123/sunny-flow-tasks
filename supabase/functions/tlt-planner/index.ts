@@ -52,11 +52,14 @@ const CAPS = {
 } as const;
 
 // Price is the driver. Bands are Nik's, absolute, and deliberately coarse.
+// ORDER MATTERS: these are scanned with find(spot < hi) and must stay ASCENDING.
+// With Infinity first, every price matches the first row and the multiplier pins
+// at 0.25x forever — which is exactly what happened on the first live run.
 const PRICE_BANDS: Array<[number, number, string]> = [
-  [Infinity, 0.25, 'above 85'],
-  [85, 0.75, '80–85'],
-  [80, 1.50, '75–80'],
   [75, 2.50, 'below 75'],
+  [80, 1.50, '75–80'],
+  [85, 0.75, '80–85'],
+  [Infinity, 0.25, 'above 85'],
 ];
 
 // Conviction is the trim. Stepped, per spec — see the cliff note in the payload.
@@ -135,6 +138,8 @@ const fmtDay = (iso: string) => {
 const fmtUsd = (v: number) => {
   const sign = v < 0 ? '−' : '';
   const a = Math.abs(v);
+  // Auction sizes are tens of billions. Without this branch supply reads "$67000M".
+  if (a >= 1_000_000_000) return `${sign}$${(a / 1_000_000_000).toFixed(a >= 10_000_000_000 ? 0 : 1)}B`;
   if (a >= 1_000_000) return `${sign}$${(a / 1_000_000).toFixed(a >= 10_000_000 ? 0 : 1)}M`;
   if (a >= 1000) return `${sign}$${Math.round(a / 1000)}K`;
   return `${sign}$${Math.round(a)}`;
@@ -313,7 +318,11 @@ Deno.serve(async (req: Request) => {
   try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is the normal case */ }
 
   const D = db(supaUrl, supaKey);
-  const today = body.asof ? parseISO(body.asof) : new Date();
+  // Normalised to UTC midnight. `new Date()` carries a time, every parsed date is
+  // midnight, and daysBetween rounds the difference — so an event dated today read
+  // as "−1d out" once the clock passed noon UTC. Option T and weeksElapsed had the
+  // same skew.
+  const today = parseISO(body.asof ?? ymd(new Date()));
   const todayISO = ymd(today);
   const fiveYrAgo = ymd(addDays(today, -5 * 365));
 
