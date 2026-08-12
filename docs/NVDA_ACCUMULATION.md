@@ -112,7 +112,17 @@ relief rather than by premium.
 - **Net delta target.** TLT's fell out of its accumulation rate. Here it is a decision,
   because a retained block plus short puts plus any floor resolve to one number.
 - **Margin.** Whether a long put beneath the short puts frees enough buying power to
-  pay for itself. Needs real IBKR numbers.
+  pay for itself. Needs real IBKR numbers, and cannot be answered until the reduction
+  is done (~19 Aug 2026) because there is no block behind the obligation until then.
+  This is not a delay in the plan: writing does not start until 26 Aug either.
+
+  **The measurement, when the block exists.** Three numbers off the account window
+  with the short puts on: *maintenance margin*, *excess liquidity*, *buying power*.
+  Then build the long put as an order and open the preview — IBKR reports the margin
+  impact of a hypothetical order without transmitting it. The difference in
+  maintenance margin is the entire answer. The floor pays for itself if that relief,
+  valued as buying power that can carry more puts, exceeds the premium; the two-year
+  model says the premium case fails by $164,434, so relief is the only case left.
 - **The price multiplier cannot be absolute.** TLT's under-75-buy-harder works because
   TLT oscillates around a yield. NVDA trends, so the speed dial has to read distance
   below a moving reference, not a price.
