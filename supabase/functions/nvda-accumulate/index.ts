@@ -216,9 +216,12 @@ function ymd(d: Date): string {
 function parseISO(s: string): Date { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); }
 function addDays(d: Date, n: number): Date { const x = new Date(d.getTime()); x.setUTCDate(x.getUTCDate() + n); return x; }
 function daysBetween(a: Date, b: Date): number { return Math.round((b.getTime() - a.getTime()) / 86400000); }
-const fmtDay = (iso: string) => {
+const fmtDay = (iso: string, thisYear?: number) => {
   const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
-  return y && m && d ? `${MONTHS[m - 1]} ${d}` : String(iso);
+  if (!(y && m && d)) return String(iso);
+  // The year appears only when it is NOT the current one, so the common case stays
+  // short — but a Dec 2028 LEAP must never render as "Dec 15" beside a Sep 18 weekly.
+  return thisYear != null && y !== thisYear ? `${MONTHS[m - 1]} ${d} ${y}` : `${MONTHS[m - 1]} ${d}`;
 };
 const fmtUsd = (v: number) => {
   const sign = v < 0 ? '−' : '';
@@ -630,7 +633,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       premium: l.premium, soldOn: l.soldOn, basis: l.basis,
       // Per leg, from the premium THAT leg was sold at.
       say: l.dir !== 'short'
-        ? `${l.ct}× ${l.strike} ${l.type} · the floor, ${fmtDay(l.expiry)}`
+        ? `${l.ct}× ${l.strike} ${l.type} · the floor, ${fmtDay(l.expiry, today.getUTCFullYear())}`
         : itm
           ? `${l.ct}× ${l.strike} ${l.type} · sold *${l.premium.toFixed(2)}*`
             + `${l.soldOn ? ` ${fmtDay(l.soldOn)}` : ''} · basis *${l.basis.toFixed(2)}*`
@@ -917,7 +920,12 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     })(),
 
     tonight: nearestExp ? {
-      label: 'Tonight', tag: 'per leg',
+      // Named for WHEN, not "Tonight" regardless. This card shows the nearest expiry,
+      // which is only tonight some of the time: with the nearest at Friday it was
+      // headed "Tonight · 3,500 shares called" for contracts two days away.
+      label: nearestExp === todayISO ? 'Tonight'
+        : nearestExp ? `Expiring ${fmtDay(nearestExp, today.getUTCFullYear())}` : 'Expiring',
+      tag: 'per leg',
       headline: expirySay,
       lines: expiringDetail.map((e) => e.say),
       foot: arriving > 0 ? `Average basis *${avgBasis.toFixed(2)}*` : null,
@@ -1056,7 +1064,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         legs: legs.map((l) => ({
           qty: `${l.ct}\u00d7`,
           leg: (count.get(name(l)) ?? 0) > 1 ? `${name(l)} \u00b7 ${fmtDay(l.expiry)}` : name(l),
-          when: l.dir === 'long' ? `${fmtDay(l.expiry)} \u00b7 the floor`
+          when: l.dir === 'long' ? `${fmtDay(l.expiry, today.getUTCFullYear())} \u00b7 the floor`
             : (l.type === 'put' ? spot! < l.strike : spot! > l.strike) ? 'in the money' : 'OTM',
         })),
       };
