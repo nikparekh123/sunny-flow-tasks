@@ -489,9 +489,24 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   emit(2);                                   // conviction scored: FRED, Treasury, bloc, calendar
 
   // ── the book ─────────────────────────────────────────────────────────────
-  const closedIds = new Set((tradeRows as Row[]).map((t) => String(t.closes_trade_id ?? '')).filter(Boolean));
-  const open = (tradeRows as Row[]).filter((t) =>
-    String(t.action) === 'open' && !closedIds.has(String(t.id)) && String(t.expiry).slice(0, 10) >= todayISO);
+  // Positions are NETTED by contract, not resolved through closes_trade_id.
+  //
+  // That link is one-to-one and IBKR's closes are not: a 47-contract floor opened
+  // across nine fills is closed by two aggregated rows, each of which can only point
+  // at ONE opener. The other seven stayed "open" forever. On 12 Aug the book showed
+  // 229 long puts and a floor covering 1527% of the block; the true floor was 75.
+  // Expired legs hid it -- they are filtered by date before anyone looks.
+  //
+  // Netting needs no back-reference to be right: opens add, closes subtract, and a
+  // contract survives only while the sum is positive.
+  const live = (tradeRows as Row[]).filter((t) => String(t.expiry).slice(0, 10) >= todayISO);
+  const netByKey = new Map<string, number>();
+  for (const t of live) {
+    const key = `${t.option_type}|${t.direction}|${t.strike}|${String(t.expiry).slice(0, 10)}`;
+    const ct = fin(Number(t.contracts));
+    netByKey.set(key, (netByKey.get(key) ?? 0) + (String(t.action) === 'open' ? ct : -ct));
+  }
+  const open = live.filter((t) => String(t.action) === 'open');
 
   // what_if lets the plan be read against a position that does not exist yet -- the
   // point being to see the post-reduction planner BEFORE committing to the reduction.
@@ -519,6 +534,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   type Agg = { row: Row; ct: number; premWeighted: number; soldOn: string; fills: number };
   const byContract = new Map<string, Agg>();
   for (const t of open) {
+    // Premium and fill dates come from the opens; the COUNT comes from the net below,
+    // so a partially closed position keeps an honest basis on the contracts left.
     const key = `${t.option_type}|${t.direction}|${t.strike}|${String(t.expiry).slice(0, 10)}`;
     const ct = fin(Number(t.contracts));
     const prem = fin(Number(t.premium));
@@ -531,6 +548,14 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       if (soldOn && (!prev.soldOn || soldOn < prev.soldOn)) prev.soldOn = soldOn;
     } else {
       byContract.set(key, { row: t, ct, premWeighted: prem * ct, soldOn, fills: 1 });
+    }
+  }
+  for (const [key, agg] of [...byContract]) {
+    const net = netByKey.get(key) ?? 0;
+    if (net <= 0) { byContract.delete(key); continue; }
+    if (net < agg.ct) {                       // partially closed: scale the basis with it
+      agg.premWeighted = agg.premWeighted * (net / agg.ct);
+      agg.ct = net;
     }
   }
 

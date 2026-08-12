@@ -615,9 +615,20 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   emit(2);                                   // conviction scored: FRED, Treasury, bloc, calendar
 
   // ── the book ─────────────────────────────────────────────────────────────
-  const closedIds = new Set((tradeRows as Row[]).map((t) => String(t.closes_trade_id ?? '')).filter(Boolean));
-  const open = (tradeRows as Row[]).filter((t) =>
-    String(t.action) === 'open' && !closedIds.has(String(t.id)) && String(t.expiry).slice(0, 10) >= todayISO);
+  // Positions are NETTED by contract, not resolved through closes_trade_id. That link
+  // is one-to-one and IBKR's closes are not: a position opened across nine fills is
+  // closed by two aggregated rows, each able to point at only ONE opener, leaving the
+  // rest "open" forever. Found on NVDA 12 Aug, where five of six floor legs were fully
+  // closed and still on screen — 229 long puts reported against a true 75. Expired legs
+  // hide it, because they are filtered by date before anyone looks.
+  const live = (tradeRows as Row[]).filter((t) => String(t.expiry).slice(0, 10) >= todayISO);
+  const netByKey = new Map<string, number>();
+  for (const t of live) {
+    const key = `${t.option_type}|${t.direction}|${t.strike}|${String(t.expiry).slice(0, 10)}`;
+    const ct = fin(Number(t.contracts));
+    netByKey.set(key, (netByKey.get(key) ?? 0) + (String(t.action) === 'open' ? ct : -ct));
+  }
+  const open = live.filter((t) => String(t.action) === 'open');
 
   const shares = (lotRows as Row[]).reduce((s, l) => s + fin(Number(l.qty_remaining)), 0);
   const qStart = quarterStart(today);
@@ -648,6 +659,14 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       if (soldOn && (!prev.soldOn || soldOn < prev.soldOn)) prev.soldOn = soldOn;
     } else {
       byContract.set(key, { row: t, ct, premWeighted: prem * ct, soldOn, fills: 1 });
+    }
+  }
+  for (const [key, agg] of [...byContract]) {
+    const net = netByKey.get(key) ?? 0;
+    if (net <= 0) { byContract.delete(key); continue; }
+    if (net < agg.ct) {                       // partially closed: scale the basis with it
+      agg.premWeighted = agg.premWeighted * (net / agg.ct);
+      agg.ct = net;
     }
   }
 
