@@ -21,6 +21,10 @@
         <string>IBMPlexMono-Light.ttf</string>
         <string>IBMPlexMono-Regular.ttf</string>
         <string>IBMPlexMono-Medium.ttf</string>
+        <!-- Margin notes only, never UI copy or data. Variable wght axis; the
+             default instance is 400, which is the weight the spec asks for, so
+             no variation wrangling is needed the way Inter and Newsreader do. -->
+        <string>Caveat.ttf</string>
     </array>
 </dict>
 </plist>
