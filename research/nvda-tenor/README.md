@@ -122,6 +122,47 @@ The `avg OTM` column exists because of these. A strike series that silently drif
 toward the money is invisible in the P&L and obvious the moment you print where it
 actually struck.
 
+## CORRECTION: assignment across regimes (`nvda_regime.py`)
+
+**The two sections below are measured only on rallies and their conclusion is
+overstated.** Every 72-week window in `nvda_hist` has drift between +22% and +86%. A
+share-accumulation strategy tested only where the share rose is not tested.
+
+Extended to 2018-2026, which contains real -37% and -28% windows, with modelled prices
+validated against the real-mark window (no calls $856,486 modelled vs $840,038 real;
+assigned $272,342 vs $263,561; share counts identical):
+
+NET as % of notional target (S0 x 15,000), so price levels compare:
+
+| regime | n | drift | no calls | ATM assigned | ATM rolled | sh (none) | sh (asgn) |
+|---|---|---|---|---|---|---|---|
+| **falling** | 50 | -14% | -1% | -6% | -3% | 15,000 | 2,650 |
+| flat to +25% | 21 | +15% | +21% | +1% | +21% | 15,100 | 1,300 |
+| +25 to +75% | 55 | +46% | +39% | +12% | +41% | 14,300 | 1,500 |
+| above +75% | 216 | +188% | **+85%** | +20% | +80% | 10,150 | 1,000 |
+
+**Assignment wins 22 of 50 falling windows, including every severe one:**
+
+| start | drift | no calls | ATM assigned | diff |
+|---|---|---|---|---|
+| 2021-05-21 | -25% | **-58.6%** | **-14.3%** | **+44.3 pts** |
+| 2021-05-28 | -23% | -46.8% | -8.1% | +38.7 |
+| 2021-08-06 | -28% | -24.4% | +0.6% | +25.0 |
+| 2018-06-15 | -24% | -2.5% | -8.6% | -6.0 |
+
+**Assignment converts accumulation into income.** It costs the upside (+20% vs +85% in
+strong rallies) and buys real downside protection (-58.6% becomes -14.3%). It is not a
+loss and it never was — the earlier framing conflated failing the SHARE TARGET with
+losing money. The assigned arm is profitable in every regime the no-calls arm is.
+
+**The mechanism that makes the drawdown case so stark:** the accumulation programme
+buys hardest exactly when NVDA falls — the MA dial multiplies up to 2.5x below the
+mean and puts assign in declines. So the no-calls arm reaches the full 15,000 in
+falling markets and takes the entire drawdown on all of them.
+
+What survives from below: if the objective is 15,000 shares, assignment fails — 2,650
+shares in falling markets, 1,000-1,500 in rallies. It fails profitably.
+
 ## Do calls fight the accumulation target? (`nvda_calls_acc.py`)
 
 `nvda_collar2` answered a different question. It held the share path FIXED and rolled
