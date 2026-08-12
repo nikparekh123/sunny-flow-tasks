@@ -122,6 +122,48 @@ The `avg OTM` column exists because of these. A strike series that silently drif
 toward the money is invisible in the P&L and obvious the moment you print where it
 actually struck.
 
+## Do calls fight the accumulation target? (`nvda_calls_acc.py`)
+
+`nvda_collar2` answered a different question. It held the share path FIXED and rolled
+every call, so the block could never leave and the only cost was the roll debit. That
+is right for "does the overwrite pay for the floor" and wrong for "should I write
+calls while building a block", because the thing that would hurt — shares called away
+that must then be re-bought — was defined out of existence.
+
+Here the share path is endogenous: accumulation runs the live model (bounded chase,
+MA100 dial, weekly 1% OTM puts) and calls may take shares. 38 windows of 72 weeks,
+0.30 delta at 50% coverage.
+
+| arm | median shares | called away | median basis | premium | roll debit |
+|---|---|---|---|---|---|
+| no calls | 14,100 | 0 | $138.13 | $91,961 | $0 |
+| calls, **rolled** | 14,100 | 0 | **$134.06** | $546,483 | $425,538 |
+| calls, **assigned** | **1,700** | **16,900** | $85.82 | $201,789 | $0 |
+
+**The rule is not "calls or no calls". It is roll or die.** Rolled, the overwrite is
+worth about $4/share of basis at no cost in shares — consistent with collar2's
++$99,014. Allowed to assign, it destroys the programme: 16,900 shares called away and
+1,700 held against a 15,000 target. Weekly 0.30 delta calls on half a growing block,
+in a stock that trends up, are in the money constantly; shares leave as fast as the
+puts deliver them and the accumulation simply churns.
+
+The cheap-looking $85.82 basis in that row is an artefact of the same thing — it is
+the average of the few shares that survived, not a good outcome.
+
+### Coverage is the dial, and the roll debit is what it costs
+
+| coverage | shares | basis | premium | roll debit | net premium |
+|---|---|---|---|---|---|
+| none | 14,100 | $138.13 | $91,961 | $0 | $91,961 |
+| 25% | 14,100 | $135.46 | $315,990 | $210,130 | $105,860 |
+| 50% | 14,100 | $134.06 | $546,483 | $425,538 | $120,944 |
+| 100% | 14,100 | $133.67 | $1,007,486 | $853,042 | $154,444 |
+
+Basis improvement flattens hard after 25% while the gross cash through the roll grows
+without limit. Going from 25% to 100% coverage buys **$1.79/share** and requires
+**$643K more** of roll debits to be funded on demand, in the weeks NVDA has just
+rallied. The premium column is not income — most of it is handed back at the roll.
+
 ## Strike, filled in (1% and 3% added)
 
 | strike | ct/wk | shares | delivery | net basis | peak cash | total |
