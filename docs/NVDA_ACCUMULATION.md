@@ -10,14 +10,14 @@ monetised by selling calls. That is a change of strategy, not of parameters.
 
 | | |
 |---|---|
-| starting point | **100 shares**, after the reduction (decided 12 Aug) |
+| starting point | **1,000 to 1,500 shares**, after the reduction (decided 12 Aug) |
 | target | 15,000 by Dec 2027 |
-| to accumulate | **14,900 shares** |
+| to accumulate | **~13,500 shares** |
 | horizon | ~72 weeks, ~5.5 quarters |
-| rate | **~207 shares/week**, ~2,700/quarter |
+| rate | **~190 shares/week**, ~2,450/quarter |
 | **expiry** | **weekly** (biweekly is a tie if fewer tickets are worth more) |
 | **strike** | **1% out of the money** |
-| contracts | **~5 a week** at that strike (207 ÷ 45% assignment) |
+| contracts | **~5 a week** at that strike |
 | cash committed | **~$117K** outstanding |
 | earnings | **play through it** |
 | calls | **none** |
@@ -98,13 +98,14 @@ Every row is the same $134,759. Only the denominator moves. Shrinking the book t
 flatter the ratio buys nothing and costs participation in the stock the programme
 exists to own.
 
-## The floor is live from week one
+## The floor
 
-At 100 shares and five short puts the book is almost entirely obligation: ~$110K of
-assignment exposure against one lot of stock. A 20% gap takes 500 shares at ~218 while
-the screen says 176. On TLT the floor could wait because the block grew first; here
-there is no block to grow behind, so protection and margin are a week-one question,
-not a later one.
+At 1,000 to 1,500 shares there IS a block behind the obligation, which is the whole
+difference from starting at 100. Five short puts carry ~$110K of assignment exposure;
+against a hundred shares that is almost pure obligation, against fifteen hundred it is
+a position with a hedgeable core. The floor stops being a week-one emergency and
+becomes what it is on TLT: sized to the fully-assigned count, and justified by margin
+relief rather than by premium.
 
 ## What is still open
 
