@@ -10,14 +10,14 @@ monetised by selling calls. That is a change of strategy, not of parameters.
 
 | | |
 |---|---|
-| starting point | ~1,500 shares, after the reduction |
+| starting point | **100 shares**, after the reduction (decided 12 Aug) |
 | target | 15,000 by Dec 2027 |
-| to accumulate | **13,500 shares** |
+| to accumulate | **14,900 shares** |
 | horizon | ~72 weeks, ~5.5 quarters |
-| rate | **~190 shares/week**, ~2,450/quarter |
+| rate | **~207 shares/week**, ~2,700/quarter |
 | **expiry** | **weekly** (biweekly is a tie if fewer tickets are worth more) |
 | **strike** | **1% out of the money** |
-| contracts | **~5 a week** at that strike |
+| contracts | **~5 a week** at that strike (207 ÷ 45% assignment) |
 | cash committed | **~$117K** outstanding |
 | earnings | **play through it** |
 | calls | **none** |
@@ -97,6 +97,14 @@ dollars:
 Every row is the same $134,759. Only the denominator moves. Shrinking the book to
 flatter the ratio buys nothing and costs participation in the stock the programme
 exists to own.
+
+## The floor is live from week one
+
+At 100 shares and five short puts the book is almost entirely obligation: ~$110K of
+assignment exposure against one lot of stock. A 20% gap takes 500 shares at ~218 while
+the screen says 176. On TLT the floor could wait because the block grew first; here
+there is no block to grow behind, so protection and margin are a week-one question,
+not a later one.
 
 ## What is still open
 
