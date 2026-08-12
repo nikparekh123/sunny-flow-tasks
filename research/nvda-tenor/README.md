@@ -36,3 +36,48 @@ chain, third Friday to third Friday, listed months ahead: 22 of 24 priceable.
 The conclusion survived the fix, which is the only reason it is reported here.
 
 `nvda_tenor.py` builds the roll schedule and strikes · `nvda_sim.py` runs the arms.
+
+## Strike distance (`nvda_strike.py`)
+
+Same 190 delta a week, weekly, real marks.
+
+| strike | ct/wk | shares | delivery | net basis | peak cash | total |
+|---|---|---|---|---|---|---|
+| ATM | 4.2 | 18,900 | **100%** | 151.84 | **$90K** | $1,359,528 |
+| OTM 2% | 6.1 | 18,500 | 99% | **149.38** | $163K | **$1,376,230** |
+| OTM 5% | 15.4 | 13,200 | **70%** | 125.91 | $929K | $1,291,787 |
+
+2% is a coin-flip against ATM: +$16,702 on $1.36M, inside noise, for 80% more
+capital. 5% fails on delivery for the same reason monthly did, and the rule that
+covers both is **stay inside one sigma**. At 33% vol on a weekly that is 4.6%.
+
+## Earnings (`nvda_earn.py`)
+
+Eight prints in the window, dates validated against the tape (each shows a
+distinct reaction; the pattern is late Feb, May, Aug, Nov). Reactions
+−6.4 +0.5 −8.5 +3.3 −0.8 −3.2 −5.5 +0.8, averaging **−2.5%**.
+
+Aggregate says play it by $141,980 over skipping, but that number is dominated by
+direction, not by the earnings decision: it credits every assigned lot with the
+stock's whole subsequent rise. Stripped to the option alone:
+
+| | |
+|---|---|
+| 8 events, option P&L only | **−$808** |
+| profitable | 4 of 8 |
+| mean per event | −$101 |
+
+**The option side of earnings week is a coin flip that nets to zero.** The premium
+is fat because IV is elevated and you hand most of it back at assignment. So the
+case for playing it is not that the premium is good. It is that skipping forfeits
+8% of the year's accumulation, and accumulation is the objective.
+
+n=8. Too small to settle anything on its own; it is consistent with the tenor and
+strike findings rather than independent of them.
+
+## What NVDA's biggest days actually were
+
+Not earnings. The largest moves in the window are DeepSeek (−17.0%), the tariff
+pause (+18.7%), and the July 2024 rotation (+12.8%). The worst earnings reaction
+was −8.5%. Anything that hedges only the earnings calendar is guarding the wrong
+date.
