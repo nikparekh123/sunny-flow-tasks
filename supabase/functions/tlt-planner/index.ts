@@ -656,6 +656,26 @@ Deno.serve(async (req: Request) => {
   const optDelta = legs.reduce((s, l) => s + l.shares, 0);
   const netDelta = shares + optDelta;
 
+  // ── what today already did ───────────────────────────────────────────────
+  // The slice is a budget for the DAY, so the recommendation has to be what is
+  // LEFT of it, not what it was worth this morning. Computed from the raw fills
+  // rather than the aggregated legs, because aggregation keeps only the earliest
+  // fill date and would miss a position topped up today at a strike opened
+  // earlier.
+  const writtenToday = (open as Row[])
+    .filter((t) => String(t.option_type) === 'put' && String(t.direction) === 'short'
+      && String(t.trade_date ?? '').slice(0, 10) === todayISO)
+    .reduce((sum, t) => {
+      const ct = fin(Number(t.contracts));
+      const K = fin(Number(t.strike));
+      const T = Math.max(daysBetween(today, parseISO(String(t.expiry))), 0) / 365;
+      return sum + putDeltaAbs(spot!, K, T, iv) * ct * 100;
+    }, 0);
+  const contractsToday = (open as Row[])
+    .filter((t) => String(t.option_type) === 'put' && String(t.direction) === 'short'
+      && String(t.trade_date ?? '').slice(0, 10) === todayISO)
+    .reduce((n, t) => n + fin(Number(t.contracts)), 0);
+
   // A short put is a commitment to buy, never income. Every unexpired one counts,
   // not just this week's.
   const outstanding = shortPuts.reduce((s, l) => s + l.strike * 100 * l.ct, 0);
@@ -719,6 +739,8 @@ Deno.serve(async (req: Request) => {
   const decisionDow = SLICE[dow] != null ? dow : (dow === 0 || dow === 6 ? 1 : dow < 3 ? 3 : dow < 5 ? 5 : 1);
   const sliceW = SLICE[decisionDow];
   const sliceDelta = weeklyDelta * sliceW;
+  const sliceLeft = Math.max(0, sliceDelta - writtenToday);
+  const sliceFilled = writtenToday > 0 && sliceLeft < sliceDelta * 0.15;
   const isDecisionDay = SLICE[dow] != null;
 
   // Emitted, not hand-written on the card. A design draft said "write the
@@ -772,7 +794,7 @@ Deno.serve(async (req: Request) => {
   const putIntrinsic = pick?.intrinsic ?? 0;
   const putExtrinsic = pick?.extrinsic ?? 0;
 
-  const wantCt = putDelta > 0 ? Math.max(0, Math.round(sliceDelta / (putDelta * 100))) : 0;
+  const wantCt = putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
   const maxCt = Math.floor(headroom / (putStrike * 100));
   const putCt = Math.min(wantCt, maxCt);
@@ -815,6 +837,7 @@ Deno.serve(async (req: Request) => {
     weeklyDelta: Math.round(weeklyDelta), sliceDelta: Math.round(sliceDelta),
     priceFactor, priceBand, convFactor: cf.f, convBand: cf.band,
     contracts: putCt, wanted: wantCt, ceilingBinds,
+    writtenToday: Math.round(writtenToday), contractsToday, sliceLeft: Math.round(sliceLeft), sliceFilled,
   };
   if (!body.dry_run) {
     await D.upsert('tlt_planner_factor_daily', [{
@@ -859,9 +882,12 @@ Deno.serve(async (req: Request) => {
 
     instruction: {
       label: 'The instruction',
-      verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}` : 'Nothing this slice',
-      meta: `${expiry ? `${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
-        + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
+      verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
+        : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
+      meta: putCt === 0 && sliceFilled
+        ? `${contractsToday} written today \u00b7 ${Math.round(writtenToday)} of ${Math.round(sliceDelta)} delta`
+        : `${expiry ? `${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
+          + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
       commit: [[usd0(putStrike * 100 * putCt), 'committed'], [String(putCt * 100), 'shares if assigned']],
       basis: { value: (putStrike - putMid).toFixed(2), label: 'basis if assigned' },
       // One figure, one label. The old three-line earn column made a subordinate
@@ -945,7 +971,10 @@ Deno.serve(async (req: Request) => {
         { text: `${Math.round(quarterBudget / 13)}/wk \u00d7 ${priceFactor} (${priceBand}) \u00d7 ${cf.f} (conv ${conviction})`,
           out: `${Math.round(weeklyDelta)} weekly` },
         { text: `${DOWN[decisionDow].slice(0, 3)} takes ${Math.round(sliceW * 100)}% \u00b7 ${Math.round(sliceDelta)} delta`,
-          out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
+          out: writtenToday > 0 ? `${Math.round(writtenToday)} written` : `${Math.round(sliceDelta)} delta` },
+        ...(writtenToday > 0 ? [{ text: `${Math.round(sliceDelta)} less ${Math.round(writtenToday)} already written`,
+          out: `${putCt} contract${putCt === 1 ? '' : 's'}` }] : [{ text: `at ${putDelta.toFixed(2)} delta`,
+          out: `${putCt} contract${putCt === 1 ? '' : 's'}` }]),
       ],
       verdict: ceilingBinds
         ? `*${putCt} of ${wantCt}*, _the ceiling cut it_`
