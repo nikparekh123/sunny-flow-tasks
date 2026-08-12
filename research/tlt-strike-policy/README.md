@@ -18,3 +18,18 @@ well for reasons that have nothing to do with the overlay. Read the RALLY block.
 
 `build.py` → roll schedule + strikes · `fetch.py` → real marks ·
 `sim2.py` → the three windows.
+
+## Round 2 — the extrinsic picker (12 Aug)
+
+`build_ext.py` fetches a full ladder near spot for every roll (980 contracts with
+bars) so the EXT arm can *choose* rather than be handed a target strike.
+`sim3.py` adds EXT alongside OTM/ATM/ITM. `sim4.py` sweeps the delta floor.
+
+The `EARNED` column is the finding: it separates extrinsic (income) from
+intrinsic (a rebate handed back at assignment). ITM collects the largest
+headline premium in every window and earns the least of it — $43,510 gross
+against $7,747 earned over the full run.
+
+Delta floor swept at 0.25 / 0.30 / 0.35 / 0.40. 0.25 and 0.30 are identical,
+so the floor is a safety rail rather than an active constraint. Raising it buys
+rally accumulation and costs more elsewhere; 0.25 stays.
