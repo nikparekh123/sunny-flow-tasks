@@ -626,6 +626,37 @@ Deno.serve(async (req: Request) => {
   const fullyAssigned = shares + pendingShares;
   const floorCoverage = fullyAssigned > 0 ? (longPuts.reduce((s, l) => s + l.ct * 100, 0) / fullyAssigned) : 0;
 
+  // ── what the next expiry actually does ───────────────────────────────────
+  // Listing the legs is not the same as saying what tonight does to the share
+  // count, and the second is the one worth acting on. A book that shows "4x
+  // short put 82.5, expiring today" is making the reader do the moneyness
+  // comparison themselves — and that comparison is the whole event.
+  const openExps = legs.map((l) => l.expiry).sort();
+  const nearestExp = openExps[0] ?? null;
+  const expiringLegs = nearestExp ? legs.filter((l) => l.expiry === nearestExp) : [];
+  let arriving = 0, leaving = 0;
+  const expiringDetail = expiringLegs.map((l) => {
+    const itm = l.type === 'put' ? spot! < l.strike : spot! > l.strike;
+    if (itm && l.dir === 'short') {
+      if (l.type === 'put') arriving += l.ct * 100;
+      else leaving += Math.min(shares, l.ct * 100);
+    }
+    return { type: l.type, dir: l.dir, ct: l.ct, strike: l.strike, itm, moves: itm && l.dir === 'short' ? l.ct * 100 : 0 };
+  });
+  const expWhen = nearestExp === todayISO ? 'tomorrow' : `after ${fmtDay(nearestExp ?? todayISO)}`;
+  const itmShorts = expiringDetail.filter((e) => e.itm && e.dir === 'short');
+  const otmShorts = expiringDetail.filter((e) => !e.itm && e.dir === 'short');
+  const strikeList = (xs: typeof expiringDetail) =>
+    xs.map((e) => `${e.ct}× ${e.strike}`).join(', ');
+  const expirySay = !nearestExp ? 'Nothing expiring.'
+    : arriving > 0 || leaving > 0
+      ? [
+          arriving > 0 ? `${arriving.toLocaleString()} shares arrive ${expWhen} — ${strikeList(itmShorts.filter((e) => e.type === 'put'))} in the money.` : '',
+          leaving > 0 ? `${leaving.toLocaleString()} shares called away — ${strikeList(itmShorts.filter((e) => e.type === 'call'))}.` : '',
+          otmShorts.length ? `${strikeList(otmShorts)} expire worthless.` : '',
+        ].filter(Boolean).join(' ')
+      : `Nothing in the money — ${strikeList(otmShorts) || 'all legs'} expire worthless.`;
+
   // ── sizing ───────────────────────────────────────────────────────────────
   const band = PRICE_BANDS.find(([hi]) => spot! < hi) ?? PRICE_BANDS[0];
   const priceFactor = band[1], priceBand = band[2];
@@ -637,6 +668,15 @@ Deno.serve(async (req: Request) => {
   const sliceW = SLICE[decisionDow];
   const sliceDelta = weeklyDelta * sliceW;
   const isDecisionDay = SLICE[dow] != null;
+
+  // Emitted, not hand-written on the card. A design draft said "write the
+  // Wednesday 40%, the rest Friday" — but Friday is 20%, not the rest, and copy
+  // that restates the mechanism from memory drifts away from it.
+  const laterDows = [1, 3, 5].filter((x) => x > decisionDow);
+  const sliceSay = laterDows.length
+    ? `${DOWN[decisionDow]} takes ${Math.round(sliceW * 100)}% of the week; `
+      + `${laterDows.map((x) => `${DOWN[x]} ${Math.round(SLICE[x] * 100)}%`).join(', ')} still to write.`
+    : `${DOWN[decisionDow]} takes the last ${Math.round(sliceW * 100)}% of the week.`;
 
   // ── the put pick ─────────────────────────────────────────────────────────
   const expiries = await putExpiries(ymd(addDays(today, 2)), polyKey);
@@ -766,7 +806,17 @@ Deno.serve(async (req: Request) => {
       perWeek: Math.round(quarterBudget / 13),
       slice: sliceW,
       sliceOf: DOWN[decisionDow],
+      sliceSay,
       formula: '(quarter budget ÷ 13) × price × conviction',
+    },
+
+    expiring: {
+      date: nearestExp,
+      isToday: nearestExp === todayISO,
+      sharesArriving: arriving,
+      sharesLeaving: leaving,
+      legs: expiringDetail,
+      say: expirySay,
     },
 
     ceiling: {
