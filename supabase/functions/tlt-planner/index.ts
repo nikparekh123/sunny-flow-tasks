@@ -875,7 +875,8 @@ Deno.serve(async (req: Request) => {
     instruction: {
       label: 'The instruction',
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}` : 'Nothing this slice',
-      meta: `${expiry ? fmtDay(expiry) : 'no expiry'} · ${putDelta.toFixed(2)} delta · ${pick?.modelled ? 'modelled' : 'real quotes'}`,
+      meta: `${expiry ? `${DOWN[parseISO(expiry).getUTCDay()]} ${fmtDay(expiry)}` : 'no expiry'}`
+        + ` · ${putDelta.toFixed(2)} delta · ${pick?.modelled ? 'modelled' : 'real quotes'}`,
       commit: [[usd0(putStrike * 100 * putCt), 'committed'], [String(putCt * 100), 'shares if assigned']],
       basis: { value: (putStrike - putMid).toFixed(2), label: 'basis if assigned' },
       earn: {
@@ -924,7 +925,12 @@ Deno.serve(async (req: Request) => {
 
     holdback: calPenalty < 0 ? {
       label: 'Held back', action: `|${Math.abs(Math.round(calPenalty))} points|`,
-      headline: nextHeavy ? String(nextHeavy.tag ?? nextHeavy.class_name) : 'Event ahead',
+      headline: (() => {
+        if (!nextHeavy) return 'Event ahead';
+        const short = String(nextHeavy.tag ?? nextHeavy.class_name).split('·')[0].trim();
+        const dd = daysBetween(today, parseISO(String(nextHeavy.event_date)));
+        return dd <= 0 ? `${short} today` : dd === 1 ? `${short} tomorrow` : `${short} in ${dd} days`;
+      })(),
       cause: `Size held back *${Math.abs(Math.round(calPenalty))} points* — ~conviction ${Math.round(base)} → ${conviction}~`,
       note: sliceSay,
     } : null,
@@ -993,8 +999,13 @@ Deno.serve(async (req: Request) => {
       normalised: capSum < 100
         ? `normalised over ${Math.round(capSum)} of 100 — ~${F.filter((f) => !f.ok).map((f) => f.key).join(', ')} dropped out~`
         : null,
-      families: F.map((f) => ({
-        label: f.label, score: f.score.toFixed(1), cap: String(Math.abs(f.cap)),
+      families: [...F].sort((a, b) => {
+        if (a.key === 'calendar') return 1;
+        if (b.key === 'calendar') return -1;
+        const at = topThree.includes(a.key) ? 1 : 0, bt = topThree.includes(b.key) ? 1 : 0;
+        return bt - at || b.score - a.score;
+      }).map((f) => ({
+        label: f.label, score: f.score.toFixed(1), cap: f.cap < 0 ? `−${Math.abs(f.cap)}` : String(f.cap),
         pct: f.cap !== 0 ? Math.min(1, Math.abs(f.score / f.cap)) : 0,
         read: f.note,
         top: topThree.includes(f.key) || undefined,
@@ -1024,8 +1035,8 @@ Deno.serve(async (req: Request) => {
     sources: {
       label: 'Freshness',
       rows: [
-        ['Spot', spotLive != null ? 'live' : 'cached', spotLive != null ? ageOf(nowTs.toISOString()) : ageOf(String(st.updated_at ?? ''))],
-        ['Chains', pick?.modelled ? 'modelled' : 'real quotes', expiry ? ageOf(nowTs.toISOString()) : 'no chain'],
+        ['Spot', spotLive != null ? 'live' : 'cached', spotLive != null ? 'now' : ageOf(String(st.updated_at ?? ''))],
+        ['Chains', pick?.modelled ? 'modelled' : 'real quotes', expiry ? 'now' : 'no chain'],
         ['FRED', 'daily', fredMissing.length ? 'feed down' : (lastFred ? fmtDay(lastFred) : 'unknown')],
         ['Treasury', 'daily', auctions.length ? fmtDay(todayISO) : 'feed down'],
         ['Book', 'on sync', ageOf(lastSync)],
