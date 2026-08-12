@@ -90,6 +90,14 @@ leave as fast as the puts deliver them and the accumulation simply churns. The
 overlay is only ever safe under a roll-always discipline the app can recommend and
 cannot enforce.
 
+**The chase cannot rescue it.** The rate reads `target - shares` live, so a called
+share does become one to re-buy — and it does not help. Allowed to assign, the rate
+climbs from 112/wk to 500/wk and the position still ends at 1,800 having bought
+16,800; at week 24 it is back to the starting 1,500. Assignment removes shares faster
+than any rate replaces them because a rally drives both sides at once. Worse, the
+failure is invisible: `standing` projects off the climbing rate and keeps reading ON
+PLAN while the share count goes nowhere.
+
 **The structure is ATM at 30% coverage** — 15-20 calls on 5,000 shares, the rest
 uncapped. It ties 4%-out at 50% on basis (ATM wins 16 of 38 windows, medians 23c
 apart), leaves 70% of the block uncapped rather than 50%, and needs ~42 contracts

@@ -150,6 +150,30 @@ puts deliver them and the accumulation simply churns.
 The cheap-looking $85.82 basis in that row is an artefact of the same thing — it is
 the average of the few shares that survived, not a good outcome.
 
+### The chase cannot outrun assignment
+
+"If calls keep getting assigned, does the target absorb it?" Yes mechanically — the
+rate reads `target - shares` live, so every called share becomes one to re-buy — and
+no in practice. One window, 30% cover, assignment allowed:
+
+| week | shares (assigned) | rate/wk | called away | re-bought | shares (no calls) |
+|---|---|---|---|---|---|
+| 0 | 1,500 | 112 | 0 | 0 | 1,500 |
+| 8 | 2,500 | 117 | 0 | 1,000 | 2,500 |
+| 16 | 2,300 | 136 | 1,900 | 2,700 | 4,100 |
+| **24** | **1,500** | 169 | 3,100 | 3,100 | 4,400 |
+| 32 | 2,100 | 194 | 3,900 | 4,500 | 5,500 |
+| 48 | 7,000 | 500 | 8,800 | 14,300 | 12,000 |
+| 71 | **1,800** | 225 | **16,500** | **16,800** | **13,800** |
+
+**You buy 16,800 shares and hold 1,800.** At week 24 the position is back to its
+starting 1,500 — six months of weekly writing, dead level. The rate does chase, 112
+to 500 a week, and it does not matter: assignment removes shares faster than any rate
+replaces them, because a rally drives both sides at once.
+
+This is what makes the failure invisible. The rate climbs, `standing` keeps reading
+ON PLAN because it projects off that climbing rate, and the share count goes nowhere.
+
 ### Coverage is the dial, and the roll debit is what it costs
 
 | coverage | shares | basis | premium | roll debit | net premium |
