@@ -188,6 +188,39 @@ without limit. Going from 25% to 100% coverage buys **$1.79/share** and requires
 **$643K more** of roll debits to be funded on demand, in the weeks NVDA has just
 rallied. The premium column is not income — most of it is handed back at the roll.
 
+## NET over time, and what actually drives it (`nvda_pnl_time.py`)
+
+Every other test here reports one number at week 72. This marks the book monthly per
+`docs/PNL_GLOSSARY.md` (NET = REALIZED + UNREALIZED).
+
+**Six-month NET is not stable.** Across all 84 start months, no-calls arm:
+min **-$239,676**, median **+$94,662**, max **+$458,830**, negative in 12 of 84.
+A ~$700K spread on identical rules, decided by where NVDA went.
+
+Within one window it also swings sign repeatedly: month 4 **-$36,090**, month 9
+**+$144,784**, month 12 **-$68,548**, month 18 **+$840,038**.
+
+**Where the money comes from**, month 18:
+
+| arm | premium | roll debit | stock realised | unrealised shares | NET |
+|---|---|---|---|---|---|
+| no calls | $73,991 | $0 | $0 | **$764,232** | $840,038 |
+| ATM 30%, rolled | $508,446 | -$480,915 | $0 | $764,232 | $811,823 |
+| ATM 30%, assigned | $218,395 | $0 | $38,796 | $3,220 | $263,561 |
+
+**91% of the profit is NVDA going up. The whole options overlay is 9%**, and the
+calls net **$27,531 after rolls — 3% of NET**. Half a million collected, $481K handed
+back.
+
+**A note on which lens ranks calls.** The basis lens (nvda_calls_atm) has calls
+HELPING by ~$4/share; this NET lens has them COSTING ~$28K over the window. Both are
+right about different questions: basis asks what each share cost, where premium
+offsets cost; NET asks what you are up, where roll debits are a real outflow. Cheap
+shares and total P&L are not the same objective and they disagree here.
+
+The programme is a leveraged long NVDA position with a small premium overlay. Every
+result in this file moves numbers inside the 9%.
+
 ## ATM but fewer, against further but more (`nvda_calls_atm.py`)
 
 Nik's structure: on 5,000 shares sell 15-20 ATM calls, leaving 3,000 uncapped for a
