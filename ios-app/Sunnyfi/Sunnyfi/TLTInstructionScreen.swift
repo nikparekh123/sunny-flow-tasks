@@ -98,15 +98,15 @@ private struct Eyebrow: View {
     var rightMono: Bool = false
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(label).font(InkFont.display(13, .medium))
+            Text(label).font(InkFont.display(15.5, .medium))
             Spacer(minLength: 8)
             if let r = right {
-                InkMark.text(r, rightMono ? 10 : 12.5, .regular, mono: rightMono, dim: Ink.dim)
+                InkMark.text(r, rightMono ? 13 : 15, .regular, mono: rightMono, dim: Ink.dim)
                     .foregroundStyle(Ink.dim)
                     .textCase(rightMono ? .uppercase : nil)
             }
         }
-        .frame(minHeight: 20)
+        .frame(minHeight: 22)
     }
 }
 
@@ -144,20 +144,33 @@ struct TLTInstructionScreen: View {
             }
             titleBar
         }
+        // Swipe horizontally to leave, same as the NVDA deck. simultaneousGesture
+        // rather than gesture: this sheet scrolls VERTICALLY, and an exclusive
+        // gesture would fight the scroll for every drag. The axis guard means a
+        // scroll never reads as a dismiss.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { g in
+                    guard abs(g.translation.width) > 80,
+                          abs(g.translation.width) > abs(g.translation.height) * 1.5
+                    else { return }
+                    onBack()
+                }
+        )
         .task { await store.load() }
     }
 
     private var titleBar: some View {
         HStack(alignment: .firstTextBaseline) {
             Button(action: onBack) {
-                Text("TLT").font(InkFont.display(17, .semibold)).foregroundStyle(Ink.text)
+                Text("TLT").font(InkFont.display(18, .semibold)).foregroundStyle(Ink.text)
             }
             .buttonStyle(.plain)
             Spacer()
             if let s = store.sheet {
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(s.asOf.label).font(InkFont.display(13)).foregroundStyle(Ink.dim)
-                    Text(s.asOf.refresh).font(InkFont.mono(11)).foregroundStyle(Ink.dim)
+                    Text(s.asOf.label).font(InkFont.display(14.5)).foregroundStyle(Ink.dim)
+                    Text(s.asOf.refresh).font(InkFont.mono(13.5)).foregroundStyle(Ink.dim)
                 }
             }
         }
@@ -220,11 +233,11 @@ struct TLTInstructionScreen: View {
     private func sheetHead(_ s: TLTSheet) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(s.phase.uppercased())
-                .font(InkFont.mono(11.5)).tracking(11.5 * 0.1).foregroundStyle(Ink.dim)
+                .font(InkFont.mono(14)).tracking(14 * 0.1).foregroundStyle(Ink.dim)
             Spacer()
             if let spot = s.sources.rows.first(where: { $0.first == "Spot" }), spot.count >= 3 {
                 (Text("spot ").foregroundStyle(Ink.dim) + Text(spot[2]).foregroundStyle(Ink.text))
-                    .font(InkFont.mono(10.5))
+                    .font(InkFont.mono(14))
             }
         }
         .padding(.top, 26).padding(.horizontal, 3)
@@ -237,11 +250,11 @@ struct TLTInstructionScreen: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Eyebrow(label: i.label).foregroundStyle(Ink.invertText.opacity(0.78))
                     Text(i.verb)
-                        .font(InkFont.display(36, .medium)).tracking(36 * -0.038)
+                        .font(InkFont.display(38, .medium)).tracking(38 * -0.038)
                         .lineSpacing(-2).padding(.top, 19)
                     Text(i.meta)
-                        .font(InkFont.mono(12)).foregroundStyle(Ink.invertText.opacity(0.62))
-                        .padding(.top, 12)
+                        .font(InkFont.mono(14.5)).foregroundStyle(Ink.invertText.opacity(0.62))
+                        .padding(.top, 13)
 
                     tierRule.padding(.top, 20)
                     HStack(alignment: .firstTextBaseline) {
@@ -249,9 +262,9 @@ struct TLTInstructionScreen: View {
                             if idx > 0 { Spacer(minLength: 14) }
                             VStack(alignment: idx == 0 ? .leading : .trailing, spacing: 3) {
                                 Text(pair.first ?? "")
-                                    .font(InkFont.mono(20, .medium)).monospacedDigit()
+                                    .font(InkFont.mono(23, .medium)).monospacedDigit()
                                 Text(pair.count > 1 ? pair[1] : "")
-                                    .font(InkFont.display(11.5))
+                                    .font(InkFont.display(14.5))
                                     .foregroundStyle(Ink.invertText.opacity(0.60))
                             }
                         }
@@ -263,28 +276,25 @@ struct TLTInstructionScreen: View {
                     // for the shares. Credit is subordinate and never blended: under
                     // the old picker $80 of a $148 "credit" was intrinsic, i.e. money
                     // handed straight back at assignment.
-                    HStack(alignment: .bottom) {
-                        VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(i.basis.value)
-                                .font(InkFont.mono(29, .medium)).monospacedDigit()
+                                .font(InkFont.mono(23, .medium)).monospacedDigit()
                             Text(i.basis.label)
-                                .font(InkFont.display(12)).foregroundStyle(Ink.invertText.opacity(0.66))
+                                .font(InkFont.display(14.5)).foregroundStyle(Ink.invertText.opacity(0.66))
                         }
                         Spacer(minLength: 14)
                         VStack(alignment: .trailing, spacing: 3) {
-                            Text(i.earn.value).font(InkFont.mono(15, .medium)).monospacedDigit()
+                            Text(i.earn.value).font(InkFont.mono(23, .medium)).monospacedDigit()
                             Text(i.earn.label)
-                                .font(InkFont.display(11.5)).foregroundStyle(Ink.invertText.opacity(0.60))
-                            Text(i.earn.note.uppercased())
-                                .font(InkFont.mono(9.5)).tracking(9.5 * 0.02)
-                                .foregroundStyle(Ink.invertText.opacity(0.60))
+                                .font(InkFont.display(14.5)).foregroundStyle(Ink.invertText.opacity(0.60))
                         }
                     }
                     .padding(.top, 15)
                 }
                 if let mark = i.mark {
                     Text(mark)
-                        .font(.custom("Caveat", size: 20))
+                        .font(.custom("Caveat", size: 22))
                         .foregroundStyle(Ink.invertText.opacity(0.72))
                         .rotationEffect(.degrees(-4))
                         .allowsHitTesting(false)
@@ -300,46 +310,50 @@ struct TLTInstructionScreen: View {
         TSCard {
             if let f = l.fallback {
                 Eyebrow(label: l.label, right: f.state)
-                Text(f.headline).font(InkFont.display(21, .medium)).padding(.top, 14)
-                InkMark.text(f.note, 13.5, .regular, dim: Ink.dim)
-                    .foregroundStyle(Ink.dim).padding(.top, 7)
+                Text(f.headline).font(InkFont.display(23, .medium)).padding(.top, 15)
+                InkMark.text(f.note, 15.5, .regular, dim: Ink.dim)
+                    .foregroundStyle(Ink.dim).padding(.top, 9)
             } else {
                 Eyebrow(label: l.label)
                 VStack(spacing: 0) {
-                    ladderRow(l.cols.map { $0.uppercased() }, head: true, chosen: false)
-                    ForEach(Array(l.rows.enumerated()), id: \.offset) { _, r in
-                        ladderRow([r.strike, r.mid, r.intrinsic, r.earned, r.basis],
-                                  head: false, chosen: r.chosen)
+                    ForEach(Array(l.rows.enumerated()), id: \.offset) { idx, r in
+                        ladderRow(r, first: idx == 0)
                     }
                 }
                 .padding(.top, 14)
                 if let v = l.verdict {
-                    InkMark.text(v, 14.5).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+                    InkMark.text(v, 16.5).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
                 }
             }
         }
     }
 
-    private func ladderRow(_ cells: [String], head: Bool, chosen: Bool) -> some View {
-        HStack(spacing: 6) {
-            ForEach(Array(cells.enumerated()), id: \.offset) { i, c in
-                Text(c)
-                    .font(InkFont.mono(head ? 9.5 : 12.5, chosen ? .medium : .regular))
-                    .monospacedDigit()
-                    .tracking(head ? 9.5 * 0.08 : 0)
-                    .frame(maxWidth: .infinity, alignment: i == 0 ? .leading : .trailing)
-            }
+    /// Two candidates, one axis that matters: basis. No column grid, no headers.
+    /// Earned is identical across candidates almost every day, so it lives in the
+    /// verdict; each row carries the ONE fact that separates it. The chosen row is
+    /// full ink with a left rule INSIDE the card, not a dot hanging outside it.
+    private func ladderRow(_ r: TLTSheet.Ladder.Row, first: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(r.strike)
+                .font(InkFont.mono(18, r.chosen ? .medium : .regular)).monospacedDigit()
+                .frame(width: 52, alignment: .leading)
+            Text(r.detail)
+                .font(InkFont.display(15)).foregroundStyle(Ink.dim)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            (Text("basis ").font(InkFont.display(15)).foregroundStyle(Ink.dim)
+             + Text(r.basis).font(InkFont.mono(18, r.chosen ? .medium : .regular)))
+                .lineLimit(1)
         }
-        .foregroundStyle(head ? Ink.dim : (chosen ? Ink.text : Ink.dim))
-        .padding(.vertical, head ? 0 : 9)
-        .padding(.bottom, head ? 4 : 0)
+        .foregroundStyle(r.chosen ? Ink.text : Ink.dim)
+        .padding(.leading, 12)
+        .padding(.top, first ? 8 : 15)
+        .padding(.bottom, 16)
         .overlay(alignment: .top) {
-            if !head { Rectangle().fill(Ink.text.opacity(0.10)).frame(height: 1) }
+            if !first { Rectangle().fill(Ink.text.opacity(0.10)).frame(height: 1) }
         }
         .overlay(alignment: .leading) {
-            if chosen {
-                Circle().fill(Ink.text).frame(width: 4, height: 4).offset(x: -10)
-            }
+            if r.chosen { Rectangle().fill(Ink.text).frame(width: 2) }
         }
     }
 
@@ -347,11 +361,11 @@ struct TLTInstructionScreen: View {
     private func tonight(_ t: TLTSheet.Tonight) -> some View {
         TSCard(kind: .fill) {
             Eyebrow(label: t.label, right: t.tag, rightMono: true)
-            InkMark.text(t.headline, 21, .medium, dim: Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
+            InkMark.text(t.headline, 23, .medium, dim: Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
             bullets(t.lines).padding(.top, 14)
             if let f = t.foot {
                 Rectangle().fill(Ink.text.opacity(0.12)).frame(height: 1).padding(.top, 14)
-                InkMark.text(f, 14, .regular, dim: Ink.dim).padding(.top, 12)
+                InkMark.text(f, 16, .regular, dim: Ink.dim).padding(.top, 13)
             }
         }
     }
@@ -361,7 +375,7 @@ struct TLTInstructionScreen: View {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
                 HStack(alignment: .top, spacing: 10) {
                     Circle().fill(Color.primary.opacity(0.55)).frame(width: 5, height: 5).padding(.top, 7)
-                    InkMark.text(l, 14.5, .regular, dim: Ink.dim)
+                    InkMark.text(l, 16.5, .regular, dim: Ink.dim)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -373,10 +387,10 @@ struct TLTInstructionScreen: View {
         TSCard {
             Eyebrow(label: h.label, right: h.action.replacingOccurrences(of: "|", with: ""))
             Text(h.headline)
-                .font(InkFont.display(31, .regular)).tracking(31 * -0.035).padding(.top, 9)
-            InkMark.text(h.cause, 14, .regular, dim: Ink.dim).padding(.top, 9)
-            InkMark.text(h.note, 13.5, .regular, dim: Ink.dim)
-                .foregroundStyle(Ink.dim).padding(.top, 7)
+                .font(InkFont.display(33, .regular)).tracking(33 * -0.035).padding(.top, 10)
+            InkMark.text(h.cause, 16.5, .regular, dim: Ink.dim).padding(.top, 11)
+            InkMark.text(h.note, 15.5, .regular, dim: Ink.dim)
+                .foregroundStyle(Ink.dim).padding(.top, 9)
         }
     }
 
@@ -386,13 +400,13 @@ struct TLTInstructionScreen: View {
             Eyebrow(label: c.label)
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(Array(c.lines.enumerated()), id: \.offset) { _, line in
-                    (InkMark.text(line.text, 21, .medium, dim: Ink.dim)
-                     + (line.emphasis.map { Text(" ") + Text($0).font(InkFont.display(21, .semibold)) } ?? Text("")))
+                    (InkMark.text(line.text, 23, .medium, dim: Ink.dim)
+                     + (line.emphasis.map { Text(" ") + Text($0).font(InkFont.display(23, .semibold)) } ?? Text("")))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(.top, 14)
-            InkMark.text(c.note, 13.5, .regular, dim: Ink.dim)
+            InkMark.text(c.note, 15.5, .regular, dim: Ink.dim)
                 .foregroundStyle(Ink.dim)
                 .padding(.top, 26).padding(.trailing, 60)
         }
@@ -410,17 +424,17 @@ struct TLTInstructionScreen: View {
                     // and the result wants another 84, on a 359pt card. fixedSize
                     // (flexible width, ideal height) lets it wrap instead of demand.
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(step.text).font(InkFont.mono(12)).foregroundStyle(Ink.dim)
+                        Text(step.text).font(InkFont.mono(14.5)).foregroundStyle(Ink.dim)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 6)
-                        Text(step.out).font(InkFont.mono(14, .medium)).monospacedDigit()
+                        Text(step.out).font(InkFont.mono(17, .medium)).monospacedDigit()
                             .layoutPriority(1)
                     }
                 }
             }
             .padding(.top, 15)
             Rectangle().fill(Ink.text.opacity(0.12)).frame(height: 1).padding(.top, 13)
-            InkMark.text(w.verdict, 14.5).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
+            InkMark.text(w.verdict, 16.5).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
         }
     }
 
@@ -428,7 +442,7 @@ struct TLTInstructionScreen: View {
     private func whereYouAre(_ w: TLTSheet.Where) -> some View {
         TSCard(kind: .ink) {
             Eyebrow(label: w.label).foregroundStyle(Ink.invertText.opacity(0.78))
-            InkMark.text(w.headline, 21, .medium, dim: Ink.invertText.opacity(0.62))
+            InkMark.text(w.headline, 23, .medium, dim: Ink.invertText.opacity(0.62))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 14)
             bullets(w.lines).padding(.top, 14)
@@ -443,21 +457,21 @@ struct TLTInstructionScreen: View {
                 ForEach(Array(p.rows.enumerated()), id: \.offset) { _, r in
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(alignment: .firstTextBaseline) {
-                            Text(r.label).font(InkFont.display(13.5)).foregroundStyle(Ink.dim)
+                            Text(r.label).font(InkFont.display(16)).foregroundStyle(Ink.dim)
                             Spacer(minLength: 10)
-                            Text(r.value).font(InkFont.display(13.5, .medium)).monospacedDigit()
+                            Text(r.value).font(InkFont.display(16, .medium)).monospacedDigit()
                         }
                         InkRule(pct: r.pct).padding(.top, 8)
-                        InkMark.text(r.note, 12.5, .regular, dim: Ink.dim)
-                            .foregroundStyle(Ink.dim).padding(.top, 7)
+                        InkMark.text(r.note, 15, .regular, dim: Ink.dim)
+                            .foregroundStyle(Ink.dim).padding(.top, 9)
                     }
                 }
             }
             .padding(.top, 16)
             HStack(alignment: .firstTextBaseline) {
-                Text(p.standing).font(InkFont.mono(11.5, .medium)).tracking(11.5 * 0.06)
+                Text(p.standing).font(InkFont.mono(14, .medium)).tracking(14 * 0.06)
                 Spacer()
-                Text(p.band).font(InkFont.mono(11.5)).tracking(11.5 * 0.03).foregroundStyle(Ink.dim)
+                Text(p.band).font(InkFont.mono(14)).tracking(14 * 0.03).foregroundStyle(Ink.dim)
             }
             .padding(.top, 22)
         }
@@ -471,18 +485,18 @@ struct TLTInstructionScreen: View {
                 HStack(alignment: .firstTextBaseline) {
                     (Text(c.head).foregroundStyle(Ink.dim)
                      + Text(" \(c.of)").foregroundStyle(Ink.dim.opacity(0.7)))
-                        .font(InkFont.display(13.5))
+                        .font(InkFont.display(16))
                     Spacer(minLength: 10)
-                    Text(c.value).font(InkFont.display(13.5, .medium)).monospacedDigit()
+                    Text(c.value).font(InkFont.display(16, .medium)).monospacedDigit()
                 }
                 InkRule(pct: c.pct).padding(.top, 8)
-                (InkMark.text(c.room, 12.5, .regular, dim: Ink.dim)
-                 + Text(" · \(c.before)").font(InkFont.display(12.5)))
+                (InkMark.text(c.room, 15, .regular, dim: Ink.dim)
+                 + Text(" · \(c.before)").font(InkFont.display(15)))
                     .foregroundStyle(Ink.dim).padding(.top, 7)
             }
             .padding(.top, 16)
             if let cut = c.cut {
-                InkMark.text(cut, 14.5, .regular, dim: Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
+                InkMark.text(cut, 16.5, .regular, dim: Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
             }
         }
     }
@@ -494,16 +508,16 @@ struct TLTInstructionScreen: View {
         return TSCard {
             Eyebrow(label: v.label, right: "base \(v.base) · calendar \(v.calendar)")
             HStack(alignment: .firstTextBaseline, spacing: 11) {
-                Text("\(v.score)").font(InkFont.display(52, .light)).monospacedDigit()
-                Text("of 100").font(InkFont.display(13)).foregroundStyle(Ink.dim)
+                Text("\(v.score)").font(InkFont.display(56, .light)).monospacedDigit()
+                Text("of 100").font(InkFont.display(15)).foregroundStyle(Ink.dim)
             }
             .padding(.top, 13)
             if let n = v.normalised {
-                InkMark.text(n, 12.5, .regular, dim: Ink.dim)
-                    .foregroundStyle(Ink.dim).padding(.top, 9)
+                InkMark.text(n, 15, .regular, dim: Ink.dim)
+                    .foregroundStyle(Ink.dim).padding(.top, 11)
             }
             Text(v.movers.uppercased())
-                .font(InkFont.mono(9.5)).tracking(9.5 * 0.08).foregroundStyle(Ink.dim)
+                .font(InkFont.mono(13)).tracking(13 * 0.05).foregroundStyle(Ink.dim)
                 .padding(.top, 15)
             VStack(spacing: 0) {
                 ForEach(Array(top.enumerated()), id: \.offset) { _, f in familyRow(f, first: true) }
@@ -516,8 +530,8 @@ struct TLTInstructionScreen: View {
                 withAnimation(.easeOut(duration: 0.22)) { expanded.toggle() }
             } label: {
                 Text(expanded ? "Fewer" : "\(rest.count) more families")
-                    .font(InkFont.mono(11)).tracking(11 * 0.03)
-                    .padding(.horizontal, 13).frame(minHeight: 30)
+                    .font(InkFont.mono(14)).tracking(14 * 0.02)
+                    .padding(.horizontal, 17).frame(minHeight: 40)
                     .overlay(Capsule().strokeBorder(Ink.text.opacity(0.22), lineWidth: 1))
                     .foregroundStyle(Ink.text)
             }
@@ -531,21 +545,21 @@ struct TLTInstructionScreen: View {
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 Text(f.label)
-                    .font(InkFont.display(14, missing || f.isDamper ? .regular : .medium))
+                    .font(InkFont.display(16.5, missing || f.isDamper ? .regular : .medium))
                     .foregroundStyle(f.isDamper ? Ink.dim : Ink.text)
                 Spacer(minLength: 10)
                 if missing {
-                    Text("NO DATA").font(InkFont.mono(10)).tracking(10 * 0.04).foregroundStyle(Ink.dim)
+                    Text("NO DATA").font(InkFont.mono(13)).tracking(13 * 0.04).foregroundStyle(Ink.dim)
                 } else {
                     (Text(f.score).foregroundStyle(Ink.text) + Text(" / \(f.cap)").foregroundStyle(Ink.dim))
-                        .font(InkFont.mono(12)).monospacedDigit()
+                        .font(InkFont.mono(14.5)).monospacedDigit()
                 }
             }
             // A damper subtracts, so its rule runs from the right and is dashed. A
             // family whose feed is down shows a dashed track with NO fill — never a
             // zero, because a zero reads as bearish rather than absent.
             familyTrack(f, missing: missing).padding(.top, 8)
-            InkMark.text(f.down ?? f.read, 12.5, .regular, dim: Ink.dim)
+            InkMark.text(f.down ?? f.read, 15, .regular, dim: Ink.dim)
                 .foregroundStyle(missing ? Ink.text.opacity(0.9) : Ink.dim)
                 .padding(.top, 6)
         }
@@ -585,17 +599,17 @@ struct TLTInstructionScreen: View {
             VStack(spacing: 0) {
                 ForEach(Array(c.events.enumerated()), id: \.offset) { i, e in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(e.date).font(InkFont.mono(12))
+                        Text(e.date).font(InkFont.mono(14.5))
                             .foregroundStyle(e.isToday ? Ink.text : Ink.dim)
-                            .frame(width: 56, alignment: .leading)
-                        Text(e.what).font(InkFont.display(14, e.isToday ? .medium : .regular))
+                            .frame(width: 72, alignment: .leading)
+                        Text(e.what).font(InkFont.display(16.5, e.isToday ? .medium : .regular))
                         if e.isToday {
-                            Text("TODAY").font(InkFont.mono(10.5)).tracking(10.5 * 0.06)
+                            Text("TODAY").font(InkFont.mono(13)).tracking(13 * 0.04)
                                 .foregroundStyle(Ink.dim)
                         }
                         Spacer(minLength: 0)
                     }
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 13)
                     .overlay(alignment: .top) {
                         if i > 0 { Rectangle().fill(Ink.text.opacity(0.10)).frame(height: 1) }
                     }
@@ -611,13 +625,13 @@ struct TLTInstructionScreen: View {
             VStack(spacing: 0) {
                 ForEach(Array(b.legs.enumerated()), id: \.offset) { i, l in
                     HStack(alignment: .firstTextBaseline, spacing: 11) {
-                        Text(l.qty).font(InkFont.mono(12.5)).foregroundStyle(Ink.dim)
-                            .frame(width: 30, alignment: .leading)
-                        Text(l.leg).font(InkFont.display(14))
+                        Text(l.qty).font(InkFont.mono(15)).foregroundStyle(Ink.dim)
+                            .frame(width: 40, alignment: .leading)
+                        Text(l.leg).font(InkFont.display(16.5))
                         Spacer(minLength: 8)
-                        Text(l.when).font(InkFont.display(12.5)).foregroundStyle(Ink.dim)
+                        Text(l.when).font(InkFont.display(14.5)).foregroundStyle(Ink.dim)
                     }
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 13)
                     .overlay(alignment: .top) {
                         if i > 0 { Rectangle().fill(Ink.text.opacity(0.10)).frame(height: 1) }
                     }
@@ -636,15 +650,15 @@ struct TLTInstructionScreen: View {
                 ForEach(Array(s.rows.enumerated()), id: \.offset) { i, r in
                     let dead = r.count > 2 && r[2] == "feed down"
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(r.first ?? "").font(InkFont.display(13)).frame(width: 66, alignment: .leading)
-                        Text(r.count > 1 ? r[1] : "").font(InkFont.mono(11.5)).foregroundStyle(Ink.dim)
+                        Text(r.first ?? "").font(InkFont.display(15.5)).frame(width: 84, alignment: .leading)
+                        Text(r.count > 1 ? r[1] : "").font(InkFont.mono(14)).foregroundStyle(Ink.dim)
                         Spacer(minLength: 8)
                         Text(r.count > 2 ? r[2] : "")
-                            .font(InkFont.mono(11.5))
+                            .font(InkFont.mono(14))
                             .strikethrough(dead)
                             .foregroundStyle(dead ? Ink.dim : Ink.text)
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 11)
                     .overlay(alignment: .top) {
                         if i > 0 { Rectangle().fill(Ink.text.opacity(0.10)).frame(height: 1) }
                     }

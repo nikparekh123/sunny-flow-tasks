@@ -43,17 +43,16 @@ struct TLTSheet: Decodable {
         let earn: Earn
         let mark: String?
         struct Pair: Decodable { let value: String; let label: String }
-        struct Earn: Decodable { let value: String; let label: String; let note: String }
+        struct Earn: Decodable { let value: String; let label: String }
     }
 
     struct Ladder: Decodable {
         let label: String
-        let cols: [String]
         let rows: [Row]
         let verdict: String?
         let fallback: Fallback?
         struct Row: Decodable {
-            let strike: String, mid: String, intrinsic: String, earned: String, basis: String
+            let strike: String, detail: String, basis: String
             let chosen: Bool
         }
         struct Fallback: Decodable { let state: String; let headline: String; let note: String }
