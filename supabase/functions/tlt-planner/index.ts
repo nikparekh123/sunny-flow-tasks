@@ -605,10 +605,33 @@ Deno.serve(async (req: Request) => {
 
   type Leg = {
     type: string; dir: string; ct: number; strike: number; expiry: string;
-    delta: number; shares: number; premium: number; soldOn: string; basis: number;
+    delta: number; shares: number; premium: number; soldOn: string; basis: number; fills: number;
   };
-  const legs: Leg[] = open.map((t) => {
+  // Fills are not positions. IBKR delivers a 4-lot as separate rows, so the book
+  // read "1× short put 82" and "3× short put 82" as two lines for one position.
+  // Aggregate by contract identity, weighting premium by size so the basis stays
+  // honest when the fills went off at different prices.
+  type Agg = { row: Row; ct: number; premWeighted: number; soldOn: string; fills: number };
+  const byContract = new Map<string, Agg>();
+  for (const t of open) {
+    const key = `${t.option_type}|${t.direction}|${t.strike}|${String(t.expiry).slice(0, 10)}`;
     const ct = fin(Number(t.contracts));
+    const prem = fin(Number(t.premium));
+    const soldOn = String(t.trade_date ?? '').slice(0, 10);
+    const prev = byContract.get(key);
+    if (prev) {
+      prev.ct += ct;
+      prev.premWeighted += prem * ct;
+      prev.fills += 1;
+      if (soldOn && (!prev.soldOn || soldOn < prev.soldOn)) prev.soldOn = soldOn;
+    } else {
+      byContract.set(key, { row: t, ct, premWeighted: prem * ct, soldOn, fills: 1 });
+    }
+  }
+
+  const legs: Leg[] = [...byContract.values()].map((a) => {
+    const t = a.row;
+    const ct = a.ct;
     const K = fin(Number(t.strike));
     const T = Math.max(daysBetween(today, parseISO(String(t.expiry))), 0) / 365;
     const isPut = String(t.option_type) === 'put';
@@ -616,16 +639,16 @@ Deno.serve(async (req: Request) => {
     const mag = isPut ? putDeltaAbs(spot!, K, T, iv) : callDelta(spot!, K, T, iv);
     // short put = +delta · short call = −delta · long put (the floor) = −delta
     const signed = isPut ? (short ? mag : -mag) : (short ? -mag : mag);
-    const prem = fin(Number(t.premium));
+    const prem = ct > 0 ? a.premWeighted / ct : 0;
     return {
       type: String(t.option_type), dir: String(t.direction), ct, strike: K,
       expiry: String(t.expiry).slice(0, 10), delta: signed, shares: signed * ct * 100,
-      premium: prem, soldOn: String(t.trade_date ?? '').slice(0, 10),
-      // What this leg actually costs if it delivers: the strike it commits to, less
-      // the premium THAT leg was sold at. Never today's candidate premium.
+      premium: Math.round(prem * 1000) / 1000, soldOn: a.soldOn, fills: a.fills,
+      // What this position actually costs if it delivers: the strike it commits to,
+      // less the size-weighted premium it was sold at. Never today's candidate.
       basis: Math.round((K - prem) * 100) / 100,
     };
-  });
+  }).sort((a, b) => a.expiry.localeCompare(b.expiry) || a.strike - b.strike);
 
   const shortPuts = legs.filter((l) => l.type === 'put' && l.dir === 'short');
   const longPuts = legs.filter((l) => l.type === 'put' && l.dir === 'long');
@@ -702,10 +725,19 @@ Deno.serve(async (req: Request) => {
   // Wednesday 40%, the rest Friday" — but Friday is 20%, not the rest, and copy
   // that restates the mechanism from memory drifts away from it.
   const laterDows = [1, 3, 5].filter((x) => x > decisionDow);
+  // Calendar-aware: when a damping event lands today, the later slices are not
+  // merely "still to write" — they are deliberately held until after the print,
+  // which is the whole reason the damper cut the size.
+  const heldForEvent = calPenalty < 0 && nextHeavy
+    ? String(nextHeavy.class_key) === 'prints' ? 'after the print'
+      : String(nextHeavy.class_key) === 'auctions' ? 'after the auction'
+      : String(nextHeavy.class_key) === 'fomc' ? 'after the FOMC' : 'after the event'
+    : null;
   const sliceSay = laterDows.length
-    ? `${DOWN[decisionDow]} takes ${Math.round(sliceW * 100)}% of the week; `
-      + `${laterDows.map((x) => `${DOWN[x]} ${Math.round(SLICE[x] * 100)}%`).join(', ')} still to write.`
-    : `${DOWN[decisionDow]} takes the last ${Math.round(sliceW * 100)}% of the week.`;
+    ? `${DOWN[decisionDow]}'s *${Math.round(sliceW * 100)}%* goes now · `
+      + `${laterDows.map((x) => `${DOWN[x]}'s *${Math.round(SLICE[x] * 100)}%*`).join(', ')}`
+      + (heldForEvent ? ` ~${heldForEvent}~` : ' ~later this week~')
+    : `${DOWN[decisionDow]}'s *${Math.round(sliceW * 100)}%* is the last of the week`;
 
   // ── the put pick ─────────────────────────────────────────────────────────
   const expiries = await putExpiries(ymd(addDays(today, 2)), polyKey);
