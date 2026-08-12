@@ -609,7 +609,29 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const band = MA_BANDS.find(([hi]: [number, number, string]) => vsMa < hi) ?? MA_BANDS[MA_BANDS.length - 1];
   const priceFactor = band[1], priceBand = band[2];
   const cf = convFactor(conviction, convWeight);
-  const weeklyDelta = (quarterBudget / 13) * priceFactor * cf.f;
+
+  // The rate chases a shortfall, bounded at 2x.
+  //
+  // It used to be open-loop on delivery: quarter budget x price x conviction, never
+  // looking at whether shares actually ARRIVED. That undershot, because puts expire
+  // worthless in a rally and the longest real dry spell at 1% OTM ran TWELVE weeks --
+  // ~2,280 shares never bought. Over every 72-week window in the data the fixed rate
+  // landed a median 12,600 of 15,000.
+  //
+  // So the rate is now what is still needed per remaining week. The bound matters as
+  // much as the chase: unbounded, the same test produced 40-contract weeks and $0.7M
+  // outstanding, because the event that starves delivery is a rally, and chasing into
+  // one fights the price dial -- the part of this model that measured best. Capped at
+  // 2x it lands a median 14,100 for about $5/share of basis, and the cash ceiling
+  // below is still the hard backstop. See research/nvda-tenor/nvda_catchup.py.
+  const baseRate = quarterBudget / 13;
+  const horizonWk = (horizonLo + horizonHi) / 2;              // the doc's ~72 weeks
+  const wkElapsed = Math.max(0, Math.floor(daysBetween(parseISO(startedOn), today) / 7));
+  const wkLeft = Math.max(1, horizonWk - wkElapsed);
+  const stillNeed = Math.max(0, targetShares - shares);
+  const chaseRate = Math.min(stillNeed / wkLeft, 2 * baseRate);
+  const chasing = chaseRate > baseRate * 1.02;
+  const weeklyDelta = chaseRate * priceFactor * cf.f;
 
   const dow = today.getUTCDay();
   const decisionDow = SLICE[dow] != null ? dow : (dow === 0 || dow === 6 ? 1 : dow < 3 ? 3 : dow < 5 ? 5 : 1);
@@ -707,9 +729,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   }
 
   // ── horizon band ─────────────────────────────────────────────────────────
-  const weeksElapsed = Math.max(0, Math.floor(daysBetween(parseISO(startedOn), today) / 7));
-  const remaining = Math.max(0, targetShares - shares);
-  const weeksAtBudget = quarterBudget > 0 ? remaining / (quarterBudget / 13) : Infinity;
+  // Same numbers the rate was sized from, so the readout cannot disagree with the
+  // instruction: projected off the rate actually being written, not the base budget.
+  const weeksElapsed = wkElapsed;
+  const remaining = stillNeed;
+  const weeksAtBudget = chaseRate > 0 ? remaining / chaseRate : Infinity;
   const projectedTotal = Math.round(weeksElapsed + weeksAtBudget);
   const standing = projectedTotal < horizonLo ? 'early' : projectedTotal <= horizonHi ? 'on plan' : 'behind';
 
@@ -717,6 +741,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const sizing = {
     weeklyDelta: Math.round(weeklyDelta), sliceDelta: Math.round(sliceDelta),
     priceFactor, priceBand, convFactor: cf.f, convBand: cf.band,
+    baseRate: Math.round(baseRate), chaseRate: Math.round(chaseRate), chasing,
+    weeksLeft: Math.round(wkLeft), stillNeed,
     contracts: putCt, wanted: wantCt, ceilingBinds,
     writtenToday: Math.round(writtenToday), contractsToday, sliceLeft: Math.round(sliceLeft), sliceFilled,
   };
@@ -1001,7 +1027,13 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       slice: sliceW,
       sliceOf: DOWN[decisionDow],
       sliceSay,
-      formula: '(quarter budget ÷ 13) × price × conviction',
+      formula: '(shares still needed ÷ weeks left, capped at 2×) × price × conviction',
+      chase: chasing
+        ? `Behind: ${stillNeed.toLocaleString()} shares in ${Math.round(wkLeft)} weeks needs `
+          + `*${Math.round(chaseRate)}/wk* against a ${Math.round(baseRate)} base`
+          + (chaseRate >= 2 * baseRate * 0.99 ? ' — |held at the 2× cap|' : '')
+        : `On rate. ${stillNeed.toLocaleString()} shares in ${Math.round(wkLeft)} weeks needs `
+          + `~${Math.round(chaseRate)}/wk, at or under the ${Math.round(baseRate)} base`,
     },
 
     expiring: {

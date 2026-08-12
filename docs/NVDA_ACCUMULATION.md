@@ -107,6 +107,36 @@ a position with a hedgeable core. The floor stops being a week-one emergency and
 becomes what it is on TLT: sized to the fully-assigned count, and justified by margin
 relief rather than by premium.
 
+## The rate chases a shortfall, bounded at 2x
+
+Puts expire worthless when NVDA rallies, so delivery starves exactly when the price
+dial is telling you to slow down. The rate used to ignore this entirely — quarter
+budget x price x conviction, never looking at whether shares actually arrived.
+
+Measured over every 72-week window in the data (`research/nvda-tenor/nvda_catchup.py`),
+starting 1,500 and targeting 15,000:
+
+| arm | median shares | worst | best | median basis | peak cash | max contracts |
+|---|---|---|---|---|---|---|
+| fixed rate | 12,600 | 11,800 | 13,400 | **$141.58** | $0.1M | 12 |
+| full chase | **14,600** | 13,500 | 15,600 | $148.14 | $0.7M | **40** |
+| **chase, 2x cap** | **14,100** | 13,100 | 15,500 | $146.77 | $0.3M | 16 |
+
+The bound matters as much as the chase. Unbounded, chasing fights the price dial —
+the part of the model that measured best — and it showed up as 40-contract weeks
+against a 5-a-week plan. Capped at 2x it recovers most of the shortfall for about
+**$5/share of basis**, and the $400K ceiling remains the hard backstop.
+
+**How long a drought actually runs.** Of 110 weekly writes at 1% OTM, 41 assigned
+(37%). Spells of four weeks or more happened three times: **12, 5 and 4 weeks**. So
+it is not a drip of misses, it is one long drought — twelve dry weeks is ~2,280
+shares never bought, which is the whole of the fixed rate's undershoot.
+
+The rate is therefore `min(shares still needed / weeks left, 2 x base) x price x
+conviction`. A useful side effect: it self-corrects for the reduction. Holding 7,500
+against a 15,000 target it writes 104/week, not 188 — and steps back up on its own
+once the block is sold down.
+
 ## What is still open
 
 - **Net delta target.** TLT's fell out of its accumulation rate. Here it is a decision,
