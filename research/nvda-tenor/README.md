@@ -179,10 +179,16 @@ share path endogenous, calls rolled.
 | 0.30d (4% out) @ 25% | $135.46 | $105,860 | **$210,130** | 24% | 24% |
 | 0.30d (4% out) @ 50% | **$134.06** | $120,944 | $425,538 | 24% | 50% |
 
-**The premise is right and the conclusion does not follow.** ATM collects far more
-gross — $451K at 20% cover against $316K for 4%-out at 25%. Net of the roll it loses:
-ATM @ 30% is DOMINATED by 4%-out @ 50%, which reaches a better basis ($134.06 vs
-$134.29) for $94K less cash through the roll.
+**The premise is right, and the two structures tie on returns.** ATM collects far
+more gross — $451K at 20% cover against $316K for 4%-out at 25%. Net of the roll the
+medians are 23 cents apart ($134.06 vs $134.29), and window by window **ATM @ 30%
+beats 4%-out @ 50% on basis in 16 of 38** — a coin flip, not a loss.
+
+**The robust difference is cash, not return.** The 4%-out arm's roll debit is lower in
+EVERY window, typically by $70-130K. Same basis, materially less capital tied up in
+funding rolls. An earlier draft of this file called ATM "dominated" on the strength of
+the median alone; that was an overstatement and the window-level spread is the reason
+to distrust medians here.
 
 The ITM rate is why. An ATM call finishes in the money **49%** of the time against
 **24%** at 4% out. Each roll debit is exactly the upside handed back, so the bigger
