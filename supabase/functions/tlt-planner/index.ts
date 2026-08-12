@@ -105,6 +105,15 @@ const PHASE_CALLS: Record<string, { enabled: boolean; delta: number; coverage: n
 // Mon/Wed/Fri each write a slice of the week. Friday's is smallest: it carries
 // the weekend, and the weekend is when you cannot react.
 const SLICE: Record<number, number> = { 1: 0.40, 3: 0.40, 5: 0.20 };
+// The same slices, accumulated. Sizing works against the week TO DATE rather than the
+// isolated day, because whole-contract rounding on a lone slice throws the remainder
+// away. Near one contract a slice IS the entire reachable output: on NVDA, where this
+// was found, every slice landed at 0.47 contracts and rounded to zero, so the week
+// wrote nothing — while five hundredths of delta the other way rounded all three up
+// and wrote double. TLT's rate keeps it further from that boundary more of the time,
+// but it is the same defect and the same fix. Resets Monday, so a slow week never
+// banks contracts into a fast one.
+const SLICE_CUM: Record<number, number> = { 1: 0.40, 3: 0.80, 5: 1.00 };
 
 // ── the strike picker ───────────────────────────────────────────────────────
 // Intrinsic value is not income. Selling the 82.5 put with TLT at 82.31 collects
@@ -684,6 +693,20 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       const T = Math.max(daysBetween(today, parseISO(String(t.expiry))), 0) / 365;
       return sum + putDeltaAbs(spot!, K, T, iv) * ct * 100;
     }, 0);
+  const weekStart = (() => {
+    const dd = new Date(today.getTime());
+    dd.setUTCDate(dd.getUTCDate() - ((dd.getUTCDay() + 6) % 7));   // back to Monday
+    return dd.toISOString().slice(0, 10);
+  })();
+  const writtenWeek = (open as Row[])
+    .filter((t) => String(t.option_type) === 'put' && String(t.direction) === 'short'
+      && String(t.trade_date ?? '').slice(0, 10) >= weekStart)
+    .reduce((sum, t) => {
+      const ct = fin(Number(t.contracts));
+      const K = fin(Number(t.strike));
+      const T = Math.max(daysBetween(today, parseISO(String(t.expiry))), 0) / 365;
+      return sum + putDeltaAbs(spot!, K, T, iv) * ct * 100;
+    }, 0);
   const contractsToday = (open as Row[])
     .filter((t) => String(t.option_type) === 'put' && String(t.direction) === 'short'
       && String(t.trade_date ?? '').slice(0, 10) === todayISO)
@@ -752,8 +775,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const decisionDow = SLICE[dow] != null ? dow : (dow === 0 || dow === 6 ? 1 : dow < 3 ? 3 : dow < 5 ? 5 : 1);
   const sliceW = SLICE[decisionDow];
   const sliceDelta = weeklyDelta * sliceW;
-  const sliceLeft = Math.max(0, sliceDelta - writtenToday);
-  const sliceFilled = writtenToday > 0 && sliceLeft < sliceDelta * 0.15;
+  // Target through today, less everything written since Monday — so an earlier slice
+  // that rounded to zero is still owed rather than forgotten.
+  const weekToDate = weeklyDelta * (SLICE_CUM[decisionDow] ?? 1);
+  const sliceLeft = Math.max(0, weekToDate - writtenWeek);
+  const sliceFilled = writtenWeek > 0 && sliceLeft < weekToDate * 0.15;
   const isDecisionDay = SLICE[dow] != null;
 
   // Emitted, not hand-written on the card. A design draft said "write the
@@ -851,7 +877,9 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     weeklyDelta: Math.round(weeklyDelta), sliceDelta: Math.round(sliceDelta),
     priceFactor, priceBand, convFactor: cf.f, convBand: cf.band,
     contracts: putCt, wanted: wantCt, ceilingBinds,
-    writtenToday: Math.round(writtenToday), contractsToday, sliceLeft: Math.round(sliceLeft), sliceFilled,
+    writtenToday: Math.round(writtenToday), writtenWeek: Math.round(writtenWeek),
+    weekToDate: Math.round(weekToDate), contractsToday,
+    sliceLeft: Math.round(sliceLeft), sliceFilled,
   };
   if (!body.dry_run) {
     await D.upsert('tlt_planner_factor_daily', [{
@@ -900,7 +928,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
       meta: putCt === 0 && sliceFilled
-        ? `${contractsToday} written today \u00b7 ${Math.round(writtenToday)} of ${Math.round(sliceDelta)} delta`
+        ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${expiry ? `${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
           + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
       commit: [[usd0(putStrike * 100 * putCt), 'committed'], [String(putCt * 100), 'shares if assigned']],
@@ -985,11 +1013,12 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       chain: [
         { text: `${Math.round(quarterBudget / 13)}/wk \u00d7 ${priceFactor} (${priceBand}) \u00d7 ${cf.f} (conv ${conviction})`,
           out: `${Math.round(weeklyDelta)} weekly` },
-        { text: `${DOWN[decisionDow].slice(0, 3)} takes ${Math.round(sliceW * 100)}% \u00b7 ${Math.round(sliceDelta)} delta`,
-          out: writtenToday > 0 ? `${Math.round(writtenToday)} written` : `${Math.round(sliceDelta)} delta` },
-        ...(writtenToday > 0 ? [{ text: `${Math.round(sliceDelta)} less ${Math.round(writtenToday)} already written`,
-          out: `${putCt} contract${putCt === 1 ? '' : 's'}` }] : [{ text: `at ${putDelta.toFixed(2)} delta`,
-          out: `${putCt} contract${putCt === 1 ? '' : 's'}` }]),
+        { text: `through ${DOWN[decisionDow].slice(0, 3)} that is ${Math.round((SLICE_CUM[decisionDow] ?? 1) * 100)}% of the week`,
+          out: `${Math.round(weekToDate)} delta` },
+        { text: writtenWeek > 0
+            ? `less ${Math.round(writtenWeek)} written since Monday, at ${putDelta.toFixed(2)} delta`
+            : `at ${putDelta.toFixed(2)} delta`,
+          out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
       ],
       // "0 of 0, nothing clipped" is true and useless on a day that is already
       // done. wanted-versus-got only means something while there is something
