@@ -202,6 +202,11 @@ struct TLTInstructionScreen: View {
                 sources(s.sources)
                 Color.clear.frame(height: 56)
             }
+            // Clamped, and not optional. A VStack inside a ScrollView sizes to its
+            // widest child, so one over-wide row silently drags the WHOLE sheet off
+            // centre — the first build lost the "$" from $73,800 and two letters
+            // from the phase line. Nothing looked broken; everything was shifted.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 17)
             .padding(.top, 62)
         }
@@ -308,7 +313,7 @@ struct TLTInstructionScreen: View {
                 }
                 .padding(.top, 14)
                 if let v = l.verdict {
-                    InkMark.text(v, 14.5).padding(.top, 12)
+                    InkMark.text(v, 14.5).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
                 }
             }
         }
@@ -341,7 +346,7 @@ struct TLTInstructionScreen: View {
     private func tonight(_ t: TLTSheet.Tonight) -> some View {
         TSCard(kind: .fill) {
             Eyebrow(label: t.label, right: t.tag, rightMono: true)
-            InkMark.text(t.headline, 21, .medium, dim: Ink.dim).padding(.top, 14)
+            InkMark.text(t.headline, 21, .medium, dim: Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
             bullets(t.lines).padding(.top, 14)
             if let f = t.foot {
                 Rectangle().fill(Ink.text.opacity(0.12)).frame(height: 1).padding(.top, 14)
@@ -408,7 +413,7 @@ struct TLTInstructionScreen: View {
             }
             .padding(.top, 15)
             Rectangle().fill(Ink.text.opacity(0.12)).frame(height: 1).padding(.top, 13)
-            InkMark.text(w.verdict, 14.5).padding(.top, 12)
+            InkMark.text(w.verdict, 14.5).fixedSize(horizontal: false, vertical: true).padding(.top, 12)
         }
     }
 
@@ -417,6 +422,7 @@ struct TLTInstructionScreen: View {
         TSCard(kind: .ink) {
             Eyebrow(label: w.label).foregroundStyle(Ink.invertText.opacity(0.78))
             InkMark.text(w.headline, 21, .medium, dim: Ink.invertText.opacity(0.62))
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 14)
             bullets(w.lines).padding(.top, 14)
         }
@@ -469,7 +475,7 @@ struct TLTInstructionScreen: View {
             }
             .padding(.top, 16)
             if let cut = c.cut {
-                InkMark.text(cut, 14.5, .regular, dim: Ink.dim).padding(.top, 14)
+                InkMark.text(cut, 14.5, .regular, dim: Ink.dim).fixedSize(horizontal: false, vertical: true).padding(.top, 14)
             }
         }
     }
