@@ -55,6 +55,19 @@ enum InkMark {
     }
 }
 
+/// Caveat, 22pt, weight 400. Chosen because it reads as pencil rather than
+/// calligraphy, and 22pt of it sits at about 15pt of the body face.
+///
+/// `available` exists because a missing custom font does not throw — UIFont
+/// returns nil and SwiftUI quietly substitutes the system face. On a sheet where
+/// the mark is deliberately the least legible thing on the page, that substitution
+/// is invisible in review and wrong in production.
+enum InkScript {
+    static let name = "Caveat"
+    static var available: Bool { UIFont(name: name, size: 12) != nil }
+    static func font(_ size: CGFloat) -> Font { .custom(name, size: size) }
+}
+
 // MARK: - Card grammar
 
 private struct TSCard<Content: View>: View {
@@ -292,12 +305,21 @@ struct TLTInstructionScreen: View {
                     }
                     .padding(.top, 15)
                 }
-                if let mark = i.mark {
+                // A mark is never load-bearing, so an empty corner is the correct
+                // fallback in all three of these cases: the engine had nothing to
+                // say, the reader turned marks off, or Caveat is not bundled.
+                //
+                // That last one matters more than it looks. `.custom("Caveat")`
+                // fails SILENTLY to the system face, which renders a straight sans
+                // at 0.72 opacity and reads as a stray label rather than a note.
+                // Better to show nothing than the wrong face.
+                if let mark = i.mark, AppPrefs.shared.handwriting, InkScript.available {
                     Text(mark)
-                        .font(.custom("Caveat", size: 22))
+                        .font(InkScript.font(22))
                         .foregroundStyle(Ink.invertText.opacity(0.72))
                         .rotationEffect(.degrees(-4))
                         .allowsHitTesting(false)
+                        .padding(.top, -2).padding(.trailing, 0)
                 }
             }
         }

@@ -39,6 +39,16 @@ final class AppPrefs {
         set { UserDefaults.standard.set(newValue, forKey: "prefs.hidePnL") }
     }
 
+    /// Margin notes on the planner sheets. On by default, but it has to stay
+    /// switchable: some readers take them as noise, screenshots and exports are
+    /// cleaner without them, and a script face at 0.6 opacity fails contrast, so
+    /// every sheet must still work with them off. Off removes the mark entirely
+    /// rather than fading it, and nothing reflows, because marks are overlaid.
+    var handwriting: Bool {
+        get { UserDefaults.standard.object(forKey: "prefs.handwriting") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "prefs.handwriting") }
+    }
+
     /// Auto = follow the system; Light = always light; Dark = always
     /// dark. Each Color.theme token resolves dynamically against the
     /// active trait, so the choice flows through the whole app.
