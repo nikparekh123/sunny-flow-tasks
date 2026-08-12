@@ -164,6 +164,48 @@ without limit. Going from 25% to 100% coverage buys **$1.79/share** and requires
 **$643K more** of roll debits to be funded on demand, in the weeks NVDA has just
 rallied. The premium column is not income — most of it is handed back at the roll.
 
+## ATM but fewer, against further but more (`nvda_calls_atm.py`)
+
+Nik's structure: on 5,000 shares sell 15-20 ATM calls, leaving 3,000 uncapped for a
+wild run. Higher premium per contract, so fewer contracts. 38 windows x 72 weeks,
+share path endogenous, calls rolled.
+
+| structure | basis | net premium | roll debit | ITM rate | block capped |
+|---|---|---|---|---|---|
+| no calls | $138.13 | $91,961 | $0 | — | 0% |
+| ATM @ 20% | $135.15 | $104,836 | $346,658 | 49% | 19% |
+| ATM @ 30% | $134.29 | $113,854 | $519,585 | 49% | 29% |
+| ATM @ 40% | $133.88 | $119,159 | $699,038 | 49% | 39% |
+| 0.30d (4% out) @ 25% | $135.46 | $105,860 | **$210,130** | 24% | 24% |
+| 0.30d (4% out) @ 50% | **$134.06** | $120,944 | $425,538 | 24% | 50% |
+
+**The premise is right and the conclusion does not follow.** ATM collects far more
+gross — $451K at 20% cover against $316K for 4%-out at 25%. Net of the roll it loses:
+ATM @ 30% is DOMINATED by 4%-out @ 50%, which reaches a better basis ($134.06 vs
+$134.29) for $94K less cash through the roll.
+
+The ITM rate is why. An ATM call finishes in the money **49%** of the time against
+**24%** at 4% out. Each roll debit is exactly the upside handed back, so the bigger
+premium and the bigger debit are one fact seen twice.
+
+**Why the intuition misfires here.** "Leave shares uncapped for a wild run" is correct
+if calls are ASSIGNED — uncapped shares are then the only ones kept. Under roll-always
+a capped share is never lost, only paid for, so the count of uncapped shares stops
+mattering and total roll debit becomes the cost. The structure optimises the variable
+the rolling discipline neutralises. It also ignores headroom: an ATM-capped share has
+none, a 4%-out-capped share runs 4% free.
+
+Basis gained per $1K of roll debt that must be funded on demand:
+
+| | basis gained | roll debit | per $1K |
+|---|---|---|---|
+| 4% out @ 25% | $2.67 | $210K | **12.7c** |
+| 4% out @ 50% | $4.07 | $426K | 9.6c |
+| ATM @ 20% | $2.98 | $347K | 8.6c |
+| ATM @ 30% | $3.84 | $520K | 7.4c |
+
+Every ATM row is less efficient than every 4%-out row.
+
 ## Strike, filled in (1% and 3% added)
 
 | strike | ct/wk | shares | delivery | net basis | peak cash | total |
