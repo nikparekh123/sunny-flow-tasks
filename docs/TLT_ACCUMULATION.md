@@ -269,9 +269,17 @@ rotation is published a year ahead, so this is a once-a-year edit, not maintenan
 
     weekly delta = (quarter budget ÷ 13) × price factor × conviction factor
 
-    conviction   0–30    0.7×
-                31–70    1.0×
-                71–100   1.3×
+    conviction   ≤ 15         0.7×
+                15 → 50   0.7 → 1.0×     continuous
+                50 → 85   1.0 → 1.3×     continuous
+                ≥ 85         1.3×
+
+A **continuous ramp**, not the three steps first drafted. Steps put a 30% swing on a
+one-point move, and the first live run landed conviction at exactly 70 the day CPI
+cleared — one point from doubling the trade on a number that moves daily. The ramp is
+anchored through the old band centres (15 / 50 / 85) rather than drawn 0-to-100, so
+0.7× and 1.3× stay reachable; a plain line would need a 0 or a 100 to hit them, which
+never happen, quietly compressing the range.
 
 Deliberately narrower than the price multiplier's 0.25×–2.5×. **Price is the driver,
 conviction is the trim** — that matches how Nik actually decides, and it stops a

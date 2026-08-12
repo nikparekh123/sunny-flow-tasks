@@ -62,11 +62,24 @@ const PRICE_BANDS: Array<[number, number, string]> = [
   [Infinity, 0.25, 'above 85'],
 ];
 
-// Conviction is the trim. Stepped, per spec — see the cliff note in the payload.
+// Conviction is the trim: a continuous ramp between the agreed 0.7x and 1.3x.
+//
+// This was three steps. Steps put a 30% swing on a 1-point move, and the live run
+// landed conviction at exactly 70 the day CPI cleared — one point from doubling
+// the trade. The ramp is anchored through the centres of the old bands (15 / 50 /
+// 85) rather than drawn 0-to-100, so the endpoints stay REACHABLE: a plain line
+// would make 0.7x and 1.3x require a 0 or a 100, which never happen, quietly
+// compressing the range everyone agreed to.
 function convFactor(score: number): { f: number; band: string } {
-  if (score <= 30) return { f: 0.7, band: '0–30' };
-  if (score <= 70) return { f: 1.0, band: '31–70' };
-  return { f: 1.3, band: '71–100' };
+  const s = clamp(score, 0, 100);
+  const f = s <= 15 ? 0.7
+    : s <= 50 ? 0.7 + 0.3 * ((s - 15) / 35)
+    : s <= 85 ? 1.0 + 0.3 * ((s - 50) / 35)
+    : 1.3;
+  return {
+    f: Math.round(f * 1000) / 1000,
+    band: s <= 15 ? 'floor (≤15)' : s >= 85 ? 'ceiling (≥85)' : 'ramp',
+  };
 }
 
 // The call side is a function of the PHASE, not the ticker. HARVEST is the only
@@ -445,8 +458,11 @@ Deno.serve(async (req: Request) => {
       if (yrV > 0) yoy = (nowV / yrV - 1) * 100;
     }
     const gap = yoy != null && be != null ? be - yoy : null;   // + = cooling faster than priced
+    // Scale is ±1.5, not the ±1.0 first drafted: the live gap was −1.43, which
+    // pinned the family at exactly 0 and lost the difference between hot and
+    // very hot. A family that saturates stops carrying information.
     F.push(fam('print', 'Inflation vs priced', CAPS.print,
-      gap == null ? null : clamp((gap + 1.0) / 2.0, 0, 1),
+      gap == null ? null : clamp((gap + 1.5) / 3.0, 0, 1),
       gap == null ? 'no CPIAUCSL/T10YIE'
         : `CPI ${yoy!.toFixed(1)}% vs ${be!.toFixed(2)}% breakeven · ${gap > 0 ? 'cooler than priced' : 'hotter than priced'}`));
   }
@@ -679,7 +695,7 @@ Deno.serve(async (req: Request) => {
       families: F,
       normalisedOver: capSum,
       missing: F.filter((f) => !f.ok).map((f) => f.key),
-      cliff: 'Stepped per spec: a 1-point move across 30 or 70 swings size ~30%. Smooth ramp available.',
+      ramp: 'Continuous 0.7×–1.3×, anchored at 15 / 50 / 85. No step, so no 1-point cliff.',
     },
 
     sizing: {
