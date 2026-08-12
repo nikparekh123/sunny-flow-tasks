@@ -353,7 +353,18 @@ const fam = (key: string, label: string, cap: number, pct: number | null, note: 
     ? { key, label, cap, score: 0, pct: null, note, ok: false }
     : { key, label, cap, score: Math.round(cap * clamp(pct, 0, 1) * 10) / 10, pct: clamp(pct, 0, 1), note, ok: true };
 
-Deno.serve(async (req: Request) => {
+// The boot layer's stages are REAL steps, so they are emitted in the order the
+// engine actually works: conviction is scored before the chain is priced, which is
+// the reverse of the first design draft. Showing them in the drawn order would mean
+// marking a step done before it ran, which is the one thing the spec forbids.
+const BOOT_STAGES = [
+  'Reading current position',
+  'Scoring conviction',
+  'Pricing the chain',
+  'Building your updated plan',
+];
+
+async function build(req: Request, emit: (n: number) => void): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const polyKey = Deno.env.get('POLYGON_API_KEY');
@@ -391,6 +402,7 @@ Deno.serve(async (req: Request) => {
       spotOf(polyKey),
       treasuryLongEnd(ymd(addDays(today, -730))),
     ]);
+  emit(1);                                   // position read: book, lots, legs, spot
 
   const st = (stateRows[0] ?? {}) as Row;
   const phase = String(body.phase ?? st.phase ?? 'ACCUMULATE').toUpperCase();
@@ -591,6 +603,7 @@ Deno.serve(async (req: Request) => {
   F.push({ key: 'calendar', label: 'Calendar', cap: CAPS.calendar, score: Math.round(calPenalty * 10) / 10, pct: null, note: calNote, ok: true });
 
   const conviction = Math.round(clamp(base + calPenalty, 0, 100));
+  emit(2);                                   // conviction scored: FRED, Treasury, bloc, calendar
 
   // ── the book ─────────────────────────────────────────────────────────────
   const closedIds = new Set((tradeRows as Row[]).map((t) => String(t.closes_trade_id ?? '')).filter(Boolean));
@@ -756,6 +769,7 @@ Deno.serve(async (req: Request) => {
   const expiry = expiries[0] ?? null;
   let putQuotes: Quote[] = [];
   if (expiry) putQuotes = await chain('put', expiry, Math.floor(spot * 0.92), Math.ceil(spot * 1.04), polyKey);
+  emit(3);                                   // chain priced: real quotes for the candidates
 
   const Tput = expiry ? Math.max(daysBetween(today, parseISO(expiry)), 0) / 365 : 0;
   const cands = putQuotes.map((q) => {
@@ -877,6 +891,7 @@ Deno.serve(async (req: Request) => {
 
   const sheet = {
     ticker: TICKER,
+    boot: { stages: BOOT_STAGES, mark: 'one moment' },
     asOf: { label: dayLabel, refresh: `${spot.toFixed(2)} \u00b7 ${phase}` },
     phase: `${phase.charAt(0)}${phase.slice(1).toLowerCase()} phase`,
 
@@ -1081,6 +1096,7 @@ Deno.serve(async (req: Request) => {
     },
   };
 
+  emit(4);                                   // plan built: sizing, ceiling, the pick
   return json(200, {
     ok: true,
     sheet,
@@ -1241,5 +1257,34 @@ Deno.serve(async (req: Request) => {
       phaseCalls: PHASE_CALLS, sliceWeights: SLICE, strikeStep: STRIKE_STEP,
       spec: 'docs/TLT_ACCUMULATION.md',
     },
+  });
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  let wantsStream = false;
+  try { wantsStream = !!(await req.clone().json())?.stream; } catch { /* no body is the normal case */ }
+  if (!wantsStream) return await build(req, () => {});
+
+  // NDJSON: one {"stage":n} line as each step actually resolves, then the payload.
+  // The client cannot see inside a single atomic fetch, so without this the boot
+  // layer could only ever run on a timer the data ignores.
+  const enc = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(c) {
+      const line = (o: unknown) => c.enqueue(enc.encode(JSON.stringify(o) + '\n'));
+      try {
+        line({ stages: BOOT_STAGES });
+        const res = await build(req, (n) => line({ stage: n }));
+        line(await res.json());
+      } catch (e) {
+        line({ ok: false, error: String(e) });
+      } finally {
+        c.close();
+      }
+    },
+  });
+  return new Response(stream, {
+    headers: { ...corsHeaders, 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' },
   });
 });

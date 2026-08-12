@@ -140,6 +140,54 @@ private struct InkRule: View {
     }
 }
 
+/// The boot layer. Sits UNDER the status and title bars, in the flow, so the app
+/// never reads as a splash screen.
+///
+/// Every stage line is a real step and advances only when the engine says that step
+/// resolved. Nothing here is on a timer: a progress display that moves on its own
+/// is telling you something it does not know.
+struct InkBoot: View {
+    let stages: [String]
+    let stage: Int
+    let mark: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(stages.enumerated()), id: \.offset) { i, s in
+                    Text(s)
+                        .font(InkFont.display(18, i == stage ? .medium : .regular))
+                        .tracking(18 * -0.018)
+                        .foregroundStyle(Ink.text)
+                        .opacity(i < stage ? 0.5 : i == stage ? (pulse ? 0.62 : 1) : 0.22)
+                        .offset(y: i > stage ? 3 : 0)
+                        .animation(.easeInOut(duration: 0.5), value: stage)
+                }
+                InkRule(pct: stages.isEmpty ? 0 : Double(stage) / Double(stages.count), height: 2)
+                    .padding(.top, 34)
+                    .animation(.timingCurve(0.16, 0.8, 0.24, 1, duration: 0.6), value: stage)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let m = mark, AppPrefs.shared.handwriting, InkScript.available {
+                Text(m).font(InkScript.font(22))
+                    .foregroundStyle(Ink.text.opacity(0.6))
+                    .rotationEffect(.degrees(-4))
+                    .padding(.trailing, 34).padding(.bottom, 52)
+                    .allowsHitTesting(false)
+            }
+        }
+        .padding(EdgeInsets(top: 0, leading: 34, bottom: 40, trailing: 34))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Ink.canvas)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) { pulse = true }
+        }
+    }
+}
+
 // MARK: - Screen
 
 struct TLTInstructionScreen: View {
@@ -150,10 +198,16 @@ struct TLTInstructionScreen: View {
     var body: some View {
         ZStack(alignment: .top) {
             Ink.canvas.ignoresSafeArea()
-            if let s = store.sheet {
-                sheetBody(s)
-            } else {
-                placeholder
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 62)          // clears the title bar
+                if let s = store.sheet {
+                    sheetBody(s)
+                } else if store.booting {
+                    InkBoot(stages: store.stages, stage: store.stage,
+                            mark: store.sheet?.boot?.mark ?? "one moment")
+                } else {
+                    placeholder
+                }
             }
             titleBar
         }

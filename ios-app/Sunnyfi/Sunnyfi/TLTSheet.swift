@@ -11,6 +11,7 @@ import Foundation
 /// the view formats, rounds, or assembles a sentence. See docs/TLT_ACCUMULATION.md.
 struct TLTSheet: Decodable {
     let ticker: String
+    let boot: Boot?
     let asOf: AsOf
     let phase: String
     let instruction: Instruction
@@ -28,7 +29,7 @@ struct TLTSheet: Decodable {
     let sources: Sources
 
     enum CodingKeys: String, CodingKey {
-        case ticker, asOf, phase, instruction, ladder, tonight, holdback, calls, why
+        case ticker, boot, asOf, phase, instruction, ladder, tonight, holdback, calls, why
         case position = "where"
         case progress, ceiling, conviction, coming, book, sources
     }
@@ -151,11 +152,18 @@ struct TLTSheet: Decodable {
         struct Leg: Decodable { let qty: String; let leg: String; let when: String }
     }
 
+    struct Boot: Decodable { let stages: [String]; let mark: String? }
+
     struct Sources: Decodable {
         let label: String
         /// [[name, kind, age], …] — all strings, so the nested array is safe here.
         let rows: [[String]]
     }
+}
+
+private struct Progress: Decodable {
+    let stages: [String]?
+    let stage: Int?
 }
 
 private struct TLTPlannerResponse: Decodable {
@@ -176,32 +184,59 @@ final class TLTSheetStore {
     /// key and which type, on screen.
     private(set) var decodeError: String?
 
+    /// Stage list and index, driven by the engine's NDJSON progress lines. Never by
+    /// a timer: the boot layer's whole claim is that a stage completing means that
+    /// step completed, and a client cannot see inside one atomic fetch.
+    private(set) var stages: [String] = []
+    private(set) var stage = 0
+    var booting: Bool { sheet == nil && decodeError == nil }
+
     func load() async {
         guard !loading else { return }
         loading = true
         defer { loading = false }
         decodeError = nil
+        stage = 0
 
         guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/tlt-planner") else {
             decodeError = "bad url"; return
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.timeoutInterval = 30
+        req.timeoutInterval = 45
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(Secrets.supabasePublishableKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(Secrets.supabasePublishableKey)", forHTTPHeaderField: "Authorization")
-        req.httpBody = Data("{}".utf8)
+        req.httpBody = Data(#"{"stream":true}"#.utf8)
 
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let (bytes, resp) = try await URLSession.shared.bytes(for: req)
             if let http = resp as? HTTPURLResponse, http.statusCode >= 400 {
-                decodeError = "HTTP \(http.statusCode) — \(String(data: data, encoding: .utf8)?.prefix(160) ?? "")"
+                decodeError = "HTTP \(http.statusCode)"
                 return
             }
-            let parsed = try JSONDecoder().decode(TLTPlannerResponse.self, from: data)
-            if let s = parsed.sheet { sheet = s }
-            else { decodeError = parsed.error ?? "no sheet in response — is tlt-planner deployed?" }
+            let dec = JSONDecoder()
+            // A function that has not been redeployed yet ignores `stream` and answers
+            // with one unbroken JSON body. That arrives as a single line and decodes
+            // here exactly the same way, so an old deploy degrades to no progress
+            // rather than to no sheet.
+            for try await line in bytes.lines {
+                guard let data = line.data(using: .utf8), !data.isEmpty else { continue }
+                if let p = try? dec.decode(Progress.self, from: data) {
+                    if let st = p.stages { stages = st }
+                    if let n = p.stage { stage = n }
+                    if p.stages != nil || p.stage != nil { continue }
+                }
+                let parsed = try dec.decode(TLTPlannerResponse.self, from: data)
+                if let sh = parsed.sheet {
+                    if stages.isEmpty, let b = sh.boot { stages = b.stages }
+                    stage = max(stage, stages.count)
+                    sheet = sh
+                } else {
+                    decodeError = parsed.error ?? "no sheet in response"
+                }
+            }
+            if sheet == nil && decodeError == nil { decodeError = "stream ended with no sheet" }
         } catch let DecodingError.keyNotFound(key, ctx) {
             decodeError = "missing key '\(key.stringValue)' at \(path(ctx))"
         } catch let DecodingError.typeMismatch(type, ctx) {
