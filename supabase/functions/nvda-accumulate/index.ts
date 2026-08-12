@@ -600,34 +600,43 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // rather than the aggregated legs, because aggregation keeps only the earliest
   // fill date and would miss a position topped up today at a strike opened
   // earlier.
-  const writtenToday = (open as Row[])
-    .filter((t) => String(t.option_type) === 'put' && String(t.direction) === 'short'
-      && String(t.trade_date ?? '').slice(0, 10) === todayISO)
-    .reduce((sum, t) => {
+  // Written = NET delta put on, not gross opens. A contract opened and closed inside
+  // the same window added no delta and must not spend the week's budget: TLT opened
+  // and closed 10 puts on 12 Aug and the week read 894 of 547 delta — "slice filled" —
+  // when the real figure was 394 and three contracts were still owed.
+  //
+  // Netted by contract over the window so a close cancels its open wherever both fall
+  // inside it. Built from raw fills rather than the aggregated legs, because
+  // aggregation keeps only the earliest fill date.
+  const writtenSince = (from: string): { delta: number; contracts: number } => {
+    const net = new Map<string, number>();
+    for (const t of tradeRows as Row[]) {
+      if (String(t.option_type) !== 'put' || String(t.direction) !== 'short') continue;
+      if (String(t.trade_date ?? '').slice(0, 10) < from) continue;
+      const key = `${t.strike}|${String(t.expiry).slice(0, 10)}`;
       const ct = fin(Number(t.contracts));
-      const K = fin(Number(t.strike));
-      const T = Math.max(daysBetween(today, parseISO(String(t.expiry))), 0) / 365;
-      return sum + putDeltaAbs(spot!, K, T, iv) * ct * 100;
-    }, 0);
+      net.set(key, (net.get(key) ?? 0) + (String(t.action) === 'open' ? ct : -ct));
+    }
+    let delta = 0, contracts = 0;
+    for (const [key, ct] of net) {
+      if (ct <= 0) continue;
+      const [K, exp] = key.split('|');
+      const T = Math.max(daysBetween(today, parseISO(exp)), 0) / 365;
+      delta += putDeltaAbs(spot!, Number(K), T, iv) * ct * 100;
+      contracts += ct;
+    }
+    return { delta, contracts };
+  };
+  const today_ = writtenSince(todayISO);
+  const writtenToday = today_.delta;
+  const contractsToday = today_.contracts;
   const weekStart = (() => {
     const d = new Date(today.getTime());
     const dow = d.getUTCDay();
     d.setUTCDate(d.getUTCDate() - ((dow + 6) % 7));   // back to Monday
     return d.toISOString().slice(0, 10);
   })();
-  const writtenWeek = (open as Row[])
-    .filter((t) => String(t.option_type) === 'put' && String(t.direction) === 'short'
-      && String(t.trade_date ?? '').slice(0, 10) >= weekStart)
-    .reduce((sum, t) => {
-      const ct = fin(Number(t.contracts));
-      const K = fin(Number(t.strike));
-      const T = Math.max(daysBetween(today, parseISO(String(t.expiry))), 0) / 365;
-      return sum + putDeltaAbs(spot!, K, T, iv) * ct * 100;
-    }, 0);
-  const contractsToday = (open as Row[])
-    .filter((t) => String(t.option_type) === 'put' && String(t.direction) === 'short'
-      && String(t.trade_date ?? '').slice(0, 10) === todayISO)
-    .reduce((n, t) => n + fin(Number(t.contracts)), 0);
+  const writtenWeek = writtenSince(weekStart).delta;
 
   // A short put is a commitment to buy, never income. Every unexpired one counts,
   // not just this week's.
