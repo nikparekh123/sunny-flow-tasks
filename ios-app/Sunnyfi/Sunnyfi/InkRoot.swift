@@ -53,9 +53,17 @@ struct InkRoot: View {
             // and NvdaPlannerV2Screen both stay in the target: the pages read
             // PlanV2Store, and the older screens still hold the force cards and
             // the split ladder that nothing has rebuilt yet.
-            PlannerPagesScreen(store: sym == "TLT" ? tltStore : store,
-                               ticker: sym == "TLT" ? "TLT" : "NVDA",
-                               onBack: { showPlanner = false })
+            // TLT gets its own sheet. It used to open PlannerPagesScreen with a TLT
+            // store, which meant tapping TLT showed the NVDA week-score model — nine
+            // circles and a baseline of 50 — for a book that has neither. The two
+            // planners answer different questions: NVDA sells vol against a block it
+            // keeps, TLT accumulates one it does not have yet.
+            if sym == "TLT" {
+                TLTInstructionScreen(onBack: { showPlanner = false })
+            } else {
+                PlannerPagesScreen(store: store, ticker: "NVDA",
+                                   onBack: { showPlanner = false })
+            }
         }
     }
 
