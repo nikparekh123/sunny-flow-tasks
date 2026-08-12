@@ -61,7 +61,7 @@ const CAPS = {
 // days NVDA spent below its own MA100, and the forward-20d return in each:
 //   deeper than -11.2%  +7.0%   ·   -11.2 to -3.3%  +5.7%
 //   -3.3% to flat       +1.4%   ·   above           +1.3%
-// ORDER MATTERS: scanned with find(belowPct < hi) and must stay ASCENDING.
+// ORDER MATTERS: scanned with find(vsMa < hi) and must stay ASCENDING.
 const MA_BANDS: Array<[number, number, string]> = [
   [-11.2, 2.50, 'more than 11% below'],
   [-3.3, 1.50, '3 to 11% below'],
@@ -722,7 +722,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   };
   if (!body.dry_run) {
     await D.upsert('nvda_planner_factor_daily', [{
-      taken_on: todayISO, spot, ma: ma100, below_pct: Math.round(belowPct * 100) / 100,
+      taken_on: todayISO, spot, ma: ma100, vs_ma_pct: Math.round(vsMa * 100) / 100,
       conviction, families: F, sizing,
     }], 'taken_on');
   }
