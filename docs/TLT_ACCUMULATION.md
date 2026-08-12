@@ -15,16 +15,22 @@ directions. That is the structural difference and everything below follows from 
 | | |
 |---|---|
 | target | ~100,000 shares |
-| horizon | Dec 2027 — **soft**, roughly 100 weeks |
+| horizon | **100–120 weeks** from Aug 2026 — a band, not a date |
 | quarterly budget | 10–12K shares |
 | cash ceiling | **$400,000** outstanding short-put commitment |
 | cadence | thrice weekly, same as NVDA |
 | floor | long puts sized to the **fully-assigned** share count |
 
-One inconsistency to resolve: 10–12K over 7.7 quarters is 77–92K, not 100K.
-Either the target is ~85K, the quarterly budget is 13K, or the horizon runs past
-Dec 2027. The tool will do this arithmetic every week; it should do it against a
-number that is meant.
+The horizon is a band because the pace is not fixed. 100K arrives in 108 weeks at
+12K a quarter, 118 weeks at 11K, and 130 weeks at 10K. So the band closes **only if
+the quarterly budget runs in its upper half** — 10K a quarter and the programme
+runs past its own outer edge. Treat 11–12K as the working budget and 10K as the
+number that means the horizon has to give.
+
+The band is what makes "soft" measurable. Inside 100 weeks the programme is early;
+between 100 and 120 it is on plan; past 120 the tool says **behind**, and the
+choice is Nik's — extend, raise the quarterly budget, or accept a smaller block.
+A soft horizon that stretches forever reports nothing.
 
 ## Three factors, two jobs
 
@@ -45,11 +51,14 @@ drift call IS the strategy.
 
 ### Quarterly budget — a budget, NOT a quota
 
-10–12K shares, set at the start of each quarter, reviewed at the end.
+10–12K shares, set at the start of each quarter, reviewed at the end. 11–12K is the
+working number; see the horizon band above for why 10K does not close.
 
 **A missed quarter is a correct outcome, not a shortfall.** If TLT sat at 88 all
 quarter and only 6K arrived, the next quarter's budget does not become 18K. It
-stays 10–12K and the gap extends the horizon. That is what "soft horizon" buys.
+stays 10–12K and the gap spends weeks out of the 100–120 band. That is what the
+band is for: the cost of a missed quarter is visible as position in the band, not
+as a pace that quietly accelerates.
 
 This rule exists because the obvious implementation breaks: *remaining gap ÷
 remaining weeks* accelerates the pace as a quarter runs out, which means buying
@@ -139,7 +148,6 @@ and the phase disagree.
 
 ## Open before build
 
-- Reconcile 100K against 10–12K per quarter over the horizon.
 - The rates conviction families (drafted separately). `supply` has no free feed;
   `real` needs FRED. Seven families with wider caps is the fallback.
 - Whether HOLD and HARVEST need their own call-side settings or inherit NVDA's.
