@@ -155,24 +155,41 @@ setting follows the intention.
 
 | | ACCUMULATE | HOLD | HARVEST |
 |---|---|---|---|
-| calls exist to | **trim delta** | **earn income** | **exit the block** |
-| distance | far OTM, ≤ 0.15δ | OTM, ~0.25δ | **ATM, ~0.50δ** |
-| coverage cap | ≤ 20% of shares | ≤ 50% | up to 100% |
-| assignment | avoid — it undoes the accumulation | tolerable | **sought** |
-| sizing driver | net-delta gap only | income + delta | exit pace |
+| calls exist to | **nothing — off** | **earn income** | **exit the block** |
+| distance | — | OTM, ~0.25δ | **ATM, ~0.50δ** |
+| coverage cap | **0** | ≤ 50% | up to 100% |
+| assignment | — | tolerable | **sought** |
+| sizing driver | — | income + delta | exit pace |
+
+**ACCUMULATE is off, and that is measured rather than reasoned.** The first draft
+had 0.15δ at 20% coverage. Testing it over 105 weekly rolls on real marks
+(`research/tlt-strike-policy`) showed calls lose money while the block is being
+built: in the rally sub-period they cost **$6,589** at 0.15δ and **$13,921** at the
+money, and gave away a third to 41% of the shares. Across the whole window they
+appeared to *gain* $40K — but that window fell 91.6 to 82.2 and the winning arms
+ended holding a quarter of what they bought, so the gain was share-shedding in a
+decline, not premium. A smaller dose of a losing trade is still a losing trade,
+which is why the setting is off rather than reduced.
 
 **HARVEST is the only phase that inherits NVDA's ATM finding** — and it does so
 because that is the only phase where the intention finally matches: monetising a
 block you are content to have called away. Reading the ATM result as a property of
 covered calls rather than of intent would put ATM calls on a block being
-accumulated, which is the worst cell in the table.
+accumulated, which the test confirms is the worst cell in the table.
 
-**In ACCUMULATE, calls are the last lever, not the first.** If net delta is too
-high, the correct first move is to write *fewer puts*. A call caps upside on shares
-you are actively paying to acquire. Calls only appear once the put side is already
-at its floor and delta is still over — which in practice means after a run of
-assignments. Expect the ACCUMULATE call side to be quiet for long stretches; that
-is the design working, not a bug.
+**In ACCUMULATE, net delta is trimmed by writing fewer puts.** That is now the only
+lever, since calls are off. A call caps upside on shares you are actively paying to
+acquire, and pays too little to be worth it.
+
+### The put strike: ATM
+
+**0.50 delta**, not the 0.45 first drafted. ATM won the full window, was never
+worst in any sub-period, and — the reason that actually decides it — **kept
+accumulating through the rally where OTM stalled: 7,800 shares against OTM's
+5,100.** An out-of-the-money put stops being assigned exactly when TLT is running
+away from you, so an OTM policy quietly halts the programme in the one regime where
+falling behind is most expensive. The P&L column barely shows this; the share count
+does.
 
 ### Coverage counts delivered shares only
 

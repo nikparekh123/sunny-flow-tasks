@@ -85,23 +85,31 @@ function convFactor(score: number): { f: number; band: string } {
 // The call side is a function of the PHASE, not the ticker. HARVEST is the only
 // phase that inherits NVDA's ATM result, because it is the only one where the
 // intention matches: monetising a block you are content to lose.
-const PHASE_CALLS: Record<string, { delta: number; coverage: number; why: string }> = {
-  ACCUMULATE: { delta: 0.15, coverage: 0.20, why: 'trim delta — a call caps shares you are paying to acquire' },
-  HOLD:       { delta: 0.25, coverage: 0.50, why: 'earn income on a block that has stopped growing' },
-  HARVEST:    { delta: 0.50, coverage: 1.00, why: 'exit — assignment is the point' },
+//
+// ACCUMULATE is OFF, measured rather than assumed (research/tlt-strike-policy,
+// 105 weekly rolls on real marks). Across the whole window calls looked worth
+// ~$40K — but that window fell 91.6 to 82.2, and the winning arms ended holding
+// 25-28% of what they bought. They were not earning premium, they were selling
+// shares into a decline. In the rally sub-period, where the answer is not
+// contaminated by direction, calls cost $6,589 at 0.15 delta and $13,921 at the
+// money, and gave away a third to 41% of the block. A smaller dose of a losing
+// trade is still a losing trade, so the old 0.15 delta / 20% setting is gone
+// rather than reduced.
+const PHASE_CALLS: Record<string, { enabled: boolean; delta: number; coverage: number; why: string }> = {
+  ACCUMULATE: { enabled: false, delta: 0, coverage: 0,
+                why: 'off — measured to cost money and shares in a rally while the block is being built' },
+  HOLD:       { enabled: true, delta: 0.25, coverage: 0.50, why: 'earn income on a block that has stopped growing' },
+  HARVEST:    { enabled: true, delta: 0.50, coverage: 1.00, why: 'exit — assignment is the point' },
 };
 
 // Mon/Wed/Fri each write a slice of the week. Friday's is smallest: it carries
 // the weekend, and the weekend is when you cannot react.
 const SLICE: Record<number, number> = { 1: 0.40, 3: 0.40, 5: 0.20 };
 
-// No calls in ACCUMULATE below this many DELIVERED shares. Nik's call, 12 Aug.
-// Below it the 20% coverage cap allows one or two contracts of far-OTM premium —
-// single-digit dollars — against the risk of having shares called away that the
-// put side just paid to acquire. The trade is not worth the ticket, and the
-// instinct it feeds (assigned, so now write calls) is the wheel, which is the
-// opposite strategy to this one.
-const ACCUM_CALL_FLOOR = 5000;
+// The 5,000-share call floor that stood here is gone — superseded, not relaxed.
+// It existed to keep calls off while the block was small; the test then showed
+// calls lose money in a rally at ANY size, so ACCUMULATE turns them off outright
+// and the floor has nothing left to guard.
 
 // ── Black-Scholes (single clock) ────────────────────────────────────────────
 function ncdf(x: number): number {
@@ -370,7 +378,11 @@ Deno.serve(async (req: Request) => {
   const horizonLo = Number(st.horizon_lo_wk ?? 100);
   const horizonHi = Number(st.horizon_hi_wk ?? 120);
   const startedOn = String(st.started_on ?? '2026-08-10');
-  const putDeltaTgt = Number(st.put_delta_tgt ?? 0.45);
+  // 0.50, not the 0.45 first drafted. ATM won the full window, was never worst in
+  // any sub-period, and — the reason that actually decides it — kept accumulating
+  // through the rally where OTM stalled: 7,800 shares against OTM's 5,100. An OTM
+  // put stops delivering exactly when TLT runs away from you.
+  const putDeltaTgt = Number(st.put_delta_tgt ?? 0.50);
 
   // spot: Polygon first, tlt_quote as the fallback
   let spot = spotLive;
@@ -644,9 +656,7 @@ Deno.serve(async (req: Request) => {
   // over, which in practice means after a run of assignments.
   const deltaTarget = shares + sliceDelta;
   const deltaOver = netDelta - deltaTarget;
-  const belowCallFloor = phase === 'ACCUMULATE' && shares < ACCUM_CALL_FLOOR;
-  const callsWarranted = phase === 'ACCUMULATE'
-    ? (!belowCallFloor && putCt === 0 && deltaOver > 200 ? Math.min(coverRoom, Math.floor(deltaOver / (cs.delta * 100))) : 0)
+  const callsWarranted = !cs.enabled ? 0
     : Math.min(coverRoom, Math.max(0, Math.floor((deltaOver > 0 ? deltaOver : shares * cs.coverage) / (cs.delta * 100))));
 
   let callStrike: number | null = null, callMid = 0;
@@ -761,13 +771,12 @@ Deno.serve(async (req: Request) => {
         credit: Math.round(callMid * 100 * callsWarranted),
         coverageCap: cs.coverage,
         coveredNow,
-        floor: phase === 'ACCUMULATE' ? ACCUM_CALL_FLOOR : null,
-        belowFloor: belowCallFloor,
+        enabled: cs.enabled,
         say: callsWarranted > 0 && callStrike != null
           ? `Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}.`
-          : belowCallFloor
-            ? `No calls until ${ACCUM_CALL_FLOOR.toLocaleString()} shares — ${shares.toLocaleString()} held.`
-            : phase === 'ACCUMULATE' ? 'No calls — the put side is doing the work.' : 'No calls warranted.',
+          : !cs.enabled
+            ? 'No calls while accumulating — they cost money and shares in a rally.'
+            : 'No calls warranted.',
       },
       netAfter: Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta),
     },

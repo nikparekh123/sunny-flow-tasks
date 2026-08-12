@@ -38,7 +38,7 @@ create table if not exists public.tlt_planner_state (
   horizon_lo_wk  int  not null default 100,
   horizon_hi_wk  int  not null default 120,
   started_on     date not null default '2026-08-10',  -- first TLT leg
-  put_delta_tgt  numeric not null default 0.45,
+  put_delta_tgt  numeric not null default 0.50,   -- ATM; see research/tlt-strike-policy
   updated_at     timestamptz default now()
 );
 
