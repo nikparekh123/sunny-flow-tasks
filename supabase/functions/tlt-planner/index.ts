@@ -976,9 +976,14 @@ Deno.serve(async (req: Request) => {
           out: `${putCt} contract${putCt === 1 ? '' : 's'}` }] : [{ text: `at ${putDelta.toFixed(2)} delta`,
           out: `${putCt} contract${putCt === 1 ? '' : 's'}` }]),
       ],
-      verdict: ceilingBinds
-        ? `*${putCt} of ${wantCt}*, _the ceiling cut it_`
-        : `*${putCt} of ${wantCt}*, _nothing clipped_`,
+      // "0 of 0, nothing clipped" is true and useless on a day that is already
+      // done. wanted-versus-got only means something while there is something
+      // left to want.
+      verdict: sliceFilled
+        ? `*${contractsToday} written*, _slice filled_`
+        : ceilingBinds
+          ? `*${putCt} of ${wantCt}*, _the ceiling cut it_`
+          : `*${putCt} of ${wantCt}*, _nothing clipped_`,
     },
 
     where: {
