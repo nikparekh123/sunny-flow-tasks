@@ -531,7 +531,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     }
   }
 
-  const legs: Leg[] = [...byContract.values()].map((a) => {
+  const legsAll: Leg[] = [...byContract.values()].map((a) => {
     const t = a.row;
     const ct = a.ct;
     const K = fin(Number(t.strike));
@@ -552,15 +552,18 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     };
   }).sort((a, b) => a.expiry.localeCompare(b.expiry) || a.strike - b.strike);
 
+  // drop_calls models closing the legacy overwrite as part of the reduction — the only
+  // safe sequencing, since 65 short calls against 1,500 shares is 5,000 shares of NAKED
+  // call, the one position here with unbounded loss. Filtered HERE rather than at each
+  // use site: the first attempt patched shortCalls and the delta sum only, so the book
+  // and tonight cards went on listing calls the same screen said had been closed.
+  const legs: Leg[] = wi?.drop_calls
+    ? legsAll.filter((l) => !(l.type === 'call' && l.dir === 'short'))
+    : legsAll;
   const shortPuts = legs.filter((l) => l.type === 'put' && l.dir === 'short');
   const longPuts = legs.filter((l) => l.type === 'put' && l.dir === 'long');
-  // drop_calls models closing the legacy overwrite as part of the reduction, which is
-  // the only safe way to sell the block: 65 short calls against 1,500 shares is 5,000
-  // shares of NAKED call, and that is the one position here with unbounded loss.
-  const shortCalls = wi?.drop_calls
-    ? [] : legs.filter((l) => l.type === 'call' && l.dir === 'short');
-  const optDelta = (wi?.drop_calls ? legs.filter((l) => !(l.type === 'call' && l.dir === 'short')) : legs)
-    .reduce((s, l) => s + l.shares, 0);
+  const shortCalls = legs.filter((l) => l.type === 'call' && l.dir === 'short');
+  const optDelta = legs.reduce((s, l) => s + l.shares, 0);
   const netDelta = shares + optDelta;
 
   // ── what today already did ───────────────────────────────────────────────
