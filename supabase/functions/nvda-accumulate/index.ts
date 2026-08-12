@@ -602,8 +602,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
 
   // ── sizing ───────────────────────────────────────────────────────────────
   // The dial. Distance below MA100, not a price.
-  const belowPct = ma100 ? (spot! / ma100 - 1) * 100 : 0;
-  const band = MA_BANDS.find(([hi]: [number, number, string]) => belowPct < hi) ?? MA_BANDS[MA_BANDS.length - 1];
+  // Signed against the mean: POSITIVE is above it, negative is below. Named for what
+  // it is rather than for the direction we care about — a field called below_pct
+  // holding +9.51 to mean "9.5% above" is a wrong conclusion waiting to happen.
+  const vsMa = ma100 ? (spot! / ma100 - 1) * 100 : 0;
+  const band = MA_BANDS.find(([hi]: [number, number, string]) => vsMa < hi) ?? MA_BANDS[MA_BANDS.length - 1];
   const priceFactor = band[1], priceBand = band[2];
   const cf = convFactor(conviction, convWeight);
   const weeklyDelta = (quarterBudget / 13) * priceFactor * cf.f;

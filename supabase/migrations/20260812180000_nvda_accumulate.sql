@@ -48,7 +48,7 @@ create table if not exists public.nvda_planner_factor_daily (
   taken_on   date primary key,
   spot       numeric,
   ma         numeric,
-  below_pct  numeric,          -- the speed dial's actual reading
+  vs_ma_pct  numeric,          -- signed against the mean: POSITIVE is above it
   conviction int,              -- scored but unweighted
   families   jsonb,
   sizing     jsonb,
