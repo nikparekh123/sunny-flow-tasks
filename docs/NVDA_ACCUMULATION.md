@@ -137,6 +137,26 @@ conviction`. A useful side effect: it self-corrects for the reduction. Holding 7
 against a 15,000 target it writes 104/week, not 188 — and steps back up on its own
 once the block is sold down.
 
+## Slices carry within the week
+
+The week's delta is split 40% Monday / 40% Wednesday / 20% Friday. Rounding each
+slice to whole contracts *independently* throws the remainder away, and near one
+contract a slice that is the entire reachable output:
+
+| | old, per-slice | new, week-to-date |
+|---|---|---|
+| throttled, 63 delta/wk | **0% – 156%** of target (writes nothing at 0.54 delta) | 71% – 92%, always 1 contract |
+| plan point, 188 delta/wk | 86% – 130% | 86% – 104% |
+
+At 63 delta a week every slice lands near 0.47 contracts and rounds to zero, so the
+week wrote NOTHING — while five hundredths of delta the other way rounded all three
+up and wrote double. Sizing against the week to date (`SLICE_CUM`, less everything
+written since Monday) makes the reachable output continuous. It resets each Monday,
+so a slow week never banks contracts into a fast one.
+
+This also means the **~5 contracts a week** above carried some rounding inflation:
+at 188 delta and 0.49 delta the honest number is 4.
+
 ## What is still open
 
 - **Net delta target.** TLT's fell out of its accumulation rate. Here it is a decision,
