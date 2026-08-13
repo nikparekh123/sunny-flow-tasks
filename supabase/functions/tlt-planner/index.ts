@@ -800,7 +800,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
       meta: putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
-        : `${expiry ? `${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
+        : `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
           + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
       commit: [[usd0(putStrike * 100 * putCt), 'committed'], [String(putCt * 100), 'shares if assigned']],
       basis: { value: (putStrike - putMid).toFixed(2), label: 'basis if assigned' },
