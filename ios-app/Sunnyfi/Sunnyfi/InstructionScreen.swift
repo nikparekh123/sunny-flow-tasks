@@ -73,11 +73,17 @@ enum InkScript {
 private struct TSCard<Content: View>: View {
     enum Kind { case plain, ink, fill, aside }
     var kind: Kind = .plain
+    /// Opt-in, and only the two swipe cards use it. A card normally hugs its content,
+    /// so an outer maxHeight would centre it inside a taller slot rather than fill it
+    /// — the background is applied to the padded VStack, not to the outer frame.
+    var stretch = false
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity,
+                   maxHeight: stretch ? .infinity : nil,
+                   alignment: stretch ? .topLeading : .leading)
             .padding(EdgeInsets(top: 16, leading: 17, bottom: 17, trailing: 17))
             .background(bg)
             .overlay(RoundedRectangle(cornerRadius: Ink.radiusCard).strokeBorder(border, lineWidth: 1))
@@ -302,17 +308,25 @@ struct InstructionScreen: View {
                 if let cc = s.callCard {
                     VStack(spacing: 11) {
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 0) {
+                            // maxHeight .infinity inside an HStack is what makes the
+                            // two cards equal: the stack takes the taller card's
+                            // height, then both expand into it. TSCard hugs its
+                            // content otherwise, and the two cards do not carry the
+                            // same number of lines.
+                            HStack(alignment: .top, spacing: 0) {
                                 // Padding INSIDE a full-width slot, not spacing between
                                 // slots: the paging step has to stay exactly one
                                 // container width or the cards stop landing square.
-                                hero(s.instruction)
+                                hero(s.instruction, stretch: true)
+                                    .frame(maxHeight: .infinity)
                                     .padding(.horizontal, 7)
                                     .containerRelativeFrame(.horizontal).id(0)
-                                hero(cc.asInstruction)
+                                hero(cc.asInstruction, stretch: true)
+                                    .frame(maxHeight: .infinity)
                                     .padding(.horizontal, 7)
                                     .containerRelativeFrame(.horizontal).id(1)
                             }
+                            .fixedSize(horizontal: false, vertical: true)
                             .scrollTargetLayout()
                         }
                         .scrollTargetBehavior(.paging)
@@ -387,8 +401,8 @@ struct InstructionScreen: View {
     }
 
     // MARK: 1 — the instruction
-    private func hero(_ i: PlannerSheet.Instruction) -> some View {
-        TSCard(kind: .ink) {
+    private func hero(_ i: PlannerSheet.Instruction, stretch: Bool = false) -> some View {
+        TSCard(kind: .ink, stretch: stretch) {
             ZStack(alignment: .topTrailing) {
                 VStack(alignment: .leading, spacing: 0) {
                     Eyebrow(label: i.label).foregroundStyle(Ink.invertText.opacity(0.78))
