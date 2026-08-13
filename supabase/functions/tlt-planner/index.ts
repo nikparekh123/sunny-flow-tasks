@@ -194,6 +194,22 @@ function daysBetween(a: Date, b: Date): number { return Math.round((b.getTime() 
 // New York is UTC-4 half the year and UTC-5 the other half, and a fixed offset is
 // wrong for one of them. Holidays are NOT handled — the NYSE calendar is not
 // derivable, so Thanksgiving reads "Live" until a holiday table exists.
+// Polygon knows the exchange calendar -- holidays, half-days, early closes -- which a
+// clock cannot derive. The clock version below stays as the fallback: if this call
+// fails or the plan does not cover it, a wrong label is better than a dead screen.
+async function marketNow(key: string): Promise<{ open: boolean; label: string } | null> {
+  try {
+    const r = await fetch(`${POLY}/v1/marketstatus/now?apiKey=${key}`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const m = String(j?.market ?? '');
+    if (!m) return null;
+    // Extended hours counts as closed: Polygon's feed is delayed and the planner
+    // prices off the regular session, so "Live" would overstate what it is reading.
+    return m === 'open' ? { open: true, label: 'Live' } : { open: false, label: 'Market closed' };
+  } catch { return null; }
+}
+
 function marketState(now: Date): { open: boolean; label: string } {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
@@ -415,7 +431,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const fiveYrAgo = ymd(addDays(today, -5 * 365));
 
   // ── state, book, and every network call that does not depend on spot ──────
-  const [stateRows, blocRows, blocMetaRows, eventRows, tradeRows, lotRows, ivRows, spotLive, auctions] =
+  const [stateRows, blocRows, blocMetaRows, eventRows, tradeRows, lotRows, ivRows, spotLive, auctions, polyMarket] =
     await Promise.all([
       D.get('tlt_planner_state?id=eq.1&select=*'),
       D.get('tlt_voter_bloc?select=code,name,lean,chair&order=sort.asc'),
@@ -429,6 +445,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       D.get('tlt_iv_daily?select=*&order=date.desc&limit=1'),
       spotOf(polyKey),
       treasuryLongEnd(ymd(addDays(today, -730))),
+      marketNow(polyKey),
     ]);
   emit(1);                                   // position read: book, lots, legs, spot
 
@@ -968,7 +985,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     ticker: TICKER,
     boot: { stages: BOOT_STAGES, mark: 'one moment' },
     asOf: { label: dayLabel, refresh: `${spot.toFixed(2)} \u00b7 ${phase}`,
-            market: marketState(new Date()) },
+            market: polyMarket ?? marketState(new Date()) },
     phase: `${phase.charAt(0)}${phase.slice(1).toLowerCase()} phase`,
 
     instruction: {
