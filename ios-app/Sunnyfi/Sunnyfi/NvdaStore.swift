@@ -42,6 +42,13 @@ final class NvdaStore {
     private var ticker: String { prefix.uppercased() }
     private func tbl(_ name: String) -> String { "\(prefix)_\(name)" }
 
+    /// TEMPORARY. Five rounds were spent guessing which layer dropped the option
+    /// marks — Polygon, the marks cron, the EOD snapshot, the id lookup, RLS — and
+    /// every one of them checked out against the database while the screen still
+    /// said "no mark". This makes the app state the numbers itself. Remove once the
+    /// cause is found.
+    private(set) var marksDebug = "—"
+
     var high52: Double? { Array(nvCloses.suffix(252)).max() }
 
     /// Seed the close series directly — fixtures/preview only (the TLT book, etc.).
@@ -112,10 +119,18 @@ final class NvdaStore {
                 .execute().value
 
             let (t, l, sl, q, mLive, c, nvc) = try await (trades, lots, sells, quotes, marks, closes, nvCloseRows)
-            let mEod = (try? await marksEod) ?? []
+            // Captured, not swallowed: an RLS or decode failure returned [] here and
+            // looked exactly like an empty table.
+            var eodErr = ""
+            var mEod: [NvOptionMarkEod] = []
+            do { mEod = try await marksEod } catch { eodErr = String(describing: error).prefix(120).description }
             // Chosen HERE rather than inside NvDerive: every derivation then sees one
             // marks list and none of the P&L maths has to know the close exists.
             let m = NvDerive.marksForSession(live: mLive, eod: mEod)
+            marksDebug = "live \(mLive.count)/\(mLive.filter { $0.mark != nil }.count) · "
+                + "eod \(mEod.count)/\(mEod.filter { $0.mark != nil }.count) · "
+                + "used \(m.count) · \(NvDerive.marketIsOpen() ? "OPEN" : "CLOSED")"
+                + (eodErr.isEmpty ? "" : " · ERR \(eodErr)")
             let nvda = q.first { $0.ticker == ticker }
             nvCloses = nvc
                 .compactMap { row in row.close_price.map { (row.date, $0) } }
