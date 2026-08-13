@@ -682,14 +682,19 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const avgBasis = arriving > 0 ? Math.round((basisWeighted / arriving) * 100) / 100 : 0;
   const strikeSet = (xs: typeof expiringDetail) =>
     [...new Set(xs.map((e) => String(e.strike)))].join(' and ');
+  // CONDITIONAL, always. "3,500 shares called" is a claim about something that has
+  // not happened -- these settle at the bell and the stock moves until then. Said
+  // flatly it also contradicted the roll instruction directly beneath it, which
+  // offered to keep the very shares this line said were gone.
+  const expiryIsToday = nearestExp === todayISO;
   const expirySay = !nearestExp ? 'Nothing expiring'
     : arriving > 0
       ? `${strikeSet(itmShorts.filter((e) => e.type === 'put'))}s *in the money*.`
-        + ` ^${arriving.toLocaleString()} shares^ likely`
+        + ` ^${arriving.toLocaleString()} shares^ arrive ${expiryIsToday ? 'tonight' : 'if it closes here'}`
       : leaving > 0
         ? `${strikeSet(itmShorts.filter((e) => e.type === 'call'))}s *in the money*.`
-          + ` ^${leaving.toLocaleString()} shares^ called`
-        : 'Nothing in the money. All expire worthless';
+          + ` ^${leaving.toLocaleString()} shares^ go ${expiryIsToday ? 'tonight' : 'if it closes here'}`
+        : 'Nothing in the money. All expire worthless as it stands';
 
   // ── sizing ───────────────────────────────────────────────────────────────
   // The dial. Distance below MA100, not a price.
@@ -914,6 +919,45 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       mark: putIntrinsic <= 0.005 ? 'all extrinsic' : null,
     },
 
+    // The SECOND card. Calls had two jobs scattered across two places -- what to
+    // write, and what to do about contracts expiring -- and the screen managed to say
+    // "3,500 shares called" above "roll to keep the shares", which are opposite
+    // claims about the same contracts. One card, both jobs, and the tense is
+    // conditional throughout: nothing is called until it settles.
+    callCard: (() => {
+      const coverPct = shares > 0 ? coveredNow / shares : 0;
+      const targetCt = Math.floor(shares * cs.coverage / 100);
+      const overCt = Math.max(0, Math.round(coveredNow / 100) - targetCt);
+      const itmCt = dueToRoll.reduce((n, l) => n + l.ct, 0);
+      const itmShares = itmCt * 100;
+      const nearest = shortCalls.length
+        ? shortCalls.map((l) => l.expiry).sort()[0] : null;
+      return {
+        label: 'The calls',
+        verb: !cs.enabled ? 'No calls while accumulating'
+          : callsWarranted > 0 && callStrike != null
+            ? `Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}`
+            : 'Nothing to sell',
+        meta: !cs.enabled ? 'Trim delta by writing fewer puts'
+          : `covered on *${coveredNow.toLocaleString()}* of ${shares.toLocaleString()} shares`
+            + ` \u00b7 ${Math.round(coverPct * 100)}% against a ${Math.round(cs.coverage * 100)}% target`,
+        commit: [
+          [`${Math.round(coverPct * 100)}%`, 'covered now'],
+          [overCt > 0 ? `${overCt} over` : `${Math.max(0, targetCt - Math.round(coveredNow / 100))} to go`,
+           `target ${targetCt}`],
+        ],
+        // CONDITIONAL. These settle on Friday and Friday has not happened.
+        basis: itmCt > 0
+          ? { value: fmtUsd(rollCost), label: `to roll ${itmCt}, keeps the shares` }
+          : { value: '\u2014', label: 'nothing in the money' },
+        earn: itmCt > 0
+          ? { value: itmShares.toLocaleString(), label: `shares go at expiry if it closes here` }
+          : { value: String(shortCalls.reduce((n, l) => n + l.ct, 0)), label: 'calls open, all out of the money' },
+        mark: itmCt > 0 ? 'roll or they go' : null,
+        when: nearest ? `${DOWN[parseISO(nearest).getUTCDay()].slice(0, 3)} ${fmtDay(nearest, today.getUTCFullYear())}` : null,
+      };
+    })(),
+
     ladder: (() => {
       // The ladder EXPLAINS the pick, so it must always show what the pick beat.
       // Built from tradeable strikes WITHOUT the delta band: the band decides which
@@ -1023,7 +1067,13 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
 
     where: {
       label: 'Where you are',
-      headline: `*${shares.toLocaleString()} shares* \u00b7 ${pendingShares.toLocaleString()} pending \u00b7 ^${fullyAssigned.toLocaleString()} assigned^`,
+      // "7,500 assigned" was fullyAssigned = shares + pending, i.e. what you would
+      // hold if every open put landed. With no puts open that equals what you already
+      // hold, so the card announced an assignment that never happened. The pending
+      // clause now appears only when something is actually pending.
+      headline: pendingShares > 0
+        ? `*${shares.toLocaleString()} shares* \u00b7 ^${pendingShares.toLocaleString()} more^ if the open puts land`
+        : `*${shares.toLocaleString()} shares* \u00b7 ~no puts open, nothing due to arrive~`,
       lines: [
         `Net delta *${Math.round(netDelta)}* \u2192 \`${Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta)}\``,
         `Floor covers *${Math.round(floorCoverage * 100)}%*`,
