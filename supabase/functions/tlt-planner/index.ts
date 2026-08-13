@@ -739,8 +739,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // BONDS ONLY, not the whole Note+Bond feed. A long-end auction is a supply event
   // landing exactly where TLT lives; FOMC measured 4.1 to 1 by comparison, because
   // it moves the front end hardest and TLT sits at the other end of the curve.
+  // >= today, not > today. An auction TODAY still sits ahead of a contract written
+  // this morning -- the 30-year prices at 1pm ET. Excluding same-day meant the brake
+  // stayed off on 13 Aug, the one day it was built for.
   const auctionBrake = !!(expiry && auctions.some((a) =>
-    a.type === 'Bond' && a.auctionDate > todayISO && a.auctionDate <= expiry));
+    a.type === 'Bond' && a.auctionDate >= todayISO && a.auctionDate <= expiry));
   const wantCt = auctionBrake ? 0
     : putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
