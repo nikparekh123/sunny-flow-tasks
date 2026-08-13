@@ -465,6 +465,11 @@ enum NvDerive {
         // ── options P&L (long: value − paid · short: collected − value) ──
         var optionsPL = 0.0
         for s in strikes {
+            // A live leg with no mark is UNKNOWN, not worth zero. Valuing it at zero
+            // booked a long option's entire cost as a loss the moment the feed went
+            // quiet: 75 long puts that had not moved read −$87K, and TLT's 10 read
+            // −$420. Expired legs DO settle at zero, which is why they stay in.
+            if s.mark == nil && !s.expired { continue }
             optionsPL += s.side == "long" ? (s.current - s.basis) : (s.basis - s.current)
         }
         let pnl = sharesPL + optionsPL
@@ -676,16 +681,22 @@ enum NvDerive {
             let netCt = a.openCt - a.closeCt
             let avg = a.openCt > 0 ? a.openPrem / a.openCt : 0        // premium/contract (×100 already in)
             let expired = isExpired(k.expiry, now: now)
-            let mark = a.markId.flatMap { markByTrade[$0]?.mark } ?? 0
+            // nil, not 0 — see position(). An unmarked live leg contributes nothing
+            // to the open value rather than pretending it is worth nothing.
+            let mk = a.markId.flatMap { markByTrade[$0]?.mark }
+            let mark = mk ?? 0
+            let priced = mk != nil || expired
             if k.dir == "short" {
                 // Assigned contracts' premium is excluded (− assignedCt·avg): it is
                 // captured in the stock sale at strike, not double-booked here.
                 premiumRealized += (a.closeCt * avg - a.closePrem) - a.assignedCt * avg + (expired ? netCt * avg : 0)
-                if !expired { premiumUnrealized += netCt * avg; openShortValue += mark * netCt * 100 }
+                if !expired { premiumUnrealized += netCt * avg
+                              if priced { openShortValue += mark * netCt * 100 } }
             } else {
                 longRealized += (a.closePrem - a.closeCt * avg) + (expired ? -netCt * avg : 0)
                 costRealized += a.closeCt * avg + (expired ? netCt * avg : 0)
-                if !expired { costUnrealized += netCt * avg; openLongValue += mark * netCt * 100; longCostBasis += netCt * avg }
+                if !expired { costUnrealized += netCt * avg
+                              if priced { openLongValue += mark * netCt * 100; longCostBasis += netCt * avg } }
             }
         }
 
