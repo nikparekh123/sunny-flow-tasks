@@ -37,7 +37,14 @@ struct PlannerSheet: Decodable {
         case progress, ceiling, conviction, coming, book, sources
     }
 
-    struct AsOf: Decodable { let label: String; let refresh: String }
+    struct AsOf: Decodable {
+        let label: String
+        let refresh: String
+        /// Optional so a function deploy that predates it still decodes; the head
+        /// falls back to the spot freshness stamp when it is absent.
+        let market: Market?
+        struct Market: Decodable { let open: Bool; let label: String }
+    }
 
     /// Deliberately mirrors Instruction rather than sharing it: the two cards are
     /// free to diverge, and `when` exists only here.

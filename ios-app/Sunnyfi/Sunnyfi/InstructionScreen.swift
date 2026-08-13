@@ -347,7 +347,17 @@ struct InstructionScreen: View {
             Text(s.phase.uppercased())
                 .font(InkFont.mono(14)).tracking(14 * 0.1).foregroundStyle(Ink.dim)
             Spacer()
-            if let spot = s.sources.rows.first(where: { $0.first == "Spot" }), spot.count >= 3 {
+            // Whether the quotes are live is the thing worth knowing up here — a
+            // stale "spot now" says nothing about whether the market is trading.
+            if let m = s.asOf.market {
+                HStack(spacing: 6) {
+                    Circle().frame(width: 6, height: 6)
+                        .foregroundStyle(m.open ? Ink.text.opacity(0.85) : Ink.dim.opacity(0.55))
+                    Text(m.label)
+                        .font(InkFont.mono(14))
+                        .foregroundStyle(m.open ? Ink.text : Ink.dim)
+                }
+            } else if let spot = s.sources.rows.first(where: { $0.first == "Spot" }), spot.count >= 3 {
                 (Text("spot ").foregroundStyle(Ink.dim) + Text(spot[2]).foregroundStyle(Ink.text))
                     .font(InkFont.mono(14))
             }

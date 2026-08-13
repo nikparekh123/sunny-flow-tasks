@@ -189,6 +189,25 @@ function ymd(d: Date): string {
 function parseISO(s: string): Date { const [y, m, d] = String(s).slice(0, 10).split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); }
 function addDays(d: Date, n: number): Date { const x = new Date(d.getTime()); x.setUTCDate(x.getUTCDate() + n); return x; }
 function daysBetween(a: Date, b: Date): number { return Math.round((b.getTime() - a.getTime()) / 86400000); }
+// ── market state ────────────────────────────────────────────────────────────
+// Read off the exchange's own clock via the IANA zone, not a hardcoded UTC offset:
+// New York is UTC-4 half the year and UTC-5 the other half, and a fixed offset is
+// wrong for one of them. Holidays are NOT handled — the NYSE calendar is not
+// derivable, so Thanksgiving reads "Live" until a holiday table exists.
+function marketState(now: Date): { open: boolean; label: string } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', hour12: false,
+      weekday: 'short', hour: '2-digit', minute: '2-digit',
+    }).formatToParts(now).map((p) => [p.type, p.value]),
+  );
+  const wd = String(parts.weekday);
+  if (wd === 'Sat' || wd === 'Sun') return { open: false, label: 'Market closed' };
+  const mins = Number(parts.hour) * 60 + Number(parts.minute);
+  const open = mins >= 9 * 60 + 30 && mins < 16 * 60;   // 09:30–16:00 ET
+  return { open, label: open ? 'Live' : 'Market closed' };
+}
+
 const fmtDay = (iso: string) => {
   const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
   return y && m && d ? `${MONTHS[m - 1]} ${d}` : String(iso);
@@ -948,7 +967,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const sheet = {
     ticker: TICKER,
     boot: { stages: BOOT_STAGES, mark: 'one moment' },
-    asOf: { label: dayLabel, refresh: `${spot.toFixed(2)} \u00b7 ${phase}` },
+    asOf: { label: dayLabel, refresh: `${spot.toFixed(2)} \u00b7 ${phase}`,
+            market: marketState(new Date()) },
     phase: `${phase.charAt(0)}${phase.slice(1).toLowerCase()} phase`,
 
     instruction: {
