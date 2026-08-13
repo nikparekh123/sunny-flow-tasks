@@ -28,3 +28,9 @@ dist-ssr
 .env.local
 .env.*.local
 .claude/worktrees/
+
+# Research data caches — refetchable, and nvda_optc.json alone is 3.1MB of option
+# marks. The scripts repull anything missing (which is how today's run rebuilt
+# nvda_hist.json), so the repo carries the harness, not the data.
+research/**/*.json
+deno.lock
