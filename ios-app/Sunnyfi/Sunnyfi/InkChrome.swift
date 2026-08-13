@@ -55,9 +55,20 @@ struct InkTickerNav: View {
                 }
             }
             Spacer(minLength: 0)
+            // Hardcoded LIVE said the feed was live at 3am. Reads the New York
+            // session, same rule the planner header uses and the same rule that now
+            // decides whether option marks come from the feed or from the close —
+            // one notion of "open" across the app.
+            //
+            // The dot only pulses when something is actually moving; a pulsing dot
+            // over a shut market is the animation lying on the label's behalf.
             HStack(spacing: 8) {
-                Circle().fill(Ink.text).frame(width: 6, height: 6).inkPulse()
-                Text("LIVE").font(InkFont.mono(9.5)).tracking(9.5 * 0.18).foregroundStyle(Ink.dim)
+                let open = NvDerive.marketIsOpen()
+                Circle().fill(open ? Ink.text : Ink.dim.opacity(0.55))
+                    .frame(width: 6, height: 6)
+                    .modifier(InkPulseIf(on: open))
+                Text(open ? "LIVE" : "MARKET CLOSED")
+                    .font(InkFont.mono(9.5)).tracking(9.5 * 0.18).foregroundStyle(Ink.dim)
             }
             .fixedSize()
         }
@@ -240,5 +251,15 @@ struct InkSheet<Head: View, Content: View, Dock: View>: View {
         .presentationDragIndicator(.hidden)
         .presentationBackground(Ink.surface)
         .presentationCornerRadius(Ink.radiusCard)
+    }
+}
+
+
+/// `.inkPulse()` unconditionally animates; this applies it only when the market is
+/// open, so the indicator is still rather than breathing after the close.
+private struct InkPulseIf: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on { content.inkPulse() } else { content }
     }
 }
