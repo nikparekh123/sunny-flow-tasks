@@ -904,7 +904,9 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
           chosen: c.strike === putStrike,
         })),
         verdict,
-        fallback: pickBy === 'extrinsic' ? null : {
+        // Only the delta fallback is a fallback. This said "not extrinsic", which
+        // after the rename meant the normal rule reported itself as a fallback.
+        fallback: pickBy !== 'delta-fallback' ? null : {
           state: 'delta fallback',
           headline: 'No ladder',
           note: `Chain quotes missing. Picked on *${putDeltaTgt.toFixed(2)} delta*`,
