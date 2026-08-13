@@ -163,6 +163,36 @@ falling markets and takes the entire drawdown on all of them.
 What survives from below: if the objective is 15,000 shares, assignment fails — 2,650
 shares in falling markets, 1,000-1,500 in rallies. It fails profitably.
 
+## The earnings brake (`nvda_brake.py`)
+
+The engine damps CONVICTION 12 points before a heavy event, and NVDA's conviction
+weight is ZERO — so the brake was changing the size by exactly nothing. Thirteen
+days from a print at an all-time high, the only thing slowing the rate was the MA
+band. Measured over the 96 windows that contain prints:
+
+| brake | shares | basis | net | worst drawdown |
+|---|---|---|---|---|
+| none | 14,000 | $118.86 | **$675,191** | **-$346,765** |
+| 0.50x for 5d | 13,600 | $118.50 | $661,637 | -$329,128 |
+| 0.25x for 5d | 13,400 | $118.43 | $658,391 | -$321,785 |
+| **pause 5d** | 13,200 | $118.09 | $656,846 | **-$312,566** |
+
+**It buys calm, not return.** A pause costs 800 shares and $18,345 of net and cuts
+the worst drawdown by $34,199 — about two dollars avoided per dollar given up.
+
+**5 days and 10 days measured identical.** With weekly expiries only one Friday
+falls inside either window, so the brake is really "skip the roll whose contract
+spans the print"; anything wider is false precision.
+
+The sample is the same relentless uptrend as everything else here, so drawdowns are
+mild by construction and the protection is probably understated. That cuts in the
+brake's favour.
+
+Note this does NOT contradict the earnings finding below. That one asked whether to
+skip earnings ENTIRELY across the year and said no, because it forfeits 8% of the
+accumulation for an option side worth -$808. This asks whether to sit out one roll,
+and the drawdown maths carries it.
+
 ## Do calls fight the accumulation target? (`nvda_calls_acc.py`)
 
 `nvda_collar2` answered a different question. It held the share path FIXED and rolled

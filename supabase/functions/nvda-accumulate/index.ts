@@ -643,7 +643,23 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const putIntrinsic = pick?.intrinsic ?? 0;
   const putExtrinsic = pick?.extrinsic ?? 0;
 
-  const wantCt = putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
+  // ── the earnings brake ───────────────────────────────────────────────────
+  // Write nothing on the roll whose contract SPANS the print. Not a scored signal
+  // and deliberately not routed through conviction, which carries weight zero on
+  // NVDA — so the -12 calendar penalty was changing the size by exactly nothing,
+  // and thirteen days out from a print at an all-time high the only brake was the
+  // MA band.
+  //
+  // Measured over 96 windows that contain prints: costs 800 shares and $18,345 of
+  // net, and cuts the worst drawdown by $34,199. About two dollars of drawdown
+  // avoided per dollar given up. It buys calm, not return, and the sample is a
+  // relentless uptrend so the protection is probably understated.
+  //
+  // Widening it past the straddling roll does nothing: with weekly expiries only
+  // one Friday falls inside, which is why 5 and 10 days measured identical.
+  const earnBrake = !!(nextEarn && expiry && expiry >= nextEarn && todayISO < nextEarn);
+  const wantCt = earnBrake ? 0
+    : putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
   const maxCt = Math.floor(headroom / (putStrike * 100));
   const putCt = Math.min(wantCt, maxCt);
@@ -751,8 +767,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     instruction: {
       label: 'The instruction',
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
+        : earnBrake ? 'Nothing — earnings inside this contract'
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
-      meta: putCt === 0 && sliceFilled
+      meta: earnBrake && nextEarn
+        ? `${fmtDay(nextEarn, today.getUTCFullYear())} print lands before ${fmtDay(expiry ?? '', today.getUTCFullYear())}`
+        : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
           + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
@@ -934,6 +953,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
             ? `less ${Math.round(writtenWeek)} written since Monday, at ${putDelta.toFixed(2)} delta`
             : `at ${putDelta.toFixed(2)} delta`,
           out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
+        ...(earnBrake ? [{ text: 'earnings inside the contract — brake on', out: 'hold' }] : []),
       ],
       // "0 of 0, nothing clipped" is true and useless on a day that is already
       // done. wanted-versus-got only means something while there is something
