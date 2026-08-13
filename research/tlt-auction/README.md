@@ -66,3 +66,57 @@ make it a winner.
 
 Shipped as Bonds only (20y and 30y). FOMC left to the existing soft damper, which is
 about what it is worth.
+
+
+## The dial: price bands, yield bands, or yield vs its own mean? (`tlt_bands.py`)
+
+TLT's dial read an ABSOLUTE PRICE. 1,029 windows x 72 weeks, 2004-2025:
+
+| bands | 0.25x | 0.75x | 1.25x | 1.75x | 2.50x |
+|---|---|---|---|---|---|
+| price 75/80/85 | **1074** | 27 | — | — | — |
+| yield absolute 5.00-5.75 | 1058 | 37 | 6 | — | — |
+| **yield vs its own 250d mean** | 308 | 240 | 267 | 181 | 105 |
+
+**The dial sat at its slowest setting 98% of the time.** It was not a dial, it was a
+constant, and TLT reached 32,500 shares of a 100,000 target. Absolute YIELD bands
+failed the same way — levels drift over decades exactly as prices do.
+
+Normalised per share, since the arms end up different sizes:
+
+| | shares | net/share | drawdown/share |
+|---|---|---|---|
+| price bands | 32,500 | -$0.52 | -$10.12 |
+| **yield vs 250d mean** | **98,000** | **+$0.98** | **-$7.43** |
+
+Better on both, and it actually reaches the target.
+
+**Why 25bp rungs.** TLT moves -0.16% per bp of the 30-year (R2 0.95, stable 2003-2026),
+so 25bp is about 4% of TLT, or $3.30 at 82 — an equal-sized rung with a mechanism
+behind it rather than a round number.
+
+**Caveat, stated plainly:** this test is harsh on the price bands. TLT traded 85-180
+for most of 2004-2020, so "above 85" swallowed that era. Those lines were calibrated
+for today's TLT and are meaningless at any other level — which is the staleness
+argument demonstrated, not a claim that they are wrong right now.
+
+## Is it worth slowing down for an expected rate move? (`tlt_foresight.py`)
+
+Perfect foresight of the 30-year four months out, braking when it is about to rise:
+
+| your call | shares | basis | net | vs no view |
+|---|---|---|---|---|
+| no view | 98,000 | $111.75 | $96,403 | — |
+| right | 83,300 | **$108.38** | $226,758 | **+$130,354** |
+| wrong | 84,000 | $112.73 | $11,461 | **-$84,942** |
+| no information (alternate weeks) | 57,500 | $110.73 | $85,704 | -$10,699 |
+
+**Break-even hit rate 39%**, payoff asymmetric at about 1.5:1. Two things make 39%
+harder than it sounds: the 30y rose 25bp+ over the next four months on 28% of Fridays
+unconditionally, so the bar is well above the base rate; and the coin-flip arm lost
+only $10,699, which says braking at random is nearly free — all the value AND all the
+risk sit in whether the calls carry information.
+
+Also measured, and the reason a rate FORECAST cannot be automated: effective fed funds
+moves the 30-year +0.01bp per bp, R2 0.01 over 7,856 observations. Announced policy is
+already in the long end. A view only pays where it DISAGREES with what is priced.

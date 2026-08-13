@@ -61,11 +61,38 @@ const CAPS = {
 // ORDER MATTERS: these are scanned with find(spot < hi) and must stay ASCENDING.
 // With Infinity first, every price matches the first row and the multiplier pins
 // at 0.25x forever — which is exactly what happened on the first live run.
+// Kept only as the fallback for a FRED outage. These are absolute price levels and
+// they go stale: over 2004-2025 the "above 85" row swallowed 1,074 of 1,101 Fridays,
+// so the dial sat at its slowest setting 98% of the time and TLT reached a third of
+// its target. They are not wrong today; they are wrong at any other price level.
 const PRICE_BANDS: Array<[number, number, string]> = [
   [75, 2.50, 'below 75'],
   [80, 1.50, '75–80'],
   [85, 0.75, '80–85'],
   [Infinity, 0.25, 'above 85'],
+];
+
+// The real dial: the 30-year yield against ITS OWN 250-day mean, in 25bp steps.
+//
+// TLT is a duration instrument — the 30y explains it with R2 0.95, and 25bp is worth
+// about 4% of TLT, or $3.30 at 82. So a 25bp step is a real, equal-sized rung rather
+// than a round number.
+//
+// RELATIVE, not absolute. Fixed yield bands failed exactly like fixed price bands:
+// 5.00-5.75% put 1,058 of 1,101 Fridays in the slowest row, because yield levels
+// drift over decades just as prices do. Against its own mean the dial actually gets
+// used — 308/240/267/181/105 across the five rows — and normalised per share it beat
+// the price bands on BOTH net (+$0.98 vs -$0.52) and drawdown (-$7.43 vs -$10.12).
+//
+// ORDER MATTERS: scanned with find(gap >= lo) and must stay DESCENDING. The price
+// bands above once shipped with Infinity first and pinned the multiplier at 0.25x
+// forever; this is the same trap facing the other way.
+const YIELD_BANDS: Array<[number, number, string]> = [
+  [50, 2.50, '50bp+ above its mean'],
+  [25, 1.75, '25–50bp above'],
+  [0, 1.25, '0–25bp above'],
+  [-25, 0.75, '0–25bp below'],
+  [-Infinity, 0.25, 'well below its mean'],
 ];
 
 // Conviction is the trim: a continuous ramp between the agreed 0.7x and 1.3x.
@@ -659,8 +686,20 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         : 'Nothing in the money. All expire worthless';
 
   // ── sizing ───────────────────────────────────────────────────────────────
-  const band = PRICE_BANDS.find(([hi]) => spot! < hi) ?? PRICE_BANDS[0];
-  const priceFactor = band[1], priceBand = band[2];
+  const y30Obs = (fredOut.DGS30 ?? []) as Obs[];
+  const y30Now = y30Obs.length ? y30Obs[y30Obs.length - 1].value : null;
+  const y30Win = y30Obs.slice(-250);
+  const y30Mean = y30Win.length >= 60
+    ? y30Win.reduce((t, o) => t + o.value, 0) / y30Win.length : null;
+  const yieldGapBp = (y30Now != null && y30Mean != null) ? (y30Now - y30Mean) * 100 : null;
+
+  // Falls back to the price bands only if FRED is down AND the rates_daily cache is
+  // empty — the planner still answers rather than refusing to size.
+  const [priceFactor, priceBand] = yieldGapBp == null
+    ? (() => { const b = PRICE_BANDS.find(([hi]) => spot! < hi) ?? PRICE_BANDS[0];
+               return [b[1], `${b[2]} · no rates feed`] as [number, string]; })()
+    : (() => { const b = YIELD_BANDS.find(([lo]) => yieldGapBp >= lo) ?? YIELD_BANDS[YIELD_BANDS.length - 1];
+               return [b[1], `30y ${yieldGapBp >= 0 ? '+' : '−'}${Math.abs(Math.round(yieldGapBp))}bp, ${b[2]}`] as [number, string]; })();
   const cf = convFactor(conviction);
   const weeklyDelta = (quarterBudget / 13) * priceFactor * cf.f;
 
