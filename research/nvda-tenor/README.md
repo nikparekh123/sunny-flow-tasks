@@ -163,6 +163,32 @@ falling markets and takes the entire drawdown on all of them.
 What survives from below: if the objective is 15,000 shares, assignment fails — 2,650
 shares in falling markets, 1,000-1,500 in rallies. It fails profitably.
 
+## The slow lane: extended markets (`nvda_extended.py`)
+
+Above the mean the dial wrote 0.60x and still sold 1% out — it changed how many,
+never whether or where. 342 windows:
+
+| arm | shares | net | worst DD | net given up | DD saved | ratio |
+|---|---|---|---|---|---|---|
+| 0.60x above mean (was) | 13,300 | $105,424 | -$120,814 | — | — | — |
+| **0.20x beyond +8%** | 10,300 | $98,468 | -$84,774 | $6,956 | $36,040 | **5.2 : 1** |
+| stop beyond +8% | 8,800 | $89,479 | -$66,464 | $15,945 | $54,350 | 3.4 : 1 |
+| 0.40x above mean | 11,500 | $97,485 | -$101,506 | $7,939 | $19,308 | 2.4 : 1 |
+| 0.20x above mean | 9,400 | $75,489 | -$77,747 | $29,935 | $43,067 | 1.4 : 1 |
+| 3% out when above | 13,100 | $99,214 | **-$123,796** | worse | worse | — |
+| 5% out when above | 12,400 | $95,855 | -$119,728 | worse | worse | — |
+
+**Separating "a bit rich" from "stretched" is where the gain is.** Braking harder
+across the whole above-mean range returns 2.4 or 1.4 to 1; a distinct band beyond
++8% returns 5.2.
+
+**Reaching further out while extended fails on both counts.** Delivery falls, so you
+pay in shares and do not even buy protection. The lever is SIZE, not distance —
+which is the same result the strike table gives for the ordinary case.
+
+Levels here come from the long 2018-2026 history, so the dollar figures sit at
+split-adjusted early prices. The ORDERING is what carries.
+
 ## The earnings brake (`nvda_brake.py`)
 
 The engine damps CONVICTION 12 points before a heavy event, and NVDA's conviction

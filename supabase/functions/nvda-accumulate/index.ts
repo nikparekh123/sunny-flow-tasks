@@ -72,7 +72,20 @@ const MA_BANDS: Array<[number, number, string]> = [
   [-11.2, 2.50, 'more than 11% below'],
   [-3.3, 1.50, '3 to 11% below'],
   [0, 1.00, 'just below'],
-  [Infinity, 0.60, 'above the mean'],
+  [8, 0.60, 'above the mean'],
+  // The slow lane. 0.60x of a bad entry is still a bad entry, and above the mean the
+  // dial only ever changed HOW MANY, never whether. Measured over 342 windows, a
+  // 0.20x band beyond +8% gives up $6,956 of net and avoids $36,040 of drawdown --
+  // 5.2 to 1, the best ratio of anything tested.
+  //
+  // Braking harder EVERYWHERE above the mean is not the same trade: 0.40x across the
+  // board returns 2.4 to 1 and 0.20x across the board only 1.4. The gain is in
+  // separating "a bit rich" from "stretched", not in leaning on the whole range.
+  //
+  // And reaching further OUT while extended fails outright -- 3% and 5% out were
+  // worse on net AND worse on drawdown. Delivery falls, so you pay in shares and do
+  // not even buy protection. The lever is size, not distance.
+  [Infinity, 0.20, 'well above the mean'],
 ];
 
 // Conviction is the trim: a continuous ramp between the agreed 0.7x and 1.3x.
