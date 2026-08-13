@@ -106,7 +106,11 @@ final class NvdaStore {
             // Peers/insights read a merged series: the deep NVDA history plus the
             // shared peer closes (deduped of the shared feed's shallow NVDA rows).
             let mergedCloses = c.filter { $0.ticker != ticker } + nvc
-            position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m)
+            // pnl FIRST: New average is buy average − realized/share, and realized
+            // has exactly one definition, which lives in NvDerive.pnl.
+            let pnlNow = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
+            position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m,
+                                          realized: pnlNow?.realized ?? 0)
             // Kept in consumption order: an assignment takes the oldest lots, so the
             // gain it books is measured against those, not the book average.
             shareLotsFIFO = l.sorted { ($0.fifo_order ?? .max) < ($1.fifo_order ?? .max) }
@@ -117,7 +121,7 @@ final class NvdaStore {
                     .order("date", ascending: false).limit(252).execute().value) ?? [])
                 : []
 
-            pnl       = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
+            pnl       = pnlNow
             perf      = NvDerive.performance(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             insights  = NvDerive.insights(trades: t, lots: l, marks: m, quote: nvda, closes: mergedCloses, ivDaily: ivDaily)
             peers     = NvDerive.peers(quotes: q, closes: mergedCloses)

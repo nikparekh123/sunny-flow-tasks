@@ -321,7 +321,7 @@ struct NvPosition: Sendable {
     let sharesValue: Double
     let sharesPL: Double
     let premiumPerShare: Double   // lifetime short-call premium / shares
-    let breakEven: Double         // avgBuy − premiumPerShare (the "safeguarded to")
+    let breakEven: Double         // "New average": avgBuy − REALIZED / shares held
     let delta: Double
     let gamma: Double
     let theta: Double
@@ -338,8 +338,11 @@ struct NvPosition: Sendable {
 
 enum NvDerive {
 
+    /// `realized` comes from NvPnL and is NOT recomputed here — the glossary keeps one
+    /// definition and this is the only figure New average is allowed to use.
     static func position(trades: [NvOptionTrade], lots: [NvShareLot], quote: NvQuote?,
-                         marks: [NvOptionMark], now: Date = Date()) -> NvPosition? {
+                         marks: [NvOptionMark], realized: Double = 0,
+                         now: Date = Date()) -> NvPosition? {
         // A non-positive spot is bad market data (e.g. a pre-open zero trade),
         // not a real price — don't derive garbage P&L off it.
         guard let spot = quote?.spot, spot > 0 else { return nil }
@@ -427,16 +430,25 @@ enum NvDerive {
         }
         let pnl = sharesPL + optionsPL
 
-        // ── lifetime SOLD premium / share → effective break-even ──
-        // Calls sold AND puts sold. The glossary is explicit — "Options SOLD =
-        // PREMIUM (calls sold + puts sold)" — and this filtered to calls only, so
-        // on a book that sells puts the premium came out at zero and New average
-        // collapsed onto buy average. Long puts stay out: bought options are COST,
-        // which the glossary keeps as a separate figure from PREMIUM.
+        // ── premium per share, still shown, but no longer the break-even ──
         let soldPrem = live.filter { $0.direction == "short" }
             .reduce(0.0) { $0 + ($1.action == "open" ? 1 : -1) * $1.premium * $1.contracts * 100 }
         let premPerShare = shares > 0 ? soldPrem / shares : 0
-        let breakEven = avgBuy - premPerShare
+
+        // ── New average = buy average − REALIZED per share held ───────────────
+        // It used to subtract premium on STILL-OPEN shorts, which is unrealized by
+        // the glossary's own definition — money not yet earned, flattering the
+        // average by counting it. REALIZED is closed positions only: shares sold,
+        // options expired or bought back, longs closed, dividends.
+        //
+        // A realized LOSS raises the average, which is the honest direction: NVDA
+        // at −$88K realized over 7,500 shares reads $220.06 against a $208.33 buy
+        // average, because that is what the block has effectively cost.
+        //
+        // Divided by shares HELD, so it answers "what did the block I still own
+        // cost me". That means it moves when shares are bought or sold even if
+        // nothing was realized — the denominator changed, and that is intended.
+        let breakEven = shares > 0 ? avgBuy - realized / shares : avgBuy
 
         // ── sleeves + groups ──
         let sleeves = buildSleeves(live: live)

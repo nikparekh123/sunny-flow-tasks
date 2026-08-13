@@ -60,6 +60,26 @@ COST_TOTAL      = COST_REALIZED + COST_UNREALIZED
 
 ---
 
+### 6. NEW AVERAGE
+What the block you still hold has effectively cost, after everything closed.
+
+```
+NEW_AVERAGE = Buy_Average − (REALIZED ÷ Shares_Held_Now)
+```
+
+Settled 2026-08-13. It previously subtracted premium on **still-open** shorts —
+unrealized by this document's own definition, money not yet earned, which flattered
+the average. Only REALIZED counts: shares sold, options expired or bought back,
+longs closed, dividends.
+
+- A realized **loss RAISES** the average. NVDA at −$88K over 7,500 shares reads
+  $220.06 against a $208.33 buy average. That is the honest direction.
+- The divisor is shares **held now**, so the figure answers "what did the block I
+  still own cost me". It therefore moves when shares are bought or sold even if
+  nothing was realized. That is intended, not a bug.
+
+---
+
 ## Rules
 
 - **Exercised = REALIZED** (position closed).

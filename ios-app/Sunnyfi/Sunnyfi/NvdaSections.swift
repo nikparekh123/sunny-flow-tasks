@@ -119,9 +119,10 @@ struct NvdaPerformanceScreen: View {
                 InkSpacer()
             }
             InkFoot(compact: true) {
-                // New average = cost basis − premium collected per share (the effective
-                // basis). Cushion (spot over it) + % move to the right, above the %.
-                Text("New average · after premium".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
+                // New average = buy average − REALIZED per share held. It said "after
+                // premium" while subtracting premium on still-open shorts, which is
+                // unrealized — the label and the maths were wrong together.
+                Text("New average · after realized".uppercased()).font(InkFont.mono(9)).tracking(9 * 0.16).foregroundStyle(Ink.dim)
                 HStack(alignment: .firstTextBaseline) {
                     Text("$\(nv2Dec(p.breakEven, 2))").font(InkFont.mono(24, .medium)).tracking(24 * -0.03).foregroundStyle(Ink.text)
                     Spacer(minLength: 0)
