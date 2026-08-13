@@ -5,7 +5,13 @@ import {
   MONTHS, DOWN, ymd, parseISO, addDays, daysBetween,
   marketNow, marketState, fmtDay, fmtUsd, quarterStart, Row,
   db, dailyCloses, spotOf, putExpiries, Quote, chain,
-} from '../_shared/planner.ts';
+} from
+  // Pinned to a commit, not to main. The dashboard bundles only the function's
+  // own folder -- a sibling ../_shared/ import fails with 'Module not found' --
+  // so the shared core is fetched over https at bundle time instead. The SHA
+  // makes that reproducible: a cached copy can never be a different version.
+  // Changing the shared file means a new SHA in both engines, and both redeploy.
+  'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/acfd49d63a4c4a852c7d1156490145cd0ea56597/supabase/functions/_shared/planner.ts';
 /**
  * nvda-accumulate — the next NVDA short-put decision.
  *
