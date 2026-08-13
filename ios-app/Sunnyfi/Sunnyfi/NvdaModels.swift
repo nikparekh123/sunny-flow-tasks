@@ -340,6 +340,9 @@ enum NvDerive {
 
     /// `realized` comes from NvPnL and is NOT recomputed here — the glossary keeps one
     /// definition and this is the only figure New average is allowed to use.
+    /// TEMPORARY diagnostic sink — remove with the marksDebug line.
+    nonisolated(unsafe) static var unmarkedTrace: [String] = []
+
     /// Is the New York equity session open? Weekday, 09:30–16:00 ET.
     /// Holidays are NOT handled — the NYSE calendar is not derivable from a date.
     /// On a holiday this reads open and the live feed simply carries the previous
@@ -433,6 +436,11 @@ enum NvDerive {
             let dEst = expired ? 0
                 : (m?.delta ?? estimateDelta(kind: k.kind, strike: k.strike, spot: spot))
                   * ct * 100 * (k.side == "long" ? 1 : -1)
+            // TEMPORARY: record legs whose lookup id is absent from the marks map,
+            // with the id, so the mismatch can be checked against the table directly.
+            if mkNow == nil && !expired, let want = anyOpenId[k] {
+                NvDerive.unmarkedTrace.append("\(Int(k.strike))\(k.kind == "put" ? "P" : "C") id=\(want.prefix(8)) inMap=\(markByTrade[want] != nil)")
+            }
             strikes.append(NvStrike(
                 side: k.side, kind: k.kind, strike: k.strike, expiry: displayExpiry(k.expiry),
                 dte: expired ? "expired" : "\(daysTo(k.expiry, now: now)) DTE", expired: expired,

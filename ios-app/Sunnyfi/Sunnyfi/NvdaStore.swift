@@ -131,6 +131,7 @@ final class NvdaStore {
                 + "eod \(mEod.count)/\(mEod.filter { $0.mark != nil }.count) · "
                 + "used \(m.count) · \(NvDerive.marketIsOpen() ? "OPEN" : "CLOSED")"
                 + (eodErr.isEmpty ? "" : " · ERR \(eodErr)")
+                + (NvDerive.unmarkedTrace.isEmpty ? "" : "\n" + NvDerive.unmarkedTrace.prefix(4).joined(separator: " | "))
             let nvda = q.first { $0.ticker == ticker }
             nvCloses = nvc
                 .compactMap { row in row.close_price.map { (row.date, $0) } }
@@ -140,6 +141,7 @@ final class NvdaStore {
             let mergedCloses = c.filter { $0.ticker != ticker } + nvc
             // pnl FIRST: New average is buy average − realized/share, and realized
             // has exactly one definition, which lives in NvDerive.pnl.
+            NvDerive.unmarkedTrace = []
             let pnlNow = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m,
                                           realized: pnlNow?.realized ?? 0)
