@@ -871,7 +871,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       // strike is chosen, not which comparison is worth showing. Filtering the
       // display by it left a one-row ladder and no verdict at all, on a day when the
       // runner-up happened to sit just outside the band.
-      const pool = pickBy === 'extrinsic' ? cands.filter((c) => c.tradeable && c.extrinsic > 0) : [];
+      // Gated on the picker having produced a real answer, NOT on one rule's name.
+      // This read `pickBy === 'extrinsic'`, and renaming the rule to 'otm-target'
+      // silently emptied the ladder — the card kept its heading and lost its rows.
+      const pool = pickBy !== 'none' ? cands.filter((c) => c.tradeable && c.extrinsic > 0) : [];
       const chosen = pool.find((c) => c.strike === putStrike);
       const other = pool.filter((c) => c.strike !== putStrike)
         .sort((a, b) => Math.abs(a.strike - spot!) - Math.abs(b.strike - spot!))[0];
