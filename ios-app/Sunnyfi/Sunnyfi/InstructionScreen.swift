@@ -198,6 +198,7 @@ struct InstructionScreen: View {
     let ticker: String
     let onBack: () -> Void
     @State private var store: PlannerSheetStore
+    @State private var cardPage: Int? = 0
 
     init(ticker: String, function: String, onBack: @escaping () -> Void) {
         self.ticker = ticker
@@ -280,11 +281,39 @@ struct InstructionScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 15) {
                 sheetHead(s)
-                hero(s.instruction)
+                // Two cards, swiped. The put decision and the call decision are
+                // separate answers to separate questions, and stacking them meant
+                // four cards none of which said plainly what to do. Paging scroll
+                // rather than TabView because TabView demands a fixed height and
+                // these two cards are not the same height.
+                if let cc = s.callCard {
+                    VStack(spacing: 11) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 0) {
+                                hero(s.instruction).containerRelativeFrame(.horizontal).id(0)
+                                hero(cc.asInstruction).containerRelativeFrame(.horizontal).id(1)
+                            }
+                            .scrollTargetLayout()
+                        }
+                        .scrollTargetBehavior(.paging)
+                        .scrollPosition(id: $cardPage)
+                        HStack(spacing: 7) {
+                            ForEach(0..<2, id: \.self) { i in
+                                Circle().frame(width: 6, height: 6)
+                                    .foregroundStyle(Ink.text.opacity((cardPage ?? 0) == i ? 0.8 : 0.22))
+                            }
+                        }
+                    }
+                } else {
+                    hero(s.instruction)
+                }
                 ladder(s.ladder)
                 if let t = s.tonight { tonight(t) }
                 if let h = s.holdback { holdback(h) }
-                callsAside(s.calls)
+                // callsAside is gone from the layout, not from the file: the call
+                // card above now carries everything it said, and having both was
+                // half of "three or four cards that don't make sense". Restoring it
+                // is this one line.
                 why(s.why)
                 whereYouAre(s.position)
                 progress(s.progress)

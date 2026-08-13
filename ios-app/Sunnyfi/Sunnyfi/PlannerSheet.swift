@@ -15,6 +15,9 @@ struct PlannerSheet: Decodable {
     let asOf: AsOf
     let phase: String
     let instruction: Instruction
+    /// The second card. Same shape as `instruction` so one renderer draws both.
+    /// Optional so a deploy that predates it still decodes to a single card.
+    let callCard: CallCard?
     let ladder: Ladder
     let tonight: Tonight?          // null when nothing is expiring
     let holdback: Holdback?        // null when the calendar is not damping
@@ -29,12 +32,29 @@ struct PlannerSheet: Decodable {
     let sources: Sources
 
     enum CodingKeys: String, CodingKey {
-        case ticker, boot, asOf, phase, instruction, ladder, tonight, holdback, calls, why
+        case ticker, boot, asOf, phase, instruction, callCard, ladder, tonight, holdback, calls, why
         case position = "where"
         case progress, ceiling, conviction, coming, book, sources
     }
 
     struct AsOf: Decodable { let label: String; let refresh: String }
+
+    /// Deliberately mirrors Instruction rather than sharing it: the two cards are
+    /// free to diverge, and `when` exists only here.
+    struct CallCard: Decodable {
+        let label: String, verb: String, meta: String
+        let commit: [[String]]
+        let basis: Instruction.Pair
+        let earn: Instruction.Earn
+        let mark: String?
+        let when: String?
+
+        /// The two cards render identically, so the call card borrows the hero.
+        var asInstruction: Instruction {
+            .init(label: label, verb: verb, meta: meta, commit: commit,
+                  basis: basis, earn: earn, mark: mark)
+        }
+    }
 
     struct Instruction: Decodable {
         let label: String, verb: String, meta: String
