@@ -976,23 +976,46 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
           : callsWarranted > 0 && callStrike != null
             ? `Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}`
             : 'Nothing to sell',
+        // Mirrors the instruction's cadence exactly: date · figure · source.
         meta: !cs.enabled ? 'Trim delta by writing fewer puts'
-          : `covered on *${coveredNow.toLocaleString()}* of ${shares.toLocaleString()} shares`
-            + ` \u00b7 ${Math.round(coverPct * 100)}% against a ${Math.round(cs.coverage * 100)}% target`,
+          : `${nearest ? `${DOWN[parseISO(nearest).getUTCDay()].slice(0, 3)} ${fmtDay(nearest, today.getUTCFullYear())}` : 'none open'}`
+            + ` \u00b7 ${itmCt} in the money \u00b7 real quotes`,
         commit: [
-          [`${Math.round(coverPct * 100)}%`, 'covered now'],
-          [overCt > 0 ? `${overCt} over` : `${Math.max(0, targetCt - Math.round(coveredNow / 100))} to go`,
-           `target ${targetCt}`],
+          [coveredNow.toLocaleString(), 'covered'],
+          [overCt > 0 ? String(overCt) : String(Math.max(0, targetCt - Math.round(coveredNow / 100))),
+           overCt > 0 ? 'over target' : 'to target'],
         ],
-        // CONDITIONAL. These settle on Friday and Friday has not happened.
+        // CONDITIONAL. These settle on Friday and Friday has not happened. The
+        // caveat lives in the cover card below; a stat label is not the place for it.
         basis: itmCt > 0
-          ? { value: fmtUsd(rollCost), label: `to roll ${itmCt}, keeps the shares` }
-          : { value: '\u2014', label: 'nothing in the money' },
+          ? { value: usd0(rollCost), label: `to roll ${itmCt}` }
+          : { value: '\u2014', label: 'none in the money' },
         earn: itmCt > 0
-          ? { value: itmShares.toLocaleString(), label: `shares go at expiry if it closes here` }
-          : { value: String(shortCalls.reduce((n, l) => n + l.ct, 0)), label: 'calls open, all out of the money' },
+          ? { value: itmShares.toLocaleString(), label: 'shares at risk' }
+          : { value: String(shortCalls.reduce((n, l) => n + l.ct, 0)), label: 'calls open' },
         mark: itmCt > 0 ? 'roll or they go' : null,
         when: nearest ? `${DOWN[parseISO(nearest).getUTCDay()].slice(0, 3)} ${fmtDay(nearest, today.getUTCFullYear())}` : null,
+      };
+    })(),
+
+    // Everything the call card used to carry in its labels. Same shape as `why`, so
+    // the existing renderer draws it and no new component is invented.
+    cover: !cs.enabled ? null : (() => {
+      const coverPct = shares > 0 ? coveredNow / shares : 0;
+      const targetCt = Math.floor(shares * cs.coverage / 100);
+      const haveCt = Math.round(coveredNow / 100);
+      const overCt = Math.max(0, haveCt - targetCt);
+      return {
+        label: 'Cover',
+        chain: [
+          { text: `${haveCt} calls written`, out: `${coveredNow.toLocaleString()} shares` },
+          { text: `against ${shares.toLocaleString()} held`, out: `${Math.round(coverPct * 100)}%` },
+          { text: `target ${Math.round(cs.coverage * 100)}%`, out: `${targetCt} contracts` },
+        ],
+        verdict: overCt > 0
+          ? `*${overCt} over.* ~Expiry brings it down — nothing to buy back~`
+          : haveCt === targetCt ? '*At target*'
+            : `*${targetCt - haveCt} short* of the target`,
       };
     })(),
 

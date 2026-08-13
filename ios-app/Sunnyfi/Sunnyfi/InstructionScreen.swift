@@ -316,6 +316,7 @@ struct InstructionScreen: View {
                 // is this one line.
                 why(s.why)
                 whereYouAre(s.position)
+                if let cv = s.cover { why(cv) }
                 progress(s.progress)
                 ceiling(s.ceiling)
                 conviction(s.conviction)

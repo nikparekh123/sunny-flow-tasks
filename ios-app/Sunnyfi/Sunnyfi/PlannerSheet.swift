@@ -18,6 +18,9 @@ struct PlannerSheet: Decodable {
     /// The second card. Same shape as `instruction` so one renderer draws both.
     /// Optional so a deploy that predates it still decodes to a single card.
     let callCard: CallCard?
+    /// The call card's explanation, moved out of its stat labels so the two swipe
+    /// cards stay the same height. Same shape as `why`, so it reuses that renderer.
+    let cover: Why?
     let ladder: Ladder
     let tonight: Tonight?          // null when nothing is expiring
     let holdback: Holdback?        // null when the calendar is not damping
@@ -32,7 +35,7 @@ struct PlannerSheet: Decodable {
     let sources: Sources
 
     enum CodingKeys: String, CodingKey {
-        case ticker, boot, asOf, phase, instruction, callCard, ladder, tonight, holdback, calls, why
+        case ticker, boot, asOf, phase, instruction, callCard, cover, ladder, tonight, holdback, calls, why
         case position = "where"
         case progress, ceiling, conviction, coming, book, sources
     }
