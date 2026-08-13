@@ -833,11 +833,16 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       // verdict, not in a column of its own. Each row carries the ONE fact that
       // separates it: how much of its premium is not really premium.
       const verdict = (!chosen || !other) ? null : (() => {
-        const dBasis = Math.abs((other.strike - other.mid) - (putStrike - putMid));
-        const dEarn = Math.abs(other.extrinsic - chosen.extrinsic);
-        return dEarn <= 0.005
-          ? `Both earn ${cents(chosen.extrinsic)}. _${cents(dBasis)} cheaper_`
-          : `${chosen.strike} earns ${cents(dEarn)} less. _${cents(dBasis)} cheaper_`;
+        // SIGNED. These were Math.abs with the words "less" and "cheaper" hardcoded,
+        // which read correctly only while the picker always took the lower strike.
+        // Picking 225 over 222.5 it claimed "earns 103c less, 144c cheaper" when 225
+        // earns 103c MORE and costs 143c MORE — the justification inverted.
+        const dBasis = (putStrike - putMid) - (other.strike - other.mid);   // + = chosen dearer
+        const dEarn = chosen.extrinsic - other.extrinsic;                    // + = chosen earns more
+        return Math.abs(dEarn) <= 0.005
+          ? `Both earn ${cents(chosen.extrinsic)}. _${cents(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`
+          : `${chosen.strike} earns ${cents(Math.abs(dEarn))} ${dEarn > 0 ? 'more' : 'less'}.`
+            + ` _${cents(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`;
       })();
       return {
         label: 'Why this strike',
