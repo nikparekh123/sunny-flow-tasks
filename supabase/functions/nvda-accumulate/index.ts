@@ -604,16 +604,32 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // 1% out is the settled strike, so the ladder is centred there rather than on a
   // delta. The extrinsic rule still picks between the neighbours around it.
   const wantStrike = Math.round((spot! * (1 - otmPct)) / STRIKE_STEP) * STRIKE_STEP;
-  const putBand = cands.filter((c) => c.tradeable && c.extrinsic > 0
-    && Math.abs(c.strike - wantStrike) <= STRIKE_STEP * 2);
+  // 1% OUT WINS. Extrinsic only separates strikes that are equally far from it.
+  //
+  // This used to take the richest extrinsic within +/- two strike steps of the
+  // target, tie-breaking to the lower strike. Extrinsic peaks AT the money, and
+  // NVDA's strikes are 2.5 apart, so neighbours differ by ~100c against a ~42c tie
+  // threshold -- the tie never fired and the rule always walked to the money. With
+  // spot at 224.96 it picked 225, four cents IN the money, while the target was
+  // 222.5. The strike test put 1% OTM at $1,429,112 against ATM's $1,359,528, so
+  // that drift costs about $70K over the horizon.
+  //
+  // The irony worth remembering: the extrinsic rule exists because intrinsic is not
+  // income, and maximising extrinsic walks straight to the strike that has some.
+  //
+  // TLT keeps the old rule deliberately. Its target IS at the money, its strikes are
+  // 0.5 apart, and the tie fires there constantly -- the same code behaves correctly
+  // on a chain with that spacing.
+  const putBand = cands.filter((c) => c.tradeable && c.extrinsic > 0);
   let pick: typeof cands[number] | null = null;
   let pickBy = 'none';
   if (putBand.length) {
-    const best = Math.max(...putBand.map((c) => c.extrinsic));
-    const tie = Math.max(TIE_ABS, TIE_REL * best);
-    // lowest strike among those within a tie of the best extrinsic
-    pick = putBand.filter((c) => c.extrinsic >= best - tie).reduce((a, b) => (a.strike <= b.strike ? a : b));
-    pickBy = 'extrinsic';
+    pick = putBand.reduce((a, b) => {
+      const da = Math.abs(a.strike - wantStrike), db = Math.abs(b.strike - wantStrike);
+      if (Math.abs(da - db) > 1e-9) return da < db ? a : b;   // nearer the 1% target wins
+      return a.extrinsic >= b.extrinsic ? a : b;              // equidistant: richer extrinsic
+    });
+    pickBy = 'otm-target';
   } else if (cands.length) {
     // Nothing tradeable in the band — fall back to the old delta target so the
     // planner still answers, and say which rule produced the answer.
