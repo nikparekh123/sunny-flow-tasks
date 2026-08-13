@@ -83,6 +83,19 @@ final class NvdaStore {
             async let marks: [NvOptionMark] = client.from(tbl("option_marks"))
                 .select("option_trade_id,mark,delta,gamma,theta,vega,iv,captured_at")
                 .execute().value
+            // The close is the ONLY value while the market is shut. Before the open the
+            // live feed has no marks, and a missing mark was read as a mark of ZERO —
+            // so 75 long puts that had not moved reported the whole $87K premium as a
+            // loss, and the hero fell $50K overnight on nothing at all.
+            //
+            // nvda_eod()/tlt_eod() already snapshot per-leg marks at the close, dated
+            // on the New York market date. The table was written nightly and never
+            // read. One row per leg for the most recent session is enough.
+            async let marksEod: [NvOptionMarkEod] = client.from(tbl("option_marks_eod"))
+                .select("option_trade_id,date,mark,delta,theta")
+                .order("date", ascending: false)
+                .limit(600)
+                .execute().value
             async let closes: [NvDailyClose] = client.from(tbl("daily_closes"))
                 .select("ticker,date,close_price")
                 .order("date", ascending: false)
@@ -98,7 +111,11 @@ final class NvdaStore {
                 .limit(300)
                 .execute().value
 
-            let (t, l, sl, q, m, c, nvc) = try await (trades, lots, sells, quotes, marks, closes, nvCloseRows)
+            let (t, l, sl, q, mLive, c, nvc) = try await (trades, lots, sells, quotes, marks, closes, nvCloseRows)
+            let mEod = (try? await marksEod) ?? []
+            // Chosen HERE rather than inside NvDerive: every derivation then sees one
+            // marks list and none of the P&L maths has to know the close exists.
+            let m = NvDerive.marksForSession(live: mLive, eod: mEod)
             let nvda = q.first { $0.ticker == ticker }
             nvCloses = nvc
                 .compactMap { row in row.close_price.map { (row.date, $0) } }

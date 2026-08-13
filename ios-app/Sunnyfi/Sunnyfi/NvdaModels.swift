@@ -340,6 +340,45 @@ enum NvDerive {
 
     /// `realized` comes from NvPnL and is NOT recomputed here — the glossary keeps one
     /// definition and this is the only figure New average is allowed to use.
+    /// Is the New York equity session open? Weekday, 09:30–16:00 ET.
+    /// Holidays are NOT handled — the NYSE calendar is not derivable from a date.
+    /// On a holiday this reads open and the live feed simply carries the previous
+    /// close, which is the same number the closed branch would have used.
+    static func marketIsOpen(_ now: Date = Date()) -> Bool {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let c = cal.dateComponents([.weekday, .hour, .minute], from: now)
+        guard let wd = c.weekday, (2...6).contains(wd) else { return false }   // Mon–Fri
+        let mins = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+        return mins >= 9 * 60 + 30 && mins < 16 * 60
+    }
+
+    /// ONE source, chosen by session state — never a blend.
+    ///
+    /// Open: the live feed. Closed: the close, and only the close.
+    ///
+    /// Not a fallback. Falling back per-leg would let a half-populated pre-market
+    /// feed value some legs live and others at the close, so the book would be
+    /// marked at two different instants and the total would mean nothing. Before
+    /// this, an absent mark was read as a mark of ZERO — 75 long puts that had not
+    /// moved reported their whole $87K premium as a loss and the hero fell $50K
+    /// overnight on no trading at all.
+    ///
+    /// nvda_eod()/tlt_eod() already snapshot per-leg marks at the close, dated on
+    /// the New York market date. The table was written nightly and never read.
+    static func marksForSession(live: [NvOptionMark], eod: [NvOptionMarkEod],
+                                open: Bool = marketIsOpen()) -> [NvOptionMark] {
+        if open { return live.filter { $0.mark != nil } }
+        // eod arrives newest-first, so the first row per leg is the latest close.
+        var newest: [String: NvOptionMarkEod] = [:]
+        for e in eod where newest[e.option_trade_id] == nil { newest[e.option_trade_id] = e }
+        return newest.values.filter { $0.mark != nil }.map { e in
+            NvOptionMark(option_trade_id: e.option_trade_id, mark: e.mark,
+                         delta: e.delta, gamma: nil, theta: e.theta, vega: nil, iv: nil,
+                         captured_at: e.date)
+        }
+    }
+
     static func position(trades: [NvOptionTrade], lots: [NvShareLot], quote: NvQuote?,
                          marks: [NvOptionMark], realized: Double = 0,
                          now: Date = Date()) -> NvPosition? {
