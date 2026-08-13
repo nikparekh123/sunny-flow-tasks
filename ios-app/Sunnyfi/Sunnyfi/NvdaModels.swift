@@ -371,11 +371,11 @@ enum NvDerive {
     /// the New York market date. The table was written nightly and never read.
     static func marksForSession(live: [NvOptionMark], eod: [NvOptionMarkEod],
                                 open: Bool = marketIsOpen()) -> [NvOptionMark] {
-        if open { return live.filter { $0.mark != nil } }
+        if open { return live.filter { ($0.mark ?? 0) > 0 } }
         // eod arrives newest-first, so the first row per leg is the latest close.
         var newest: [String: NvOptionMarkEod] = [:]
         for e in eod where newest[e.option_trade_id] == nil { newest[e.option_trade_id] = e }
-        return newest.values.filter { $0.mark != nil }.map { e in
+        return newest.values.filter { ($0.mark ?? 0) > 0 }.map { e in
             NvOptionMark(option_trade_id: e.option_trade_id, mark: e.mark,
                          delta: e.delta, gamma: nil, theta: e.theta, vega: nil, iv: nil,
                          captured_at: e.date)
@@ -416,7 +416,7 @@ enum NvDerive {
                 // feed reached carry a price — taking the first blindly could pick an
                 // unmarked sibling and render a fully-priced leg as "no mark".
                 if anyOpenId[k] == nil { anyOpenId[k] = t.id }
-                else if markByTrade[anyOpenId[k]!]?.mark == nil, markByTrade[t.id]?.mark != nil { anyOpenId[k] = t.id }
+                else if (markByTrade[anyOpenId[k]!]?.mark ?? 0) <= 0, (markByTrade[t.id]?.mark ?? 0) > 0 { anyOpenId[k] = t.id }
                 if openedAt[k] == nil || t.trade_date > openedAt[k]! { openedAt[k] = t.trade_date }
             }
         }
@@ -425,7 +425,9 @@ enum NvDerive {
         for (k, ct) in net where ct > 0.0001 {
             let m = anyOpenId[k].flatMap { markByTrade[$0] }
             let expired = isExpired(k.expiry, now: now)
-            let mkNow = expired ? nil : m?.mark
+            // A mark of 0 is the absence of a price, not a price of zero — see
+            // nvda-marks. Normalised here so every consumer sees nil for both.
+            let mkNow: Double? = expired ? nil : m?.mark.flatMap { $0 > 0 ? $0 : nil }
             let current = (mkNow ?? 0) * ct * 100
             // per-contract basis reflects the OPEN legs of this net position
             let basis = openBasis[k] ?? 0
@@ -482,7 +484,7 @@ enum NvDerive {
             // booked a long option's entire cost as a loss the moment the feed went
             // quiet: 75 long puts that had not moved read −$87K, and TLT's 10 read
             // −$420. Expired legs DO settle at zero, which is why they stay in.
-            if s.mark == nil && !s.expired { continue }
+            if (s.mark ?? 0) <= 0 && !s.expired { continue }
             optionsPL += s.side == "long" ? (s.current - s.basis) : (s.basis - s.current)
         }
         let pnl = sharesPL + optionsPL
@@ -540,7 +542,7 @@ enum NvDerive {
             net[k, default: 0] += (t.action == "open" ? 1 : -1) * t.contracts
             if t.action == "open" {
                 if anyId[k] == nil { anyId[k] = t.id }
-                else if markByTrade[anyId[k]!]?.mark == nil, markByTrade[t.id]?.mark != nil { anyId[k] = t.id }
+                else if (markByTrade[anyId[k]!]?.mark ?? 0) <= 0, (markByTrade[t.id]?.mark ?? 0) > 0 { anyId[k] = t.id }
             }
         }
         func openPrem(_ kind: String, _ dir: String) -> Double {
@@ -681,7 +683,7 @@ enum NvDerive {
             if t.action == "open" {
                 a.openCt += t.contracts; a.openPrem += t.premium * t.contracts * 100
                 if a.markId == nil { a.markId = t.id }
-                else if markByTrade[a.markId!]?.mark == nil, markByTrade[t.id]?.mark != nil { a.markId = t.id }
+                else if (markByTrade[a.markId!]?.mark ?? 0) <= 0, (markByTrade[t.id]?.mark ?? 0) > 0 { a.markId = t.id }
             }
             else {
                 a.closeCt += t.contracts; a.closePrem += t.premium * t.contracts * 100
@@ -703,7 +705,7 @@ enum NvDerive {
             let expired = isExpired(k.expiry, now: now)
             // nil, not 0 — see position(). An unmarked live leg contributes nothing
             // to the open value rather than pretending it is worth nothing.
-            let mk = a.markId.flatMap { markByTrade[$0]?.mark }
+            let mk = a.markId.flatMap { markByTrade[$0]?.mark }.flatMap { $0 > 0 ? $0 : nil }
             let mark = mk ?? 0
             let priced = mk != nil || expired
             if k.dir == "short" {
@@ -762,7 +764,7 @@ enum NvDerive {
             net[k, default: 0] += (t.action == "open" ? 1 : -1) * t.contracts
             if t.action == "open" {
                 if anyId[k] == nil { anyId[k] = t.id }
-                else if markByTrade[anyId[k]!]?.mark == nil, markByTrade[t.id]?.mark != nil { anyId[k] = t.id }
+                else if (markByTrade[anyId[k]!]?.mark ?? 0) <= 0, (markByTrade[t.id]?.mark ?? 0) > 0 { anyId[k] = t.id }
             }
         }
         var covered = 0.0, ct = 0.0, floors: [Double] = []

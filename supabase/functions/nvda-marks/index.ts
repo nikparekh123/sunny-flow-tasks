@@ -147,7 +147,17 @@ Deno.serve(async (req) => {
         const snap = await fetchOption(book.under, c.occ, key);
         if (!snap) continue;
         const fresh: Record<string, unknown> = { captured_at: now };
-        for (const [k, v] of Object.entries(snap)) if (v !== null && v !== undefined) fresh[k] = v;
+        for (const [k, v] of Object.entries(snap)) {
+          if (v === null || v === undefined) continue;
+          // A mark of ZERO is not a price, it is the absence of one. Polygon returns
+          // day.close = 0 for a contract that has not traded yet, and writing that
+          // wiped the last good mark. Zero is non-null, so every downstream guard
+          // that checked for null let it through: the leg then valued at nothing and
+          // booked its whole cost as a loss. Greeks may legitimately be 0; the price
+          // may not.
+          if (k === 'mark' && Number(v) <= 0) continue;
+          fresh[k] = v;
+        }
         for (const id of c.ids) {
           const { error } = await admin.from(`${book.prefix}_option_marks`).upsert(
             { option_trade_id: id, ...fresh },

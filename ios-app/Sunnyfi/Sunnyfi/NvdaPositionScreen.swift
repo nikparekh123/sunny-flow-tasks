@@ -438,7 +438,7 @@ private struct SleeveGroupCard: View {
         // had not moved. Only legs we can actually price contribute to value or P&L;
         // an expired leg is genuinely worth zero and stays in. Paid is summed over
         // every leg regardless, because that money was really spent.
-        let priced = pageStrikes.filter { $0.mark != nil || $0.expired }
+        let priced = pageStrikes.filter { ($0.mark ?? 0) > 0 || $0.expired }
         let basis = pageStrikes.reduce(0) { $0 + $1.basis }
         let pricedBasis = priced.reduce(0) { $0 + $1.basis }
         let cur = priced.reduce(0) { $0 + $1.current }
