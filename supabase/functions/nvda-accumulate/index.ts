@@ -979,7 +979,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         // Mirrors the instruction's cadence exactly: date · figure · source.
         meta: !cs.enabled ? 'Trim delta by writing fewer puts'
           : `${nearest ? `${DOWN[parseISO(nearest).getUTCDay()].slice(0, 3)} ${fmtDay(nearest, today.getUTCFullYear())}` : 'none open'}`
-            + ` \u00b7 ${itmCt} in the money \u00b7 real quotes`,
+            // No "real quotes" here: unlike the put card, nothing below is a quote.
+            + ` \u00b7 ${itmCt} of ${shortCalls.reduce((n, l) => n + l.ct, 0)} in the money`,
         commit: [
           [coveredNow.toLocaleString(), 'covered'],
           [overCt > 0 ? String(overCt) : String(Math.max(0, targetCt - Math.round(coveredNow / 100))),
@@ -987,8 +988,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         ],
         // CONDITIONAL. These settle on Friday and Friday has not happened. The
         // caveat lives in the cover card below; a stat label is not the place for it.
+        // Intrinsic, and labelled as such. "to roll" overstated it -- a roll sells a
+        // later call and gives back some of this in time value -- and the honest
+        // figure is simply how far in the money the calls are.
         basis: itmCt > 0
-          ? { value: usd0(rollCost), label: `to roll ${itmCt}` }
+          ? { value: usd0(rollCost), label: 'in the money' }
           : { value: '\u2014', label: 'none in the money' },
         earn: itmCt > 0
           ? { value: itmShares.toLocaleString(), label: 'shares at risk' }
