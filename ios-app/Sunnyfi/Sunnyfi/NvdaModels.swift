@@ -408,7 +408,12 @@ enum NvDerive {
             net[k, default: 0] += (t.action == "open" ? 1 : -1) * t.contracts
             if t.action == "open" {
                 openBasis[k, default: 0] += t.premium * t.contracts * 100
+                // Prefer an open id that HAS a mark. A position filled across several
+                // executions has one trade row per fill, and only the rows the marks
+                // feed reached carry a price — taking the first blindly could pick an
+                // unmarked sibling and render a fully-priced leg as "no mark".
                 if anyOpenId[k] == nil { anyOpenId[k] = t.id }
+                else if markByTrade[anyOpenId[k]!]?.mark == nil, markByTrade[t.id]?.mark != nil { anyOpenId[k] = t.id }
                 if openedAt[k] == nil || t.trade_date > openedAt[k]! { openedAt[k] = t.trade_date }
             }
         }
@@ -525,7 +530,10 @@ enum NvDerive {
         for t in live {
             let k = Key(side: t.direction, kind: t.option_type, strike: t.strike, expiry: t.expiry)
             net[k, default: 0] += (t.action == "open" ? 1 : -1) * t.contracts
-            if t.action == "open", anyId[k] == nil { anyId[k] = t.id }
+            if t.action == "open" {
+                if anyId[k] == nil { anyId[k] = t.id }
+                else if markByTrade[anyId[k]!]?.mark == nil, markByTrade[t.id]?.mark != nil { anyId[k] = t.id }
+            }
         }
         func openPrem(_ kind: String, _ dir: String) -> Double {
             live.filter { $0.option_type == kind && $0.direction == dir && $0.action == "open" }
@@ -662,7 +670,11 @@ enum NvDerive {
         for t in live {
             let k = Key(kind: t.option_type, dir: t.direction, strike: t.strike, expiry: t.expiry)
             var a = byKey[k] ?? Agg()
-            if t.action == "open" { a.openCt += t.contracts; a.openPrem += t.premium * t.contracts * 100; if a.markId == nil { a.markId = t.id } }
+            if t.action == "open" {
+                a.openCt += t.contracts; a.openPrem += t.premium * t.contracts * 100
+                if a.markId == nil { a.markId = t.id }
+                else if markByTrade[a.markId!]?.mark == nil, markByTrade[t.id]?.mark != nil { a.markId = t.id }
+            }
             else {
                 a.closeCt += t.contracts; a.closePrem += t.premium * t.contracts * 100
                 // Assigned short call (premium ≈ 0 close + a same-day share sell at
@@ -740,7 +752,10 @@ enum NvDerive {
         for t in live where t.option_type == "put" && t.direction == "long" {
             let k = PKey(strike: t.strike, expiry: t.expiry)
             net[k, default: 0] += (t.action == "open" ? 1 : -1) * t.contracts
-            if t.action == "open", anyId[k] == nil { anyId[k] = t.id }
+            if t.action == "open" {
+                if anyId[k] == nil { anyId[k] = t.id }
+                else if markByTrade[anyId[k]!]?.mark == nil, markByTrade[t.id]?.mark != nil { anyId[k] = t.id }
+            }
         }
         var covered = 0.0, ct = 0.0, floors: [Double] = []
         for (k, c) in net where c > 0.0001 && !isExpired(k.expiry, now: now) {
