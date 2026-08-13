@@ -727,7 +727,22 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const putIntrinsic = pick?.intrinsic ?? 0;
   const putExtrinsic = pick?.extrinsic ?? 0;
 
-  const wantCt = putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
+  // ── the auction brake ────────────────────────────────────────────────────
+  // Write nothing on the roll whose contract SPANS a long-end auction.
+  //
+  // TLT already damped events through conviction, but that is a -12 penalty on a
+  // score feeding a 0.7-1.3 ramp, so the brake topped out near 0.9x. Measured over
+  // 1,079 windows (research/tlt-auction), a hard stop on the straddling roll gives
+  // up $4,151 of net and avoids $58,846 of drawdown -- 14.2 to 1, by far the best
+  // ratio of anything tested on either ticker.
+  //
+  // BONDS ONLY, not the whole Note+Bond feed. A long-end auction is a supply event
+  // landing exactly where TLT lives; FOMC measured 4.1 to 1 by comparison, because
+  // it moves the front end hardest and TLT sits at the other end of the curve.
+  const auctionBrake = !!(expiry && auctions.some((a) =>
+    a.type === 'Bond' && a.auctionDate > todayISO && a.auctionDate <= expiry));
+  const wantCt = auctionBrake ? 0
+    : putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
   const maxCt = Math.floor(headroom / (putStrike * 100));
   const putCt = Math.min(wantCt, maxCt);
@@ -820,8 +835,16 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     instruction: {
       label: 'The instruction',
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
+        : auctionBrake ? 'Nothing — auction inside this contract'
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
-      meta: putCt === 0 && sliceFilled
+      meta: auctionBrake && expiry
+        ? (() => {
+            const a = auctions.filter((x) => x.type === 'Bond' && x.auctionDate > todayISO && x.auctionDate <= expiry)
+              .sort((x, y) => x.auctionDate.localeCompare(y.auctionDate))[0];
+            return a ? `${Math.round(a.termYears)}y auction ${fmtDay(a.auctionDate)} lands before ${fmtDay(expiry)}`
+                     : 'auction inside this contract';
+          })()
+        : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
           + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
@@ -918,6 +941,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
             ? `less ${Math.round(writtenWeek)} written since Monday, at ${putDelta.toFixed(2)} delta`
             : `at ${putDelta.toFixed(2)} delta`,
           out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
+        ...(auctionBrake ? [{ text: 'long-end auction inside the contract — brake on', out: 'hold' }] : []),
       ],
       // "0 of 0, nothing clipped" is true and useless on a day that is already
       // done. wanted-versus-got only means something while there is something

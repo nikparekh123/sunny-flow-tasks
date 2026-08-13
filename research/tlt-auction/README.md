@@ -36,3 +36,33 @@ fires BEFORE an event on the theory that unknowns deserve smaller size. Merging
 them into one number would confuse two distinct claims.
 
 Baseline: TLT 21d after any 30-year auction, +0.50% (sd 3.86, n=91).
+
+
+## Should TLT hard-stop the roll that spans a heavy event? (`tlt_brake.py`)
+
+TLT already damped events, but only through conviction: a -12 penalty on a score
+feeding a 0.7-1.3 ramp, so the brake topped out near 0.9x. 1,079 windows x 72 weeks.
+Auction dates are REAL, from Treasury's API (213 long-end auctions 2017-2026). FOMC
+dates are hand-entered from the published schedule and are the weaker evidence.
+
+| arm | shares | net | worst DD | net given up | DD saved | ratio |
+|---|---|---|---|---|---|---|
+| no brake (~0.9x) | 32,600 | -$1,875 | -$321,424 | — | — | — |
+| **auctions: hard stop** | 30,400 | -$6,026 | -$262,578 | $4,151 | $58,846 | **14.2 : 1** |
+| auctions: 0.25x | 30,700 | -$6,183 | -$275,808 | $4,308 | $45,616 | 10.6 : 1 |
+| FOMC: hard stop | 31,200 | -$5,908 | -$304,995 | $4,033 | $16,429 | 4.1 : 1 |
+| both: hard stop | 30,000 | -$7,709 | -$244,531 | $5,834 | $76,893 | 13.2 : 1 |
+
+**Auctions are worth three times FOMC**, and the reason is mechanical: an auction is
+a SUPPLY event landing exactly where TLT lives, while FOMC moves the front end
+hardest and TLT sits at the other end of the curve.
+
+**14.2:1 is the best ratio anything has produced on either ticker** — against ~2:1
+for NVDA's earnings brake and 5.2:1 for its extended band.
+
+Every arm's net is NEGATIVE: TLT fell hard through 2020-23, so "net given up" means
+"loss deepened", not "profit forgone". The braking logic holds; the sign does not
+make it a winner.
+
+Shipped as Bonds only (20y and 30y). FOMC left to the existing soft damper, which is
+about what it is worth.
