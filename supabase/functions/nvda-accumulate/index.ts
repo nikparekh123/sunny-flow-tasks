@@ -644,10 +644,15 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     });
     pickBy = 'otm-target';
   } else if (cands.length) {
-    // Nothing tradeable in the band — fall back to the old delta target so the
-    // planner still answers, and say which rule produced the answer.
-    pick = cands.reduce((a, b) => (Math.abs(a.dAbs - putDeltaTgt) <= Math.abs(b.dAbs - putDeltaTgt) ? a : b));
-    pickBy = 'delta-fallback';
+    // Nothing has a two-sided quote — Polygon returns mid 0 whenever a bid or an ask
+    // is missing, which happens on thin expiries and in the first minutes of a
+    // session. Fall back to the strike NEAREST THE 1% TARGET rather than to a delta,
+    // so the settled rule still decides where; only the pricing is degraded.
+    // Falling back to a delta silently changed the STRIKE RULE on exactly the days
+    // no one was watching.
+    pick = cands.reduce((a, b) =>
+      Math.abs(a.strike - wantStrike) <= Math.abs(b.strike - wantStrike) ? a : b);
+    pickBy = 'unquoted';
   }
 
   const putStrike = pick?.strike ?? Math.round((spot * 0.99) / STRIKE_STEP) * STRIKE_STEP;
@@ -787,7 +792,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
-          + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
+          + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 `
+          + (pickBy === 'unquoted' ? 'no live quote' : pick?.modelled ? 'modelled' : 'real quotes'),
       commit: [[usd0(putStrike * 100 * putCt), 'committed'], [String(putCt * 100), 'shares if assigned']],
       basis: { value: (putStrike - putMid).toFixed(2), label: 'basis if assigned' },
       // One figure, one label. The old three-line earn column made a subordinate
@@ -906,10 +912,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         verdict,
         // Only the delta fallback is a fallback. This said "not extrinsic", which
         // after the rename meant the normal rule reported itself as a fallback.
-        fallback: pickBy !== 'delta-fallback' ? null : {
-          state: 'delta fallback',
+        fallback: pickBy !== 'unquoted' ? null : {
+          state: 'no live quote',
           headline: 'No ladder',
-          note: `Chain quotes missing. Picked on *${putDeltaTgt.toFixed(2)} delta*`,
+          note: `No two-sided quote on the chain. Held to the *1% target*, ${putStrike}`,
         },
       };
     })(),
