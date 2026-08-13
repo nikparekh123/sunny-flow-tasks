@@ -158,6 +158,20 @@ export async function marketNow(key: string): Promise<{ open: boolean; label: st
   } catch { return null; }
 }
 
+// The trading day is NEW YORK's, not UTC's. ymd(new Date()) rolls over at midnight
+// UTC — 8pm ET on daylight time — so for four hours every evening the engines were a
+// calendar day ahead of the market they price. It showed as "30-year today" on the
+// Wednesday evening before a Thursday auction, and it moved every date comparison in
+// both engines with it: the event calendar, the expiry filter, the week-start.
+export function nyToday(): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date()).map((x) => [x.type, x.value]),
+  );
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 export function marketState(now: Date): { open: boolean; label: string } {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', {
