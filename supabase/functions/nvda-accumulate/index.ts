@@ -3,7 +3,7 @@ import {
   SLICE, SLICE_CUM, ncdf, d1of, putDeltaAbs, callDelta,
   clamp, fin, num, mean, sd, pctRank,
   MONTHS, DOWN, ymd, parseISO, addDays, daysBetween,
-  marketNow, marketState, fmtDay, fmtUsd, quarterStart, Row,
+  marketNow, marketState, nyToday, fmtDay, fmtUsd, quarterStart, Row,
   db, dailyCloses, spotOf, putExpiries, Quote, chain,
 } from
   // Pinned to a commit, not to main. The dashboard bundles only the function's
@@ -11,7 +11,7 @@ import {
   // so the shared core is fetched over https at bundle time instead. The SHA
   // makes that reproducible: a cached copy can never be a different version.
   // Changing the shared file means a new SHA in both engines, and both redeploy.
-  'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/acfd49d63a4c4a852c7d1156490145cd0ea56597/supabase/functions/_shared/planner.ts';
+  'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 /**
  * nvda-accumulate — the next NVDA short-put decision.
  *
@@ -194,7 +194,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // midnight, and daysBetween rounds the difference — so an event dated today read
   // as "−1d out" once the clock passed noon UTC. Option T and weeksElapsed had the
   // same skew.
-  const today = parseISO(body.asof ?? ymd(new Date()));
+  const today = parseISO(body.asof ?? nyToday());
   const todayISO = ymd(today);
   const fiveYrAgo = ymd(addDays(today, -5 * 365));
 
