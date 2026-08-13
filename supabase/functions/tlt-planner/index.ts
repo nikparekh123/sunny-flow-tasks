@@ -881,7 +881,9 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
       meta: auctionBrake && expiry
         ? (() => {
-            const a = auctions.filter((x) => x.type === 'Bond' && x.auctionDate > todayISO && x.auctionDate <= expiry)
+            // >= today, matching the brake itself. Left as > here, this found nothing
+            // on the very day the brake fired and fell back to the generic wording.
+            const a = auctions.filter((x) => x.type === 'Bond' && x.auctionDate >= todayISO && x.auctionDate <= expiry)
               .sort((x, y) => x.auctionDate.localeCompare(y.auctionDate))[0];
             return a ? `${Math.round(a.termYears)}y auction ${fmtDay(a.auctionDate)} lands before ${fmtDay(expiry)}`
                      : 'auction inside this contract';
