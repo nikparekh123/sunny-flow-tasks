@@ -98,7 +98,7 @@ struct NvdaPositionScreen: View {
         }
         var out: [RailGroup] = [
             .init(id: "overview", label: "Overview", glyph: nil, count: 1, width: 348,
-                  cards: [AnyView(SummaryCard(p: p, pnl: store.pnl, marksDebug: store.marksDebug).inkEntrance(0))]),
+                  cards: [AnyView(SummaryCard(p: p, pnl: store.pnl).inkEntrance(0))]),
             .init(id: "shares", label: "Shares", glyph: "○", count: sharesCards.count, width: 348, cards: sharesCards),
         ]
         var cards: [AnyView] = []
@@ -219,8 +219,6 @@ private func unitLabel(_ s: String) -> some View {
 private struct SummaryCard: View {
     let p: NvPosition
     let pnl: NvPnL?
-    /// TEMPORARY marks diagnostic — remove once "no mark" is solved.
-    var marksDebug: String = ""
 
     private var openPnl: Double { p.sharesPL + p.optionsPL }
     private var todayStep: Double { p.spot - p.spot / (1 + p.dayChangePct / 100) }
@@ -247,12 +245,6 @@ private struct SummaryCard: View {
                                hue: Ink.signed(realized >= 0), first: true)
                     LedgerLine(k: "New average", sub: "buy average $\(nvDec(p.avgBuy, 2))", v: "$\(nvDec(p.breakEven, 2))")
                     LedgerLine(k: "Net delta", sub: "share equivalent", v: nvSigned(p.delta))
-                    // TEMPORARY marks diagnostic — remove once "no mark" is solved.
-                    if !marksDebug.isEmpty {
-                        Text(marksDebug)
-                            .font(InkFont.mono(9)).foregroundStyle(Ink.dim)
-                            .padding(.top, 6).fixedSize(horizontal: false, vertical: true)
-                    }
                 }
                 .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }   // divider at row top…
                 .padding(.top, 20)                                                           // …with the 20pt gap above it

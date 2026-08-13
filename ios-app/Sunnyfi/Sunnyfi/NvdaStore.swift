@@ -42,12 +42,6 @@ final class NvdaStore {
     private var ticker: String { prefix.uppercased() }
     private func tbl(_ name: String) -> String { "\(prefix)_\(name)" }
 
-    /// TEMPORARY. Five rounds were spent guessing which layer dropped the option
-    /// marks — Polygon, the marks cron, the EOD snapshot, the id lookup, RLS — and
-    /// every one of them checked out against the database while the screen still
-    /// said "no mark". This makes the app state the numbers itself. Remove once the
-    /// cause is found.
-    private(set) var marksDebug = "—"
 
     var high52: Double? { Array(nvCloses.suffix(252)).max() }
 
@@ -127,11 +121,6 @@ final class NvdaStore {
             // Chosen HERE rather than inside NvDerive: every derivation then sees one
             // marks list and none of the P&L maths has to know the close exists.
             let m = NvDerive.marksForSession(live: mLive, eod: mEod)
-            marksDebug = "live \(mLive.count)/\(mLive.filter { $0.mark != nil }.count) · "
-                + "eod \(mEod.count)/\(mEod.filter { $0.mark != nil }.count) · "
-                + "used \(m.count) · \(NvDerive.marketIsOpen() ? "OPEN" : "CLOSED")"
-                + (eodErr.isEmpty ? "" : " · ERR \(eodErr)")
-                + (NvDerive.unmarkedTrace.isEmpty ? "" : "\n" + NvDerive.unmarkedTrace.prefix(4).joined(separator: " | "))
             let nvda = q.first { $0.ticker == ticker }
             nvCloses = nvc
                 .compactMap { row in row.close_price.map { (row.date, $0) } }
@@ -141,7 +130,6 @@ final class NvdaStore {
             let mergedCloses = c.filter { $0.ticker != ticker } + nvc
             // pnl FIRST: New average is buy average − realized/share, and realized
             // has exactly one definition, which lives in NvDerive.pnl.
-            NvDerive.unmarkedTrace = []
             let pnlNow = NvDerive.pnl(trades: t, lots: l, sells: sl, quote: nvda, marks: m)
             position  = NvDerive.position(trades: t, lots: l, quote: nvda, marks: m,
                                           realized: pnlNow?.realized ?? 0)
