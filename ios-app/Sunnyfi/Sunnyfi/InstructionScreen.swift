@@ -199,6 +199,8 @@ struct InstructionScreen: View {
     let onBack: () -> Void
     @State private var store: PlannerSheetStore
     @State private var cardPage: Int? = 0
+    /// Captured so the dismiss gesture can tell an edge drag from a card swipe.
+    @State private var screenW: CGFloat = 393
 
     init(ticker: String, function: String, onBack: @escaping () -> Void) {
         self.ticker = ticker
@@ -225,14 +227,25 @@ struct InstructionScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Ink.canvas.ignoresSafeArea())
+        .background(GeometryReader { geo in
+            Color.clear.onAppear { screenW = geo.size.width }
+                .onChange(of: geo.size.width) { _, w in screenW = w }
+        })
         // Swipe horizontally to leave, same as the NVDA deck. simultaneousGesture
         // rather than gesture: this sheet scrolls VERTICALLY, and an exclusive
         // gesture would fight the scroll for every drag. The axis guard means a
         // scroll never reads as a dismiss.
+        //
+        // The drag must START AT AN EDGE. Without that the gesture is identical to a
+        // card swipe -- horizontal, over 80pt -- so paging to the calls card closed
+        // the screen instead. Edge-initiated is what iOS itself uses for back, and it
+        // leaves the whole middle of the screen free for the pager.
         .simultaneousGesture(
             DragGesture(minimumDistance: 30)
                 .onEnded { g in
-                    guard abs(g.translation.width) > 80,
+                    let fromEdge = g.startLocation.x < 36 || g.startLocation.x > screenW - 36
+                    guard fromEdge,
+                          abs(g.translation.width) > 80,
                           abs(g.translation.width) > abs(g.translation.height) * 1.5
                     else { return }
                     onBack()
@@ -290,8 +303,15 @@ struct InstructionScreen: View {
                     VStack(spacing: 11) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 0) {
-                                hero(s.instruction).containerRelativeFrame(.horizontal).id(0)
-                                hero(cc.asInstruction).containerRelativeFrame(.horizontal).id(1)
+                                // Padding INSIDE a full-width slot, not spacing between
+                                // slots: the paging step has to stay exactly one
+                                // container width or the cards stop landing square.
+                                hero(s.instruction)
+                                    .padding(.horizontal, 7)
+                                    .containerRelativeFrame(.horizontal).id(0)
+                                hero(cc.asInstruction)
+                                    .padding(.horizontal, 7)
+                                    .containerRelativeFrame(.horizontal).id(1)
                             }
                             .scrollTargetLayout()
                         }
