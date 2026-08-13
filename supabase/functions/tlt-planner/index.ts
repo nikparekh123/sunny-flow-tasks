@@ -903,7 +903,12 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
 
     where: {
       label: 'Where you are',
-      headline: `*${shares.toLocaleString()} shares* \u00b7 ${pendingShares.toLocaleString()} pending \u00b7 ^${fullyAssigned.toLocaleString()} assigned^`,
+      // "1,000 assigned" was fullyAssigned = shares + pending, i.e. what you would
+      // hold if every open put landed. Nothing had been assigned. Fixed in NVDA on
+      // 12 Aug and missed here -- the sheet copy is the duplication the audit left.
+      headline: pendingShares > 0
+        ? `*${shares.toLocaleString()} shares* \u00b7 ^${pendingShares.toLocaleString()} more^ if the open puts land`
+        : `*${shares.toLocaleString()} shares* \u00b7 ~no puts open, nothing due to arrive~`,
       lines: [
         `Net delta *${Math.round(netDelta)}* \u2192 \`${Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta)}\``,
         `Floor covers *${Math.round(floorCoverage * 100)}%*`,
