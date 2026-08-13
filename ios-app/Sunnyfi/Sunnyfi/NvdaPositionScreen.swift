@@ -433,9 +433,16 @@ private struct SleeveGroupCard: View {
     var body: some View {
         let short = pageStrikes.first?.side == "short"
         let ct = pageStrikes.reduce(0) { $0 + $1.ct }
+        // `current` is (mark ?? 0), so an unmarked LIVE leg reads as worth nothing and
+        // a long position books its whole cost as a loss — the −$87K on 75 puts that
+        // had not moved. Only legs we can actually price contribute to value or P&L;
+        // an expired leg is genuinely worth zero and stays in. Paid is summed over
+        // every leg regardless, because that money was really spent.
+        let priced = pageStrikes.filter { $0.mark != nil || $0.expired }
         let basis = pageStrikes.reduce(0) { $0 + $1.basis }
-        let cur = pageStrikes.reduce(0) { $0 + $1.current }
-        let net = short ? basis - cur : cur - basis     // unrealized (open) P&L for this page
+        let pricedBasis = priced.reduce(0) { $0 + $1.basis }
+        let cur = priced.reduce(0) { $0 + $1.current }
+        let net = short ? pricedBasis - cur : cur - pricedBasis   // unrealized, priced legs only
         let ie = pageStrikes.reduce((int: 0.0, ext: 0.0)) { acc, s in
             guard let x = legIntExt(kind: s.kind, strike: s.strike, mark: s.mark, ct: s.ct, spot: spot) else { return acc }
             return (acc.int + x.int, acc.ext + x.ext)
