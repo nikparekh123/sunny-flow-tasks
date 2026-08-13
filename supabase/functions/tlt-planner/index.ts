@@ -451,7 +451,30 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     calPenalty = dd <= 2 ? CAPS.calendar : dd <= 4 ? CAPS.calendar / 2 : dd <= 7 ? CAPS.calendar / 4 : 0;
     calNote = `${nextHeavy.class_name} ${fmtDay(String(nextHeavy.event_date))}${dd <= 7 ? ` · ${dd}d out` : ''}`;
   }
-  F.push({ key: 'calendar', label: 'Calendar', cap: CAPS.calendar, score: Math.round(calPenalty * 10) / 10, pct: null, note: calNote, ok: true });
+  // The last long-end auction's demand, SHOWN but not scored. bid_to_cover is
+  // already fetched for the issuance figure, so this costs nothing.
+  //
+  // Not weighted, deliberately. 91 auctions since 2001 put the 21-day tercile
+  // spread at -1.50% against a 1.04% standard error -- 1.44x, short of the 2x bar
+  // the NVDA conviction families were held to. The sign IS consistent across 1d,
+  // 5d and 21d and points the right way, which none of those six managed, so it
+  // is worth watching. See research/tlt-auction.
+  //
+  // It also cannot inform the day it happens: results publish about a day late.
+  // That makes it a different claim from the calendar damper above, which fires
+  // BEFORE an event because unknowns deserve smaller size.
+  const scored = auctions.filter((a) => a.btc != null && a.auctionDate < todayISO)
+    .sort((x, y) => y.auctionDate.localeCompare(x.auctionDate));
+  const lastLong = scored.find((a) => a.termYears >= 20) ?? null;
+  const btcAvg = scored.length ? scored.reduce((t, a) => t + (a.btc ?? 0), 0) / scored.length : 0;
+  const auctionNote = lastLong && lastLong.btc != null
+    ? `last ${Math.round(lastLong.termYears)}y ${fmtDay(lastLong.auctionDate)} \u00b7 `
+      + `${lastLong.btc.toFixed(2)} cover vs ${btcAvg.toFixed(2)} avg \u00b7 `
+      + `${lastLong.btc >= btcAvg ? 'solid' : 'soft'}`
+    : 'no auction result yet';
+
+  F.push({ key: 'calendar', label: 'Calendar', cap: CAPS.calendar, score: Math.round(calPenalty * 10) / 10, pct: null,
+           note: `${calNote} \u00b7 ${auctionNote}`, ok: true });
 
   const conviction = Math.round(clamp(base + calPenalty, 0, 100));
   emit(2);                                   // conviction scored: FRED, Treasury, bloc, calendar
