@@ -813,6 +813,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const putCt = Math.min(wantCt, maxCt);
   // Whole contracts dealt out, not the delta split three ways and each rounded, which
   // loses fractions and turns 29 into 27 or 30 for no reason. 29 becomes 10, 10, 9.
+  const openPutCt = shortPuts.reduce((n, l) => n + l.ct, 0);
   const putLegs = (() => {
     const n = legExpiries.length;
     if (!n || putCt <= 0) return [] as Array<{ expiry: string; ct: number }>;
@@ -914,8 +915,12 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       label: 'The instruction',
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
+      // The count of puts already open leads the line. Without it the card cannot be
+      // told apart from a stale one: Nik sold 25, the sync took two minutes, and the
+      // card still read 38 with no way to see whether it knew.
       meta: putLegs.length > 1
-        ? putLegs.map((l) => `${l.ct} ${DOWN[parseISO(l.expiry).getUTCDay()].slice(0, 3)} ${fmtDay(l.expiry)}`).join(' \u00b7 ')
+        ? `${openPutCt} open \u00b7 `
+          + putLegs.map((l) => `${l.ct} ${DOWN[parseISO(l.expiry).getUTCDay()].slice(0, 3)} ${fmtDay(l.expiry)}`).join(' \u00b7 ')
         : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`

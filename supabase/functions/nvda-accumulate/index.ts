@@ -812,7 +812,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         ? `${fmtDay(nextEarn, today.getUTCFullYear())} print lands before ${fmtDay(expiry ?? '', today.getUTCFullYear())}`
         : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
-        : `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
+        : `${shortPuts.reduce((n, l) => n + l.ct, 0)} open \u00b7 `
+          + `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
           + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 `
           + (pickBy === 'unquoted' ? 'no live quote' : pick?.modelled ? 'modelled' : 'real quotes'),
       commit: [[usd0(putStrike * 100 * putCt), 'committed'], [String(putCt * 100), 'shares if assigned']],
