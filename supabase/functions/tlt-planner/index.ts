@@ -701,7 +701,26 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     : (() => { const b = YIELD_BANDS.find(([lo]) => yieldGapBp >= lo) ?? YIELD_BANDS[YIELD_BANDS.length - 1];
                return [b[1], `30y ${yieldGapBp >= 0 ? '+' : '−'}${Math.abs(Math.round(yieldGapBp))}bp, ${b[2]}`] as [number, string]; })();
   const cf = convFactor(conviction);
-  const weeklyDelta = (quarterBudget / 13) * priceFactor * cf.f;
+  // The rate chases a shortfall, bounded at 2x. Ported from nvda-accumulate, and one
+  // of the few rules that genuinely should be identical on both tickers.
+  //
+  // A flat quarter budget never notices. Six months in the 0.25x band and TLT simply
+  // stays behind; a hot run and it sails past 100,000 without slowing. The rate is now
+  // what is still needed per remaining week, so it self-corrects both ways.
+  //
+  // The 2x bound matters as much as the chase. On NVDA an uncapped version produced
+  // 40-contract weeks, because the condition that starves delivery is the same one the
+  // price dial slows down for, and chasing into it fights the dial. Here the ceiling
+  // already caps the top band at 48 contracts, so the bound is the second guard rather
+  // than the only one.
+  const baseRate = quarterBudget / 13;
+  const horizonWk = (horizonLo + horizonHi) / 2;
+  const wkElapsed = Math.max(0, Math.floor(daysBetween(parseISO(startedOn), today) / 7));
+  const wkLeft = Math.max(1, horizonWk - wkElapsed);
+  const stillNeed = Math.max(0, targetShares - shares);
+  const chaseRate = Math.min(stillNeed / wkLeft, 2 * baseRate);
+  const chasing = chaseRate > baseRate * 1.02;
+  const weeklyDelta = chaseRate * priceFactor * cf.f;
 
   const dow = today.getUTCDay();
   const decisionDow = SLICE[dow] != null ? dow : (dow === 0 || dow === 6 ? 1 : dow < 3 ? 3 : dow < 5 ? 5 : 1);
@@ -808,9 +827,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   }
 
   // ── horizon band ─────────────────────────────────────────────────────────
-  const weeksElapsed = Math.max(0, Math.floor(daysBetween(parseISO(startedOn), today) / 7));
-  const remaining = Math.max(0, targetShares - shares);
-  const weeksAtBudget = quarterBudget > 0 ? remaining / (quarterBudget / 13) : Infinity;
+  // Same numbers the rate was sized from, so the readout cannot disagree with the
+  // instruction: projected off the rate actually being written, not the base budget.
+  const weeksElapsed = wkElapsed;
+  const remaining = stillNeed;
+  const weeksAtBudget = chaseRate > 0 ? remaining / chaseRate : Infinity;
   const projectedTotal = Math.round(weeksElapsed + weeksAtBudget);
   const standing = projectedTotal < horizonLo ? 'early' : projectedTotal <= horizonHi ? 'on plan' : 'behind';
 
@@ -819,6 +840,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     weeklyDelta: Math.round(weeklyDelta), sliceDelta: Math.round(sliceDelta),
     priceFactor, priceBand, convFactor: cf.f, convBand: cf.band,
     contracts: putCt, wanted: wantCt, ceilingBinds,
+    baseRate: Math.round(baseRate), chaseRate: Math.round(chaseRate), chasing,
+    weeksLeft: Math.round(wkLeft), stillNeed,
     writtenToday: Math.round(writtenToday), writtenWeek: Math.round(writtenWeek),
     weekToDate: Math.round(weekToDate), contractsToday,
     sliceLeft: Math.round(sliceLeft), sliceFilled,
@@ -959,7 +982,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     why: {
       label: 'Why this size',
       chain: [
-        { text: `${Math.round(quarterBudget / 13)}/wk \u00d7 ${priceFactor} (${priceBand}) \u00d7 ${cf.f} (conv ${conviction})`,
+        { text: `${Math.round(chaseRate)}/wk \u00d7 ${priceFactor} (${priceBand}) \u00d7 ${cf.f} (conv ${conviction})`,
           out: `${Math.round(weeklyDelta)} weekly` },
         { text: `through ${DOWN[decisionDow].slice(0, 3)} that is ${Math.round((SLICE_CUM[decisionDow] ?? 1) * 100)}% of the week`,
           out: `${Math.round(weekToDate)} delta` },

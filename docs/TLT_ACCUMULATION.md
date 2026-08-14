@@ -338,3 +338,20 @@ The two engines are separate files and differ on purpose: strike (TLT at the mon
 NVDA 1% out), dial (TLT reads the 30-year against its own mean, NVDA reads MA100),
 conviction weight (TLT on, NVDA zero). "Fix it for both" applies to bugs in shared
 behaviour, not to rules that differ.
+
+
+## The rate chases a shortfall, bounded at 2x
+
+Ported from NVDA on 13 Aug 2026. The rate was a flat `quarter budget / 13`, which
+never notices: six months in the 0.25x band and TLT simply stays behind, a hot run
+and it sails past 100,000 without slowing.
+
+    rate = min(shares still needed / weeks left, 2 x base) x band x conviction
+
+At 100,000 shares over ~110 weeks that is 908/wk against a base of 846, so it barely
+moves the number today. The value is that it self-corrects both ways rather than
+running open loop.
+
+The 2x bound is the second guard here, not the only one: the $400K ceiling already
+caps the top band at 48 contracts. On NVDA, where there is no such cap in the fast
+band, an uncapped chase produced 40-contract weeks.
