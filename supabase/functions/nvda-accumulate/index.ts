@@ -686,18 +686,44 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // are capped by shares owned rather than by a weekly slot, so a skipped green day
   // is written later against the same shares, while a skipped put week is band
   // capacity that simply expired unused.
-  const putGate  = !wheel || today.getUTCDay() === 5;
+  // SLICED ACROSS THE WEEK, not fired in one go on Friday. A fifth of the band each
+  // trading day, every slice getting a full week of tenor.
+  //
+  // Writing the whole band at one strike on one afternoon is concentration: a gap down
+  // on Monday catches every contract at Friday's price. Slicing cut the worst two-year
+  // run from -$4.04m to -$2.41m on NVDA and from -$0.65m to -$0.26m on AVGO, for 38%
+  // of the income. Income per unit of worst case is 0.40 either way, so on the numbers
+  // it is a size dial rather than a free lunch.
+  //
+  // Taken anyway, for two reasons the backtest cannot price. Nik is positioned bearish,
+  // so the bad case is the one he expects. And the whole sample is a bull market with
+  // almost no gap-downs, which flatters the concentrated version.
+  //
+  // Slicing into the SAME coming Friday does NOT work and was measured: Thursday's
+  // slice is a one-day contract that pays almost nothing. It cost income and cut no
+  // risk at all. Each slice must get its own full week, which is why the wheel's put
+  // expiry is the first Friday at least 5 days out rather than the coming one.
+  const putGate  = !wheel || (today.getUTCDay() >= 1 && today.getUTCDay() <= 5);
   const callGate = !wheel || greenRun >= 2;
   // Absolute price bands, not distance from a mean. Nik's rule, and it measured 14%
   // better than flat sizing with a slightly BETTER worst two-year run.
   const wheelCap = wheel
     ? (WHEEL_BANDS.find(([floor]) => (spot ?? 0) >= floor) ?? WHEEL_BANDS[WHEEL_BANDS.length - 1])[1]
     : 0;
+  // A fifth of the band, rounded up, so the deeper bands still fill inside a week
+  // rather than taking seventeen days to reach 50.
+  const wheelSlice = wheel ? Math.max(1, Math.ceil(wheelCap / 5)) : 0;
 
   // The wheel takes the COMING Friday, so the search must start tomorrow rather than
   // two days out, or a Thursday trigger would skip a whole week.
   const expiries = await putExpiries(TICKER, ymd(addDays(today, wheel ? 1 : 2)), polyKey);
-  const expiry = comingFriday(today, expiries);
+  // Each slice gets a FULL week. On a Friday that is the coming Friday; on a Monday it
+  // skips past the Friday four days out to the one eleven days out. Without this the
+  // late-week slices are one and two day contracts that pay nothing.
+  const expiry = wheel
+    ? (expiries.find((e) => parseISO(e).getUTCDay() === 5 && daysBetween(today, parseISO(e)) >= 5)
+       ?? comingFriday(today, expiries))
+    : comingFriday(today, expiries);
   let putQuotes: Quote[] = [];
   if (expiry) putQuotes = await chain(TICKER, 'put', expiry, Math.floor(spot * 0.92), Math.ceil(spot * 1.04), polyKey);
   emit(3);                                   // chain priced: real quotes for the candidates
@@ -798,7 +824,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // inside the contract, which the trigger knows nothing about.
   const openPutCt = shortPuts.reduce((n, l) => n + l.ct, 0);
   const wantCt = earnBrake ? 0
-    : wheel ? (putGate ? Math.max(0, wheelCap - openPutCt) : 0)
+    : wheel ? (putGate ? Math.min(wheelSlice, Math.max(0, wheelCap - openPutCt)) : 0)
     : putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
   const maxCt = Math.floor(headroom / (putStrike * 100));
@@ -936,7 +962,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // the strings as *bold* ~thin~ ^thick^ _underline_ for the client's parser.
   const nowTs = new Date();
   const usd0 = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
-  const cents = (v: number) => `${Math.round(v * 100)}¢`;
+  // Dollars, not cents. "350¢" is not how anyone talks about an option price.
+  const money = (v: number) => `$${v.toFixed(2)}`;
   const ageOf = (iso: string | null | undefined): string => {
     if (!iso) return 'unknown';
     const t = Date.parse(String(iso));
@@ -968,7 +995,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       // that is what sets the size once the gate opens.
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
         : earnBrake ? 'Nothing, earnings inside this contract'
-        : wheel && !putGate ? 'Puts write on Friday'
+        : wheel && !putGate ? 'Puts write on weekdays'
         : wheel ? `Band is full, ${openPutCt} of ${wheelCap} open`
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
       meta: earnBrake && nextEarn
@@ -977,7 +1004,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         ? `${openPutCt} of ${wheelCap} open · `
           + (spot != null && spot >= 200 ? 'above 200' : spot != null && spot >= 175 ? '175 to 200'
              : spot != null && spot >= 150 ? '150 to 175' : 'below 150')
-          + (putGate ? '' : ` · next write ${DOWN[5].slice(0, 3)}`)
+          + (putGate ? ` · ${wheelSlice} a day` : ' · next write Mon')
         : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${shortPuts.reduce((n, l) => n + l.ct, 0)} open \u00b7 `
@@ -989,8 +1016,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       // One figure, one label. The old three-line earn column made a subordinate
       // number look like a third tier of its own.
       earn: {
-        value: cents(putExtrinsic),
-        label: putIntrinsic <= 0.005 ? 'no intrinsic' : `${cents(putIntrinsic)} intrinsic`,
+        value: money(putExtrinsic),
+        label: putIntrinsic <= 0.005 ? 'no intrinsic' : `${money(putIntrinsic)} intrinsic`,
       },
       mark: putIntrinsic <= 0.005 ? 'all extrinsic' : null,
     },
@@ -1095,9 +1122,9 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         const dBasis = (putStrike - putMid) - (other.strike - other.mid);   // + = chosen dearer
         const dEarn = chosen.extrinsic - other.extrinsic;                    // + = chosen earns more
         return Math.abs(dEarn) <= 0.005
-          ? `Both earn ${cents(chosen.extrinsic)}. _${cents(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`
-          : `${chosen.strike} earns ${cents(Math.abs(dEarn))} ${dEarn > 0 ? 'more' : 'less'}.`
-            + ` _${cents(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`;
+          ? `Both earn ${money(chosen.extrinsic)}. _${money(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`
+          : `${chosen.strike} earns ${money(Math.abs(dEarn))} ${dEarn > 0 ? 'more' : 'less'}.`
+            + ` _${money(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`;
       })();
       return {
         label: 'Why this strike',
@@ -1299,7 +1326,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     // failed to read the tape. redRun 0 on a red screen means the closes did not
     // arrive, which looks identical to a quiet day on the card alone.
     wheel: wheel ? {
-      on: true, redRun, greenRun, putGate, callGate, putRule: 'every Friday',
+      on: true, redRun, greenRun, putGate, callGate, putRule: 'a slice a day, full week out',
+      slicePerDay: wheelSlice,
       band: wheelCap, openPuts: openPutCt,
       prevClose: histC.length ? histC[histC.length - 1] : null,
       callAnchor, heldBasis, callExpiry,

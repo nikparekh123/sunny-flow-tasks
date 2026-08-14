@@ -17,7 +17,30 @@ weakness and sells upside into strength, and the share count lands where it land
 ## The put side
 
 ### When to write
-**Every Friday.** No trigger.
+**A slice every weekday.** No trigger. A fifth of the band each day, so the week's
+full size is on by Friday.
+
+| NVDA price | band | per day |
+|---|---|---|
+| above 200 | 15 | 3 |
+| 175 to 200 | 25 | 5 |
+| 150 to 175 | 35 | 7 |
+| below 150 | 50 | 10 |
+
+> Writing the whole band at one strike on one afternoon is concentration: a Monday gap
+> down catches every contract at Friday's price. Slicing cut the worst two-year run
+> from -$4.04m to -$2.41m on NVDA and -$0.65m to -$0.26m on AVGO, at a cost of 38% of
+> the income ($1.62m down to $1.00m).
+>
+> On the numbers alone it is a wash: income per unit of worst case is 0.40 either way,
+> so it is a size dial, not a free lunch. Taken anyway for two reasons the backtest
+> cannot price. Nik is positioned bearish, so the bad case is the one he expects. And
+> the entire sample is a bull market with almost no gap-downs, which flatters the
+> concentrated version.
+>
+> **To get the income back without giving up the spreading**, raise the top band from
+> 15 to about 25. That returns roughly the original income at roughly the original
+> risk, but spread over five days instead of one.
 
 > **This spec originally said "two red days in a row" and that was WRONG for income.**
 > It shipped on 14 Aug and was pulled the same day, after the AVGO comparison exposed
@@ -91,7 +114,16 @@ If 8 are already open and the band allows 12, write 4.
 > fall that has not happened yet, not for the average day.
 
 ### What expiry
-**The COMING Friday.** The next Friday on the board, however close.
+**The first Friday at least 5 days out.** On a Friday that is the coming Friday; on a
+Monday it skips the Friday four days away to the one eleven days away.
+
+> Every slice must get a FULL week. Slicing into the same coming Friday was measured
+> and does not work: Thursday's slice is a one-day contract paying almost nothing. It
+> cost income ($1.26m against $1.62m) and cut no risk at all (-$4.09m against -$4.04m).
+> Only the full-week version delivers the protection.
+>
+> The note below on short tenors still holds for a SINGLE unsliced write, which is what
+> it was measured on.
 
 > Why the shortest: income is time value per day, and short contracts decay fastest.
 > Measured with at-the-money strikes over 62 two-year runs:

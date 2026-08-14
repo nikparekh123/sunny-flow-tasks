@@ -918,7 +918,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // the strings as *bold* ~thin~ ^thick^ _underline_ for the client's parser.
   const nowTs = new Date();
   const usd0 = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
-  const cents = (v: number) => `${Math.round(v * 100)}¢`;
+  // Dollars, not cents. "350¢" is not how anyone talks about an option price.
+  const money = (v: number) => `$${v.toFixed(2)}`;
   const ageOf = (iso: string | null | undefined): string => {
     if (!iso) return 'unknown';
     const t = Date.parse(String(iso));
@@ -982,8 +983,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       // One figure, one label. The old three-line earn column made a subordinate
       // number look like a third tier of its own.
       earn: {
-        value: cents(putExtrinsic),
-        label: putIntrinsic <= 0.005 ? 'no intrinsic' : `${cents(putIntrinsic)} intrinsic`,
+        value: money(putExtrinsic),
+        label: putIntrinsic <= 0.005 ? 'no intrinsic' : `${money(putIntrinsic)} intrinsic`,
       },
       mark: putIntrinsic <= 0.005 ? 'all extrinsic' : null,
     },
@@ -1011,9 +1012,9 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         const dBasis = (putStrike - putMid) - (other.strike - other.mid);   // + = chosen dearer
         const dEarn = chosen.extrinsic - other.extrinsic;                    // + = chosen earns more
         return Math.abs(dEarn) <= 0.005
-          ? `Both earn ${cents(chosen.extrinsic)}. _${cents(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`
-          : `${chosen.strike} earns ${cents(Math.abs(dEarn))} ${dEarn > 0 ? 'more' : 'less'}.`
-            + ` _${cents(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`;
+          ? `Both earn ${money(chosen.extrinsic)}. _${money(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`
+          : `${chosen.strike} earns ${money(Math.abs(dEarn))} ${dEarn > 0 ? 'more' : 'less'}.`
+            + ` _${money(Math.abs(dBasis))} ${dBasis < 0 ? 'cheaper' : 'dearer'}_`;
       })();
       return {
         label: 'Why this strike',
