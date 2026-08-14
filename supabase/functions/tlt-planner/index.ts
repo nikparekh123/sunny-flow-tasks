@@ -241,27 +241,6 @@ const BOOT_STAGES = [
   'Building your updated plan',
 ];
 
-// The COMING FRIDAY, not the nearest expiry.
-//
-// This asked Polygon for expiries from today+2 and took the first, so on a Monday it
-// wrote a Wednesday contract, on a Wednesday a Friday one, on a Friday the next
-// Monday: 2-3 day options, three times a week. The plan is WEEKLY, and the tenor test
-// measured Friday-to-Friday 7-day rolls -- "delivery 98% at 7 days against 82% at 30"
-// comes from those. Contracts shorter than 7 days were never tested.
-//
-// The Mon/Wed/Fri slices exist to spread WHEN the week's Friday contract is entered,
-// not to write three different contracts. Three tickets and three spreads, on options
-// carrying far less extrinsic each, against a strike policy built on extrinsic being
-// the only real income.
-//
-// Falls back to the nearest listed expiry if no Friday is available -- a holiday
-// week, or a chain that has not listed the coming Friday yet.
-function comingFriday(from: Date, expiries: string[]): string | null {
-  if (!expiries.length) return null;
-  const fri = expiries.find((e) => parseISO(e).getUTCDay() === 5);
-  return fri ?? expiries[0];
-}
-
 async function build(req: Request, emit: (n: number) => void): Promise<Response> {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -745,7 +724,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     : `*${Math.round(sliceW * 100)}%* now, last of the week`;
 
   const expiries = await putExpiries(TICKER, ymd(addDays(today, 2)), polyKey);
-  const expiry = comingFriday(today, expiries);
+  // TLT writes EVERY available expiry, not Fridays. NVDA is the Friday-only one.
+  // A Friday-only rule was applied here by mistake on 13 Aug; the two planners are
+  // separate files and their cadences differ on purpose.
+  const expiry = expiries[0] ?? null;
   let putQuotes: Quote[] = [];
   if (expiry) putQuotes = await chain(TICKER, 'put', expiry, Math.floor(spot * 0.92), Math.ceil(spot * 1.04), polyKey);
   emit(3);                                   // chain priced: real quotes for the candidates

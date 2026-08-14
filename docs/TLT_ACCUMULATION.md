@@ -324,3 +324,17 @@ trading against, not the one a survey collected.
 
 - Whether HOLD and HARVEST re-weight the families or only flip signs. Several
   invert: in HARVEST a high real yield means do **not** sell into cheapness.
+
+
+## Expiry cadence
+
+**TLT writes every available expiry.** Whatever the nearest listed one is.
+
+NVDA is the Friday-only programme, because its tenor test measured Friday-to-Friday
+7-day rolls. That rule does not transfer here and was applied to TLT by mistake on
+13 Aug 2026, then reverted the same day.
+
+The two engines are separate files and differ on purpose: strike (TLT at the money,
+NVDA 1% out), dial (TLT reads the 30-year against its own mean, NVDA reads MA100),
+conviction weight (TLT on, NVDA zero). "Fix it for both" applies to bugs in shared
+behaviour, not to rules that differ.
