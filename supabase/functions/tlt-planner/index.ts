@@ -728,7 +728,12 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const sliceDelta = weeklyDelta * sliceW;
   // Target through today, less everything written since Monday — so an earlier slice
   // that rounded to zero is still owed rather than forgotten.
-  const weekToDate = weeklyDelta * (SLICE_CUM[decisionDow] ?? 1);
+  // No day slicing on TLT. The week's whole budget is due whenever you act, and the
+  // spreading happens across EXPIRIES instead, which is what actually diversifies the
+  // settlement date. Slicing by day only averaged the entry price, and it left a
+  // non-slice day claiming 100% of the week anyway through the decisionDow fallback.
+  // NVDA keeps its day slicing: it has one weekly expiry and nothing to spread over.
+  const weekToDate = weeklyDelta;
   const sliceLeft = Math.max(0, weekToDate - writtenWeek);
   const sliceFilled = writtenWeek > 0 && sliceLeft < weekToDate * 0.15;
   const isDecisionDay = SLICE[dow] != null;
@@ -746,7 +751,14 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // TLT writes EVERY available expiry, not Fridays. NVDA is the Friday-only one.
   // A Friday-only rule was applied here by mistake on 13 Aug; the two planners are
   // separate files and their cadences differ on purpose.
-  const expiry = expiries[0] ?? null;
+  // Up to three, at least two days out. Splitting the write across them cuts the
+  // worst single assignment from 6,100 shares to 5,100 and the 95th percentile from
+  // 5,200 to 4,200, for the same share count and a basis $0.25 better: entering at
+  // three moments averages the price. It is free here only because TLT lists expiries
+  // two or three days apart; on NVDA the alternative was a monthly, where delivery
+  // falls from 98% to 82%. Fewer than three listed, use what is there.
+  const legExpiries = expiries.slice(0, 3);
+  const expiry = legExpiries[0] ?? null;
   let putQuotes: Quote[] = [];
   if (expiry) putQuotes = await chain(TICKER, 'put', expiry, Math.floor(spot * 0.92), Math.ceil(spot * 1.04), polyKey);
   emit(3);                                   // chain priced: real quotes for the candidates
@@ -799,6 +811,15 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const headroom = Math.max(0, cashCeiling - outstanding);
   const maxCt = Math.floor(headroom / (putStrike * 100));
   const putCt = Math.min(wantCt, maxCt);
+  // Whole contracts dealt out, not the delta split three ways and each rounded, which
+  // loses fractions and turns 29 into 27 or 30 for no reason. 29 becomes 10, 10, 9.
+  const putLegs = (() => {
+    const n = legExpiries.length;
+    if (!n || putCt <= 0) return [] as Array<{ expiry: string; ct: number }>;
+    const base = Math.floor(putCt / n), extra = putCt % n;
+    return legExpiries.map((e, i) => ({ expiry: e, ct: base + (i < extra ? 1 : 0) }))
+      .filter((l) => l.ct > 0);
+  })();
   const ceilingBinds = putCt < wantCt;
 
   // ── the call side, per phase, against DELIVERED shares only ──────────────
@@ -893,7 +914,9 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       label: 'The instruction',
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
-      meta: putCt === 0 && sliceFilled
+      meta: putLegs.length > 1
+        ? putLegs.map((l) => `${l.ct} ${DOWN[parseISO(l.expiry).getUTCDay()].slice(0, 3)} ${fmtDay(l.expiry)}`).join(' \u00b7 ')
+        : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
           + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
@@ -984,7 +1007,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       chain: [
         { text: `${Math.round(chaseRate)}/wk \u00d7 ${priceFactor} (${priceBand}) \u00d7 ${cf.f} (conv ${conviction})`,
           out: `${Math.round(weeklyDelta)} weekly` },
-        { text: `through ${DOWN[decisionDow].slice(0, 3)} that is ${Math.round((SLICE_CUM[decisionDow] ?? 1) * 100)}% of the week`,
+        { text: `the week's budget, due whenever you write`,
           out: `${Math.round(weekToDate)} delta` },
         { text: writtenWeek > 0
             ? `less ${Math.round(writtenWeek)} written since Monday, at ${putDelta.toFixed(2)} delta`
@@ -1183,6 +1206,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       optionDelta: Math.round(optDelta),
       floorCoverage: Math.round(floorCoverage * 100) / 100,
       floorNote: 'Floor is sized to the fully-assigned count, not to shares held, it anticipates assignment.',
+      legs: putLegs,
       deltaNote: 'Net delta and share count diverge as TLT falls: the floor gets longer exactly while assignments add shares.',
       openLegs: legs.map((l) => ({ type: l.type, dir: l.dir, ct: l.ct, strike: l.strike, expiry: l.expiry, delta: Math.round(l.delta * 100) / 100 })),
     },
