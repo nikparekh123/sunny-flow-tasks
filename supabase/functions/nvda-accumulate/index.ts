@@ -1013,7 +1013,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       meta: earnBrake && nextEarn
         ? `${fmtDay(nextEarn, today.getUTCFullYear())} print lands before ${fmtDay(expiry ?? '', today.getUTCFullYear())}`
         : wheel
-        ? `${openPutCt} of ${wheelCap} open · `
+        // The expiry LEADS. Slicing means a different date every couple of days, so
+        // "which contract is this" is the first thing to answer, not the last.
+        ? (expiry ? `for ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)} · ` : '')
+          + `${openPutCt} of ${wheelCap} open · `
           + (spot != null && spot >= 200 ? 'above 200' : spot != null && spot >= 175 ? '175 to 200'
              : spot != null && spot >= 150 ? '150 to 175' : 'below 150')
           + (putGate ? ` · ${wheelSlice} a day` : ' · next write Mon')

@@ -978,7 +978,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       // told apart from a stale one: Nik sold 25, the sync took two minutes, and the
       // card still read 38 with no way to see whether it knew.
       meta: (putCt === 0 && !dipGate)
-        ? `${openPutCt} open \u00b7 `
+        // Which contract it WOULD write when the gate opens, so the date is on the card
+        // on the quiet days too, not only on the day it actually trades.
+        ? (expiry ? `for ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)} \u00b7 ` : '')
+          + `${openPutCt} open \u00b7 `
           + (redStreak === 1 ? 'red once, needs a second' : 'TLT is not red')
           // Carries the caveat the headline no longer has room for: on a filled week
           // the gate opening still would not trade, and that has to be visible or the
