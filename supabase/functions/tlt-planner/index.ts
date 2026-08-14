@@ -67,8 +67,8 @@ const CAPS = {
 // its target. They are not wrong today; they are wrong at any other price level.
 const PRICE_BANDS: Array<[number, number, string]> = [
   [75, 2.50, 'below 75'],
-  [80, 1.50, '75–80'],
-  [85, 0.75, '80–85'],
+  [80, 1.50, '75-80'],
+  [85, 0.75, '80-85'],
   [Infinity, 0.25, 'above 85'],
 ];
 
@@ -89,9 +89,9 @@ const PRICE_BANDS: Array<[number, number, string]> = [
 // forever; this is the same trap facing the other way.
 const YIELD_BANDS: Array<[number, number, string]> = [
   [50, 2.50, '50bp+ above its mean'],
-  [25, 1.75, '25–50bp above'],
-  [0, 1.25, '0–25bp above'],
-  [-25, 0.75, '0–25bp below'],
+  [25, 1.75, '25-50bp above'],
+  [0, 1.25, '0-25bp above'],
+  [-25, 0.75, '0-25bp below'],
   [-Infinity, 0.25, 'well below its mean'],
 ];
 
@@ -1003,7 +1003,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
           note: `~week ${weeksElapsed}, projects to~ *${projectedTotal}*` },
       ],
       standing: standing.toUpperCase(),
-      band: `band ${horizonLo}\u2013${horizonHi}`,
+      band: `band ${horizonLo}-${horizonHi}`,
     },
 
     ceiling: {
@@ -1106,7 +1106,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       families: F,
       normalisedOver: capSum,
       missing: F.filter((f) => !f.ok).map((f) => f.key),
-      ramp: 'Continuous 0.7×–1.3×, anchored at 15 / 50 / 85. No step, so no 1-point cliff.',
+      ramp: 'Continuous 0.7×-1.3×, anchored at 15 / 50 / 85. No step, so no 1-point cliff.',
     },
 
     sizing: {

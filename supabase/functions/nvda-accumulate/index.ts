@@ -1036,7 +1036,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
           note: `~week ${weeksElapsed}, projects to~ *${projectedTotal}*` },
       ],
       standing: standing.toUpperCase(),
-      band: `band ${horizonLo}\u2013${horizonHi}`,
+      band: `band ${horizonLo}-${horizonHi}`,
     },
 
     ceiling: {
@@ -1139,7 +1139,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       families: F,
       normalisedOver: capSum,
       missing: F.filter((f) => !f.ok).map((f) => f.key),
-      ramp: 'Continuous 0.7×–1.3×, anchored at 15 / 50 / 85. No step, so no 1-point cliff.',
+      ramp: 'Continuous 0.7×-1.3×, anchored at 15 / 50 / 85. No step, so no 1-point cliff.',
     },
 
     sizing: {
