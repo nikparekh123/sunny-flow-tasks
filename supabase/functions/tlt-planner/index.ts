@@ -747,17 +747,46 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       + laterDows.map((x) => `*${Math.round(SLICE[x] * 100)}%* ${DOWN[x]}`).join(' · ')
     : `*${Math.round(sliceW * 100)}%* now, last of the week`;
 
+  // ── the dip gate ─────────────────────────────────────────────────────────
+  // TLT is bought on weakness, not on a timetable. Across the full 2003-2026 history
+  // writing only after TLT has closed red twice running enters at $2.76 below the
+  // average tape, against $1.71 for any red day and $0.77 for writing every Friday
+  // regardless. It held in all four eras tested, and a green-day control came in
+  // WORSE than the timetable, so the red condition is doing real work.
+  //
+  // Skipping the FIRST red day is most of the edge, and it is not intuitive. TLT mean
+  // reverts harder the longer a slide runs: the day after one red day averages
+  // +0.033%, after four it is +0.181%, against a +0.004% baseline. So the first day of
+  // a drop is the expensive entry and the third is the cheap one. Sizing UP on bigger
+  // drops tested worse for the same reason, which is why size is flat here.
+  const hist = (await dailyCloses(TICKER, polyKey, ymd(addDays(today, -25)), todayISO))
+    .filter((x) => x.d < todayISO).map((x) => x.c);
+  // Today's own daily bar is partial while the session is open, so today counts as red
+  // on the LIVE spot against the last complete close. Reading a half-formed bar would
+  // flip the gate on and off through the day.
+  const redStreak = (() => {
+    if (spot == null || hist.length < 2 || spot >= hist[hist.length - 1]) return 0;
+    let n = 1;
+    for (let i = hist.length - 1; i >= 1 && hist[i] < hist[i - 1]; i--) n++;
+    return n;
+  })();
+  const dipGate = redStreak >= 2;
+
   const expiries = await putExpiries(TICKER, ymd(addDays(today, 2)), polyKey);
-  // TLT writes EVERY available expiry, not Fridays. NVDA is the Friday-only one.
-  // A Friday-only rule was applied here by mistake on 13 Aug; the two planners are
-  // separate files and their cadences differ on purpose.
-  // Up to three, at least two days out. Splitting the write across them cuts the
-  // worst single assignment from 6,100 shares to 5,100 and the 95th percentile from
-  // 5,200 to 4,200, for the same share count and a basis $0.25 better: entering at
-  // three moments averages the price. It is free here only because TLT lists expiries
-  // two or three days apart; on NVDA the alternative was a monthly, where delivery
-  // falls from 98% to 82%. Fewer than three listed, use what is there.
-  const legExpiries = expiries.slice(0, 3);
+  // The NEAREST FRIDAY, one leg. This replaces the three-nearest-expiry split, and it
+  // reverses the earlier "TLT writes every available expiry" rule on Nik's call after
+  // the tenor study. On live chain quotes every longer-dated leg is beaten outright by
+  // the near Friday at a different strike: Aug 28 gave 81.32 in 53 weeks where the near
+  // Friday gives about 80.80 over the same 53, and Sep 4 gave 80.57 in 93 weeks against
+  // 80.20 in 86. Strike and expiry turned out to be the same dial, price against speed,
+  // and the near Friday is the efficient edge of it.
+  //
+  // NVDA is still Friday-only for a different reason (delivery falls 98% to 82% at a
+  // monthly); the two planners remain separate files with separate rules.
+  const legExpiries = (() => {
+    const fri = expiries.filter((e) => parseISO(e).getUTCDay() === 5);
+    return fri.length ? [fri[0]] : expiries.slice(0, 1);
+  })();
   const expiry = legExpiries[0] ?? null;
   let putQuotes: Quote[] = [];
   if (expiry) putQuotes = await chain(TICKER, 'put', expiry, Math.floor(spot * 0.92), Math.ceil(spot * 1.04), polyKey);
@@ -807,7 +836,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // weeks run -0.31% against other weeks at 2.0 sigma, and auction DAYS are slightly
   // positive. A brake that fires unpredictably is worse than none, because a quiet
   // week cannot be told apart from a data gap. Findings kept in research/tlt-auction.
-  const wantCt = putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
+  // The gate zeroes the write, it does NOT cut the budget. An unwritten week stays
+  // owed through sliceLeft, so when the second red day arrives the whole of it is due
+  // at once. That is deliberate: the trigger fires about 56 times a year and clusters
+  // into slides, so the ceiling, not the budget, is what limits any single write.
+  const wantCt = (dipGate && putDelta > 0) ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
   const maxCt = Math.floor(headroom / (putStrike * 100));
   const putCt = Math.min(wantCt, maxCt);
@@ -913,12 +946,25 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
 
     instruction: {
       label: 'The instruction',
+      // The gate is the first thing the card has to explain, because on most days it
+      // is the whole reason the answer is "nothing". Without it the card reads as
+      // broken: a budget owed, room on the ceiling, and no instruction.
+      // A FILLED week outranks a shut gate. Both produce zero contracts, but only one
+      // of them is the reason: with the budget already spent an open gate would still
+      // write nothing, so blaming the gate tells Nik to watch for a second red day
+      // that would not trade anyway.
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
-        : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
+        : sliceFilled ? "Today's slice is filled"
+        : !dipGate ? (redStreak === 1 ? 'One red day. Wait for a second' : 'Waiting for two red days')
+        : 'Nothing this slice',
       // The count of puts already open leads the line. Without it the card cannot be
       // told apart from a stale one: Nik sold 25, the sync took two minutes, and the
       // card still read 38 with no way to see whether it knew.
-      meta: putLegs.length > 1
+      meta: (putCt === 0 && !dipGate && !sliceFilled)
+        ? `${openPutCt} open \u00b7 `
+          + (redStreak === 1 ? 'red once, needs a second' : 'TLT is not red')
+          + ` \u00b7 ${Math.round(sliceLeft)} delta owed, carried`
+        : putLegs.length > 1
         ? `${openPutCt} open \u00b7 `
           + putLegs.map((l) => `${l.ct} ${DOWN[parseISO(l.expiry).getUTCDay()].slice(0, 3)} ${fmtDay(l.expiry)}`).join(' \u00b7 ')
         : putCt === 0 && sliceFilled
@@ -1017,7 +1063,14 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         { text: writtenWeek > 0
             ? `less ${Math.round(writtenWeek)} written since Monday, at ${putDelta.toFixed(2)} delta`
             : `at ${putDelta.toFixed(2)} delta`,
-          out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
+          out: `${wantCt} contract${wantCt === 1 ? '' : 's'}` },
+        // The gate is a MULTIPLIER of zero or one on the last line, so it belongs in
+        // the chain rather than hidden behind a contract count that silently went to
+        // nought. On most days this is the line that decides the answer.
+        { text: dipGate
+            ? `${redStreak} red days in a row, the gate is open`
+            : redStreak === 1 ? 'one red day, the gate needs two' : 'TLT is not red, the gate is shut',
+          out: dipGate ? 'write' : 'hold' },
       ],
       // "0 of 0, nothing clipped" is true and useless on a day that is already
       // done. wanted-versus-got only means something while there is something
@@ -1136,6 +1189,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     asof: todayISO,
     day: DOWN[dow],
     isDecisionDay,
+    // Inspectable, so a day that writes nothing can be told apart from a day that
+    // failed to read the tape. redStreak 0 with a red screen means the closes did not
+    // arrive, which looks identical to a quiet day on the card alone.
+    gate: { redStreak, open: dipGate, prevClose: hist.length ? hist[hist.length - 1] : null, rule: 'two red days' },
     spot,
     iv,
 
