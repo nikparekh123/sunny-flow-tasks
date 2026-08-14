@@ -147,7 +147,36 @@ const PHASE_CALLS: Record<string, { enabled: boolean; delta: number; coverage: n
                 why: 'ATM on part of the block, worth ~$4/share of basis, but ONLY while every in-the-money call is rolled' },
   HOLD:       { enabled: true, delta: 0.25, coverage: 0.50, why: 'Income on a block that has stopped growing' },
   HARVEST:    { enabled: true, delta: 0.50, coverage: 1.00, why: 'Exit. Assignment is the point' },
+  // Coverage here is the LADDER's total. The individual rungs are in WHEEL_CALL_LADDER
+  // and this figure exists so the ceiling and coverage displays keep working.
+  WHEEL:      { enabled: true, delta: 0.50, coverage: 0.50,
+                why: 'Three rungs above the higher of spot and basis, half the block left alone' },
 };
+
+// ── THE INCOME WHEEL ─────────────────────────────────────────────────────────
+// A different objective from accumulation, not a tuning of it. No share target, no
+// chase, no MA dial, no day slicing. Income is the goal and the share count lands
+// where it lands. Full spec and every measurement in docs/NVDA_INCOME_WHEEL_SPEC.md.
+//
+// Entered with {"phase":"WHEEL"} or by setting phase on nvda_state.
+//
+// The two sides deliberately DISAGREE on tenor, and it is not an oversight:
+//   puts  want the COMING Friday. They are capped by how many can be open at once,
+//         and that slot refreshes weekly, so the shortest contract means most turns.
+//         $0.67m/yr on the coming Friday against $0.62m at five days out.
+//   calls want a LONGER Friday. They are capped by shares owned rather than by a
+//         slot, so tenor is simply more premium off the same shares, and they assign
+//         less often so more of the block survives. $0.67m at five days out against
+//         $0.56m on the coming Friday.
+const WHEEL_BANDS: Array<[number, number]> = [   // [price floor, max puts open at once]
+  [200, 15], [175, 25], [150, 35], [0, 50],
+];
+// Three rungs off the anchor, 50% of the block covered in total. Widening from
+// +0/+2/+4 to +0/+3/+6 earned the same and kept ~100 more shares.
+const WHEEL_CALL_LADDER: Array<[number, number]> = [   // [% of block, strike offset]
+  [17, 0.00], [17, 0.03], [16, 0.06],
+];
+const WHEEL_CALL_MIN_DAYS = 5;
 
 const DELTA_FLOOR = 0.25;   // below this the test showed accumulation stalls in a rally
 const DELTA_CEIL  = 0.70;   // above this the premium is mostly intrinsic, not earnings
@@ -239,7 +268,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       D.get(`macro_events?event_date=gte.${todayISO}&select=name,event_date&order=event_date.asc&limit=12`),
       D.get(`earnings_events?select=*&order=event_date.asc&limit=8`),
       D.get('nvda_option_trades?voided_at=is.null&select=id,action,option_type,direction,contracts,strike,premium,expiry,closes_trade_id,trade_date,last_synced_at'),
-      D.get('nvda_share_lots?voided_at=is.null&select=acquired_date,qty_remaining'),
+      // cost_per_share is read for the wheel's call anchor. Without it the ladder can
+      // only anchor to spot, which writes calls BELOW basis after a fall and books a
+      // loss on the shares to collect premium.
+      D.get('nvda_share_lots?voided_at=is.null&select=acquired_date,qty_remaining,cost_per_share'),
       D.get('nvda_iv_daily?select=*&order=date.desc&limit=260'),
       spotOf(TICKER, polyKey),
       dailyCloses(TICKER, polyKey, ymd(addDays(today, -400)), todayISO),
@@ -250,7 +282,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   emit(1);                                   // position read: book, lots, legs, spot, closes
 
   const st = (stateRows[0] ?? {}) as Row;
-  const phase = 'ACCUMULATE';   // no phase switch here: NVDA is building a block, full stop
+  // WHEEL is the one switch that exists. It is a different objective, not a setting:
+  // accumulation chases a share target, the wheel chases income. Everything else
+  // still hard-codes ACCUMULATE.
+  const phase = String(body.phase ?? st.phase ?? 'ACCUMULATE').toUpperCase();
+  const wheel = phase === 'WHEEL';
   if (!PHASE_CALLS[phase]) return json(400, { ok: false, error: `unknown phase ${phase}` });
   const targetShares = Number(st.target_shares ?? 15000);
   const quarterBudget = Number(st.quarter_budget ?? 2450);
@@ -614,7 +650,38 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       + laterDows.map((x) => `*${Math.round(SLICE[x] * 100)}%* ${DOWN[x]}`).join(' · ')
     : `*${Math.round(sliceW * 100)}%* now, last of the week`;
 
-  const expiries = await putExpiries(TICKER, ymd(addDays(today, 2)), polyKey);
+  // ── the wheel's triggers ───────────────────────────────────────────────────
+  // Two red days in a row to write puts, two green to write calls. It fires on the
+  // SECOND day of a run and on every further day while the run continues.
+  //
+  // Skipping the FIRST day is most of the edge and is not intuitive. NVDA reverts
+  // harder the longer a run goes: +0.36% the day after one red day, +1.38% after
+  // four, against a +0.23% baseline. The first day of a drop is the expensive entry.
+  // Writing on the first red day alone tested WORSE than the timetable.
+  //
+  // Today counts on the LIVE price against the last completed close, never on today's
+  // part-formed daily bar, so the gate cannot flicker during the session.
+  const histC = closes.filter((x) => x.d < todayISO).map((x) => x.c);
+  const runOf = (up: boolean): number => {
+    if (spot == null || histC.length < 2) return 0;
+    const last = histC[histC.length - 1];
+    if (up ? spot <= last : spot >= last) return 0;
+    let n = 1;
+    for (let i = histC.length - 1; i >= 1 && (up ? histC[i] > histC[i - 1] : histC[i] < histC[i - 1]); i--) n++;
+    return n;
+  };
+  const redRun = runOf(false), greenRun = runOf(true);
+  const putGate  = !wheel || redRun >= 2;
+  const callGate = !wheel || greenRun >= 2;
+  // Absolute price bands, not distance from a mean. Nik's rule, and it measured 14%
+  // better than flat sizing with a slightly BETTER worst two-year run.
+  const wheelCap = wheel
+    ? (WHEEL_BANDS.find(([floor]) => (spot ?? 0) >= floor) ?? WHEEL_BANDS[WHEEL_BANDS.length - 1])[1]
+    : 0;
+
+  // The wheel takes the COMING Friday, so the search must start tomorrow rather than
+  // two days out, or a Thursday trigger would skip a whole week.
+  const expiries = await putExpiries(TICKER, ymd(addDays(today, wheel ? 1 : 2)), polyKey);
   const expiry = comingFriday(today, expiries);
   let putQuotes: Quote[] = [];
   if (expiry) putQuotes = await chain(TICKER, 'put', expiry, Math.floor(spot * 0.92), Math.ceil(spot * 1.04), polyKey);
@@ -637,7 +704,20 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
 
   // 1% out is the settled strike, so the ladder is centred there rather than on a
   // delta. The extrinsic rule still picks between the neighbours around it.
-  const wantStrike = Math.round((spot! * (1 - otmPct)) / STRIKE_STEP) * STRIKE_STEP;
+  // The wheel writes AT THE MONEY. Income is time value, and time value peaks at the
+  // money and falls away in both directions. On the live chain with NVDA at 225.15
+  // the 225 put carried 7.33 of time value against 6.25 at 227.50 and 5.20 at 230.
+  //
+  // A 230 put pays 10.05, which looks like more money than 7.33, but 4.85 of it is
+  // intrinsic: you are agreeing to buy 4.85 above the market and you hand it back on
+  // assignment. The first draft of this specced 1.5% ABOVE spot off a backtest that
+  // counted intrinsic as income. It does not stand.
+  //
+  // ACCUMULATE keeps 1% out, which is right for ITS goal: a cheaper entry, not the
+  // most income. Different objectives, different strikes, both measured.
+  const wantStrike = wheel
+    ? Math.round(spot! / STRIKE_STEP) * STRIKE_STEP
+    : Math.round((spot! * (1 - otmPct)) / STRIKE_STEP) * STRIKE_STEP;
   // 1% OUT WINS. Extrinsic only separates strikes that are equally far from it.
   //
   // This used to take the richest extrinsic within +/- two strike steps of the
@@ -697,7 +777,13 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // Widening it past the straddling roll does nothing: with weekly expiries only
   // one Friday falls inside, which is why 5 and 10 days measured identical.
   const earnBrake = !!(nextEarn && expiry && expiry >= nextEarn && todayISO < nextEarn);
+  // The wheel ignores the weekly budget entirely. Its size is the price band, less
+  // whatever is already open, because the band is a cap on OPEN CONTRACTS rather than
+  // a per-trade quantity. The earnings brake still applies: it is about a known event
+  // inside the contract, which the trigger knows nothing about.
+  const openPutCt = shortPuts.reduce((n, l) => n + l.ct, 0);
   const wantCt = earnBrake ? 0
+    : wheel ? (putGate ? Math.max(0, wheelCap - openPutCt) : 0)
     : putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
   const maxCt = Math.floor(headroom / (putStrike * 100));
@@ -730,8 +816,65 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const dueToRoll = shortCalls.filter((l) => spot! > l.strike);
   const rollCost = dueToRoll.reduce((s, l) => s + (spot! - l.strike) * 100 * l.ct, 0);
 
+  // ── the wheel's call ladder ────────────────────────────────────────────────
+  // Three rungs off an anchor, each topped up to its OWN share of the block, so a
+  // rung that got assigned refills without disturbing the others.
+  //
+  // The anchor is the HIGHER of spot and the block's average cost. Anchoring to basis
+  // alone was a real bug caught in a trade-by-trade trace: once NVDA rises above what
+  // you paid, every call written at basis is deep in the money and assigns at once.
+  // One run was selling shares at 275 while the market was 300. Anchoring to spot
+  // alone is the mirror failure, writing below basis after a fall and booking a loss
+  // on the shares to collect premium. max() is right, not a compromise.
+  const heldBasis = (() => {
+    const rows = lotRows as Row[];
+    let q = 0, c = 0;
+    for (const l of rows) {
+      const n = fin(Number(l.qty_remaining)), p = fin(Number(l.cost_per_share));
+      if (n > 0 && p > 0) { q += n; c += n * p; }
+    }
+    return q > 0 ? c / q : 0;
+  })();
+  const callAnchor = Math.max(spot ?? 0, heldBasis);
+  // Calls want tenor where puts want the coming Friday. See the note on WHEEL_BANDS.
+  const callExpiry = wheel
+    ? (expiries.find((e) => parseISO(e).getUTCDay() === 5
+        && daysBetween(today, parseISO(e)) >= WHEEL_CALL_MIN_DAYS) ?? expiry)
+    : expiry;
+  type Rung = { strike: number; ct: number; mid: number; pct: number };
+  let ladder: Rung[] = [];
+  if (wheel && callGate && shares > 0 && callExpiry) {
+    const cq = await chain(TICKER, 'call', callExpiry, Math.floor(callAnchor * 0.98), Math.ceil(callAnchor * 1.14), polyKey);
+    const openAt = (k: number) => shortCalls.filter((l) => l.strike === k).reduce((n, l) => n + l.ct, 0);
+    let used = shortCalls.reduce((n, l) => n + l.ct, 0);
+    // WHOLE contracts dealt out from one total, not each rung floored on its own.
+    // Flooring per rung silently under-writes: on 4,000 shares 17/17/16% is 6.8, 6.8
+    // and 6.4 contracts, every one of which rounds DOWN to 6, giving 18 against the
+    // 20 the coverage asks for. Same fix as the TLT put legs, where 29 becomes 10/10/9.
+    const totalPct = WHEEL_CALL_LADDER.reduce((s, [p]) => s + p, 0);
+    const wantTotal = Math.max(0, Math.floor((shares * (totalPct / 100)) / 100));
+    const n = WHEEL_CALL_LADDER.length;
+    const base = Math.floor(wantTotal / n), extra = wantTotal % n;
+    for (let i = 0; i < n; i++) {
+      const [pct, off] = WHEEL_CALL_LADDER[i];
+      const want = Math.round((callAnchor * (1 + off)) / STRIKE_STEP) * STRIKE_STEP;
+      const q = cq.filter((x) => x.mid > 0).reduce((a: Quote | null, b) =>
+        !a || Math.abs(b.strike - want) < Math.abs(a.strike - want) ? b : a, null as Quote | null);
+      if (!q) continue;
+      // never write against shares that are not there, across ALL rungs together
+      const room = Math.max(0, Math.floor(shares / 100) - used);
+      const target = base + (i < extra ? 1 : 0);
+      const ct = Math.min(Math.max(0, target - openAt(q.strike)), room);
+      if (ct <= 0) continue;
+      used += ct;
+      ladder.push({ strike: q.strike, ct, mid: q.mid, pct });
+    }
+  }
+  const ladderCt = ladder.reduce((n, r) => n + r.ct, 0);
+  const ladderCredit = ladder.reduce((s, r) => s + r.mid * 100 * r.ct, 0);
+
   let callStrike: number | null = null, callMid = 0;
-  if (callsWarranted > 0 && expiry) {
+  if (!wheel && callsWarranted > 0 && expiry) {
     const cq = await chain(TICKER, 'call', expiry, Math.floor(spot * 0.98), Math.ceil(spot * 1.12), polyKey);
     const Tc = Math.max(daysBetween(today, parseISO(expiry)), 0) / 365;
     const withD = cq.map((q) => ({ ...q, dAbs: q.delta != null ? Math.abs(q.delta) : callDelta(spot!, q.strike, Tc, iv) }));
@@ -805,11 +948,22 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
 
     instruction: {
       label: 'The instruction',
+      // In WHEEL the gate is the first thing to explain, because on most days it is
+      // the whole reason the answer is nothing. The band it is in comes second, since
+      // that is what sets the size once the gate opens.
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
         : earnBrake ? 'Nothing, earnings inside this contract'
+        : wheel && !putGate
+          ? (redRun === 1 ? 'One red day. Wait for a second' : 'Waiting for two red days')
+        : wheel ? `Band is full, ${openPutCt} of ${wheelCap} open`
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
       meta: earnBrake && nextEarn
         ? `${fmtDay(nextEarn, today.getUTCFullYear())} print lands before ${fmtDay(expiry ?? '', today.getUTCFullYear())}`
+        : wheel
+        ? `${openPutCt} of ${wheelCap} open · `
+          + (spot != null && spot >= 200 ? 'above 200' : spot != null && spot >= 175 ? '175 to 200'
+             : spot != null && spot >= 150 ? '150 to 175' : 'below 150')
+          + (putGate ? ` · ${redRun} red days` : redRun === 1 ? ' · red once, needs a second' : ' · not red')
         : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${shortPuts.reduce((n, l) => n + l.ct, 0)} open \u00b7 `
@@ -842,7 +996,13 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         ? shortCalls.map((l) => l.expiry).sort()[0] : null;
       return {
         label: 'The calls',
-        verb: !cs.enabled ? 'No calls while accumulating'
+        verb: wheel
+          ? (ladderCt > 0
+              ? `Sell ${ladderCt} call${ladderCt === 1 ? '' : 's'} across ${ladder.length} strike${ladder.length === 1 ? '' : 's'}`
+              : !callGate
+                ? (greenRun === 1 ? 'One green day. Wait for a second' : 'Waiting for two green days')
+                : shares <= 0 ? 'No shares to write against' : 'Ladder is full')
+          : !cs.enabled ? 'No calls while accumulating'
           : callsWarranted > 0 && callStrike != null
             ? `Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}`
             : 'Nothing to sell',
@@ -1121,6 +1281,17 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     asof: todayISO,
     day: DOWN[dow],
     isDecisionDay,
+    // Inspectable, so a day that writes nothing can be told apart from a day that
+    // failed to read the tape. redRun 0 on a red screen means the closes did not
+    // arrive, which looks identical to a quiet day on the card alone.
+    wheel: wheel ? {
+      on: true, redRun, greenRun, putGate, callGate,
+      band: wheelCap, openPuts: openPutCt,
+      prevClose: histC.length ? histC[histC.length - 1] : null,
+      callAnchor, heldBasis, callExpiry,
+      ladder: ladder.map((r) => ({ strike: r.strike, contracts: r.ct, mid: r.mid, pctOfBlock: r.pct })),
+      ladderCredit: Math.round(ladderCredit),
+    } : { on: false },
     spot,
     iv,
 
