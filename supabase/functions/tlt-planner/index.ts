@@ -949,21 +949,27 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       // The gate is the first thing the card has to explain, because on most days it
       // is the whole reason the answer is "nothing". Without it the card reads as
       // broken: a budget owed, room on the ceiling, and no instruction.
-      // A FILLED week outranks a shut gate. Both produce zero contracts, but only one
-      // of them is the reason: with the budget already spent an open gate would still
-      // write nothing, so blaming the gate tells Nik to watch for a second red day
-      // that would not trade anyway.
+      // The GATE leads. It is the thing worth watching, because it names what has to
+      // happen before anything trades at all. A filled week is not a competing
+      // headline, it is a qualifier, so it belongs on the meta line where both facts
+      // can be true at once. An earlier version made the two exclusive and let the
+      // filled week win, which was accurate and told Nik nothing he could act on.
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
-        : sliceFilled ? "Today's slice is filled"
         : !dipGate ? (redStreak === 1 ? 'One red day. Wait for a second' : 'Waiting for two red days')
+        : sliceFilled ? "Today's slice is filled"
         : 'Nothing this slice',
       // The count of puts already open leads the line. Without it the card cannot be
       // told apart from a stale one: Nik sold 25, the sync took two minutes, and the
       // card still read 38 with no way to see whether it knew.
-      meta: (putCt === 0 && !dipGate && !sliceFilled)
+      meta: (putCt === 0 && !dipGate)
         ? `${openPutCt} open \u00b7 `
           + (redStreak === 1 ? 'red once, needs a second' : 'TLT is not red')
-          + ` \u00b7 ${Math.round(sliceLeft)} delta owed, carried`
+          // Carries the caveat the headline no longer has room for: on a filled week
+          // the gate opening still would not trade, and that has to be visible or the
+          // card is quietly promising a trade it cannot make.
+          + ' \u00b7 ' + (sliceFilled
+              ? `week already filled, ${Math.round(writtenWeek)} of ${Math.round(weekToDate)}`
+              : `${Math.round(sliceLeft)} delta owed, carried`)
         : putLegs.length > 1
         ? `${openPutCt} open \u00b7 `
           + putLegs.map((l) => `${l.ct} ${DOWN[parseISO(l.expiry).getUTCDay()].slice(0, 3)} ${fmtDay(l.expiry)}`).join(' \u00b7 ')
