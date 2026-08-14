@@ -80,6 +80,21 @@ longs closed, dividends.
 
 ---
 
+### 7. THE GAINS AND LOSSES CARD
+The by-month and by-week history books the same REALIZED as metric 1, split by date
+and by sleeve. It must reconcile to the summary card's "Total realized so far".
+
+A SHORT option's premium belongs to the date the position CLOSES or EXPIRES, never
+the date it was sold. Booking on open is cash accounting: the money is not earned
+while the contract can still be bought back higher.
+
+Settled 2026-08-13, after the card read +$499 against the summary's $249 on TLT.
+The gap was premium on ten puts still open. Expiry is not a trade row, so contracts
+left open past their expiry date are booked on that date; live positions are booked
+nowhere, which is the point.
+
+---
+
 ## Rules
 
 - **Exercised = REALIZED** (position closed).

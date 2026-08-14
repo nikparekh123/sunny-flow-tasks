@@ -921,11 +921,48 @@ enum NvDerive {
             byDate[date, default: [:]][src, default: 0] += v
             seen.insert(src)
         }
+        // A SHORT option's premium is booked when the position CLOSES or EXPIRES, not
+        // when it is sold. Booking it on open is cash accounting: it counts money that
+        // is not yet earned, because the contract can still be bought back at a higher
+        // price. That is what made this card read $499 against the summary's $249, the
+        // difference being premium on ten puts still open.
+        //
+        // docs/PNL_GLOSSARY.md: REALIZED is closed positions only.
+        //
+        // Expiry is not a trade row, so the still-open contracts are booked on their
+        // expiry date once it has passed. Nothing is booked for a position that is
+        // genuinely still live, which is the point.
+        do {
+            struct S { var openCt = 0.0, openPrem = 0.0, closeCt = 0.0, closePrem = 0.0, closeOn = "" }
+            var byKey: [Key: S] = [:]
+            for t in live where t.direction == "short" {
+                let k = Key(kind: t.option_type, dir: "short", strike: t.strike, expiry: t.expiry)
+                var a = byKey[k] ?? S()
+                if t.action == "open" { a.openCt += t.contracts; a.openPrem += t.premium * t.contracts * 100 }
+                else {
+                    a.closeCt += t.contracts; a.closePrem += t.premium * t.contracts * 100
+                    if t.trade_date > a.closeOn { a.closeOn = t.trade_date }
+                }
+                byKey[k] = a
+            }
+            let todayISO = Self.isoDay(now)
+            for (k, a) in byKey {
+                let per = a.openCt > 0 ? a.openPrem / a.openCt : 0
+                let src = bucket(k.kind, "short")
+                if a.closeCt > 0, !a.closeOn.isEmpty {
+                    add(a.closeOn, src, per * a.closeCt - a.closePrem)      // kept, net of the buy-back
+                }
+                let left = a.openCt - a.closeCt
+                if left > 0.0001, k.expiry < todayISO {
+                    add(k.expiry, src, per * left)                          // expired worthless, premium earned
+                }
+            }
+        }
         for t in live {
             let src = bucket(t.option_type, t.direction)
             let amt = t.premium * t.contracts * 100
             if t.direction == "short" {
-                add(t.trade_date, src, t.action == "open" ? amt : -amt)     // collect on open, pay to buy back
+                // handled above
             } else if t.action == "close" {
                 let k = Key(kind: t.option_type, dir: t.direction, strike: t.strike, expiry: t.expiry)
                 add(t.trade_date, src, amt - avgOpenPerContract(k) * t.contracts)   // proceeds − cost
