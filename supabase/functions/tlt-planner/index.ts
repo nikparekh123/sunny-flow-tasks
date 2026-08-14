@@ -1206,7 +1206,6 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       optionDelta: Math.round(optDelta),
       floorCoverage: Math.round(floorCoverage * 100) / 100,
       floorNote: 'Floor is sized to the fully-assigned count, not to shares held, it anticipates assignment.',
-      legs: putLegs,
       deltaNote: 'Net delta and share count diverge as TLT falls: the floor gets longer exactly while assignments add shares.',
       openLegs: legs.map((l) => ({ type: l.type, dir: l.dir, ct: l.ct, strike: l.strike, expiry: l.expiry, delta: Math.round(l.delta * 100) / 100 })),
     },
@@ -1214,6 +1213,9 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     plan: {
       expiry,
       puts: {
+        // The write dealt across expiries. Sits here rather than on `position`,
+        // where `legs` would read as a second kind of OPEN leg.
+        legs: putLegs,
         contracts: putCt,
         strike: putStrike,
         delta: Math.round(putDelta * 100) / 100,
