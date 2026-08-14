@@ -671,7 +671,22 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     return n;
   };
   const redRun = runOf(false), greenRun = runOf(true);
-  const putGate  = !wheel || redRun >= 2;
+  // PUTS WRITE EVERY FRIDAY. The two-red-day trigger shipped here on 14 Aug and was
+  // pulled the same day: measured under the INCOME goal it halved the income and
+  // returned nothing. It wrote on 30 days a year instead of 50, and the entry price
+  // came out identical (-5.4% against -5.5% versus the end price on NVDA, and
+  // actually worse on AVGO at +0.7% against -0.6%).
+  //
+  // The trigger was measured under the ACCUMULATION goal, where a cheap entry was the
+  // whole point, and it is excellent at that. It does not survive the switch to
+  // income. TLT still uses it, correctly, because TLT is still accumulating.
+  //
+  // Calls KEEP the green trigger. It is worth a little on NVDA ($1.62m against
+  // $1.57m) and neutral on AVGO, and it does not have the puts' failure mode: calls
+  // are capped by shares owned rather than by a weekly slot, so a skipped green day
+  // is written later against the same shares, while a skipped put week is band
+  // capacity that simply expired unused.
+  const putGate  = !wheel || today.getUTCDay() === 5;
   const callGate = !wheel || greenRun >= 2;
   // Absolute price bands, not distance from a mean. Nik's rule, and it measured 14%
   // better than flat sizing with a slightly BETTER worst two-year run.
@@ -953,8 +968,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       // that is what sets the size once the gate opens.
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
         : earnBrake ? 'Nothing, earnings inside this contract'
-        : wheel && !putGate
-          ? (redRun === 1 ? 'One red day. Wait for a second' : 'Waiting for two red days')
+        : wheel && !putGate ? 'Puts write on Friday'
         : wheel ? `Band is full, ${openPutCt} of ${wheelCap} open`
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
       meta: earnBrake && nextEarn
@@ -963,7 +977,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         ? `${openPutCt} of ${wheelCap} open · `
           + (spot != null && spot >= 200 ? 'above 200' : spot != null && spot >= 175 ? '175 to 200'
              : spot != null && spot >= 150 ? '150 to 175' : 'below 150')
-          + (putGate ? ` · ${redRun} red days` : redRun === 1 ? ' · red once, needs a second' : ' · not red')
+          + (putGate ? '' : ` · next write ${DOWN[5].slice(0, 3)}`)
         : putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${shortPuts.reduce((n, l) => n + l.ct, 0)} open \u00b7 `
@@ -1285,7 +1299,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     // failed to read the tape. redRun 0 on a red screen means the closes did not
     // arrive, which looks identical to a quiet day on the card alone.
     wheel: wheel ? {
-      on: true, redRun, greenRun, putGate, callGate,
+      on: true, redRun, greenRun, putGate, callGate, putRule: 'every Friday',
       band: wheelCap, openPuts: openPutCt,
       prevClose: histC.length ? histC[histC.length - 1] : null,
       callAnchor, heldBasis, callExpiry,

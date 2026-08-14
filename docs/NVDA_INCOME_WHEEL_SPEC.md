@@ -17,23 +17,29 @@ weakness and sells upside into strength, and the share count lands where it land
 ## The put side
 
 ### When to write
-Only when **NVDA is red today and was red at the previous close.** It fires on the
-second red day of a slide and on every further red day while the slide continues.
+**Every Friday.** No trigger.
 
-"Red today" is measured on the live price against the last completed close, not on
-today's part-formed daily bar, so it does not flip on and off during the session.
-
-Any size of drop counts. Do not wait for a 2% or 4% fall.
-
-> Why: tested on NVDA 2018-2026. Writing on the second red day gets you in about 2.6
-> percentage points cheaper than writing every Friday, and it beat the timetable in
-> 76% of 12-week windows. Demanding a bigger drop made it worse: waiting for −4%
-> cut both the income and the shares by about a third, because it only fires 26 times
-> a year instead of 50.
+> **This spec originally said "two red days in a row" and that was WRONG for income.**
+> It shipped on 14 Aug and was pulled the same day, after the AVGO comparison exposed
+> it.
 >
-> Skipping the FIRST red day matters and is not intuitive. NVDA bounces harder the
-> longer a slide runs: +0.36% the day after one red day, +1.38% after four, against a
-> +0.23% baseline. The first day of a drop is the expensive entry.
+> | | income/yr | net | entry vs end price |
+> |---|---|---|---|
+> | **NVDA every Friday** | **$1.63m** | **$2.75m** | -5.4% |
+> | NVDA two red days | $0.82m | $1.35m | -5.5% |
+> | **AVGO every Friday** | **$0.98m** | **$1.65m** | -0.6% |
+> | AVGO two red days | $0.52m | $0.95m | +0.7% |
+>
+> Waiting halves the income and returns nothing. It writes on 30 days a year instead
+> of 50, and the entry price comes out the same on NVDA and WORSE on AVGO.
+>
+> The trigger is genuinely good, but at a different job. Every test behind it measured
+> ENTRY PRICE, which is what matters when accumulating. TLT still uses it and should,
+> because TLT is still accumulating. It does not survive the switch to income.
+>
+> Waiting does reduce the worst two-year run, -$3.14m against -$3.87m, but only by
+> making the position smaller. Lowering the price bands does that more directly and
+> does not cost half the income.
 
 ### What strike
 **AT THE MONEY.** The nearest listed strike to the current price.
