@@ -847,10 +847,12 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
             ? `Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}`
             : 'Nothing to sell',
         // Mirrors the instruction's cadence exactly: date · figure · source.
+        // Leads with the count open, matching the put card, so each card states how
+        // much is already written before it says what to do next.
         meta: !cs.enabled ? 'Trim delta by writing fewer puts'
-          : `${nearest ? `${DOWN[parseISO(nearest).getUTCDay()].slice(0, 3)} ${fmtDay(nearest, today.getUTCFullYear())}` : 'none open'}`
+          : `${shortCalls.reduce((n, l) => n + l.ct, 0)} open \u00b7 ${itmCt} in the money`
             // No "real quotes" here: unlike the put card, nothing below is a quote.
-            + ` \u00b7 ${itmCt} of ${shortCalls.reduce((n, l) => n + l.ct, 0)} in the money`,
+            + `${nearest ? ` \u00b7 ${DOWN[parseISO(nearest).getUTCDay()].slice(0, 3)} ${fmtDay(nearest, today.getUTCFullYear())}` : ''}`,
         commit: [
           [coveredNow.toLocaleString(), 'covered'],
           [overCt > 0 ? String(overCt) : String(Math.max(0, targetCt - Math.round(coveredNow / 100))),
