@@ -64,8 +64,23 @@ Every arm's net is NEGATIVE: TLT fell hard through 2020-23, so "net given up" me
 "loss deepened", not "profit forgone". The braking logic holds; the sign does not
 make it a winner.
 
-Shipped as Bonds only (20y and 30y). FOMC left to the existing soft damper, which is
-about what it is worth.
+**PULLED on 13 Aug 2026, the same day it shipped.** The 14.2:1 came from feeding the
+test the COMPLETE historical list of auction dates. Live, the brake reads Treasury's
+API, which publishes close to the auction: on 13 Aug the feed held only that day's
+30-year, while the 20-year eight days later was absent. So the deployed brake fired
+late or not at all, and the number that justified it assumed foresight it never had.
+
+The underlying effect is also marginal. Measured directly: auction weeks run -0.31%
+against other weeks, 2.0 sigma, and auction DAYS themselves are slightly POSITIVE
+(+0.05%, worst -2.76% against -6.67% for an ordinary day). The drift is over the week,
+not a shock on the day.
+
+A brake that fires unpredictably is worse than no brake, because a quiet week cannot
+be told apart from a data gap.
+
+If revived: read `macro_events`, which is forward-looking and already carries the
+19 Aug 20-year, then re-measure allowing only about a week of notice rather than
+perfect knowledge.
 
 
 ## The dial: price bands, yield bands, or yield vs its own mean? (`tlt_bands.py`)

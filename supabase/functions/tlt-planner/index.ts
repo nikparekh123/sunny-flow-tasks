@@ -130,7 +130,7 @@ function convFactor(score: number): { f: number; band: string } {
 // rather than reduced.
 const PHASE_CALLS: Record<string, { enabled: boolean; delta: number; coverage: number; why: string }> = {
   ACCUMULATE: { enabled: false, delta: 0, coverage: 0,
-                why: 'off — measured to cost money and shares in a rally while the block is being built' },
+                why: 'off, measured to cost money and shares in a rally while the block is being built' },
   HOLD:       { enabled: true, delta: 0.25, coverage: 0.50, why: 'Income on a block that has stopped growing' },
   HARVEST:    { enabled: true, delta: 0.50, coverage: 1.00, why: 'Exit. Assignment is the point' },
 };
@@ -769,25 +769,14 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   const putIntrinsic = pick?.intrinsic ?? 0;
   const putExtrinsic = pick?.extrinsic ?? 0;
 
-  // ── the auction brake ────────────────────────────────────────────────────
-  // Write nothing on the roll whose contract SPANS a long-end auction.
-  //
-  // TLT already damped events through conviction, but that is a -12 penalty on a
-  // score feeding a 0.7-1.3 ramp, so the brake topped out near 0.9x. Measured over
-  // 1,079 windows (research/tlt-auction), a hard stop on the straddling roll gives
-  // up $4,151 of net and avoids $58,846 of drawdown -- 14.2 to 1, by far the best
-  // ratio of anything tested on either ticker.
-  //
-  // BONDS ONLY, not the whole Note+Bond feed. A long-end auction is a supply event
-  // landing exactly where TLT lives; FOMC measured 4.1 to 1 by comparison, because
-  // it moves the front end hardest and TLT sits at the other end of the curve.
-  // >= today, not > today. An auction TODAY still sits ahead of a contract written
-  // this morning -- the 30-year prices at 1pm ET. Excluding same-day meant the brake
-  // stayed off on 13 Aug, the one day it was built for.
-  const auctionBrake = !!(expiry && auctions.some((a) =>
-    a.type === 'Bond' && a.auctionDate >= todayISO && a.auctionDate <= expiry));
-  const wantCt = auctionBrake ? 0
-    : putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
+  // No auction brake. It shipped on a 14.2:1 backtest that fed it the COMPLETE
+  // historical list of auction dates; live, it reads Treasury's API, which publishes
+  // close to the auction, so it could not see the 20-year eight days out and fired
+  // late or not at all. The underlying effect is real but marginal anyway: auction
+  // weeks run -0.31% against other weeks at 2.0 sigma, and auction DAYS are slightly
+  // positive. A brake that fires unpredictably is worse than none, because a quiet
+  // week cannot be told apart from a data gap. Findings kept in research/tlt-auction.
+  const wantCt = putDelta > 0 ? Math.max(0, Math.round(sliceLeft / (putDelta * 100))) : 0;
   const headroom = Math.max(0, cashCeiling - outstanding);
   const maxCt = Math.floor(headroom / (putStrike * 100));
   const putCt = Math.min(wantCt, maxCt);
@@ -880,18 +869,8 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     instruction: {
       label: 'The instruction',
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
-        : auctionBrake ? 'Nothing — auction inside this contract'
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
-      meta: auctionBrake && expiry
-        ? (() => {
-            // >= today, matching the brake itself. Left as > here, this found nothing
-            // on the very day the brake fired and fell back to the generic wording.
-            const a = auctions.filter((x) => x.type === 'Bond' && x.auctionDate >= todayISO && x.auctionDate <= expiry)
-              .sort((x, y) => x.auctionDate.localeCompare(y.auctionDate))[0];
-            return a ? `${Math.round(a.termYears)}y auction ${fmtDay(a.auctionDate)} lands before ${fmtDay(expiry)}`
-                     : 'auction inside this contract';
-          })()
-        : putCt === 0 && sliceFilled
+      meta: putCt === 0 && sliceFilled
         ? `${contractsToday} written today \u00b7 ${Math.round(writtenWeek)} of ${Math.round(weekToDate)} delta this week`
         : `${expiry ? `expires ${DOWN[parseISO(expiry).getUTCDay()].slice(0, 3)} ${fmtDay(expiry)}` : 'no expiry'}`
           + ` \u00b7 ${putDelta.toFixed(2)} delta \u00b7 ${pick?.modelled ? 'modelled' : 'real quotes'}`,
@@ -972,7 +951,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     calls: {
       label: cs.enabled ? 'Calls' : 'No calls',
       lines: cs.enabled
-        ? [[`^Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike ?? '\u2014'}^`, null]]
+        ? [[`^Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike ?? '-'}^`, null]]
         : [['^No calls while accumulating^', null], ['cost money and shares', 'in a rally']],
       note: cs.enabled ? cs.why : 'Trim delta by *writing fewer puts*',
     },
@@ -988,7 +967,6 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
             ? `less ${Math.round(writtenWeek)} written since Monday, at ${putDelta.toFixed(2)} delta`
             : `at ${putDelta.toFixed(2)} delta`,
           out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
-        ...(auctionBrake ? [{ text: 'long-end auction inside the contract — brake on', out: 'hold' }] : []),
       ],
       // "0 of 0, nothing clipped" is true and useless on a day that is already
       // done. wanted-versus-got only means something while there is something
@@ -1167,10 +1145,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         ? Math.round(((outstanding + putStrike * 100 * putCt) / cashCeiling) * 1000) / 1000 : 0,
       binds: ceilingBinds,
       cut: ceilingBinds
-        ? `Wanted *${wantCt}*, wrote *${putCt}* — ~the ceiling took ${wantCt - putCt} contract${wantCt - putCt === 1 ? '' : 's'}~`
+        ? `Wanted *${wantCt}*, wrote *${putCt}*, ~the ceiling took ${wantCt - putCt} contract${wantCt - putCt === 1 ? '' : 's'}~`
         : null,
       note: ceilingBinds
-        ? `Cut from ${wantCt} to ${putCt} — ${fmtUsd(headroom)} of room against ${fmtUsd(cashCeiling)}.`
+        ? `Cut from ${wantCt} to ${putCt}, ${fmtUsd(headroom)} of room against ${fmtUsd(cashCeiling)}.`
         : `${fmtUsd(headroom)} of room.`,
     },
 
@@ -1181,7 +1159,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       netDelta: Math.round(netDelta),
       optionDelta: Math.round(optDelta),
       floorCoverage: Math.round(floorCoverage * 100) / 100,
-      floorNote: 'Floor is sized to the fully-assigned count, not to shares held — it anticipates assignment.',
+      floorNote: 'Floor is sized to the fully-assigned count, not to shares held, it anticipates assignment.',
       deltaNote: 'Net delta and share count diverge as TLT falls: the floor gets longer exactly while assignments add shares.',
       openLegs: legs.map((l) => ({ type: l.type, dir: l.dir, ct: l.ct, strike: l.strike, expiry: l.expiry, delta: Math.round(l.delta * 100) / 100 })),
     },
@@ -1202,7 +1180,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         extrinsic: Math.round(putExtrinsic * 100) / 100,
         basisIfAssigned: Math.round((putStrike - putMid) * 100) / 100,
         pickedBy: pickBy,
-        premium: putMid <= 0 ? 'no bid — modelled'
+        premium: putMid <= 0 ? 'no bid, modelled'
           : putIntrinsic <= 0.005
             ? `${Math.round(putMid * 100)}¢, all time value`
             : `${Math.round(putMid * 100)}¢, of which ${Math.round(putIntrinsic * 100)}¢ is intrinsic`,
@@ -1214,7 +1192,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
           chosen: c.strike === putStrike,
         })),
         say: putCt > 0
-          ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike} — ${fmtUsd(putStrike * 100 * putCt)} committed, ${putCt * 100} shares if assigned.`
+          ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}, ${fmtUsd(putStrike * 100 * putCt)} committed, ${putCt * 100} shares if assigned.`
           : ceilingBinds ? 'No room under the ceiling.' : 'Nothing this slice.',
       },
       calls: {
@@ -1229,7 +1207,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         say: callsWarranted > 0 && callStrike != null
           ? `Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}.`
           : !cs.enabled
-            ? 'No calls while accumulating — they cost money and shares in a rally.'
+            ? 'No calls while accumulating, they cost money and shares in a rally.'
             : 'No calls warranted.',
       },
       netAfter: Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta),

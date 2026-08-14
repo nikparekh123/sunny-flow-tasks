@@ -144,7 +144,7 @@ function convFactor(score: number, weight: number): { f: number; band: string } 
 // rather than reduced.
 const PHASE_CALLS: Record<string, { enabled: boolean; delta: number; coverage: number; why: string }> = {
   ACCUMULATE: { enabled: true, delta: 0.50, coverage: 0.30,
-                why: 'ATM on part of the block — worth ~$4/share of basis, but ONLY while every in-the-money call is rolled' },
+                why: 'ATM on part of the block, worth ~$4/share of basis, but ONLY while every in-the-money call is rolled' },
   HOLD:       { enabled: true, delta: 0.25, coverage: 0.50, why: 'Income on a block that has stopped growing' },
   HARVEST:    { enabled: true, delta: 0.50, coverage: 1.00, why: 'Exit. Assignment is the point' },
 };
@@ -806,7 +806,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     instruction: {
       label: 'The instruction',
       verb: putCt > 0 ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}`
-        : earnBrake ? 'Nothing — earnings inside this contract'
+        : earnBrake ? 'Nothing, earnings inside this contract'
         : sliceFilled ? "Today's slice is filled" : 'Nothing this slice',
       meta: earnBrake && nextEarn
         ? `${fmtDay(nextEarn, today.getUTCFullYear())} print lands before ${fmtDay(expiry ?? '', today.getUTCFullYear())}`
@@ -862,7 +862,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         // figure is simply how far in the money the calls are.
         basis: itmCt > 0
           ? { value: usd0(rollCost), label: 'in the money' }
-          : { value: '\u2014', label: 'none in the money' },
+          : { value: '-', label: 'none in the money' },
         earn: itmCt > 0
           ? { value: itmShares.toLocaleString(), label: 'shares at risk' }
           : { value: String(shortCalls.reduce((n, l) => n + l.ct, 0)), label: 'calls open' },
@@ -886,7 +886,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
           { text: `target ${Math.round(cs.coverage * 100)}%`, out: `${targetCt} contracts` },
         ],
         verdict: overCt > 0
-          ? `*${overCt} over.* ~Expiry brings it down — nothing to buy back~`
+          ? `*${overCt} over.* ~Expiry brings it down, nothing to buy back~`
           : haveCt === targetCt ? '*At target*'
             : `*${targetCt - haveCt} short* of the target`,
       };
@@ -998,7 +998,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
             ? `less ${Math.round(writtenWeek)} written since Monday, at ${putDelta.toFixed(2)} delta`
             : `at ${putDelta.toFixed(2)} delta`,
           out: `${putCt} contract${putCt === 1 ? '' : 's'}` },
-        ...(earnBrake ? [{ text: 'earnings inside the contract — brake on', out: 'hold' }] : []),
+        ...(earnBrake ? [{ text: 'earnings inside the contract, brake on', out: 'hold' }] : []),
       ],
       // "0 of 0, nothing clipped" is true and useless on a day that is already
       // done. wanted-versus-got only means something while there is something
@@ -1153,7 +1153,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       chase: chasing
         ? `Behind: ${stillNeed.toLocaleString()} shares in ${Math.round(wkLeft)} weeks needs `
           + `*${Math.round(chaseRate)}/wk* against a ${Math.round(baseRate)} base`
-          + (chaseRate >= 2 * baseRate * 0.99 ? ' — |held at the 2× cap|' : '')
+          + (chaseRate >= 2 * baseRate * 0.99 ? ', |held at the 2× cap|' : '')
         : `On rate. ${stillNeed.toLocaleString()} shares in ${Math.round(wkLeft)} weeks needs `
           + `~${Math.round(chaseRate)}/wk, at or under the ${Math.round(baseRate)} base`,
     },
@@ -1184,10 +1184,10 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         ? Math.round(((outstanding + putStrike * 100 * putCt) / cashCeiling) * 1000) / 1000 : 0,
       binds: ceilingBinds,
       cut: ceilingBinds
-        ? `Wanted *${wantCt}*, wrote *${putCt}* — ~the ceiling took ${wantCt - putCt} contract${wantCt - putCt === 1 ? '' : 's'}~`
+        ? `Wanted *${wantCt}*, wrote *${putCt}*, ~the ceiling took ${wantCt - putCt} contract${wantCt - putCt === 1 ? '' : 's'}~`
         : null,
       note: ceilingBinds
-        ? `Cut from ${wantCt} to ${putCt} — ${fmtUsd(headroom)} of room against ${fmtUsd(cashCeiling)}.`
+        ? `Cut from ${wantCt} to ${putCt}, ${fmtUsd(headroom)} of room against ${fmtUsd(cashCeiling)}.`
         : `${fmtUsd(headroom)} of room.`,
     },
 
@@ -1198,7 +1198,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
       netDelta: Math.round(netDelta),
       optionDelta: Math.round(optDelta),
       floorCoverage: Math.round(floorCoverage * 100) / 100,
-      floorNote: 'Floor is sized to the fully-assigned count, not to shares held — it anticipates assignment.',
+      floorNote: 'Floor is sized to the fully-assigned count, not to shares held, it anticipates assignment.',
       deltaNote: 'Net delta and share count diverge as TLT falls: the floor gets longer exactly while assignments add shares.',
       openLegs: legs.map((l) => ({ type: l.type, dir: l.dir, ct: l.ct, strike: l.strike, expiry: l.expiry, delta: Math.round(l.delta * 100) / 100 })),
     },
@@ -1219,7 +1219,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         extrinsic: Math.round(putExtrinsic * 100) / 100,
         basisIfAssigned: Math.round((putStrike - putMid) * 100) / 100,
         pickedBy: pickBy,
-        premium: putMid <= 0 ? 'no bid — modelled'
+        premium: putMid <= 0 ? 'no bid, modelled'
           : putIntrinsic <= 0.005
             ? `${Math.round(putMid * 100)}¢, all time value`
             : `${Math.round(putMid * 100)}¢, of which ${Math.round(putIntrinsic * 100)}¢ is intrinsic`,
@@ -1231,7 +1231,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
           chosen: c.strike === putStrike,
         })),
         say: putCt > 0
-          ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike} — ${fmtUsd(putStrike * 100 * putCt)} committed, ${putCt * 100} shares if assigned.`
+          ? `Sell ${putCt} put${putCt === 1 ? '' : 's'} at ${putStrike}, ${fmtUsd(putStrike * 100 * putCt)} committed, ${putCt * 100} shares if assigned.`
           : ceilingBinds ? 'No room under the ceiling.' : 'Nothing this slice.',
       },
       calls: {
@@ -1246,7 +1246,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
         say: callsWarranted > 0 && callStrike != null
           ? `Sell ${callsWarranted} call${callsWarranted === 1 ? '' : 's'} at ${callStrike}.`
           : !cs.enabled
-            ? 'No calls while accumulating — they cost money and shares in a rally.'
+            ? 'No calls while accumulating, they cost money and shares in a rally.'
             : 'No calls warranted.',
       },
       netAfter: Math.round(netDelta + putCt * 100 * putDelta - callsWarranted * 100 * cs.delta),
