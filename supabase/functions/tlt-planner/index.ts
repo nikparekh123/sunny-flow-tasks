@@ -772,7 +772,9 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   })();
   const dipGate = redStreak >= 2;
 
-  const expiries = await putExpiries(TICKER, ymd(addDays(today, 2)), polyKey);
+  // From TOMORROW, not two days out. The "third expiry" has to be counted off the same
+  // list the test counted off, or the rule shifts by one and the tenor with it.
+  const expiries = await putExpiries(TICKER, ymd(addDays(today, 1)), polyKey);
   // The NEAREST FRIDAY, one leg. This replaces the three-nearest-expiry split, and it
   // reverses the earlier "TLT writes every available expiry" rule on Nik's call after
   // the tenor study. On live chain quotes every longer-dated leg is beaten outright by
@@ -783,9 +785,22 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   //
   // NVDA is still Friday-only for a different reason (delivery falls 98% to 82% at a
   // monthly); the two planners remain separate files with separate rules.
+  // THE THIRD EXPIRY OUT, replacing the nearest Friday. TLT lists Mon/Wed/Fri, so the
+  // third is about a week from any starting day and the write rotates across expiry
+  // dates instead of stacking on one Friday.
+  //
+  // The red-day trigger STAYS. It was tested against the daily-slice rotation that
+  // NVDA now uses, and the rotation earns far more premium but buys TLT no cheaper,
+  // -1.7% either way. TLT's job is cheap shares, not income, so the trigger keeps its
+  // place. Only the expiry changes. Measured, two red days throughout:
+  //
+  //   nearest Friday   4d   $27,329/yr   entry -2.4% vs the market
+  //   3 expiries out   7d   $38,297/yr   entry -3.2%
+  //
+  // Better on both, which is why it is worth doing at all.
   const legExpiries = (() => {
-    const fri = expiries.filter((e) => parseISO(e).getUTCDay() === 5);
-    return fri.length ? [fri[0]] : expiries.slice(0, 1);
+    const third = expiries[2] ?? expiries[expiries.length - 1];
+    return third ? [third] : [];
   })();
   const expiry = legExpiries[0] ?? null;
   let putQuotes: Quote[] = [];

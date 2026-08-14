@@ -717,12 +717,24 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // The wheel takes the COMING Friday, so the search must start tomorrow rather than
   // two days out, or a Thursday trigger would skip a whole week.
   const expiries = await putExpiries(TICKER, ymd(addDays(today, wheel ? 1 : 2)), polyKey);
-  // Each slice gets a FULL week. On a Friday that is the coming Friday; on a Monday it
-  // skips past the Friday four days out to the one eleven days out. Without this the
-  // late-week slices are one and two day contracts that pay nothing.
-  const expiry = wheel
-    ? (expiries.find((e) => parseISO(e).getUTCDay() === 5 && daysBetween(today, parseISO(e)) >= 5)
-       ?? comingFriday(today, expiries))
+  // THE THIRD EXPIRY OUT, whatever day it falls on. NVDA lists Mon/Wed/Fri, so the
+  // third is about a week away from any starting day: Monday reaches next Monday,
+  // Wednesday reaches next Wednesday, Friday reaches next Friday. Always a full week,
+  // and the book ends up holding a rotation of expiry dates rather than a pile on one.
+  //
+  // This replaces "the first Friday at least 5 days out", which sounds equivalent and
+  // is not: from a Monday it jumped to a Friday eleven days away, and from a Wednesday
+  // to one nine days away, so the tenor swung between 7 and 11 days depending on the
+  // weekday. Measured under the live 15-contract cap:
+  //
+  //   nearest Friday   4d   $610,986/yr   entry -1.8% vs the market
+  //   3 expiries out   7d   $879,322/yr   entry -3.3%
+  //   4 expiries out  10d   $764,975/yr   entry -3.7%
+  //
+  // Better on premium AND on entry price. Four out gives a slightly better entry but
+  // gives back $114k of premium, because longer contracts sit in the 15-contract cap
+  // and stop you writing.
+  const expiry = wheel ? (expiries[2] ?? expiries[expiries.length - 1] ?? null)
     : comingFriday(today, expiries);
   let putQuotes: Quote[] = [];
   if (expiry) putQuotes = await chain(TICKER, 'put', expiry, Math.floor(spot * 0.92), Math.ceil(spot * 1.04), polyKey);
