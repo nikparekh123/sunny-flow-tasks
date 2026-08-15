@@ -91,6 +91,7 @@ struct NvdaPositionScreen: View {
     private func groups(_ p: NvPosition) -> [RailGroup] {
         var sharesCards: [AnyView] = [
             AnyView(SharesCard(p: p, perShare: store.perf?.perShare ?? 0, open: avgDown,
+                               realized: store.perf?.sleeves.first(where: { $0.name == "Shares" })?.realized ?? 0,
                                onToggle: { withAnimation(InkMotion.ease(0.3)) { avgDown.toggle() } }).inkEntrance(1)),
         ]
         if avgDown {
@@ -295,6 +296,9 @@ private struct SharesCard: View {
     let p: NvPosition
     let perShare: Double
     let open: Bool
+    /// Realised share P&L, shown under the hero exactly as the sleeve cards do.
+    /// Defaulted so the Average-down preview site does not have to supply it.
+    var realized: Double = 0
     let onToggle: () -> Void
     var body: some View {
         InkCard(stamp: (stampState(p.fresh), p.freshText)) {
@@ -314,7 +318,10 @@ private struct SharesCard: View {
                 }
                 HeroSplit {
                     InkDelta(value: nvUsdS(p.sharesPL), good: p.sharesPL >= 0, size: 40, weight: .medium)
-                    unitLabel("open · shares")
+                    // Hero is the OPEN position; the line under it is what has already
+                    // been banked, matching the sleeve cards. "open · shares" only shows
+                    // while nothing has been sold, otherwise it says nothing useful.
+                    unitLabel(realized != 0 ? "\(nvUsd(realized)) realized" : "open · shares")
                 } side: {
                     InkRoll(text: "$\(nvDec(p.spot, 2))", font: InkFont.mono(20, .regular), tracking: 20 * -0.03, color: Ink.text)
                     Text("LIVE SPOT").font(InkFont.mono(10.5)).tracking(10.5 * 0.06)

@@ -597,6 +597,27 @@ enum NvDerive {
             let perContract = openCt > 0 ? openPremK / openCt : 0
             openShortPrem += c * perContract                  // c = net-open contracts
         }
+        // Same computation for the short PUT sleeve. Its realized figure was a literal
+        // 0, so the card read "nothing realized yet" forever however much had settled.
+        //
+        // Unlike calls, there is NO assignment exclusion here, and that asymmetry is
+        // deliberate. An assigned CALL sells shares at the strike and IBKR folds the
+        // premium into that sale's realized P&L, so counting it again would double it.
+        // An assigned PUT buys shares, and a purchase books no realized P&L at all, so
+        // the premium is realized nowhere else. PNL_GLOSSARY: "PREMIUM_REALIZED =
+        // premium from sold options that have EXPIRED or been CLOSED", and "Exercised
+        // = REALIZED".
+        var openShortPutPrem = 0.0
+        for (k, c) in net where c > 0.0001 && k.kind == "put" && k.side == "short" {
+            let opens = live.filter { $0.direction == "short" && $0.option_type == "put"
+                && $0.strike == k.strike && $0.expiry == k.expiry && $0.action == "open" }
+            let openCt = opens.reduce(0.0) { $0 + $1.contracts }
+            let openPremK = opens.reduce(0.0) { $0 + $1.premium * $1.contracts * 100 }
+            let perContract = openCt > 0 ? openPremK / openCt : 0
+            openShortPutPrem += c * perContract
+        }
+        let realizedClosedPuts = netPrem("put", "short") - openShortPutPrem
+
         let realizedShares = sells.filter { $0.voided_at == nil }.reduce(0.0) { $0 + ($1.realized_pl ?? 0) }
         // Assigned-call premium is EXCLUDED (captured in the share sale at strike,
         // per IBKR — same rule as NvDerive.pnl()), so the Calls-sold sleeve
@@ -637,7 +658,8 @@ enum NvDerive {
                   realized: longRealized("call"), unrealized: sleeveMTM("call", "long") - cbPaid,
                   empty: writtenCt("call", "long") == 0),
             .init(name: "Puts sold", glyph: "▼", total: psCt, basisLabel: "Collected", basis: openPrem("put", "short"),
-                  realized: 0, unrealized: 0, empty: psCt == 0),
+                  realized: realizedClosedPuts, unrealized: openShortPutPrem - sleeveMTM("put", "short"),
+                  empty: psCt == 0 && realizedClosedPuts == 0),
             .init(name: "Puts bought", glyph: "▽", total: pbCt, basisLabel: "Paid", basis: pbPaid,
                   realized: longRealized("put"), unrealized: sleeveMTM("put", "long") - pbPaid,
                   empty: writtenCt("put", "long") == 0),
