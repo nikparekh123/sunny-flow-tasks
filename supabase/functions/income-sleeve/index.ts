@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.5';
+const BUILD = '2026-08-17.6';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -384,6 +384,18 @@ Deno.serve(async (req) => {
       // Calls are limited by shares actually HELD. Pending assignment is not cover:
       // write against shares that have not arrived and a rally leaves you naked.
       const callCt = Math.max(0, Math.floor(shares / 100) - openCalls);
+      /* PUT SIZE IS A SETTING, because it is a MARGIN decision and only Nik can
+         see his margin. put_contracts null keeps the old one-for-one behaviour.
+
+         One-for-one is what broke the model: every assignment doubles the block,
+         1,000 shares to 2,000 to 4,000, so a name that keeps falling grows the
+         position exponentially into the fall. Simulated on NKE's own returns that
+         is the difference between a median average 13% below the market after ten
+         weeks and a 70% tail loss. A FIXED count grows it in a straight line and
+         the averaging-down works as intended.
+
+         Calls stay one-for-one and always will: you cannot sell a call against
+         stock you do not own. */
       // Puts match the block too, 1:1, exactly as the calls do.
       //
       // NO TARGET. Until 2026-08-16 this refilled toward a target_shares figure,
@@ -396,7 +408,10 @@ Deno.serve(async (req) => {
       // them back, so a block written 1:1 on both legs oscillates around its own
       // size and needs nothing to aim at. target_shares stays on the table as dead
       // weight rather than being dropped mid-week; nothing reads it now.
-      const putCt = Math.max(0, Math.floor(shares / 100) - openPuts);
+      const putSize = n.put_contracts != null
+        ? Math.max(0, Number(n.put_contracts))
+        : Math.floor(shares / 100);
+      const putCt = Math.max(0, putSize - openPuts);
 
       // ── write or skip. There is no CAREFUL any more. ───────────────────────
       //
@@ -495,6 +510,8 @@ Deno.serve(async (req) => {
         earnings: nextEarn ?? null,
         earnings_missing: earnMissing,
         can_buy: canBuy,
+        put_size: putSize,
+        put_size_fixed: n.put_contracts != null,
         atm_pair_strike: atmPut?.strike ?? null,
         earnings_soon: earnSoon,
         earnings_in_days: nextEarn ? daysBetween(today, parseISO(nextEarn)) : null,
