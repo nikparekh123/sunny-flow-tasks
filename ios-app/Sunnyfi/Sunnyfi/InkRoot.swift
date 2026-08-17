@@ -25,6 +25,8 @@ struct InkRoot: View {
     @State private var sym = "Nvidia"
     @State private var scrollY: CGFloat = 0
     @State private var showPlanner = false
+    // App-wide, not a tab's: no other screen shows the whole book at once.
+    @State private var premium = OpenPremiumStore()
     // Income is a THIRD ticker slot, not a third bottom tab: it lives on the
     // portfolio page beside Nvidia and TLT because it is the same question
     // ("what is my position") asked of a sleeve rather than of one name.
@@ -39,6 +41,11 @@ struct InkRoot: View {
                 if tab == 0 {
                     InkTickerNav(symbols: symbols, selected: $sym)   // only on the portfolio page
                 }
+                // In normal flow, under the nav, above the scroll. The drawer
+                // placement this replaces overlaid the content and swallowed taps
+                // on the ticker buttons; a strip cannot, because it occupies the
+                // space it draws in.
+                if let t = premium.data?.tape { OpenPremiumStrip(tape: t) }
                 content
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
@@ -47,6 +54,7 @@ struct InkRoot: View {
                 .padding(.bottom, 6)
         }
         .task { await store.poll(seconds: 60) }
+        .task { await premium.load() }
         .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)   // Auto=system, or the Profile override
         .fullScreenCover(isPresented: $showPlanner) {
             // The morning card replaces the seven-section planner. NvdaPlannerV2Screen
