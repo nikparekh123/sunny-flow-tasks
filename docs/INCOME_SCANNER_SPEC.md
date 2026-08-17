@@ -53,7 +53,7 @@ Applied after market days are removed, and after earnings days are identified.
 
 | gate | threshold | why |
 |---|---|---|
-| **weekly options** | must exist | the whole cadence is weekly |
+| **weekly options** | **3+ distinct expiries in the next 5 weeks** | see below |
 | **option liquidity** | **50** open interest across ±5% of spot, both legs | see below |
 | **share price** | $15 to $400 | under, the premium is noise and spreads eat it; over, one contract is too big to size against a ~$200k block |
 | **own gap** | no non-earnings, non-market day worse than **12%** | Nik's no-bizarre-swings rule, properly isolated |
@@ -63,6 +63,31 @@ Applied after market days are removed, and after earnings days are identified.
 | **earnings date** | on file, confirmed or estimated | otherwise nothing guards the print |
 | **correlation** | under **0.40** to every held name, over 250 days | or the sleeve owns one position twice |
 | **52-week position** | under **45%** | Nik writes into names near their lows, not their highs |
+
+### Weeklies must be counted, not assumed
+
+**This gate was in this spec from the first draft and was not implemented for two
+days.** The scanner only ever asked for the coming Friday, and 21 Aug 2026 is the
+THIRD Friday — the monthly expiry — so every optionable name in the country has
+contracts that day.
+
+ZTS passed with 11,252 open interest and a 4.23% straddle while having no weekly
+market at all:
+
+```
+              ZTS   NKE   PEP
+2026-08-21     17    46    55     <- monthly, everyone is here
+2026-08-28      0    39    54
+2026-09-04      0    37    53
+2026-09-11      0    27    50
+```
+
+Nik caught it. The failure would have appeared only one week in four, which is
+the worst kind: silent three weeks out of every month.
+
+Counting DISTINCT EXPIRIES over the next five weeks is the test. A weekly name has
+four or five; a monthly name has one. A separate, deliberately narrow call, since
+it only needs the dates.
 
 ### Liquidity is a floor, not a bar
 

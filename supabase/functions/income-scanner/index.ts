@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-17.5';
+const BUILD = '2026-08-17.6';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -62,6 +62,10 @@ const G = {
      zero volume on everything. */
   oiMin: 50,             // open interest across the band, both legs
   quietVol: 32,          // below this the name goes in the 'quiet' bucket
+  /* At least this many distinct expiries in the next five weeks. A weekly name
+     has four or five; a monthly name has one. The whole cadence is weekly, so a
+     monthly-only name cannot run this strategy at all. */
+  weekliesMin: 3,
 };
 
 /* MARKET DAYS. A day when more than this fraction of the universe moved more
@@ -108,6 +112,43 @@ function corr(a: number[], b: number[]): number {
   let cov = 0, vx = 0, vy = 0;
   for (let i = 0; i < n; i++) { cov += (x[i] - mx) * (y[i] - my); vx += (x[i] - mx) ** 2; vy += (y[i] - my) ** 2; }
   return (vx && vy) ? cov / Math.sqrt(vx * vy) : 0;
+}
+
+/* WEEKLIES: how many distinct expiries exist over the next five weeks.
+   A weekly name has four or five; a monthly name has one.
+
+   This gate was in the spec from the start and was never actually implemented.
+   The scanner only ever asked for the coming Friday, and 21 Aug 2026 happens to
+   be the THIRD Friday — the monthly expiry — so every optionable name in the
+   country has contracts that day. ZTS passed with 11,252 open interest and a
+   4.23% straddle while having no weekly market at all: 17 strikes on 21 Aug and
+   zero on 28 Aug, 4 Sep and 11 Sep.
+
+   It would have waved monthly-only names through one week in four, and only in
+   the other three weeks would anything have looked wrong.
+
+   A deliberately tight strike band, because this call only counts dates. */
+async function weeklyCount(ticker: string, from: string, to: string,
+                           spot: number, key: string): Promise<number> {
+  try {
+    const u = new URL(`${POLY}/v3/snapshot/options/${ticker}`);
+    u.searchParams.set('expiration_date.gte', from);
+    u.searchParams.set('expiration_date.lte', to);
+    u.searchParams.set('strike_price.gte', String(Math.floor(spot * 0.98)));
+    u.searchParams.set('strike_price.lte', String(Math.ceil(spot * 1.02)));
+    u.searchParams.set('contract_type', 'put');
+    u.searchParams.set('limit', '250');
+    u.searchParams.set('apiKey', key);
+    const r = await fetch(u.toString());
+    if (!r.ok) return -1;                       // unknown, not zero
+    const j = await r.json();
+    const days = new Set<string>();
+    for (const c of (j?.results ?? [])) {
+      const e = c.details?.expiration_date;
+      if (e) days.add(String(e));
+    }
+    return days.size;
+  } catch { return -1; }
 }
 
 /** The coming Friday: the expiry the sleeve actually writes. */
@@ -303,6 +344,11 @@ Deno.serve(async (req) => {
         // ── the option side, read straight from the snapshot ────────────────
         let straddlePct: number | null = null, iv: number | null = null;
         let oi = 0, vol = 0;
+        const weeks = await weeklyCount(t, todayISO, ymd(addDays(today, 35)), spot, polyKey);
+        if (weeks === 0) fails.push('no options at all');
+        else if (weeks > 0 && weeks < G.weekliesMin) {
+          fails.push(`monthly only: ${weeks} expiry in the next 5 weeks`);
+        }
         try {
           const chain = await snapshot(t, expiry, polyKey, spot);
           const puts = chain.filter((c: any) => c.type === 'put' && c.mid > 0);
@@ -348,6 +394,7 @@ Deno.serve(async (req) => {
           implied_vol: iv != null ? Math.round(iv * 100) : null,
           edge: edge != null ? Math.round(edge * 10) / 10 : null,
           option_oi: oi, option_volume: vol,
+          weeklies: weeks,
           // Reported, never gated. Thin is a fact about the name, not a verdict.
           liquidity: oi >= 5000 ? 'deep' : oi >= 800 ? 'fine' : 'thin',
           max_correlation: Math.round(mx * 100) / 100,
