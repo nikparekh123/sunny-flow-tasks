@@ -273,7 +273,12 @@ private struct NameRow: View {
 
             Field(k: "Earned", v: n.rank_line ?? "nothing yet")
             if skipped {
-                Field(k: "Skip", v: (n.why ?? []).first ?? "blocked", hue: Ink.loss)
+                // Plain text, NOT Ink.loss. Rendering the skip reason in the loss
+                // colour put the alarm straight back in through the palette: on the
+                // opening week all three names read "no shares yet" in warning
+                // orange, which is the exact tone CAREFUL was deleted for. A skip
+                // is a fact about the week, not a loss.
+                Field(k: "Skip", v: (n.why ?? []).first ?? "blocked")
             } else if let w = n.write {
                 Field(k: "Write", v: writeLine(w))
                 Field(k: "Money", v: "puts commit \(inUsd(n.put_commitment ?? 0))")
