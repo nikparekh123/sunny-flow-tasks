@@ -662,6 +662,10 @@ Deno.serve(async (req) => {
       const w = r.write as Record<string, any> | null;
       const f = r.floor as Record<string, any> | null;
       const noShares = (r.shares ?? 0) <= 0;
+      // The blocking reason that is NOT "no shares", which is the condition the
+      // ramp exists to fix and so never the interesting half.
+      const hardBlock = ((r.why ?? []) as string[])
+        .find((x) => !String(x).startsWith('no shares'));
 
       const chip = r.verdict === 'poor week to sell' ? { chip: 'Poor week', fill: true }
         : r.verdict === 'rich, but near the high' ? { chip: 'Near the high', fill: true }
@@ -682,8 +686,8 @@ Deno.serve(async (req) => {
              inside the margin week. Both were true; only one explains why there
              is no buy line under it either. Having no shares is the condition the
              ramp exists to fix, so it is never the interesting half. */
-          : (r.why ?? []).find((w) => !String(w).startsWith('no shares'))
-            ? `Skipping · ${(r.why ?? []).find((w) => !String(w).startsWith('no shares'))}.`
+          : hardBlock
+            ? `Skipping · ${hardBlock}.`
             : 'No shares yet, nothing to write against.';
 
       const floorBullet = f
