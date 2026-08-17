@@ -97,19 +97,34 @@ struct OpenPremiumStrip: View {
     /// color-mix(in srgb, var(--ink-text) 7%, var(--ink-surface)).
     private var cardTone: some ShapeStyle { Ink.surface }
 
+    /* THE LEDGER'S HEIGHT IS A CONSTANT, NOT A MEASUREMENT.
+       Two rows of a label at 12.5 and a figure at 20, on 8pt and 18pt spacings,
+       inside 2/18 padding. The content is always four cells, so this is exactly
+       determined and does not need discovering. Measuring it with a
+       GeometryReader is what made the drawer jerk: the reader wrote the height
+       back into state on every layout pass and the animation chased a moving
+       target. */
+    private var ledgerHeight: CGFloat { tape.note == nil ? 132 : 158 }
+
     var body: some View {
         VStack(spacing: 0) {
             bar
-            if open {
-                ledger
-                    .transition(.opacity)
-            }
+            /* FOLDED, NOT INSERTED. `if open { ledger }` adds and removes the view,
+               which rebuilds it and restarts its layout mid-animation. Keeping it
+               mounted and animating its frame is one interpolation instead. */
+            ledger
+                .frame(height: open ? ledgerHeight : 0, alignment: .top)
+                .opacity(open ? 1 : 0)
+                .clipped()
         }
         .background(cardTone)
         .background(Ink.text.opacity(0.07))
-        // A full pill when collapsed, the card radius when open. The shape change
-        // is animated with the fold, so it reads as one movement.
-        .clipShape(RoundedRectangle(cornerRadius: open ? Ink.radiusCard : 999, style: .continuous))
+        /* 23, NOT 999. A 999 radius on a 46pt bar clamps to half its height, so
+           the collapsed shape is identical either way — but animating a corner
+           from 20 to 999 makes SwiftUI interpolate through hundreds of radii it
+           then has to clamp every frame, and that is visible as a stutter. The
+           honest pair is the two radii actually drawn. */
+        .clipShape(RoundedRectangle(cornerRadius: open ? Ink.radiusCard : 23, style: .continuous))
         .animation(motion, value: open)
         .padding(EdgeInsets(top: 14, leading: 16, bottom: 2, trailing: 16))
     }
