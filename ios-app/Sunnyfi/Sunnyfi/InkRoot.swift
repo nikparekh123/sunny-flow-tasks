@@ -44,21 +44,34 @@ struct InkRoot: View {
                 if tab == 0 {
                     InkTickerNav(symbols: symbols, selected: $sym)   // only on the portfolio page
                 }
-                content
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                /* THE DRAWER LIVES BELOW THE NAV AND IS CLIPPED THERE.
+                   The design gives the status bar and nav z-index 26 and the dock
+                   20, so a closed sheet slides up BEHIND them and disappears. My
+                   first attempt hung the drawer off the root stack instead, which
+                   put it above everything: the sheet escaped over the nav and sat
+                   on top of the status bar, and the tab floated loose in the
+                   middle of the screen.
+
+                   SwiftUI has no z-index to lean on here, so the geometry does
+                   the work. The drawer overlays the content region only, and the
+                   region clips, so the closed sheet is cut off exactly where the
+                   nav's bottom edge is.
+
+                   It overlays rather than stacks: the design's dock is height 0,
+                   so the tab sits ON the first 40pt of the list rather than
+                   pushing it down. */
+                ZStack(alignment: .top) {
+                    content
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    OpenPremiumScrim(open: $premiumOpen)
+                    if let t = premium.data?.tape {
+                        OpenPremiumDrawer(tape: t, open: $premiumOpen)
+                            .frame(maxHeight: .infinity, alignment: .top)
+                    }
+                }
+                .clipped()
             }
             .frame(maxWidth: .infinity)
-            // The scrim covers the whole screen, so it sits outside the drawer's
-            // own 42pt of layout and above the content it dims.
-            OpenPremiumScrim(open: $premiumOpen)
-            if let t = premium.data?.tape {
-                VStack(spacing: 0) {
-                    // clears the nav; the sheet then slides down over the list
-                    Color.clear.frame(height: tab == 0 ? 61 : 0)
-                    OpenPremiumDrawer(tape: t, open: $premiumOpen)
-                    Spacer(minLength: 0)
-                }
-            }
             InkTabBar(selection: $tab, dimmed: scrolled)
                 .padding(.bottom, 6)
         }

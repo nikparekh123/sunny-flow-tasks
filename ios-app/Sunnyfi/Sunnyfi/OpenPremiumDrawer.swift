@@ -233,8 +233,10 @@ struct OpenPremiumScrim: View {
     @Binding var open: Bool
     var body: some View {
         if open {
+            // No ignoresSafeArea: the scrim sits inside the clipped content
+            // region so the nav above it stays legible and undimmed, which is
+            // where the design puts it too (the dock's scrim starts at the dock).
             Ink.canvas.opacity(0.66)
-                .ignoresSafeArea()
                 .background(.ultraThinMaterial)
                 .onTapGesture { withAnimation(.timingCurve(0.32, 0.72, 0, 1, duration: 0.52)) { open = false } }
                 .transition(.opacity)
