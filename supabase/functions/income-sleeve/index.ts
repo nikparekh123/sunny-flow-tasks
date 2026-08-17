@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.6';
+const BUILD = '2026-08-17.8';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -190,8 +190,11 @@ Deno.serve(async (req) => {
       // exists. db.get() swallows the 400 and returns [], so the wrong name fails
       // silently rather than loudly, which is how nvda-accumulate's earnings brake
       // sat dead without anyone noticing.
-      D.get(`earnings_events?ticker=in.${inList}&report_date=gte.${todayISO}`
-            + `&select=ticker,report_date&order=report_date.asc`),
+      /* gte today MINUS a week, not today. An ESTIMATED date has to keep
+         blocking for a few days after it passes, because the estimate is worth
+         about a week either way and the real print may not have happened yet. */
+      D.get(`earnings_events?ticker=in.${inList}&report_date=gte.${ymd(addDays(today, -10))}`
+            + `&select=ticker,report_date,scope_tag&order=report_date.asc`),
       D.get(`option_trades?ticker=in.${inList}&voided_at=is.null`
             + `&select=ticker,trade_date,action,option_type,direction,contracts,strike,premium,expiry`),
       D.get(`share_lots?ticker=in.${inList}&voided_at=is.null&select=ticker,acquired_date,qty_remaining,cost_per_share`),
@@ -338,14 +341,38 @@ Deno.serve(async (req) => {
 
          So a missing date is now a STATE, not an absence. The card says so, and
          `earnings_missing` is on the row for anything that wants to alert. */
-      const nextEarn = earnRows.find((e) => e.ticker === t)?.report_date as string | undefined;
+      /* ESTIMATED DATES, AND WHY THEY EXIST.
+         Companies publish a report date three or four weeks ahead, so the quarter
+         after next is simply not knowable. Waiting for it means each name goes
+         silent for weeks every quarter: LULU's confirmed date runs out on 27 Aug
+         2026 and its December one does not exist anywhere yet.
+
+         So a row tagged 'estimate' is anchored to the same quarter a year earlier
+         (LULU printed 11 Dec 2025, so 10 Dec 2026) and blocks a TWO-WEEK WINDOW
+         rather than a day. That is deliberately blunt: the anchor is good to
+         about a week, and a window absorbs the error instead of pretending to a
+         precision it does not have.
+
+         This is NOT the cadence inference tested and rejected on 2026-08-17,
+         which guessed dates from price gaps and came out 31, 29 and 120 days
+         wrong. Same quarter last year is a far stronger anchor, and the window
+         covers what is left. A real date replaces the estimate the moment the
+         company announces, and the block narrows to the normal rule. */
+      const earnRow = earnRows.find((e) => e.ticker === t
+        && (String(e.report_date) >= todayISO || e.scope_tag === 'estimate'));
+      const nextEarn = earnRow?.report_date as string | undefined;
+      const earnEstimated = earnRow?.scope_tag === 'estimate';
       const earnMissing = !nextEarn;
       const earnInside = !!(nextEarn && nextEarn <= expiry);
       /* MARGIN RISES BEFORE THE PRINT, not on the day of it. Nik's rule, added
          2026-08-17: come down a week early rather than carry full size into the
          margin increase. So the brake reaches one expiry FURTHER than the write —
          an earnings date inside the week AFTER this one already stops new puts. */
-      const earnSoon = !!(nextEarn && nextEarn <= ymd(addDays(parseISO(expiry), 7)));
+      // A confirmed date stops writing a week early (margin rises before a print).
+      // An estimate reaches a week further either side, because it might be wrong
+      // by that much in either direction.
+      const earnSoon = !!(nextEarn
+        && nextEarn <= ymd(addDays(parseISO(expiry), earnEstimated ? 14 : 7)));
 
       // ── the floor ──────────────────────────────────────────────────────────
       const fStrike = n.floor_strike != null ? Number(n.floor_strike) : null;
@@ -432,10 +459,12 @@ Deno.serve(async (req) => {
       const why: string[] = [];
       if (earnInside) {
         state = 'SKIP';
-        why.push(`Nothing to write this week, earnings ${dayShort(nextEarn)} lands inside this expiry`);
+        why.push(`Nothing to write this week, ${earnEstimated ? 'an estimated print around ' : 'earnings '}`
+               + `${dayShort(nextEarn)} lands inside this expiry`);
       } else if (earnSoon) {
         state = 'SKIP';
-        why.push(`Nothing to write this week, too close to earnings ${dayShort(nextEarn)}`);
+        why.push(`Nothing to write this week, too close to ${earnEstimated ? 'an estimated print around ' : 'earnings '}`
+               + `${dayShort(nextEarn)}`);
       } else if (earnMissing) {
         // Not a warning about the market. A warning about the DATA: nothing is
         // protecting this name, and saying nothing would imply something is.
@@ -509,6 +538,7 @@ Deno.serve(async (req) => {
         low52: Math.round(lo52 * 100) / 100, high52: Math.round(hi52 * 100) / 100,
         earnings: nextEarn ?? null,
         earnings_missing: earnMissing,
+        earnings_estimated: earnEstimated,
         can_buy: canBuy,
         put_size: putSize,
         put_size_fixed: n.put_contracts != null,
@@ -593,11 +623,25 @@ Deno.serve(async (req) => {
     }
     [...rows].sort((a, b) => Number(b.rank_value ?? -1) - Number(a.rank_value ?? -1))
       .forEach((r, i) => { r.rank = i + 1; });
+    /* THE BASIS IS GLOBAL, THE LINE IS PER ROW, and conflating the two took the
+       screen down with a 500 the moment the first trade landed.
+
+       `ranked_on` is deliberately global: every name has to be ordered on the
+       same measure or the ranking means nothing. But it was then used to pick
+       what each CARD says, so as soon as ONE name had collected premium, every
+       other name was asked for an earned figure it did not have, and
+       null.toFixed() threw.
+
+       This is the third time a state I treated as transitional (day one, no
+       shares, and now a partly-filled book) turned out to be a state it runs in
+       for weeks. A row prints what that row actually has. */
     for (const r of rows) {
-      r.rank_line = r.ranked_on === 'earned'
+      const earned = r.earned_per_week != null && r.premium_collected > 0;
+      r.rank_shown = earned ? 'earned' : 'quoted';
+      r.rank_line = earned
         ? `${(r.earned_per_week as number).toFixed(2)}% a week · `
           + `$${Math.round(r.premium_collected as number).toLocaleString('en-US')} since `
-          + fmtDay(String(r.started_on))
+          + dayShort(String(r.started_on))
         : r.quoted_yield == null
           ? 'nothing yet · no price to rank on'
           : `nothing yet · ranked on this week's ${(r.quoted_yield as number).toFixed(1)}%`;
@@ -675,7 +719,7 @@ Deno.serve(async (req) => {
        drop it because "the text already says forecast" — the text is the part
        nobody reads twice. */
     for (const r of rows) {
-      const fc = r.ranked_on !== 'earned';
+      const fc = r.rank_shown !== 'earned';
       const w = r.write as Record<string, any> | null;
       const f = r.floor as Record<string, any> | null;
       const noShares = (r.shares ?? 0) <= 0;
@@ -721,13 +765,15 @@ Deno.serve(async (req) => {
         forecast: fc,
         hero: fc
           ? (r.quoted_yield != null ? `${Number(r.quoted_yield).toFixed(1)}%` : '—')
-          : `${Number(r.earned_per_week).toFixed(2)}%`,
+          : `${Number(r.earned_per_week ?? 0).toFixed(2)}%`,
         unit: fc
           ? (noShares ? 'forecast for this week · no shares yet' : 'forecast for this week')
           : `cash a week per dollar · ${Math.round(r.share_of_sleeve ?? 0)}% of the group`,
         bullets: [trade, floorBullet],
         earn: r.earnings
-          ? `${dayShort(r.earnings)} · ${r.earnings_in_days} days`
+          ? `${r.earnings_estimated ? '~' : ''}${dayShort(r.earnings)}`
+            + (r.earnings_estimated ? ' · estimated, not confirmed'
+               : ` · ${r.earnings_in_days} days`)
             + (String(r.earnings) <= String(r.expiry) ? ' · inside this expiry'
                : r.earnings_soon ? ' · the week after' : '')
           : 'no date on file',
