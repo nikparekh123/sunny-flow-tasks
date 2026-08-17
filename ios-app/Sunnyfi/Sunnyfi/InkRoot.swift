@@ -25,6 +25,11 @@ struct InkRoot: View {
     @State private var sym = "Nvidia"
     @State private var scrollY: CGFloat = 0
     @State private var showPlanner = false
+    // The open-premium drawer is app-wide, not a tab's. Nik's problem is that no
+    // screen shows the whole book at once, so it hangs off the nav and stays put
+    // whichever ticker is selected.
+    @State private var premium = OpenPremiumStore()
+    @State private var premiumOpen = false
     // Income is a THIRD ticker slot, not a third bottom tab: it lives on the
     // portfolio page beside Nvidia and TLT because it is the same question
     // ("what is my position") asked of a sleeve rather than of one name.
@@ -43,10 +48,23 @@ struct InkRoot: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity)
+            // The scrim covers the whole screen, so it sits outside the drawer's
+            // own 42pt of layout and above the content it dims.
+            OpenPremiumScrim(open: $premiumOpen)
+            if let t = premium.data?.tape {
+                VStack(spacing: 0) {
+                    // clears the nav; the sheet then slides down over the list
+                    Color.clear.frame(height: tab == 0 ? 61 : 0)
+                    OpenPremiumDrawer(tape: t, open: $premiumOpen)
+                    Spacer(minLength: 0)
+                }
+            }
             InkTabBar(selection: $tab, dimmed: scrolled)
                 .padding(.bottom, 6)
         }
         .task { await store.poll(seconds: 60) }
+        .task { await premium.load() }
+        .onChange(of: tab) { _, _ in premiumOpen = false }
         .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)   // Auto=system, or the Profile override
         .fullScreenCover(isPresented: $showPlanner) {
             // The morning card replaces the seven-section planner. NvdaPlannerV2Screen
