@@ -266,7 +266,11 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     await Promise.all([
       D.get('nvda_planner_state?id=eq.1&select=*'),
       D.get(`macro_events?event_date=gte.${todayISO}&select=name,event_date&order=event_date.asc&limit=12`),
-      D.get(`earnings_events?select=*&order=event_date.asc&limit=8`),
+      // report_date. This ordered by event_date, which does not exist on this table,
+      // so PostgREST 400'd, db.get() swallowed it and returned [], nextEarn was always
+      // null and THE EARNINGS BRAKE NEVER FIRED. Found 2026-08-15 while wiring the
+      // income sleeve, with NVDA reporting on the 26th.
+      D.get(`earnings_events?ticker=eq.${TICKER}&select=*&order=report_date.asc&limit=8`),
       D.get('nvda_option_trades?voided_at=is.null&select=id,action,option_type,direction,contracts,strike,premium,expiry,closes_trade_id,trade_date,last_synced_at'),
       // cost_per_share is read for the wheel's call anchor. Without it the ladder can
       // only anchor to spot, which writes calls BELOW basis after a fall and books a
@@ -376,7 +380,7 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   // cannot produce.
   const nextHeavy = (eventRows as Row[])[0];
   const nextEarn = (earnRows as Row[])
-    .map((e) => String(e.event_date ?? e.date ?? '').slice(0, 10))
+    .map((e) => String(e.report_date ?? e.event_date ?? e.date ?? '').slice(0, 10))
     .filter((d) => d >= todayISO).sort()[0] ?? null;
   let calPenalty = 0, calNote = 'clear for a week';
   if (nextHeavy) {
