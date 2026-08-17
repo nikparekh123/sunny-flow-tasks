@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.4';
+const BUILD = '2026-08-17.5';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -417,27 +417,27 @@ Deno.serve(async (req) => {
       const why: string[] = [];
       if (earnInside) {
         state = 'SKIP';
-        why.push(`earnings ${dayShort(nextEarn)} is inside this expiry`);
+        why.push(`Nothing to write this week, earnings ${dayShort(nextEarn)} lands inside this expiry`);
       } else if (earnSoon) {
         state = 'SKIP';
-        why.push(`earnings ${dayShort(nextEarn)} is the week after, margin rises first`);
+        why.push(`Nothing to write this week, too close to earnings ${dayShort(nextEarn)}`);
       } else if (earnMissing) {
         // Not a warning about the market. A warning about the DATA: nothing is
         // protecting this name, and saying nothing would imply something is.
         state = 'SKIP';
-        why.push('no earnings date on file, so nothing is guarding the print');
+        why.push('Nothing to write this week, no earnings date on file to write around');
       } else if (shares <= 0) {
         state = 'SKIP';
-        why.push('no shares yet, nothing to write against');
+        why.push('no shares yet, nothing to write against');   // matched by the hardBlock filter
       } else if (callCt <= 0 && putCt <= 0) {
         state = 'SKIP';
-        why.push('nothing left to write, calls and puts both full');
+        why.push('Nothing left to write, the calls and puts are both full');
       } else if (fStrike != null && fWeeksLeft != null && fWeeksLeft < FLOOR_MIN_WEEKS) {
         // The structure is only sound while the protection is on. A floor about to
         // expire gets rolled BEFORE more premium is written against it, otherwise
         // this is a naked short straddle wearing a hedge's name.
         state = 'SKIP';
-        why.push(`floor expires in ${fWeeksLeft} week${fWeeksLeft === 1 ? '' : 's'}, roll it first`);
+        why.push(`Nothing to write this week, the floor expires in ${fWeeksLeft} week${fWeeksLeft === 1 ? '' : 's'} and needs rolling first`);
       }
 
       // The verdict: one phrase, right-aligned on the card, replacing the two
@@ -687,7 +687,7 @@ Deno.serve(async (req) => {
              is no buy line under it either. Having no shares is the condition the
              ramp exists to fix, so it is never the interesting half. */
           : hardBlock
-            ? `Skipping · ${hardBlock}.`
+            ? `${hardBlock}.`
             : 'No shares yet, nothing to write against.';
 
       const floorBullet = f
