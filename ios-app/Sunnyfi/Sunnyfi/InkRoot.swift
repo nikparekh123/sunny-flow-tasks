@@ -25,11 +25,6 @@ struct InkRoot: View {
     @State private var sym = "Nvidia"
     @State private var scrollY: CGFloat = 0
     @State private var showPlanner = false
-    // The open-premium drawer is app-wide, not a tab's. Nik's problem is that no
-    // screen shows the whole book at once, so it hangs off the nav and stays put
-    // whichever ticker is selected.
-    @State private var premium = OpenPremiumStore()
-    @State private var premiumOpen = false
     // Income is a THIRD ticker slot, not a third bottom tab: it lives on the
     // portfolio page beside Nvidia and TLT because it is the same question
     // ("what is my position") asked of a sleeve rather than of one name.
@@ -44,40 +39,14 @@ struct InkRoot: View {
                 if tab == 0 {
                     InkTickerNav(symbols: symbols, selected: $sym)   // only on the portfolio page
                 }
-                /* THE DRAWER LIVES BELOW THE NAV AND IS CLIPPED THERE.
-                   The design gives the status bar and nav z-index 26 and the dock
-                   20, so a closed sheet slides up BEHIND them and disappears. My
-                   first attempt hung the drawer off the root stack instead, which
-                   put it above everything: the sheet escaped over the nav and sat
-                   on top of the status bar, and the tab floated loose in the
-                   middle of the screen.
-
-                   SwiftUI has no z-index to lean on here, so the geometry does
-                   the work. The drawer overlays the content region only, and the
-                   region clips, so the closed sheet is cut off exactly where the
-                   nav's bottom edge is.
-
-                   It overlays rather than stacks: the design's dock is height 0,
-                   so the tab sits ON the first 40pt of the list rather than
-                   pushing it down. */
-                ZStack(alignment: .top) {
-                    content
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    OpenPremiumScrim(open: $premiumOpen)
-                    if let t = premium.data?.tape {
-                        OpenPremiumDrawer(tape: t, open: $premiumOpen)
-                            .frame(maxHeight: .infinity, alignment: .top)
-                    }
-                }
-                .clipped()
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .frame(maxWidth: .infinity)
             InkTabBar(selection: $tab, dimmed: scrolled)
                 .padding(.bottom, 6)
         }
         .task { await store.poll(seconds: 60) }
-        .task { await premium.load() }
-        .onChange(of: tab) { _, _ in premiumOpen = false }
         .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)   // Auto=system, or the Profile override
         .fullScreenCover(isPresented: $showPlanner) {
             // The morning card replaces the seven-section planner. NvdaPlannerV2Screen
