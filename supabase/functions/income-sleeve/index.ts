@@ -263,7 +263,14 @@ Deno.serve(async (req) => {
         ? Math.max(1, daysBetween(parseISO(String(n.started_on)), today) / 7)
         : 0;
       const capitalBase = target > 0 ? target * spot : shares * spot;
-      const earnedPerWeek = (weeksIn > 0 && capitalBase > 0)
+      // premCollected > 0 matters, and the first live run is what showed why. On
+      // day one started_on is today, so weeksIn floors to 1 and this evaluated to
+      // a real 0.00 rather than null. Every name scored zero, "any name has earned
+      // something" came out true, and the rank fell through to input order while
+      // printing "0.00% a week" as though it had measured something. Nothing
+      // collected means there is nothing to rank on, so: null, and the quoted-yield
+      // fallback takes over as intended.
+      const earnedPerWeek = (weeksIn > 0 && capitalBase > 0 && premCollected > 0)
         ? 100 * (premCollected / weeksIn) / capitalBase
         : null;
 
