@@ -25,7 +25,10 @@ struct InkRoot: View {
     @State private var sym = "Nvidia"
     @State private var scrollY: CGFloat = 0
     @State private var showPlanner = false
-    private let symbols = ["Nvidia", "TLT"]
+    // Income is a THIRD ticker slot, not a third bottom tab: it lives on the
+    // portfolio page beside Nvidia and TLT because it is the same question
+    // ("what is my position") asked of a sleeve rather than of one name.
+    private let symbols = ["Nvidia", "TLT", "Income"]
 
     private var scrolled: Bool { scrollY < -24 }
 
@@ -76,6 +79,10 @@ struct InkRoot: View {
             switch sym {
             case "Nvidia": portfolioScroll(store, isNvda: true)
             case "TLT":    portfolioScroll(tltStore, isNvda: false)
+            // The sleeve owns its whole page: it is ranked rows, not the four
+            // handoff sections, and it reads its own edge function rather than
+            // an NvdaStore. Nothing in portfolioScroll applies to it.
+            case "Income": IncomeScreen()
             default:       quiet("No position", "Nothing held or written in \(sym) — watchlist only.")
             }
         case 1:
