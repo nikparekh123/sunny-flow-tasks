@@ -122,6 +122,37 @@ function meanOf(cl: number[], n: number): number | null {
   return cl.slice(-n).reduce((s, x) => s + x, 0) / n;
 }
 
+/* ── the card contract ────────────────────────────────────────────────────────
+   Claude Design's Income screen (docs/INCOME_SCREEN_DESIGN_BRIEF.md, returned
+   2026-08-16) sets one rule: EVERY DISPLAYED STRING IS EMITTED HERE. The client
+   formats nothing. The only number crossing the boundary is foot.pct, which sets
+   the width of the 52-week range track.
+
+   That is why the helpers below exist rather than living in Swift. Two clients
+   formatting the same figure two ways is exactly how the covered-call card ended
+   up reading $499 against a summary saying $249. */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** "2026-08-21" -> "Fri 21 Aug". The expiry has to read at a glance, so weekday first. */
+function dayShort(iso?: string | null): string {
+  if (!iso || iso.length < 10) return '';
+  const d = parseISO(String(iso).slice(0, 10));
+  return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+/** "2027-01-15" -> "Jan". The floor is named by its month, never its full date. */
+function monShort(iso?: string | null): string {
+  if (!iso || iso.length < 7) return '';
+  return MONTHS[parseISO(String(iso).slice(0, 10)).getUTCMonth()] ?? '';
+}
+
+/** "$24,652". Whole dollars, grouped. No k/m compaction: the design shows the figure. */
+function usd(v: number): string {
+  return '$' + Math.round(v).toLocaleString('en-US');
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
@@ -432,7 +463,7 @@ Deno.serve(async (req) => {
         // "floor 310 Jan · 10% below the price · paid for", or "none yet". Never a
         // warning: a sleeve in its first week has nothing to protect.
         floor_line: fStrike == null ? 'none yet'
-          : `${fStrike} ${fExpiry ? fmtDay(fExpiry).slice(-3) : ''} · `
+          : `${fStrike} ${monShort(fExpiry)} · `
             + `${(Math.round(1000 * (spot - fStrike) / spot) / 10).toFixed(0)}% below the price · `
             + (fundedPct == null ? 'cost unknown'
                : fundedPct >= 100 ? 'paid for'
@@ -487,6 +518,88 @@ Deno.serve(async (req) => {
           + `${(Math.round(1000 * v / stock) / 10).toFixed(0)}% of the sleeve`
         : 'no shares yet';
     }
+    /* ── THE CARD, exactly as Claude Design specified it ─────────────────────
+       Anatomy per position: numbered eyebrow + state chip · hero figure + unit
+       line · two bullets (the trade, the floor) · open space · next earnings ·
+       a band of three (collected, commits, effective cost) · a foot carrying the
+       one graphic on the screen, the 52-week range · freshness stamp.
+
+       The vertical list I built first was replaced by the design's horizontal
+       snap rail. I had argued a rail hides the third-ranked name; the design
+       answers that by putting the rank in the eyebrow as 01/02/03 and stating
+       the basis above the rail, so the ordering survives being scrolled.
+
+       `forecast` is the field that keeps a projection from being mistaken for a
+       record: it dashes the hero underline and hollows the stamp dot. Do not
+       drop it because "the text already says forecast" — the text is the part
+       nobody reads twice. */
+    for (const r of rows) {
+      const fc = r.ranked_on !== 'earned';
+      const w = r.write as Record<string, any> | null;
+      const f = r.floor as Record<string, any> | null;
+      const noShares = (r.shares ?? 0) <= 0;
+
+      const chip = r.verdict === 'poor week to sell' ? { chip: 'Poor week', fill: true }
+        : r.verdict === 'rich, but near the high' ? { chip: 'Near the high', fill: true }
+        : r.verdict === 'no read' ? { chip: 'No read', fill: false }
+        : { chip: 'Good week', fill: false };
+
+      const trade = w
+        ? 'Write ' + [
+            (w.puts ?? 0) > 0 ? `${w.puts} puts ${w.put_strike}` : null,
+            (w.calls ?? 0) > 0 ? `${w.calls} calls ${w.call_strike}` : null,
+          ].filter(Boolean).join(' · ')
+          + ` · ${dayShort(r.expiry)} for ${usd(w.credit ?? 0)}.`
+        : noShares
+          ? 'No shares yet, nothing to write against.'
+          : `Skipping · ${(r.why ?? ['blocked'])[0]}.`;
+
+      const floorBullet = f
+        ? `Floor ${f.strike} ${monShort(f.expiry)} · ${Math.round(f.gap_pct ?? 0)}% below the price · `
+          + (f.funded ? 'paid for.' : `${Math.round(f.funded_pct ?? 0)}% paid for.`)
+        : 'No floor yet.';
+
+      const prem = r.premium_collected ?? 0, commits = r.put_commitment ?? 0;
+      r.card = {
+        n: String(r.rank ?? 0).padStart(2, '0'),
+        sym: r.ticker,
+        price: r.spot != null ? Number(r.spot).toFixed(2) : '',
+        ...chip,
+        forecast: fc,
+        hero: fc
+          ? (r.quoted_yield != null ? `${Number(r.quoted_yield).toFixed(1)}%` : '—')
+          : `${Number(r.earned_per_week).toFixed(2)}%`,
+        unit: fc
+          ? (noShares ? 'forecast for this week · no shares yet' : 'forecast for this week')
+          : `cash a week per dollar · ${Math.round(r.share_of_sleeve ?? 0)}% of the group`,
+        bullets: [trade, floorBullet],
+        earn: r.earnings
+          ? `${dayShort(r.earnings)} · ${r.earnings_in_days} days`
+            + (String(r.earnings) <= String(r.expiry) ? ' · inside this expiry' : '')
+          : 'not on the feed yet',
+        band: [
+          { k: 'Collected', v: prem > 0 ? usd(prem) : 'nothing yet', text: prem <= 0 },
+          { k: 'Commits', v: commits > 0 ? usd(commits) : 'nothing', text: commits <= 0, mark: commits > 0 },
+          { k: 'Eff. cost', v: noShares ? 'nothing yet' : Number(r.current_avg).toFixed(2), text: noShares },
+        ],
+        foot: {
+          lab: 'Where it sits · 52w range',
+          fig: r.new_low ? 'At the low' : `${Math.round(r.pos52 ?? 0)}%`,
+          sub: r.new_low ? '52-week low' : 'up the range',
+          pct: Math.max(0, Math.min(100, Math.round(r.pos52 ?? 0))),
+          line: [
+            r.trend?.ma50 != null
+              ? `${Number(r.spot) >= Number(r.trend.ma50) ? '▲ above' : '▼ below'} the 50 day` : null,
+            r.trend?.rsi != null ? `RSI ${r.trend.rsi}` : null,
+          ].filter(Boolean).join(' · '),
+        },
+        stamp: {
+          text: fc ? 'forecast · nothing collected yet' : 'updated now · cash collected',
+          forecast: fc,
+        },
+      };
+    }
+
     const commit = rows.reduce((s, r) => s + (r.put_commitment ?? 0), 0);
     // The floors are shown as a NEGATIVE line. Selling ATM puts on a block you
     // already own roughly DOUBLES what you are liable for, and one "committed"
@@ -540,6 +653,52 @@ Deno.serve(async (req) => {
         premium_this_week: rows.reduce((s, r) => s + ((r.write?.credit) ?? 0), 0),
         expiring_friday: rows.reduce((s, r) => s + (r.open_calls ?? 0) + (r.open_puts ?? 0), 0),
       },
+      /* ── THE SLEEVE CARD, the design's wide header ───────────────────────────
+         Same anatomy as a position card, full width, no foot: eyebrow, hero,
+         two bullets, band of three, stamp. It answers what is collectable this
+         week, how the money is split across the names, and whether the floors
+         have paid for themselves.
+
+         The bullets carry the balance INTU 34% · NKE 33% · LULU 30%, which is
+         what replaced target_shares. Note it is a share of money invested, not
+         of some intended size: there is no intended size any more. */
+      head: (() => {
+        const invested = Math.round(rows.reduce((s, r) => s + (r.shares ?? 0) * (r.avg_buy ?? 0), 0));
+        const prem = Math.round(rows.reduce((s, r) => s + (r.premium_collected ?? 0), 0));
+        const fc = Math.round(rows.reduce((s, r) => s + (r.floor_cost ?? 0), 0));
+        const week = rows.reduce((s, r) => s + ((r.write?.credit) ?? 0), 0);
+        const below = invested > 0 ? Math.round(1000 * prem / invested) / 10 : null;
+        const weeks = fc > 0 && week > 0 ? Math.ceil(fc / week) : null;
+        const held = rows.filter((r) => (r.shares ?? 0) > 0);
+        return {
+          n: 'Sleeve', sym: `${rows.length} names`, chip: dayShort(expiry),
+          hero: usd(week),
+          unit: `to collect this week · writes ${dayShort(expiry)}`,
+          bullets: [
+            held.length
+              ? held.map((r) => `${r.ticker} ${Math.round(r.share_of_sleeve ?? 0)}%`).join(' · ')
+                + ' of the money invested.'
+              : 'No shares yet, so nothing is invested.',
+            fc > 0
+              ? `Floors ${usd(fc)} · ${Math.round(100 * fc / Math.max(prem, 1))}% of the cash · `
+                + `${weeks} week${weeks === 1 ? '' : 's'} pays for them.`
+              : 'No floors yet, nothing to pay back.',
+          ],
+          band: [
+            { k: 'Invested', v: usd(invested) },
+            { k: 'Collected', v: usd(prem), mark: prem > 0 },
+            { k: 'Below cost', v: below != null ? `${below.toFixed(1)}%` : 'none yet', text: below == null },
+          ],
+          stamp: `updated now · ${dayShort(todayISO)}`,
+        };
+      })(),
+      // The label above the rail, and the sentence under it saying which of the
+      // two bases produced the order. A forecast and a track record must never be
+      // mistakable for one another.
+      grp: rows.some((r) => r.ranked_on === 'earned') ? 'Ranked on cash collected' : 'Ranked on forecast',
+      basis: rows.some((r) => r.ranked_on === 'earned')
+        ? `Cash a week per dollar invested, since ${dayShort(rows.find((r) => r.started_on)?.started_on)}.`
+        : "Nothing collected yet, so the order is this week's forecast.",
       // The footer. A note, not a total: these blocks are the tool, not the holding.
       note: 'These are trading positions. Every put here is a promise to buy at the '
           + 'strike, and the calls can take the shares away.',

@@ -5,21 +5,30 @@
 //  Several names, ONE rule: own a block, sell an ATM call and an ATM put every
 //  week, hold a long-dated OTM put as a floor. Spec: docs/INCOME_SLEEVE_SPEC.md
 //
-//  Reads the income-sleeve edge function. The function does every calculation;
-//  this file only lays out what it returns.
+//  ── This is Claude Design's screen, replicated, not interpreted ──────────────
+//  Brief: docs/INCOME_SCREEN_DESIGN_BRIEF.md. Returned 2026-08-16 as
+//  ~/Downloads/income_export (Income - Ink.html + ink-income.jsx). Every measure
+//  here comes from that CSS: 348pt cards, 22pt body gutter, hero at 40, band
+//  labels at 12.5 with .07em tracking, the 8pt range track. Where this file and
+//  the export disagree, the export is right.
 //
-//  ── Why this screen stacks instead of using InkRail ──────────────────────────
-//  Every other Ink page is a horizontal rail of fixed 348pt cards. This one is a
-//  vertical list, on purpose: the names are RANKED, and a rail puts the third
-//  name off-screen where the ordering stops meaning anything. The rank is the
-//  point, so all of it has to be visible at once.
+//  The first build was mine and it was wrong twice over. It stacked the names
+//  vertically because I argued a rail hides the third-ranked one; the design
+//  answers that by numbering the eyebrow 01/02/03 and stating the ranking basis
+//  above the rail, so the order survives being scrolled. And it was set several
+//  points smaller than this throughout, which is the "too small to read"
+//  Nik reported.
+//
+//  ── The contract ─────────────────────────────────────────────────────────────
+//  EVERY DISPLAYED STRING IS EMITTED BY THE ENGINE. This file formats nothing.
+//  The only number crossing the boundary is foot.pct, which sets the width of
+//  the range track. Two clients formatting one figure two ways is how the
+//  covered-call card ended up reading $499 against a summary saying $249.
 //
 //  ── Tone ─────────────────────────────────────────────────────────────────────
-//  There is no warning state here. An earlier build had CAREFUL, which fired on
-//  a missing floor and printed "CAREFUL — no floor set" against a sleeve that had
-//  not opened yet. Nik's word for it was fear-mongering, and he was right: a
-//  state that never blocks anything is a tone of voice, not information. Facts
-//  only. A missing floor reads "none yet".
+//  No warning state. An earlier build had CAREFUL, which fired on a missing floor
+//  and printed "CAREFUL - no floor set" against a sleeve that had not opened yet.
+//  Facts only: a missing floor reads "No floor yet."
 //
 
 import SwiftUI
@@ -31,50 +40,70 @@ struct IncomeSleeve: Decodable {
     var asof: String?
     var expiry: String?
     var note: String?
-    var portfolio: Portfolio?
+    var grp: String?
+    var basis: String?
+    var head: Head?
     var names: [Name]?
     var error: String?
 
-    struct Portfolio: Decodable {
-        var invested: Double?
-        var collected: Double?
-        /// How far the blended average sits BELOW what the shares cost, in percent.
-        var average_below_pct: Double?
-        var floor_cost: Double?
-        var floor_pct_of_premium: Double?
-        var floor_weeks_to_pay: Int?
-        var premium_this_week: Double?
-        var expiring_friday: Int?
+    /// A band cell. `text` renders as prose rather than a figure; `mark` underlines
+    /// it. Both come from the engine — the client does not decide what is a figure.
+    struct Cell: Decodable {
+        var k: String
+        var v: String
+        var text: Bool?
+        var mark: Bool?
     }
 
-    struct Write: Decodable {
-        var calls: Int?; var call_strike: Double?; var call_mid: Double?
-        var puts: Int?;  var put_strike: Double?;  var put_mid: Double?
-        var credit: Double?
+    struct Stamp: Decodable {
+        var text: String
+        var forecast: Bool?
+    }
+
+    struct Foot: Decodable {
+        var lab: String
+        var fig: String
+        var sub: String
+        /// The one number the client is allowed to use as a number: the track width.
+        var pct: Double
+        var line: String
+    }
+
+    /// The wide header card. Same anatomy as a position card, minus the foot.
+    struct Head: Decodable {
+        var n: String
+        var sym: String
+        var chip: String
+        var hero: String
+        var unit: String
+        var bullets: [String]
+        var band: [Cell]
+        var stamp: String
+    }
+
+    struct Card: Decodable {
+        var n: String
+        var sym: String
+        var price: String
+        var chip: String
+        var fill: Bool?
+        /// Dashes the hero underline and hollows the stamp dot. It is the whole
+        /// defence against a projection being read as a track record.
+        var forecast: Bool?
+        var hero: String
+        var unit: String
+        var bullets: [String]
+        var earn: String
+        var band: [Cell]
+        var foot: Foot
+        var stamp: Stamp
     }
 
     struct Name: Decodable, Identifiable {
         var ticker: String
         var id: String { ticker }
         var rank: Int?
-        var state: String?
-        var verdict: String?
-        var why: [String]?
-        var spot: Double?
-        var rank_line: String?
-        var where_line: String?
-        var trend_line: String?
-        var floor_line: String?
-        var avg_line: String?
-        var avg_split_line: String?
-        var put_commitment: Double?
-        /// "600 shares · $207,000 · 32% of the sleeve". Replaced the old
-        /// "0 of 600 shares": Nik removed targets, so there is no progress to
-        /// report, only how the money actually sits across the names.
-        var balance_line: String?
-        var share_of_sleeve: Double?
-        var new_low: Bool?
-        var write: Write?
+        var card: Card?
     }
 }
 
@@ -85,7 +114,6 @@ final class IncomeStore {
     var sleeve: IncomeSleeve?
     var error: String?
     var loading = false
-    var loadedAt: Date?
 
     func load() async {
         guard !loading else { return }
@@ -110,35 +138,39 @@ final class IncomeStore {
             let parsed = try JSONDecoder().decode(IncomeSleeve.self, from: data)
             if let e = parsed.error { error = e; return }
             sleeve = parsed
-            loadedAt = Date()
         } catch {
             self.error = String(describing: error)
         }
     }
 }
 
-// MARK: - formatting
+// MARK: - Figure: numbers in prose go mono
 
-private func inUsd(_ v: Double) -> String {
-    let n = abs(v)
-    if n >= 1_000_000 { return "$\(String(format: "%.2f", v / 1_000_000))m" }
-    if n >= 10_000 { return "$\(Int(v / 1000).formatted())k" }
-    return "$" + Int(v.rounded()).formatted(.number.grouping(.automatic))
-}
+/// Ink's Figure treatment, ported from the export's `Fig` component. A bullet
+/// reading "Write 6 puts 350 · Fri 18 Sep for $10,200." sets the quantities in
+/// mono and the words in the display face, so the numbers are scannable inside a
+/// sentence. Cheap to do, and it is most of why the bullets read as data.
+private func inkFig(_ s: String, size: CGFloat, color: Color) -> Text {
+    var out = Text("")
+    var run = ""
+    var isNum = false
 
-private func inStrike(_ v: Double?) -> String {
-    guard let v else { return "—" }
-    return v == v.rounded() ? String(format: "%.0f", v) : String(format: "%.1f", v)
-}
-
-/// "2026-08-21" -> "Fri 21 Aug". The expiry is the one date on this screen that
-/// has to read at a glance, so it gets a weekday.
-private func inDay(_ iso: String?) -> String {
-    guard let iso, iso.count >= 10 else { return "—" }
-    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "America/New_York")
-    guard let d = f.date(from: String(iso.prefix(10))) else { return iso }
-    let o = DateFormatter(); o.dateFormat = "EEE d MMM"; o.timeZone = f.timeZone
-    return o.string(from: d)
+    func flush() {
+        guard !run.isEmpty else { return }
+        out = out + Text(run).font(isNum ? InkFont.mono(size) : InkFont.display(size))
+        run = ""
+    }
+    // A character belongs to a figure if it is a digit or one of the glyphs that
+    // holds a figure together. A bare "%" or "$" beside a word stays prose.
+    for ch in s {
+        let digit = ch.isNumber
+        let glue = "$,.%–−-".contains(ch)
+        let num = digit || (glue && (isNum || digit))
+        if num != isNum && !(glue && !isNum) { flush(); isNum = num }
+        run.append(ch)
+    }
+    flush()
+    return out.foregroundColor(color)
 }
 
 // MARK: - the screen
@@ -149,221 +181,327 @@ struct IncomeScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                InkSectionHead(title: "Income",
-                               count: store.sleeve?.asof.map { inDay($0).uppercased() },
-                               icon: "arrow.clockwise",
-                               onAction: { Task { await store.load() } })
-
-                if let s = store.sleeve, let p = s.portfolio {
-                    HeaderBlock(p: p, expiry: s.expiry)
-                    ForEach(ranked(s.names ?? [])) { n in
-                        NameRow(n: n, expiry: s.expiry)
+                if let s = store.sleeve, let h = s.head {
+                    // secthead: Newsreader 26 + the as-of stamp, per the export
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("Income").font(InkFont.serif(26)).tracking(26 * -0.015)
+                            .foregroundStyle(Ink.text)
+                        Spacer(minLength: 0)
+                        Text(dayStamp(s.asof)).font(InkFont.mono(12.5)).tracking(12.5 * 0.09)
+                            .foregroundStyle(Ink.dim).fixedSize()
                     }
+                    .padding(EdgeInsets(top: 24, leading: 16, bottom: 18, trailing: 16))
+
+                    SleeveCard(h: h).padding(.horizontal, 16)
+
+                    // grp-h: the ranking basis, and how many names carry it
+                    HStack(spacing: 9) {
+                        Text((s.grp ?? "").uppercased()).font(InkFont.mono(12.5))
+                            .tracking(12.5 * 0.2).foregroundStyle(Ink.dim)
+                        Text("\(s.names?.count ?? 0)").font(InkFont.mono(12.5))
+                            .tracking(12.5 * 0.1).foregroundStyle(Ink.text)
+                    }
+                    // 24/18, not the export's 8/10. On device the label sat
+                    // wedged between the sleeve card and the rail with no room
+                    // either side; it is a section break and has to read as one.
+                    .padding(EdgeInsets(top: 24, leading: 16, bottom: 18, trailing: 16))
+
+                    // The rail. Equal-height cards, snapped, in rank order.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 10) {
+                            ForEach(ranked(s.names ?? [])) { n in
+                                if let c = n.card { PosCard(c: c) }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 2)
+                        .padding(.bottom, 8)
+                        .scrollTargetLayout()
+                    }
+                    .scrollTargetBehavior(.viewAligned)
+                    .scrollClipDisabled()
+
                     if let note = s.note { NoteFoot(text: note) }
                 } else if let e = store.error {
                     Quiet(title: "Could not load", body: e)
                 } else {
                     Quiet(title: "Loading", body: "Reading the sleeve.")
                 }
-                Color.clear.frame(height: 104)
+                Color.clear.frame(height: 96)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { if store.sleeve == nil { await store.load() } }
+        .refreshable { await store.load() }
     }
 
-    /// Rank order, with anything unranked (a no-price row) pushed to the bottom
-    /// rather than dropped: a name that failed to price is still a name he holds.
+    /// Rank order. An unranked row (one that failed to price) sinks to the end
+    /// rather than being dropped: a name that could not be priced is still held.
     private func ranked(_ ns: [IncomeSleeve.Name]) -> [IncomeSleeve.Name] {
         ns.sorted { ($0.rank ?? 99) < ($1.rank ?? 99) }
     }
+
+    /// The one string the engine does not emit, because it is chrome rather than
+    /// content: the section-head as-of. "2026-08-16" -> "SUN 16 AUG".
+    private func dayStamp(_ iso: String?) -> String {
+        guard let iso, iso.count >= 10 else { return "" }
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(identifier: "America/New_York")
+        guard let d = f.date(from: String(iso.prefix(10))) else { return "" }
+        let o = DateFormatter(); o.dateFormat = "EEE d MMM"; o.timeZone = f.timeZone
+        return o.string(from: d).uppercased()
+    }
 }
 
-// MARK: - header
+// MARK: - card parts, each one measured off the export's CSS
 
-/// What went in, what came back, what the shares really cost now, and whether the
-/// protection has paid for itself.
-///
-/// This used to lead with stock / put commitment / NET AT RISK. Nik removed the
-/// net figure on 2026-08-16: the put commitment is on every row, so the doubling
-/// is still visible name by name, and a seven-figure headline on a screen he
-/// opens daily was noise rather than information.
-private struct HeaderBlock: View {
-    let p: IncomeSleeve.Portfolio
-    let expiry: String?
+private enum IC {
+    static let cardW: CGFloat = 348
+    /// Every position card is this tall so the rail stays level. The body's
+    /// spacer absorbs the slack; content longer than this CLIPS, silently, off
+    /// the bottom — the same failure the InkCard header documents.
+    ///
+    /// 720, measured rather than guessed. At 660 the ranked-first card fitted
+    /// exactly and looked fine, and the SKIPPED card lost half its stamp: it
+    /// carries a two-line skip bullet AND a wrapped earnings line ("Thu 25 Sep ·
+    /// 12 days · inside this expiry"). Roughly one card in five is a skip, so the
+    /// worst case is the normal case. Anything added to the body must be checked
+    /// against a skipped row, not a writing one.
+    static let cardH: CGFloat = 720
+    static let gutter: CGFloat = 22
+}
 
+private struct Eyebrow: View {
+    let n: String, sym: String, price: String?, chip: String, fill: Bool
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 0) {
-                Figure(k: "Invested", v: inUsd(p.invested ?? 0))
-                Figure(k: "Collected", v: inUsd(p.collected ?? 0), hue: (p.collected ?? 0) > 0 ? Ink.gain : Ink.text, rule: true)
-            }
-            Rectangle().fill(Ink.hair).frame(height: 1).padding(.vertical, 16)
-            Line(k: "Average",
-                 v: p.average_below_pct.map { "\(String(format: "%.1f", $0))% below cost" } ?? "nothing yet")
-            Line(k: "Floors", v: floorText)
-            Line(k: "This week",
-                 v: "\(inUsd(p.premium_this_week ?? 0)) to collect, writes to \(inDay(expiry))")
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
-    }
-
-    private var floorText: String {
-        guard let fc = p.floor_cost, fc > 0 else { return "none yet, nothing to pay back" }
-        var s = inUsd(fc)
-        if let pct = p.floor_pct_of_premium { s += ", \(pct)% of premium" }
-        if let w = p.floor_weeks_to_pay { s += ", paid back in \(w) week\(w == 1 ? "" : "s")" }
-        return s
-    }
-
-    private struct Figure: View {
-        let k: String; let v: String; var hue: Color = Ink.text; var rule: Bool = false
-        var body: some View {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(k.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.07).foregroundStyle(Ink.dim)
-                InkRoll(text: v, font: InkFont.mono(28, .medium), tracking: 28 * -0.03, color: hue)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, rule ? 14 : 0)
-            .overlay(alignment: .leading) { if rule { Rectangle().fill(Ink.hair).frame(width: 1) } }
-        }
-    }
-
-    private struct Line: View {
-        let k: String; let v: String
-        var body: some View {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(k.uppercased()).font(InkFont.mono(10.5)).tracking(10.5 * 0.07)
-                    .foregroundStyle(Ink.dim).frame(width: 86, alignment: .leading)
-                Text(v).font(InkFont.mono(12.5)).tracking(12.5 * -0.01)
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Text(n.uppercased()).font(InkFont.mono(12.5)).tracking(12.5 * 0.16).foregroundStyle(Ink.dim)
+                sep
+                Text(sym.uppercased()).font(InkFont.mono(12.5)).tracking(12.5 * 0.16)
                     .foregroundStyle(Ink.text)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
+                if let price, !price.isEmpty {
+                    sep
+                    Text(price).font(InkFont.mono(13.5)).foregroundStyle(Ink.dim)
+                }
             }
-            .padding(.vertical, 6)
+            .lineLimit(1)
+            Spacer(minLength: 0)
+            Text(chip.uppercased()).font(InkFont.mono(12.5)).tracking(12.5 * 0.05)
+                .foregroundStyle(fill ? Ink.invertText : Ink.text)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Capsule().fill(fill ? Ink.invertBg : .clear))
+                .overlay(Capsule().strokeBorder(fill ? .clear : Ink.text, lineWidth: 1))
+                .fixedSize()
         }
+        .frame(minHeight: 30)
+    }
+    private var sep: some View {
+        Text("·").font(InkFont.mono(12.5)).foregroundStyle(Ink.dim).opacity(0.7)
     }
 }
 
-// MARK: - one name
-
-private struct NameRow: View {
-    let n: IncomeSleeve.Name
-    let expiry: String?
-
-    private var skipped: Bool { (n.state ?? "") == "SKIP" }
-
+private struct Hero: View {
+    let fig: String, unit: String, forecast: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // rank · ticker · spot ......................... verdict
-            HStack(alignment: .center, spacing: 10) {
-                RankPip(n: n.rank)
-                Text(n.ticker).font(InkFont.serif(22)).tracking(22 * -0.01).foregroundStyle(Ink.text)
-                if let s = n.spot {
-                    Text(String(format: "%.2f", s)).font(InkFont.mono(14)).tracking(14 * -0.02)
-                        .foregroundStyle(Ink.dim)
+            Text(fig).font(InkFont.mono(40, .medium)).tracking(40 * -0.04)
+                .foregroundStyle(Ink.text)
+                .padding(.bottom, forecast ? 7 : 0)
+                // A forecast wears a dashed rule. It is the difference between
+                // "this is what it has done" and "this is what it would pay".
+                .overlay(alignment: .bottom) {
+                    if forecast {
+                        Line().stroke(Ink.dim, style: .init(lineWidth: 1, dash: [3, 3]))
+                            .frame(height: 1)
+                    }
                 }
-                Spacer(minLength: 8)
-                Text((n.verdict ?? "").uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.12)
-                    .foregroundStyle(verdictHue).multilineTextAlignment(.trailing)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.bottom, 14)
-
-            Field(k: "Earned", v: n.rank_line ?? "nothing yet")
-            if skipped {
-                // Plain text, NOT Ink.loss. Rendering the skip reason in the loss
-                // colour put the alarm straight back in through the palette: on the
-                // opening week all three names read "no shares yet" in warning
-                // orange, which is the exact tone CAREFUL was deleted for. A skip
-                // is a fact about the week, not a loss.
-                Field(k: "Skip", v: (n.why ?? []).first ?? "blocked")
-            } else if let w = n.write {
-                Field(k: "Write", v: writeLine(w))
-                Field(k: "Money", v: "puts commit \(inUsd(n.put_commitment ?? 0))")
-            }
-            if let b = n.balance_line {
-                Field(k: "Block", v: b)
-            }
-            Field(k: "Avg", v: avgLine)
-            Field(k: "Where", v: [n.where_line, n.trend_line].compactMap { $0 }.joined(separator: " · "),
-                  hue: (n.new_low ?? false) ? Ink.loss : Ink.text)
-            Field(k: "Floor", v: n.floor_line ?? "none yet")
+                .fixedSize()
+            Text(unit.uppercased()).font(InkFont.mono(12.5)).tracking(12.5 * 0.05)
+                .foregroundStyle(Ink.dim).lineSpacing(4).padding(.top, 14)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous).fill(Ink.surface))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 5)
-        .opacity(skipped ? 0.62 : 1)
+        .padding(.top, 26)
     }
-
-    /// "4 puts 345 · 2 calls 345 · Fri 21 Aug · $5,010". Puts lead: on a sleeve
-    /// that is still filling its blocks the put is the trade being put on and the
-    /// call is whatever the held shares can cover, which is often nothing.
-    private func writeLine(_ w: IncomeSleeve.Write) -> String {
-        var parts: [String] = []
-        if (w.puts ?? 0) > 0 { parts.append("\(w.puts!) puts \(inStrike(w.put_strike))") }
-        if (w.calls ?? 0) > 0 { parts.append("\(w.calls!) calls \(inStrike(w.call_strike))") }
-        if parts.isEmpty { parts.append("nothing to write") }
-        parts.append(inDay(expiry))
-        parts.append(inUsd(w.credit ?? 0))
-        return parts.joined(separator: " · ")
-    }
-
-    /// The average, then what each LEG took off it. Confirmed with Nik 2026-08-16:
-    /// this is the split of the credit, NOT the average that would result if the
-    /// calls carried the shares away.
-    private var avgLine: String {
-        guard let a = n.avg_line else { return "nothing yet" }
-        guard let s = n.avg_split_line else { return a }
-        return "\(a) · \(s)"
-    }
-
-    private var verdictHue: Color {
-        switch n.verdict ?? "" {
-        case "good week to sell": return Ink.gain
-        case "poor week to sell": return Ink.loss
-        default: return Ink.dim
-        }
-    }
-
-    private struct RankPip: View {
-        let n: Int?
-        var body: some View {
-            Text(n.map(String.init) ?? "—").font(InkFont.mono(11, .medium)).tracking(11 * 0.02)
-                .foregroundStyle(n == 1 ? Ink.invertText : Ink.text)
-                .frame(width: 22, height: 22)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(n == 1 ? Ink.invertBg : .clear))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(n == 1 ? .clear : Ink.hair, lineWidth: 1))
-        }
-    }
-
-    /// A labelled line. An EMPTY value renders nothing at all rather than an empty
-    /// row: a deploy that is behind the app leaves some of these nil, and a blank
-    /// gap where a fact should be reads as missing data instead of as absent data.
-    private struct Field: View {
-        let k: String; let v: String; var hue: Color = Ink.text
-        var body: some View {
-            if v.trimmingCharacters(in: .whitespaces).isEmpty { EmptyView() } else { row }
-        }
-        private var row: some View {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(k.uppercased()).font(InkFont.mono(9.5)).tracking(9.5 * 0.14)
-                    .foregroundStyle(Ink.dim).frame(width: 52, alignment: .leading)
-                Text(v).font(InkFont.mono(12)).tracking(12 * -0.01).foregroundStyle(hue)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.vertical, 5)
+    private struct Line: Shape {
+        func path(in r: CGRect) -> Path {
+            var p = Path(); p.move(to: .init(x: 0, y: 0)); p.addLine(to: .init(x: r.width, y: 0)); return p
         }
     }
 }
 
-// MARK: - footer
+private struct Bullets: View {
+    let items: [String]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 11) {
+            ForEach(items, id: \.self) { t in
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Circle().fill(Ink.dim).frame(width: 4, height: 4).offset(y: -4)
+                    inkFig(t, size: 15, color: Ink.text)
+                        .lineSpacing(15 * 0.5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.top, 22)
+    }
+}
+
+private struct Band: View {
+    let items: [IncomeSleeve.Cell]
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(items.indices, id: \.self) { i in
+                let b = items[i]
+                VStack(alignment: .leading, spacing: 11) {
+                    Text(b.k.uppercased()).font(InkFont.mono(12.5)).tracking(12.5 * 0.07)
+                        .foregroundStyle(Ink.dim).lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Group {
+                        if b.text == true {
+                            Text(b.v).font(InkFont.display(15)).foregroundStyle(Ink.text)
+                        } else {
+                            Text(b.v).font(InkFont.mono(17)).tracking(17 * -0.02)
+                                .foregroundStyle(Ink.text).lineLimit(1)
+                        }
+                    }
+                    // `mark` underlines the figure the card wants read first. On a
+                    // position card that is Commits: what assignment would cost.
+                    .padding(.bottom, b.mark == true ? 3 : 0)
+                    .overlay(alignment: .bottom) {
+                        if b.mark == true { Rectangle().fill(Ink.text).frame(height: 1.5) }
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, i == 0 ? 0 : 10).padding(.trailing, 10).padding(.top, 18)
+                .overlay(alignment: .leading) {
+                    if i > 0 { Rectangle().fill(Ink.hair).frame(width: 1) }
+                }
+            }
+        }
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+    }
+}
+
+/// The foot, and the one graphic on the screen: where the price sits in its year.
+private struct FootZone: View {
+    let f: IncomeSleeve.Foot
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text(f.lab.uppercased()).font(InkFont.mono(12.5)).tracking(12.5 * 0.07)
+                .foregroundStyle(Ink.dim)
+            HStack(alignment: .firstTextBaseline, spacing: 11) {
+                Text(f.fig).font(InkFont.mono(26)).tracking(26 * -0.03).foregroundStyle(Ink.text)
+                Text(f.sub).font(InkFont.display(13.5)).foregroundStyle(Ink.dim)
+            }
+            GeometryReader { g in
+                let x = g.size.width * CGFloat(max(0, min(100, f.pct)) / 100)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Ink.hair).frame(height: 8)
+                    Capsule().fill(Ink.text).opacity(0.88).frame(width: x, height: 8)
+                    Rectangle().fill(Ink.text).frame(width: 2, height: 16).offset(x: x - 1)
+                }
+                .frame(height: 16, alignment: .center)
+            }
+            .frame(height: 16)
+            inkFig(f.line, size: 13.5, color: Ink.dim)
+                .lineSpacing(13.5 * 0.4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(EdgeInsets(top: 18, leading: IC.gutter, bottom: 20, trailing: IC.gutter))
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+    }
+}
+
+/// The freshness stamp, INSIDE the card under a hairline. A hollow dot means the
+/// figure above it is a forecast, not a reading.
+private struct CardStamp: View {
+    let text: String, forecast: Bool
+    var body: some View {
+        HStack(spacing: 9) {
+            Group {
+                if forecast {
+                    Circle().strokeBorder(Ink.dim, lineWidth: 1.5)
+                } else {
+                    Circle().fill(Ink.text)
+                }
+            }
+            .frame(width: 6, height: 6)
+            Text(text.uppercased()).font(InkFont.mono(12.5)).tracking(12.5 * 0.06)
+                .foregroundStyle(Ink.dim)
+            Spacer(minLength: 0)
+        }
+        .opacity(0.85)
+        .padding(EdgeInsets(top: 14, leading: IC.gutter, bottom: 15, trailing: IC.gutter))
+        .overlay(alignment: .top) { Rectangle().fill(Ink.hair).frame(height: 1) }
+    }
+}
+
+// MARK: - the two cards
+
+private struct PosCard: View {
+    let c: IncomeSleeve.Card
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Eyebrow(n: c.n, sym: c.sym, price: c.price, chip: c.chip, fill: c.fill ?? false)
+                Hero(fig: c.hero, unit: c.unit, forecast: c.forecast ?? false)
+                Bullets(items: c.bullets)
+                Spacer(minLength: 26)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Next earnings".uppercased()).font(InkFont.mono(12.5))
+                        .tracking(12.5 * 0.07).foregroundStyle(Ink.dim)
+                    Spacer(minLength: 0)
+                    inkFig(c.earn, size: 15, color: Ink.text)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.bottom, 17)
+                Band(items: c.band)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(EdgeInsets(top: IC.gutter, leading: IC.gutter,
+                                bottom: 24, trailing: IC.gutter))
+            FootZone(f: c.foot)
+            CardStamp(text: c.stamp.text, forecast: c.stamp.forecast ?? false)
+        }
+        .frame(width: IC.cardW, height: IC.cardH, alignment: .top)
+        .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
+            .fill(Ink.surface))
+        .clipShape(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous))
+    }
+}
+
+/// The wide header. Same anatomy, full width, no foot: what is collectable this
+/// week, how the money is split across the names, and whether the floors have
+/// paid for themselves.
+private struct SleeveCard: View {
+    let h: IncomeSleeve.Head
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Eyebrow(n: h.n, sym: h.sym, price: nil, chip: h.chip, fill: false)
+                Hero(fig: h.hero, unit: h.unit, forecast: false)
+                Bullets(items: h.bullets)
+                Spacer(minLength: 26)
+                Band(items: h.band)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(EdgeInsets(top: IC.gutter, leading: IC.gutter,
+                                bottom: 24, trailing: IC.gutter))
+            CardStamp(text: h.stamp, forecast: false)
+        }
+        .frame(maxWidth: .infinity, alignment: .top)
+        .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
+            .fill(Ink.surface))
+        .clipShape(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous))
+    }
+}
+
+// MARK: - footer + quiet states
 
 /// A note, not a total. The blocks here are the tool, not the holding, and a
 /// screen that ends on a big premium figure quietly says the opposite.
@@ -371,8 +509,9 @@ private struct NoteFoot: View {
     let text: String
     var body: some View {
         Text(text)
-            .font(InkFont.display(13, .regular))
+            .font(InkFont.display(13.5))
             .foregroundStyle(Ink.dim)
+            .lineSpacing(4)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 16)
             .padding(.top, 18)
@@ -384,8 +523,8 @@ private struct Quiet: View {
     init(title: String, body: String) { self.title = title; self.body_ = body }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(InkFont.serif(24)).foregroundStyle(Ink.text)
-            Text(body_).font(InkFont.display(14)).foregroundStyle(Ink.dim)
+            Text(title).font(InkFont.serif(26)).foregroundStyle(Ink.text)
+            Text(body_).font(InkFont.display(15)).foregroundStyle(Ink.dim)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
