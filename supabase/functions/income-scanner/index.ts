@@ -42,8 +42,20 @@ const G = {
      shows the distribution, and setting them from a guess is how the gap gate
      came to exclude the two names Nik holds. */
   oiBandPct: 5,          // ±% of spot that counts as "around the money"
-  oiMin: 500,            // open interest across that band, both legs
-  volMin: 50,            // contracts traded today across that band
+  /* A FLOOR, NOT A BAR. Nik: "128 is not bad unless you see one or two then
+     reject." The gate's job is to catch a name with no weekly market at all, and
+     nothing beyond that. Judging how GOOD the market is would be a quality score
+     smuggled in through a filter, which is the thing this whole screen refuses to
+     do — it reports and Nik picks.
+
+     50 across the band, both legs, is the level below which there is genuinely
+     nothing to trade against. Anything above it passes and the actual figure is
+     reported so he can see thin from deep himself.
+
+     Volume is NOT gated at all. A quiet name with real open interest and no
+     trades today is perfectly tradeable, and a scan running before the open sees
+     zero volume on everything. */
+  oiMin: 50,             // open interest across the band, both legs
   quietVol: 32,          // below this the name goes in the 'quiet' bucket
 };
 
@@ -264,8 +276,7 @@ Deno.serve(async (req) => {
         if (edge == null) fails.push('no edge reading');
         else if (edge <= G.edgeMin) fails.push(`edge ${edge.toFixed(1)}`);
         else if (edge > G.edgeMax) fails.push(`edge ${edge.toFixed(1)}, an event is priced`);
-        if (oi < G.oiMin) fails.push(`open interest ${oi} around the money`);
-        if (vol < G.volMin) fails.push(`${vol} traded today around the money`);
+        if (oi < G.oiMin) fails.push(`no market: ${oi} open interest around the money`);
 
         return {
           ticker: t, asof: todayISO, spot: Math.round(spot * 100) / 100,
@@ -277,6 +288,8 @@ Deno.serve(async (req) => {
           implied_vol: iv != null ? Math.round(iv * 100) : null,
           edge: edge != null ? Math.round(edge * 10) / 10 : null,
           option_oi: oi, option_volume: vol,
+          // Reported, never gated. Thin is a fact about the name, not a verdict.
+          liquidity: oi >= 5000 ? 'deep' : oi >= 800 ? 'fine' : 'thin',
           max_correlation: Math.round(mx * 100) / 100,
           bucket: v60 < G.quietVol ? 'quiet' : 'broken',
           passes: fails.length === 0,

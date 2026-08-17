@@ -54,7 +54,7 @@ Applied after market days are removed, and after earnings days are identified.
 | gate | threshold | why |
 |---|---|---|
 | **weekly options** | must exist | the whole cadence is weekly |
-| **option liquidity** | volume and open interest above a floor, TBD | you have to be able to get out |
+| **option liquidity** | **50** open interest across ±5% of spot, both legs | see below |
 | **share price** | $15 to $400 | under, the premium is noise and spreads eat it; over, one contract is too big to size against a ~$200k block |
 | **own gap** | no non-earnings, non-market day worse than **9%** | Nik's no-bizarre-swings rule, properly isolated |
 | **has stopped falling** | within **±15%** over three months | a broken narrative that has settled, not one still breaking |
@@ -63,6 +63,28 @@ Applied after market days are removed, and after earnings days are identified.
 | **earnings date** | on file, confirmed or estimated | otherwise nothing guards the print |
 | **correlation** | under **0.40** to every held name, over 250 days | or the sleeve owns one position twice |
 | **52-week position** | under **45%** | Nik writes into names near their lows, not their highs |
+
+### Liquidity is a floor, not a bar
+
+Nik, on seeing NKE rejected at 38: *"128 is not bad unless you see one or two then
+reject."* He is right, and the first version was wrong twice over.
+
+**It measured one strike.** Open interest piles up on round strikes, so whichever
+happens to sit nearest spot says nothing about whether there is a market. NKE and
+LULU, two of the most heavily traded names in the US, came back at 38 and 128. It
+now sums every strike within **5% of spot**, both legs.
+
+**And it judged rather than filtered.** The gate's only job is to catch a name with
+no weekly market at all. Grading how *good* the market is would be a quality score
+smuggled in through a filter, which is the thing this screen exists not to do.
+
+So: **50 across the band**, and everything above it passes. The figure itself is
+reported, plus a plain word — thin, fine, deep — so the difference is visible
+without being a verdict.
+
+**Volume is not gated at all.** A quiet name with real open interest and no trades
+today is perfectly tradeable, and a scan running before the open sees zero volume
+on everything.
 
 ### Why the edge has an upper bound
 
