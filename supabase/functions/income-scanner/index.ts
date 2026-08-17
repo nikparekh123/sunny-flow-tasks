@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-17.4';
+const BUILD = '2026-08-17.5';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -120,7 +120,7 @@ function comingFriday(from: Date): string {
 /** Every listed contract at one expiry, WITH open interest and volume. The
  *  option-chain function drops both; the liquidity gate is the one that cannot
  *  be faked, so this reads the snapshot directly rather than proxying it. */
-async function snapshot(ticker: string, expiry: string, key: string, spot: number, tries = 2) {
+async function snapshot(ticker: string, expiry: string, key: string, spot: number, tries = 3) {
   /* NARROWED BY STRIKE, the way option-chain does it. Asking for every strike at
      an expiry and capping at 250 was the bug behind LULU: the results come back
      from the lowest strike up, so on a name with hundreds of listings the 250
@@ -134,28 +134,40 @@ async function snapshot(ticker: string, expiry: string, key: string, spot: numbe
   u.searchParams.set('strike_price.lte', String(Math.ceil(spot * 1.12)));
   u.searchParams.set('limit', '250');
   u.searchParams.set('apiKey', key);
-  /* Retried once. 143 names hitting the snapshot in parallel drew a transient
-     failure on LULU in the first full run, and the row came back reading "no
-     market: 0 open interest" — indistinguishable from a name that genuinely has
-     no weekly options. A retry costs one call; a false rejection costs a name. */
-  let r = await fetch(u.toString());
-  if (!r.ok && tries > 1) {
-    await new Promise((res) => setTimeout(res, 400));
-    r = await fetch(u.toString());
+  /* THE FETCH THROWS, IT DOES NOT RETURN A BAD STATUS.
+     LULU failed four runs running while 124 of 143 names succeeded, and the real
+     message was finally visible on build .4:
+
+       error sending request from 10.32.181.208:59522 for api.polygon.io/v3/...
+
+     That is a connection failure, not an HTTP error. Both my retry and my
+     fallback tested `!r.ok`, and a fetch that throws never reaches that test, so
+     neither had ever run. Three builds spent fixing the wrong thing because the
+     guard was in the wrong place.
+
+     It is not about LULU either. 143 names opening connections in parallel
+     exhausts something and one of them loses; LULU is simply where it lands. So:
+     catch the throw, back off, and try again. */
+  const attempt = async (url: string) => {
+    try { return await fetch(url); } catch { return null; }
+  };
+  let r = await attempt(u.toString());
+  for (let i = 1; i < tries && (!r || !r.ok); i++) {
+    await new Promise((res) => setTimeout(res, 300 * i));
+    r = await attempt(u.toString());
   }
-  /* FALL BACK TO A DATE RANGE. An exact expiration_date works for 124 of 143
-     names and has now failed on LULU across three separate runs, which is not a
-     rate limit. option-chain asks the same endpoint with expiration_date.gte and
-     prices LULU's 21 Aug chain without trouble, so the range form is the one
-     known to work; this drops to it rather than reporting a name as having no
-     market when it plainly has one. */
-  if (!r.ok) {
+  /* Then the date-range form, which is what option-chain uses and what prices
+     LULU's chain without trouble. Kept as a second line of defence now that the
+     connection failure above is handled. */
+  if (!r || !r.ok) {
     const v = new URL(u.toString());
     v.searchParams.delete('expiration_date');
     v.searchParams.set('expiration_date.gte', expiry);
     v.searchParams.set('expiration_date.lte', expiry);
-    r = await fetch(v.toString());
+    await new Promise((res) => setTimeout(res, 300));
+    r = await attempt(v.toString());
   }
+  if (!r) throw new Error(`no connection for ${ticker} ${expiry}`);
   if (!r.ok) throw new Error(`snapshot ${r.status} for ${ticker} ${expiry}`);
   const j = await r.json();
   return (j?.results ?? []).map((c: Record<string, any>) => ({
@@ -195,7 +207,10 @@ Deno.serve(async (req) => {
     // ── prices for everything, including the held names for correlation ──────
     const need = Array.from(new Set([...universe, ...held]));
     const bars: Record<string, { d: string; c: number }[]> = {};
-    const CHUNK = 12;
+    /* 8, not 12. The connection failures above are a concurrency problem, and
+       widening the retry without narrowing the fan-out treats the symptom. The
+       scan runs on a cron; a slower pass costs nothing. */
+    const CHUNK = 8;
     for (let i = 0; i < need.length; i += CHUNK) {
       const part = need.slice(i, i + CHUNK);
       await Promise.all(part.map(async (t) => {
