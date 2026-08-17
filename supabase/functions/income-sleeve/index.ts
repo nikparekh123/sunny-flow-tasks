@@ -34,6 +34,12 @@ import {
   sd, fmtDay,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
+/* Bumped by hand on every meaningful change. Six deploys on 2026-08-16 went in
+   with no error and several of them changed nothing (the dashboard's Save is not
+   its Deploy), and each one cost a round of "is it live?" guessing. The response
+   carries this, so one call answers it. */
+const BUILD = '2026-08-17.1';
+
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
 const HIGH_IN_RANGE = 75;      // above this much of the 52w range the verdict softens
@@ -261,7 +267,20 @@ Deno.serve(async (req) => {
 
       // ── the two numbers neither other engine has ───────────────────────────
       const rv = realisedVol(cl, REALISED_DAYS);
-      const T = Math.max(daysBetween(today, parseISO(expiry)), 1) / 365;
+      /* TIME TO EXPIRY IS MEASURED FROM THE QUOTE'S OWN SESSION, not from now.
+         Polygon returns the last session's close while the market is shut. Read
+         on a Sunday, a Friday-close price for the coming Friday was being divided
+         by 5 days of life when it was bought with 7, so implied vol came out high
+         and every name read "good week to sell". INTU showed 60% on the Sunday
+         against 44% measured on the Friday: not a small distortion, and it lands
+         on the one number the whole screen is disciplined by.
+
+         The fix is not a weekend special case. Any time the market is shut the
+         quote is older than the clock, so the clock is the wrong reference. */
+      const quoteDay = (mkt?.open ?? marketState(new Date()).open)
+        ? todayISO
+        : (closes[closes.length - 1]?.d ?? todayISO);
+      const T = Math.max(daysBetween(parseISO(String(quoteDay)), parseISO(expiry)), 1) / 365;
       const [puts, calls] = await Promise.all([
         chain(t, 'put', expiry, Math.floor(spot * 0.90), Math.ceil(spot * 1.06), polyKey),
         chain(t, 'call', expiry, Math.floor(spot * 0.94), Math.ceil(spot * 1.10), polyKey),
@@ -303,8 +322,28 @@ Deno.serve(async (req) => {
         ? 100 * (premCollected / weeksIn) / capitalBase
         : null;
 
+      /* ── EARNINGS, AND THE SILENCE WHEN THERE ARE NONE ─────────────────────
+         earnings_events holds hand-entered dates. When a name runs out of them
+         the query simply returns nothing, nextEarn is undefined, earnInside is
+         false, and the sleeve writes straight through the print without a word.
+
+         That is not hypothetical: on 2026-08-17 the table held exactly three
+         future dates (INTU 25 Aug, LULU 27 Aug, NKE 24 Sep). After 24 Sep every
+         name would have been flying blind, and the card would have said nothing
+         at all about it. It is the same failure that left nvda-accumulate's brake
+         dead for months — a guard that cannot fire looks identical to a guard
+         with nothing to catch.
+
+         So a missing date is now a STATE, not an absence. The card says so, and
+         `earnings_missing` is on the row for anything that wants to alert. */
       const nextEarn = earnRows.find((e) => e.ticker === t)?.report_date as string | undefined;
+      const earnMissing = !nextEarn;
       const earnInside = !!(nextEarn && nextEarn <= expiry);
+      /* MARGIN RISES BEFORE THE PRINT, not on the day of it. Nik's rule, added
+         2026-08-17: come down a week early rather than carry full size into the
+         margin increase. So the brake reaches one expiry FURTHER than the write —
+         an earnings date inside the week AFTER this one already stops new puts. */
+      const earnSoon = !!(nextEarn && nextEarn <= ymd(addDays(parseISO(expiry), 7)));
 
       // ── the floor ──────────────────────────────────────────────────────────
       const fStrike = n.floor_strike != null ? Number(n.floor_strike) : null;
@@ -360,7 +399,15 @@ Deno.serve(async (req) => {
       const why: string[] = [];
       if (earnInside) {
         state = 'SKIP';
-        why.push(`earnings ${fmtDay(nextEarn!)} is inside this expiry`);
+        why.push(`earnings ${dayShort(nextEarn)} is inside this expiry`);
+      } else if (earnSoon) {
+        state = 'SKIP';
+        why.push(`earnings ${dayShort(nextEarn)} is the week after, margin rises first`);
+      } else if (earnMissing) {
+        // Not a warning about the market. A warning about the DATA: nothing is
+        // protecting this name, and saying nothing would imply something is.
+        state = 'SKIP';
+        why.push('no earnings date on file, so nothing is guarding the print');
       } else if (shares <= 0) {
         state = 'SKIP';
         why.push('no shares yet, nothing to write against');
@@ -420,6 +467,8 @@ Deno.serve(async (req) => {
         pos52: Math.round(pos52),
         low52: Math.round(lo52 * 100) / 100, high52: Math.round(hi52 * 100) / 100,
         earnings: nextEarn ?? null,
+        earnings_missing: earnMissing,
+        earnings_soon: earnSoon,
         earnings_in_days: nextEarn ? daysBetween(today, parseISO(nextEarn)) : null,
         started_on: n.started_on ?? null,
         shares,
@@ -575,8 +624,9 @@ Deno.serve(async (req) => {
         bullets: [trade, floorBullet],
         earn: r.earnings
           ? `${dayShort(r.earnings)} · ${r.earnings_in_days} days`
-            + (String(r.earnings) <= String(r.expiry) ? ' · inside this expiry' : '')
-          : 'not on the feed yet',
+            + (String(r.earnings) <= String(r.expiry) ? ' · inside this expiry'
+               : r.earnings_soon ? ' · the week after' : '')
+          : 'no date on file',
         band: [
           { k: 'Collected', v: prem > 0 ? usd(prem) : 'nothing yet', text: prem <= 0 },
           { k: 'Commits', v: commits > 0 ? usd(commits) : 'nothing', text: commits <= 0, mark: commits > 0 },
@@ -611,6 +661,7 @@ Deno.serve(async (req) => {
 
     return json(200, {
       ok: true,
+      build: BUILD,
       asof: todayISO,
       expiry,
       market: mkt ?? marketState(new Date()),
