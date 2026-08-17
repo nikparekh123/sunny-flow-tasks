@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.8';
+const BUILD = '2026-08-17.10';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -194,7 +194,7 @@ Deno.serve(async (req) => {
          blocking for a few days after it passes, because the estimate is worth
          about a week either way and the real print may not have happened yet. */
       D.get(`earnings_events?ticker=in.${inList}&report_date=gte.${ymd(addDays(today, -10))}`
-            + `&select=ticker,report_date,scope_tag&order=report_date.asc`),
+            + `&select=ticker,report_date,date_estimated&order=report_date.asc`),
       D.get(`option_trades?ticker=in.${inList}&voided_at=is.null`
             + `&select=ticker,trade_date,action,option_type,direction,contracts,strike,premium,expiry`),
       D.get(`share_lots?ticker=in.${inList}&voided_at=is.null&select=ticker,acquired_date,qty_remaining,cost_per_share`),
@@ -247,6 +247,17 @@ Deno.serve(async (req) => {
                             * Number(l.premium ?? 0) * Number(l.contracts ?? 0) * 100, 0);
       const premCalls = premOf('call'), premPuts = premOf('put');
       const premCollected = premOf(null);
+      /* WHAT THIS WEEK HAS ALREADY PAID, as opposed to what it is planning to.
+         The ramp measured its shortfall against planned writes only. So a name
+         that is already fully written contributes nothing, the target looks
+         untouched, and the screen sizes a second purchase on top of premium
+         already in the account. First live morning it saw $2,420 collected on
+         NKE, called the week empty, and asked for another 2,000 shares. */
+      const premThisExpiry = legs
+        .filter((l) => l.direction === 'short' && l.action === 'open'
+                    && String(l.expiry ?? '') === expiry)
+        .reduce((s, l) => s + Number(l.premium ?? 0) * Number(l.contracts ?? 0) * 100, 0);
+
       const realisedShares = sellRows.filter((r) => r.ticker === t && String(r.trade_date ?? '') >= since)
         .reduce((s, r) => s + Number(r.realized_pl ?? 0), 0);
 
@@ -359,9 +370,9 @@ Deno.serve(async (req) => {
          covers what is left. A real date replaces the estimate the moment the
          company announces, and the block narrows to the normal rule. */
       const earnRow = earnRows.find((e) => e.ticker === t
-        && (String(e.report_date) >= todayISO || e.scope_tag === 'estimate'));
+        && (String(e.report_date) >= todayISO || e.date_estimated === true));
       const nextEarn = earnRow?.report_date as string | undefined;
-      const earnEstimated = earnRow?.scope_tag === 'estimate';
+      const earnEstimated = earnRow?.date_estimated === true;
       const earnMissing = !nextEarn;
       const earnInside = !!(nextEarn && nextEarn <= expiry);
       /* MARGIN RISES BEFORE THE PRINT, not on the day of it. Nik's rule, added
@@ -564,6 +575,7 @@ Deno.serve(async (req) => {
             + `puts gave ${(Math.round(100 * premPuts / shares) / 100).toFixed(2)}`
           : null,
         premium_collected: Math.round(premCollected),
+        premium_this_expiry: Math.round(premThisExpiry),
         premium_calls: Math.round(premCalls),
         premium_puts: Math.round(premPuts),
         realised_shares: Math.round(realisedShares),
@@ -681,8 +693,10 @@ Deno.serve(async (req) => {
     const paused = cfg.ramp_paused === true;
     const target = Math.min(rampCap, rampStart + (paused ? 0 : rampStep * rampWk));
 
-    // What the blocks already held will pay this week, before any buying.
-    const running = rows.reduce((s, r) => s + ((r.write?.credit) ?? 0), 0);
+    // What this week pays before any buying: premium ALREADY COLLECTED on legs
+    // expiring this Friday, plus what the screen is still planning to write.
+    const running = rows.reduce((s, r) =>
+      s + ((r.write?.credit) ?? 0) + (r.premium_this_expiry ?? 0), 0);
     const shortfall = Math.max(0, target - running);
     const buyers = rows.filter((r) => r.can_buy && r.atm_straddle && r.spot);
     const per = buyers.length ? shortfall / buyers.length : 0;
@@ -877,7 +891,8 @@ Deno.serve(async (req) => {
         // existing blocks pay nothing, and a $0 headline over three cards each
         // saying "buy" would be the screen arguing with itself.
         const planned = rows.reduce((s, r) => s + (r.buy?.adds ?? 0), 0);
-        const week = rows.reduce((s, r) => s + ((r.write?.credit) ?? 0), 0) + planned;
+        const week = rows.reduce((s, r) =>
+          s + ((r.write?.credit) ?? 0) + (r.premium_this_expiry ?? 0), 0) + planned;
         const below = invested > 0 ? Math.round(1000 * prem / invested) / 10 : null;
         const weeks = fc > 0 && week > 0 ? Math.ceil(fc / week) : null;
         const held = rows.filter((r) => (r.shares ?? 0) > 0);
