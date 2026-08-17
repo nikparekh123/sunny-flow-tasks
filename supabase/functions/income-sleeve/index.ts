@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.2';
+const BUILD = '2026-08-17.3';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -174,10 +174,12 @@ Deno.serve(async (req) => {
     const expiry = comingFriday(today);
     const D = db(url, key);
 
-    const [names, mkt] = await Promise.all([
+    const [names, mkt, setRows] = await Promise.all([
       D.get('income_sleeve_names?active=is.true&select=*&order=sort.asc'),
       marketNow(polyKey),
+      D.get('income_sleeve_settings?id=eq.1&select=*'),
     ]);
+    const cfg = setRows[0] ?? {};
     if (!names.length) return json(200, { ok: true, empty: true, note: 'no active names' });
 
     const tickers = names.map((n) => String(n.ticker));
@@ -441,6 +443,14 @@ Deno.serve(async (req) => {
       // The verdict: one phrase, right-aligned on the card, replacing the two
       // percentages that used to sit in the row body. iv and rv still ship in the
       // payload for the detail view, so the working is a tap away rather than gone.
+      /* ELIGIBLE TO BUY is not the same question as eligible to write.
+         "No shares yet" is precisely what the ramp exists to fix, so it must not
+         exclude a name from the buy plan — otherwise the sleeve can never start.
+         A print inside the next two expiries, or no date on file, does exclude
+         it: buying stock a week before the margin rises is the thing Nik's own
+         rule is there to prevent. */
+      const canBuy = !earnInside && !earnSoon && !earnMissing;
+
       const verdict = edge == null ? 'no read'
         : edge < 0 ? 'poor week to sell'
         : pos52 > HIGH_IN_RANGE ? 'rich, but near the high'
@@ -484,6 +494,8 @@ Deno.serve(async (req) => {
         low52: Math.round(lo52 * 100) / 100, high52: Math.round(hi52 * 100) / 100,
         earnings: nextEarn ?? null,
         earnings_missing: earnMissing,
+        can_buy: canBuy,
+        atm_pair_strike: atmPut?.strike ?? null,
         earnings_soon: earnSoon,
         earnings_in_days: nextEarn ? daysBetween(today, parseISO(nextEarn)) : null,
         started_on: n.started_on ?? null,
@@ -587,6 +599,49 @@ Deno.serve(async (req) => {
           + `${(Math.round(1000 * v / stock) / 10).toFixed(0)}% of the sleeve`
         : 'no shares yet';
     }
+    /* ── THE RAMP: turn a weekly income target into a share purchase ─────────
+       Nik's rule: $5,000 of income a week, plus $5,000 each week, toward
+       $30,000. Slow on purpose, one rung at a time, stoppable at any point.
+
+       Writing both legs on a block earns the straddle premium every week, so the
+       stock needed for a given income is target / straddle-yield. That is all
+       this is. The shortfall is split evenly across the names that CAN buy
+       today, then rounded to whole contracts, because a block that is not a
+       multiple of 100 cannot be fully written against.
+
+       Names skipped for EARNINGS are excluded from the buy as well as the write:
+       buying a week before the margin rises is exactly what Nik's rule exists to
+       prevent. Names skipped only for having no shares are the whole point. */
+    const rampOn = String(cfg.ramp_start_on ?? '2026-08-17');
+    const rampWk = Math.max(0, Math.floor(daysBetween(parseISO(rampOn), today) / 7));
+    const rampStart = Number(cfg.ramp_start ?? 5000);
+    const rampStep = Number(cfg.ramp_step ?? 5000);
+    const rampCap = Number(cfg.ramp_cap ?? 30000);
+    const paused = cfg.ramp_paused === true;
+    const target = Math.min(rampCap, rampStart + (paused ? 0 : rampStep * rampWk));
+
+    // What the blocks already held will pay this week, before any buying.
+    const running = rows.reduce((s, r) => s + ((r.write?.credit) ?? 0), 0);
+    const shortfall = Math.max(0, target - running);
+    const buyers = rows.filter((r) => r.can_buy && r.atm_straddle && r.spot);
+    const per = buyers.length ? shortfall / buyers.length : 0;
+
+    for (const r of rows) {
+      const eligible = r.can_buy && r.atm_straddle && r.spot;
+      if (!eligible || per <= 0) { r.buy = null; continue; }
+      const ct = Math.round(per / (Number(r.atm_straddle) * 100));
+      if (ct < 1) { r.buy = null; continue; }
+      r.buy = {
+        contracts: ct,
+        shares: ct * 100,
+        cost: Math.round(ct * 100 * Number(r.spot)),
+        adds: Math.round(Number(r.atm_straddle) * 100 * ct),
+        strike: r.atm_pair_strike,
+        line: `Buy ${(ct * 100).toLocaleString('en-US')} shares, ${usd(ct * 100 * Number(r.spot))}`
+              + `, to add ${usd(Number(r.atm_straddle) * 100 * ct)} a week.`,
+      };
+    }
+
     /* ── THE CARD, exactly as Claude Design specified it ─────────────────────
        Anatomy per position: numbered eyebrow + state chip · hero figure + unit
        line · two bullets (the trade, the floor) · open space · next earnings ·
@@ -619,9 +674,11 @@ Deno.serve(async (req) => {
             (w.calls ?? 0) > 0 ? `${w.calls} calls ${w.call_strike}` : null,
           ].filter(Boolean).join(' · ')
           + ` · ${dayShort(r.expiry)} for ${usd(w.credit ?? 0)}.`
-        : noShares
-          ? 'No shares yet, nothing to write against.'
-          : `Skipping · ${(r.why ?? ['blocked'])[0]}.`;
+        : (r.buy?.line)
+          ? String(r.buy.line)
+          : noShares
+            ? 'No shares yet, nothing to write against.'
+            : `Skipping · ${(r.why ?? ['blocked'])[0]}.`;
 
       const floorBullet = f
         ? `Floor ${f.strike} ${monShort(f.expiry)} · ${Math.round(f.gap_pct ?? 0)}% below the price · `
@@ -722,6 +779,11 @@ Deno.serve(async (req) => {
         })(),
         stock, put_commitment: commit,
         premium_this_week: rows.reduce((s, r) => s + ((r.write?.credit) ?? 0), 0),
+        ramp_week: rampWk + 1,
+        ramp_target: target,
+        ramp_paused: paused,
+        ramp_shortfall: Math.round(shortfall),
+        buy_cost: Math.round(rows.reduce((s, r) => s + (r.buy?.cost ?? 0), 0)),
         expiring_friday: rows.reduce((s, r) => s + (r.open_calls ?? 0) + (r.open_puts ?? 0), 0),
       },
       /* ── THE SLEEVE CARD, the design's wide header ───────────────────────────
@@ -737,7 +799,12 @@ Deno.serve(async (req) => {
         const invested = Math.round(rows.reduce((s, r) => s + (r.shares ?? 0) * (r.avg_buy ?? 0), 0));
         const prem = Math.round(rows.reduce((s, r) => s + (r.premium_collected ?? 0), 0));
         const fc = Math.round(rows.reduce((s, r) => s + (r.floor_cost ?? 0), 0));
-        const week = rows.reduce((s, r) => s + ((r.write?.credit) ?? 0), 0);
+        // The hero is what this week collects IF the screen is followed, so it
+        // counts the buys it is telling him to make. On an empty book the
+        // existing blocks pay nothing, and a $0 headline over three cards each
+        // saying "buy" would be the screen arguing with itself.
+        const planned = rows.reduce((s, r) => s + (r.buy?.adds ?? 0), 0);
+        const week = rows.reduce((s, r) => s + ((r.write?.credit) ?? 0), 0) + planned;
         const below = invested > 0 ? Math.round(1000 * prem / invested) / 10 : null;
         const weeks = fc > 0 && week > 0 ? Math.ceil(fc / week) : null;
         const held = rows.filter((r) => (r.shares ?? 0) > 0);
@@ -746,6 +813,10 @@ Deno.serve(async (req) => {
           hero: usd(week),
           unit: `to collect this week · writes ${dayShort(expiry)}`,
           bullets: [
+            // The rung, always first: it is the instruction the rest follows from.
+            `Week ${rampWk + 1} of the ramp · target ${usd(target)}`
+              + (paused ? ' · held here' : '')
+              + (planned > 0 ? ` · ${usd(planned)} of it from buying.` : '.'),
             held.length
               ? held.map((r) => `${r.ticker} ${Math.round(r.share_of_sleeve ?? 0)}%`).join(' · ')
                 + ' of the money invested.'
@@ -754,7 +825,7 @@ Deno.serve(async (req) => {
               ? `Floors ${usd(fc)} · ${Math.round(100 * fc / Math.max(prem, 1))}% of the cash · `
                 + `${weeks} week${weeks === 1 ? '' : 's'} pays for them.`
               : 'No floors yet, nothing to pay back.',
-          ],
+          ].slice(0, held.length ? 3 : 2),
           band: [
             { k: 'Invested', v: usd(invested) },
             { k: 'Collected', v: usd(prem), mark: prem > 0 },
