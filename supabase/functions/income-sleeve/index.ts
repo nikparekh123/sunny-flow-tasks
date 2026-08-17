@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.10';
+const BUILD = '2026-08-17.11';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -415,6 +415,22 @@ Deno.serve(async (req) => {
 
          It is deliberately current, not forward: nothing here pre-buys protection
          for shares that have not arrived. */
+      /* ALL IN: the average with the floor's cost added back.
+         Nik asked whether to fold the floor into the share average. Deliberately
+         NOT, because the day you buy protection it would jump the average 9% and
+         read as 8% underwater on a position that just got safer, and because the
+         floor is an asset you still hold rather than money gone.
+
+         So both numbers ship. `current_avg` is the grind, what the shares cost
+         after premium. `all_in` is what you actually have to get back, protection
+         included. Each means exactly one thing. One figure quietly meaning two is
+         how the covered-call card came to read $499 against a summary saying $249.
+
+         The cell only appears once a floor exists; with nothing bought there is
+         nothing to add and the band stays at its designed three columns. */
+      const floorPerShare = shares > 0 && fCost > 0 ? fCost / shares : 0;
+      const allIn = shares > 0 ? currentAvg + floorPerShare : 0;
+
       const floorNeed = Math.floor(shares / 100) + openPuts;
       const floorShort = Math.max(0, floorNeed - fCt);
 
@@ -570,6 +586,8 @@ Deno.serve(async (req) => {
           calls: Math.round(100 * premCalls / shares) / 100,
           puts: Math.round(100 * premPuts / shares) / 100,
         } : null,
+        all_in: shares > 0 ? Math.round(allIn * 100) / 100 : null,
+        floor_per_share: Math.round(floorPerShare * 100) / 100,
         avg_split_line: shares > 0
           ? `calls gave ${(Math.round(100 * premCalls / shares) / 100).toFixed(2)}, `
             + `puts gave ${(Math.round(100 * premPuts / shares) / 100).toFixed(2)}`
@@ -795,6 +813,9 @@ Deno.serve(async (req) => {
           { k: 'Collected', v: prem > 0 ? usd(prem) : 'nothing yet', text: prem <= 0 },
           { k: 'Commits', v: commits > 0 ? usd(commits) : 'nothing', text: commits <= 0, mark: commits > 0 },
           { k: 'Eff. cost', v: noShares ? 'nothing yet' : Number(r.current_avg).toFixed(2), text: noShares },
+          ...((r.floor_per_share ?? 0) > 0
+            ? [{ k: 'All in', v: Number(r.all_in).toFixed(2) }]
+            : []),
         ],
         foot: {
           lab: 'Where it sits · 52w range',
