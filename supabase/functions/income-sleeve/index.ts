@@ -369,6 +369,15 @@ Deno.serve(async (req) => {
           chg5 != null ? `5d ${chg5 >= 0 ? '+' : ''}${(Math.round(chg5 * 10) / 10).toFixed(1)}%` : null,
         ].filter(Boolean).join(' · '),
         new_low: newLow,
+        // The ATM straddle, on EVERY row including a skipped one. The quoted-yield
+        // fallback used to read these out of `write`, which is null on SKIP — so
+        // the moment all three names skipped (no shares held, opening week) the
+        // rank had nothing to sort on and fell back to input order while claiming
+        // "no price to rank on". The prices were never missing, only unreachable.
+        atm_call_mid: atmCall?.mid ?? null,
+        atm_put_mid: atmPut?.mid ?? null,
+        atm_straddle: (atmCall?.mid != null && atmPut?.mid != null)
+          ? Math.round((atmCall.mid + atmPut.mid) * 100) / 100 : null,
         where_line: (newLow ? 'at the 52w low' : `${Math.round(pos52)}% up the 52w range`),
         earned_per_week: earnedPerWeek != null ? Math.round(earnedPerWeek * 100) / 100 : null,
         weeks_in: weeksIn > 0 ? Math.round(weeksIn * 10) / 10 : null,
@@ -443,9 +452,8 @@ Deno.serve(async (req) => {
        yield and the card says so rather than pretending the rank is history.
        `ranked_on` carries which of the two produced the order. */
     const quotedYield = (r: Record<string, any>) => {
-      const w = r.write as { call_mid?: number; put_mid?: number } | null;
-      if (!w || !r.spot) return null;
-      const straddle = Number(w.call_mid ?? 0) + Number(w.put_mid ?? 0);
+      if (!r.spot || r.atm_straddle == null) return null;
+      const straddle = Number(r.atm_straddle);
       return straddle > 0 ? 100 * straddle / Number(r.spot) : null;
     };
     const anyEarned = rows.some((r) => r.earned_per_week != null);
