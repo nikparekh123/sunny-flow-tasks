@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.3';
+const BUILD = '2026-08-17.4';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -676,9 +676,15 @@ Deno.serve(async (req) => {
           + ` · ${dayShort(r.expiry)} for ${usd(w.credit ?? 0)}.`
         : (r.buy?.line)
           ? String(r.buy.line)
-          : noShares
-            ? 'No shares yet, nothing to write against.'
-            : `Skipping · ${(r.why ?? ['blocked'])[0]}.`;
+          /* A HARD BLOCK OUTRANKS "no shares yet".
+             LULU came back reading "No shares yet, nothing to write against" when
+             the actual reason it had nothing to do was its 27 Aug print landing
+             inside the margin week. Both were true; only one explains why there
+             is no buy line under it either. Having no shares is the condition the
+             ramp exists to fix, so it is never the interesting half. */
+          : (r.why ?? []).find((w) => !String(w).startsWith('no shares'))
+            ? `Skipping · ${(r.why ?? []).find((w) => !String(w).startsWith('no shares'))}.`
+            : 'No shares yet, nothing to write against.';
 
       const floorBullet = f
         ? `Floor ${f.strike} ${monShort(f.expiry)} · ${Math.round(f.gap_pct ?? 0)}% below the price · `
