@@ -165,7 +165,6 @@ Deno.serve(async (req) => {
     // cast at every read.
     const rows: Array<Record<string, any>> = await Promise.all(names.map(async (n) => {
       const t = String(n.ticker);
-      const target = Number(n.target_shares ?? 0);
 
       const [spot, closes] = await Promise.all([
         spotOf(t, polyKey),
@@ -251,18 +250,17 @@ Deno.serve(async (req) => {
       const chg5 = cl.length >= 6 ? 100 * (spot / cl[cl.length - 6] - 1) : null;
 
       // ── the rank, and what it is measured on ───────────────────────────────
-      // Premium collected per week, against the capital the name is DESIGNED to
-      // consume (target shares at today's price), not against what it happens to
-      // hold right now. Holdings are lumpy week to week and would make the rank
-      // jump on assignment rather than on performance. The targets are sized to
-      // roughly $200k each, so the denominators are already comparable.
+      // Premium collected per week, against the value of the block it was written
+      // on. Both halves move with assignment, which is the point: a name that gets
+      // called away and rebuilt smaller has less capital working AND collects less,
+      // so the ratio still says how hard the money worked.
       //
       // Per WEEK, not cumulative: a name added in October must not rank last for
       // three months purely for being young.
       const weeksIn = n.started_on
         ? Math.max(1, daysBetween(parseISO(String(n.started_on)), today) / 7)
         : 0;
-      const capitalBase = target > 0 ? target * spot : shares * spot;
+      const capitalBase = shares * spot;
       // premCollected > 0 matters, and the first live run is what showed why. On
       // day one started_on is today, so weeksIn floors to 1 and this evaluated to
       // a real 0.00 rather than null. Every name scored zero, "any name has earned
@@ -298,9 +296,19 @@ Deno.serve(async (req) => {
       // Calls are limited by shares actually HELD. Pending assignment is not cover:
       // write against shares that have not arrived and a rally leaves you naked.
       const callCt = Math.max(0, Math.floor(shares / 100) - openCalls);
-      // Puts REFILL toward the target. Not a fixed count (the block runs away) and
-      // not capped by current holdings (it ratchets down); refill toward target.
-      const putCt = Math.max(0, Math.floor(Math.max(0, target - shares) / 100) - openPuts);
+      // Puts match the block too, 1:1, exactly as the calls do.
+      //
+      // NO TARGET. Until 2026-08-16 this refilled toward a target_shares figure,
+      // which sized the first write at 6 INTU + 50 NKE + 16 LULU: $604,000 of
+      // commitment in one Friday. Nik removed targets outright: the sleeve reads
+      // what IBKR says he holds and reports each name as a share of the whole.
+      //
+      // It is also the correct structure, not just the requested one. The wheel is
+      // self-balancing: the call takes shares out at the same rate the put brings
+      // them back, so a block written 1:1 on both legs oscillates around its own
+      // size and needs nothing to aim at. target_shares stays on the table as dead
+      // weight rather than being dropped mid-week; nothing reads it now.
+      const putCt = Math.max(0, Math.floor(shares / 100) - openPuts);
 
       // ── write or skip. There is no CAREFUL any more. ───────────────────────
       //
@@ -322,9 +330,9 @@ Deno.serve(async (req) => {
       if (earnInside) {
         state = 'SKIP';
         why.push(`earnings ${fmtDay(nextEarn!)} is inside this expiry`);
-      } else if (target <= 0 && shares <= 0) {
+      } else if (shares <= 0) {
         state = 'SKIP';
-        why.push('no block and no target set');
+        why.push('no shares yet, nothing to write against');
       } else if (callCt <= 0 && putCt <= 0) {
         state = 'SKIP';
         why.push('nothing left to write, calls and puts both full');
@@ -374,7 +382,7 @@ Deno.serve(async (req) => {
         earnings: nextEarn ?? null,
         earnings_in_days: nextEarn ? daysBetween(today, parseISO(nextEarn)) : null,
         started_on: n.started_on ?? null,
-        shares, target_shares: target,
+        shares,
         avg_buy: Math.round(avgBuy * 100) / 100,
         current_avg: Math.round(currentAvg * 100) / 100,
         avg_line: shares > 0
@@ -459,6 +467,18 @@ Deno.serve(async (req) => {
     }
 
     const stock = rows.reduce((s, r) => s + (r.stock_value ?? 0), 0);
+    // THE BALANCE, which is what replaced "0 of 600 shares". Each name as a share
+    // of the sleeve by value: INTU 32%, NKE 46%, LULU 22%. A target said how far
+    // off some intended size you were; this says how the money actually sits.
+    for (const r of rows) {
+      const v = r.stock_value ?? 0;
+      r.share_of_sleeve = stock > 0 ? Math.round(1000 * v / stock) / 10 : null;
+      r.balance_line = stock > 0 && v > 0
+        ? `${Math.round(r.shares ?? 0).toLocaleString('en-US')} shares · `
+          + `$${Math.round(v).toLocaleString('en-US')} · `
+          + `${(Math.round(1000 * v / stock) / 10).toFixed(0)}% of the sleeve`
+        : 'no shares yet';
+    }
     const commit = rows.reduce((s, r) => s + (r.put_commitment ?? 0), 0);
     // The floors are shown as a NEGATIVE line. Selling ATM puts on a block you
     // already own roughly DOUBLES what you are liable for, and one "committed"

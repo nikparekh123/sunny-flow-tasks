@@ -68,6 +68,11 @@ struct IncomeSleeve: Decodable {
         var avg_line: String?
         var avg_split_line: String?
         var put_commitment: Double?
+        /// "600 shares · $207,000 · 32% of the sleeve". Replaced the old
+        /// "0 of 600 shares": Nik removed targets, so there is no progress to
+        /// report, only how the money actually sits across the names.
+        var balance_line: String?
+        var share_of_sleeve: Double?
         var new_low: Bool?
         var write: Write?
     }
@@ -272,6 +277,9 @@ private struct NameRow: View {
             } else if let w = n.write {
                 Field(k: "Write", v: writeLine(w))
                 Field(k: "Money", v: "puts commit \(inUsd(n.put_commitment ?? 0))")
+            }
+            if let b = n.balance_line {
+                Field(k: "Block", v: b)
             }
             Field(k: "Avg", v: avgLine)
             Field(k: "Where", v: [n.where_line, n.trend_line].compactMap { $0 }.joined(separator: " · "),
