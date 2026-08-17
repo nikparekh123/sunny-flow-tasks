@@ -31,8 +31,19 @@ const G = {
   edgeMax: 15,           // ...but a huge edge is a hidden event, not a bargain
   corrMax: 0.40,         // to anything already held
   pos52Max: 45,          // near the low, not the high
-  oiMin: 200,            // at-the-money open interest
-  volMin: 20,            // at-the-money contracts traded today
+  /* Liquidity is measured across the STRIKES AROUND THE MONEY, not on the one
+     nearest strike. A single strike's open interest is noise: the first dry run
+     put NKE at 38 and LULU at 128, which would read as illiquid on two of the
+     most heavily traded names in the market. Open interest concentrates on round
+     strikes, so whichever one happens to sit nearest spot says nothing about
+     whether there is a market to trade in.
+
+     Deliberately loose to begin with. These are placeholders until a full run
+     shows the distribution, and setting them from a guess is how the gap gate
+     came to exclude the two names Nik holds. */
+  oiBandPct: 5,          // ±% of spot that counts as "around the money"
+  oiMin: 500,            // open interest across that band, both legs
+  volMin: 50,            // contracts traded today across that band
   quietVol: 32,          // below this the name goes in the 'quiet' bucket
 };
 
@@ -161,6 +172,11 @@ Deno.serve(async (req) => {
         (moves[b[i].d] ??= []).push(Math.abs(100 * (b[i].c / b[i - 1].c - 1)));
       }
     }
+    /* Market-day detection needs the WHOLE universe. On a six-name dry run no day
+       reaches the 60-sample floor, so none are found and every stock's macro days
+       count against it: NKE came back with a 15.2% "own gap" that is really the
+       April 2025 week. The response reports market_days so a zero is visible
+       rather than assumed. */
     const marketDays = new Set(
       Object.entries(moves)
         .filter(([, ms]) => ms.length >= 60
@@ -229,7 +245,10 @@ Deno.serve(async (req) => {
             const p = near(puts), c = near(calls);
             straddlePct = 100 * (p.mid + c.mid) / spot;
             iv = impliedVol(p.mid, spot, p.strike, T);
-            oi = Math.min(p.oi, c.oi); vol = Math.min(p.vol, c.vol);
+            const lo = spot * (1 - G.oiBandPct / 100), hi = spot * (1 + G.oiBandPct / 100);
+            const band = chain.filter((x: any) => x.strike >= lo && x.strike <= hi);
+            oi = band.reduce((s: number, x: any) => s + (x.oi ?? 0), 0);
+            vol = band.reduce((s: number, x: any) => s + (x.vol ?? 0), 0);
           } else fails.push('no weekly option at this expiry');
         } catch { fails.push('option snapshot failed'); }
 
@@ -245,8 +264,8 @@ Deno.serve(async (req) => {
         if (edge == null) fails.push('no edge reading');
         else if (edge <= G.edgeMin) fails.push(`edge ${edge.toFixed(1)}`);
         else if (edge > G.edgeMax) fails.push(`edge ${edge.toFixed(1)}, an event is priced`);
-        if (oi < G.oiMin) fails.push(`open interest ${oi}`);
-        if (vol < G.volMin) fails.push(`${vol} traded today`);
+        if (oi < G.oiMin) fails.push(`open interest ${oi} around the money`);
+        if (vol < G.volMin) fails.push(`${vol} traded today around the money`);
 
         return {
           ticker: t, asof: todayISO, spot: Math.round(spot * 100) / 100,
