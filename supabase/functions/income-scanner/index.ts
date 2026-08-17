@@ -19,12 +19,17 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-17.2';
+const BUILD = '2026-08-17.3';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
   priceMin: 15, priceMax: 400,
-  ownGapMax: 9,          // worst non-earnings, non-market day, %
+  /* 12, and the number is Nik's: "no bizarre swings, no like 10% drop, 15% down."
+     I had it at 9, which is inside his own tolerance, and it threw NFLX out at
+     9.7% — a held name that had passed the run before. A threshold I invented
+     rejecting a name he owns is the same mistake as the market-day gate, one
+     notch smaller. */
+  ownGapMax: 12,         // worst non-earnings, non-market day, %
   ret3moMax: 15,         // has it stopped falling, %
   vol60Max: 45,          // realised, annualised %
   edgeMin: 0,            // implied must beat realised
@@ -115,9 +120,18 @@ function comingFriday(from: Date): string {
 /** Every listed contract at one expiry, WITH open interest and volume. The
  *  option-chain function drops both; the liquidity gate is the one that cannot
  *  be faked, so this reads the snapshot directly rather than proxying it. */
-async function snapshot(ticker: string, expiry: string, key: string, tries = 2) {
+async function snapshot(ticker: string, expiry: string, key: string, spot: number, tries = 2) {
+  /* NARROWED BY STRIKE, the way option-chain does it. Asking for every strike at
+     an expiry and capping at 250 was the bug behind LULU: the results come back
+     from the lowest strike up, so on a name with hundreds of listings the 250
+     returned are all far out of the money and nothing near the money is in them.
+     The response is also large enough to fail outright, which is what LULU did
+     twice, reading as "no market" when the market is plainly there — the sleeve
+     prices the same expiry at a 4.62 straddle. */
   const u = new URL(`${POLY}/v3/snapshot/options/${ticker}`);
   u.searchParams.set('expiration_date', expiry);
+  u.searchParams.set('strike_price.gte', String(Math.floor(spot * 0.88)));
+  u.searchParams.set('strike_price.lte', String(Math.ceil(spot * 1.12)));
   u.searchParams.set('limit', '250');
   u.searchParams.set('apiKey', key);
   /* Retried once. 143 names hitting the snapshot in parallel drew a transient
@@ -262,7 +276,7 @@ Deno.serve(async (req) => {
         let straddlePct: number | null = null, iv: number | null = null;
         let oi = 0, vol = 0;
         try {
-          const chain = await snapshot(t, expiry, polyKey);
+          const chain = await snapshot(t, expiry, polyKey, spot);
           const puts = chain.filter((c: any) => c.type === 'put' && c.mid > 0);
           const calls = chain.filter((c: any) => c.type === 'call' && c.mid > 0);
           if (puts.length && calls.length) {

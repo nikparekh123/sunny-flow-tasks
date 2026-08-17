@@ -56,7 +56,7 @@ Applied after market days are removed, and after earnings days are identified.
 | **weekly options** | must exist | the whole cadence is weekly |
 | **option liquidity** | **50** open interest across ±5% of spot, both legs | see below |
 | **share price** | $15 to $400 | under, the premium is noise and spreads eat it; over, one contract is too big to size against a ~$200k block |
-| **own gap** | no non-earnings, non-market day worse than **9%** | Nik's no-bizarre-swings rule, properly isolated |
+| **own gap** | no non-earnings, non-market day worse than **12%** | Nik's no-bizarre-swings rule, properly isolated |
 | **has stopped falling** | within **±15%** over three months | a broken narrative that has settled, not one still breaking |
 | **calm enough** | 60-day realised vol under **45%** | high vol demands capital better spent elsewhere, and it is realised vol that eats the short straddle |
 | **edge** | **positive AND under 15 points** | see below |
