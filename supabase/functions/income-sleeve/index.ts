@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.1';
+const BUILD = '2026-08-17.2';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -362,6 +362,22 @@ Deno.serve(async (req) => {
         : 0;
       const fundedPct = fCost > 0 ? 100 * premSinceFloor / fCost : null;
 
+      /* HOW MANY FLOOR CONTRACTS THE POSITION ACTUALLY NEEDS.
+         Nik's rule, 2026-08-17: shares held PLUS puts sold, never a future or
+         intended size. A short put is a promise to buy more shares at the strike,
+         so in a fall it loses alongside the block rather than instead of it. A
+         floor sized to the shares alone leaves exactly half the exposure bare.
+
+         Priced on the week-one package it is decisive. Covering shares only, a
+         40% fall left $62,402 of put assignment unhedged. Covering shares plus
+         puts, the net result is FLAT from -10% through -40%. The floor doubles in
+         cost, from 15% to 29% of the income, and that is what it buys.
+
+         It is deliberately current, not forward: nothing here pre-buys protection
+         for shares that have not arrived. */
+      const floorNeed = Math.floor(shares / 100) + openPuts;
+      const floorShort = Math.max(0, floorNeed - fCt);
+
       // ── how many to write ──────────────────────────────────────────────────
       // Calls are limited by shares actually HELD. Pending assignment is not cover:
       // write against shares that have not arrived and a rally leaves you naked.
@@ -511,12 +527,16 @@ Deno.serve(async (req) => {
         },
         // "floor 310 Jan · 10% below the price · paid for", or "none yet". Never a
         // warning: a sleeve in its first week has nothing to protect.
-        floor_line: fStrike == null ? 'none yet'
+        floor_needed: floorNeed,
+        floor_short: floorShort,
+        floor_line: fStrike == null
+          ? (floorNeed > 0 ? `none yet · ${floorNeed} contracts needed` : 'none yet')
           : `${fStrike} ${monShort(fExpiry)} · `
             + `${(Math.round(1000 * (spot - fStrike) / spot) / 10).toFixed(0)}% below the price · `
             + (fundedPct == null ? 'cost unknown'
                : fundedPct >= 100 ? 'paid for'
-               : `${Math.round(fundedPct)}% paid for`),
+               : `${Math.round(fundedPct)}% paid for`)
+            + (floorShort > 0 ? ` · ${fCt} of ${floorNeed}, ${floorShort} short` : ''),
         floor_cost: fCost,
         floor_prem_since: Math.round(premSinceFloor),
       };
