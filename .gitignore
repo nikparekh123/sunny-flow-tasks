@@ -34,3 +34,11 @@ dist-ssr
 # nvda_hist.json), so the repo carries the harness, not the data.
 research/**/*.json
 deno.lock
+
+# Xcode per-user state and the Supabase CLI's scratch file. CLAUDE.md says never
+# to commit these, and they were showing up dirty on every single status, which
+# is how a real change hides in the noise. Untracked here rather than remembered
+# each time.
+**/xcuserdata/
+**/*.xcuserstate
+supabase/.temp/

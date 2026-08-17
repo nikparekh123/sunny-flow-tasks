@@ -1,6 +1,11 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "vite", "runtimeExecutable": "npx", "runtimeArgs": ["vite", "--port", "8080"], "port": 8080 }
+    {
+      "name": "risk-terminal",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-lc", "cd '/Users/niketparekh/Library/Mobile Documents/com~apple~CloudDocs/Claude/the-risk-shop-terminal' && npm run dev -- --port 3131"],
+      "port": 3131
+    }
   ]
 }
