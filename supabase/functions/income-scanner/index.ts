@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-17.1';
+const BUILD = '2026-08-17.2';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -115,12 +115,20 @@ function comingFriday(from: Date): string {
 /** Every listed contract at one expiry, WITH open interest and volume. The
  *  option-chain function drops both; the liquidity gate is the one that cannot
  *  be faked, so this reads the snapshot directly rather than proxying it. */
-async function snapshot(ticker: string, expiry: string, key: string) {
+async function snapshot(ticker: string, expiry: string, key: string, tries = 2) {
   const u = new URL(`${POLY}/v3/snapshot/options/${ticker}`);
   u.searchParams.set('expiration_date', expiry);
   u.searchParams.set('limit', '250');
   u.searchParams.set('apiKey', key);
-  const r = await fetch(u.toString());
+  /* Retried once. 143 names hitting the snapshot in parallel drew a transient
+     failure on LULU in the first full run, and the row came back reading "no
+     market: 0 open interest" — indistinguishable from a name that genuinely has
+     no weekly options. A retry costs one call; a false rejection costs a name. */
+  let r = await fetch(u.toString());
+  if (!r.ok && tries > 1) {
+    await new Promise((res) => setTimeout(res, 400));
+    r = await fetch(u.toString());
+  }
   if (!r.ok) return [];
   const j = await r.json();
   return (j?.results ?? []).map((c: Record<string, any>) => ({
@@ -165,7 +173,13 @@ Deno.serve(async (req) => {
       const part = need.slice(i, i + CHUNK);
       await Promise.all(part.map(async (t) => {
         try {
-          bars[t] = await dailyCloses(t, polyKey, ymd(addDays(today, -430)), todayISO);
+          /* 600 days, not 430. The metrics only need 252 trading days, but the
+             MARKET-DAY detector needs to see the macro weeks, and at 430 the
+             first run started on 13 Jun 2025 — after April 2025 entirely. It
+             found 6 market days where a longer window finds 15, so NKE came back
+             with a 15.2% "own gap" that is a macro session, which is the exact
+             failure this gate exists to prevent. */
+          bars[t] = await dailyCloses(t, polyKey, ymd(addDays(today, -600)), todayISO);
         } catch { bars[t] = []; }
       }));
     }
