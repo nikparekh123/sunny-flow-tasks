@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-17.3';
+const BUILD = '2026-08-17.4';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -143,7 +143,20 @@ async function snapshot(ticker: string, expiry: string, key: string, spot: numbe
     await new Promise((res) => setTimeout(res, 400));
     r = await fetch(u.toString());
   }
-  if (!r.ok) return [];
+  /* FALL BACK TO A DATE RANGE. An exact expiration_date works for 124 of 143
+     names and has now failed on LULU across three separate runs, which is not a
+     rate limit. option-chain asks the same endpoint with expiration_date.gte and
+     prices LULU's 21 Aug chain without trouble, so the range form is the one
+     known to work; this drops to it rather than reporting a name as having no
+     market when it plainly has one. */
+  if (!r.ok) {
+    const v = new URL(u.toString());
+    v.searchParams.delete('expiration_date');
+    v.searchParams.set('expiration_date.gte', expiry);
+    v.searchParams.set('expiration_date.lte', expiry);
+    r = await fetch(v.toString());
+  }
+  if (!r.ok) throw new Error(`snapshot ${r.status} for ${ticker} ${expiry}`);
   const j = await r.json();
   return (j?.results ?? []).map((c: Record<string, any>) => ({
     strike: c.details?.strike_price,
@@ -290,7 +303,11 @@ Deno.serve(async (req) => {
             oi = band.reduce((s: number, x: any) => s + (x.oi ?? 0), 0);
             vol = band.reduce((s: number, x: any) => s + (x.vol ?? 0), 0);
           } else fails.push('no weekly option at this expiry');
-        } catch { fails.push('option snapshot failed'); }
+        } catch (e) {
+          // The real message, not a generic one. "option snapshot failed" sent me
+          // hunting a rate limit for three runs when the cause was the query.
+          fails.push(`option snapshot: ${String((e as Error)?.message ?? e).slice(0, 90)}`);
+        }
 
         const edge = (iv != null) ? 100 * iv - v20 : null;
 
