@@ -48,12 +48,32 @@ struct IncomeSleeve: Decodable {
     /// the same shapes as the sleeve — a wide head card and a rail of position
     /// cards — because it answers the same kind of question about names Nik does
     /// not hold yet.
-    var scanner: Scanner?
+    var scanner: Block?
+    /* The opportunity view: what the book owes, and what clears the edge floor
+       today. Same {head, grp, rows} anatomy as the scanner, so it renders
+       through the identical card views and the client decides nothing. */
+    var book: Block?
 
-    struct Scanner: Decodable {
-        var head: Head
+    /* A LIST, not a rail. Twelve candidates and thirteen skip reasons are a
+       shortlist: read down, not swiped through. A full card per row only earns
+       its space when each row is worth dwelling on, which is true of a position
+       and not true of a name that failed a gate. `head` is optional because the
+       book has none: Nik removed the commitment card 2026-08-18. */
+    struct Block: Decodable {
+        var head: Head?
         var grp: String
-        var rows: [Card]
+        var note: String?
+        var list: [ListRow]
+    }
+
+    struct ListRow: Decodable {
+        var n: String
+        var sym: String
+        var price: String
+        var chip: String
+        var fill: Bool?
+        var fig: String
+        var line: String
     }
     var error: String?
 
@@ -232,25 +252,22 @@ struct IncomeScreen: View {
                     .scrollTargetBehavior(.viewAligned)
                     .scrollClipDisabled()
 
+                    /* THE BOOK, above the scanner on purpose. The scanner is a
+                       shortlist of names that might one day be worth owning; this
+                       is what to do today. The thing you act on goes first. */
+                    if let bk = s.book {
+                        GrpHead(label: bk.grp, count: bk.list.count)
+                        ListCard(note: bk.note, rows: bk.list)
+                            .padding(.horizontal, 16)
+                    }
+
                     if let sc = s.scanner {
-                        SleeveCard(h: sc.head)
-                            .padding(.horizontal, 16).padding(.top, 26)
-                        HStack(spacing: 9) {
-                            Text(sc.grp.uppercased()).font(InkFont.mono(12.5))
-                                .tracking(12.5 * 0.2).foregroundStyle(Ink.dim)
-                            Text("\(sc.rows.count)").font(InkFont.mono(12.5))
-                                .tracking(12.5 * 0.1).foregroundStyle(Ink.text)
+                        if let h = sc.head {
+                            SleeveCard(h: h).padding(.horizontal, 16).padding(.top, 26)
                         }
-                        .padding(EdgeInsets(top: 24, leading: 16, bottom: 18, trailing: 16))
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 10) {
-                                ForEach(sc.rows, id: \.sym) { PosCard(c: $0) }
-                            }
-                            .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
-                            .scrollTargetLayout()
-                        }
-                        .scrollTargetBehavior(.viewAligned)
-                        .scrollClipDisabled()
+                        GrpHead(label: sc.grp, count: sc.list.count)
+                        ListCard(note: sc.note, rows: sc.list)
+                            .padding(.horizontal, 16)
                     }
 
                     if let note = s.note { NoteFoot(text: note) }
@@ -530,6 +547,80 @@ private struct SleeveCard: View {
         .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
             .fill(Ink.surface))
         .clipShape(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous))
+    }
+}
+
+// MARK: - the list card
+
+/// The section break above a card or rail.
+private struct GrpHead: View {
+    let label: String; let count: Int
+    var body: some View {
+        HStack(spacing: 9) {
+            Text(label.uppercased()).font(InkFont.mono(12.5))
+                .tracking(12.5 * 0.2).foregroundStyle(Ink.dim)
+            Text("\(count)").font(InkFont.mono(12.5))
+                .tracking(12.5 * 0.1).foregroundStyle(Ink.text)
+        }
+        .padding(EdgeInsets(top: 24, leading: 16, bottom: 18, trailing: 16))
+    }
+}
+
+/// One card, many rows. Each row is two lines: the identity and the figure on
+/// the first, the reason on the second. Hairlines between, none at the ends.
+private struct ListCard: View {
+    let note: String?
+    let rows: [IncomeSleeve.ListRow]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let note, !note.isEmpty {
+                inkFig(note, size: 13.5, color: Ink.dim)
+                    .lineSpacing(4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(EdgeInsets(top: 18, leading: IC.gutter,
+                                        bottom: 16, trailing: IC.gutter))
+            }
+            ForEach(rows.indices, id: \.self) { i in
+                if i > 0 || note != nil {
+                    Rectangle().fill(Ink.hair).frame(height: 1)
+                }
+                row(rows[i])
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous)
+            .fill(Ink.surface))
+        .clipShape(RoundedRectangle(cornerRadius: Ink.radiusCard, style: .continuous))
+    }
+
+    private func row(_ r: IncomeSleeve.ListRow) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 9) {
+                Text(r.n).font(InkFont.mono(12.5)).tracking(12.5 * 0.16)
+                    .foregroundStyle(Ink.dim)
+                Text(r.sym.uppercased()).font(InkFont.mono(13.5)).tracking(13.5 * 0.08)
+                    .foregroundStyle(Ink.text)
+                Text(r.price).font(InkFont.mono(12.5)).foregroundStyle(Ink.dim)
+                Spacer(minLength: 8)
+                Text(r.fig).font(InkFont.mono(19)).tracking(19 * -0.03)
+                    .foregroundStyle(Ink.text).lineLimit(1)
+                Text(r.chip.uppercased()).font(InkFont.mono(11)).tracking(11 * 0.05)
+                    .foregroundStyle((r.fill ?? false) ? Ink.invertText : Ink.dim)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Capsule().fill((r.fill ?? false) ? Ink.invertBg : .clear))
+                    .overlay(Capsule().strokeBorder(
+                        (r.fill ?? false) ? .clear : Ink.hair, lineWidth: 1))
+                    .fixedSize()
+            }
+            .lineLimit(1)
+            inkFig(r.line, size: 13.5, color: Ink.dim)
+                .lineSpacing(13.5 * 0.35)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(EdgeInsets(top: 16, leading: IC.gutter, bottom: 16, trailing: IC.gutter))
     }
 }
 

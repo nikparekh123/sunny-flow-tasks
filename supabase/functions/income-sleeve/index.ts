@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-18.2';
+const BUILD = '2026-08-18.5';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -969,15 +969,28 @@ Deno.serve(async (req) => {
         // existing blocks pay nothing, and a $0 headline over three cards each
         // saying "buy" would be the screen arguing with itself.
         const planned = rows.reduce((s, r) => s + (r.buy?.adds ?? 0), 0);
-        const week = rows.reduce((s, r) =>
+        /* CASH IN, and nothing else. This used to add the weekly planner's
+           PROPOSED write and the buys it was suggesting, so the headline was a
+           fact plus two guesses. It read $6,881 while $5,156 had actually been
+           received, it drifted every time the chain moved (6,536 -> 6,576 ->
+           6,881 in one morning), and it argued out loud with the book card
+           underneath saying the week was already paid for and nothing should be
+           written. A headline has to be the one number that cannot be wrong.
+           What COULD still be written now lives on the book card, where the
+           edge floor and the cap are allowed to veto it. */
+        const week = rows.reduce((s, r) => s + (r.premium_this_expiry ?? 0), 0);
+        // Kept for the payback-weeks maths below, which is about the run rate
+        // rather than the headline: a floor is paid off by what the sleeve
+        // earns in a normal week, proposals included.
+        const runRate = rows.reduce((s, r) =>
           s + ((r.write?.credit) ?? 0) + (r.premium_this_expiry ?? 0), 0) + planned;
         const below = invested > 0 ? Math.round(1000 * prem / invested) / 10 : null;
-        const weeks = fc > 0 && week > 0 ? Math.ceil(fc / week) : null;
+        const weeks = fc > 0 && runRate > 0 ? Math.ceil(fc / runRate) : null;
         const held = rows.filter((r) => (r.shares ?? 0) > 0);
         return {
           n: 'Sleeve', sym: `${rows.length} names`, chip: dayShort(expiry),
           hero: usd(week),
-          unit: `to collect this week · writes ${dayShort(expiry)}`,
+          unit: `collected for ${dayShort(expiry)}`,
           bullets: [
             // The rung, always first: it is the instruction the rest follows from.
             `Week ${rampWk + 1} of the ramp · target ${usd(target)}`
@@ -1016,6 +1029,205 @@ Deno.serve(async (req) => {
          is ~280 Polygon calls and ninety seconds, which is not a screen load. The
          cron writes, this reads. If the table is empty the block is null and the
          screen simply has no second rail. */
+      /* ── THE BOOK: opportunity, not calendar ───────────────────────────────
+         Agreed with Nik 2026-08-18. Spec: docs/INCOME_OPPORTUNITY_SPEC.md
+
+         The sleeve wrote on a weekly rhythm and sized in a fixed 25 contracts.
+         Neither was ever the strategy. The rhythm was a habit sitting on top of
+         it, and a fixed count is not a fixed size: 25 NFLX puts is a $190,000
+         promise and 25 CCL puts is a $133,000 one.
+
+         So: EDGE is the trigger, dollars are the size, the cap is the stop, and
+         the day of the week decides nothing except on a Friday.
+
+         Edge leads the card, deliberately. On 2026-08-18 UBER paid the most on
+         the whole board at 3.29% a week and earned none of it, edge +0.3: the
+         option was priced at almost exactly what UBER actually moves. CCL paid
+         3.25% with +5.7 of real edge. Premium is the number that feels like the
+         answer and is not, so the hero figure here is the edge and the premium
+         sits in the band.
+
+         Expiries are deliberately NOT spread. It was asked for and tested, and
+         the book is currently flat on puts every Friday afternoon. Carrying two
+         expiries removes that: peak exposure is unchanged, since both are open
+         together, and the only moment the book is empty disappears. Writing
+         smaller gets the smaller assignment without giving up the flat week. */
+      book: (() => {
+        const cap = Number(cfg.commit_cap ?? 500000);
+        const eFloor = Number(cfg.edge_floor ?? 3);
+        const eCeil = Number(cfg.edge_ceiling ?? 15);
+        const nameCap = cap * Number(cfg.name_cap_pct ?? 33) / 100;
+
+        const committed = rows.reduce((a, r) => a + Number(r.put_commitment ?? 0), 0);
+        /* COLLECTED, not `running`. running adds the old weekly planner's
+           PROPOSED write to the cash already taken, which would be circular
+           here: that block's phantom plan would tell this one the week was
+           already paid for and suppress every real trade. Only money actually
+           received counts against the target. */
+        const paid = rows.reduce((a, r) => a + Number(r.premium_this_expiry ?? 0), 0);
+        const headroom = Math.max(0, cap - committed);
+        const openPuts = rows.reduce((a, r) => a + Number(r.open_puts ?? 0), 0);
+
+        /* Friday with puts still on the board is a SETTLE day, not a write day.
+           Nik's rule, and it is the right one: until they run off you do not
+           know Monday's share count, so you cannot know what you are able to
+           write against. */
+        const dow = new Date(`${todayISO}T12:00:00Z`).getUTCDay();
+        const settle = dow === 5 && openPuts > 0;
+
+        type Cand = {
+          sym: string; spot: number; edge: number | null; strike: number;
+          mid: number | null; iv: number | null; rv: number | null;
+          held: boolean; mine: number; wkPct: number | null;
+        };
+        const cands: Cand[] = [];
+
+        // Held names first: their quotes are live, the scanner's are last night's.
+        for (const r of rows) {
+          if (!r.spot) continue;
+          cands.push({
+            sym: String(r.ticker), spot: Number(r.spot),
+            edge: r.edge != null ? Number(r.edge) : null,
+            strike: Number(r.atm_pair_strike ?? r.spot),
+            mid: r.atm_put_mid != null ? Number(r.atm_put_mid) : null,
+            iv: r.iv != null ? Number(r.iv) : null,
+            rv: r.rv != null ? Number(r.rv) : null,
+            held: true, mine: Number(r.put_commitment ?? 0),
+            wkPct: (r.atm_straddle && r.spot)
+              ? (Number(r.atm_straddle) / Number(r.spot)) * 100 : null,
+          });
+        }
+        // Then whatever last night's scan cleared. No live chain is pulled for
+        // these: a candidate is a shortlist entry, not a quote to trade off.
+        if (scanRows.length) {
+          const asof0 = String(scanRows[0].asof);
+          for (const r of scanRows) {
+            if (String(r.asof) !== asof0 || r.passes !== true) continue;
+            const sym = String(r.ticker);
+            if (cands.some((c) => c.sym === sym)) continue;
+            const sp = Number(r.spot ?? 0);
+            if (!sp) continue;
+            const wk = r.atm_straddle_pct != null ? Number(r.atm_straddle_pct) : null;
+            cands.push({
+              sym, spot: sp, edge: r.edge != null ? Number(r.edge) : null,
+              strike: Math.round(sp * 2) / 2,
+              mid: wk != null ? (sp * wk / 100) / 2 : null,
+              iv: r.implied_vol != null ? Number(r.implied_vol) : null,
+              rv: r.vol_60d != null ? Number(r.vol_60d) : null,
+              held: false, mine: 0, wkPct: wk,
+            });
+          }
+        }
+
+        /* Gate first, THEN allocate in edge order against a running headroom.
+
+           Sizing each row against the full headroom independently is the
+           obvious way to write this and it is wrong: on 2026-08-18 it produced
+           eight writable names totalling $1.1m of commitment against $319k of
+           room. Every row was individually legal and the page as a whole was
+           nonsense. A plan has to be executable top to bottom.
+
+           Three things bound the size, and the smallest wins:
+             the headroom LEFT after the names above it,
+             the per-name cap minus what that name already owes,
+             and the income still needed to reach this week's target.
+
+           The third is what makes income the goal rather than the trigger. Once
+           the week's target is covered there is no reason to add commitment, no
+           matter how good the edge looks. */
+        const gated = cands.map((c) => {
+          const e = earnRows.find((x) => x.ticker === c.sym);
+          const earnISO = e ? String(e.report_date) : null;
+
+          let why: string | null = null;
+          if (settle) why = 'settle day, Monday is not known yet';
+          else if (c.edge == null) why = 'no edge reading';
+          else if (c.edge < eFloor) why = `edge ${c.edge.toFixed(1)}, under the floor`;
+          else if (c.edge > eCeil) why = `edge ${c.edge.toFixed(1)}, an event is priced`;
+          else if (!earnISO) why = 'no earnings date on file';
+          /* A WEEK PAST the expiry, not the expiry itself. Getting this wrong
+             would have written PDD today: it reports Mon 24 Aug and the expiry
+             is Fri 21 Aug, so the option is clear of the print and the first
+             version let it through. But an assigned put hands you the shares on
+             Monday morning, straight into the report. The exposure is not the
+             option, it is what the option turns into. */
+          else if (earnISO <= ymd(addDays(parseISO(expiry), 7)))
+            why = `reports ${dayShort(earnISO)}, too close to the expiry`;
+
+          return { c, earnISO, why, ct: 0, pays: 0, commits: 0 };
+        }).sort((a, b) =>
+          (a.why ? 1 : 0) - (b.why ? 1 : 0) ||
+          (Number(b.c.edge ?? -99) - Number(a.c.edge ?? -99)));
+
+        let left = headroom;
+        let need = Math.max(0, target - paid);
+        for (const x of gated) {
+          if (x.why) continue;
+          const room = Math.max(0, Math.min(left, nameCap - x.c.mine));
+          let ct = Math.floor(room / (x.c.strike * 100));
+          // Stop at the target. Income says when to stop, never when to go.
+          if (x.c.mid != null && x.c.mid > 0) {
+            ct = Math.min(ct, Math.ceil(need / (x.c.mid * 100)));
+          }
+          if (ct < 1) {
+            x.why = need <= 0
+              ? 'the week is already paid for'
+              : 'no room left under the cap';
+            continue;
+          }
+          x.ct = ct;
+          x.commits = Math.round(ct * x.c.strike * 100);
+          x.pays = x.c.mid != null ? Math.round(x.c.mid * 100 * ct) : 0;
+          left -= x.commits;
+          need -= x.pays;
+        }
+        // Re-sort: a name gated during allocation drops below the ones that took.
+        const ev = gated.sort((a, b) =>
+          (a.why ? 1 : 0) - (b.why ? 1 : 0) ||
+          (Number(b.c.edge ?? -99) - Number(a.c.edge ?? -99)));
+
+        const go = ev.filter((x) => !x.why);
+        const names = (a: string[]) => a.length <= 1 ? a.join('')
+          : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+
+        /* A LIST, not a rail, and no header card. Nik 2026-08-18: "Nothing
+           today should also be a list not individual cards" and "remove the
+           180,000 card". Thirteen full-height cards to say nothing is writable
+           was thirteen swipes to read one sentence, and a card per row only
+           earns its space when each row is worth dwelling on.
+
+           The commitment figure went with the header. If it is wanted back it
+           belongs in the sleeve head's band, not in a card of its own. */
+        return {
+          grp: settle ? 'Running off today'
+             : go.length ? 'Write today'
+             : 'Nothing today',
+          note: settle
+            ? `${openPuts} puts run off today. Nothing new until Monday.`
+            : go.length
+              ? `${usd(headroom)} of headroom left under a ${usd(cap)} cap.`
+              : paid >= target
+                ? `${usd(paid)} in against a ${usd(target)} target. The week is paid for.`
+                : `Nothing clears the +${eFloor} floor. The edge was not there.`,
+          list: ev.map((x, i) => {
+            const c = x.c;
+            const edgeTxt = c.edge == null ? 'n/a'
+              : `${c.edge >= 0 ? '+' : ''}${c.edge.toFixed(1)}`;
+            return {
+              n: String(i + 1).padStart(2, '0'),
+              sym: c.sym,
+              price: c.spot.toFixed(2),
+              chip: x.why ? 'Skip' : 'Write',
+              fill: !x.why,
+              fig: edgeTxt,
+              line: x.why
+                ? x.why.charAt(0).toUpperCase() + x.why.slice(1) + '.'
+                : `Write ${x.ct} puts at ${c.strike}, ${dayShort(expiry)}. `
+                  + `Pays ${usd(x.pays)}, commits ${usd(x.commits)}.`,
+            };
+          }),
+        };
+      })(),
       scanner: (() => {
         if (!scanRows.length) return null;
         const asof = String(scanRows[0].asof);
@@ -1057,45 +1269,31 @@ Deno.serve(async (req) => {
             ],
             stamp: `scanned ${dayShort(asof)}`,
           },
+          /* ONE card holding a list, not twelve cards. Nik 2026-08-18:
+             "Clear to add should be one card list not 12 cards." The rail made
+             sense when the sleeve held three names and each card was a position
+             worth studying; twelve candidates are a shortlist, and a shortlist
+             is read down, not swiped through. The head card above stays, it is
+             the one thing here worth a card. */
           grp: 'Clear to add',
-          rows: pass.map((r, i) => ({
-            n: String(i + 1).padStart(2, '0'),
-            sym: String(r.ticker),
-            price: Number(r.spot).toFixed(2),
-            chip: isCalm(r.bucket) ? 'Calm' : 'Jumpy', fill: false,
-            forecast: true,          // nothing is held, so every figure here is a quote
-            hero: `${Number(r.atm_straddle_pct ?? 0).toFixed(2)}%`,
-            unit: `a week at the money · edge ${Number(r.edge ?? 0) >= 0 ? '+' : ''}`
-                  + `${Number(r.edge ?? 0).toFixed(1)}`,
-            bullets: [
-              `${Number(r.ret_12mo ?? 0) >= 0 ? 'Up' : 'Down'} `
-              + `${Math.abs(Math.round(Number(r.ret_12mo ?? 0)))}% over the year, `
-              + `${Math.abs(Number(r.ret_3mo ?? 0)) < 5 ? 'flat' :
-                  (Number(r.ret_3mo ?? 0) < 0 ? 'still easing' : 'firming')} over three months.`,
-              `${r.liquidity ?? 'thin'} market, `
-              + `${Number(r.option_oi ?? 0).toLocaleString('en-US')} open interest around the money.`,
-            ],
-            earn: (() => {
-              const e = earnRows.find((x) => x.ticker === r.ticker);
-              return e ? `${dayShort(String(e.report_date))} · `
-                       + `${daysBetween(today, parseISO(String(e.report_date)))} days`
-                       : 'no date on file, cannot be added yet';
-            })(),
-            band: [
-              { k: '60d vol', v: `${Math.round(Number(r.vol_60d ?? 0))}%` },
-              { k: 'Worst day', v: `${Number(r.own_gap ?? 0).toFixed(1)}%` },
-              { k: 'Weeklies', v: String(r.weeklies ?? '-') },
-            ],
-            foot: {
-              lab: 'Where it sits · 52w range',
-              fig: `${Math.round(Number(r.pos_52w ?? 0))}%`,
-              sub: 'up the range',
-              pct: Math.max(0, Math.min(100, Math.round(Number(r.pos_52w ?? 0)))),
-              line: `${isCalm(r.bucket) ? 'calm' : 'jumpy'} · `
-                    + `correlates ${Number(r.max_correlation ?? 0).toFixed(2)} to what you hold`,
-            },
-            stamp: { text: `scanned ${dayShort(asof)}`, forecast: true },
-          })),
+          note: `${pass.length} of ${run.length} clear every gate`
+                + (noDate ? `, ${noDate} still need a date` : ''),
+          list: pass.map((r, i) => {
+            const e = earnRows.find((x) => x.ticker === r.ticker);
+            const edge = Number(r.edge ?? 0);
+            return {
+              n: String(i + 1).padStart(2, '0'),
+              sym: String(r.ticker),
+              price: Number(r.spot).toFixed(2),
+              chip: isCalm(r.bucket) ? 'Calm' : 'Jumpy',
+              fill: false,
+              fig: `${Number(r.atm_straddle_pct ?? 0).toFixed(2)}%`,
+              line: `Edge ${edge >= 0 ? '+' : ''}${edge.toFixed(1)} · `
+                    + `${r.liquidity ?? 'thin'} market · `
+                    + `${Math.round(Number(r.pos_52w ?? 0))}% up the range · `
+                    + (e ? dayShort(String(e.report_date)) : 'no date yet'),
+            };
+          }),
         };
       })(),
       // The footer. A note, not a total: these blocks are the tool, not the holding.
