@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.12';
+const BUILD = '2026-08-17.13';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -174,10 +174,13 @@ Deno.serve(async (req) => {
     const expiry = comingFriday(today);
     const D = db(url, key);
 
-    const [names, mkt, setRows] = await Promise.all([
+    const [names, mkt, setRows, scanRows] = await Promise.all([
       D.get('income_sleeve_names?active=is.true&select=*&order=sort.asc'),
       marketNow(polyKey),
       D.get('income_sleeve_settings?id=eq.1&select=*'),
+      // The scanner writes here on a cron. Reading the table rather than calling
+      // the function keeps this screen at one second instead of ninety.
+      D.get('income_scanner_results?select=*&order=asof.desc&limit=300'),
     ]);
     const cfg = setRows[0] ?? {};
     if (!names.length) return json(200, { ok: true, empty: true, note: 'no active names' });
@@ -995,6 +998,93 @@ Deno.serve(async (req) => {
       basis: rows.some((r) => r.ranked_on === 'earned')
         ? `Cash a week per dollar invested, since ${dayShort(rows.find((r) => r.started_on)?.started_on)}.`
         : "Nothing collected yet, so the order is this week's forecast.",
+      /* ── THE SCANNER, AS CARDS ───────────────────────────────────────────────
+         Nik: "We need to show the 9 in somewhere." A count alone is not useful —
+         the point of the screen is which names, so they get their own rail below
+         the sleeve's, on the same card anatomy.
+
+         Read from income_scanner_results, not by calling the scanner: a live run
+         is ~280 Polygon calls and ninety seconds, which is not a screen load. The
+         cron writes, this reads. If the table is empty the block is null and the
+         screen simply has no second rail. */
+      scanner: (() => {
+        if (!scanRows.length) return null;
+        const asof = String(scanRows[0].asof);
+        const run = scanRows.filter((r) => String(r.asof) === asof);
+        const pass = run.filter((r) => r.passes === true)
+          .sort((a, b) => Number(a.pos_52w ?? 99) - Number(b.pos_52w ?? 99));
+        const heldRows = run.filter((r) => tickers.includes(String(r.ticker)));
+        const failing = heldRows.filter((r) => !r.passes);
+        const quiet = pass.filter((r) => r.bucket === 'quiet').map((r) => String(r.ticker));
+        const broken = pass.filter((r) => r.bucket === 'broken').map((r) => String(r.ticker));
+        const noDate = pass.filter((r) => !earnRows.some((e) => e.ticker === r.ticker)).length;
+
+        const list = (a: string[]) => a.length <= 1 ? a.join('')
+          : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+
+        return {
+          head: {
+            n: 'Scanner', sym: `${run.length} names`, chip: `${pass.length} clear`,
+            hero: String(pass.length),
+            unit: 'names clear every gate',
+            bullets: [
+              // The book first. A name Nik holds failing a gate is the highest-value
+              // thing this can say, and it must not sit under a list of candidates.
+              failing.length
+                ? `${list(failing.map((r) => String(r.ticker)))} no longer passes: `
+                  + `${((failing[0].fails ?? ['a gate']) as string[])[0]}.`
+                : 'All the names you hold still pass.',
+              [quiet.length ? `${list(quiet)} ${quiet.length === 1 ? 'is' : 'are'} the quiet ones` : null,
+               broken.length ? `${list(broken)} pay more` : null].filter(Boolean).join(', ') + '.',
+            ],
+            band: [
+              { k: 'Checked', v: String(run.length) },
+              { k: 'Clear', v: String(pass.length), mark: true },
+              { k: 'Needs a date', v: noDate ? String(noDate) : 'none', text: !noDate },
+            ],
+            stamp: `scanned ${dayShort(asof)}`,
+          },
+          grp: 'Clear to add',
+          rows: pass.map((r, i) => ({
+            n: String(i + 1).padStart(2, '0'),
+            sym: String(r.ticker),
+            price: Number(r.spot).toFixed(2),
+            chip: r.bucket === 'quiet' ? 'Quiet' : 'Broken', fill: false,
+            forecast: true,          // nothing is held, so every figure here is a quote
+            hero: `${Number(r.atm_straddle_pct ?? 0).toFixed(2)}%`,
+            unit: `a week at the money · edge ${Number(r.edge ?? 0) >= 0 ? '+' : ''}`
+                  + `${Number(r.edge ?? 0).toFixed(1)}`,
+            bullets: [
+              `${Number(r.ret_12mo ?? 0) >= 0 ? 'Up' : 'Down'} `
+              + `${Math.abs(Math.round(Number(r.ret_12mo ?? 0)))}% over the year, `
+              + `${Math.abs(Number(r.ret_3mo ?? 0)) < 5 ? 'flat' :
+                  (Number(r.ret_3mo ?? 0) < 0 ? 'still easing' : 'firming')} over three months.`,
+              `${r.liquidity ?? 'thin'} market, `
+              + `${Number(r.option_oi ?? 0).toLocaleString('en-US')} open interest around the money.`,
+            ],
+            earn: (() => {
+              const e = earnRows.find((x) => x.ticker === r.ticker);
+              return e ? `${dayShort(String(e.report_date))} · `
+                       + `${daysBetween(today, parseISO(String(e.report_date)))} days`
+                       : 'no date on file, cannot be added yet';
+            })(),
+            band: [
+              { k: '60d vol', v: `${Math.round(Number(r.vol_60d ?? 0))}%` },
+              { k: 'Worst day', v: `${Number(r.own_gap ?? 0).toFixed(1)}%` },
+              { k: 'Weeklies', v: String(r.weeklies ?? '-') },
+            ],
+            foot: {
+              lab: 'Where it sits · 52w range',
+              fig: `${Math.round(Number(r.pos_52w ?? 0))}%`,
+              sub: 'up the range',
+              pct: Math.max(0, Math.min(100, Math.round(Number(r.pos_52w ?? 0)))),
+              line: `${r.bucket === 'quiet' ? 'quiet' : 'broken'} bucket · `
+                    + `correlates ${Number(r.max_correlation ?? 0).toFixed(2)} to what you hold`,
+            },
+            stamp: { text: `scanned ${dayShort(asof)}`, forecast: true },
+          })),
+        };
+      })(),
       // The footer. A note, not a total: these blocks are the tool, not the holding.
       note: 'These are trading positions. Every put here is a promise to buy at the '
           + 'strike, and the calls can take the shares away.',

@@ -44,6 +44,17 @@ struct IncomeSleeve: Decodable {
     var basis: String?
     var head: Head?
     var names: [Name]?
+    /// The scanner: which of the 143 names are eligible, as their own rail. It is
+    /// the same shapes as the sleeve — a wide head card and a rail of position
+    /// cards — because it answers the same kind of question about names Nik does
+    /// not hold yet.
+    var scanner: Scanner?
+
+    struct Scanner: Decodable {
+        var head: Head
+        var grp: String
+        var rows: [Card]
+    }
     var error: String?
 
     /// A band cell. `text` renders as prose rather than a figure; `mark` underlines
@@ -220,6 +231,27 @@ struct IncomeScreen: View {
                     }
                     .scrollTargetBehavior(.viewAligned)
                     .scrollClipDisabled()
+
+                    if let sc = s.scanner {
+                        SleeveCard(h: sc.head)
+                            .padding(.horizontal, 16).padding(.top, 26)
+                        HStack(spacing: 9) {
+                            Text(sc.grp.uppercased()).font(InkFont.mono(12.5))
+                                .tracking(12.5 * 0.2).foregroundStyle(Ink.dim)
+                            Text("\(sc.rows.count)").font(InkFont.mono(12.5))
+                                .tracking(12.5 * 0.1).foregroundStyle(Ink.text)
+                        }
+                        .padding(EdgeInsets(top: 24, leading: 16, bottom: 18, trailing: 16))
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 10) {
+                                ForEach(sc.rows, id: \.sym) { PosCard(c: $0) }
+                            }
+                            .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 8)
+                            .scrollTargetLayout()
+                        }
+                        .scrollTargetBehavior(.viewAligned)
+                        .scrollClipDisabled()
+                    }
 
                     if let note = s.note { NoteFoot(text: note) }
                 } else if let e = store.error {
