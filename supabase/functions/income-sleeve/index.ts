@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-18.5';
+const BUILD = '2026-08-18.6';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -768,6 +768,12 @@ Deno.serve(async (req) => {
     const paused = cfg.ramp_paused === true;
     const target = Math.min(rampCap, rampStart + (paused ? 0 : rampStep * rampWk));
 
+    /* Hoisted so the head band and the book agree by construction, rather than
+       by both happening to add the same column up the same way. */
+    const commitCap = Number(cfg.commit_cap ?? 500000);
+    const committedAll = rows.reduce((a, r) => a + Number(r.put_commitment ?? 0), 0);
+    const headroomAll = Math.max(0, commitCap - committedAll);
+
     // What this week pays before any buying: premium ALREADY COLLECTED on legs
     // expiring this Friday, plus what the screen is still planning to write.
     const running = rows.reduce((s, r) =>
@@ -1000,14 +1006,25 @@ Deno.serve(async (req) => {
               ? held.map((r) => `${r.ticker} ${Math.round(r.share_of_sleeve ?? 0)}%`).join(' · ')
                 + ' of the money invested.'
               : 'No shares yet, so nothing is invested.',
+            // The cap lives here rather than in the band because a bullet wraps
+            // and a band cell cannot. Three figures is the band's limit.
+            `Committed ${usd(committedAll)} of a ${usd(commitCap)} cap · `
+              + `${usd(headroomAll)} still free.`,
             fc > 0
               ? `Floors ${usd(fc)} · ${Math.round(100 * fc / Math.max(prem, 1))}% of the cash · `
                 + `${weeks} week${weeks === 1 ? '' : 's'} pays for them.`
               : 'No floors yet, nothing to pay back.',
-          ].slice(0, held.length ? 3 : 2),
+          ].slice(0, held.length ? 4 : 3),
           band: [
             { k: 'Invested', v: usd(invested) },
-            { k: 'Collected', v: usd(prem), mark: prem > 0 },
+            /* COMMITTED, not collected. Collected read the same $5,156 as the
+               hero directly above it, and the band holds three values only:
+               four eight-character figures cannot shrink (the client sets
+               fixedSize) and push the card past the screen edge, which is
+               exactly how the page got clipped earlier today. What the sleeve
+               owes if assigned was nowhere on the screen once the commitment
+               card came off, and it is the more useful of the two. */
+            { k: 'Committed', v: usd(committedAll), mark: committedAll > 0 },
             { k: 'Below cost', v: below != null ? `${below.toFixed(1)}%` : 'none yet', text: below == null },
           ],
           stamp: `updated now · ${dayShort(todayISO)}`,
@@ -1053,19 +1070,19 @@ Deno.serve(async (req) => {
          together, and the only moment the book is empty disappears. Writing
          smaller gets the smaller assignment without giving up the flat week. */
       book: (() => {
-        const cap = Number(cfg.commit_cap ?? 500000);
+        const cap = commitCap;
         const eFloor = Number(cfg.edge_floor ?? 3);
         const eCeil = Number(cfg.edge_ceiling ?? 15);
         const nameCap = cap * Number(cfg.name_cap_pct ?? 33) / 100;
 
-        const committed = rows.reduce((a, r) => a + Number(r.put_commitment ?? 0), 0);
+        const committed = committedAll;
         /* COLLECTED, not `running`. running adds the old weekly planner's
            PROPOSED write to the cash already taken, which would be circular
            here: that block's phantom plan would tell this one the week was
            already paid for and suppress every real trade. Only money actually
            received counts against the target. */
         const paid = rows.reduce((a, r) => a + Number(r.premium_this_expiry ?? 0), 0);
-        const headroom = Math.max(0, cap - committed);
+        const headroom = headroomAll;
         const openPuts = rows.reduce((a, r) => a + Number(r.open_puts ?? 0), 0);
 
         /* Friday with puts still on the board is a SETTLE day, not a write day.

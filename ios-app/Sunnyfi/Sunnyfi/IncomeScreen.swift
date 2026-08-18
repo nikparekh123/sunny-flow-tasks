@@ -278,6 +278,20 @@ struct IncomeScreen: View {
                 }
                 Color.clear.frame(height: 96)
             }
+            /* LOCKED to the container, not to .infinity.
+
+               maxWidth: .infinity only says "take everything offered"; it does
+               not stop a child whose MINIMUM width exceeds the screen from
+               widening the whole stack. When that happens every full-width card
+               grows with it and the page sits wider than the display, centred,
+               so it clips at both edges at once: the "Income" title loses its I
+               and the date loses its G, and the page drifts sideways.
+
+               containerRelativeFrame pins the width to the scroll view's own
+               width, so an over-wide child clips inside its own card instead of
+               dragging the page with it. The horizontal rail below is a
+               ScrollView and manages its own content, so it is unaffected. */
+            .containerRelativeFrame(.horizontal)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task { if store.sleeve == nil { await store.load() } }
@@ -601,11 +615,16 @@ private struct ListCard: View {
                 Text(r.n).font(InkFont.mono(12.5)).tracking(12.5 * 0.16)
                     .foregroundStyle(Ink.dim)
                 Text(r.sym.uppercased()).font(InkFont.mono(13.5)).tracking(13.5 * 0.08)
-                    .foregroundStyle(Ink.text)
+                    .foregroundStyle(Ink.text).layoutPriority(2)
                 Text(r.price).font(InkFont.mono(12.5)).foregroundStyle(Ink.dim)
+                    .layoutPriority(1)
                 Spacer(minLength: 8)
+                // Shrinks rather than pushes. A five-character figure never
+                // needs this; a name at $1,234.56 with a wide chip beside it
+                // would, and the row must give before the page does.
                 Text(r.fig).font(InkFont.mono(19)).tracking(19 * -0.03)
                     .foregroundStyle(Ink.text).lineLimit(1)
+                    .minimumScaleFactor(0.7).layoutPriority(3)
                 Text(r.chip.uppercased()).font(InkFont.mono(11)).tracking(11 * 0.05)
                     .foregroundStyle((r.fill ?? false) ? Ink.invertText : Ink.dim)
                     .padding(.horizontal, 9).padding(.vertical, 5)
