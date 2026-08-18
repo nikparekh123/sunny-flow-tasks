@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-17.6';
+const BUILD = '2026-08-18.3';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -61,7 +61,7 @@ const G = {
      trades today is perfectly tradeable, and a scan running before the open sees
      zero volume on everything. */
   oiMin: 50,             // open interest across the band, both legs
-  quietVol: 32,          // below this the name goes in the 'quiet' bucket
+  calmVol: 32,           // below this the name is 'calm', at or above it 'jumpy'
   /* At least this many distinct expiries in the next five weeks. A weekly name
      has four or five; a monthly name has one. The whole cadence is weekly, so a
      monthly-only name cannot run this strategy at all. */
@@ -398,7 +398,17 @@ Deno.serve(async (req) => {
           // Reported, never gated. Thin is a fact about the name, not a verdict.
           liquidity: oi >= 5000 ? 'deep' : oi >= 800 ? 'fine' : 'thin',
           max_correlation: Math.round(mx * 100) / 100,
-          bucket: v60 < G.quietVol ? 'quiet' : 'broken',
+          /* CALM or JUMPY, and it measures exactly one thing: 60-day realised
+             volatility against calmVol. It is not a gate and it says nothing
+             about the company.
+
+             It used to read 'quiet' or 'broken'. Broken was coined when the
+             sleeve held NKE, LULU and NFLX, which genuinely had fallen hard
+             and then settled. Run across 143 names it started labelling
+             anything merely volatile as broken: CCL is down 7% over the year
+             and firming, and still read BROKEN purely because it realises 42%.
+             That is a verdict the scanner is not entitled to make. */
+          bucket: v60 < G.calmVol ? 'calm' : 'jumpy',
           passes: fails.length === 0,
           fails,
         };
@@ -409,15 +419,65 @@ Deno.serve(async (req) => {
     /* The shared db() exposes upsert(table, rows, onConflict), not a raw post.
        The write is deliberately non-fatal there: a failed cache write must not
        fail the run, and the response below carries the full result either way. */
+    /* The write is done HERE rather than through D.upsert, for one reason: the
+       shared helper only catches THROWN errors —
+
+           try { await fetch(...) } catch { }
+
+       — and a PostgREST 400 is a perfectly good Response, so it falls straight
+       through. The table was created before the weeklies gate and the liquidity
+       word existed, so every write since has been "column weeklies does not
+       exist", discarded in silence. The run kept reporting "passed: 12" while
+       storing nothing, income-sleeve read an empty table, emitted scanner:null,
+       and the card never appeared on the screen.
+
+       Still non-fatal — a failed cache write must not lose a 90-second scan —
+       but the reason now travels back in the response. */
+    /* One shape for every row, or PostgREST rejects the whole batch with
+       PGRST102 "All object keys must match". A bulk insert is a single
+       statement, so it needs one column list: the two early exits above
+       (too little history, a single day over 45%) return four and five keys
+       while a scored name returns twenty-one, and that alone was enough to
+       throw away all 143 rows. Missing keys become null rather than absent. */
+    const COLS = [
+      'ticker', 'asof', 'spot', 'ret_12mo', 'ret_3mo', 'vol_60d', 'vol_20d',
+      'pos_52w', 'own_gap', 'own_gap_on', 'atm_straddle_pct', 'implied_vol',
+      'edge', 'option_oi', 'option_volume', 'weeklies', 'liquidity',
+      'max_correlation', 'bucket', 'passes', 'fails',
+    ] as const;
+    const shaped = out.map((r) => {
+      const o: Record<string, unknown> = {};
+      for (const c of COLS) o[c] = (r as Record<string, unknown>)[c] ?? null;
+      o.passes = (r as Record<string, unknown>).passes === true;
+      return o;
+    });
+
+    let cacheError: string | null = null;
     if (!body.dry_run) {
-      for (let i = 0; i < out.length; i += 50) {
-        await D.upsert('income_scanner_results', out.slice(i, i + 50), 'ticker,asof');
+      for (let i = 0; i < shaped.length; i += 50) {
+        try {
+          const r = await fetch(`${url}/rest/v1/income_scanner_results?on_conflict=ticker,asof`, {
+            method: 'POST',
+            headers: {
+              apikey: key,
+              Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json',
+              Prefer: 'resolution=merge-duplicates,return=minimal',
+            },
+            body: JSON.stringify(shaped.slice(i, i + 50)),
+          });
+          if (!r.ok && !cacheError) cacheError = `${r.status} ${(await r.text()).slice(0, 200)}`;
+        } catch (e) {
+          if (!cacheError) cacheError = String(e).slice(0, 200);
+        }
       }
     }
 
     const passed = out.filter((r) => r.passes);
     const heldRes = out.filter((r) => held.includes(r.ticker));
     return json(200, {
+      // Written, or why not. A silent cache miss cost a day.
+      cached: body.dry_run ? 'dry_run' : (cacheError ?? 'ok'),
       ok: true, build: BUILD, asof: todayISO, expiry,
       checked: out.length,
       passed: passed.length,

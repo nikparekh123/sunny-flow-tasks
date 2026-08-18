@@ -578,7 +578,8 @@ interface OpenPos {
  * the intraday cron.
  */
 function parseOpenPositions(xml: string): OpenPos[] {
-  const bySymbol = new Map<string, OpenPos>();
+  // Pass 1 — collect every STK SUMMARY row the report carries.
+  const rows: OpenPos[] = [];
   const re = /<OpenPosition\s([^>]*?)\/?>/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(xml)) !== null) {
@@ -591,16 +592,41 @@ function parseOpenPositions(xml: string): OpenPos[] {
     if (!a.symbol) continue;
     const qty = parseFloat(a.position);
     if (!isFinite(qty)) continue;
-    const prev = bySymbol.get(a.symbol);
-    if (!prev || (a.reportDate ?? '') >= prev.reportDate) {
-      bySymbol.set(a.symbol, {
-        symbol: a.symbol,
-        quantity: qty,
-        costBasisPrice: parseFloat(a.costBasisPrice) || 0,
-        markPrice: parseFloat(a.markPrice) || 0,
-        reportDate: a.reportDate ?? '',
-      });
-    }
+    rows.push({
+      symbol: a.symbol,
+      quantity: qty,
+      costBasisPrice: parseFloat(a.costBasisPrice) || 0,
+      markPrice: parseFloat(a.markPrice) || 0,
+      reportDate: a.reportDate ?? '',
+    });
+  }
+
+  /* Pass 2 — keep ONLY the report's final day.
+     ────────────────────────────────────────────────────────────────────
+     This used to keep the latest reportDate PER SYMBOL, and that quietly
+     invented positions. A multi-day Daily Flex emits one OpenPosition
+     row per symbol per day, and a symbol sold to flat simply STOPS
+     appearing — there is no zero row. Keeping its last non-zero day
+     therefore froze the holding forever.
+
+     NVDA, 2026-08-17: sold to flat over the 14th and 17th. The report's
+     last NVDA row was the 14th at 1,000 shares, so reconcile kept
+     writing quantity 1000 / status 'open' and the ticker never reached
+     the close-out branch below, because it WAS being reported — just
+     from a stale day. Worse, `reconciled_through` is the report's global
+     max (the 17th), so the intraday layer treated the 17th's sells as
+     already included and declined to subtract them. The app showed
+     1,000 phantom shares that no query could explain.
+
+     The report's newest reportDate is the only authoritative snapshot.
+     A symbol missing from it is flat, and must fall through to the
+     close-out branch. Single-snapshot reports have one date, so this is
+     a no-op for them. */
+  const latest = rows.map((r) => r.reportDate).filter(Boolean).sort().at(-1) ?? '';
+  const bySymbol = new Map<string, OpenPos>();
+  for (const r of rows) {
+    if (r.reportDate !== latest) continue;
+    bySymbol.set(r.symbol, r);
   }
   return Array.from(bySymbol.values());
 }
@@ -1034,8 +1060,8 @@ async function upsertStock(
   // and — crucially — it is the only correct source for shares that were
   // already sold (assignment call-aways), whose cost basis our local
   // reconcile can't reconstruct because the consumed lots are gone. When
-  // it's present we stamp `fifo_reconciled_at` so reconcile_share_fifo()
-  // leaves the row alone. When absent (intraday TCF), fall back to the
+  // it's present we mark realized_pl_source='ibkr' so reconcile_share_fifo()
+  // leaves the NUMBER alone while still consuming the lots. When absent (intraday TCF), fall back to the
   // old path: realized_pl 0, filled later by reconcile_share_fifo().
   const ibkrPnlRaw = t.fifoPnlRealized ?? '';
   const ibkrPnl = ibkrPnlRaw !== '' ? Number(ibkrPnlRaw) : NaN;
@@ -1052,7 +1078,17 @@ async function upsertStock(
     last_synced_at: new Date().toISOString(),
     voided_at: null,
     realized_pl: hasIbkrPnl ? ibkrPnl : 0,
-    fifo_reconciled_at: hasIbkrPnl ? new Date().toISOString() : null,
+    /* Who priced this row. reconcile_share_fifo() recomputes 'fifo' rows and
+       never touches 'ibkr' ones, because our local FIFO cannot rebuild the
+       basis of an assignment call-away whose lots are already gone.
+
+       This replaces the old habit of stamping fifo_reconciled_at here to keep
+       the reconcile off the row. That stamp ALSO switched off lot consumption,
+       because the old reconcile gated both jobs on it, and 1,000 NVDA shares
+       stayed on the books after the account went flat. The reconcile is a full
+       rebuild now and owns fifo_reconciled_at outright; the sync no longer
+       writes it. */
+    realized_pl_source: hasIbkrPnl ? 'ibkr' : 'fifo',
     note: hasIbkrPnl
       ? 'IBKR sync — realized_pl from fifoPnlRealized'
       : 'IBKR sync — realized_pl set by reconcile_share_fifo()',
@@ -1067,12 +1103,12 @@ async function upsertStock(
   if (existing) {
     // When IBKR gives us realized P&L directly, it is authoritative —
     // write it (this is what corrects the stuck-at-0 rows). Otherwise
-    // leave realized_pl / fifo_reconciled_at to reconcile_share_fifo():
+    // leave realized_pl / realized_pl_source to reconcile_share_fifo():
     // re-syncing (the nightly Daily Flex re-walks 5 business days) must
     // NOT reset an already-reconciled row to 0 and orphan its lots.
     let amend: Record<string, unknown> = row;
     if (!hasIbkrPnl) {
-      const { realized_pl: _rp, fifo_reconciled_at: _fr, ...rest } = row;
+      const { realized_pl: _rp, realized_pl_source: _rs, ...rest } = row;
       amend = rest;
     }
     const { error } = await supabase

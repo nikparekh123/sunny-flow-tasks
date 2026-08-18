@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.13';
+const BUILD = '2026-08-18.2';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -187,6 +187,15 @@ Deno.serve(async (req) => {
 
     const tickers = names.map((n) => String(n.ticker));
     const inList = `(${tickers.join(',')})`;
+    /* Earnings are asked for across the SCANNER's names too, not just the book.
+       The scanner card prints "no date on file, cannot be added yet" whenever it
+       cannot find a row, and this query was scoped to the three names in the
+       sleeve, so every candidate said that no matter what was loaded. UBER and
+       CCL were entered by hand and still read as missing, which looked like the
+       insert had failed. Nothing was wrong with the data; the question was never
+       being asked. The book's own queries below stay narrow on purpose. */
+    const earnList = `(${[...new Set([...tickers,
+      ...scanRows.map((r) => String(r.ticker))])].join(',')})`;
     const [earnRows, tradeRows, lotRows, sellRows] = await Promise.all([
       // report_date, NOT earnings_date or event_date. Two migrations and two other
       // functions each use a different name for this column and only report_date
@@ -196,7 +205,7 @@ Deno.serve(async (req) => {
       /* gte today MINUS a week, not today. An ESTIMATED date has to keep
          blocking for a few days after it passes, because the estimate is worth
          about a week either way and the real print may not have happened yet. */
-      D.get(`earnings_events?ticker=in.${inList}&report_date=gte.${ymd(addDays(today, -10))}`
+      D.get(`earnings_events?ticker=in.${earnList}&report_date=gte.${ymd(addDays(today, -10))}`
             + `&select=ticker,report_date,date_estimated&order=report_date.asc`),
       D.get(`option_trades?ticker=in.${inList}&voided_at=is.null`
             + `&select=ticker,trade_date,action,option_type,direction,contracts,strike,premium,expiry`),
@@ -1015,8 +1024,12 @@ Deno.serve(async (req) => {
           .sort((a, b) => Number(a.pos_52w ?? 99) - Number(b.pos_52w ?? 99));
         const heldRows = run.filter((r) => tickers.includes(String(r.ticker)));
         const failing = heldRows.filter((r) => !r.passes);
-        const quiet = pass.filter((r) => r.bucket === 'quiet').map((r) => String(r.ticker));
-        const broken = pass.filter((r) => r.bucket === 'broken').map((r) => String(r.ticker));
+        /* Accepts the old words too. The scanner writes calm/jumpy now, but a
+           row written before the rename still says quiet/broken and would
+           otherwise silently fall into the wrong half until the next scan. */
+        const isCalm = (b: unknown) => b === 'calm' || b === 'quiet';
+        const calm = pass.filter((r) => isCalm(r.bucket)).map((r) => String(r.ticker));
+        const jumpy = pass.filter((r) => !isCalm(r.bucket)).map((r) => String(r.ticker));
         const noDate = pass.filter((r) => !earnRows.some((e) => e.ticker === r.ticker)).length;
 
         const list = (a: string[]) => a.length <= 1 ? a.join('')
@@ -1034,8 +1047,8 @@ Deno.serve(async (req) => {
                 ? `${list(failing.map((r) => String(r.ticker)))} no longer passes: `
                   + `${((failing[0].fails ?? ['a gate']) as string[])[0]}.`
                 : 'All the names you hold still pass.',
-              [quiet.length ? `${list(quiet)} ${quiet.length === 1 ? 'is' : 'are'} the quiet ones` : null,
-               broken.length ? `${list(broken)} pay more` : null].filter(Boolean).join(', ') + '.',
+              [calm.length ? `${list(calm)} ${calm.length === 1 ? 'is' : 'are'} the calm ones` : null,
+               jumpy.length ? `${list(jumpy)} pay more` : null].filter(Boolean).join(', ') + '.',
             ],
             band: [
               { k: 'Checked', v: String(run.length) },
@@ -1049,7 +1062,7 @@ Deno.serve(async (req) => {
             n: String(i + 1).padStart(2, '0'),
             sym: String(r.ticker),
             price: Number(r.spot).toFixed(2),
-            chip: r.bucket === 'quiet' ? 'Quiet' : 'Broken', fill: false,
+            chip: isCalm(r.bucket) ? 'Calm' : 'Jumpy', fill: false,
             forecast: true,          // nothing is held, so every figure here is a quote
             hero: `${Number(r.atm_straddle_pct ?? 0).toFixed(2)}%`,
             unit: `a week at the money · edge ${Number(r.edge ?? 0) >= 0 ? '+' : ''}`
@@ -1078,7 +1091,7 @@ Deno.serve(async (req) => {
               fig: `${Math.round(Number(r.pos_52w ?? 0))}%`,
               sub: 'up the range',
               pct: Math.max(0, Math.min(100, Math.round(Number(r.pos_52w ?? 0)))),
-              line: `${r.bucket === 'quiet' ? 'quiet' : 'broken'} bucket · `
+              line: `${isCalm(r.bucket) ? 'calm' : 'jumpy'} · `
                     + `correlates ${Number(r.max_correlation ?? 0).toFixed(2)} to what you hold`,
             },
             stamp: { text: `scanned ${dayShort(asof)}`, forecast: true },

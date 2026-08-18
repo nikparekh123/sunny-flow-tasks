@@ -135,12 +135,26 @@ confident nonsense. ZS was caught this way on 2026-08-17 (a -32% day).
 Simulated over ten weeks on each name's own returns, these behave differently
 enough that a single score would hide it:
 
-**Broken and quiet** — NKE, LULU, NFLX. A bigger discount, and a worse tail.
+**JUMPY** — 60-day realised vol of 32% or more. NKE, LULU, NFLX. A bigger
+discount, and a worse tail.
 
-**Just quiet** — KO, PEP, MCD, PG. A smaller discount and almost no tail. KO's
-worst case was 1% underwater against NKE's 10%.
+**CALM** — under 32%. KO, PEP, MCD, PG. A smaller discount and almost no tail.
+KO's worst case was 1% underwater against NKE's 10%.
 
-Every row carries its bucket. Neither is better; they are different trades.
+Every row carries its bucket. Neither is better; they are different trades. It
+is not a gate: realised vol is gated separately, at 45%.
+
+### The words were wrong until 2026-08-18
+
+These read **quiet** and **broken**. "Broken" was coined when the sleeve held
+NKE, LULU and NFLX, all of which genuinely had fallen hard and then settled, and
+it survived the move to a 143-name universe where it stopped being true. CCL is
+down 7% over the year and firming, and the card still said BROKEN, purely
+because it realises 42%.
+
+The chip measures one number and must sound like it. A label that reads as a
+verdict on the company is exactly the recommender behaviour this screen exists
+not to do. Calm and jumpy describe movement and claim nothing else.
 
 ---
 
