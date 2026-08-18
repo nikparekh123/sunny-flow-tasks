@@ -98,18 +98,23 @@ begin
   select max(reconciled_through) into baseline from public.positions;
 
   if baseline is not null then
-    update public.share_lots l
+    /* Alias sl, NOT l. `l` is already a plpgsql RECORD variable, declared for
+       pass 2's inner loop, and inside a function the variable wins over a table
+       alias of the same name: `l.voided_at` resolved against the record and
+       threw 42703 "record l has no field voided_at" at runtime. The CREATE
+       succeeded, so it only failed when the function was actually called. */
+    update public.share_lots sl
        set qty_remaining = 0
-     where l.voided_at is null
-       and l.qty_remaining > 0
+     where sl.voided_at is null
+       and sl.qty_remaining > 0
        and not exists (
              select 1 from public.positions p
-              where p.ticker = l.ticker
+              where p.ticker = sl.ticker
                 and p.status = 'open'
                 and coalesce(p.quantity, 0) > 0)
        and not exists (
              select 1 from public.share_lots f
-              where f.ticker = l.ticker
+              where f.ticker = sl.ticker
                 and f.voided_at is null
                 and f.acquired_date > baseline);
   end if;
