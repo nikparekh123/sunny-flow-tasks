@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-17.11';
+const BUILD = '2026-08-17.12';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -385,16 +385,58 @@ Deno.serve(async (req) => {
       const earnSoon = !!(nextEarn
         && nextEarn <= ymd(addDays(parseISO(expiry), earnEstimated ? 14 : 7)));
 
-      // ── the floor ──────────────────────────────────────────────────────────
-      const fStrike = n.floor_strike != null ? Number(n.floor_strike) : null;
-      const fExpiry = n.floor_expiry ? String(n.floor_expiry) : null;
-      const fCt = Number(n.floor_contracts ?? 0);
-      const fCost = Number(n.floor_cost ?? 0);
+      /* ── THE FLOOR, READ FROM THE BOOK ────────────────────────────────────
+         There is no floor entry form and there should not be one. ibkr-flex-sync
+         already imports every option Nik trades, and it already tags a bought put
+         as direction='long', action='open'. A long put on a name in this sleeve
+         IS the floor. Asking him to type it in a second time would create a
+         second source of truth for a position the ledger already holds, and the
+         two would disagree the first time he rolled one.
+
+         So: net the long puts, take the earliest expiry as the one that governs,
+         and price the cost from what he actually paid. Rolls, partial rolls and
+         multiple tranches all work without anyone recording anything.
+
+         income_sleeve_names.floor_* stays as a manual OVERRIDE, for a floor held
+         somewhere the sync cannot see. Book first, row second. */
+      const floorLegs = (() => {
+        const net = new Map<string, { k: number; e: string; ct: number; cost: number; on: string }>();
+        for (const l of legs) {
+          if (l.option_type !== 'put' || l.direction !== 'long') continue;
+          const e = String(l.expiry ?? '').slice(0, 10);
+          if (e < todayISO) continue;                        // already gone
+          const k = Number(l.strike ?? 0);
+          const id = `${k}|${e}`;
+          const sign = l.action === 'open' ? 1 : -1;
+          const cur = net.get(id) ?? { k, e, ct: 0, cost: 0, on: String(l.trade_date ?? '') };
+          cur.ct += sign * Number(l.contracts ?? 0);
+          cur.cost += sign * Number(l.premium ?? 0) * Number(l.contracts ?? 0) * 100;
+          if (String(l.trade_date ?? '') < cur.on) cur.on = String(l.trade_date ?? '');
+          net.set(id, cur);
+        }
+        return [...net.values()].filter((x) => x.ct > 0).sort((a, b) => (a.e < b.e ? -1 : 1));
+      })();
+
+      const bookFloor = floorLegs.length ? {
+        // The EARLIEST expiry governs: that is when the protection lapses, and a
+        // longer tranche behind it does not cover the gap in between.
+        strike: floorLegs.reduce((s, x) => s + x.k * x.ct, 0) / floorLegs.reduce((s, x) => s + x.ct, 0),
+        expiry: floorLegs[0].e,
+        contracts: floorLegs.reduce((s, x) => s + x.ct, 0),
+        cost: floorLegs.reduce((s, x) => s + x.cost, 0),
+        on: floorLegs.reduce((a, x) => (x.on && x.on < a ? x.on : a), floorLegs[0].on),
+      } : null;
+
+      const fStrike = bookFloor ? Math.round(bookFloor.strike * 100) / 100
+        : (n.floor_strike != null ? Number(n.floor_strike) : null);
+      const fExpiry = bookFloor ? bookFloor.expiry : (n.floor_expiry ? String(n.floor_expiry) : null);
+      const fCt = bookFloor ? bookFloor.contracts : Number(n.floor_contracts ?? 0);
+      const fCost = bookFloor ? bookFloor.cost : Number(n.floor_cost ?? 0);
+      const floorFromBook = !!bookFloor;
       const fWeeksLeft = fExpiry ? Math.floor(daysBetween(today, parseISO(fExpiry)) / 7) : null;
       // FUNDED: has the premium collected since the floor was bought paid for it?
-      // Once this crosses 100% the protection is free for the rest of its life. On
-      // AVGO that took about 21 days of a 154-day life.
-      const boughtOn = n.floor_bought_on ? String(n.floor_bought_on) : null;
+      // Once this crosses 100% the protection is free for the rest of its life.
+      const boughtOn = bookFloor ? bookFloor.on : (n.floor_bought_on ? String(n.floor_bought_on) : null);
       const premSinceFloor = boughtOn
         ? legs.filter((l) => l.direction === 'short' && l.action === 'open'
                           && String(l.trade_date ?? '') >= boughtOn)
@@ -627,6 +669,9 @@ Deno.serve(async (req) => {
                : `${Math.round(fundedPct)}% paid for`)
             + (floorShort > 0 ? ` · ${fCt} of ${floorNeed}, ${floorShort} short` : ''),
         floor_cost: fCost,
+        floor_from_book: floorFromBook,
+        floor_tranches: floorLegs.map((x) => ({ strike: x.k, expiry: x.e,
+                                                contracts: x.ct, cost: Math.round(x.cost) })),
         floor_prem_since: Math.round(premSinceFloor),
       };
     }));
