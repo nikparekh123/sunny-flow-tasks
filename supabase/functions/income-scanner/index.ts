@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-18.3';
+const BUILD = '2026-08-18.4';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -230,7 +230,7 @@ Deno.serve(async (req) => {
     const polyKey = Deno.env.get('POLYGON_API_KEY')!;
     if (!polyKey) return json(500, { ok: false, error: 'POLYGON_API_KEY is not set' });
 
-    let body: { asof?: string; dry_run?: boolean; tickers?: string[] } = {};
+    let body: { asof?: string; dry_run?: boolean; tickers?: string[]; explain?: string[] } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is normal */ }
     const today = parseISO(body.asof ?? nyToday());
     const todayISO = ymd(today);
@@ -486,6 +486,19 @@ Deno.serve(async (req) => {
       // comes back first rather than buried in the full list.
       held: heldRes.map((r) => ({ ticker: r.ticker, passes: r.passes, fails: r.fails })),
       names: passed.sort((a, b) => (a.pos_52w ?? 99) - (b.pos_52w ?? 99)),
+      /* Why a NAMED ticker did not clear. Only passers come back in `names`, so
+         a rejected name was previously unanswerable without reading the table
+         directly, and "no rows returned" is indistinguishable from "it passed".
+
+         Deliberately NOT the same as body.tickers, which REPLACES the universe:
+         a narrow run has too few samples for market-day detection, so no day
+         reaches the 60-sample floor, none are found, and every stock wears the
+         April 2025 macro week as its own gap. NKE came back at 15.2% that way.
+         explain scans the whole universe and merely reports more of it. */
+      explain: (body.explain ?? []).length
+        ? out.filter((r) => (body.explain as string[])
+            .map((t) => t.toUpperCase()).includes(String(r.ticker)))
+        : undefined,
       // Liquidity is the gate that cannot be proxied, so say plainly whether the
       // feed actually returned it rather than letting a zero read as "illiquid".
       liquidity_seen: out.filter((r) => (r.option_oi ?? 0) > 0).length,

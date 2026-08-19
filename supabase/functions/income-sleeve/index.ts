@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-18.6';
+const BUILD = '2026-08-19.1';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -174,13 +174,14 @@ Deno.serve(async (req) => {
     const expiry = comingFriday(today);
     const D = db(url, key);
 
-    const [names, mkt, setRows, scanRows] = await Promise.all([
+    const [names, mkt, setRows, scanRows, watchRows] = await Promise.all([
       D.get('income_sleeve_names?active=is.true&select=*&order=sort.asc'),
       marketNow(polyKey),
       D.get('income_sleeve_settings?id=eq.1&select=*'),
       // The scanner writes here on a cron. Reading the table rather than calling
       // the function keeps this screen at one second instead of ninety.
       D.get('income_scanner_results?select=*&order=asof.desc&limit=300'),
+      D.get('income_scanner_universe?watch=is.true&select=ticker'),
     ]);
     const cfg = setRows[0] ?? {};
     if (!names.length) return json(200, { ok: true, empty: true, note: 'no active names' });
@@ -1278,7 +1279,25 @@ Deno.serve(async (req) => {
                 : 'All the names you hold still pass.',
               [calm.length ? `${list(calm)} ${calm.length === 1 ? 'is' : 'are'} the calm ones` : null,
                jumpy.length ? `${list(jumpy)} pay more` : null].filter(Boolean).join(', ') + '.',
-            ],
+              /* The watchlist. A name Nik rates that does not clear yet would
+                 otherwise vanish from this screen entirely, since only passers
+                 are shown, and "not on the list" reads identically to "never
+                 looked at". This says what each one is still waiting on. When
+                 it clears it ALSO appears as a card below by the normal route,
+                 so the good news arrives twice rather than not at all. */
+              (() => {
+                const watch = (watchRows ?? []).map((w) => String(w.ticker));
+                if (!watch.length) return null;
+                const said = watch.map((t) => {
+                  const row = run.find((r) => String(r.ticker) === t);
+                  if (!row) return `${t} was not scanned`;
+                  if (row.passes === true) return `${t} clears now`;
+                  const f = (row.fails ?? []) as string[];
+                  return `${t} is waiting on ${f.length ? list(f) : 'a gate'}`;
+                });
+                return `Watching: ${said.join('. ')}.`;
+              })(),
+            ].filter(Boolean),
             band: [
               { k: 'Checked', v: String(run.length) },
               { k: 'Clear', v: String(pass.length), mark: true },

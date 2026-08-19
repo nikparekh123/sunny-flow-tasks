@@ -37,9 +37,19 @@ Deno.serve(async (req) => {
   }).formatToParts(now);
   const wd = estParts.find(p => p.type === 'weekday')?.value ?? '';
   const h = Number(estParts.find(p => p.type === 'hour')?.value ?? '0');
-  // Trading window 9:30–16:00 ET, Mon–Fri.
+  // Trading window 9:30-16:00 ET, Mon-Fri.
   const isWeekday = !['Sat', 'Sun'].includes(wd);
-  const inMarket = isWeekday && h >= 9 && h < 16;
+  const mins = Number(estParts.find(p => p.type === 'minute')?.value ?? '0');
+  const minsET = h * 60 + mins;
+  const inMarket = isWeekday && minsET >= (9 * 60 + 30) && minsET < (16 * 60);
+  /* Minutes since ibkr-flex-sync was ALLOWED to start today. The sync self-gates
+     to 09:30-16:30 ET and returns 'out-of-window' before that, so the overnight
+     gap is not staleness and must not be counted as it. This used to say
+     `h >= 9`, which had the monitor demanding a fresh run at 09:00 while the
+     sync was still barred from making one. It measured back to the previous
+     afternoon and raised CRITICAL every single weekday morning. Harmless while
+     APNs was dead; a 09:00 alarm on Nik's phone now that it works. */
+  const minsSinceSyncOpen = minsET - (9 * 60 + 30);
 
   const findings: { code: string; ok: boolean; severity?: 'warn' | 'critical'; detail: string; meta?: Record<string, unknown> }[] = [];
 
@@ -125,7 +135,9 @@ Deno.serve(async (req) => {
       const latest = ibkr?.[0]?.finished_at
         ? new Date(ibkr[0].finished_at as string).getTime()
         : 0;
-      const ageMin = latest > 0 ? (now.getTime() - latest) / 60000 : Infinity;
+      const rawAgeMin = latest > 0 ? (now.getTime() - latest) / 60000 : Infinity;
+      // Never blame the sync for time it was not permitted to run.
+      const ageMin = Math.min(rawAgeMin, minsSinceSyncOpen);
       // Cron is 15-min. Two tiers:
       //   ≤ 35m  → ok
       //   35-90m → warn (yellow, "IBKR sync delayed")

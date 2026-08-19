@@ -56,9 +56,12 @@ Deno.serve(async (req) => {
 
   // Pull everything we need in parallel.
   const [{ data: trades }, { data: quotes }, { data: positions }] = await Promise.all([
-    supabase.from('option_trades').select('id, ticker, action, option_type, direction, contracts, strike, expiry, closes_trade_id'),
+    supabase.from('option_trades').select('id, ticker, action, option_type, direction, contracts, strike, expiry, closes_trade_id, voided_at'),
     supabase.from('ticker_quotes_latest').select('ticker, spot'),
-    supabase.from('positions').select('ticker, earnings_date'),
+    /* Held positions only. Without the filter this warned about earnings for
+       every ticker ever entered, INTU included, which Nik has not owned since
+       July. A print only matters if there is exposure to it. */
+    supabase.from('positions').select('ticker, earnings_date').eq('status', 'open').gt('quantity', 0),
   ]);
   const allTrades = (trades ?? []) as OptionTradeRow[];
   const spotByTicker: Record<string, number> = {};
@@ -66,66 +69,136 @@ Deno.serve(async (req) => {
     if (q.spot != null) spotByTicker[q.ticker] = Number(q.spot);
   }
 
-  // Remaining contracts per open id.
-  const closedBy: Record<string, number> = {};
-  for (const t of allTrades) {
-    if (t.action === 'close' && t.closes_trade_id) {
-      closedBy[t.closes_trade_id] = (closedBy[t.closes_trade_id] ?? 0) + Number(t.contracts);
-    }
-  }
-  const openLegs = allTrades.filter(t => {
-    if (t.action !== 'open') return false;
-    const rem = Number(t.contracts) - (closedBy[t.id] ?? 0);
-    return rem > 0.0001;
-  });
+  /* What is actually still open, netted by CONTRACT.
+     ────────────────────────────────────────────────────────────────────────
+     This used to subtract closes from the specific open row they pointed at:
 
-  // Per-leg evaluations.
+         rem = t.contracts - closedBy[t.id]
+
+     but ibkr-flex-sync links every close to the OLDEST matching open, FIFO. So
+     one open absorbs a pile of closes and goes far negative (filtered out),
+     while later identical opens are never pointed at by anything and read as
+     fully open forever. NVDA has 855 contracts opened and 855 closed, every
+     close linked, and this still reported 40 short calls sitting in the money
+     on an account that is flat. That is where most of the 88 daily alerts came
+     from: positions Nik closed weeks ago.
+
+     Netting per (ticker, type, direction, strike, expiry) is the same thing
+     open-premium does, which is why that screen has always had NVDA right.
+
+     Two more holes closed while here: voided_at was never filtered, so
+     soft-deleted trades still alerted, and expiry was never checked, so an
+     expired leg that was never explicitly closed alerted every single day. */
+  const todayKey = todayEST;
+  const netKey = (t: OptionTradeRow) =>
+    `${t.ticker}|${t.option_type}|${t.direction}|${Number(t.strike)}|${String(t.expiry).slice(0, 10)}`;
+
+  const net = new Map<string, { open: number; close: number; row: OptionTradeRow | null }>();
+  for (const t of allTrades) {
+    if ((t as { voided_at?: string | null }).voided_at != null) continue;
+    const k = netKey(t);
+    const e = net.get(k) ?? { open: 0, close: 0, row: null };
+    if (t.action === 'open') { e.open += Number(t.contracts); e.row = t; }
+    else { e.close += Number(t.contracts); }
+    net.set(k, e);
+  }
+
+  const openLegs = [...net.values()]
+    .filter((e) => e.row !== null && e.open - e.close > 0.0001)
+    .filter((e) => String(e.row!.expiry).slice(0, 10) >= todayKey)
+    .map((e) => ({ ...e.row!, contracts: e.open - e.close }));
+
+  /* ── Grouped per ticker, not per leg ────────────────────────────────────
+     Every one of these used to enqueue with dedup_key `<cat>:<leg.id>:<date>`,
+     so one notification fired per option leg. Nik holds a lot of legs, and the
+     12:00 run produced 88 alerts on 19 Aug, 99 on the 18th, 97 on the 17th.
+     Three separate "NVDA short call is ITM" pushes in one batch, saying the
+     same thing about the same underlying three times.
+
+     It went unnoticed for two months because APNs was never configured, so the
+     rows piled up unseen. The moment delivery started working it would have
+     been ~90 notifications a morning, which is the same as no notifications.
+
+     Now the key is `<cat>:<ticker>:<date>` and the leg detail moves into the
+     body, where it costs nothing to read. Roughly 4 or 5 pushes a day. */
+  type Bucket = { legs: typeof openLegs; spot: number };
+  const buckets = new Map<string, Map<string, Bucket>>();
+  const collect = (cat: string, leg: typeof openLegs[number], spot: number) => {
+    let byTicker = buckets.get(cat);
+    if (!byTicker) { byTicker = new Map(); buckets.set(cat, byTicker); }
+    const b = byTicker.get(leg.ticker) ?? { legs: [], spot };
+    b.legs.push(leg);
+    b.spot = spot;
+    byTicker.set(leg.ticker, b);
+  };
+
   for (const leg of openLegs) {
     const dte = daysUntilEST(leg.expiry);
     const spot = spotByTicker[leg.ticker] ?? 0;
 
-    // theta_cliff — DTE == 21 (first day in cliff zone)
-    if (dte === 21) {
-      await enqueue(queued, supabase, {
-        category: 'theta_cliff',
-        dedup_key: `theta_cliff:${leg.id}:${todayEST}`,
-        ticker: leg.ticker,
-        title: `${leg.ticker} $${Math.round(leg.strike)}${leg.option_type[0]} enters cliff zone`,
-        body: `21 days to expiry. Theta acceleration starts now.`,
-        deep_link: `hedge://leg/${leg.id}`,
-      });
-    }
-    // theta_critical — DTE == 7
-    if (dte === 7) {
-      await enqueue(queued, supabase, {
-        category: 'theta_critical',
-        dedup_key: `theta_critical:${leg.id}:${todayEST}`,
-        ticker: leg.ticker,
-        title: `${leg.ticker} $${Math.round(leg.strike)}${leg.option_type[0]} — critical`,
-        body: `7 days to expiry. Burn is steep — roll or commit.`,
-        deep_link: `hedge://leg/${leg.id}`,
-      });
-    }
-    // short_call_itm — short call, spot >= strike (assignment risk)
+    if (dte === 21) collect('theta_cliff', leg, spot);
+    if (dte === 7)  collect('theta_critical', leg, spot);
     if (spot > 0 && leg.option_type === 'call' && leg.direction === 'short' && spot >= Number(leg.strike)) {
-      await enqueue(queued, supabase, {
-        category: 'short_call_itm',
-        dedup_key: `short_call_itm:${leg.id}:${todayEST}`,
-        ticker: leg.ticker,
-        title: `${leg.ticker} short call is ITM`,
-        body: `Spot $${spot.toFixed(2)} ≥ strike $${Number(leg.strike).toFixed(0)}. Assignment risk.`,
-        deep_link: `trades://leg/${leg.id}`,
-      });
+      collect('short_call_itm', leg, spot);
     }
-    // long_put_itm — long put, spot <= strike (insurance kicking in)
     if (spot > 0 && leg.option_type === 'put' && leg.direction === 'long' && spot <= Number(leg.strike)) {
+      collect('long_put_itm', leg, spot);
+    }
+  }
+
+  // Strikes read better than ids, and they are what Nik actually recognises.
+  const strikeList = (legs: typeof openLegs) => {
+    const ks = [...new Set(legs.map((l) => Number(l.strike)))].sort((a, b) => a - b);
+    const txt = ks.map((k) => (Number.isInteger(k) ? String(k) : k.toFixed(1)));
+    return txt.length === 1 ? txt[0]
+      : txt.slice(0, -1).join(', ') + ' and ' + txt[txt.length - 1];
+  };
+
+  // Contracts, not rows. "3 short calls" should mean three contracts.
+  const ct = (b: Bucket) => b.legs.reduce((a, l) => a + Number(l.contracts), 0);
+
+  const COPY: Record<string, (t: string, b: Bucket) => { title: string; body: string; link: string }> = {
+    theta_cliff: (t, b) => ({
+      title: b.legs.length === 1
+        ? `${t} $${Math.round(Number(b.legs[0].strike))}${b.legs[0].option_type[0]} enters cliff zone`
+        : `${t}: ${ct(b)} legs enter the cliff zone`,
+      body: `21 days to expiry on ${strikeList(b.legs)}. Theta acceleration starts now.`,
+      link: `hedge://leg/${b.legs[0].id}`,
+    }),
+    theta_critical: (t, b) => ({
+      title: b.legs.length === 1
+        ? `${t} $${Math.round(Number(b.legs[0].strike))}${b.legs[0].option_type[0]} is critical`
+        : `${t}: ${ct(b)} legs critical`,
+      body: `7 days to expiry on ${strikeList(b.legs)}. Burn is steep, roll or commit.`,
+      link: `hedge://leg/${b.legs[0].id}`,
+    }),
+    short_call_itm: (t, b) => ({
+      title: ct(b) === 1
+        ? `${t} short call is ITM`
+        : `${t}: ${ct(b)} short calls ITM`,
+      body: `Spot $${b.spot.toFixed(2)} at or above ${strikeList(b.legs)}. Assignment risk.`,
+      link: `trades://leg/${b.legs[0].id}`,
+    }),
+    long_put_itm: (t, b) => ({
+      title: ct(b) === 1
+        ? `${t} long put is ITM`
+        : `${t}: ${ct(b)} long puts ITM`,
+      body: `Spot $${b.spot.toFixed(2)} at or below ${strikeList(b.legs)}. Hedge is active.`,
+      link: `hedge://leg/${b.legs[0].id}`,
+    }),
+  };
+
+  for (const [cat, byTicker] of buckets) {
+    for (const [ticker, b] of byTicker) {
+      const c = COPY[cat](ticker, b);
       await enqueue(queued, supabase, {
-        category: 'long_put_itm',
-        dedup_key: `long_put_itm:${leg.id}:${todayEST}`,
-        ticker: leg.ticker,
-        title: `${leg.ticker} long put is ITM`,
-        body: `Spot $${spot.toFixed(2)} ≤ strike $${Number(leg.strike).toFixed(0)}. Hedge is active.`,
-        deep_link: `hedge://leg/${leg.id}`,
+        category: cat,
+        // One per ticker per category per day, NOT one per leg.
+        dedup_key: `${cat}:${ticker}:${todayEST}`,
+        ticker,
+        title: c.title,
+        body: c.body,
+        deep_link: c.link,
       });
     }
   }

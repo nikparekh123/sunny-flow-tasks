@@ -28,9 +28,18 @@ final class PushRegistrar {
     var lastToken: String?
     var lastError: String?
 
-    /// Bundle id we report to push_devices. Hard-coded so the worker
-    /// can filter by it. Update if the bundle id changes.
-    private let bundleId = "com.sunnyfi.Sunnyfi"
+    /// Bundle id we report to push_devices, read from the app itself.
+    ///
+    /// This was hard-coded to "com.sunnyfi.Sunnyfi" and the app's real bundle
+    /// is com.sunnyfi.app, so every one of the 13 registered devices carried a
+    /// bundle id that does not exist. It mattered twice over: apns-deliver
+    /// filters push_devices by it, AND the same string is sent to Apple as the
+    /// apns-topic, where it must be the true bundle id or APNs answers
+    /// TopicDisallowed. Set it correctly for Apple and the device lookup found
+    /// nothing; set it to match the rows and Apple refused the push.
+    ///
+    /// Reading it from Bundle.main means it cannot drift from the target again.
+    private let bundleId = Bundle.main.bundleIdentifier ?? "com.sunnyfi.app"
 
     /// Are we a debug/simulator build (sandbox APNs) or a TestFlight /
     /// App Store build (production APNs)? Affects which APNs server
