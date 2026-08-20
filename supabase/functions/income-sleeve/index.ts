@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-20.2';
+const BUILD = '2026-08-20.5';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
          blocking for a few days after it passes, because the estimate is worth
          about a week either way and the real print may not have happened yet. */
       D.get(`earnings_events?ticker=in.${earnList}&report_date=gte.${ymd(addDays(today, -10))}`
-            + `&select=ticker,report_date,date_estimated&order=report_date.asc`),
+            + `&select=ticker,report_date,date_estimated,report_session&order=report_date.asc`),
       D.get(`option_trades?ticker=in.${inList}&voided_at=is.null`
             + `&select=ticker,trade_date,action,option_type,direction,contracts,strike,premium,expiry`),
       D.get(`share_lots?ticker=in.${inList}&voided_at=is.null&select=ticker,acquired_date,qty_remaining,cost_per_share`),
@@ -1112,10 +1112,31 @@ Deno.serve(async (req) => {
         const dow = new Date(`${todayISO}T12:00:00Z`).getUTCDay();
         const settle = dow === 5 && openPuts > 0;
 
+        /* TWO DECISIONS, NOT ONE RANKED LIST. See docs/STRATEGIES.md.
+           ───────────────────────────────────────────────────────────────────
+           This block used to rank held blocks and fresh candidates together and
+           judge them all with the same new-money edge floor. That produced two
+           instructions Nik called out as not his strategy at all:
+
+             "Write 11 puts at 143"  for PG, a name he does not own. The sleeve
+             cannot produce that sentence. Entering is FOUR legs: buy the shares,
+             sell the call, sell the put, buy the floor.
+
+             "NKE, edge 0.7, under the floor"  on a block of 2,000 shares with
+             20 long puts at 40 sitting under it. The floor is bought and
+             decaying whether or not he writes, and premium is what funds it.
+             An edge floor decides where NEW money goes; it has no business
+             judging a block already owned.
+
+           So: a name WITH shares is written every week at one contract per 100
+           shares, blocked only by a print or a settle day. A name WITHOUT
+           shares is an entry, and entries face the floor, the cap and the
+           target. LULU falls into the second group today, holding 0 shares and
+           no floor, which is why it was being ranked as a position it is not. */
         type Cand = {
           sym: string; spot: number; edge: number | null; strike: number;
-          mid: number | null; iv: number | null; rv: number | null;
-          held: boolean; mine: number; wkPct: number | null;
+          mid: number | null; straddle: number | null; iv: number | null; rv: number | null;
+          held: boolean; shares: number; mine: number; wkPct: number | null;
         };
         const cands: Cand[] = [];
 
@@ -1129,7 +1150,12 @@ Deno.serve(async (req) => {
             mid: r.atm_put_mid != null ? Number(r.atm_put_mid) : null,
             iv: r.iv != null ? Number(r.iv) : null,
             rv: r.rv != null ? Number(r.rv) : null,
-            held: true, mine: Number(r.put_commitment ?? 0),
+            straddle: r.atm_straddle != null ? Number(r.atm_straddle) : null,
+            // held means SHARES, not membership. LULU is an active row with an
+            // empty block; there is nothing to write a covered call against.
+            held: Number(r.shares ?? 0) > 0,
+            shares: Number(r.shares ?? 0),
+            mine: Number(r.put_commitment ?? 0),
             wkPct: (r.atm_straddle && r.spot)
               ? (Number(r.atm_straddle) / Number(r.spot)) * 100 : null,
           });
@@ -1149,9 +1175,10 @@ Deno.serve(async (req) => {
               sym, spot: sp, edge: r.edge != null ? Number(r.edge) : null,
               strike: Math.round(sp * 2) / 2,
               mid: wk != null ? (sp * wk / 100) / 2 : null,
+              straddle: wk != null ? sp * wk / 100 : null,
               iv: r.implied_vol != null ? Number(r.implied_vol) : null,
               rv: r.vol_60d != null ? Number(r.vol_60d) : null,
-              held: false, mine: 0, wkPct: wk,
+              held: false, shares: 0, mine: 0, wkPct: wk,
             });
           }
         }
@@ -1172,16 +1199,56 @@ Deno.serve(async (req) => {
            The third is what makes income the goal rather than the trigger. Once
            the week's target is covered there is no reason to add commitment, no
            matter how good the edge looks. */
-        const gated = cands.map((c) => {
-          const e = earnRows.find((x) => x.ticker === c.sym);
-          const earnISO = e ? String(e.report_date) : null;
+        /* A print that has already been delivered must stop blocking, and it
+           must stop blocking HERE too. The scanner learned this an hour before
+           this block did, so for one deploy the scanner cleared BABA at +9.8
+           while this card still said "reports Thu 20 Aug", which is the exact
+           two-cards-disagree bug we had just removed. Same rule, same place:
 
+             pre  + today + past 09:30 ET  ->  behind you
+             post + today                  ->  blocks all day
+             confirmed date in the past    ->  behind you
+             ESTIMATED date in the past    ->  still blocks, the estimate is
+                                               worth about a week either way */
+        const nyNow = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+        }).formatToParts(new Date());
+        const afterOpen = (Number(nyNow.find((x) => x.type === 'hour')?.value ?? '0') * 60
+          + Number(nyNow.find((x) => x.type === 'minute')?.value ?? '0')) >= (9 * 60 + 30);
+        const delivered = (r: Record<string, unknown>) => {
+          const d = String(r.report_date).slice(0, 10);
+          if (d === todayISO) return String(r.report_session ?? 'post') === 'pre' && afterOpen;
+          return d < todayISO && r.date_estimated !== true;
+        };
+
+        const gated = cands.map((c) => {
+          /* A DELIVERED print is knowledge, not absence. Dropping the row and
+             reporting "no earnings date on file" reads as never-looked-at and
+             skips the name, which is how BABA went from cleared on one card to
+             missing-a-date on the other within a single deploy. Keep the row,
+             mark it behind you, and stop blocking. */
+          const mine = earnRows.filter((x) => x.ticker === c.sym);
+          const e = mine.find((x) => !delivered(x));
+          const earnISO = e ? String(e.report_date) : null;
+          const everKnown = mine.length > 0;
+
+          /* The edge floor is a NEW-MONEY test and applies to entries only.
+             A block already owned has its floor bought and decaying, and the
+             spec is explicit that premium funds the floor, so it is written
+             every week. Skipping NKE at edge 0.7 while holding 2,000 shares
+             and 20 long puts left that floor bleeding with nothing paying for
+             it. The edge CEILING still applies to both: a priced event is a
+             reason to stand aside whoever you are. */
           let why: string | null = null;
           if (settle) why = 'settle day, Monday is not known yet';
-          else if (c.edge == null) why = 'no edge reading';
-          else if (c.edge < eFloor) why = `edge ${c.edge.toFixed(1)}, under the floor`;
-          else if (c.edge > eCeil) why = `edge ${c.edge.toFixed(1)}, an event is priced`;
-          else if (!earnISO) why = 'no earnings date on file';
+          else if (!c.held && c.edge == null) why = 'no edge reading';
+          else if (!c.held && c.edge != null && c.edge < eFloor) {
+            why = `edge ${c.edge.toFixed(1)}, under the floor`;
+          } else if (c.edge != null && c.edge > eCeil) {
+            why = `edge ${c.edge.toFixed(1)}, an event is priced`;
+          }
+          else if (!earnISO && !everKnown) why = 'no earnings date on file';
+          else if (!earnISO) { /* reported already, nothing ahead inside the window */ }
           /* A WEEK PAST the expiry, not the expiry itself. Getting this wrong
              would have written PDD today: it reports Mon 24 Aug and the expiry
              is Fri 21 Aug, so the option is clear of the print and the first
@@ -1198,8 +1265,28 @@ Deno.serve(async (req) => {
 
         let left = headroom;
         let need = Math.max(0, target - paid);
+
+        /* Pass 1, THE BLOCKS YOU HOLD. Size is not negotiable and not
+           allocated: one contract per 100 shares, both legs, as the spec has
+           always said. The target does not gate these either. The target
+           decides how much NEW commitment to add; it has no say over the
+           routine on a position already owned and already protected. */
         for (const x of gated) {
-          if (x.why) continue;
+          if (x.why || !x.c.held) continue;
+          const ct = Math.floor(x.c.shares / 100);
+          if (ct < 1) { x.why = 'no shares to write against'; continue; }
+          x.ct = ct;
+          x.commits = Math.round(ct * x.c.strike * 100);
+          // Both legs: the call and the put together are the week's income.
+          x.pays = x.c.straddle != null ? Math.round(x.c.straddle * 100 * ct) : 0;
+          left -= x.commits;
+          need -= x.pays;
+        }
+
+        /* Pass 2, NEW MONEY. Now the floor, the cap and the target all bite,
+           and the size comes from whichever of the three is smallest. */
+        for (const x of gated) {
+          if (x.why || x.c.held) continue;
           const room = Math.max(0, Math.min(left, nameCap - x.c.mine));
           let ct = Math.floor(room / (x.c.strike * 100));
           // Stop at the target. Income says when to stop, never when to go.
@@ -1214,7 +1301,8 @@ Deno.serve(async (req) => {
           }
           x.ct = ct;
           x.commits = Math.round(ct * x.c.strike * 100);
-          x.pays = x.c.mid != null ? Math.round(x.c.mid * 100 * ct) : 0;
+          x.pays = x.c.straddle != null ? Math.round(x.c.straddle * 100 * ct)
+                 : x.c.mid != null ? Math.round(x.c.mid * 100 * ct) : 0;
           left -= x.commits;
           need -= x.pays;
         }
@@ -1257,10 +1345,21 @@ Deno.serve(async (req) => {
               chip: x.why ? 'Skip' : 'Write',
               fill: !x.why,
               fig: edgeTxt,
+              /* "Write N puts on X" is not a sentence this strategy can
+                 produce, and it printed one for PG, a name Nik does not own.
+                 See docs/STRATEGIES.md. A held block is the weekly straddle
+                 against shares already there. An entry is FOUR legs placed
+                 together: buy the shares, sell the call, sell the put, buy the
+                 floor. Anything less is the TLT trade wearing this screen. */
               line: x.why
                 ? x.why.charAt(0).toUpperCase() + x.why.slice(1) + '.'
-                : `Write ${x.ct} puts at ${c.strike}, ${dayShort(expiry)}. `
-                  + `Pays ${usd(x.pays)}, commits ${usd(x.commits)}.`,
+                : c.held
+                  ? `Sell ${x.ct} calls and ${x.ct} puts at ${c.strike}, `
+                    + `${dayShort(expiry)}. Pays ${usd(x.pays)} on `
+                    + `${c.shares.toLocaleString('en-US')} shares.`
+                  : `Buy ${(x.ct * 100).toLocaleString('en-US')} shares at ${c.spot.toFixed(2)}, `
+                    + `sell ${x.ct} calls and ${x.ct} puts at ${c.strike} ${dayShort(expiry)}, `
+                    + `buy ${x.ct} floor puts. Pays ${usd(x.pays)}, commits ${usd(x.commits)}.`,
             };
           }),
         };

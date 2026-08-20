@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-20.2';
+const BUILD = '2026-08-20.3';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -279,7 +279,7 @@ Deno.serve(async (req) => {
       D.get('income_sleeve_names?active=is.true&select=ticker'),
       D.get('income_sleeve_settings?id=eq.1&select=edge_floor,edge_ceiling'),
       D.get(`earnings_events?report_date=gte.${todayISO}`
-            + `&select=ticker,report_date&order=report_date.asc`),
+            + `&select=ticker,report_date,report_session&order=report_date.asc`),
     ]);
     const cfg = setRows[0] ?? {};
     const edgeFloor = Number(cfg.edge_floor ?? G.edgeMin);
@@ -292,10 +292,28 @@ Deno.serve(async (req) => {
        PDD reporting Mon 24 Aug against a Fri 21 Aug expiry is clear on the
        option and holds you into the print. */
     const blackoutEnd = ymd(addDays(parseISO(expiry), 7));
-    const earnBy = new Map<string, string>();
+
+    /* A print dated TODAY may already be behind you. earnings_events stores a
+       date and no time, so BABA was blocked on 20 Aug by a report it had
+       delivered before that morning's open, at an edge of +9.3, the best on
+       the board. report_session settles it: 'pre' clears once 09:30 ET has
+       passed, 'post' blocks the whole day, and NULL is treated as post so not
+       knowing never releases a name early. */
+    const nyNow = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(new Date());
+    const nyMins = Number(nyNow.find((p) => p.type === 'hour')?.value ?? '0') * 60
+                 + Number(nyNow.find((p) => p.type === 'minute')?.value ?? '0');
+    const afterOpen = nyMins >= (9 * 60 + 30);
+
+    const earnBy = new Map<string, { d: string; done: boolean }>();
     for (const e of earnRows) {
       const tk = String(e.ticker);
-      if (!earnBy.has(tk)) earnBy.set(tk, String(e.report_date).slice(0, 10));
+      if (earnBy.has(tk)) continue;
+      const d = String(e.report_date).slice(0, 10);
+      // Already delivered: dated today, before the open, and the open has passed.
+      const done = d === todayISO && String(e.report_session ?? 'post') === 'pre' && afterOpen;
+      earnBy.set(tk, { d, done });
     }
     const held = heldRows.map((r) => String(r.ticker));
     const universe = (body.tickers ?? uniRows.map((r) => String(r.ticker)));
@@ -443,7 +461,9 @@ Deno.serve(async (req) => {
         // cannot fire looks exactly like a guard with nothing to catch.
         const rep = earnBy.get(t);
         if (!rep) fails.push('no earnings date on file');
-        else if (rep <= blackoutEnd) fails.push(`reports ${rep}, inside the blackout`);
+        else if (!rep.done && rep.d <= blackoutEnd) {
+          fails.push(`reports ${rep.d}, inside the blackout`);
+        }
 
         return {
           ticker: t, asof: todayISO, spot: Math.round(spot * 100) / 100,
