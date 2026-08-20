@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-18.4';
+const BUILD = '2026-08-20.1';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -151,11 +151,37 @@ async function weeklyCount(ticker: string, from: string, to: string,
   } catch { return -1; }
 }
 
-/** The coming Friday: the expiry the sleeve actually writes. */
+/** The next Friday on the calendar. Not necessarily the one to price. */
 function comingFriday(from: Date): string {
   const d = new Date(from.getTime());
   do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() !== 5);
   return ymd(d);
+}
+
+/* The expiry the sleeve ACTUALLY writes, which always carries about a week.
+   ─────────────────────────────────────────────────────────────────────────
+   This used to price comingFriday() outright, so the scan measured a 5-day
+   option on Monday and a ONE-day option on Thursday. Implied vol is the
+   straddle price over the square root of time, and as time goes to zero that
+   division amplifies every cent of spread into whole volatility points.
+
+   The same book, three consecutive days, straddle price barely moving:
+
+       MCD    1.83  1.54  1.36 % of spot     IV  25   21   36
+       KMB    2.12  3.11  2.41               IV  33   34   78
+       CPB    2.73  2.71  2.77               IV  35   41   17
+
+   Not even a consistent inflation: KMB doubled while CPB halved, because at
+   one day the error simply leans whichever way the quote happens to sit. The
+   clear list fell from 10 names to 3 overnight on an unchanged book.
+
+   Nik writes on Friday for the FOLLOWING Friday, so the contract he sells has
+   roughly seven days in it and never one. Skipping to the next Friday inside
+   five days prices the option he actually trades, and makes the reading mean
+   the same thing on a Monday as on a Thursday. */
+function writeFriday(from: Date): string {
+  const f = parseISO(comingFriday(from));
+  return ymd(daysBetween(from, f) < 5 ? addDays(f, 7) : f);
 }
 
 /** Every listed contract at one expiry, WITH open interest and volume. The
@@ -234,7 +260,7 @@ Deno.serve(async (req) => {
     try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is normal */ }
     const today = parseISO(body.asof ?? nyToday());
     const todayISO = ymd(today);
-    const expiry = comingFriday(today);
+    const expiry = writeFriday(today);
     const D = db(url, key);
 
     const [uniRows, heldRows] = await Promise.all([
