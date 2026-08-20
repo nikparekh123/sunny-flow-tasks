@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-19.1';
+const BUILD = '2026-08-20.2';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -93,11 +93,30 @@ function nearest(qs: Quote[], target: number): Quote | null {
   return live.reduce((a, b) => (Math.abs(a.strike - target) <= Math.abs(b.strike - target) ? a : b));
 }
 
-/** The coming Friday. Weekly is the whole cadence here; there is no tenor decision. */
+/** The next Friday on the calendar. Not necessarily the one being written. */
 function comingFriday(from: Date): string {
   const d = new Date(from.getTime());
   do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() !== 5);
   return ymd(d);
+}
+
+/* The expiry actually being written, which always carries about a week.
+   ───────────────────────────────────────────────────────────────────────────
+   Same fix as income-scanner, and for the same reason. Pricing comingFriday()
+   outright meant a Thursday read measured a ONE-day option, and implied vol is
+   the straddle over the square root of time, so as time goes to zero the
+   division turns a cent of spread into whole volatility points.
+
+   It showed up as the two cards disagreeing: on 2026-08-20 LULU read +8.8 here
+   and +7.2 on the scanner, same name, same second, because this one was still
+   pricing tomorrow's expiry and the scanner had moved to the eight-day one.
+
+   Nik writes on Friday for the FOLLOWING Friday, so the contract is never a
+   one-day option. Both functions must measure the same contract or the screen
+   argues with itself. */
+function writeFriday(from: Date): string {
+  const f = parseISO(comingFriday(from));
+  return ymd(daysBetween(from, f) < 5 ? addDays(f, 7) : f);
 }
 
 /**
@@ -171,7 +190,7 @@ Deno.serve(async (req) => {
     try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is normal */ }
     const today = parseISO(body.asof ?? nyToday());
     const todayISO = ymd(today);
-    const expiry = comingFriday(today);
+    const expiry = writeFriday(today);
     const D = db(url, key);
 
     const [names, mkt, setRows, scanRows, watchRows] = await Promise.all([
@@ -1274,10 +1293,11 @@ Deno.serve(async (req) => {
               // The book first. A name Nik holds failing a gate is the highest-value
               // thing this can say, and it must not sit under a list of candidates.
               failing.length
-                ? `${list(failing.map((r) => String(r.ticker)))} no longer passes: `
+                ? `${list(failing.map((r) => String(r.ticker)))} no longer `
+                  + `${failing.length === 1 ? 'passes' : 'pass'}: `
                   + `${((failing[0].fails ?? ['a gate']) as string[])[0]}.`
                 : 'All the names you hold still pass.',
-              [calm.length ? `${list(calm)} ${calm.length === 1 ? 'is' : 'are'} the calm ones` : null,
+              [calm.length ? `${list(calm)} ${calm.length === 1 ? 'is the calm one' : 'are the calm ones'}` : null,
                jumpy.length ? `${list(jumpy)} pay more` : null].filter(Boolean).join(', ') + '.',
               /* The watchlist. A name Nik rates that does not clear yet would
                  otherwise vanish from this screen entirely, since only passers

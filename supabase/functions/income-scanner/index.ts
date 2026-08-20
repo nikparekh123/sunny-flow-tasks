@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-20.1';
+const BUILD = '2026-08-20.2';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -263,10 +263,40 @@ Deno.serve(async (req) => {
     const expiry = writeFriday(today);
     const D = db(url, key);
 
-    const [uniRows, heldRows] = await Promise.all([
+    /* Settings and earnings come from the SAME rows the sleeve reads.
+       ─────────────────────────────────────────────────────────────────────
+       The edge floor and ceiling used to be hardcoded here at 0 and 15 while
+       income_sleeve_settings held 3 and 15. So CPB at edge +1.3 passed the
+       scanner ("clear to add") and failed the book ("under the floor") on the
+       same screen, same second, same word. Nik: "why two different answers,
+       when can I actually trust the app".
+
+       A rule written in two places drifts by construction. Changing
+       edge_floor in settings moved half the screen. Now there is one number
+       in one row and both cards read it. */
+    const [uniRows, heldRows, setRows, earnRows] = await Promise.all([
       D.get('income_scanner_universe?active=is.true&select=ticker'),
       D.get('income_sleeve_names?active=is.true&select=ticker'),
+      D.get('income_sleeve_settings?id=eq.1&select=edge_floor,edge_ceiling'),
+      D.get(`earnings_events?report_date=gte.${todayISO}`
+            + `&select=ticker,report_date&order=report_date.asc`),
     ]);
+    const cfg = setRows[0] ?? {};
+    const edgeFloor = Number(cfg.edge_floor ?? G.edgeMin);
+    const edgeCeiling = Number(cfg.edge_ceiling ?? G.edgeMax);
+
+    /* The earnings blackout, which this spec has described since the first
+       draft and which was never implemented. It runs a week PAST the expiry,
+       not to it: an assigned put hands you the shares the Monday after, so
+       the exposure is what the option TURNS INTO, not the option itself.
+       PDD reporting Mon 24 Aug against a Fri 21 Aug expiry is clear on the
+       option and holds you into the print. */
+    const blackoutEnd = ymd(addDays(parseISO(expiry), 7));
+    const earnBy = new Map<string, string>();
+    for (const e of earnRows) {
+      const tk = String(e.ticker);
+      if (!earnBy.has(tk)) earnBy.set(tk, String(e.report_date).slice(0, 10));
+    }
     const held = heldRows.map((r) => String(r.ticker));
     const universe = (body.tickers ?? uniRows.map((r) => String(r.ticker)));
     if (!universe.length) return json(200, { ok: true, empty: true, note: 'universe is empty' });
@@ -406,9 +436,14 @@ Deno.serve(async (req) => {
         if (pos52 >= G.pos52Max) fails.push(`${pos52.toFixed(0)}% up its range`);
         if (mx >= G.corrMax) fails.push(`correlates ${mx.toFixed(2)} to a held name`);
         if (edge == null) fails.push('no edge reading');
-        else if (edge <= G.edgeMin) fails.push(`edge ${edge.toFixed(1)}`);
-        else if (edge > G.edgeMax) fails.push(`edge ${edge.toFixed(1)}, an event is priced`);
+        else if (edge < edgeFloor) fails.push(`edge ${edge.toFixed(1)}, under the floor`);
+        else if (edge > edgeCeiling) fails.push(`edge ${edge.toFixed(1)}, an event is priced`);
         if (oi < G.oiMin) fails.push(`no market: ${oi} open interest around the money`);
+        // A name with no date on file is SKIPPED, not passed: a guard that
+        // cannot fire looks exactly like a guard with nothing to catch.
+        const rep = earnBy.get(t);
+        if (!rep) fails.push('no earnings date on file');
+        else if (rep <= blackoutEnd) fails.push(`reports ${rep}, inside the blackout`);
 
         return {
           ticker: t, asof: todayISO, spot: Math.round(spot * 100) / 100,
