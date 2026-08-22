@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.3';
+const BUILD = '2026-08-22.7';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -80,7 +80,11 @@ const G = {
 
    A universe fraction rather than an index return: no benchmark to fetch, and it
    scales with whatever list is being scanned. */
-const MARKET_DAY_SHARE = 0.25;
+const MARKET_REF = 'SPY';
+/* |SPY| daily move that makes a session THE MARKET rather than the stock.
+   Tunable; the run reports how many days it finds so it can be calibrated. */
+const MARKET_REF_MOVE = 2.0;
+const MARKET_DAY_SHARE = 0.25;   // retained for the legacy path only
 const MARKET_DAY_MOVE = 5;
 
 const POLY = 'https://api.polygon.io';
@@ -257,12 +261,109 @@ Deno.serve(async (req) => {
     if (!polyKey) return json(500, { ok: false, error: 'POLYGON_API_KEY is not set' });
 
     let body: { asof?: string; dry_run?: boolean; tickers?: string[]; explain?: string[];
-                store_history?: boolean } = {};
+                store_history?: boolean; suggest_universe?: number; probe?: boolean } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is normal */ }
     const today = parseISO(body.asof ?? nyToday());
     const todayISO = ymd(today);
     const expiry = writeFriday(today);
     const D = db(url, key);
+
+    /* Does this Polygon plan carry earnings dates? 455 of 596 names fail for
+       want of one, and the table is hand-maintained, so this is the ceiling on
+       the whole universe. Ask rather than assume. */
+    if (body.probe) {
+      const tries: Record<string, string> = {
+        financials: `${POLY}/vX/reference/financials?ticker=AAPL&limit=2&apiKey=${polyKey}`,
+        benzinga_earnings: `${POLY}/benzinga/v1/earnings?ticker=AAPL&limit=2&apiKey=${polyKey}`,
+        benzinga_consensus: `${POLY}/benzinga/v1/consensus-ratings?ticker=AAPL&limit=1&apiKey=${polyKey}`,
+        dividends_control: `${POLY}/v3/reference/dividends?ticker=AAPL&limit=1&apiKey=${polyKey}`,
+        ticker_details: `${POLY}/v3/reference/ticker-details/AAPL?apiKey=${polyKey}`,
+      };
+      const out: Record<string, unknown> = {};
+      for (const [k, u] of Object.entries(tries)) {
+        try {
+          const r = await fetch(u);
+          const t = await r.text();
+          out[k] = { status: r.status, body: t.slice(0, 260) };
+        } catch (e) { out[k] = { status: 'threw', body: String(e).slice(0, 160) }; }
+      }
+      return json(200, { ok: true, build: BUILD, probe: out });
+    }
+
+    /* Build a universe from what actually trades, not from index membership.
+       ─────────────────────────────────────────────────────────────────────
+       Nik asked for the S&P 500 and the Nasdaq 100. Constituent lists are
+       licensed data and reconstructing them from memory is how SPCX, FIG and
+       META got in and produced confident nonsense.
+
+       Dollar volume is the better proxy anyway: this strategy needs a liquid
+       WEEKLY OPTIONS market, and index membership does not guarantee one while
+       heavy share turnover very nearly does. One grouped-bars call returns
+       every US stock for a session, so the ranking costs a single request.
+
+       Returns a suggestion and writes NOTHING. The universe stays Nik's. */
+    if (body.suggest_universe) {
+      const day = ymd(addDays(today, 1));
+      let bar: Record<string, unknown>[] = [];
+      for (let back = 1; back <= 6 && !bar.length; back++) {
+        const d = ymd(addDays(today, -back));
+        try {
+          const r = await fetch(`${POLY}/v2/aggs/grouped/locale/us/market/stocks/${d}`
+            + `?adjusted=true&apiKey=${polyKey}`);
+          if (r.ok) {
+            const j = await r.json();
+            if ((j?.results ?? []).length) bar = j.results;
+          }
+        } catch { /* try the day before */ }
+      }
+      if (!bar.length) return json(502, { ok: false, error: 'no grouped bars from Polygon' });
+      /* COMMON STOCK ONLY. Ranking raw dollar volume put IWM, SOXL, TQQQ,
+         IBIT, GDX, HYG and LQD in the top 25: index ETFs, a leveraged
+         semiconductor fund and two bond funds. A leveraged ETF cannot run this
+         strategy at all, and TLT already has its own book with its own rule.
+         Polygon classifies them, so ask rather than guess from the symbol. */
+      const cs = new Set<string>();
+      let next: string | null = `${POLY}/v3/reference/tickers?market=stocks&type=CS`
+        + `&active=true&limit=1000&apiKey=${polyKey}`;
+      for (let page = 0; page < 8 && next; page++) {
+        try {
+          const r: Response = await fetch(next);
+          if (!r.ok) break;
+          const j = await r.json();
+          for (const x of (j?.results ?? [])) cs.add(String(x.ticker));
+          next = j?.next_url ? `${j.next_url}&apiKey=${polyKey}` : null;
+        } catch { break; }
+      }
+
+      const have = new Set((await D.get('income_scanner_universe?select=ticker'))
+        .map((r) => String(r.ticker)));
+      const ranked = bar
+        .map((b) => ({
+          ticker: String((b as { T: string }).T ?? ''),
+          close: Number((b as { c: number }).c ?? 0),
+          vol: Number((b as { v: number }).v ?? 0),
+        }))
+        // The price gate, applied up front: no point ranking what cannot pass.
+        .filter((x) => x.ticker && !x.ticker.includes('.') && !x.ticker.includes(':')
+          && (cs.size === 0 || cs.has(x.ticker))
+          && x.close >= G.priceMin && x.close <= G.priceMax && x.vol > 0)
+        .map((x) => ({ ...x, dollars: x.close * x.vol }))
+        .sort((a, b) => b.dollars - a.dollars);
+      const take = ranked.slice(0, body.suggest_universe);
+      return json(200, {
+        ok: true, build: BUILD, day,
+        scanned: bar.length,
+        common_stocks_known: cs.size,
+        in_band: ranked.length,
+        already_have: take.filter((x) => have.has(x.ticker)).length,
+        suggest: take.map((x) => ({
+          t: x.ticker,
+          px: Math.round(x.close * 100) / 100,
+          usd_m: Math.round(x.dollars / 1e6),
+          new: !have.has(x.ticker),
+        })),
+      });
+    }
 
     /* Settings and earnings come from the SAME rows the sleeve reads.
        ─────────────────────────────────────────────────────────────────────
@@ -324,7 +425,8 @@ Deno.serve(async (req) => {
     if (!universe.length) return json(200, { ok: true, empty: true, note: 'universe is empty' });
 
     // ── prices for everything, including the held names for correlation ──────
-    const need = Array.from(new Set([...universe, ...held]));
+    // SPY is fetched but never scanned: it is the market-day reference.
+    const need = Array.from(new Set([...universe, ...held, MARKET_REF]));
     const bars: Record<string, { d: string; c: number }[]> = {};
     /* 8, not 12. The connection failures above are a concurrency problem, and
        widening the retry without narrowing the fan-out treats the symptom. The
@@ -355,14 +457,15 @@ Deno.serve(async (req) => {
        must never cost a scan. */
     let stored = 0, storeErr: string | null = null;
     if (!body.dry_run) {
+      /* STREAMED, not accumulated. Building the whole set first meant 596
+         names x 600 sessions = 357,000 objects alive at once, and the worker
+         died with WORKER_RESOURCE_LIMIT. Flush as we go and the peak is one
+         batch. */
       const keep = body.store_history ? 10_000 : 10;
-      const rowsOut: Array<{ ticker: string; date: string; close: number }> = [];
-      for (const [t, arr] of Object.entries(bars)) {
-        for (const b of (arr ?? []).slice(-keep)) {
-          if (Number.isFinite(b.c)) rowsOut.push({ ticker: t, date: b.d, close: b.c });
-        }
-      }
-      for (let i = 0; i < rowsOut.length; i += 2000) {
+      let buf: Array<{ ticker: string; date: string; close: number }> = [];
+      const flush = async () => {
+        if (!buf.length) return;
+        const n = buf.length;
         try {
           const r = await fetch(`${url}/rest/v1/scanner_closes?on_conflict=ticker,date`, {
             method: 'POST',
@@ -371,12 +474,21 @@ Deno.serve(async (req) => {
               'Content-Type': 'application/json',
               Prefer: 'resolution=merge-duplicates,return=minimal',
             },
-            body: JSON.stringify(rowsOut.slice(i, i + 2000)),
+            body: JSON.stringify(buf),
           });
-          if (r.ok) stored += Math.min(2000, rowsOut.length - i);
+          if (r.ok) stored += n;
           else if (!storeErr) storeErr = `${r.status} ${(await r.text()).slice(0, 160)}`;
         } catch (e) { if (!storeErr) storeErr = String(e).slice(0, 160); }
+        buf = [];
+      };
+      for (const [t, arr] of Object.entries(bars)) {
+        for (const b of (arr ?? []).slice(-keep)) {
+          if (!Number.isFinite(b.c)) continue;
+          buf.push({ ticker: t, date: b.d, close: b.c });
+          if (buf.length >= 2000) await flush();
+        }
       }
+      await flush();
     }
 
     /* PERSISTENCE: has this name LIVED near its low, or is it just visiting?
@@ -417,12 +529,30 @@ Deno.serve(async (req) => {
        count against it: NKE came back with a 15.2% "own gap" that is really the
        April 2025 week. The response reports market_days so a zero is visible
        rather than assumed. */
-    const marketDays = new Set(
-      Object.entries(moves)
-        .filter(([, ms]) => ms.length >= 60
-          && ms.filter((m) => m > MARKET_DAY_MOVE).length / ms.length > MARKET_DAY_SHARE)
-        .map(([d]) => d),
-    );
+    /* ⚠ A FIXED REFERENCE, NOT A FRACTION OF THE UNIVERSE.
+       ────────────────────────────────────────────────────────────────────────
+       This used to call a session a market day when more than 25% of the names
+       being scanned moved more than 5%. That reads as universe-independent and
+       is the opposite: it measures the list, not the market.
+
+       Growing the universe from 144 names to 596 by adding the S&P 500 cut
+       detected market days from 13 to 5, because the index is far calmer than
+       the original hand-picked list, so macro sessions stopped clearing the
+       threshold. Nothing about April 2025 changed. What changed was who was
+       standing next to NKE when its worst day was judged.
+
+       That makes own_gap incomparable between runs, which is precisely the
+       failure this gate exists to prevent. SPY's own move is the market's move
+       whoever else is in the room. */
+    const marketDays = new Set<string>();
+    {
+      const ref = bars[MARKET_REF] ?? [];
+      for (let i = 1; i < ref.length; i++) {
+        if (Math.abs(100 * (ref[i].c / ref[i - 1].c - 1)) >= MARKET_REF_MOVE) {
+          marketDays.add(ref[i].d);
+        }
+      }
+    }
 
     // ── the scan ────────────────────────────────────────────────────────────
     const heldRets = Object.fromEntries(held.map((h) => [h, rets(h)]));
@@ -678,6 +808,7 @@ Deno.serve(async (req) => {
       checked: out.length,
       passed: passed.length,
       market_days: marketDays.size,
+      market_ref: `${MARKET_REF} >= ${MARKET_REF_MOVE}%`,
       // Whether the book is still clean is the highest-value thing here, so it
       // comes back first rather than buried in the full list.
       held: heldRes.map((r) => ({ ticker: r.ticker, passes: r.passes, fails: r.fails })),
