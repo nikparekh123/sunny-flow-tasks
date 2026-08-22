@@ -261,7 +261,8 @@ Deno.serve(async (req) => {
     if (!polyKey) return json(500, { ok: false, error: 'POLYGON_API_KEY is not set' });
 
     let body: { asof?: string; dry_run?: boolean; tickers?: string[]; explain?: string[];
-                store_history?: boolean; suggest_universe?: number; probe?: boolean } = {};
+                store_history?: boolean; suggest_universe?: number; probe?: boolean;
+                intel?: string[] } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is normal */ }
     const today = parseISO(body.asof ?? nyToday());
     const todayISO = ymd(today);
@@ -271,10 +272,39 @@ Deno.serve(async (req) => {
     /* Does this Polygon plan carry earnings dates? 455 of 596 names fail for
        want of one, and the table is hand-maintained, so this is the ceiling on
        the whole universe. Ask rather than assume. */
+    if (body.intel) {
+      const out: Record<string, unknown> = {};
+      for (const t of (body.intel as string[])) {
+        const g = async (u: string) => {
+          try { const r = await fetch(u); return r.ok ? (await r.json())?.results ?? [] : { err: r.status }; }
+          catch (e) { return { err: String(e).slice(0, 80) }; }
+        };
+        out[t] = {
+          guidance: await g(`${POLY}/benzinga/v1/guidance?ticker.any_of=${t}&limit=6&order=desc&sort=date&apiKey=${polyKey}`),
+          ratings: await g(`${POLY}/benzinga/v1/ratings?ticker.any_of=${t}&limit=20&order=desc&sort=date&apiKey=${polyKey}`),
+          insights: await g(`${POLY}/benzinga/v1/analyst-insights?ticker.any_of=${t}&limit=3&order=desc&sort=date&apiKey=${polyKey}`),
+          // ⚠ consensus is a PATH parameter, not a query filter. Every
+          // ?ticker= and ?ticker.any_of= form returns an empty 404, which
+          // reads as "not entitled" and is not.
+          consensus: await g(`${POLY}/benzinga/v1/consensus-ratings/${t}?apiKey=${polyKey}`),
+        };
+      }
+      return json(200, { ok: true, build: BUILD, intel: out });
+    }
+
     if (body.probe) {
       const tries: Record<string, string> = {
         financials: `${POLY}/vX/reference/financials?ticker=AAPL&limit=2&apiKey=${polyKey}`,
         benzinga_earnings: `${POLY}/benzinga/v1/earnings?ticker=AAPL&limit=2&apiKey=${polyKey}`,
+        bz_guidance: `${POLY}/benzinga/v1/guidance?ticker.any_of=NKE,LULU&limit=2&order=desc&sort=date&apiKey=${polyKey}`,
+        bz_ratings: `${POLY}/benzinga/v1/ratings?ticker.any_of=NKE,LULU&limit=2&order=desc&sort=date&apiKey=${polyKey}`,
+        bz_insights: `${POLY}/benzinga/v1/analyst-insights?ticker.any_of=NKE&limit=1&apiKey=${polyKey}`,
+        cons_t: `${POLY}/benzinga/v1/consensus-ratings?ticker=NKE&limit=1&apiKey=${polyKey}`,
+        cons_none: `${POLY}/benzinga/v1/consensus-ratings?limit=1&apiKey=${polyKey}`,
+        cons_slash: `${POLY}/benzinga/v1/consensus-ratings/NKE?apiKey=${polyKey}`,
+        news_t: `${POLY}/benzinga/v1/news?ticker=NKE&limit=1&apiKey=${polyKey}`,
+        news_pub: `${POLY}/benzinga/v1/news?published.gte=2026-08-01&limit=1&apiKey=${polyKey}`,
+        news_ref: `${POLY}/v2/reference/news?ticker=NKE&limit=2&apiKey=${polyKey}`,
         bz_by_date: `${POLY}/benzinga/v1/earnings?date.gte=2026-08-24&date.lte=2026-09-30`
           + `&limit=5&order=asc&sort=date&apiKey=${polyKey}`,
         bz_multi: `${POLY}/benzinga/v1/earnings?ticker.any_of=NKE,BABA,PG&date.gte=2026-08-01`
