@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.9';
+const BUILD = '2026-08-22.10';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -380,13 +380,23 @@ Deno.serve(async (req) => {
        A rule written in two places drifts by construction. Changing
        edge_floor in settings moved half the screen. Now there is one number
        in one row and both cards read it. */
-    const [uniRows, heldRows, setRows, earnRows] = await Promise.all([
+    const [uniRows, persRows, heldRows, setRows, earnRows] = await Promise.all([
       D.get('income_scanner_universe?active=is.true&select=ticker,conviction'),
+      D.get('scanner_persistence?select=ticker,persistence,measured&limit=2000'),
       D.get('income_sleeve_names?active=is.true&select=ticker'),
       D.get('income_sleeve_settings?id=eq.1&select=edge_floor,edge_ceiling'),
       D.get(`earnings_events?report_date=gte.${todayISO}`
             + `&select=ticker,report_date,report_time&order=report_date.asc`),
     ]);
+    /* Persistence comes from SQL over scanner_closes, not from the bars held
+       here. Computing it in-memory tied its measurement window to the fetch
+       window, so cutting the fetch from 600 days to 420 quietly cut the
+       measurement from ~158 sessions to ~30 and PEP read 100% where it had read
+       29.4% that morning. `measured` under ~60 is noise, so it scores zero. */
+    const persist = new Map<string, { p: number; n: number }>(
+      persRows.map((r) => [String(r.ticker),
+        { p: Number(r.persistence ?? 0), n: Number(r.measured ?? 0) }]));
+
     const cfg = setRows[0] ?? {};
     const edgeFloor = Number(cfg.edge_floor ?? G.edgeMin);
     const edgeCeiling = Number(cfg.edge_ceiling ?? G.edgeMax);
@@ -506,25 +516,6 @@ Deno.serve(async (req) => {
       }
       await flush();
     }
-
-    /* PERSISTENCE: has this name LIVED near its low, or is it just visiting?
-       Share of sessions in the last ~7 months within 10% of the trailing
-       252-day low. The median stock across 140 names scores 4.7% and the
-       median VISIT lasts four trading days, which is why a "within 5% today"
-       gate found zero names out of 144. Nik's book runs 50-80: NKE 72.5,
-       PG 80.6, MCD 75.0. It cannot be moved by a single session. */
-    const persistenceOf = (t: string): number | null => {
-      const c = (bars[t] ?? []).map((x) => x.c);
-      if (c.length < 282) return null;                 // 252 window + 30 to measure
-      let hits = 0, n = 0;
-      for (let i = 252; i < c.length; i++) {
-        let lo = Infinity;
-        for (let j = i - 252; j <= i; j++) if (c[j] < lo) lo = c[j];
-        n++;
-        if ((c[i] / lo - 1) * 100 <= 10) hits++;
-      }
-      return n ? Math.round((hits / n) * 1000) / 10 : null;
-    };
 
     const rets = (t: string) => {
       const c = (bars[t] ?? []).map((x) => x.c); const out: number[] = [];
@@ -668,7 +659,9 @@ Deno.serve(async (req) => {
           fails.push(`reports ${rep.d}, inside the blackout`);
         }
 
-        const persist = persistenceOf(t);
+        // Thin evidence scores zero rather than flattering the name.
+        const pr = persist.get(t);
+        const pers = (pr && pr.n >= 60) ? pr.p : null;
 
         return {
           ticker: t, asof: todayISO, spot: Math.round(spot * 100) / 100,
@@ -681,7 +674,7 @@ Deno.serve(async (req) => {
           edge: edge != null ? Math.round(edge * 10) / 10 : null,
           option_oi: oi, option_volume: vol,
           weeklies: weeks,
-          persistence: persist,
+          persistence: pers,
           score: (() => {
             /* BANDED, not linear. A linear edge component scored INTU 74/100
                while it failed four gates, because +35 of edge and a 9.76%
@@ -695,7 +688,7 @@ Deno.serve(async (req) => {
             const cl = (x: number) => Math.max(0, Math.min(1, x));
             const parts =
                 band                                    * 25
-              + cl((persist ?? 0) / 60)                 * 25   // 60%+ of days is full marks
+              + cl((pers ?? 0) / 60)                    * 25   // 60%+ of days is full marks
               + cl(((straddlePct ?? 0) - 1) / 5)        * 15   // 1%/wk -> 0, 6%/wk -> full
               + (conviction.get(t) ?? 5) / 10           * 15
               + cl((60 - pos52) / 60)                   * 10
