@@ -23,7 +23,46 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.5';
+const BUILD = '2026-08-22.8';
+const POLY = 'https://api.polygon.io';
+
+/** The Friday at least 5 sessions out: the contract actually written. */
+function writeFriday(from: Date): string {
+  const d = new Date(from.getTime());
+  do { d.setUTCDate(d.getUTCDate() + 1); } while (d.getUTCDay() !== 5);
+  if (daysBetween(from, d) < 5) d.setUTCDate(d.getUTCDate() + 7);
+  return ymd(d);
+}
+
+/** Live chain for one expiry, narrowed around spot. */
+async function chain(t: string, expiry: string, spot: number, k: string, window = 0) {
+  const u = new URL(`${POLY}/v3/snapshot/options/${t}`);
+  if (window) {
+    /* A floor is "about four months out", and an exact date is almost never a
+       listed expiry, so asking for one returns nothing and the top-up silently
+       goes unpriced. Ask for a window and take whichever expiry the chain
+       actually offers. */
+    u.searchParams.set('expiration_date.gte', ymd(addDays(parseISO(expiry), -window)));
+    u.searchParams.set('expiration_date.lte', ymd(addDays(parseISO(expiry), window)));
+  } else {
+    u.searchParams.set('expiration_date', expiry);
+  }
+  u.searchParams.set('strike_price.gte', String(Math.floor(spot * 0.88)));
+  u.searchParams.set('strike_price.lte', String(Math.ceil(spot * 1.12)));
+  u.searchParams.set('limit', '250');
+  u.searchParams.set('apiKey', k);
+  try {
+    const r = await fetch(u.toString());
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j?.results ?? []).map((c: Record<string, any>) => ({
+      strike: Number(c.details?.strike_price), type: String(c.details?.contract_type),
+      expiry: String(c.details?.expiration_date ?? ''),
+      mid: (c.last_quote?.bid > 0 && c.last_quote?.ask > 0)
+        ? (c.last_quote.bid + c.last_quote.ask) / 2 : Number(c.day?.close ?? 0),
+    })).filter((c: { strike: number }) => c.strike > 0);
+  } catch { return []; }
+}
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 const usd = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
 const pct = (v: number, dp = 1) => `${v >= 0 ? '+' : ''}${v.toFixed(dp)}%`;
@@ -39,6 +78,7 @@ Deno.serve(async (req) => {
   try {
     const url = Deno.env.get('SUPABASE_URL')!;
     const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const pk = Deno.env.get('POLYGON_API_KEY')!;
     const D = db(url, key);
     let body: { tickers?: string[] } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* none */ }
@@ -52,7 +92,7 @@ Deno.serve(async (req) => {
     if (!names.length) return json(200, { ok: true, empty: true, note: 'no shares held' });
     const inList = `(${names.join(',')})`;
 
-    const [trades, quotes, closes, pers, scan, earn, guide, acts, cons, news] = await Promise.all([
+    const [trades, quotes, closes, pers, scan, earn, guide, acts, cons, news, divs] = await Promise.all([
       D.get(`option_trades?ticker=in.${inList}&voided_at=is.null`
         + '&select=ticker,action,option_type,direction,contracts,strike,premium,expiry'),
       D.get(`ticker_quotes_latest?ticker=in.${inList}&select=ticker,spot`),
@@ -69,11 +109,12 @@ Deno.serve(async (req) => {
         + '&select=ticker,date,firm,rating,rating_action,price_target,previous_price_target,price_target_action&order=date.desc'),
       D.get(`analyst_consensus?ticker=in.${inList}&select=*&order=as_of_date.desc`),
       D.get(`name_news?ticker=in.${inList}&select=ticker,published,title,publisher&order=published.desc`),
+      D.get(`dividends?ticker=in.${inList}&select=ticker,ex_date,cash_amount,frequency&order=ex_date.desc`),
     ]);
 
     const first = (a: Record<string, unknown>[], t: string) =>
       a.find((x) => String(x.ticker) === t) as Record<string, unknown> | undefined;
-    const out = names.map((t) => {
+    const out = await Promise.all(names.map(async (t) => {
       const mine = lots.filter((l) => String(l.ticker) === t);
       const shares = mine.reduce((s, l) => s + N(l.qty_remaining), 0);
       const paid = mine.reduce((s, l) => s + N(l.qty_remaining) * N(l.cost_per_share), 0);
@@ -137,15 +178,41 @@ Deno.serve(async (req) => {
       const s0 = scan.find((r) => String(r.ticker) === t);
       const p0 = first(pers as Record<string, unknown>[], t);
       const nw = news.filter((r) => String(r.ticker) === t).slice(0, 3);
+      const dv0 = divs.find((r) => String(r.ticker) === t);
+      const nextWrite = writeFriday(today);
 
       const need = lots100 + nPuts;
       const needAfter = lots100 * 2;
+      /* ── Price the actual trade ──────────────────────────────────────────
+         "Write 20 calls and 20 puts at the money" is a instruction with no
+         number attached, and Nik places these by hand. Pull the live chain for
+         the expiry actually being written and quote the strike and the mid, so
+         the card says what it pays before he opens the broker. */
+      const wk = await chain(t, nextWrite, spot, pk);
+      const near = (arr: { strike: number; type: string; mid: number; expiry?: string }[], ty: string) => {
+        const c = arr.filter((x) => x.type === ty && x.mid > 0);
+        if (!c.length) return null;
+        return c.reduce((b, x) => Math.abs(x.strike - spot) < Math.abs(b.strike - spot) ? x : b);
+      };
+      const atmC = near(wk, 'call'), atmP = near(wk, 'put');
+      /* The floor is a FOUR-MONTH at-the-money put, per the spec. Nearest
+         listed expiry to 120 days out, from whatever the chain offers. */
+      const floorExp = ymd(addDays(today, 120));
+      const fl = nFloor < needAfter ? await chain(t, floorExp, spot, pk, 30) : [];
+      const atmF = near(fl, 'put');
+
       /* Sentences, not field-speak. The two paragraphs above read like a
          person and then this said "floor short 20 against 20 shares plus 20
          puts sold", which is the same jargon wearing a bullet. */
       const doList: string[] = [];
       if (nCalls < lots100) {
-        doList.push(`Write ${lots100 - nCalls} calls and ${lots100 - nPuts} puts at the money.`);
+        const nc = lots100 - nCalls, np = lots100 - nPuts;
+        doList.push(atmC
+          ? `Sell ${nc} calls, ${atmC.strike} strike, ${day(nextWrite)}, about ${atmC.mid.toFixed(2)} each — ${usd(atmC.mid * 100 * nc)}`
+          : `Sell ${nc} calls at the money, ${day(nextWrite)}`);
+        doList.push(atmP
+          ? `Sell ${np} puts, ${atmP.strike} strike, ${day(nextWrite)}, about ${atmP.mid.toFixed(2)} each — ${usd(atmP.mid * 100 * np)}`
+          : `Sell ${np} puts at the money, ${day(nextWrite)}`);
       }
       for (const c of itmCall) {
         doList.push(`Let the ${c.n} calls at ${c.k} go: ${(c.n * 100).toLocaleString('en-US')} shares `
@@ -154,7 +221,17 @@ Deno.serve(async (req) => {
       if (nFloor < need) {
         doList.push(`Buy ${need - nFloor} more floor puts. You hold ${nFloor} against the ${need} your rule asks for.`);
       } else if (nFloor < needAfter) {
-        doList.push(`Your floor will be ${needAfter - nFloor} contracts short once this week's puts are on.`);
+        const gap = needAfter - nFloor;
+        doList.push(atmF
+          ? `Buy ${gap} puts at ${atmF.strike}, ${day(String(atmF.expiry ?? floorExp))}, about ${atmF.mid.toFixed(2)} each — ${usd(atmF.mid * 100 * gap)} to close the floor gap`
+          : `Buy ${gap} four-month puts at the money to close the floor gap`);
+        const inFlow = (atmC ? atmC.mid * 100 * (lots100 - nCalls) : 0) + (atmP ? atmP.mid * 100 * (lots100 - nPuts) : 0);
+        const outFlow = atmF ? atmF.mid * 100 * gap : 0;
+        /* Only claim a NET when both sides are actually priced. Reporting
+           inflow alone under a "net after the floor top-up" label overstates
+           the week by the entire cost of the floor. */
+        if (inFlow && outFlow) doList.push(`Net after the floor top-up: ${usd(inFlow - outFlow)}`);
+        else if (inFlow) doList.push(`Premium in: ${usd(inFlow)}. The floor top-up is not priced here.`);
       }
       if (fk && (spot - fk) / spot > 0.15) {
         doList.push(`Consider rolling the floor up. At ${((spot - fk) / spot * 100).toFixed(0)}% below the price it protects very little.`);
@@ -163,78 +240,79 @@ Deno.serve(async (req) => {
         doList.push(`The company cut guidance on ${day(String(g0.date))}. Think hard before adding to this one.`);
       }
 
-      /* ── The card in English, as paragraphs ──────────────────────────────
-         Not a list. An earlier version emitted one sentence per bullet and Nik
-         called it "still bullet points": a stack of one-line paragraphs reads
-         like a form, not like someone telling you where you are.
-
-         Two blocks, and the split matters. SITUATIONAL is the MARKET's view of
-         the company: what analysts are doing, what the company has said, where
-         the price sits. POSITION is yours. They were tangled before, with
-         holdings sitting under a heading called background.
-
-         Deliberately NOT said: whether anything is written this week. Nik cut
-         it. Every Monday the book is empty by construction, so "all 2,000
-         shares are sitting idle" is the calendar, not news, and the DO block
-         already asks for the trade. */
-      const money = (v: number) => usd(Math.abs(v));
-      const sit: string[] = [];
-      if (p0 || hi52) {
-        sit.push(`${t} sits ${Math.abs(hi52 ? (spot / hi52 - 1) * 100 : 0).toFixed(0)}% below its high`
-          + (p0 ? ` and has spent ${N(p0.persistence).toFixed(0)}% of the last seven months within 10% of its low` : '')
-          + `.`);
+      /* ── Situational analysis, grouped by what a signal MEANS ────────────
+         Nik's format, and it is better than prose here: bullets are fine when
+         each one carries a judgement. Grouped by DIRECTION rather than by
+         source, so the tension is visible instead of buried. NKE is the case
+         that proves it: 22 target cuts sit under Bearish while 70 buy ratings
+         and a reaffirmed guidance sit under Supportive, and the disagreement
+         between them IS the information. */
+      const bear: string[] = [], bull: string[] = [], cat: string[] = [];
+      if (tg.length) {
+        if (cuts > raises) bear.push(`${raises} raises against ${cuts} cuts and ${downs} downgrades, across ${a.length} analyst actions in 120 days`);
+        else bull.push(`${raises} target raises against ${cuts} cuts in 120 days`);
+        const dg = a.find((r) => r.rating_action === 'downgrades');
+        if (dg) bear.push(`${dg.firm} to ${dg.rating} ${daysBetween(parseISO(String(dg.date)), today)} days ago, target ${N(dg.previous_price_target)} to ${N(dg.price_target)}`);
+        if (med > spot) bull.push(`Median target ${med.toFixed(2)}, ${pct((med / spot - 1) * 100)} upside even after the cuts`);
+        else bear.push(`Median target ${med.toFixed(2)}, below where it trades`);
+      }
+      if (c0) {
+        const bulls = N(c0.strong_buy) + N(c0.buy), bears = N(c0.sell) + N(c0.strong_sell);
+        if (bulls > bears * 3) bull.push(`Street still net constructive: ${bulls} buy-rated against ${bears} sell`);
+        else bear.push(`Street mixed: ${bulls} buy against ${bears} sell`);
       }
       if (m50 && m200) {
-        const a50 = spot > m50, a200 = spot > m200;
-        sit.push(a50 === a200
-          ? `It trades ${a50 ? 'above' : 'below'} both its 50-day and 200-day averages.`
-          : `It trades ${a50 ? 'above' : 'below'} its 50-day average but ${a200 ? 'above' : 'below'} its 200-day.`);
+        const below = spot < m50 && spot < m200;
+        (below ? bear : bull).push(`Trading ${below ? 'below' : 'above'} the 50-day (${m50.toFixed(2)}) and 200-day (${m200.toFixed(2)})`);
       }
-      if (tg.length) {
-        const bulls = c0 ? N(c0.strong_buy) + N(c0.buy) : 0;
-        const r0 = a[0];
-        let line = cuts > raises
-          ? `The street has cut its price target ${cuts} times in four months and raised it ${raises === 0 ? 'none' : `${raises} times`}`
-          : `Targets have moved up ${raises} times against ${cuts} cuts in four months`;
-        if (r0 && r0.rating_action === 'downgrades') {
-          line += `, with ${r0.firm} downgrading ${daysBetween(parseISO(String(r0.date)), today)} days ago to a target of `
-            + `${N(r0.price_target)}${N(r0.price_target) < spot ? `, below where it trades` : ``}`;
-        }
-        line += bulls ? `, though ${bulls} analysts still call it a buy.` : `.`;
-        sit.push(line);
+      if (hi52 && p0) {
+        const dh = (spot / hi52 - 1) * 100;
+        (dh < -25 ? bear : bull).push(`Down ${Math.abs(dh).toFixed(1)}% from the high, ${N(p0.persistence).toFixed(0)}% persistence`);
       }
+      if (Math.abs(ext) < 1) bull.push(`Extension only ${ext.toFixed(2)}sd, so not at a capitulation extreme`);
+      else if (ext < -1) bull.push(`Extension ${ext.toFixed(2)}sd, stretched to the downside`);
+      else cat.push(`Extension ${ext.toFixed(2)}sd above its 20-day mean`);
       if (g0) {
-        const gd = String(g0.direction);
-        const ago = daysBetween(parseISO(String(g0.date)), today);
-        sit.push(gd === 'cut'
-          ? `The company cut its guidance ${ago} days ago, which is the business itself guiding down.`
-          : `The company ${gd} its guidance ${ago} days ago.`);
+        const gd = String(g0.direction), ago = daysBetween(parseISO(String(g0.date)), today);
+        if (gd === 'cut') bear.push(`Guidance CUT ${ago} days ago, the business itself guiding down`);
+        else if (gd === 'raised') bull.push(`Guidance raised ${ago} days ago`);
+        else bull.push(`Guidance reaffirmed ${ago} days ago, no fundamental deterioration signalled`);
+      }
+      if (dv0) {
+        const y = N(dv0.cash_amount) * (N(dv0.frequency) || 4) / spot * 100;
+        if (y > 1) bull.push(`Dividend yield roughly ${y.toFixed(1)}%, paid through the drawdown`);
       }
       if (e0) {
         const dd = daysBetween(today, parseISO(String(e0.report_date)));
-        sit.push(`It reports on ${day(String(e0.report_date))}, ${dd} days away.`);
+        cat.push(`Earnings ${day(String(e0.report_date))}, ${dd} days out. `
+          + (parseISO(String(e0.report_date)) <= parseISO(nextWrite)
+             ? `This week's write CARRIES THROUGH the print.`
+             : `The ${day(nextWrite)} expiry is clear of it.`));
       }
-
-      const pos: string[] = [];
-      pos.push(`You own ${shares.toLocaleString('en-US')} shares at an average of ${avg.toFixed(2)}.`);
-      pos.push(`Premium has taken that to ${effective.toFixed(2)}, and with the floor ${allIn.toFixed(2)}, `
-        + `so the stock is ${Math.abs((spot / allIn - 1) * 100).toFixed(0)}% ${spot >= allIn ? 'above' : 'below'} your all-in cost.`);
-      if (itmCall.length) {
-        const c = itmCall[0];
-        pos.push(`Your ${c.n} calls at ${c.k} are in the money, so ${(c.n * 100).toLocaleString('en-US')} shares `
-          + `go on ${day(c.e)} for ${usd(c.n * 100 * c.k)}.`);
-      }
-      if (nFloor) {
-        pos.push(`The floor is ${nFloor} puts at ${fk}, ${((spot - fk) / spot * 100).toFixed(1)}% below the price, `
-          + (nFloor >= need
-            ? `covering what you hold today but ${Math.round(nFloor / needAfter * 100)}% of what you will be exposed to once this week's puts are on.`
-            : `which is ${need - nFloor} short of the ${need} your rule asks for.`));
-      } else pos.push(`There is no floor under this position.`);
+      for (const nn of nw.slice(0, 1)) cat.push(`${nn.publisher}: ${String(nn.title).slice(0, 90)}`);
+      const stance = bear.length > bull.length + 1 ? 'Bearish'
+                   : bull.length > bear.length + 1 ? 'Supportive' : 'Balanced';
 
       return {
-        situational: sit.join(' '),
-        position: pos.join(' '),
-        ticker: t, spot, shares, avg, effective, allIn,
+        stance, bearish: bear, supportive: bull, catalyst: cat,
+        stand: [
+          `Spot ${spot.toFixed(2)}`,
+          `Long ${shares.toLocaleString('en-US')} shares at ${avg.toFixed(2)}`,
+          `${usd(premTaken)} premium collected, effective cost ${effective.toFixed(2)}`,
+          `All-in basis ${allIn.toFixed(2)} including the floor`,
+        ],
+        coverage: [
+          nCalls >= lots100
+            ? `${nCalls} of ${lots100} calls written`
+            : `${nCalls} of ${lots100} calls written, ${(shares - nCalls * 100).toLocaleString('en-US')} shares exposed to upside with no premium offset`,
+          ...itmCall.map((c) => `${c.n} calls at ${c.k} are ${(spot - c.k).toFixed(2)} in the money, ${(c.n * 100).toLocaleString('en-US')} shares leave ${day(c.e)}`),
+        ],
+        floor_lines: nFloor ? [
+          `${nFloor} puts long at ${fk}, ${((spot - fk) / spot * 100).toFixed(1)}% below spot`,
+          `Once this week's ${lots100} short puts are on, exposure is ${(needAfter * 100).toLocaleString('en-US')} shares equivalent and the floor needs ${needAfter}`,
+          nFloor < needAfter ? `Gap: ${needAfter - nFloor} puts` : `Fully covered`,
+        ] : [`No floor on this position`],
+        ticker: t, spot, shares, avg, effective, allIn, next_write: nextWrite,
         background: {
           analysts: tg.length ? {
             actions: a.length, median_target: med, vs_spot: spot ? (med / spot - 1) * 100 : 0,
@@ -262,7 +340,7 @@ Deno.serve(async (req) => {
                    premium_taken: premTaken },
         do: doList,
       };
-    });
+    }));
     return json(200, { ok: true, build: BUILD, asof: todayISO, positions: out });
   } catch (e) { return json(500, { ok: false, error: String(e) }); }
 });
