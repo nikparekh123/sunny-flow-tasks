@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.10';
+const BUILD = '2026-08-22.11';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -410,11 +410,19 @@ Deno.serve(async (req) => {
        A rule written in two places drifts by construction. Changing
        edge_floor in settings moved half the screen. Now there is one number
        in one row and both cards read it. */
-    const [uniRows, persRows, heldRows, setRows, earnRows] = await Promise.all([
+    const [uniRows, persRows, heldRows, setRows, cutRows, earnRows] = await Promise.all([
       D.get('income_scanner_universe?active=is.true&select=ticker,conviction'),
       D.get('scanner_persistence?select=ticker,persistence,measured&limit=2000'),
       D.get('income_sleeve_names?active=is.true&select=ticker'),
       D.get('income_sleeve_settings?id=eq.1&select=edge_floor,edge_ceiling'),
+      /* A guidance CUT in the last 120 days is a hard skip. It is the only
+         gate here that speaks to the BUSINESS: every other one reads price or
+         option quotes, and a company can shrink for two years while
+         persistence, 52-week position, edge and premium all call it cheap and
+         settled. GPN guided FY EPS from +1.33/+1.42 to -3.85/-3.77 on 5 Aug
+         and nothing else in this screen could see it. */
+      D.get(`guidance_events?direction=eq.cut&date=gte.${ymd(addDays(today, -120))}`
+            + `&select=ticker,date&order=date.desc&limit=4000`),
       D.get(`earnings_events?report_date=gte.${todayISO}`
             + `&select=ticker,report_date,report_time&order=report_date.asc`),
     ]);
@@ -437,6 +445,13 @@ Deno.serve(async (req) => {
        the exposure is what the option TURNS INTO, not the option itself.
        PDD reporting Mon 24 Aug against a Fri 21 Aug expiry is clear on the
        option and holds you into the print. */
+    // Most recent cut per ticker, for the message.
+    const cutBy = new Map<string, string>();
+    for (const c of cutRows) {
+      const t = String(c.ticker);
+      if (!cutBy.has(t)) cutBy.set(t, String(c.date).slice(0, 10));
+    }
+
     const blackoutEnd = ymd(addDays(parseISO(expiry), 7));
 
     /* A print dated TODAY may already be behind you. earnings_events stores a
@@ -683,6 +698,9 @@ Deno.serve(async (req) => {
         if (oi < G.oiMin) fails.push(`no market: ${oi} open interest around the money`);
         // A name with no date on file is SKIPPED, not passed: a guard that
         // cannot fire looks exactly like a guard with nothing to catch.
+        const cut = cutBy.get(t);
+        if (cut) fails.push(`guidance cut ${cut}`);
+
         const rep = earnBy.get(t);
         if (!rep) fails.push('no earnings date on file');
         else if (!rep.done && rep.d <= blackoutEnd) {
@@ -846,6 +864,7 @@ Deno.serve(async (req) => {
       ok: true, build: BUILD, asof: todayISO, expiry,
       checked: out.length,
       passed: passed.length,
+      guidance_cuts: cutBy.size,
       market_days: marketDays.size,
       market_ref: `${MARKET_REF} >= ${MARKET_REF_MOVE}%`,
       // Whether the book is still clean is the highest-value thing here, so it

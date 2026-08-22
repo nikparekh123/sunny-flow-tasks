@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.2';
+const BUILD = '2026-08-22.3';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 const usd = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
 const pct = (v: number, dp = 1) => `${v >= 0 ? '+' : ''}${v.toFixed(dp)}%`;
@@ -103,6 +103,7 @@ Deno.serve(async (req) => {
       const itmCall = calls.filter((l) => spot >= l.k);
       const nextExp = live.filter((l) => l.d === 'short').map((l) => l.e).sort()[0];
 
+      const x0 = premTaken;
       const effective = shares ? avg - premTaken / shares : 0;
       const allIn = shares ? effective + floorCost / shares : 0;
 
@@ -141,7 +142,59 @@ Deno.serve(async (req) => {
       if (fk && (spot - fk) / spot > 0.15) doList.push(`floor ${pct((spot - fk) / spot * 100)} below spot, little protection left`);
       if (g0 && String(g0.direction) === 'cut' && String(g0.date) >= d120) doList.push(`guidance CUT ${g0.date}, the business is guiding down while you accumulate`);
 
+      /* ── The same card in English ────────────────────────────────────────
+         Everything above is fields for a screen to lay out. This is the card
+         read aloud, because "extension -0.57sd, persistence 72%" is a fact
+         nobody can act on at a glance. Short sentences, plain words, the
+         answer first. Numbers stay; the jargon around them goes. */
+      const say: string[] = [];
+      const money = (v: number) => usd(Math.abs(v));
+      say.push(
+        `You own ${shares.toLocaleString('en-US')} shares. You paid ${avg.toFixed(2)} and have `
+        + `collected ${money(x0)} in premium, so they have cost you ${effective.toFixed(2)}. `
+        + `With the floor, ${allIn.toFixed(2)}. `
+        + (spot >= allIn ? `The stock is ${pct((spot / allIn - 1) * 100)} above that.`
+                         : `The stock is ${Math.abs((spot / allIn - 1) * 100).toFixed(1)}% below that.`));
+      say.push(nCalls >= lots100 && nPuts > 0
+        ? `This week is written: ${nCalls} calls and ${nPuts} puts, expiring ${nextExp}.`
+        : nCalls === 0 && nPuts === 0
+          ? `Nothing is written this week. All ${shares.toLocaleString('en-US')} shares are sitting idle.`
+          : `Partly written: ${nCalls} calls and ${nPuts} puts against ${lots100} you could write.`);
+      if (itmCall.length) {
+        const c = itmCall[0];
+        say.push(`Your ${c.n} calls at ${c.k} are in the money, so `
+          + `${(c.n * 100).toLocaleString('en-US')} shares go on ${c.e} for ${usd(c.n * 100 * c.k)}.`);
+      }
+      if (nFloor) {
+        say.push(`Your floor is ${nFloor} puts at ${fk}, ${((spot - fk) / spot * 100).toFixed(1)}% below the price. `
+          + (nFloor >= need
+            ? `It covers what you hold today. The moment you write this week's puts it covers ${Math.round(nFloor / needAfter * 100)}% of what you are exposed to.`
+            : `That is ${need - nFloor} short of the ${need} your rule asks for.`));
+      } else say.push(`There is no floor under this position.`);
+      if (tg.length) {
+        const dir = cuts > raises
+          ? `The street has cut its target ${cuts} times in four months and raised it ${raises === 0 ? 'none' : raises + ' times'}.`
+          : `Targets have moved up ${raises} times against ${cuts} cuts in four months.`;
+        const r0 = a[0];
+        const bulls = c0 ? N(c0.strong_buy) + N(c0.buy) : 0;
+        say.push(dir
+          + (r0 ? ` ${r0.firm} ${r0.rating_action === 'downgrades' ? 'downgraded it' : r0.rating_action === 'upgrades' ? 'upgraded it' : 'held its rating'} `
+              + `${daysBetween(parseISO(String(r0.date)), today)} days ago at ${N(r0.price_target)}`
+              + (N(r0.price_target) < spot ? `, below where it trades.` : `.`) : '')
+          + (bulls ? ` ${bulls} analysts still call it a buy.` : ''));
+      }
+      if (g0) {
+        const gd = String(g0.direction);
+        say.push(gd === 'cut'
+          ? `The company CUT its guidance ${daysBetween(parseISO(String(g0.date)), today)} days ago. That is the business itself guiding down.`
+          : `The company ${gd} guidance ${daysBetween(parseISO(String(g0.date)), today)} days ago.`);
+      }
+      if (e0) say.push(`Earnings ${String(e0.report_date)}, in ${daysBetween(today, parseISO(String(e0.report_date)))} days.`);
+      if (p0) say.push(`It sits ${Math.abs(hi52 ? (spot / hi52 - 1) * 100 : 0).toFixed(0)}% below its high `
+        + `and has spent ${N(p0.persistence).toFixed(0)}% of the last seven months within 10% of its low.`);
+
       return {
+        narrative: say,
         ticker: t, spot, shares, avg, effective, allIn,
         background: {
           analysts: tg.length ? {
