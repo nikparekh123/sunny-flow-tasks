@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-20.3';
+const BUILD = '2026-08-22.2';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -256,7 +256,8 @@ Deno.serve(async (req) => {
     const polyKey = Deno.env.get('POLYGON_API_KEY')!;
     if (!polyKey) return json(500, { ok: false, error: 'POLYGON_API_KEY is not set' });
 
-    let body: { asof?: string; dry_run?: boolean; tickers?: string[]; explain?: string[] } = {};
+    let body: { asof?: string; dry_run?: boolean; tickers?: string[]; explain?: string[];
+                store_history?: boolean } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is normal */ }
     const today = parseISO(body.asof ?? nyToday());
     const todayISO = ymd(today);
@@ -339,6 +340,40 @@ Deno.serve(async (req) => {
           bars[t] = await dailyCloses(t, polyKey, ymd(addDays(today, -600)), todayISO);
         } catch { bars[t] = []; }
       }));
+    }
+
+    /* Keep the history instead of discarding it. The 600-day pull above is
+       already paid for; writing it costs one round trip and answers every
+       question that needs a past, which none of them could before.
+
+       Normal runs store the last 10 sessions, which is all that can be new.
+       {"store_history":true} writes the whole 600 days, for the initial
+       backfill or after a gap. Failure is non-fatal: this is research data and
+       must never cost a scan. */
+    let stored = 0, storeErr: string | null = null;
+    if (!body.dry_run) {
+      const keep = body.store_history ? 10_000 : 10;
+      const rowsOut: Array<{ ticker: string; date: string; close: number }> = [];
+      for (const [t, arr] of Object.entries(bars)) {
+        for (const b of (arr ?? []).slice(-keep)) {
+          if (Number.isFinite(b.c)) rowsOut.push({ ticker: t, date: b.d, close: b.c });
+        }
+      }
+      for (let i = 0; i < rowsOut.length; i += 2000) {
+        try {
+          const r = await fetch(`${url}/rest/v1/scanner_closes?on_conflict=ticker,date`, {
+            method: 'POST',
+            headers: {
+              apikey: key, Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json',
+              Prefer: 'resolution=merge-duplicates,return=minimal',
+            },
+            body: JSON.stringify(rowsOut.slice(i, i + 2000)),
+          });
+          if (r.ok) stored += Math.min(2000, rowsOut.length - i);
+          else if (!storeErr) storeErr = `${r.status} ${(await r.text()).slice(0, 160)}`;
+        } catch (e) { if (!storeErr) storeErr = String(e).slice(0, 160); }
+      }
     }
 
     const rets = (t: string) => {
@@ -554,11 +589,46 @@ Deno.serve(async (req) => {
       }
     }
 
+    /* The option market's trend, from figures already in hand. The liquidity
+       GATE reads today's number; this is so a draining market becomes visible
+       before the spreads make it obvious. One row per name per scan date. */
+    let optRows = 0;
+    if (!body.dry_run) {
+      const oh = out
+        .filter((r) => (r as Record<string, unknown>).option_oi != null)
+        .map((r) => {
+          const x = r as Record<string, unknown>;
+          return {
+            ticker: x.ticker, asof: todayISO, expiry,
+            spot: x.spot ?? null, option_oi: x.option_oi ?? null,
+            option_vol: x.option_volume ?? null,
+            straddle_pct: x.atm_straddle_pct ?? null,
+            implied_vol: x.implied_vol ?? null,
+          };
+        });
+      for (let i = 0; i < oh.length; i += 200) {
+        try {
+          const r = await fetch(`${url}/rest/v1/scanner_option_history?on_conflict=ticker,asof`, {
+            method: 'POST',
+            headers: {
+              apikey: key, Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json',
+              Prefer: 'resolution=merge-duplicates,return=minimal',
+            },
+            body: JSON.stringify(oh.slice(i, i + 200)),
+          });
+          if (r.ok) optRows += Math.min(200, oh.length - i);
+          else if (!storeErr) storeErr = `opt ${r.status} ${(await r.text()).slice(0, 140)}`;
+        } catch (e) { if (!storeErr) storeErr = `opt ${String(e).slice(0, 140)}`; }
+      }
+    }
+
     const passed = out.filter((r) => r.passes);
     const heldRes = out.filter((r) => held.includes(r.ticker));
     return json(200, {
       // Written, or why not. A silent cache miss cost a day.
       cached: body.dry_run ? 'dry_run' : (cacheError ?? 'ok'),
+      history_rows: stored, option_rows: optRows, history_error: storeErr,
       ok: true, build: BUILD, asof: todayISO, expiry,
       checked: out.length,
       passed: passed.length,
