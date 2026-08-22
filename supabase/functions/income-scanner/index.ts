@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.7';
+const BUILD = '2026-08-22.9';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -275,6 +275,10 @@ Deno.serve(async (req) => {
       const tries: Record<string, string> = {
         financials: `${POLY}/vX/reference/financials?ticker=AAPL&limit=2&apiKey=${polyKey}`,
         benzinga_earnings: `${POLY}/benzinga/v1/earnings?ticker=AAPL&limit=2&apiKey=${polyKey}`,
+        bz_by_date: `${POLY}/benzinga/v1/earnings?date.gte=2026-08-24&date.lte=2026-09-30`
+          + `&limit=5&order=asc&sort=date&apiKey=${polyKey}`,
+        bz_multi: `${POLY}/benzinga/v1/earnings?ticker.any_of=NKE,BABA,PG&date.gte=2026-08-01`
+          + `&limit=5&apiKey=${polyKey}`,
         benzinga_consensus: `${POLY}/benzinga/v1/consensus-ratings?ticker=AAPL&limit=1&apiKey=${polyKey}`,
         dividends_control: `${POLY}/v3/reference/dividends?ticker=AAPL&limit=1&apiKey=${polyKey}`,
         ticker_details: `${POLY}/v3/reference/ticker-details/AAPL?apiKey=${polyKey}`,
@@ -381,7 +385,7 @@ Deno.serve(async (req) => {
       D.get('income_sleeve_names?active=is.true&select=ticker'),
       D.get('income_sleeve_settings?id=eq.1&select=edge_floor,edge_ceiling'),
       D.get(`earnings_events?report_date=gte.${todayISO}`
-            + `&select=ticker,report_date,report_session&order=report_date.asc`),
+            + `&select=ticker,report_date,report_time&order=report_date.asc`),
     ]);
     const cfg = setRows[0] ?? {};
     const edgeFloor = Number(cfg.edge_floor ?? G.edgeMin);
@@ -398,8 +402,8 @@ Deno.serve(async (req) => {
     /* A print dated TODAY may already be behind you. earnings_events stores a
        date and no time, so BABA was blocked on 20 Aug by a report it had
        delivered before that morning's open, at an edge of +9.3, the best on
-       the board. report_session settles it: 'pre' clears once 09:30 ET has
-       passed, 'post' blocks the whole day, and NULL is treated as post so not
+       the board. report_time settles it: 'bmo' clears once 09:30 ET has
+       passed, 'amc' blocks the whole day, and NULL is treated as amc so not
        knowing never releases a name early. */
     const nyNow = new Intl.DateTimeFormat('en-US', {
       timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false,
@@ -414,7 +418,7 @@ Deno.serve(async (req) => {
       if (earnBy.has(tk)) continue;
       const d = String(e.report_date).slice(0, 10);
       // Already delivered: dated today, before the open, and the open has passed.
-      const done = d === todayISO && String(e.report_session ?? 'post') === 'pre' && afterOpen;
+      const done = d === todayISO && String(e.report_time ?? 'amc') === 'bmo' && afterOpen;
       earnBy.set(tk, { d, done });
     }
     const held = heldRows.map((r) => String(r.ticker));
@@ -442,7 +446,19 @@ Deno.serve(async (req) => {
              found 6 market days where a longer window finds 15, so NKE came back
              with a 15.2% "own gap" that is a macro session, which is the exact
              failure this gate exists to prevent. */
-          bars[t] = await dailyCloses(t, polyKey, ymd(addDays(today, -600)), todayISO);
+          /* 600 days for SPY, ~420 for everything else.
+             ────────────────────────────────────────────────────────────────
+             The 600-day window existed for ONE reason: the market-day detector
+             needed to see the April 2025 macro weeks across the whole universe,
+             and at 430 days the window started after them entirely. That
+             detector now reads SPY alone, so only SPY needs the long history.
+
+             Individual names need 252 sessions for the 52-week range and about
+             the same again to measure persistence. 420 covers both. At 596
+             names the difference is ~100,000 bar objects, and the run was dying
+             with WORKER_RESOURCE_LIMIT holding history nothing was reading. */
+          const days = t === MARKET_REF ? 600 : 420;
+          bars[t] = await dailyCloses(t, polyKey, ymd(addDays(today, -days)), todayISO);
         } catch { bars[t] = []; }
       }));
     }
@@ -499,7 +515,7 @@ Deno.serve(async (req) => {
        PG 80.6, MCD 75.0. It cannot be moved by a single session. */
     const persistenceOf = (t: string): number | null => {
       const c = (bars[t] ?? []).map((x) => x.c);
-      if (c.length < 292) return null;                 // 252 window + 40 to measure
+      if (c.length < 282) return null;                 // 252 window + 30 to measure
       let hits = 0, n = 0;
       for (let i = 252; i < c.length; i++) {
         let lo = Infinity;

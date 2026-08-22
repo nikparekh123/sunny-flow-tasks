@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-20.5';
+const BUILD = '2026-08-22.1';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -226,7 +226,7 @@ Deno.serve(async (req) => {
          blocking for a few days after it passes, because the estimate is worth
          about a week either way and the real print may not have happened yet. */
       D.get(`earnings_events?ticker=in.${earnList}&report_date=gte.${ymd(addDays(today, -10))}`
-            + `&select=ticker,report_date,date_estimated,report_session&order=report_date.asc`),
+            + `&select=ticker,report_date,date_estimated,report_time&order=report_date.asc`),
       D.get(`option_trades?ticker=in.${inList}&voided_at=is.null`
             + `&select=ticker,trade_date,action,option_type,direction,contracts,strike,premium,expiry`),
       D.get(`share_lots?ticker=in.${inList}&voided_at=is.null&select=ticker,acquired_date,qty_remaining,cost_per_share`),
@@ -1217,7 +1217,7 @@ Deno.serve(async (req) => {
           + Number(nyNow.find((x) => x.type === 'minute')?.value ?? '0')) >= (9 * 60 + 30);
         const delivered = (r: Record<string, unknown>) => {
           const d = String(r.report_date).slice(0, 10);
-          if (d === todayISO) return String(r.report_session ?? 'post') === 'pre' && afterOpen;
+          if (d === todayISO) return String(r.report_time ?? 'amc') === 'bmo' && afterOpen;
           return d < todayISO && r.date_estimated !== true;
         };
 
