@@ -19,7 +19,7 @@ import {
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.2';
+const BUILD = '2026-08-22.3';
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -276,7 +276,7 @@ Deno.serve(async (req) => {
        edge_floor in settings moved half the screen. Now there is one number
        in one row and both cards read it. */
     const [uniRows, heldRows, setRows, earnRows] = await Promise.all([
-      D.get('income_scanner_universe?active=is.true&select=ticker'),
+      D.get('income_scanner_universe?active=is.true&select=ticker,conviction'),
       D.get('income_sleeve_names?active=is.true&select=ticker'),
       D.get('income_sleeve_settings?id=eq.1&select=edge_floor,edge_ceiling'),
       D.get(`earnings_events?report_date=gte.${todayISO}`
@@ -318,6 +318,9 @@ Deno.serve(async (req) => {
     }
     const held = heldRows.map((r) => String(r.ticker));
     const universe = (body.tickers ?? uniRows.map((r) => String(r.ticker)));
+    // NULL reads as 5, neutral: an unrated name is neither rewarded nor punished.
+    const conviction = new Map<string, number>(
+      uniRows.map((r) => [String(r.ticker), r.conviction == null ? 5 : Number(r.conviction)]));
     if (!universe.length) return json(200, { ok: true, empty: true, note: 'universe is empty' });
 
     // ── prices for everything, including the held names for correlation ──────
@@ -375,6 +378,25 @@ Deno.serve(async (req) => {
         } catch (e) { if (!storeErr) storeErr = String(e).slice(0, 160); }
       }
     }
+
+    /* PERSISTENCE: has this name LIVED near its low, or is it just visiting?
+       Share of sessions in the last ~7 months within 10% of the trailing
+       252-day low. The median stock across 140 names scores 4.7% and the
+       median VISIT lasts four trading days, which is why a "within 5% today"
+       gate found zero names out of 144. Nik's book runs 50-80: NKE 72.5,
+       PG 80.6, MCD 75.0. It cannot be moved by a single session. */
+    const persistenceOf = (t: string): number | null => {
+      const c = (bars[t] ?? []).map((x) => x.c);
+      if (c.length < 292) return null;                 // 252 window + 40 to measure
+      let hits = 0, n = 0;
+      for (let i = 252; i < c.length; i++) {
+        let lo = Infinity;
+        for (let j = i - 252; j <= i; j++) if (c[j] < lo) lo = c[j];
+        n++;
+        if ((c[i] / lo - 1) * 100 <= 10) hits++;
+      }
+      return n ? Math.round((hits / n) * 1000) / 10 : null;
+    };
 
     const rets = (t: string) => {
       const c = (bars[t] ?? []).map((x) => x.c); const out: number[] = [];
@@ -500,6 +522,8 @@ Deno.serve(async (req) => {
           fails.push(`reports ${rep.d}, inside the blackout`);
         }
 
+        const persist = persistenceOf(t);
+
         return {
           ticker: t, asof: todayISO, spot: Math.round(spot * 100) / 100,
           ret_12mo: Math.round(r12 * 10) / 10, ret_3mo: Math.round(r3 * 10) / 10,
@@ -511,6 +535,27 @@ Deno.serve(async (req) => {
           edge: edge != null ? Math.round(edge * 10) / 10 : null,
           option_oi: oi, option_volume: vol,
           weeklies: weeks,
+          persistence: persist,
+          score: (() => {
+            /* BANDED, not linear. A linear edge component scored INTU 74/100
+               while it failed four gates, because +35 of edge and a 9.76%
+               straddle were both the print three days away. Zero above the
+               ceiling, or the score rewards what the ceiling rejects. */
+            const band = edge == null ? 0
+              : (edge <= 0 || edge >= G.edgeMax) ? 0
+              : edge < 4 ? edge / 4
+              : edge <= 10 ? 1
+              : (G.edgeMax - edge) / 5;
+            const cl = (x: number) => Math.max(0, Math.min(1, x));
+            const parts =
+                band                                    * 25
+              + cl((persist ?? 0) / 60)                 * 25   // 60%+ of days is full marks
+              + cl(((straddlePct ?? 0) - 1) / 5)        * 15   // 1%/wk -> 0, 6%/wk -> full
+              + (conviction.get(t) ?? 5) / 10           * 15
+              + cl((60 - pos52) / 60)                   * 10
+              + cl(1 - Math.abs(r3) / 25)               * 10;
+            return Math.round(parts * 10) / 10;
+          })(),
           // Reported, never gated. Thin is a fact about the name, not a verdict.
           liquidity: oi >= 5000 ? 'deep' : oi >= 800 ? 'fine' : 'thin',
           max_correlation: Math.round(mx * 100) / 100,
@@ -558,7 +603,7 @@ Deno.serve(async (req) => {
     const COLS = [
       'ticker', 'asof', 'spot', 'ret_12mo', 'ret_3mo', 'vol_60d', 'vol_20d',
       'pos_52w', 'own_gap', 'own_gap_on', 'atm_straddle_pct', 'implied_vol',
-      'edge', 'option_oi', 'option_volume', 'weeklies', 'liquidity',
+      'edge', 'option_oi', 'option_volume', 'weeklies', 'liquidity', 'persistence', 'score',
       'max_correlation', 'bucket', 'passes', 'fails',
     ] as const;
     const shaped = out.map((r) => {
