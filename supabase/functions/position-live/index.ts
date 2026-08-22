@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.8';
+const BUILD = '2026-08-22.9';
 const POLY = 'https://api.polygon.io';
 
 /** The Friday at least 5 sessions out: the contract actually written. */
@@ -86,9 +86,22 @@ Deno.serve(async (req) => {
     const todayISO = ymd(today);
     const d120 = ymd(addDays(today, -120));
 
-    const lots = await D.get('share_lots?voided_at=is.null&qty_remaining=gt.0'
-      + '&select=ticker,qty_remaining,cost_per_share');
-    const names = body.tickers ?? [...new Set(lots.map((r) => String(r.ticker)))];
+    /* ⚠ INCOME SLEEVE NAMES ONLY. This card is built on the sleeve's rules:
+       one call and one put per 100 shares, a floor sized to shares PLUS puts
+       sold. TLT does not work that way at all. It has no block, no conviction
+       and no floor; the put IS the trade, sold on the second red day. See
+       docs/STRATEGIES.md.
+
+       Rendering every ticker with shares pulled TLT in and produced
+       "sell -27 puts" and "your floor needs 49", which is the sleeve's rule
+       applied to a book that has never had one. Same confusion as CPB, and
+       the strategies file exists precisely to stop it. */
+    const [lots, sleeveRows] = await Promise.all([
+      D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
+      D.get('income_sleeve_names?active=is.true&select=ticker'),
+    ]);
+    const sleeve = new Set(sleeveRows.map((r) => String(r.ticker)));
+    const names = body.tickers ?? [...new Set(lots.map((r) => String(r.ticker)))].filter((t) => sleeve.has(t));
     if (!names.length) return json(200, { ok: true, empty: true, note: 'no shares held' });
     const inList = `(${names.join(',')})`;
 
@@ -206,13 +219,16 @@ Deno.serve(async (req) => {
          puts sold", which is the same jargon wearing a bullet. */
       const doList: string[] = [];
       if (nCalls < lots100) {
-        const nc = lots100 - nCalls, np = lots100 - nPuts;
-        doList.push(atmC
+        /* Never negative. TLT carried 38 short puts against 11 lots and this
+           asked for "-27 puts" at a credit of -$1,147. */
+        const nc = Math.max(0, lots100 - nCalls), np = Math.max(0, lots100 - nPuts);
+        if (nc === 0 && np === 0) { /* nothing to add */ } else
+        { if (nc) doList.push(atmC
           ? `Sell ${nc} calls, ${atmC.strike} strike, ${day(nextWrite)}, about ${atmC.mid.toFixed(2)} each — ${usd(atmC.mid * 100 * nc)}`
           : `Sell ${nc} calls at the money, ${day(nextWrite)}`);
-        doList.push(atmP
+        if (np) doList.push(atmP
           ? `Sell ${np} puts, ${atmP.strike} strike, ${day(nextWrite)}, about ${atmP.mid.toFixed(2)} each — ${usd(atmP.mid * 100 * np)}`
-          : `Sell ${np} puts at the money, ${day(nextWrite)}`);
+          : `Sell ${np} puts at the money, ${day(nextWrite)}`); }
       }
       for (const c of itmCall) {
         doList.push(`Let the ${c.n} calls at ${c.k} go: ${(c.n * 100).toLocaleString('en-US')} shares `
