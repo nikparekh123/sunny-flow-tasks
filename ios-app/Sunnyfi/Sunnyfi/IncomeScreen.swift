@@ -208,6 +208,12 @@ private func inkFig(_ s: String, size: CGFloat, color: Color) -> Text {
 
 struct IncomeScreen: View {
     @State private var store = IncomeStore()
+    /* A SECOND store, not a second block on the first response. position-live
+       owns the position arithmetic and income-sleeve owns the book, and neither
+       recomputes the other's numbers. Two functions each holding their own copy
+       of the same rule is what made the scanner and the book disagree about CPB
+       on one screen. */
+    @State private var live = LiveStore()
 
     var body: some View {
         ScrollView {
@@ -252,6 +258,22 @@ struct IncomeScreen: View {
                     .scrollTargetBehavior(.viewAligned)
                     .scrollClipDisabled()
 
+                    /* THE LIVE CARDS, first of the three lists.
+
+                       The rail above says what each name IS. This says what the
+                       position is DOING and what it needs this week, which is
+                       the only part that is about today. The book is next
+                       because it proposes trades, and the scanner is last
+                       because it is a shortlist of names not yet owned. Sorted
+                       by urgency: act, then decide, then browse. */
+                    if let ps = live.book?.positions, !ps.isEmpty {
+                        GrpHead(label: "Your positions", count: ps.count)
+                        VStack(spacing: 12) {
+                            ForEach(ps) { LiveCard(p: $0) }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+
                     /* THE BOOK, above the scanner on purpose. The scanner is a
                        shortlist of names that might one day be worth owning; this
                        is what to do today. The thing you act on goes first. */
@@ -294,8 +316,20 @@ struct IncomeScreen: View {
             .containerRelativeFrame(.horizontal)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .task { if store.sleeve == nil { await store.load() } }
-        .refreshable { await store.load() }
+        /* Fired separately so a slow chain pull cannot hold up the sleeve.
+           position-live prices the live option chain for every held name, so it
+           is the slower of the two by design. */
+        .task {
+            if store.sleeve == nil { await store.load() }
+        }
+        .task {
+            if live.book == nil { await live.load() }
+        }
+        .refreshable {
+            async let a: () = store.load()
+            async let b: () = live.load()
+            _ = await (a, b)
+        }
     }
 
     /// Rank order. An unranked row (one that failed to price) sinks to the end

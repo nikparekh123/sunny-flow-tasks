@@ -38,7 +38,7 @@ import {
    with no error and several of them changed nothing (the dashboard's Save is not
    its Deploy), and each one cost a round of "is it live?" guessing. The response
    carries this, so one call answers it. */
-const BUILD = '2026-08-22.1';
+const BUILD = '2026-08-22.2';
 
 // ── the rules, all of them ──────────────────────────────────────────────────
 const REALISED_DAYS = 20;      // the window the edge is measured against
@@ -193,13 +193,14 @@ Deno.serve(async (req) => {
     const expiry = writeFriday(today);
     const D = db(url, key);
 
-    const [names, mkt, setRows, scanRows, watchRows] = await Promise.all([
+    const [names, mkt, setRows, scanRows, persRows, watchRows] = await Promise.all([
       D.get('income_sleeve_names?active=is.true&select=*&order=sort.asc'),
       marketNow(polyKey),
       D.get('income_sleeve_settings?id=eq.1&select=*'),
       // The scanner writes here on a cron. Reading the table rather than calling
       // the function keeps this screen at one second instead of ninety.
       D.get('income_scanner_results?select=*&order=asof.desc&limit=300'),
+      D.get('scanner_persistence?select=ticker,persistence,measured&limit=2000'),
       D.get('income_scanner_universe?watch=is.true&select=ticker'),
     ]);
     const cfg = setRows[0] ?? {};
@@ -1368,8 +1369,11 @@ Deno.serve(async (req) => {
         if (!scanRows.length) return null;
         const asof = String(scanRows[0].asof);
         const run = scanRows.filter((r) => String(r.asof) === asof);
+        const pers = new Map<string, number>(
+          (persRows ?? []).filter((r) => Number(r.measured ?? 0) >= 60)
+            .map((r) => [String(r.ticker), Number(r.persistence ?? 0)]));
         const pass = run.filter((r) => r.passes === true)
-          .sort((a, b) => Number(a.pos_52w ?? 99) - Number(b.pos_52w ?? 99));
+          .sort((a, b) => Number(b.score ?? 0) - Number(a.score ?? 0));  // by SCORE, not by range
         const heldRows = run.filter((r) => tickers.includes(String(r.ticker)));
         const failing = heldRows.filter((r) => !r.passes);
         /* Accepts the old words too. The scanner writes calm/jumpy now, but a
@@ -1443,8 +1447,16 @@ Deno.serve(async (req) => {
               chip: isCalm(r.bucket) ? 'Calm' : 'Jumpy',
               fill: false,
               fig: `${Number(r.atm_straddle_pct ?? 0).toFixed(2)}%`,
-              line: `Edge ${edge >= 0 ? '+' : ''}${edge.toFixed(1)} · `
-                    + `${r.liquidity ?? 'thin'} market · `
+              /* SCORE and PERSISTENCE lead now. Edge and the 52-week reading
+                 are single-day facts; the score ranks the name against every
+                 other survivor and persistence says whether it has LIVED down
+                 here or is just visiting. The universe median persistence is
+                 4.7% and Nik's own names run 50-80, so it is the line that
+                 separates his kind of name from the rest of the board. */
+              line: `Score ${Number(r.score ?? 0).toFixed(0)} · `
+                    + (pers.has(String(r.ticker))
+                       ? `${Number(pers.get(String(r.ticker))).toFixed(0)}% near its low · ` : '')
+                    + `edge ${edge >= 0 ? '+' : ''}${edge.toFixed(1)} · `
                     + `${Math.round(Number(r.pos_52w ?? 0))}% up the range · `
                     + (e ? dayShort(String(e.report_date)) : 'no date yet'),
             };
