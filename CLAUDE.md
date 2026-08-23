@@ -40,7 +40,11 @@ This replaces a prior buggy rule ("any IBKR trade with `last_synced_at` in the l
 
 - Repo path: `ios-app/Sunnyfi/Sunnyfi/`
 - Bundle ID: `com.sunnyfi.app` (Apple team `AR5LF7RNCP`)
-- Xcode beta at `/Users/niketparekh/Downloads/Xcode-beta.app` — use `DEVELOPER_DIR` env var when shelling out to `xcodebuild`.
+- Xcode beta at `/Applications/Xcode-beta.app` — use `DEVELOPER_DIR` env var when shelling out to `xcodebuild`.
+  Moved out of `~/Downloads` on 2026-08-22: that folder is TCC-protected, so Claude Code's simulator
+  bridge could not read the Xcode bundle and the live simulator panel failed with a SimulatorKit load
+  error. The framework itself was fine (symlinks intact, binary dlopen'd, CoreSimulator matched at
+  1155.4); it was purely the location. Do not move it back.
 - For physical device builds: `ENABLE_DEBUG_DYLIB = NO` is set on Debug config — keep it. Xcode 16+'s default split-binary debug layout broke launch on iOS 27 builds (libxpc init crash).
 - **"App keeps pausing when I run it" = the Xcode debugger, not a bug.** On the iOS 27 beta device, the attached debugger suspends the app whenever it backgrounds / the connection hiccups, and Xcode shows "Paused." Fix (confirmed working): Edit Scheme → Run → Info → uncheck **"Debug executable"** so ⌘R installs+launches without lldb attached. Or just launch from the home screen after install. Do NOT go hunting for a code cause.
 - Sentry SPM package is pinned (sentry-cocoa 9.16.1) but **not currently linked to the target** — `import Sentry` and `SentrySDK.start { ... }` are commented out in `SunnyfiApp.swift`. To re-enable: Xcode → target → General → Frameworks → add Sentry, then uncomment those lines.

@@ -65,7 +65,7 @@ private struct RootView: View {
         // half-finished for weeks while Nik trades from the installed app, so
         // no setting and no bad build may put it on his phone. See
         // Redesign/RedesignRoot.swift.
-        if Redesign.isActive { return AnyView(RedesignRoot()) }
+        if Redesign.isActive(userOn: RedesignSession.shared.on) { return AnyView(RedesignRoot()) }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-inkPreview") {
             return AnyView(InkDesignPreview())

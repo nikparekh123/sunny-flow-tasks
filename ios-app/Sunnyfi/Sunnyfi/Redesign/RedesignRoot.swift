@@ -37,40 +37,47 @@
 import SwiftUI
 
 enum Redesign {
-    /// Compiled out on device. There is deliberately no way to turn this on
-    /// from a phone.
-    static var isActive: Bool {
+    /// Simulator always shows the redesign, so building it needs no setting.
+    /// The phone shows it only when Nik has turned the switch on in Settings,
+    /// and that switch defaults OFF, so a rebuild never surprises him.
+    static func isActive(userOn: Bool) -> Bool {
         #if targetEnvironment(simulator)
         // Escape hatch for checking the CURRENT app on the simulator:
         // launch with -currentApp.
         return !ProcessInfo.processInfo.arguments.contains("-currentApp")
         #else
-        return false
+        return userOn
         #endif
     }
 }
 
+/// The switch. Deliberately NOT persisted.
+///
+/// ⚠ SESSION-SCOPED IS THE WHOLE SAFETY MECHANISM. Nik's idea, and it is better
+/// than the persisted flag it replaced. Every launch starts in the CURRENT app,
+/// so the redesign can only ever be reached by deliberately flipping the switch
+/// in a running app. Two consequences fall out for free:
+///
+///   1. There is always a way back. Quit and reopen. No button needed inside a
+///      shell that has no Settings screen yet, and no chance of being trapped in
+///      a half-built app until a new build rescues him.
+///   2. A launch crash in redesign code is impossible, because launch never
+///      starts there. The persisted version needed a crash guard reading a
+///      "pending" mark to avoid a permanent boot loop. All of that is now dead
+///      code that never has to be right.
+///
+/// Persisting this later means bringing the guard back with it. Do not persist
+/// it casually.
+@Observable
+final class RedesignSession {
+    static let shared = RedesignSession()
+    var on = false
+    private init() {}
+}
+
 struct RedesignRoot: View {
     var body: some View {
-        ZStack {
-            Ink.canvas.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 18) {
-                Text("REDESIGN").font(InkFont.mono(12)).tracking(12 * 0.2)
-                    .foregroundStyle(Ink.dim)
-                Text("Simulator only.\nThe app on the phone is untouched.")
-                    .font(InkFont.display(19))
-                    .foregroundStyle(Ink.text)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Scaffolding is in place and verified end to end: build, "
-                   + "install, launch, screenshot. The screens go here next.")
-                    .font(InkFont.display(14))
-                    .foregroundStyle(Ink.dim)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(28)
-        }
-        .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)
+        SunnyShell()
+            .sunnyEscape()
     }
 }
