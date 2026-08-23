@@ -1,0 +1,8 @@
+# Fetched Polygon bars, 5.8MB and regenerable: run fetch_hist.py, then
+# probe_expiries.py, build_plan.py and fetch_marks.py. The findings live in
+# README.md; the raw bars do not belong in git history forever.
+opt_bars.json
+tlt_hist.json
+plan.json
+res.json
+expiries.json
