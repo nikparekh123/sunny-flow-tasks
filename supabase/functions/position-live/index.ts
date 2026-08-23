@@ -3,7 +3,10 @@
  *
  * Not a score. Ranking one position against itself says nothing. Five sections:
  *
- *   BACKGROUND      situational: analysts, guidance, technicals, earnings
+ *   ANALYSTS        rating changes, the re-rating cluster, target, consensus
+ *   PRICE           moving averages, drawdown, extension, and option flow
+ *   COMPANY         guidance and the earnings date
+ *   HEADLINES       two, linked, filtered to ones about this company
  *   WHERE YOU STAND the grind: what you paid, what premium took off, all-in
  *   WHAT IS COVERED calls against shares, assignment risk
  *   THE FLOOR       the only genuine decision here
@@ -15,6 +18,24 @@
  * and it does not break even until roughly +40% annual drift. Extension is
  * shown because it explains why a week feels uncomfortable. It changes nothing.
  *
+ * ⚠ TWO LAYOUTS FAILED HERE. Do not reintroduce either.
+ *
+ * Bearish / Supportive HEADINGS failed because two labelled buckets are a
+ * QUOTA: the card had to fill both every day whether or not anything had
+ * happened, so it reached for what is permanently true, a 120-day aggregate,
+ * which then counted one event many times. NKE's "27 analyst actions" were 14
+ * firms answering a single earnings report. Nik: "reading this every day, it
+ * feels like I'm repeating the same thing."
+ *
+ * A DATED FEED failed the opposite way. With the substance moved out to WHERE
+ * YOU STAND, the wire filled the space it left. Nik: "everything is news,
+ * where is the analyst upgrade or consensus, technical indicator", and he did
+ * not want today/yesterday stamps either.
+ *
+ * What works is DOMAIN grouping with direction as a per-bullet TAG. A tag
+ * rides on a bullet that already earned its place, so unlike a heading it can
+ * never manufacture content. Freshness lives in the NEW tag and the counter.
+ *
  * ⚠ THE CONSENSUS TARGET IS NOT USED against spot. That feed aggregates every
  * analyst who ever covered the name: NKE reads 91.56 against a spot of 40.91.
  * The usable number is the rolling 120-day median of analyst_actions, and the
@@ -23,7 +44,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.9';
+const BUILD = '2026-08-23.4';
 const POLY = 'https://api.polygon.io';
 
 /** The Friday at least 5 sessions out: the contract actually written. */
@@ -63,6 +84,20 @@ async function chain(t: string, expiry: string, spot: number, k: string, window 
     })).filter((c: { strike: number }) => c.strike > 0);
   } catch { return []; }
 }
+/** The company's name, so a headline tagged to NKE that is actually about
+ *  Dick's Sporting Goods can be dropped. Falls back to showing everything:
+ *  a failed lookup must not silently blank the headlines. */
+async function tickerName(t: string, k: string): Promise<string> {
+  try {
+    // NOT /v3/reference/ticker-details, which 404s. Verified against the
+    // scanner's own probe before trusting it.
+    const r = await fetch(`${POLY}/v3/reference/tickers/${t}?apiKey=${k}`);
+    if (!r.ok) return '';
+    const j = await r.json();
+    return String(j?.results?.name ?? '');
+  } catch { return ''; }
+}
+
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 const usd = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
 const pct = (v: number, dp = 1) => `${v >= 0 ? '+' : ''}${v.toFixed(dp)}%`;
@@ -80,7 +115,7 @@ Deno.serve(async (req) => {
     const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const pk = Deno.env.get('POLYGON_API_KEY')!;
     const D = db(url, key);
-    let body: { tickers?: string[] } = {};
+    let body: { tickers?: string[]; peek?: boolean } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* none */ }
     const today = parseISO(nyToday());
     const todayISO = ymd(today);
@@ -105,7 +140,7 @@ Deno.serve(async (req) => {
     if (!names.length) return json(200, { ok: true, empty: true, note: 'no shares held' });
     const inList = `(${names.join(',')})`;
 
-    const [trades, quotes, closes, pers, scan, earn, guide, acts, cons, news, divs] = await Promise.all([
+    const [trades, quotes, closes, pers, scan, earn, guide, acts, cons, news, divs, seen, ohist] = await Promise.all([
       D.get(`option_trades?ticker=in.${inList}&voided_at=is.null`
         + '&select=ticker,action,option_type,direction,contracts,strike,premium,expiry'),
       D.get(`ticker_quotes_latest?ticker=in.${inList}&select=ticker,spot`),
@@ -121,8 +156,13 @@ Deno.serve(async (req) => {
       D.get(`analyst_actions?ticker=in.${inList}&date=gte.${d120}`
         + '&select=ticker,date,firm,rating,rating_action,price_target,previous_price_target,price_target_action&order=date.desc'),
       D.get(`analyst_consensus?ticker=in.${inList}&select=*&order=as_of_date.desc`),
-      D.get(`name_news?ticker=in.${inList}&select=ticker,published,title,publisher&order=published.desc`),
+      D.get(`name_news?ticker=in.${inList}&select=ticker,published,title,publisher,url&order=published.desc`),
       D.get(`dividends?ticker=in.${inList}&select=ticker,ex_date,cash_amount,frequency&order=ex_date.desc`),
+      D.get('income_card_seen?select=ticker,since_on,visit_on'),
+      /* Ordered DESC and generously capped: the OI comparison must line up
+         SAME EXPIRY against SAME EXPIRY, so it needs several days back. */
+      D.get(`scanner_option_history?ticker=in.${inList}`
+        + '&select=ticker,asof,expiry,option_oi,option_vol&order=asof.desc&limit=2000'),
     ]);
 
     const first = (a: Record<string, unknown>[], t: string) =>
@@ -224,10 +264,10 @@ Deno.serve(async (req) => {
         const nc = Math.max(0, lots100 - nCalls), np = Math.max(0, lots100 - nPuts);
         if (nc === 0 && np === 0) { /* nothing to add */ } else
         { if (nc) doList.push(atmC
-          ? `Sell ${nc} calls, ${atmC.strike} strike, ${day(nextWrite)}, about ${atmC.mid.toFixed(2)} each — ${usd(atmC.mid * 100 * nc)}`
+          ? `Sell ${nc} calls, ${atmC.strike} strike, ${day(nextWrite)}, about ${atmC.mid.toFixed(2)} each, ${usd(atmC.mid * 100 * nc)} in`
           : `Sell ${nc} calls at the money, ${day(nextWrite)}`);
         if (np) doList.push(atmP
-          ? `Sell ${np} puts, ${atmP.strike} strike, ${day(nextWrite)}, about ${atmP.mid.toFixed(2)} each — ${usd(atmP.mid * 100 * np)}`
+          ? `Sell ${np} puts, ${atmP.strike} strike, ${day(nextWrite)}, about ${atmP.mid.toFixed(2)} each, ${usd(atmP.mid * 100 * np)} in`
           : `Sell ${np} puts at the money, ${day(nextWrite)}`); }
       }
       for (const c of itmCall) {
@@ -239,7 +279,7 @@ Deno.serve(async (req) => {
       } else if (nFloor < needAfter) {
         const gap = needAfter - nFloor;
         doList.push(atmF
-          ? `Buy ${gap} puts at ${atmF.strike}, ${day(String(atmF.expiry ?? floorExp))}, about ${atmF.mid.toFixed(2)} each — ${usd(atmF.mid * 100 * gap)} to close the floor gap`
+          ? `Buy ${gap} puts at ${atmF.strike}, ${day(String(atmF.expiry ?? floorExp))}, about ${atmF.mid.toFixed(2)} each, ${usd(atmF.mid * 100 * gap)} out, to close the floor gap`
           : `Buy ${gap} four-month puts at the money to close the floor gap`);
         const inFlow = (atmC ? atmC.mid * 100 * (lots100 - nCalls) : 0) + (atmP ? atmP.mid * 100 * (lots100 - nPuts) : 0);
         const outFlow = atmF ? atmF.mid * 100 * gap : 0;
@@ -256,61 +296,183 @@ Deno.serve(async (req) => {
         doList.push(`The company cut guidance on ${day(String(g0.date))}. Think hard before adding to this one.`);
       }
 
-      /* ── Situational analysis, grouped by what a signal MEANS ────────────
-         Nik's format, and it is better than prose here: bullets are fine when
-         each one carries a judgement. Grouped by DIRECTION rather than by
-         source, so the tension is visible instead of buried. NKE is the case
-         that proves it: 22 target cuts sit under Bearish while 70 buy ratings
-         and a reaffirmed guidance sit under Supportive, and the disagreement
-         between them IS the information. */
-      const bear: string[] = [], bull: string[] = [], cat: string[] = [];
-      if (tg.length) {
-        if (cuts > raises) bear.push(`${raises} raises against ${cuts} cuts and ${downs} downgrades, across ${a.length} analyst actions in 120 days`);
-        else bull.push(`${raises} target raises against ${cuts} cuts in 120 days`);
-        const dg = a.find((r) => r.rating_action === 'downgrades');
-        if (dg) bear.push(`${dg.firm} to ${dg.rating} ${daysBetween(parseISO(String(dg.date)), today)} days ago, target ${N(dg.previous_price_target)} to ${N(dg.price_target)}`);
-        if (med > spot) bull.push(`Median target ${med.toFixed(2)}, ${pct((med / spot - 1) * 100)} upside even after the cuts`);
-        else bear.push(`Median target ${med.toFixed(2)}, below where it trades`);
+      /* ── The situational read: ANALYSTS, PRICE, COMPANY, HEADLINES ────────
+         Grouped by DOMAIN, so it reads as a situation rather than a timeline.
+
+         ⚠ NOT BEARISH / SUPPORTIVE SECTIONS. Two labelled buckets are a QUOTA:
+         the card had to fill both every day whether or not anything happened,
+         so it reached for what is permanently true, a 120-day aggregate, which
+         then counted ONE event many times. NKE's "27 analyst actions" were 14
+         firms answering a single earnings report on 1 July. Nik: "reading this
+         every day, it feels like I'm repeating the same thing."
+
+         ⚠ NOR IS IT A DATED FEED. That was the next attempt and it failed the
+         other way: with the substance moved out, the wire filled the space and
+         the card read like a Motley Fool channel. Nik: "everything is news,
+         where is the analyst upgrade or consensus, technical indicator."
+
+         Direction returns as a per-bullet TAG rather than a heading, which is
+         safe for the reason the headings were not: a tag rides on a bullet
+         that already earned its place, so it can never manufacture content. */
+      const sRow = (seen as Record<string, unknown>[]).find((r) => String(r.ticker) === t);
+      const lastVisit = sRow ? String(sRow.visit_on ?? '').slice(0, 10) : '';
+      /* The cutoff moves on the FIRST open of a new day and lands on the
+         PREVIOUS visit day, never on today. Collapse the two dates into one
+         and opening the app twice before lunch empties the card the second. */
+      const sinceOn = sRow
+        ? (lastVisit && lastVisit < todayISO ? lastVisit : String(sRow.since_on ?? '').slice(0, 10))
+        : '';
+      const cut = sinceOn || ymd(addDays(today, -14));
+
+      type Line = { text: string; tags: string[] };
+      const L = (text: string, ...tags: Array<string | null>): Line =>
+        ({ text, tags: tags.filter((x): x is string => !!x) });
+      const isNew = (d: string) => d > cut ? 'NEW' : null;
+      const ago = (d: string) => {
+        const n = daysBetween(parseISO(d), today);
+        return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${n} days ago`;
+      };
+
+      // ── ANALYSTS ──────────────────────────────────────────────────────────
+      /* IMPORTANT is derived from RARITY, not from Benzinga's own field, which
+         scores 40% of all actions a 5 and 58% a 0 and every NKE action a 5. A
+         rating change is 9% of the feed; a "maintains" is 77%. */
+      const analysts: Line[] = [];
+      const rateChg = a.find((r) => r.rating_action === 'downgrades' || r.rating_action === 'upgrades');
+      if (rateChg) {
+        const dn = rateChg.rating_action === 'downgrades';
+        const pt = N(rateChg.price_target), pp = N(rateChg.previous_price_target);
+        const d = String(rateChg.date).slice(0, 10);
+        analysts.push(L(`${rateChg.firm} ${dn ? 'cut' : 'raised'} it to ${rateChg.rating} ${ago(d)}`
+          + (pt && pp && pt !== pp ? `, ${pp} to ${pt}` : ''),
+          isNew(d), dn ? 'BEARISH' : 'BULLISH', 'IMPORTANT'));
+      }
+      /* The biggest same-day cluster, as ONE line. Counting each firm
+         separately is what turned a single earnings reaction into "22 cuts". */
+      const byDay = new Map<string, Record<string, unknown>[]>();
+      for (const r of a) {
+        const dd = String(r.date).slice(0, 10);
+        const g = byDay.get(dd); if (g) g.push(r); else byDay.set(dd, [r]);
+      }
+      const big = [...byDay.entries()].filter(([, g]) => g.length >= 3)
+        .sort((x, y) => y[1].length - x[1].length)[0];
+      if (big) {
+        const [dd, g] = big;
+        const cu = g.filter((r) => r.price_target_action === 'lowers').length;
+        const ra = g.filter((r) => r.price_target_action === 'raises').length;
+        const parts: string[] = [];
+        if (cu) parts.push(`${cu} target cut${cu > 1 ? 's' : ''}`);
+        if (ra) parts.push(`${ra} target raise${ra > 1 ? 's' : ''}`);
+        analysts.push(L(`${g.length} firms re-rated it ${ago(dd)}`
+          + (parts.length ? `, ${parts.join(' and ')}` : ''),
+          isNew(dd), cu > ra ? 'BEARISH' : ra > cu ? 'BULLISH' : null,
+          g.length >= 5 ? 'IMPORTANT' : null));
+      }
+      if (med) {
+        analysts.push(L(`Median target ${med.toFixed(2)}, ${pct((med / spot - 1) * 100)} against spot`,
+          med > spot ? 'BULLISH' : 'BEARISH'));
       }
       if (c0) {
-        const bulls = N(c0.strong_buy) + N(c0.buy), bears = N(c0.sell) + N(c0.strong_sell);
-        if (bulls > bears * 3) bull.push(`Street still net constructive: ${bulls} buy-rated against ${bears} sell`);
-        else bear.push(`Street mixed: ${bulls} buy against ${bears} sell`);
+        const bu = N(c0.strong_buy) + N(c0.buy), se = N(c0.sell) + N(c0.strong_sell);
+        analysts.push(L(`${N(c0.contributors)} analysts: ${bu} buy, ${N(c0.hold)} hold, ${se} sell`,
+          bu > se * 3 ? 'BULLISH' : se > bu ? 'BEARISH' : null));
       }
+
+      // ── PRICE ─────────────────────────────────────────────────────────────
+      const price: Line[] = [];
       if (m50 && m200) {
-        const below = spot < m50 && spot < m200;
-        (below ? bear : bull).push(`Trading ${below ? 'below' : 'above'} the 50-day (${m50.toFixed(2)}) and 200-day (${m200.toFixed(2)})`);
+        const below = spot < m50 && spot < m200, above = spot > m50 && spot > m200;
+        price.push(L(`${below ? 'Below' : above ? 'Above' : 'Between'} the 50-day ${m50.toFixed(2)}`
+          + ` and the 200-day ${m200.toFixed(2)}`, below ? 'BEARISH' : above ? 'BULLISH' : null));
       }
+      /* No direction tag on this one on purpose. A 48% drawdown is weakness if
+         you read momentum and it is the ENTRY CONDITION if you run the sleeve.
+         Tagging it would be the engine picking a side it cannot justify. */
       if (hi52 && p0) {
-        const dh = (spot / hi52 - 1) * 100;
-        (dh < -25 ? bear : bull).push(`Down ${Math.abs(dh).toFixed(1)}% from the high, ${N(p0.persistence).toFixed(0)}% persistence`);
+        price.push(L(`${Math.abs((spot / hi52 - 1) * 100).toFixed(1)}% off the high, `
+          + `${N(p0.persistence).toFixed(0)}% persistence`));
       }
-      if (Math.abs(ext) < 1) bull.push(`Extension only ${ext.toFixed(2)}sd, so not at a capitulation extreme`);
-      else if (ext < -1) bull.push(`Extension ${ext.toFixed(2)}sd, stretched to the downside`);
-      else cat.push(`Extension ${ext.toFixed(2)}sd above its 20-day mean`);
+      if (sd20) {
+        price.push(L(`${Math.abs(ext).toFixed(2)}sd ${ext < 0 ? 'below' : 'above'} its 20-day mean`
+          + `${Math.abs(ext) < 1 ? ', not at an extreme' : ''}`));
+      }
+      /* ── Option flow: where the traders are actually moving ────────────────
+         ⚠ SAME EXPIRY ONLY. The scanner measures the expiry it would WRITE, so
+         the raw series rolls every Friday: NKE read 87,881 open interest on the
+         18th and 41,914 on the 20th, which is the roll from 21 Aug to 28 Aug and
+         not one contract of genuine unwinding. Compared naively this fires a
+         false collapse on every name every week. Silent until the same expiry
+         has history, which is the honest state for a table created today. */
+      const oh = (ohist as Record<string, unknown>[])
+        .filter((r) => String(r.ticker) === t)
+        .sort((x, y) => String(y.asof).localeCompare(String(x.asof)));
+      if (oh.length >= 2) {
+        const now0 = oh[0];
+        const same = oh.slice(1).filter((r) => String(r.expiry) === String(now0.expiry));
+        if (same.length >= 1) {
+          const a0 = N(now0.option_oi), b0 = N(same[0].option_oi);
+          if (b0 > 0) {
+            const ch = (a0 - b0) / b0 * 100;
+            if (Math.abs(ch) >= 15) {
+              price.push(L(`Open interest at the ${day(String(now0.expiry))} expiry `
+                + `${ch > 0 ? 'up' : 'down'} ${Math.abs(ch).toFixed(0)}% since ${ago(String(same[0].asof))}`, 'NEW'));
+            }
+          }
+        }
+        // Volume is a daily flow, so it needs an average, and an average needs
+        // observations. Three same-expiry days is the floor for saying anything.
+        if (same.length >= 3) {
+          const vs = same.map((r) => N(r.option_vol)).filter((x) => x > 0);
+          const avg = vs.reduce((s2, x) => s2 + x, 0) / (vs.length || 1);
+          const v0 = N(now0.option_vol);
+          if (avg > 0 && v0 >= avg * 2) {
+            price.push(L(`Option volume ${(v0 / avg).toFixed(1)}x its recent average today`,
+              'NEW', v0 >= avg * 3 ? 'IMPORTANT' : null));
+          }
+        }
+      }
+
+      // ── COMPANY ───────────────────────────────────────────────────────────
+      const company: Line[] = [];
       if (g0) {
-        const gd = String(g0.direction), ago = daysBetween(parseISO(String(g0.date)), today);
-        if (gd === 'cut') bear.push(`Guidance CUT ${ago} days ago, the business itself guiding down`);
-        else if (gd === 'raised') bull.push(`Guidance raised ${ago} days ago`);
-        else bull.push(`Guidance reaffirmed ${ago} days ago, no fundamental deterioration signalled`);
-      }
-      if (dv0) {
-        const y = N(dv0.cash_amount) * (N(dv0.frequency) || 4) / spot * 100;
-        if (y > 1) bull.push(`Dividend yield roughly ${y.toFixed(1)}%, paid through the drawdown`);
+        const gd = String(g0.direction), gdt = String(g0.date).slice(0, 10);
+        const gw = gd === 'cut' ? 'cut' : gd === 'raised' ? 'raised'
+                 : gd === 'reaffirmed' ? 'reaffirmed' : gd === 'initiated' ? 'introduced' : gd;
+        company.push(L(`Guidance ${gw} ${ago(gdt)}${g0.fiscal_period ? ` for ${g0.fiscal_period}` : ''}`,
+          isNew(gdt), gd === 'cut' ? 'BEARISH' : gd === 'raised' ? 'BULLISH' : null,
+          gd === 'cut' || gd === 'raised' ? 'IMPORTANT' : null));
       }
       if (e0) {
-        const dd = daysBetween(today, parseISO(String(e0.report_date)));
-        cat.push(`Earnings ${day(String(e0.report_date))}, ${dd} days out. `
+        company.push(L(`Earnings ${day(String(e0.report_date))}, `
+          + `${daysBetween(today, parseISO(String(e0.report_date)))} days out. `
           + (parseISO(String(e0.report_date)) <= parseISO(nextWrite)
-             ? `This week's write CARRIES THROUGH the print.`
-             : `The ${day(nextWrite)} expiry is clear of it.`));
+             ? `This week's write carries through the print.`
+             : `The ${day(nextWrite)} expiry is clear of it.`)));
       }
-      for (const nn of nw.slice(0, 1)) cat.push(`${nn.publisher}: ${String(nn.title).slice(0, 90)}`);
-      const stance = bear.length > bull.length + 1 ? 'Bearish'
-                   : bull.length > bear.length + 1 ? 'Supportive' : 'Balanced';
+
+      // ── HEADLINES ─────────────────────────────────────────────────────────
+      /* Two, with links, and only ones actually about this company. The wire
+         tags a Dick's Sporting Goods piece to NKE, and an unfiltered feed is
+         how the card turned into a news channel the first time. */
+      const coName = (await tickerName(t, pk)).split(/[\s,.]+/)[0] ?? '';
+      const mine2 = nw.filter((r) => {
+        const ti = String(r.title ?? '').toLowerCase();
+        if (!coName) return true;
+        return ti.includes(coName.toLowerCase()) || ti.includes(t.toLowerCase());
+      });
+      const headlines = (mine2.length ? mine2 : []).slice(0, 2).map((r) => ({
+        title: String(r.title ?? ''), publisher: String(r.publisher ?? ''),
+        url: String(r.url ?? ''), when: ago(String(r.published).slice(0, 10)),
+      }));
+
+      const newCount = [...analysts, ...price, ...company].filter((x) => x.tags.includes('NEW')).length;
 
       return {
-        stance, bearish: bear, supportive: bull, catalyst: cat,
+        analysts, price, company, headlines,
+        // The counter is the whole freshness story now: it says whether to read
+        // closely or skip, and it needs no timeline to do it.
+        new_count: newCount,
+        since: cut,
         stand: [
           `Spot ${spot.toFixed(2)}`,
           `Long ${shares.toLocaleString('en-US')} shares at ${avg.toFixed(2)}`,
@@ -357,6 +519,28 @@ Deno.serve(async (req) => {
         do: doList,
       };
     }));
+
+    /* ── Consume the freshness window, but only after the cards are built ────
+       The cutoff advances on the FIRST open of a new day and lands on the
+       previous visit day, never on today, so the card reads the same all day
+       instead of emptying itself the second time it is opened.
+
+       `peek` exists so a probe can read a card without burning the window.
+       Without it, testing this endpoint marks everything as seen and the next
+       real open shows nothing. */
+    if (!body.peek) {
+      const rows = names.map((t) => {
+        const r = (seen as Record<string, unknown>[]).find((x) => String(x.ticker) === t);
+        const lv = r ? String(r.visit_on ?? '').slice(0, 10) : '';
+        return {
+          ticker: t,
+          visit_on: todayISO,
+          since_on: !r ? null : (lv && lv < todayISO ? lv : (r.since_on ?? null)),
+          updated_at: new Date().toISOString(),
+        };
+      });
+      await D.upsert('income_card_seen', rows, 'ticker');
+    }
     return json(200, { ok: true, build: BUILD, asof: todayISO, positions: out });
   } catch (e) { return json(500, { ok: false, error: String(e) }); }
 });

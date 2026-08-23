@@ -5,25 +5,26 @@
 //  What a position you ALREADY HOLD is doing, and what it needs this week.
 //  Backed by the `position-live` function, which covers income_sleeve_names ONLY.
 //
-//  ── Why this is a second request and not part of income-sleeve ───────────────
-//  The alternative was to have income-sleeve emit this block too. It would have
-//  meant the same position arithmetic living in two functions, which is the
-//  failure that has cost this project most: the scanner and the book each had
-//  their own edge floor and disagreed about CPB on the same screen at the same
-//  second. One computation, one owner, two calls.
+//  ── The contract ────────────────────────────────────────────────────────────
+//  EVERY DISPLAYED STRING IS EMITTED BY THE ENGINE, tags included. This file
+//  formats nothing and judges nothing. If a line reads badly or a tag is wrong,
+//  the fix is in position-live, not here.
 //
-//  ── The contract, unchanged ─────────────────────────────────────────────────
-//  EVERY DISPLAYED STRING IS EMITTED BY THE ENGINE. This file formats nothing.
-//  No thresholds, no rounding, no wording. If a line reads badly the fix is in
-//  position-live, not here.
+//  ── TWO LAYOUTS FAILED BEFORE THIS ONE. Do not reintroduce either ──────────
+//  Bearish / Supportive HEADINGS failed because two labelled buckets are a
+//  quota: the card had to fill both every day whether or not anything had
+//  happened, so it reached for what is permanently true, a 120-day aggregate,
+//  which counted one event many times. NKE's "27 analyst actions" were 14 firms
+//  answering a single earnings report. Nik: "reading this every day, it feels
+//  like I'm repeating the same thing."
 //
-//  ── Why bullets, when the sleeve card uses prose ─────────────────────────────
-//  Nik, on an earlier prose version: "too much still bullet points but human
-//  tone", and then on seeing the grouped version, that it was right. The
-//  distinction is that these bullets are grouped by what a signal MEANS rather
-//  than where it came from. NKE carries 22 target cuts under Bearish and 70 buy
-//  ratings under Supportive, and the DISAGREEMENT between them is the
-//  information. Averaged into a sentence it disappears.
+//  A DATED FEED failed the opposite way. With the substance moved out, the wire
+//  filled the space it left. Nik: "everything is news, where is the analyst
+//  upgrade or consensus, technical indicator", and no today/yesterday stamps.
+//
+//  What works: DOMAIN sections with direction as a per-bullet TAG. A tag rides
+//  on a bullet that already earned its place, so unlike a heading it can never
+//  manufacture content. Freshness lives in the NEW tag and the header counter.
 //
 
 import SwiftUI
@@ -36,15 +37,33 @@ struct LiveBook: Decodable {
     var positions: [Position]?
     var error: String?
 
+    /// One bullet. `tags` is any of NEW, IMPORTANT, BULLISH, BEARISH, and is
+    /// frequently empty: a bullet whose direction depends on your strategy
+    /// rather than on the data goes untagged on purpose.
+    struct Line: Decodable {
+        var text: String
+        var tags: [String]
+    }
+
+    struct Headline: Decodable {
+        var title: String
+        var publisher: String
+        var url: String
+        var when: String
+    }
+
     struct Position: Decodable, Identifiable {
         var ticker: String
         var id: String { ticker }
         var spot: Double
-        /// Bearish · Balanced · Supportive. The engine decides; the client colours.
-        var stance: String
-        var bearish: [String]
-        var supportive: [String]
-        var catalyst: [String]
+        var analysts: [Line]
+        var price: [Line]
+        var company: [Line]
+        var headlines: [Headline]
+        /// How many bullets carry NEW. Says whether to read closely or skip,
+        /// which is the whole freshness story without a timeline.
+        var new_count: Int
+        var since: String?
         var stand: [String]
         var coverage: [String]
         var floor_lines: [String]
@@ -65,12 +84,14 @@ final class LiveStore {
         guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/position-live") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        // 60s, not 45. It prices the live chain for every held name, so it is
-        // slower than the sleeve by design.
+        // 60s. It prices the live chain for every held name, so it is slower
+        // than the sleeve by design.
         req.timeoutInterval = 60
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(Secrets.supabasePublishableKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(Secrets.supabasePublishableKey)", forHTTPHeaderField: "Authorization")
+        // No `peek`. A real open CONSUMES the freshness window, which is what
+        // makes tomorrow's NEW tags mean something.
         req.httpBody = Data("{}".utf8)
         do {
             let (d, resp) = try await URLSession.shared.data(for: req)
@@ -87,41 +108,68 @@ final class LiveStore {
 struct LiveCard: View {
     let p: LiveBook.Position
 
-    /* Colour carries the STANCE and nothing else. Ink's rule is colour = data,
-       loss = orange, gain = blue, so a bearish reading takes the loss tone and a
-       supportive one the gain tone. Balanced stays in text, because a neutral
-       reading painted either way is an opinion the engine did not express. */
-    private var stanceTone: Color {
-        switch p.stance.lowercased() {
-        case "bearish": return Ink.loss
-        case "supportive": return Ink.gain
-        default: return Ink.text
+    /* Ink: colour is data. Direction takes the loss and gain tones so the two
+       coloured words are the only thing the eye catches. NEW and IMPORTANT are
+       status rather than direction, so they stay in ink and lean on weight. */
+    private func tone(_ tag: String) -> Color {
+        switch tag {
+        case "BEARISH":   return Ink.loss
+        case "BULLISH":   return Ink.gain
+        case "NEW":       return Ink.text.opacity(0.8)
+        default:          return Ink.dim.opacity(0.75)
         }
+    }
+
+    /// Text and its tags as one attributed run, so the tags sit at the end of
+    /// the sentence and wrap with it instead of being pinned to a column.
+    private func bullet(_ l: LiveBook.Line) -> AttributedString {
+        var s = AttributedString(l.text)
+        s.font = InkFont.display(14)
+        s.foregroundColor = Ink.text.opacity(0.92)
+        for t in l.tags {
+            var tag = AttributedString("  \(t)")
+            tag.font = InkFont.mono(10.5)
+            tag.foregroundColor = tone(t)
+            s += tag
+        }
+        return s
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // eyebrow: ticker and spot, then the stance as the one coloured thing
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(p.ticker).font(InkFont.mono(13)).tracking(13 * 0.16)
                     .foregroundStyle(Ink.dim)
                 Text(String(format: "%.2f", p.spot)).font(InkFont.mono(13))
                     .tracking(13 * -0.02).foregroundStyle(Ink.text)
                 Spacer(minLength: 0)
-                Text(p.stance.uppercased()).font(InkFont.mono(12)).tracking(12 * 0.14)
-                    .foregroundStyle(stanceTone)
+                Text(p.new_count > 0 ? "\(p.new_count) NEW" : "NOTHING NEW")
+                    .font(InkFont.mono(11)).tracking(11 * 0.14)
+                    .foregroundStyle(p.new_count > 0 ? Ink.text.opacity(0.8) : Ink.dim.opacity(0.55))
             }
             .padding(EdgeInsets(top: 22, leading: 22, bottom: 16, trailing: 22))
 
-            group("Bearish", p.bearish, Ink.loss)
-            group("Supportive", p.supportive, Ink.gain)
-            group("Watch", p.catalyst, Ink.dim)
+            section("Analysts", p.analysts)
+            section("Price", p.price)
+            section("Company", p.company)
+
+            if !p.headlines.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("HEADLINES").font(InkFont.mono(11.5)).tracking(11.5 * 0.16)
+                        .foregroundStyle(Ink.dim.opacity(0.55))
+                    ForEach(Array(p.headlines.enumerated()), id: \.offset) { _, h in
+                        headlineRow(h)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(EdgeInsets(top: 4, leading: 22, bottom: 16, trailing: 22))
+            }
 
             Rectangle().fill(Ink.hair).frame(height: 1).padding(.vertical, 4)
 
-            group("Where you stand", p.stand, Ink.dim)
-            group("What is covered", p.coverage, Ink.dim)
-            group("The floor", p.floor_lines, Ink.dim)
+            plain("Where you stand", p.stand)
+            plain("What is covered", p.coverage)
+            plain("The floor", p.floor_lines)
 
             /* DO is inverted, because it is the only part that asks for an
                action. Everything above it is a reading. */
@@ -147,25 +195,47 @@ struct LiveCard: View {
     }
 
     @ViewBuilder
-    private func group(_ label: String, _ lines: [String], _ tone: Color) -> some View {
+    private func headlineRow(_ h: LiveBook.Headline) -> some View {
+        let row = VStack(alignment: .leading, spacing: 3) {
+            Text(h.title).font(InkFont.display(14))
+                .foregroundStyle(Ink.text.opacity(0.92))
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+            Text("\(h.publisher) · \(h.when)").font(InkFont.mono(10.5))
+                .foregroundStyle(Ink.dim.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // A dead link is worse than none, so only wrap when there is a URL.
+        if let u = URL(string: h.url), !h.url.isEmpty {
+            Link(destination: u) { row }.buttonStyle(.plain)
+        } else {
+            row
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ label: String, _ lines: [LiveBook.Line]) -> some View {
         if !lines.isEmpty {
             VStack(alignment: .leading, spacing: 9) {
                 Text(label.uppercased()).font(InkFont.mono(11.5)).tracking(11.5 * 0.16)
-                    .foregroundStyle(tone.opacity(tone == Ink.dim ? 0.55 : 0.9))
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    .foregroundStyle(Ink.dim.opacity(0.55))
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, l in
                     HStack(alignment: .top, spacing: 9) {
-                        // A dot, not a glyph bullet: it sits on the baseline and
-                        // does not fight the mono figures inside the line.
-                        Circle().fill(tone.opacity(0.5)).frame(width: 3.5, height: 3.5)
+                        Circle().fill(Ink.dim.opacity(0.5)).frame(width: 3.5, height: 3.5)
                             .padding(.top, 7)
-                        Text(line).font(InkFont.display(14))
-                            .foregroundStyle(Ink.text.opacity(0.92))
-                            .fixedSize(horizontal: false, vertical: true)
+                        Text(bullet(l)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(EdgeInsets(top: 4, leading: 22, bottom: 16, trailing: 22))
+        }
+    }
+
+    @ViewBuilder
+    private func plain(_ label: String, _ lines: [String]) -> some View {
+        if !lines.isEmpty {
+            section(label, lines.map { LiveBook.Line(text: $0, tags: []) })
         }
     }
 }
