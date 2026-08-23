@@ -60,6 +60,12 @@ private struct RootView: View {
     let prefs: NotificationPrefs
 
     var body: some View {
+        // ⚠ THE REDESIGN IS SIMULATOR ONLY, and the branch is compiled out on
+        // device rather than gated at runtime. A complete rebuild stays
+        // half-finished for weeks while Nik trades from the installed app, so
+        // no setting and no bad build may put it on his phone. See
+        // Redesign/RedesignRoot.swift.
+        if Redesign.isActive { return AnyView(RedesignRoot()) }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-inkPreview") {
             return AnyView(InkDesignPreview())

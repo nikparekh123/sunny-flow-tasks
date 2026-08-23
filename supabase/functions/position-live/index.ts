@@ -44,7 +44,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-23.4';
+const BUILD = '2026-08-23.5';
 const POLY = 'https://api.polygon.io';
 
 /** The Friday at least 5 sessions out: the contract actually written. */
@@ -467,7 +467,28 @@ Deno.serve(async (req) => {
 
       const newCount = [...analysts, ...price, ...company].filter((x) => x.tags.includes('NEW')).length;
 
+      /* ── Compatibility for builds ALREADY ON THE PHONE ───────────────────
+         ⚠ NEVER REMOVE A FIELD A SHIPPED BUILD READS. Deploying the new shape
+         on its own broke the installed app the moment it went live: that
+         build's Position struct declares stance/bearish/supportive/catalyst
+         NON-OPTIONAL, so JSONDecoder threw keyNotFound and every live card
+         vanished. There is one backend and many builds of the client, some of
+         them on a phone in Nik's pocket, so responses are ADDITIVE ONLY.
+
+         These four are derived from the tagged lines, cost nothing to keep,
+         and come out when no build that reads them is still in use. */
+      const allLines = [...analysts, ...price, ...company];
+      const bearish = allLines.filter((l) => l.tags.includes('BEARISH')).map((l) => l.text);
+      const supportive = allLines.filter((l) => l.tags.includes('BULLISH')).map((l) => l.text);
+      const catalyst = [
+        ...company.filter((l) => !l.tags.includes('BEARISH') && !l.tags.includes('BULLISH')).map((l) => l.text),
+        ...headlines.map((h) => `${h.publisher}: ${h.title}`),
+      ];
+      const stance = bearish.length > supportive.length + 1 ? 'Bearish'
+                   : supportive.length > bearish.length + 1 ? 'Supportive' : 'Balanced';
+
       return {
+        stance, bearish, supportive, catalyst,
         analysts, price, company, headlines,
         // The counter is the whole freshness story now: it says whether to read
         // closely or skip, and it needs no timeline to do it.
