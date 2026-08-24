@@ -71,33 +71,49 @@ struct SunnyFilterStrip: View {
             }
             .scrollIndicators(.hidden)
             .mask {
-                /* ⚠ THE FADE HAS TO BE WIDE OR IT IS NOT A FADE, and it is here
-                   on Nik's call rather than in the sheet. A hidden scrollbar
-                   plus a clip landing mid-word turned "NFLX Awareness" into
-                   "NFL" at the frame edge, which reads as a rendering fault
-                   rather than a hint. The first pass ran it over 32pt, which
-                   greyed two letters and still read as a clipped word; 72
-                   dissolves a label instead. */
-                LinearGradient(stops: [
-                    .init(color: .black, location: 0),
-                    .init(color: .black, location: 1 - (S.railFadeW / S.content)),
-                    .init(color: .black.opacity(0.35), location: 1 - (S.railFadeW * 0.35 / S.content)),
-                    .init(color: .clear, location: 1),
-                ], startPoint: .leading, endPoint: .trailing)
+                /* ⚠ THE FADE IS A FIXED TRAILING BAND, NOT A PERCENTAGE.
+                   It used to be a LinearGradient whose stops were computed as a
+                   fraction of --content (361) — but the thing it masks is the
+                   pill scroller, which is ~319pt on a 402pt phone, not 361. The
+                   fade therefore began at 80% of the WRONG width and started
+                   dissolving about 40pt earlier than it should, which is why CEG
+                   read as clipped while actually fitting with room to spare.
+
+                   An HStack of [opaque, flexible] + [gradient, exactly 72] is
+                   exact at any port width and cannot drift again. */
+                HStack(spacing: 0) {
+                    Rectangle().fill(.black)
+                    LinearGradient(colors: [.black, .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: S.railFadeW)
+                }
             }
 
-            SunnyFilterLabel(text: "Clear", on: false,
-                             colourOn: S.faint, colourOff: S.faint, weight: S.wSemi) {
-                selected.removeAll(); onChange()          // resets filters only, not the query
+            /* ⚠ CLEAR TAKES NO WIDTH UNTIL IT EXISTS. SHELL.md §4 hides it with
+               `opacity: 0` and `pointer-events: none`, which in CSS flex still
+               RESERVES its box — and that box plus its 16pt gap is ~51pt of the
+               row, held permanently for a control that is invisible most of the
+               time. On a 402pt screen that was the difference between six
+               tickers fitting and CEG dissolving into the fade at the frame
+               edge, which reads as a rendering fault rather than as "there is
+               more this way".
+
+               So it is absent, not transparent. The row reflows once, when the
+               first filter is selected — and at that moment the strip is
+               already changing, so the move reads as part of the same event. */
+            if !selected.isEmpty {
+                SunnyFilterLabel(text: "Clear", on: false,
+                                 colourOn: S.faint, colourOff: S.faint, weight: S.wSemi) {
+                    selected.removeAll(); onChange()      // resets filters only, not the query
+                }
+                .transition(.opacity)
             }
-            .opacity(selected.isEmpty ? 0 : 1)
-            .allowsHitTesting(!selected.isEmpty)
-            .animation(.easeInOut(duration: S.transition), value: selected.isEmpty)
         }
         .padding(.horizontal, S.margin)
         .frame(height: S.filterrowH)
         .frame(maxWidth: .infinity)
         .background(S.ground)
+        .animation(.easeInOut(duration: S.transition), value: selected.isEmpty)
         .measure("row2-filterstrip")
     }
 }

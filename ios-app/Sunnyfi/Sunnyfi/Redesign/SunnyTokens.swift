@@ -323,9 +323,25 @@ enum S {
     // rgb(38,41,34), which costs a solid-ink palette ~40% of its contrast. The
     // first pass shipped #9BA196 words (6.84:1 solid, 3.98:1 composited) and a
     // #363A31 rule at 1.10:1, invisible. Paper inks die outright here.
-    /// How far the filter row's trailing fade runs. 72, not 32: a short fade
-    /// greys two letters and still reads as a clipped word.
-    static let railFadeW: CGFloat = 72
+    /// How far the filter strip's trailing fade runs.
+    ///
+    /// ⚠ 40, AND THE TWO EARLIER VALUES WERE BOTH RIGHT FOR THEIR OWN STRIP.
+    /// It began at 32, which greyed two letters of a long label and still read
+    /// as a clipped word, so it went to 72. That was correct while the strip
+    /// showed "NFLX Awareness" — dissolving a 90pt label needs a long ramp.
+    ///
+    /// The new shell shows tickers first, and a ticker is ~22pt. Measured on a
+    /// 402pt phone the pill port is 319 and the six tickers use 270, so they
+    /// fit with 49 to spare — but a 72pt fade starts at 314 and CEG starts at
+    /// 315, so the whole label sat inside the ramp and read as cut. That is the
+    /// bug Nik reported, and it was never a width problem.
+    ///
+    /// The rule the number comes from: THE FADE MUST BE NARROWER THAN THE SLACK
+    /// AFTER THE LAST TICKER, or it eats a whole label. 40 clears CEG by 9pt and
+    /// is still long enough to dissolve rather than cut. If a seventh name is
+    /// added the tickers themselves will overflow, and no fade width saves that
+    /// — the strip would have to drop the per-card tags to the search field.
+    static let railFadeW: CGFloat = 40
     static let railH: CGFloat = 48
     static let tRail: CGFloat = 13          // THE size. one, no exceptions
     static let railGap: CGFloat = 14        // fact, rule, fact
