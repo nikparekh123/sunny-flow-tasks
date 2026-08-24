@@ -13,7 +13,6 @@ struct SunnyShell: View {
     @State private var filters: Set<SunnyTag> = []
     @State private var activeZone: SunnyZone = .now
     @State private var jumpTo: SunnyZone?
-    @State private var showPercent = true
 
     /// Deterministic states for verification, so a screenshot of "filtered to
     /// TLT" does not depend on a simulated tap landing on the right pixel.
@@ -22,7 +21,7 @@ struct SunnyShell: View {
     private static var argFilter: SunnyTag? {
         let a = ProcessInfo.processInfo.arguments
         guard let i = a.firstIndex(of: "-filter"), i + 1 < a.count else { return nil }
-        return SunnyTag(rawValue: a[i + 1].lowercased())
+        return SunnyTag(a[i + 1])
     }
     private static var argScroll: CGFloat? {
         let a = ProcessInfo.processInfo.arguments
@@ -31,20 +30,21 @@ struct SunnyShell: View {
         return CGFloat(v)
     }
 
-    /// Placeholder quotes. The cards and their data land later; the shell is
-    /// what this turn builds.
-    private let quotes = [
-        SunnyQuote(symbol: "SPY", percent: "+0.42%", last: "612.18", up: true),
-        SunnyQuote(symbol: "QQQ", percent: "+0.61%", last: "544.03", up: true),
-        SunnyQuote(symbol: "IWM", percent: "\u{2212}0.18%", last: "231.77", up: false),
-    ]
+    /* ⚠ NO TICKER STRIP. Handoff 10 DELETED row 2 — the market-state dot and the
+       SPY/QQQ/IWM cluster together, not hidden, not relocated. Neither earned
+       permanent space: the open/closed dot repeats what the clock already says,
+       and those three are not positions Nik holds. The always-on rail replaces
+       it and docks at the BOTTOM, in thumb reach, where it never competes with
+       the zone bar for the top of the screen.
+
+       Fixed rows are now 54 + 56 + 0 + 24 = 134, and the pane takes 718.
+       Do not re-add either half from memory. */
 
     /// CHROME.md §3: narrowed = a filter is selected OR the query is non-empty.
     private var narrowed: Bool { !filters.isEmpty || !query.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
         VStack(spacing: 0) {
-            SunnyTicker(state: .closed, quotes: quotes, showPercent: $showPercent).measure("row2-ticker")
             SunnyZoneBar(active: activeZone, narrowed: narrowed,
                          onJump: { jumpTo = $0 }, searchOpen: $searchOpen).measure("row3-zonebar")
             SunnySearchDrawer(query: $query, open: $searchOpen)

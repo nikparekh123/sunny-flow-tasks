@@ -23,8 +23,14 @@ enum S {
     // MARK: grid (iPhone 393pt)
     static let screen:  CGFloat = 393
     static let margin:  CGFloat = 16
-    static let gutter:  CGFloat = 12
-    static let col:     CGFloat = 174.5     // (393 - 32 - 12) / 2
+    /// ⚠ 11, NOT 12 — and this is what finally kills the half pixel.
+    /// The old grid was margin 16 / gutter 12 / column 174.5, and 174.5 x 3 is
+    /// 523.5 device pixels, so a column could never sit on a whole pixel and the
+    /// first build measured 174.67 against a spec of 174.5. Handoff 10 moved the
+    /// gutter to 11: 16 + 175 + 11 + 175 + 16 = 393 exactly. Two columns still
+    /// make 361, so M and L never moved.
+    static let gutter:  CGFloat = 11
+    static let col:     CGFloat = 175
     static let content: CGFloat = 361
 
     // MARK: card sizes — column spans and ratios, NEVER a fixed height
@@ -35,13 +41,22 @@ enum S {
         /// aspect-ratio
         var ratio: CGFloat {
             switch self {
-            case .xs: return 2.0 / 1.0            // 174.5 × 87.25
-            case .s:  return 1.0                  // 174.5 × 174.5
+            // ⚠ 175/64, not 2/1. The derived XS (half an S, 174.5 x 87.25) is
+            // RETIRED — no card uses that shape. 64 not 56: a 32pt inner box left
+            // the label touching the figure.
+            case .xs: return 175.0 / 64.0         // 175 × 64
+            case .s:  return 1.0                  // 175 × 175
             case .m:  return 361.0 / 174.0        // 361 × 174
             case .l:  return 361.0 / 361.0        // 361 × 361
             }
         }
-        var padding: EdgeInsets { self == .m || self == .l ? S.padCardM : S.padCard }
+        var padding: EdgeInsets {
+            switch self {
+            case .xs: return S.padCardXS          // 16 all round leaves nothing to fit
+            case .s:  return S.padCard
+            case .m, .l: return S.padCardM
+            }
+        }
         var shadow: [SunnyShadow] { self == .l ? S.shadowCardL : S.shadowCard }
     }
 
@@ -56,6 +71,8 @@ enum S {
     static let padCard  = EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)
     /// --pad-card-m: 17px 19px 16px — an optical bottom trim, not a mistake.
     static let padCardM = EdgeInsets(top: 17, leading: 19, bottom: 16, trailing: 19)
+    /// XS only. Inner box 147 x 40.
+    static let padCardXS = EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14)
     static let padChip  = EdgeInsets(top: 3, leading: 7, bottom: 3, trailing: 7)
     static let padPill  = EdgeInsets(top: 7, leading: 13, bottom: 7, trailing: 13)
 
@@ -146,6 +163,12 @@ enum S {
     static let tPaperChip: CGFloat = 18
     static let lhPaperBody: CGFloat = 1.45
 
+    static let paperBulletSize: CGFloat = 5
+    /// ⚠ 9, not 8. It centres a 5px bullet on a 23.2px line box (16px / 1.45).
+    /// It was 8 at the old 14.5px body and moved WITH the scale — a paper bullet
+    /// at 8 is a defect, and so is a white bullet at 9.
+    static let paperBulletOffset: CGFloat = 9
+
     static let radiusMark: CGFloat = 4
     static let padMark = EdgeInsets(top: 0, leading: 6, bottom: 1, trailing: 6)
 
@@ -222,7 +245,12 @@ enum S {
 
     // MARK: chrome
     static let statusbarH: CGFloat = 54
-    static let tickerH: CGFloat = 34
+    /// ⚠ THE TICKER STRIP IS GONE. Handoff 10 deleted row 2 outright — the
+    /// market-state dot and the SPY/QQQ/IWM cluster with it. Neither earned
+    /// permanent space: the open/closed dot repeats the clock, and those three
+    /// are not positions Nik holds. The always-on rail replaced it and docks at
+    /// the BOTTOM. Left here as a gravestone so nobody re-adds it from memory.
+    // static let tickerH: CGFloat = 34
     static let zonebarH: CGFloat = 56
     static let searchH: CGFloat = 56          // open; 0 closed
     static let filterrowH: CGFloat = 44
@@ -235,6 +263,74 @@ enum S {
     static let zoneJumpOffset: CGFloat = 46
     static let scrollDeadband: CGFloat = 4
     static let scrollReveal: CGFloat = 24
+
+    // MARK: always-on rail (bottom dock) — CHROME.md §2, cards/text-rail.md
+    //
+    // ⚠ TEXT, NEVER CARDS. A card in a 48pt strip is a geometry argument with
+    // itself: radius over half the height, a figure fighting a 32pt inner box,
+    // a hit target per slot. Card mode was built and rejected.
+    //
+    // ⚠ AND EVERY INK IS JUDGED AGAINST THE COMPOSITE, never against --ink. The
+    // ground is translucent: rgba(20,23,15,.92) over --ground resolves to
+    // rgb(38,41,34), which costs a solid-ink palette ~40% of its contrast. The
+    // first pass shipped #9BA196 words (6.84:1 solid, 3.98:1 composited) and a
+    // #363A31 rule at 1.10:1, invisible. Paper inks die outright here.
+    /// How far the filter row's trailing fade runs. 72, not 32: a short fade
+    /// greys two letters and still reads as a clipped word.
+    static let railFadeW: CGFloat = 72
+    static let railH: CGFloat = 48
+    static let tRail: CGFloat = 13          // THE size. one, no exceptions
+    static let railGap: CGFloat = 14        // fact, rule, fact
+    static let railGround = Color(red: 20/255, green: 23/255, blue: 15/255).opacity(0.92)
+    static let railWord   = hex(0xC2C7BE)   // the name of a fact.        8.66:1
+    static let railFigure = hex(0xF4F6F2)   // any figure with no direction. 13:1
+    static let railMinor  = hex(0x9BA196)   // joining words, 2d, 4d.     5.54:1
+    static let railDivider = Color(red: 244/255, green: 246/255, blue: 242/255).opacity(0.22)
+    static let gainOnInk  = hex(0x55C98C)   // 7.17:1
+    static let lossOnInk  = hex(0xF0837F)   // 5.8:1
+    /// padding-bottom on a fact: rides 2.5pt high so the line optically centres
+    /// in the space ABOVE the home indicator, not in its own 48pt box.
+    static let railLift: CGFloat = 5
+    static let durRail = 0.58, durRailFade = 0.44
+    /// ⚠ 12, not the filter row's 4. At 4 one thumb flick toggles the dock twice
+    /// and the 580ms transform never lands. A dock that snaps looks like a bug.
+    static let scrollDeadbandRail: CGFloat = 12
+    /// 28 + the dock's 48, so the last card clears the overlay.
+    static let tailSpacer: CGFloat = 76
+
+    // MARK: planner card (M) — cards/planner-card.md
+    //
+    // ⚠ RULED, not the digest's dot grid, and never both on one card.
+    static let plannerGround   = hex(0xFBF5E4)   // ruled sheet, AND the disc glyph
+    static let plannerRuleInk  = Color(red: 20/255, green: 23/255, blue: 15/255).opacity(0.07)
+    static let plannerRulePitch: CGFloat = 25
+    static let plannerDot      = hex(0x00A945)   // 7px, filled, never a ring
+    static let plannerLabel    = hex(0x55502F)
+    static let plannerBody     = hex(0x4C4835)
+    /// NOT --pad-card-m. The ruled ground reads as a sheet and needs the base
+    /// tighter than the crown.
+    static let padPlannerM = EdgeInsets(top: 16, leading: 19, bottom: 15, trailing: 19)
+    static let tHandInstruction: CGFloat = 31
+    /// Below 1, so two lines close up into one written gesture. Caveat carries
+    /// it; do not try .95 on Inter.
+    static let lhHandInstruction: CGFloat = 0.95
+    static let stampInk    = hex(0x8A1F14)
+    static let stampBorder = hex(0xC86A5E)
+    static let stampRadius: CGFloat = 5
+    static let padStamp = EdgeInsets(top: 3, leading: 6, bottom: 3, trailing: 6)
+    /// The only rotation on this card, and deliberately not the digest chip's
+    /// −1.4°. Different objects; do not unify them.
+    static let stampTilt: Double = -2.5
+    static let streakDiscM: CGFloat = 34
+    static let streakGlyphM: CGFloat = 16
+    static let streakPct: CGFloat = 10
+    static let gapDisc: CGFloat = 8
+
+    /// Caveat's own line height, for the sub-1 instruction leading.
+    static func leadingHand(_ size: CGFloat, _ multiple: CGFloat) -> CGFloat {
+        guard let f = handUI(size, 600) else { return 0 }
+        return size * multiple - f.lineHeight
+    }
 
     // MARK: chrome colour
     static let dim = hex(0xD3D6D0)
@@ -258,8 +354,18 @@ enum S {
     static let transition = 0.18
 
     // MARK: cubic-bezier, since SwiftUI has no direct equivalent for these
-    static let cEaseOut   = Animation.timingCurve(0.2, 0, 0.1, 1)
-    static let cEaseSettle = Animation.timingCurve(0.16, 1, 0.3, 1)
+    //
+    // ⚠ PASS THE DURATION. DO NOT USE .speed(1 / duration).
+    // `.speed(x)` multiplies the RATE, so .speed(1/0.58) is speed 1.72 — nearly
+    // twice as FAST as the 0.35s default, landing at 0.203s. Every animation in
+    // the redesign was built that way and every one ran 2.9x too quick: the
+    // dock snapped away in 0.2s where the sheet asks for 0.58 and says in
+    // as many words that a dock which snaps looks like a bug. Nik spotted it on
+    // the rail; it was in the filter row and the card reveal too.
+    static func easeOut(_ d: Double) -> Animation { .timingCurve(0.2, 0, 0.1, 1, duration: d) }
+    static func easeSettle(_ d: Double) -> Animation { .timingCurve(0.16, 1, 0.3, 1, duration: d) }
+    static let cEaseOut   = easeOut(0.35)
+    static let cEaseSettle = easeSettle(0.35)
     static let cEaseSwap  = Animation.timingCurve(0.4, 0, 0.2, 1)
 
     static func hex(_ v: UInt32) -> Color {

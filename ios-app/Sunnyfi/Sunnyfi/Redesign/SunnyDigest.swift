@@ -2,6 +2,12 @@
 //  SunnyDigest.swift
 //  Sunny — the paper digest card. DIGEST-CARD.md is the normative build sheet.
 //
+//  ── Called the AWARENESS CARD ───────────────────────────────────────────────
+//  Nik's name for it, short for situational awareness. Use it in conversation
+//  and in comments; it is deliberately NOT on screen. The card carries no title
+//  in the feed and should not gain one. The type names here predate the name
+//  and are not worth churning.
+//
 //  ── The three rules that outrank everything else (DIGEST-CARD §0) ──────────
 //  1. HANDWRITING IS LABELS, TAGS, THE TICKER AND THE TIMESTAMP. NEVER A FIGURE.
 //     Every number is Inter, tabular. A handwritten price reads as decorative
@@ -238,11 +244,67 @@ struct SunnyDigestCard: View {
     }
 }
 
+// MARK: - paper primitives, shared with the Monday card
+
+/// A section heading and the rule that runs out from it. `flex: 1` on the rule,
+/// never a width — it stops at the text column, which is the whole difference
+/// from the hairlines on the white cards.
+struct PaperHeading: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 9) {
+            /* ⚠ ONE LINE, ALWAYS. A heading that wraps drags its rule down
+               beside the second line and reads as broken; "What last week
+               earned" did exactly that at Caveat 22. fixedSize keeps it whole
+               and lets the rule take what is left. Keep headings short. */
+            Text(text)                                  // sentence case, never upper
+                .font(S.hand(S.tHandHead, 700))
+                .foregroundStyle(S.paperInkHead)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            RoundedRectangle(cornerRadius: 1)
+                .fill(S.paperRule)
+                .frame(height: 1.5)
+                .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+/// Bullet 5px, offset 8 from the top. NOT centre alignment, which drifts on any
+/// line that wraps.
+struct PaperBullet<C: View>: View {
+    @ViewBuilder let content: C
+    var body: some View {
+        HStack(alignment: .top, spacing: S.gap4) {
+            Circle().fill(S.paperBullet)
+                .frame(width: 5, height: 5)
+                .padding(.top, S.gap4)
+            content
+        }
+    }
+}
+
+/// The three-layer sheet: ground, grain, deckle ring. The inset ring is what
+/// makes it read as paper rather than a tinted div, and is the part people drop.
+struct PaperSheet: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .frame(width: S.content)
+            .background { ZStack { S.paperButter; PaperGrain() } }
+            .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous)
+                .strokeBorder(S.paperRing, lineWidth: 1))
+            .shadow(color: S.shadowInk(0.06), radius: 2, x: 0, y: 2)
+            .shadow(color: S.shadowInk(0.09), radius: 11, x: 0, y: 9)
+    }
+}
+extension View { func paperSheet() -> some View { modifier(PaperSheet()) } }
+
 // MARK: - grain
 
 /// One dot per 16px cell, the same grid the rest of the app is spaced on, so
 /// the grain never fights the type. Do not scale it per card size.
-private struct PaperGrain: View {
+struct PaperGrain: View {
     var body: some View {
         Canvas { ctx, size in
             var y: CGFloat = 0

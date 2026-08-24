@@ -42,6 +42,18 @@ struct SunnyFilterRow: View {
 
     var body: some View {
         HStack(spacing: S.gap7) {
+            /* ⚠ THE FADE IS NOT IN CHROME.md, and it is here on Nik's call.
+               §5 makes this row overflow-x: auto with the scrollbar hidden, and
+               that was fine at five short labels. His rule that every card
+               carries its ticker AND a card-kind tag doubled the row: six labels
+               now measure ~469pt against ~330pt of space. Hidden scrollbar plus
+               a clip landing mid-word turned "NFLX Awareness" into "NFL" at the
+               frame edge, which reads as a rendering fault rather than a hint.
+               The fade says "more this way" and touches nothing else.
+
+               Masked, not overlaid: an overlay would need to know the ground
+               colour, and this row sits on --ground while the drawer above it
+               sits on --paper. */
             ScrollView(.horizontal) {
                 HStack(spacing: S.hitGrow) {
                     ForEach(tags) { tag in
@@ -60,6 +72,20 @@ struct SunnyFilterRow: View {
                 .frame(height: S.filterrowH)
             }
             .scrollIndicators(.hidden)
+            .mask {
+                /* ⚠ THE FADE HAS TO BE WIDE OR IT IS NOT A FADE. The first pass
+                   ran it over the last 32pt, which greyed roughly two letters
+                   and still read as a word cut in half. It now runs over the
+                   last 72pt — long enough that a label dissolves rather than
+                   stopping, which is the only thing that distinguishes "there
+                   is more to the right" from "this is broken". */
+                LinearGradient(stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 1 - (S.railFadeW / S.content)),
+                    .init(color: .black.opacity(0.35), location: 1 - (S.railFadeW * 0.35 / S.content)),
+                    .init(color: .clear, location: 1),
+                ], startPoint: .leading, endPoint: .trailing)
+            }
             SunnyFilterLabel(text: "Clear", on: false,
                              colourOn: S.faint, colourOff: S.faint, weight: S.wSemi) {
                 selected.removeAll(); onChange()          // resets filters only, not the query
@@ -124,7 +150,16 @@ struct SunnyPane: View {
     @State private var debounce: Task<Void, Never>?
     @State private var sectionTops: [SunnyZone: CGFloat] = [:]
     @State private var digest = DigestStore()
+    @State private var week = WeekStore()
     @State private var scrollPos = ScrollPosition()
+    @State private var rail = RailStore()
+    @State private var railHidden = false
+
+    /// The OS home-indicator row. The spec draws its own; a real app inherits it.
+    private var bottomSafeArea: CGFloat {
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?
+            .windows.first?.safeAreaInsets.bottom ?? 0
+    }
 
     private func visible(_ z: SunnyZone) -> [SunnyCard] {
         SunnyDeck.cards(z).filter { $0.matches(query: query, filters: filters) }
@@ -140,6 +175,19 @@ struct SunnyPane: View {
         }
     }
 
+    /* ⚠ THE ZONES FINALLY DO SOMETHING. Every Awareness Card sat in Now
+       regardless, which is why Now was five screens long: CHROME.md gives Now to
+       "a rule says a decision is open", and a name nothing has happened to does
+       not qualify. A card with NEW items stays in Now; a quiet one drops to
+       Next, on Nik's call — nothing is pending on it, so it is not New either. */
+    private func digests(for z: SunnyZone) -> [SunnyDigestCardModel] {
+        switch z {
+        case .now:  return digestsVisible.filter { $0.newCount > 0 }
+        case .new:  return []
+        case .next: return digestsVisible.filter { $0.newCount == 0 }
+        }
+    }
+
     /// Labels come from tags on REAL CARDS, and the placeholder shells are not
     /// real cards.
     ///
@@ -151,7 +199,7 @@ struct SunnyPane: View {
     private var presentTags: [SunnyTag] {
         var seen = Set<SunnyTag>()
         for d in digest.cards { seen.formUnion(d.tags) }
-        return SunnyTag.allCases.filter { seen.contains($0) }
+        return seen.sorted()      // tickers first, then the Awareness tags
     }
 
     var body: some View {
@@ -167,7 +215,8 @@ struct SunnyPane: View {
                         Color.clear.frame(height: S.filterrowH)
                         ForEach(SunnyZone.allCases) { zone in
                             SunnySection(zone: zone, cards: visible(zone), token: revealToken,
-                                         digests: zone == .now ? digestsVisible : [],
+                                         week: zone == .now ? week.card : nil,
+                                         digests: digests(for: zone),
                                          narrowed: !filters.isEmpty || !query.trimmingCharacters(in: .whitespaces).isEmpty)
                                 .id(zone)
                                 .background {
@@ -181,7 +230,7 @@ struct SunnyPane: View {
                                     } action: { sectionTops[zone] = $0 }
                                 }
                         }
-                        Color.clear.frame(height: 28)          // tail spacer
+                        Color.clear.frame(height: S.tailSpacer)   // 28 + the dock's 48, so the last card clears it
                     }
                     .coordinateSpace(.named("content"))
                 }
@@ -203,6 +252,13 @@ struct SunnyPane: View {
                     if y < S.scrollReveal { rowHidden = false }
                     else if y > lastY + S.scrollDeadband { rowHidden = true }
                     else if y < lastY - S.scrollDeadband { rowHidden = false }
+                    /* ⚠ THE DOCK USES 12, NOT THE ROW'S 4. At 4 a single thumb
+                       flick toggles it twice and the 580ms transform never
+                       lands. Slow and settled is the point; a dock that snaps
+                       looks like a bug. Same signal, wider deadband. */
+                    if y < S.scrollReveal { railHidden = false }
+                    else if y > lastY + S.scrollDeadbandRail { railHidden = true }
+                    else if y < lastY - S.scrollDeadbandRail { railHidden = false }
                     lastY = y
                     let line = y + S.zoneLine
                     for z in SunnyZone.allCases where (sectionTops[z] ?? .infinity) <= line { activeZone = z }
@@ -214,7 +270,18 @@ struct SunnyPane: View {
                 .offset(y: rowHidden ? -S.filterrowH : 0)
                 .opacity(rowHidden ? 0 : 1)
                 .allowsHitTesting(!rowHidden)
-                .animation(S.cEaseOut.speed(1 / S.durFilterrow), value: rowHidden)
+                .animation(S.easeOut(S.durFilterrow), value: rowHidden)
+
+            // ⚠ INSIDE THE WRAPPER, at the bottom, over the pane. It is an
+            // overlay so it consumes no layout height and can leave without
+            // opening a gap. It sits outside the ScrollView, so filters, search
+            // and the zone bar can never reach it — that is what "always on"
+            // structurally means.
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                SunnyRail(facts: rail.facts, hidden: railHidden, bottomInset: bottomSafeArea)
+            }
+            .ignoresSafeArea(edges: .bottom)
 
             if loading {
                 SunnySkeleton()
@@ -223,7 +290,9 @@ struct SunnyPane: View {
             }
         }
         .onChange(of: query) { _, _ in applyChange(S.debounceQuery) }
+        .task { await rail.load() }
         .task { await digest.load() }
+        .task { await week.load() }
     }
 
     /// Every trigger cancels the previous timer (CHROME.md §8).
@@ -249,6 +318,7 @@ struct SunnySection: View {
     let token: UUID
     /// The situational-awareness digest. Leads the Now zone, and is the ONLY
     /// card in the deck with no size class: its height follows its content.
+    var week: SunnyWeekModel? = nil
     var digests: [SunnyDigestCardModel] = []
     var narrowed: Bool = false
 
@@ -270,11 +340,40 @@ struct SunnySection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ForEach(Array(digests.enumerated()), id: \.offset) { _, d in
-                SunnyDigestCard(d)
-                    .padding(.bottom, S.gutter)
+            // The Monday card leads: it reports the week just gone, and the
+            // Awareness Cards below it report right now.
+            if let w = week {
+                SunnyWeekCard(m: w).padding(.bottom, S.gutter)
             }
-            if cards.isEmpty && digests.isEmpty {
+            /* ⚠ AWARENESS CARDS ONLY, and horizontally. Six of them stacked
+               measured 3,361pt against a 718pt pane — 4.7 screens before the
+               feed reached anything else. Nik's call.
+
+               ⚠ THE CARDS ARE NOT THE SAME HEIGHT (465 to 634 today, because the
+               height follows the content and always will). A horizontal row
+               takes the TALLEST and top-aligns the rest, which is why the HStack
+               is .top: centre would make every short card drift and the swipe
+               would feel loose. There is no fix for the whitespace under a short
+               card that does not involve pinning a height, and pinning a height
+               is the one thing this card may never do.
+
+               No other card type does this. The feed grid is still the grid. */
+            if !digests.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: S.gutter) {
+                        ForEach(Array(digests.enumerated()), id: \.offset) { _, d in
+                            SunnyDigestCard(d)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+                .scrollIndicators(.hidden)
+                // Snap card to card, and keep the first one on the 16pt margin.
+                .scrollTargetBehavior(.viewAligned)
+                .contentMargins(.horizontal, 0, for: .scrollContent)
+                .padding(.bottom, S.gutter)
+            }
+            if cards.isEmpty && digests.isEmpty && week == nil {
                 // Zones never collapse and never reorder. The section keeps its padding.
                 // CHROME.md gives one string, and it names a filter. With the
                 // placeholder deck gone New and Next are empty with no filter
@@ -333,7 +432,7 @@ struct SunnyReveal: ViewModifier, Animatable {
     }
 
     private func fire(_ delay: Double) {
-        withAnimation(S.cEaseOut.speed(1 / S.durRevealOpacity).delay(delay)) { shown = true }
+        withAnimation(S.easeOut(S.durRevealOpacity).delay(delay)) { shown = true }
     }
 }
 

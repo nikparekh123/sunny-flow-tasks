@@ -15,48 +15,16 @@
 
 import SwiftUI
 
-// MARK: - row 2 · ticker strip, 34pt
+/* ⚠ ROW 2 IS GONE. `SunnyTicker` lived here: a market-state dot and the
+   SPY/QQQ/IWM cluster with tap-to-swap between percent and last price.
+   Handoff 10 deleted the whole strip, and cards/text-rail.md §4 carries the
+   reasoning so it is not relitigated: the open/closed dot repeats the clock,
+   and those three indices are not positions Nik holds. Neither half was
+   relocated — if either returns it returns as a FACT in the bottom rail, in
+   that spec's language, spending that spec's width budget.
 
-struct SunnyTicker: View {
-    let state: SunnyMarketState
-    let quotes: [SunnyQuote]
-    @Binding var showPercent: Bool
-
-    var body: some View {
-        HStack(spacing: S.gap7) {
-            HStack(spacing: S.gap3) {
-                Circle().fill(state.dot).frame(width: S.gap3, height: S.gap3)
-                Text(state.label)
-                    .font(InkFont.display(S.t11, S.wSemi))
-                    .tracking(S.track(S.t11, 0.02))
-                    .foregroundStyle(S.mute)
-            }
-            HStack(spacing: S.gap6) {
-                Spacer(minLength: 0)
-                ForEach(quotes) { q in
-                    HStack(alignment: .firstTextBaseline, spacing: S.gap2) {
-                        Text(q.symbol)
-                            .font(InkFont.display(S.t11, S.wBold))
-                            .foregroundStyle(S.ink)
-                        Text(showPercent ? q.percent : q.last)
-                            .font(InkFont.display(S.t11, S.wMid))
-                            .foregroundStyle(q.up ? S.tickUp : S.tickDown)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .monospacedDigit()                       // tabular in BOTH modes, so no reflow
-            .contentShape(Rectangle())
-            .onTapGesture { withAnimation(S.cEaseSwap.speed(1 / S.durSwap)) { showPercent.toggle() } }
-        }
-        .padding(.horizontal, S.margin)
-        .frame(height: S.tickerH)
-        .overlay(alignment: .bottom) {
-            // SPEC 04: a rule is a child view with a height, never a border.
-            Rectangle().fill(S.wash).frame(height: S.rule)
-        }
-    }
-}
+   Gone with it: SunnyQuote's use here, the percent/price toggle, and the swap
+   animation. Fixed rows dropped 168 -> 134 and the pane grew 684 -> 718. */
 
 // MARK: - row 3 · zone bar, 56pt
 

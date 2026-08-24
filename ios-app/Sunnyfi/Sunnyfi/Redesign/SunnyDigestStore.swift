@@ -2,6 +2,12 @@
 //  SunnyDigestStore.swift
 //  Sunny — the digest card's data. position-live, income_sleeve_names only.
 //
+//  ── Called the AWARENESS CARD ───────────────────────────────────────────────
+//  Nik's name for it, short for situational awareness. Use it in conversation
+//  and in comments; it is deliberately NOT on screen. The card carries no title
+//  in the feed and should not gain one. The type names here predate the name
+//  and are not worth churning.
+//
 //  The seven sections the card wants are exactly what the engine already emits,
 //  so there is no shape to invent here: Analysts, Price, Company, Where you
 //  stand, What is covered, The floor, Do.
@@ -80,8 +86,11 @@ struct SunnyDigestCardModel {
 
     fileprivate init(_ p: LivePayload.Pos, asof: String) {
         // Kalam 12.5/300, and the only place a date appears on the card.
-        tags = [SunnyTag(rawValue: p.ticker.lowercased())].compactMap { $0 }
-        name = "\(p.ticker) digest"
+        // Nik's rule: the ticker, and the card kind. Filtering NKE finds it;
+        // so does filtering NKE Awareness, which will matter once other kinds
+        // of card sit on the same name.
+        tags = [.ticker(p.ticker), .awareness(p.ticker)]
+        name = "\(p.ticker) awareness"
         timestamp = SunnyDigestCardModel.stamp(asof)
         ticker = p.ticker
         spot = String(format: "%.2f", p.spot)
@@ -94,30 +103,39 @@ struct SunnyDigestCardModel {
         func plain(_ h: String, _ xs: [String]) -> DigestSection? {
             xs.isEmpty ? nil : DigestSection(heading: h, lines: xs.map { DigestLine(text: $0, tags: []) })
         }
-        // Headings are SENTENCE CASE. Never uppercase, never letter-spaced.
+        /* ⚠ THE POSITION SECTIONS ARE DELIBERATELY NOT RENDERED. Nik: "remove
+           where you stand, what is covered, the floor from the awareness card,
+           I want it to be more price company and analyst vs the position. We
+           can add that later in a different format."
+
+           So the card is the market read on the name, and the DO block below it
+           is the only place his own position appears.
+
+           ⚠ AND THE ENGINE STILL SENDS THEM. `stand`, `coverage` and
+           `floor_lines` remain in the position-live response and remain
+           non-optional here, because the build already on his phone decodes all
+           three and would throw keyNotFound the moment they disappeared. This is
+           a rendering decision, not a payload change. Dropping them server-side
+           is the mistake that broke the live app once already. */
         sections = [
             sec("Analysts", p.analysts),
             sec("Price", p.price),
             sec("Company", p.company),
-            plain("Where you stand", p.stand),
-            plain("What is covered", p.coverage),
-            plain("The floor", p.floor_lines),
         ].compactMap { $0 }
 
         // Exactly one DO block, always last, and every action keeps its own
         // line. Joining the tail into a single "reason" string was what made
         // three instructions read as one sentence.
-        // Prefer the typed list. Fall back to the flat one so an older engine
-        // still renders, just without the action/note distinction.
-        if let typed = p.do_lines, !typed.isEmpty {
-            doBlock = DigestDo(lines: typed.map {
-                DigestDo.Line(text: $0.text, isAction: $0.kind == "action")
-            })
-        } else if !p.`do`.isEmpty {
-            doBlock = DigestDo(lines: p.`do`.map { DigestDo.Line(text: $0, isAction: true) })
-        } else {
-            doBlock = nil
-        }
+        /* ⚠ NO DO BLOCK. With Where you stand, What is covered and The floor
+           gone, the card is a read on the NAME rather than on the position, and
+           an instruction to sell 20 calls was the last thing dragging his own
+           book back onto it. DIGEST-CARD §9 agrees by construction: the
+           market-read variant has three sections and never carries a DO.
+
+           The engine still returns `do` and `do_lines`, and DigestDo still
+           exists, because both are needed the moment the position side comes
+           back "in a different format". This is a rendering decision. */
+        doBlock = nil
     }
 
     private static func stamp(_ iso: String) -> String {

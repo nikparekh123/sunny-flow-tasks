@@ -5,17 +5,38 @@
 
 import SwiftUI
 
-/// CARDS.md: the tag vocabulary is a CLOSED SET. Adding one means adding a
-/// filter label too, so the two cannot drift apart.
-enum SunnyTag: String, CaseIterable, Identifiable {
-    case tlt, nke, nvda, baba, nflx, earnings, iv
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .tlt: return "TLT"; case .nke: return "NKE"; case .nvda: return "NVDA"
-        case .baba: return "BABA"; case .nflx: return "NFLX"
-        case .earnings: return "Earnings"; case .iv: return "IV"
-        }
+/// A filter key.
+///
+/// ⚠ NO LONGER A CLOSED ENUM. CARDS.md fixes the vocabulary at
+/// `tlt nke nvda earnings iv`, which worked while the deck was 18 fixed shells.
+/// It cannot survive Nik's rule that every card carries its ticker AND a
+/// per-card tag ("NKE Awareness"), because that set grows with the positions he
+/// holds and with the kinds of card that exist. So the vocabulary is DERIVED
+/// from the cards in the feed instead of declared ahead of them.
+///
+/// `key` is what matching uses and is always lowercase. `label` is what the
+/// filter rail shows. Keeping them separate is what lets "NKE Awareness" be one
+/// tag rather than two words that happen to sit together.
+struct SunnyTag: Identifiable, Hashable, Comparable {
+    let key: String
+    let label: String
+    var id: String { key }
+
+    init(_ label: String) {
+        self.label = label
+        self.key = label.lowercased()
+    }
+    /// The ticker on its own.
+    static func ticker(_ t: String) -> SunnyTag { SunnyTag(t.uppercased()) }
+    /// The card-kind tag: "NKE Awareness".
+    static func awareness(_ t: String) -> SunnyTag { SunnyTag("\(t.uppercased()) Awareness") }
+
+    var isAwareness: Bool { key.hasSuffix(" awareness") }
+
+    /// Plain tickers first, then the per-card tags, each alphabetical. Without
+    /// an order the rail reshuffles whenever the position set changes.
+    static func < (a: SunnyTag, b: SunnyTag) -> Bool {
+        a.isAwareness == b.isAwareness ? a.key < b.key : (!a.isAwareness && b.isAwareness)
     }
 }
 
@@ -51,7 +72,7 @@ struct SunnyCard: Identifiable {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return true }
         if name.lowercased().contains(q) { return true }
-        return tags.contains { $0.rawValue.contains(q) }
+        return tags.contains { $0.key.contains(q) }
     }
 }
 
