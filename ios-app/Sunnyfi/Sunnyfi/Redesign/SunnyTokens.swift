@@ -96,13 +96,115 @@ enum S {
     static let warnWash = hex(0xFBEEDC), warnChip = hex(0xF4D9AE)
     static let doGround = hex(0xFBF5E4), doLabel = hex(0x55502F), doBody = hex(0x4C4835)
 
+
+    // MARK: paper — THE DIGEST CARD ONLY
+    //
+    // ⚠ DO NOT SPREAD THESE. tokens.css: "The long position digest uses a paper
+    // treatment. NOTHING else does — do not spread these onto feed cards,
+    // chrome, or chart cards." It earns its difference by being the only one.
+    //
+    // ⚠ AND HANDWRITING IS NEVER A FIGURE. Labels, tags, the ticker and the
+    // timestamp are hand. Every number stays Inter, semibold, tabular. A
+    // handwritten price reads as decorative and the card stops being
+    // trustworthy at a glance. That is the one rule that outranks the rest.
+    static let paperButter    = hex(0xFFFBEA)
+    static let paperDot       = Color(red: 160/255, green: 140/255, blue: 80/255).opacity(0.16)
+    static let paperDotSize:  CGFloat = 16
+    static let paperRing      = Color(red: 160/255, green: 140/255, blue: 80/255).opacity(0.14)
+    static let paperRule      = hex(0xE3D9B8)
+    static let paperBullet    = hex(0xC4B78C)
+    static let paperInk       = hex(0x1F1B12)
+    static let paperInkStrong = hex(0x1B1710)
+    static let paperInkHead   = hex(0x5A5033)
+    static let paperInkMeta   = hex(0x8A7B52)
+    static let paperInkDo     = hex(0x453D26)
+    static let paperRuleInk   = hex(0x3B3319)
+    static let paperDoGround  = Color(red: 216/255, green: 190/255, blue: 110/255).opacity(0.16)
+
+    // Washes are ALPHA OVER THE BUTTER GROUND, never opaque fills. That is what
+    // makes them read as highlighter rather than as a chip.
+    static let paperMarkNew  = Color(red: 217/255, green: 162/255, blue: 90/255).opacity(0.28)
+    static let paperMarkBull = Color(red: 120/255, green: 190/255, blue: 140/255).opacity(0.30)
+    static let paperMarkNote = Color(red: 120/255, green: 160/255, blue: 205/255).opacity(0.26)
+    static let markNewInk    = hex(0x7C4A16)
+    static let markBullInk   = hex(0x0F5A2C)
+    static let markNoteInk   = hex(0x2A4A6E)
+
+    // Not in tokens.css, but named there in the DIGEST-CARD colour table.
+    static let paperInkTicker = hex(0x2A2413)
+    static let paperChipInk   = hex(0x7C4A16)
+    static let paperChipRing  = hex(0xD9A25A)
+
+    static let tHandHead:  CGFloat = 22
+    static let tHandTag:   CGFloat = 22
+    static let tHandTitle: CGFloat = 28
+    static let tHandMeta:  CGFloat = 13.5
+    /// Paper body, spot and chip. Bumped from 14.5 / 23 / 17 on 2026-08-23 for
+    /// readability. The 1.45 multiple is unchanged.
+    static let tPaperBody: CGFloat = 16
+    static let tPaperSpot: CGFloat = 25
+    static let tPaperChip: CGFloat = 18
+    static let lhPaperBody: CGFloat = 1.45
+
+    static let radiusMark: CGFloat = 4
+    static let padMark = EdgeInsets(top: 0, leading: 6, bottom: 1, trailing: 6)
+
+    /// Caveat ships VARIABLE (wght 400..700). SwiftUI's .weight() does not drive
+    /// a bundled variable font's axes, so the axis is set explicitly, the same
+    /// way InkFont handles Inter.
+    static func hand(_ size: CGFloat, _ wght: CGFloat = 700) -> Font {
+        handUI(size, wght).map(Font.init) ?? .system(size: size)
+    }
+    /// Inter with an explicit numeric weight, so 450 survives the trip.
+    static func interUI(_ size: CGFloat, _ wght: CGFloat) -> UIFont? {
+        guard let b = UIFont(name: "Inter", size: size) else { return nil }
+        return UIFont(descriptor: b.fontDescriptor.addingAttributes([
+            UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"):
+                [0x77676874: wght, 0x6F70737A: min(max(size, 14), 32)]]), size: size)
+    }
+    static func inter(_ size: CGFloat, _ wght: CGFloat) -> Font {
+        interUI(size, wght).map(Font.init) ?? .system(size: size)
+    }
+
+    /// ⚠ CSS line-height is the TOTAL line advance; SwiftUI's .lineSpacing is
+    /// the EXTRA space ON TOP of the font's own natural line height. Passing
+    /// size x (multiple - 1) is the obvious move and it is wrong: at 14.5/1.45
+    /// it hands SwiftUI 6.52 where the answer is 3.48, because Inter's natural
+    /// advance at 14.5 is already 17.54. Measure the font, then subtract.
+    static func leading(_ size: CGFloat, _ wght: CGFloat, _ multiple: CGFloat) -> CGFloat {
+        guard let f = interUI(size, wght) else { return 0 }
+        return max(0, size * multiple - f.lineHeight)
+    }
+    static func handUI(_ size: CGFloat, _ wght: CGFloat) -> UIFont? {
+        guard let b = UIFont(name: "Caveat-Regular", size: size) else { return nil }
+        return UIFont(descriptor: b.fontDescriptor.addingAttributes([
+            UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"):
+                [0x77676874: wght]]), size: size)
+    }
+
+    /// Kalam is STATIC, and exists so the timestamp does not read as another
+    /// heading. Do not merge it with Caveat.
+    static func handAlt(_ size: CGFloat) -> Font {
+        Font(UIFont(name: "Kalam-Light", size: size) ?? .systemFont(ofSize: size))
+    }
+
     // MARK: type ramp — pick a step, never interpolate
     static let t10: CGFloat = 10, t11: CGFloat = 11, t12: CGFloat = 12, t13: CGFloat = 13
     static let t14: CGFloat = 14, t15: CGFloat = 15, t17: CGFloat = 17, t19: CGFloat = 19
     static let t22: CGFloat = 22, t26: CGFloat = 26, t30: CGFloat = 30
     static let t34: CGFloat = 34, t39: CGFloat = 39
 
-    static let wBody: Font.Weight = .regular     // 450, nearest SwiftUI step
+    /// ⚠ NOT a Font.Weight. SwiftUI's Font.Weight has no 450 step, and routing
+    /// through it silently rounds to .regular = 400. DIGEST-CARD §2: "Body is
+    /// 450, not 400 and not 500. On butter at 14.5px, 400 goes thin and 500
+    /// goes heavy — 450 is the one that holds." Inter is variable, so 450 is
+    /// reachable; it just has to be asked for as a number. Use S.inter().
+    static let wBodyN: CGFloat = 450
+    static let wMidN:  CGFloat = 500
+    static let wSemiN: CGFloat = 600
+    static let wBoldN: CGFloat = 700
+
+    static let wBody: Font.Weight = .regular     // 400. Do NOT use for paper body.
     static let wMid:  Font.Weight = .medium      // 500
     static let wSemi: Font.Weight = .semibold    // 600 — all figures
     static let wBold: Font.Weight = .bold        // 700 — all uppercase labels

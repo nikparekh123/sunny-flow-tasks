@@ -29,7 +29,10 @@ import {
 const BUILD = '2026-08-17.1';
 const POLY = 'https://api.polygon.io';
 
-const usd = (v: number) => '$' + Math.round(v).toLocaleString('en-US');
+/* SPEC 05: the minus sits OUTSIDE the currency and is U+2212, not a hyphen.
+   toLocaleString gives "-3,726", which renders as "$-3,726". */
+const usd = (v: number) => (v < 0 ? '\u2212' : '')
+  + '$' + Math.abs(Math.round(v)).toLocaleString('en-US');
 
 /** Every contract at one expiry for one underlying, keyed strike|type. */
 async function marks(ticker: string, expiry: string, key: string) {

@@ -36,6 +36,7 @@ struct SunnyCardSlot: View {
 // MARK: - row 5a · filter row, 44pt, sticky
 
 struct SunnyFilterRow: View {
+    let tags: [SunnyTag]
     @Binding var selected: Set<SunnyTag>
     let onChange: () -> Void
 
@@ -43,7 +44,7 @@ struct SunnyFilterRow: View {
         HStack(spacing: S.gap7) {
             ScrollView(.horizontal) {
                 HStack(spacing: S.hitGrow) {
-                    ForEach(SunnyTag.allCases) { tag in
+                    ForEach(tags) { tag in
                         SunnyFilterLabel(
                             text: tag.label,
                             on: selected.contains(tag),
@@ -114,6 +115,7 @@ struct SunnyPane: View {
     @Binding var activeZone: SunnyZone
     let jumpTo: SunnyZone?
     let onJumpHandled: () -> Void
+    var startAt: CGFloat? = nil
 
     @State private var rowHidden = false
     @State private var lastY: CGFloat = 0
@@ -121,9 +123,35 @@ struct SunnyPane: View {
     @State private var revealToken = UUID()
     @State private var debounce: Task<Void, Never>?
     @State private var sectionTops: [SunnyZone: CGFloat] = [:]
+    @State private var digest = DigestStore()
+    @State private var scrollPos = ScrollPosition()
 
     private func visible(_ z: SunnyZone) -> [SunnyCard] {
         SunnyDeck.cards(z).filter { $0.matches(query: query, filters: filters) }
+    }
+
+    /// The digest is a card, so it obeys the filter like the rest. Without this
+    /// it was the one thing in the feed that no filter could ever hide, which
+    /// makes the filter row a decoration rather than a control.
+    private var digestsVisible: [SunnyDigestCardModel] {
+        digest.cards.filter {
+            SunnyCard(tags: $0.tags, name: $0.name, size: .m)
+                .matches(query: query, filters: filters)
+        }
+    }
+
+    /// Labels come from tags on REAL CARDS, and the placeholder shells are not
+    /// real cards.
+    ///
+    /// ⚠ COUNTING THE PLACEHOLDER DECK IS THE BUG THIS REPLACES. Deriving the
+    /// vocabulary from "everything in the feed" sounds right and isn't: the 18
+    /// shells from CARDS.md carry tlt / nvda / earnings / iv, so the row offered
+    /// TLT and NVDA when the feed held nothing of either. A filter that returns
+    /// only empty shells is indistinguishable from a broken one.
+    private var presentTags: [SunnyTag] {
+        var seen = Set<SunnyTag>()
+        for d in digest.cards { seen.formUnion(d.tags) }
+        return SunnyTag.allCases.filter { seen.contains($0) }
     }
 
     var body: some View {
@@ -138,14 +166,19 @@ struct SunnyPane: View {
                         // never shift when the row hides.
                         Color.clear.frame(height: S.filterrowH)
                         ForEach(SunnyZone.allCases) { zone in
-                            SunnySection(zone: zone, cards: visible(zone), token: revealToken)
+                            SunnySection(zone: zone, cards: visible(zone), token: revealToken,
+                                         digests: zone == .now ? digestsVisible : [],
+                                         narrowed: !filters.isEmpty || !query.trimmingCharacters(in: .whitespaces).isEmpty)
                                 .id(zone)
                                 .background {
-                                    GeometryReader { g in
-                                        Color.clear.onAppear {
-                                            sectionTops[zone] = g.frame(in: .named("content")).minY
-                                        }
-                                    }
+                                    // ⚠ TRACK, do not sample once. onAppear read
+                                    // these before the digest card had loaded, so
+                                    // New and Next kept offsets from a Now zone
+                                    // that was ~1200pt shorter, and both lit up a
+                                    // couple of hundred points into the scroll.
+                                    Color.clear.onGeometryChange(for: CGFloat.self) {
+                                        $0.frame(in: .named("content")).minY
+                                    } action: { sectionTops[zone] = $0 }
                                 }
                         }
                         Color.clear.frame(height: 28)          // tail spacer
@@ -153,6 +186,12 @@ struct SunnyPane: View {
                     .coordinateSpace(.named("content"))
                 }
                 .scrollIndicators(.hidden)
+                .scrollPosition($scrollPos)
+                .task {
+                    guard let y = startAt else { return }
+                    try? await Task.sleep(for: .seconds(4))   // let the digest land first
+                    scrollPos.scrollTo(y: y)
+                }
                 .onChange(of: jumpTo) { _, z in
                     guard let z else { return }
                     withAnimation(.easeInOut) { proxy.scrollTo(z, anchor: .top) }
@@ -171,7 +210,7 @@ struct SunnyPane: View {
             }
             .background(S.ground)
 
-            SunnyFilterRow(selected: $filters) { applyChange(S.debounceFilter) }
+            SunnyFilterRow(tags: presentTags, selected: $filters) { applyChange(S.debounceFilter) }
                 .offset(y: rowHidden ? -S.filterrowH : 0)
                 .opacity(rowHidden ? 0 : 1)
                 .allowsHitTesting(!rowHidden)
@@ -184,6 +223,7 @@ struct SunnyPane: View {
             }
         }
         .onChange(of: query) { _, _ in applyChange(S.debounceQuery) }
+        .task { await digest.load() }
     }
 
     /// Every trigger cancels the previous timer (CHROME.md §8).
@@ -207,6 +247,10 @@ struct SunnySection: View {
     let zone: SunnyZone
     let cards: [SunnyCard]
     let token: UUID
+    /// The situational-awareness digest. Leads the Now zone, and is the ONLY
+    /// card in the deck with no size class: its height follows its content.
+    var digests: [SunnyDigestCardModel] = []
+    var narrowed: Bool = false
 
     /// Pack into rows: a span-2 card sits alone, span-1 cards pair up.
     private var rows: [[SunnyCard]] {
@@ -226,9 +270,18 @@ struct SunnySection: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if cards.isEmpty {
+            ForEach(Array(digests.enumerated()), id: \.offset) { _, d in
+                SunnyDigestCard(d)
+                    .padding(.bottom, S.gutter)
+            }
+            if cards.isEmpty && digests.isEmpty {
                 // Zones never collapse and never reorder. The section keeps its padding.
-                Text("Nothing in this zone for that filter.")
+                // CHROME.md gives one string, and it names a filter. With the
+                // placeholder deck gone New and Next are empty with no filter
+                // set, where that copy would be a lie. Flagged for Nik: the
+                // spec has no line for a genuinely empty zone.
+                Text(narrowed ? "Nothing in this zone for that filter."
+                              : "Nothing here yet.")
                     .font(InkFont.display(S.t13, S.wMid))
                     .foregroundStyle(S.mute2)
                     .frame(maxWidth: .infinity, alignment: .leading)

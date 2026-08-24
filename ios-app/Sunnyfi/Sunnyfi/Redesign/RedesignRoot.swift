@@ -79,5 +79,6 @@ struct RedesignRoot: View {
     var body: some View {
         SunnyShell()
             .sunnyEscape()
+            .onAppear { SunnyFontAudit.dump(); SunnyFontAudit.leading() }
     }
 }

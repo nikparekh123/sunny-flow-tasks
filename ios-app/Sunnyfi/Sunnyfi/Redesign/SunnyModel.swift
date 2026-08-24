@@ -8,11 +8,12 @@ import SwiftUI
 /// CARDS.md: the tag vocabulary is a CLOSED SET. Adding one means adding a
 /// filter label too, so the two cannot drift apart.
 enum SunnyTag: String, CaseIterable, Identifiable {
-    case tlt, nke, nvda, earnings, iv
+    case tlt, nke, nvda, baba, nflx, earnings, iv
     var id: String { rawValue }
     var label: String {
         switch self {
         case .tlt: return "TLT"; case .nke: return "NKE"; case .nvda: return "NVDA"
+        case .baba: return "BABA"; case .nflx: return "NFLX"
         case .earnings: return "Earnings"; case .iv: return "IV"
         }
     }
@@ -54,36 +55,23 @@ struct SunnyCard: Identifiable {
     }
 }
 
-/// CARDS.md "Current deck — do not renumber". Order and sizes are normative.
-/// XS cards pair up; an odd XS at the end of a zone is a defect.
+/// The feed's non-digest cards.
+///
+/// ⚠ EMPTY ON PURPOSE. CARDS.md ships 18 placeholder shells across the three
+/// zones — correct shells with empty interiors, meant to be filled one at a
+/// time. Once the digest cards carried real content the shells stopped reading
+/// as "not built yet" and started reading as broken cards, and they polluted
+/// the filter row: they carry tlt / nvda / earnings / iv tags, so the row
+/// offered filters that could only ever return blanks. Removed on Nik's call.
+///
+/// The deck order is kept in the comment below so it can be restored exactly
+/// when real cards arrive. Do not renumber it.
+///
+///   Now   M(tlt) · S(nvda) · S(nke) · XS(tlt) · XS(iv)
+///   New   S(nvda) · S(tlt) · M(nke) · XS(tlt) · XS(iv) · S(earnings) · S(nvda)
+///   Next  L(tlt) · S(nke) · S(nvda) · M(earnings) · XS(iv) · XS(tlt)
 enum SunnyDeck {
-    static let now: [SunnyCard] = [
-        .init(tags: [.tlt],  name: "TLT iShares 20+ Year Treasury bond", size: .m),
-        .init(tags: [.nvda], name: "NVDA Nvidia", size: .s),
-        .init(tags: [.nke],  name: "NKE Nike", size: .s),
-        .init(tags: [.tlt],  name: "TLT iShares 20+ Year Treasury bond", size: .xs),
-        .init(tags: [.iv],   name: "IV implied volatility", size: .xs),
-    ]
-    static let new: [SunnyCard] = [
-        .init(tags: [.nvda], name: "NVDA Nvidia", size: .s),
-        .init(tags: [.tlt],  name: "TLT iShares 20+ Year Treasury bond", size: .s),
-        .init(tags: [.nke],  name: "NKE Nike", size: .m),
-        .init(tags: [.tlt],  name: "TLT iShares 20+ Year Treasury bond", size: .xs),
-        .init(tags: [.iv],   name: "IV implied volatility", size: .xs),
-        .init(tags: [.earnings], name: "Earnings calendar", size: .s),
-        .init(tags: [.nvda], name: "NVDA Nvidia", size: .s),
-    ]
-    static let next: [SunnyCard] = [
-        .init(tags: [.tlt],  name: "TLT iShares 20+ Year Treasury bond", size: .l),
-        .init(tags: [.nke],  name: "NKE Nike", size: .s),
-        .init(tags: [.nvda], name: "NVDA Nvidia", size: .s),
-        .init(tags: [.earnings], name: "Earnings calendar", size: .m),
-        .init(tags: [.iv],   name: "IV implied volatility", size: .xs),
-        .init(tags: [.tlt],  name: "TLT iShares 20+ Year Treasury bond", size: .xs),
-    ]
-    static func cards(_ z: SunnyZone) -> [SunnyCard] {
-        switch z { case .now: return now; case .new: return new; case .next: return next }
-    }
+    static func cards(_ z: SunnyZone) -> [SunnyCard] { [] }
 }
 
 /// A ticker-strip quote. CHROME.md §2: direction colour is a property of the

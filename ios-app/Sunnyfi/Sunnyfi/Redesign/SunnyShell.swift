@@ -15,6 +15,22 @@ struct SunnyShell: View {
     @State private var jumpTo: SunnyZone?
     @State private var showPercent = true
 
+    /// Deterministic states for verification, so a screenshot of "filtered to
+    /// TLT" does not depend on a simulated tap landing on the right pixel.
+    ///   -filter tlt      preselect a filter
+    ///   -scrollTo 900    start the pane at that offset
+    private static var argFilter: SunnyTag? {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-filter"), i + 1 < a.count else { return nil }
+        return SunnyTag(rawValue: a[i + 1].lowercased())
+    }
+    private static var argScroll: CGFloat? {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-scrollTo"), i + 1 < a.count,
+              let v = Double(a[i + 1]) else { return nil }
+        return CGFloat(v)
+    }
+
     /// Placeholder quotes. The cards and their data land later; the shell is
     /// what this turn builds.
     private let quotes = [
@@ -33,10 +49,12 @@ struct SunnyShell: View {
                          onJump: { jumpTo = $0 }, searchOpen: $searchOpen).measure("row3-zonebar")
             SunnySearchDrawer(query: $query, open: $searchOpen)
             SunnyPane(query: $query, filters: $filters, activeZone: $activeZone,
-                      jumpTo: jumpTo, onJumpHandled: { jumpTo = nil })
+                      jumpTo: jumpTo, onJumpHandled: { jumpTo = nil },
+                      startAt: Self.argScroll)
                 .frame(maxHeight: .infinity)
         }
         .background(S.ground)
+        .onAppear { if let t = Self.argFilter { filters = [t] } }
         .preferredColorScheme(.light)      // the token set is a light system
     }
 }

@@ -44,7 +44,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-23.5';
+const BUILD = '2026-08-23.10';
 const POLY = 'https://api.polygon.io';
 
 /** The Friday at least 5 sessions out: the contract actually written. */
@@ -99,8 +99,17 @@ async function tickerName(t: string, k: string): Promise<string> {
 }
 
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
-const usd = (v: number) => `$${Math.round(v).toLocaleString('en-US')}`;
-const pct = (v: number, dp = 1) => `${v >= 0 ? '+' : ''}${v.toFixed(dp)}%`;
+/* SPEC 05: "Signed values always carry the sign: +$3,394, −$127. Use U+2212
+   minus (−), not a hyphen." Number.toLocaleString emits a HYPHEN and puts it
+   inside the currency, so the DO block read "$-4,020" where it should read
+   "−$4,020". The sign belongs outside the $, and it is U+2212.
+
+   ⚠ Positives are NOT given a leading +. usd() is used for gross inflows too
+   ("$1,220 in"), where a + would be wrong; only a genuinely signed figure
+   carries one, and those build it themselves. */
+const usd = (v: number) => (v < 0 ? '\u2212' : '')
+  + `$${Math.abs(Math.round(v)).toLocaleString('en-US')}`;
+const pct = (v: number, dp = 1) => (v < 0 ? '\u2212' : '+') + `${Math.abs(v).toFixed(dp)}%`;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 /** 2026-09-24 -> 24 Sep. Nobody reads a date aloud as an ISO string. */
 const day = (iso: string) => {
@@ -257,43 +266,64 @@ Deno.serve(async (req) => {
       /* Sentences, not field-speak. The two paragraphs above read like a
          person and then this said "floor short 20 against 20 shares plus 20
          puts sold", which is the same jargon wearing a bullet. */
+      /* DO carries two kinds of line and they are not interchangeable. An
+         ACTION is something to place at the broker; a NOTE is the consequence
+         or the caveat that hangs off the actions above it.
+
+         ⚠ THE CARD CANNOT TELL THEM APART FROM THE WORDING, so it must be told.
+         Rendered as one kind, "Net after the floor top-up: −$4,020" sits in the
+         same heavy 18/600 as the three orders above it and reads as a fourth
+         thing to go and do.
+
+         `do` stays a flat string[] because a build already on Nik's phone
+         decodes it as one. This is ADDITIVE — see the warning at the top of the
+         file about the last time a field was removed. */
+      const doLines: Array<{ text: string; kind: 'action' | 'note' }> = [];
       const doList: string[] = [];
-      if (nCalls < lots100) {
-        /* Never negative. TLT carried 38 short puts against 11 lots and this
-           asked for "-27 puts" at a credit of -$1,147. */
-        const nc = Math.max(0, lots100 - nCalls), np = Math.max(0, lots100 - nPuts);
-        if (nc === 0 && np === 0) { /* nothing to add */ } else
-        { if (nc) doList.push(atmC
+      const act = (t: string) => { doList.push(t); doLines.push({ text: t, kind: 'action' }); };
+      const note = (t: string) => { doList.push(t); doLines.push({ text: t, kind: 'note' }); };
+      /* Never negative. TLT carried 38 short puts against 11 lots and this
+         asked for "-27 puts" at a credit of -$1,147. */
+      const nc = Math.max(0, lots100 - nCalls), np = Math.max(0, lots100 - nPuts);
+      /* ⚠ GATE ON BOTH LEGS. This used to read `if (nCalls < lots100)`, so a
+         position with its calls full but its puts unwritten produced NOTHING —
+         the put leg was unreachable. Gate on the work outstanding, not on one
+         side of it. */
+      if (nc || np) {
+        if (nc) act(atmC
           ? `Sell ${nc} calls, ${atmC.strike} strike, ${day(nextWrite)}, about ${atmC.mid.toFixed(2)} each, ${usd(atmC.mid * 100 * nc)} in`
           : `Sell ${nc} calls at the money, ${day(nextWrite)}`);
-        if (np) doList.push(atmP
+        if (np) act(atmP
           ? `Sell ${np} puts, ${atmP.strike} strike, ${day(nextWrite)}, about ${atmP.mid.toFixed(2)} each, ${usd(atmP.mid * 100 * np)} in`
-          : `Sell ${np} puts at the money, ${day(nextWrite)}`); }
+          : `Sell ${np} puts at the money, ${day(nextWrite)}`);
+      } else if (lots100 > 0) {
+        /* Say it. An omitted DO block and a failure to compute one look
+           identical on the card, and BABA is genuinely finished for the week. */
+        note(`Fully written this week: ${nCalls} calls and ${nPuts} puts against `
+          + `${lots100} lots.`);
       }
       for (const c of itmCall) {
-        doList.push(`Let the ${c.n} calls at ${c.k} go: ${(c.n * 100).toLocaleString('en-US')} shares `
+        act(`Let the ${c.n} calls at ${c.k} go: ${(c.n * 100).toLocaleString('en-US')} shares `
           + `leave on ${day(c.e)} and ${usd(c.n * 100 * c.k)} comes back.`);
       }
-      if (nFloor < need) {
-        doList.push(`Buy ${need - nFloor} more floor puts. You hold ${nFloor} against the ${need} your rule asks for.`);
-      } else if (nFloor < needAfter) {
-        const gap = needAfter - nFloor;
-        doList.push(atmF
-          ? `Buy ${gap} puts at ${atmF.strike}, ${day(String(atmF.expiry ?? floorExp))}, about ${atmF.mid.toFixed(2)} each, ${usd(atmF.mid * 100 * gap)} out, to close the floor gap`
-          : `Buy ${gap} four-month puts at the money to close the floor gap`);
-        const inFlow = (atmC ? atmC.mid * 100 * (lots100 - nCalls) : 0) + (atmP ? atmP.mid * 100 * (lots100 - nPuts) : 0);
-        const outFlow = atmF ? atmF.mid * 100 * gap : 0;
-        /* Only claim a NET when both sides are actually priced. Reporting
-           inflow alone under a "net after the floor top-up" label overstates
-           the week by the entire cost of the floor. */
-        if (inFlow && outFlow) doList.push(`Net after the floor top-up: ${usd(inFlow - outFlow)}`);
-        else if (inFlow) doList.push(`Premium in: ${usd(inFlow)}. The floor top-up is not priced here.`);
-      }
-      if (fk && (spot - fk) / spot > 0.15) {
-        doList.push(`Consider rolling the floor up. At ${((spot - fk) / spot * 100).toFixed(0)}% below the price it protects very little.`);
-      }
+      /* ⚠ DO NEVER PROPOSES BUYING PUTS. Nik: "Dont suggest buying puts at all
+         just selling calls and what call and selling puts what put. I will
+         handle the puts myself."
+
+         What used to live here: a floor top-up, a floor roll, and a net figure
+         for the top-up. All three were wrong in practice. The top-up fired on
+         `needAfter = lots100 * 2`, which pre-buys four-month protection for
+         short puts that have not been written yet, so it reappeared every time
+         the card was opened. Worse, it proposed a NEW expiry — 18 Dec against a
+         floor actually held to 15 Jan 2027 — so it read as "open a second
+         floor", not "top up the one you have".
+
+         The floor is his to manage. The card reports what he holds and stops. */
+      const inFlow = (atmC ? atmC.mid * 100 * Math.max(0, lots100 - nCalls) : 0)
+                   + (atmP ? atmP.mid * 100 * Math.max(0, lots100 - nPuts) : 0);
+      if (inFlow > 0) note(`Premium in: ${usd(inFlow)}`);
       if (g0 && String(g0.direction) === 'cut' && String(g0.date) >= d120) {
-        doList.push(`The company cut guidance on ${day(String(g0.date))}. Think hard before adding to this one.`);
+        note(`The company cut guidance on ${day(String(g0.date))}. Think hard before adding to this one.`);
       }
 
       /* ── The situational read: ANALYSTS, PRICE, COMPANY, HEADLINES ────────
@@ -506,10 +536,20 @@ Deno.serve(async (req) => {
             : `${nCalls} of ${lots100} calls written, ${(shares - nCalls * 100).toLocaleString('en-US')} shares exposed to upside with no premium offset`,
           ...itmCall.map((c) => `${c.n} calls at ${c.k} are ${(spot - c.k).toFixed(2)} in the money, ${(c.n * 100).toLocaleString('en-US')} shares leave ${day(c.e)}`),
         ],
+        /* Held, not wanted. "Gap: 20 puts" and "the floor needs 40" were
+           instructions in disguise and are gone with the DO top-up. */
         floor_lines: nFloor ? [
-          `${nFloor} puts long at ${fk}, ${((spot - fk) / spot * 100).toFixed(1)}% below spot`,
-          `Once this week's ${lots100} short puts are on, exposure is ${(needAfter * 100).toLocaleString('en-US')} shares equivalent and the floor needs ${needAfter}`,
-          nFloor < needAfter ? `Gap: ${needAfter - nFloor} puts` : `Fully covered`,
+          /* BABA's floor is struck at 120 against a spot of 119.53, i.e. ABOVE
+             it, and the old line read "-0.4% below spot". A negative distance
+             below is a distance above; say which. */
+          (() => {
+            const rel = (spot - fk) / spot * 100;
+            return `${nFloor} puts long at ${fk}, ${Math.abs(rel).toFixed(1)}% `
+              + `${rel >= 0 ? 'below' : 'above'} spot`;
+          })(),
+          ...(floor.map((l) => l.e).sort()[0]
+              ? [`Expires ${day(floor.map((l) => l.e).sort()[0])}`] : []),
+          `Covers ${(nFloor * 100).toLocaleString('en-US')} shares against ${shares.toLocaleString('en-US')} held`,
         ] : [`No floor on this position`],
         ticker: t, spot, shares, avg, effective, allIn, next_write: nextWrite,
         background: {
@@ -538,6 +578,7 @@ Deno.serve(async (req) => {
                    pos_52w: s0 ? N(s0.pos_52w) : null, score: s0 ? N(s0.score) : null,
                    premium_taken: premTaken },
         do: doList,
+        do_lines: doLines,
       };
     }));
 
