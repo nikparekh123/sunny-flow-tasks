@@ -264,6 +264,54 @@ enum S {
     static let scrollDeadband: CGFloat = 4
     static let scrollReveal: CGFloat = 24
 
+    // MARK: the shell — SHELL.md
+    //
+    // ⚠ THE ZONE BAR IS GONE, AND WITH IT Now / New / Next. SHELL.md replaces
+    // the three zones with Featured, then one section per name, then Misc. A
+    // card is in ONE of those places at a time — never two — and an `order`
+    // decides which. Zones sorted by recency and could not answer "where is my
+    // TLT card"; a name section always can.
+    //
+    // Row stack is 54 / 44 / 0 / pane / 48 / 24 = 860. Rows 1 and 6 are the
+    // OS's here (see SunnyChrome.swift), so this app renders 44 / 0 / pane and
+    // lets the safe area supply the rest.
+
+    /// Pane padding: 16 all round, 40 at the base (SHELL.md §6). The 40 is
+    /// breathing room only.
+    ///
+    /// ⚠ AND THE RAIL'S 48 IS ADDED TO IT HERE. SHELL.md derives a 690 pane by
+    /// putting the rail IN FLOW below it. Nik's instruction is that the rail
+    /// stays as it is, which means the overlay of cards/text-rail.md — so the
+    /// pane runs under the dock and has to clear it itself. Same picture at
+    /// rest; the difference only shows when the dock slides away, and in flow
+    /// that would open a 48pt white gap instead of showing the feed.
+    static let panePadTop: CGFloat = 16
+    static let panePadBottom: CGFloat = 40
+
+    /// Section heading, measured 361 × 34 = 10 + 18 (a 15px Inter line box) + 6.
+    static let headingPadTop: CGFloat = 10
+    static let headingPadBottom: CGFloat = 6
+    static let headingGap: CGFloat = 9
+
+    /// The read control on a Featured card: 44 tall, ground --ink, label
+    /// 13/600 --on-ink. The negative insets let the 44pt hit bleed past the
+    /// card's 17/16 padding so the button does not inflate the row it sits in.
+    static let readPillPadX: CGFloat = 20
+    static let readBleedTop: CGFloat = -14
+    static let readBleedBottom: CGFloat = -13
+    /// The paper variant's own bleed. A Caveat 18 pencil circle measures ~26pt,
+    /// so −9 top and bottom takes a 44pt hit box back to the circle's height.
+    static let readBleedPaper: CGFloat = -9
+
+    /// The search disc in the filter strip. −9 lands the 30pt disc on the 16pt
+    /// margin while the 44pt hit box keeps its size.
+    static let searchDisc: CGFloat = 30
+    static let searchLead: CGFloat = -9
+    /// Gap between pills in the strip's scroller, and between the scroller and
+    /// its two neighbours.
+    static let pillGap: CGFloat = 20
+    static let stripGap: CGFloat = 16
+
     // MARK: always-on rail (bottom dock) — CHROME.md §2, cards/text-rail.md
     //
     // ⚠ TEXT, NEVER CARDS. A card in a 48pt strip is a geometry argument with

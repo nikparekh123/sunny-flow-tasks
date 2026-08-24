@@ -86,6 +86,9 @@ struct SunnyWeekModel {
 
 struct SunnyWeekCard: View {
     let m: SunnyWeekModel
+    /// SHELL.md §9: this card is read-once. It has no ticker, so it has nowhere
+    /// to file — reading it removes it from the feed until it is due again.
+    var onRead: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -100,10 +103,17 @@ struct SunnyWeekCard: View {
                     PaperBullet { dated(e.when, e.text) }
                 }
             }
-            section("What it earned", isLast: true) {
+            section("What it earned", isLast: onRead == nil) {
                 ForEach(Array(m.earned.enumerated()), id: \.offset) { _, e in
                     PaperBullet { body("\(e.ticker)  \(e.amount)") }
                 }
+            }
+            if let onRead {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    PaperReadControl(action: onRead)
+                }
+                .padding(EdgeInsets(top: 0, leading: 20, bottom: 20, trailing: 20))
             }
         }
         .paperSheet()

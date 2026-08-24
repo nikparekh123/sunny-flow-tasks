@@ -26,52 +26,83 @@ import SwiftUI
    Gone with it: SunnyQuote's use here, the percent/price toggle, and the swap
    animation. Fixed rows dropped 168 -> 134 and the pane grew 684 -> 718. */
 
-// MARK: - row 3 · zone bar, 56pt
+// MARK: - row 2 · filter strip, 44pt, always on screen
 
-struct SunnyZoneBar: View {
-    let active: SunnyZone
-    /// CHROME.md §3: narrowed = a filter is selected OR the query is non-empty.
-    /// All three labels go --dim and lose their hit area, because jumping to a
-    /// zone is meaningless while the feed is filtered.
-    let narrowed: Bool
-    let onJump: (SunnyZone) -> Void
+/* ⚠ THE ZONE BAR IS GONE. `SunnyZoneBar` lived here: Now — New — Next at 22/600
+   with an em-dash separator, a --dim narrowed state, and tap-to-jump. SHELL.md
+   deletes the whole row. Three zones sorted by recency could not answer the one
+   question the feed is asked — "where is my TLT card" — because the answer
+   changed with the news. Featured plus a section per name always can.
+
+   Gone with it: SunnyZone's jump target, `activeZone` tracking, the --zone-line
+   scroll maths, and the narrowed state that dimmed all three labels while a
+   filter was on. Do not re-add any of it from memory.
+
+   What replaced it is this strip, and it is NOT the old filter row moved up:
+   SHELL.md §4 puts the search icon FIRST, on the left, on Nik's instruction,
+   and the strip NEVER HIDES. An earlier build collapsed it on scroll-down
+   behind a 12px deadband; that came out. Filters are the way out of a long
+   feed, so they must never be somewhere you scroll back up to find. */
+
+struct SunnyFilterStrip: View {
+    let tags: [SunnyTag]
+    @Binding var selected: Set<SunnyTag>
     @Binding var searchOpen: Bool
-
-    private func colour(_ z: SunnyZone) -> Color {
-        narrowed ? S.dim : (z == active ? S.ink : S.faint)
-    }
+    let onChange: () -> Void
 
     var body: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: S.gap4 + 1) {                    // 9pt
-                ForEach(Array(SunnyZone.allCases.enumerated()), id: \.element.id) { i, z in
-                    if i > 0 {
-                        Text("\u{2014}")                      // em dash. not a slash, not a bullet
-                            .font(InkFont.display(S.t22, .regular))
-                            .foregroundStyle(S.dim)
-                    }
-                    Text(z.label)
-                        .font(InkFont.display(S.t22, S.wSemi))
-                        .tracking(S.track(S.t22, -0.025))
-                        .foregroundStyle(colour(z))
-                        .animation(.easeInOut(duration: S.durZone), value: narrowed)
-                        .contentShape(Rectangle())
-                        .onTapGesture { if !narrowed { onJump(z) } }
-                        .allowsHitTesting(!narrowed)
-                }
-            }
-            Spacer(minLength: 0)
+        HStack(spacing: S.stripGap) {
             SunnySearchButton(active: $searchOpen)
+                .padding(.leading, S.searchLead)
+
+            ScrollView(.horizontal) {
+                HStack(spacing: S.pillGap) {
+                    ForEach(tags) { tag in
+                        SunnyFilterLabel(text: tag.label, on: selected.contains(tag),
+                                         colourOn: S.ink, colourOff: S.mute) {
+                            // Multi-select, OR-matched. Tapping the only selected
+                            // label clears it.
+                            if selected.contains(tag) { selected.remove(tag) } else { selected.insert(tag) }
+                            onChange()
+                        }
+                    }
+                }
+                .frame(height: S.filterrowH)
+            }
+            .scrollIndicators(.hidden)
+            .mask {
+                /* ⚠ THE FADE HAS TO BE WIDE OR IT IS NOT A FADE, and it is here
+                   on Nik's call rather than in the sheet. A hidden scrollbar
+                   plus a clip landing mid-word turned "NFLX Awareness" into
+                   "NFL" at the frame edge, which reads as a rendering fault
+                   rather than a hint. The first pass ran it over 32pt, which
+                   greyed two letters and still read as a clipped word; 72
+                   dissolves a label instead. */
+                LinearGradient(stops: [
+                    .init(color: .black, location: 0),
+                    .init(color: .black, location: 1 - (S.railFadeW / S.content)),
+                    .init(color: .black.opacity(0.35), location: 1 - (S.railFadeW * 0.35 / S.content)),
+                    .init(color: .clear, location: 1),
+                ], startPoint: .leading, endPoint: .trailing)
+            }
+
+            SunnyFilterLabel(text: "Clear", on: false,
+                             colourOn: S.faint, colourOff: S.faint, weight: S.wSemi) {
+                selected.removeAll(); onChange()          // resets filters only, not the query
+            }
+            .opacity(selected.isEmpty ? 0 : 1)
+            .allowsHitTesting(!selected.isEmpty)
+            .animation(.easeInOut(duration: S.transition), value: selected.isEmpty)
         }
         .padding(.horizontal, S.margin)
-        .frame(height: S.zonebarH)
-        .background(S.paper)
-        .overlay(alignment: .bottom) { Rectangle().fill(S.wash).frame(height: S.rule) }
+        .frame(height: S.filterrowH)
+        .frame(maxWidth: .infinity)
+        .background(S.ground)
+        .measure("row2-filterstrip")
     }
 }
 
-/// 44 × 44 tap box holding a 30pt disc. The negative trailing inset lands the
-/// disc 16pt from the frame edge while keeping the full 44pt target.
+/// 44 × 44 tap box holding a 30pt disc.
 struct SunnySearchButton: View {
     @Binding var active: Bool
     var body: some View {
@@ -79,14 +110,13 @@ struct SunnySearchButton: View {
             ZStack {
                 Circle()
                     .fill(active ? S.ink : S.wash)
-                    .frame(width: S.zonebarH - 26, height: S.zonebarH - 26)   // 30
+                    .frame(width: S.searchDisc, height: S.searchDisc)
                 SunnyLens(size: 14, stroke: 1.6, colour: active ? S.onInk : S.mute2)
             }
             .frame(width: S.hitMin, height: S.hitMin)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.trailing, -7)
         .animation(.easeInOut(duration: S.transition), value: active)
     }
 }

@@ -33,7 +33,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-24.2';
+const BUILD = '2026-08-24.3';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** The rail abbreviates money: $400k, never $400,000. */
@@ -42,6 +42,35 @@ function money(v: number): string {
   if (a >= 1_000_000) return `$${(a / 1_000_000).toFixed(1)}m`;
   if (a >= 1_000) return `$${Math.round(a / 1000)}k`;
   return `$${a.toLocaleString('en-US')}`;
+}
+
+/* ── the book, for the shell's section headings ────────────────────────────
+   SHELL.md §7: a name heading is ticker + full company name + weight, and the
+   names run largest position first. That is chrome the shell cannot compute on
+   its own — it holds cards, not lots — so it is served here, beside the rail
+   facts it already fetches, rather than in a second call.
+
+   ⚠ ADDITIVE ONLY. `book` is a new key. Nothing above it changed shape, because
+   a build already on the phone decodes this response and a removed field throws
+   keyNotFound there. That mistake has been made once.
+
+   Weight is COST, not market value: the same basis the invested fact on the
+   dock is drawn on, so a heading can never disagree with the number two rows
+   below it. */
+const NAMES = new Map<string, string>();
+
+async function companyName(t: string, k: string): Promise<string> {
+  const hit = NAMES.get(t);
+  if (hit !== undefined) return hit;
+  try {
+    // NOT /v3/reference/ticker-details, which 404s.
+    const r = await fetch(`https://api.polygon.io/v3/reference/tickers/${t}?apiKey=${k}`);
+    if (!r.ok) { NAMES.set(t, t); return t; }
+    const j = await r.json();
+    const n = String(j?.results?.name ?? '').trim();
+    NAMES.set(t, n || t);
+    return n || t;
+  } catch { return t; }
 }
 
 type Span = { text: string; kind: 'word' | 'figure' | 'minor' };
@@ -64,6 +93,27 @@ Deno.serve(async (req) => {
     const facts: Array<{ key: string; spans: Span[]; projected?: boolean }> = [];
 
     const invested = lots.reduce((s, l) => s + N(l.qty_remaining) * N(l.cost_per_share), 0);
+
+    /* One row per name that still holds shares, largest first. A name with no
+       lots is absent rather than shown at 0% — the shell hides a heading with
+       no card under it anyway, and a 0% row would claim a position he closed. */
+    const byTicker = new Map<string, number>();
+    for (const l of lots) {
+      const t = String(l.ticker);
+      byTicker.set(t, (byTicker.get(t) ?? 0) + N(l.qty_remaining) * N(l.cost_per_share));
+    }
+    const pk = Deno.env.get('POLYGON_API_KEY') ?? '';
+    const book = await Promise.all(
+      [...byTicker.entries()]
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(async ([ticker, cost]) => ({
+          ticker,
+          name: pk ? await companyName(ticker, pk) : ticker,
+          weight: invested > 0 ? Math.round(cost / invested * 100) : 0,
+          cost: Math.round(cost),
+        })),
+    );
 
     /* Net each leg by contract before counting it. A leg that has been bought
        back nets to zero and must not contribute its premium — netting on the
@@ -133,6 +183,7 @@ Deno.serve(async (req) => {
     return json(200, {
       ok: true, build: BUILD, asof: ymd(today),
       facts,
+      book,
       rates_asof: r0 ? String(r0.date).slice(0, 10) : null,
       open_premium: Math.round(openPremium),
       omitted: [],

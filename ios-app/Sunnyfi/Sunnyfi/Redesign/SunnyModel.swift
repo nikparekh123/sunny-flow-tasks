@@ -33,6 +33,19 @@ struct SunnyTag: Identifiable, Hashable, Comparable {
 
     var isAwareness: Bool { key.hasSuffix(" awareness") }
 
+    /* ⚠ IDENTITY IS THE KEY ALONE, never the label. The synthesized conformance
+       hashed both, so SunnyTag("nke") and SunnyTag("NKE") were two different
+       filters that matched the same cards — and the filter set is compared by
+       SET INTERSECTION, so selecting one could never find a card tagged with
+       the other. It showed up as a pre-filtered launch returning an empty feed
+       with the pill un-highlighted: the filter was on, and nothing on earth
+       carried it.
+
+       `key` is already documented as the thing matching uses. The label is
+       presentation, and two spellings of one filter are one filter. */
+    static func == (a: SunnyTag, b: SunnyTag) -> Bool { a.key == b.key }
+    func hash(into h: inout Hasher) { h.combine(key) }
+
     /// Plain tickers first, then the per-card tags, each alphabetical. Without
     /// an order the rail reshuffles whenever the position set changes.
     static func < (a: SunnyTag, b: SunnyTag) -> Bool {
@@ -40,19 +53,14 @@ struct SunnyTag: Identifiable, Hashable, Comparable {
     }
 }
 
-enum SunnyZone: String, CaseIterable, Identifiable {
-    case now, new, next
-    var id: String { rawValue }
-    var label: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
-    /// CHROME.md §6 — each zone carries its own padding and they are not equal.
-    var padding: EdgeInsets {
-        switch self {
-        case .now:  return EdgeInsets(top: 4,  leading: 16, bottom: 0,  trailing: 16)
-        case .new:  return EdgeInsets(top: 12, leading: 16, bottom: 0,  trailing: 16)
-        case .next: return EdgeInsets(top: 12, leading: 16, bottom: 40, trailing: 16)
-        }
-    }
-}
+/* ⚠ `SunnyZone` AND `SunnyDeck` ARE GONE. The zone enum carried Now / New /
+   Next with a per-zone padding, and SunnyDeck was the 18-shell placeholder deck
+   keyed on it. SHELL.md deletes the zones outright: a card now sits in Featured,
+   under its own name, or in Misc, and where it sits is decided by `place()` in
+   SunnyFeed.swift, not by how recent it is.
+
+   The deck's original order is recorded in git, not here. Do not reconstruct
+   either type from memory — a zone is not a thing the app has any more. */
 
 /// One feed slot. `tags` and `name` are the ONLY filter surfaces.
 ///
@@ -74,25 +82,6 @@ struct SunnyCard: Identifiable {
         if name.lowercased().contains(q) { return true }
         return tags.contains { $0.key.contains(q) }
     }
-}
-
-/// The feed's non-digest cards.
-///
-/// ⚠ EMPTY ON PURPOSE. CARDS.md ships 18 placeholder shells across the three
-/// zones — correct shells with empty interiors, meant to be filled one at a
-/// time. Once the digest cards carried real content the shells stopped reading
-/// as "not built yet" and started reading as broken cards, and they polluted
-/// the filter row: they carry tlt / nvda / earnings / iv tags, so the row
-/// offered filters that could only ever return blanks. Removed on Nik's call.
-///
-/// The deck order is kept in the comment below so it can be restored exactly
-/// when real cards arrive. Do not renumber it.
-///
-///   Now   M(tlt) · S(nvda) · S(nke) · XS(tlt) · XS(iv)
-///   New   S(nvda) · S(tlt) · M(nke) · XS(tlt) · XS(iv) · S(earnings) · S(nvda)
-///   Next  L(tlt) · S(nke) · S(nvda) · M(earnings) · XS(iv) · XS(tlt)
-enum SunnyDeck {
-    static func cards(_ z: SunnyZone) -> [SunnyCard] { [] }
 }
 
 /// A ticker-strip quote. CHROME.md §2: direction colour is a property of the

@@ -97,12 +97,16 @@ struct SunnyDigestCard: View {
     let newCount: Int
     let sections: [DigestSection]
     let doBlock: DigestDo?
+    /// Present only while the card sits in Featured. SHELL.md §9: reading it
+    /// files the card under its own name and the control disappears. Nil
+    /// everywhere else, which is why it is not part of the card's identity.
+    var onRead: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             ForEach(Array(sections.enumerated()), id: \.element.id) { i, sec in
-                section(sec, isLast: i == sections.count - 1 && doBlock == nil)
+                section(sec, isLast: i == sections.count - 1 && doBlock == nil && onRead == nil)
             }
             if let d = doBlock {
                 // The ONLY full-bleed rule on the card, and it sits immediately
@@ -111,6 +115,15 @@ struct SunnyDigestCard: View {
                     .frame(height: S.ruleHeavy)
                     .frame(maxWidth: .infinity)
                 doBand(d)
+            }
+            if let onRead {
+                // Same 0 20 20 as a last section: the control IS the base of the
+                // card, so the card must not also pay for one.
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    PaperReadControl(action: onRead)
+                }
+                .padding(EdgeInsets(top: 0, leading: 20, bottom: 20, trailing: 20))
             }
         }
         .frame(width: S.content)                       // 361, fixed. Height is an OUTPUT.
@@ -382,5 +395,40 @@ private struct FlowLayout: Layout {
             x += s.width + spacing
             lineH = max(lineH, s.height)
         }
+    }
+}
+
+
+// MARK: - the read control, paper variant
+
+/// SHELL.md §9: on a white card the read control is a 44pt ink pill; "on a
+/// paper card the same control is a Caveat pencil circle instead, matching the
+/// card's hand". Every card in the feed today is paper, so this is the one that
+/// gets built. The white pill is not written until a white card is featured.
+///
+/// ⚠ NO ROTATION. The "1 new" chip owns the only tilt on the card, and
+/// DIGEST-CARD §3 says a second one makes the whole thing read as a template
+/// rather than a note. This is the same shape without the tilt.
+///
+/// ⚠ AND IT DOES NOT INFLATE THE BAND. The visual circle is ~26pt; the 44pt hit
+/// target is taken with negative vertical insets, exactly as the white pill
+/// takes −14 / −13 past the card's own padding. Growing the band to 44 instead
+/// would push the card's base out by 18pt and only on featured cards, so the
+/// same card would measure two heights.
+struct PaperReadControl: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("Read")
+                .font(S.hand(S.tPaperChip, 600))
+                .foregroundStyle(S.paperChipInk)
+                .padding(EdgeInsets(top: 1, leading: 11, bottom: 2, trailing: 11))
+                .overlay(Capsule().strokeBorder(S.paperChipRing, lineWidth: 1.5))
+                .frame(height: S.hitMin)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, S.readBleedPaper)
     }
 }

@@ -147,8 +147,9 @@ struct SunnyDigestCardModel {
 }
 
 extension SunnyDigestCard {
-    init(_ m: SunnyDigestCardModel) {
+    init(_ m: SunnyDigestCardModel, onRead: (() -> Void)? = nil) {
         self.init(timestamp: m.timestamp, ticker: m.ticker, spot: m.spot,
-                  newCount: m.newCount, sections: m.sections, doBlock: m.doBlock)
+                  newCount: m.newCount, sections: m.sections, doBlock: m.doBlock,
+                  onRead: onRead)
     }
 }

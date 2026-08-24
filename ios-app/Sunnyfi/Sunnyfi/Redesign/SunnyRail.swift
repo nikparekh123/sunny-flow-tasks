@@ -30,6 +30,8 @@ import SwiftUI
 @Observable
 final class RailStore {
     var facts: [RailFact] = []
+    /// Chrome for the pane, not for the dock: the shell's section headings.
+    var book: [BookName] = []
     var error: String?
     private var loading = false
 
@@ -47,12 +49,27 @@ final class RailStore {
         do {
             let (d, resp) = try await URLSession.shared.data(for: r)
             if let h = resp as? HTTPURLResponse, h.statusCode >= 400 { error = "HTTP \(h.statusCode)"; return }
-            facts = try JSONDecoder().decode(RailPayload.self, from: d).facts ?? []
+            let p = try JSONDecoder().decode(RailPayload.self, from: d)
+            facts = p.facts ?? []
+            book = p.book ?? []
         } catch { self.error = String(describing: error) }
     }
 }
 
-private struct RailPayload: Decodable { var facts: [RailFact]? }
+private struct RailPayload: Decodable { var facts: [RailFact]?; var book: [BookName]? }
+
+/// One name in the book, largest first. SHELL.md §7: a section heading is the
+/// ticker, the full company name, and the weight — and none of that is
+/// derivable from the cards, which know a ticker and nothing else.
+///
+/// Weight is a COST basis, matching the `Income invested` fact on the dock, so
+/// a heading can never disagree with the number a few rows below it.
+struct BookName: Decodable, Identifiable {
+    let ticker: String
+    let name: String
+    let weight: Int
+    var id: String { ticker }
+}
 
 struct RailFact: Decodable, Identifiable {
     let key: String
