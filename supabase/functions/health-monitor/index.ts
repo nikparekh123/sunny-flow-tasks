@@ -180,20 +180,32 @@ Deno.serve(async (req) => {
 
         Cadence is daily at 05:30 UTC, so the grace is generous: a run missed by
         an hour is noise, a run missed by a day is the thing worth knowing. */
+  /* Cadences are the cron's own, plus a grace that makes a single missed run a
+     WARN and a genuinely dead feed a CRITICAL. Weekday-only feeds get a grace
+     that clears a weekend: position-snapshot last runs Friday 20:30 UTC, so by
+     Monday morning it is ~60h old and healthy. Setting those to a day would
+     alert every Sunday, and an alarm that cries on schedule is one he stops
+     reading — the same reason rows_written is never the trigger. */
   const FEEDS: Array<{ feed: string; warnHours: number; critHours: number }> = [
-    { feed: 'intel-sync', warnHours: 30, critHours: 50 },
+    // daily, every day
+    { feed: 'intel-sync',           warnHours: 30,  critHours: 50 },
+    { feed: 'earnings-sync',        warnHours: 30,  critHours: 50 },
+    // weekday only — the grace has to clear a weekend, and a long one
+    { feed: 'income-scanner',       warnHours: 80,  critHours: 110 },
+    { feed: 'ticker-iv-snapshot',   warnHours: 80,  critHours: 110 },
+    { feed: 'daily-theta-snapshot', warnHours: 80,  critHours: 110 },
+    { feed: 'position-snapshot',    warnHours: 80,  critHours: 110 },
   ];
+  const { data: beats, error: beatErr } = await supabase
+    .from('sync_heartbeat')
+    .select('feed, ran_at, rows_written, detail');
   for (const f of FEEDS) {
     const code = `feed.${f.feed.replace(/-/g, '_')}_stale`;
-    const { data: hb, error: hbErr } = await supabase
-      .from('sync_heartbeat')
-      .select('ran_at, rows_written, detail')
-      .eq('feed', f.feed)
-      .limit(1);
-    if (hbErr) {
-      findings.push({ code, ok: false, detail: `sync_heartbeat query failed: ${hbErr.message}` });
+    if (beatErr) {
+      findings.push({ code, ok: false, detail: `sync_heartbeat query failed: ${beatErr.message}` });
       continue;
     }
+    const hb = (beats ?? []).filter((b) => b.feed === f.feed);
     const stamped = hb?.[0]?.ran_at ? new Date(hb[0].ran_at as string).getTime() : 0;
     // No row at all is not "infinitely stale" on the first deploy; it is a feed
     // that has never reported, which is worth a warn rather than a red screen.
@@ -273,6 +285,16 @@ function titleForCode(code: string, sev: 'warn' | 'critical' = 'critical'): stri
       return sev === 'warn' ? 'IBKR sync delayed' : 'IBKR sync is stale';
     case 'feed.intel_sync_stale':
       return sev === 'warn' ? 'News feed one run behind' : 'News feed has stopped';
+    case 'feed.earnings_sync_stale':
+      return sev === 'warn' ? 'Earnings dates one run behind' : 'Earnings dates have stopped';
+    case 'feed.income_scanner_stale':
+      return sev === 'warn' ? 'Scanner one run behind' : 'Scanner has stopped';
+    case 'feed.ticker_iv_snapshot_stale':
+      return sev === 'warn' ? 'IV snapshot one run behind' : 'IV snapshot has stopped';
+    case 'feed.daily_theta_snapshot_stale':
+      return sev === 'warn' ? 'Theta snapshot one run behind' : 'Theta snapshot has stopped';
+    case 'feed.position_snapshot_stale':
+      return sev === 'warn' ? 'Position snapshot one run behind' : 'Position snapshot has stopped';
     default:                                    return code;
   }
 }

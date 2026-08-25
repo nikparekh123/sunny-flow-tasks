@@ -84,6 +84,21 @@ Deno.serve(async (req) => {
     }
   }
 
+  /* ⚠ THE FEED SAYS IT RAN. THE CRON CANNOT. pg_cron logs "succeeded" the
+     moment net.http_post hands back a request id and never learns whether this
+     function ran, wrote, or threw. health-monitor watches the AGE of this row
+     instead. Stamped last, after the writes, on the success path only — an
+     error return must leave the row old, or the alarm is decorative.
+
+     This one matters most: tracker #19 is position_history coming up empty
+     while its cron reported success, and the check for it in health-monitor is
+     switched off precisely because cron status could not be trusted. */
+  await supabase.from('sync_heartbeat').upsert({
+    feed: 'position-snapshot', ran_at: new Date().toISOString(),
+    rows_written: rows.length,
+    detail: `snapshot ${snapshotDate} · ${rows.length} tickers`,
+  }, { onConflict: 'feed' });
+
   return new Response(
     JSON.stringify({ snapshot_date: snapshotDate, tickers: rows.length }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
