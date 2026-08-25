@@ -441,7 +441,25 @@ enum S {
     // else. Same split on the loss side.
     static let fiveDayCols: CGFloat = 5
     static let fiveDayColGap: CGFloat = 12     // 323 − 4×12 = 275, /5 = 55 exactly
-    static let fiveDayValueH: CGFloat = 11     // the value's own box, line-height 1
+    /* ⚠ THE DAY VALUE AND THE CARD TITLE ARE BUMPED OFF THE SHEET, ON NIK'S
+       CALL (25 Aug): "can we increase the % font a bit and also the title TLT 5
+       days". five-day-price.md §2 gives 11 for the day value and 10 for the card
+       label; both are one ramp step too quiet on a real phone, where the value
+       is the thing the card is read for.
+
+       Both land on real ramp steps — --t-13 and --t-12 — rather than between
+       them. The value keeps line-height 1: at the default a 13px value makes a
+       16pt box and eats the 8px column gap, which is the same trap the sheet
+       warns about at 11. And it keeps its minimumScaleFactor, because a −12% day
+       at 13px would otherwise run past a 55pt column.
+
+       The FOOTER labels take the same 12. They share a style with the card label
+       in the sheet, and the sheet is right about that even where it is wrong
+       about the size: bumping one and leaving the other put two weights of the
+       same label on one card. Nik's call, in the same breath. */
+    static let fiveDayValue: CGFloat = 13      // sheet says 11
+    static let fiveDayLabel: CGFloat = 12      // sheet says 10
+    static let fiveDayValueH: CGFloat = 13     // the value's own box, line-height 1
     static let fiveDayNameH: CGFloat = 12
     static let fiveDayBarRadius: CGFloat = 5   // the corner AWAY from zero
     static let fiveDayBarRadiusFlat: CGFloat = 1

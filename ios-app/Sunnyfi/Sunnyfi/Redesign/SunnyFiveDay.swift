@@ -71,9 +71,10 @@ struct SunnyFiveDayCard: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
             Text("\(ticker) · 5 days")
-                .font(InkFont.display(S.t10, S.wBold))
-                .tracking(S.track(S.t10, S.lsLabel))
+                .font(InkFont.display(S.fiveDayLabel, S.wBold))
+                .tracking(S.track(S.fiveDayLabel, S.lsLabel))
                 .foregroundStyle(S.mute)
+                .fixedSize()
             Spacer(minLength: 0)
             /* The week's two ends, not a spot figure. Spot is stated on the
                position card, and two ends of a week say more here than one
@@ -110,7 +111,7 @@ struct SunnyFiveDayCard: View {
             // The value sits ABOVE the bar: the row of five signed numbers then
             // reads as a line, and the sign lands before the bar does.
             Text(showPrice ? signedUSD(d.usd) : signedPct(d.pct))
-                .font(InkFont.display(S.t11, S.wSemi))
+                .font(InkFont.display(S.fiveDayValue, S.wSemi))
                 .foregroundStyle(up ? S.gainText : S.lossText)
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .frame(height: S.fiveDayValueH)
@@ -174,8 +175,8 @@ struct SunnyFiveDayCard: View {
     private func cell(_ label: String, _ v: Double, pad: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: S.fiveDayCellGap) {
             Text(label)
-                .font(InkFont.display(S.t10, S.wBold))
-                .tracking(S.track(S.t10, S.lsLabel))
+                .font(InkFont.display(S.fiveDayLabel, S.wBold))
+                .tracking(S.track(S.fiveDayLabel, S.lsLabel))
                 .foregroundStyle(S.mute)
             Text(signedPct(v))
                 .font(InkFont.display(S.t19, S.wSemi))
