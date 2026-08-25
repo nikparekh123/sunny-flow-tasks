@@ -127,12 +127,18 @@ Deno.serve(async (req) => {
          slots and the tab strip from four tabs. Strikes roll up into the
          contract line. */
       const rolled = new Map<Code, {
-        contracts: number; cash: number; value: number; parts: string[];
+        contracts: number; cash: number; value: number; parts: string[]; dte: number;
       }>();
       for (const leg of (legBy.get(ticker) ?? new Map<string, Leg>()).values()) {
         if (Math.abs(leg.contracts) < 0.0001) continue;
         if (!(leg.mark > 0)) continue;
-        const e = rolled.get(leg.code) ?? { contracts: 0, cash: 0, value: 0, parts: [] };
+        const e = rolled.get(leg.code) ?? { contracts: 0, cash: 0, value: 0, parts: [], dte: 0 };
+        /* The NEAREST expiry when a code rolls up several: the sub-label says
+           how long you are exposed, and the leg that decides that is the one
+           that resolves first. */
+        const d = Math.round(
+          (Date.parse(leg.expiry + 'T00:00:00Z') - Date.parse(todayISO + 'T00:00:00Z')) / 86_400_000);
+        e.dte = e.dte === 0 ? d : Math.min(e.dte, d);
         e.contracts += Math.abs(leg.contracts);
         e.cash += Math.abs(leg.cash);
         e.value += Math.abs(leg.contracts) * leg.mark * 100;
@@ -157,6 +163,7 @@ Deno.serve(async (req) => {
           value: Math.round(e.value),
           contracts: e.contracts,
           contract: e.parts.join(' · '),
+          dte: e.dte,
         };
       });
 

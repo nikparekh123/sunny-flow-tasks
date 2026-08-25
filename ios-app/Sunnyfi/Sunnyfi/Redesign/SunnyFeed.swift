@@ -158,6 +158,7 @@ struct SunnyPane: View {
     @State private var digest = DigestStore()
     @State private var week = WeekStore()
     @State private var planner = PlannerStore()
+    @State private var legs = LegsStore()
     @State private var rail = RailStore()
     @State private var railHidden = false
     @State private var read: Set<String> = SunnyRead.load()
@@ -348,6 +349,15 @@ struct SunnyPane: View {
                            It sits under the awareness card rather than over it
                            because the awareness card is what CHANGED and this is
                            the standing backdrop. */
+                        /* ⚠ THE LEGS WIDGET IS A REGION, NOT A CARD, and it
+                           goes above the price week: the legs are the position,
+                           the week is the backdrop. It owns opacity, transform
+                           and clip for its zoom, so it must stay outside the
+                           feed's reveal — which it is, because the reveal is
+                           applied per card and this is not one. */
+                        if let lp = legs.positions.first(where: { $0.ticker == s.0.ticker }) {
+                            SunnyLegsRegion(p: lp)
+                        }
                         if let w = s.0.week {
                             SunnyFiveDayCard(
                                 ticker: s.0.ticker, m: w,
@@ -442,6 +452,7 @@ struct SunnyPane: View {
         .task { await digest.load(); onTags(presentTags) }
         .task { await week.load(); onTags(presentTags) }
         .task { await planner.load() }
+        .task { await legs.load() }
     }
 
     // MARK: a card, with or without its read control

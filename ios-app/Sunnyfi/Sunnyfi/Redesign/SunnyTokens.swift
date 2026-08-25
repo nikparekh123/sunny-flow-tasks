@@ -483,6 +483,53 @@ enum S {
     static let fiveDayCellGap: CGFloat = 5
     static let fiveDayCellPad: CGFloat = 16    // every cell but the first
 
+    // MARK: position legs widget — cards/position-legs.md
+    //
+    // ⚠ EVERY CARD HERE IS ABSOLUTELY POSITIONED AND FIXED-SIZE, which CARDS.md
+    // forbids on a feed card. The widget breaks that rule knowingly: the cards
+    // are a REGION with three layouts chosen by leg count, and a grid cannot
+    // express that without leaving holes. §8 records the trade.
+    //
+    // ⚠ AND IT OWNS opacity/transform/clip. The feed's reveal writes those three
+    // inline on [data-card]; inside the region they belong to the zoom, so the
+    // region must be excluded from the reveal or the two fight.
+    static let totalInk = hex(0xA3202C)   // the position total, and only that
+
+    static let sharesMH: CGFloat = 174    // shares as an M
+    static let regionRow: CGFloat = 186   // 175 + 11, one S row pitch
+    static let regionMOffset: CGFloat = 185 // 174 + 11, the row under the M
+    static let legCard: CGFloat = 175
+    static let detailSide: CGFloat = 361
+
+    /* The figure is the ONE element that travels, and it is rendered at 34 and
+       scaled DOWN so the resting state in the detail card is native-crisp.
+       .88235 is 30/34 exactly. The label does not travel: a tab's x depends on
+       the width of every tab before it, which is unmeasurable at author time,
+       so the strip fades in as a unit with the tapped leg already inked. */
+    static let figS: CGFloat = 16, figSY: CGFloat = 52
+    static let figL: CGFloat = 19, figLY: CGFloat = 93
+    static let zoomFigScale: CGFloat = 30.0 / 34.0
+    static let subSY: CGFloat = 89, subLY: CGFloat = 134
+
+    static let durZoom = 0.42        // travel, and the input lock
+    static let durZoomFade = 0.20    // the grid cards leaving
+    static let durZoomIn = 0.34      // the detail content arriving
+    static let zoomContentDelay = 0.14
+    static let zoomBackDelay = 0.22  // grid cards land as the card does
+    static let durZoomOut = 0.14     // content leaving is quicker than arriving
+    static let zoomScale: CGFloat = 0.97
+    static let zoomLock = 0.42
+
+    /// The shadow is its own leaf, because a clip-path clips a shadow away.
+    /// Lighter when small: scaling tightens the blur, which is physically what
+    /// a smaller card does.
+    static let zoomShadowSmall = 0.62
+
+    static let bandH: CGFloat = 133  // was 147; the week labels sat on the footer
+    static let weekCell: CGFloat = 74
+    static let weekGap: CGFloat = 9
+    static let weekBar: CGFloat = 40
+
     // MARK: chrome colour
     static let dim = hex(0xD3D6D0)
     static let openDot = hex(0x34C759)
