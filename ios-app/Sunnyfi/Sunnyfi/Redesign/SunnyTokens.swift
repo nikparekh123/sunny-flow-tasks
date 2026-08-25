@@ -409,9 +409,13 @@ enum S {
     /// tighter than the crown.
     static let padPlannerM = EdgeInsets(top: 16, leading: 19, bottom: 15, trailing: 19)
     static let tHandInstruction: CGFloat = 31
-    /// Below 1, so two lines close up into one written gesture. Caveat carries
-    /// it; do not try .95 on Inter.
-    static let lhHandInstruction: CGFloat = 0.95
+    /// ⚠ 1.02, NOT .95 — and the design changed it for the reason I hit.
+    /// planner-card.md in handoff 11: "it was .95 under Caveat, which clipped
+    /// Patrick Hand's capitals. Patrick Hand sits taller in its box, so 1.02
+    /// keeps the two lines reading as one written gesture without shaving the
+    /// tops." Still below the font's natural advance, so it is still a NEGATIVE
+    /// VStack spacing; .lineSpacing cannot express either number. Never on Inter.
+    static let lhHandInstruction: CGFloat = 1.02
     static let stampInk    = hex(0x8A1F14)
     static let stampBorder = hex(0xC86A5E)
     static let stampRadius: CGFloat = 5
