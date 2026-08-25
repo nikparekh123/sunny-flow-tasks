@@ -369,6 +369,44 @@ Deno.serve(async (req) => {
          rating change is 9% of the feed; a "maintains" is 77%. */
       const analysts: Line[] = [];
       const rateChg = a.find((r) => r.rating_action === 'downgrades' || r.rating_action === 'upgrades');
+
+      /* ── THE NEWEST ACTION, WHATEVER KIND IT IS ────────────────────────────
+         Nik, 25 Aug: "we don't see stale news, miss the latest thinking nothing
+         happened."
+
+         Until this line existed the Analysts section admitted exactly two kinds
+         of event: a rating change, and a same-day cluster of three or more
+         firms. A price target moving on its own could never reach the card,
+         however large and however recent. On the day he asked, NFLX had Wolfe
+         Research raising its target 84 to 95 — a 13% raise, that morning, on a
+         name he holds — and the card showed a 39-day-old cluster instead and
+         reported new_count 0. That is not staleness in the feed; the feed had
+         written it at 05:30. It was the filter.
+
+         So: the single newest action leads the section whenever it is newer
+         than the last visit. It is capped at one line and gated on isNew, so a
+         quiet name gains nothing and the section cannot fill with wire noise —
+         the failure the cluster rule was built to prevent.
+
+         It is skipped when it is already on the card: the rating-change line
+         above is the same row, or the cluster line below covers its day. */
+      const a0 = a[0];
+      const bigDay = (() => {
+        const m = new Map<string, number>();
+        for (const r of a) { const dd = String(r.date).slice(0, 10); m.set(dd, (m.get(dd) ?? 0) + 1); }
+        return [...m.entries()].filter(([, n]) => n >= 3).sort((x, y) => y[1] - x[1])[0]?.[0] ?? '';
+      })();
+      if (a0 && a0 !== rateChg) {
+        const d0s = String(a0.date).slice(0, 10);
+        const pt = N(a0.price_target), pp = N(a0.previous_price_target);
+        const moved = pt && pp && pt !== pp;
+        if (isNew(d0s) && d0s !== bigDay && moved) {
+          const up = pt > pp;
+          analysts.push(L(
+            `${a0.firm} ${up ? 'raised' : 'cut'} its target ${pp} to ${pt} ${ago(d0s)}`,
+            'NEW', up ? 'BULLISH' : 'BEARISH'));
+        }
+      }
       if (rateChg) {
         const dn = rateChg.rating_action === 'downgrades';
         const pt = N(rateChg.price_target), pp = N(rateChg.previous_price_target);
@@ -519,6 +557,20 @@ Deno.serve(async (req) => {
 
       return {
         stance, bearish, supportive, catalyst,
+        /* THE AGE OF THE NEWEST EVENT ON THE CARD, and the reason it is here:
+           the card used to stamp itself with the REQUEST date, so a card built
+           entirely from 39-day-old facts read "as of 25 Aug" and looked freshly
+           updated. The one signal that should have shown something was wrong
+           was reporting the wrong thing.
+
+           Events only. Price lines are derived from spot and move every day, so
+           counting them would make every card permanently fresh and put the
+           stamp back where it started. */
+        freshest: [
+          a0 ? String(a0.date).slice(0, 10) : '',
+          g0 ? String(g0.date).slice(0, 10) : '',
+          mine2[0] ? String(mine2[0].published).slice(0, 10) : '',
+        ].filter(Boolean).sort().pop() ?? null,
         analysts, price, company, headlines,
         // The counter is the whole freshness story now: it says whether to read
         // closely or skip, and it needs no timeline to do it.

@@ -66,6 +66,9 @@ private struct LivePayload: Decodable {
         var floor_lines: [String]
         var `do`: [String]
         var do_lines: [DoLine]?
+        /// The date of the newest EVENT on the card. Optional so a response
+        /// from before it existed still decodes.
+        var freshest: String?
     }
     struct DoLine: Decodable { var text: String; var kind: String }
 }
@@ -91,7 +94,7 @@ struct SunnyDigestCardModel {
         // of card sit on the same name.
         tags = [.ticker(p.ticker), .awareness(p.ticker)]
         name = "\(p.ticker) awareness"
-        timestamp = SunnyDigestCardModel.stamp(asof)
+        timestamp = SunnyDigestCardModel.stamp(p.freshest, asof: asof)
         ticker = p.ticker
         spot = String(format: "%.2f", p.spot)
         newCount = p.new_count
@@ -138,11 +141,33 @@ struct SunnyDigestCardModel {
         doBlock = nil
     }
 
-    private static func stamp(_ iso: String) -> String {
+    /* ⚠ THE AGE OF THE NEWEST FACT, NOT THE DATE OF THE REQUEST.
+       This used to print `asof`, which is always today, so a card built
+       entirely from 39-day-old analyst actions read "as of 25 Aug" and looked
+       freshly updated. Nik: "we don't see stale news, miss the latest thinking
+       nothing happened." The one line that should have warned him was the line
+       telling him everything was fine.
+
+       It pairs with the "N new" chip: when something IS new the chip says so
+       and this reads "latest today"; when nothing is, this is the only thing on
+       the card that can tell him how long it has been quiet. LEN currently
+       reads 6 Aug, nineteen days.
+
+       Falls back to the old behaviour when `freshest` is absent, so a stale
+       deployment of the engine does not blank the line. */
+    private static func stamp(_ freshest: String?, asof: String) -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
-        guard let d = f.date(from: String(iso.prefix(10))) else { return iso }
+        guard let iso = freshest, let d = f.date(from: String(iso.prefix(10))) else {
+            guard let a = f.date(from: String(asof.prefix(10))) else { return asof }
+            let o = DateFormatter(); o.dateFormat = "d MMM"
+            return "as of " + o.string(from: a)
+        }
+        let days = Calendar.current.dateComponents(
+            [.day], from: Calendar.current.startOfDay(for: d), to: Calendar.current.startOfDay(for: Date())).day ?? 0
+        if days <= 0 { return "latest today" }
+        if days == 1 { return "latest yesterday" }
         let o = DateFormatter(); o.dateFormat = "d MMM"
-        return "as of " + o.string(from: d)
+        return "latest \(o.string(from: d)), \(days) days ago"
     }
 }
 

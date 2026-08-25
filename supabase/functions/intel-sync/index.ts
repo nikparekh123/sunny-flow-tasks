@@ -17,7 +17,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.5';
+const BUILD = '2026-08-25.1';
 const POLY = 'https://api.polygon.io';
 const CHUNK = 40;
 /* 180 days, not 400. The 120-day median target and the 120-day guidance
@@ -185,6 +185,25 @@ Deno.serve(async (req) => {
     const a = await post('analyst_actions', aRows, 'benzinga_id');
     const c = await post('analyst_consensus', cRows, 'ticker,as_of_date');
     const n = await post('name_news', nRows, 'ticker,id');
+    /* ⚠ STAMP THE HEARTBEAT LAST, AFTER THE WRITES, AND ONLY ON THE WAY OUT.
+       pg_cron logs "succeeded" the moment net.http_post hands back a request
+       id — it never learns whether this function ran, wrote, or threw. Three
+       days of green cron rows is what a feed with a hole in it looks like, and
+       it is why the analyst hole went unnoticed until Nik spotted the card
+       repeating itself.
+
+       So the evidence is a row this function writes about itself. Its AGE is
+       the health signal. `rows_written` rides along but must not be an alert on
+       its own: analysts are silent at weekends and over holidays, and a feed
+       that runs correctly and finds nothing is healthy. */
+    const written = (g.n ?? 0) + (a.n ?? 0) + (c.n ?? 0) + (n.n ?? 0);
+    await D.upsert('sync_heartbeat', [{
+      feed: 'intel-sync',
+      ran_at: new Date().toISOString(),
+      rows_written: written,
+      detail: `guidance ${g.n ?? 0} · actions ${a.n ?? 0} · consensus ${c.n ?? 0} · news ${n.n ?? 0}`,
+    }], 'feed');
+
     return json(200, { ok: true, build: BUILD, universe: all.length, held,
       guidance: g, actions: a, consensus: c, news: n });
   } catch (e) { return json(500, { ok: false, error: String(e) }); }
