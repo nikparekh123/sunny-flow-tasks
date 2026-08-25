@@ -772,6 +772,28 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
   })();
   const dipGate = redStreak >= 2;
 
+  /* The size of each red day in the streak, newest first, UNSIGNED — the
+     planner card puts them in red discs under a downward arrow, and a minus
+     beside that is the same fact three times.
+
+     ⚠ IT IS COMPUTED HERE, BESIDE THE STREAK, ON PURPOSE. The card needs the
+     two percentages and the client must not derive them: reading
+     tlt_daily_closes on 24 Aug showed red on the 20th and the 21st and looked
+     armed, while this function said redStreak 0 because it reads LIVE spot and
+     TLT was up that morning. Two things counting red days is how the scanner
+     and the book ended up disagreeing about CPB. One engine owns the gate, and
+     it owns the evidence for the gate too. */
+  const redDays = (() => {
+    const out: Array<{ pct: number }> = [];
+    if (redStreak < 1 || spot == null) return out;
+    out.push({ pct: Math.abs((spot - hist[hist.length - 1]) / hist[hist.length - 1] * 100) });
+    for (let i = hist.length - 1; i >= 1 && out.length < redStreak; i--) {
+      if (hist[i] >= hist[i - 1]) break;
+      out.push({ pct: Math.abs((hist[i] - hist[i - 1]) / hist[i - 1] * 100) });
+    }
+    return out.map((d) => ({ pct: Math.round(d.pct * 100) / 100 }));
+  })();
+
   // From TOMORROW, not two days out. The "third expiry" has to be counted off the same
   // list the test counted off, or the rule shifts by one and the tenor with it.
   const expiries = await putExpiries(TICKER, ymd(addDays(today, 1)), polyKey);
@@ -1217,7 +1239,12 @@ async function build(req: Request, emit: (n: number) => void): Promise<Response>
     // Inspectable, so a day that writes nothing can be told apart from a day that
     // failed to read the tape. redStreak 0 with a red screen means the closes did not
     // arrive, which looks identical to a quiet day on the card alone.
-    gate: { redStreak, open: dipGate, prevClose: hist.length ? hist[hist.length - 1] : null, rule: 'two red days' },
+    gate: {
+      redStreak, open: dipGate,
+      prevClose: hist.length ? hist[hist.length - 1] : null,
+      rule: 'two red days',
+      days: redDays,
+    },
     spot,
     iv,
 

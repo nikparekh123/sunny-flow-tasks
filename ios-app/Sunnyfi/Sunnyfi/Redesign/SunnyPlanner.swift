@@ -66,6 +66,7 @@ struct SunnyPlannerCard: View {
         // the standard shadow disappears against it. NO inset ring.
         .shadow(color: S.shadowInk(0.09), radius: 2, x: 0, y: 2)
         .shadow(color: S.shadowInk(0.10), radius: 11, x: 0, y: 9)
+        .measure("planner-card")
     }
 
     // MARK: header — live dot, zone label, then the stamp pushed right
@@ -78,6 +79,7 @@ struct SunnyPlannerCard: View {
             Text(m.zoneLabel)
                 .font(S.inter(S.t10, S.wBoldN))
                 .tracking(S.track(S.t10, 0.13))
+                .textCase(.uppercase)
                 .foregroundStyle(S.plannerLabel)
             Spacer(minLength: 0)
             stamp
@@ -92,6 +94,7 @@ struct SunnyPlannerCard: View {
         Text(m.stamp)
             .font(S.inter(S.t11, S.wBoldN))
             .tracking(S.track(S.t11, 0.06))
+            .textCase(.uppercase)
             .foregroundStyle(S.stampInk)
             .padding(S.padStamp)
             .overlay(RoundedRectangle(cornerRadius: S.stampRadius)
@@ -105,12 +108,28 @@ struct SunnyPlannerCard: View {
         // flex-end: the instruction's last line and the percentages share a
         // bottom edge. Centre-aligning makes the discs float.
         HStack(alignment: .bottom, spacing: S.gap7) {
-            Text(m.instruction)
-                .font(S.hand(S.tHandInstruction))
-                .lineSpacing(S.leadingHand(S.tHandInstruction, S.lhHandInstruction))
-                .foregroundStyle(S.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            /* ⚠ .95 CANNOT BE DONE WITH .lineSpacing — IT CLAMPS AT ZERO.
+               The sheet wants an advance BELOW the font's own line height, so
+               the two lines close up into one written gesture; SwiftUI's
+               lineSpacing only ever adds. Passing it a negative number is a
+               silent no-op, which is what the first build did: the lines sat a
+               full line box apart and the instruction read as two statements
+               rather than one.
+
+               A VStack takes a negative spacing, so the lines are separate Texts
+               and the overlap is explicit. Split on the newline the model
+               already carries, so the model is unchanged. */
+            VStack(alignment: .leading,
+                   spacing: S.leadingHand(S.tHandInstruction, S.lhHandInstruction)) {
+                ForEach(Array(m.instruction.split(separator: "\n").enumerated()),
+                        id: \.offset) { _, line in
+                    Text(String(line))
+                        .font(S.hand(S.tHandInstruction))
+                        .foregroundStyle(S.ink)
+                        .fixedSize()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: S.gapDisc) {
                 ForEach(Array(m.sessions.enumerated()), id: \.offset) { _, s in
                     VStack(spacing: S.gap2) {
@@ -163,5 +182,119 @@ private struct RuledLines: View {
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+
+// MARK: - the store, and the gate that decides the card exists
+
+/// ⚠ SELL, NEVER BUY. The build sheet's specimen reads "Buy 10 TLT puts" and it
+/// is wrong for this book — that phrasing is the reference card's placeholder.
+/// docs/STRATEGIES.md: TLT has no block and no floor, so there is nothing to
+/// protect and nothing to hedge. "Sell puts on the second red day of a slide,
+/// nearest Friday, nearest strike, flat size. Assignment is how you buy it. The
+/// put IS the trade." Buying puts here would be the income sleeve's floor leg
+/// applied to the one book that has no floor. Nik confirmed: sell, not buy.
+@Observable
+final class PlannerStore {
+    /// Nil is the normal state and the correct one. The card exists only while
+    /// two red sessions are confirmed; the rest of the time it is ABSENT, not
+    /// greyed and not pending.
+    var card: PlannerModel?
+    var error: String?
+    private var loading = false
+
+    func load() async {
+        guard !loading else { return }
+        loading = true; defer { loading = false }
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/tlt-planner") else { return }
+        var r = URLRequest(url: url)
+        r.httpMethod = "POST"
+        r.timeoutInterval = 60
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.setValue(Secrets.supabasePublishableKey, forHTTPHeaderField: "apikey")
+        r.setValue("Bearer \(Secrets.supabasePublishableKey)", forHTTPHeaderField: "Authorization")
+        r.httpBody = Data("{}".utf8)
+
+        /* Verification only. The gate is shut most days — that is the point of
+           the gate — so the fired card cannot be screenshot or measured from
+           live data on demand.
+
+           ⚠ IT FEEDS A PAYLOAD THROUGH THE REAL DECODER, not a hand-built
+           PlannerModel. Everything under test runs: the open-gate guard, the
+           contracts guard, the two-day cap, "Sell" rather than "Buy", the stamp
+           format and the footer. A probe that constructs the model directly
+           would prove only that a struct can hold values. */
+        if ProcessInfo.processInfo.arguments.contains("-plannerFired") {
+            let canned = """
+            {"gate":{"redStreak":2,"open":true,"days":[{"pct":0.42},{"pct":0.79}]},
+             "plan":{"expiry":"2026-08-28","puts":{"contracts":22,"strike":83}},
+             "asof":"2026-08-25","day":"Tuesday"}
+            """
+            card = (try? JSONDecoder().decode(PlannerPayload.self, from: Data(canned.utf8)))
+                .flatMap(PlannerModel.init)
+            return
+        }
+
+        do {
+            let (d, resp) = try await URLSession.shared.data(for: r)
+            if let h = resp as? HTTPURLResponse, h.statusCode >= 400 { error = "HTTP \(h.statusCode)"; return }
+            let p = try JSONDecoder().decode(PlannerPayload.self, from: d)
+            card = PlannerModel(p)
+        } catch { self.error = String(describing: error) }
+    }
+}
+
+private struct PlannerPayload: Decodable {
+    struct Gate: Decodable {
+        var redStreak: Int
+        var open: Bool
+        var days: [Day]?
+        struct Day: Decodable { var pct: Double }
+    }
+    struct Plan: Decodable {
+        var expiry: String?
+        var puts: Puts?
+        struct Puts: Decodable { var contracts: Double?; var strike: Double? }
+    }
+    var gate: Gate?
+    var plan: Plan?
+    var asof: String?
+    var day: String?
+}
+
+extension PlannerModel {
+    /// Returns nil whenever the card should not be in the feed at all.
+    fileprivate init?(_ p: PlannerPayload) {
+        guard let g = p.gate, g.open else { return nil }
+        let n = Int(p.plan?.puts?.contracts ?? 0)
+        /* An open gate with nothing to write is still nothing to do. The card
+           says DO SOMETHING; "Sell 0 TLT puts" is not something. */
+        guard n > 0 else { return nil }
+
+        // Exactly two, never three, however long the run is. The streak widget
+        // is where a longer run belongs.
+        let days = (g.days ?? []).prefix(2)
+        guard days.count == 2 else { return nil }
+
+        zoneLabel = "Planner"
+        stamp = PlannerModel.stamp(p.asof ?? "")
+        instruction = "Sell \(n)\nTLT puts"
+        sessions = days.map { Session(pct: String(format: "%.2f%%", $0.pct)) }
+        /* ⚠ NO EM DASH. The reference footer is "Two red days back to back —
+           place it Monday"; Nik's rule is no em dashes anywhere in app copy, so
+           the joint is a middle dot. The strong half is the ACTION, the quiet
+           half is the reason, which is the shape the sheet ships. */
+        footer = [
+            FooterPart(text: "Two red days back to back · ", strong: false),
+            FooterPart(text: "place it \(p.day ?? "today")", strong: true),
+        ]
+    }
+
+    private static func stamp(_ iso: String) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: String(iso.prefix(10))) else { return iso }
+        let o = DateFormatter(); o.dateFormat = "MMM d"
+        return o.string(from: d)          // "Aug 25"; the view uppercases it
     }
 }

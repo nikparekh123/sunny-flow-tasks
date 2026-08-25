@@ -112,6 +112,7 @@ struct SunnyFeedItem: Identifiable {
     enum Kind {
         case week(SunnyWeekModel)
         case digest(SunnyDigestCardModel)
+        case planner(PlannerModel)
     }
 
     func matches(query: String, filters: Set<SunnyTag>) -> Bool {
@@ -156,6 +157,7 @@ struct SunnyPane: View {
     @State private var debounce: Task<Void, Never>?
     @State private var digest = DigestStore()
     @State private var week = WeekStore()
+    @State private var planner = PlannerStore()
     @State private var rail = RailStore()
     @State private var railHidden = false
     @State private var read: Set<String> = SunnyRead.load()
@@ -192,6 +194,23 @@ struct SunnyPane: View {
             out.append(SunnyFeedItem(id: "week|" + w.label, ticker: nil, clock: true,
                                      tags: [SunnyTag("Week")], name: "last week summary",
                                      kind: .week(w)))
+        }
+        if let pl = planner.card {
+            /* ⚠ FEATURED, AND NEVER FILED. SHELL.md §9 names "a planner that
+               fired" in the entry rule, so this is the one card that is on a
+               clock by definition. It carries NO read control, deliberately and
+               against the generic Featured behaviour: reading a card files it
+               under its name, and filing an open instruction hides the one thing
+               on the screen that is asking to be done. It leaves when the gate
+               shuts, which is its own lifecycle and a better one.
+
+               `clock: true` with no id in `read` is what keeps it at the top;
+               the id still changes with the contract count so it cannot go
+               stale if the size is revised intraday. */
+            out.append(SunnyFeedItem(id: "planner|" + pl.instruction,
+                                     ticker: "TLT", clock: true,
+                                     tags: [.ticker("TLT")], name: "TLT planner",
+                                     kind: .planner(pl)))
         }
         for d in digest.cards {
             out.append(SunnyFeedItem(id: "digest|\(d.ticker)|\(d.newCount)",
@@ -422,6 +441,7 @@ struct SunnyPane: View {
         }
         .task { await digest.load(); onTags(presentTags) }
         .task { await week.load(); onTags(presentTags) }
+        .task { await planner.load() }
     }
 
     // MARK: a card, with or without its read control
@@ -430,8 +450,9 @@ struct SunnyPane: View {
     private func card(_ i: SunnyFeedItem, featured: Bool) -> some View {
         let mark: (() -> Void)? = featured ? { markRead(i) } : nil
         switch i.kind {
-        case .week(let w):   SunnyWeekCard(m: w, onRead: mark)
-        case .digest(let d): SunnyDigestCard(d, onRead: mark)
+        case .week(let w):    SunnyWeekCard(m: w, onRead: mark)
+        case .digest(let d):  SunnyDigestCard(d, onRead: mark)
+        case .planner(let p): SunnyPlannerCard(m: p)      // no read control, see items
         }
     }
 
