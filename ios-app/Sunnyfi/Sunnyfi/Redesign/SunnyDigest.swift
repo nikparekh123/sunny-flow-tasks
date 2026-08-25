@@ -117,13 +117,16 @@ struct SunnyDigestCard: View {
                 doBand(d)
             }
             if let onRead {
-                // Same 0 20 20 as a last section: the control IS the base of the
-                // card, so the card must not also pay for one.
+                // Its own band, measured 62 = the 44pt hit + 18 below it. Every
+                // section above keeps its 16, and a filed card drops this band
+                // whole rather than collapsing it — which is what makes the read
+                // and unread heights identical.
                 HStack(spacing: 0) {
                     Spacer(minLength: 0)
                     PaperReadControl(action: onRead)
                 }
-                .padding(EdgeInsets(top: 0, leading: 20, bottom: 20, trailing: 20))
+                .padding(EdgeInsets(top: 0, leading: 20,
+                                    bottom: S.readBandPadBottom, trailing: 20))
             }
         }
         .frame(width: S.content)                       // 361, fixed. Height is an OUTPUT.
@@ -160,7 +163,7 @@ struct SunnyDigestCard: View {
             // heights and only a baseline lines them up.
             HStack(alignment: .firstTextBaseline, spacing: 9) {
                 Text(ticker)
-                    .font(S.hand(S.tHandTitle, 700))
+                    .font(S.hand(S.tHandTitle))
                     .foregroundStyle(S.paperInkTicker)
                 Text(spot)
                     .font(S.inter(S.tPaperSpot, S.wSemiN))
@@ -176,16 +179,19 @@ struct SunnyDigestCard: View {
     }
 
     /// A PENCIL CIRCLE, not a filled pill. Outline only, no background.
-    /// −1.4° is the ONLY rotation on the card; a second tilt makes the whole
-    /// thing read as a template rather than a note.
+    ///
+    /// ⚠ TWO ROTATIONS ON THE CARD NOW, AND ONLY TWO. This chip at −1.4 and the
+    /// read circle at −1.1 (awareness-card.md §0.4). The old rule said one, and
+    /// it said so while the read control did not exist. A third tilt makes the
+    /// whole thing read as a template rather than a note.
     private var chip: some View {
         Text("\(newCount) new")
-            .font(S.hand(S.tPaperChip, 600))
+            .font(S.hand(S.tPaperChip))
             .foregroundStyle(S.paperChipInk)
-            // 1 top / 2 bottom optically centres Caveat, which sits high in its box.
+            // 1 top / 2 bottom optically centres the hand, which sits high in its box.
             .padding(EdgeInsets(top: 1, leading: 11, bottom: 2, trailing: 11))
             .overlay(Capsule().strokeBorder(S.paperChipRing, lineWidth: 1.5))
-            .rotationEffect(.degrees(-1.4))
+            .rotationEffect(.degrees(S.chipTilt))
     }
 
     // MARK: section — padding-top is ALWAYS 0; the heading's rule separates
@@ -195,7 +201,7 @@ struct SunnyDigestCard: View {
             HStack(spacing: 9) {
                 Text(sec.heading)                       // sentence case, never upper
                     .measure("head-" + sec.heading.prefix(6).lowercased())
-                    .font(S.hand(S.tHandHead, 700))
+                    .font(S.hand(S.tHandHead))
                     .foregroundStyle(S.paperInkHead)
                 // flex: 1, never a width. The rule stops at the text column —
                 // that is the whole difference from the old hairline.
@@ -227,7 +233,7 @@ struct SunnyDigestCard: View {
     private func doBand(_ d: DigestDo) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text("Do")
-                .font(S.hand(S.tHandHead, 700))
+                .font(S.hand(S.tHandHead))
                 .foregroundStyle(S.paperInkHead)
             // ⚠ DO LINES ARE BODY TYPE, BULLETED, exactly like every other line
             // on the card. DIGEST-CARD §9 puts the instruction at Inter 18/600
@@ -271,7 +277,7 @@ struct PaperHeading: View {
                earned" did exactly that at Caveat 22. fixedSize keeps it whole
                and lets the rule take what is left. Keep headings short. */
             Text(text)                                  // sentence case, never upper
-                .font(S.hand(S.tHandHead, 700))
+                .font(S.hand(S.tHandHead))
                 .foregroundStyle(S.paperInkHead)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -358,7 +364,7 @@ private struct DigestFlow: View {
             }
             ForEach(tags) { t in
                 Text(t.rawValue)                        // lowercase, no tracking
-                    .font(S.hand(S.tHandTag, 700))
+                    .font(S.hand(S.tHandTag))
                     .foregroundStyle(t.ink)
                     .padding(S.padMark)                 // 0 top, 1 bottom: centres Caveat
                     .background(RoundedRectangle(cornerRadius: S.radiusMark).fill(t.wash))
@@ -420,15 +426,23 @@ struct PaperReadControl: View {
 
     var body: some View {
         Button(action: action) {
-            Text("Read")
-                .font(S.hand(S.tPaperChip, 600))
-                .foregroundStyle(S.paperChipInk)
-                .padding(EdgeInsets(top: 1, leading: 11, bottom: 2, trailing: 11))
-                .overlay(Capsule().strokeBorder(S.paperChipRing, lineWidth: 1.5))
+            // Lowercase. awareness-card.md §6: "never `Read` and never
+            // uppercase: the hand layer is sentence case everywhere on this
+            // card." The white card's control says Read; this one is not that
+            // control wearing paper, it is a different object.
+            Text("read")
+                .font(S.hand(S.tPaperChip))
+                .foregroundStyle(S.paperInkHead)
+                // 1 top / 2 bottom optically centres the hand, which sits high
+                // in its box. 15 across, wider than the chip's 11.
+                .padding(S.padRead)
+                .overlay(Capsule().strokeBorder(S.readRing, lineWidth: 1.5))
+                .rotationEffect(.degrees(S.readTilt))
+                // The 44pt hit is the PARENT; the circle inside measures ~28 and
+                // does not need to. Hit and circle are different objects here.
                 .frame(height: S.hitMin)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.vertical, S.readBleedPaper)
     }
 }

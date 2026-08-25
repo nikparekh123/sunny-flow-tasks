@@ -106,7 +106,7 @@ struct SunnyPlannerCard: View {
         // bottom edge. Centre-aligning makes the discs float.
         HStack(alignment: .bottom, spacing: S.gap7) {
             Text(m.instruction)
-                .font(S.hand(S.tHandInstruction, 600))
+                .font(S.hand(S.tHandInstruction))
                 .lineSpacing(S.leadingHand(S.tHandInstruction, S.lhHandInstruction))
                 .foregroundStyle(S.ink)
                 .fixedSize(horizontal: false, vertical: true)

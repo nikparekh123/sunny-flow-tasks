@@ -130,7 +130,7 @@ struct SunnyWeekCard: View {
                 .foregroundStyle(S.paperInkMeta)
             HStack(alignment: .firstTextBaseline, spacing: 9) {
                 Text("Last week")
-                    .font(S.hand(S.tHandTitle, 700))
+                    .font(S.hand(S.tHandTitle))
                     .foregroundStyle(S.paperInkTicker)
                 Text(m.total)
                     .font(S.inter(S.tPaperSpot, S.wSemiN))

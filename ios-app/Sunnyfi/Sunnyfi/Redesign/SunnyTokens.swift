@@ -152,15 +152,24 @@ enum S {
     static let paperChipInk   = hex(0x7C4A16)
     static let paperChipRing  = hex(0xD9A25A)
 
-    static let tHandHead:  CGFloat = 22
-    static let tHandTag:   CGFloat = 22
+    /* ⚠ THE HAND SCALE MOVED WITH THE FAMILY. awareness-card.md §2 measures the
+       card after the swap and supersedes DIGEST-CARD.md on type: heading and tag
+       21 (were 22), chip and read 17 (chip was 18). Patrick Hand runs wider and
+       squarer than Caveat at the same nominal size, so the old numbers read a
+       step too large. The ticker stayed at 28 and the timestamp at 13.5. */
+    static let tHandHead:  CGFloat = 21
+    static let tHandTag:   CGFloat = 21
     static let tHandTitle: CGFloat = 28
     static let tHandMeta:  CGFloat = 13.5
+    /// Every hand element, one value. In CSS this is what stops the capitals
+    /// clipping; here the font's own metrics already clear them, and it is kept
+    /// so a hand line's box matches the sheet when it is measured.
+    static let lhHand: CGFloat = 1.25
     /// Paper body, spot and chip. Bumped from 14.5 / 23 / 17 on 2026-08-23 for
     /// readability. The 1.45 multiple is unchanged.
     static let tPaperBody: CGFloat = 16
     static let tPaperSpot: CGFloat = 25
-    static let tPaperChip: CGFloat = 18
+    static let tPaperChip: CGFloat = 17
     static let lhPaperBody: CGFloat = 1.45
 
     static let paperBulletSize: CGFloat = 5
@@ -172,11 +181,25 @@ enum S {
     static let radiusMark: CGFloat = 4
     static let padMark = EdgeInsets(top: 0, leading: 6, bottom: 1, trailing: 6)
 
-    /// Caveat ships VARIABLE (wght 400..700). SwiftUI's .weight() does not drive
-    /// a bundled variable font's axes, so the axis is set explicitly, the same
-    /// way InkFont handles Inter.
-    static func hand(_ size: CGFloat, _ wght: CGFloat = 700) -> Font {
-        handUI(size, wght).map(Font.init) ?? .system(size: size)
+    /// The hand. **Patrick Hand, one weight, 400.**
+    ///
+    /// ⚠ CAVEAT IS GONE, AND THE REASON IS THE BUG NIK FOUND. Caveat is a
+    /// lowercase-first script whose capitals ride above the em box, so on
+    /// Apple's text engine "LEN" came out with the N's right stem sheared off.
+    /// He reported it, I first blamed the typeface's own shape, and the design
+    /// had already reached the same conclusion from the other side: awareness-
+    /// card.md §0.2 replaces the hand for exactly this. Patrick Hand is printed
+    /// rather than joined and its capitals are built as capitals, which is what
+    /// lets it set an all-caps ticker at 28.
+    ///
+    /// ⚠ ONE WEIGHT, SO THIS TAKES NO WEIGHT ARGUMENT. Patrick Hand ships 400
+    /// only. A heading and a tag differ by SIZE AND COLOUR, never by weight —
+    /// asking for 700 here would get a synthesised bold, which is the thing a
+    /// hand layer must never look like. The old signature carried a wght because
+    /// Caveat was variable; it is gone so no call site can ask for a weight that
+    /// does not exist.
+    static func hand(_ size: CGFloat) -> Font {
+        handUI(size).map(Font.init) ?? .system(size: size)
     }
     /// Inter with an explicit numeric weight, so 450 survives the trip.
     static func interUI(_ size: CGFloat, _ wght: CGFloat) -> UIFont? {
@@ -198,11 +221,10 @@ enum S {
         guard let f = interUI(size, wght) else { return 0 }
         return max(0, size * multiple - f.lineHeight)
     }
-    static func handUI(_ size: CGFloat, _ wght: CGFloat) -> UIFont? {
-        guard let b = UIFont(name: "Caveat-Regular", size: size) else { return nil }
-        return UIFont(descriptor: b.fontDescriptor.addingAttributes([
-            UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"):
-                [0x77676874: wght]]), size: size)
+    /// No variation attribute: Patrick Hand is a static face with a single
+    /// master, so there is no axis to set.
+    static func handUI(_ size: CGFloat) -> UIFont? {
+        UIFont(name: "PatrickHand-Regular", size: size)
     }
 
     /// Kalam is STATIC, and exists so the timestamp does not read as another
@@ -299,9 +321,21 @@ enum S {
     static let readPillPadX: CGFloat = 20
     static let readBleedTop: CGFloat = -14
     static let readBleedBottom: CGFloat = -13
-    /// The paper variant's own bleed. A Caveat 18 pencil circle measures ~26pt,
-    /// so −9 top and bottom takes a 44pt hit box back to the circle's height.
-    static let readBleedPaper: CGFloat = -9
+
+    /* ⚠ THE PAPER READ CONTROL PAYS FOR ITS OWN BAND — no negative bleed.
+       The first build borrowed the white pill's −14 / −13 so the 44pt hit would
+       not inflate the row. awareness-card.md §1 measures the real thing: the
+       read band is its own 62pt row (44 hit + 18 padding-bottom) and the card is
+       641 with it. A filed card drops the whole band rather than collapsing it,
+       which is why "measured height is identical before and after" holds. */
+    static let readBandPadBottom: CGFloat = 18
+    /// Pencil circle, not the white card's filled pill: an ink pill on butter
+    /// reads as a foreign element pasted onto a note.
+    static let readRing = hex(0xC4B78C)          // = --paper-bullet
+    static let padRead = EdgeInsets(top: 1, leading: 15, bottom: 2, trailing: 15)
+    /// The card's second and last rotation. The chip owns −1.4.
+    static let readTilt: Double = -1.1
+    static let chipTilt: Double = -1.4
 
     /// The search disc in the filter strip. −9 lands the 30pt disc on the 16pt
     /// margin while the 44pt hit box keeps its size.
@@ -390,9 +424,9 @@ enum S {
     static let streakPct: CGFloat = 10
     static let gapDisc: CGFloat = 8
 
-    /// Caveat's own line height, for the sub-1 instruction leading.
+    /// The hand's own line height, for the planner's sub-1 instruction leading.
     static func leadingHand(_ size: CGFloat, _ multiple: CGFloat) -> CGFloat {
-        guard let f = handUI(size, 600) else { return 0 }
+        guard let f = handUI(size) else { return 0 }
         return size * multiple - f.lineHeight
     }
 

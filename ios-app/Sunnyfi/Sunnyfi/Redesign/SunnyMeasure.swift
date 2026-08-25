@@ -46,35 +46,46 @@ enum SunnyFontAudit {
     /// own arithmetic, so it reported OK while the card was rendering body text
     /// at 400: S.wBody is .regular, and InkFont maps .regular to 400, not 450.
     /// A test that cannot fail is not a test.
-    private static func rows() -> [(String, CGFloat, CGFloat, UIFont?)] {
+    /* ⚠ AND A STATIC FONT NEEDS ITS FAMILY CHECKED, NOT ITS AXIS. The weight test
+       reads NSCTFontVariationAttribute, which a static face does not carry — so
+       for Patrick Hand it passes unconditionally, and the row could report OK
+       while UIFont(name:) returned nil and the card silently rendered in the
+       system face. The expected family is the fourth column for exactly that. */
+    private static func rows() -> [(String, CGFloat, CGFloat, String, UIFont?)] {
         [
-            ("timestamp Kalam", 13.5, 300, UIFont(name: "Kalam-Light", size: S.tHandMeta)),
-            ("ticker Caveat",   28,   700, S.handUI(S.tHandTitle, 700)),
-            ("spot Inter",      25,   600, S.interUI(S.tPaperSpot, S.wSemiN)),
-            ("chip Caveat",     18,   600, S.handUI(S.tPaperChip, 600)),
-            ("heading Caveat",  22,   700, S.handUI(S.tHandHead, 700)),
-            ("body Inter",      16,   450, S.interUI(S.tPaperBody, S.wBodyN)),
-            ("tag Caveat",      22,   700, S.handUI(S.tHandTag, 700)),
-            ("do instr Inter",  18,   600, S.interUI(18, S.wSemiN)),
-            ("do reason Inter", 14,   450, S.interUI(14, S.wBodyN)),
+            // Wants come from awareness-card.md §2, measured after the hand
+            // moved to Patrick Hand. Every hand row wants 400 — the family ships
+            // one weight, so a row reporting anything else means a synthesised
+            // bold slipped in, which is the failure this table exists to catch.
+            ("timestamp Kalam", 13.5, 300, "Kalam", UIFont(name: "Kalam-Light", size: S.tHandMeta)),
+            ("ticker hand", 28, 400, "Patrick Hand", S.handUI(S.tHandTitle)),
+            ("spot Inter", 25, 600, "Inter", S.interUI(S.tPaperSpot, S.wSemiN)),
+            ("chip hand", 17, 400, "Patrick Hand", S.handUI(S.tPaperChip)),
+            ("read hand", 17, 400, "Patrick Hand", S.handUI(S.tPaperChip)),
+            ("heading hand", 21, 400, "Patrick Hand", S.handUI(S.tHandHead)),
+            ("body Inter", 16, 450, "Inter", S.interUI(S.tPaperBody, S.wBodyN)),
+            ("tag hand", 21, 400, "Patrick Hand", S.handUI(S.tHandTag)),
+            ("do instr Inter", 18, 600, "Inter", S.interUI(18, S.wSemiN)),
+            ("do reason Inter", 14, 450, "Inter", S.interUI(14, S.wBodyN)),
         ]
     }
 
     static func dump() {
         guard SunnyMeasure.on else { return }
         print("FONTAUDIT ---- element | want | got size | got wght | family")
-        for (label, wantSize, wantW, f) in rows() {
+        for (label, wantSize, wantW, wantFamily, f) in rows() {
             guard let f else { print("FONTAUDIT \(label) | MISSING FONT"); continue }
             let vars = f.fontDescriptor.object(forKey:
                 UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute")) as? [Int: CGFloat]
             let gotW = vars?[0x77676874]
             let sizeOK = abs(f.pointSize - wantSize) < 0.01
             let wOK = gotW == nil ? true : abs((gotW ?? 0) - wantW) < 0.01
+            let famOK = f.familyName == wantFamily
             print(String(format: "FONTAUDIT %-16@ | %5.1f/%3.0f | %6.2f | %@ | %@ | %@",
                          label as NSString, wantSize, wantW, f.pointSize,
                          gotW.map { String(format: "%.0f", $0) } ?? "static",
                          f.familyName,
-                         (sizeOK && wOK) ? "OK" : "MISMATCH"))
+                         (sizeOK && wOK && famOK) ? "OK" : "MISMATCH"))
         }
     }
 
