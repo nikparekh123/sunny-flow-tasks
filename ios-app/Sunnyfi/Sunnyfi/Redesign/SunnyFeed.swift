@@ -159,6 +159,15 @@ struct SunnyPane: View {
     @State private var rail = RailStore()
     @State private var railHidden = false
     @State private var read: Set<String> = SunnyRead.load()
+    /// ⚠ PER NAME, NOT PER CARD (five-day-price.md §6). Held here rather than
+    /// inside the card so an M and an L on the same ticker flip together.
+    @State private var priceUnits: Set<String> = []
+    /// Verification only, same gating as -filter and -scrollTo: seeds every name
+    /// into the price unit so the swapped state can be screenshot and measured
+    /// without a touch. The sheet requires the card's height to be identical in
+    /// both states, and that is only checkable if both can be reached.
+    private static let argShowPrice =
+        ProcessInfo.processInfo.arguments.contains("-showPrice")
 
     /// The OS home-indicator row. The spec draws its own; a real app inherits it.
     private var bottomSafeArea: CGFloat {
@@ -225,7 +234,19 @@ struct SunnyPane: View {
         var placed = Set<String>()
         for b in rail.book {
             let cards = visible.filter { place($0) == .ticker(b.ticker) }
-            if !cards.isEmpty { out.append((b, cards)); placed.insert(b.ticker) }
+            /* ⚠ A HOLDING WITH NO FEED CARD STILL GETS ITS SECTION, because it
+               still gets its 5-day price card. TLT is the case: no awareness
+               card exists for it, so when sections were built from feed items
+               alone TLT had no heading — and 21% of the book was missing from a
+               feed that showed six smaller names. Nik asked for the price week
+               on ALL holdings, and a holding is a name with lots, not a name
+               that happens to emit a digest.
+
+               A name still disappears under a filter it does not match, because
+               `matchesBook` runs the same query and pill test the cards run. */
+            if !cards.isEmpty || (b.week != nil && matchesBook(b)) {
+                out.append((b, cards)); placed.insert(b.ticker)
+            }
         }
         /* A name with a card but no lots — a position closed today, a watch-list
            name that still emits a digest — still gets a section, just without a
@@ -234,7 +255,7 @@ struct SunnyPane: View {
             guard case .ticker(let t) = place(i) else { return nil }
             return placed.contains(t) ? nil : t
         }).sorted() {
-            out.append((BookName(ticker: t, name: "", weight: 0),
+            out.append((BookName(ticker: t, name: "", weight: 0, week: nil),
                         visible.filter { place($0) == .ticker(t) }))
         }
         return out
@@ -250,9 +271,21 @@ struct SunnyPane: View {
     /// per-card tag ("NKE Awareness"), so both are here and his rule wins on
     /// what is in the strip. It does not win on the ORDER: the tags follow the
     /// tickers, in the same book order, so the two halves read as one list.
+    /// The book row's own filter test. A 5-day card carries its ticker and its
+    /// name, exactly as a feed card does — matching is on those two and never on
+    /// what the chart happens to show.
+    private func matchesBook(_ b: BookName) -> Bool {
+        SunnyCard(tags: [.ticker(b.ticker)],
+                  name: "\(b.ticker) \(b.name) 5-day price", size: .l)
+            .matches(query: query, filters: filters)
+    }
+
     private var presentTags: [SunnyTag] {
         var seen = Set<SunnyTag>()
         for i in items { seen.formUnion(i.tags) }
+        // Every holding earns a pill, whether or not it emits a feed card —
+        // otherwise TLT has a section you can see and no pill to reach it with.
+        for b in rail.book where b.week != nil { seen.insert(.ticker(b.ticker)) }
         var rank: [String: Int] = [:]
         for (i, b) in rail.book.enumerated() { rank[b.ticker.lowercased()] = i }
         func order(_ t: SunnyTag) -> Int {
@@ -286,6 +319,26 @@ struct SunnyPane: View {
                         SunnyHeading(title: s.0.ticker, name: s.0.name,
                                      weight: s.0.weight > 0 ? "\(s.0.weight)%" : nil)
                         ForEach(s.1) { card($0, featured: false) }
+                        /* ⚠ LAST IN THE SECTION, AND NEVER IN FEATURED. Nik:
+                           "it wont be sitting in featured but on each ticker",
+                           and five-day-price.md agrees — a price week is not on
+                           a clock, so it has no claim on the top of the feed. It
+                           also carries no read control for the same reason:
+                           there is nothing to have read.
+
+                           It sits under the awareness card rather than over it
+                           because the awareness card is what CHANGED and this is
+                           the standing backdrop. */
+                        if let w = s.0.week {
+                            SunnyFiveDayCard(
+                                ticker: s.0.ticker, m: w,
+                                showPrice: Binding(
+                                    get: { priceUnits.contains(s.0.ticker) },
+                                    set: { on in
+                                        if on { priceUnits.insert(s.0.ticker) }
+                                        else { priceUnits.remove(s.0.ticker) }
+                                    }))
+                        }
                     }
 
                     /* ⚠ MISC STAYS, AND IT IS NOT THE OVERFLOW BIN. Nik: "Misc
@@ -354,7 +407,19 @@ struct SunnyPane: View {
         .onChange(of: query) { _, _ in applyChange(S.debounceQuery) }
         .onChange(of: filters) { _, _ in applyChange(S.debounceFilter) }
         .onChange(of: presentTags) { _, t in onTags(t) }
-        .task { await rail.load() }
+        /* Verification only: the touch bridge cannot inject a tap in this
+           session, so this fires the real handler on the first featured card a
+           few seconds in. Everything downstream of the tap is exercised; only
+           UIKit delivering the touch is not. */
+        .task {
+            guard ProcessInfo.processInfo.arguments.contains("-tapRead") else { return }
+            try? await Task.sleep(for: .seconds(10))
+            if let first = featured.first { markRead(first) }
+        }
+        .task {
+            await rail.load()
+            if Self.argShowPrice { priceUnits = Set(rail.book.map(\.ticker)) }
+        }
         .task { await digest.load(); onTags(presentTags) }
         .task { await week.load(); onTags(presentTags) }
     }
@@ -363,17 +428,25 @@ struct SunnyPane: View {
 
     @ViewBuilder
     private func card(_ i: SunnyFeedItem, featured: Bool) -> some View {
-        let mark: (() -> Void)? = featured ? {
-            /* Reading changes WHERE the card is, never what it says. SHELL.md
-               §9 measured the card identical before and after, and that is the
-               point: the control is not a dismissal. */
-            withAnimation(S.easeSettle(S.durRevealTransform)) {
-                read.insert(i.id); SunnyRead.save(read)
-            }
-        } : nil
+        let mark: (() -> Void)? = featured ? { markRead(i) } : nil
         switch i.kind {
         case .week(let w):   SunnyWeekCard(m: w, onRead: mark)
         case .digest(let d): SunnyDigestCard(d, onRead: mark)
+        }
+    }
+
+    /* Reading changes WHERE the card is, never what it says. SHELL.md §9
+       measures the card identical before and after, and that is the point: the
+       control files the card, it does not dismiss it.
+
+       ⚠ ONE FUNCTION, SO THE PROBE CANNOT DIVERGE FROM THE BUTTON. -tapRead
+       calls this, not a copy of it. A verification path that reimplements the
+       thing it verifies is the shape of test that passes while the real control
+       is broken, and this file has been burned by that once already. */
+    private func markRead(_ i: SunnyFeedItem) {
+        withAnimation(S.easeSettle(S.durRevealTransform)) {
+            read.insert(i.id)
+            SunnyRead.save(read)
         }
     }
 

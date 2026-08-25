@@ -430,6 +430,37 @@ enum S {
         return size * multiple - f.lineHeight
     }
 
+    // MARK: 5-day price card (L) — cards/five-day-price.md
+    //
+    // ⚠ BARS ARE DAILY CHANGE, NEVER PRICE LEVEL. Five price levels at this size
+    // are five identical bars; the shape of the week is the whole point, and
+    // only change has a shape. A down day hangs below the zero line.
+    //
+    // ⚠ TWO GREENS AND TWO REDS, NOT INTERCHANGEABLE. --gain-text is the 11px
+    // day value, --gain the 19px footer figure, --gain-bar the fill and nothing
+    // else. Same split on the loss side.
+    static let fiveDayCols: CGFloat = 5
+    static let fiveDayColGap: CGFloat = 12     // 323 − 4×12 = 275, /5 = 55 exactly
+    static let fiveDayValueH: CGFloat = 11     // the value's own box, line-height 1
+    static let fiveDayNameH: CGFloat = 12
+    static let fiveDayBarRadius: CGFloat = 5   // the corner AWAY from zero
+    static let fiveDayBarRadiusFlat: CGFloat = 1
+    /// The tallest bar clears its end of the area by this much, both ends.
+    ///
+    /// ⚠ THE ZERO LINE IS DERIVED, NEVER AUTHORED. §0.3: "It sits where the
+    /// week's largest move needs it, and it is re-derived whenever the data
+    /// changes." The sheet's `top: 116` is one solution for the week it was
+    /// measured on (best +0.94, worst −0.43); it is not a constant, and pinning
+    /// it would put a bar outside its box the first week the extremes move.
+    /// The constraint the sheet states is what is implemented: the space above
+    /// zero clears the largest up move and the space below clears the largest
+    /// down move, each with this headroom.
+    static let fiveDayHeadroom: CGFloat = 6
+    /// Footer cell: label 12 + gap 5 + figure 19 = 36. The 5 is from §5 and is
+    /// not on the --gap ramp; it exists only here.
+    static let fiveDayCellGap: CGFloat = 5
+    static let fiveDayCellPad: CGFloat = 16    // every cell but the first
+
     // MARK: chrome colour
     static let dim = hex(0xD3D6D0)
     static let openDot = hex(0x34C759)

@@ -68,6 +68,10 @@ struct BookName: Decodable, Identifiable {
     let ticker: String
     let name: String
     let weight: Int
+    /// The five-day price week. Optional because a name with fewer than two
+    /// closes has no week to draw, and a card that invents one is worse than a
+    /// card that is absent.
+    let week: FiveDay?
     var id: String { ticker }
 }
 

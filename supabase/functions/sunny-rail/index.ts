@@ -33,7 +33,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-24.3';
+const BUILD = '2026-08-25.1';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** The rail abbreviates money: $400k, never $400,000. */
@@ -82,12 +82,19 @@ Deno.serve(async (req) => {
     const today = parseISO(nyToday());
 
     const todayISO = ymd(today);
-    const [lots, divs, rates, shorts] = await Promise.all([
+    /* Six closes, not five: five daily CHANGES need six levels, and the sixth is
+       also the left end of the week range in the card's header. Ordered newest
+       first here and kept that way all the way to the card, because
+       five-day-price.md §0.2 puts the newest day on the LEFT. */
+    const sinceISO = ymd(addDays(today, -21));   // 3 weeks covers holidays
+    const [lots, divs, rates, shorts, closes] = await Promise.all([
       D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
       D.get('dividends?ticker=eq.TLT&select=ex_date,cash_amount,frequency&order=ex_date.desc&limit=1'),
       D.get('rates_daily?series=eq.DGS10&select=date,value&order=date.desc&limit=1'),
       D.get(`option_trades?voided_at=is.null&direction=eq.short&expiry=gte.${todayISO}`
         + '&select=ticker,option_type,strike,expiry,action,contracts,premium'),
+      D.get(`daily_closes?date=gte.${sinceISO}&select=ticker,date,close_price`
+        + '&order=date.desc'),
     ]);
 
     const facts: Array<{ key: string; spans: Span[]; projected?: boolean }> = [];
@@ -102,6 +109,54 @@ Deno.serve(async (req) => {
       const t = String(l.ticker);
       byTicker.set(t, (byTicker.get(t) ?? 0) + N(l.qty_remaining) * N(l.cost_per_share));
     }
+    /* ── the five-day week, per name ──────────────────────────────────────
+       The card charts daily CHANGE against a zero line, never price level: five
+       price levels at this size are five identical bars, and the shape of the
+       week is the whole point. So the server sends changes, and it sends both
+       units because a tap swaps between them without refetching.
+
+       Percent and dollar are both computed HERE. Deriving the dollar on the
+       client from a rounded percent reproduces it wrong by a cent or two, and
+       the card prints them side by side across a tap. */
+    const byName = new Map<string, Array<{ date: string; close: number }>>();
+    for (const r of closes) {
+      const t = String(r.ticker);
+      const c = N(r.close_price);
+      if (!(c > 0)) continue;
+      const a = byName.get(t) ?? [];
+      if (a.length < 6) a.push({ date: String(r.date).slice(0, 10), close: c });
+      byName.set(t, a);
+    }
+    const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    function week(t: string) {
+      const a = byName.get(t) ?? [];
+      if (a.length < 2) return null;
+      const days = [];
+      for (let i = 0; i < Math.min(5, a.length - 1); i++) {
+        const c = a[i].close, p = a[i + 1].close;
+        days.push({
+          day: DOW[parseISO(a[i].date).getUTCDay()],
+          date: a[i].date,
+          pct: Math.round((c - p) / p * 10000) / 100,
+          usd: Math.round((c - p) * 100) / 100,
+        });
+      }
+      if (!days.length) return null;
+      /* The header's two ends and the footer's "On the week" are ONE span, and
+         it is the span the five bars actually cover: the close before the
+         oldest bar, through the newest close. Quoting a 5-session range beside
+         bars that show 5 changes would be off by one day. */
+      const from = a[days.length].close, to = a[0].close;
+      const pcts = days.map((d) => d.pct);
+      return {
+        days,
+        from, to,
+        week_pct: Math.round((to - from) / from * 10000) / 100,
+        best: Math.max(...pcts),
+        worst: Math.min(...pcts),
+      };
+    }
+
     const pk = Deno.env.get('POLYGON_API_KEY') ?? '';
     const book = await Promise.all(
       [...byTicker.entries()]
@@ -112,6 +167,7 @@ Deno.serve(async (req) => {
           name: pk ? await companyName(ticker, pk) : ticker,
           weight: invested > 0 ? Math.round(cost / invested * 100) : 0,
           cost: Math.round(cost),
+          week: week(ticker),
         })),
     );
 
