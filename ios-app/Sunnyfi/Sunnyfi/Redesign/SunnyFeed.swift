@@ -105,9 +105,6 @@ struct SunnyPane: View {
     @State private var week = WeekStore()
     @State private var planner = PlannerStore()
     @State private var legs = LegsStore()
-    /// Per CARD, not per name: each leg card owns its own toggle, because a
-    /// shared handler makes a tap on one card silently swap another.
-    @State private var legUnits: Set<String> = []
     @State private var rail = RailStore()
     @State private var read: Set<String> = SunnyRead.load()
     /// ⚠ PER NAME, NOT PER CARD (five-day-price.md §6). Held here rather than
@@ -290,11 +287,14 @@ struct SunnyPane: View {
             let filed = items.filter { place($0) == .name(b.ticker) }
             ForEach(filed) { card($0) }
 
-            /* ⚠ FIVE CARDS, NOT A REGION. One per leg, and a leg with no
-               contracts produces NO card rather than an empty one. They sit
-               above the price week because the legs are the position and the
-               week is the backdrop. */
-            SunnyLegCards(p: position, units: $legUnits)
+            /* ⚠ ONE CARD, NOT FIVE (26 Aug 2026). The five per-leg cards are
+               retired: their scales were not comparable, so shares showing a
+               loss beside calls showing a profit could not be reconciled, and
+               Nik read it as losing the story. One figure and one chart of every
+               leg summed per week. The put floors stay separate below it,
+               because a floor is a distance from a strike and not a
+               contribution to a P&L total. */
+            SunnyPositionCards(p: position)
 
             if let w = b.week {
                 SunnyFiveDayCard(

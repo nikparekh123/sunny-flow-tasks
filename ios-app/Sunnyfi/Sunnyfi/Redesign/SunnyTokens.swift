@@ -643,6 +643,33 @@ enum S {
     static let cEaseSettle = easeSettle(0.35)
     static let cEaseSwap  = Animation.timingCurve(0.4, 0, 0.2, 1)
 
+    // MARK: - position card (L) — cards/tlt-position.md
+    //
+    // ⚠ ONE CARD, NOT FIVE. Legs that disagree in sign only make sense as
+    // contributions to ONE total, so the card gives one figure and one chart of
+    // every leg SUMMED per week. That is a single comparable scale, which the
+    // five per-leg cards never were.
+    //
+    // ⚠ THE BAR ROWS ARE PROPORTIONAL, NEVER FIXED. The split is max positive
+    // against max negative, so the zero line sits where the data puts it and both
+    // extremes reach their edge. Fixed heights inside a flexible parent left 140
+    // of dead space once the leg rows came out.
+    static let posFigureTop: CGFloat = 13
+    static let posPillPadV: CGFloat = 5
+    static let posPillPadH: CGFloat = 11
+    static let posChartPadTop: CGFloat = 14
+    static let posChartPadBottom: CGFloat = 2
+    static let posChartGap: CGFloat = 11
+    static let posBarW: CGFloat = 56
+    static let posBarGap: CGFloat = 8
+    static let posBarRadius: CGFloat = 6
+    /// The live week, hatched at FULL bar ink. --gain-bar is 3.11:1 on white, so
+    /// every green lighter than it fails 3:1; a lighter live bar measured 2.07:1
+    /// and made the card's own live figure its faintest mark. On a white ground a
+    /// provisional signal cannot be lightness, it has to be pattern.
+    static let posHatchStripe: CGFloat = 3
+    static let posHatchGap: CGFloat = 3
+
     // MARK: - the paged shell — SHELL-PAGED.md
     //
     // ⚠ THE FILTER, THE SEARCH FIELD, THE THREE SECTIONS AND THE BOTTOM RAIL ARE

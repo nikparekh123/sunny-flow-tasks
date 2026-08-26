@@ -44,7 +44,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-26.1';
+const BUILD = '2026-08-26.2';
 const POLY = 'https://api.polygon.io';
 
 /** The Friday at least 5 sessions out: the contract actually written. */
@@ -130,21 +130,61 @@ Deno.serve(async (req) => {
     const todayISO = ymd(today);
     const d120 = ymd(addDays(today, -120));
 
-    /* ⚠ INCOME SLEEVE NAMES ONLY. This card is built on the sleeve's rules:
-       one call and one put per 100 shares, a floor sized to shares PLUS puts
-       sold. TLT does not work that way at all. It has no block, no conviction
-       and no floor; the put IS the trade, sold on the second red day. See
-       docs/STRATEGIES.md.
+    /* ⚠ INCOME SLEEVE NAMES ONLY, AND THE SET IS NOW DERIVED (26 Aug 2026).
+       This card is built on the sleeve's rules: one call and one put per 100
+       shares, a floor sized to shares PLUS puts sold. TLT does not work that
+       way at all. It has no block, no conviction and no floor; the put IS the
+       trade, sold on the second red day. See docs/STRATEGIES.md.
 
        Rendering every ticker with shares pulled TLT in and produced
        "sell -27 puts" and "your floor needs 49", which is the sleeve's rule
-       applied to a book that has never had one. Same confusion as CPB, and
-       the strategies file exists precisely to stop it. */
-    const [lots, sleeveRows] = await Promise.all([
-      D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
-      D.get('income_sleeve_names?active=is.true&select=ticker'),
+       applied to a book that has never had one. That gate still has to exist.
+
+       ⚠ WHAT CHANGED: it used to read `income_sleeve_names`, a HAND-MAINTAINED
+       table, so a name Nik actually bought got no card until someone remembered
+       to insert a row. FIS and AIG were bought on 26 Aug and would never have
+       had one. The table had also drifted the other way: LULU sat in it as
+       active with zero shares held.
+
+       The rule now: A NAME WITH SHARES AND A SHORT CALL WRITTEN AGAINST THEM.
+       That is exactly what entering the sleeve means in STRATEGIES.md — buy the
+       shares, sell the call, sell the put, buy the floor — and it separates the
+       two books on their own structure rather than on a special case. Measured
+       across the live book on 26 Aug, every sleeve name has all three legs and
+       TLT is the ONLY name with zero short calls, ever. It excludes itself.
+
+       ⚠ SINCE THE BLOCK OPENED, NOT "OPEN RIGHT NOW". Keyed on a call being
+       open at this instant, a week where the call is not rewritten silently
+       drops the name's card. The block's start is the oldest lot he still
+       holds, so a re-entry starts the clock again.
+
+       `income_sleeve_names` is no longer what admits a name, but an explicit
+       `active = false` row still VETOES one. That keeps a way to say "not this
+       one" without a deploy, and it is the only thing the table still decides
+       here. Its other columns belong to the income-sleeve screen. */
+    const [lots, vetoRows, callRows] = await Promise.all([
+      D.get('share_lots?voided_at=is.null&qty_remaining=gt.0'
+        + '&select=ticker,qty_remaining,cost_per_share,acquired_date'),
+      D.get('income_sleeve_names?active=is.false&select=ticker'),
+      D.get('option_trades?voided_at=is.null&direction=eq.short&option_type=eq.call'
+        + '&action=eq.open&select=ticker,trade_date'),
     ]);
-    const sleeve = new Set(sleeveRows.map((r) => String(r.ticker)));
+    const veto = new Set(vetoRows.map((r) => String(r.ticker)));
+    /** The oldest lot still held: when the block he owns today began. */
+    const blockStart = new Map<string, string>();
+    for (const l of lots) {
+      const t = String(l.ticker), d = String(l.acquired_date ?? '').slice(0, 10);
+      if (!d) continue;
+      const cur = blockStart.get(t);
+      if (!cur || d < cur) blockStart.set(t, d);
+    }
+    const sleeve = new Set<string>();
+    for (const c of callRows) {
+      const t = String(c.ticker);
+      const start = blockStart.get(t);
+      if (!start || veto.has(t)) continue;
+      if (String(c.trade_date ?? '').slice(0, 10) >= start) sleeve.add(t);
+    }
     /* ── MARK A CARD READ ────────────────────────────────────────────────
        `{"seen":["NKE"]}` advances the freshness window for those names and
        returns. It is the ONLY thing that advances it now — see the note at the
