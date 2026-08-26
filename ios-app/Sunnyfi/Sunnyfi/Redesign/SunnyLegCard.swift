@@ -251,6 +251,13 @@ struct SunnyLegCards: View {
                 timeLabel: "Held", timeValue: "\(p.shares.held)d",
                 committed: p.shares.basis,
                 showPct: bind("\(p.ticker)|SH"))
+            /* ⚠ ONE CARD PER PUT POSITION. TLT's December 75 and 80 are two
+               pieces of cover with two separate bands, and they can disagree —
+               that is correct, they are different insurance. They sit after the
+               legs because a floor is a property OF the position. */
+            ForEach(p.floors) { f in
+                SunnyPutFloorCard(ticker: p.ticker, spot: p.spot, f: f)
+            }
             ForEach(p.legs) { l in
                 SunnyLegCard(
                     ticker: p.ticker, name: l.label.lowercased(),

@@ -22,7 +22,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-25.3';
+const BUILD = '2026-08-25.4';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** Reading order in the grid is tab order in the detail card (§1). Fixed. */
@@ -297,8 +297,46 @@ Deno.serve(async (req) => {
         };
       });
 
+      /* ⚠ ONE CARD PER PUT POSITION, KEYED ON THE POSITION AND NOT THE TICKER.
+         Five NKE puts at one strike are one card; two different NKE strikes are
+         two cards, and they can disagree — that is correct, they are different
+         insurance. So the floors do NOT come from the rolled-up PB leg, which
+         folds every strike into one figure: TLT's December 75 and 80 are two
+         separate pieces of cover with two separate bands.
+
+         ⚠ AND THE TRIGGER READS DISTANCE, NEVER P&L. |spot − strike| / strike
+         against the band. A put 12% in the money is up several hundred percent
+         and still says roll, because it has stopped being insurance and become
+         a position. Never gate the state on profit. */
+      const floors = [...(legBy.get(ticker) ?? new Map<string, Leg>()).values()]
+        .filter((l) => !l.short && l.type === 'put'
+                    && Math.abs(l.contracts) > 0.0001 && l.mark > 0)
+        .sort((a, b) => a.expiry.localeCompare(b.expiry) || a.strike - b.strike)
+        .map((l) => {
+          const n = Math.abs(l.contracts);
+          const debit = Math.abs(l.cash);
+          const value = n * l.mark * 100;
+          const dist = (spot - l.strike) / l.strike * 100;
+          return {
+            strike: l.strike, expiry: l.expiry, contracts: n,
+            dte: Math.round((Date.parse(l.expiry + 'T00:00:00Z')
+                           - Date.parse(todayISO + 'T00:00:00Z')) / 86_400_000),
+            debit: Math.round(debit),
+            value: Math.round(value),
+            pnl: Math.round(value - debit),
+            pct: debit > 0 ? Math.round((value - debit) / debit * 1000) / 10 : 0,
+            /* Raw, unrounded — the BREACH TEST uses this. The display guards
+               its own rounding separately: 43.90 against 40 is exactly 9.75%,
+               which lands at 9.7499…96 in binary and prints 9.7 under a plain
+               toFixed(1). Guard the display only, so a true 10.0000001% still
+               breaches even though it prints as 10.0%. */
+            distance: dist,
+          };
+        });
+
       out.push({
         ticker, spot,
+        floors,
         shares,
         legs,
         /* The header is the sum of the VISIBLE legs, so it moves with the leg

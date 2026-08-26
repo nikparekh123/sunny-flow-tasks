@@ -82,6 +82,9 @@ enum S {
     static let shadowCard  = [SunnyShadow(shadowInk(0.05), 2, 1), SunnyShadow(shadowInk(0.05), 16, 6)]
     static let shadowCardL = [SunnyShadow(shadowInk(0.07), 4, 2), SunnyShadow(shadowInk(0.08), 22, 9)]
     static let shadowFlat  = [SunnyShadow(shadowInk(0.05), 2, 1)]
+    /// A saturated ground swallows the lighter pair. The breached put floor is
+    /// the only M that takes it.
+    static let shadowCardInk = [SunnyShadow(shadowInk(0.16), 4, 2), SunnyShadow(shadowInk(0.18), 22, 9)]
 
     // MARK: rules — ALWAYS a child view with a height, never a border (SPEC 04)
     static let rule:      CGFloat = 1
@@ -584,6 +587,25 @@ enum S {
     static let onLoss     = hex(0xFFFFFF)     // figures, ticker, strike. 7.84:1
     static let onLossBody = hex(0xF3C7CC)     // body, contract, labels. 5.17:1
     static let onLossTrack = Color.white.opacity(0.20)   // composites to #B93345
+
+    // MARK: put floor (M) — cards/put-floor.md
+    //
+    // The axis spans 1.5x the band each way, which is what keeps the two bound
+    // marks at 16.667% / 83.333% at EVERY band value so only the needle moves.
+    static let floorSpanFactor: Double = 1.5
+    static let floorRailH: CGFloat = 18
+    static let floorTrackH: CGFloat = 10
+    static let floorTrackRadius: CGFloat = 5
+    static let floorMarkW: CGFloat = 2
+    static let floorNeedleW: CGFloat = 3
+    static let floorNeedleRadius: CGFloat = 2
+    /// Matches the TRACK on white and the GROUND on red — never the card ground
+    /// on white, and never white on red, where it would vanish into the needle.
+    static let floorNeedleRing: CGFloat = 1.5
+    /// The needle pins here and at 100 minus this, i.e. ±14.4% of price at band
+    /// 10. Past that the rail stops reporting distance and the sentence carries
+    /// it — a needle at the very edge is unreadable as a position anyway.
+    static let floorNeedleClamp: CGFloat = 2
 
     // MARK: chrome colour
     static let dim = hex(0xD3D6D0)

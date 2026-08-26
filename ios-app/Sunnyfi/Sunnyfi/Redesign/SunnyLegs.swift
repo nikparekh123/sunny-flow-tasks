@@ -21,6 +21,7 @@ struct LegsPosition: Decodable, Identifiable {
     let spot: Double
     let shares: Shares
     let legs: [Leg]
+    let floors: [PutFloor]
     let total: Int
     var id: String { ticker }
 
