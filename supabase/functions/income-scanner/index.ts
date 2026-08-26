@@ -15,11 +15,62 @@
 // Pinned https import, NOT ../_shared/ — the dashboard bundles only this folder
 // and a sibling import fails at deploy with 'Module not found'.
 import {
-  corsHeaders, json, db, dailyCloses, ymd, parseISO, addDays, daysBetween,
+  corsHeaders, json, db, ymd, parseISO, addDays, daysBetween,
   nyToday, sd, ncdf, d1of,
 } from 'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-22.11';
+const BUILD = '2026-08-26.1';
+
+/* ── Polygon daily closes, with the FAILURE kept ───────────────────────────
+   ⚠ NOT the shared `dailyCloses`. That helper returns [] both when Polygon
+   answers 200 with nothing AND when it answers 429, and the scanner fed the
+   empty array to `b.length < 260` and reported "too little history" — a
+   property of the COMPANY — for what was a dropped request.
+
+   On 25 Aug that mislabelled 28 of 30 drops. NVDA, ORCL, O, EQIX, OXY and BBY
+   all have years of history and scored fine when run alone. The failures arrived
+   in chunk-shaped groups, five batches losing exactly four of their eight names,
+   on the same batches across two runs, and the count went 4 to 30 the day the
+   universe went 143 to 596. That is a rate limit, not a data property.
+
+   So this returns the reason and the caller keeps it. Retries on 429 and 5xx
+   only: a 404 is a symbol that does not exist, and retrying it spends the budget
+   the 429s need. */
+type CloseFetch = { bars: Array<{ d: string; c: number }>; fail: string | null };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchCloses(
+  ticker: string, key: string, fromISO: string, toISO: string,
+): Promise<CloseFetch> {
+  let last = 'unknown';
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const r = await fetch(`https://api.polygon.io/v2/aggs/ticker/${ticker}`
+        + `/range/1/day/${fromISO}/${toISO}`
+        + `?adjusted=true&sort=asc&limit=50000&apiKey=${key}`);
+      if (r.ok) {
+        const j = await r.json() as { results?: Array<Record<string, number>> };
+        return {
+          bars: (j?.results ?? [])
+            .map((x) => ({ d: new Date(x.t).toISOString().slice(0, 10), c: x.c })),
+          fail: null,
+        };
+      }
+      last = `http ${r.status}`;
+      if (r.status !== 429 && r.status < 500) return { bars: [], fail: last };
+      /* Polygon's own Retry-After when it sends one, otherwise widen. The point
+         is to stop asking, not to ask again immediately. */
+      const hinted = Number(r.headers.get('retry-after')) * 1000;
+      await sleep(Number.isFinite(hinted) && hinted > 0
+        ? Math.min(hinted, 8_000) : 400 * Math.pow(2, attempt));
+    } catch (e) {
+      last = String(e).slice(0, 60);
+      await sleep(400 * Math.pow(2, attempt));
+    }
+  }
+  return { bars: [], fail: last };
+}
 
 // ── the gates, all of them, in one place ────────────────────────────────────
 const G = {
@@ -487,10 +538,14 @@ Deno.serve(async (req) => {
     // SPY is fetched but never scanned: it is the market-day reference.
     const need = Array.from(new Set([...universe, ...held, MARKET_REF]));
     const bars: Record<string, { d: string; c: number }[]> = {};
+    /** ticker -> why its price fetch failed. Empty on a healthy run. */
+    const fetchFail = new Map<string, string>();
     /* 8, not 12. The connection failures above are a concurrency problem, and
        widening the retry without narrowing the fan-out treats the symptom. The
        scan runs on a cron; a slower pass costs nothing. */
     const CHUNK = 8;
+    /** Between batches, not inside them. See the note at the sleep below. */
+    const CHUNK_PAUSE = 250;
     for (let i = 0; i < need.length; i += CHUNK) {
       const part = need.slice(i, i + CHUNK);
       await Promise.all(part.map(async (t) => {
@@ -513,9 +568,18 @@ Deno.serve(async (req) => {
              names the difference is ~100,000 bar objects, and the run was dying
              with WORKER_RESOURCE_LIMIT holding history nothing was reading. */
           const days = t === MARKET_REF ? 600 : 420;
-          bars[t] = await dailyCloses(t, polyKey, ymd(addDays(today, -days)), todayISO);
-        } catch { bars[t] = []; }
+          const got = await fetchCloses(t, polyKey, ymd(addDays(today, -days)), todayISO);
+          bars[t] = got.bars;
+          /* ⚠ KEEP THE REASON. An empty array is not evidence of anything on its
+             own, and treating it as evidence produced 28 wrong verdicts. */
+          if (got.fail) fetchFail.set(t, got.fail);
+        } catch (e) { bars[t] = []; fetchFail.set(t, String(e).slice(0, 60)); }
       }));
+      /* ⚠ PACE THE BATCHES. Narrowing the fan-out 12 to 8 treated the wrong
+         variable: the limit is requests per MINUTE, and 75 batches back to back
+         is the same request rate whatever the batch size. The scan runs on a
+         cron, so a slower pass costs nothing and a dropped name costs a day. */
+      if (i + CHUNK < need.length) await sleep(CHUNK_PAUSE);
     }
 
     /* Keep the history instead of discarding it. The 600-day pull above is
@@ -616,6 +680,14 @@ Deno.serve(async (req) => {
       const done = await Promise.all(part.map(async (t) => {
         const b = bars[t] ?? [];
         const fails: string[] = [];
+        /* ⚠ A FAILED FETCH IS NOT A SHORT HISTORY, and saying so is the bug
+           this replaces. The two are indistinguishable from the bar array alone,
+           so the reason is carried down from the fetch rather than inferred. */
+        const why = fetchFail.get(t);
+        if (why) {
+          return { ticker: t, asof: todayISO, passes: false,
+                   fails: [`no price data from Polygon (${why})`] };
+        }
         if (b.length < 260) return { ticker: t, asof: todayISO, passes: false, fails: ['too little history'] };
 
         const cl = b.map((x) => x.c); const lr = rets(t); const spot = cl[cl.length - 1];
@@ -867,7 +939,9 @@ Deno.serve(async (req) => {
       await D.upsert('sync_heartbeat', [{
         feed: 'income-scanner', ran_at: new Date().toISOString(),
         rows_written: stored,
-        detail: `checked ${out.length} · passed ${passed.length} · option rows ${optRows}`,
+        detail: `checked ${out.length} · passed ${passed.length} · option rows ${optRows}`
+          + (fetchFail.size ? ` · NO PRICE DATA for ${fetchFail.size}: `
+              + [...fetchFail.keys()].slice(0, 12).join(',') : ''),
       }], 'feed');
     }
 
@@ -876,6 +950,11 @@ Deno.serve(async (req) => {
       cached: body.dry_run ? 'dry_run' : (cacheError ?? 'ok'),
       history_rows: stored, option_rows: optRows, history_error: storeErr,
       ok: true, build: BUILD, asof: todayISO, expiry,
+      /* ⚠ SURFACED, NOT SWALLOWED. 30 names missing out of 596 used to return a
+         green result with no count anywhere. A screen that quietly shrinks is
+         worse than one that fails. */
+      fetch_failures: fetchFail.size,
+      fetch_failed: [...fetchFail.entries()].map(([t, why]) => `${t}: ${why}`),
       checked: out.length,
       passed: passed.length,
       guidance_cuts: cutBy.size,
