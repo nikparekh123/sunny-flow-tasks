@@ -530,6 +530,54 @@ enum S {
     static let weekGap: CGFloat = 9
     static let weekBar: CGFloat = 40
 
+    // MARK: the white-card pass — CARD-SYSTEM.md, 25 Aug 2026
+    //
+    // ⚠ THERE IS NO HAND LAYER. Patrick Hand and Kalam are retired along with
+    // BOTH paper treatments — the digest's butter + dot grid and the planner's
+    // ruled sheet. Inter is the only family in the shipped deck. The reasoning,
+    // from CLAUDE.md: on a butter ground with a dot grid the handwriting read as
+    // a note someone left you; on white it reads as a typeface choice, and the
+    // tags read as UI highlighting rather than a pen. Once the paper went, the
+    // hand had nothing to sit on.
+    //
+    // ⚠ WEIGHT IS THE HIERARCHY NOW. 300 is context, 700 is the answer, ONE bold
+    // per line and it is the figure the line is about. The test: read only the
+    // bold and you should get a fair summary of the card. A line whose subject is
+    // a RELATIONSHIP gets no bold at all.
+    //
+    // ⚠ AND 300 IS ONLY LEGAL AT 14 AND ABOVE. Below that it reads as a printing
+    // fault however good the contrast is; 12px body words take 400. The same
+    // floor applies at ANY size on a saturated ground — contrast does not rescue
+    // a thin weight.
+    static let wLightN: CGFloat = 300      // context. >= 14px only
+    static let wMidSmN: CGFloat = 400      // 12px body words, contract lines
+
+    static let tDigestBody: CGFloat = 15
+    static let lhDigest: CGFloat = 1.6     // a 24px line box at 15px
+    /// (24 − 4) / 2. NOT the white-card 8 and NOT the retired paper 9 — it is
+    /// derived from the line box, so it moves whenever the body does.
+    static let digestBulletOffset: CGFloat = 10
+    static let tTagBracket: CGFloat = 11
+    static let lsTagBracket = 0.1          // looser than a label's .13 at this size
+    static let padMarkHi = EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4)
+    static let radiusMarkHi: CGFloat = 3
+    static let tStar: CGFloat = 14
+
+    // MARK: the red ground — a STATE, not a voice (breached put floor only)
+    //
+    // ⚠ --ink IS 2.31:1 ON THIS GROUND, so nothing from the white card survives
+    // the flip and the card carries its own light-on-dark ladder. The grey ink
+    // ladder cannot be reused either: --on-ink-label is 2.96:1 here.
+    //
+    // ⚠ TWO TEXT STEPS, NOT THREE. A dimmer pink for the 10px bound labels
+    // measured 4.62:1 — over the AA line but not by enough for uppercase at that
+    // size — so they use --on-loss-body. On a saturated ground there is not
+    // enough range below the figure ink to spend on a label tier.
+    static let lossGround = hex(0xA80016)     // = --loss, in a GROUND role
+    static let onLoss     = hex(0xFFFFFF)     // figures, ticker, strike. 7.84:1
+    static let onLossBody = hex(0xF3C7CC)     // body, contract, labels. 5.17:1
+    static let onLossTrack = Color.white.opacity(0.20)   // composites to #B93345
+
     // MARK: chrome colour
     static let dim = hex(0xD3D6D0)
     static let openDot = hex(0x34C759)

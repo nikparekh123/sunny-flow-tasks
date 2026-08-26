@@ -29,14 +29,22 @@
 import SwiftUI
 
 struct PlannerModel {
-    let zoneLabel: String        // "NOW"
+    let zoneLabel: String        // "PLANNER"
     let stamp: String            // an execution DATE, never a status word
-    let instruction: String      // handwritten, the only hand on the card
+    /// ⚠ THE INSTRUCTION IS THE CARD'S ANSWER, so it takes the largest slot and
+    /// the ONE bold. `verb` is context at 300, `answer` is the answer at 700 —
+    /// "Sell" then "22 TLT puts". One bold, the same rule as every other card.
+    let verb: String
+    let answer: String
+    /// ⚠ AND IT MUST NOT RESTATE THE DISCS. The discs print the two magnitudes;
+    /// the sentence names the PATTERN and the tag gives the verdict. It used to
+    /// carry "−0.42% then −0.79%", which is the same fact twice on one row.
+    let evidence: String
     let sessions: [Session]      // exactly two. never three.
-    let footer: [FooterPart]
+    let footerLead: String       // "Place it "
+    let footerAnswer: String     // "Tuesday" — the actionable half, at 700
 
-    struct Session { let pct: String }        // UNSIGNED — the red disc carries direction
-    struct FooterPart { let text: String; let strong: Bool }
+    struct Session { let pct: String }        // UNSIGNED — the disc's arrow is the sign
 }
 
 struct SunnyPlannerCard: View {
@@ -50,141 +58,120 @@ struct SunnyPlannerCard: View {
             Spacer(minLength: 0)
             footer
         }
-        .padding(S.padPlannerM)                 // 16 / 19 / 15 — NOT --pad-card-m
+        .padding(S.padCardM)                    // 17 19 16 — the retired ruled build used 16/19/15
         .frame(maxWidth: .infinity)
         .aspectRatio(S.Size.m.ratio, contentMode: .fit)
-        .background {
-            ZStack {
-                S.plannerGround
-                RuledLines()                    // 25px pitch, 1px line
-            }
-        }
-        // overflow: hidden is REQUIRED here, unlike white cards — the ruled
-        // ground must clip to the radius.
+        .background(S.paper)
         .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
-        // Heavier than --shadow-card because the ground is darker than white and
-        // the standard shadow disappears against it. NO inset ring.
-        .shadow(color: S.shadowInk(0.09), radius: 2, x: 0, y: 2)
-        .shadow(color: S.shadowInk(0.10), radius: 11, x: 0, y: 9)
+        .sunnyShadow(S.shadowCard)
         .measure("planner-card")
     }
 
-    // MARK: header — live dot, zone label, then the stamp pushed right
+    /* ⚠ AN AMBER CHIP, NOT A RED STAMP, AND NO ROTATION ANYWHERE. The ruled
+       build used a tilted 1.5px outlined stamp in --stamp-ink; that was a hand
+       affordance and it went with the hand. Amber is the deck's attention
+       pairing, and a date is attention, not loss.
 
+       The market-state dot that used to sit before the label is gone and stays
+       gone — the rule against a ticker strip and a state dot applies here too. */
     private var header: some View {
-        HStack(spacing: S.gap3) {
-            // Filled, never a ring. A ring means "watched, no open leg" on the
-            // P&L cards; reusing it here would say the opposite.
-            Circle().fill(S.plannerDot).frame(width: S.dot, height: S.dot)
+        HStack(spacing: S.gap6) {
             Text(m.zoneLabel)
-                .font(S.inter(S.t10, S.wBoldN))
-                .tracking(S.track(S.t10, 0.13))
+                .font(InkFont.display(S.t10, S.wBold))
+                .tracking(S.track(S.t10, S.lsLabel))
                 .textCase(.uppercase)
-                .foregroundStyle(S.plannerLabel)
+                .foregroundStyle(S.mute)
             Spacer(minLength: 0)
-            stamp
+            SunnyChip(text: m.stamp)
         }
-        .frame(height: 22)
     }
-
-    /// A RUBBER STAMP, not a chip — outline only, squared at 5px rather than
-    /// pilled, and it carries a date, never a status word. −2.5° is the only
-    /// rotation on the card, and it is deliberately not the digest chip's −1.4°.
-    private var stamp: some View {
-        Text(m.stamp)
-            .font(S.inter(S.t11, S.wBoldN))
-            .tracking(S.track(S.t11, 0.06))
-            .textCase(.uppercase)
-            .foregroundStyle(S.stampInk)
-            .padding(S.padStamp)
-            .overlay(RoundedRectangle(cornerRadius: S.stampRadius)
-                .strokeBorder(S.stampBorder, lineWidth: 1.5))
-            .rotationEffect(.degrees(S.stampTilt))
-    }
-
-    // MARK: body — instruction takes the slack, evidence sits on its baseline
 
     private var body_: some View {
-        // flex-end: the instruction's last line and the percentages share a
-        // bottom edge. Centre-aligning makes the discs float.
-        HStack(alignment: .bottom, spacing: S.gap7) {
-            /* ⚠ .95 CANNOT BE DONE WITH .lineSpacing — IT CLAMPS AT ZERO.
-               The sheet wants an advance BELOW the font's own line height, so
-               the two lines close up into one written gesture; SwiftUI's
-               lineSpacing only ever adds. Passing it a negative number is a
-               silent no-op, which is what the first build did: the lines sat a
-               full line box apart and the instruction read as two statements
-               rather than one.
-
-               A VStack takes a negative spacing, so the lines are separate Texts
-               and the overlap is explicit. Split on the newline the model
-               already carries, so the model is unchanged. */
-            VStack(alignment: .leading,
-                   spacing: S.leadingHand(S.tHandInstruction, S.lhHandInstruction)) {
-                ForEach(Array(m.instruction.split(separator: "\n").enumerated()),
-                        id: \.offset) { _, line in
-                    Text(String(line))
-                        .font(S.hand(S.tHandInstruction))
-                        .foregroundStyle(S.ink)
-                        .fixedSize()
-                }
+        HStack(alignment: .center, spacing: S.gap7) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text(instruction)
+                    .lineSpacing(S.leading(S.t19, S.wLightN, S.lhTight))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(evidenceRuns)
+                    .lineSpacing(S.leading(S.tDigestBody, S.wLightN, S.lhLoose))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: S.gapDisc) {
-                ForEach(Array(m.sessions.enumerated()), id: \.offset) { _, s in
-                    VStack(spacing: S.gap2) {
-                        ZStack {
-                            Circle().fill(S.lossBar)
-                                .frame(width: S.streakDiscM, height: S.streakDiscM)
-                            // ⚠ THE GROUND COLOUR, NOT WHITE. On paper a white
-                            // glyph glares; the ground reads as the sheet showing
-                            // through the ink. The one place a background colour
-                            // is used as a foreground, and it is intentional.
-                            Text("\u{2193}")
-                                .font(S.inter(S.streakGlyphM, S.wBoldN))
-                                .foregroundStyle(S.plannerGround)
-                        }
-                        Text(s.pct)
-                            .font(S.inter(S.streakPct, S.wSemiN))
-                            .foregroundStyle(S.loss)
-                            .monospacedDigit()
+            discs
+        }
+    }
+
+    /// One bold, and it is the thing to do. `Sell` is context.
+    private var instruction: AttributedString {
+        var lead = AttributedString(m.verb + " ")
+        lead.font = S.inter(S.t19, S.wLightN)
+        var ans = AttributedString(m.answer)
+        ans.font = S.inter(S.t19, S.wBoldN)
+        var all = lead + ans
+        all.foregroundColor = S.ink
+        all.tracking = S.track(S.t19, -0.01)
+        return all
+    }
+
+    private var evidenceRuns: AttributedString {
+        var out = AttributedString(m.evidence)
+        out.font = S.inter(S.tDigestBody, S.wLightN)
+        out.foregroundColor = S.ink
+        out += AttributedString(" ") + BracketTag.bearish.attributed()
+        return out
+    }
+
+    /// The trigger DRAWN rather than described. A five-session change strip in
+    /// the 5-day card's idiom was built and rejected: it showed the streak in
+    /// context, but the card's subject is the confirmed pattern, not the week's
+    /// shape, and the strip needed dimmed context bars to make that point at all.
+    private var discs: some View {
+        HStack(spacing: S.gapDisc) {
+            ForEach(Array(m.sessions.enumerated()), id: \.offset) { _, s in
+                VStack(spacing: S.gap2) {
+                    ZStack {
+                        Circle().fill(S.lossBar)
+                            .frame(width: S.streakDiscM, height: S.streakDiscM)
+                        /* ⚠ WHITE NOW, NOT THE GROUND TOKEN. The rule is "the
+                           glyph is the card's ground colour" — it was butter on
+                           the ruled sheet and the ground changed. */
+                        Text("\u{2193}")
+                            .font(S.inter(S.streakGlyphM, S.wBoldN))
+                            .foregroundStyle(S.onLoss)
                     }
+                    // UNSIGNED. The arrow is the sign; a minus beside a downward
+                    // arrow inside a red circle is the same fact three times.
+                    Text(s.pct)
+                        .font(S.inter(S.streakPct, S.wBoldN))
+                        .foregroundStyle(S.loss)
+                        .monospacedDigit()
                 }
             }
-            .fixedSize()
         }
+        .fixedSize()
     }
 
+    /// Same one-bold rule as the body: the day is the actionable part. --ink-2
+    /// rather than --mute because it is an instruction, not a caption.
     private var footer: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(m.footer.enumerated()), id: \.offset) { _, p in
-                Text(p.text)
-                    .font(S.inter(S.t12, p.strong ? S.wBoldN : S.wMidN))
-                    .foregroundStyle(p.strong ? S.ink : S.plannerBody)
-                    .monospacedDigit()
-            }
-            Spacer(minLength: 0)
-        }
+        Text(footerRuns).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var footerRuns: AttributedString {
+        var lead = AttributedString(m.footerLead)
+        lead.font = S.inter(S.t12, S.wMidSmN)
+        var ans = AttributedString(m.footerAnswer)
+        ans.font = S.inter(S.t12, S.wBoldN)
+        var all = lead + ans
+        all.foregroundColor = S.ink2
+        return all
     }
 }
 
-/// 25px pitch, 1px line. Ruled lines are NOT aligned to the type — they run
-/// under it like real ruled paper, which is the point: a note written across a
-/// sheet, not text set on a baseline grid.
-private struct RuledLines: View {
-    var body: some View {
-        Canvas { ctx, size in
-            var y = S.plannerRulePitch
-            while y < size.height {
-                ctx.fill(Path(CGRect(x: 0, y: y, width: size.width, height: 1)),
-                         with: .color(S.plannerRuleInk))
-                y += S.plannerRulePitch
-            }
-        }
-        .allowsHitTesting(false)
-    }
-}
-
+/* ⚠ RuledLines IS GONE. The 25px ruled butter sheet went with the hand layer on
+   25 Aug 2026 — a ruled ground under Inter reads as a texture with no reason.
+   Both paper treatments are out of the deck; do not reintroduce either from an
+   old sheet or a screenshot. */
 
 // MARK: - the store, and the gate that decides the card exists
 
@@ -279,16 +266,12 @@ extension PlannerModel {
 
         zoneLabel = "Planner"
         stamp = PlannerModel.stamp(p.asof ?? "")
-        instruction = "Sell \(n)\nTLT puts"
+        verb = "Sell"
+        answer = "\(n) TLT puts"
+        evidence = "Two red sessions back to back"
         sessions = days.map { Session(pct: String(format: "%.2f%%", $0.pct)) }
-        /* ⚠ NO EM DASH. The reference footer is "Two red days back to back —
-           place it Monday"; Nik's rule is no em dashes anywhere in app copy, so
-           the joint is a middle dot. The strong half is the ACTION, the quiet
-           half is the reason, which is the shape the sheet ships. */
-        footer = [
-            FooterPart(text: "Two red days back to back · ", strong: false),
-            FooterPart(text: "place it \(p.day ?? "today")", strong: true),
-        ]
+        footerLead = "Place it "
+        footerAnswer = p.day ?? "today"
     }
 
     private static func stamp(_ iso: String) -> String {

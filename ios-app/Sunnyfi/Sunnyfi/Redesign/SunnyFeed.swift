@@ -208,7 +208,7 @@ struct SunnyPane: View {
                `clock: true` with no id in `read` is what keeps it at the top;
                the id still changes with the contract count so it cannot go
                stale if the size is revised intraday. */
-            out.append(SunnyFeedItem(id: "planner|" + pl.instruction,
+            out.append(SunnyFeedItem(id: "planner|" + pl.answer,
                                      ticker: "TLT", clock: true,
                                      tags: [.ticker("TLT")], name: "TLT planner",
                                      kind: .planner(pl)))

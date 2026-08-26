@@ -70,28 +70,34 @@ struct SunnyFiveDayCard: View {
     /// Baseline, not centre: a 10px label and a 17px figure line up on nothing else.
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
-            Text("\(ticker) · 5 days")
-                .font(InkFont.display(S.fiveDayLabel, S.wBold))
-                .tracking(S.track(S.fiveDayLabel, S.lsLabel))
-                .foregroundStyle(S.mute)
-                .fixedSize()
+            SunnyCardHead(ticker: ticker, kind: "5 days")
             Spacer(minLength: 0)
-            /* The week's two ends, not a spot figure. Spot is stated on the
-               position card, and two ends of a week say more here than one
-               number repeated. It is a PAIR OF PRICES, not a direction, so it
-               stays --ink however the week went. */
-            HStack(spacing: S.gap2) {
-                Text(price(m.from))
-                Text("\u{2192}")                       // →, a mark rather than a word
-                    .font(S.inter(S.t17, S.wBodyN))
-                    .foregroundStyle(S.faint)
-                Text(price(m.to))
-            }
-            .font(InkFont.display(S.t17, S.wSemi))
-            .tracking(S.track(S.t17, -0.02))
-            .foregroundStyle(S.ink)
-            .monospacedDigit()
+            /* ⚠ OPENS LIGHT, CLOSES BOLD. The close is the LIVE price, so it is
+               the answer and takes the one bold; the open is context. The pair
+               is still not a direction — it is two prices — so neither end takes
+               gain or loss ink.
+
+               ⚠ AND THE ARROW IS --mute, NOT --faint. --faint measures 3.27:1 on
+               white; it is documented for a 22px inactive tab label and nothing
+               else, and at 17px in a light weight it was the least readable
+               thing on the card. It is a mark, but a mark still has to be seen. */
+            Text(rangeRuns).monospacedDigit()
         }
+    }
+
+    private var rangeRuns: AttributedString {
+        var open = AttributedString(price(m.from))
+        open.font = S.inter(S.t17, S.wLightN)
+        open.foregroundColor = S.ink
+        var arrow = AttributedString(" \u{2192} ")
+        arrow.font = S.inter(S.t17, S.wMidSmN)
+        arrow.foregroundColor = S.mute
+        var close = AttributedString(price(m.to))
+        close.font = S.inter(S.t17, S.wBoldN)
+        close.foregroundColor = S.ink
+        var all = open + arrow + close
+        all.tracking = S.track(S.t17, -0.02)
+        return all
     }
 
     // MARK: chart — the only flexible row
@@ -108,35 +114,21 @@ struct SunnyFiveDayCard: View {
     private func column(_ d: FiveDay.Day, newest: Bool) -> some View {
         let up = d.pct >= 0
         return VStack(spacing: S.gap4) {
-            // The value sits ABOVE the bar: the row of five signed numbers then
-            // reads as a line, and the sign lands before the bar does.
-            Text(showPrice ? signedUSD(d.usd) : signedPct(d.pct))
-                .font(InkFont.display(S.fiveDayValue, S.wSemi))
-                .foregroundStyle(up ? S.gainText : S.lossText)
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .frame(height: S.fiveDayValueH)
-
-            /* ⚠ MEASURE THE BAR AREA, NOT THE CHART ROW. The first build read
-               the height off the chart's own GeometryReader and scaled to it —
-               but the chart row is the bar area PLUS the 11pt value, two 8pt
-               gaps and the 12pt name, so every bar came out 39pt too tall and
-               Friday's down bar was drawn straight through the day names. The
-               reader belongs inside the column, around the thing being scaled.
-
-               Same height in every column, so the scale is identical across the
-               five without being threaded through. */
+            /* ⚠ THE VALUE SITS BELOW ITS BAR AND ABOVE ITS DAY NAME. It used to
+               lead the column. Moving it down puts the two pieces of text that
+               describe a day next to each other instead of splitting them around
+               183px of chart, so a column reads as one label rather than two —
+               and the bars now start from a common top edge, which makes the
+               week's shape the first thing the eye lands on. */
             GeometryReader { g in
                 let scale = scale(for: g.size.height)
                 let zeroY = zeroY(for: g.size.height)
                 let h = max(1, CGFloat(abs(d.pct)) * scale)
                 ZStack(alignment: .topLeading) {
                     Color.clear
-                    // Per column, not one rule across the row: a spanning rule
-                    // sits above the bars and reads as an axis.
                     Rectangle().fill(S.ruleColor)
                         .frame(height: S.rule)
                         .offset(y: zeroY)
-                    // The radius flips so the corner AWAY from zero is round.
                     UnevenRoundedRectangle(
                         topLeadingRadius:     up ? S.fiveDayBarRadius : S.fiveDayBarRadiusFlat,
                         bottomLeadingRadius:  up ? S.fiveDayBarRadiusFlat : S.fiveDayBarRadius,
@@ -150,8 +142,16 @@ struct SunnyFiveDayCard: View {
                 .frame(width: g.size.width, height: g.size.height)
             }
 
+            // A SERIES IS NOT AN ANSWER: five values stay 600. Bolding all five
+            // would bold nothing.
+            Text(showPrice ? signedUSD(d.usd) : signedPct(d.pct))
+                .font(InkFont.display(S.fiveDayValue, S.wSemi))
+                .foregroundStyle(up ? S.gainText : S.lossText)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(height: S.fiveDayValue)
+
             Text(d.day)
-                .font(InkFont.display(S.t12, newest ? S.wSemi : S.wMid))
+                .font(S.inter(S.t12, newest ? S.wBoldN : S.wMidSmN))
                 .foregroundStyle(newest ? S.ink : S.mute)
                 .frame(height: S.fiveDayNameH)
         }
@@ -178,8 +178,10 @@ struct SunnyFiveDayCard: View {
                 .font(InkFont.display(S.fiveDayLabel, S.wBold))
                 .tracking(S.track(S.fiveDayLabel, S.lsLabel))
                 .foregroundStyle(S.mute)
+            // Each of the three IS an answer, so all three are bold — unlike
+            // the five day values, which are a series.
             Text(signedPct(v))
-                .font(InkFont.display(S.t19, S.wSemi))
+                .font(S.inter(S.t19, S.wBoldN))
                 .tracking(S.track(S.t19, -0.025))
                 .foregroundStyle(v >= 0 ? S.gain : S.loss)
                 .monospacedDigit()
