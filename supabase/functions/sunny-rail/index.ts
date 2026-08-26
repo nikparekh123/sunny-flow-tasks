@@ -33,7 +33,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-25.1';
+const BUILD = '2026-08-26.2';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** The rail abbreviates money: $400k, never $400,000. */
@@ -87,7 +87,19 @@ Deno.serve(async (req) => {
        first here and kept that way all the way to the card, because
        five-day-price.md §0.2 puts the newest day on the LEFT. */
     const sinceISO = ymd(addDays(today, -21));   // 3 weeks covers holidays
-    const [lots, divs, rates, shorts, closes] = await Promise.all([
+    /* ⚠ EVERY SHORT LEG EVER, not just the open ones. The average card credits
+       ALL premium written on a name, and a leg that has expired is exactly the
+       premium that already came in. option_trades is past 680 rows and this
+       project caps PostgREST at 1000 with no way to lift it, so page it. */
+    async function getAll(path: string): Promise<Record<string, unknown>[]> {
+      const out: Record<string, unknown>[] = [];
+      for (let off = 0; ; off += 1000) {
+        const page = await D.get(`${path}&limit=1000&offset=${off}`);
+        out.push(...(page as Record<string, unknown>[]));
+        if (page.length < 1000) return out;
+      }
+    }
+    const [lots, divs, rates, shorts, closes, allShorts, quotes] = await Promise.all([
       D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
       D.get('dividends?ticker=eq.TLT&select=ex_date,cash_amount,frequency&order=ex_date.desc&limit=1'),
       D.get('rates_daily?series=eq.DGS10&select=date,value&order=date.desc&limit=1'),
@@ -95,6 +107,9 @@ Deno.serve(async (req) => {
         + '&select=ticker,option_type,strike,expiry,action,contracts,premium'),
       D.get(`daily_closes?date=gte.${sinceISO}&select=ticker,date,close_price`
         + '&order=date.desc'),
+      getAll('option_trades?voided_at=is.null&direction=eq.short&order=id.asc'
+        + '&select=ticker,action,contracts,premium'),
+      D.get('ticker_quotes_latest?select=ticker,spot'),
     ]);
 
     const facts: Array<{ key: string; spans: Span[]; projected?: boolean }> = [];
@@ -157,6 +172,69 @@ Deno.serve(async (req) => {
       };
     }
 
+    /* ── the average price, one per name ──────────────────────────────────
+       ⚠ PREMIUM, NOT REALIZED. Nik chose this on 26 Aug over the glossary's
+       NEW AVERAGE, which subtracts REALIZED instead. The two disagree hard on
+       this book — NKE reads 37.79 under spot one way and 44.41 over it the
+       other, and five of nine cards change colour between them.
+
+       This is the income sleeve's own number and the one he watches: what the
+       block has cost after every dollar of premium written against the name.
+       It walks down every week he writes, which is the thing the sleeve exists
+       to show. The glossary's version answers a different question, and the
+       page heading's Total already answers that one.
+
+       ⚠ ALL-TIME PREMIUM, not premium since the current block opened. Those
+       differ a lot — NKE's block is days old while its premium history runs to
+       months — and all-time is what he approved.
+
+       Known cost, accepted: it credits premium on shorts that are STILL OPEN,
+       so an average can improve on paper and give some back when a leg is
+       bought in. The glossary calls that flattering; here it is deliberate. */
+    const premBy = new Map<string, number>();
+    for (const t of allShorts) {
+      const k = String(t.ticker);
+      const sign = t.action === 'open' ? 1 : -1;
+      premBy.set(k, (premBy.get(k) ?? 0) + sign * N(t.contracts) * N(t.premium) * 100);
+    }
+    const shareBy = new Map<string, { qty: number; cost: number; lots: number }>();
+    for (const l of lots) {
+      const t = String(l.ticker);
+      const e = shareBy.get(t) ?? { qty: 0, cost: 0, lots: 0 };
+      e.qty += N(l.qty_remaining);
+      e.cost += N(l.qty_remaining) * N(l.cost_per_share);
+      e.lots += 1;
+      shareBy.set(t, e);
+    }
+    const spotBy = new Map<string, number>();
+    for (const q of quotes) {
+      const v = N(q.spot);
+      if (v > 0) spotBy.set(String(q.ticker), v);
+    }
+    function average(ticker: string) {
+      const sh = shareBy.get(ticker);
+      if (!sh || !(sh.qty > 0)) return null;
+      const paid = sh.cost / sh.qty;
+      const avg = paid - (premBy.get(ticker) ?? 0) / sh.qty;
+      const spot = spotBy.get(ticker) ?? 0;
+      return {
+        shares: Math.round(sh.qty),
+        /* The S card's right-hand label says what the average covers. The
+           handoff's specimen reads "Both lots"; generalised, it is the count. */
+        lots: sh.lots,
+        cost: Math.round(sh.cost),
+        paid: Math.round(paid * 100) / 100,
+        average: Math.round(avg * 100) / 100,
+        spot: Math.round(spot * 100) / 100,
+        /* Both percentages name their reference because they move
+           independently: one is premium against what he paid, the other is the
+           resulting basis against the market. Neither can be the silent
+           default, which is why the card's reference line has two cells. */
+        vs_paid: paid > 0 ? Math.round((avg / paid - 1) * 1000) / 10 : 0,
+        vs_spot: spot > 0 ? Math.round((avg / spot - 1) * 1000) / 10 : 0,
+      };
+    }
+
     const pk = Deno.env.get('POLYGON_API_KEY') ?? '';
     const book = await Promise.all(
       [...byTicker.entries()]
@@ -167,6 +245,7 @@ Deno.serve(async (req) => {
           name: pk ? await companyName(ticker, pk) : ticker,
           weight: invested > 0 ? Math.round(cost / invested * 100) : 0,
           cost: Math.round(cost),
+          avg: average(ticker),
           week: week(ticker),
         })),
     );

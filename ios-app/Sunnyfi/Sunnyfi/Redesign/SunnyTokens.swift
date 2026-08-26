@@ -238,6 +238,7 @@ enum S {
 
     // MARK: type ramp — pick a step, never interpolate
     static let t10: CGFloat = 10, t11: CGFloat = 11, t12: CGFloat = 12, t13: CGFloat = 13
+    static let t16: CGFloat = 16          // the average list's row index
     static let t14: CGFloat = 14, t15: CGFloat = 15, t17: CGFloat = 17, t19: CGFloat = 19
     static let t22: CGFloat = 22, t26: CGFloat = 26, t30: CGFloat = 30
     static let t34: CGFloat = 34, t39: CGFloat = 39
@@ -669,6 +670,34 @@ enum S {
     /// provisional signal cannot be lightness, it has to be pattern.
     static let posHatchStripe: CGFloat = 3
     static let posHatchGap: CGFloat = 3
+
+    // MARK: - average price — average-price.md / average-combined.md
+    //
+    // ⚠ THE GROUND IS THE READING on the S card: --gain-wash while the average
+    // sits under spot, --loss-wash when it sits over. Not decoration, not a
+    // category — the answer, and what lets the card be an S at all.
+    static let avgPadX: CGFloat = 19
+    static let avgHeadTop: CGFloat = 18
+    static let avgHeadBottom: CGFloat = 12
+    /// The last row has no separator, so this makes the closing air equal the
+    /// header's top and the card shuts symmetrically.
+    static let avgFootH: CGFloat = 18
+    static let avgRowPadY: CGFloat = 12
+    static let avgRowGap: CGFloat = 5
+    /// 12 above and below against 5 inside: 24 between two positions against 5
+    /// within one. A block boundary must beat twice its internal gap; this is
+    /// 4.8 times it.
+    static let avgIndexW: CGFloat = 19
+    /// The one cell whose string length is unpredictable, so it is fixed and
+    /// never wraps — a wrap doubles the row while leaving scrollHeight at zero,
+    /// which the card-level overflow check cannot see.
+    static let avgSpotW: CGFloat = 118
+    /// ⚠ 38 IS NOT A STEP ON THE RAMP. Its neighbours are 34 and 39, and the
+    /// handoff's own tokens file records it as measured rather than sanctioned.
+    /// Kept because the card was signed off at this size; resolve it to a step
+    /// before reusing it anywhere else.
+    static let avgFigure: CGFloat = 38
+    static let avgFigureLH: CGFloat = 0.9
 
     // MARK: - the paged shell — SHELL-PAGED.md
     //

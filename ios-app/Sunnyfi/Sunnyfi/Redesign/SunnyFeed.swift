@@ -186,7 +186,7 @@ struct SunnyPane: View {
     private var current: BookName? {
         guard case .name(let t) = page else { return nil }
         return rail.book.first { $0.ticker == t }
-            ?? BookName(ticker: t, name: "", weight: 0, week: nil)
+            ?? BookName(ticker: t, name: "", weight: 0, week: nil, avg: nil)
     }
 
     private var position: LegsPosition? {
@@ -257,6 +257,13 @@ struct SunnyPane: View {
     @ViewBuilder
     private var newPage: some View {
         SunnyNewHead(due: due.count)
+        /* ⚠ THE LIST IS NOT A DATED CARD. It has no read control and no name to
+           file under: it is about the whole book, so it belongs on New every
+           morning rather than moving to a page when it is read. The per-name S
+           cards on each page are the same number, one at a time. */
+        if rail.book.contains(where: { $0.avg != nil }) {
+            SunnyAverageList(book: rail.book)
+        }
         if due.isEmpty {
             SunnyPageNote("Nothing on a clock. Every card has moved to its own "
                         + "name — a name comes back here when it has something new.")
@@ -296,6 +303,12 @@ struct SunnyPane: View {
                contribution to a P&L total. */
             SunnyPositionCards(p: position)
 
+            /* The same average as the list's row for this name, alone. It sits
+               above the price week for the same reason the position card does:
+               the basis is the position, the week is the backdrop. */
+            if let a = b.avg {
+                SunnyAverageCard(ticker: b.ticker, a: a)
+            }
             if let w = b.week {
                 SunnyFiveDayCard(
                     ticker: b.ticker, m: w,
@@ -307,7 +320,7 @@ struct SunnyPane: View {
                         }))
             }
 
-            if filed.isEmpty && position == nil && b.week == nil {
+            if filed.isEmpty && position == nil && b.week == nil && b.avg == nil {
                 SunnyPageNote("Held, and quiet. No card has been built for this "
                             + "name yet — it earns one when it has something to say.")
             }

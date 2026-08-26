@@ -72,7 +72,35 @@ struct BookName: Decodable, Identifiable {
     /// closes has no week to draw, and a card that invents one is worse than a
     /// card that is absent.
     let week: FiveDay?
+    /// The average price cards' data. Optional so a run against an older
+    /// deployment of sunny-rail decodes rather than throws.
+    let avg: BookAverage?
     var id: String { ticker }
+}
+
+/// ⚠ THE AVERAGE IS BUY PRICE MINUS PREMIUM WRITTEN, not minus realized. Nik
+/// chose this on 26 Aug over the glossary's NEW AVERAGE. The two disagree hard:
+/// NKE reads 37.79 UNDER spot one way and 44.41 OVER it the other, and five of
+/// nine cards change ground colour between them. Computed in sunny-rail, never
+/// on the client — two cards read it and they must never disagree.
+struct BookAverage: Decodable {
+    let shares: Int
+    let lots: Int
+    let cost: Int
+    let paid: Double
+    let average: Double
+    let spot: Double
+    /// Premium against what he paid. Negative means the premium brought it down.
+    let vsPaid: Double
+    /// The resulting basis against the market. Negative is GOOD, which is why
+    /// the cards spell `under` and `over` rather than showing a sign.
+    let vsSpot: Double
+
+    enum CodingKeys: String, CodingKey {
+        case shares, lots, cost, paid, average, spot
+        case vsPaid = "vs_paid"
+        case vsSpot = "vs_spot"
+    }
 }
 
 struct RailFact: Decodable, Identifiable {
