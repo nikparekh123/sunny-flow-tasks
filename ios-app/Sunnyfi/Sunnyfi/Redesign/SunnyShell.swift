@@ -5,8 +5,8 @@
 //  Rows, top to bottom, and their sum is the acceptance test:
 //
 //      54  status bar     the OS's here — a real app inherits it
-//      88  strip          the whole navigation
-//     694  pane           the only flexible row
+//     665  pane           the only flexible row
+//     117  strip          the whole navigation, DOCKED AT THE BOTTOM
 //      24  home indicator the OS's
 //     ---
 //     860
@@ -24,6 +24,11 @@
 //
 //  ⚠ THE STRIP IS THE WHOLE NAVIGATION. Tapping a circle REPLACES the pane; it
 //  does not scroll to a section. A card exists in exactly one place at a time.
+//
+//  ⚠ AND IT SITS AT THE BOTTOM (26 Aug 2026), as a flex sibling AFTER the pane
+//  rather than an absolute overlay. It is the only control on screen and the one
+//  pressed most; at the top of a 393 × 860 phone it was outside thumb reach. The
+//  circles went 44 → 60 in the same change — --hit-min is a floor, not a target.
 //
 
 import SwiftUI
@@ -53,9 +58,9 @@ struct SunnyShell: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SunnyStrip(book: nav.book, pending: nav.pending, due: nav.due, page: $page)
             SunnyPane(page: $page, onNav: { nav = $0 }, startAt: Self.argScroll)
                 .frame(maxHeight: .infinity)
+            SunnyStrip(book: nav.book, pending: nav.pending, due: nav.due, page: $page)
         }
         .background(S.ground)
         .onAppear { if let p = Self.argPage { page = p } }

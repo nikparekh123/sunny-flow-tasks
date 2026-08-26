@@ -11,6 +11,11 @@
 //  carries the whole "where am I" job, and scrolling makes every page one long
 //  page, so the answer is ambiguous again.
 //
+//  ⚠ IT DOCKS AT THE BOTTOM. It is a flex sibling AFTER the pane, not an
+//  absolute overlay, so it takes its own 117 of the frame: 54 + 665 + 117 + 24.
+//  At the top of a 393 × 860 phone the only control on screen sat outside thumb
+//  reach, and it is the thing pressed most.
+//
 //  ⚠ TICKERS, NOT LOGOS. Companies have marks and funds have an issuer badge, so
 //  a logo strip reads half-finished and depends on artwork arriving. TLT held
 //  its ticker while NKE carried a wordmark and the strip looked broken. The
@@ -35,9 +40,11 @@ enum SunnyPage: Hashable {
 
 // MARK: - one circle
 
-/// ⚠ TWO SIGNALS THAT STACK RATHER THAN COMPETE. The inner ring says *has
-/// something new*; the outer halo says *this is the page you are on*. A name can
-/// be both at once, and then it wears both.
+/// ⚠ ONE RING, AND THE CAPTION. Blue says *this name has something to read*;
+/// ink says *this is the page you are on*. There is no halo any more — a
+/// ground-coloured spacer plus an outer ring read as a target reticle at 60px.
+/// Where a name is both active and unread, the blue wins on the ring and the ink
+/// caption still says where you are.
 private struct SunnyCircle: View {
     let caption: String
     let active: Bool
@@ -68,32 +75,22 @@ private struct SunnyCircle: View {
                element's edge, which is exactly what strokeBorder does and what
                stroke does not. */
             .overlay(Circle().strokeBorder(innerRing.0, lineWidth: innerRing.1))
-            /* The halo, ordered outward: a ground-coloured spacer from the
-               circle's edge out 3, then the ink ring from there out another
-               1.5. CSS spreads each stop from the edge, so the second is 4.5
-               and only its outer 1.5 is left visible. A single thick ring is
-               what this looks like when the spacer is dropped. */
-            .overlay {
-                if active {
-                    ZStack {
-                        Circle().stroke(S.ground, lineWidth: S.shellHaloSpacer)
-                            .frame(width: S.shellCircle + S.shellHaloSpacer,
-                                   height: S.shellCircle + S.shellHaloSpacer)
-                        Circle().stroke(S.ink, lineWidth: S.shellHaloRing)
-                            .frame(width: S.shellCircle + S.shellHaloSpacer * 2 + S.shellHaloRing,
-                                   height: S.shellCircle + S.shellHaloSpacer * 2 + S.shellHaloRing)
-                    }
-                }
-            }
-
+            /* ⚠ NO HALO. It was a ground-coloured spacer plus an outer ink
+               ring, and at 60px that read as a target reticle rather than a
+               selection. Active is the ink ring above and the ink caption
+               below, with nothing orbiting it. */
             Text(caption)
-                .font(S.inter(S.t11, S.wSemiN))
-                .tracking(S.track(S.t11, -0.005))
+                .font(S.inter(S.tShellCaption, S.wSemiN))
+                .tracking(S.track(S.tShellCaption, -0.01))
                 .foregroundStyle(active ? S.ink : S.shellCountClear)
                 .monospacedDigit()
                 .lineLimit(1)
         }
         .frame(width: S.shellCircle)
+        /* The column must measure 85 (60 + 10 + 15): 116 − 18 − 13 = 85 exactly,
+           and anything taller clips against the scroller rather than scrolling,
+           because a horizontal scroller has no vertical axis to give. */
+        .measure("strip-col")
         .contentShape(Rectangle())
         .onTapGesture(perform: tap)
         .animation(.easeInOut(duration: S.durRing), value: active)
@@ -112,6 +109,21 @@ struct SunnyStrip: View {
     @Binding var page: SunnyPage
 
     var body: some View {
+        /* ⚠ A HAIRLINE, NOT A SHADOW. A shadow says the strip floats over the
+           pane; it does not — it is a sibling AFTER the pane and takes its own
+           117 of the frame. The rule is full bleed and never compresses. */
+        VStack(spacing: 0) {
+            Rectangle().fill(S.shellHair)
+                .frame(height: 1)
+                .frame(maxWidth: .infinity)
+            scroller
+        }
+        .frame(height: S.shellStripH)
+        .background(S.ground)
+        .measure("strip")
+    }
+
+    private var scroller: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: S.shellStripGap) {
                 SunnyCircle(caption: "New",
@@ -120,22 +132,22 @@ struct SunnyStrip: View {
                             tap: { go(.new) }) {
                     /* ⚠ NOT A SOLID BLACK DISC. A filled circle is the heaviest
                        object the strip can hold and it outweighed the positions
-                       the strip exists to show. New now uses the SAME vocabulary
-                       as the names — empty circle, thin ring, figure in ink — and
+                       the strip exists to show. New uses the SAME vocabulary as
+                       the names — empty circle, thin ring, figure in ink — and
                        earns the blue ring only when something is actually due,
                        which is precisely what "new" means. */
                     AnyView(
                         Text("\(due)")
                             .font(S.inter(S.tShellCount, S.wBoldN))
-                            .tracking(S.track(S.tShellCount, -0.02))
+                            .tracking(S.track(S.tShellCount, -0.03))
                             .foregroundStyle(due > 0 ? S.update : S.shellCountClear)
                             .monospacedDigit()
                     )
                 }
 
-                /* A rule between New and the positions, centred on the circles
-                   rather than on the whole column — the captions below are not
-                   part of what it separates. */
+                /* A rule between New and the positions, lifted so it centres on
+                   the circles rather than on the whole column — the captions
+                   below are not part of what it separates. */
                 Rectangle().fill(S.shellHair)
                     .frame(width: 1, height: S.shellDividerH)
                     .offset(y: (S.shellCircle - S.shellDividerH) / 2)
@@ -147,8 +159,8 @@ struct SunnyStrip: View {
                                 tap: { go(.name(b.ticker)) }) {
                         AnyView(
                             Text(b.ticker)
-                                .font(S.inter(S.t11, S.wBoldN))
-                                .tracking(S.track(S.t11, 0.02))
+                                .font(S.inter(S.tShellTicker, S.wBoldN))
+                                .tracking(S.track(S.tShellTicker, 0.01))
                                 .foregroundStyle(S.mute)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
@@ -158,12 +170,13 @@ struct SunnyStrip: View {
             }
             .padding(.horizontal, S.margin)
             .padding(.top, S.shellStripPadTop)
+            /* ⚠ 13 IS LOAD-BEARING. The circle column measures 85 (60 + 10 + 15)
+               and 116 − 18 − 13 = 85 exactly. At 14 the strip scrolled 1px
+               vertically, which on a horizontal scroller reads as a jitter. */
             .padding(.bottom, S.shellStripPadBottom)
         }
         .scrollIndicators(.hidden)
-        .frame(height: S.shellStripH)
-        .background(S.ground)
-        .measure("strip")
+        .frame(height: S.shellStripScrollH)
     }
 
     private func go(_ p: SunnyPage) {

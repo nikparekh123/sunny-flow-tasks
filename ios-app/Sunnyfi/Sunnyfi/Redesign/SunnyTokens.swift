@@ -657,22 +657,42 @@ enum S {
     //
     // The row sum is load-bearing: 54 + 88 + 694 + 24 = 860. Change one row and
     // another has to give the same amount back.
-    static let shellStripH: CGFloat = 88
-    static let shellStripPadTop: CGFloat = 8
-    static let shellStripPadBottom: CGFloat = 14
-    static let shellStripGap: CGFloat = 15
-    static let shellPanePadTop: CGFloat = 2
-    static let shellPanePadBottom: CGFloat = 64
+    /// ⚠ THE STRIP DOCKS AT THE BOTTOM (26 Aug 2026), as a flex sibling AFTER
+    /// the pane — not an absolute overlay. It is the only control on screen and
+    /// the one pressed most, and at the top of a 393 × 860 phone it sat outside
+    /// thumb reach. The rows are now 54 + 665 + 117 + 24 = 860, and that sum is
+    /// still load-bearing: change one row and another gives the same back.
+    ///
+    /// The band is a 1px hairline over a 116 scroller, laid out as a column.
+    /// ⚠ A HAIRLINE, NOT A SHADOW. A shadow says the strip floats over the
+    /// content, and it does not — it takes its own space.
+    static let shellStripH: CGFloat = 117          // 1 hairline + 116 scroller
+    static let shellStripScrollH: CGFloat = 116
+    static let shellStripPadTop: CGFloat = 18
+    /// ⚠ 13 IS LOAD-BEARING. The circle column measures 85 (60 + 10 + 15) and
+    /// 116 − 18 − 13 = 85 exactly. At 14 the strip scrolled 1px vertically.
+    static let shellStripPadBottom: CGFloat = 13
+    static let shellStripGap: CGFloat = 14
+    static let shellPanePadTop: CGFloat = 4
+    /// ⚠ 24, NOT 64. The 64 cleared a bottom rail that is no longer there, and
+    /// the strip now takes its own space rather than overlaying the pane.
+    static let shellPanePadBottom: CGFloat = 24
     static let shellPaneGap: CGFloat = 11
-    static let shellCircle: CGFloat = 44          // = --hit-min. never smaller
-    static let shellCircleGap: CGFloat = 9        // circle to caption
-    static let shellHeadMark: CGFloat = 34        // the ticker circle in a heading
-    static let shellDividerH: CGFloat = 30
-    static let shellDividerLift: CGFloat = 8
+    /// ⚠ 60, NOT 44. --hit-min is a floor, not a target: at 44 the circles were
+    /// too small and too far from the thumb, and they are the only thing on the
+    /// screen to press.
+    static let shellCircle: CGFloat = 60
+    static let shellCircleGap: CGFloat = 10        // circle to caption
+    static let shellHeadMark: CGFloat = 34         // the ticker circle in a heading
+    static let shellDividerH: CGFloat = 40
+    static let shellDividerLift: CGFloat = 13
 
-    /// THE shell hairline — rest ring, heading mark, P&L divider, strip divider.
-    /// One step lighter than --hair #C2C7BE, which stays on card interiors: a
-    /// card hairline inside a shell hairline reads as a double rule.
+    /// The strip's own type, which moved with the circle. None of it is on the
+    /// white card ramp — a 60pt target carries its own scale.
+    static let tShellTicker: CGFloat = 13          // 700, .01em
+    static let tShellCount: CGFloat = 21           // 700, −.03em. the New count
+    static let tShellCaption: CGFloat = 12         // 600, −.01em
+
     static let shellHair = hex(0xE7E9E5)
     static let shellCountClear = hex(0x8A9086)    // the New count when nothing is due
     static let shellEmptyInk   = hex(0x3C423A)    // empty-page body at 300 — legal at 15
@@ -683,12 +703,10 @@ enum S {
     /// direction. Ring, glow and the due count all share it.
     static let update = hex(0x2A4A6E)
 
-    /// The active halo: a ground-coloured spacer, then the ring drawn outside it,
-    /// ordered outward so the gap reads as a gap and not as a thick ring. CSS
-    /// spreads a box-shadow from the element edge, so 3 then 4.5 paints 3pt of
-    /// ground and 1.5pt of ink.
-    static let shellHaloSpacer: CGFloat = 3
-    static let shellHaloRing: CGFloat = 1.5
+    /// ⚠ THE ACTIVE HALO IS GONE (26 Aug 2026). It was a ground-coloured spacer
+    /// plus an outer ink ring, and at 60px that read as a target reticle rather
+    /// than a selection. Active is now the ink ring and the ink caption, with
+    /// nothing orbiting it. The blue update ring and its glow are unchanged.
     static let shellRingRest: CGFloat = 1
     static let shellRingLive: CGFloat = 1.5
 
@@ -702,11 +720,6 @@ enum S {
     /// them at once never stop.
     static let shellGlow = [SunnyShadow(hex(0x2A4A6E).opacity(0.34), 5, 0),
                             SunnyShadow(hex(0x2A4A6E).opacity(0.18), 9, 0)]
-    /// The New count. 16 is NOT on the white ramp — SHELL.md dropped it there for
-    /// exactly that reason — so it is declared here as a shell value rather than
-    /// borrowed from the retired --t-paper-body, which is a different job at the
-    /// same size. It is the only 16px figure in the app.
-    static let tShellCount: CGFloat = 16
     static let durRing: Double = 0.18             // the shell's only motion
 
     static func hex(_ v: UInt32) -> Color {
