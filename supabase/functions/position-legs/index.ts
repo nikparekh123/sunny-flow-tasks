@@ -22,7 +22,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-26.7';
+const BUILD = '2026-08-26.9';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** Reading order in the grid is tab order in the detail card (§1). Fixed. */
@@ -139,7 +139,7 @@ Deno.serve(async (req) => {
     }
     const [everyTrade, sells, allLots] = await Promise.all([
       getAll('option_trades?voided_at=is.null&order=id.asc'
-        + '&select=ticker,option_type,direction,strike,expiry,action,contracts,premium'),
+        + '&select=id,ticker,trade_date,option_type,direction,strike,expiry,action,contracts,premium'),
       getAll('share_sells?voided_at=is.null&order=id.asc'
         + '&select=ticker,trade_date,quantity,price,realized_pl'),
       /* ⚠ EVERY LOT, INCLUDING THE FULLY SOLD ONES. The fetch above filters
@@ -201,8 +201,16 @@ Deno.serve(async (req) => {
 
        Per leg the series is a few hundred rows at most, so each request is
        comfortably inside the cap and the fan-out is one call per OPEN leg. */
-    const openIds = [...new Set((trades as Record<string, unknown>[])
-      .filter((t) => t.action === 'open')
+    /* ⚠ EVERY LEG ALIVE IN THE WINDOW, not just the ones still open today.
+       The weekly chart used to read marks for `expiry >= today` only, so a leg
+       that expired inside the window contributed NOTHING to the week it lived
+       and died in — which is the week its money was made. NKE's week of 17 Aug
+       showed −$1,668: shares +$32 plus a long put's −$1,700 of decay, while the
+       20 calls sold at 0.61 and the 20 puts sold at 0.60 that expired that
+       Friday were invisible. The card's own subject is what the position did
+       that week, and the two legs it dropped were most of it. */
+    const openIds = [...new Set((everyTrade as Record<string, unknown>[])
+      .filter((t) => t.action === 'open' && String(t.expiry ?? '') >= since)
       .map((t) => String(t.id)))];
     const markSeries = new Map<string, Array<{ d: string; v: number }>>();
     await Promise.all(openIds.map(async (id) => {
@@ -363,6 +371,70 @@ Deno.serve(async (req) => {
     const cashIn = (t: string, after: string, on: string) =>
       (ledger.get(t) ?? []).reduce((n, e) => (e.d > after && e.d <= on ? n + e.cash : n), 0);
 
+    /* ── the option ledger, so a week counts every leg that lived in it ───────
+       Same identity as the shares, and it has to be the same one or the two
+       halves of a week cannot be added:
+
+         weekly P&L = value(end) − value(start) − cash paid in during the week
+
+       An option's VALUE is signed by direction — a long leg is an asset, a short
+       leg is a liability — and CASH IN is money out of pocket, so buying is
+       positive and selling is negative. Once a leg expires it holds no
+       contracts, so its value is zero and the identity books the whole remaining
+       credit or debit into that week without needing a settlement price.
+
+       ⚠ AND AN ASSIGNMENT IS NOT DOUBLE COUNTED. A short call assigned on Friday
+       leaves the option worth nothing here, while the shares it called away
+       leave through the share ledger at the strike. Two ledgers, one event, no
+       overlap. */
+    type OptLeg = { long: boolean; expiry: string; openId: string;
+                    events: Array<{ d: string; dq: number; cash: number }> };
+    const optBy = new Map<string, Map<string, OptLeg>>();
+    for (const t of everyTrade) {
+      const tick = String(t.ticker);
+      const expiry = String(t.expiry ?? '').slice(0, 10);
+      if (expiry && expiry < since) continue;          // dead before the window
+      const long = String(t.direction) !== 'short';
+      const key = `${t.option_type}|${N(t.strike)}|${expiry}|${long}`;
+      const per = optBy.get(tick) ?? new Map<string, OptLeg>();
+      const e: OptLeg = per.get(key)
+        ?? { long, expiry, openId: '', events: [] };
+      const opening = t.action === 'open';
+      if (opening && !e.openId) e.openId = String(t.id);
+      const q = N(t.contracts);
+      e.events.push({
+        d: String(t.trade_date ?? '').slice(0, 10),
+        dq: (opening ? 1 : -1) * q,
+        cash: (opening ? 1 : -1) * (long ? 1 : -1) * q * N(t.premium) * 100,
+      });
+      per.set(key, e);
+      optBy.set(tick, per);
+    }
+    /** The option book's mark-to-market value on `on`, longs positive. */
+    const optValueOn = (t: string, on: string): number | null => {
+      let v = 0;
+      for (const leg of (optBy.get(t) ?? new Map<string, OptLeg>()).values()) {
+        const held = leg.events.reduce((n, e) => (e.d <= on ? n + e.dq : n), 0);
+        if (Math.abs(held) < 0.0001) continue;         // not open on that day
+        if (leg.expiry && leg.expiry < on) continue;   // expired, worth nothing
+        const m = valueOn(markSeries.get(leg.openId) ?? [], on);
+        /* ⚠ ALIVE BUT UNPRICED IS NOT WORTHLESS. Returning 0 here would make a
+           leg with no mark at a boundary read as a full gain or loss. No price,
+           no week — the caller nulls it, exactly as the shares do. */
+        if (m == null) return null;
+        v += (leg.long ? 1 : -1) * held * m * 100;
+      }
+      return v;
+    };
+    /** Cash paid in for options over (after, on]. Selling is negative. */
+    const optCashIn = (t: string, after: string, on: string) => {
+      let c = 0;
+      for (const leg of (optBy.get(t) ?? new Map<string, OptLeg>()).values()) {
+        for (const e of leg.events) if (e.d > after && e.d <= on) c += e.cash;
+      }
+      return c;
+    };
+
     const out: Record<string, unknown>[] = [];
     for (const [ticker, sh] of shareBy) {
       const spot = spotBy.get(ticker) ?? 0;
@@ -517,8 +589,69 @@ Deno.serve(async (req) => {
           };
         });
 
+      /* ── the position's week: REALIZED ONLY ──────────────────────────────
+         ⚠ NOTHING UNREALIZED IN THIS CHART. Nik, 26 Aug: "this is unrealized
+         you cannot count this — it's only realized that we need to count." The
+         version before this marked every open leg to market, so the week he
+         bought a Jan 15 hedge for $8,300 charged him its first four days of
+         decay: his week of 17 Aug read +$1,952 against the +$2,452 he actually
+         banked, and the $500 difference was a put he still holds.
+
+         docs/PNL_GLOSSARY.md defines REALIZED as closed positions only, and
+         that is exactly this: a leg books its whole lifetime cash flow in the
+         week it closed or expired, and shares book IBKR's own fifoPnlRealized
+         on the day of the sale. Nothing that is still open contributes.
+
+         ⚠ AND THAT MEANS MOST WEEKS ARE EMPTY, which is correct rather than
+         broken. A position opened this week has realized nothing, so its card
+         draws no bars at all. Six of nine names read empty on 26 Aug. A blank
+         chart on a young position is the honest answer to "what has this
+         banked", not a missing feature.
+
+         One good property falls out: the share side uses IBKR's realized figure
+         rather than our own lot reconstruction, so a name whose lot history has
+         a hole — NKE is short about 500 shares — still books the right number
+         here, because IBKR did the FIFO. */
+      const realizedWeek = (i: number) => {
+        const w = weekStarts[i], end = weekEnds[i];
+        let v = 0;
+        let any = false;
+        for (const r of sells) {
+          if (String(r.ticker) !== ticker) continue;
+          const d = String(r.trade_date ?? '').slice(0, 10);
+          if (d < w || d > end) continue;
+          v += N(r.realized_pl); any = true;
+        }
+        for (const leg of (optBy.get(ticker) ?? new Map<string, OptLeg>()).values()) {
+          const net = leg.events.reduce((n, e) => n + e.dq, 0);
+          const closes = leg.events.filter((e) => e.dq < 0).map((e) => e.d).sort();
+          /* Closed out by a trade, or simply expired. An expired leg has no
+             closing row on some paths, so the expiry IS the date it realized. */
+          const on = Math.abs(net) < 0.0001 && closes.length
+            ? closes[closes.length - 1]
+            : (leg.expiry && leg.expiry < todayISO ? leg.expiry : '');
+          if (!on || on < w || on > end) continue;
+          /* cash is money OUT, so the realized P&L is its negative: a short leg
+             opened for a credit and expiring worthless nets the credit. */
+          v += -leg.events.reduce((n, e) => n + e.cash, 0);
+          any = true;
+        }
+        return { any, v };
+      };
+      const posWeeks = weekStarts.map((_, i) => {
+        const live = i === weekStarts.length - 1;
+        const label = live ? 'Live' : weekLabel(weekStarts[i]);
+        const { any, v } = realizedWeek(i);
+        if (!any) return null;
+        return { label, live, pnl: Math.round(v) };
+      });
+
       out.push({
         ticker, spot,
+        /* ⚠ THE CARD READS THIS, not the per-leg series summed. The per-leg
+           arrays stay in the payload because they are still true statements
+           about each leg, and because one backend serves two clients. */
+        weeks: posWeeks,
         floors,
         shares,
         legs,

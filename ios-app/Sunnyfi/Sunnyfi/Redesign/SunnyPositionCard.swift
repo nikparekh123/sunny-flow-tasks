@@ -31,23 +31,19 @@ struct SunnyPositionCard: View {
         var id: String { label }
     }
 
+    /* ⚠ THE SERVER'S POSITION SERIES, NEVER THE PER-LEG ONES SUMMED. Summing
+       here looked equivalent and was not: the per-leg arrays only cover legs
+       that are still open, so a leg that expired inside the window contributed
+       nothing to the week it lived and died in. NKE's week of 17 Aug came out
+       −$1,668 — shares +$32 and a long put's decay — while the 20 calls sold at
+       0.61 and the 20 puts sold at 0.60 that expired that Friday were not in the
+       payload at all. Both halves now come from one identity server-side, where
+       the expired legs are visible. */
     private var weeks: [Week] {
-        /* The shares series defines the week grid: it is the one leg that exists
-           for the whole life of the position, so its labels are the axis. */
-        let grid = p.shares.weeks
-        var out: [Week] = []
-        for (i, w) in grid.enumerated() {
-            var sum = 0
-            var seen = false
-            if let w { sum += w.pnl; seen = true }
-            for l in p.legs where i < l.weeks.count {
-                if let lw = l.weeks[i] { sum += lw.pnl; seen = true }
-            }
-            guard seen, let ref = w ?? p.legs.compactMap({ i < $0.weeks.count ? $0.weeks[i] : nil }).first
-            else { continue }
-            out.append(Week(label: ref.label, live: ref.live, pnl: sum))
+        (p.weeks ?? []).compactMap { w in
+            guard let w else { return nil }
+            return Week(label: w.label, live: w.live, pnl: w.pnl)
         }
-        return out
     }
 
     /* ⚠ THE ROWS ARE PROPORTIONAL, NEVER FIXED-HEIGHT. Fixed heights inside a

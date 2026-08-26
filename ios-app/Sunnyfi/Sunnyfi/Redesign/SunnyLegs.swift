@@ -22,6 +22,16 @@ struct LegsPosition: Decodable, Identifiable {
     let shares: Shares
     let legs: [Leg]
     let floors: [PutFloor]
+    /// ⚠ THE POSITION'S OWN WEEKLY SERIES, and the card must read THIS rather
+    /// than summing the per-leg arrays. Those are mark-to-mark on legs that are
+    /// still open, so a leg that expired inside the window contributes nothing
+    /// to the week it lived and died in — the week its money was made. NKE's
+    /// week of 17 Aug summed to −$1,668 that way: shares +$32 and a long put's
+    /// decay, with 20 calls and 20 puts sold that Friday invisible. Server-side
+    /// it is +$1,952.
+    ///
+    /// Optional so a run against an older deployment decodes rather than throws.
+    let weeks: [LegWeek?]?
     /// UNREALIZED, and the page heading calls it CURRENT: the five leg cards
     /// summed, so the heading and the cards under it can never disagree.
     let total: Int
