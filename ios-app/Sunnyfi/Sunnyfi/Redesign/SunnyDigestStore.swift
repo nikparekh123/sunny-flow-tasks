@@ -36,8 +36,11 @@ final class DigestStore {
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
         r.setValue(Secrets.supabasePublishableKey, forHTTPHeaderField: "apikey")
         r.setValue("Bearer \(Secrets.supabasePublishableKey)", forHTTPHeaderField: "Authorization")
-        // peek: reading the card to build it must not consume the freshness
-        // window that decides tomorrow's `new` tags.
+        /* `peek` is now redundant — position-live v22 never writes the seen
+           table on a fetch — but it is still sent, because it costs nothing and
+           an older deployment of the function would consume the window without
+           it. Belt and braces on the one thing that is invisible when it goes
+           wrong: a burned window looks exactly like a quiet day. */
         r.httpBody = Data("{\"peek\":true}".utf8)
         do {
             let (d, resp) = try await URLSession.shared.data(for: r)
@@ -46,6 +49,52 @@ final class DigestStore {
             cards = (p.positions ?? []).map { SunnyDigestCardModel($0, asof: p.asof ?? "") }
         } catch { self.error = String(describing: error) }
     }
+
+    /* ── the Read control is what advances the freshness window ─────────────
+       ⚠ MARKING IS A READ, NOT A FETCH. Until 26 Aug position-live advanced the
+       window whenever anyone asked it for cards, so a probe, a refresh or a
+       background task could empty a day on Nik's behalf — and a diagnostic
+       `curl -d '{}'` did exactly that while this was being built. The server
+       and the screen now mean the same thing by "read": this fires from the
+       same `markRead` the Read pill calls, and nothing else moves it.
+
+       Fire-and-forget on purpose. The card has already moved to its name's page
+       locally; a failed mark means it comes back tomorrow, which is a far better
+       failure than a card that vanishes because a write succeeded and the UI
+       did not. */
+    func markSeen(_ ticker: String) async {
+        guard !SunnyProbe.on else { return }
+        guard let url = URL(string: "\(Secrets.supabaseURL)/functions/v1/position-live") else { return }
+        var r = URLRequest(url: url)
+        r.httpMethod = "POST"
+        r.timeoutInterval = 20
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.setValue(Secrets.supabasePublishableKey, forHTTPHeaderField: "apikey")
+        r.setValue("Bearer \(Secrets.supabasePublishableKey)", forHTTPHeaderField: "Authorization")
+        r.httpBody = Data("{\"seen\":[\"\(ticker.uppercased())\"]}".utf8)
+        _ = try? await URLSession.shared.data(for: r)
+    }
+}
+
+/// ⚠ A VERIFICATION RUN MUST NOT SPEND HIS FEED. Every launch argument here is
+/// one only I ever pass, and any of them means this launch is a screenshot or a
+/// measurement rather than Nik reading his cards. Local filing still runs, so
+/// the card still moves to its name's page and that half is fully exercised —
+/// but the server window is left alone. The guard sits on the WRITE, not on the
+/// feature.
+///
+/// ⚠ `-tapRead` IS DELIBERATELY NOT IN THIS SET. Its entire purpose is to fire
+/// the real Read handler end to end, and a probe that skips the write would
+/// verify everything except the thing most likely to be broken — the exact
+/// shape of test this file has been burned by before. So it DOES spend one
+/// name's window, and that is the price of it being a real test. Use it on
+/// purpose, not by habit.
+enum SunnyProbe {
+    static let on: Bool = {
+        let a = Set(ProcessInfo.processInfo.arguments)
+        return !a.isDisjoint(with: ["-forceFeatured", "-showPrice",
+                                    "-page", "-scrollTo", "-measure"])
+    }()
 }
 
 // MARK: - wire format

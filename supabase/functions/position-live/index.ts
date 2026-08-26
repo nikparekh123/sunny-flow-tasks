@@ -44,7 +44,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-25.2';
+const BUILD = '2026-08-26.1';
 const POLY = 'https://api.polygon.io';
 
 /** The Friday at least 5 sessions out: the contract actually written. */
@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
     const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const pk = Deno.env.get('POLYGON_API_KEY')!;
     const D = db(url, key);
-    let body: { tickers?: string[]; peek?: boolean } = {};
+    let body: { tickers?: string[]; peek?: boolean; seen?: string[] } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* none */ }
     const today = parseISO(nyToday());
     const todayISO = ymd(today);
@@ -145,6 +145,22 @@ Deno.serve(async (req) => {
       D.get('income_sleeve_names?active=is.true&select=ticker'),
     ]);
     const sleeve = new Set(sleeveRows.map((r) => String(r.ticker)));
+    /* ── MARK A CARD READ ────────────────────────────────────────────────
+       `{"seen":["NKE"]}` advances the freshness window for those names and
+       returns. It is the ONLY thing that advances it now — see the note at the
+       old consume block below. Handled here, before any card is built, because
+       marking is not a read of the feed and should not pay for one. */
+    if (body.seen?.length) {
+      const now = new Date().toISOString();
+      await D.upsert('income_card_seen',
+        body.seen.map((t) => ({ ticker: String(t).toUpperCase(),
+                                since_on: todayISO, visit_on: todayISO,
+                                updated_at: now })),
+        'ticker');
+      return json(200, { ok: true, build: BUILD, asof: todayISO,
+                         seen: body.seen, positions: [] });
+    }
+
     const names = body.tickers ?? [...new Set(lots.map((r) => String(r.ticker)))].filter((t) => sleeve.has(t));
     if (!names.length) return json(200, { ok: true, empty: true, note: 'no shares held' });
     const inList = `(${names.join(',')})`;
@@ -345,13 +361,24 @@ Deno.serve(async (req) => {
          safe for the reason the headings were not: a tag rides on a bullet
          that already earned its place, so it can never manufacture content. */
       const sRow = (seen as Record<string, unknown>[]).find((r) => String(r.ticker) === t);
-      const lastVisit = sRow ? String(sRow.visit_on ?? '').slice(0, 10) : '';
-      /* The cutoff moves on the FIRST open of a new day and lands on the
-         PREVIOUS visit day, never on today. Collapse the two dates into one
-         and opening the app twice before lunch empties the card the second. */
-      const sinceOn = sRow
-        ? (lastVisit && lastVisit < todayISO ? lastVisit : String(sRow.since_on ?? '').slice(0, 10))
-        : '';
+      /* ⚠ `since_on` IS THE DAY HE READ THE CARD, NOT THE DAY HE OPENED THE APP.
+         It moves only when the Read control fires (`{"seen":[...]}` above), so
+         `d > since_on` is exactly right: everything dated that day was ON the
+         card he just read.
+
+         The old rule walked it forward on the first FETCH of a new day and
+         landed it on the PREVIOUS visit day. Two things broke. Any fetch burned
+         the window, so twenty verification launches emptied a day he had not
+         looked at. And with day-granularity dates, `>` on the previous visit
+         day threw away everything that arrived on that day AFTER he looked —
+         on 26 Aug the cut sat on the 25th and the newest action on every name
+         he holds was also the 25th, so the card reported nothing new while
+         intel-sync had written 15,297 rows at 05:30 that morning.
+
+         Residual, and it is small: an item landing later on the day he read is
+         dated that day and will not resurface. intel-sync runs once at 05:30,
+         before he opens, so in practice a day arrives whole. */
+      const sinceOn = sRow ? String(sRow.since_on ?? '').slice(0, 10) : '';
       const cut = sinceOn || ymd(addDays(today, -14));
 
       /* ⚠ THE ENGINE MARKS THE BOLD AND THE HIGHLIGHT, because only the engine
@@ -680,27 +707,17 @@ Deno.serve(async (req) => {
       };
     }));
 
-    /* ── Consume the freshness window, but only after the cards are built ────
-       The cutoff advances on the FIRST open of a new day and lands on the
-       previous visit day, never on today, so the card reads the same all day
-       instead of emptying itself the second time it is opened.
+    /* ── NOTHING IS CONSUMED BY A FETCH ANY MORE ─────────────────────────
+       ⚠ THIS FUNCTION NO LONGER WRITES income_card_seen. Reading the feed is
+       not reading a card: the shell has an explicit Read control, and that
+       control is what files the card and what advances the window, through
+       `{"seen":[...]}` at the top of this handler. Server and screen now mean
+       the same thing by "read".
 
-       `peek` exists so a probe can read a card without burning the window.
-       Without it, testing this endpoint marks everything as seen and the next
-       real open shows nothing. */
-    if (!body.peek) {
-      const rows = names.map((t) => {
-        const r = (seen as Record<string, unknown>[]).find((x) => String(x.ticker) === t);
-        const lv = r ? String(r.visit_on ?? '').slice(0, 10) : '';
-        return {
-          ticker: t,
-          visit_on: todayISO,
-          since_on: !r ? null : (lv && lv < todayISO ? lv : (r.since_on ?? null)),
-          updated_at: new Date().toISOString(),
-        };
-      });
-      await D.upsert('income_card_seen', rows, 'ticker');
-    }
+       `body.peek` is accepted and ignored, kept only so an older caller that
+       still sends it does not break. Do not reintroduce a write here — a fetch
+       that marks is a window any probe, any refresh and any background task can
+       empty on his behalf. */
     return json(200, { ok: true, build: BUILD, asof: todayISO, positions: out });
   } catch (e) { return json(500, { ok: false, error: String(e) }); }
 });

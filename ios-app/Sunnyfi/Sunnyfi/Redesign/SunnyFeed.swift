@@ -339,5 +339,14 @@ struct SunnyPane: View {
             read.insert(i.id)
             SunnyRead.save(read)
         }
+        /* ⚠ AND TELL THE SERVER, because the server's idea of "read" used to be
+           "somebody fetched this", which any probe or refresh could satisfy.
+           The Read control is now the only thing that advances the freshness
+           window, so the amber highlight and the NEW tags mean on the wire what
+           the pill means on the screen. Digests only — the week card belongs to
+           no name and the planner has no read control at all. */
+        if case .digest = i.kind, let t = i.ticker {
+            Task { await digest.markSeen(t) }
+        }
     }
 }
