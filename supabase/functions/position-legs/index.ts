@@ -22,7 +22,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-25.4';
+const BUILD = '2026-08-26.1';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** Reading order in the grid is tab order in the detail card (§1). Fixed. */
@@ -97,6 +97,81 @@ Deno.serve(async (req) => {
       D.get(`daily_closes?date=gte.${since}&select=ticker,date,close_price`
         + '&order=date.asc&limit=5000'),
     ]);
+
+    /* ── REALIZED, so a page heading can print a Total ────────────────────
+       SHELL-PAGED.md §5 puts two figures over every name: Current, what the
+       open position is worth against its basis right now, and Total, every
+       dollar the name has made or lost all time. Current is the sum of the leg
+       cards and is already computed below. Total is Current + REALIZED, and
+       docs/PNL_GLOSSARY.md fixes what that word means:
+
+         REALIZED = stock sold - stock bought
+                  + premium collected on CLOSED positions
+                  - cost on CLOSED positions
+                  + dividends received on CLOSED positions
+
+       ⚠ THE DIVIDEND TERM IS MISSING AND THAT IS KNOWN, NOT AN OVERSIGHT. The
+       `dividends` table is Polygon's SCHEDULE — ex_date, cash_amount, frequency
+       — not a record of cash received, and there is no receipts table to sum.
+       TLT is the only name it would move. Do not synthesise it from the
+       schedule and a share count: a payment is a fact, not an estimate.
+
+       ⚠ PAGINATED ON PURPOSE. This project caps PostgREST at 1000 rows and
+       `limit` cannot lift it; option_trades is at 681 and grows every week. A
+       truncated response is indistinguishable from a complete one, and this
+       file has already been burned by that once (see the per-leg mark fan-out
+       below). Loop until a page comes back short. */
+    async function getAll(path: string): Promise<Record<string, unknown>[]> {
+      const out: Record<string, unknown>[] = [];
+      for (let off = 0; ; off += 1000) {
+        const page = await D.get(`${path}&limit=1000&offset=${off}`);
+        out.push(...(page as Record<string, unknown>[]));
+        if (page.length < 1000) return out;
+      }
+    }
+    const [everyTrade, sells] = await Promise.all([
+      getAll('option_trades?voided_at=is.null&order=id.asc'
+        + '&select=ticker,option_type,direction,strike,expiry,action,contracts,premium'),
+      getAll('share_sells?voided_at=is.null&order=id.asc&select=ticker,realized_pl'),
+    ]);
+
+    /* A leg is REALIZED when it has been closed out (contracts net to zero) or
+       when its expiry has passed — an expired short keeps its whole credit, an
+       expired long loses its whole debit, and an assignment is a close by the
+       glossary's own rule. Either way the realized figure is simply the leg's
+       net CASH FLOW, signed by what the trade did rather than by the leg's
+       direction:
+
+         short open  receive +      long open   pay      -
+         short close pay     -      long close  receive  +
+
+       Net that over the life of the leg and the sign is already the P&L, which
+       is why nothing here needs a short/long branch at the end. */
+    const realizedBy = new Map<string, number>();
+    const legFlow = new Map<string, { net: number; cash: number; expiry: string; ticker: string }>();
+    for (const t of everyTrade) {
+      const tick = String(t.ticker);
+      const short = String(t.direction) === 'short';
+      const opening = t.action === 'open';
+      const expiry = String(t.expiry ?? '').slice(0, 10);
+      const key = `${tick}|${t.option_type}|${N(t.strike)}|${expiry}|${short}`;
+      const e = legFlow.get(key) ?? { net: 0, cash: 0, expiry, ticker: tick };
+      e.net += (opening ? 1 : -1) * N(t.contracts);
+      e.cash += (opening ? 1 : -1) * (short ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
+      legFlow.set(key, e);
+    }
+    for (const e of legFlow.values()) {
+      const closed = Math.abs(e.net) < 0.0001 || (e.expiry !== '' && e.expiry < todayISO);
+      if (!closed) continue;
+      realizedBy.set(e.ticker, (realizedBy.get(e.ticker) ?? 0) + e.cash);
+    }
+    /* share_sells.realized_pl is IBKR's own fifoPnlRealized, imported rather
+       than recomputed — the reconcile could not rebuild a sold lot's basis and
+       left every sell at zero, which is what put Sunnyfi ~$5.9k under IBKR. */
+    for (const r of sells) {
+      const t = String(r.ticker);
+      realizedBy.set(t, (realizedBy.get(t) ?? 0) + N(r.realized_pl));
+    }
 
     const markBy = new Map<string, number>();
     for (const m of marks) markBy.set(String(m.option_trade_id), N(m.last_mark));
@@ -342,6 +417,15 @@ Deno.serve(async (req) => {
         /* The header is the sum of the VISIBLE legs, so it moves with the leg
            count exactly as §4 requires. */
         total: Math.round(shares.pnl + legs.reduce((s, l) => s + l.pnl, 0)),
+        /* The page heading's two figures. `total` above is UNREALIZED and is
+           what the heading calls CURRENT — it is the five leg cards summed, so
+           the heading and the cards under it can never disagree. `allTime` adds
+           everything already closed. They disagree with each other on purpose:
+           that gap is what years of writing premium against a position that is
+           currently underwater looks like. */
+        realized: Math.round(realizedBy.get(ticker) ?? 0),
+        allTime: Math.round(shares.pnl + legs.reduce((s, l) => s + l.pnl, 0)
+                            + (realizedBy.get(ticker) ?? 0)),
         /* Parity of the OPTION-leg count picks the layout (§1): even puts
            shares on an M so the rows square off, odd makes shares an S and it
            joins the run. The client must not re-derive this. */

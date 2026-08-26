@@ -82,90 +82,21 @@ struct RailFact: Decodable, Identifiable {
     struct Span: Decodable { let text: String; let kind: String }
 }
 
-// MARK: - the dock
+// MARK: - the dock is retired
 
-struct SunnyRail: View {
-    let facts: [RailFact]
-    let hidden: Bool
-    /// The bottom safe area. The spec's home-indicator row is drawn by the HTML
-    /// mock; in a real app it is the OS's, so the dock's ground extends under it
-    /// instead. Same intent — the two read as one surface to the frame edge.
-    let bottomInset: CGFloat
+/* ⚠ THE ALWAYS-ON RAIL IS GONE (26 Aug 2026) and the view that drew it is
+   deleted, not commented out. SHELL-PAGED.md §9: two navigations for one app,
+   and the strip already names every destination.
 
-    private func ink(_ kind: String) -> Color {
-        switch kind {
-        case "figure": return S.railFigure
-        case "minor":  return S.railMinor
-        default:       return S.railWord
-        }
-    }
-    private func weight(_ kind: String) -> CGFloat { kind == "figure" ? S.wSemiN : S.wMidN }
+   ⚠ THIS REVERSES AN EARLIER INSTRUCTION. Nik's line on the previous shell was
+   "the text rail at the bottom will stay as is", and it did stay until the shell
+   under it was replaced. If the facts are wanted back they need a home in the
+   paged shell, not the old dock — a 48pt overlay belongs to a feed you scroll,
+   and there is no longer one feed to scroll.
 
-    var body: some View {
-        VStack(spacing: 0) {
-            ScrollView(.horizontal) {
-                HStack(alignment: .center, spacing: S.railGap) {
-                    ForEach(Array(facts.enumerated()), id: \.element.id) { i, f in
-                        // ⚠ A RULE GOES *BETWEEN* TWO FACTS. N facts, N−1 rules.
-                        // Never leading, never trailing, never inside a compound
-                        // fact — a compound fact is one hit box and one name.
-                        if i > 0 {
-                            Rectangle().fill(S.railDivider)
-                                .frame(width: 1, height: 15)
-                                .padding(.bottom, S.railLift)   // centres on the lifted line
-                        }
-                        fact(f)
-                    }
-                }
-                .padding(.horizontal, S.margin)
-                // stretch is load-bearing: it makes each fact a full 48pt-tall
-                // item, which is how the 44pt hit floor is met with no card.
-                .frame(height: S.railH)
-            }
-            .scrollIndicators(.hidden)
-            .frame(height: S.railH)
-            // The ground carries on under the OS home indicator so the dock and
-            // the frame edge read as one surface.
-            Color.clear.frame(height: bottomInset)
-        }
-        .background {
-            ZStack {
-                // Glass, not a second floor: the feed passes under as a blur.
-                Rectangle().fill(.ultraThinMaterial)
-                Rectangle().fill(S.railGround)
-            }
-            .ignoresSafeArea(edges: .bottom)
-        }
-        // The only upward shadow in the app. No top hairline: at 92% ink against
-        // --ground the edge is already the strongest contrast on screen.
-        .shadow(color: S.shadowInk(0.14), radius: 13, x: 0, y: -10)
-        .offset(y: hidden ? S.railH + bottomInset : 0)
-        .opacity(hidden ? 0 : 1)
-        .animation(S.easeSettle(S.durRailFade), value: hidden)
-        .allowsHitTesting(!hidden)
-                /* Transform on --dur-rail .58s, opacity on --dur-rail-fade .44s, both
-           on --ease-settle. The fade finishes first so the dock is already
-           invisible while it is still travelling, which is what makes it read
-           as sliding away rather than blinking out. */
-        .animation(S.easeSettle(S.durRail), value: hidden)
-    }
-
-    /// One flex item. gap 6, 13px, −.005em, and `padding-bottom: 5` so the line
-    /// rides 2.5pt high — it optically centres in the space ABOVE the home
-    /// indicator rather than measuring centred in its own 48pt box.
-    private func fact(_ f: RailFact) -> some View {
-        HStack(spacing: S.gap3) {
-            ForEach(Array(f.spans.enumerated()), id: \.offset) { _, s in
-                Text(s.text)
-                    .font(S.inter(S.tRail, weight(s.kind)))
-                    .tracking(S.track(S.tRail, -0.005))
-                    .foregroundStyle(ink(s.kind))
-            }
-        }
-        .monospacedDigit()                 // set once, at the fact
-        .padding(.bottom, S.railLift)
-        .frame(height: S.railH)
-        .fixedSize()
-        .contentShape(Rectangle())
-    }
-}
+   THE FILE STAYS because `book` lives here: the strip's names, weights and
+   five-day series all come from sunny-rail, which is why the store is still
+   fetched on every launch. `facts` is still decoded and now goes unused; it is
+   left in the payload rather than dropped from the response, because ONE
+   BACKEND SERVES TWO CLIENTS and a removed field throws keyNotFound in the
+   build already on Nik's phone. Additive only, in both directions. */

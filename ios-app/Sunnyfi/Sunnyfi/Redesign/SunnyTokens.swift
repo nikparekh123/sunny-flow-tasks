@@ -643,6 +643,72 @@ enum S {
     static let cEaseSettle = easeSettle(0.35)
     static let cEaseSwap  = Animation.timingCurve(0.4, 0, 0.2, 1)
 
+    // MARK: - the paged shell — SHELL-PAGED.md
+    //
+    // ⚠ THE FILTER, THE SEARCH FIELD, THE THREE SECTIONS AND THE BOTTOM RAIL ARE
+    // ALL RETIRED (26 Aug 2026). One strip of circles at the top is the whole
+    // navigation: New first, then one circle per position, and tapping one
+    // REPLACES the pane rather than scrolling to a section. SHELL.md is history;
+    // do not rebuild any part of it from that file or from a screenshot.
+    //
+    // The reasoning, so it is not relitigated: a filter is a question the app
+    // asks the user, and a position list is an answer. Seven names fit in a
+    // strip. Two navigations for one app is one too many.
+    //
+    // The row sum is load-bearing: 54 + 88 + 694 + 24 = 860. Change one row and
+    // another has to give the same amount back.
+    static let shellStripH: CGFloat = 88
+    static let shellStripPadTop: CGFloat = 8
+    static let shellStripPadBottom: CGFloat = 14
+    static let shellStripGap: CGFloat = 15
+    static let shellPanePadTop: CGFloat = 2
+    static let shellPanePadBottom: CGFloat = 64
+    static let shellPaneGap: CGFloat = 11
+    static let shellCircle: CGFloat = 44          // = --hit-min. never smaller
+    static let shellCircleGap: CGFloat = 9        // circle to caption
+    static let shellHeadMark: CGFloat = 34        // the ticker circle in a heading
+    static let shellDividerH: CGFloat = 30
+    static let shellDividerLift: CGFloat = 8
+
+    /// THE shell hairline — rest ring, heading mark, P&L divider, strip divider.
+    /// One step lighter than --hair #C2C7BE, which stays on card interiors: a
+    /// card hairline inside a shell hairline reads as a double rule.
+    static let shellHair = hex(0xE7E9E5)
+    static let shellCountClear = hex(0x8A9086)    // the New count when nothing is due
+    static let shellEmptyInk   = hex(0x3C423A)    // empty-page body at 300 — legal at 15
+
+    /// ⚠ AN UPDATE SIGNAL IS BLUE, NEVER RED. Red is loss in this deck, and a red
+    /// ring around NKE reads as *NKE is down*, not *NKE has something to read*.
+    /// #2A4A6E appears nowhere else except the [note] verdict, so it carries no
+    /// direction. Ring, glow and the due count all share it.
+    static let update = hex(0x2A4A6E)
+
+    /// The active halo: a ground-coloured spacer, then the ring drawn outside it,
+    /// ordered outward so the gap reads as a gap and not as a thick ring. CSS
+    /// spreads a box-shadow from the element edge, so 3 then 4.5 paints 3pt of
+    /// ground and 1.5pt of ink.
+    static let shellHaloSpacer: CGFloat = 3
+    static let shellHaloRing: CGFloat = 1.5
+    static let shellRingRest: CGFloat = 1
+    static let shellRingLive: CGFloat = 1.5
+
+    /// ⚠ BLUR ONLY, NO SPREAD STOP. A low-alpha blue band on this warm grey
+    /// ground desaturates into what reads as a dirty drop shadow rather than
+    /// light — that was the "weird shadow". Both stops stay under 9 so the bloom
+    /// clears the strip's 8pt top padding instead of being cut off flat, and the
+    /// glow never travels without the 1.5pt ring under it: a glow survives
+    /// neither a bright screen nor a screenshot, so it cannot carry the signal
+    /// alone. It does not pulse — a circle that moves keeps asking, and three of
+    /// them at once never stop.
+    static let shellGlow = [SunnyShadow(hex(0x2A4A6E).opacity(0.34), 5, 0),
+                            SunnyShadow(hex(0x2A4A6E).opacity(0.18), 9, 0)]
+    /// The New count. 16 is NOT on the white ramp — SHELL.md dropped it there for
+    /// exactly that reason — so it is declared here as a shell value rather than
+    /// borrowed from the retired --t-paper-body, which is a different job at the
+    /// same size. It is the only 16px figure in the app.
+    static let tShellCount: CGFloat = 16
+    static let durRing: Double = 0.18             // the shell's only motion
+
     static func hex(_ v: UInt32) -> Color {
         Color(red: Double((v >> 16) & 0xFF) / 255,
               green: Double((v >> 8) & 0xFF) / 255,
@@ -663,6 +729,18 @@ extension View {
             AnyView(acc.shadow(color: l.color, radius: l.radius / 2, x: 0, y: l.y))
         }
     }
+    /// CSS `line-height: 1` on ONE line of type.
+    ///
+    /// SwiftUI has no line-height for a single line — a Text lays out at the
+    /// font's own line box, which for Inter at 19 is about 23 — so the box is
+    /// pinned to the type size instead. That is what the CSS means and it is the
+    /// only faithful translation. The frame does not clip; the glyphs simply
+    /// stop reserving their leading, exactly as `line-height: 1` does.
+    ///
+    /// ⚠ SINGLE LINE ONLY. On wrapping text this crushes every line but the
+    /// first — use `lineSpacing` there.
+    func sunnyLineBox(_ size: CGFloat) -> some View { frame(height: size) }
+
     /// CSS letter-spacing is per-em; SwiftUI tracking is absolute points.
     func sunnyType(_ size: CGFloat, _ weight: Font.Weight, _ em: Double = 0) -> some View {
         font(InkFont.display(size, weight)).tracking(S.track(size, em))

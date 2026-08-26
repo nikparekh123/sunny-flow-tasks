@@ -22,7 +22,18 @@ struct LegsPosition: Decodable, Identifiable {
     let shares: Shares
     let legs: [Leg]
     let floors: [PutFloor]
+    /// UNREALIZED, and the page heading calls it CURRENT: the five leg cards
+    /// summed, so the heading and the cards under it can never disagree.
     let total: Int
+    /// Everything already closed. docs/PNL_GLOSSARY.md's REALIZED, minus the
+    /// dividend term, which has no receipts table to sum — see position-legs.
+    ///
+    /// ⚠ OPTIONAL BECAUSE THE BACKEND IS SHARED AND ADDITIVE ONLY. A build
+    /// already on Nik's phone decodes this same response; these two keys landed
+    /// on 26 Aug 2026 and a run against an older deploy must decode, not throw.
+    let realized: Int?
+    /// REALIZED + UNREALIZED — the glossary's NET, and the heading's TOTAL.
+    let allTime: Int?
     var id: String { ticker }
 
     struct Shares: Decodable {
