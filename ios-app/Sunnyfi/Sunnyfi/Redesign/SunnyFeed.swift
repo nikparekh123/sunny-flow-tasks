@@ -159,6 +159,9 @@ struct SunnyPane: View {
     @State private var week = WeekStore()
     @State private var planner = PlannerStore()
     @State private var legs = LegsStore()
+    /// Per CARD, not per name: each leg card owns its own toggle, because a
+    /// shared handler makes a tap on one card silently swap another.
+    @State private var legUnits: Set<String> = []
     @State private var rail = RailStore()
     @State private var railHidden = false
     @State private var read: Set<String> = SunnyRead.load()
@@ -349,15 +352,16 @@ struct SunnyPane: View {
                            It sits under the awareness card rather than over it
                            because the awareness card is what CHANGED and this is
                            the standing backdrop. */
-                        /* ⚠ THE LEGS WIDGET IS A REGION, NOT A CARD, and it
-                           goes above the price week: the legs are the position,
-                           the week is the backdrop. It owns opacity, transform
-                           and clip for its zoom, so it must stay outside the
-                           feed's reveal — which it is, because the reveal is
-                           applied per card and this is not one. */
-                        if let lp = legs.positions.first(where: { $0.ticker == s.0.ticker }) {
-                            SunnyLegsRegion(p: lp)
-                        }
+                        /* ⚠ FIVE CARDS, NOT A REGION. One per leg, and a leg
+                           with no contracts produces NO card rather than an
+                           empty one. They sit above the price week because the
+                           legs are the position and the week is the backdrop.
+
+                           Broken out into its own view: the section builder was
+                           already at the compiler's type-check limit and adding
+                           the leg fan-out inline tipped it over. */
+                        SunnyLegCards(p: legs.positions.first { $0.ticker == s.0.ticker },
+                                      units: $legUnits)
                         if let w = s.0.week {
                             SunnyFiveDayCard(
                                 ticker: s.0.ticker, m: w,

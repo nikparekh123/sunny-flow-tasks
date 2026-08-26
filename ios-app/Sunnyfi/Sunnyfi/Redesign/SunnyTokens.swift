@@ -525,6 +525,13 @@ enum S {
     /// a smaller card does.
     static let zoomShadowSmall = 0.62
 
+    /// Four columns in 323: (323 − 36) / 4 = 71.75. FOUR is the limit — six fit
+    /// at 44 but the 13px values start colliding. A longer history is a second
+    /// card, not more columns.
+    static let legColGap: CGFloat = 12
+    static let hatchStripe: CGFloat = 6
+    static let hatchGap: CGFloat = 3
+
     static let bandH: CGFloat = 133  // was 147; the week labels sat on the footer
     static let weekCell: CGFloat = 74
     static let weekGap: CGFloat = 9
