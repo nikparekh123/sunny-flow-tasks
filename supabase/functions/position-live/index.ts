@@ -44,7 +44,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday, daysBetween } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-23.10';
+const BUILD = '2026-08-25.2';
 const POLY = 'https://api.polygon.io';
 
 /** The Friday at least 5 sessions out: the contract actually written. */
@@ -354,9 +354,29 @@ Deno.serve(async (req) => {
         : '';
       const cut = sinceOn || ymd(addDays(today, -14));
 
-      type Line = { text: string; tags: string[] };
+      /* ⚠ THE ENGINE MARKS THE BOLD AND THE HIGHLIGHT, because only the engine
+         can. CARD-SYSTEM.md §4: one bold per line and it is "the figure the
+         line is ABOUT" — that is a judgment about a sentence, and the sentence
+         is composed here. This function knows a line is about the median target
+         and not the 71 analysts; the client sees a finished string and cannot.
+         A missing bold reads as a quiet line; a GUESSED bold reads as a wrong
+         answer, which is why the client never guesses.
+
+         `hi` is the amber, and it means one thing only: CHANGED SINCE YOU LAST
+         READ. It rides the same cut the NEW tag does, so it can only appear on
+         a line the seen-flag already called new — one per card in practice.
+
+         ⚠ TRAILING PUNCTUATION GOES INSIDE THE HIGHLIGHT. Leaving the comma out
+         puts the mark's right padding between the word and its comma, which
+         renders as "yesterday , 1 target cut" and reads as a typo. A real
+         marker would cover the comma anyway. */
+      type Line = { text: string; tags: string[]; bold?: string; hi?: string };
       const L = (text: string, ...tags: Array<string | null>): Line =>
         ({ text, tags: tags.filter((x): x is string => !!x) });
+      /** Mark a line: the one bold run, and optionally the amber phrase. */
+      const B = (l: Line, bold?: string, hi?: string): Line => ({ ...l, bold, hi });
+      /** The amber only exists on a line the cut already called new. */
+      const hiIf = (l: Line, phrase: string) => l.tags.includes('NEW') ? phrase : undefined;
       const isNew = (d: string) => d > cut ? 'NEW' : null;
       const ago = (d: string) => {
         const n = daysBetween(parseISO(d), today);
@@ -402,18 +422,25 @@ Deno.serve(async (req) => {
         const moved = pt && pp && pt !== pp;
         if (isNew(d0s) && d0s !== bigDay && moved) {
           const up = pt > pp;
-          analysts.push(L(
-            `${a0.firm} ${up ? 'raised' : 'cut'} its target ${pp} to ${pt} ${ago(d0s)}`,
-            'NEW', up ? 'BULLISH' : 'BEARISH'));
+          const l = L(`${a0.firm} ${up ? 'raised' : 'cut'} its target ${pp} to ${pt} ${ago(d0s)}`,
+            'NEW', up ? 'BULLISH' : 'BEARISH');
+          // The line is about where the target landed, so the new target is the
+          // bold. The amber is the WHEN, because that is what changed.
+          analysts.push(B(l, `${pt}`, hiIf(l, ago(d0s))));
         }
       }
       if (rateChg) {
         const dn = rateChg.rating_action === 'downgrades';
         const pt = N(rateChg.price_target), pp = N(rateChg.previous_price_target);
         const d = String(rateChg.date).slice(0, 10);
-        analysts.push(L(`${rateChg.firm} ${dn ? 'cut' : 'raised'} it to ${rateChg.rating} ${ago(d)}`
-          + (pt && pp && pt !== pp ? `, ${pp} to ${pt}` : ''),
-          isNew(d), dn ? 'BEARISH' : 'BULLISH', 'IMPORTANT'));
+        const moved2 = pt && pp && pt !== pp;
+        const l = L(`${rateChg.firm} ${dn ? 'cut' : 'raised'} it to ${rateChg.rating} ${ago(d)}`
+          + (moved2 ? `, ${pp} to ${pt}` : ''),
+          isNew(d), dn ? 'BEARISH' : 'BULLISH', 'IMPORTANT');
+        /* No target move means no FIGURE on the line, and the deck's rule is
+           that a bold is a figure. A rating word is not one, so the line goes
+           unbolded rather than emphasising a word. */
+        analysts.push(B(l, moved2 ? `${pt}` : undefined, hiIf(l, ago(d))));
       }
       /* The biggest same-day cluster, as ONE line. Counting each firm
          separately is what turned a single earnings reaction into "22 cuts". */
@@ -431,25 +458,36 @@ Deno.serve(async (req) => {
         const parts: string[] = [];
         if (cu) parts.push(`${cu} target cut${cu > 1 ? 's' : ''}`);
         if (ra) parts.push(`${ra} target raise${ra > 1 ? 's' : ''}`);
-        analysts.push(L(`${g.length} firms re-rated it ${ago(dd)}`
+        const l = L(`${g.length} firms re-rated it ${ago(dd)}`
           + (parts.length ? `, ${parts.join(' and ')}` : ''),
           isNew(dd), cu > ra ? 'BEARISH' : ra > cu ? 'BULLISH' : null,
-          g.length >= 5 ? 'IMPORTANT' : null));
+          g.length >= 5 ? 'IMPORTANT' : null);
+        // How MANY moved is the fact; the individual cuts and raises are the shape.
+        analysts.push(B(l, `${g.length} firms`, hiIf(l, `re-rated it ${ago(dd)},`)));
       }
       if (med) {
-        analysts.push(L(`Median target ${med.toFixed(2)}, ${pct((med / spot - 1) * 100)} against spot`,
-          med > spot ? 'BULLISH' : 'BEARISH'));
+        // The line is about the GAP to spot, not the target itself.
+        analysts.push(B(
+          L(`Median target ${med.toFixed(2)}, ${pct((med / spot - 1) * 100)} against spot`,
+            med > spot ? 'BULLISH' : 'BEARISH'),
+          pct((med / spot - 1) * 100)));
       }
       if (c0) {
         const bu = N(c0.strong_buy) + N(c0.buy), se = N(c0.sell) + N(c0.strong_sell);
-        analysts.push(L(`${N(c0.contributors)} analysts: ${bu} buy, ${N(c0.hold)} hold, ${se} sell`,
-          bu > se * 3 ? 'BULLISH' : se > bu ? 'BEARISH' : null));
+        analysts.push(B(
+          L(`${N(c0.contributors)} analysts: ${bu} buy, ${N(c0.hold)} hold, ${se} sell`,
+            bu > se * 3 ? 'BULLISH' : se > bu ? 'BEARISH' : null),
+          `${bu} buy`));
       }
 
       // ── PRICE ─────────────────────────────────────────────────────────────
       const price: Line[] = [];
       if (m50 && m200) {
         const below = spot < m50 && spot < m200, above = spot > m50 && spot > m200;
+        /* ⚠ NO BOLD ON THIS LINE, DELIBERATELY, and it is the rule working
+           rather than an omission. Its subject is a RELATIONSHIP — spot sitting
+           between two levels — so neither number is the answer. CARD-SYSTEM.md
+           §0.6: "a line whose subject is a relationship gets no bold at all." */
         price.push(L(`${below ? 'Below' : above ? 'Above' : 'Between'} the 50-day ${m50.toFixed(2)}`
           + ` and the 200-day ${m200.toFixed(2)}`, below ? 'BEARISH' : above ? 'BULLISH' : null));
       }
@@ -457,12 +495,16 @@ Deno.serve(async (req) => {
          you read momentum and it is the ENTRY CONDITION if you run the sleeve.
          Tagging it would be the engine picking a side it cannot justify. */
       if (hi52 && p0) {
-        price.push(L(`${Math.abs((spot / hi52 - 1) * 100).toFixed(1)}% off the high, `
-          + `${N(p0.persistence).toFixed(0)}% persistence`));
+        price.push(B(
+          L(`${Math.abs((spot / hi52 - 1) * 100).toFixed(1)}% off the high, `
+            + `${N(p0.persistence).toFixed(0)}% persistence`),
+          `${Math.abs((spot / hi52 - 1) * 100).toFixed(1)}%`));
       }
       if (sd20) {
-        price.push(L(`${Math.abs(ext).toFixed(2)}sd ${ext < 0 ? 'below' : 'above'} its 20-day mean`
-          + `${Math.abs(ext) < 1 ? ', not at an extreme' : ''}`));
+        price.push(B(
+          L(`${Math.abs(ext).toFixed(2)}sd ${ext < 0 ? 'below' : 'above'} its 20-day mean`
+            + `${Math.abs(ext) < 1 ? ', not at an extreme' : ''}`),
+          `${Math.abs(ext).toFixed(2)}sd`));
       }
       /* ── Option flow: where the traders are actually moving ────────────────
          ⚠ SAME EXPIRY ONLY. The scanner measures the expiry it would WRITE, so
@@ -511,11 +553,15 @@ Deno.serve(async (req) => {
           gd === 'cut' || gd === 'raised' ? 'IMPORTANT' : null));
       }
       if (e0) {
-        company.push(L(`Earnings ${day(String(e0.report_date))}, `
-          + `${daysBetween(today, parseISO(String(e0.report_date)))} days out. `
-          + (parseISO(String(e0.report_date)) <= parseISO(nextWrite)
-             ? `This week's write carries through the print.`
-             : `The ${day(nextWrite)} expiry is clear of it.`)));
+        // The line is about how far away the print is.
+        const dOut = daysBetween(today, parseISO(String(e0.report_date)));
+        company.push(B(
+          L(`Earnings ${day(String(e0.report_date))}, `
+            + `${dOut} days out. `
+            + (parseISO(String(e0.report_date)) <= parseISO(nextWrite)
+               ? `This week's write carries through the print.`
+               : `The ${day(nextWrite)} expiry is clear of it.`)),
+          `${dOut} days`));
       }
 
       // ── HEADLINES ─────────────────────────────────────────────────────────

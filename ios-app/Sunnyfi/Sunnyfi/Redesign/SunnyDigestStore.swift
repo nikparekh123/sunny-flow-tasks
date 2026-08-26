@@ -53,7 +53,14 @@ final class DigestStore {
 private struct LivePayload: Decodable {
     var asof: String?
     var positions: [Pos]?
-    struct Ev: Decodable { var text: String; var tags: [String] }
+    struct Ev: Decodable {
+        var text: String
+        var tags: [String]
+        /// The one bold run and the amber phrase, both chosen by the engine —
+        /// see position-live. Optional so an older deployment still decodes.
+        var bold: String?
+        var hi: String?
+    }
     struct Pos: Decodable {
         var ticker: String
         var spot: Double
@@ -100,7 +107,8 @@ struct SunnyDigestCardModel {
         newCount = p.new_count
 
         func sec(_ h: String, _ evs: [LivePayload.Ev]) -> DigestSection? {
-            let ls = evs.map { DigestLine(text: $0.text, tags: DigestTag.from($0.tags)) }
+            let ls = evs.map { DigestLine(text: $0.text, tags: DigestTag.from($0.tags),
+                                          bold: $0.bold, hi: $0.hi) }
             return ls.isEmpty ? nil : DigestSection(heading: h, lines: ls)
         }
         func plain(_ h: String, _ xs: [String]) -> DigestSection? {

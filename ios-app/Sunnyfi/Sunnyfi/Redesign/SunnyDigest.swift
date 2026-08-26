@@ -36,6 +36,22 @@ struct DigestLine: Identifiable {
     let id = UUID()
     let text: String
     let tags: [DigestTag]
+    /// Chosen by the engine, never by this file. See position-live and
+    /// SunnyCardBits — a guessed bold reads as a wrong answer.
+    var bold: String? = nil
+    var hi: String? = nil
+
+    /// ⚠ THE VERDICT IS NOW A BRACKET, NOT A WASH. The three highlighter washes
+    /// went with the paper: on white a wash puts the verdict in competition with
+    /// the amber highlighter, and with three sentiments that is four washes on
+    /// one card. A bracket has no ground, which is exactly what lets it appear
+    /// three times without the card becoming a sticker album.
+    var bracket: BracketTag? {
+        if tags.contains(.bullish) { return .bullish }
+        if tags.contains(.bearish) { return .bearish }
+        if tags.contains(.note) { return .note }
+        return nil
+    }
 }
 
 /// ⚠ THREE WASHES, NO MORE. DIGEST-CARD §5 lists exactly new / bullish / note
@@ -44,12 +60,13 @@ struct DigestLine: Identifiable {
 /// `note` — a neutral fact worth flagging. A bullet carrying both gets ONE tag,
 /// not two.
 enum DigestTag: String, Identifiable {
-    case new, bullish, note
+    case new, bullish, bearish, note
     var id: String { rawValue }
     var ink: Color {
         switch self {
         case .new: return S.markNewInk
         case .bullish: return S.markBullInk
+        case .bearish: return S.lossText
         case .note: return S.markNoteInk
         }
     }
@@ -57,6 +74,7 @@ enum DigestTag: String, Identifiable {
         switch self {
         case .new: return S.paperMarkNew
         case .bullish: return S.paperMarkBull
+        case .bearish: return S.lossWash
         case .note: return S.paperMarkNote
         }
     }
@@ -64,8 +82,14 @@ enum DigestTag: String, Identifiable {
     static func from(_ engine: [String]) -> [DigestTag] {
         var out: [DigestTag] = []
         if engine.contains("NEW") { out.append(.new) }
+        /* ⚠ BEARISH IS ITS OWN VERDICT NOW. It used to fold into `note`,
+           because the paper build had only three washes and no red one. The
+           white deck's brackets carry three sentiments outright, so a bearish
+           line finally says so. IMPORTANT still folds into note — it is a
+           flag, not a direction. */
         if engine.contains("BULLISH") { out.append(.bullish) }
-        else if engine.contains("BEARISH") || engine.contains("IMPORTANT") { out.append(.note) }
+        else if engine.contains("BEARISH") { out.append(.bearish) }
+        else if engine.contains("IMPORTANT") { out.append(.note) }
         return out
     }
 }
@@ -97,177 +121,128 @@ struct SunnyDigestCard: View {
     let newCount: Int
     let sections: [DigestSection]
     let doBlock: DigestDo?
-    /// Present only while the card sits in Featured. SHELL.md §9: reading it
-    /// files the card under its own name and the control disappears. Nil
-    /// everywhere else, which is why it is not part of the card's identity.
     var onRead: (() -> Void)? = nil
+    /// The user's flag. Deliberately NOT persisted here — it belongs with the
+    /// seen state, and nothing writes it yet.
+    @State private var starred = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            ForEach(Array(sections.enumerated()), id: \.element.id) { i, sec in
-                section(sec, isLast: i == sections.count - 1 && doBlock == nil && onRead == nil)
+            ForEach(Array(sections.enumerated()), id: \.element.id) { _, sec in
+                band(sec)
             }
-            if let d = doBlock {
-                // The ONLY full-bleed rule on the card, and it sits immediately
-                // above the DO block. Nowhere else.
-                Rectangle().fill(S.paperRuleInk)
-                    .frame(height: S.ruleHeavy)
-                    .frame(maxWidth: .infinity)
-                doBand(d)
-            }
-            if let onRead {
-                // Its own band, measured 62 = the 44pt hit + 18 below it. Every
-                // section above keeps its 16, and a filed card drops this band
-                // whole rather than collapsing it — which is what makes the read
-                // and unread heights identical.
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    PaperReadControl(action: onRead)
-                }
-                .padding(EdgeInsets(top: 0, leading: 20,
-                                    bottom: S.readBandPadBottom, trailing: 20))
-            }
+            if onRead != nil { readBand }
         }
-        .frame(width: S.content)                       // 361, fixed. Height is an OUTPUT.
-        .measure("digest-card")
-        // ⚠ ONE background, not two chained. A second .background sits BEHIND
-        // the first, so grain applied that way lands under the butter fill and
-        // never shows. Stack them explicitly instead.
-        .background {
-            ZStack {
-                S.paperButter
-                PaperGrain()                           // one dot per 16px cell
-            }
-        }
+        .frame(width: S.content, alignment: .leading)
+        .background(S.paper)
         .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
-        // The inset ring is what makes it read as a sheet rather than a tinted
-        // div. It is the part people drop; do not.
-        .overlay(
-            RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous)
-                .strokeBorder(S.paperRing, lineWidth: 1)
-        )
-        .shadow(color: S.shadowInk(0.06), radius: 2, x: 0, y: 2)
-        .shadow(color: S.shadowInk(0.09), radius: 11, x: 0, y: 9)
+        /* ⚠ NO overflow CLIP. The paper build needed one for the dot grid; white
+           has nothing to clip, and dropping it stops the shadow clipping on some
+           engines. It takes --shadow-card-l despite having no size class,
+           because it is the tallest thing in the feed. */
+        .sunnyShadow(S.shadowCardL)
+        .measure("digest-card")
     }
 
-    // MARK: header — 18 / 20 / 14, gap 2
+    // MARK: header — 78, two rows
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: S.gap1) {
-            Text(timestamp)
-                .font(S.handAlt(S.tHandMeta))
-                .tracking(S.track(S.tHandMeta, 0.02))
-                .foregroundStyle(S.paperInkMeta)
-            // BASELINE, not centre: Caveat 26 and Inter 23 have different cap
-            // heights and only a baseline lines them up.
-            HStack(alignment: .firstTextBaseline, spacing: 9) {
-                Text(ticker)
-                    .font(S.hand(S.tHandTitle))
-                    .foregroundStyle(S.paperInkTicker)
-                Text(spot)
-                    .font(S.inter(S.tPaperSpot, S.wSemiN))
-                    .tracking(S.track(S.tPaperSpot, -0.03))
-                    .foregroundStyle(S.paperInkStrong)
-                    .monospacedDigit()
-                Spacer(minLength: 0)
-                if newCount > 0 { chip }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(EdgeInsets(top: 18, leading: 20, bottom: 14, trailing: 20))
-    }
-
-    /// A PENCIL CIRCLE, not a filled pill. Outline only, no background.
-    ///
-    /// ⚠ TWO ROTATIONS ON THE CARD NOW, AND ONLY TWO. This chip at −1.4 and the
-    /// read circle at −1.1 (awareness-card.md §0.4). The old rule said one, and
-    /// it said so while the read control did not exist. A third tilt makes the
-    /// whole thing read as a template rather than a note.
-    private var chip: some View {
-        Text("\(newCount) new")
-            .font(S.hand(S.tPaperChip))
-            .foregroundStyle(S.paperChipInk)
-            // 1 top / 2 bottom optically centres the hand, which sits high in its box.
-            .padding(EdgeInsets(top: 1, leading: 11, bottom: 2, trailing: 11))
-            .overlay(Capsule().strokeBorder(S.paperChipRing, lineWidth: 1.5))
-            .rotationEffect(.degrees(S.chipTilt))
-    }
-
-    // MARK: section — padding-top is ALWAYS 0; the heading's rule separates
-
-    private func section(_ sec: DigestSection, isLast: Bool) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 9) {
-                Text(sec.heading)                       // sentence case, never upper
-                    .measure("head-" + sec.heading.prefix(6).lowercased())
-                    .font(S.hand(S.tHandHead))
-                    .foregroundStyle(S.paperInkHead)
-                // flex: 1, never a width. The rule stops at the text column —
-                // that is the whole difference from the old hairline.
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(S.paperRule)
-                    .frame(height: 1.5)
-                    .frame(maxWidth: .infinity)
-            }
-            ForEach(sec.lines) { line in bodyLine(line) }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(EdgeInsets(top: 0, leading: 20, bottom: isLast ? 20 : 16, trailing: 20))
-    }
-
-    /// Bullet is 5px (4 vanishes on butter) and offset 8 from the top, which is
-    /// what optically centres it on the first line at 14.5/1.45. NOT centre
-    /// alignment, which drifts on any line that wraps.
-    private func bodyLine(_ line: DigestLine) -> some View {
-        HStack(alignment: .top, spacing: S.gap4) {
-            Circle().fill(S.paperBullet)
-                .frame(width: 5, height: 5)
-                .padding(.top, S.gap4)
-            DigestFlow(text: line.text, tags: line.tags)
-        }
-    }
-
-    // MARK: DO — 16 / 20 / 18, gap 5, on its own ground
-
-    private func doBand(_ d: DigestDo) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Do")
-                .font(S.hand(S.tHandHead))
-                .foregroundStyle(S.paperInkHead)
-            // ⚠ DO LINES ARE BODY TYPE, BULLETED, exactly like every other line
-            // on the card. DIGEST-CARD §9 puts the instruction at Inter 18/600
-            // and the reason at 14/450, and Nik rejected both on sight: four
-            // heavy 18pt lines stacked at the foot of the card read as a
-            // different document, and two sizes inside one block read as odd.
-            // Same size, same weight, same bullet — the ink and the ground are
-            // what mark this block out, not the type. His call outranks §9.
-            ForEach(d.lines) { line in
-                HStack(alignment: .top, spacing: S.gap4) {
-                    Circle().fill(S.paperBullet)
-                        .frame(width: 5, height: 5)
-                        .padding(.top, S.gap4)
-                    Text(line.text)
-                        .font(S.inter(S.tPaperBody, S.wBodyN))
-                        .lineSpacing(S.leading(S.tPaperBody, S.wBodyN, S.lhPaperBody))
-                        .foregroundStyle(S.paperInkDo)
-                        .monospacedDigit()
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            // CENTRE here, not baseline: a row of same-height objects.
+            HStack(alignment: .center, spacing: S.gap6) {
+                HStack(alignment: .center, spacing: S.gap4) {
+                    /* ⚠ THE STAR IS --ink, NEVER AMBER. Amber on this card means
+                       "changed since you last read" — that is the app talking.
+                       Importance is the USER talking, so the star stays out of
+                       the state vocabulary entirely. It precedes the timestamp
+                       because a flag qualifies the whole card and the top-left
+                       corner is read first. */
+                    Button { starred.toggle() } label: {
+                        Text(starred ? "\u{2605}" : "\u{2606}")
+                            .font(.system(size: S.tStar))
+                            .foregroundStyle(S.ink)
+                            .frame(width: S.hitMin, height: S.hitMin)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    // The 44pt target OVERHANGS the row rather than growing it:
+                    // padding the row taller breaks the 78pt header.
+                    .frame(width: S.tStar, height: S.tStar)
+                    Text(timestamp)
+                        .font(InkFont.display(S.t10, S.wBold))
+                        .tracking(S.track(S.t10, S.lsLabel))
+                        .textCase(.uppercase)
+                        .foregroundStyle(S.mute)
                 }
+                Spacer(minLength: 0)
+                if newCount > 0 { SunnyChip(text: "\(newCount) new") }
+            }
+            // BASELINE here: a row mixing weights at one size.
+            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                /* Same size, separated by WEIGHT alone, so "BABA 119.53" reads
+                   as one line rather than a name and a number. The name is
+                   context; the price is the figure. */
+                Text(ticker)
+                    .font(S.inter(S.t19, S.wLightN))
+                    .tracking(S.track(S.t19, -0.01))
+                    .foregroundStyle(S.ink)
+                Text(spot)
+                    .font(S.inter(S.t19, S.wBoldN))
+                    .tracking(S.track(S.t19, -0.02))
+                    .foregroundStyle(S.ink)
+                    .monospacedDigit()
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(EdgeInsets(top: 16, leading: 20, bottom: 18, trailing: 20))
-        .background(S.paperDoGround)
+        /* ⚠ PAD FIRST, THEN PIN THE WIDTH. Pinning 361 and padding after adds
+           19 either side OUTSIDE the pin, so the band renders 399 wide inside a
+           361 card and the chip and the heading rule run off the right edge.
+           The width is the card's; the padding lives inside it. */
+        .padding(EdgeInsets(top: 17, leading: 19, bottom: 15, trailing: 19))
+        .frame(width: S.content, alignment: .leading)
+    }
+
+    // MARK: a band — heading then bullets. Only the header has a top padding;
+    // every band's top spacing is the previous band's padding-bottom.
+
+    private func band(_ sec: DigestSection) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SunnySectionHead(title: sec.heading)
+            ForEach(sec.lines) { l in
+                SunnyBodyLine(text: l.text, bold: l.bold, highlight: l.hi, tag: l.bracket)
+            }
+        }
+        .padding(EdgeInsets(top: 0, leading: 19, bottom: 18, trailing: 19))
+        .frame(width: S.content, alignment: .leading)
+    }
+
+    // MARK: read band — 60
+
+    private var readBand: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Button { onRead?() } label: {
+                /* A 44pt row holds the pill so the hit target is right WITHOUT
+                   padding the band. No rotation: the paper build's −1.1° was a
+                   hand affordance and went with the hand layer. There is no
+                   rotation anywhere on this card. */
+                Text("Read")
+                    .font(InkFont.display(S.t10, S.wBold))
+                    .tracking(S.track(S.t10, S.lsLabel))
+                    .textCase(.uppercase)
+                    .foregroundStyle(S.mute)
+                    .padding(S.padPill)
+                    .overlay(Capsule().strokeBorder(S.hair, lineWidth: S.rule))
+                    .frame(height: S.hitMin)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(EdgeInsets(top: 0, leading: 19, bottom: 16, trailing: 19))
+        .frame(width: S.content, alignment: .trailing)
     }
 }
 
-// MARK: - paper primitives, shared with the Monday card
-
-/// A section heading and the rule that runs out from it. `flex: 1` on the rule,
-/// never a width — it stops at the text column, which is the whole difference
-/// from the hairlines on the white cards.
 struct PaperHeading: View {
     let text: String
     var body: some View {
