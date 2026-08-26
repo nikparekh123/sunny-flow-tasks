@@ -22,7 +22,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-26.1';
+const BUILD = '2026-08-26.7';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** Reading order in the grid is tab order in the detail card (§1). Fixed. */
@@ -89,13 +89,21 @@ Deno.serve(async (req) => {
 
     const [lots, trades, marks, quotes, closes] = await Promise.all([
       D.get('share_lots?voided_at=is.null&qty_remaining=gt.0'
-        + '&select=ticker,qty_remaining,cost_per_share,acquired_date'),
+        + '&select=ticker,qty_remaining,qty_original,cost_per_share,acquired_date'),
       D.get(`option_trades?voided_at=is.null&expiry=gte.${todayISO}`
         + '&select=id,ticker,option_type,direction,strike,expiry,action,contracts,premium'),
       D.get('option_greeks_latest?select=option_trade_id,last_mark,captured_at'),
       D.get('ticker_quotes_latest?select=*'),
-      D.get(`daily_closes?date=gte.${since}&select=ticker,date,close_price`
-        + '&order=date.asc&limit=5000'),
+      /* ⚠ TEN DAYS BEFORE THE FIRST WEEK, not from it. The weekly P&L values the
+         position as it stood going IN, which needs the close on the day BEFORE
+         the week opens. Fetching from the first Monday leaves that day missing,
+         and the opening value silently fell to zero — NFLX printed +$7,286 for
+         a week it actually sold 100 shares in, because "held 100, worth nothing"
+         made the proceeds look like profit. Ten days clears a long weekend. */
+      D.get(`daily_closes?date=gte.${
+          new Date(Date.parse(since + 'T00:00:00Z') - 10 * 86_400_000)
+            .toISOString().slice(0, 10)}`
+        + '&select=ticker,date,close_price&order=date.asc&limit=5000'),
     ]);
 
     /* ── REALIZED, so a page heading can print a Total ────────────────────
@@ -129,10 +137,18 @@ Deno.serve(async (req) => {
         if (page.length < 1000) return out;
       }
     }
-    const [everyTrade, sells] = await Promise.all([
+    const [everyTrade, sells, allLots] = await Promise.all([
       getAll('option_trades?voided_at=is.null&order=id.asc'
         + '&select=ticker,option_type,direction,strike,expiry,action,contracts,premium'),
-      getAll('share_sells?voided_at=is.null&order=id.asc&select=ticker,realized_pl'),
+      getAll('share_sells?voided_at=is.null&order=id.asc'
+        + '&select=ticker,trade_date,quantity,price,realized_pl'),
+      /* ⚠ EVERY LOT, INCLUDING THE FULLY SOLD ONES. The fetch above filters
+         qty_remaining > 0 because it feeds the CURRENT position. The ledger
+         below reconstructs the PAST, and a closed lot is exactly the history it
+         needs: with only open lots and every sell, the share count ran deeply
+         negative and NFLX printed −$105,778 for a week. */
+      getAll('share_lots?voided_at=is.null&order=id.asc'
+        + '&select=ticker,acquired_date,qty_original,cost_per_share'),
     ]);
 
     /* A leg is REALIZED when it has been closed out (contracts net to zero) or
@@ -276,6 +292,77 @@ Deno.serve(async (req) => {
       return Math.round((Date.parse(todayISO + 'T00:00:00Z') - Date.parse(d + 'T00:00:00Z')) / 86_400_000);
     };
 
+    /* ── the share ledger, so a week he did not hold prints nothing ──────────
+       ⚠ THIS MULTIPLIED THE WEEK'S PRICE MOVE BY TODAY'S SHARE COUNT, for every
+       week in the window, with no reference to what he actually held. CEG, LEN
+       and PEP were bought on 24 Aug and each showed four weeks of history: CEG
+       printed −$382 for the week of 3 Aug, which is exactly
+       (269.89 − 273.71) × 100 — what a hundred shares WOULD have done in a week
+       he owned nothing. A hypothetical rendered as history, and the arithmetic
+       was right, which is what made it convincing.
+
+       ⚠ AND NULLING WEEKS BEFORE THE CURRENT BLOCK IS ALSO WRONG. NKE's block
+       dates from 24 Aug, but he held NKE through every week in the window — a
+       different, larger block that was called away. "You held nothing" would be
+       as false as the fabricated bars.
+
+       So the position is RECONSTRUCTED per week from the lots and the sells:
+
+         weekly P&L = value(end) − value(start) − cash IN during the week
+
+       where value is shares held on that day times the close, cash in is what
+       the buys cost, and a sell is negative cash in. That identity is exact for
+       every case that broke: a week with no shares gives 0 − 0 − 0 and prints
+       nothing; the week he bought gives value(end) − cost, which is what the
+       block has done since he actually bought it; a week he sold into books the
+       proceeds; and a mid-week trade needs no special case at all.
+
+       `qty_original`, not `qty_remaining`: remaining is what is left TODAY, so
+       using it would erase every share he has since sold from the history. */
+    type ShareEvent = { d: string; dq: number; cash: number };
+    const ledger = new Map<string, ShareEvent[]>();
+    const push = (t: string, e: ShareEvent) => {
+      const a = ledger.get(t) ?? [];
+      a.push(e);
+      ledger.set(t, a);
+    };
+    for (const l of allLots) {
+      const d = String(l.acquired_date ?? '').slice(0, 10);
+      if (!d) continue;
+      const q = N(l.qty_original);
+      if (!(q > 0)) continue;
+      push(String(l.ticker), { d, dq: q, cash: q * N(l.cost_per_share) });
+    }
+    for (const r of sells) {
+      const d = String(r.trade_date ?? '').slice(0, 10);
+      if (!d) continue;
+      const q = N(r.quantity);
+      push(String(r.ticker), { d, dq: -q, cash: -q * N(r.price) });
+    }
+    for (const a of ledger.values()) a.sort((x, y) => x.d.localeCompare(y.d));
+
+    /** Shares held at the close of `on`, WALKED BACK from what he holds today.
+     *
+     * ⚠ BACKWARDS, NOT FORWARDS, AND THE REASON IS NKE. Summing lots forward
+     * from the beginning assumes the lot history is complete, and NKE's is not:
+     * it runs 500 → 0 → 500 → 148 and then a 600-share sell on 17 Jul takes it
+     * to −452, ending at 1,500 against the 2,000 he actually holds. Roughly 500
+     * shares were acquired and never wrote a lot row. A negative share count
+     * times a price is what printed −$18,804 for a quiet week.
+     *
+     * Today's quantity is a known truth (`share_lots.qty_remaining`), so the
+     * walk starts there and subtracts every event since. The result is exact at
+     * today and degrades only as far back as the gap, instead of being wrong
+     * everywhere. NFLX reconciles either way; NKE only this way.
+     *
+     * The gap is a real defect in the book and is reported as `share_history`
+     * below rather than silently absorbed. */
+    const qtyOn = (t: string, on: string, today: number) =>
+      (ledger.get(t) ?? []).reduce((n, e) => (e.d > on ? n - e.dq : n), today);
+    /** Cash paid in for shares over (after, on], sells counting negative. */
+    const cashIn = (t: string, after: string, on: string) =>
+      (ledger.get(t) ?? []).reduce((n, e) => (e.d > after && e.d <= on ? n + e.cash : n), 0);
+
     const out: Record<string, unknown>[] = [];
     for (const [ticker, sh] of shareBy) {
       const spot = spotBy.get(ticker) ?? 0;
@@ -288,11 +375,32 @@ Deno.serve(async (req) => {
          nothing there — distinct from a real zero. */
       const shClose = closeSeries.get(ticker) ?? [];
       const shareWeeks = weekStarts.map((w, i) => {
-        const a = valueOn(shClose, w), b = valueOn(shClose, weekEnds[i]);
-        if (a == null || b == null) return null;
-        return { label: i === weekStarts.length - 1 ? 'Live' : weekLabel(w),
-                 live: i === weekStarts.length - 1,
-                 pnl: Math.round((b - a) * sh.qty) };
+        const end = weekEnds[i];
+        const live = i === weekStarts.length - 1;
+        const label = live ? 'Live' : weekLabel(w);
+        /* The day BEFORE the week opens: the position as it stood going in,
+           priced on the last close before the week rather than on its first. */
+        const prev = new Date(Date.parse(w + 'T00:00:00Z') - 86_400_000)
+          .toISOString().slice(0, 10);
+        /* ⚠ THE LIVE WEEK ENDS AT SPOT, not at the last close. The card prints
+           the since-open figure right above this bar, and that figure is marked
+           to spot — on a position opened this week the two ARE the same
+           quantity, so a close-priced bar sat $2k away from the figure over it
+           and neither was wrong. One price for one card. */
+        const pOpen = valueOn(shClose, prev);
+        const pEnd = live ? spot : valueOn(shClose, end);
+        if (pEnd == null) return null;
+        const qOpen = qtyOn(ticker, prev, sh.qty), qEnd = qtyOn(ticker, end, sh.qty);
+        /* Held nothing at either end and traded nothing between: not a zero
+           week, a week the position did not exist. The card draws nothing. */
+        const flow = cashIn(ticker, prev, end);
+        if (qOpen <= 0 && qEnd <= 0 && Math.abs(flow) < 0.005) return null;
+        /* ⚠ HELD SHARES BUT NO PRICE TO VALUE THEM AT IS NOT ZERO. Treating a
+           missing opening close as a zero opening value is what made a week's
+           SALE PROCEEDS read as a week's profit. No price, no week. */
+        if (qOpen > 0 && pOpen == null) return null;
+        const vOpen = qOpen > 0 ? qOpen * (pOpen as number) : 0;
+        return { label, live, pnl: Math.round(qEnd * pEnd - vOpen - flow) };
       });
 
       const shares = {
@@ -423,6 +531,12 @@ Deno.serve(async (req) => {
            everything already closed. They disagree with each other on purpose:
            that gap is what years of writing premium against a position that is
            currently underwater looks like. */
+        /* ⚠ DOES THE LOT HISTORY ADD UP? Forward from the lots against what he
+           holds today. Non-zero means rows are missing and the weekly bars are
+           reconstructed across a gap — NKE is out by 500. Surfaced rather than
+           swallowed: the fix belongs in the book, not in this arithmetic. */
+        share_history: Math.round(
+          (ledger.get(ticker) ?? []).reduce((n, e) => n + e.dq, 0) - sh.qty),
         realized: Math.round(realizedBy.get(ticker) ?? 0),
         allTime: Math.round(shares.pnl + legs.reduce((s, l) => s + l.pnl, 0)
                             + (realizedBy.get(ticker) ?? 0)),
