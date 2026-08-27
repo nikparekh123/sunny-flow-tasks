@@ -89,9 +89,22 @@ interface OpenTradeRow {
 const positive = (n: number | undefined | null): number | null =>
   typeof n === 'number' && n > 0 ? n : null;
 
+/* ⚠ THE MIDPOINT IS THE MARK, AND THE LAST TRADE IS THE LAST RESORT. Nik chose
+   this on 27 Aug after the two screens disagreed by $254 with the market shut,
+   which was never a timing gap: open-premium reads the midpoint and this read
+   the last trade, so they were two different definitions of one word.
+
+   A last trade can be hours old on a thin contract and can print BELOW
+   INTRINSIC, which no live two-sided market ever does — PEP's 144 put last
+   traded at 3.17 against 3.99 of intrinsic on a 2-lot. That stale print is what
+   drove time value negative. A midpoint is always a current quote, so it cannot.
+
+   The order below is therefore: the quote's own midpoint, a midpoint we compute
+   from bid and ask, the day's close, the last trade, and only then Polygon's
+   fair value. The last trade is kept because a quote can vanish outside hours
+   and a stale print beats no price at all — the per-leg clamp in sunny-rail is
+   what stops it lying when it is the one we fall to. */
 const pickPremium = (s: PolyOptionSnapshot): number | null => {
-  const lt = positive(s.last_trade?.price);
-  if (lt != null) return lt;
   const mid = positive(s.last_quote?.midpoint);
   if (mid != null) return mid;
   const bid = positive(s.last_quote?.bid);
@@ -99,6 +112,8 @@ const pickPremium = (s: PolyOptionSnapshot): number | null => {
   if (bid != null && ask != null) return (bid + ask) / 2;
   const dc = positive(s.day?.close);
   if (dc != null) return dc;
+  const lt = positive(s.last_trade?.price);
+  if (lt != null) return lt;
   return positive(s.fair_market_value);
 };
 
