@@ -623,6 +623,13 @@ enum S {
     static let durOverlayIn = 0.26, durOverlayOut = 0.38
     static let overlayLift: CGFloat = -4
     static let durSwap = 0.34, swapMidpoint = 0.130
+    /* ⚠ THE PAGE TRANSITION IS A SLIDE, NOT A CROSSFADE. Swapping the pane's
+       children under a stable ScrollView is a change of content, which SwiftUI
+       renders as an opacity dissolve — and a dissolve between two dense cards
+       reads as fake, because nothing in the world dissolves. Nik, 27 Aug: "we
+       need the default swipe animation, not a fade in, looks very fake."
+       0.32 with easeOut is the platform's own page feel. */
+    static let durPage = 0.32
     static let durFilterrow = 0.3, durZone = 0.22, durDrawer = 0.22
     static let pulse = 1.05
     static let debounceQuery = 0.420, debounceFilter = 0.320, debounceClear = 0.260

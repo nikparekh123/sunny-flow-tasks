@@ -119,6 +119,8 @@ struct SunnyPane: View {
     /// filter the strip carries the whole "where am I" job, and scrolling makes
     /// every page one long page, so the answer goes ambiguous again.
     @Binding var page: SunnyPage
+    /// +1 forward through the strip, −1 back. Decided by whoever moved the page.
+    let dir: Int
     let onNav: (SunnyNav) -> Void
     var startAt: CGFloat? = nil
 
@@ -246,12 +248,25 @@ struct SunnyPane: View {
                and spends the spare width on the margin. Do not "fix" this back
                to a leading 16. */
             .frame(width: S.content)
+            /* ⚠ THE `.id` IS ON THE CONTENT, NOT ON THE SCROLLER. Keying the
+               ScrollView would slide correctly and throw away the @State stores
+               with it, refetching the book, the digests, the legs and the
+               planner on every move — the note below this block is the record of
+               that. The VStack holds no state, so giving IT a per-page identity
+               costs nothing and is what lets a transition fire at all: without
+               new identity SwiftUI sees one view whose children changed, and
+               dissolves them. */
+            .id(page.key)
+            .transition(.asymmetric(
+                insertion: .move(edge: dir > 0 ? .trailing : .leading),
+                removal:   .move(edge: dir > 0 ? .leading  : .trailing)))
             .padding(EdgeInsets(top: S.shellPanePadTop, leading: S.margin,
                                 bottom: S.shellPanePadBottom, trailing: S.margin))
         }
         .scrollIndicators(.hidden)
         .background(S.ground)
         .scrollPosition($pos)
+        .animation(S.easeOut(S.durPage), value: page)
         /* ⚠ A PAGE CHANGE SETS THE OFFSET TO THE TOP, AND NOTHING ELSE. No DOM
            insertion, no scroll-into-view, no reload.
 

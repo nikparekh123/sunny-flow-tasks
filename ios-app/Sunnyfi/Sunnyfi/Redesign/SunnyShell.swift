@@ -38,6 +38,11 @@ struct SunnyShell: View {
     /// Pushed up from the pane, which owns the stores and is therefore the only
     /// thing that knows the book, what is unread and how much is due.
     @State private var nav = SunnyNav()
+    /* ⚠ THE DIRECTION IS DECIDED BEFORE THE PAGE CHANGES, and it lives up here
+       because both movers set it: the swipe and a tap on the strip. Deriving it
+       inside the pane from a remembered index cannot work — `onChange` fires in
+       the same update as the body that must already know which way to slide. */
+    @State private var dir = 1
 
     /// Deterministic states for verification, so a screenshot of "the TLT page"
     /// does not depend on a simulated tap landing on the right pixel.
@@ -70,7 +75,7 @@ struct SunnyShell: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SunnyPane(page: $page, onNav: { nav = $0 }, startAt: Self.argScroll)
+            SunnyPane(page: $page, dir: dir, onNav: { nav = $0 }, startAt: Self.argScroll)
                 .frame(maxHeight: .infinity)
                 /* ⚠ SIMULTANEOUS, AND HORIZONTAL-DOMINANT ONLY. The pane is a
                    vertical scroller; an exclusive gesture would swallow its
@@ -91,12 +96,7 @@ struct SunnyShell: View {
                             guard abs(dx) > 60, abs(dx) > abs(dy) * 1.6 else { return }
                             step(dx < 0 ? 1 : -1)
                         })
-            SunnyStrip(nav: nav, page: $page)
-                .overlay(alignment: .top) {
-                    if Self.argSwipe != nil {
-                        Text("PAGE \(page.key)").font(.system(size: 9)).opacity(0.001)
-                    }
-                }
+            SunnyStrip(nav: nav, page: $page, dir: $dir)
         }
         .background(S.ground)
         .onAppear { if let p = Self.argPage { page = p } }
@@ -121,6 +121,10 @@ struct SunnyShell: View {
         guard let i = ps.firstIndex(of: page) else { return }
         let j = i + by
         guard ps.indices.contains(j) else { return }
-        withAnimation(S.easeSettle(S.durRevealTransform)) { page = ps[j] }
+        dir = by
+        /* No withAnimation here: the pane animates its own transition on `page`,
+           so wrapping the assignment as well would run the slide twice on two
+           curves. */
+        page = ps[j]
     }
 }
