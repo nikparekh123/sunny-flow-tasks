@@ -114,38 +114,38 @@ struct SunnyNav: Equatable {
     var pages: [SunnyPage] { [.new] + ordered.map { .name($0.ticker) } }
 }
 
-struct SunnyPane: View {
-    /// ⚠ THE PAGE REPLACES THE PANE. It does not scroll to a section — with no
-    /// filter the strip carries the whole "where am I" job, and scrolling makes
-    /// every page one long page, so the answer goes ambiguous again.
-    @Binding var page: SunnyPage
-    /// +1 forward through the strip, −1 back. Decided by whoever moved the page.
-    let dir: Int
-    let onNav: (SunnyNav) -> Void
-    var startAt: CGFloat? = nil
 
-    @State private var digest = DigestStore()
-    @State private var week = WeekStore()
-    @State private var planner = PlannerStore()
-    @State private var legs = LegsStore()
-    @State private var rail = RailStore()
-    @State private var read: Set<String> = SunnyRead.load()
-    /// ⚠ PER NAME, NOT PER CARD (five-day-price.md §6). Held here rather than
-    /// inside the card so an M and an L on the same ticker flip together.
-    @State private var priceUnits: Set<String> = []
-    @State private var pos = ScrollPosition()
-    private static let argShowPrice =
-        ProcessInfo.processInfo.arguments.contains("-showPrice")
+/// ⚠ EVERY STORE THE PANES SHARE, HOISTED OUT OF THE PANE ITSELF. It moved here
+/// the day the swipe had to track the finger: a pager lays the pages SIDE BY
+/// SIDE, so more than one pane exists at once, and stores held as the pane's own
+/// `@State` would be fetched once per visible page and mutate independently —
+/// a Read on one copy would leave the next copy still showing the card as
+/// unread.
+///
+/// ⚠ AND THE PLACEMENT LIVES HERE TOO, not on the pane. `place`, `due` and
+/// `pending` are facts about the BOOK, not about the page being looked at, and
+/// the shell needs them for the strip before any pane has rendered.
+@Observable
+final class PaneModel {
+    var digest = DigestStore()
+    var week = WeekStore()
+    var planner = PlannerStore()
+    var legs = LegsStore()
+    var rail = RailStore()
+    var read: Set<String> = SunnyRead.load()
+    /// ⚠ PER NAME, NOT PER CARD (five-day-price.md §6), so an M and an L on the
+    /// same ticker flip together.
+    var priceUnits: Set<String> = []
 
-    // MARK: the items, and where each one sits
+    private static let forceFeatured =
+        ProcessInfo.processInfo.arguments.contains("-forceFeatured")
 
-    private var items: [SunnyFeedItem] {
+    var items: [SunnyFeedItem] {
         var out: [SunnyFeedItem] = []
         if let w = week.card {
             /* The weekly cross-position summary. It has no ticker on purpose —
                it is about every name at once — so reading it removes it rather
-               than filing it, exactly as SHELL-PAGED.md's slot D does. The
-               engine also decides whether it exists at all (Monday, once). */
+               than filing it, exactly as SHELL-PAGED.md's slot D does. */
             out.append(SunnyFeedItem(id: "week|" + w.label, ticker: nil, clock: true,
                                      tags: [SunnyTag("Week")], name: "last week summary",
                                      kind: .week(w)))
@@ -154,8 +154,7 @@ struct SunnyPane: View {
             /* ⚠ ON NEW, AND NEVER FILED. A planner that fired is on a clock by
                definition. It carries NO read control, deliberately: filing an
                open instruction hides the one thing on the screen that is asking
-               to be done. It leaves when the gate shuts, which is its own
-               lifecycle and a better one. */
+               to be done. It leaves when the gate shuts. */
             out.append(SunnyFeedItem(id: "planner|" + pl.answer,
                                      ticker: "TLT", clock: true,
                                      tags: [.ticker("TLT")], name: "TLT planner",
@@ -166,48 +165,32 @@ struct SunnyPane: View {
                `digest|BABA|1`, which is the same string every day a name has one
                new item — so the first day's Read filed every later day's card
                before it reached New, and the awareness card went straight to the
-               ticker page. Nik, 27 Aug: "awareness card should come in New
-               first, it's coming straight in ticker." The date moves only when
-               something actually arrives, which is the definition the card
-               needs. Falls back to the count where the backend sends no date,
-               so an older deploy still behaves as it did. */
-            out.append(SunnyFeedItem(id: "digest|\(d.ticker)|\(d.freshest.isEmpty ? String(d.newCount) : d.freshest)",
-                                     ticker: d.ticker, clock: d.newCount > 0 || Self.forceFeatured,
-                                     tags: d.tags, name: d.name, kind: .digest(d)))
+               ticker page. The date moves only when something arrives. */
+            out.append(SunnyFeedItem(
+                id: "digest|\(d.ticker)|\(d.freshest.isEmpty ? String(d.newCount) : d.freshest)",
+                ticker: d.ticker, clock: d.newCount > 0 || Self.forceFeatured,
+                tags: d.tags, name: d.name, kind: .digest(d)))
         }
         return out
     }
 
-    /* New is empty on a quiet day by design, and a quiet day is the common case
-       — every name currently reads new_count 0 and the engine has already spent
-       this week's Monday card. That leaves the read control, the filing move and
-       the empty state unverifiable from a screenshot, so this forces every card
-       onto a clock. Verification only; it changes nothing a normal run reaches. */
-    private static let forceFeatured =
-        ProcessInfo.processInfo.arguments.contains("-forceFeatured")
-
     /* ⚠ ONE COPY OF EACH CARD. SHELL-PAGED.md §0 rule 2: a dated card has ONE
        wrapper. While unread it shows on New; once read it shows on its own
        name's page. Never both, never rendered twice. Here that is structural:
-       one array of items and `place()` is a pure function of the item plus the
+       one array of items and `place` is a pure function of the item plus the
        read set, so a card cannot be in two places even by mistake. */
-    private func place(_ i: SunnyFeedItem) -> SunnyPage? {
+    func place(_ i: SunnyFeedItem) -> SunnyPage? {
         if i.clock && !read.contains(i.id) { return .new }
         if let t = i.ticker { return .name(t) }
-        /* Read, and no name to file under: it is gone until it is due again.
-           That is SHELL-PAGED.md's slot D — the card belongs to no name, so
-           reading it clears it rather than moving it. */
+        /* Read, and no name to file under: it is gone until it is due again. */
         return nil
     }
 
-    private var due: [SunnyFeedItem] { items.filter { place($0) == .new } }
+    var due: [SunnyFeedItem] { items.filter { place($0) == .new } }
+    /// Names with a dated card still sitting on New. They wear the amber ring.
+    var pending: Set<String> { Set(due.compactMap(\.ticker)) }
 
-    /// Names with a dated card still sitting on New. They wear the blue ring.
-    private var pending: Set<String> {
-        Set(due.compactMap(\.ticker))
-    }
-
-    private var nav: SunnyNav {
+    var nav: SunnyNav {
         SunnyNav(book: rail.book.map { .init(ticker: $0.ticker, weight: $0.weight) },
                  pending: pending,
                  /* Puts bought are never here: a long put in the money is cover
@@ -216,39 +199,76 @@ struct SunnyPane: View {
                  due: due.count)
     }
 
-    /// The name pages, in book order — largest position first, exactly as the
-    /// strip runs. A name is a page whether or not it has a card: the heading
-    /// and its two figures are the page's floor, and an empty page says so.
-    private var current: BookName? {
-        guard case .name(let t) = page else { return nil }
-        return rail.book.first { $0.ticker == t }
-            ?? BookName(ticker: t, name: "", weight: 0, week: nil, avg: nil, exercise: nil, delta: nil)
+    func book(_ t: String) -> BookName {
+        rail.book.first { $0.ticker == t }
+            ?? BookName(ticker: t, name: "", weight: 0, week: nil,
+                        avg: nil, exercise: nil, delta: nil)
+    }
+    func position(_ t: String) -> LegsPosition? { legs.positions.first { $0.ticker == t } }
+
+    /* Reading changes WHERE the card is, never what it says: the control files
+       the card, it does not dismiss it.
+
+       ⚠ ONE FUNCTION, SO THE PROBE CANNOT DIVERGE FROM THE BUTTON. -tapRead
+       calls this, not a copy of it. A verification path that reimplements the
+       thing it verifies is the shape of test that passes while the real control
+       is broken, and this file has been burned by that once already. */
+    func markRead(_ i: SunnyFeedItem) {
+        read.insert(i.id)
+        SunnyRead.save(read)
+        /* ⚠ AND TELL THE SERVER, because the server's idea of "read" used to be
+           "somebody fetched this", which any probe or refresh could satisfy. The
+           Read control is now the only thing that advances the freshness window.
+           Digests only — the week card belongs to no name and the planner has no
+           read control at all. */
+        if case .digest = i.kind, let t = i.ticker {
+            Task { await digest.markSeen(t) }
+        }
     }
 
+    func loadAll() async {
+        async let a: Void = rail.load()
+        async let b: Void = digest.load()
+        async let c: Void = week.load()
+        async let d: Void = planner.load()
+        async let e: Void = legs.load()
+        _ = await (a, b, c, d, e)
+        if ProcessInfo.processInfo.arguments.contains("-showPrice") {
+            priceUnits = Set(rail.book.map(\.ticker))
+        }
+    }
+}
+
+struct SunnyPane: View {
+    /// ⚠ THE PAGE REPLACES THE PANE. It does not scroll to a section — with no
+    /// filter the strip carries the whole "where am I" job, and scrolling makes
+    /// every page one long page, so the answer goes ambiguous again.
+    /// ⚠ A `let`, NOT A BINDING. The pane renders one page and never changes
+    /// which — the pager decides that by scrolling. A binding here would let
+    /// every visible pane fight over the same value.
+    let page: SunnyPage
+    let m: PaneModel
+    var startAt: CGFloat? = nil
+
+    @State private var pos = ScrollPosition()
+
+    private var current: BookName? {
+        guard case .name(let t) = page else { return nil }
+        return m.book(t)
+    }
     private var position: LegsPosition? {
         guard case .name(let t) = page else { return nil }
-        return legs.positions.first { $0.ticker == t }
+        return m.position(t)
     }
 
     // MARK: body
 
     var body: some View {
-        /* ⚠ THE SCROLLER IS INSIDE THE TRANSITION, NOT THE OTHER WAY ROUND, and
-           that is the whole fix. A `.transition` on ScrollView CONTENT does not
-           fire: a scroller treats a content swap as a change of what it is
-           measuring, never as an insert and a remove, so SwiftUI falls back to
-           the default and dissolves. Nik saw it twice — "it's fade in and fade
-           out not a swipe" — and both times the transition was written
-           correctly and simply never ran.
-
-           ⚠ THE ZStack IS WHAT KEEPS IDENTITY. Every `.task` and the stores they
-           fill hang off IT, so the ScrollView underneath is free to be
-           re-identified per page — which is what a transition needs — without
-           re-running a single load. That is the reconciliation of the two rules
-           this file has been carrying: the scroller must be keyed for the slide,
-           and the fetches must not be. They just cannot live on the same view. */
-        ZStack {
-            ScrollView {
+        /* ⚠ NO TRANSITION AND NO `.id` ANY MORE. Both existed to fake a slide
+           between two pages that were never on screen together; the pager lays
+           them side by side and moves them with the finger, so the motion is
+           real and a transition would fight it. */
+        ScrollView {
             VStack(alignment: .leading, spacing: S.shellPaneGap) {
                 switch page {
                 case .new:  newPage
@@ -259,31 +279,14 @@ struct SunnyPane: View {
                is drawn at 393pt and the column arithmetic only closes there:
                16 + 175 + 11 + 175 + 16. Holding --margin at 16 on a wider phone
                would widen the content to 370 and resize every card already
-               signed off; holding the 361 block keeps the grid exactly as drawn
-               and spends the spare width on the margin. Do not "fix" this back
-               to a leading 16. */
-            .frame(width: S.content)
-            .padding(EdgeInsets(top: S.shellPanePadTop, leading: S.margin,
-                                bottom: S.shellPanePadBottom, trailing: S.margin))
-            }
-            .scrollIndicators(.hidden)
-            .scrollPosition($pos)
-            .id(page.key)
-            /* Forward slides in from the right and the old page leaves left;
-               back is the mirror. The direction is decided by whoever moved the
-               page, so a tap two circles along slides the way a swipe would. */
-            .transition(.asymmetric(
-                insertion: .move(edge: dir > 0 ? .trailing : .leading),
-                removal:   .move(edge: dir > 0 ? .leading  : .trailing)))
+               signed off. Do not "fix" this back to a leading 16. */
+            .frame(maxWidth: .infinity)
+            .padding(EdgeInsets(top: S.shellPanePadTop, leading: 0,
+                                bottom: S.shellPanePadBottom, trailing: 0))
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
+        .scrollIndicators(.hidden)
+        .scrollPosition($pos)
         .background(S.ground)
-        .animation(S.easeOut(S.durPage), value: page)
-        /* The new scroller starts at the top on its own, but `pos` still holds
-           the old page's offset and would restore it on the next bind. */
-        .onChange(of: page) { _, _ in pos.scrollTo(edge: .top) }
-        .onChange(of: nav) { _, n in onNav(n) }
         .task {
             /* Verification only: -scrollTo starts the pane at a fixed offset so a
                screenshot of "TLT at 900" does not depend on a simulated drag
@@ -292,28 +295,14 @@ struct SunnyPane: View {
             try? await Task.sleep(for: .seconds(6))   // let the cards land first
             pos.scrollTo(y: y)
         }
-        .task {
-            guard ProcessInfo.processInfo.arguments.contains("-tapRead") else { return }
-            try? await Task.sleep(for: .seconds(10))
-            if let first = due.first { markRead(first) }
-        }
-        .task {
-            await rail.load()
-            if Self.argShowPrice { priceUnits = Set(rail.book.map(\.ticker)) }
-            onNav(nav)
-        }
-        .task { await digest.load(); onNav(nav) }
-        .task { await week.load(); onNav(nav) }
-        .task { await planner.load() }
-        .task { await legs.load() }
     }
 
     // MARK: the New page
 
     @ViewBuilder
     private var newPage: some View {
-        SunnyNewHead(due: due.count)
-        if let os = rail.openShorts, os.contracts > 0 {
+        SunnyNewHead(due: m.due.count)
+        if let os = m.rail.openShorts, os.contracts > 0 {
             SunnyShortFigures(s: os)
         }
         /* ⚠ THE SIX SUMMARY LISTS CAME OFF NEW (27 Aug 2026) and the five M
@@ -334,7 +323,7 @@ struct SunnyPane: View {
            planner. The book-wide sweep the list headers used to give (`3 ABOVE
            SPOT`) moves to the strip as a flag on the circle — a design of Nik's
            own, not something to improvise here. */
-        if due.isEmpty {
+        if m.due.isEmpty {
             SunnyPageNote("Nothing on a clock. Every card has moved to its own "
                         + "name — a name comes back here when it has something new.")
         } else {
@@ -346,7 +335,7 @@ struct SunnyPane: View {
                week card's — and the planner carries none deliberately. A row
                under those would put two Reads on one card. Add the wrapper back
                the day a dated card arrives without one, not before. */
-            ForEach(due) { card($0) }
+            ForEach(m.due) { card($0) }
         }
     }
 
@@ -361,7 +350,7 @@ struct SunnyPane: View {
             /* ⚠ A FILED CARD LANDS BETWEEN THE FIGURES AND THE RESIDENT CARDS,
                not above the heading and not at the bottom. A thing that just
                arrived belongs at the top of what is already there. */
-            let filed = items.filter { place($0) == .name(b.ticker) }
+            let filed = m.items.filter { m.place($0) == .name(b.ticker) }
             ForEach(filed) { card($0) }
 
             /* ⚠ ONE CARD FOR THE WHOLE NAME, and it is the FIRST thing on
@@ -370,8 +359,8 @@ struct SunnyPane: View {
                the story the way the five leg cards did before them. */
             SunnyTickerCard(
                 b: b, current: position?.total, allTime: position?.allTime,
-                callsSold: rail.callsSold, putsSold: rail.putsSold,
-                putsBought: rail.putsBought)
+                callsSold: m.rail.callsSold, putsSold: m.rail.putsSold,
+                putsBought: m.rail.putsBought)
 
             /* ⚠ SECOND, AND ONLY WHERE SOMETHING COULD BE ASSIGNED. It answers a
                different question from the card above it — that one is what do I
@@ -394,10 +383,10 @@ struct SunnyPane: View {
                 SunnyFiveDayCard(
                     ticker: b.ticker, m: w,
                     showPrice: Binding(
-                        get: { priceUnits.contains(b.ticker) },
+                        get: { m.priceUnits.contains(b.ticker) },
                         set: { on in
-                            if on { priceUnits.insert(b.ticker) }
-                            else { priceUnits.remove(b.ticker) }
+                            if on { m.priceUnits.insert(b.ticker) }
+                            else { m.priceUnits.remove(b.ticker) }
                         }))
             }
 
@@ -413,8 +402,8 @@ struct SunnyPane: View {
 
     @ViewBuilder
     private func card(_ i: SunnyFeedItem) -> some View {
-        let onNew = place(i) == .new
-        let mark: (() -> Void)? = onNew ? { markRead(i) } : nil
+        let onNew = m.place(i) == .new
+        let mark: (() -> Void)? = onNew ? { withAnimation(S.easeSettle(S.durRevealTransform)) { m.markRead(i) } } : nil
         switch i.kind {
         case .week(let w):    SunnyWeekCard(m: w, onRead: mark)
         case .digest(let d):  SunnyDigestCard(d, onRead: mark)
@@ -422,26 +411,4 @@ struct SunnyPane: View {
         }
     }
 
-    /* Reading changes WHERE the card is, never what it says: the control files
-       the card, it does not dismiss it.
-
-       ⚠ ONE FUNCTION, SO THE PROBE CANNOT DIVERGE FROM THE BUTTON. -tapRead
-       calls this, not a copy of it. A verification path that reimplements the
-       thing it verifies is the shape of test that passes while the real control
-       is broken, and this file has been burned by that once already. */
-    private func markRead(_ i: SunnyFeedItem) {
-        withAnimation(S.easeSettle(S.durRevealTransform)) {
-            read.insert(i.id)
-            SunnyRead.save(read)
-        }
-        /* ⚠ AND TELL THE SERVER, because the server's idea of "read" used to be
-           "somebody fetched this", which any probe or refresh could satisfy.
-           The Read control is now the only thing that advances the freshness
-           window, so the amber highlight and the NEW tags mean on the wire what
-           the pill means on the screen. Digests only — the week card belongs to
-           no name and the planner has no read control at all. */
-        if case .digest = i.kind, let t = i.ticker {
-            Task { await digest.markSeen(t) }
-        }
-    }
 }

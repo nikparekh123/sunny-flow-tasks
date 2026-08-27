@@ -35,36 +35,25 @@ import SwiftUI
 
 struct SunnyShell: View {
     @State private var page: SunnyPage = .new
-    /// Pushed up from the pane, which owns the stores and is therefore the only
-    /// thing that knows the book, what is unread and how much is due.
-    @State private var nav = SunnyNav()
-    /* ⚠ THE DIRECTION IS DECIDED BEFORE THE PAGE CHANGES, and it lives up here
-       because both movers set it: the swipe and a tap on the strip. Deriving it
-       inside the pane from a remembered index cannot work — `onChange` fires in
-       the same update as the body that must already know which way to slide. */
-    @State private var dir = 1
+    /// ⚠ THE STORES LIVE HERE NOW, not inside the pane. A pager lays the pages
+    /// side by side, so more than one pane exists at once — see PaneModel.
+    @State private var model = PaneModel()
+    private var nav: SunnyNav { model.nav }
+    /* ⚠ THE SCROLLER'S PAGE IS THE SOURCE OF TRUTH, and `page` follows it. A
+       paging scroller owns the position while a finger is on it; a second value
+       driving it would fight the drag mid-gesture. */
+    @State private var scrolled: String?
 
     /// Deterministic states for verification, so a screenshot of "the TLT page"
-    /// does not depend on a simulated tap landing on the right pixel.
-    ///   -page TLT       open that name's page instead of New
-    ///   -scrollTo 900   start the pane at that offset
+    /// does not depend on a simulated drag landing on the right pixel.
+    ///   -page TLT     open that name's page instead of New
+    ///   -scrollTo 900 start the pane at that offset
+    ///   -swipe 2      move two pages forward once the book has loaded
     private static var argPage: SunnyPage? {
         let a = ProcessInfo.processInfo.arguments
         guard let i = a.firstIndex(of: "-page"), i + 1 < a.count else { return nil }
         let k = a[i + 1].uppercased()
         return k == "NEW" ? .new : .name(k)
-    }
-    /// ⚠ VERIFICATION ONLY, AND IT CALLS `step` ITSELF rather than a copy of it.
-    /// The touch bridge is dead, so a swipe cannot be driven; this drives the
-    /// thing the swipe calls. What it does NOT prove is the gesture recogniser —
-    /// that the drag survives the pane's vertical scroller and clears the
-    /// dominance test. Only a finger proves that.
-    ///   -swipe 2   step forward twice after the nav loads
-    ///   -swipe -1  step back once
-    private static var argSwipe: Int? {
-        let a = ProcessInfo.processInfo.arguments
-        guard let i = a.firstIndex(of: "-swipe"), i + 1 < a.count else { return nil }
-        return Int(a[i + 1])
     }
     private static var argScroll: CGFloat? {
         let a = ProcessInfo.processInfo.arguments
@@ -72,40 +61,76 @@ struct SunnyShell: View {
               let v = Double(a[i + 1]) else { return nil }
         return CGFloat(v)
     }
+    /// ⚠ VERIFICATION ONLY. The touch bridge is dead, so a real drag cannot be
+    /// driven; this moves the page the way a completed swipe would and leaves
+    /// the scroller to follow. What it does NOT prove is the paging scroller's
+    /// own feel under a finger.
+    private static var argSwipe: Int? {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-swipe"), i + 1 < a.count else { return nil }
+        return Int(a[i + 1])
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            SunnyPane(page: $page, dir: dir, onNav: { nav = $0 }, startAt: Self.argScroll)
-                .frame(maxHeight: .infinity)
-                /* ⚠ SIMULTANEOUS, AND HORIZONTAL-DOMINANT ONLY. The pane is a
-                   vertical scroller; an exclusive gesture would swallow its
-                   scrolling, and one without the dominance test fires on the
-                   diagonal drift at the start of every flick. `minimumDistance`
-                   alone is not enough — a vertical flick clears 20 in both axes
-                   long before it clears the ratio.
-
-                   ⚠ AND IT MOVES THE PAGE, NOT A CAROUSEL. The pages are not
-                   laid out side by side and never will be: SHELL-PAGED §0 rule
-                   1 is that a page REPLACES the pane, and a rubber-banding
-                   filmstrip would make the strip's circles look like an index
-                   into one long scroll again. */
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 20)
-                        .onEnded { g in
-                            let dx = g.translation.width, dy = g.translation.height
-                            guard abs(dx) > 60, abs(dx) > abs(dy) * 1.6 else { return }
-                            step(dx < 0 ? 1 : -1)
-                        })
-            SunnyStrip(nav: nav, page: $page, dir: $dir)
+            pager.frame(maxHeight: .infinity)
+            SunnyStrip(nav: nav, page: $page)
         }
         .background(S.ground)
-        .onAppear { if let p = Self.argPage { page = p } }
-        .onChange(of: nav.pages.count) { _, n in
-            guard let by = Self.argSwipe, n > 1 else { return }
-            for _ in 0 ..< abs(by) { step(by > 0 ? 1 : -1) }
-            print("SWIPE \(by) -> \(page.key)   order " + nav.pages.map(\.key).joined(separator: ","))
-        }
+        .task { await model.loadAll() }
+        .onAppear { if let p = Self.argPage { page = p; scrolled = p.key } }
         .preferredColorScheme(.light)      // the token set is a light system
+    }
+
+    /* ⚠ THE PAGES ARE LAID OUT SIDE BY SIDE AND THE FINGER MOVES THEM. Nik asked
+       three times for the swipe to feel native, and it could not while the pane
+       was one view swapping its contents: a transition can only start when the
+       finger has already left the glass, so the page never tracked the drag and
+       every version of it read as fake however it was eased.
+
+       This is the platform's own paged scroller — it tracks, it rubber-bands at
+       both ends, it takes a flick's velocity — and it costs what the pane was
+       structured to avoid: more than one pane alive at once. `PaneModel` is the
+       answer to that. The stores are shared, so a second pane is view
+       construction and not a second fetch, and `LazyHStack` only builds the
+       pages either side of the one being looked at.
+
+       ⚠ AND THERE IS NO DRAG GESTURE ANY MORE. The hand-rolled one had to guess
+       at a 60pt threshold and a 1.6x dominance ratio to avoid eating the
+       vertical scroll. The paging scroller resolves that itself, the way every
+       other iOS pager does. */
+    private var pager: some View {
+        GeometryReader { g in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(nav.pages, id: \.key) { p in
+                        SunnyPane(page: p, m: model, startAt: Self.argScroll)
+                            .frame(width: g.size.width)
+                            .id(p.key)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: $scrolled)
+            .scrollIndicators(.hidden)
+            /* The strip and the pager are two views of one position, so each
+               follows the other. `guard` on equality keeps that from looping. */
+            .onChange(of: scrolled) { _, k in
+                guard let k, k != page.key else { return }
+                page = k == SunnyPage.new.key ? .new : .name(k)
+            }
+            .onChange(of: page) { _, p in
+                guard scrolled != p.key else { return }
+                withAnimation(S.easeOut(S.durPage)) { scrolled = p.key }
+            }
+            .onChange(of: nav.pages.count) { _, _ in
+                if scrolled == nil { scrolled = page.key }
+                guard let by = Self.argSwipe else { return }
+                for _ in 0 ..< abs(by) { step(by > 0 ? 1 : -1) }
+                print("SWIPE \(by) -> \(page.key)   order " + nav.pages.map(\.key).joined(separator: ","))
+            }
+        }
     }
 
     /* ⚠ IT WALKS `nav.pages`, WHICH IS THE STRIP'S OWN ORDER — New, then the
@@ -121,10 +146,6 @@ struct SunnyShell: View {
         guard let i = ps.firstIndex(of: page) else { return }
         let j = i + by
         guard ps.indices.contains(j) else { return }
-        dir = by
-        /* No withAnimation here: the pane animates its own transition on `page`,
-           so wrapping the assignment as well would run the slide twice on two
-           curves. */
         page = ps[j]
     }
 }

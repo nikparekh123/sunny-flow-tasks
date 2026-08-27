@@ -150,10 +150,6 @@ struct SunnyStrip: View {
     private var flagged: Set<String> { nav.flagged }
     private var due: Int { nav.due }
     @Binding var page: SunnyPage
-    /// Which way the pane should slide. A tap two circles to the right slides
-    /// the same way a swipe would, so the strip and the swipe never disagree
-    /// about which direction the book runs in.
-    @Binding var dir: Int
 
     var body: some View {
         /* ⚠ A HAIRLINE, NOT A SHADOW. A shadow says the strip floats over the
@@ -249,12 +245,10 @@ struct SunnyStrip: View {
         }
     }
 
+    /* A tap sets the page; the pager scrolls to it and the strip's own
+       `onChange` then centres the circle. One value, two followers. */
     private func go(_ p: SunnyPage) {
         guard p != page else { return }
-        let ps = nav.pages
-        if let a = ps.firstIndex(of: page), let b = ps.firstIndex(of: p) {
-            dir = b > a ? 1 : -1
-        }
         page = p
     }
 }

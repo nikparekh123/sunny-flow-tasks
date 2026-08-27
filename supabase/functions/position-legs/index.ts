@@ -286,6 +286,19 @@ Deno.serve(async (req) => {
       legBy.set(tick, per);
     }
 
+    /** The first date the name appears anywhere: a lot ever acquired, a sell, or
+        an option trade. This is when the POSITION started, which is not the same
+        as when its surviving lots were bought. */
+    const firstSeen = new Map<string, string>();
+    const sawOn = (t: string, d: string) => {
+      if (!t || !d) return;
+      const cur = firstSeen.get(t);
+      if (!cur || d < cur) firstSeen.set(t, d);
+    };
+    for (const l of allLots) sawOn(String(l.ticker), String(l.acquired_date ?? '').slice(0, 10));
+    for (const r of sells) sawOn(String(r.ticker), String(r.trade_date ?? '').slice(0, 10));
+    for (const t of everyTrade) sawOn(String(t.ticker), String(t.trade_date ?? '').slice(0, 10));
+
     /** Days since the oldest open lot — the shares card's third footer stat. */
     const acquired = new Map<string, string>();
     for (const l of lots) {
@@ -638,11 +651,30 @@ Deno.serve(async (req) => {
         }
         return { any, v };
       };
+      /* ⚠ A WEEK HE HELD THE NAME AND REALIZED NOTHING IS A ZERO, NOT A NULL.
+         Null means "we do not know"; here we do. The card was returning null for
+         every quiet week, so six of nine names drew no bars at all — Nik, 27
+         Aug: "no bars are showing for any tickers." On a realized-only series a
+         book whose legs all expire on the same future Friday is quiet by
+         construction, and a flat zero is the true shape of that.
+
+         ⚠ BEFORE HE OWNED IT, THE NULL IS STILL RIGHT. AIG and FIS are days
+         old; a zero bar for the weeks before the first lot would claim a flat
+         result on a position that did not exist.
+
+         ⚠ AND THE CUT IS THE FIRST TIME HE HELD THE NAME AT ALL, not the oldest
+         OPEN lot. `acquired` sees only surviving lots, so NKE dated from 24 Aug
+         — a different, larger block had been called away — and four weeks he
+         held it through came back null. The earliest of every lot ever, every
+         sell and every option trade is the honest start of a position; the same
+         mistake is already recorded a few lines above this one against the value
+         series. */
+      const since = firstSeen.get(ticker) ?? '';
       const posWeeks = weekStarts.map((_, i) => {
         const live = i === weekStarts.length - 1;
         const label = live ? 'Live' : weekLabel(weekStarts[i]);
         const { any, v } = realizedWeek(i);
-        if (!any) return null;
+        if (!any && (!since || weekEnds[i] < since)) return null;
         return { label, live, pnl: Math.round(v) };
       });
 
