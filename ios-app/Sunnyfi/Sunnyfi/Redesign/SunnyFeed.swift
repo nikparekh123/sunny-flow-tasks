@@ -186,7 +186,7 @@ struct SunnyPane: View {
     private var current: BookName? {
         guard case .name(let t) = page else { return nil }
         return rail.book.first { $0.ticker == t }
-            ?? BookName(ticker: t, name: "", weight: 0, week: nil, avg: nil)
+            ?? BookName(ticker: t, name: "", weight: 0, week: nil, avg: nil, delta: nil)
     }
 
     private var position: LegsPosition? {
@@ -264,6 +264,9 @@ struct SunnyPane: View {
         if rail.book.contains(where: { $0.avg != nil }) {
             SunnyAverageList(book: rail.book)
         }
+        if rail.book.contains(where: { $0.delta != nil }) {
+            SunnyNetDeltaList(book: rail.book)
+        }
         if due.isEmpty {
             SunnyPageNote("Nothing on a clock. Every card has moved to its own "
                         + "name — a name comes back here when it has something new.")
@@ -309,6 +312,9 @@ struct SunnyPane: View {
             if let a = b.avg {
                 SunnyAverageCard(ticker: b.ticker, a: a)
             }
+            if let d = b.delta {
+                SunnyNetDeltaCard(ticker: b.ticker, d: d)
+            }
             if let w = b.week {
                 SunnyFiveDayCard(
                     ticker: b.ticker, m: w,
@@ -320,7 +326,7 @@ struct SunnyPane: View {
                         }))
             }
 
-            if filed.isEmpty && position == nil && b.week == nil && b.avg == nil {
+            if filed.isEmpty && position == nil && b.week == nil && b.avg == nil && b.delta == nil {
                 SunnyPageNote("Held, and quiet. No card has been built for this "
                             + "name yet — it earns one when it has something to say.")
             }

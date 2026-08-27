@@ -33,7 +33,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-26.2';
+const BUILD = '2026-08-26.3';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** The rail abbreviates money: $400k, never $400,000. */
@@ -99,7 +99,8 @@ Deno.serve(async (req) => {
         if (page.length < 1000) return out;
       }
     }
-    const [lots, divs, rates, shorts, closes, allShorts, quotes] = await Promise.all([
+    const [lots, divs, rates, shorts, closes, allShorts, quotes, openLegs, greeks] =
+      await Promise.all([
       D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
       D.get('dividends?ticker=eq.TLT&select=ex_date,cash_amount,frequency&order=ex_date.desc&limit=1'),
       D.get('rates_daily?series=eq.DGS10&select=date,value&order=date.desc&limit=1'),
@@ -110,6 +111,9 @@ Deno.serve(async (req) => {
       getAll('option_trades?voided_at=is.null&direction=eq.short&order=id.asc'
         + '&select=ticker,action,contracts,premium'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
+      getAll(`option_trades?voided_at=is.null&expiry=gte.${todayISO}&order=id.asc`
+        + '&select=id,ticker,direction,action,contracts'),
+      D.get('option_greeks_latest?select=option_trade_id,delta'),
     ]);
 
     const facts: Array<{ key: string; spans: Span[]; projected?: boolean }> = [];
@@ -235,6 +239,58 @@ Deno.serve(async (req) => {
       };
     }
 
+    /* ── net delta, one per name ──────────────────────────────────────────
+       The position's directional exposure expressed in SHARES: what he is
+       actually long or short once the options are counted.
+
+         net = shares + Σ (long ? +1 : −1) × contracts × 100 × delta
+
+       Polygon's delta is already signed by option type, so a put arrives
+       negative and the direction factor is the only thing this has to supply.
+       Each of the four cases then falls out without a special case: a short call
+       reduces exposure, a short put adds it, a long put reduces it.
+
+       ⚠ A POSITIVE DELTA IS NOT A GAIN. It is a direction, and the cards carry
+       no green anywhere for exactly that reason. Only a SHORT takes colour.
+
+       ⚠ A LEG WITH NO DELTA SUPPRESSES THE WHOLE NAME. A missing greek is not a
+       zero: NKE's 10 short 38.5 puts, filled minutes ago and not yet marked,
+       are worth roughly +250 shares of exposure, and counting them as nothing
+       would print 1,060 where the truth is nearer 1,310. Same rule the rest of
+       the deck follows — no price, no week. The greeks cron fills it within the
+       quarter hour, so the name comes back on its own. */
+    const deltaById = new Map<string, number>();
+    for (const g of greeks) {
+      const v = g.delta;
+      if (v !== null && v !== undefined) deltaById.set(String(g.option_trade_id), N(v));
+    }
+    const legDelta = new Map<string, { d: number; missing: number }>();
+    for (const t of openLegs) {
+      const tick = String(t.ticker);
+      const e = legDelta.get(tick) ?? { d: 0, missing: 0 };
+      const dl = deltaById.get(String(t.id));
+      if (dl === undefined) { e.missing += 1; legDelta.set(tick, e); continue; }
+      const dir = String(t.direction) === 'long' ? 1 : -1;
+      const open = t.action === 'open' ? 1 : -1;
+      e.d += dir * open * N(t.contracts) * 100 * dl;
+      legDelta.set(tick, e);
+    }
+    function netDelta(ticker: string) {
+      const sh = shareBy.get(ticker);
+      if (!sh || !(sh.qty > 0)) return null;
+      const e = legDelta.get(ticker);
+      if (e && e.missing > 0) return null;          // see the note above
+      const net = Math.round(sh.qty + (e?.d ?? 0));
+      const spot = spotBy.get(ticker) ?? 0;
+      return {
+        net,
+        short: net < 0,
+        /* The position's NOTIONAL, and the card names it `exposure` because a
+           signed dollar figure in this deck otherwise reads as P&L. */
+        exposure: Math.round(net * spot),
+      };
+    }
+
     const pk = Deno.env.get('POLYGON_API_KEY') ?? '';
     const book = await Promise.all(
       [...byTicker.entries()]
@@ -246,6 +302,7 @@ Deno.serve(async (req) => {
           weight: invested > 0 ? Math.round(cost / invested * 100) : 0,
           cost: Math.round(cost),
           avg: average(ticker),
+          delta: netDelta(ticker),
           week: week(ticker),
         })),
     );

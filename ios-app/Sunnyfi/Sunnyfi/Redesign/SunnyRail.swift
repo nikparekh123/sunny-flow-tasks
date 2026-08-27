@@ -75,6 +75,9 @@ struct BookName: Decodable, Identifiable {
     /// The average price cards' data. Optional so a run against an older
     /// deployment of sunny-rail decodes rather than throws.
     let avg: BookAverage?
+    /// The net delta cards' data. Null when a leg has no delta yet — see the
+    /// note on BookDelta.
+    let delta: BookDelta?
     var id: String { ticker }
 }
 
@@ -101,6 +104,26 @@ struct BookAverage: Decodable {
         case vsPaid = "vs_paid"
         case vsSpot = "vs_spot"
     }
+}
+
+/// The position's directional exposure in SHARES: what he is actually long or
+/// short once the options are counted.
+///
+/// ⚠ NULL WHEN ANY OPEN LEG HAS NO DELTA, and the name then shows no tile and no
+/// card. A missing greek is not a zero: ten short puts filled minutes ago are
+/// worth a few hundred shares of exposure, and counting them as nothing prints a
+/// confident wrong number. Same rule the rest of the deck follows — no price, no
+/// week. The greeks cron fills it within the quarter hour and the name returns
+/// on its own.
+struct BookDelta: Decodable {
+    /// shares + Σ (long ? +1 : −1) × contracts × 100 × delta. Polygon's delta is
+    /// already signed by option type, so a short call reduces exposure and a
+    /// short put adds it without any special case.
+    let net: Int
+    let short: Bool
+    /// The NOTIONAL. The card names it `exposure` because a signed dollar figure
+    /// in this deck otherwise reads as P&L.
+    let exposure: Int
 }
 
 struct RailFact: Decodable, Identifiable {

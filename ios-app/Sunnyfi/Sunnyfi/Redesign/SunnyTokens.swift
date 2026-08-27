@@ -699,6 +699,30 @@ enum S {
     static let avgFigure: CGFloat = 38
     static let avgFigureLH: CGFloat = 0.9
 
+    // MARK: - net delta — net-delta.md / net-delta-single.md
+    //
+    // ⚠ NO GREEN ON EITHER CARD, and none in their token set. A positive delta
+    // is a direction, not money made. Only a SHORT takes colour, and the SIGNED
+    // figure carries it — the exposure line stays grey. That is the inverse of
+    // average price, whose unsigned figure makes the READING turn red.
+    static let deltaHeadBottom: CGFloat = 14
+    /// A 22 radius inside a 22 radius reads as a card in a card.
+    static let radiusTile: CGFloat = 14
+    static let tileH: CGFloat = 83
+    static let tileHWide: CGFloat = 48      // the span-2 tile — one line, not two
+    static let tileGap: CGFloat = 11        // the same 11 the feed uses between cards
+    static let tileSlotGap: CGFloat = 7
+    /// 13 at the bottom against 12 on top: the figure's line-height crops its
+    /// ascender, so equal padding reads top-heavy.
+    static let padTile = EdgeInsets(top: 12, leading: 13, bottom: 13, trailing: 13)
+    static let padTileWide = EdgeInsets(top: 13, leading: 14, bottom: 13, trailing: 14)
+    static let dotException: CGFloat = 5    // --loss disc before an exception's name
+    static let wideSlotGap: CGFloat = 12
+    static let listFoot: CGFloat = 19
+    static let t18: CGFloat = 18            // the list title, at 300
+    static let lhHero: CGFloat = 0.9
+    static let lhRead: CGFloat = 1.35
+
     // MARK: - the paged shell — SHELL-PAGED.md
     //
     // ⚠ THE FILTER, THE SEARCH FIELD, THE THREE SECTIONS AND THE BOTTOM RAIL ARE
