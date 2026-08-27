@@ -280,9 +280,17 @@ struct SunnyPane: View {
                16 + 175 + 11 + 175 + 16. Holding --margin at 16 on a wider phone
                would widen the content to 370 and resize every card already
                signed off. Do not "fix" this back to a leading 16. */
+            /* ⚠ 361 WIDE AND CENTRED, NOT maxWidth: .infinity. The pager made
+               each page the full screen width and this frame was widened to
+               match it, which is a different thing entirely: the CONTENT column
+               is 361 and the page is 393, and the 16 either side is the margin.
+               Widened, every card sat hard against the left edge with all 32 of
+               the slack on the right. The page's width is the pager's business;
+               the column's is this line's. */
+            .frame(width: S.content)
+            .padding(EdgeInsets(top: S.shellPanePadTop, leading: S.margin,
+                                bottom: S.shellPanePadBottom, trailing: S.margin))
             .frame(maxWidth: .infinity)
-            .padding(EdgeInsets(top: S.shellPanePadTop, leading: 0,
-                                bottom: S.shellPanePadBottom, trailing: 0))
         }
         .scrollIndicators(.hidden)
         .scrollPosition($pos)

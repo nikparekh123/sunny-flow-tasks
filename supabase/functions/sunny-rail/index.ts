@@ -341,9 +341,16 @@ Deno.serve(async (req) => {
        ⚠ NONE OF THE THREE IS A DIRECTION, so none takes gain or loss ink. The
        deck reserves colour for direction, and a balance is not one. */
     const markById = new Map<string, number>();
+    /* ⚠ THE SPOT THE MARK WAS QUOTED AGAINST, when we have it. Polygon's option
+       snapshot carries its own underlying price, and mp-refresh now stamps it
+       beside the mark, so intrinsic is computed against the two halves of ONE
+       quote rather than against a stock snapshot on a different clock. */
+    const underById = new Map<string, number>();
     for (const g of greeks) {
       const v = g.last_mark;
       if (v !== null && v !== undefined) markById.set(String(g.option_trade_id), N(v));
+      const u = (g as { underlying?: number | null }).underlying;
+      if (u !== null && u !== undefined && N(u) > 0) underById.set(String(g.option_trade_id), N(u));
     }
     const shortLeg = new Map<string, {
       net: number; credit: number; mark: number; itm: number;
@@ -355,13 +362,23 @@ Deno.serve(async (req) => {
       const e = shortLeg.get(key) ?? { net: 0, credit: 0, mark: 0, itm: 0 };
       const sign = t.action === 'open' ? 1 : -1;
       e.net += sign * N(t.contracts);
+      /* ⚠ THE MARK AND ITS SPOT ARE TAKEN TOGETHER OR NOT AT ALL. A leg is
+         several trade rows — an open, a partial buy-back — and only the rows
+         mp-refresh still refreshes carry a mark. Reading the spot outside this
+         guard let a later unmarked row overwrite the intrinsic, pairing one
+         row's mark with another row's spot, which is the exact thing the stamp
+         exists to prevent. */
       const mk = markById.get(String(t.id));
-      if (mk !== undefined) e.mark = mk;
-      const spot = spotBy.get(tick) ?? 0;
-      e.itm = spot > 0
-        ? Math.max(0, String(t.option_type) === 'put'
-            ? N(t.strike) - spot : spot - N(t.strike))
-        : 0;
+      if (mk !== undefined) {
+        e.mark = mk;
+        /* Fall back to the latest quote for rows captured before 27 Aug 2026
+           and for any snapshot Polygon returned without an underlying price. */
+        const spot = underById.get(String(t.id)) ?? spotBy.get(tick) ?? 0;
+        e.itm = spot > 0
+          ? Math.max(0, String(t.option_type) === 'put'
+              ? N(t.strike) - spot : spot - N(t.strike))
+          : 0;
+      }
       shortLeg.set(key, e);
     }
     /* The credit comes from the same netted short rows the premium map is built
@@ -372,13 +389,35 @@ Deno.serve(async (req) => {
       creditBy.set(k, (creditBy.get(k) ?? 0) + N(t.contracts) * N(t.premium) * 100
         * (t.action === 'open' ? 1 : -1));
     }
+    /* ⚠ TIME VALUE CANNOT BE NEGATIVE, AND IT IS CLAMPED PER LEG, NOT ON THE
+       TOTAL. The mark and the spot come from two different feeds on two
+       different clocks — option_greeks_latest is a 15-minute cron, ticker
+       quotes have their own cadence — so on a deep-ITM leg, whose extrinsic is
+       a few cents to begin with, a small drift between the two makes the
+       computed intrinsic exceed the mark. Three legs did on 27 Aug (CEG 272.5
+       −$14, NKE 40.5 −$110, PEP 144 −$140) and the book's time value came out
+       $264 light at $2,537 instead of $2,801.
+
+       Clamping the TOTAL would hide it; clamping each leg is the true statement,
+       because the error is per leg and a leg that is all intrinsic has zero time
+       value, never negative. Intrinsic takes the same clamp from the other side
+       so the two still sum to the value exactly — an identity the card depends
+       on, since it prints both.
+
+       ⚠ IT IS A FLOOR, AND IT STAYS EVEN NOW THE SPOT IS STAMPED. The drift is
+       addressed at the source — option_greeks.underlying carries the price
+       Polygon quoted beside the mark, so intrinsic is now the two halves of one
+       quote — but every row captured before 27 Aug 2026 has none, and Polygon
+       can omit it. Those fall back to the latest quote and can still drift, so
+       the invariant is kept here rather than assumed upstream. */
     let oCredit = 0, oValue = 0, oItm = 0, oCtr = 0;
     for (const [k, e] of shortLeg) {
       if (!(e.net > 0.0001)) continue;
       oCtr += e.net;
       oCredit += creditBy.get(k) ?? 0;
-      oValue += e.net * e.mark * 100;
-      oItm += e.net * e.itm * 100;
+      const value = e.net * e.mark * 100;
+      oValue += value;
+      oItm += Math.min(e.net * e.itm * 100, value);
     }
     const openShorts = {
       contracts: Math.round(oCtr),

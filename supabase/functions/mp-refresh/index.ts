@@ -43,6 +43,14 @@ interface PolyOptionSnapshot {
   last_quote?: { midpoint?: number; bid?: number; ask?: number };
   last_trade?: { price?: number };
   fair_market_value?: number;
+  /* ⚠ THE SPOT THIS MARK WAS QUOTED AGAINST, and the reason it is stamped. The
+     stock snapshot in step 4 is a SECOND call on its own clock, and it can also
+     be skipped entirely when it returns null (we keep the last good quote), so
+     intrinsic computed from it is against a spot that may be minutes away from
+     the mark. On a deep-ITM leg whose extrinsic is a few cents that made
+     intrinsic exceed the mark and time value go negative. This field is the
+     option chain's own answer and cannot drift from the mark beside it. */
+  underlying_asset?: { price?: number };
 }
 interface PolyOptionResp {
   status?: string;
@@ -249,7 +257,7 @@ Deno.serve(async (req) => {
       id: string; delta: number | null; gamma: number | null;
       theta: number | null; vega: number | null;
       iv: number | null; oi: number | null; vol: number | null;
-      last_mark: number | null;
+      last_mark: number | null; underlying: number | null;
     }> = [];
     const legFailures: Array<{ id: string; ticker: string; occ: string; reason: string }> = [];
 
@@ -288,6 +296,7 @@ Deno.serve(async (req) => {
           oi:        s.open_interest ?? null,
           vol:       s.day?.volume ?? null,
           last_mark: pickPremium(s),
+          underlying: s.underlying_asset?.price ?? null,
         });
       } catch (err) {
         legFailures.push({ id: leg.id, ticker: leg.ticker, occ, reason: (err as Error).message });
@@ -335,6 +344,7 @@ Deno.serve(async (req) => {
         option_trade_id: r.id,
         delta: r.delta, gamma: r.gamma, theta: r.theta, vega: r.vega,
         iv: r.iv, open_interest: r.oi, volume: r.vol, last_mark: r.last_mark,
+        underlying: r.underlying,
         captured_at: now,
       }));
       // Append-only: each cron run inserts a new row. The
