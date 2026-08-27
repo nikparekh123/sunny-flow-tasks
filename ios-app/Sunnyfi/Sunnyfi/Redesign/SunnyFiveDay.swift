@@ -21,7 +21,14 @@ import SwiftUI
 // MARK: - the model, as the server sends it
 
 struct FiveDay: Decodable {
-    let days: [Day]          // newest first
+    /// ⚠ OLDEST FIRST (26 Aug 2026), reversing five-day-price.md §0.2. That rule
+    /// put the newest day on the left, "reading back into the past like every
+    /// other list in the app" — but a chart is not a list. On a Friday it read
+    /// cleanly as Fri Thu Wed Tue Mon; on any other weekday the weekend wraps and
+    /// it came out Wed Tue Mon Fri Thu, which reads as random days rather than as
+    /// time running backwards. Time now runs left to right like every price
+    /// chart, and today lands at the right end where the eye finishes.
+    let days: [Day]
     let from: Double         // the close BEFORE the oldest bar
     let to: Double
     let week_pct: Double
@@ -105,7 +112,8 @@ struct SunnyFiveDayCard: View {
     private var chart: some View {
         HStack(spacing: S.fiveDayColGap) {
             ForEach(Array(m.days.enumerated()), id: \.offset) { i, d in
-                column(d, newest: i == 0)
+                /* The newest day is the LAST column now, not the first. */
+                column(d, newest: i == m.days.count - 1)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

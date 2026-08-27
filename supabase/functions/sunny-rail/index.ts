@@ -33,7 +33,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-26.5';
+const BUILD = '2026-08-26.6';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** The rail abbreviates money: $400k, never $400,000. */
@@ -182,7 +182,8 @@ Deno.serve(async (req) => {
       const from = a[days.length].close, to = a[0].close;
       const pcts = days.map((d) => d.pct);
       return {
-        days,
+        /* Oldest first — see the note on the fetch above. */
+        days: days.reverse(),
         from, to,
         week_pct: Math.round((to - from) / from * 10000) / 100,
         best: Math.max(...pcts),
