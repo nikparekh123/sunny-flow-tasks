@@ -60,7 +60,8 @@ struct SunnyShell: View {
         VStack(spacing: 0) {
             SunnyPane(page: $page, onNav: { nav = $0 }, startAt: Self.argScroll)
                 .frame(maxHeight: .infinity)
-            SunnyStrip(book: nav.book, pending: nav.pending, due: nav.due, page: $page)
+            SunnyStrip(book: nav.book, pending: nav.pending, flagged: nav.flagged,
+                       due: nav.due, page: $page)
         }
         .background(S.ground)
         .onAppear { if let p = Self.argPage { page = p } }

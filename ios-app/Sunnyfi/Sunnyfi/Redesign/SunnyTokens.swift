@@ -755,6 +755,55 @@ enum S {
     static let padListHeadTop: CGFloat = 19
     static let padListHeadBottom: CGFloat = 16
 
+    // MARK: - one ticker, one card — cards/ticker-card.md
+    //
+    // ⚠ THE SUMMARY LIST ROW WITH THE AXIS SWAPPED. The ticker moves to the
+    // header; the METRIC takes the subject slot. Figure and support keep their
+    // type, their inks and their rules. Nothing here is a new design.
+    //
+    // ⚠ THE LABEL PINS TO THE TILE'S TOP-LEFT CORNER, not a left column. The
+    // column was built and measured first: at 361 it left support 106 against a
+    // 110 worst case ("opened yesterday"), so the card could only survive by
+    // shortening strings shared with the six lists. The corner costs 12 of row
+    // height (109 against 97) and buys roughly double the support width.
+    static let padTileCorner = EdgeInsets(top: 16, leading: 17, bottom: 16, trailing: 17)
+    static let tileCornerGap: CGFloat = 10     // label line -> body row
+    /// ⚠ EVERY ROW IS THIS TALL whatever its support count. Five metrics stacked
+    /// read as a ledger, and a ragged stack of five is noise the list cards never
+    /// had to carry. 109 is the three-line case: 16 + 10 + 10 + 57 + 16.
+    static let tileCornerRowH: CGFloat = 109
+    static let padCardHeadTop: CGFloat = 19
+    static let padCardHeadBottom: CGFloat = 16
+
+    // MARK: - if exercised, the ladder — cards/exercise-ladder.md
+    //
+    // ⚠ A SOLD CALL AND A SOLD PUT ON ONE NAME CANNOT BOTH BE ASSIGNED. They are
+    // branches of one variable, where the price lands. So the card is a ladder of
+    // MUTUALLY EXCLUSIVE PRICE BANDS ordered high to low and exactly one rung is
+    // true. A list of legs cannot express that, and every version that tried read
+    // as two unrelated facts.
+    //
+    // ⚠ NO DOT GUTTER, the one card in the family with none. On a list the dot
+    // indents one row of seven and the cost is absorbed, because there you compare
+    // one row against six. On a ladder you compare three rungs of ONE card and the
+    // shared left edge is how you do it.
+    /// One step darker than tileGround, on the band spot sits in. It replaces the
+    /// flag dot there, costs no alignment, and says the only thing it needs to:
+    /// this is the world you are actually in.
+    static let tileGroundLive = hex(0xE9E9EE)
+    static let padRung = EdgeInsets(top: 20, leading: 18, bottom: 20, trailing: 18)
+    static let rungMinH: CGFloat = 140
+    static let rungGap: CGFloat = 14           // title row -> body row
+    /// ⚠ FIXED, so support starts at the same x on every rung. The support
+    /// block's LEFT edge is this card's column, where a list row's column is the
+    /// support block's RIGHT edge.
+    static let figSlot: CGFloat = 110
+    static let figUnitGap: CGFloat = 4
+    static let verdictGap: CGFloat = 8         // figure -> verdict, inside the column
+    static let supportLineGapLg: CGFloat = 5
+    static let lhSupportLg: CGFloat = 1.45     // 20.3 line box at 14
+    static let lsRung = 0.12          // the rung title, one step under lsLabel
+
     // MARK: - the paged shell — SHELL-PAGED.md
     //
     // ⚠ THE FILTER, THE SEARCH FIELD, THE THREE SECTIONS AND THE BOTTOM RAIL ARE
@@ -796,7 +845,41 @@ enum S {
     static let shellCircle: CGFloat = 60
     static let shellCircleGap: CGFloat = 10        // circle to caption
     static let shellHeadMark: CGFloat = 34         // the ticker circle in a heading
-    static let shellDividerH: CGFloat = 40
+    /* ⚠ THE DIVIDER AFTER `New` IS RETIRED (27 Aug 2026). Shape already says
+       *different kind of destination* — New is a square, a name is a circle —
+       and the rule was saying it a second time. Content width drops by 15. */
+
+    // MARK: - the strip's ring is the EVENT channel — cards/strip-flag.md
+    //
+    // ⚠ ONE CHANNEL, ONE JOB, and that is the whole design. Ring = the event.
+    // Interior = where you are. Caption = the weight. Shape = name or not a name.
+    // Nothing shares a channel, so selected + unread + assignment all read at
+    // once with NO PRECEDENCE RULE.
+    //
+    // ⚠ POSSIBLE ONLY BECAUSE ACTIVE LEFT THE RING. Active was double-encoded —
+    // an ink ring AND an ink caption — so the ring's copy of it was the redundant
+    // one, and giving it up freed the ring entirely. Every earlier attempt failed
+    // because four states competed for one 1.5px stroke.
+    //
+    // ⚠ NO GREEN AND NO RED, EVER. They are gain and loss on every card in the
+    // deck; a green ring on a name whose card prints a loss argues with the card.
+    static let assign = hex(0x5B4B8A)
+    static let ringRest: CGFloat = 1
+    static let ringEvent: CGFloat = 1.5
+    /// ⚠ ONE STOP, NO SPREAD, UNDER 9 so the band does not clip it. The shell's
+    /// two-stop recipe read as dirt on these hues — they are warmer and stronger
+    /// than --update blue. And the glow never travels alone: it always sits
+    /// outside a 1.5px ring that is legible without it, because a glow survives
+    /// neither a bright screen nor a screenshot.
+    static let glowEventAmber  = [SunnyShadow(hex(0xE08600).opacity(0.5), 9, 0)]
+    static let glowEventAssign = [SunnyShadow(hex(0x5B4B8A).opacity(0.5), 9, 0)]
+    /// ⚠ ROTATION MEANS "TWO". Motion is the only channel that can say *more than
+    /// one thing is true here* without printing a number, and a number gets
+    /// counted. 3.2 reads as a state; at 1.5 it reads as loading. NOTHING PULSES:
+    /// six pulsing circles docked in peripheral vision through an expiry week is
+    /// what that rule exists to prevent.
+    static let spinRing: Double = 3.2
+    static let radiusNew: CGFloat = 14         // = radiusTile. the not-a-name shape
     static let shellDividerLift: CGFloat = 13
 
     /// The strip's own type, which moved with the circle. None of it is on the

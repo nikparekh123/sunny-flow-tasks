@@ -138,6 +138,10 @@ struct BookName: Decodable, Identifiable {
     /// The average price cards' data. Optional so a run against an older
     /// deployment of sunny-rail decodes rather than throws.
     let avg: BookAverage?
+    /// The exercise ladder's data. Null when the name has no open short leg —
+    /// there is then nothing that could be assigned and the card is absent, not
+    /// empty.
+    let exercise: BookExercise?
     /// The net delta cards' data. Null when a leg has no delta yet — see the
     /// note on BookDelta.
     let delta: BookDelta?
@@ -197,6 +201,51 @@ struct BookDelta: Decodable {
     enum CodingKeys: String, CodingKey {
         case net, short, prior, change, exposure
         case priorOn = "prior_on"
+    }
+}
+
+/// ⚠ THE BANDS ARE COMPUTED SERVER-SIDE AND ARRIVE ORDERED HIGH TO LOW. The
+/// client never re-ranks them: the order is the price axis, not a ranking by
+/// likelihood, size or P&L.
+struct BookExercise: Decodable {
+    let legs: Int
+    let spot: Double
+    let rungs: [Rung]
+
+    struct Rung: Decodable, Identifiable {
+        /// Null above the top strike / below the bottom one. Both null cannot
+        /// happen: a ladder has at least one strike.
+        let lo: Double?
+        let hi: Double?
+        /// The band spot is in. Exactly one rung per card carries it.
+        let live: Bool
+        let verdict: String        // likely · possible · unlikely
+        /// ⚠ WHAT YOU WOULD HOLD, not what moves. Read the figure column down
+        /// and you have your position in each world, and the mutual exclusivity
+        /// stops needing an explanation. The share DELTA is support line 2.
+        let held: Int
+        let cash: Int
+        let calls: Int             // legs assigned, this band
+        let puts: Int
+        let callLegs: Int          // legs on the name, for "first set" vs "both"
+        let putLegs: Int
+        /// Only the band where nothing is assigned, and it credits EVERY leg
+        /// that expires. Crediting one set of two is a defect.
+        let credit: Int?
+        let realized: Int?
+        let newAvg: Double?
+        let oldAvg: Double
+        var id: String { "\(lo ?? -1)|\(hi ?? -1)" }
+
+        enum CodingKeys: String, CodingKey {
+            case lo, hi, live, verdict, held, cash, calls, puts, credit, realized
+            case shareDelta = "share_delta"
+            case callLegs = "call_legs"
+            case putLegs = "put_legs"
+            case newAvg = "new_avg"
+            case oldAvg = "old_avg"
+        }
+        let shareDelta: Int
     }
 }
 

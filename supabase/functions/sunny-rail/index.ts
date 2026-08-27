@@ -470,6 +470,92 @@ Deno.serve(async (req) => {
         : a.strike - b.strike;
     callsSold.sort(rank); putsSold.sort(rank); putsBought.sort(rank);
 
+    /* ── if exercised, the ladder ─────────────────────────────────────────
+       cards/exercise-ladder.md. A sold call and a sold put on ONE NAME CANNOT
+       BOTH BE ASSIGNED — they are branches of one variable, where the price
+       lands. So this is not a list of legs, it is a ladder of MUTUALLY
+       EXCLUSIVE PRICE BANDS ordered high to low, and exactly one rung is true.
+
+       The bands come from the distinct short strikes: n strikes make n+1 bands.
+       Inside a band the outcome is constant, which is the whole reason the band
+       is the unit — a short call at K is assigned for every price above K, a
+       short put at K for every price below it, so a band whose floor is at or
+       above K assigns that call and one whose ceiling is at or below K assigns
+       that put. No representative price is ever picked.
+
+       ⚠ THE BASIS USED IS `average`, NOT `paid`. Realized on a call assignment
+       and the new average after a put both run off the premium-adjusted average
+       the average price card prints, so the two cards can never tell him two
+       different stories about the same block. It is not FIFO — the true lot
+       basis differs — but the card that would disagree is the one on the same
+       page, and this is the number that is on it. */
+    function exercise(ticker: string) {
+      const spot = spotBy.get(ticker) ?? 0;
+      const a = average(ticker);
+      if (!(spot > 0) || !a) return null;
+      const shorts = [...legBy.values()]
+        .filter((e) => e.ticker === ticker && e.short && e.net > 0.0001);
+      if (!shorts.length) return null;
+
+      const shares = a.shares, avg = a.average;
+      const callLegs = shorts.filter((e) => e.type === 'call').length;
+      const putLegs = shorts.length - callLegs;
+      const strikes = [...new Set(shorts.map((e) => e.strike))].sort((x, y) => y - x);
+
+      const rungs = strikes.concat([0]).map((_, i) => {
+        /* hi = null above the top strike, lo = null below the bottom one. */
+        const hi = i === 0 ? null : strikes[i - 1];
+        const lo = i === strikes.length ? null : strikes[i];
+        const on = shorts.filter((e) =>
+          e.type === 'call' ? (lo !== null && lo >= e.strike)
+                            : (hi !== null && hi <= e.strike));
+        const calls = on.filter((e) => e.type === 'call');
+        const puts = on.filter((e) => e.type === 'put');
+        const out = calls.reduce((n, e) => n + Math.round(e.net) * 100, 0);
+        const inn = puts.reduce((n, e) => n + Math.round(e.net) * 100, 0);
+        const held = shares - out + inn;
+        const cash = calls.reduce((n, e) => n + Math.round(e.net) * 100 * e.strike, 0)
+                   - puts.reduce((n, e) => n + Math.round(e.net) * 100 * e.strike, 0);
+        /* Shares sold leave at the average, so what stays behind keeps it and
+           only the bought shares move the basis. */
+        const kept = shares - out;
+        const bought = puts.reduce((n, e) => n + Math.round(e.net) * 100 * e.strike, 0);
+        const newAvg = held > 0 && inn > 0
+          ? Math.round((kept * avg + bought) / held * 100) / 100 : null;
+        const realized = out > 0
+          ? Math.round(calls.reduce((n, e) =>
+              n + Math.round(e.net) * 100 * (e.strike - avg), 0)) : null;
+
+        /* ⚠ LIKELIHOOD IS A WORD AND IT COMES FROM MONEYNESS, NEVER FROM DELTA.
+           Nik, 27 Aug: "the simpler the better, prefer OTM, ITM and ATM vs
+           delta." Spot inside the band is the world we are in; a band whose
+           nearest edge is within 5% of spot is one price move away; anything
+           further is not. The threshold reproduces the handoff's own NKE
+           ladder exactly — 2.8% Possible, 9.1% Unlikely. */
+        const live = (lo === null || spot > lo) && (hi === null || spot <= hi);
+        const edges = [lo, hi].filter((v): v is number => v !== null);
+        const near = Math.min(...edges.map((v) => Math.abs(spot - v))) / spot * 100;
+        const verdict = live ? 'likely' : near <= 5 ? 'possible' : 'unlikely';
+
+        return {
+          lo, hi, live, verdict,
+          held, share_delta: held - shares, cash: Math.round(cash),
+          calls: calls.length, puts: puts.length, call_legs: callLegs, put_legs: putLegs,
+          /* Only the band where nothing is assigned prints a credit, and it
+             credits EVERY leg that expires — crediting one set of two is the
+             defect the sheet names. */
+          credit: on.length === 0
+            ? Math.round(shorts.reduce((n, e) => {
+                const k = `${ticker}|${e.type}|${e.strike}|${e.expiry}|true`;
+                return n + Math.abs(cashByKey.get(k) ?? 0);
+              }, 0))
+            : null,
+          realized, new_avg: newAvg, old_avg: avg,
+        };
+      });
+      return { legs: shorts.length, spot: Math.round(spot * 100) / 100, rungs };
+    }
+
     /* ── net delta, day over day ──────────────────────────────────────────
        Written on every call, keyed on the day, so it is idempotent; a nightly
        cron covers a day he does not open the app. The support line compares
@@ -494,6 +580,7 @@ Deno.serve(async (req) => {
           cost: Math.round(cost),
           avg: average(ticker),
           delta: netDelta(ticker),
+          exercise: exercise(ticker),
           week: week(ticker),
         })),
     );

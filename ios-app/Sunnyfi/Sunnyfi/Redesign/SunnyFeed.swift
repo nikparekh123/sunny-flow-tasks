@@ -90,6 +90,9 @@ struct SunnyNav: Equatable {
     }
     var book: [Name] = []
     var pending: Set<String> = []
+    /// A short leg in the money. See SunnyStrip.flagged for why it is that and
+    /// not "has an exception".
+    var flagged: Set<String> = []
     var due: Int = 0
 }
 
@@ -177,7 +180,11 @@ struct SunnyPane: View {
 
     private var nav: SunnyNav {
         SunnyNav(book: rail.book.map { .init(ticker: $0.ticker, weight: $0.weight) },
-                 pending: pending, due: due.count)
+                 pending: pending,
+                 /* Puts bought are never here: a long put in the money is cover
+                    doing its job, not something that could be done to him. */
+                 flagged: Set((rail.callsSold + rail.putsSold).filter(\.itm).map(\.ticker)),
+                 due: due.count)
     }
 
     /// The name pages, in book order — largest position first, exactly as the
@@ -186,7 +193,7 @@ struct SunnyPane: View {
     private var current: BookName? {
         guard case .name(let t) = page else { return nil }
         return rail.book.first { $0.ticker == t }
-            ?? BookName(ticker: t, name: "", weight: 0, week: nil, avg: nil, delta: nil)
+            ?? BookName(ticker: t, name: "", weight: 0, week: nil, avg: nil, exercise: nil, delta: nil)
     }
 
     private var position: LegsPosition? {
@@ -260,39 +267,24 @@ struct SunnyPane: View {
         if let os = rail.openShorts, os.contracts > 0 {
             SunnyShortFigures(s: os)
         }
-        /* ⚠ THE SIX LISTS ARE NOT DATED CARDS. None has a read control and none
-           has a name to file under: each is about the whole book, so it belongs
-           on New every morning rather than moving to a page when it is read.
-           The five M cards on each page are the same rows, one at a time.
+        /* ⚠ THE SIX SUMMARY LISTS CAME OFF NEW (27 Aug 2026) and the five M
+           cards came off the name pages with them. Both are deleted, not
+           commented out. Nik: "do we need these cards on the new page, or do we
+           directly show this card on the ticker page as the first thing you see
+           every time."
 
-           ⚠ THE ORDER IS THE BOOK'S OWN. Position first (what he owns, what it
-           cost, how it has done), then the options over it, shorts before the
-           protection under them. It is the order the sleeve is built in. */
-        if rail.book.contains(where: { $0.delta != nil }) {
-            SunnyDeltaList(book: rail.book)
-        }
-        if rail.book.contains(where: { $0.avg != nil }) {
-            SunnyAvgList(book: rail.book)
-        }
-        if !legs.positions.isEmpty {
-            SunnyPerfList(book: rail.book, positions: legs.positions)
-        }
-        if !rail.callsSold.isEmpty {
-            SunnyOptionList(title: "Calls sold", stateWord: "ITM",
-                            rows: rail.callsSold, name: "summary-calls-sold")
-        }
-        if !rail.putsSold.isEmpty {
-            SunnyOptionList(title: "Puts sold", stateWord: "underwater",
-                            rows: rail.putsSold, name: "summary-puts-sold")
-        }
-        /* ⚠ PUTS BOUGHT IS THE ONE LIST WHERE NOTHING CAN BE AN EXCEPTION, so
-           its header always shows the grey row count. Protection cannot be
-           underwater the way a short can: a floor that has lost value is a floor
-           he did not need. */
-        if !rail.putsBought.isEmpty {
-            SunnyOptionList(title: "Puts bought", stateWord: "open",
-                            rows: rail.putsBought, name: "summary-puts-bought")
-        }
+           Three things decided it. The six measured 6,107 stacked against a 665
+           pane, so whatever was actually new that morning sat nine screens down
+           — and a card must lead with what CHANGED, never a standing aggregate.
+           The strip is already the cross-name view; a card on New that ranks
+           nine names is the retired Featured page coming back in through a card.
+           And a list makes him read nine names to find the one he opened the app
+           for.
+
+           What New keeps is what is dated: the awareness card, the week, the
+           planner. The book-wide sweep the list headers used to give (`3 ABOVE
+           SPOT`) moves to the strip as a flag on the circle — a design of Nik's
+           own, not something to improvise here. */
         if due.isEmpty {
             SunnyPageNote("Nothing on a clock. Every card has moved to its own "
                         + "name — a name comes back here when it has something new.")
@@ -323,41 +315,32 @@ struct SunnyPane: View {
             let filed = items.filter { place($0) == .name(b.ticker) }
             ForEach(filed) { card($0) }
 
-            /* ⚠ ONE CARD, NOT FIVE (26 Aug 2026). The five per-leg cards are
-               retired: their scales were not comparable, so shares showing a
-               loss beside calls showing a profit could not be reconciled, and
-               Nik read it as losing the story. One figure and one chart of every
-               leg summed per week. The put floors stay separate below it,
-               because a floor is a distance from a strike and not a
-               contribution to a P&L total. */
+            /* ⚠ ONE CARD FOR THE WHOLE NAME, and it is the FIRST thing on
+               the page. The five M cards it replaces were one card per metric —
+               five cards to read one name, and a page of singletons that lost
+               the story the way the five leg cards did before them. */
+            SunnyTickerCard(
+                b: b, current: position?.total, allTime: position?.allTime,
+                callsSold: rail.callsSold, putsSold: rail.putsSold,
+                putsBought: rail.putsBought)
+
+            /* ⚠ SECOND, AND ONLY WHERE SOMETHING COULD BE ASSIGNED. It answers a
+               different question from the card above it — that one is what do I
+               have on this name, this one is what happens if the price moves —
+               so it is not a variant of it and never folds into it. */
+            if let x = b.exercise {
+                SunnyLadderCard(ticker: b.ticker, e: x)
+            }
+
+            /* ⚠ THIRD, AND ONLY FOR THE CHART. The two cards above answer what
+               he holds and what happens next; this one is the only place the
+               week-by-week P&L is drawn, which is a shape and not a reading.
+               It was one card, not five, for the same reason the ticker card is
+               one card and not five: the per-leg scales were not comparable, so
+               shares showing a loss beside calls showing a profit could not be
+               reconciled, and Nik read it as losing the story. */
             SunnyPositionCards(p: position)
 
-            /* ⚠ THE SAME ROWS AS THE LISTS ABOVE, ROTATED. An M says nothing
-               new — it is the row with room. They sit above the price week for
-               the same reason the position card does: the position is the
-               subject, the week is the backdrop.
-
-               ⚠ AND THERE IS NO PERFORMANCE M. Current and Total are printed by
-               SunnyPageFigures two rows above; a card would be two readings of
-               one number. Nik, 27 Aug. */
-            if let d = b.delta {
-                SunnyDeltaM(ticker: b.ticker, d: d)
-            }
-            if let a = b.avg {
-                SunnyAvgM(ticker: b.ticker, a: a)
-            }
-            /* One M per LEG, not per name: NKE holds two strikes of puts sold
-               and two of puts bought, and netting them would print a strike that
-               does not exist. */
-            ForEach(rail.callsSold.filter { $0.ticker == b.ticker }) { r in
-                SunnyOptionM(kind: "Call sold", stateWord: "ITM", r: r)
-            }
-            ForEach(rail.putsSold.filter { $0.ticker == b.ticker }) { r in
-                SunnyOptionM(kind: "Put sold", stateWord: "Underwater", r: r)
-            }
-            ForEach(rail.putsBought.filter { $0.ticker == b.ticker }) { r in
-                SunnyOptionM(kind: "Put bought", stateWord: "", r: r)
-            }
             if let w = b.week {
                 SunnyFiveDayCard(
                     ticker: b.ticker, m: w,
@@ -369,7 +352,8 @@ struct SunnyPane: View {
                         }))
             }
 
-            if filed.isEmpty && position == nil && b.week == nil && b.avg == nil && b.delta == nil {
+            if filed.isEmpty && position == nil && b.week == nil && b.avg == nil
+                && b.delta == nil && b.exercise == nil {
                 SunnyPageNote("Held, and quiet. No card has been built for this "
                             + "name yet — it earns one when it has something to say.")
             }

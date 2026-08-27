@@ -38,53 +38,94 @@ enum SunnyPage: Hashable {
     }
 }
 
-// MARK: - one circle
+// MARK: - what a ring is saying
 
-/// ⚠ ONE RING, AND THE CAPTION. Blue says *this name has something to read*;
-/// ink says *this is the page you are on*. There is no halo any more — a
-/// ground-coloured spacer plus an outer ring read as a target reticle at 60px.
-/// Where a name is both active and unread, the blue wins on the ring and the ink
-/// caption still says where you are.
+/// ⚠ THE RING IS THE EVENT CHANNEL AND NOTHING ELSE. Active is not here: it left
+/// the ring for the interior, which is what freed the ring to carry two events
+/// at once without a precedence rule.
+enum SunnyEvent {
+    case none
+    /// A card is waiting to be read. Amber, because on the awareness card
+    /// `--warn` already means *changed since you last read* — the card layer and
+    /// the strip finally say the same thing in the same colour. Blue was only
+    /// ever chosen as "not red".
+    case unread
+    /// A short leg is in the money: something could be assigned. Violet, because
+    /// GREEN AND RED CANNOT MEAN IT — an assignment is neither a gain nor a loss,
+    /// and violet carries no P&L meaning anywhere in the deck.
+    case assign
+    case both
+
+    var live: Bool { if case .none = self { return false }; return true }
+}
+
+// MARK: - one column
+
+/// ⚠ THE RING IS A BACKGROUND UNDER A COVER DISC, not an inset stroke. A conic
+/// gradient cannot be a stroke, and the rotating case has to use the same
+/// construction as the static ones or the two read as different objects. The
+/// cover's inset IS the ring thickness: 1 at rest, 1.5 for every event.
 private struct SunnyCircle: View {
     let caption: String
     let active: Bool
-    let news: Bool
+    let event: SunnyEvent
+    /// `New` is not a name, so it is not a circle. Shape says *different kind of
+    /// destination* before colour does, which is what retired the divider.
+    var square = false
     let tap: () -> Void
-    @ViewBuilder let glyph: () -> AnyView
+    @ViewBuilder let glyph: (Bool) -> AnyView
 
-    private var innerRing: (Color, CGFloat) {
-        if news   { return (S.update, S.shellRingLive) }
-        if active { return (S.ink,    S.shellRingLive) }
-        return (S.shellHair, S.shellRingRest)
+    @State private var spin = false
+
+    private var inset: CGFloat { event.live ? S.ringEvent : S.ringRest }
+
+    private var shape: AnyShape {
+        square ? AnyShape(RoundedRectangle(cornerRadius: S.radiusNew, style: .continuous))
+               : AnyShape(Circle())
+    }
+
+    @ViewBuilder private var ring: some View {
+        switch event {
+        case .none:   shape.fill(S.shellHair)
+        case .unread: shape.fill(S.warn).sunnyShadow(S.glowEventAmber)
+        case .assign: shape.fill(S.assign).sunnyShadow(S.glowEventAssign)
+        case .both:
+            /* Two events, one ring, and the motion is the second reading. The
+               glow takes the violet: it is the rarer and the more consequential
+               of the two, and a two-hue glow is a smudge. */
+            shape.fill(AngularGradient(
+                stops: [.init(color: S.warn, location: 0), .init(color: S.warn, location: 0.5),
+                        .init(color: S.assign, location: 0.5), .init(color: S.assign, location: 1)],
+                center: .center))
+                .rotationEffect(.degrees(spin ? 360 : 0))
+                .animation(.linear(duration: S.spinRing).repeatForever(autoreverses: false),
+                           value: spin)
+                .sunnyShadow(S.glowEventAssign)
+                .onAppear { spin = true }
+        }
     }
 
     var body: some View {
         VStack(spacing: S.shellCircleGap) {
             ZStack {
-                /* ⚠ THE DISC IS FILLED, AND IT HAS TO BE. CSS draws a box-shadow
-                   from the border box whether or not the background is painted,
-                   so the glow is a full 44pt circular bloom. SwiftUI's .shadow
-                   traces the rendered pixels, so a transparent circle casts
-                   nothing at all. Filling it with the strip's own ground is
-                   invisible and gives the glow something to come off. */
-                Circle().fill(S.ground).sunnyShadow(news ? S.shellGlow : [])
-                glyph()
+                ring
+                /* ⚠ THE INTERIOR IS WHERE YOU ARE, and it is the only filled
+                   object the strip can hold. SHELL-PAGED §9 rejected a solid
+                   black `New` disc for exactly that weight; this is tolerable
+                   only because EXACTLY ONE COLUMN IS EVER FILLED and it moves
+                   with you. If a second filled state is ever proposed, this one
+                   goes back on the table. */
+                shape.fill(active ? S.ink : S.ground).padding(inset)
+                glyph(active)
             }
             .frame(width: S.shellCircle, height: S.shellCircle)
-            /* The inner ring is `inset 0 0 0 Npx` in CSS — drawn INSIDE the
-               element's edge, which is exactly what strokeBorder does and what
-               stroke does not. */
-            .overlay(Circle().strokeBorder(innerRing.0, lineWidth: innerRing.1))
-            /* ⚠ NO HALO. It was a ground-coloured spacer plus an outer ink
-               ring, and at 60px that read as a target reticle rather than a
-               selection. Active is the ink ring above and the ink caption
-               below, with nothing orbiting it. */
             Text(caption)
                 .font(S.inter(S.tShellCaption, S.wSemiN))
                 .tracking(S.track(S.tShellCaption, -0.01))
                 .foregroundStyle(active ? S.ink : S.shellCountClear)
                 .monospacedDigit()
                 .lineLimit(1)
+                .sunnyLineBox(S.tShellCaption * 1.25)
         }
         .frame(width: S.shellCircle)
         /* The column must measure 85 (60 + 10 + 15): 116 − 18 − 13 = 85 exactly,
@@ -94,7 +135,6 @@ private struct SunnyCircle: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: tap)
         .animation(.easeInOut(duration: S.durRing), value: active)
-        .animation(.easeInOut(duration: S.durRing), value: news)
     }
 }
 
@@ -102,8 +142,17 @@ private struct SunnyCircle: View {
 
 struct SunnyStrip: View {
     let book: [SunnyNav.Name]
-    /// Names with a dated card still sitting on New. Blue ring, blue glow.
+    /// Names with a dated card still sitting on New. Amber ring, amber glow.
     let pending: Set<String>
+    /// Names with a short leg in the money. Violet ring.
+    ///
+    /// ⚠ THIS IS NOT "HAS AN EXCEPTION". Any exception on the ticker card flags
+    /// eight of nine names on this book, and a mark on eight of nine marks
+    /// nothing — the same fault the retired tile grid recorded as "nineteen
+    /// greens mark nothing". A short leg IN THE MONEY is the one thing that can
+    /// take shares off him without his asking, and it is the same test the
+    /// ladder's `Likely` rung uses, so the circle and the card cannot disagree.
+    let flagged: Set<String>
     /// How many dated cards are unread, whatever name they file under.
     let due: Int
     @Binding var page: SunnyPage
@@ -126,42 +175,36 @@ struct SunnyStrip: View {
     private var scroller: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: S.shellStripGap) {
+                /* ⚠ `New` SPEAKS FOR THE READING QUEUE ONLY. It wears the same
+                   amber a name wears for unread, because it is the same fact
+                   counted differently: cards are waiting. It NEVER wears violet —
+                   assignment is a property of a name, and a count of flagged
+                   names behind the strip would be a summary of a summary. */
                 SunnyCircle(caption: "New",
                             active: page == .new,
-                            news: due > 0,
-                            tap: { go(.new) }) {
-                    /* ⚠ NOT A SOLID BLACK DISC. A filled circle is the heaviest
-                       object the strip can hold and it outweighed the positions
-                       the strip exists to show. New uses the SAME vocabulary as
-                       the names — empty circle, thin ring, figure in ink — and
-                       earns the blue ring only when something is actually due,
-                       which is precisely what "new" means. */
+                            event: due > 0 ? .unread : .none,
+                            square: true,
+                            tap: { go(.new) }) { on in
                     AnyView(
                         Text("\(due)")
                             .font(S.inter(S.tShellCount, S.wBoldN))
                             .tracking(S.track(S.tShellCount, -0.03))
-                            .foregroundStyle(due > 0 ? S.update : S.shellCountClear)
+                            .foregroundStyle(on ? S.onInk
+                                               : due > 0 ? S.ink : S.shellCountClear)
                             .monospacedDigit()
                     )
                 }
 
-                /* A rule between New and the positions, lifted so it centres on
-                   the circles rather than on the whole column — the captions
-                   below are not part of what it separates. */
-                Rectangle().fill(S.shellHair)
-                    .frame(width: 1, height: S.shellDividerH)
-                    .offset(y: (S.shellCircle - S.shellDividerH) / 2)
-
-                ForEach(book) { b in
+                ForEach(ordered) { b in
                     SunnyCircle(caption: "\(b.weight)%",
                                 active: page == .name(b.ticker),
-                                news: pending.contains(b.ticker),
-                                tap: { go(.name(b.ticker)) }) {
+                                event: event(b.ticker),
+                                tap: { go(.name(b.ticker)) }) { on in
                         AnyView(
                             Text(b.ticker)
                                 .font(S.inter(S.tShellTicker, S.wBoldN))
                                 .tracking(S.track(S.tShellTicker, 0.01))
-                                .foregroundStyle(S.mute)
+                                .foregroundStyle(on ? S.onInk : S.mute)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         )
@@ -177,6 +220,27 @@ struct SunnyStrip: View {
         }
         .scrollIndicators(.hidden)
         .frame(height: S.shellStripScrollH)
+    }
+
+    private func event(_ t: String) -> SunnyEvent {
+        switch (pending.contains(t), flagged.contains(t)) {
+        case (true, true):   return .both
+        case (true, false):  return .unread
+        case (false, true):  return .assign
+        default:             return .none
+        }
+    }
+
+    /* ⚠ FLAGGED NAMES SORT FIRST, and that is the price of `New` saying nothing
+       about assignment: a flagged name off the right edge of the scroller is
+       invisible. Order is New · flagged · the rest, each group alphabetical —
+       which means the strip no longer runs largest position first. The weight is
+       still on the caption; it is no longer the order. */
+    private var ordered: [SunnyNav.Name] {
+        book.sorted {
+            let a = flagged.contains($0.ticker), b = flagged.contains($1.ticker)
+            return a != b ? a : $0.ticker < $1.ticker
+        }
     }
 
     private func go(_ p: SunnyPage) {
