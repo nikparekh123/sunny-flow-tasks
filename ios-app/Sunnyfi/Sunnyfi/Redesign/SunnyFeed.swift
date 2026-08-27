@@ -233,7 +233,22 @@ struct SunnyPane: View {
     // MARK: body
 
     var body: some View {
-        ScrollView {
+        /* ⚠ THE SCROLLER IS INSIDE THE TRANSITION, NOT THE OTHER WAY ROUND, and
+           that is the whole fix. A `.transition` on ScrollView CONTENT does not
+           fire: a scroller treats a content swap as a change of what it is
+           measuring, never as an insert and a remove, so SwiftUI falls back to
+           the default and dissolves. Nik saw it twice — "it's fade in and fade
+           out not a swipe" — and both times the transition was written
+           correctly and simply never ran.
+
+           ⚠ THE ZStack IS WHAT KEEPS IDENTITY. Every `.task` and the stores they
+           fill hang off IT, so the ScrollView underneath is free to be
+           re-identified per page — which is what a transition needs — without
+           re-running a single load. That is the reconciliation of the two rules
+           this file has been carrying: the scroller must be keyed for the slide,
+           and the fetches must not be. They just cannot live on the same view. */
+        ZStack {
+            ScrollView {
             VStack(alignment: .leading, spacing: S.shellPaneGap) {
                 switch page {
                 case .new:  newPage
@@ -248,33 +263,25 @@ struct SunnyPane: View {
                and spends the spare width on the margin. Do not "fix" this back
                to a leading 16. */
             .frame(width: S.content)
-            /* ⚠ THE `.id` IS ON THE CONTENT, NOT ON THE SCROLLER. Keying the
-               ScrollView would slide correctly and throw away the @State stores
-               with it, refetching the book, the digests, the legs and the
-               planner on every move — the note below this block is the record of
-               that. The VStack holds no state, so giving IT a per-page identity
-               costs nothing and is what lets a transition fire at all: without
-               new identity SwiftUI sees one view whose children changed, and
-               dissolves them. */
+            .padding(EdgeInsets(top: S.shellPanePadTop, leading: S.margin,
+                                bottom: S.shellPanePadBottom, trailing: S.margin))
+            }
+            .scrollIndicators(.hidden)
+            .scrollPosition($pos)
             .id(page.key)
+            /* Forward slides in from the right and the old page leaves left;
+               back is the mirror. The direction is decided by whoever moved the
+               page, so a tap two circles along slides the way a swipe would. */
             .transition(.asymmetric(
                 insertion: .move(edge: dir > 0 ? .trailing : .leading),
                 removal:   .move(edge: dir > 0 ? .leading  : .trailing)))
-            .padding(EdgeInsets(top: S.shellPanePadTop, leading: S.margin,
-                                bottom: S.shellPanePadBottom, trailing: S.margin))
         }
-        .scrollIndicators(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .background(S.ground)
-        .scrollPosition($pos)
         .animation(S.easeOut(S.durPage), value: page)
-        /* ⚠ A PAGE CHANGE SETS THE OFFSET TO THE TOP, AND NOTHING ELSE. No DOM
-           insertion, no scroll-into-view, no reload.
-
-           ⚠ AND IT MUST NOT BE `.id(page.key)`. Keying the scroller on the page
-           resets the offset for free, but it also gives every page a new view
-           identity — which throws away the @State stores and refetches the whole
-           book, the digests, the legs and the planner on every tap of the strip.
-           The scroller stays one view; only its offset moves. */
+        /* The new scroller starts at the top on its own, but `pos` still holds
+           the old page's offset and would restore it on the next bind. */
         .onChange(of: page) { _, _ in pos.scrollTo(edge: .top) }
         .onChange(of: nav) { _, n in onNav(n) }
         .task {

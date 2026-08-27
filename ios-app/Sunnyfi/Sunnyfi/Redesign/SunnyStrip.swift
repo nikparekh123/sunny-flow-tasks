@@ -171,6 +171,18 @@ struct SunnyStrip: View {
     }
 
     private var scroller: some View {
+        /* ⚠ THE STRIP FOLLOWS THE SELECTION. Four and a bit columns fit in 393,
+           so swiping past the fifth name left the filled circle off the right
+           edge and the strip stopped answering *where am I* — which is half its
+           job. Nik: "when you swipe past the 4-5 tickers the bottom circles
+           should move to see where the selection is."
+
+           ⚠ CENTRED, AND THE CLAMP IS THE POINT. `.center` parks the active
+           column mid-strip in the middle of the book and does nothing at either
+           end, where the scroller has nowhere to go — so New stays put on the
+           first two pages and the last name stays put on the last two, and the
+           strip only moves when moving is the only way to show you. */
+        ScrollViewReader { proxy in
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: S.shellStripGap) {
                 /* ⚠ `New` SPEAKS FOR THE READING QUEUE ONLY. It wears the same
@@ -192,6 +204,7 @@ struct SunnyStrip: View {
                             .monospacedDigit()
                     )
                 }
+                .id(SunnyPage.new.key)
 
                 ForEach(nav.ordered) { b in
                     SunnyCircle(caption: "\(b.weight)%",
@@ -207,6 +220,7 @@ struct SunnyStrip: View {
                                 .minimumScaleFactor(0.8)
                         )
                     }
+                    .id(SunnyPage.name(b.ticker).key)
                 }
             }
             .padding(.horizontal, S.margin)
@@ -218,6 +232,12 @@ struct SunnyStrip: View {
         }
         .scrollIndicators(.hidden)
         .frame(height: S.shellStripScrollH)
+        /* Same curve and duration as the pane's own slide, so the circle and the
+           page it names arrive together rather than as two events. */
+        .onChange(of: page) { _, p in
+            withAnimation(S.easeOut(S.durPage)) { proxy.scrollTo(p.key, anchor: .center) }
+        }
+        }
     }
 
     private func event(_ t: String) -> SunnyEvent {
