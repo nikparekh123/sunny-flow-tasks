@@ -94,6 +94,24 @@ struct SunnyNav: Equatable {
     /// not "has an exception".
     var flagged: Set<String> = []
     var due: Int = 0
+
+    /* ⚠ ONE ORDER, READ BY BOTH THE STRIP AND THE SWIPE. Flagged names sort
+       first after New, then the rest, each group alphabetical — the price of
+       `New` saying nothing about assignment is that a flagged name off the right
+       edge of the scroller is invisible. The weight is still on the caption; it
+       is no longer the order.
+
+       ⚠ AND THE SWIPE MUST WALK THIS LIST, NOT THE BOOK. A swipe that advanced
+       through book order while the strip showed another would make the strip
+       lie about where the next page is — the strip is the whole navigation, so
+       nothing may disagree with it. */
+    var ordered: [Name] {
+        book.sorted {
+            let a = flagged.contains($0.ticker), b = flagged.contains($1.ticker)
+            return a != b ? a : $0.ticker < $1.ticker
+        }
+    }
+    var pages: [SunnyPage] { [.new] + ordered.map { .name($0.ticker) } }
 }
 
 struct SunnyPane: View {
@@ -142,7 +160,16 @@ struct SunnyPane: View {
                                      kind: .planner(pl)))
         }
         for d in digest.cards {
-            out.append(SunnyFeedItem(id: "digest|\(d.ticker)|\(d.newCount)",
+            /* ⚠ KEYED ON THE FRESHEST EVENT, NOT ON THE COUNT. The id was
+               `digest|BABA|1`, which is the same string every day a name has one
+               new item — so the first day's Read filed every later day's card
+               before it reached New, and the awareness card went straight to the
+               ticker page. Nik, 27 Aug: "awareness card should come in New
+               first, it's coming straight in ticker." The date moves only when
+               something actually arrives, which is the definition the card
+               needs. Falls back to the count where the backend sends no date,
+               so an older deploy still behaves as it did. */
+            out.append(SunnyFeedItem(id: "digest|\(d.ticker)|\(d.freshest.isEmpty ? String(d.newCount) : d.freshest)",
                                      ticker: d.ticker, clock: d.newCount > 0 || Self.forceFeatured,
                                      tags: d.tags, name: d.name, kind: .digest(d)))
         }

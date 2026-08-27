@@ -49,6 +49,18 @@ struct SunnyShell: View {
         let k = a[i + 1].uppercased()
         return k == "NEW" ? .new : .name(k)
     }
+    /// ⚠ VERIFICATION ONLY, AND IT CALLS `step` ITSELF rather than a copy of it.
+    /// The touch bridge is dead, so a swipe cannot be driven; this drives the
+    /// thing the swipe calls. What it does NOT prove is the gesture recogniser —
+    /// that the drag survives the pane's vertical scroller and clears the
+    /// dominance test. Only a finger proves that.
+    ///   -swipe 2   step forward twice after the nav loads
+    ///   -swipe -1  step back once
+    private static var argSwipe: Int? {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-swipe"), i + 1 < a.count else { return nil }
+        return Int(a[i + 1])
+    }
     private static var argScroll: CGFloat? {
         let a = ProcessInfo.processInfo.arguments
         guard let i = a.firstIndex(of: "-scrollTo"), i + 1 < a.count,
@@ -60,11 +72,55 @@ struct SunnyShell: View {
         VStack(spacing: 0) {
             SunnyPane(page: $page, onNav: { nav = $0 }, startAt: Self.argScroll)
                 .frame(maxHeight: .infinity)
-            SunnyStrip(book: nav.book, pending: nav.pending, flagged: nav.flagged,
-                       due: nav.due, page: $page)
+                /* ⚠ SIMULTANEOUS, AND HORIZONTAL-DOMINANT ONLY. The pane is a
+                   vertical scroller; an exclusive gesture would swallow its
+                   scrolling, and one without the dominance test fires on the
+                   diagonal drift at the start of every flick. `minimumDistance`
+                   alone is not enough — a vertical flick clears 20 in both axes
+                   long before it clears the ratio.
+
+                   ⚠ AND IT MOVES THE PAGE, NOT A CAROUSEL. The pages are not
+                   laid out side by side and never will be: SHELL-PAGED §0 rule
+                   1 is that a page REPLACES the pane, and a rubber-banding
+                   filmstrip would make the strip's circles look like an index
+                   into one long scroll again. */
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 20)
+                        .onEnded { g in
+                            let dx = g.translation.width, dy = g.translation.height
+                            guard abs(dx) > 60, abs(dx) > abs(dy) * 1.6 else { return }
+                            step(dx < 0 ? 1 : -1)
+                        })
+            SunnyStrip(nav: nav, page: $page)
+                .overlay(alignment: .top) {
+                    if Self.argSwipe != nil {
+                        Text("PAGE \(page.key)").font(.system(size: 9)).opacity(0.001)
+                    }
+                }
         }
         .background(S.ground)
         .onAppear { if let p = Self.argPage { page = p } }
+        .onChange(of: nav.pages.count) { _, n in
+            guard let by = Self.argSwipe, n > 1 else { return }
+            for _ in 0 ..< abs(by) { step(by > 0 ? 1 : -1) }
+            print("SWIPE \(by) -> \(page.key)   order " + nav.pages.map(\.key).joined(separator: ","))
+        }
         .preferredColorScheme(.light)      // the token set is a light system
+    }
+
+    /* ⚠ IT WALKS `nav.pages`, WHICH IS THE STRIP'S OWN ORDER — New, then the
+       flagged names, then the rest. Swiping from New lands on the first circle
+       after it, which is what the strip is showing.
+
+       ⚠ AND IT STOPS AT BOTH ENDS RATHER THAN WRAPPING. Wrapping puts New one
+       swipe left of the last name, so a swipe past the end silently teleports
+       across the whole strip; a page that does not move says *that was the end*
+       without having to be told. */
+    private func step(_ by: Int) {
+        let ps = nav.pages
+        guard let i = ps.firstIndex(of: page) else { return }
+        let j = i + by
+        guard ps.indices.contains(j) else { return }
+        withAnimation(S.easeSettle(S.durRevealTransform)) { page = ps[j] }
     }
 }

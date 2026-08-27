@@ -140,6 +140,12 @@ struct SunnyDigestCardModel {
     let ticker: String
     let spot: String
     let newCount: Int
+    /// ⚠ THE ISO DATE OF THE NEWEST EVENT ON THE CARD, and the card's IDENTITY.
+    /// The feed keys its read state on this, not on the new count: `digest|BABA|1`
+    /// today and `digest|BABA|1` tomorrow are two different cards wearing one id,
+    /// so reading the first filed the second before it was ever shown. This
+    /// moves only when something actually arrives.
+    let freshest: String
     let sections: [DigestSection]
     let doBlock: DigestDo?
 
@@ -154,6 +160,7 @@ struct SunnyDigestCardModel {
         ticker = p.ticker
         spot = String(format: "%.2f", p.spot)
         newCount = p.new_count
+        freshest = p.freshest ?? ""
 
         func sec(_ h: String, _ evs: [LivePayload.Ev]) -> DigestSection? {
             let ls = evs.map { DigestLine(text: $0.text, tags: DigestTag.from($0.tags),

@@ -141,20 +141,14 @@ private struct SunnyCircle: View {
 // MARK: - the strip, 88pt
 
 struct SunnyStrip: View {
-    let book: [SunnyNav.Name]
-    /// Names with a dated card still sitting on New. Amber ring, amber glow.
-    let pending: Set<String>
-    /// Names with a short leg in the money. Violet ring.
-    ///
-    /// ⚠ THIS IS NOT "HAS AN EXCEPTION". Any exception on the ticker card flags
-    /// eight of nine names on this book, and a mark on eight of nine marks
-    /// nothing — the same fault the retired tile grid recorded as "nineteen
-    /// greens mark nothing". A short leg IN THE MONEY is the one thing that can
-    /// take shares off him without his asking, and it is the same test the
-    /// ladder's `Likely` rung uses, so the circle and the card cannot disagree.
-    let flagged: Set<String>
-    /// How many dated cards are unread, whatever name they file under.
-    let due: Int
+    /* ⚠ THE WHOLE NAV, NOT ITS PIECES. The order the strip runs in is the order
+       the swipe walks, so both read one value. Passing book/flagged separately
+       let the two derive it twice, which is how they would come to disagree —
+       and the strip is the whole navigation, so nothing may disagree with it. */
+    let nav: SunnyNav
+    private var pending: Set<String> { nav.pending }
+    private var flagged: Set<String> { nav.flagged }
+    private var due: Int { nav.due }
     @Binding var page: SunnyPage
 
     var body: some View {
@@ -195,7 +189,7 @@ struct SunnyStrip: View {
                     )
                 }
 
-                ForEach(ordered) { b in
+                ForEach(nav.ordered) { b in
                     SunnyCircle(caption: "\(b.weight)%",
                                 active: page == .name(b.ticker),
                                 event: event(b.ticker),
@@ -228,18 +222,6 @@ struct SunnyStrip: View {
         case (true, false):  return .unread
         case (false, true):  return .assign
         default:             return .none
-        }
-    }
-
-    /* ⚠ FLAGGED NAMES SORT FIRST, and that is the price of `New` saying nothing
-       about assignment: a flagged name off the right edge of the scroller is
-       invisible. Order is New · flagged · the rest, each group alphabetical —
-       which means the strip no longer runs largest position first. The weight is
-       still on the caption; it is no longer the order. */
-    private var ordered: [SunnyNav.Name] {
-        book.sorted {
-            let a = flagged.contains($0.ticker), b = flagged.contains($1.ticker)
-            return a != b ? a : $0.ticker < $1.ticker
         }
     }
 
