@@ -32,6 +32,7 @@ final class RailStore {
     var facts: [RailFact] = []
     /// Chrome for the pane, not for the dock: the shell's section headings.
     var book: [BookName] = []
+    var openShorts: OpenShorts?
     var error: String?
     private var loading = false
 
@@ -50,13 +51,39 @@ final class RailStore {
             let (d, resp) = try await URLSession.shared.data(for: r)
             if let h = resp as? HTTPURLResponse, h.statusCode >= 400 { error = "HTTP \(h.statusCode)"; return }
             let p = try JSONDecoder().decode(RailPayload.self, from: d)
+            openShorts = p.open_shorts
             facts = p.facts ?? []
             book = p.book ?? []
         } catch { self.error = String(describing: error) }
     }
 }
 
-private struct RailPayload: Decodable { var facts: [RailFact]?; var book: [BookName]? }
+private struct RailPayload: Decodable {
+    var facts: [RailFact]?
+    var book: [BookName]?
+    var open_shorts: OpenShorts?
+}
+
+/// The open short book, for the New page's three figures.
+///
+/// ⚠ NONE OF THESE IS A DIRECTION, so none takes gain or loss ink. The deck
+/// reserves colour for direction and a balance is not one.
+struct OpenShorts: Decodable {
+    let contracts: Int
+    /// What he was paid to write the options still open.
+    let credit: Int
+    /// ⚠ TOTAL VALUE LEFT is the whole mark, intrinsic included: everything
+    /// still standing in the open shorts. Nik picked this on 26 Aug over "credit
+    /// less cost to close", which is what has been CAPTURED rather than what is
+    /// left.
+    let value: Int
+    let intrinsic: Int
+    /// ⚠ THE EXTRINSIC PART, and the only one of the three he earns by waiting.
+    /// Intrinsic is settled by where the stock is, not by the clock. On this
+    /// book intrinsic is nearly four fifths of the cost to close, so these two
+    /// figures sit far apart and the gap is the interesting part.
+    let time_value: Int
+}
 
 /// One name in the book, largest first. SHELL.md §7: a section heading is the
 /// ticker, the full company name, and the weight — and none of that is

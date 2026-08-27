@@ -257,6 +257,9 @@ struct SunnyPane: View {
     @ViewBuilder
     private var newPage: some View {
         SunnyNewHead(due: due.count)
+        if let os = rail.openShorts, os.contracts > 0 {
+            SunnyShortFigures(s: os)
+        }
         /* ⚠ THE LIST IS NOT A DATED CARD. It has no read control and no name to
            file under: it is about the whole book, so it belongs on New every
            morning rather than moving to a page when it is read. The per-name S

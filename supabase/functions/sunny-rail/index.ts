@@ -33,7 +33,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-26.3';
+const BUILD = '2026-08-26.5';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** The rail abbreviates money: $400k, never $400,000. */
@@ -59,7 +59,21 @@ function money(v: number): string {
    below it. */
 const NAMES = new Map<string, string>();
 
+/* ⚠ POLYGON'S OWN CASING IS WRONG FOR SOME NAMES, and it is the heading on a
+   whole page, so it gets corrected here rather than lived with. NFLX comes back
+   as "NetFlix Inc" and the company writes itself Netflix.
+
+   ⚠ AND IT HAS TO BE AN OVERRIDE, NOT A CASING RULE. Title-casing everything
+   would break iShares, which Polygon gets RIGHT — a lowercase first letter is
+   the brand. Any general normaliser has to know which is which, which is what
+   this map is. Add a row when a name is wrong; do not write a rule. */
+const NAME_FIX = new Map<string, string>([
+  ['NFLX', 'Netflix, Inc.'],
+]);
+
 async function companyName(t: string, k: string): Promise<string> {
+  const fix = NAME_FIX.get(t);
+  if (fix) return fix;
   const hit = NAMES.get(t);
   if (hit !== undefined) return hit;
   try {
@@ -112,8 +126,8 @@ Deno.serve(async (req) => {
         + '&select=ticker,action,contracts,premium'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
       getAll(`option_trades?voided_at=is.null&expiry=gte.${todayISO}&order=id.asc`
-        + '&select=id,ticker,direction,action,contracts'),
-      D.get('option_greeks_latest?select=option_trade_id,delta'),
+        + '&select=id,ticker,direction,action,contracts,option_type,strike,expiry'),
+      D.get('option_greeks_latest?select=option_trade_id,delta,last_mark'),
     ]);
 
     const facts: Array<{ key: string; spans: Span[]; projected?: boolean }> = [];
@@ -291,6 +305,76 @@ Deno.serve(async (req) => {
       };
     }
 
+    /* ── the open short book, for the New page's three figures ────────────
+       What he was paid to write the options still open, what it would cost to
+       buy them back, and how much of that cost is time rather than moneyness.
+
+         credit    Σ contracts × premium × 100        what he received
+         value     Σ contracts × mark × 100           what it costs to close
+         intrinsic Σ contracts × max(0, ITM) × 100    the part that will not decay
+         time      value − intrinsic                  the part that will
+
+       ⚠ TIME VALUE IS THE EXTRINSIC PART, confirmed by Nik 26 Aug. It is the
+       only one of the three he actually earns by waiting; intrinsic is settled
+       by where the stock is, not by the clock. On this book intrinsic is nearly
+       four fifths of the cost to close — $9,188 of $11,830, almost all of it
+       NKE's 40.5 puts and BABA — so the two figures are far apart and the gap is
+       the interesting part.
+
+       ⚠ NONE OF THE THREE IS A DIRECTION, so none takes gain or loss ink. The
+       deck reserves colour for direction, and a balance is not one. */
+    const markById = new Map<string, number>();
+    for (const g of greeks) {
+      const v = g.last_mark;
+      if (v !== null && v !== undefined) markById.set(String(g.option_trade_id), N(v));
+    }
+    const shortLeg = new Map<string, {
+      net: number; credit: number; mark: number; itm: number;
+    }>();
+    for (const t of openLegs) {
+      if (String(t.direction) !== 'short') continue;
+      const tick = String(t.ticker);
+      const key = `${tick}|${t.option_type}|${N(t.strike)}|${String(t.expiry).slice(0, 10)}`;
+      const e = shortLeg.get(key) ?? { net: 0, credit: 0, mark: 0, itm: 0 };
+      const sign = t.action === 'open' ? 1 : -1;
+      e.net += sign * N(t.contracts);
+      const mk = markById.get(String(t.id));
+      if (mk !== undefined) e.mark = mk;
+      const spot = spotBy.get(tick) ?? 0;
+      e.itm = spot > 0
+        ? Math.max(0, String(t.option_type) === 'put'
+            ? N(t.strike) - spot : spot - N(t.strike))
+        : 0;
+      shortLeg.set(key, e);
+    }
+    /* The credit comes from the same netted short rows the premium map is built
+       from, so a leg bought back contributes nothing here either. */
+    const creditBy = new Map<string, number>();
+    for (const t of shorts) {
+      const k = `${t.ticker}|${t.option_type}|${N(t.strike)}|${String(t.expiry).slice(0, 10)}`;
+      creditBy.set(k, (creditBy.get(k) ?? 0) + N(t.contracts) * N(t.premium) * 100
+        * (t.action === 'open' ? 1 : -1));
+    }
+    let oCredit = 0, oValue = 0, oItm = 0, oCtr = 0;
+    for (const [k, e] of shortLeg) {
+      if (!(e.net > 0.0001)) continue;
+      oCtr += e.net;
+      oCredit += creditBy.get(k) ?? 0;
+      oValue += e.net * e.mark * 100;
+      oItm += e.net * e.itm * 100;
+    }
+    const openShorts = {
+      contracts: Math.round(oCtr),
+      credit: Math.round(oCredit),
+      /* ⚠ TOTAL VALUE LEFT is the whole mark, intrinsic included — everything
+         still standing in the open shorts. Time value is the subset of it that
+         decays. Nik picked this reading on 26 Aug over "credit less cost to
+         close", which is what has been captured rather than what is left. */
+      value: Math.round(oValue),
+      intrinsic: Math.round(oItm),
+      time_value: Math.round(oValue - oItm),
+    };
+
     const pk = Deno.env.get('POLYGON_API_KEY') ?? '';
     const book = await Promise.all(
       [...byTicker.entries()]
@@ -376,6 +460,7 @@ Deno.serve(async (req) => {
       ok: true, build: BUILD, asof: ymd(today),
       facts,
       book,
+      open_shorts: openShorts,
       rates_asof: r0 ? String(r0.date).slice(0, 10) : null,
       open_premium: Math.round(openPremium),
       omitted: [],

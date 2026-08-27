@@ -131,6 +131,61 @@ struct SunnyNewHead: View {
     }
 }
 
+// MARK: - the New page's figures
+
+/// The same treatment as a name page's Current / Total, on the book's open short
+/// options. Nik: "just how we have current and total on top for each ticker we
+/// should do that to featured."
+///
+/// ⚠ THREE COLUMNS, AND THAT DEPARTS FROM SHELL-PAGED §5, which says two and
+/// never three because a third "makes the row a table and the heading stops
+/// being a heading". That rule was written about the NAME page's P&L block,
+/// where the third candidate was a redundant restatement (today, or unrealised).
+/// Here the three are genuinely different quantities and Nik named all three. If
+/// it reads as a table on a real screen the fix is a design prompt, not a
+/// silent drop of one figure.
+///
+/// ⚠ NO DIRECTION INK. A credit, a value and a time value are balances, not
+/// directions, and the deck reserves colour for direction. All three are --ink.
+struct SunnyShortFigures: View {
+    let s: OpenShorts
+
+    var body: some View {
+        HStack(spacing: 0) {
+            column("Credit open", s.credit, padLeft: 0)
+            Rectangle().fill(S.shellHair).frame(width: 1)
+            column("Time value", s.time_value, padLeft: S.gap7)
+            Rectangle().fill(S.shellHair).frame(width: 1)
+            column("Value left", s.value, padLeft: S.gap7)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: S.content)
+        .padding(.top, S.gap1)
+        .padding(.bottom, S.gap2)
+        .measure("shortfigs")
+    }
+
+    private func column(_ label: String, _ v: Int, padLeft: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label.uppercased())
+                .font(S.inter(S.t10, S.wBoldN))
+                .tracking(S.track(S.t10, S.lsLabel))
+                .foregroundStyle(S.mute)
+                .lineLimit(1)
+            Text("$" + abs(v).formatted(.number.grouping(.automatic)))
+                .font(S.inter(S.t19, S.wBoldN))
+                .tracking(S.track(S.t19, -0.025))
+                .foregroundStyle(S.ink)
+                .monospacedDigit()
+                .sunnyLineBox(S.t19)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, padLeft)
+    }
+}
+
 // MARK: - an honest empty page
 
 /// 15px at weight 300, which clears the 14px floor by one step. A page with no
