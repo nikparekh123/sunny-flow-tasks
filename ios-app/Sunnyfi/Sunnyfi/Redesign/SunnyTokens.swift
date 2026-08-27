@@ -723,6 +723,38 @@ enum S {
     static let lhHero: CGFloat = 0.9
     static let lhRead: CGFloat = 1.35
 
+    // MARK: - the summary list row — cards/summary-lists.md
+    //
+    // ⚠ ONE ROW, THREE SLOTS, READ LEFT TO RIGHT: WHO · HOW MUCH · WHY. Every
+    // one of the six lists is this row. What changes between cards is the NUMBER
+    // OF SUPPORT LINES — A one, B two, C three, never four. Not the layout, not
+    // the sizes, not the order. A fourth fact belongs on the name's own page.
+    //
+    // ⚠ THE RED SLOT FLIPS WITH THE SIGN OF THE FIGURE. Signed figure (net
+    // delta, performance) → the FIGURE takes --loss. Unsigned (an average, a
+    // strike) → the READING takes --loss-text and the figure stays --ink. Never
+    // both: one red slot per row.
+    static let tileGround = hex(0xF5F5F7)
+    /// Classes A and B. C keeps a smaller padding because three support lines
+    /// already give the row its height — at 26 a C row measures 108.7 and the
+    /// option cards run past 500.
+    static let padTileRow = EdgeInsets(top: 26, leading: 17, bottom: 26, trailing: 17)
+    static let padTileRowC = EdgeInsets(top: 20, leading: 17, bottom: 20, trailing: 17)
+    static let tileRowGap: CGFloat = 12
+    /// ⚠ THE WIDTH OF THE WIDEST TICKER IN THE BOOK, and it must never shrink.
+    /// At 50 and flexible, BABA (55) and NFLX (52) ate the row's 10pt gap and
+    /// rendered as "BABA +415 sh" with 5pt of air. The figures still aligned —
+    /// only the gap failed — which reads as a typesetting fault, not a rule.
+    static let tickerSlot: CGFloat = 56
+    static let tickerSlotBox: CGFloat = 67   // 5 dot + 6 gap + 56 ticker
+    static let rowSlotGap: CGFloat = 10
+    static let supportLineGap: CGFloat = 3
+    static let lhSupport: CGFloat = 1.3
+    static let t20: CGFloat = 20             // THE list row figure: ticker and value both
+    static let padListX: CGFloat = 19
+    static let padListHeadTop: CGFloat = 19
+    static let padListHeadBottom: CGFloat = 16
+
     // MARK: - the paged shell — SHELL-PAGED.md
     //
     // ⚠ THE FILTER, THE SEARCH FIELD, THE THREE SECTIONS AND THE BOTTOM RAIL ARE

@@ -260,15 +260,38 @@ struct SunnyPane: View {
         if let os = rail.openShorts, os.contracts > 0 {
             SunnyShortFigures(s: os)
         }
-        /* ⚠ THE LIST IS NOT A DATED CARD. It has no read control and no name to
-           file under: it is about the whole book, so it belongs on New every
-           morning rather than moving to a page when it is read. The per-name S
-           cards on each page are the same number, one at a time. */
-        if rail.book.contains(where: { $0.avg != nil }) {
-            SunnyAverageList(book: rail.book)
-        }
+        /* ⚠ THE SIX LISTS ARE NOT DATED CARDS. None has a read control and none
+           has a name to file under: each is about the whole book, so it belongs
+           on New every morning rather than moving to a page when it is read.
+           The five M cards on each page are the same rows, one at a time.
+
+           ⚠ THE ORDER IS THE BOOK'S OWN. Position first (what he owns, what it
+           cost, how it has done), then the options over it, shorts before the
+           protection under them. It is the order the sleeve is built in. */
         if rail.book.contains(where: { $0.delta != nil }) {
-            SunnyNetDeltaList(book: rail.book)
+            SunnyDeltaList(book: rail.book)
+        }
+        if rail.book.contains(where: { $0.avg != nil }) {
+            SunnyAvgList(book: rail.book)
+        }
+        if !legs.positions.isEmpty {
+            SunnyPerfList(book: rail.book, positions: legs.positions)
+        }
+        if !rail.callsSold.isEmpty {
+            SunnyOptionList(title: "Calls sold", stateWord: "ITM",
+                            rows: rail.callsSold, name: "summary-calls-sold")
+        }
+        if !rail.putsSold.isEmpty {
+            SunnyOptionList(title: "Puts sold", stateWord: "underwater",
+                            rows: rail.putsSold, name: "summary-puts-sold")
+        }
+        /* ⚠ PUTS BOUGHT IS THE ONE LIST WHERE NOTHING CAN BE AN EXCEPTION, so
+           its header always shows the grey row count. Protection cannot be
+           underwater the way a short can: a floor that has lost value is a floor
+           he did not need. */
+        if !rail.putsBought.isEmpty {
+            SunnyOptionList(title: "Puts bought", stateWord: "open",
+                            rows: rail.putsBought, name: "summary-puts-bought")
         }
         if due.isEmpty {
             SunnyPageNote("Nothing on a clock. Every card has moved to its own "
@@ -309,14 +332,31 @@ struct SunnyPane: View {
                contribution to a P&L total. */
             SunnyPositionCards(p: position)
 
-            /* The same average as the list's row for this name, alone. It sits
-               above the price week for the same reason the position card does:
-               the basis is the position, the week is the backdrop. */
-            if let a = b.avg {
-                SunnyAverageCard(ticker: b.ticker, a: a)
-            }
+            /* ⚠ THE SAME ROWS AS THE LISTS ABOVE, ROTATED. An M says nothing
+               new — it is the row with room. They sit above the price week for
+               the same reason the position card does: the position is the
+               subject, the week is the backdrop.
+
+               ⚠ AND THERE IS NO PERFORMANCE M. Current and Total are printed by
+               SunnyPageFigures two rows above; a card would be two readings of
+               one number. Nik, 27 Aug. */
             if let d = b.delta {
-                SunnyNetDeltaCard(ticker: b.ticker, d: d)
+                SunnyDeltaM(ticker: b.ticker, d: d)
+            }
+            if let a = b.avg {
+                SunnyAvgM(ticker: b.ticker, a: a)
+            }
+            /* One M per LEG, not per name: NKE holds two strikes of puts sold
+               and two of puts bought, and netting them would print a strike that
+               does not exist. */
+            ForEach(rail.callsSold.filter { $0.ticker == b.ticker }) { r in
+                SunnyOptionM(kind: "Call sold", stateWord: "ITM", r: r)
+            }
+            ForEach(rail.putsSold.filter { $0.ticker == b.ticker }) { r in
+                SunnyOptionM(kind: "Put sold", stateWord: "Underwater", r: r)
+            }
+            ForEach(rail.putsBought.filter { $0.ticker == b.ticker }) { r in
+                SunnyOptionM(kind: "Put bought", stateWord: "", r: r)
             }
             if let w = b.week {
                 SunnyFiveDayCard(

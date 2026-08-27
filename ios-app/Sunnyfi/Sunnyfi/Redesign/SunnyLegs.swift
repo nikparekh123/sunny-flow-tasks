@@ -74,6 +74,24 @@ struct LegsPosition: Decodable, Identifiable {
     }
 }
 
+/// ⚠ THE MODEL OUTLIVED ITS CARD. `SunnyPutFloorCard` was retired on 27 Aug
+/// 2026, but `floors` is still served by position-legs and still decoded here,
+/// because ONE BACKEND SERVES TWO CLIENTS and the build already on Nik's phone
+/// reads it. Deleting the type would make this response fail to decode on a
+/// device that has not updated. Additive only, in both directions.
+struct PutFloor: Decodable, Identifiable {
+    let strike: Double
+    let expiry: String
+    let contracts: Double
+    let dte: Int
+    let debit: Int
+    let value: Int
+    let pnl: Int
+    let pct: Double
+    let distance: Double
+    var id: String { "\(strike)|\(expiry)" }
+}
+
 @Observable
 final class LegsStore {
     var positions: [LegsPosition] = []

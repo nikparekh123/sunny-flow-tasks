@@ -236,22 +236,20 @@ struct SunnyHatch: View {
 
 // MARK: - the fan-out
 
-/// What a name page shows for its position: one card for the legs, then one per
-/// put floor.
+/// What a name page shows for its position: one card for the legs.
 ///
-/// ⚠ THE FLOORS STAY SEPARATE. A floor is not a contribution to the total — it is
-/// a band around a strike, and TLT's December 75 and 80 are two pieces of cover
-/// that can disagree. Folding them into the position chart would put a distance
-/// reading inside a P&L sum.
+/// ⚠ THE PUT FLOOR CARDS ARE RETIRED (27 Aug 2026). Nik: "we have a put floor
+/// card that we need to remove. Remove all the put floor card." The floor's own
+/// facts did not go with it — every put bought is a row on the puts bought list
+/// and an M on its name's page, carrying the strike, the size, the expiry, the
+/// distance to spot and what the cover has cost. What the floor card added on
+/// top of that was a drawn band, and a band is a graphic where a number would
+/// do. `floors` is still decoded from position-legs and still served: ONE
+/// BACKEND, TWO CLIENTS, and the build already on his phone reads it.
 struct SunnyPositionCards: View {
     let p: LegsPosition?
 
     var body: some View {
-        if let p {
-            SunnyPositionCard(p: p)
-            ForEach(p.floors) { f in
-                SunnyPutFloorCard(ticker: p.ticker, spot: p.spot, f: f)
-            }
-        }
+        if let p { SunnyPositionCard(p: p) }
     }
 }

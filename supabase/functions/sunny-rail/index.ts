@@ -33,7 +33,7 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-26.6';
+const BUILD = '2026-08-27.1';
 const N = (v: unknown, d = 0) => (v === null || v === undefined || v === '' ? d : Number(v));
 
 /** The rail abbreviates money: $400k, never $400,000. */
@@ -92,6 +92,10 @@ type Span = { text: string; kind: 'word' | 'figure' | 'minor' };
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
+    /* `peek` skips the daily delta stamp. A probe should be able to read the
+       book without writing a reading into its history. */
+    let body: { peek?: boolean } = {};
+    try { if (req.method === 'POST') body = await req.json(); } catch { /* none */ }
     const D = db(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
     const today = parseISO(nyToday());
 
@@ -113,8 +117,8 @@ Deno.serve(async (req) => {
         if (page.length < 1000) return out;
       }
     }
-    const [lots, divs, rates, shorts, closes, allShorts, quotes, openLegs, greeks] =
-      await Promise.all([
+    const [lots, divs, rates, shorts, closes, allShorts, quotes, openLegs, greeks,
+           deltaPrior] = await Promise.all([
       D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
       D.get('dividends?ticker=eq.TLT&select=ex_date,cash_amount,frequency&order=ex_date.desc&limit=1'),
       D.get('rates_daily?series=eq.DGS10&select=date,value&order=date.desc&limit=1'),
@@ -126,8 +130,13 @@ Deno.serve(async (req) => {
         + '&select=ticker,action,contracts,premium'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
       getAll(`option_trades?voided_at=is.null&expiry=gte.${todayISO}&order=id.asc`
-        + '&select=id,ticker,direction,action,contracts,option_type,strike,expiry'),
+        + '&select=id,ticker,direction,action,contracts,option_type,strike,expiry,premium'),
       D.get('option_greeks_latest?select=option_trade_id,delta,last_mark'),
+      /* Every prior reading, newest first — the "since yesterday" support line
+         compares against the most recent day BEFORE today, which is not
+         necessarily yesterday if he skipped a day. */
+      D.get(`delta_history?snapshot_date=lt.${todayISO}`
+        + '&select=ticker,snapshot_date,net_delta&order=snapshot_date.desc'),
     ]);
 
     const facts: Array<{ key: string; spans: Span[]; projected?: boolean }> = [];
@@ -297,9 +306,16 @@ Deno.serve(async (req) => {
       if (e && e.missing > 0) return null;          // see the note above
       const net = Math.round(sh.qty + (e?.d ?? 0));
       const spot = spotBy.get(ticker) ?? 0;
+      const was = priorDelta.get(ticker);
       return {
         net,
         short: net < 0,
+        /* The most recent reading BEFORE today, and its date. Null on a name
+           whose first snapshot is today — the card then says "opened today"
+           rather than inventing a change from nothing. */
+        prior: was ? was.d : null,
+        prior_on: was ? was.on : null,
+        change: was ? net - was.d : null,
         /* The position's NOTIONAL, and the card names it `exposure` because a
            signed dollar figure in this deck otherwise reads as P&L. */
         exposure: Math.round(net * spot),
@@ -375,6 +391,96 @@ Deno.serve(async (req) => {
       intrinsic: Math.round(oItm),
       time_value: Math.round(oValue - oItm),
     };
+
+    /* ── the three option lists ───────────────────────────────────────────
+       ONE ROW PER LEG, so a name with two strikes of the same kind appears
+       twice — Nik, 27 Aug: "it will still be one row, but we'll just have to
+       repeat that row". A row's figure IS the strike, so it can only carry one;
+       NKE holds 40.5 and 38.5 puts sold, and TLT 75 and 80 puts bought.
+
+       ⚠ MONEYNESS IS AGAINST SPOT, never against the strike. Both denominators
+       are live and they differ; the sheet fixes spot (§0.6) and the M card
+       prints spot beside the figure so the arithmetic is auditable.
+
+       ⚠ THE EXCEPTION TEST IS DIRECTION-AWARE. A call sold is an exception when
+       it is IN the money; a put sold when the cost to close has passed the
+       credit taken; a put bought never — protection cannot be underwater the
+       way a short can, which is why that list's header carries a count in grey
+       rather than an exception in red. */
+    type LegRow = {
+      ticker: string; strike: number; expiry: string; contracts: number;
+      itm: boolean; moneyness: number; opened: number; now: number;
+      exception: boolean;
+    };
+    const legBy = new Map<string, {
+      ticker: string; type: string; short: boolean; strike: number; expiry: string;
+      net: number; cash: number; mark: number;
+    }>();
+    for (const t of openLegs) {
+      const tick = String(t.ticker);
+      const short = String(t.direction) === 'short';
+      const type = String(t.option_type);
+      const strike = N(t.strike);
+      const expiry = String(t.expiry).slice(0, 10);
+      const key = `${tick}|${type}|${strike}|${expiry}|${short}`;
+      const e = legBy.get(key)
+        ?? { ticker: tick, type, short, strike, expiry, net: 0, cash: 0, mark: 0 };
+      const sign = t.action === 'open' ? 1 : -1;
+      e.net += sign * N(t.contracts);
+      const mk = markById.get(String(t.id));
+      if (mk !== undefined) e.mark = mk;
+      legBy.set(key, e);
+    }
+    /* What the leg took in or cost, netted over its own open and close rows, so
+       a partial buy-back reduces it rather than being counted twice. The same
+       fetch carries both directions, so a credit and a debit are one formula
+       and only the label differs on the card. */
+    const cashByKey = new Map<string, number>();
+    for (const t of openLegs) {
+      const tick = String(t.ticker);
+      const short = String(t.direction) === 'short';
+      const key = `${tick}|${t.option_type}|${N(t.strike)}|${String(t.expiry).slice(0, 10)}|${short}`;
+      const sign = t.action === 'open' ? 1 : -1;
+      cashByKey.set(key, (cashByKey.get(key) ?? 0) + sign * N(t.contracts) * N(t.premium) * 100);
+    }
+    const callsSold: LegRow[] = [], putsSold: LegRow[] = [], putsBought: LegRow[] = [];
+    for (const [key, e] of legBy) {
+      if (!(e.net > 0.0001)) continue;
+      const spot = spotBy.get(e.ticker) ?? 0;
+      if (!(spot > 0)) continue;
+      const itm = e.type === 'call' ? spot > e.strike : spot < e.strike;
+      const row: LegRow = {
+        ticker: e.ticker, strike: e.strike, expiry: e.expiry,
+        contracts: Math.round(e.net),
+        itm,
+        moneyness: Math.round(Math.abs(spot - e.strike) / spot * 1000) / 10,
+        opened: Math.round(Math.abs(cashByKey.get(key) ?? 0)),
+        now: Math.round(e.net * e.mark * 100),
+        exception: false,
+      };
+      if (e.short && e.type === 'call') { row.exception = itm; callsSold.push(row); }
+      else if (e.short) { row.exception = row.now > row.opened; putsSold.push(row); }
+      else if (e.type === 'put') { putsBought.push(row); }
+    }
+    /* Exceptions first, then alphabetical, then by strike so a name that
+       repeats keeps a stable order between its own rows. */
+    const rank = (a: LegRow, b: LegRow) =>
+      a.exception !== b.exception ? (a.exception ? -1 : 1)
+        : a.ticker !== b.ticker ? a.ticker.localeCompare(b.ticker)
+        : a.strike - b.strike;
+    callsSold.sort(rank); putsSold.sort(rank); putsBought.sort(rank);
+
+    /* ── net delta, day over day ──────────────────────────────────────────
+       Written on every call, keyed on the day, so it is idempotent; a nightly
+       cron covers a day he does not open the app. The support line compares
+       against the most recent reading BEFORE today, which is not always
+       yesterday. */
+    const priorDelta = new Map<string, { d: number; on: string }>();
+    for (const r of deltaPrior) {
+      const t = String(r.ticker);
+      if (priorDelta.has(t)) continue;          // ordered desc, first wins
+      priorDelta.set(t, { d: N(r.net_delta), on: String(r.snapshot_date).slice(0, 10) });
+    }
 
     const pk = Deno.env.get('POLYGON_API_KEY') ?? '';
     const book = await Promise.all(
@@ -457,11 +563,30 @@ Deno.serve(async (req) => {
       ] });
     }
 
+    /* ⚠ STAMP TODAY'S DELTA LAST, after the book is built, and keyed on the day
+       so it is idempotent however many times the app is opened. A nightly cron
+       calls this function too, so a day he never opens the app is still
+       captured — otherwise "since yesterday" silently becomes "since whenever
+       he last looked". */
+    if (!body.peek) {
+      const rows = book
+        .filter((b) => b.delta)
+        .map((b) => ({
+          ticker: b.ticker, snapshot_date: todayISO,
+          net_delta: b.delta!.net, exposure: b.delta!.exposure,
+          captured_at: new Date().toISOString(),
+        }));
+      if (rows.length) await D.upsert('delta_history', rows, 'ticker,snapshot_date');
+    }
+
     return json(200, {
       ok: true, build: BUILD, asof: ymd(today),
       facts,
       book,
       open_shorts: openShorts,
+      calls_sold: callsSold,
+      puts_sold: putsSold,
+      puts_bought: putsBought,
       rates_asof: r0 ? String(r0.date).slice(0, 10) : null,
       open_premium: Math.round(openPremium),
       omitted: [],

@@ -33,6 +33,9 @@ final class RailStore {
     /// Chrome for the pane, not for the dock: the shell's section headings.
     var book: [BookName] = []
     var openShorts: OpenShorts?
+    var callsSold: [OptionRow] = []
+    var putsSold: [OptionRow] = []
+    var putsBought: [OptionRow] = []
     var error: String?
     private var loading = false
 
@@ -54,6 +57,9 @@ final class RailStore {
             openShorts = p.open_shorts
             facts = p.facts ?? []
             book = p.book ?? []
+            callsSold = p.calls_sold ?? []
+            putsSold = p.puts_sold ?? []
+            putsBought = p.puts_bought ?? []
         } catch { self.error = String(describing: error) }
     }
 }
@@ -62,6 +68,36 @@ private struct RailPayload: Decodable {
     var facts: [RailFact]?
     var book: [BookName]?
     var open_shorts: OpenShorts?
+    var calls_sold: [OptionRow]?
+    var puts_sold: [OptionRow]?
+    var puts_bought: [OptionRow]?
+}
+
+/// ⚠ ONE ROW PER LEG, NOT PER NAME. NKE holds two strikes of puts sold and two
+/// of puts bought; TLT two of puts bought. Netting them would print a strike
+/// that does not exist and a moneyness against nothing. A name with two legs
+/// simply appears twice — Nik, 27 Aug: "it will still be one row, but we'll just
+/// have to repeat that row."
+struct OptionRow: Decodable, Identifiable {
+    let ticker: String
+    let strike: Double
+    let expiry: String
+    let contracts: Int
+    let itm: Bool
+    /// ⚠ AGAINST SPOT, NEVER AGAINST COST. Both denominators are live in this
+    /// payload and they differ visibly. summary-lists.md §0.6.
+    let moneyness: Double
+    /// The credit taken (short) or the debit paid (long), netted for buybacks.
+    let opened: Int
+    /// What the leg is worth now, at the mark.
+    let now: Int
+    /// ⚠ COMPUTED SERVER-SIDE AND DIRECTION-AWARE. A call sold is excepted when
+    /// ITM; a put sold when it costs more to close than it paid; a put bought
+    /// NEVER — protection cannot be underwater the way a short can. Never
+    /// re-derive it here from the sign of a number: summary-lists.md §0.4 is the
+    /// record of that mistake.
+    let exception: Bool
+    var id: String { "\(ticker)|\(strike)|\(expiry)" }
 }
 
 /// The open short book, for the New page's three figures.
@@ -148,9 +184,20 @@ struct BookDelta: Decodable {
     /// short put adds it without any special case.
     let net: Int
     let short: Bool
+    /// Yesterday's reading, from `delta_history`. Null on the first day a name
+    /// is stamped — the card then reads `opened yesterday` rather than a change
+    /// of zero, which would claim a comparison it cannot make.
+    let prior: Int?
+    let priorOn: String?
+    let change: Int?
     /// The NOTIONAL. The card names it `exposure` because a signed dollar figure
     /// in this deck otherwise reads as P&L.
     let exposure: Int
+
+    enum CodingKeys: String, CodingKey {
+        case net, short, prior, change, exposure
+        case priorOn = "prior_on"
+    }
 }
 
 struct RailFact: Decodable, Identifiable {
