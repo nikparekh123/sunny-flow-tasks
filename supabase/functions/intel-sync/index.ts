@@ -51,7 +51,8 @@ Deno.serve(async (req) => {
     const url = Deno.env.get('SUPABASE_URL')!;
     const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const pk = Deno.env.get('POLYGON_API_KEY')!;
-    let body: { dry_run?: boolean; tickers?: string[]; back_days?: number; page?: number } = {};
+    let body: { dry_run?: boolean; tickers?: string[]; back_days?: number; page?: number;
+                news_only?: boolean } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* none */ }
     const D = db(url, key);
     const today = parseISO(nyToday());
@@ -107,9 +108,20 @@ Deno.serve(async (req) => {
       catch { return []; }
     };
 
+    /* ⚠ NEWS RUNS HOURLY, THE REST RUNS ONCE. News was arriving in the 05:30
+       batch with everything else, so a story published at 20:05 sat nine hours
+       before it existed here — the freshness limit was OURS, not Benzinga's.
+       Nik, 27 Aug, on the news feed: "this news is also good enough."
+
+       ⚠ AND `news_only` EXISTS BECAUSE THE OTHER THREE CANNOT AFFORD THE HOUR.
+       Guidance and ratings sweep the WHOLE 596-name universe in 40-name chunks
+       walked backwards 180 days, which is dozens of calls; consensus is one per
+       held name and refreshes daily at best. News is one call per HELD name —
+       nine — so it is the only feed cheap enough to run twelve times a day, and
+       it is the only one whose value decays in hours. */
     // ── guidance + ratings, whole universe ────────────────────────────────
     const gRows: unknown[] = [], aRows: unknown[] = [];
-    for (let i = 0; i < all.length; i += CHUNK) {
+    for (let i = 0; body.news_only ? false : i < all.length; i += CHUNK) {
       const p = all.slice(i, i + CHUNK).join(',');
       /* Walk backwards a slice at a time. A single call caps at 1,000 and
          silently truncates: at 400 days a 40-ticker chunk returned exactly
@@ -155,7 +167,8 @@ Deno.serve(async (req) => {
     // ── consensus + news, held names only (one call each) ─────────────────
     const cRows: unknown[] = [], nRows: unknown[] = [];
     for (const t of held) {
-      for (const c of await get(`${POLY}/benzinga/v1/consensus-ratings/${t}?apiKey=${pk}`)) {
+      for (const c of body.news_only
+        ? [] : await get(`${POLY}/benzinga/v1/consensus-ratings/${t}?apiKey=${pk}`)) {
         cRows.push({
           ticker: t, rating: c.consensus_rating ?? null, rating_value: num(c.consensus_rating_value),
           target: num(c.consensus_price_target), high: num(c.high_price_target), low: num(c.low_price_target),
@@ -197,8 +210,11 @@ Deno.serve(async (req) => {
        its own: analysts are silent at weekends and over holidays, and a feed
        that runs correctly and finds nothing is healthy. */
     const written = (g.n ?? 0) + (a.n ?? 0) + (c.n ?? 0) + (n.n ?? 0);
+    /* ⚠ THE HOURLY RUN STAMPS ITS OWN FEED. health-monitor alerts on the AGE of
+       `intel-sync`, and an hourly news pass writing that row would keep it fresh
+       forever — the full sync could stop for a week and nothing would say so. */
     await D.upsert('sync_heartbeat', [{
-      feed: 'intel-sync',
+      feed: body.news_only ? 'intel-sync-news' : 'intel-sync',
       ran_at: new Date().toISOString(),
       rows_written: written,
       detail: `guidance ${g.n ?? 0} · actions ${a.n ?? 0} · consensus ${c.n ?? 0} · news ${n.n ?? 0}`,
