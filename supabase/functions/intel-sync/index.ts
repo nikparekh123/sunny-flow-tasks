@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
     }
 
     // ── consensus + news, held names only (one call each) ─────────────────
-    const cRows: unknown[] = [], nRows: unknown[] = [];
+    const cRows: unknown[] = [], nRows: unknown[] = [], iRows: unknown[] = [];
     for (const t of held) {
       for (const c of body.news_only
         ? [] : await get(`${POLY}/benzinga/v1/consensus-ratings/${t}?apiKey=${pk}`)) {
@@ -176,6 +176,33 @@ Deno.serve(async (req) => {
           strong_buy: num(c.strong_buy_ratings), buy: num(c.buy_ratings), hold: num(c.hold_ratings),
           sell: num(c.sell_ratings), strong_sell: num(c.strong_sell_ratings),
           as_of: new Date().toISOString(),
+        });
+      }
+      /* ⚠ THE INSIGHT ARRIVES ONLY WITH A RATING, so it can never be more
+         frequent than the ratings feed and it is fetched per HELD name rather
+         than over the universe. `benzinga_rating_id` joins exactly to
+         `analyst_actions.benzinga_id` — verified 4 of 4 on live rows — which is
+         what lets a rating card carry its own insight instead of the insight
+         needing a section of its own.
+
+         Skipped on the hourly news pass: the ratings clock is weekly, so
+         refetching this twelve times a day would be twelve times the calls for
+         the same three rows. */
+      for (const i of body.news_only
+        ? [] : await get(`${POLY}/benzinga/v1/analyst-insights?ticker.any_of=${t}`
+            + `&limit=12&order=desc&sort=date&apiKey=${pk}`)) {
+        const txt = String(i.insight ?? '').trim();
+        if (!txt) continue;
+        iRows.push({
+          benzinga_id: String(i.benzinga_id),
+          benzinga_rating_id: i.benzinga_rating_id ? String(i.benzinga_rating_id) : null,
+          ticker: t,
+          date: String(i.date ?? '').slice(0, 10) || null,
+          firm: i.firm ?? null,
+          rating: i.rating ?? null,
+          rating_action: i.rating_action ?? null,
+          price_target: num(i.price_target),
+          insight: txt,
         });
       }
       for (const n of await get(`${POLY}/v2/reference/news?ticker=${t}&limit=20&order=desc&apiKey=${pk}`)) {
@@ -189,7 +216,8 @@ Deno.serve(async (req) => {
     if (body.dry_run) {
       return json(200, { ok: true, build: BUILD, dry_run: true,
         universe: all.length, held,
-        guidance: gRows.length, actions: aRows.length, consensus: cRows.length, news: nRows.length,
+        guidance: gRows.length, actions: aRows.length, consensus: cRows.length,
+        news: nRows.length, insights: iRows.length,
         sample_guidance: gRows.slice(0, 4), sample_action: aRows.slice(0, 2),
         by_direction: gRows.reduce((m: Record<string, number>, g) => {
           const d = String((g as Record<string, unknown>).direction); m[d] = (m[d] ?? 0) + 1; return m; }, {}) });
@@ -198,6 +226,7 @@ Deno.serve(async (req) => {
     const a = await post('analyst_actions', aRows, 'benzinga_id');
     const c = await post('analyst_consensus', cRows, 'ticker,as_of_date');
     const n = await post('name_news', nRows, 'ticker,id');
+    const i = await post('analyst_insights', iRows, 'benzinga_id');
     /* ⚠ STAMP THE HEARTBEAT LAST, AFTER THE WRITES, AND ONLY ON THE WAY OUT.
        pg_cron logs "succeeded" the moment net.http_post hands back a request
        id — it never learns whether this function ran, wrote, or threw. Three
@@ -209,7 +238,7 @@ Deno.serve(async (req) => {
        the health signal. `rows_written` rides along but must not be an alert on
        its own: analysts are silent at weekends and over holidays, and a feed
        that runs correctly and finds nothing is healthy. */
-    const written = (g.n ?? 0) + (a.n ?? 0) + (c.n ?? 0) + (n.n ?? 0);
+    const written = (g.n ?? 0) + (a.n ?? 0) + (c.n ?? 0) + (n.n ?? 0) + (i.n ?? 0);
     /* ⚠ THE HOURLY RUN STAMPS ITS OWN FEED. health-monitor alerts on the AGE of
        `intel-sync`, and an hourly news pass writing that row would keep it fresh
        forever — the full sync could stop for a week and nothing would say so. */
@@ -217,10 +246,11 @@ Deno.serve(async (req) => {
       feed: body.news_only ? 'intel-sync-news' : 'intel-sync',
       ran_at: new Date().toISOString(),
       rows_written: written,
-      detail: `guidance ${g.n ?? 0} · actions ${a.n ?? 0} · consensus ${c.n ?? 0} · news ${n.n ?? 0}`,
+      detail: `guidance ${g.n ?? 0} · actions ${a.n ?? 0} · consensus ${c.n ?? 0}`
+            + ` · news ${n.n ?? 0} · insights ${i.n ?? 0}`,
     }], 'feed');
 
     return json(200, { ok: true, build: BUILD, universe: all.length, held,
-      guidance: g, actions: a, consensus: c, news: n });
+      guidance: g, actions: a, consensus: c, news: n, insights: i });
   } catch (e) { return json(500, { ok: false, error: String(e) }); }
 });
