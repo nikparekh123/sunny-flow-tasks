@@ -245,15 +245,16 @@ Deno.serve(async (req) => {
     const hours = (iso: string) =>
       Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 3_600_000));
 
-    /* ⚠ ON-TOPIC FIRST, THEN A PRESS RELEASE ONLY IF IT IS FROM TODAY, THEN
-       NEWEST. The filter is the section's whole point, so an off-topic listicle
-       can never lead. A press release is materially different — BABA's three
-       class-action notices in two days — but a three-day-old release must not
-       hold the lead over this morning's article. */
-    const leadRank = (r: NewsRow) => {
-      const h = hours(r.published);
-      return (r.kind === 'press release' && h <= 24 ? 0 : 1) * 1e6 + h;
-    };
+    /* ⚠ ON-TOPIC FIRST, THEN NEWEST. FULL STOP.
+       An earlier pass ranked a same-day press release above an article, on the
+       sheet's rule that a press release outranks one — 19% of the feed and
+       close to 100% on topic. Nik saw the result and cut it: the lead became a
+       securities-fraud class-action notice, which is material but is not what
+       the day was about. The KIND is still printed, so a press release still
+       announces itself; it just does not jump the queue.
+       The filter remains the section's whole point, so an off-topic listicle
+       can never lead however fresh it is. */
+    const leadRank = (r: NewsRow) => hours(r.published);
     const ordered = [...kept].sort((a, b) => leadRank(a) - leadRank(b));
     const lead = ordered[0] ?? null;
     const links = ordered.slice(1, 3);

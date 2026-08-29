@@ -261,9 +261,17 @@ struct SunnyActionList: View {
                              ? "\(tight(r.prev!)) \u{2192} \(tight(r.now!))" : r.rating.capitalized)
                             .font(S.inter(S.t14, S.wSemiN))
                             .foregroundStyle(S.ink)
-                            .frame(width: 76, alignment: .leading)
+                            /* ⚠ 84, NOT THE SHEET'S 76. The reference rows are
+                               two-digit strikes (`47 → 42`); this book holds
+                               three-digit ones, and `185 → 190` measured past
+                               76 and truncated to `185 →…`. A slot is sized to
+                               the widest string it must hold, not to the
+                               widest one the example happened to have. */
+                            .frame(width: 84, alignment: .leading)
                             .lineLimit(1)
-                        Text("\(r.state) \u{00B7} \(r.firm)")
+                        /* Same suffix rule as the card: at full length this
+                           truncated to `target raised · Wolfe Rese…`. */
+                        Text("\(r.state) \u{00B7} \(shortFirm(r.firm))")
                             .font(S.inter(S.t13, S.wMidSmN))
                             .foregroundStyle(S.mute2)
                             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -320,7 +328,9 @@ struct SunnyTargetCard: View {
                                 .font(S.inter(S.t14, S.wSemiN))
                                 .foregroundStyle(S.ink)
                                 .frame(width: S.targetTickerSlot, alignment: .leading)
-                            Text(sPrice(r.target))
+                            /* A median target has no cents worth printing —
+                               the sheet's own reference row is `340`. */
+                            Text(tight(r.target))
                                 .font(S.inter(S.t14, S.wSemiN))
                                 .foregroundStyle(S.ink)
                                 .frame(width: S.targetFigSlot, alignment: .leading)
