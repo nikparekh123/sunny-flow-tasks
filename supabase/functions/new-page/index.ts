@@ -372,15 +372,24 @@ Deno.serve(async (req) => {
       e.n += (t.action === 'open' ? 1 : -1) * N(t.contracts);
       netLeg.set(k, e);
     }
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    /* A support line is prose, so its date is written the way a person writes
+       one. The ISO form belongs in the payload's own fields, never in a
+       sentence. */
+    const said = (iso: string) => {
+      const p = iso.split('-');
+      return p.length === 3 ? `${Number(p[2])} ${MON[Number(p[1]) - 1]}` : iso;
+    };
     const earnRows = dates.slice(0, 4).map((d) => {
       const open = [...netLeg.entries()]
         .filter(([k, v]) => k.startsWith(d.ticker + '|') && v.n > 0.0001 && v.expiry >= d.date);
       const shortAfter = open.find(([, v]) => v.short);
       const longAfter = open.find(([, v]) => !v.short);
       const support = shortAfter
-        ? { text: `Inside the ${shortAfter[1].type} you sold, ${shortAfter[1].expiry}`, red: true }
+        ? { text: `Inside the ${shortAfter[1].type} you sold, ${said(shortAfter[1].expiry)}`, red: true }
         : longAfter
-        ? { text: `Inside the ${longAfter[1].type} you bought, ${longAfter[1].expiry} — covered`, red: false }
+        ? { text: `Inside the ${longAfter[1].type} you bought, ${said(longAfter[1].expiry)} — covered`,
+            red: false }
         : null;
       return {
         kind: 'earnings' as const, ticker: d.ticker,

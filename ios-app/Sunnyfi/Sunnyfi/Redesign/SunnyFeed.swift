@@ -132,6 +132,9 @@ final class PaneModel {
     var planner = PlannerStore()
     var legs = LegsStore()
     var rail = RailStore()
+    /// The New page's whole payload. It lives here with the other stores so the
+    /// pager can hold more than one pane without fetching it twice.
+    var newPage = NewPageStore()
     var read: Set<String> = SunnyRead.load()
     /// ⚠ PER NAME, NOT PER CARD (five-day-price.md §6), so an M and an L on the
     /// same ticker flip together.
@@ -174,21 +177,43 @@ final class PaneModel {
         return out
     }
 
-    /* ⚠ ONE COPY OF EACH CARD. SHELL-PAGED.md §0 rule 2: a dated card has ONE
-       wrapper. While unread it shows on New; once read it shows on its own
-       name's page. Never both, never rendered twice. Here that is structural:
-       one array of items and `place` is a pure function of the item plus the
-       read set, so a card cannot be in two places even by mistake. */
+    /* ⚠ NEW NO LONGER HOLDS CARDS, SO NOTHING FILES TO IT (29 Aug 2026). A
+       dated card used to sit on New while unread and move to its name once
+       read; with the New page rebuilt as five sections of its own, an unread
+       card would have rendered NOWHERE. Every card now goes straight to its
+       name's page.
+
+       ⚠ AND A CARD WITH NO NAME IS GONE. The week card belonged to no ticker
+       and reading it cleared it — it has nowhere left to land, which is what
+       "everything else not on this new layout goes" means for it. */
     func place(_ i: SunnyFeedItem) -> SunnyPage? {
-        if i.clock && !read.contains(i.id) { return .new }
-        if let t = i.ticker { return .name(t) }
-        /* Read, and no name to file under: it is gone until it is due again. */
-        return nil
+        i.ticker.map { .name($0) }
     }
 
-    var due: [SunnyFeedItem] { items.filter { place($0) == .new } }
-    /// Names with a dated card still sitting on New. They wear the amber ring.
-    var pending: Set<String> { Set(due.compactMap(\.ticker)) }
+    /* ⚠ THE STRIP'S TWO SIGNALS HAD TO BE REDEFINED WITH THE CARDS GONE. The
+       count was "dated cards unread" and the amber ring was "this name has one
+       waiting"; neither exists any more, and both would have kept reporting a
+       dead code path — the count read 7 against a page holding no cards at all.
+
+       They now read the same feeds the page does: the count is what ARRIVED
+       TODAY across the book, and a name wears amber when it has news or a
+       rating THIS WEEK. Amber still means "changed since you last read" — the
+       card layer's own meaning — it is just measured against the feed rather
+       than against a read pill that no longer exists. */
+    var due: Int {
+        let p = newPage.page
+        let fresh = (p?.news.lead.map { $0.hours < 24 } ?? false) ? 1 : 0
+        let links = p?.news.links.filter { $0.hours < 24 }.count ?? 0
+        let acts = p?.analysts.cards.filter { $0.date == p?.date }.count ?? 0
+        return fresh + links + acts
+    }
+    var pending: Set<String> {
+        guard let p = newPage.page else { return [] }
+        var out = Set(p.analysts.cards.map(\.ticker) + p.analysts.rest.map(\.ticker))
+        if let l = p.news.lead { out.insert(l.ticker) }
+        for l in p.news.links { out.insert(l.ticker) }
+        return out
+    }
 
     var nav: SunnyNav {
         SunnyNav(book: rail.book.map { .init(ticker: $0.ticker, weight: $0.weight) },
@@ -196,7 +221,7 @@ final class PaneModel {
                  /* Puts bought are never here: a long put in the money is cover
                     doing its job, not something that could be done to him. */
                  flagged: Set((rail.callsSold + rail.putsSold).filter(\.itm).map(\.ticker)),
-                 due: due.count)
+                 due: due)
     }
 
     func book(_ t: String) -> BookName {
@@ -232,7 +257,8 @@ final class PaneModel {
         async let c: Void = week.load()
         async let d: Void = planner.load()
         async let e: Void = legs.load()
-        _ = await (a, b, c, d, e)
+        async let f: Void = newPage.load()
+        _ = await (a, b, c, d, e, f)
         if ProcessInfo.processInfo.arguments.contains("-showPrice") {
             priceUnits = Set(rail.book.map(\.ticker))
         }
@@ -251,6 +277,9 @@ struct SunnyPane: View {
     var startAt: CGFloat? = nil
 
     @State private var pos = ScrollPosition()
+    /// Expand-in-place state for the news gate's chip. Per view, not per model:
+    /// it is a reading position, not a fact about the book.
+    @State private var showFiltered = false
 
     private var current: BookName? {
         guard case .name(let t) = page else { return nil }
@@ -309,41 +338,78 @@ struct SunnyPane: View {
 
     @ViewBuilder
     private var newPage: some View {
-        SunnyNewHead(due: m.due.count)
-        if let os = m.rail.openShorts, os.contracts > 0 {
-            SunnyShortFigures(s: os)
-        }
-        /* ⚠ THE SIX SUMMARY LISTS CAME OFF NEW (27 Aug 2026) and the five M
-           cards came off the name pages with them. Both are deleted, not
-           commented out. Nik: "do we need these cards on the new page, or do we
-           directly show this card on the ticker page as the first thing you see
-           every time."
+        /* ⚠ EVERYTHING THAT WAS ON THIS PAGE IS GONE (29 Aug 2026). The
+           awareness digests, the planner, the week card and the three
+           open-short figures are all off it. Nik: "everything else not on this
+           new layout goes."
 
-           Three things decided it. The six measured 6,107 stacked against a 665
-           pane, so whatever was actually new that morning sat nine screens down
-           — and a card must lead with what CHANGED, never a standing aggregate.
-           The strip is already the cross-name view; a card on New that ranks
-           nine names is the retired Featured page coming back in through a card.
-           And a list makes him read nine names to find the one he opened the app
-           for.
+           ⚠ SECTIONS ARE SPEEDS, NEVER TICKERS. Sorting by name gave every
+           section eight of everything and turned a quiet week into forty cells.
+           Three sections, because the five feeds collapse to three rhythms:
+           news daily, analysts weekly, earnings and guidance quarterly.
 
-           What New keeps is what is dated: the awareness card, the week, the
-           planner. The book-wide sweep the list headers used to give (`3 ABOVE
-           SPOT`) moves to the strip as a flag on the circle — a design of Nik's
-           own, not something to improvise here. */
-        if m.due.isEmpty {
-            SunnyPageNote("Nothing on a clock. Every card has moved to its own "
-                        + "name — a name comes back here when it has something new.")
-        } else {
-            /* ⚠ NO SEPARATE READ ROW, AND THAT IS NOT AN OMISSION. SHELL-PAGED
-               §7 measures a dated wrapper as card + 4 + a 44pt Read row, because
-               in the handoff the planner and the put floor sit on New without a
-               control of their own. Every dated card this app actually builds
-               carries its read control INSIDE itself — the digest's pill, the
-               week card's — and the planner carries none deliberately. A row
-               under those would put two Reads on one card. Add the wrapper back
-               the day a dated card arrives without one, not before. */
-            ForEach(m.due) { card($0) }
+           ⚠ AND THE PAGE RUNS ON TWO CLOCKS. The lead says TODAY, the analyst
+           seam says THIS WEEK, and the header date is a DAY. */
+        if let p = m.newPage.page {
+            SunnyNewTitle(date: p.date)
+            SunnyDateRow(dates: p.dates)
+
+            /* News carries NO SEAM: a 26/300 headline under the date row is
+               self-evidently news, and a heading over the first block on a page
+               is a partition with nothing on the other side. */
+            SunnyNewsLead(lead: p.news.lead, filtered: p.news.filtered.count,
+                          onChip: { showFiltered.toggle() },
+                          chipLabel: showFiltered ? "Fewer" : "See them")
+            if p.news.lead != nil {
+                VStack(alignment: .leading, spacing: S.gap7) {
+                    ForEach(p.news.links) { SunnyLinkRow(l: $0) }
+                }
+                .padding(.top, S.gap3)
+                HStack(spacing: S.gap6) {
+                    /* ⚠ THE FILTERED COUNT IS ALWAYS SHOWN AND NAMED. A silent
+                       gate on a paid feed looks broken. */
+                    Text("\(p.news.filtered.count) filtered")
+                        .font(S.inter(S.t14, S.wMidSmN))
+                        .foregroundStyle(S.mute2)
+                    SunnyExpandChip(label: showFiltered ? "Fewer" : "See them") {
+                        showFiltered.toggle()
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            if showFiltered { SunnyFilteredList(rows: p.news.filtered.rows) }
+
+            SunnySeam(label: "This week · analysts", count: p.analysts.count)
+            if p.analysts.cards.isEmpty {
+                /* ⚠ AN EMPTY SECTION STATES ITS LAST DATE. Without one, an
+                   empty feed and a broken feed are indistinguishable. */
+                SunnyEmptyNote(
+                    line: "No firm has moved on any of your names this week.",
+                    last: p.analysts.last.map {
+                        "Last was \(p.analysts.lastFirm ?? "a firm") on "
+                        + "\(p.analysts.lastTicker ?? ""), \(shortDate($0))."
+                    })
+            } else {
+                ForEach(p.analysts.cards) { SunnyAnalystCard(a: $0) }
+                if !p.analysts.rest.isEmpty { SunnyActionList(rows: p.analysts.rest) }
+            }
+            /* On every state of the page, with that state's own numbers — a
+               standing fact, not an arrival. */
+            if !p.targets.rows.isEmpty { SunnyTargetCard(t: p.targets) }
+
+            SunnySeam(label: "Earnings & guidance", count: p.earnings.count)
+            if p.earnings.rows.isEmpty {
+                SunnyEmptyNote(line: "Nothing reports inside 30 days, and no guide has changed.",
+                               last: nil)
+            } else {
+                SunnyEarningsCard(e: p.earnings)
+            }
+
+            SunnySeam(label: "The drift", count: nil)
+            SunnyDriftCard(d: p.drift)
+        } else if m.newPage.error != nil {
+            SunnyPageNote("The feed did not answer. It will try again when you "
+                        + "come back to this page.")
         }
     }
 

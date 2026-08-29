@@ -811,6 +811,59 @@ enum S {
     static let lhSupportLg: CGFloat = 1.45     // 20.3 line box at 14
     static let lsRung = 0.12          // the rung title, one step under lsLabel
 
+    // MARK: - the New page — NEW-PAGE.md
+    //
+    // ⚠ SECTIONS ARE SPEEDS, NEVER TICKERS, AND THE PAGE RUNS ON TWO CLOCKS.
+    // News is daily (~22 items a week), analyst actions weekly (~10), earnings
+    // and guidance quarterly. The lead says TODAY, the analyst seam says THIS
+    // WEEK, and the header date is a DAY — an earlier pass put both under one
+    // "week to 26 Aug" and made three news items look like a slow week rather
+    // than a normal day.
+    //
+    // ⚠ EVERY EMPTY SECTION STATES ITS LAST DATE, and every seam prints its
+    // count including 0. An empty section with no last-seen date is
+    // indistinguishable from a broken feed.
+    //
+    // ⚠ THE SIDE PADDING IS 21, NOT THE DECK'S 19. Every card on this page is
+    // built to it; do not inherit padListX here.
+    static let padNewX: CGFloat = 21
+
+    /* The date row — chrome, the only forward-looking block on the page and the
+       only amber above the fold. The COUNTDOWN is the figure and the event is
+       the label, never the reverse. */
+    static let padPillDate = EdgeInsets(top: 8, leading: 13, bottom: 8, trailing: 13)
+    static let gapPillDate: CGFloat = 7      // countdown -> event
+    static let gapDateRow: CGFloat = 8       // pill to pill
+    static let tPillFigure: CGFloat = 13     // 600, −.01em, lh 1
+    /// 12, not 11: 11px is a 600-uppercase size only, never sentence body.
+    static let tPillLabel: CGFloat = 12
+    static let dateWarnDays = 30             // inside this the pill goes amber
+
+    /* The seam. Exists only where two sections need telling apart — News
+       carries none, because a 26/300 headline under the date row is
+       self-evidently news and a heading over the first block on a page is a
+       partition with nothing on the other side. */
+    static let padSeam = EdgeInsets(top: 16, leading: 0, bottom: 5, trailing: 0)
+    static let seamIndent: CGFloat = 26      // the strip circle's left rhythm
+    static let seamGap: CGFloat = 10
+
+    /* The cards. */
+    static let padNewsLead = EdgeInsets(top: 22, leading: 21, bottom: 20, trailing: 21)
+    static let padStateRow = EdgeInsets(top: 15, leading: 21, bottom: 17, trailing: 21)
+    static let padAction = EdgeInsets(top: 20, leading: 21, bottom: 22, trailing: 21)
+    static let padInsight = EdgeInsets(top: 16, leading: 21, bottom: 20, trailing: 21)
+    static let padTargetHead = EdgeInsets(top: 19, leading: 21, bottom: 13, trailing: 21)
+    static let targetRowPad: CGFloat = 13
+    static let targetTickerSlot: CGFloat = 46   // BABA at 14/600. flex:none
+    static let targetFigSlot: CGFloat = 52      // holds a four-digit target
+    static let padDrift = EdgeInsets(top: 20, leading: 21, bottom: 22, trailing: 21)
+    /// ⚠ --ink ON --wash, NEVER RED. 185 lowers is a fact about analysts, not a
+    /// loss in the book; a red bar would say the position is down.
+    static let driftBarH: CGFloat = 8
+    static let driftBlockGap: CGFloat = 11
+    static let driftCardGap: CGFloat = 18
+    static let lsNew = 0.12                  // .12em on this page's micro labels
+
     // MARK: - the paged shell — SHELL-PAGED.md
     //
     // ⚠ THE FILTER, THE SEARCH FIELD, THE THREE SECTIONS AND THE BOTTOM RAIL ARE
