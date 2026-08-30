@@ -341,7 +341,20 @@ Deno.serve(async (req) => {
       .slice(0, 3);
     const cardIds = new Set(carded.map((a) => String(a.benzinga_id)));
     const cards = carded.map((a: Record<string, unknown>) => {
-      const ins = insightBy.get(String(a.benzinga_id));
+      /* ⚠ THE NOTE MAY COME FROM THE NAME'S OTHER ACTION OF THE WEEK. One
+         card per name means the week's single insight usually lands on the
+         action that did not win the card: RBC's Nike note sat on a
+         restatement while Truist's downgrade took the card, and the note
+         vanished from the page. It is the only writing in the whole feed
+         better than a headline, so it stays with the NAME. What makes that
+         honest rather than a misattribution is the byline the card already
+         prints under it, `RBC Capital's note`, naming a firm that is not the
+         one in the header. The borrowed action also keeps its own list row,
+         so the count still adds up. */
+      const own = insightBy.get(String(a.benzinga_id));
+      const alt = own ? undefined : week.find((x: Record<string, unknown>) =>
+        String(x.ticker) === String(a.ticker) && insightBy.has(String(x.benzinga_id)));
+      const ins = own ?? (alt ? insightBy.get(String(alt.benzinga_id)) : undefined);
       const text = ins ? pickInsight(String(ins.insight ?? '')) : null;
       return {
         ...actionRow(a),
