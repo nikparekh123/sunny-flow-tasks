@@ -447,39 +447,81 @@ Deno.serve(async (req) => {
     }).filter(Boolean).sort((a, b) => (b!.date < a!.date ? -1 : 1)).slice(0, 2);
 
     /* ── the drift: the never-empty floor ─────────────────────────────────
-       ⚠ EVERY NAME, RANKED BY CUT SHARE, and the sentence goes to the widest
-       spread. The first build showed the two names with the most ACTIONS,
-       which is not a ranking at all: NFLX and NKE are the best-covered names
-       in the book, so they won every day and the other six were never seen.
-       Cut share is the thing the section is actually about, so it sorts, and
-       nothing is cut off. The bar is a SHARE OF ACTIONS, never a price, and it
-       is --ink: 185 lowers is a fact about analysts, not a loss in the book. */
+       ⚠ EVERY NAME, RANKED BY CUT SHARE, OVER ONE ROLLING YEAR, and the
+       sentence goes to the widest spread.
+
+       The window was `since 2023` and it did not just read stale, it inverted
+       the ranking: FIS is 45% cuts across three years and 94% across one, and
+       NFLX is 26% across three and 82% across one. The card was averaging
+       across regimes and reporting 2023. A year is also the SHORTEST window
+       that still separates the names — at 180 days five of eight sit above
+       90% and at 90 days three of them hit exactly 100%, which tells you
+       nothing about which name is worse.
+
+       The bar is a SHARE OF ACTIONS, never a price, and it is --ink: 185
+       lowers is a fact about analysts, not a loss in the book. */
+    const DRIFT_DAYS = 365, DRIFT_Q = 92;
+    const driftFrom = ago(DRIFT_DAYS);
+    const qOldEnd = ago(DRIFT_DAYS - DRIFT_Q);
+    const qNewFrom = ago(DRIFT_Q);
     const driftAll = held.map((t) => {
-      const a = acts.filter((x: Record<string, unknown>) =>
-        String(x.ticker) === t && ['lowers', 'raises'].includes(String(x.price_target_action)));
+      const mine = acts.filter((x: Record<string, unknown>) => String(x.ticker) === t);
+      /* ⚠ THE SPLIT IS IN THE DATA, SO READ IT FROM THE DATA. A one-year
+         window crosses NFLX's Nov 2025 10:1, and a raw median would print
+         `1400 -> 91`, which is the split and not the street. Benzinga codes
+         the event as `adjusts` and the row carries the exact ratio (Barclays
+         1100 -> 110), so the factor is derived, never hardcoded, and the next
+         split in any name is handled without a change here. `adjusts` also
+         covers ordinary small revisions, hence the 3x gate.
+
+         The date, not the firm, is what scales: Benzinga restates a firm's
+         `previous` at the split but leaves its historical rows alone, so JP
+         Morgan's 1275 becomes 127.5 with no row of its own. Everything before
+         the first big-ratio adjust is divided; everything after stands.
+
+         The CUT SHARE never needed this — `adjusts` is neither `lowers` nor
+         `raises`, so a split has never entered the count. */
+      const split = mine
+        .filter((x: Record<string, unknown>) => {
+          if (String(x.price_target_action) !== 'adjusts') return false;
+          const p = N(x.previous_price_target), n = N(x.price_target);
+          return p > 0 && n > 0 && (p / n >= 3 || n / p >= 3);
+        })
+        .sort((p, q) => String(p.date).localeCompare(String(q.date)))[0];
+      const factor = split
+        ? N(split.previous_price_target) / N(split.price_target) : 1;
+      const splitDate = split ? String(split.date) : null;
+      const adj = (x: Record<string, unknown>) =>
+        splitDate && String(x.date) < splitDate ? N(x.price_target) / factor : N(x.price_target);
+
+      const a = mine.filter((x: Record<string, unknown>) =>
+        String(x.date) >= driftFrom
+        && ['lowers', 'raises'].includes(String(x.price_target_action)));
+      if (!a.length) return null;
       const cuts = a.filter((x: Record<string, unknown>) =>
         String(x.price_target_action) === 'lowers').length;
-      if (!a.length) return null;
-      const years = new Map<string, number[]>();
-      for (const x of acts) {
-        if (String(x.ticker) !== t || !(N(x.price_target) > 0)) continue;
-        const y = String(x.date).slice(0, 4);
-        if (!years.has(y)) years.set(y, []);
-        years.get(y)!.push(N(x.price_target));
-      }
-      const medians = [...years.entries()].sort()
-        .map(([y, v]) => ({ year: y, median: v.sort((p, q) => p - q)[Math.floor(v.length / 2)] }));
+      /* ⚠ FIVE TARGETS OR NO MEDIAN. A median of three is one analyst's
+         opinion wearing a statistic's clothes. */
+      const bucket = (from: string, to: string | null) => {
+        const v = mine
+          .filter((x: Record<string, unknown>) =>
+            String(x.date) >= from && (to === null || String(x.date) < to)
+            && N(x.price_target) > 0)
+          .map(adj).sort((p, q) => p - q);
+        return v.length >= 5 ? v[Math.floor(v.length / 2)] : null;
+      };
+      const from = bucket(driftFrom, qOldEnd), to = bucket(qNewFrom, null);
       return {
         ticker: t, actions: a.length, cuts, raises: a.length - cuts,
         pct: Math.round(cuts / a.length * 100),
-        since: String(acts.filter((x: Record<string, unknown>) =>
-          String(x.ticker) === t).slice(-1)[0]?.date ?? '').slice(0, 7),
-        medians,
+        walk: from !== null && to !== null ? { from, to } : null,
       };
     }).filter(Boolean);
     const blocks = [...driftAll].sort((a, b) => b!.pct - a!.pct);
-    const sentenceOn = blocks.length
-      ? [...blocks].sort((a, b) => Math.abs(b!.pct - 50) - Math.abs(a!.pct - 50))[0]!.ticker
+    /* Only a name that HAS a walk can carry the sentence. */
+    const withWalk = blocks.filter((b) => b!.walk);
+    const sentenceOn = withWalk.length
+      ? [...withWalk].sort((a, b) => Math.abs(b!.pct - 50) - Math.abs(a!.pct - 50))[0]!.ticker
       : null;
 
     return json(200, {
@@ -508,7 +550,7 @@ Deno.serve(async (req) => {
       },
       targets: { window: 90, covered: targets.length, of: held.length, rows: targets },
       earnings: { count: earnRows.length + gRows.length, rows: [...earnRows, ...gRows] },
-      drift: { blocks, sentenceOn, names: driftAll.length },
+      drift: { blocks, sentenceOn, names: driftAll.length, days: DRIFT_DAYS },
     });
   } catch (e) { return json(500, { ok: false, error: String(e) }); }
 });

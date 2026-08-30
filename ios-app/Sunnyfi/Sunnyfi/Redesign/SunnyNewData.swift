@@ -188,12 +188,15 @@ struct DriftBlock: Decodable {
     let blocks: [Block]
     let sentenceOn: String?
     let names: Int
+    let days: Int
     struct Block: Decodable, Identifiable {
         let ticker: String
         let actions: Int, cuts: Int, raises: Int, pct: Int
-        let since: String
-        let medians: [Median]
+        /// ⚠ NIL WHEN EITHER END IS THIN. A median of three targets is one
+        /// analyst's opinion wearing a statistic's clothes, so the server
+        /// withholds the walk rather than print a weak one.
+        let walk: Walk?
         var id: String { ticker }
-        struct Median: Decodable { let year: String; let median: Double }
+        struct Walk: Decodable { let from: Double; let to: Double }
     }
 }

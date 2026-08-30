@@ -863,7 +863,7 @@ enum S {
     static let driftBlockGap: CGFloat = 11
     static let driftCardGap: CGFloat = 18
     static let driftPctSlot: CGFloat = 46       // holds 100% at 14/600
-    static let driftBarW: CGFloat = 96          // fixed, so the bars compare
+    static let driftBarW: CGFloat = 64          // fixed, so the bars compare
     static let driftRowPad: CGFloat = 12
     static let lsNew = 0.12                  // .12em on this page's micro labels
 

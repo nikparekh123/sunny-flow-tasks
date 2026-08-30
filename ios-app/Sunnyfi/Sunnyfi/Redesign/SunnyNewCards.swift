@@ -443,11 +443,11 @@ struct SunnyDriftCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: S.seamGap) {
                     HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-                        Text("SHARE LOWERED")
+                        Text("TARGET CUTS")
                             .font(S.inter(S.t11, S.wSemiN))
                             .tracking(S.track(S.t11, S.lsNew))
                             .foregroundStyle(S.mute)
-                        Text("since \(sinceLabel)")
+                        Text("share, \(windowLabel)")
                             .font(S.inter(S.t13, S.wMidSmN))
                             .foregroundStyle(S.mute2)
                     }
@@ -474,11 +474,10 @@ struct SunnyDriftCard: View {
                    Standing below the rows it has to NAME its name; inline under
                    one block it did not. */
                 if let b = d.blocks.first(where: { $0.ticker == d.sentenceOn }),
-                   b.medians.count >= 2,
-                   let f = b.medians.first, let l = b.medians.last {
+                   let w = b.walk {
                     (Text("\(b.ticker)\u{2019}s median target has walked ")
-                        + Text("\(tight(f.median)) \u{2192} \(tight(l.median))").fontWeight(.semibold)
-                        + Text(" since \(f.year)."))
+                        + Text("\(tight(w.from)) \u{2192} \(tight(w.to))").fontWeight(.semibold)
+                        + Text(" over the \(windowLabel)."))
                         .font(S.inter(S.t15, S.wMidSmN))
                         .lineSpacing(S.t15 * 0.4)
                         .foregroundStyle(S.ink)
@@ -487,7 +486,7 @@ struct SunnyDriftCard: View {
                                             bottom: 0, trailing: S.padNewX))
                 }
 
-                Text("Every target an analyst set on these names since \(sinceLabel), counted.")
+                Text("Every price target an analyst moved on these names in the \(windowLabel), counted. A cut is a target set below the one before it.")
                     .font(S.inter(S.t13, S.wMidSmN))
                     .lineSpacing(S.t13 * 0.45)
                     .foregroundStyle(S.mute2)
@@ -499,8 +498,12 @@ struct SunnyDriftCard: View {
         }
     }
 
-    private var sinceLabel: String {
-        d.blocks.compactMap { $0.medians.first?.year }.min() ?? "2023"
+    /// ⚠ THE WINDOW IS THE CARD'S WHOLE MEANING, so it is stated twice: once
+    /// beside the title and once in the footnote. `since 2023` averaged across
+    /// regimes and inverted the ranking — FIS reads 45% over three years and
+    /// 94% over one.
+    private var windowLabel: String {
+        d.days == 365 ? "past year" : "past \(d.days) days"
     }
 
     /* ⚠ ONE LINE PER NAME. Eight full blocks would run past 800pt and the
@@ -525,7 +528,13 @@ struct SunnyDriftCard: View {
             .frame(width: S.driftBarW, height: S.driftBarH)
             /* ⚠ A COUNT AND A PAIR, OR NOTHING. The percentage is only legible
                next to the counts it came from. */
-            Text("\(b.cuts) of \(b.actions)")
+            /* ⚠ THE NOUN STAYS ON THE ROW. `185 of 239` counts nothing you can
+               name: the first compact build dropped the words the two-block
+               version carried (`of 269 target actions`, `69 lowers`) and the
+               row went unreadable. The bar gave up the width for them, which
+               it could afford — the rows are sorted by this number, so the
+               bar was ranking what was already ranked. */
+            Text("\(b.cuts) cuts of \(b.actions)")
                 .font(S.inter(S.t13, S.wMidSmN))
                 .foregroundStyle(S.mute2)
                 .frame(maxWidth: .infinity, alignment: .trailing)
