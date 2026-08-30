@@ -314,16 +314,31 @@ Deno.serve(async (req) => {
         importance: N(a.importance),
       };
     };
-    /* ⚠ AN ACTION CARRYING AN INSIGHT IS PROMOTED. The cards are the newest
-       three, except that the insight is the only writing in the whole feed that
-       is better than a headline and it arrives on maybe one action a week —
-       last week's sat on the fourth-newest, which would have buried it in a
-       one-line list. Order inside the three stays newest first. */
-    const hasIns = (a: Record<string, unknown>) => insightBy.has(String(a.benzinga_id));
-    const carded = [...week]
-      .sort((x, y) => (hasIns(y) ? 1 : 0) - (hasIns(x) ? 1 : 0))
-      .slice(0, 3)
-      .sort((x, y) => String(y.date).localeCompare(String(x.date)));
+    /* ⚠ ONE CARD PER NAME, MAX THREE. The section answers "who moved", so a
+       name twice is a name too many. Under the old newest-three rule the week
+       FIS ran three actions including a Wells Fargo downgrade put NKE on two
+       cards and FIS on none: the busiest name got the quietest treatment.
+       Now each name fields ONE action and the three newest of those are the
+       cards. A name's second action is a list row like any other, which is
+       also where an insight goes if it did not land on the chosen action. */
+    const heft = (a: Record<string, unknown>) => {
+      const act = String(a.rating_action ?? '');
+      if (act === 'downgrades' || act === 'upgrades') return 2;
+      return N(a.price_target) !== N(a.previous_price_target) ? 1 : 0;
+    };
+    /* Newest wins the name; a tie inside one day goes to the heavier action,
+       so a rating change beats a target nudge beats a restatement. */
+    const perName = new Map<string, Record<string, unknown>>();
+    for (const a of week) {
+      const cur = perName.get(String(a.ticker));
+      if (!cur || String(a.date) > String(cur.date)
+        || (String(a.date) === String(cur.date) && heft(a) > heft(cur))) {
+        perName.set(String(a.ticker), a);
+      }
+    }
+    const carded = [...perName.values()]
+      .sort((x, y) => String(y.date).localeCompare(String(x.date)) || heft(y) - heft(x))
+      .slice(0, 3);
     const cardIds = new Set(carded.map((a) => String(a.benzinga_id)));
     const cards = carded.map((a: Record<string, unknown>) => {
       const ins = insightBy.get(String(a.benzinga_id));
@@ -381,7 +396,13 @@ Deno.serve(async (req) => {
       const p = iso.split('-');
       return p.length === 3 ? `${Number(p[2])} ${MON[Number(p[1]) - 1]}` : iso;
     };
-    const earnRows = dates.slice(0, 4).map((d) => {
+    /* ⚠ A HORIZON, NOT A COUNT. The first build showed four dates because I
+       capped it at four, so the seam always read `4` however the calendar
+       moved and the four beyond the cut were invisible rather than distant.
+       Sixty days is the cut now: inside it a report is something to hold a
+       position against, past it there is nothing to do yet. Today the two
+       rules agree at four names; in November they will not. */
+    const earnRows = dates.filter((d) => d.days <= 60).map((d) => {
       const open = [...netLeg.entries()]
         .filter(([k, v]) => k.startsWith(d.ticker + '|') && v.n > 0.0001 && v.expiry >= d.date);
       const shortAfter = open.find(([, v]) => v.short);
@@ -413,12 +434,13 @@ Deno.serve(async (req) => {
     }).filter(Boolean).sort((a, b) => (b!.date < a!.date ? -1 : 1)).slice(0, 2);
 
     /* ── the drift: the never-empty floor ─────────────────────────────────
-       ⚠ TWO BLOCKS, PICKED BY EVIDENCE, and the sentence goes to the widest
-       spread. The two names with the most target actions have the most to say
-       (NFLX 269, NKE 239); the one furthest from an even split earns the median
-       sentence (NKE 77% cuts against NFLX's 25%). The bar is a SHARE OF
-       ACTIONS, never a price, and it is --ink: 185 lowers is a fact about
-       analysts, not a loss in the book. */
+       ⚠ EVERY NAME, RANKED BY CUT SHARE, and the sentence goes to the widest
+       spread. The first build showed the two names with the most ACTIONS,
+       which is not a ranking at all: NFLX and NKE are the best-covered names
+       in the book, so they won every day and the other six were never seen.
+       Cut share is the thing the section is actually about, so it sorts, and
+       nothing is cut off. The bar is a SHARE OF ACTIONS, never a price, and it
+       is --ink: 185 lowers is a fact about analysts, not a loss in the book. */
     const driftAll = held.map((t) => {
       const a = acts.filter((x: Record<string, unknown>) =>
         String(x.ticker) === t && ['lowers', 'raises'].includes(String(x.price_target_action)));
@@ -442,7 +464,7 @@ Deno.serve(async (req) => {
         medians,
       };
     }).filter(Boolean);
-    const blocks = [...driftAll].sort((a, b) => b!.actions - a!.actions).slice(0, 2);
+    const blocks = [...driftAll].sort((a, b) => b!.pct - a!.pct);
     const sentenceOn = blocks.length
       ? [...blocks].sort((a, b) => Math.abs(b!.pct - 50) - Math.abs(a!.pct - 50))[0]!.ticker
       : null;

@@ -440,19 +440,62 @@ struct SunnyDriftCard: View {
 
     var body: some View {
         NewCard(name: "the-drift") {
-            VStack(alignment: .leading, spacing: S.driftCardGap) {
-                ForEach(Array(d.blocks.enumerated()), id: \.element.id) { i, b in
-                    if i > 0 { Rectangle().fill(S.ruleColor).frame(height: 1) }
-                    block(b)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: S.seamGap) {
+                    HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                        Text("SHARE LOWERED")
+                            .font(S.inter(S.t11, S.wSemiN))
+                            .tracking(S.track(S.t11, S.lsNew))
+                            .foregroundStyle(S.mute)
+                        Text("since \(sinceLabel)")
+                            .font(S.inter(S.t13, S.wMidSmN))
+                            .foregroundStyle(S.mute2)
+                    }
+                    Spacer(minLength: 0)
+                    /* Same disclosure as the target card, and the same absence:
+                       TLT is a fund, so nobody has ever set a target on it. */
+                    Text("\(d.blocks.count) OF 9")
+                        .font(S.inter(S.t11, S.wSemiN))
+                        .tracking(S.track(S.t11, S.lsNew))
+                        .foregroundStyle(S.mute)
                 }
+                .padding(S.padTargetHead)
+
+                VStack(spacing: 0) {
+                    ForEach(Array(d.blocks.enumerated()), id: \.element.id) { i, b in
+                        if i > 0 { Rectangle().fill(S.ruleColor).frame(height: 1) }
+                        row(b)
+                    }
+                }
+                .padding(.horizontal, S.padNewX)
+
+                /* ⚠ EXACTLY ONE MEDIAN SENTENCE ON THE CARD, on the name whose
+                   drift is the argument. Eight of them would be a second table.
+                   Standing below the rows it has to NAME its name; inline under
+                   one block it did not. */
+                if let b = d.blocks.first(where: { $0.ticker == d.sentenceOn }),
+                   b.medians.count >= 2,
+                   let f = b.medians.first, let l = b.medians.last {
+                    (Text("\(b.ticker)\u{2019}s median target has walked ")
+                        + Text("\(tight(f.median)) \u{2192} \(tight(l.median))").fontWeight(.semibold)
+                        + Text(" since \(f.year)."))
+                        .font(S.inter(S.t15, S.wMidSmN))
+                        .lineSpacing(S.t15 * 0.4)
+                        .foregroundStyle(S.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(EdgeInsets(top: 16, leading: S.padNewX,
+                                            bottom: 0, trailing: S.padNewX))
+                }
+
                 Text("Every target an analyst set on these names since \(sinceLabel), counted.")
                     .font(S.inter(S.t13, S.wMidSmN))
                     .lineSpacing(S.t13 * 0.45)
                     .foregroundStyle(S.mute2)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(EdgeInsets(top: 12, leading: S.padNewX,
+                                        bottom: 20, trailing: S.padNewX))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(S.padDrift)
         }
     }
 
@@ -460,58 +503,35 @@ struct SunnyDriftCard: View {
         d.blocks.compactMap { $0.medians.first?.year }.min() ?? "2023"
     }
 
-    @ViewBuilder private func block(_ b: DriftBlock.Block) -> some View {
-        VStack(alignment: .leading, spacing: S.driftBlockGap) {
-            HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-                Text(b.ticker)
-                    .font(S.inter(S.t11, S.wSemiN))
-                    .tracking(S.track(S.t11, S.lsNew))
-                    .foregroundStyle(S.mute)
-                Spacer(minLength: 0)
-                Text("since \(b.medians.first?.year ?? "2023")")
-                    .font(S.inter(S.t13, S.wMidSmN))
-                    .foregroundStyle(S.mute2)
+    /* ⚠ ONE LINE PER NAME. Eight full blocks would run past 800pt and the
+       section is the page's floor, not its argument. The bar is a FIXED width
+       so the eight rows compare against each other and not against the width
+       of whatever sits beside them. */
+    @ViewBuilder private func row(_ b: DriftBlock.Block) -> some View {
+        HStack(alignment: .center, spacing: S.gap6) {
+            Text(b.ticker)
+                .font(S.inter(S.t14, S.wSemiN))
+                .foregroundStyle(S.ink)
+                .frame(width: S.targetTickerSlot, alignment: .leading)
+            Text("\(b.pct)%")
+                .font(S.inter(S.t14, S.wSemiN))
+                .foregroundStyle(S.ink)
+                .frame(width: S.driftPctSlot, alignment: .leading)
+            ZStack(alignment: .leading) {
+                Capsule().fill(S.wash)
+                Capsule().fill(S.ink)
+                    .frame(width: max(2, S.driftBarW * CGFloat(b.pct) / 100))
             }
-            HStack(alignment: .center, spacing: S.gap6) {
-                Text("\(b.pct)%")
-                    .font(S.inter(S.t26, S.wSemiN))
-                    .tracking(S.track(S.t26, -0.03))
-                    .foregroundStyle(S.ink)
-                    .sunnyLineBox(S.t26)
-                /* ⚠ A COUNT AND A PAIR, OR NOTHING. The percentage is only
-                   legible next to the counts it came from. */
-                VStack(alignment: .trailing, spacing: S.supportLineGap) {
-                    Text("of \(b.actions) target actions")
-                        .font(S.inter(S.t13, S.wMidSmN))
-                        .foregroundStyle(S.mute2)
-                    Text("\(b.cuts) lowers, \(b.raises) raises")
-                        .font(S.inter(S.t13, S.wMidSmN))
-                        .foregroundStyle(S.mute2)
-                }
+            .frame(width: S.driftBarW, height: S.driftBarH)
+            /* ⚠ A COUNT AND A PAIR, OR NOTHING. The percentage is only legible
+               next to the counts it came from. */
+            Text("\(b.cuts) of \(b.actions)")
+                .font(S.inter(S.t13, S.wMidSmN))
+                .foregroundStyle(S.mute2)
                 .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(S.wash)
-                    Capsule().fill(S.ink)
-                        .frame(width: max(2, g.size.width * CGFloat(b.pct) / 100))
-                }
-            }
-            .frame(height: S.driftBarH)
-            /* ⚠ EXACTLY ONE MEDIAN SENTENCE ON THE CARD, on the name whose
-               drift is the argument. Giving both one would make the card a
-               table. */
-            if b.ticker == d.sentenceOn, b.medians.count >= 2,
-               let f = b.medians.first, let l = b.medians.last {
-                (Text("The median target has walked ")
-                    + Text("\(tight(f.median)) \u{2192} \(tight(l.median))").fontWeight(.semibold)
-                    + Text(" since \(f.year)."))
-                    .font(S.inter(S.t15, S.wMidSmN))
-                    .lineSpacing(S.t15 * 0.4)
-                    .foregroundStyle(S.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                .lineLimit(1)
         }
+        .padding(.vertical, S.driftRowPad)
     }
 }
 
