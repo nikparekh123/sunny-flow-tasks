@@ -455,6 +455,229 @@ private func belowLine(_ r: TargetBlock.Row) -> String {
                  : "\(r.below) of \(r.n) under the price"
 }
 
+// MARK: - 3b · the room
+
+/// ⚠ ONE DOT IS ONE ANALYST, and the roster barely moves between snapshots, so
+/// pressing play reads as firms changing their minds rather than as a
+/// different crowd walking in. That only works because the server counts FIRMS
+/// and not publications; a trailing window of publications ran BABA at 2, 11,
+/// 4, 4 and the animation was a reshuffle.
+///
+/// ⚠ STANCE IS THE ONE OPINION THIS DECK COLOURS. Everywhere else red is a
+/// loss and blue is a gain on money. An analyst being bearish is neither, so
+/// the card carries its own three and a legend naming them.
+struct SunnyRoomCard: View {
+    let r: RoomBlock
+    @State private var snap: Int
+    @State private var playing = false
+    @State private var timer: Timer?
+
+    /// ⚠ VERIFICATION ONLY, same reason as `-page` and `-scrollTo` on the
+    /// shell: the touch bridge is dead, so a chip cannot be tapped. `-roomSnap
+    /// 0` opens on the oldest snapshot, which is the only way to prove the
+    /// scrubber selects anything. It does NOT prove the tap target or the
+    /// transition, only that each snapshot renders its own numbers.
+    private static var argSnap: Int? {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-roomSnap"), i + 1 < a.count,
+              let v = Int(a[i + 1]) else { return nil }
+        return v
+    }
+
+    init(r: RoomBlock) {
+        self.r = r
+        _snap = State(initialValue: Self.argSnap ?? max(0, r.snaps - 1))
+    }
+
+    private var labels: [String] { r.rows.first?.snaps.map(\.label) ?? [] }
+    private var live: Int { min(snap, (r.rows.first?.snaps.count ?? 1) - 1) }
+
+    var body: some View {
+        NewCard(name: "the-room") {
+            VStack(alignment: .leading, spacing: 0) {
+                head
+                controls
+                legend
+                VStack(spacing: 0) {
+                    ForEach(r.rows) { row in
+                        line(row)
+                    }
+                    bookLine
+                }
+                .padding(EdgeInsets(top: 0, leading: S.padNewX, bottom: 6, trailing: S.padNewX))
+            }
+        }
+        .onDisappear { stop() }
+    }
+
+    private var head: some View {
+        HStack(alignment: .firstTextBaseline, spacing: S.seamGap) {
+            HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                Text("THE ROOM")
+                    .font(S.inter(S.t11, S.wSemiN))
+                    .tracking(S.track(S.t11, S.lsNew))
+                    .foregroundStyle(S.mute)
+                Text(labels.indices.contains(live) ? labels[live] : "")
+                    .font(S.inter(S.t13, S.wMidSmN))
+                    .foregroundStyle(S.ink)
+            }
+            Spacer(minLength: 0)
+            /* TLT is a fund. Nobody has ever set a target on it, so it has no
+               room, and this count is the whole disclosure. */
+            Text("\(r.covered) OF \(r.of)")
+                .font(S.inter(S.t11, S.wSemiN))
+                .tracking(S.track(S.t11, S.lsNew))
+                .foregroundStyle(S.mute)
+        }
+        .padding(EdgeInsets(top: 19, leading: S.padNewX, bottom: 11, trailing: S.padNewX))
+    }
+
+    private var controls: some View {
+        HStack(spacing: 6) {
+            ForEach(Array(labels.enumerated()), id: \.offset) { i, l in
+                Button {
+                    stop()
+                    withAnimation(.easeInOut(duration: 0.5)) { snap = i }
+                } label: {
+                    Text(l)
+                        .font(S.inter(S.t12, S.wSemiN))
+                        .tracking(S.track(S.t12, 0.02))
+                        .foregroundStyle(i == live ? S.paper : S.mute)
+                        .padding(.horizontal, 11).padding(.vertical, 7)
+                        .background(Capsule().fill(i == live ? S.ink : S.roomChip))
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+            Button { playing ? stop() : play() } label: {
+                Text(playing ? "Stop" : "Play")
+                    .font(S.inter(S.t12, S.wSemiN))
+                    .foregroundStyle(S.ink)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(Capsule().fill(S.paper))
+                    .overlay(Capsule().stroke(S.roomEdge, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(EdgeInsets(top: 0, leading: S.padNewX, bottom: 11, trailing: S.padNewX))
+    }
+
+    private var legend: some View {
+        HStack(spacing: 13) {
+            key("bearish", S.roomBear)
+            key("neutral", S.roomNeu)
+            key("bullish", S.roomBull)
+        }
+        .padding(EdgeInsets(top: 0, leading: S.padNewX, bottom: 12, trailing: S.padNewX))
+    }
+
+    private func key(_ t: String, _ c: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(c).frame(width: S.roomDot, height: S.roomDot)
+            Text(t.uppercased())
+                .font(S.inter(S.t11, S.wSemiN))
+                .tracking(S.track(S.t11, S.lsRoom))
+                .foregroundStyle(S.mute2)
+        }
+    }
+
+    @ViewBuilder private func line(_ row: RoomBlock.Row) -> some View {
+        let s = row.snaps[live]
+        let prev = live > 0 ? row.snaps[live - 1] : nil
+        let d = prev.map { s.bear - $0.bear }
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: S.seamGap) {
+                Text(row.ticker)
+                    .font(S.inter(S.t14, S.wSemiN))
+                    .foregroundStyle(S.ink)
+                    .frame(width: S.targetTickerSlot, alignment: .leading)
+                VStack(alignment: .leading, spacing: 3) {
+                    /* ⚠ THE SENTENCE NAMES THE PRICE IT COUNTED AGAINST, and
+                       that price is the snapshot's own close. Carrying today's
+                       spot backwards would restate history against a number
+                       that did not exist yet. */
+                    Text(s.bear > 0
+                         ? "\(s.bear) bearish, under \(sPrice(s.spot))"
+                         : "nobody under \(sPrice(s.spot))")
+                        .font(S.inter(S.t13, s.bear > 0 ? S.wSemiN : S.wMidSmN))
+                        .foregroundStyle(s.bear > 0 ? S.ink : S.mute2)
+                    Text(deltaLine(d, prev))
+                        .font(S.inter(S.t12, (d ?? 0) != 0 ? S.wSemiN : S.wMidSmN))
+                        .foregroundStyle((d ?? 0) != 0 ? S.ink : S.mute2)
+                }
+                Spacer(minLength: 0)
+            }
+            dots(s)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 12)
+        .overlay(alignment: .top) { Rectangle().fill(S.ruleColor).frame(height: 1) }
+    }
+
+    private func deltaLine(_ d: Int?, _ prev: RoomBlock.Snap?) -> String {
+        guard let d, let prev else { return "first snapshot" }
+        if d == 0 { return "no change since \(prev.label)" }
+        return "\(d > 0 ? "+" : "\u{2212}")\(abs(d)) bearish since \(prev.label)"
+    }
+
+    /* ⚠ THE PITCH IS 11 AS DRAWN AND COMPRESSES ONLY WHEN A ROSTER WOULD RUN
+       OFF THE CARD. The design was drawn against a 26-dot maximum; counting
+       firms rather than publications puts NFLX at 34, which needs 386pt inside
+       a 319pt column. Every other row keeps the drawn spacing exactly. */
+    private func dots(_ s: RoomBlock.Snap) -> some View {
+        let inner = S.content - S.padNewX * 2
+        let n = max(s.total, 1)
+        let need = CGFloat(n - 1) * S.roomPitch + S.roomGroupGap * 2 + S.roomDot
+        let pitch = need <= inner ? S.roomPitch
+            : max(S.roomDot, (inner - S.roomGroupGap * 2 - S.roomDot) / CGFloat(n - 1))
+        return ZStack(alignment: .topLeading) {
+            Color.clear.frame(height: S.roomDot)
+            ForEach(0..<n, id: \.self) { i in
+                Circle()
+                    .fill(i < s.bear ? S.roomBear
+                          : i < s.bear + s.neu ? S.roomNeu : S.roomBull)
+                    .frame(width: S.roomDot, height: S.roomDot)
+                    .offset(x: CGFloat(i) * pitch
+                            + (i >= s.bear ? S.roomGroupGap : 0)
+                            + (i >= s.bear + s.neu ? S.roomGroupGap : 0))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var bookLine: some View {
+        let t = r.rows.reduce(into: (0, 0, 0)) { a, row in
+            let s = row.snaps[live]; a.0 += s.bear; a.1 += s.neu; a.2 += s.bull
+        }
+        return HStack(alignment: .firstTextBaseline, spacing: S.seamGap) {
+            Text("BOOK")
+                .font(S.inter(S.t11, S.wSemiN))
+                .tracking(S.track(S.t11, S.lsNew))
+                .foregroundStyle(S.mute)
+            Text("\(t.0) bearish \u{00b7} \(t.1) neutral \u{00b7} \(t.2) bullish")
+                .font(S.inter(S.t13, S.wMidSmN))
+                .foregroundStyle(S.ink)
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 12).padding(.bottom, 7)
+        .overlay(alignment: .top) { Rectangle().fill(S.ruleColor).frame(height: 1) }
+    }
+
+    private func play() {
+        stop()
+        playing = true
+        withAnimation(.easeInOut(duration: 0.5)) { snap = 0 }
+        timer = Timer.scheduledTimer(withTimeInterval: 1.15, repeats: true) { t in
+            if snap >= r.snaps - 1 { t.invalidate(); playing = false; return }
+            withAnimation(.easeInOut(duration: 0.5)) { snap += 1 }
+        }
+    }
+
+    private func stop() {
+        timer?.invalidate(); timer = nil; playing = false
+    }
+}
+
 // MARK: - shared
 
 /// The firm without its category word. `Truist Securities` is Truist to

@@ -867,6 +867,18 @@ enum S {
     static let driftRowPad: CGFloat = 12
     static let lsNew = 0.12                  // .12em on this page's micro labels
 
+    // The room. Stance is the one place this deck spends colour on an opinion
+    // rather than on money, so it uses its own three and never the P&L pair.
+    static let roomBear = hex(0xB0453A)
+    static let roomNeu  = hex(0xC0C4BA)
+    static let roomBull = hex(0x4C7A44)
+    static let roomChip = hex(0xF2F3F0)      // unselected snapshot chip
+    static let roomEdge = hex(0xD6DAD1)      // the play button's hairline
+    static let roomDot: CGFloat = 7          // as drawn
+    static let roomPitch: CGFloat = 11       // as drawn; compresses only to fit
+    static let roomGroupGap: CGFloat = 8     // between bearish, neutral, bullish
+    static let lsRoom = 0.06                 // the legend's own tracking
+
     // MARK: - the paged shell — SHELL-PAGED.md
     //
     // ⚠ THE FILTER, THE SEARCH FIELD, THE THREE SECTIONS AND THE BOTTOM RAIL ARE

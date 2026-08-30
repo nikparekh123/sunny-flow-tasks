@@ -49,8 +49,8 @@ struct NewPagePayload: Decodable {
     let news: NewsBlock
     let analysts: AnalystBlock
     let targets: TargetBlock
+    let room: RoomBlock?
     let earnings: EarningsBlock
-    let drift: DriftBlock?
 }
 
 /// ⚠ ONE ROW PER NAME. `earnings_events` holds duplicates — NKE carries both
@@ -164,6 +164,27 @@ struct TargetBlock: Decodable {
     }
 }
 
+/// ⚠ ONE DOT PER FIRM, NOT PER PUBLICATION, which is what lets the four
+/// snapshots animate as defection rather than as a reshuffle. A firm is in the
+/// room if it set a target inside the year before that snapshot, and it brings
+/// its most recent one. Each snapshot carries its OWN close: `4 bearish, under
+/// 86` has to mean under the price that day.
+struct RoomBlock: Decodable {
+    let snaps: Int, covered: Int, of: Int
+    let rows: [Row]
+    struct Row: Decodable, Identifiable {
+        let ticker: String
+        let snaps: [Snap]
+        var id: String { ticker }
+    }
+    struct Snap: Decodable {
+        let label: String, date: String
+        let spot: Double
+        let bear: Int, neu: Int, bull: Int
+        var total: Int { bear + neu + bull }
+    }
+}
+
 struct EarningsBlock: Decodable {
     let count: Int
     let rows: [Row]
@@ -187,19 +208,9 @@ struct EarningsBlock: Decodable {
 /// ⚠ THE NEVER-EMPTY FLOOR, AND THEREFORE ALWAYS LAST. It is the one block with
 /// something to say in every state, which is why a dead week still has a page.
 /// Nothing else on the page may be padded to fill space.
-struct DriftBlock: Decodable {
-    let blocks: [Block]
-    let sentenceOn: String?
-    let names: Int
-    let days: Int
-    struct Block: Decodable, Identifiable {
-        let ticker: String
-        let actions: Int, cuts: Int, raises: Int, pct: Int
-        /// ⚠ NIL WHEN EITHER END IS THIN. A median of three targets is one
-        /// analyst's opinion wearing a statistic's clothes, so the server
-        /// withholds the walk rather than print a weak one.
-        let walk: Walk?
-        var id: String { ticker }
-        struct Walk: Decodable { let from: Double; let to: Double }
-    }
-}
+/* ⚠ `DriftBlock` IS DELETED, AND SO IS THE PROPERTY. An optional Decodable
+   still THROWS on a shape mismatch — `decodeIfPresent` only tolerates a
+   missing key, not a changed one — so leaving a stale model behind for a field
+   the server had reshaped took the whole page down to "the feed did not
+   answer". An unmodelled key is ignored; a wrongly modelled one is fatal.
+   The server still serves `drift` for older builds. */

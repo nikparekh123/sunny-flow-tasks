@@ -395,7 +395,17 @@ struct SunnyPane: View {
             }
             /* On every state of the page, with that state's own numbers — a
                standing fact, not an arrival. */
-            if !p.targets.rows.isEmpty { SunnyTargetCard(t: p.targets) }
+            /* ⚠ THE ROOM REPLACES THE MEDIAN. A median is one number standing
+               in for a crowd; the room is the crowd, and it can say things a
+               median cannot — that eleven of eleven analysts are above BABA's
+               price, or that LEN gained two bearish votes this month. Falls
+               back to the median card only against an older server that does
+               not serve `room`. */
+            if let room = p.room, !room.rows.isEmpty {
+                SunnyRoomCard(r: room)
+            } else if !p.targets.rows.isEmpty {
+                SunnyTargetCard(t: p.targets)
+            }
 
             SunnySeam(label: "Earnings & guidance", count: p.earnings.count)
             if p.earnings.rows.isEmpty {

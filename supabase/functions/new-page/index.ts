@@ -402,6 +402,86 @@ Deno.serve(async (req) => {
       };
     }).filter(Boolean).sort((a, b) => (b!.upside ?? 0) - (a!.upside ?? 0));
 
+    /* Hoisted above the room, which labels its snapshots with it. */
+    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    /* ── the room ─────────────────────────────────────────────────────────
+       ⚠ ONE DOT PER FIRM, NOT PER PUBLICATION. The card is a roster of
+       analysts whose stance changes over time, so the dot has to BE an
+       analyst. Counting publications in a trailing 90 days counts neither:
+       a name goes quiet after earnings and half the room vanishes — BABA ran
+       2, 11, 4, 4 across the four snapshots — and pressing play is then a
+       reshuffle rather than a defection.
+
+       A firm is in the room if it set a target inside the year before the
+       snapshot, and it brings its most recent one. The roster then holds
+       nearly still (BABA 11, 11, 11, 11; NKE 25, 25, 26, 26), so a dot
+       changing colour means that firm changed its mind or the price crossed
+       its target, which is the thing the card claims to show.
+
+       ⚠ EACH SNAPSHOT USES ITS OWN CLOSE. `4 bearish, under 86` has to mean
+       under the price THAT DAY; carrying today's spot backwards would restate
+       history against a number that did not exist yet. */
+    const ROOM_BACK = [180, 90, 30, 0], ROOM_LOOK = 365;
+    const before = (iso: string, d: number) =>
+      new Date(Date.parse(iso + 'T00:00:00Z') - d * 86_400_000).toISOString().slice(0, 10);
+    const dated = new Map<string, { d: string; p: number }[]>();
+    for (const c of closes) {
+      const t = String(c.ticker);
+      if (!dated.has(t)) dated.set(t, []);
+      dated.get(t)!.push({ d: String(c.date).slice(0, 10), p: N(c.close_price) });
+    }
+    /* Ascending, so the last row at or before the date is that date's close.
+       A snapshot landing on a weekend takes the Friday, which is correct. */
+    const closeOn = (t: string, on: string) => {
+      let px = 0;
+      for (const r of dated.get(t) ?? []) { if (r.d <= on) px = r.p; else break; }
+      return px;
+    };
+    const snapLabel = (iso: string) => {
+      const p = iso.split('-');
+      return `${Number(p[2])} ${MON[Number(p[1]) - 1]}`;
+    };
+    const room = held.map((t) => {
+      /* `acts` is date-descending, so the first row seen for a firm is its
+         latest, which is what makes the one-pass map correct. */
+      const mine = acts.filter((x: Record<string, unknown>) =>
+        String(x.ticker) === t && N(x.price_target) > 0 && x.firm);
+      const snaps = ROOM_BACK.map((back) => {
+        const on = back === 0 ? today : ago(back);
+        const from = before(on, ROOM_LOOK);
+        const latest = new Map<string, number>();
+        for (const a of mine) {
+          const d = String(a.date).slice(0, 10);
+          if (d > on || d <= from) continue;
+          const f = String(a.firm);
+          if (!latest.has(f)) latest.set(f, N(a.price_target));
+        }
+        const spot = back === 0
+          ? (spotBy.get(t) ?? closeOn(t, on)) : closeOn(t, on);
+        if (!latest.size || !(spot > 0)) return null;
+        const v = [...latest.values()];
+        return {
+          label: back === 0 ? 'Today' : snapLabel(on), date: on,
+          spot: Math.round(spot * 100) / 100,
+          bear: v.filter((x) => x < spot).length,
+          neu: v.filter((x) => x >= spot && x < spot * 1.2).length,
+          bull: v.filter((x) => x >= spot * 1.2).length,
+        };
+      });
+      /* All four snapshots or no row. A row that starts halfway through the
+         scrubber would make the chips lie about what they select. */
+      if (snaps.some((x) => !x)) return null;
+      return { ticker: t, snaps };
+    }).filter(Boolean)
+      /* The loudest rooms first: most bearish, then the bigger roster, so a
+         dissenting voice among twenty-six outranks the same voice among four. */
+      .sort((a, b) => {
+        const x = a!.snaps[3]!, y = b!.snaps[3]!;
+        return y.bear - x.bear
+          || (y.bear + y.neu + y.bull) - (x.bear + x.neu + x.bull)
+          || a!.ticker.localeCompare(b!.ticker);
+      });
+
     /* ── earnings & guidance: conditions, not answers ─────────────────────
        ⚠ THE COLLISION TEST IS DIRECTION-AWARE. Earnings inside a SHORT put's
        life is exposure; inside a BOUGHT put's life the cover is doing its job.
@@ -417,7 +497,6 @@ Deno.serve(async (req) => {
       e.n += (t.action === 'open' ? 1 : -1) * N(t.contracts);
       netLeg.set(k, e);
     }
-    const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     /* A support line is prose, so its date is written the way a person writes
        one. The ISO form belongs in the payload's own fields, never in a
        sentence. */
@@ -462,83 +541,53 @@ Deno.serve(async (req) => {
       };
     }).filter(Boolean).sort((a, b) => (b!.date < a!.date ? -1 : 1)).slice(0, 2);
 
-    /* ── the drift: the never-empty floor ─────────────────────────────────
-       ⚠ EVERY NAME, RANKED BY CUT SHARE, OVER ONE ROLLING YEAR, and the
-       sentence goes to the widest spread.
+    /* ── the drift: the turn, not the level ──────────────────────────────
+       ⚠ THREE TWELVE-MONTH BLOCKS AND THE TURN BETWEEN THE ENDS. A single
+       blended cut share was the price chart told twice: over any one window
+       the target walk tracks the price walk inside five points on every name,
+       so the number carried no information and read as a wall of bad news.
 
-       The window was `since 2023` and it did not just read stale, it inverted
-       the ranking: FIS is 45% cuts across three years and 94% across one, and
-       NFLX is 26% across three and 82% across one. The card was averaging
-       across regimes and reporting 2023. A year is also the SHORTEST window
-       that still separates the names — at 180 days five of eight sit above
-       90% and at 90 days three of them hit exactly 100%, which tells you
-       nothing about which name is worse.
+       The TURN survives that test, because it separates two things a price
+       cannot. NFLX cut 5% of the time a year ago and 82% since: a regime
+       break inside one year. NKE fell just as hard this past year and its
+       share moved five points, because it was already at 85% two years ago.
+       Newly out of favour and chronically out of favour look identical on a
+       chart and are opposite situations to sell calls into.
 
-       The bar is a SHARE OF ACTIONS, never a price, and it is --ink: 185
-       lowers is a fact about analysts, not a loss in the book. */
-    const DRIFT_DAYS = 365, DRIFT_Q = 92;
-    const driftFrom = ago(DRIFT_DAYS);
-    const qOldEnd = ago(DRIFT_DAYS - DRIFT_Q);
-    const qNewFrom = ago(DRIFT_Q);
+       Rolling twelve-month blocks, not calendar years — the feed starts in
+       Aug 2023, so a calendar 2023 column would be four months wearing a
+       year's label. No split adjustment is needed anywhere here: `adjusts` is
+       neither a `lowers` nor a `raises`, so NFLX's ten-for-one never entered
+       a count. */
+    const DRIFT_SPAN = 365, DRIFT_MIN = 10;
     const driftAll = held.map((t) => {
-      const mine = acts.filter((x: Record<string, unknown>) => String(x.ticker) === t);
-      /* ⚠ THE SPLIT IS IN THE DATA, SO READ IT FROM THE DATA. A one-year
-         window crosses NFLX's Nov 2025 10:1, and a raw median would print
-         `1400 -> 91`, which is the split and not the street. Benzinga codes
-         the event as `adjusts` and the row carries the exact ratio (Barclays
-         1100 -> 110), so the factor is derived, never hardcoded, and the next
-         split in any name is handled without a change here. `adjusts` also
-         covers ordinary small revisions, hence the 3x gate.
-
-         The date, not the firm, is what scales: Benzinga restates a firm's
-         `previous` at the split but leaves its historical rows alone, so JP
-         Morgan's 1275 becomes 127.5 with no row of its own. Everything before
-         the first big-ratio adjust is divided; everything after stands.
-
-         The CUT SHARE never needed this — `adjusts` is neither `lowers` nor
-         `raises`, so a split has never entered the count. */
-      const split = mine
-        .filter((x: Record<string, unknown>) => {
-          if (String(x.price_target_action) !== 'adjusts') return false;
-          const p = N(x.previous_price_target), n = N(x.price_target);
-          return p > 0 && n > 0 && (p / n >= 3 || n / p >= 3);
-        })
-        .sort((p, q) => String(p.date).localeCompare(String(q.date)))[0];
-      const factor = split
-        ? N(split.previous_price_target) / N(split.price_target) : 1;
-      const splitDate = split ? String(split.date) : null;
-      const adj = (x: Record<string, unknown>) =>
-        splitDate && String(x.date) < splitDate ? N(x.price_target) / factor : N(x.price_target);
-
-      const a = mine.filter((x: Record<string, unknown>) =>
-        String(x.date) >= driftFrom
+      const mine = acts.filter((x: Record<string, unknown>) =>
+        String(x.ticker) === t
         && ['lowers', 'raises'].includes(String(x.price_target_action)));
-      if (!a.length) return null;
-      const cuts = a.filter((x: Record<string, unknown>) =>
-        String(x.price_target_action) === 'lowers').length;
-      /* ⚠ FIVE TARGETS OR NO MEDIAN. A median of three is one analyst's
-         opinion wearing a statistic's clothes. */
-      const bucket = (from: string, to: string | null) => {
-        const v = mine
-          .filter((x: Record<string, unknown>) =>
-            String(x.date) >= from && (to === null || String(x.date) < to)
-            && N(x.price_target) > 0)
-          .map(adj).sort((p, q) => p - q);
-        return v.length >= 5 ? v[Math.floor(v.length / 2)] : null;
-      };
-      const from = bucket(driftFrom, qOldEnd), to = bucket(qNewFrom, null);
+      /* Oldest first, so the row reads left to right as time. */
+      const years = [2, 1, 0].map((i) => {
+        const from = ago(DRIFT_SPAN * (i + 1)), to = ago(DRIFT_SPAN * i);
+        const v = mine.filter((x: Record<string, unknown>) =>
+          String(x.date) >= from && (i === 0 || String(x.date) < to));
+        /* ⚠ TEN ACTIONS OR NO BLOCK. A share off four actions swings 25 points
+           on one analyst and would draw a turn that is not there. */
+        if (v.length < DRIFT_MIN) return null;
+        const cuts = v.filter((x: Record<string, unknown>) =>
+          String(x.price_target_action) === 'lowers').length;
+        return { pct: Math.round(cuts / v.length * 100), n: v.length };
+      });
+      if (!years.some(Boolean)) return null;
+      const first = years[0], last = years[years.length - 1];
       return {
-        ticker: t, actions: a.length, cuts, raises: a.length - cuts,
-        pct: Math.round(cuts / a.length * 100),
-        walk: from !== null && to !== null ? { from, to } : null,
+        ticker: t, years,
+        turn: first && last ? last.pct - first.pct : null,
       };
     }).filter(Boolean);
-    const blocks = [...driftAll].sort((a, b) => b!.pct - a!.pct);
-    /* Only a name that HAS a walk can carry the sentence. */
-    const withWalk = blocks.filter((b) => b!.walk);
-    const sentenceOn = withWalk.length
-      ? [...withWalk].sort((a, b) => Math.abs(b!.pct - 50) - Math.abs(a!.pct - 50))[0]!.ticker
-      : null;
+    /* Biggest turn first, in either direction — BABA improving 48 points is
+       as much of a story as FIS deteriorating 86. */
+    const blocks = [...driftAll]
+      .sort((a, b) => Math.abs(b!.turn ?? 0) - Math.abs(a!.turn ?? 0));
+    const sentenceOn = blocks.find((b) => b!.turn !== null)?.ticker ?? null;
 
     return json(200, {
       ok: true, build: BUILD, date: today,
@@ -565,8 +614,9 @@ Deno.serve(async (req) => {
         lastTicker: lastAction ? String(lastAction.ticker) : null,
       },
       targets: { window: 90, covered: targets.length, of: held.length, rows: targets },
+      room: { snaps: ROOM_BACK.length, covered: room.length, of: held.length, rows: room },
       earnings: { count: earnRows.length + gRows.length, rows: [...earnRows, ...gRows] },
-      drift: { blocks, sentenceOn, names: driftAll.length, days: DRIFT_DAYS },
+      drift: { blocks, sentenceOn, names: driftAll.length, span: DRIFT_SPAN },
     });
   } catch (e) { return json(500, { ok: false, error: String(e) }); }
 });
