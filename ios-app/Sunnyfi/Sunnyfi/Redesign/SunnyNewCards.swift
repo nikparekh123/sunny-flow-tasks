@@ -320,27 +320,48 @@ struct SunnyTargetCard: View {
                 VStack(spacing: 0) {
                     ForEach(Array(t.rows.enumerated()), id: \.element.id) { i, r in
                         if i > 0 { Rectangle().fill(S.ruleColor).frame(height: 1) }
-                        HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
-                            /* Ticker and target are the same size and weight —
-                               the name is a figure too. Hierarchy inside the row
-                               is position, not weight. */
-                            Text(r.ticker)
-                                .font(S.inter(S.t14, S.wSemiN))
-                                .foregroundStyle(S.ink)
-                                .frame(width: S.targetTickerSlot, alignment: .leading)
-                            /* A median target has no cents worth printing —
-                               the sheet's own reference row is `340`. */
-                            Text(tight(r.target))
-                                .font(S.inter(S.t14, S.wSemiN))
-                                .foregroundStyle(S.ink)
-                                .frame(width: S.targetFigSlot, alignment: .leading)
-                            /* ⚠ ONE DENOMINATOR, NAMED. The spot is printed
-                               beside it so the percentage is auditable. */
-                            Text("\(r.upside.map { signedPct($0) } ?? "\u{2014}") on \(sPrice(r.spot))")
-                                .font(S.inter(S.t13, S.wMidSmN))
-                                .foregroundStyle(S.mute2)
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .lineLimit(1)
+                        VStack(alignment: .leading, spacing: S.supportLineGap) {
+                            HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+                                /* Ticker and target are the same size and weight
+                                   — the name is a figure too. Hierarchy inside
+                                   the row is position, not weight. */
+                                Text(r.ticker)
+                                    .font(S.inter(S.t14, S.wSemiN))
+                                    .foregroundStyle(S.ink)
+                                    .frame(width: S.targetTickerSlot, alignment: .leading)
+                                /* A median target has no cents worth printing —
+                                   the sheet's own reference row is `340`. */
+                                Text(tight(r.target))
+                                    .font(S.inter(S.t14, S.wSemiN))
+                                    .foregroundStyle(S.ink)
+                                    .frame(width: S.targetFigSlot, alignment: .leading)
+                                /* ⚠ ONE DENOMINATOR, NAMED. The spot is printed
+                                   beside it so the percentage is auditable. */
+                                Text("\(r.upside.map { signedPct($0) } ?? "\u{2014}") on \(sPrice(r.spot))")
+                                    .font(S.inter(S.t13, S.wMidSmN))
+                                    .foregroundStyle(S.mute2)
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                    .lineLimit(1)
+                            }
+                            /* ⚠ THE SECOND LINE IS THE DISAGREEMENT, and it is
+                               why the drift card is gone. A median hides both
+                               the spread and the dissent: NKE's 47 sits in a
+                               23-to-75 range and LEN has seven of ten analysts
+                               under the price. The dissent takes the sole
+                               emphasis on the line because it is the only part
+                               that argues against the row above it. */
+                            HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+                                Text("\(tight(r.lo)) to \(tight(r.hi))")
+                                    .font(S.inter(S.t13, S.wMidSmN))
+                                    .foregroundStyle(S.mute2)
+                                    .frame(width: S.targetTickerSlot + S.targetFigSlot + S.gap6,
+                                           alignment: .leading)
+                                Text(belowLine(r))
+                                    .font(S.inter(S.t13, r.below > 0 ? S.wSemiN : S.wMidSmN))
+                                    .foregroundStyle(r.below > 0 ? S.mute : S.mute2)
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                    .lineLimit(1)
+                            }
                         }
                         .padding(.vertical, S.targetRowPad)
                     }
@@ -427,121 +448,11 @@ struct SunnyEarningsCard: View {
     }
 }
 
-// MARK: - 5 · the drift
-
-/// ⚠ NEVER EMPTY, THEREFORE ALWAYS LAST. The one block with something to say in
-/// every state, which is why a dead week still has a page.
-///
-/// ⚠ THE BAR IS A SHARE OF ACTIONS, NEVER A PRICE, and it is --ink: 185 lowers
-/// is a fact about analysts, not a loss in the book. A red bar would say the
-/// position is down, which this card does not know.
-struct SunnyDriftCard: View {
-    let d: DriftBlock
-
-    var body: some View {
-        NewCard(name: "the-drift") {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline, spacing: S.seamGap) {
-                    HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-                        Text("TARGET CUTS")
-                            .font(S.inter(S.t11, S.wSemiN))
-                            .tracking(S.track(S.t11, S.lsNew))
-                            .foregroundStyle(S.mute)
-                        Text("share, \(windowLabel)")
-                            .font(S.inter(S.t13, S.wMidSmN))
-                            .foregroundStyle(S.mute2)
-                    }
-                    Spacer(minLength: 0)
-                    /* Same disclosure as the target card, and the same absence:
-                       TLT is a fund, so nobody has ever set a target on it. */
-                    Text("\(d.blocks.count) OF 9")
-                        .font(S.inter(S.t11, S.wSemiN))
-                        .tracking(S.track(S.t11, S.lsNew))
-                        .foregroundStyle(S.mute)
-                }
-                .padding(S.padTargetHead)
-
-                VStack(spacing: 0) {
-                    ForEach(Array(d.blocks.enumerated()), id: \.element.id) { i, b in
-                        if i > 0 { Rectangle().fill(S.ruleColor).frame(height: 1) }
-                        row(b)
-                    }
-                }
-                .padding(.horizontal, S.padNewX)
-
-                /* ⚠ EXACTLY ONE MEDIAN SENTENCE ON THE CARD, on the name whose
-                   drift is the argument. Eight of them would be a second table.
-                   Standing below the rows it has to NAME its name; inline under
-                   one block it did not. */
-                if let b = d.blocks.first(where: { $0.ticker == d.sentenceOn }),
-                   let w = b.walk {
-                    (Text("\(b.ticker)\u{2019}s median target has walked ")
-                        + Text("\(tight(w.from)) \u{2192} \(tight(w.to))").fontWeight(.semibold)
-                        + Text(" over the \(windowLabel)."))
-                        .font(S.inter(S.t15, S.wMidSmN))
-                        .lineSpacing(S.t15 * 0.4)
-                        .foregroundStyle(S.ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(EdgeInsets(top: 16, leading: S.padNewX,
-                                            bottom: 0, trailing: S.padNewX))
-                }
-
-                Text("Every price target an analyst moved on these names in the \(windowLabel), counted. A cut is a target set below the one before it.")
-                    .font(S.inter(S.t13, S.wMidSmN))
-                    .lineSpacing(S.t13 * 0.45)
-                    .foregroundStyle(S.mute2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(EdgeInsets(top: 12, leading: S.padNewX,
-                                        bottom: 20, trailing: S.padNewX))
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    /// ⚠ THE WINDOW IS THE CARD'S WHOLE MEANING, so it is stated twice: once
-    /// beside the title and once in the footnote. `since 2023` averaged across
-    /// regimes and inverted the ranking — FIS reads 45% over three years and
-    /// 94% over one.
-    private var windowLabel: String {
-        d.days == 365 ? "past year" : "past \(d.days) days"
-    }
-
-    /* ⚠ ONE LINE PER NAME. Eight full blocks would run past 800pt and the
-       section is the page's floor, not its argument. The bar is a FIXED width
-       so the eight rows compare against each other and not against the width
-       of whatever sits beside them. */
-    @ViewBuilder private func row(_ b: DriftBlock.Block) -> some View {
-        HStack(alignment: .center, spacing: S.gap6) {
-            Text(b.ticker)
-                .font(S.inter(S.t14, S.wSemiN))
-                .foregroundStyle(S.ink)
-                .frame(width: S.targetTickerSlot, alignment: .leading)
-            Text("\(b.pct)%")
-                .font(S.inter(S.t14, S.wSemiN))
-                .foregroundStyle(S.ink)
-                .frame(width: S.driftPctSlot, alignment: .leading)
-            ZStack(alignment: .leading) {
-                Capsule().fill(S.wash)
-                Capsule().fill(S.ink)
-                    .frame(width: max(2, S.driftBarW * CGFloat(b.pct) / 100))
-            }
-            .frame(width: S.driftBarW, height: S.driftBarH)
-            /* ⚠ A COUNT AND A PAIR, OR NOTHING. The percentage is only legible
-               next to the counts it came from. */
-            /* ⚠ THE NOUN STAYS ON THE ROW. `185 of 239` counts nothing you can
-               name: the first compact build dropped the words the two-block
-               version carried (`of 269 target actions`, `69 lowers`) and the
-               row went unreadable. The bar gave up the width for them, which
-               it could afford — the rows are sorted by this number, so the
-               bar was ranking what was already ranked. */
-            Text("\(b.cuts) cuts of \(b.actions)")
-                .font(S.inter(S.t13, S.wMidSmN))
-                .foregroundStyle(S.mute2)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .lineLimit(1)
-        }
-        .padding(.vertical, S.driftRowPad)
-    }
+/// `none under the price` reads as a fact; `0 of 16 below` reads as a hole in
+/// the data. The count only earns digits when there is dissent to count.
+private func belowLine(_ r: TargetBlock.Row) -> String {
+    r.below == 0 ? "none under the price"
+                 : "\(r.below) of \(r.n) under the price"
 }
 
 // MARK: - shared

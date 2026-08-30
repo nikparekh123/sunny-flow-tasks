@@ -50,7 +50,7 @@ struct NewPagePayload: Decodable {
     let analysts: AnalystBlock
     let targets: TargetBlock
     let earnings: EarningsBlock
-    let drift: DriftBlock
+    let drift: DriftBlock?
 }
 
 /// ⚠ ONE ROW PER NAME. `earnings_events` holds duplicates — NKE carries both
@@ -157,6 +157,9 @@ struct TargetBlock: Decodable {
         let target: Double, spot: Double
         let upside: Double?
         let n: Int
+        /// The live range and how many of those targets sit under the price.
+        /// A median alone hides both the disagreement and the dissent.
+        let lo: Double, hi: Double, below: Int
         var id: String { ticker }
     }
 }

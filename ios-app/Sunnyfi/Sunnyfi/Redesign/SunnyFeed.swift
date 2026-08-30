@@ -405,8 +405,13 @@ struct SunnyPane: View {
                 SunnyEarningsCard(e: p.earnings)
             }
 
-            SunnySeam(label: "The drift", count: nil)
-            SunnyDriftCard(d: p.drift)
+            /* ⚠ THE DRIFT IS GONE, AND ITS JOB MOVED UP ONE CARD. It counted
+               how often analysts cut, which turned out to be the price chart
+               told twice: over the same two quarters the target walk tracked
+               the price walk inside five points on all eight names. The
+               median-target card carries the two-sided version now, the range
+               and the count below spot. The server still serves `drift` so an
+               older build keeps decoding. */
         } else if m.newPage.error != nil {
             SunnyPageNote("The feed did not answer. It will try again when you "
                         + "come back to this page.")

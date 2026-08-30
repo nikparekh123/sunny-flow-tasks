@@ -379,10 +379,26 @@ Deno.serve(async (req) => {
       if (!tg.length) return null;
       const med = tg[Math.floor(tg.length / 2)];
       const spot = spotBy.get(t) ?? 0;
+      /* ⚠ THE SPREAD AND THE BELOW-SPOT COUNT, because a median alone hides
+         both the disagreement and the dissent. NKE's median of 47 is one
+         number over a 23-to-75 range: nobody agrees. AIG's 88 sits in an
+         80-to-98 range: everybody does. And LEN has SEVEN of ten analysts
+         below the price, which no median can show and which is the opposite
+         story to BABA's four of four above it.
+
+         This replaces the drift card, which counted how often analysts cut.
+         That number turned out to be the price chart told twice — over the
+         same two quarters the target walk tracked the price walk inside five
+         points on every one of the eight names — so it read as a wall of bad
+         news carrying no information. Where the targets SIT is two-sided by
+         construction and is the thing you look at before picking a strike. */
       return {
         ticker: t, target: Math.round(med * 100) / 100, n: tg.length,
         spot: Math.round(spot * 100) / 100,
         upside: spot > 0 ? Math.round((med / spot - 1) * 1000) / 10 : null,
+        lo: Math.round(tg[0] * 100) / 100,
+        hi: Math.round(tg[tg.length - 1] * 100) / 100,
+        below: spot > 0 ? tg.filter((v: number) => v < spot).length : 0,
       };
     }).filter(Boolean).sort((a, b) => (b!.upside ?? 0) - (a!.upside ?? 0));
 
