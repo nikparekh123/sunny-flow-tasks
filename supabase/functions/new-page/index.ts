@@ -559,7 +559,11 @@ Deno.serve(async (req) => {
        year's label. No split adjustment is needed anywhere here: `adjusts` is
        neither a `lowers` nor a `raises`, so NFLX's ten-for-one never entered
        a count. */
-    const DRIFT_SPAN = 365, DRIFT_MIN = 10;
+    /* ⚠ THE THRESHOLD LIVES ON THE CLIENT, so raw counts ship. The card draws
+       a dotted bridge and a dashed hollow ring where a thin block would have
+       been, which it can only do if it knows the block exists and is thin.
+       A null pct with a real n is that fact; a silently dropped point is not. */
+    const DRIFT_SPAN = 365, DRIFT_MIN = 12;
     const driftAll = held.map((t) => {
       const mine = acts.filter((x: Record<string, unknown>) =>
         String(x.ticker) === t
@@ -569,25 +573,30 @@ Deno.serve(async (req) => {
         const from = ago(DRIFT_SPAN * (i + 1)), to = ago(DRIFT_SPAN * i);
         const v = mine.filter((x: Record<string, unknown>) =>
           String(x.date) >= from && (i === 0 || String(x.date) < to));
-        /* ⚠ TEN ACTIONS OR NO BLOCK. A share off four actions swings 25 points
-           on one analyst and would draw a turn that is not there. */
-        if (v.length < DRIFT_MIN) return null;
         const cuts = v.filter((x: Record<string, unknown>) =>
           String(x.price_target_action) === 'lowers').length;
-        return { pct: Math.round(cuts / v.length * 100), n: v.length };
+        return {
+          pct: v.length >= DRIFT_MIN ? Math.round(cuts / v.length * 100) : null,
+          n: v.length,
+        };
       });
-      if (!years.some(Boolean)) return null;
-      const first = years[0], last = years[years.length - 1];
+      const drawn = years.filter((y) => y.pct !== null);
+      if (drawn.length < 2) return null;
       return {
-        ticker: t, years,
-        turn: first && last ? last.pct - first.pct : null,
+        ticker: t,
+        v: years.map((y) => y.pct),
+        n: years.map((y) => y.n),
+        /* Last drawn minus first drawn. A turn across a gap is still a turn;
+           what a gap forbids is a POINT, not an arithmetic. */
+        turn: drawn[drawn.length - 1]!.pct! - drawn[0]!.pct!,
       };
     }).filter(Boolean);
-    /* Biggest turn first, in either direction — BABA improving 48 points is
-       as much of a story as FIS deteriorating 86. */
+    /* ⚠ HUE IS ASSIGNED BY RANK, NOT BY TICKER. The sheet's four plum steps are
+       `turned toward cuts, by rank`, so the deepest belongs to the biggest turn
+       whoever holds it that week. Sorting here is what makes the client's index
+       into the ramp correct without the client re-deriving the ranking. */
     const blocks = [...driftAll]
-      .sort((a, b) => Math.abs(b!.turn ?? 0) - Math.abs(a!.turn ?? 0));
-    const sentenceOn = blocks.find((b) => b!.turn !== null)?.ticker ?? null;
+      .sort((a, b) => b!.turn - a!.turn);
 
     return json(200, {
       ok: true, build: BUILD, date: today,
@@ -616,7 +625,8 @@ Deno.serve(async (req) => {
       targets: { window: 90, covered: targets.length, of: held.length, rows: targets },
       room: { snaps: ROOM_BACK.length, covered: room.length, of: held.length, rows: room },
       earnings: { count: earnRows.length + gRows.length, rows: [...earnRows, ...gRows] },
-      drift: { blocks, sentenceOn, names: driftAll.length, span: DRIFT_SPAN },
+      drift: { span: DRIFT_SPAN, minActions: DRIFT_MIN,
+               covered: driftAll.length, of: held.length, rows: blocks },
     });
   } catch (e) { return json(500, { ok: false, error: String(e) }); }
 });

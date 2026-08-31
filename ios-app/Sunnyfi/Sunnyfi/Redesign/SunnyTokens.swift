@@ -879,6 +879,24 @@ enum S {
     static let roomGroupGap: CGFloat = 8     // between bearish, neutral, bullish
     static let lsRoom = 0.06                 // the legend's own tracking
 
+    // The drift. HUE IS THE DIRECTION OF THE TURN, DEPTH IS ITS SIZE, and the
+    // four plum steps are assigned BY RANK, never by ticker. Neither family is
+    // the deck's money ink: a cut share is a fact about analysts, not a loss in
+    // the book, so --gain and --loss are both barred here.
+    static let driftTurn: [Color] = [hex(0x6B2C58), hex(0x7C3A66),
+                                     hex(0x8C4B74), hex(0x96567D)]
+    static let driftBack = hex(0x1E6E68)     // turned away from cuts
+    // ⚠ LINES AND DOTS ONLY, NEVER TEXT. #9AA093 measures 2.6:1; grey text on
+    // this card bottoms out at --mute-2 #6B7166 (5.03:1).
+    static let driftFlat = hex(0x9AA093)
+    static let driftPlotW: CGFloat = 197, driftPlotH: CGFloat = 168
+    static let driftLead: CGFloat = 6        // plot edge to the label column
+    static let driftPitch: CGFloat = 19      // forced slot pitch, de-collides labels
+    static let driftLabelH: CGFloat = 13
+    static let driftYCol: CGFloat = 30       // 30 + 6 + 197 + 6 + 80 = 319
+    static let driftLabelCol: CGFloat = 80
+    static let driftHitBleed: CGFloat = 10.5 // 23 + 21 = 44, and never via padding
+
     // MARK: - the paged shell — SHELL-PAGED.md
     //
     // ⚠ THE FILTER, THE SEARCH FIELD, THE THREE SECTIONS AND THE BOTTOM RAIL ARE

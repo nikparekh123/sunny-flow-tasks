@@ -415,13 +415,15 @@ struct SunnyPane: View {
                 SunnyEarningsCard(e: p.earnings)
             }
 
-            /* ⚠ THE DRIFT IS GONE, AND ITS JOB MOVED UP ONE CARD. It counted
-               how often analysts cut, which turned out to be the price chart
-               told twice: over the same two quarters the target walk tracked
-               the price walk inside five points on all eight names. The
-               median-target card carries the two-sided version now, the range
-               and the count below spot. The server still serves `drift` so an
-               older build keeps decoding. */
+            /* ⚠ THE NEVER-EMPTY BLOCK, AND IT GOES LAST. On a dead week it and
+               the room are the page. It came back as a slope chart because the
+               single blended cut share could not tell a REGIME BREAK from a
+               name that has always been unloved, and those are opposite
+               situations to sell calls into. */
+            if let drift = p.drift, !drift.rows.isEmpty {
+                SunnySeam(label: "The drift", count: nil)
+                SunnyDriftCard(d: drift)
+            }
         } else if m.newPage.error != nil {
             SunnyPageNote("The feed did not answer. It will try again when you "
                         + "come back to this page.")

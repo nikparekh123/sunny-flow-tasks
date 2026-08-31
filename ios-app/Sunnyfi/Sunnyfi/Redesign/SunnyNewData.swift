@@ -50,6 +50,7 @@ struct NewPagePayload: Decodable {
     let analysts: AnalystBlock
     let targets: TargetBlock
     let room: RoomBlock?
+    let drift: DriftBlock?
     let earnings: EarningsBlock
 }
 
@@ -184,6 +185,30 @@ struct RoomBlock: Decodable {
         var total: Int { bear + neu + bull }
     }
 }
+
+/// ⚠ RAW COUNTS SHIP AND THE THRESHOLD LIVES HERE. A block under `minActions`
+/// draws no point, and the card marks the hole with a dotted bridge and a
+/// dashed hollow ring — which it can only do because it knows the block exists
+/// and is thin. `pct` nil beside a real `n` is that fact.
+///
+/// Rows arrive sorted by turn descending, so a row's index among the
+/// turned-bearish names IS its rank into the plum ramp.
+struct DriftBlock: Decodable {
+    let span: Int, minActions: Int, covered: Int, of: Int
+    let rows: [Row]
+    struct Row: Decodable, Identifiable {
+        let ticker: String
+        let v: [Int?], n: [Int]
+        let turn: Int
+        var id: String { ticker }
+        /// The sheet's three classes. Anything not a turn either way is flat.
+        var kind: DriftKind { turn >= 50 ? .toward : turn <= -25 ? .away : .flat }
+        var last: Int? { v.compactMap { $0 }.last }
+        var first: Int? { v.compactMap { $0 }.first }
+    }
+}
+
+enum DriftKind { case toward, away, flat }
 
 struct EarningsBlock: Decodable {
     let count: Int
