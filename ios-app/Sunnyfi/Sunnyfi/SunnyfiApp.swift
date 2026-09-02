@@ -59,22 +59,37 @@ private struct RootView: View {
     let lock:  AppLock
     let prefs: NotificationPrefs
 
-    var body: some View {
-        // ⚠ THE REDESIGN IS SIMULATOR ONLY, and the branch is compiled out on
-        // device rather than gated at runtime. A complete rebuild stays
-        // half-finished for weeks while Nik trades from the installed app, so
-        // no setting and no bad build may put it on his phone. See
-        // Redesign/RedesignRoot.swift.
-        if Redesign.isActive(userOn: RedesignSession.shared.on) { return AnyView(RedesignRoot()) }
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-inkPreview") {
-            return AnyView(InkDesignPreview())
-        }
+    /* ⚠ THE SHELL NOW SITS BEHIND THE GATE, NOT BESIDE IT. While the redesign
+       was a branch taken before `auth.state` was ever read, it bypassed sign-in,
+       onboarding and the biometric lock entirely — which was fine for a
+       simulator-only preview and is not fine for the app Nik trades from. The
+       old design is deleted, so the shell is what the gate opens onto and every
+       protection is back in the path.
+
+       The switch, the escapes and the crash guard are gone with it. They existed
+       to make a half-built shell safe to reach and a bad build safe to leave;
+       with nothing to fall back to they would only strand him. `ios-ink-final`
+       is the way back now, and it is a build, not a tap. */
+    /* ⚠ VERIFICATION ONLY, AND THREE CONDITIONS DEEP. Routing the shell behind
+       the gate is correct and it also means the simulator now stops at sign-in,
+       which is where every screenshot check in this project happens. This skips
+       it — but only in a DEBUG build, only on the simulator, and only when the
+       argument is passed. It cannot compile into a device build, so it is not a
+       hole in the lock. */
+    private var devBypass: Bool {
+        #if DEBUG && targetEnvironment(simulator)
+        return ProcessInfo.processInfo.arguments.contains("-skipAuth")
+        #else
+        return false
         #endif
-        return AnyView(routed)
     }
 
-    @ViewBuilder private var routed: some View {
+    var body: some View {
+        if devBypass { return AnyView(RedesignRoot()) }
+        return AnyView(gated)
+    }
+
+    @ViewBuilder private var gated: some View {
         switch auth.state {
         case .loading:
             ZStack {
@@ -87,10 +102,6 @@ private struct RootView: View {
             SignInView(auth: auth)
 
         case .signedIn:
-            // Three-layer gate once signed in:
-            //   1. Onboarding (first-launch only)
-            //   2. Biometric lock (if enabled + currently locked)
-            //   3. Tab root
             if !lock.onboardingDone {
                 OnboardingView(lock: lock, prefs: prefs, onFinish: {
                     lock.onboardingDone = true
@@ -98,8 +109,7 @@ private struct RootView: View {
             } else if lock.biometricEnabled && lock.isLocked {
                 BiometricGate(lock: lock, auth: auth)
             } else {
-                // Ink rebuild root (replaces TabRootView).
-                InkRoot(auth: auth, lock: lock, prefs: prefs)
+                RedesignRoot()
             }
         }
     }
