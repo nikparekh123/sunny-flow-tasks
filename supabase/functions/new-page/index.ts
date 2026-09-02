@@ -212,6 +212,13 @@ Deno.serve(async (req) => {
       if (!byUrl.has(u)) byUrl.set(u, []);
       byUrl.get(u)!.push(String(n.ticker));
     }
+    /* Advertisements for legal services, and auto-generated price recaps.
+       Measured against a real week: 9 and 4 of 46, with no false positives. */
+    const SOLICIT =
+      /class action|lead plaintiff|deadline alert|investor alert|securities fraud|encourages .{0,60}investors|urged to contact|shareholders who lost|investigation on behalf|rights firm|trial attorneys|law offices|\bLLP\b|\bLLC\b/i;
+    const RECAP =
+      /(dipped|falls?|fell|rises?|suffers|gains?) .{0,40}(than|amid) .{0,30}(market|broader)|what investors need to know|key insights|market size & share/i;
+
     type NewsRow = {
       ticker: string; title: string; url: string; publisher: string; published: string;
       keep: boolean; reason: string | null; kind: 'press release' | 'article';
@@ -235,7 +242,23 @@ Deno.serve(async (req) => {
       else if (seen.has(key)) continue; else seen.add(key);
 
       let keep = false, reason: string | null = null;
-      if (names) keep = true;
+      /* ⚠ NAMING THE COMPANY IS NOT ENOUGH, and that was the whole hole. A law
+         firm trawling for plaintiffs names it harder than any reporter does,
+         so `ROSEN, A TRUSTED INVESTOR RIGHTS FIRM, Encourages Alibaba Group
+         Holding Limited Investors to Secure Counsel` sailed through the names
+         test and LED THE PAGE for days. Nine of forty-six items in a week were
+         this, every one on BABA, every one through GlobeNewswire. They are
+         advertisements for legal services that happen to carry a ticker.
+
+         The recap rule catches the other template: Zacks publishes a price
+         recap the day a name moves, which restates the chart and nothing else.
+         `Why Lennar (LEN) Dipped More Than Broader Market Today` is the shape.
+
+         Both are DROPPED WITH A REASON rather than hidden, so the filtered
+         count still owns them and you can open the list and disagree. */
+      if (SOLICIT.test(title)) { reason = 'a law firm soliciting plaintiffs'; }
+      else if (RECAP.test(title)) { reason = 'an automated price recap'; }
+      else if (names) keep = true;
       else {
         /* ⚠ THE SUBJECT IS FOUND BY NAME, NOT GUESSED. Every company we hold
            an earnings date for gives us its own name, so a title naming one of

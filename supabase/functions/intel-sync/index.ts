@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
     const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const pk = Deno.env.get('POLYGON_API_KEY')!;
     let body: { dry_run?: boolean; tickers?: string[]; back_days?: number; page?: number;
-                news_only?: boolean } = {};
+                news_only?: boolean; probe_news?: string } = {};
     try { if (req.method === 'POST') body = await req.json(); } catch { /* none */ }
     const D = db(url, key);
     const today = parseISO(nyToday());
@@ -230,6 +230,44 @@ Deno.serve(async (req) => {
           title: n.title ?? null, publisher: n.publisher?.name ?? null, url: n.article_url ?? null,
         });
       }
+    }
+
+    /* ⚠ PROBE ONLY, writes nothing. Polygon's /v2/reference/news returns
+       aggregator soup for these names — of forty items in a week, eighteen
+       were Motley Fool listicles, ten Zacks templates and seven GlobeNewswire
+       law-firm solicitations, with several mis-tagged ("Where Will Dick's
+       Sporting Goods Stock Be in 5 Years?" filed under NKE). This asks
+       whether the Benzinga newswire, which the plan already serves for
+       ratings and guidance, carries better material for the same tickers. */
+    if (body.probe_news) {
+      const t = String(body.probe_news);
+      const out: Record<string, unknown> = { ticker: t };
+      for (const [label, url] of [
+        ['bz_news', `${POLY}/benzinga/v1/news?tickers=${t}&limit=15&apiKey=${pk}`],
+        ['bz_firms', `${POLY}/benzinga/v1/firms?limit=1&apiKey=${pk}`],
+        ['bz_news_alt', `${POLY}/benzinga/v1/news?ticker.any_of=${t}&limit=15&apiKey=${pk}`],
+        ['reference', `${POLY}/v2/reference/news?ticker=${t}&limit=15&order=desc&apiKey=${pk}`],
+      ] as [string, string][]) {
+        try {
+          const r = await fetch(url);
+          const body = await r.text();
+          if (!r.ok || !body) { out[label] = { status: r.status, body: body.slice(0, 200) || '(empty)' }; continue; }
+          const j = JSON.parse(body);
+          if (!Array.isArray(j.results)) { out[label] = { status: r.status, raw: JSON.stringify(j).slice(0, 300) }; continue; }
+          out[label] = {
+            status: r.status,
+            error: j.error ?? j.message ?? null,
+            n: (j.results ?? []).length,
+            sample: (j.results ?? []).slice(0, 8).map((x: Record<string, unknown>) => ({
+              published: x.published ?? x.published_utc,
+              author: x.author ?? (x.publisher as Record<string, unknown>)?.name,
+              channels: x.channels ?? null,
+              title: String(x.title ?? '').slice(0, 90),
+            })),
+          };
+        } catch (e) { out[label] = { err: String(e).slice(0, 120) }; }
+      }
+      return json(200, { ok: true, probe: out });
     }
 
     if (body.dry_run) {
