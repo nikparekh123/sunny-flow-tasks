@@ -62,28 +62,51 @@ Deno.serve(async (req) => {
     const ago = (d: number) => new Date(Date.parse(today + 'T00:00:00Z') - d * 86_400_000)
       .toISOString().slice(0, 10);
 
-    const [lots, quotes, news, acts, insights, earn, guide, closes, legs, book] = await Promise.all([
+    /* ⚠ THE UNIVERSE IS SHARES **OR** AN OPEN OPTION LEG, and it used to be
+       shares alone. The day the share block was sold and replaced by long
+       calls, five names — NKE, NFLX, BABA, FIS, PEP — vanished from every
+       screen at once: no ticker in the universe means no page, no analyst
+       actions, no closes and no news filter subject.
+
+       Legs are NETTED on their contract key before a name counts. A raw
+       `expiry >= today` scan counts a position that was opened and bought
+       back in the same week, which is how a flat account reports positions. */
+    const [lotRows, legRows] = await Promise.all([
       D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker'),
+      D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
+        + '&select=ticker,option_type,direction,strike,expiry,action,contracts'),
+    ]);
+    const legNet = new Map<string, number>();
+    for (const t of legRows) {
+      const k = `${t.ticker}|${t.option_type}|${t.direction}|${N(t.strike)}`
+        + `|${String(t.expiry).slice(0, 10)}`;
+      legNet.set(k, (legNet.get(k) ?? 0)
+        + (String(t.action) === 'open' ? 1 : -1) * N(t.contracts));
+    }
+    const universe = [...new Set([
+      ...lotRows.map((r: Record<string, unknown>) => String(r.ticker)),
+      ...[...legNet.entries()].filter(([, v]) => v > 0.0001).map(([k]) => k.split('|')[0]),
+    ])].sort();
+    const inList = universe.join(',');
+
+    const [lots, quotes, news, acts, insights, earn, guide, closes, legs, book] = await Promise.all([
+      Promise.resolve(lotRows),
       D.get('ticker_quotes_latest?select=ticker,spot,day_change_pct'),
       D.get(`name_news?published=gte.${ago(8)}&select=ticker,id,published,title,publisher,url`
         + '&order=published.desc'),
-      D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker')
-        .then((l) => page(D, 'analyst_actions?select=*&order=date.desc&ticker=in.('
-          + [...new Set(l.map((r) => String(r.ticker)))].join(',') + ')')),
+      page(D, `analyst_actions?select=*&order=date.desc&ticker=in.(${inList})`),
       D.get('analyst_insights?select=*&order=date.desc'),
       D.get(`earnings_events?report_date=gte.${today}`
         + '&select=ticker,report_date,report_time,date_estimated,source&order=report_date.asc'),
       D.get('guidance_events?select=*&order=date.desc'),
-      D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker')
-        .then((l) => page(D, 'daily_closes?select=ticker,date,close_price&order=date.asc'
-          + `&date=gte.${ago(320)}&ticker=in.(`
-          + [...new Set(l.map((r) => String(r.ticker)))].join(',') + ')')),
+      page(D, 'daily_closes?select=ticker,date,close_price&order=date.asc'
+        + `&date=gte.${ago(320)}&ticker=in.(${inList})`),
       D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
         + '&select=ticker,option_type,direction,action,contracts,strike,expiry'),
       D.get('ticker_names?select=ticker,name'),
     ]);
 
-    const held = [...new Set(lots.map((r: Record<string, unknown>) => String(r.ticker)))].sort();
+    const held = universe;
     const heldSet = new Set(held);
     const spotBy = new Map<string, number>();
     for (const q of quotes) if (N(q.spot) > 0) spotBy.set(String(q.ticker), N(q.spot));

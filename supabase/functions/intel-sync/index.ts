@@ -63,17 +63,36 @@ Deno.serve(async (req) => {
     const back = Math.max(1, Number(body.back_days ?? BACK));
     const from = ymd(addDays(today, -back));
 
-    const [uni, sleeve, pos] = await Promise.all([
+    const [uni, sleeve, pos, legRows] = await Promise.all([
       D.get('income_scanner_universe?active=is.true&select=ticker'),
       D.get('income_sleeve_names?active=is.true&select=ticker'),
       // qty_remaining > 0, or 'held' picks up every ticker ever owned:
       // FIG, SPCX, HOOD and fifteen others with zero shares.
       D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker'),
+      /* ⚠ AN OPEN OPTION LEG IS A POSITION TOO. Shares alone meant that the
+         afternoon the share block was sold and replaced by long calls, this
+         function silently STOPPED COLLECTING NEWS for NKE, NFLX, BABA, FIS
+         and PEP. Nothing errored; the articles simply were not fetched, and
+         the New page had nothing to show days later.
+         Netted on the contract key, so a leg opened and closed inside the
+         week does not keep a closed name alive. */
+      D.get('option_trades?voided_at=is.null&expiry=gte.'
+        + new Date().toISOString().slice(0, 10)
+        + '&select=ticker,option_type,direction,strike,expiry,action,contracts'),
     ]);
     const all = body.tickers ?? [...new Set(uni.map((r) => String(r.ticker)))];
     // Held: one call each, so only names with an actual position or a sleeve row.
+    const legNet = new Map<string, number>();
+    for (const t of legRows) {
+      const k = `${t.ticker}|${t.option_type}|${t.direction}|${t.strike}`
+        + `|${String(t.expiry).slice(0, 10)}`;
+      legNet.set(k, (legNet.get(k) ?? 0)
+        + (String(t.action) === 'open' ? 1 : -1) * Number(t.contracts ?? 0));
+    }
     const held = [...new Set([...sleeve.map((r) => String(r.ticker)),
-                              ...pos.map((r) => String(r.ticker))])];
+                              ...pos.map((r) => String(r.ticker)),
+                              ...[...legNet.entries()].filter(([, v]) => v > 0.0001)
+                                .map(([k]) => k.split('|')[0])])];
 
     /* Dedupe on the conflict key BEFORE posting. The backwards date slices
        overlap at their boundaries, so the same benzinga_id arrives twice in one

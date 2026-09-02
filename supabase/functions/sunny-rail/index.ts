@@ -141,16 +141,47 @@ Deno.serve(async (req) => {
 
     const facts: Array<{ key: string; spans: Span[]; projected?: boolean }> = [];
 
-    const invested = lots.reduce((s, l) => s + N(l.qty_remaining) * N(l.cost_per_share), 0);
+    /* ⚠ CAPITAL COMMITTED, NOT SHARE COST. The book was share cost alone, so
+       a name whose shares are sold and replaced by long calls DISAPPEARED
+       from the strip: no circle, therefore no page, therefore no news. Five
+       names went that way in one afternoon. Weight now counts what was
+       actually paid — share cost plus net premium on open LONG legs — which
+       is the meaning the label always had, extended to the instrument that
+       now holds the position.
 
-    /* One row per name that still holds shares, largest first. A name with no
-       lots is absent rather than shown at 0% — the shell hides a heading with
-       no card under it anyway, and a 0% row would claim a position he closed. */
+       `invested` moves with it deliberately. The header comment above
+       promises a heading can never disagree with the dock fact two rows
+       below it, and that only holds if both are drawn on the same basis. */
     const byTicker = new Map<string, number>();
     for (const l of lots) {
       const t = String(l.ticker);
       byTicker.set(t, (byTicker.get(t) ?? 0) + N(l.qty_remaining) * N(l.cost_per_share));
     }
+    /* ⚠ NET ON THE CONTRACT KEY FIRST, then count only what is still open.
+       Summing signed premium per TICKER instead put NVDA in the book at
+       $71,489 with zero contracts outstanding: on a fully closed position the
+       signed sum is not capital committed, it is realised P&L wearing its
+       coat. Same trap the openPremium map below already avoids. */
+    const longLeg = new Map<string, { net: number; paid: number; t: string }>();
+    for (const t of openLegs) {
+      if (String(t.direction) !== 'long') continue;
+      const k = `${t.ticker}|${t.option_type}|${N(t.strike)}|${String(t.expiry).slice(0, 10)}`;
+      const e = longLeg.get(k) ?? { net: 0, paid: 0, t: String(t.ticker) };
+      const sign = String(t.action) === 'open' ? 1 : -1;
+      e.net += sign * N(t.contracts);
+      e.paid += sign * N(t.contracts) * N(t.premium) * 100;
+      longLeg.set(k, e);
+    }
+    for (const e of longLeg.values()) {
+      if (e.net <= 0.0001) continue;
+      byTicker.set(e.t, (byTicker.get(e.t) ?? 0) + e.paid);
+    }
+    /* A name that nets to zero or below has been closed out, not held. */
+    const invested = [...byTicker.values()].reduce((s, v) => s + Math.max(v, 0), 0);
+
+    /* One row per name with capital in it, largest first. A name with no
+       lots is absent rather than shown at 0% — the shell hides a heading with
+       no card under it anyway, and a 0% row would claim a position he closed. */
     /* ── the five-day week, per name ──────────────────────────────────────
        The card charts daily CHANGE against a zero line, never price level: five
        price levels at this size are five identical bars, and the shape of the
