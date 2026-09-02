@@ -20,6 +20,15 @@ private struct TCard<Content: View>: View {
     @ViewBuilder let body_: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { body_() }
+            /* ⚠ THE INNER BOX IS SIZED, NOT THE PADDED ONE. `.frame(height:)`
+               applied AFTER `.padding()` sizes the padded result, which leaves
+               the VStack itself free-height: the Spacer then collapses to its
+               minLength, the content stacks from the top, and the footer lands
+               wherever it finishes rather than a fixed distance off the floor.
+               Sizing the CONTENT box instead (361 − 17 − 22 = 322) is what lets
+               the slack row do its job, and it is why the bottom gap looked
+               wrong at every padding value I tried. */
+            .frame(width: S.content - 38, height: 361 - 39, alignment: .top)
             /* ⚠ 22 AT THE BOTTOM, NOT THE SHEET'S 16. The sheet measured
                --pad-card-m off CSS, where a 19px figure at line-height 1 sits
                its baseline flush to the box floor. SwiftUI gives Text its own
@@ -27,7 +36,7 @@ private struct TCard<Content: View>: View {
                the card edge on every card. The extra 6 comes out of the slack
                row, so the card still measures 361. */
             .padding(EdgeInsets(top: 17, leading: 19, bottom: 22, trailing: 19))
-            .frame(width: S.content, height: 361, alignment: .top)
+            .frame(width: S.content, alignment: .top)
             .background(S.paper)
             .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
             .sunnyShadow(S.shadowCard)

@@ -24,15 +24,22 @@
 
 import SwiftUI
 
-/// Which page the pane is showing. There is no third kind — a card either has a
-/// clock on it and is on `new`, or it belongs to a name.
+/// Which page the pane is showing.
+///
+/// ⚠ THERE IS A THIRD KIND NOW, and the old comment here said there could not
+/// be. `new` was getting crowded — eight blocks, with the news pushed below
+/// three option cards — so the book's own cards moved to their own page. The
+/// test the old comment implied still holds: a card either has a clock on it,
+/// belongs to a name, or belongs to the option book as a whole.
 enum SunnyPage: Hashable {
     case new
+    case options
     case name(String)
 
     var key: String {
         switch self {
         case .new: return "NEW"
+        case .options: return "OPTIONS"
         case .name(let t): return t
         }
     }
@@ -149,6 +156,7 @@ struct SunnyStrip: View {
     private var pending: Set<String> { nav.pending }
     private var flagged: Set<String> { nav.flagged }
     private var due: Int { nav.due }
+    private var rolling: Int { nav.rolling }
     @Binding var page: SunnyPage
 
     var body: some View {
@@ -201,6 +209,34 @@ struct SunnyStrip: View {
                     )
                 }
                 .id(SunnyPage.new.key)
+
+                /* ⚠ A SECOND NOT-A-NAME, AND THE SHAPE CHANNEL NOW CARRIES A
+                   GLYPH. `strip-flag.md` §5 gives shape one job — name or not
+                   a name — with `New` the only square. Two squares need a
+                   second distinction, and a star inside one is the cheapest:
+                   the shape still says "not a name" and the glyph says which.
+
+                   ⚠ IT WEARS VIOLET, WHICH THE SHEET FORBIDS ON `New`. The
+                   argument there was that assignment is a property of a name
+                   and a count of flagged names would be a summary of a
+                   summary. This tile is not the reading queue, it is the option
+                   book, and `--assign` means exactly what the ring says here: a
+                   short leg is in the money, so a roll is due. It IS still a
+                   summary of the names' own rings, and that tension is real —
+                   Nik drew it violet and it is his channel to spend. */
+                SunnyCircle(caption: "Options",
+                            active: page == .options,
+                            event: rolling > 0 ? .assign : .none,
+                            square: true,
+                            tap: { go(.options) }) { on in
+                    AnyView(
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 21, weight: .bold))
+                            .foregroundStyle(on ? S.onInk
+                                               : rolling > 0 ? S.ink : S.shellCountClear)
+                    )
+                }
+                .id(SunnyPage.options.key)
 
                 ForEach(nav.ordered) { b in
                     SunnyCircle(caption: "\(b.weight)%",

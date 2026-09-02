@@ -94,6 +94,9 @@ struct SunnyNav: Equatable {
     /// not "has an exception".
     var flagged: Set<String> = []
     var due: Int = 0
+    /// Short legs in the money, book-wide. The Options tile's ring reads this,
+    /// and so does the roll check's footer, so the two cannot disagree.
+    var rolling: Int = 0
 
     /* ⚠ ONE ORDER, READ BY BOTH THE STRIP AND THE SWIPE. Flagged names sort
        first after New, then the rest, each group alphabetical — the price of
@@ -111,7 +114,10 @@ struct SunnyNav: Equatable {
             return a != b ? a : $0.ticker < $1.ticker
         }
     }
-    var pages: [SunnyPage] { [.new] + ordered.map { .name($0.ticker) } }
+    /* ⚠ ONE ORDER, AND THE SWIPE MUST SEE THE OPTIONS PAGE TOO. The strip and
+       the pager both read this; a page in the strip that the pager did not know
+       about would be reachable by tap and skipped by swipe. */
+    var pages: [SunnyPage] { [.new, .options] + ordered.map { .name($0.ticker) } }
 }
 
 
@@ -225,7 +231,7 @@ final class PaneModel {
                  /* Puts bought are never here: a long put in the money is cover
                     doing its job, not something that could be done to him. */
                  flagged: Set((rail.callsSold + rail.putsSold).filter(\.itm).map(\.ticker)),
-                 due: due)
+                 due: due, rolling: options.data?.book.rolling ?? 0)
     }
 
     func book(_ t: String) -> BookName {
@@ -306,6 +312,7 @@ struct SunnyPane: View {
             VStack(alignment: .leading, spacing: S.shellPaneGap) {
                 switch page {
                 case .new:  newPage
+                case .options: optionsPage
                 case .name: namePage
                 }
             }
@@ -362,19 +369,6 @@ struct SunnyPane: View {
             /* News carries NO SEAM: a 26/300 headline under the date row is
                self-evidently news, and a heading over the first block on a page
                is a partition with nothing on the other side. */
-            /* ⚠ THE THREE OPTION CARDS LEAD THE DASHBOARD, and the roll check
-               leads them, because it is the only card on this page that asks
-               for an action. All three are UNCONDITIONAL: they show the
-               progress that is going on, so a quiet day still has a dashboard.
-               Exactly one roll-check form renders and the LEG COUNT picks it —
-               six legs today, so the paged one. */
-            if let o = m.options.data, !o.positions.isEmpty {
-                SunnySeam(label: "The book", count: o.book.legs)
-                SunnyRollCheck(book: o.book, positions: o.positions)
-                SunnyYieldProgress(book: o.book, positions: o.positions)
-                SunnyWeeklyYield(book: o.book)
-            }
-
             SunnyNewsLead(lead: p.news.lead, filtered: p.news.filtered.count,
                           onChip: { showFiltered.toggle() },
                           chipLabel: showFiltered ? "Fewer" : "See them")
@@ -444,6 +438,28 @@ struct SunnyPane: View {
             }
         } else if m.newPage.error != nil {
             SunnyPageNote("The feed did not answer. It will try again when you "
+                        + "come back to this page.")
+        }
+    }
+
+    // MARK: the options page
+
+    /* ⚠ ITS OWN PAGE, NOT A BLOCK ON `New`. They shipped on New and pushed the
+       news below three full-height cards, which made an eight-block page whose
+       lead was buried. Nik: "new is getting crowded... we need another
+       dedicated space." The order is the sheet's: roll check first, because it
+       is the only one of the three that asks for an action. */
+    @ViewBuilder
+    private var optionsPage: some View {
+        if let o = m.options.data, !o.positions.isEmpty {
+            SunnyPageTitle(title: "Options",
+                           note: o.book.rolling > 0
+                                 ? "\(o.book.rolling) to roll" : "\(o.book.legs) legs open")
+            SunnyRollCheck(book: o.book, positions: o.positions)
+            SunnyYieldProgress(book: o.book, positions: o.positions)
+            SunnyWeeklyYield(book: o.book)
+        } else if m.options.error != nil {
+            SunnyPageNote("The book did not answer. It will try again when you "
                         + "come back to this page.")
         }
     }

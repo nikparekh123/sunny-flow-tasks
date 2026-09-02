@@ -32,6 +32,30 @@ struct SunnyNewTitle: View {
     }
 }
 
+/// The same device as `SunnyNewTitle`, for a page whose right-hand fact is not
+/// a date. Kept separate rather than making the date optional: the New page's
+/// title always has one, and an optional there would let a future edit ship a
+/// New page with no date and no error.
+struct SunnyPageTitle: View {
+    let title: String
+    let note: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: S.gap5) {
+            Text(title)
+                .font(S.inter(S.t22, S.wSemiN))
+                .tracking(S.track(S.t22, -0.025))
+                .foregroundStyle(S.ink)
+            Spacer(minLength: 0)
+            Text(note)
+                .font(S.inter(S.t13, S.wMidSmN))
+                .foregroundStyle(S.mute2)
+        }
+        .padding(.top, S.gap4)
+        .measure("page-title")
+    }
+}
+
 // MARK: - the date row
 
 /// ⚠ THE ONLY FORWARD-LOOKING BLOCK ON THE PAGE — everything below it has

@@ -53,7 +53,9 @@ struct SunnyShell: View {
         let a = ProcessInfo.processInfo.arguments
         guard let i = a.firstIndex(of: "-page"), i + 1 < a.count else { return nil }
         let k = a[i + 1].uppercased()
-        return k == "NEW" ? .new : .name(k)
+        if k == "NEW" { return .new }
+        if k == "OPTIONS" { return .options }
+        return .name(k)
     }
     private static var argScroll: CGFloat? {
         let a = ProcessInfo.processInfo.arguments
