@@ -20,15 +20,23 @@ private struct TCard<Content: View>: View {
     @ViewBuilder let body_: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { body_() }
-            /* ⚠ THE INNER BOX IS SIZED, NOT THE PADDED ONE. `.frame(height:)`
-               applied AFTER `.padding()` sizes the padded result, which leaves
-               the VStack itself free-height: the Spacer then collapses to its
-               minLength, the content stacks from the top, and the footer lands
-               wherever it finishes rather than a fixed distance off the floor.
-               Sizing the CONTENT box instead (361 − 17 − 22 = 322) is what lets
-               the slack row do its job, and it is why the bottom gap looked
-               wrong at every padding value I tried. */
-            .frame(width: S.content - 38, height: 361 - 39, alignment: .top)
+            /* ⚠ 361 IS A FLOOR, NOT A CEILING, AND THAT IS THE WHOLE FIX.
+               `.frame(height:)` PROPOSES a height, it does not clamp one. Every
+               fixed card measured OVER its 322 content box — yield-progress by
+               33.7, pair-week 21.7, pace-ahead 18.0, name-credit 12.3,
+               weekly-yield 8.0 — so the content ran past the box, ate all 22pt
+               of bottom padding, and on yield-progress was CLIPPED 11.7pt below
+               the card edge. The one card that measured right was the rows form,
+               and it measured right because it was free-height.
+
+               The 361 came off CSS, where line-height IS the line advance.
+               SwiftUI gives every Text its own leading on top of that, so the
+               same content lays out taller here and no padding number could
+               have made it fit. `minHeight` keeps 361 for a card whose content
+               fits and lets the rest grow, so the footer sits 22 off the floor
+               on all six. Cards now vary in height with the size of the book. */
+            .frame(width: S.content - 38, alignment: .top)
+            .frame(minHeight: 361 - 39, alignment: .top)
             /* ⚠ 22 AT THE BOTTOM, NOT THE SHEET'S 16. The sheet measured
                --pad-card-m off CSS, where a 19px figure at line-height 1 sits
                its baseline flush to the box floor. SwiftUI gives Text its own
