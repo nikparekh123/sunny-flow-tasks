@@ -428,6 +428,7 @@ struct SunnyPane: View {
             SunnyPageNote("The feed did not answer. It will try again when you "
                         + "come back to this page.")
         }
+        SunnyWayBack()
     }
 
     // MARK: a name page
@@ -502,4 +503,48 @@ struct SunnyPane: View {
         }
     }
 
+}
+
+
+/// ⚠ THE WAY BACK, AND IT IS LOAD-BEARING. The paged shell is the default on
+/// device now, which gave up the old safety of a session-scoped switch: there
+/// is no longer a way out by quitting. Eleven screens still live only in the
+/// current app — IncomeScreen, the six NVDA screens, the three TLT screens and
+/// InstructionScreen — so this is a route to working software, not a debug
+/// toggle. It stays until those screens exist here.
+///
+/// Grey, small, and last on the page on purpose: findable when wanted, silent
+/// otherwise. The flag it sets is PERSISTED, so quitting does not undo it, and
+/// the current app carries the switch back the other way.
+struct SunnyWayBack: View {
+    @State private var armed = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if armed {
+                Text("The old app still has Income, NVDA and TLT. This choice sticks until you change it back.")
+                    .font(S.inter(S.t12, S.wMidSmN))
+                    .lineSpacing(S.t12 * 0.4)
+                    .foregroundStyle(S.mute2)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                /* Two taps, because one tap on a grey word at the bottom of a
+                   scroll is an accident waiting to happen. */
+                if armed { RedesignSession.shared.useCurrentApp() }
+                else { withAnimation(.easeInOut(duration: 0.18)) { armed = true } }
+            } label: {
+                Text(armed ? "Yes, open the old app" : "Open the old app")
+                    .font(S.inter(S.t13, armed ? S.wSemiN : S.wMidSmN))
+                    .foregroundStyle(armed ? S.ink : S.mute2)
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .overlay(Capsule().stroke(S.ruleColor, lineWidth: 1))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 26).padding(.bottom, 10)
+    }
 }

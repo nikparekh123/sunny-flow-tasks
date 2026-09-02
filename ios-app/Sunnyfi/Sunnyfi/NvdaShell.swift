@@ -431,10 +431,13 @@ struct NvdaProfileScreen: View {
             toggleRow(icon: "eye.slash", label: "Hide P&L amounts",
                       on: Binding(get: { appPrefs.hidePnL }, set: { appPrefs.hidePnL = $0 }))
             hair
-            // Not persisted: every launch starts in the current app, so quitting
-            // and reopening is always the way back out.
+            /* ⚠ PERSISTED as of 2026-09-02, when the paged shell became the
+               default. This row is now the way FORWARD after an escape, so it
+               must clear the escape flag rather than only set the in-memory
+               one, or the next launch undoes it. */
             toggleRow(icon: "square.grid.2x2", label: "Use new design",
-                      on: Binding(get: { redesign.on }, set: { redesign.on = $0 }))
+                      on: Binding(get: { redesign.on },
+                                  set: { $0 ? redesign.useNewShell() : redesign.useCurrentApp() }))
         }
     }
 

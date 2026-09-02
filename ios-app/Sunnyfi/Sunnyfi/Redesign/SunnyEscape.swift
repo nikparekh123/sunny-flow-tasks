@@ -8,6 +8,11 @@
 //  so the crash guard never fires. Nik would simply be stuck in a half-built app
 //  until a new build rescued him. He spotted this before it shipped.
 //
+//  ⚠ UPDATED 2026-09-02: the shell is now the DEFAULT on device, so quitting no
+//  longer takes you out and this is no longer merely convenient. It is one of
+//  two ways back, beside the control at the foot of the New page, and both set
+//  the same persisted flag.
+//
 //  Shake to leave. Chosen because it costs the design NOTHING: no button, no
 //  gesture layered over a real control, no pixel altered, which matters while
 //  the rule is to replicate the handoff exactly. It is also close to impossible
@@ -29,10 +34,13 @@ struct SunnyEscape: ViewModifier {
         content
             .background(ShakeDetector { asking = true }.allowsHitTesting(false))
             .confirmationDialog("Leave the new design?", isPresented: $asking, titleVisibility: .visible) {
-                Button("Back to the current app") { redesign.on = false }
+                /* ⚠ useCurrentApp(), NOT `on = false`. The switch is persisted
+                   now that the shell is the default, so clearing the in-memory
+                   flag alone would bounce straight back on the next launch. */
+                Button("Back to the current app") { redesign.useCurrentApp() }
                 Button("Stay", role: .cancel) { }
             } message: {
-                Text("Quitting and reopening the app does the same thing.")
+                Text("The old app still has Income, NVDA and TLT. This sticks until you change it back in Profile.")
             }
     }
 }
