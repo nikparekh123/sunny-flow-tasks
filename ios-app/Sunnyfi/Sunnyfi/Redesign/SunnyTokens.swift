@@ -879,6 +879,38 @@ enum S {
     static let roomGroupGap: CGFloat = 8     // between bearish, neutral, bullish
     static let lsRoom = 0.06                 // the legend's own tracking
 
+    // ── OPTIONS CARDS, 2 Sep 2026 ────────────────────────────────────────
+    // Build sheet: OPTIONS-CARDS.md. Every value is MEASURED off
+    // `Sunny Options Page.dc.html`, not chosen. A value not here is not
+    // allowed; a new value needs a new token.
+    //
+    // ⚠ --board #E8EAE6 is deliberately NOT carried over. The sheet says it is
+    // "the ground these cards lay out on, there is no shell here" — and here
+    // there IS a shell, so they sit on S.ground like every other card.
+    static let barQuiet   = hex(0xDDE0DA)   // measured, but not an exception
+    // the zero line on a row plot is S.ruleColorStrong, already declared
+    static let refLine: CGFloat = 1.5       // a line laid ACROSS a series
+    static let levelKey: CGFloat = 9        // the dash in a level marker
+    static let pipDot: CGFloat = 5          // the page pip
+    // roll check, the bar forms
+    static let rollPlotH: CGFloat = 148
+    static let rollBarW:  CGFloat = 34      // five at flex:1 measured 51 and read chunky
+    static let rollColW:  CGFloat = 64      // 323 / 5 = 64.6
+    // the row form, shared with yield progress
+    static let progRowH:   CGFloat = 14
+    static let progRowGap: CGFloat = 18
+    static let progNameCol: CGFloat = 46    // BABA at 12/600 measures 34
+    static let progValCol:  CGFloat = 44    // "-111%" at 13/600 is the widest
+    static let progLastwkW: CGFloat = 1.5
+    // bars with an average line
+    static let weekPlotH:   CGFloat = 147
+    static let weekBarMax:  CGFloat = 30
+    // shared footer + motion
+    static let statRulePad: CGFloat = 16
+    static let durBar: Double = 0.72
+    static let barStagger: Double = 0.055
+    // t30 and radiusBar are already declared above; the options block reuses them.
+
     // The drift. HUE IS THE DIRECTION OF THE TURN, DEPTH IS ITS SIZE, and the
     // four plum steps are assigned BY RANK, never by ticker. Neither family is
     // the deck's money ink: a cut share is a fact about analysts, not a loss in

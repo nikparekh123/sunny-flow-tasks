@@ -135,6 +135,10 @@ final class PaneModel {
     /// The New page's whole payload. It lives here with the other stores so the
     /// pager can hold more than one pane without fetching it twice.
     var newPage = NewPageStore()
+    /// The six option cards read ONE contract, because the weekly-yield card's
+    /// last bar must equal the yield-progress card's "this week" figure and two
+    /// endpoints would let them drift.
+    var options = OptionsStore()
     var read: Set<String> = SunnyRead.load()
     /// ⚠ PER NAME, NOT PER CARD (five-day-price.md §6), so an M and an L on the
     /// same ticker flip together.
@@ -258,7 +262,8 @@ final class PaneModel {
         async let d: Void = planner.load()
         async let e: Void = legs.load()
         async let f: Void = newPage.load()
-        _ = await (a, b, c, d, e, f)
+        async let g: Void = options.load()
+        _ = await (a, b, c, d, e, f, g)
         if ProcessInfo.processInfo.arguments.contains("-showPrice") {
             priceUnits = Set(rail.book.map(\.ticker))
         }
@@ -357,6 +362,19 @@ struct SunnyPane: View {
             /* News carries NO SEAM: a 26/300 headline under the date row is
                self-evidently news, and a heading over the first block on a page
                is a partition with nothing on the other side. */
+            /* ⚠ THE THREE OPTION CARDS LEAD THE DASHBOARD, and the roll check
+               leads them, because it is the only card on this page that asks
+               for an action. All three are UNCONDITIONAL: they show the
+               progress that is going on, so a quiet day still has a dashboard.
+               Exactly one roll-check form renders and the LEG COUNT picks it —
+               six legs today, so the paged one. */
+            if let o = m.options.data, !o.positions.isEmpty {
+                SunnySeam(label: "The book", count: o.book.legs)
+                SunnyRollCheck(book: o.book, positions: o.positions)
+                SunnyYieldProgress(book: o.book, positions: o.positions)
+                SunnyWeeklyYield(book: o.book)
+            }
+
             SunnyNewsLead(lead: p.news.lead, filtered: p.news.filtered.count,
                           onChip: { showFiltered.toggle() },
                           chipLabel: showFiltered ? "Fewer" : "See them")
