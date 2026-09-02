@@ -454,7 +454,16 @@ struct SunnyPane: View {
     private var namePage: some View {
         if let b = current {
             SunnyPageHead(ticker: b.ticker, name: b.name, weight: b.weight)
-            SunnyPageFigures(current: position?.total, total: position?.allTime)
+            /* ⚠ THE FIGURES COME FROM THE OPTIONS BOOK NOW. They read from
+               `position`, which is share-lot derived, and there are no shares
+               left — so both printed an em dash on every name. Per the P&L
+               glossary: CURRENT is unrealized on what is open (the LEAP's mark
+               against its cost, plus each open short's credit against its
+               current value); TOTAL is net, that plus the credits already
+               realized on legs since closed. */
+            let opt = m.options.data?.positions.first { $0.t == b.ticker }
+            SunnyPageFigures(current: opt.map(optCurrent) ?? position?.total,
+                             total: opt.map(optTotal) ?? position?.allTime)
 
             /* ⚠ A FILED CARD LANDS BETWEEN THE FIGURES AND THE RESIDENT CARDS,
                not above the heading and not at the bottom. A thing that just
@@ -462,14 +471,25 @@ struct SunnyPane: View {
             let filed = m.items.filter { m.place($0) == .name(b.ticker) }
             ForEach(filed) { card($0) }
 
-            /* ⚠ ONE CARD FOR THE WHOLE NAME, and it is the FIRST thing on
-               the page. The five M cards it replaces were one card per metric —
-               five cards to read one name, and a page of singletons that lost
-               the story the way the five leg cards did before them. */
-            SunnyTickerCard(
-                b: b, current: position?.total, allTime: position?.allTime,
-                callsSold: m.rail.callsSold, putsSold: m.rail.putsSold,
-                putsBought: m.rail.putsBought)
+            /* ⚠ THE TICKER CARD IS GONE, 2026-09-02. It led the page with
+               the short leg's strike, its moneyness and its credit against its
+               current value — which is now the roll check, the pair card and
+               the figures above it, three times over. Nik: "remove the first
+               card it's a repeat." Its file stays; nothing renders it. */
+
+            /* ⚠ THE THREE OPTION CARDS, IN THE SHEET'S ORDER: weekly credit,
+               the pair in THIS WEEK, pace to cover. Three, not four — Part 1
+               §2 and Part 4 §11 of OPTIONS-CARDS.md contradict each other on
+               whether SINCE OPEN also renders, and Nik ruled three. The scope
+               is a tag, not a second card type, so `SunnyPair(p:scope:)` builds
+               both and only one is called. */
+            if let o = m.options.data,
+               let op = o.positions.first(where: { $0.t == b.ticker }) {
+                SunnySeam(label: "The position", count: nil)
+                SunnyNameCredit(p: op)
+                SunnyPair(p: op, scope: .week)
+                SunnyPace(p: op)
+            }
 
             /* ⚠ SECOND, AND ONLY WHERE SOMETHING COULD BE ASSIGNED. It answers a
                different question from the card above it — that one is what do I

@@ -185,6 +185,9 @@ Deno.serve(async (req) => {
              governs. A card that charts eight weeks and prints an all-time
              total must label which is which. */
           windowCredit: weekly.reduce((a, b) => a + b, 0),
+          /* Same correction per name: FIS and PEP have run two weeks of the
+             eight, so an eight-week divisor understates them fourfold. */
+          liveWeeks: weekly.filter((v) => v !== 0).length,
           week: Math.round(wk.get(thisWeek) ?? 0),
           weekly, weeksRun, weeksLeft,
           longN: leap.n, shortN,
@@ -211,7 +214,20 @@ Deno.serve(async (req) => {
     const rolling = positions.reduce((s, p) => s + p.shorts.filter((x) => x.itm).length, 0);
     const kept = positions.reduce((s, p) =>
       s + p.shorts.reduce((a, x) => a + (x.credit - x.value), 0), 0);
-    const avgPct = bookWeekly.reduce((s, w) => s + w.pct, 0) / bookWeekly.length;
+    /* ⚠ THE AVERAGE COUNTS ONLY WEEKS THE BOOK ACTUALLY RAN. Nik caught this:
+       the eight-week window reaches back before the position existed, so five
+       zeros dragged the book rate from 2.78% to 1.04% and "Yearly" from 144%
+       to 54% — a 2.7x understatement of the real run rate. The sheet is silent
+       on the averaging window because it was authored against a book with
+       eight full weeks behind it.
+
+       The bars still chart all eight, zeros included, because a zero week is a
+       fact and hiding it would make a young programme look established. It is
+       the DIVISOR that changes, not the series. Once eight live weeks exist
+       the two definitions converge and this stops mattering. */
+    const liveWeeks = bookWeekly.filter((w) => w.credit !== 0);
+    const avgPct = liveWeeks.length
+      ? liveWeeks.reduce((s, w) => s + w.pct, 0) / liveWeeks.length : 0;
 
     return json(200, {
       ok: true, build: BUILD, date: today,
@@ -221,6 +237,7 @@ Deno.serve(async (req) => {
         windowCredit: bookWeekly.reduce((s, w) => s + w.credit, 0),
         weekly: bookWeekly,
         avgPct: r2(avgPct),
+        liveWeeks: liveWeeks.length,
         thisWeek: bookWeekly[bookWeekly.length - 1].credit,
         bestWeek: Math.max(...bookWeekly.map((w) => w.credit)),
         /* ⚠ NOT A FORECAST. The eight-week average × 52, and the sheet keeps

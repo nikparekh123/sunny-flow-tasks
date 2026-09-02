@@ -42,7 +42,9 @@ private struct OptHead: View {
             HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
                 Text(title).font(S.inter(S.t14, S.wBoldN))
                     .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
-                Text(sub).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
+                if !sub.isEmpty {
+                    Text(sub).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
+                }
             }
             Spacer(minLength: 0)
             if let right {
@@ -140,14 +142,32 @@ struct SunnyRollCheck: View {
         return (up, down, k, up * k)
     }
 
+    /* ⚠ THE PAGED FORM CANNOT EXIST IN THIS SHELL, and that is a fact about
+       the shell rather than a fault in the sheet. The handoff escalates
+       ≤5 bars → 6–10 paged → 11+ rows, and the paged form pages on a
+       HORIZONTAL gesture. Our shell IS a horizontal paging ScrollView: swiping
+       sideways is how you change ticker. So the card and the navigation fight
+       over every drag, which is what Nik hit at six legs.
+
+       Rows are the answer above five here. They show every leg at once with no
+       gesture at all, which is what the sheet wanted paging to achieve, and the
+       sheet's own reason for escalating to rows — "a card you page three times
+       to read is a list pretending to be a chart" — applies at one page in a
+       shell that owns the gesture. The bar form still renders at five or
+       fewer, unchanged. */
+    private var useRows: Bool { bars.count > 5 }
+
     var body: some View {
+        if useRows { rowsCard } else { barsCard }
+    }
+
+    private var barsCard: some View {
         OptCard(name: "roll-check") {
             OptHead(title: "Roll check", sub: "calls sold")
             Spacer().frame(height: S.gap7)
             keyRow
             Spacer().frame(height: S.gap5)
             plot
-            if book.form == "paged" { pips }
             Spacer(minLength: S.gap7)
             OptFooter(stats: [
                 .init(label: "Rolling", value: "\(book.rolling)", ink: S.loss),
@@ -179,13 +199,9 @@ struct SunnyRollCheck: View {
         }
     }
 
-    @State private var page = 0
-    private var pageCount: Int { max(1, Int(ceil(Double(bars.count) / 5.0))) }
-
     private var plot: some View {
         let sc = scale
-        let shown = book.form == "paged"
-            ? Array(bars.dropFirst(page * 5).prefix(5)) : bars
+        let shown = bars
         return ZStack(alignment: .topLeading) {
             Rectangle().fill(S.ruleColor).frame(height: 1).offset(y: sc.zero)
             Rectangle().fill(S.hair).frame(height: S.refLine)
@@ -194,11 +210,6 @@ struct SunnyRollCheck: View {
                 .offset(y: sc.zero - CGFloat(giveBackLine) * sc.k)
             HStack(spacing: 0) {
                 ForEach(shown) { b in column(b, sc) }
-                if shown.count < 5 && book.form == "paged" {
-                    ForEach(shown.count..<5, id: \.self) { _ in
-                        Color.clear.frame(maxWidth: .infinity)
-                    }
-                }
             }
         }
         .frame(height: S.rollPlotH + S.gap5 + 31, alignment: .top)
@@ -234,16 +245,94 @@ struct SunnyRollCheck: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var pips: some View {
-        HStack(spacing: S.gap3) {
-            ForEach(0..<pageCount, id: \.self) { i in
-                Circle().fill(i == page ? S.ink : S.hair)
-                    .frame(width: S.pipDot, height: S.pipDot)
-                    .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { page = i } }
+    // MARK: rows
+
+    /// Free height, one row per leg. Name and value columns are `flex: none` —
+    /// the summary-lists rule, learned there when a `flex: 1` ticker slot shrank
+    /// under BABA and ate the row gap.
+    private var rowsCard: some View {
+        let hi = max(CGFloat(captureLine), CGFloat(bars.map(\.captured).max() ?? 0)) * 1.1
+        let lo = min(CGFloat(giveBackLine), CGFloat(bars.map(\.captured).min() ?? 0)) * 1.1
+        let track: CGFloat = 217
+        let x = { (v: CGFloat) in track * (v - lo) / max(hi - lo, 1) }
+        return OptCard(name: "roll-check-rows", fixedHeight: nil) {
+            OptHead(title: "Roll check", sub: "calls sold", right: "\(bars.count) legs")
+            Spacer().frame(height: S.gap7)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("CAPTURED OF CREDIT")
+                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                    .foregroundStyle(S.mute)
+                HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
+                    Text(optMoney(book.kept))
+                        .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
+                        .foregroundStyle(book.kept < 0 ? S.loss : S.gain)
+                        .sunnyLineBox(S.t30)
+                    Text("kept this week")
+                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+                }
             }
+            Spacer().frame(height: 18)
+            HStack(spacing: S.gap4) {
+                Color.clear.frame(width: S.progNameCol, height: 1)
+                HStack {
+                    Text("\(giveBackLine)%".replacingOccurrences(of: "-", with: "\u{2212}"))
+                    Spacer()
+                    Text("+\(captureLine)%")
+                }
+                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                .foregroundStyle(S.mute)
+                .frame(width: track)
+                Color.clear.frame(width: S.progValCol, height: 1)
+            }
+            .padding(.bottom, S.gap4)
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: S.progRowGap) {
+                    ForEach(bars) { b in rowFor(b, x: x, track: track) }
+                }
+                /* The lines live in the ROW box, so each carries the name
+                   column plus its gap as an offset. */
+                ForEach([("give", CGFloat(giveBackLine)), ("cap", CGFloat(captureLine))], id: \.0) { _, v in
+                    Rectangle().fill(S.hair).frame(width: S.refLine)
+                        .offset(x: S.progNameCol + S.gap4 + x(v), y: -4)
+                        .frame(maxHeight: .infinity).padding(.bottom, -4)
+                }
+                Rectangle().fill(S.ruleColorStrong).frame(width: 1)
+                    .offset(x: S.progNameCol + S.gap4 + x(0), y: -4)
+                    .frame(maxHeight: .infinity).padding(.bottom, -4)
+            }
+            Spacer().frame(height: 22)
+            OptFooter(stats: [
+                .init(label: "Rolling", value: "\(book.rolling)", ink: S.loss),
+                .init(label: "Next expiry", value: "\(book.nextExpiry)", ink: S.gain),
+                .init(label: "Kept", value: optMoney(book.kept),
+                      ink: book.kept < 0 ? S.loss : S.gain),
+            ])
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, S.gap5)
+    }
+
+    @ViewBuilder private func rowFor(_ b: Bar, x: (CGFloat) -> CGFloat,
+                                     track: CGFloat) -> some View {
+        let v = CGFloat(b.captured)
+        let x0 = x(min(v, 0)), x1 = x(max(v, 0))
+        HStack(spacing: S.gap4) {
+            Text(b.ticker)
+                .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
+                .foregroundStyle(S.ink)
+                .frame(width: S.progNameCol, alignment: .leading).lineLimit(1)
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
+                RoundedRectangle(cornerRadius: S.radiusBar)
+                    .fill(b.itm ? S.lossBar : S.gainBar)
+                    .frame(width: max(2, x1 - x0))
+                    .offset(x: x0)
+            }
+            .frame(width: track, height: S.progRowH)
+            .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
+            Text(signedPctInt(b.captured))
+                .font(S.inter(S.t13, S.wSemiN))
+                .foregroundStyle(b.captured < 0 ? S.lossText : S.gainText)
+                .frame(width: S.progValCol, alignment: .trailing)
+        }
     }
 }
 
@@ -273,12 +362,15 @@ struct SunnyYieldProgress: View {
 
     var body: some View {
         OptCard(name: "yield-progress") {
-            /* The sheet's right-hand slot named the denominator in full ("of
-               $162,235 paid") and at 323 that wrapped the title onto a second
-               line. Every percentage still names its denominator — the rule is
-               that it is stated, not how many words it takes. */
-            OptHead(title: "Yield progress", sub: "paid back",
-                    right: "of \(optMoney(book.paid))")
+            /* ⚠ THE SUB IS GONE AND THE DENOMINATOR CARRIES THE WHOLE JOB.
+               The sheet's header was "Yield progress · premium paid back · of
+               $162,235 paid", which wrapped the title onto a second line at
+               323. Nik's call: drop the sub, keep "$162,235 paid". The rule is
+               that every percentage NAMES its denominator, not that it takes
+               three phrases to do it — and "paid back" was already said by the
+               hero's own label two rows down. */
+            OptHead(title: "Yield progress", sub: "",
+                    right: "\(optMoney(book.paid)) paid")
             Spacer().frame(height: S.gap7)
             VStack(alignment: .leading, spacing: 5) {
                 Text("BOOK AVERAGE")
@@ -359,8 +451,13 @@ struct SunnyWeeklyYield: View {
 
     var body: some View {
         OptCard(name: "weekly-yield") {
+            /* ⚠ THE WINDOW AND THE DIVISOR ARE DIFFERENT NUMBERS, and the
+               header now says so. The bars chart all eight weeks because a
+               zero week is a fact; the average divides by the weeks the book
+               actually ran, because five weeks before the position existed
+               dragged a 2.78% rate to 1.04%. */
             OptHead(title: "Weekly yield", sub: "on premium paid",
-                    right: "last \(book.weekly.count) weeks")
+                    right: "\(book.liveWeeks) of \(book.weekly.count) weeks")
             Spacer().frame(height: S.gap6)
             VStack(alignment: .leading, spacing: 5) {
                 Text("AVERAGE")
@@ -410,7 +507,10 @@ struct SunnyWeeklyYield: View {
         HStack(spacing: S.gap4) {
             ForEach(Array(book.weekly.enumerated()), id: \.element.id) { i, _ in
                 let live = i == book.weekly.count - 1
-                Text("Wk \(i + 1)")
+                /* The sheet writes these `Wk 1`…`Wk 8`. Nik's call on
+                   2026-09-02: `W1`. Eight labels in 323 with a space in each
+                   crowd the row, and the axis is unambiguous without it. */
+                Text("W\(i + 1)")
                     .font(S.inter(S.t11, live ? S.wBoldN : S.wMidSmN))
                     .foregroundStyle(live ? S.ink : S.mute)
                     .frame(maxWidth: S.weekBarMax)

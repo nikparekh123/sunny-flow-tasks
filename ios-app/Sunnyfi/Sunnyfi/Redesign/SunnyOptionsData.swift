@@ -50,6 +50,8 @@ struct OptionsBook: Decodable {
     let paid: Int, collected: Int, windowCredit: Int
     let weekly: [BookWeek]
     let avgPct: Double
+    /// Weeks with a credit. The average divides by THIS, not by 8.
+    let liveWeeks: Int
     let thisWeek: Int, bestWeek: Int
     /// ⚠ NOT A FORECAST. The eight-week average × 52. The one-word label the
     /// sheet mandates cannot carry that caveat, so it lives here.
@@ -77,6 +79,8 @@ struct OptionsPosition: Decodable, Identifiable {
     /// is why `windowCredit` exists beside it: the eight bars total THAT.
     let collected: Int
     let windowCredit: Int
+    /// Weeks with a credit, the divisor for this name's average.
+    let liveWeeks: Int
     let week: Int
     let weekly: [Int]
     let weeksRun: Int, weeksLeft: Int

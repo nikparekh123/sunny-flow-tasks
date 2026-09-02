@@ -909,6 +909,13 @@ enum S {
     static let statRulePad: CGFloat = 16
     static let durBar: Double = 0.72
     static let barStagger: Double = 0.055
+    // the pair card
+    static let pairBarW:   CGFloat = 58     // two legs in 323; the comparison IS the card
+    static let pairColGap: CGFloat = 22     // 2 x 58 + 22 = 138, each bar in a 150 slot
+    static let pairPlotH:  CGFloat = 132    // 150 was 16 over the L, 134 was 2 over
+    // pace to cover
+    static let paceH:   CGFloat = 143
+    static let paceDot: CGFloat = 9         // 5, the deck's flag dot, is invisible at 22
     // t30 and radiusBar are already declared above; the options block reuses them.
 
     // The drift. HUE IS THE DIRECTION OF THE TURN, DEPTH IS ITS SIZE, and the
