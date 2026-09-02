@@ -20,7 +20,13 @@ private struct TCard<Content: View>: View {
     @ViewBuilder let body_: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { body_() }
-            .padding(EdgeInsets(top: 17, leading: 19, bottom: 16, trailing: 19))
+            /* ⚠ 22 AT THE BOTTOM, NOT THE SHEET'S 16. The sheet measured
+               --pad-card-m off CSS, where a 19px figure at line-height 1 sits
+               its baseline flush to the box floor. SwiftUI gives Text its own
+               leading, so the same 16 left the footer figures visually touching
+               the card edge on every card. The extra 6 comes out of the slack
+               row, so the card still measures 361. */
+            .padding(EdgeInsets(top: 17, leading: 19, bottom: 22, trailing: 19))
             .frame(width: S.content, height: 361, alignment: .top)
             .background(S.paper)
             .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
@@ -159,7 +165,13 @@ struct SunnyNameCredit: View {
         HStack(spacing: S.gap4) {
             ForEach(Array(p.weekly.enumerated()), id: \.offset) { i, _ in
                 let live = i == p.weekly.count - 1
-                Text("\(p.weeksRun - (p.weekly.count - 1 - i))")
+                /* ⚠ COUNT FORWARD, NOT BACK FROM weeksRun. The sheet labels
+                   these with the position's real week numbers, which assumes
+                   the window sits inside its life. FIS has run ONE week, so
+                   counting back eight printed −6, −5, −4 … and a negative week
+                   is not a thing. W1…W8 names the window, which is what the
+                   axis actually is, and matches the book card. */
+                Text("W\(i + 1)")
                     .font(S.inter(S.t12, live ? S.wBoldN : S.wMidSmN))
                     .foregroundStyle(live ? S.ink : S.mute)
                     .frame(maxWidth: S.weekBarMax).lineLimit(1)

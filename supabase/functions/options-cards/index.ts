@@ -82,20 +82,25 @@ Deno.serve(async (req) => {
     /* ── net every open leg on its contract key ─────────────────────────── */
     type Leg = {
       ticker: string; type: string; dir: string; k: number; exp: string;
-      n: number; cash: number; ids: string[];
+      n: number; cash: number; ids: string[]; opened: string;
     };
     const byKey = new Map<string, Leg>();
     for (const t of legs) {
       const key = `${t.ticker}|${t.option_type}|${t.direction}|${N(t.strike)}`
         + `|${String(t.expiry).slice(0, 10)}`;
-      const e = byKey.get(key) ?? {
+      const e: Leg = byKey.get(key) ?? {
         ticker: String(t.ticker), type: String(t.option_type), dir: String(t.direction),
         k: N(t.strike), exp: String(t.expiry).slice(0, 10), n: 0, cash: 0, ids: [],
+        opened: String(t.trade_date).slice(0, 10),
       };
       const sign = String(t.action) === 'open' ? 1 : -1;
       e.n += sign * N(t.contracts);
       e.cash += sign * N(t.contracts) * N(t.premium) * 100;
-      if (String(t.action) === 'open') e.ids.push(String(t.id));
+      if (String(t.action) === 'open') {
+        e.ids.push(String(t.id));
+        const d = String(t.trade_date).slice(0, 10);
+        if (d < e.opened) e.opened = d;
+      }
       byKey.set(key, e);
     }
     const open = [...byKey.values()].filter((e) => e.n > 0.0001);
@@ -123,6 +128,22 @@ Deno.serve(async (req) => {
       weeks.push(new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
         .toISOString().slice(0, 10));
     }
+
+    /* ⚠ THE TARGET IS 25 WEEKS TO COVER, NOT THE LEAP'S EXPIRY. Nik's ruling
+       2026-09-02: "the pace should be more like 25 weeks to cover the
+       investment, anything below is danger anything above is good."
+
+       The sheet ramped to the LEAP's expiry, which is 72 weeks out, so every
+       position sat as a flat line in the bottom-left corner and would have for
+       months — the sheet flags that as "honest, and hard to read" at 21 weeks
+       in; we are at three. A 25-week target is a standard the position can
+       actually be measured against today.
+
+       He also said "avg should be 3% each week roughly", and those two do not
+       agree: 25 weeks implies 4.0% a week, 3% implies 33. TARGET_WEEKS is the
+       one that ships because he named it first and definitely; change this
+       single constant to move the standard. The book currently runs 2.78%. */
+    const TARGET_WEEKS = 25;
 
     const positions = open
       .filter((e) => e.dir === 'long' && e.type === 'call')
@@ -156,9 +177,16 @@ Deno.serve(async (req) => {
         const wk = creditByWeek.get(t) ?? new Map();
         const collected = [...wk.values()].reduce((a, b) => a + b, 0);
         const weekly = weeks.map((w) => Math.round(wk.get(w) ?? 0));
-        const first = firstCredit.get(t) ?? today;
+        /* ⚠ THE CLOCK STARTS WHEN THE LEAP OPENED, not at the first credit.
+           `collected` is every credit ever, Nik's ruling, and NKE's run back to
+           20 May — so counting from there made the pace card ask NKE for
+           $45,300 of its $75,500 by now, when the thing being paid off has
+           existed for three weeks. Credits earned before the LEAP still COUNT
+           toward paying it off; they just mean the position starts ahead. What
+           they cannot do is start the clock on an obligation that did not
+           exist. */
         const weeksRun = Math.max(1, Math.round(
-          (Date.parse(today) - Date.parse(first)) / (7 * 86_400_000)));
+          (Date.parse(today) - Date.parse(leap.opened)) / (7 * 86_400_000)));
         const weeksLeft = Math.max(0, Math.round(
           (Date.parse(leap.exp) - Date.parse(today)) / (7 * 86_400_000)));
         const dShort = shorts.length
@@ -168,7 +196,7 @@ Deno.serve(async (req) => {
         return {
           t, co: co.get(t) ?? t,
           leap: contractLine(leap.n, leap.k, leap.exp, true),
-          leapOpened: null as string | null,
+          leapOpened: leap.opened,
           paid: Math.round(paid), mark: Math.round(m * leap.n * 100),
           /* ⚠ A CHANGE IN MARK, NOT CASH THAT MOVED. A LEAP held all week moves
              no cash and still gains or loses every week. Zero until a week of
@@ -191,6 +219,10 @@ Deno.serve(async (req) => {
           week: Math.round(wk.get(thisWeek) ?? 0),
           weekly, weeksRun, weeksLeft,
           longN: leap.n, shortN,
+          targetWeeks: TARGET_WEEKS,
+          /* What a straight line to a 25-week payback needs by now. Capped at
+             the full premium: past week 25 the target is "all of it", not more. */
+          neededByNow: Math.round(paid * Math.min(weeksRun, TARGET_WEEKS) / TARGET_WEEKS),
           dLong: r2(dLong), dShort: r2(dShort),
           /* ⚠ SHARE EQUIVALENTS, AND THE TWO LEG COUNTS ARE WEIGHTED
              SEPARATELY. The sheet's `contracts × 100 × (dLong − dShort)`
@@ -244,6 +276,10 @@ Deno.serve(async (req) => {
            the caveat the one-word label cannot. */
         yearly: Math.round(avgPct * 52 * 100) / 100,
         legs: legCount,
+        targetWeeks: TARGET_WEEKS,
+        /* The weekly rate the target implies, so the card never has to
+           re-derive it and the two can never disagree. */
+        targetPct: r2(100 / TARGET_WEEKS),
         /* The leg count picks the form and nothing else does: ≤5 bars,
            6–10 paged, 11+ rows. */
         form: legCount <= 5 ? 'bars' : legCount <= 10 ? 'paged' : 'rows',

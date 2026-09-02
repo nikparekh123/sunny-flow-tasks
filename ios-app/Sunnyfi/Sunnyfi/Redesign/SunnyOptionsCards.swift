@@ -24,7 +24,13 @@ private struct OptCard<Content: View>: View {
     @ViewBuilder let body_: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0) { body_() }
-            .padding(EdgeInsets(top: 17, leading: 19, bottom: 16, trailing: 19))
+            /* ⚠ 22 AT THE BOTTOM, NOT THE SHEET'S 16. The sheet measured
+               --pad-card-m off CSS, where a 19px figure at line-height 1 sits
+               its baseline flush to the box floor. SwiftUI gives Text its own
+               leading, so the same 16 left the footer figures visually touching
+               the card edge on every card. The extra 6 comes out of the slack
+               row, so the card still measures 361. */
+            .padding(EdgeInsets(top: 17, leading: 19, bottom: 22, trailing: 19))
             .frame(width: S.content, height: fixedHeight, alignment: .top)
             .background(S.paper)
             .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
