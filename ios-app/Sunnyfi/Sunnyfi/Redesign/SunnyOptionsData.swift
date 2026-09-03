@@ -64,6 +64,11 @@ struct OptionsBook: Decodable {
 
     struct BookWeek: Decodable, Identifiable {
         let week: String, credit: Int, pct: Double
+        /// ⚠ THE LIVE BAR IS NOT THE LAST ONE any more. The window reaches
+        /// forward into weeks already sold, so the server says which column is
+        /// the current week and the card must not infer it from an index.
+        /// Optional so an older payload still decodes.
+        let current: Bool?
         var id: String { week }
     }
 }
@@ -97,6 +102,11 @@ struct OptionsPosition: Decodable, Identifiable {
         let credit: Int, value: Int
         /// THE ACTION. `verdictOf` reads this and nothing else.
         let itm: Bool
+        /// ⚠ FALSE MEANS NO MARK EXISTS YET, NOT BREAK-EVEN. An unpriced leg
+        /// used to compute captured = 100%: a call sold minutes ago read as a
+        /// perfect capture. The server now sends value == credit for those so
+        /// they net to zero everywhere; this says not to believe the figure.
+        let priced: Bool?
         /// THE MONEY, of the credit received. Disagrees with `itm` often, and
         /// that disagreement is the point.
         let captured: Int

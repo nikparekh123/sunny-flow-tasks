@@ -113,6 +113,11 @@ func optMoney(_ v: Int) -> String {
     let s = a >= 1000 ? "$\(a / 1000),\(String(format: "%03d", a % 1000))" : "$\(a)"
     return v < 0 ? "\u{2212}" + s : s
 }
+/// ⚠ NO SIGN GLYPH. Nik, 2026-09-03: "remove the + and - sign green and red
+/// text is enough." The bar's side of the zero line and the ink both say the
+/// direction already, and "+" / "−" in a 44pt column was what pushed −158%
+/// onto a second line.
+private func barePctInt(_ v: Int) -> String { "\(abs(v))%" }
 private func signedPctInt(_ v: Int) -> String {
     (v > 0 ? "+" : v < 0 ? "\u{2212}" : "") + "\(abs(v))%"
 }
@@ -160,12 +165,34 @@ struct SunnyRollCheck: View {
                 let k = s.k.formatted(.number.precision(.fractionLength(0)))
                 let label: String
                 if p.shorts.count <= 1 { label = p.t }
-                else if (strikeCount[s.k] ?? 0) > 1 { label = "\(p.t) \(k) \(shortDay(s.exp))" }
+                /* ⚠ AND THE STRIKE IS DROPPED WHEN IT COLLIDES, not kept
+                   alongside the date. Two legs at 114 make "114" carry no
+                   information at all; keeping it only bought "BABA 114 11 Sep",
+                   which does not fit any sane name column. The date alone
+                   separates them. */
+                else if (strikeCount[s.k] ?? 0) > 1 { label = "\(p.t) \(shortDay(s.exp))" }
                 else { label = "\(p.t) \(k)" }
                 return Bar(id: "\(p.t)-\(s.id)", ticker: label,
                            captured: s.captured, itm: s.itm)
             }
         }
+    }
+
+    /* ⚠ THE COLUMNS ARE MEASURED, NOT ASSUMED. 46 was sized for a bare
+       ticker and 44 for "-111%"; the first label with a date in it truncated
+       to "BABA..." and -158% wrapped onto a second line. Both columns now take
+       their widest actual content and the TRACK absorbs the difference, so the
+       row still totals 323 and the plot never overflows the card. */
+    private var nameCol: CGFloat {
+        min(134, max(S.progNameCol,
+                     (bars.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3))
+    }
+    private var valCol: CGFloat {
+        max(S.progValCol,
+            (bars.map { S.textW(barePctInt($0.captured), S.t13, S.wSemiN) }.max() ?? 0) + 3)
+    }
+    private var rowTrack: CGFloat {
+        max(110, S.content - 38 - nameCol - valCol - 2 * S.gap4)
     }
 
     /// "11 Sep" — only ever appended when two legs share a strike.
@@ -281,7 +308,7 @@ struct SunnyRollCheck: View {
             .frame(height: S.rollPlotH)
             Spacer().frame(height: S.gap5)
             VStack(spacing: S.gap3) {
-                Text(signedPctInt(b.captured))
+                Text(barePctInt(b.captured))
                     .font(S.inter(S.t13, S.wSemiN))
                     .foregroundStyle(b.captured < 0 ? S.lossText : S.gainText)
                     .lineLimit(1)
@@ -300,7 +327,7 @@ struct SunnyRollCheck: View {
     private var rowsCard: some View {
         let hi = max(CGFloat(captureLine), CGFloat(bars.map(\.captured).max() ?? 0)) * 1.1
         let lo = min(CGFloat(giveBackLine), CGFloat(bars.map(\.captured).min() ?? 0)) * 1.1
-        let track: CGFloat = 217
+        let track: CGFloat = rowTrack
         let x = { (v: CGFloat) in track * (v - lo) / max(hi - lo, 1) }
         return OptCard(name: "roll-check-rows", fixedHeight: nil) {
             OptHead(title: "Roll check", sub: "calls sold", right: "\(bars.count) legs")
@@ -320,7 +347,7 @@ struct SunnyRollCheck: View {
             }
             Spacer().frame(height: 18)
             HStack(spacing: S.gap4) {
-                Color.clear.frame(width: S.progNameCol, height: 1)
+                Color.clear.frame(width: nameCol, height: 1)
                 HStack {
                     Text("\(giveBackLine)%".replacingOccurrences(of: "-", with: "\u{2212}"))
                     Spacer()
@@ -329,7 +356,7 @@ struct SunnyRollCheck: View {
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
                 .foregroundStyle(S.mute)
                 .frame(width: track)
-                Color.clear.frame(width: S.progValCol, height: 1)
+                Color.clear.frame(width: valCol, height: 1)
             }
             .padding(.bottom, S.gap4)
             ZStack(alignment: .topLeading) {
@@ -340,11 +367,11 @@ struct SunnyRollCheck: View {
                    column plus its gap as an offset. */
                 ForEach([("give", CGFloat(giveBackLine)), ("cap", CGFloat(captureLine))], id: \.0) { _, v in
                     Rectangle().fill(S.hair).frame(width: S.refLine)
-                        .offset(x: S.progNameCol + S.gap4 + x(v), y: -4)
+                        .offset(x: nameCol + S.gap4 + x(v), y: -4)
                         .frame(maxHeight: .infinity).padding(.bottom, -4)
                 }
                 Rectangle().fill(S.ruleColorStrong).frame(width: 1)
-                    .offset(x: S.progNameCol + S.gap4 + x(0), y: -4)
+                    .offset(x: nameCol + S.gap4 + x(0), y: -4)
                     .frame(maxHeight: .infinity).padding(.bottom, -4)
             }
             Spacer().frame(height: 22)
@@ -365,7 +392,7 @@ struct SunnyRollCheck: View {
             Text(b.ticker)
                 .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
                 .foregroundStyle(S.ink)
-                .frame(width: S.progNameCol, alignment: .leading).lineLimit(1)
+                .frame(width: nameCol, alignment: .leading).lineLimit(1)
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
                 RoundedRectangle(cornerRadius: S.radiusBar)
@@ -375,10 +402,10 @@ struct SunnyRollCheck: View {
             }
             .frame(width: track, height: S.progRowH)
             .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
-            Text(signedPctInt(b.captured))
+            Text(barePctInt(b.captured))
                 .font(S.inter(S.t13, S.wSemiN))
                 .foregroundStyle(b.captured < 0 ? S.lossText : S.gainText)
-                .frame(width: S.progValCol, alignment: .trailing)
+                .frame(width: valCol, alignment: .trailing)
         }
     }
 }
@@ -546,7 +573,15 @@ struct SunnyLeapGains: View {
     private var bookPct: Double { paid > 0 ? Double(gain) / Double(paid) * 100 : 0 }
     /// Symmetric, so the centre line is genuinely the centre.
     private var span: Double { max(5, (rows.map { abs($0.pct) }.max() ?? 5) * 1.1) }
-    private let track: CGFloat = 217
+    /* Measured for the same reason the roll check's is: the fixed 44 was sized
+       for "-111%" and "+10.9%" wrapped onto a second line in it. */
+    private var valCol: CGFloat {
+        max(S.progValCol,
+            (rows.map { S.textW(pct($0.pct), S.t13, S.wSemiN) }.max() ?? 0) + 3)
+    }
+    private var track: CGFloat {
+        max(110, S.content - 38 - S.progNameCol - valCol - 2 * S.gap4)
+    }
 
     private func x(_ v: Double) -> CGFloat {
         track * CGFloat((v + span) / (2 * span))
@@ -583,7 +618,7 @@ struct SunnyLeapGains: View {
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
                 .foregroundStyle(S.mute)
                 .frame(width: track)
-                Color.clear.frame(width: S.progValCol, height: 1)
+                Color.clear.frame(width: valCol, height: 1)
             }
             .padding(.bottom, S.gap4)
             ZStack(alignment: .topLeading) {
@@ -607,7 +642,7 @@ struct SunnyLeapGains: View {
                             Text(pct(r.pct))
                                 .font(S.inter(S.t13, S.wSemiN))
                                 .foregroundStyle(r.pct < 0 ? S.lossText : S.gainText)
-                                .frame(width: S.progValCol, alignment: .trailing)
+                                .frame(width: valCol, alignment: .trailing)
                         }
                     }
                 }
@@ -659,8 +694,6 @@ struct SunnyWeeklyYield: View {
             }
             Spacer().frame(height: 18)
             plot
-            Spacer().frame(height: S.gap4)
-            labels
             Spacer(minLength: S.gap6)
             OptFooter(stats: [
                 .init(label: "This week", value: optMoney(book.thisWeek), ink: S.gain),
@@ -670,39 +703,44 @@ struct SunnyWeeklyYield: View {
         }
     }
 
+    /* ⚠ THE WEEK NUMBERS ARE GONE AND THE VALUE SITS ON THE BAR. Nik:
+       "Remove W1, ... W8 text we dont need the text also on bars can you add %
+       value on top of the bars." W1…W8 named a column without saying anything
+       about it, and the reader still had to measure a bar against a line to
+       learn the number. The figure on the bar answers it directly.
+
+       A zero week gets NO label. Five "0.0%" on five empty bars is the axis
+       row again in a worse place; the empty bar is already the whole story. */
+    private let capH: CGFloat = 14      // the figure above a bar
+    private var barMaxH: CGFloat { S.weekPlotH - capH - 4 }
+
     private var plot: some View {
         ZStack(alignment: .bottom) {
             Rectangle().fill(S.ruleColor).frame(height: 1)
             HStack(alignment: .bottom, spacing: S.gap4) {
-                ForEach(Array(book.weekly.enumerated()), id: \.element.id) { i, w in
-                    let live = i == book.weekly.count - 1
-                    UnevenRoundedRectangle(topLeadingRadius: S.radiusBar,
-                                           bottomLeadingRadius: 1, bottomTrailingRadius: 1,
-                                           topTrailingRadius: S.radiusBar)
-                        .fill(live ? S.gainBar : S.barQuiet)
-                        .frame(maxWidth: S.weekBarMax)
-                        .frame(height: max(1, S.weekPlotH * w.pct / maxPct))
+                ForEach(book.weekly) { w in
+                    /* Server-flagged, never the last index: the window now
+                       reaches into weeks already sold but not yet begun. */
+                    let live = w.current ?? false
+                    VStack(spacing: 4) {
+                        Text(w.pct > 0 ? String(format: "%.1f%%", w.pct) : "")
+                            .font(S.inter(S.t10, live ? S.wBoldN : S.wMidSmN))
+                            .foregroundStyle(live ? S.ink : S.mute)
+                            .lineLimit(1).fixedSize()
+                            .frame(height: capH)
+                        UnevenRoundedRectangle(topLeadingRadius: S.radiusBar,
+                                               bottomLeadingRadius: 1, bottomTrailingRadius: 1,
+                                               topTrailingRadius: S.radiusBar)
+                            .fill(live ? S.gainBar : S.barQuiet)
+                            .frame(height: max(1, barMaxH * w.pct / maxPct))
+                    }
+                    .frame(maxWidth: S.weekBarMax)
                 }
             }
             Rectangle().fill(S.ink).frame(height: S.refLine)
-                .offset(y: -S.weekPlotH * book.avgPct / maxPct)
+                .offset(y: -barMaxH * book.avgPct / maxPct)
         }
         .frame(height: S.weekPlotH, alignment: .bottom)
     }
 
-    private var labels: some View {
-        HStack(spacing: S.gap4) {
-            ForEach(Array(book.weekly.enumerated()), id: \.element.id) { i, _ in
-                let live = i == book.weekly.count - 1
-                /* The sheet writes these `Wk 1`…`Wk 8`. Nik's call on
-                   2026-09-02: `W1`. Eight labels in 323 with a space in each
-                   crowd the row, and the axis is unambiguous without it. */
-                Text("W\(i + 1)")
-                    .font(S.inter(S.t11, live ? S.wBoldN : S.wMidSmN))
-                    .foregroundStyle(live ? S.ink : S.mute)
-                    .frame(maxWidth: S.weekBarMax)
-                    .lineLimit(1)
-            }
-        }
-    }
 }

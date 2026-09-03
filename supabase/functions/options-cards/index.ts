@@ -186,15 +186,33 @@ Deno.serve(async (req) => {
         const shorts = open.filter((e) =>
           e.ticker === t && e.dir === 'short' && e.type === 'call').map((s) => {
             const sm = s.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
-            const value = (sm.length ? sm.reduce((a, x) => a + x.m, 0) / sm.length : 0) * s.n * 100;
+            /* ⚠ AN UNPRICED LEG IS NOT A FULLY CAPTURED ONE. `value` used to
+               fall back to 0 when no mark existed, which made captured
+               (credit − 0) / credit = 100%. Nik caught it on a BABA 114 sold
+               minutes earlier: "baba is not 100% and cannot be 100% with one
+               day remaining". Every newly sold leg read as a perfect capture
+               until the next mp-refresh, and it inflated `kept` by the whole
+               credit besides.
+
+               `priced` is the truth of it. The value and captured FIELDS stay
+               numeric rather than going null, because a shipped build decodes
+               them as Int and an optional Decodable still throws on a changed
+               shape — it tolerates a missing key, not a null one. So an
+               unpriced leg reports value = credit and captured = 0, which nets
+               to zero contribution everywhere, and the new build reads
+               `priced` to render it as unknown rather than as break-even. */
+            const priced = sm.length > 0;
+            const value = priced
+              ? (sm.reduce((a, x) => a + x.m, 0) / sm.length) * s.n * 100
+              : s.cash;
             const credit = s.cash;
             return {
               n: s.n, k: s.k, exp: s.exp, credit: Math.round(credit),
-              value: Math.round(value), itm: S > s.k,
+              value: Math.round(value), itm: S > s.k, priced,
               /* ⚠ CAPTURED IS OF THE CREDIT RECEIVED, never the option's own
                  price change and never a dollar. It is the MONEY; `itm` is the
                  ACTION, and they disagree often on purpose. */
-              captured: credit > 0 ? Math.round((credit - value) / credit * 100) : 0,
+              captured: (priced && credit > 0) ? Math.round((credit - value) / credit * 100) : 0,
               delta: sm.length ? r2(sm.reduce((a, x) => a + x.d, 0) / sm.length) : 0,
               contract: contractLine(s.n, s.k, s.exp, false),
             };
@@ -266,12 +284,21 @@ Deno.serve(async (req) => {
     const bookWeekly = weeks.map((w) => {
       let c = 0;
       for (const p of positions) c += (creditByWeek.get(p.t)?.get(w) ?? 0);
-      return { week: w, credit: Math.round(c), pct: paidTotal > 0 ? r2(c / paidTotal * 100) : 0 };
+      /* ⚠ WHICH BAR IS "NOW" IS NO LONGER THE LAST ONE. The window reaches
+         forward, so the final column can be a week already sold but not yet
+         begun — and the card was painting THAT one as the live week. The
+         server says which is current; the client must not infer it from a
+         position in the array. */
+      return { week: w, credit: Math.round(c), current: w === thisWeek,
+               pct: paidTotal > 0 ? r2(c / paidTotal * 100) : 0 };
     });
     const legCount = positions.reduce((s, p) => s + p.shorts.length, 0);
     const rolling = positions.reduce((s, p) => s + p.shorts.filter((x) => x.itm).length, 0);
+    /* Unpriced legs contribute nothing rather than their whole credit: value
+       equals credit for them, so the subtraction is already zero. Filtered
+       explicitly anyway, so the intent survives a change to that fallback. */
     const kept = positions.reduce((s, p) =>
-      s + p.shorts.reduce((a, x) => a + (x.credit - x.value), 0), 0);
+      s + p.shorts.reduce((a, x) => a + (x.priced ? x.credit - x.value : 0), 0), 0);
     /* ⚠ THE AVERAGE COUNTS ONLY WEEKS THE BOOK ACTUALLY RAN. Nik caught this:
        the eight-week window reaches back before the position existed, so five
        zeros dragged the book rate from 2.78% to 1.04% and "Yearly" from 144%

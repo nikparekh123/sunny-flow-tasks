@@ -220,6 +220,14 @@ enum S {
     /// size x (multiple - 1) is the obvious move and it is wrong: at 14.5/1.45
     /// it hands SwiftUI 6.52 where the answer is 3.48, because Inter's natural
     /// advance at 14.5 is already 17.54. Measure the font, then subtract.
+    /// Rendered width of a string in Inter at a given size and weight. Exists
+    /// because a FIXED name column is only safe while every label is a bare
+    /// ticker: the roll check started labelling colliding legs with an expiry
+    /// and "BABA 11 Sep" rendered as "BABA..." in a 46pt slot.
+    static func textW(_ s: String, _ size: CGFloat, _ wght: CGFloat) -> CGFloat {
+        guard let f = interUI(size, wght) else { return CGFloat(s.count) * size * 0.62 }
+        return (s as NSString).size(withAttributes: [.font: f]).width
+    }
     static func leading(_ size: CGFloat, _ wght: CGFloat, _ multiple: CGFloat) -> CGFloat {
         guard let f = interUI(size, wght) else { return 0 }
         return max(0, size * multiple - f.lineHeight)
