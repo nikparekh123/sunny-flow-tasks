@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
       D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
         + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date'),
       D.get('option_trades?voided_at=is.null&option_type=eq.call&direction=eq.short'
-        + '&select=ticker,action,contracts,premium,trade_date&order=trade_date.asc'),
+        + '&select=ticker,action,contracts,premium,trade_date,expiry&order=trade_date.asc'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
       D.get('option_greeks_latest?select=option_trade_id,delta,last_mark'),
       D.get(`option_greeks?captured_at=gte.${ago(12)}`
@@ -114,7 +114,18 @@ Deno.serve(async (req) => {
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
       if (!creditByWeek.has(tk)) creditByWeek.set(tk, new Map());
       const m = creditByWeek.get(tk)!;
-      const w = weekStart(d);
+      /* ⚠ THE WEEK A CREDIT BELONGS TO IS THE WEEK IT COVERS, NOT THE DAY IT
+         WAS SOLD. Nik, 2026-09-03, after selling a BABA 114 for 11 Sep on the
+         3rd and finding it nowhere: "Which week it's sold for not the day it
+         is sold." Bucketing by trade_date put that credit in the week of the
+         SALE, so a call written a week ahead landed on top of the week it was
+         written in and the week it actually covers showed nothing.
+
+         This rewrites every historical bar, deliberately. The question the
+         card answers is what each week of COVERAGE earned, which is the only
+         reading under which "3 of 8 weeks" and the weekly rate mean anything.
+         A credit is now filed under its expiry's Monday. */
+      const w = weekStart(String(t.expiry).slice(0, 10));
       m.set(w, (m.get(w) ?? 0) + c);
       if (!firstCredit.has(tk) || d < firstCredit.get(tk)!) firstCredit.set(tk, d);
     }
@@ -123,9 +134,24 @@ Deno.serve(async (req) => {
        no sale, not missing data — the sheet's `weekly[]` must sum to
        `collected`, so a gap is a zero and never a dropped column. */
     const thisWeek = weekStart(today);
+    /* ⚠ AND THE WINDOW HAS TO REACH FORWARD, or expiry-bucketing achieves
+       nothing: a call sold today for next Friday files under NEXT week, which
+       an eight-week window ending on THIS week cannot show. The window now ends
+       at the furthest week that actually carries a credit.
+
+       Capped four weeks out. The shorts are weeklies, so a credit further ahead
+       than that is a typo or a one-off, and either way it must not drag six
+       empty columns into a chart that only has three live weeks in it. */
+    const FORWARD_CAP = 4;
+    let lastWeek = thisWeek;
+    const capWeek = new Date(Date.parse(thisWeek + 'T00:00:00Z')
+      + FORWARD_CAP * 7 * 86_400_000).toISOString().slice(0, 10);
+    for (const m of creditByWeek.values()) {
+      for (const [w, c] of m) if (c !== 0 && w > lastWeek && w <= capWeek) lastWeek = w;
+    }
     const weeks: string[] = [];
     for (let i = 7; i >= 0; i--) {
-      weeks.push(new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
+      weeks.push(new Date(Date.parse(lastWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
         .toISOString().slice(0, 10));
     }
 
@@ -270,7 +296,12 @@ Deno.serve(async (req) => {
         weekly: bookWeekly,
         avgPct: r2(avgPct),
         liveWeeks: liveWeeks.length,
-        thisWeek: bookWeekly[bookWeekly.length - 1].credit,
+        /* ⚠ THE LAST BAR IS NO LONGER THIS WEEK. Once the window reaches
+           forward, bookWeekly's final column can be a week that has not
+           started, so reading the footer's THIS WEEK off the end of the array
+           would report next week's credit under this week's label. Key it on
+           the current Monday instead. */
+        thisWeek: bookWeekly.find((w) => w.week === thisWeek)?.credit ?? 0,
         bestWeek: Math.max(...bookWeekly.map((w) => w.credit)),
         /* ⚠ NOT A FORECAST. The eight-week average × 52, and the sheet keeps
            the caveat the one-word label cannot. */
