@@ -407,15 +407,22 @@ struct SunnyPane: View {
             }
             /* On every state of the page, with that state's own numbers — a
                standing fact, not an arrival. */
-            /* ⚠ THE ROOM REPLACES THE MEDIAN. A median is one number standing
-               in for a crowd; the room is the crowd, and it can say things a
-               median cannot — that eleven of eleven analysts are above BABA's
-               price, or that LEN gained two bearish votes this month. Falls
-               back to the median card only against an older server that does
-               not serve `room`. */
+            /* ⚠ THE ROOM DOES NOT REPLACE THE MEDIAN. It did, and that was
+               wrong. The two answer different questions: the room is the
+               spread of opinion and how it MOVED, the median is the single
+               number and the distance from today's price to it. Demoting the
+               median to an `else` branch meant it could never render at all,
+               because `room` always has rows — so a card whose own comment
+               says "on every state of the page" was invisible for weeks.
+
+               Nik, 2026-09-03: "we use to have this on the new page and then
+               it was removed I want to keep this always as a view." Both now
+               render, room first because movement is the newer information and
+               the median is the standing fact underneath it. */
             if let room = p.room, !room.rows.isEmpty {
                 SunnyRoomCard(r: room)
-            } else if !p.targets.rows.isEmpty {
+            }
+            if !p.targets.rows.isEmpty {
                 SunnyTargetCard(t: p.targets)
             }
 
