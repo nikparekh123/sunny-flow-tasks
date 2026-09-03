@@ -457,6 +457,10 @@ struct SunnyPane: View {
                                  ? "\(o.book.rolling) to roll" : "\(o.book.legs) legs open")
             SunnyRollCheck(book: o.book, positions: o.positions)
             SunnyYieldProgress(book: o.book, positions: o.positions)
+            /* Directly under Yield progress on purpose: the two share the
+               $164,725 denominator and answer the halves of one question,
+               how much the premium has paid back and what the LEAP is worth. */
+            SunnyLeapGains(book: o.book, positions: o.positions)
             SunnyWeeklyYield(book: o.book)
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "

@@ -143,15 +143,39 @@ struct SunnyRollCheck: View {
        labelled `NKE` and `NKE`, indistinguishable. The strike is appended only
        for a name with more than one leg, so the common case keeps the sheet's
        form exactly and the ambiguous one stops lying. */
+    /* ⚠ THE STRIKE IS NOT ALWAYS ENOUGH TO TELL TWO LEGS APART. It was while
+       the only doubled name was NKE at 39 and 40. Then BABA went to 114 for
+       4 Sep AND 114 for 11 Sep — a roll to the same strike a week out, which is
+       the normal shape of this book — and both rows rendered "BABA 114". Two
+       identical labels on two different legs is worse than no label.
+
+       So the disambiguator escalates: one leg is the bare name, several legs
+       take the strike, and legs that COLLIDE on a strike also take the expiry.
+       Only the colliding ones, so NKE stays "NKE 39 / NKE 40" and does not
+       grow a date it does not need. */
     private var bars: [Bar] {
         positions.flatMap { p -> [Bar] in
-            let many = p.shorts.count > 1
+            let strikeCount = Dictionary(grouping: p.shorts, by: \.k).mapValues(\.count)
             return p.shorts.map { s in
-                Bar(id: "\(p.t)-\(s.id)",
-                    ticker: many ? "\(p.t) \(s.k.formatted(.number.precision(.fractionLength(0))))" : p.t,
-                    captured: s.captured, itm: s.itm)
+                let k = s.k.formatted(.number.precision(.fractionLength(0)))
+                let label: String
+                if p.shorts.count <= 1 { label = p.t }
+                else if (strikeCount[s.k] ?? 0) > 1 { label = "\(p.t) \(k) \(shortDay(s.exp))" }
+                else { label = "\(p.t) \(k)" }
+                return Bar(id: "\(p.t)-\(s.id)", ticker: label,
+                           captured: s.captured, itm: s.itm)
             }
         }
+    }
+
+    /// "11 Sep" — only ever appended when two legs share a strike.
+    private func shortDay(_ iso: String) -> String {
+        let p = iso.split(separator: "-")
+        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]), (1...12).contains(m)
+        else { return iso }
+        let mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        return "\(d) \(mon[m - 1])"
     }
 
     /* 10% headroom past whichever is further out, the bar or the level line.
@@ -380,7 +404,14 @@ struct SunnyYieldProgress: View {
     private var bookPct: Double {
         book.paid > 0 ? Double(book.collected) / Double(book.paid) * 100 : 0
     }
-    private var maxPct: Double { max(rows.map(\.pct).max() ?? 1, bookPct, 1) }
+    /* ⚠ THE DENOMINATOR IS 100, NOT THE LEADER. It used to be
+       max(best, bookAverage), which made the best name's bar full-width by
+       construction: NFLX at 16.9% filled the track and read as "winning",
+       when all it means is it is 16.9% of the way to paying its LEAP back.
+       Nik: "change from winner within them to racing to 100%". Every bar is
+       now its true share of a fully repaid LEAP, so the bars are SHORT and
+       that is the honest picture. The track's right edge is 100%. */
+    private let fullPct: Double = 100
     private let track: CGFloat = 217   // 323 − 46 − 44 − 8 − 8
 
     var body: some View {
@@ -407,6 +438,19 @@ struct SunnyYieldProgress: View {
                 }
             }
             Spacer().frame(height: 18)
+            /* ⚠ THE AXIS IS NOT DECORATION. Rescaling to 100 makes every bar
+               short, and a short bar with no end marked reads as a broken
+               chart rather than an early one. Same axis row as the roll-check
+               card, one page across. */
+            HStack(spacing: S.gap4) {
+                Color.clear.frame(width: S.progNameCol, height: 1)
+                HStack { Spacer(); Text("100% = PAID BACK") }
+                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                    .foregroundStyle(S.mute)
+                    .frame(width: track)
+                Color.clear.frame(width: S.progValCol, height: 1)
+            }
+            .padding(.bottom, S.gap4)
             rowsBlock
             Spacer(minLength: S.gap7)
             OptFooter(stats: [
@@ -432,12 +476,22 @@ struct SunnyYieldProgress: View {
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
                             RoundedRectangle(cornerRadius: S.radiusBar).fill(S.gainBar)
-                                .frame(width: max(2, track * r.pct / maxPct))
-                                .overlay(alignment: .trailing) {
-                                    if r.last > 0 && r.pct > r.last {
-                                        Rectangle().fill(S.paper)
-                                            .frame(width: S.progLastwkW)
-                                            .offset(x: -track * (r.pct - r.last) / maxPct)
+                                .frame(width: max(2, track * r.pct / fullPct))
+                                /* ⚠ TWO TONES, NOT A GAP. Last week used to be
+                                   a 1.5pt --paper rule inset from the bar's
+                                   tip, which worked when the leader filled the
+                                   track. Against a 100% denominator the bars
+                                   are short and most of the paid-back happened
+                                   THIS week, so the rule landed near the start
+                                   and severed every bar into two: NFLX and BABA
+                                   read as two separate bars. Prior weeks now
+                                   take --gain-span and this week keeps
+                                   --gain-bar, which says the same thing in one
+                                   continuous bar. */
+                                .overlay(alignment: .leading) {
+                                    if r.last > 0 {
+                                        Rectangle().fill(S.gainSpan)
+                                            .frame(width: max(1, track * r.last / fullPct))
                                     }
                                 }
                                 .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
@@ -454,9 +508,119 @@ struct SunnyYieldProgress: View {
                is a rate and a rate takes no direction ink. */
             Rectangle().fill(S.ink)
                 .frame(width: S.refLine)
-                .offset(x: S.progNameCol + S.gap4 + track * bookPct / maxPct, y: -4)
+                .offset(x: S.progNameCol + S.gap4 + track * bookPct / fullPct, y: -4)
                 .frame(maxHeight: .infinity)
                 .padding(.bottom, -4)
+        }
+    }
+}
+
+// MARK: - 2b · Long calls
+
+/// The other half of Yield progress. That card asks how much of the LEAP the
+/// premium has paid back; this one asks what the LEAP itself is worth. Same
+/// denominator, same row geometry, opposite question.
+///
+/// ⚠ THE BARS DIVERGE OFF A CENTRE LINE, which Yield progress does not need
+/// because paid-back cannot go backwards. A gain can, so zero has to be a
+/// place on the track rather than the left edge. Geometry is the roll-check
+/// card's, not a third invention.
+///
+/// ⚠ AND THE SCALE IS SYMMETRIC AROUND ZERO, floored at ±5%. Fitting the axis
+/// to the data alone would make a book that moved 0.3% look identical to one
+/// that moved 30%, which is the "winner within them" failure Yield progress
+/// just had, one card over.
+struct SunnyLeapGains: View {
+    let book: OptionsBook
+    let positions: [OptionsPosition]
+
+    private var rows: [(t: String, pct: Double, gain: Int)] {
+        positions.map { p in
+            (p.t, p.paid > 0 ? Double(p.mark - p.paid) / Double(p.paid) * 100 : 0,
+             p.mark - p.paid)
+        }.sorted { $0.pct > $1.pct }
+    }
+    private var paid: Int { positions.reduce(0) { $0 + $1.paid } }
+    private var worth: Int { positions.reduce(0) { $0 + $1.mark } }
+    private var gain: Int { worth - paid }
+    private var bookPct: Double { paid > 0 ? Double(gain) / Double(paid) * 100 : 0 }
+    /// Symmetric, so the centre line is genuinely the centre.
+    private var span: Double { max(5, (rows.map { abs($0.pct) }.max() ?? 5) * 1.1) }
+    private let track: CGFloat = 217
+
+    private func x(_ v: Double) -> CGFloat {
+        track * CGFloat((v + span) / (2 * span))
+    }
+    private func pct(_ v: Double) -> String {
+        (v > 0 ? "+" : v < 0 ? "\u{2212}" : "") + String(format: "%.1f%%", abs(v))
+    }
+
+    var body: some View {
+        OptCard(name: "leap-gains") {
+            OptHead(title: "Long calls", sub: "", right: "\(optMoney(paid)) paid")
+            Spacer().frame(height: S.gap7)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("BOOK GAIN")
+                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                    .foregroundStyle(S.mute)
+                HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
+                    /* A gain is signed P&L, not a rate, so it DOES take
+                       direction ink. The weekly-yield card's "a rate takes no
+                       direction ink" rule does not reach this figure. */
+                    Text(pct(bookPct))
+                        .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
+                        .foregroundStyle(gain < 0 ? S.loss : S.gain)
+                        .sunnyLineBox(S.t30)
+                    Text("unrealised").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+                }
+            }
+            Spacer().frame(height: 18)
+            HStack(spacing: S.gap4) {
+                Color.clear.frame(width: S.progNameCol, height: 1)
+                HStack {
+                    Text(pct(-span)); Spacer(); Text(pct(span))
+                }
+                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                .foregroundStyle(S.mute)
+                .frame(width: track)
+                Color.clear.frame(width: S.progValCol, height: 1)
+            }
+            .padding(.bottom, S.gap4)
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: S.progRowGap) {
+                    ForEach(rows, id: \.t) { r in
+                        let x0 = x(min(r.pct, 0)), x1 = x(max(r.pct, 0))
+                        HStack(spacing: S.gap4) {
+                            Text(r.t)
+                                .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
+                                .foregroundStyle(S.ink)
+                                .frame(width: S.progNameCol, alignment: .leading).lineLimit(1)
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
+                                RoundedRectangle(cornerRadius: S.radiusBar)
+                                    .fill(r.pct < 0 ? S.lossBar : S.gainBar)
+                                    .frame(width: max(2, x1 - x0))
+                                    .offset(x: x0)
+                            }
+                            .frame(width: track, height: S.progRowH)
+                            .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
+                            Text(pct(r.pct))
+                                .font(S.inter(S.t13, S.wSemiN))
+                                .foregroundStyle(r.pct < 0 ? S.lossText : S.gainText)
+                                .frame(width: S.progValCol, alignment: .trailing)
+                        }
+                    }
+                }
+                Rectangle().fill(S.ruleColorStrong).frame(width: 1)
+                    .offset(x: S.progNameCol + S.gap4 + x(0), y: -4)
+                    .frame(maxHeight: .infinity).padding(.bottom, -4)
+            }
+            Spacer(minLength: S.gap7)
+            OptFooter(stats: [
+                .init(label: "Paid", value: optMoney(paid), ink: S.ink),
+                .init(label: "Worth now", value: optMoney(worth), ink: S.ink),
+                .init(label: "Gain", value: optMoney(gain), ink: gain < 0 ? S.loss : S.gain),
+            ])
         }
     }
 }
