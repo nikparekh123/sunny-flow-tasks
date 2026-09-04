@@ -179,7 +179,16 @@ Deno.serve(async (req) => {
         const paid = leap.cash;
         const md = leap.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
         const dLong = md.length ? md.reduce((s, x) => s + x.d, 0) / md.length : 0;
-        const m = md.length ? md.reduce((s, x) => s + x.m, 0) / md.length : 0;
+        /* ⚠ AN UNPRICED LEAP IS NOT A WORTHLESS ONE. This fell back to 0,
+           so a LEAP bought minutes ago reported mark = $0 and the Long calls
+           card showed LULU at -100.0% on the day it was opened. Same mistake
+           as the short legs' captured = 100%, one side over. `leapPriced`
+           says whether a price exists, and until one does the mark equals
+           what was paid, so the gain reads 0.0% rather than a total loss. */
+        const leapPriced = md.length > 0;
+        const m = leapPriced
+          ? md.reduce((s, x) => s + x.m, 0) / md.length
+          : (leap.n > 0 ? paid / (leap.n * 100) : 0);
         const wa = leap.ids.map((i) => weekAgo.get(i)).filter((x) => x !== undefined) as number[];
         const prev = wa.length ? wa.reduce((s, x) => s + x, 0) / wa.length : 0;
 
@@ -241,7 +250,7 @@ Deno.serve(async (req) => {
           t, co: co.get(t) ?? t,
           leap: contractLine(leap.n, leap.k, leap.exp, true),
           leapOpened: leap.opened,
-          paid: Math.round(paid), mark: Math.round(m * leap.n * 100),
+          paid: Math.round(paid), mark: Math.round(m * leap.n * 100), leapPriced,
           /* ⚠ A CHANGE IN MARK, NOT CASH THAT MOVED. A LEAP held all week moves
              no cash and still gains or loses every week. Zero until a week of
              `option_greeks` exists for a leg opened days ago. */

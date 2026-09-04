@@ -200,6 +200,7 @@ Deno.serve(async (req) => {
   let rowsUpdated = 0;
   let rowsVoided = 0;
   let posReconcile = { updated: 0, inserted: 0, closed: 0, closedTickers: [] as string[] };
+  let audit: Awaited<ReturnType<typeof auditBook>> | null = null;
   // Outer scope so debug return can include it.
   let reportXml = '';
 
@@ -406,6 +407,41 @@ Deno.serve(async (req) => {
     const openPositions = parseOpenPositions(reportXml);
     posReconcile = await reconcilePositions(supabase, openPositions);
 
+    /* ── 7c. Audit the option book ─────────────────────────────────────
+       Runs on EVERY trigger, because two of its three checks need no
+       external data and would have caught the double-closed legs on the
+       day they happened. The IBKR comparison self-skips when the report
+       carried no option positions, which is every TCF run.
+
+       It raises rather than fixes. A drift is a symptom with several
+       possible causes — a missed fill, a duplicated close, a leg IBKR
+       adjusted — and guessing which, then writing trades to match, is how
+       a reconciler invents positions. Nik decides what to do about it. */
+    try {
+      audit = await auditBook(supabase, parseOptionPositions(reportXml));
+      const bad = audit.drift.length + audit.overClosed.length + audit.expiredOpen.length;
+      if (bad > 0) {
+        const parts: string[] = [];
+        if (audit.drift.length) parts.push(`${audit.drift.length} leg(s) disagree with IBKR`);
+        if (audit.overClosed.length) parts.push(`${audit.overClosed.length} closed more than opened`);
+        if (audit.expiredOpen.length) parts.push(`${audit.expiredOpen.length} expired but still open`);
+        await supabase.rpc('raise_system_alert', {
+          p_code: 'book.option_drift',
+          p_severity: audit.drift.length ? 'critical' : 'warning',
+          p_title: 'The option book does not reconcile',
+          p_detail: parts.join('; '),
+          p_meta: audit as unknown as Record<string, unknown>,
+        });
+      } else if (audit.compared) {
+        /* Only clear on a run that actually COMPARED. Clearing after a TCF
+           run would resolve the alert using evidence that was never
+           gathered, which is worse than never raising it. */
+        await supabase.rpc('clear_system_alert', { p_code: 'book.option_drift' });
+      }
+    } catch (e) {
+      errors.push({ reason: `audit: ${e instanceof Error ? e.message : String(e)}` });
+    }
+
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     errors.push({ reason: `Fatal: ${msg}` });
@@ -463,6 +499,7 @@ Deno.serve(async (req) => {
     rows_voided: rowsVoided,
     rows_errored: errors.length,
     positions_reconcile: posReconcile,
+    audit,
     errors: errors.slice(0, 10), // truncate response payload
     // Debug payload — only included when caller passed {debug: true}.
     // Trims XML to keep response under 6KB; enough to see Trade
@@ -629,6 +666,140 @@ function parseOpenPositions(xml: string): OpenPos[] {
     bySymbol.set(r.symbol, r);
   }
   return Array.from(bySymbol.values());
+}
+
+type OptPos = {
+  ticker: string; putCall: 'P' | 'C'; strike: number; expiry: string;
+  qty: number; reportDate: string;
+};
+
+/**
+ * Parse OPT OpenPositions from an Activity/Daily Flex report.
+ *
+ * ⚠ SAME FINAL-DAY RULE AS THE STOCK PARSER, AND FOR THE SAME REASON. A
+ * multi-day report emits one row per contract per day, and a leg closed to
+ * flat simply STOPS APPEARING — there is no zero row. Keeping a contract's
+ * last non-zero day would freeze it open forever, which is exactly the bug
+ * that put 1,000 phantom NVDA shares on the screen.
+ *
+ * TCF reports carry no OpenPositions, so this returns [] for them and every
+ * caller must treat an EMPTY result as "no data", never as "the book is flat".
+ */
+function parseOptionPositions(xml: string): { asOf: string; rows: OptPos[] } {
+  const rows: OptPos[] = [];
+  const re = /<OpenPosition\s([^>]*?)\/?>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) {
+    const a: Record<string, string> = {};
+    const ar = /(\w+)="([^"]*)"/g;
+    let x: RegExpExecArray | null;
+    while ((x = ar.exec(m[1])) !== null) a[x[1]] = x[2];
+    if (a.assetCategory !== 'OPT') continue;
+    if (a.levelOfDetail && a.levelOfDetail !== 'SUMMARY') continue;
+    const tk = a.underlyingSymbol || a.symbol;
+    const qty = parseFloat(a.position);
+    const k = parseFloat(a.strike);
+    if (!tk || !isFinite(qty) || !isFinite(k) || !a.expiry) continue;
+    const pc = (a.putCall || '').toUpperCase().startsWith('P') ? 'P' : 'C';
+    rows.push({
+      ticker: tk.toUpperCase(), putCall: pc, strike: k,
+      expiry: ymdToDate(a.expiry), qty, reportDate: a.reportDate ?? '',
+    });
+  }
+  const latest = rows.map((r) => r.reportDate).filter(Boolean).sort().at(-1) ?? '';
+  const byKey = new Map<string, OptPos>();
+  for (const r of rows) {
+    if (r.reportDate !== latest) continue;
+    byKey.set(`${r.ticker}|${r.putCall}|${r.strike}|${r.expiry}`, r);
+  }
+  /* The snapshot's OWN date travels with it. Comparing IBKR's holdings to a
+     book that has moved on since is the difference between a useful alert and
+     one that fires every time a trade is made. */
+  return { asOf: ymdToDate(latest), rows: Array.from(byKey.values()) };
+}
+
+/**
+ * Audit our option book against IBKR's, and against itself.
+ *
+ * ⚠ THIS EXISTS BECAUSE "THE CRON SUCCEEDED" PROVED NOTHING. On 2026-09-03
+ * the intraday feed returned an empty <TradeConfirms> all day while the fills
+ * sat in the account, every run logged `success`, and the gap was found by Nik
+ * noticing a wrong figure on a card. Separately, nine legs had been closed
+ * TWICE — once by close_expired_option_legs and once by IBKR's own lifecycle
+ * event four days later — which read downstream as phantom LONG positions.
+ * Neither was visible to anything that was watching.
+ *
+ * Three checks. The last two need no external data at all, which is the point:
+ * they would have caught the double-closes on the day they happened.
+ */
+async function auditBook(
+  supabase: ReturnType<typeof createClient>,
+  ibkr: { asOf: string; rows: OptPos[] },
+): Promise<{
+  asOf: string; drift: unknown[]; overClosed: unknown[];
+  expiredOpen: unknown[]; compared: boolean;
+}> {
+  const { data: trades } = await supabase
+    .from('option_trades')
+    .select('ticker,option_type,direction,strike,expiry,action,contracts,trade_date')
+    .is('voided_at', null);
+
+  type Agg = { opened: number; closed: number; net: number };
+  /* TWO books. `book` is everything, which is what the self-checks want. `asOf`
+     is the book frozen at the snapshot's date, which is the ONLY thing
+     comparable to IBKR's holdings. */
+  const book = new Map<string, Agg>();
+  const asOfBook = new Map<string, number>();
+  for (const t of (trades ?? []) as Record<string, unknown>[]) {
+    const pc = String(t.option_type) === 'put' ? 'P' : 'C';
+    const key = `${String(t.ticker).toUpperCase()}|${pc}|${Number(t.strike)}|${String(t.expiry)}`;
+    const a = book.get(key) ?? { opened: 0, closed: 0, net: 0 };
+    const n = Number(t.contracts);
+    const sign = String(t.direction) === 'long' ? 1 : -1;
+    const delta = String(t.action) === 'open' ? sign * n : -sign * n;
+    if (String(t.action) === 'open') a.opened += n; else a.closed += n;
+    a.net += delta;
+    book.set(key, a);
+    if (ibkr.asOf && String(t.trade_date) <= ibkr.asOf) {
+      asOfBook.set(key, (asOfBook.get(key) ?? 0) + delta);
+    }
+  }
+
+  /* 1. Against IBKR. Skipped entirely when the report carried no option
+     positions — an empty list means the report had none to give, and
+     treating that as "IBKR says you hold nothing" would alarm on every
+     intraday run. */
+  const drift: unknown[] = [];
+  const compared = ibkr.rows.length > 0 && !!ibkr.asOf;
+  if (compared) {
+    const theirs = new Map(ibkr.rows.map((p) =>
+      [`${p.ticker}|${p.putCall}|${p.strike}|${p.expiry}`, p.qty]));
+    for (const [key, qty] of theirs) {
+      const ours = asOfBook.get(key) ?? 0;
+      if (Math.abs(ours - qty) > 0.001) drift.push({ key, ibkr: qty, sunnyfi: ours });
+    }
+    /* And the other direction: a leg we held on that date which IBKR does not
+       list at all is flat there, which is the shape a missed close takes. */
+    for (const [key, net] of asOfBook) {
+      if (net === 0 || theirs.has(key)) continue;
+      drift.push({ key, ibkr: 0, sunnyfi: net });
+    }
+  }
+
+  /* 2. Closed more than was ever opened. Always a data fault, never a real
+     position — this is what the double-closes looked like. */
+  const overClosed = [...book.entries()]
+    .filter(([, a]) => a.closed > a.opened)
+    .map(([key, a]) => ({ key, opened: a.opened, closed: a.closed }));
+
+  /* 3. Expired and still open. close_expired_option_legs should have taken
+     these; if it has not, either it is not running or its buffer is wrong. */
+  const today = new Date().toISOString().slice(0, 10);
+  const expiredOpen = [...book.entries()]
+    .filter(([key, a]) => a.net !== 0 && key.split('|')[3] < today)
+    .map(([key, a]) => ({ key, net: a.net }));
+
+  return { asOf: ibkr.asOf, drift, overClosed, expiredOpen, compared };
 }
 
 /**
