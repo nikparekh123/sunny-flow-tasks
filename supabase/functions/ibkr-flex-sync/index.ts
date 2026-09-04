@@ -976,18 +976,68 @@ async function upsertOption(
     // close; we'd surface it as a row to investigate, not silently drop.
   }
 
-  // Check if exists
+  // Check if exists — IBKR's own id is the primary identity.
   const { data: existing } = await supabase
     .from('option_trades')
     .select('id')
     .eq('ibkr_trade_id', t.tradeID)
     .maybeSingle();
 
-  if (existing) {
+  let targetId = existing?.id as string | undefined;
+  let adopted = false;
+
+  /* ⚠ ADOPT A MANUAL ROW FOR THE SAME FILL RATHER THAN INSERTING BESIDE IT.
+     The intraday TCF feed stopped returning confirms on 2026-09-03 while the
+     09:00 daily backfill kept working, so a fill entered by hand to keep the
+     app current was guaranteed to be delivered again the next morning with a
+     real tradeID — and BABA duly went to 20 LEAPs and -10 for 11 Sep against
+     the broker's 15 and -5. The manual row had to be voided by hand.
+
+     `ibkr_trade_id` cannot dedupe those: a manual row has none, and the
+     broker's execution id (0002920a.6a99da58.01.01) is not IBKR's Flex
+     tradeID (10169958038), so there is nothing to match on. The natural key
+     of a fill is what both records share.
+
+     THE FILTERS ARE THE WHOLE SAFETY ARGUMENT. Only rows that are
+     source='manual', un-voided, and carry NO ibkr_trade_id are eligible, so
+     this can never collapse two genuine Flex fills into one. Two identical
+     manual fills on one day are handled correctly too: the first Flex row
+     claims one, and because claiming stamps the tradeID, the second Flex row
+     sees only the remaining one. Processing is a sequential for/await loop,
+     so there is no race between those two claims. */
+  if (!targetId) {
+    const { data: manual } = await supabase
+      .from('option_trades')
+      .select('id')
+      .is('ibkr_trade_id', null)
+      .is('voided_at', null)
+      .eq('source', 'manual')
+      .eq('ticker', row.ticker as string)
+      .eq('trade_date', row.trade_date as string)
+      .eq('action', row.action as string)
+      .eq('option_type', row.option_type as string)
+      .eq('direction', row.direction as string)
+      .eq('contracts', row.contracts as number)
+      .eq('strike', row.strike as number)
+      .eq('expiry', row.expiry as string)
+      .eq('premium', row.premium as number)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (manual) { targetId = manual.id as string; adopted = true; }
+  }
+
+  if (adopted && !isLifecycle) {
+    row.note = 'Entered by hand while the intraday feed was down; IBKR Flex '
+      + `later delivered the same fill as tradeID ${t.tradeID} and this row was `
+      + 'adopted rather than duplicated.';
+  }
+
+  if (targetId) {
     const { error } = await supabase
       .from('option_trades')
       .update(row)
-      .eq('id', existing.id);
+      .eq('id', targetId);
     if (error) throw error;
     return 'updated';
   }
