@@ -737,7 +737,7 @@ async function auditBook(
   ibkr: { asOf: string; rows: OptPos[] },
 ): Promise<{
   asOf: string; drift: unknown[]; overClosed: unknown[];
-  expiredOpen: unknown[]; compared: boolean;
+  expiredOpen: unknown[]; preHistory: unknown[]; compared: boolean;
 }> {
   const { data: trades } = await supabase
     .from('option_trades')
@@ -765,7 +765,35 @@ async function auditBook(
     }
   }
 
-  /* 1. Against IBKR. Skipped entirely when the report carried no option
+  /* 1. Closed more than was ever opened.
+     Computed FIRST because the IBKR comparison below needs `preHistory` — a
+     `const` read before its declaration is a ReferenceError at runtime that
+     `deno check` alone would not have surfaced in an earlier arrangement.
+     ⚠ TWO DIFFERENT THINGS LOOK IDENTICAL HERE, and only one is a fault.
+
+     `0 < opened < closed` is a genuine data fault — a close counted twice.
+     That is what the nine expiry duplicates were.
+
+     `opened === 0` on an expired leg is a HISTORY BOUNDARY, not a fault. ADBE
+     260P: three real closes carrying $2,762 and two more of realised P&L,
+     whose opens were bought in Q1 2026, before this database holds anything.
+     Verified against the broker's own Q2 record on 2026-09-06 — the closes are
+     real and the opens are simply older than us. Voiding them would discard
+     genuine P&L; inventing an open would fabricate a cost basis. So it is
+     reported and never alerted on, because an alert nobody can action is an
+     alert that trains you to ignore the ones you can. */
+  const overClosed: unknown[] = [];
+  const preHistory: unknown[] = [];
+  const todayISO = new Date().toISOString().slice(0, 10);
+  for (const [key, a] of book) {
+    if (a.closed <= a.opened) continue;
+    const expired = key.split('|')[3] < todayISO;
+    (a.opened === 0 && expired ? preHistory : overClosed)
+      .push({ key, opened: a.opened, closed: a.closed });
+  }
+
+
+  /* 2. Against IBKR. Skipped entirely when the report carried no option
      positions — an empty list means the report had none to give, and
      treating that as "IBKR says you hold nothing" would alarm on every
      intraday run. */
@@ -782,24 +810,24 @@ async function auditBook(
        list at all is flat there, which is the shape a missed close takes. */
     for (const [key, net] of asOfBook) {
       if (net === 0 || theirs.has(key)) continue;
+      /* A pre-history leg reads as a phantom SHORT here for the same reason:
+         its closes have no opens to cancel. IBKR is flat and so is the real
+         world; only our arithmetic disagrees. */
+      if (preHistory.some((p) => (p as { key: string }).key === key)) continue;
       drift.push({ key, ibkr: 0, sunnyfi: net });
     }
   }
 
-  /* 2. Closed more than was ever opened. Always a data fault, never a real
-     position — this is what the double-closes looked like. */
-  const overClosed = [...book.entries()]
-    .filter(([, a]) => a.closed > a.opened)
-    .map(([key, a]) => ({ key, opened: a.opened, closed: a.closed }));
-
   /* 3. Expired and still open. close_expired_option_legs should have taken
      these; if it has not, either it is not running or its buffer is wrong. */
-  const today = new Date().toISOString().slice(0, 10);
+  /* A pre-history leg is over-closed, so it nets negative and would also trip
+     the expired-and-open check. Same artefact, so the same exemption. */
+  const preKeys = new Set(preHistory.map((p) => (p as { key: string }).key));
   const expiredOpen = [...book.entries()]
-    .filter(([key, a]) => a.net !== 0 && key.split('|')[3] < today)
+    .filter(([key, a]) => a.net !== 0 && key.split('|')[3] < todayISO && !preKeys.has(key))
     .map(([key, a]) => ({ key, net: a.net }));
 
-  return { asOf: ibkr.asOf, drift, overClosed, expiredOpen, compared };
+  return { asOf: ibkr.asOf, drift, overClosed, expiredOpen, preHistory, compared };
 }
 
 /**
