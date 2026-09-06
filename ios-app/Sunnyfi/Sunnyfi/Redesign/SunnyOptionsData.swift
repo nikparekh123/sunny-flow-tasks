@@ -78,6 +78,14 @@ struct OptionsBook: Decodable {
     /// nothing else does.
     let form: String
     let rolling: Int, nextExpiry: Int, kept: Int
+    /// The roll check footer, computed server-side so it can never disagree
+    /// with the weekly-yield card, which charts the same credit.
+    let openCredit: Int?, openValue: Int?, openYield: Double?
+    /// ⚠ WHICH WEEK THE OPEN LEGS ACTUALLY COVER, not an assumption that it is
+    /// this one. On a weekend the ISO week that contains today is the one that
+    /// just ENDED, so the card used to print "kept this week" over credit for
+    /// legs expiring the following Friday.
+    let openWhen: String?
 
     struct BookWeek: Decodable, Identifiable {
         let week: String, credit: Int, pct: Double

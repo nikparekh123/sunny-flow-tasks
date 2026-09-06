@@ -144,6 +144,9 @@ struct SunnyRollCheck: View {
 
     struct Bar: Identifiable {
         let id: String, ticker: String, captured: Int, itm: Bool
+        /// Credit minus current value, in dollars — the same quantity the
+        /// percentage expresses, which is why one tap may swap them.
+        var kept: Int = 0
         /* ⚠ FALSE MEANS NO CALL IS SOLD, WHICH IS NOT A CAPTURE OF ZERO.
            An uncovered name has captured nothing because there is nothing
            to capture, and the row must say that rather than draw a bar at
@@ -216,7 +219,8 @@ struct SunnyRollCheck: View {
                    other when it falls. Nik's call, 2026-09-06. */
                 else { label = "\(p.t) \(k)\(s.type == "put" ? "P" : "")" }
                 return Bar(id: "\(p.t)-\(s.id)", ticker: label,
-                           captured: s.captured, itm: s.itm)
+                           captured: s.captured, itm: s.itm,
+                           kept: s.credit - (s.priced == false ? s.credit : s.value))
             }
         }
     }
@@ -273,7 +277,19 @@ struct SunnyRollCheck: View {
        escalating to rows — "a card you page three times to read is a list
        pretending to be a chart" — lands at one page in a shell that owns the
        gesture, which means it lands at five legs too. */
-    var body: some View { rowsCard }
+    /* ⚠ VERIFICATION ONLY, and it exists because the touch bridge is dead —
+       `-showMoney` starts the card in the dollar state so the RENDERING can be
+       checked. It does not test the tap, which cannot be driven here. */
+    @State private var showMoney =
+        ProcessInfo.processInfo.arguments.contains("-showMoney")
+
+    var body: some View {
+        rowsCard
+            /* A discrete tap, so it never competes with the shell's horizontal
+               paging drag. */
+            .contentShape(Rectangle())
+            .onTapGesture { showMoney.toggle() }
+    }
 
     // MARK: rows
 
@@ -305,7 +321,7 @@ struct SunnyRollCheck: View {
                         .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
                         .foregroundStyle(book.kept < 0 ? S.loss : S.gain)
                         .sunnyLineBox(S.t30)
-                    Text("kept this week")
+                    Text("kept \(book.openWhen ?? "this week")")
                         .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
                 }
             }
@@ -341,11 +357,25 @@ struct SunnyRollCheck: View {
                     .frame(maxHeight: .infinity).padding(.bottom, -4)
             }
             Spacer().frame(height: 22)
+            /* ⚠ COLLECTED AND CURRENT VALUE ARE THE HERO'S TWO HALVES, so
+               every figure on the card audits against the other two:
+               5,267 − 5,441 = −174, which is what "kept this week" says.
+               ROLLING is gone because colour no longer means moneyness and a
+               count with nothing on screen agreeing with it is a loose end.
+               Yield is GROSS — credit on the LEAP capital, before buying the
+               legs back — and it is the same 2.70% the weekly-yield card
+               charts for the week these legs cover, because the server
+               computes it once for both. */
             OptFooter(stats: [
-                .init(label: "Rolling", value: "\(book.rolling)", ink: S.loss),
-                .init(label: "Next expiry", value: "\(book.nextExpiry)", ink: S.gain),
-                .init(label: "Kept", value: optMoney(book.kept),
-                      ink: book.kept < 0 ? S.loss : S.gain),
+                .init(label: "Collected",
+                      value: optMoney(book.openCredit ?? 0), ink: S.gainText),
+                /* "Current value" truncated to "CURRENT VA…" in a third of
+                   323 at 10px. The Long calls card already settled this
+                   wording, so both now say the same thing. */
+                .init(label: "Worth now",
+                      value: optMoney(book.openValue ?? 0), ink: S.ink),
+                .init(label: "Yield",
+                      value: String(format: "%.1f%%", book.openYield ?? 0), ink: S.ink),
             ])
         }
     }
@@ -366,26 +396,44 @@ struct SunnyRollCheck: View {
                    is a different and wrong statement. */
                 if b.covered {
                     RoundedRectangle(cornerRadius: S.radiusBar)
-                        .fill(b.itm ? S.lossBar : S.gainBar)
+                        .fill(b.captured < 0 ? S.lossBar : S.gainBar)
                         .frame(width: max(2, x1 - x0))
                         .offset(x: x0)
                 }
             }
             .frame(width: track, height: S.progRowH)
             .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
-            /* ⚠ THE INK IS MONEYNESS, NOT THE SIGN — the same rule the bar
-               already follows, and the value was breaking it. In the
-               reference, JPM at +14% and BABA at +23% are RED because both
-               are in the money, and ROLLING counts exactly those four. Ours
-               coloured the text by the sign, so an ITM leg that had still
-               captured something rendered a green number on a red bar and
-               contradicted the card's own ROLLING count. */
+            /* ⚠ THE INK IS THE MONEY, AND IT WAS MONEYNESS UNTIL 2026-09-06.
+               The reference layout coloured by moneyness — JPM at +14% RED
+               because it was in the money — and I built that. Nik overruled it
+               after living with it: "Bar shuold be green for anything positive
+               which means if collected 1000 and current avlue is 250 which is
+               positive... When red is opposite of the first one - Collected
+               1000 and current value 1500."
+
+               He is right about the failure mode. Nothing was in the money, so
+               the colour channel carried NO information at all — eight green
+               rows, four of them losing money. Moneyness only speaks on the
+               days something is ITM; the sign speaks every day.
+
+               ⚠ SO THE CARD NO LONGER MARKS WHICH LEG TO ROLL, and the page
+               title carries that instead ("2 to roll"). The bar's SIDE of the
+               centre line was already the sign, so colour and position now say
+               the same thing twice — which is the price of the trade. */
             /* "No call" takes --mute: it is neither a win nor a loss, it is
                an absence, and giving it direction ink would rank it against
                figures it is not comparable to. */
-            Text(b.covered ? barePctInt(b.captured) : "No call")
+            /* ⚠ ONE TAP SWAPS THE UNIT, and the two are the same fact. A
+               percentage compares legs of different sizes; the dollars say
+               what it is worth. NKE at -17% and BABA 114 at -23% look like
+               BABA is worse, and in money NKE is the larger number because it
+               is 50 contracts against 5. Both readings are true and neither
+               is derivable from the row alone, which is the whole reason the
+               tap exists rather than a choice of one. */
+            Text(b.covered ? (showMoney ? optMoney(b.kept) : barePctInt(b.captured))
+                           : "No call")
                 .font(S.inter(S.t13, S.wSemiN))
-                .foregroundStyle(b.covered ? (b.itm ? S.lossText : S.gainText) : S.mute)
+                .foregroundStyle(b.covered ? (b.captured < 0 ? S.lossText : S.gainText) : S.mute)
                 .frame(width: valCol, alignment: .trailing).lineLimit(1)
         }
     }

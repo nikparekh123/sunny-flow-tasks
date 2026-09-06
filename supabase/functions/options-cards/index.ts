@@ -145,7 +145,23 @@ Deno.serve(async (req) => {
     /* The eight weeks the cards chart, newest last. Real zeros are weeks with
        no sale, not missing data — the sheet's `weekly[]` must sum to
        `collected`, so a gap is a zero and never a dropped column. */
-    const thisWeek = weekStart(today);
+    /* ⚠ THE TRADING WEEK ENDS AT FRIDAY'S CLOSE, NOT SUNDAY MIDNIGHT. An ISO
+       week runs Mon-Sun, so on a Saturday or Sunday `weekStart(today)` returns
+       the week that has ALREADY EXPIRED — and every leg still open covers the
+       week ahead. On Sunday 2026-09-06 that had the roll card showing $5,267
+       of credit for legs expiring Friday the 11th while the weekly-yield card
+       called this week $4,243, whose legs were gone. Both were right and the
+       pair was useless.
+
+       Nik: "Numbers shuold change on Friday night on Saturday morning for next
+       week." So the weekend belongs to the week AHEAD. Bucketing is untouched
+       — a call expiring Fri 11 Sep still files under Mon 7 Sep — it is only
+       the question "which week is now" that moves. */
+    const dow = new Date(today + 'T00:00:00Z').getUTCDay();   // 0 Sun, 6 Sat
+    const thisWeek = (dow === 0 || dow === 6)
+      ? new Date(Date.parse(weekStart(today) + 'T00:00:00Z') + 7 * 86_400_000)
+          .toISOString().slice(0, 10)
+      : weekStart(today);
     /* ⚠ AND THE WINDOW HAS TO REACH FORWARD, or expiry-bucketing achieves
        nothing: a call sold today for next Friday files under NEXT week, which
        an eight-week window ending on THIS week cannot show. The window now ends
@@ -323,6 +339,16 @@ Deno.serve(async (req) => {
                pct: paidTotal > 0 ? r2(c / paidTotal * 100) : 0 };
     });
     const legCount = positions.reduce((s, p) => s + p.shorts.length, 0);
+    /* ⚠ THE ROLL CHECK FOOTER IS COMPUTED HERE, NOT ON THE CLIENT, for the
+       reason this whole function exists: two cards that derive the same figure
+       separately will disagree eventually. `openCredit` is the credit on the
+       legs currently open, and it is the SAME number the weekly-yield card
+       charts for the week those legs cover — 5,267 at 2.70% for the week of
+       7 Sep. Deriving it twice is how those two silently drift apart. */
+    const openCredit = positions.reduce((s, p) =>
+      s + p.shorts.reduce((a, x) => a + x.credit, 0), 0);
+    const openValue = positions.reduce((s, p) =>
+      s + p.shorts.reduce((a, x) => a + (x.priced ? x.value : x.credit), 0), 0);
     const rolling = positions.reduce((s, p) => s + p.shorts.filter((x) => x.itm).length, 0);
     /* Unpriced legs contribute nothing rather than their whole credit: value
        equals credit for them, so the subtraction is already zero. Filtered
@@ -423,6 +449,29 @@ Deno.serve(async (req) => {
            the caveat the one-word label cannot. */
         yearly: Math.round(avgPct * 52 * 100) / 100,
         legs: legCount,
+        openCredit: Math.round(openCredit),
+        openValue: Math.round(openValue),
+        /* Gross: what the sold calls yield on the capital, before buying them
+           back. The hero already carries the net as `kept`. */
+        openYield: paidTotal > 0 ? r2(openCredit / paidTotal * 100) : 0,
+        /* ⚠ THE OPEN LEGS DO NOT ALWAYS COVER "THIS WEEK", and the roll card
+           said they did. An ISO week runs Mon-Sun, so on a SATURDAY OR SUNDAY
+           the current week is the one that just ENDED and whose legs have
+           already expired, while everything still open covers the week ahead.
+           On Sunday 2026-09-06 that had the card printing "kept this week"
+           over $5,267 of credit for legs expiring Friday the 11th, while the
+           weekly-yield card correctly showed this week as $4,243. Both were
+           right; the sentence was wrong.
+
+           The server says which week the open legs actually cover, so the
+           phrase follows the legs instead of asserting a week. */
+        openWhen: (() => {
+          const exps = positions.flatMap((p) => p.shorts.map((x) => weekStart(x.exp)));
+          if (!exps.length) return 'this week';
+          const w = exps.sort()[0];
+          const d = Math.round((Date.parse(w) - Date.parse(thisWeek)) / (7 * 86_400_000));
+          return d <= 0 ? 'this week' : d === 1 ? 'next week' : `in ${d} weeks`;
+        })(),
         targetWeeks: TARGET_WEEKS,
         /* The weekly rate the target implies, so the card never has to
            re-derive it and the two can never disagree. */
