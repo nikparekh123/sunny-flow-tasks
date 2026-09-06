@@ -17,6 +17,8 @@
 //
 
 import SwiftUI
+import UIKit
+import CoreText
 
 enum S {
 
@@ -224,9 +226,22 @@ enum S {
     /// because a FIXED name column is only safe while every label is a bare
     /// ticker: the roll check started labelling colliding legs with an expiry
     /// and "BABA 11 Sep" rendered as "BABA..." in a 46pt slot.
+    /* ⚠ MEASURE THE FONT THE CARD ACTUALLY RENDERS. Every option card carries
+       `.monospacedDigit()`, whose digits are WIDER than Inter's proportional
+       ones, and measuring without it under-reported "BABA 114" by three
+       digits' worth — so the column was sized to fit a string the card then
+       drew wider, and it truncated to "BABA 1…". */
     static func textW(_ s: String, _ size: CGFloat, _ wght: CGFloat) -> CGFloat {
-        guard let f = interUI(size, wght) else { return CGFloat(s.count) * size * 0.62 }
-        return (s as NSString).size(withAttributes: [.font: f]).width
+        guard let base = interUI(size, wght) else {
+            return CGFloat(s.count) * size * 0.62
+        }
+        let mono = UIFont(descriptor: base.fontDescriptor.addingAttributes([
+            .featureSettings: [[
+                UIFontDescriptor.FeatureKey.type: kNumberSpacingType,
+                UIFontDescriptor.FeatureKey.selector: kMonospacedNumbersSelector,
+            ]],
+        ]), size: size)
+        return (s as NSString).size(withAttributes: [.font: mono]).width
     }
     static func leading(_ size: CGFloat, _ wght: CGFloat, _ multiple: CGFloat) -> CGFloat {
         guard let f = interUI(size, wght) else { return 0 }

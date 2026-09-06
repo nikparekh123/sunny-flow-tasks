@@ -113,11 +113,15 @@ func optMoney(_ v: Int) -> String {
     let s = a >= 1000 ? "$\(a / 1000),\(String(format: "%03d", a % 1000))" : "$\(a)"
     return v < 0 ? "\u{2212}" + s : s
 }
-/// ⚠ NO SIGN GLYPH. Nik, 2026-09-03: "remove the + and - sign green and red
-/// text is enough." The bar's side of the zero line and the ink both say the
-/// direction already, and "+" / "−" in a 44pt column was what pushed −158%
-/// onto a second line.
-private func barePctInt(_ v: Int) -> String { "\(abs(v))%" }
+/* ⚠ THE MINUS STAYS, THE PLUS GOES. Nik asked for "remove the + and - sign"
+   and I removed both, which made -28% render as "28%" in red — a number
+   saying one thing and a colour saying another. His reference layout settles
+   it: negatives keep the minus, positives carry no plus. That is also why
+   dropping the plus is safe, since it never carried information the bar's
+   side of zero did not already give. */
+private func barePctInt(_ v: Int) -> String {
+    (v < 0 ? "\u{2212}" : "") + "\(abs(v))%"
+}
 private func signedPctInt(_ v: Int) -> String {
     (v > 0 ? "+" : v < 0 ? "\u{2212}" : "") + "\(abs(v))%"
 }
@@ -158,7 +162,19 @@ struct SunnyRollCheck: View {
        take the strike, and legs that COLLIDE on a strike also take the expiry.
        Only the colliding ones, so NKE stays "NKE 39 / NKE 40" and does not
        grow a date it does not need. */
+    /* ⚠ WORST FIRST, and the reference is unambiguous about it: -113, -111,
+       14, 23 … 83. The rows are a queue of work, so the leg that needs a
+       decision has to be the one your eye lands on. Unsorted meant the order
+       was whatever the book happened to return. */
     private var bars: [Bar] {
+        sortedBars
+    }
+
+    private var sortedBars: [Bar] {
+        rawBars.sorted { $0.captured < $1.captured }
+    }
+
+    private var rawBars: [Bar] {
         positions.flatMap { p -> [Bar] in
             let strikeCount = Dictionary(grouping: p.shorts, by: \.k).mapValues(\.count)
             return p.shorts.map { s in
@@ -205,119 +221,29 @@ struct SunnyRollCheck: View {
         return "\(d) \(mon[m - 1])"
     }
 
-    /* 10% headroom past whichever is further out, the bar or the level line.
-       Without it the extreme bar tops out flush against the plot edge and hides
-       the line it crossed. */
-    private var scale: (up: CGFloat, down: CGFloat, k: CGFloat, zero: CGFloat) {
-        let vals = bars.map { CGFloat($0.captured) }
-        let up = max(CGFloat(captureLine), 0, vals.max() ?? 0) * 1.1
-        let down = max(CGFloat(abs(giveBackLine)), 0, -(vals.min() ?? 0)) * 1.1
-        let k = S.rollPlotH / max(up + down, 1)
-        return (up, down, k, up * k)
-    }
+    /* ⚠ ONE FORM, ALWAYS ROWS. The sheet escalates ≤5 bars → 6–10 paged →
+       11+ rows, and both of the other two are gone for reasons this shell
+       forces.
 
-    /* ⚠ THE PAGED FORM CANNOT EXIST IN THIS SHELL, and that is a fact about
-       the shell rather than a fault in the sheet. The handoff escalates
-       ≤5 bars → 6–10 paged → 11+ rows, and the paged form pages on a
-       HORIZONTAL gesture. Our shell IS a horizontal paging ScrollView: swiping
-       sideways is how you change ticker. So the card and the navigation fight
-       over every drag, which is what Nik hit at six legs.
+       PAGED cannot exist here: it pages on a horizontal gesture and our shell
+       IS a horizontal paging ScrollView, so the card and the navigation fight
+       over every drag. Nik hit that at six legs.
 
-       Rows are the answer above five here. They show every leg at once with no
-       gesture at all, which is what the sheet wanted paging to achieve, and the
-       sheet's own reason for escalating to rows — "a card you page three times
-       to read is a list pretending to be a chart" — applies at one page in a
-       shell that owns the gesture. The bar form still renders at five or
-       fewer, unchanged. */
-    private var useRows: Bool { bars.count > 5 }
+       BARS is gone because the FORM ITSELF MOVED. It rendered at five legs or
+       fewer, so closing one call silently changed the card's shape — Nik, on
+       dropping back to five: "I thought we changed the layout so that all
+       tickers fit and suddenly it went back to the old layout." A card that
+       re-lays-itself out as the book breathes is not a layout, it is two
+       layouts and a coin toss. Bars also crowded the labels it did keep:
+       five names across 323 put "BABA 114" and "BABA 115" shoulder to
+       shoulder under 30pt columns.
 
-    var body: some View {
-        if useRows { rowsCard } else { barsCard }
-    }
-
-    private var barsCard: some View {
-        OptCard(name: "roll-check") {
-            OptHead(title: "Roll check", sub: "calls sold")
-            Spacer().frame(height: S.gap7)
-            keyRow
-            Spacer().frame(height: S.gap5)
-            plot
-            Spacer(minLength: S.gap7)
-            OptFooter(stats: [
-                .init(label: "Rolling", value: "\(book.rolling)", ink: S.loss),
-                .init(label: "Next expiry", value: "\(book.nextExpiry)", ink: S.gain),
-                .init(label: "Kept", value: optMoney(book.kept),
-                      ink: book.kept < 0 ? S.loss : S.gain),
-            ])
-        }
-    }
-
-    private var keyRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-            Text("CAPTURED OF CREDIT")
-                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                .foregroundStyle(S.mute)
-            Spacer(minLength: 0)
-            HStack(spacing: S.gap5) {
-                keyDash("+\(captureLine)%")
-                keyDash("\(giveBackLine)%".replacingOccurrences(of: "-", with: "\u{2212}"))
-            }
-        }
-    }
-
-    private func keyDash(_ t: String) -> some View {
-        HStack(spacing: S.gap3) {
-            Rectangle().fill(S.hair).frame(width: S.levelKey, height: S.refLine)
-            Text(t).font(S.inter(S.t10, S.wBoldN))
-                .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
-        }
-    }
-
-    private var plot: some View {
-        let sc = scale
-        let shown = bars
-        return ZStack(alignment: .topLeading) {
-            Rectangle().fill(S.ruleColor).frame(height: 1).offset(y: sc.zero)
-            Rectangle().fill(S.hair).frame(height: S.refLine)
-                .offset(y: sc.zero - CGFloat(captureLine) * sc.k)
-            Rectangle().fill(S.hair).frame(height: S.refLine)
-                .offset(y: sc.zero - CGFloat(giveBackLine) * sc.k)
-            HStack(spacing: 0) {
-                ForEach(shown) { b in column(b, sc) }
-            }
-        }
-        .frame(height: S.rollPlotH + S.gap5 + 31, alignment: .top)
-    }
-
-    @ViewBuilder private func column(_ b: Bar, _ sc: (up: CGFloat, down: CGFloat, k: CGFloat, zero: CGFloat)) -> some View {
-        let v = CGFloat(b.captured)
-        let h = abs(v) * sc.k
-        /* ⚠ AN UP BAR IS OFFSET FROM THE PLOT'S BOTTOM, A DOWN BAR FROM ITS
-           TOP. One shared offset sent the down bar 15.5px past the plot floor
-           into the value labels; that shipped once and was caught in review. */
-        let fill = b.itm ? S.lossBar : S.gainBar
-        VStack(spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                Color.clear
-                RoundedRectangle(cornerRadius: S.radiusBar, style: .continuous)
-                    .fill(fill)
-                    .frame(width: S.rollBarW, height: max(h, 1))
-                    .offset(y: v >= 0 ? sc.zero - h : sc.zero)
-                    .frame(maxWidth: .infinity)
-            }
-            .frame(height: S.rollPlotH)
-            Spacer().frame(height: S.gap5)
-            VStack(spacing: S.gap3) {
-                Text(barePctInt(b.captured))
-                    .font(S.inter(S.t13, S.wSemiN))
-                    .foregroundStyle(b.captured < 0 ? S.lossText : S.gainText)
-                    .lineLimit(1)
-                Text(b.ticker)
-                    .font(S.inter(S.t12, S.wBoldN)).foregroundStyle(S.ink).lineLimit(1)
-            }
-        }
-        .frame(maxWidth: .infinity)
-    }
+       Rows show every leg at once, at any count, with the name on its own
+       line and a measured column that fits it. The sheet's own argument for
+       escalating to rows — "a card you page three times to read is a list
+       pretending to be a chart" — lands at one page in a shell that owns the
+       gesture, which means it lands at five legs too. */
+    var body: some View { rowsCard }
 
     // MARK: rows
 
@@ -349,9 +275,11 @@ struct SunnyRollCheck: View {
             HStack(spacing: S.gap4) {
                 Color.clear.frame(width: nameCol, height: 1)
                 HStack {
-                    Text("\(giveBackLine)%".replacingOccurrences(of: "-", with: "\u{2212}"))
+                    /* No % on the axis. The eyebrow already says CAPTURED OF
+                       CREDIT, and the reference layout drops it. */
+                    Text("\(giveBackLine)".replacingOccurrences(of: "-", with: "\u{2212}"))
                     Spacer()
-                    Text("+\(captureLine)%")
+                    Text("+\(captureLine)")
                 }
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
                 .foregroundStyle(S.mute)
@@ -402,9 +330,16 @@ struct SunnyRollCheck: View {
             }
             .frame(width: track, height: S.progRowH)
             .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
+            /* ⚠ THE INK IS MONEYNESS, NOT THE SIGN — the same rule the bar
+               already follows, and the value was breaking it. In the
+               reference, JPM at +14% and BABA at +23% are RED because both
+               are in the money, and ROLLING counts exactly those four. Ours
+               coloured the text by the sign, so an ITM leg that had still
+               captured something rendered a green number on a red bar and
+               contradicted the card's own ROLLING count. */
             Text(barePctInt(b.captured))
                 .font(S.inter(S.t13, S.wSemiN))
-                .foregroundStyle(b.captured < 0 ? S.lossText : S.gainText)
+                .foregroundStyle(b.itm ? S.lossText : S.gainText)
                 .frame(width: valCol, alignment: .trailing)
         }
     }
