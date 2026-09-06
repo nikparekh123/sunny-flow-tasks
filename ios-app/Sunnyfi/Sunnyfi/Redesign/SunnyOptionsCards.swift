@@ -108,6 +108,29 @@ private struct OptFooter: View {
     }
 }
 
+/// ⚠ ONE SWITCH, THREE CARDS. Roll check, Long calls and Weekly yield all
+/// print a percentage that has an exact dollar twin, and the two are not
+/// redundant: a percentage compares things of different sizes, dollars say
+/// what a thing is worth. NKE reads fourth-worst at -17% and WORST at -$250,
+/// because it is 50 contracts against BABA's 5.
+///
+/// ⚠ VERIFICATION ONLY on the launch argument — the simulator's touch bridge
+/// crashes, so `-showMoney` forces the state and proves the RENDERING. It
+/// does not test the tap, which cannot be driven here.
+private var moneyByDefault: Bool {
+    ProcessInfo.processInfo.arguments.contains("-showMoney")
+}
+
+/// "$4.2k" — the weekly-yield labels sit over 30pt bars and a full
+/// "$4,243" collides with its neighbour at eight columns.
+func optMoneyShort(_ v: Int) -> String {
+    let a = abs(v)
+    let s = a >= 1000
+        ? "$" + String(format: "%.1f", Double(a) / 1000).replacingOccurrences(of: ".0", with: "") + "k"
+        : "$\(a)"
+    return v < 0 ? "\u{2212}" + s : s
+}
+
 func optMoney(_ v: Int) -> String {
     let a = abs(v)
     let s = a >= 1000 ? "$\(a / 1000),\(String(format: "%03d", a % 1000))" : "$\(a)"
@@ -280,8 +303,7 @@ struct SunnyRollCheck: View {
     /* ⚠ VERIFICATION ONLY, and it exists because the touch bridge is dead —
        `-showMoney` starts the card in the dollar state so the RENDERING can be
        checked. It does not test the tap, which cannot be driven here. */
-    @State private var showMoney =
-        ProcessInfo.processInfo.arguments.contains("-showMoney")
+    @State private var showMoney = moneyByDefault
 
     var body: some View {
         rowsCard
@@ -590,6 +612,8 @@ struct SunnyLeapGains: View {
     let book: OptionsBook
     let positions: [OptionsPosition]
 
+    @State private var showMoney = moneyByDefault
+
     private var rows: [(t: String, pct: Double, gain: Int)] {
         positions.map { p in
             (p.t, p.paid > 0 ? Double(p.mark - p.paid) / Double(p.paid) * 100 : 0,
@@ -606,7 +630,8 @@ struct SunnyLeapGains: View {
        for "-111%" and "+10.9%" wrapped onto a second line in it. */
     private var valCol: CGFloat {
         max(S.progValCol,
-            (rows.map { S.textW(pct($0.pct), S.t13, S.wSemiN) }.max() ?? 0) + 3)
+            (rows.map { S.textW(showMoney ? optMoney($0.gain) : pct($0.pct),
+                                S.t13, S.wSemiN) }.max() ?? 0) + 3)
     }
     private var track: CGFloat {
         max(110, S.content - 38 - S.progNameCol - valCol - 2 * S.gap4)
@@ -620,6 +645,10 @@ struct SunnyLeapGains: View {
     }
 
     var body: some View {
+        card.contentShape(Rectangle()).onTapGesture { showMoney.toggle() }
+    }
+
+    private var card: some View {
         OptCard(name: "leap-gains") {
             OptHead(title: "Long calls", sub: "", right: "\(optMoney(paid)) paid")
             Spacer().frame(height: S.gap7)
@@ -668,7 +697,7 @@ struct SunnyLeapGains: View {
                             }
                             .frame(width: track, height: S.progRowH)
                             .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
-                            Text(pct(r.pct))
+                            Text(showMoney ? optMoney(r.gain) : pct(r.pct))
                                 .font(S.inter(S.t13, S.wSemiN))
                                 .foregroundStyle(r.pct < 0 ? S.lossText : S.gainText)
                                 .frame(width: valCol, alignment: .trailing)
@@ -787,9 +816,15 @@ struct SunnyPutCover: View {
 struct SunnyWeeklyYield: View {
     let book: OptionsBook
 
+    @State private var showMoney = moneyByDefault
+
     private var maxPct: Double { max(book.weekly.map(\.pct).max() ?? 1, 0.01) }
 
     var body: some View {
+        card.contentShape(Rectangle()).onTapGesture { showMoney.toggle() }
+    }
+
+    private var card: some View {
         OptCard(name: "weekly-yield") {
             /* ⚠ THE WINDOW AND THE DIVISOR ARE DIFFERENT NUMBERS, and the
                header now says so. The bars chart all eight weeks because a
@@ -841,7 +876,13 @@ struct SunnyWeeklyYield: View {
                        reaches into weeks already sold but not yet begun. */
                     let live = w.current ?? false
                     VStack(spacing: 4) {
-                        Text(w.pct > 0 ? String(format: "%.1f%%", w.pct) : "")
+                        /* A zero week still gets no label in either unit: an
+                           empty bar is already the whole story, and "$0" eight
+                           times is the axis row again in a worse place. */
+                        Text(w.pct > 0
+                             ? (showMoney ? optMoneyShort(w.credit)
+                                          : String(format: "%.1f%%", w.pct))
+                             : "")
                             .font(S.inter(S.t10, live ? S.wBoldN : S.wMidSmN))
                             .foregroundStyle(live ? S.ink : S.mute)
                             .lineLimit(1).fixedSize()
