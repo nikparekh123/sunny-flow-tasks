@@ -456,12 +456,29 @@ struct SunnyPane: View {
        lead was buried. Nik: "new is getting crowded... we need another
        dedicated space." The order is the sheet's: roll check first, because it
        is the only one of the three that asks for an action. */
+    private func optionsNote(_ o: OptionsPayload) -> String {
+        if o.book.rolling > 0 {
+            return "\(o.book.rolling) to roll"
+        }
+        let names = o.positions.count
+        return "\(names) name\(names == 1 ? "" : "s"), \(o.book.legs) sold"
+    }
+
     @ViewBuilder
     private var optionsPage: some View {
         if let o = m.options.data, !o.positions.isEmpty {
-            SunnyPageTitle(title: "Options",
-                           note: o.book.rolling > 0
-                                 ? "\(o.book.rolling) to roll" : "\(o.book.legs) legs open")
+            /* ⚠ THE NOTE TAKES THE URGENT THING ONLY WHEN THE CARD IS NOT
+               ALREADY SAYING IT. Roll check headlines its own uncovered count
+               now ("3 with no call"), and both are on screen at once, so a
+               note that also led with uncovered would spend the page's one
+               summary line repeating the card two rows below it.
+
+               Rolling is the exception: no card puts it in a header, so the
+               note carries it. With nothing to roll it falls back to the shape
+               of the book, which is the one fact no card states — "5 legs
+               open" counted what the roll card could draw, not what he holds,
+               and that gap is exactly what hid FIS, PEP and KR. */
+            SunnyPageTitle(title: "Options", note: optionsNote(o))
             SunnyRollCheck(book: o.book, positions: o.positions)
             SunnyYieldProgress(book: o.book, positions: o.positions)
             /* Directly under Yield progress on purpose: the two share the
