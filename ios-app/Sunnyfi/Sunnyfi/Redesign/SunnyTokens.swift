@@ -930,6 +930,16 @@ enum S {
     static let weekBarMax:  CGFloat = 30
     // shared footer + motion
     static let statRulePad: CGFloat = 16
+
+    /* ---------- PUT COVER · the ring. 6 Sep 2026 ----------
+       Measured off final/Sunny Put Cover.dc.html, not chosen. CHANGING EITHER
+       OF THE FIRST TWO MEANS RECOMPUTING NOTHING HERE — SwiftUI's Circle.trim
+       takes a fraction, so the CSS build's 496.4 circumference has no analogue
+       and must not be ported across. */
+    static let coverRingD: CGFloat = 176     // 323 inner leaves 73.5 of air each side
+    static let coverStroke: CGFloat = 18     // thick enough to read as a quantity
+    static let coverTrack = wash             // the part of the cost with no news yet
+
     static let durBar: Double = 0.72
     static let barStagger: Double = 0.055
     // the pair card

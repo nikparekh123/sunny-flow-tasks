@@ -39,11 +39,28 @@ final class OptionsStore {
     }
 }
 
+/// ⚠ CUMULATIVE AND IT NEVER RESETS. Nik, 2026-09-06: "It's a continous
+/// process when new stock is added new puts are added so not it never resets
+/// its continuous." Buying a tranche raises `cost` and drops the ring; the
+/// weeklies climb it back. `collected` is short-PUT premium only — call
+/// premium is already Yield progress's numerator and cannot discharge two
+/// obligations at once.
+struct PutCover: Decodable {
+    let names: Int, puts: Int
+    let cost: Int, collected: Int, left: Int, pace: Int
+    let pct: Double
+    /// 0 when already covered, or when no pace has been established yet.
+    let weeksToCover: Int
+}
+
 struct OptionsPayload: Decodable {
     let ok: Bool
     let date: String
     let book: OptionsBook
     let positions: [OptionsPosition]
+    /// Null until a long put is held. A ring at 0% of $0 is not an empty
+    /// state, it is a card with no subject, so the page drops it.
+    let putCover: PutCover?
 }
 
 struct OptionsBook: Decodable {
@@ -100,8 +117,11 @@ struct OptionsPosition: Decodable, Identifiable {
     struct ShortLeg: Decodable, Identifiable {
         let n: Int, k: Double, exp: String
         let credit: Int, value: Int
-        /// THE ACTION. `verdictOf` reads this and nothing else.
+        /// THE ACTION. `verdictOf` reads this and nothing else. Already
+        /// inverted server-side for a put, so the client never re-derives it.
         let itm: Bool
+        /// "call" or "put". Optional so an older payload still decodes.
+        let type: String?
         /// ⚠ FALSE MEANS NO MARK EXISTS YET, NOT BREAK-EVEN. An unpriced leg
         /// used to compute captured = 100%: a call sold minutes ago read as a
         /// perfect capture. The server now sends value == credit for those so

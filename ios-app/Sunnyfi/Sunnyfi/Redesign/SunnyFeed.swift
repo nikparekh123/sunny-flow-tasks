@@ -456,6 +456,26 @@ struct SunnyPane: View {
        lead was buried. Nik: "new is getting crowded... we need another
        dedicated space." The order is the sheet's: roll check first, because it
        is the only one of the three that asks for an action. */
+    /* ⚠ VERIFICATION ONLY, like `-page` and `-roomSnap`. The put cover card
+       cannot render until a long put exists, and shipping a card nobody has
+       ever seen draw is how the last two layout bugs got in. `-fakeCover`
+       feeds it one plausible book so the ring, the clamp and the footer can be
+       measured before Tuesday. DEBUG and the simulator only. */
+    private static var argCover: PutCover? {
+        #if DEBUG
+        let a = ProcessInfo.processInfo.arguments
+        guard a.contains("-fakeCover") else { return nil }
+        let over = a.contains("-coverOver")
+        let cost = 60225, collected = over ? 63400 : 38100
+        return PutCover(names: 5, puts: 105, cost: cost, collected: collected,
+                        left: cost - collected, pace: 2316,
+                        pct: Double(collected) / Double(cost) * 100,
+                        weeksToCover: max(0, Int(ceil(Double(cost - collected) / 2316))))
+        #else
+        return nil
+        #endif
+    }
+
     private func optionsNote(_ o: OptionsPayload) -> String {
         if o.book.rolling > 0 {
             return "\(o.book.rolling) to roll"
@@ -485,6 +505,8 @@ struct SunnyPane: View {
                $164,725 denominator and answer the halves of one question,
                how much the premium has paid back and what the LEAP is worth. */
             SunnyLeapGains(book: o.book, positions: o.positions)
+            /* Only when a put is actually held. Nothing to hedge, no card. */
+            if let cover = o.putCover ?? Self.argCover { SunnyPutCover(c: cover) }
             SunnyWeeklyYield(book: o.book)
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "

@@ -201,14 +201,20 @@ struct SunnyRollCheck: View {
             return p.shorts.map { s in
                 let k = s.k.formatted(.number.precision(.fractionLength(0)))
                 let label: String
-                if p.shorts.count <= 1 { label = p.t }
+                if p.shorts.count <= 1 { label = p.t + (s.type == "put" ? " \(k)P" : "") }
                 /* ⚠ AND THE STRIKE IS DROPPED WHEN IT COLLIDES, not kept
                    alongside the date. Two legs at 114 make "114" carry no
                    information at all; keeping it only bought "BABA 114 11 Sep",
                    which does not fit any sane name column. The date alone
                    separates them. */
-                else if (strikeCount[s.k] ?? 0) > 1 { label = "\(p.t) \(shortDay(s.exp))" }
-                else { label = "\(p.t) \(k)" }
+                else if (strikeCount[s.k] ?? 0) > 1 {
+                    label = "\(p.t)\(s.type == "put" ? " \(k)P" : "") \(shortDay(s.exp))"
+                }
+                /* ⚠ A PUT SUFFIXES ITS STRIKE. Without it a sold 140 call and
+                   a sold 140 put on PEP render the identical row, and they are
+                   opposite trades — one is assigned when the name rises and the
+                   other when it falls. Nik's call, 2026-09-06. */
+                else { label = "\(p.t) \(k)\(s.type == "put" ? "P" : "")" }
                 return Bar(id: "\(p.t)-\(s.id)", ticker: label,
                            captured: s.captured, itm: s.itm)
             }
@@ -282,7 +288,10 @@ struct SunnyRollCheck: View {
         return OptCard(name: "roll-check-rows", fixedHeight: nil) {
             /* "5 legs" was true and misleading: it counted what the card
                could draw, not what he holds. */
-            OptHead(title: "Roll check", sub: "calls sold",
+            /* "calls sold" while it carried only calls. It carries sold puts
+               too now, and a header that names one leg type while showing both
+               is the same class of lie as "5 legs" was. */
+            OptHead(title: "Roll check", sub: "sold",
                     right: uncovered == 0
                         ? "\(positions.count) names"
                         : "\(uncovered) with no call")
@@ -629,6 +638,95 @@ struct SunnyLeapGains: View {
                 .init(label: "Gain", value: optMoney(gain), ink: gain < 0 ? S.loss : S.gain),
             ])
         }
+    }
+}
+
+// MARK: - 2c · Put cover
+
+/// The hedge, and whether it is paying for itself. Build sheet:
+/// handoff/cards/put-cover.md, and every measurement here is from it.
+///
+/// ⚠ THE CIRCLE IS THE COMBINED COST OF EVERY PUT, AND THE AMOUNT IS PRINTED.
+/// Not a target, not 100% of a rate. A ring with no amount on it is a
+/// percentage wearing a costume; the reason this card may be a ring at all is
+/// that its whole is real money.
+///
+/// ⚠ THE ARC CLAMPS AT FULL, THE NUMBER CARRIES THE OVERAGE. Past twelve
+/// o'clock an arc overwrites its own start, so 105% would draw as 5%. At
+/// collected ≥ cost the arc stops closed, the centre prints the true figure,
+/// and the third stat flips to OVER.
+///
+/// ⚠ ONE SERIES, SO ONE COLOUR, and NO PER-NAME ROWS. The moment it lists
+/// names it is another ranking card and the options family already has three.
+/// Which names are in it is the header count.
+struct SunnyPutCover: View {
+    let c: PutCover
+
+    private var frac: Double { c.cost > 0 ? Double(c.collected) / Double(c.cost) : 0 }
+    private var covered: Bool { c.left <= 0 }
+
+    var body: some View {
+        OptCard(name: "put-cover") {
+            /* No scope word. The sheet has "all tickers" there; Nik ruled it
+               off on 2026-09-06 because not every position will carry a put,
+               and naming the whole book when five of seven are in it is the
+               same lie "5 legs" was. The count already says the size. */
+            OptHead(title: "Put cover", sub: "",
+                    right: "\(c.names) name\(c.names == 1 ? "" : "s") \u{00B7} \(c.puts) put\(c.puts == 1 ? "" : "s")")
+            Spacer().frame(height: 20)
+            ring
+            Spacer().frame(height: 14)
+            Text("\(optMoney(c.collected)) of \(optMoney(c.cost)) collected")
+                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+                .frame(maxWidth: .infinity, alignment: .center)
+            Spacer().frame(height: S.gap5)
+            /* One line, never a second graphic: a pace chart here would be a
+               second answer competing with the ring, and the projection is one
+               division. */
+            Text(paceLine)
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .lineLimit(1)
+            Spacer(minLength: S.gap7)
+            OptFooter(stats: [
+                .init(label: "Put cost", value: optMoney(c.cost), ink: S.ink),
+                .init(label: "Collected", value: optMoney(c.collected), ink: S.gainText),
+                covered
+                    ? .init(label: "Over", value: "+" + optMoney(-c.left), ink: S.gainText)
+                    : .init(label: "To cover", value: optMoney(c.left), ink: S.ink),
+            ])
+        }
+    }
+
+    private var paceLine: String {
+        if covered { return "Covered \u{00B7} \(optMoney(c.pace))/wk still coming in" }
+        guard c.pace > 0 else { return "No put sold yet \u{00B7} nothing covering it" }
+        return "\(optMoney(c.pace))/wk pace \u{00B7} full cover in "
+            + "\(c.weeksToCover) week\(c.weeksToCover == 1 ? "" : "s")"
+    }
+
+    private var ring: some View {
+        ZStack {
+            Circle()
+                .stroke(S.coverTrack, lineWidth: S.coverStroke)
+            /* ⚠ CLAMPED AT 1. Trim past 1 wraps and the arc eats its own tail. */
+            Circle()
+                .trim(from: 0, to: max(0.001, min(frac, 1)))
+                .stroke(S.gainBar,
+                        style: StrokeStyle(lineWidth: S.coverStroke, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            /* The figure is a SIBLING of the arc, never rotated with it. */
+            VStack(spacing: 3) {
+                Text(String(format: "%.0f%%", frac * 100))
+                    .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
+                    .foregroundStyle(S.gainText).sunnyLineBox(S.t30)
+                Text("COVERED")
+                    .font(S.inter(S.t11, S.wBoldN)).tracking(S.track(S.t11, S.lsLabel))
+                    .foregroundStyle(S.mute)
+            }
+        }
+        .frame(width: S.coverRingD, height: S.coverRingD)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 

@@ -54,11 +54,23 @@ Deno.serve(async (req) => {
     const ago = (d: number) => new Date(Date.parse(today + 'T00:00:00Z') - d * 86_400_000)
       .toISOString().slice(0, 10);
 
-    const [legs, allCalls, quotes, greeks, greeksHist, names] = await Promise.all([
+    const [legs, allCalls, allPuts, quotes, greeks, greeksHist, names] = await Promise.all([
       D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
         + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date'),
       D.get('option_trades?voided_at=is.null&option_type=eq.call&direction=eq.short'
         + '&select=ticker,action,contracts,premium,trade_date,expiry&order=trade_date.asc'),
+      /* ⚠ SHORT PUTS ARE A SEPARATE SERIES AND MUST STAY SEPARATE. They fund the
+         long puts and nothing else. Nik, 2026-09-06, on whether the cover ring
+         should count call premium: it must not, because call premium is already
+         the numerator of Yield progress, and one dollar cannot discharge two
+         obligations on two cards. */
+      /* ⚠ NO EXPIRY FILTER, BOTH DIRECTIONS. The cover ring is cumulative and
+         never resets, so a put that has already expired still spent its money
+         and its funding week still counted. Filtering to live legs the way the
+         `legs` query does would quietly shrink the cost every time a tranche
+         ran off, and the ring would climb for no reason. */
+      D.get('option_trades?voided_at=is.null&option_type=eq.put'
+        + '&select=ticker,direction,action,contracts,premium,trade_date,expiry&order=trade_date.asc'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
       D.get('option_greeks_latest?select=option_trade_id,delta,last_mark'),
       D.get(`option_greeks?captured_at=gte.${ago(12)}`
@@ -193,7 +205,9 @@ Deno.serve(async (req) => {
         const prev = wa.length ? wa.reduce((s, x) => s + x, 0) / wa.length : 0;
 
         const shorts = open.filter((e) =>
-          e.ticker === t && e.dir === 'short' && e.type === 'call').map((s) => {
+          /* Sold PUTS join sold calls here. Roll check answers "what did I
+             sell", and after 2026-09 that is both. */
+          e.ticker === t && e.dir === 'short').map((s) => {
             const sm = s.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
             /* ⚠ AN UNPRICED LEG IS NOT A FULLY CAPTURED ONE. `value` used to
                fall back to 0 when no mark existed, which made captured
@@ -217,7 +231,14 @@ Deno.serve(async (req) => {
             const credit = s.cash;
             return {
               n: s.n, k: s.k, exp: s.exp, credit: Math.round(credit),
-              value: Math.round(value), itm: S > s.k, priced,
+              /* ⚠ MONEYNESS INVERTS ON A PUT. A call is in the money ABOVE its
+                 strike, a put BELOW it. The card colours every row and counts
+                 ROLLING off this flag, so hard-coding the call rule would have
+                 painted every sold put backwards — green when it was about to
+                 be assigned. */
+              type: s.type,
+              value: Math.round(value), priced,
+              itm: s.type === 'put' ? S < s.k && S > 0 : S > s.k,
               /* ⚠ CAPTURED IS OF THE CREDIT RECEIVED, never the option's own
                  price change and never a dollar. It is the MONEY; `itm` is the
                  ACTION, and they disagree often on purpose. */
@@ -323,8 +344,67 @@ Deno.serve(async (req) => {
     const avgPct = liveWeeks.length
       ? liveWeeks.reduce((s, w) => s + w.pct, 0) / liveWeeks.length : 0;
 
+    /* ── put cover ────────────────────────────────────────────────────────
+       The long puts are the hedge; the short puts pay for them. The ring is
+       one against the other, for the whole book.
+
+       ⚠ IT NEVER RESETS. Nik, 2026-09-06: "It's a continous process when new
+       stock is added new puts are added so not it never resets its
+       continuous." So `cost` is every dollar ever spent NET on long puts and
+       `collected` is every short-put credit ever. That is not a ratchet that
+       ends life stuck at 100%: buying a tranche RAISES the cost and drops the
+       ring, and the weeklies climb it back. Every purchase re-opens the gap,
+       which is what makes a cumulative ring keep saying something.
+
+       ⚠ AND CALL PREMIUM IS NOT IN IT. Yield progress already divides by call
+       credits; counting them here would let one dollar discharge two different
+       obligations on two cards that sit one above the other. */
+    const netLongPuts = new Map<string, number>();   // ticker -> contracts held
+    let putCost = 0;
+    for (const t of allPuts) {
+      if (String(t.direction) !== 'long') continue;
+      const sign = String(t.action) === 'open' ? 1 : -1;
+      const tk = String(t.ticker);
+      netLongPuts.set(tk, (netLongPuts.get(tk) ?? 0) + sign * N(t.contracts));
+      /* Net of any sold back, so rolling one does not inflate the cost. */
+      putCost += sign * N(t.contracts) * N(t.premium) * 100;
+    }
+    const putNames = [...netLongPuts.entries()].filter(([, n]) => n > 0.0001);
+    const putContracts = putNames.reduce((a, [, n]) => a + n, 0);
+
+    /* Short-put credits, bucketed by the week they COVER, same rule the call
+       side uses. */
+    const putWeek = new Map<string, number>();
+    for (const t of allPuts) {
+      if (String(t.direction) !== 'short') continue;
+      const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
+      const w = weekStart(String(t.expiry).slice(0, 10));
+      putWeek.set(w, (putWeek.get(w) ?? 0) + c);
+    }
+    const putCollected = [...putWeek.values()].reduce((a, b) => a + b, 0);
+    /* Pace is the realised rate over the weeks that actually ran, never over
+       the calendar — the same divisor Nik ruled on for the weekly yield. */
+    const putLive = [...putWeek.values()].filter((v) => v !== 0);
+    const putPace = putLive.length
+      ? putLive.reduce((a, b) => a + b, 0) / putLive.length : 0;
+    const putLeft = Math.round(putCost - putCollected);
+
     return json(200, {
       ok: true, build: BUILD, date: today,
+      /* Null when nothing is held: a ring at 0% of $0 is not an empty state,
+         it is a card with no subject. The client drops it entirely. */
+      putCover: putContracts > 0 && putCost > 0
+        ? {
+          names: putNames.length,
+          puts: Math.round(putContracts),
+          cost: Math.round(putCost),
+          collected: Math.round(putCollected),
+          left: putLeft,
+          pace: Math.round(putPace),
+          pct: r2(putCollected / putCost * 100),
+          weeksToCover: putLeft > 0 && putPace > 0 ? Math.ceil(putLeft / putPace) : 0,
+        }
+        : null,
       book: {
         paid: paidTotal,
         collected: positions.reduce((s, p) => s + p.collected, 0),
