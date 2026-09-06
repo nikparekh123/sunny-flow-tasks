@@ -737,10 +737,17 @@ struct SunnyLeapGains: View {
 /// names it is another ranking card and the options family already has three.
 /// Which names are in it is the header count.
 struct SunnyPutCover: View {
-    let c: PutCover
+    /// Null before the first put is bought. The card still draws — Nik asked
+    /// to watch the circle develop as the book is built — but it draws an
+    /// ABSENCE, not a zero.
+    let c: PutCover?
 
-    private var frac: Double { c.cost > 0 ? Double(c.collected) / Double(c.cost) : 0 }
-    private var covered: Bool { c.left <= 0 }
+    private var frac: Double {
+        guard let c, c.cost > 0 else { return 0 }
+        return Double(c.collected) / Double(c.cost)
+    }
+    private var covered: Bool { (c?.left ?? 1) <= 0 }
+    private var started: Bool { (c?.cost ?? 0) > 0 }
 
     var body: some View {
         OptCard(name: "put-cover") {
@@ -749,11 +756,15 @@ struct SunnyPutCover: View {
                and naming the whole book when five of seven are in it is the
                same lie "5 legs" was. The count already says the size. */
             OptHead(title: "Put cover", sub: "",
-                    right: "\(c.names) name\(c.names == 1 ? "" : "s") \u{00B7} \(c.puts) put\(c.puts == 1 ? "" : "s")")
+                    right: started
+                        ? "\(c!.names) name\(c!.names == 1 ? "" : "s") \u{00B7} \(c!.puts) put\(c!.puts == 1 ? "" : "s")"
+                        : "none yet")
             Spacer().frame(height: 20)
             ring
             Spacer().frame(height: 14)
-            Text("\(optMoney(c.collected)) of \(optMoney(c.cost)) collected")
+            Text(started
+                 ? "\(optMoney(c!.collected)) of \(optMoney(c!.cost)) collected"
+                 : "No puts bought yet")
                 .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
                 .frame(maxWidth: .infinity, alignment: .center)
             Spacer().frame(height: S.gap5)
@@ -765,17 +776,30 @@ struct SunnyPutCover: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .lineLimit(1)
             Spacer(minLength: S.gap7)
-            OptFooter(stats: [
-                .init(label: "Put cost", value: optMoney(c.cost), ink: S.ink),
-                .init(label: "Collected", value: optMoney(c.collected), ink: S.gainText),
-                covered
-                    ? .init(label: "Over", value: "+" + optMoney(-c.left), ink: S.gainText)
-                    : .init(label: "To cover", value: optMoney(c.left), ink: S.ink),
-            ])
+            /* ⚠ AN ABSENT VALUE IS A DASH, NEVER A ZERO. "$0" at 19/700 in a
+               footer slot reads as a measured nothing — the book was priced
+               and came to zero — which is a different and false statement. A
+               dash cannot be mistaken for a measurement. */
+            OptFooter(stats: started
+                ? [
+                    .init(label: "Put cost", value: optMoney(c!.cost), ink: S.ink),
+                    .init(label: "Collected", value: optMoney(c!.collected), ink: S.gainText),
+                    covered
+                        ? .init(label: "Over", value: "+" + optMoney(-c!.left), ink: S.gainText)
+                        : .init(label: "To cover", value: optMoney(c!.left), ink: S.ink),
+                ]
+                : [
+                    .init(label: "Put cost", value: "\u{2014}", ink: S.mute),
+                    .init(label: "Collected", value: "\u{2014}", ink: S.mute),
+                    .init(label: "To cover", value: "\u{2014}", ink: S.mute),
+                ])
         }
     }
 
     private var paceLine: String {
+        guard let c, started else {
+            return "The ring fills as premium covers what the puts cost"
+        }
         if covered { return "Covered \u{00B7} \(optMoney(c.pace))/wk still coming in" }
         guard c.pace > 0 else { return "No put sold yet \u{00B7} nothing covering it" }
         return "\(optMoney(c.pace))/wk pace \u{00B7} full cover in "
@@ -786,18 +810,27 @@ struct SunnyPutCover: View {
         ZStack {
             Circle()
                 .stroke(S.coverTrack, lineWidth: S.coverStroke)
-            /* ⚠ CLAMPED AT 1. Trim past 1 wraps and the arc eats its own tail. */
-            Circle()
-                .trim(from: 0, to: max(0.001, min(frac, 1)))
-                .stroke(S.gainBar,
-                        style: StrokeStyle(lineWidth: S.coverStroke, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+            /* ⚠ CLAMPED AT 1. Trim past 1 wraps and the arc eats its own tail.
+               And NO ARC AT ALL before the first put: a 0.001 stub would be a
+               green pip at twelve o'clock claiming a start that has not
+               happened. */
+            if started {
+                Circle()
+                    .trim(from: 0, to: max(0.001, min(frac, 1)))
+                    .stroke(S.gainBar,
+                            style: StrokeStyle(lineWidth: S.coverStroke, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
             /* The figure is a SIBLING of the arc, never rotated with it. */
             VStack(spacing: 3) {
-                Text(String(format: "%.0f%%", frac * 100))
+                /* ⚠ "0%" WOULD READ AS FAILING AT SOMETHING. Before the first
+                   put there is no denominator, so the centre carries a dash in
+                   --mute and the label says what has not happened rather than
+                   scoring it at nothing. */
+                Text(started ? String(format: "%.0f%%", frac * 100) : "\u{2014}")
                     .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
-                    .foregroundStyle(S.gainText).sunnyLineBox(S.t30)
-                Text("COVERED")
+                    .foregroundStyle(started ? S.gainText : S.mute).sunnyLineBox(S.t30)
+                Text(started ? "COVERED" : "NO PUTS YET")
                     .font(S.inter(S.t11, S.wBoldN)).tracking(S.track(S.t11, S.lsLabel))
                     .foregroundStyle(S.mute)
             }

@@ -505,8 +505,11 @@ struct SunnyPane: View {
                $164,725 denominator and answer the halves of one question,
                how much the premium has paid back and what the LEAP is worth. */
             SunnyLeapGains(book: o.book, positions: o.positions)
-            /* Only when a put is actually held. Nothing to hedge, no card. */
-            if let cover = o.putCover ?? Self.argCover { SunnyPutCover(c: cover) }
+            /* Always shown now. Nik: "Maybe we can show the put card also and
+               when positions get added the circle develops". Before the first
+               put it draws an ABSENCE — empty track, dashes, no percentage —
+               rather than a zero. */
+            SunnyPutCover(c: o.putCover ?? Self.argCover)
             SunnyWeeklyYield(book: o.book)
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "
