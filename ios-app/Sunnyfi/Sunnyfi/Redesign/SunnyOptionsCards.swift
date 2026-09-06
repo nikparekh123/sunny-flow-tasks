@@ -144,6 +144,11 @@ struct SunnyRollCheck: View {
 
     struct Bar: Identifiable {
         let id: String, ticker: String, captured: Int, itm: Bool
+        /* ⚠ FALSE MEANS NO CALL IS SOLD, WHICH IS NOT A CAPTURE OF ZERO.
+           An uncovered name has captured nothing because there is nothing
+           to capture, and the row must say that rather than draw a bar at
+           the zero line as though a leg existed and had gone nowhere. */
+        var covered: Bool = true
     }
 
     /* ⚠ THE LABEL CARRIES THE STRIKE ONLY WHEN IT HAS TO. The sheet's bar
@@ -170,12 +175,28 @@ struct SunnyRollCheck: View {
         sortedBars
     }
 
+    /* ⚠ UNCOVERED NAMES SORT ABOVE EVERYTHING, not into the numeric order.
+       They have no captured value to sort BY, and they are the work that has
+       not started: a name with no call earns nothing this week, while a leg
+       at -28% out of the money needs no decision at all. Nik found this the
+       hard way — the card said "5 legs" while he held seven LEAPs, and the
+       three it could not draw (FIS, PEP, KR, whose calls expired on the
+       Friday) were exactly the three needing action. */
     private var sortedBars: [Bar] {
-        rawBars.sorted { $0.captured < $1.captured }
+        let all = rawBars
+        return all.filter { !$0.covered }.sorted { $0.ticker < $1.ticker }
+             + all.filter { $0.covered }.sorted { $0.captured < $1.captured }
     }
 
     private var rawBars: [Bar] {
         positions.flatMap { p -> [Bar] in
+            /* A LEAP with no call against it is still a row. The card is the
+               only place the book is listed against its calls, so a name it
+               cannot draw is a name that cannot be noticed. */
+            guard !p.shorts.isEmpty else {
+                return [Bar(id: "\(p.t)-none", ticker: p.t, captured: 0,
+                            itm: false, covered: false)]
+            }
             let strikeCount = Dictionary(grouping: p.shorts, by: \.k).mapValues(\.count)
             return p.shorts.map { s in
                 let k = s.k.formatted(.number.precision(.fractionLength(0)))
@@ -205,8 +226,11 @@ struct SunnyRollCheck: View {
     }
     private var valCol: CGFloat {
         max(S.progValCol,
-            (bars.map { S.textW(barePctInt($0.captured), S.t13, S.wSemiN) }.max() ?? 0) + 3)
+            (bars.map { S.textW($0.covered ? barePctInt($0.captured) : "No call",
+                                S.t13, S.wSemiN) }.max() ?? 0) + 3)
     }
+    private var uncovered: Int { rawBars.filter { !$0.covered }.count }
+
     private var rowTrack: CGFloat {
         max(110, S.content - 38 - nameCol - valCol - 2 * S.gap4)
     }
@@ -256,7 +280,12 @@ struct SunnyRollCheck: View {
         let track: CGFloat = rowTrack
         let x = { (v: CGFloat) in track * (v - lo) / max(hi - lo, 1) }
         return OptCard(name: "roll-check-rows", fixedHeight: nil) {
-            OptHead(title: "Roll check", sub: "calls sold", right: "\(bars.count) legs")
+            /* "5 legs" was true and misleading: it counted what the card
+               could draw, not what he holds. */
+            OptHead(title: "Roll check", sub: "calls sold",
+                    right: uncovered == 0
+                        ? "\(positions.count) names"
+                        : "\(uncovered) with no call")
             Spacer().frame(height: S.gap7)
             VStack(alignment: .leading, spacing: 5) {
                 Text("CAPTURED OF CREDIT")
@@ -319,14 +348,19 @@ struct SunnyRollCheck: View {
         HStack(spacing: S.gap4) {
             Text(b.ticker)
                 .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
-                .foregroundStyle(S.ink)
+                .foregroundStyle(b.covered ? S.ink : S.mute)
                 .frame(width: nameCol, alignment: .leading).lineLimit(1)
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
-                RoundedRectangle(cornerRadius: S.radiusBar)
-                    .fill(b.itm ? S.lossBar : S.gainBar)
-                    .frame(width: max(2, x1 - x0))
-                    .offset(x: x0)
+                /* ⚠ NO MARK AT ALL WHEN NOTHING IS SOLD. A 2pt sliver at the
+                   zero line would read as a leg that captured nothing, which
+                   is a different and wrong statement. */
+                if b.covered {
+                    RoundedRectangle(cornerRadius: S.radiusBar)
+                        .fill(b.itm ? S.lossBar : S.gainBar)
+                        .frame(width: max(2, x1 - x0))
+                        .offset(x: x0)
+                }
             }
             .frame(width: track, height: S.progRowH)
             .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
@@ -337,10 +371,13 @@ struct SunnyRollCheck: View {
                coloured the text by the sign, so an ITM leg that had still
                captured something rendered a green number on a red bar and
                contradicted the card's own ROLLING count. */
-            Text(barePctInt(b.captured))
+            /* "No call" takes --mute: it is neither a win nor a loss, it is
+               an absence, and giving it direction ink would rank it against
+               figures it is not comparable to. */
+            Text(b.covered ? barePctInt(b.captured) : "No call")
                 .font(S.inter(S.t13, S.wSemiN))
-                .foregroundStyle(b.itm ? S.lossText : S.gainText)
-                .frame(width: valCol, alignment: .trailing)
+                .foregroundStyle(b.covered ? (b.itm ? S.lossText : S.gainText) : S.mute)
+                .frame(width: valCol, alignment: .trailing).lineLimit(1)
         }
     }
 }
