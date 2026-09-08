@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-02.1';
+const BUILD = '2026-09-08.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -54,11 +54,21 @@ Deno.serve(async (req) => {
     const ago = (d: number) => new Date(Date.parse(today + 'T00:00:00Z') - d * 86_400_000)
       .toISOString().slice(0, 10);
 
-    const [legs, allCalls, allPuts, quotes, greeks, greeksHist, names] = await Promise.all([
+    const [legs, allShorts, allPuts, quotes, greeks, greeksHist, names] = await Promise.all([
       D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
         + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date'),
-      D.get('option_trades?voided_at=is.null&option_type=eq.call&direction=eq.short'
-        + '&select=ticker,action,contracts,premium,trade_date,expiry&order=trade_date.asc'),
+      /* ⚠ SHORT PUTS COUNT HERE TOO. Nik, 2026-09-08: "short calls only shuold
+         also include short puts as well." The weekly bars were calls-only
+         while Roll check's footer summed both, so the same week read 2.7% on
+         one card and 2.8% on the other, the $235 gap being an NFLX short put.
+         The weekly yield is what the book earned that week, and a sold put
+         earned it. It is also still the numerator of the put cover ring, and
+         that is not double counting: the ring asks how much of the hedge is
+         paid off, this asks what the week returned on capital. The rule the
+         ring does keep is the one that matters, that CALL premium never
+         funds the puts. */
+      D.get('option_trades?voided_at=is.null&direction=eq.short'
+        + '&select=ticker,option_type,action,contracts,premium,trade_date,expiry&order=trade_date.asc'),
       /* ⚠ SHORT PUTS ARE A SEPARATE SERIES AND MUST STAY SEPARATE. They fund the
          long puts and nothing else. Nik, 2026-09-06, on whether the cover ring
          should count call premium: it must not, because call premium is already
@@ -70,7 +80,7 @@ Deno.serve(async (req) => {
          `legs` query does would quietly shrink the cost every time a tranche
          ran off, and the ring would climb for no reason. */
       D.get('option_trades?voided_at=is.null&option_type=eq.put'
-        + '&select=ticker,direction,action,contracts,premium,trade_date,expiry&order=trade_date.asc'),
+        + '&select=ticker,direction,action,contracts,strike,premium,trade_date,expiry&order=trade_date.asc'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
       D.get('option_greeks_latest?select=option_trade_id,delta,last_mark'),
       D.get(`option_greeks?captured_at=gte.${ago(12)}`
@@ -120,7 +130,7 @@ Deno.serve(async (req) => {
     /* ── every credit ever, bucketed by week ────────────────────────────── */
     const creditByWeek = new Map<string, Map<string, number>>();
     const firstCredit = new Map<string, string>();
-    for (const t of allCalls) {
+    for (const t of allShorts) {
       const tk = String(t.ticker);
       const d = String(t.trade_date).slice(0, 10);
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
@@ -385,10 +395,38 @@ Deno.serve(async (req) => {
        ⚠ AND CALL PREMIUM IS NOT IN IT. Yield progress already divides by call
        credits; counting them here would let one dollar discharge two different
        obligations on two cards that sit one above the other. */
+    /* ⚠ THE PROGRAMME STARTS 1 SEP 2026 AND BOTH SIDES COUNT FROM THERE.
+       Nik, 2026-09-08, seeing $105,892 of "put cost": "I havent bought puts
+       worth 100K." He had not. The ring summed cash across every long put he
+       had ever traded, so a June META put bought at 8.80 and sold at 2.00
+       arrived here as $6,800 of COST. That is realized loss on a different
+       programme, on names no longer in the book: $84,092 of the $105,892.
+
+       "Never resets" was right and I read it too widely. It means a tranche
+       running off does not wipe the number. It does not mean two eras of
+       unrelated closed trades are the cost of this one.
+
+       ⚠ MEMBERSHIP IS THE POSITION'S FIRST OPEN, NOT THE TRADE'S DATE. On
+       1 Sep Nik closed ten August tranches. A `trade_date >= start` filter
+       would have taken those closes without their opens, and the ring would
+       have read −$3,035 collected against a negative cost. A position is in
+       the programme when it was OPENED into it. */
+    const PUT_START = '2026-09-01';
+    const putKey = (t: Record<string, unknown>) =>
+      `${t.ticker}|${t.direction}|${N(t.strike)}|${t.expiry}`;
+    const firstOpen = new Map<string, string>();
+    for (const t of allPuts) {
+      if (String(t.action) !== 'open') continue;
+      const k = putKey(t), d = String(t.trade_date).slice(0, 10);
+      if (!firstOpen.has(k) || d < firstOpen.get(k)!) firstOpen.set(k, d);
+    }
+    /* A key with no open at all is pre-history, not a programme position. */
+    const inProgramme = (t: Record<string, unknown>) => (firstOpen.get(putKey(t)) ?? '0000-00-00') >= PUT_START;
+
     const netLongPuts = new Map<string, number>();   // ticker -> contracts held
     let putCost = 0;
     for (const t of allPuts) {
-      if (String(t.direction) !== 'long') continue;
+      if (String(t.direction) !== 'long' || !inProgramme(t)) continue;
       const sign = String(t.action) === 'open' ? 1 : -1;
       const tk = String(t.ticker);
       netLongPuts.set(tk, (netLongPuts.get(tk) ?? 0) + sign * N(t.contracts));
@@ -402,7 +440,7 @@ Deno.serve(async (req) => {
        side uses. */
     const putWeek = new Map<string, number>();
     for (const t of allPuts) {
-      if (String(t.direction) !== 'short') continue;
+      if (String(t.direction) !== 'short' || !inProgramme(t)) continue;
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
       const w = weekStart(String(t.expiry).slice(0, 10));
       putWeek.set(w, (putWeek.get(w) ?? 0) + c);
