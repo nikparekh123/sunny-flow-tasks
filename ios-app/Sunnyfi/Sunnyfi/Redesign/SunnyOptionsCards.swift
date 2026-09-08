@@ -501,9 +501,10 @@ struct SunnyYieldProgress: View {
 
     private var rows: [(t: String, pct: Double, last: Double)] {
         positions.map { p in
-            let pct = p.paid > 0 ? Double(p.collected) / Double(p.paid) * 100 : 0
+            let cap = p.invested ?? p.paid
+            let pct = cap > 0 ? Double(p.collected) / Double(cap) * 100 : 0
             let prior = p.collected - p.week
-            let last = p.paid > 0 ? Double(prior) / Double(p.paid) * 100 : 0
+            let last = cap > 0 ? Double(prior) / Double(cap) * 100 : 0
             return (p.t, pct, last)
         }.sorted { $0.pct > $1.pct }
     }
@@ -530,7 +531,9 @@ struct SunnyYieldProgress: View {
                three phrases to do it — and "paid back" was already said by the
                hero's own label two rows down. */
             OptHead(title: "Yield progress", sub: "",
-                    right: "\(optMoney(book.paid)) paid")
+                    /* "paid" now covers the puts too, so the word is
+                       "invested" — the label has to match the number. */
+                    right: "\(optMoney(book.paid)) invested")
             Spacer().frame(height: S.gap7)
             VStack(alignment: .leading, spacing: 5) {
                 Text("BOOK AVERAGE")
@@ -963,4 +966,148 @@ struct SunnyWeeklyYield: View {
         .frame(height: S.weekPlotH, alignment: .bottom)
     }
 
+}
+
+// MARK: - stock price
+
+/// ⚠ ROLL CHECK'S LAYOUT, A DIFFERENT SUBJECT. Nik, 2026-09-08: "Just like a
+/// roll check card can we do one for stock price. Same layout as Roll check the
+/// only added thing I want is adding 1 week, 2 weeks, 3 weeks and 4 weeks
+/// filter", then "also need one for today", then "remove ref lines".
+///
+/// ⚠ SO THERE ARE NO REFERENCE LINES HERE, only the zero line. Roll check's
+/// −100 and +75 are thresholds that mean something about capture; a price move
+/// has no equivalent, and drawing two arbitrary verticals would invent a
+/// standard the number is not being judged against.
+///
+/// ⚠ AND THE HERO IS WEIGHTED BY COST. The rows already say what each name did.
+/// An unweighted mean would restate them and would call a 1% KR position the
+/// equal of a 24% BABA one, so the server weights by the same cost basis the
+/// ticker strip uses. See `feedback_metric_must_add_information`.
+struct SunnyStockPrice: View {
+    let prices: PricesBlock
+
+    @State private var window: PriceWindow = .today
+
+    private struct Row: Identifiable {
+        let id: String, ticker: String, pct: Double
+    }
+
+    /// Worst first, the same queue-of-work order Roll check uses. A name with
+    /// no history for this window is dropped, not drawn at zero — see the
+    /// server's note on why the move is null rather than 0.
+    private var rows: [Row] {
+        prices.rows.compactMap { r in
+            r.pct.value(window).map { Row(id: r.ticker, ticker: r.ticker, pct: $0) }
+        }.sorted { $0.pct < $1.pct }
+    }
+
+    private var nameCol: CGFloat {
+        min(134, max(S.progNameCol,
+                     (rows.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3))
+    }
+    private var valCol: CGFloat {
+        max(S.progValCol,
+            (rows.map { S.textW(pctLabel($0.pct), S.t13, S.wSemiN) }.max() ?? 0) + 3)
+    }
+    private var rowTrack: CGFloat {
+        max(110, S.content - 38 - nameCol - valCol - 2 * S.gap4)
+    }
+
+    /// One decimal, because a price move of −0.6% rounds to −1% and reads as
+    /// six times the day it had. Roll check's integers are fine for capture,
+    /// which is never this small.
+    private func pctLabel(_ v: Double) -> String {
+        String(format: "%@%.1f%%", v < 0 ? "\u{2212}" : "", abs(v))
+    }
+
+    var body: some View {
+        let vals = rows.map(\.pct)
+        /* Both ends get headroom off the data, so the zero line is never pinned
+           to an edge even when every name is red — which, this month, it is. */
+        let mx = max(vals.max() ?? 0, 0), mn = min(vals.min() ?? 0, 0)
+        let span = max(mx - mn, 1)
+        let hi = mx + span * 0.08, lo = mn - span * 0.08
+        let track = rowTrack
+        let x = { (v: Double) in track * CGFloat((v - lo) / max(hi - lo, 0.0001)) }
+        let bookPct = prices.book.value(window)
+
+        return OptCard(name: "stock-price", fixedHeight: nil) {
+            OptHead(title: "Stock price", sub: "spot",
+                    right: "\(rows.count) names")
+            Spacer().frame(height: S.gap7)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("BOOK MOVE")
+                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                    .foregroundStyle(S.mute)
+                HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
+                    Text(bookPct.map(pctLabel) ?? "\u{2014}")
+                        .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
+                        .foregroundStyle((bookPct ?? 0) < 0 ? S.loss : S.gain)
+                        .sunnyLineBox(S.t30)
+                    Text(window.phrase)
+                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+                }
+            }
+            Spacer().frame(height: 14)
+            /* The filter. A discrete tap per pill, so it never competes with
+               the shell's horizontal paging drag. */
+            HStack(spacing: S.gap3) {
+                ForEach(PriceWindow.allCases) { w in
+                    Text(w.label)
+                        .font(S.inter(S.t11, S.wSemiN))
+                        .tracking(S.track(S.t11, 0.02))
+                        .foregroundStyle(w == window ? S.onInk : S.mute)
+                        .padding(.horizontal, 9).padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 999)
+                                .fill(w == window ? S.ink : S.wash))
+                        .contentShape(Rectangle())
+                        .onTapGesture { window = w }
+                }
+                Spacer(minLength: 0)
+            }
+            Spacer().frame(height: 16)
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: S.progRowGap) {
+                    ForEach(rows) { r in
+                        HStack(spacing: S.gap4) {
+                            Text(r.ticker)
+                                .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
+                                .foregroundStyle(S.ink)
+                                .frame(width: nameCol, alignment: .leading).lineLimit(1)
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
+                                RoundedRectangle(cornerRadius: S.radiusBar)
+                                    .fill(r.pct < 0 ? S.lossBar : S.gainBar)
+                                    .frame(width: max(2, x(max(r.pct, 0)) - x(min(r.pct, 0))))
+                                    .offset(x: x(min(r.pct, 0)))
+                            }
+                            .frame(width: track, height: S.progRowH)
+                            Text(pctLabel(r.pct))
+                                .font(S.inter(S.t13, S.wSemiN)).monospacedDigit()
+                                .foregroundStyle(r.pct < 0 ? S.lossText : S.gainText)
+                                .frame(width: valCol, alignment: .trailing).lineLimit(1)
+                        }
+                    }
+                }
+                /* The only vertical on this card. */
+                Rectangle().fill(S.ruleColorStrong).frame(width: 1)
+                    .offset(x: nameCol + S.gap4 + x(0), y: -4)
+                    .frame(maxHeight: .infinity).padding(.bottom, -4)
+            }
+            Spacer().frame(height: 22)
+            OptFooter(stats: [
+                .init(label: "Best",
+                      value: rows.last.map { pctLabel($0.pct) } ?? "\u{2014}",
+                      ink: (rows.last?.pct ?? 0) < 0 ? S.lossText : S.gainText),
+                .init(label: "Worst",
+                      value: rows.first.map { pctLabel($0.pct) } ?? "\u{2014}",
+                      ink: (rows.first?.pct ?? 0) < 0 ? S.lossText : S.gainText),
+                .init(label: "Up",
+                      value: "\(rows.filter { $0.pct > 0 }.count) of \(rows.count)",
+                      ink: S.ink),
+            ])
+        }
+    }
 }

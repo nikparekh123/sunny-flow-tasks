@@ -508,6 +508,10 @@ struct SunnyPane: View {
                and that gap is exactly what hid FIS, PEP and KR. */
             SunnyPageTitle(title: "Options", note: optionsNote(o))
             SunnyRollCheck(book: o.book, positions: o.positions)
+            /* Directly under Roll check because it is the same layout asking
+               the other half of the question: Roll check is what the legs did,
+               this is what the stock underneath them did. */
+            if let pr = o.prices, !pr.rows.isEmpty { SunnyStockPrice(prices: pr) }
             SunnyYieldProgress(book: o.book, positions: o.positions)
             /* Directly under Yield progress on purpose: the two share the
                $164,725 denominator and answer the halves of one question,

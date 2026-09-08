@@ -146,13 +146,14 @@ struct SunnyNameCredit: View {
             TFooter(stats: [
                 .init(label: "Paid back",
                       value: String(format: "%.1f%%",
-                                    p.paid > 0 ? Double(p.collected) / Double(p.paid) * 100 : 0),
+                                    (p.invested ?? p.paid) > 0
+                                        ? Double(p.collected) / Double(p.invested ?? p.paid) * 100 : 0),
                       ink: S.ink),
                 .init(label: "Collected", value: optMoney(p.collected), ink: S.gain),
                 /* Weeks to the LEAP's expiry at the current average. Not a
                    forecast, and it says "covers in" rather than "will cover". */
                 .init(label: "Covers in",
-                      value: avg > 0 ? "\(Int((Double(p.paid - p.collected) / avg).rounded()))w" : "\u{2014}",
+                      value: avg > 0 ? "\(Int((Double((p.invested ?? p.paid) - p.collected) / avg).rounded()))w" : "\u{2014}",
                       ink: S.ink),
             ])
         }
@@ -279,12 +280,13 @@ struct SunnyPair: View {
         }
         /* ⚠ YEARLY IS ON THIS SCOPE ONLY. It is the one window with enough
            weeks behind it for a yearly rate to mean anything. */
-        let yearly = p.paid > 0 && p.weeksRun > 0
-            ? Double(p.collected) / Double(p.weeksRun) * 52 / Double(p.paid) * 100 : 0
+        let cap = p.invested ?? p.paid
+        let yearly = cap > 0 && p.weeksRun > 0
+            ? Double(p.collected) / Double(p.weeksRun) * 52 / Double(cap) * 100 : 0
         return [
             .init(label: "Paid back",
                   value: String(format: "%.1f%%",
-                                p.paid > 0 ? Double(p.collected) / Double(p.paid) * 100 : 0),
+                                cap > 0 ? Double(p.collected) / Double(cap) * 100 : 0),
                   ink: S.ink),
             delta,
             .init(label: "Yearly", value: String(format: "%.0f%%", yearly), ink: S.ink),
@@ -354,7 +356,9 @@ struct SunnyPace: View {
     let p: OptionsPosition
 
     private var total: Int { p.weeksRun + p.weeksLeft }
-    private var needed: Int { Int(Double(p.paid) * Double(p.weeksRun) / Double(max(total, 1))) }
+    private var needed: Int {
+        Int(Double(p.invested ?? p.paid) * Double(p.weeksRun) / Double(max(total, 1)))
+    }
     private var ahead: Bool { p.collected >= needed }
     private var ink: Color { ahead ? S.gain : S.loss }
 
@@ -388,7 +392,8 @@ struct SunnyPace: View {
     }
 
     private var sentence: String {
-        let pct = p.paid > 0 ? Double(p.collected) / Double(p.paid) * 100 : 0
+        let pct = (p.invested ?? p.paid) > 0
+            ? Double(p.collected) / Double(p.invested ?? p.paid) * 100 : 0
         return ahead
             ? "\(optMoney(p.collected)) collected, \(String(format: "%.0f", pct))% of the LEAP, and ahead of the pace it needs."
             : "\(optMoney(p.collected)) collected, \(String(format: "%.0f", pct))% of the LEAP, and behind the pace it needs."
@@ -418,7 +423,7 @@ struct SunnyPace: View {
     private var chart: some View {
         GeometryReader { g in
             let w = g.size.width, h = S.paceH
-            let top = CGFloat(max(p.paid, 1))
+            let top = CGFloat(max(p.invested ?? p.paid, 1))
             let x = { (i: Int) in w * CGFloat(i) / CGFloat(max(total, 1)) }
             let y = { (v: CGFloat) in h - h * v / top }
             ZStack(alignment: .topLeading) {

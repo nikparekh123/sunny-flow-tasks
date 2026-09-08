@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-08.3';
+const BUILD = '2026-09-08.7';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
     const ago = (d: number) => new Date(Date.parse(today + 'T00:00:00Z') - d * 86_400_000)
       .toISOString().slice(0, 10);
 
-    const [legs, allShorts, allPuts, quotes, greeks, greeksHist, names] = await Promise.all([
+    const [legs, allShorts, allPuts, quotes, greeks, greeksHist, names, closes] = await Promise.all([
       D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
         + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date'),
       /* ⚠ SHORT PUTS COUNT HERE TOO. Nik, 2026-09-08: "short calls only shuold
@@ -86,6 +86,12 @@ Deno.serve(async (req) => {
       D.get(`option_greeks?captured_at=gte.${ago(12)}`
         + '&select=option_trade_id,delta,last_mark,captured_at&order=captured_at.desc'),
       D.get('ticker_names?select=ticker,name'),
+      /* ⚠ SIXTY CALENDAR DAYS, NOT TWENTY-ONE ROWS. The furthest window is
+         four TRADING weeks, which is 21 sessions, and 21 sessions spans more
+         than 21 days across two holidays. Fetching by date and counting rows
+         client-side is the only way the count stays a count of sessions. */
+      D.get(`daily_closes?date=gte.${ago(60)}&select=ticker,date,close_price`
+        + '&order=date.desc'),
     ]);
 
     const spot = new Map<string, number>();
@@ -209,6 +215,13 @@ Deno.serve(async (req) => {
        single constant to move the standard. The book currently runs 2.78%. */
     const TARGET_WEEKS = 25;
 
+    /* Per name, for the ticker page's own yield progress. */
+    const putCostBy = new Map<string, number>();
+    for (const e of open) {
+      if (e.dir !== 'long' || e.type !== 'put') continue;
+      putCostBy.set(e.ticker, (putCostBy.get(e.ticker) ?? 0) + e.cash);
+    }
+
     const positions = open
       .filter((e) => e.dir === 'long' && e.type === 'call')
       .map((leap) => {
@@ -298,6 +311,9 @@ Deno.serve(async (req) => {
           leap: contractLine(leap.n, leap.k, leap.exp, true),
           leapOpened: leap.opened,
           paid: Math.round(paid), mark: Math.round(m * leap.n * 100), leapPriced,
+          /* Capital to earn back on this name: the LEAP plus any long puts.
+             `paid` stays the LEAP alone because `mark - paid` is its gain. */
+          invested: Math.round(paid + (putCostBy.get(t) ?? 0)),
           /* ⚠ A CHANGE IN MARK, NOT CASH THAT MOVED. A LEAP held all week moves
              no cash and still gains or loses every week. Zero until a week of
              `option_greeks` exists for a leg opened days ago. */
@@ -349,21 +365,53 @@ Deno.serve(async (req) => {
        dividing by the same number, which is the reason this whole function
        exists, and it stops a closed position's realized gain from shrinking a
        past week's denominator. */
-    const openLeapKeys = new Set(
-      open.filter((e) => e.dir === 'long' && e.type === 'call')
-          .map((e) => `${e.ticker}|call|long|${e.k}|${e.exp}`));
+    /* ⚠ INVESTED IS CALLS PLUS PUTS. Nik, 2026-09-08: "does it calculate the
+       put cost or not? if not it shuold consider the total investment of the
+       account not just calls." It did not, and once short puts became income
+       this morning the omission was incoherent: the premium counted but the
+       capital it was earned on did not. This supersedes ruling 2 of 2026-09-06
+       ("put cost does not join Yield progress's denominator"), and he chose to
+       move BOTH cards so `paid` never means two things on one page.
+
+       ⚠ BUT A POSITION'S OWN `paid` STAYS LEAP-ONLY. The Long calls card reads
+       `mark - paid` as the LEAP's gain; folding put cost into that would report
+       a loss the LEAP did not have. Capital-to-earn-back and cost-basis-of-the-
+       mark are two different quantities that happened to share a field. */
+    const investedKeys = new Set(
+      open.filter((e) => e.dir === 'long')
+          .map((e) => `${e.ticker}|${e.type}|long|${e.k}|${e.exp}`));
     const paidByDay = new Map<string, number>();
     for (const t of legs) {
-      if (String(t.option_type) !== 'call' || String(t.direction) !== 'long') continue;
+      if (String(t.direction) !== 'long') continue;
       const key = `${t.ticker}|${t.option_type}|${t.direction}|${N(t.strike)}`
         + `|${String(t.expiry).slice(0, 10)}`;
-      if (!openLeapKeys.has(key)) continue;
+      if (!investedKeys.has(key)) continue;
       const d = String(t.trade_date).slice(0, 10);
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
       paidByDay.set(d, (paidByDay.get(d) ?? 0) + c);
     }
     const paidDates = [...paidByDay.keys()].sort();
-    /** Premium paid on the LEAPs held, as at the END of the given week. */
+    /* ⚠ THE PROGRAMME BEGINS AT THE FIRST LEAP, AND THAT IS THE FALLBACK TEST.
+       Testing `dated > 0` looked equivalent and was not: a single FIS put
+       bought on 26 Aug, at a strike later re-bought, put $1,750 of capital into
+       the week of 24 Aug. That week collected $6,085 against shares he no
+       longer holds, so the bar read 347.71% — arithmetically correct and
+       meaningless. A week that ENDS before the first LEAP was bought predates
+       the programme entirely, whatever stray capital existed, and takes today's
+       total by Nik's ruling. */
+    const leapKeys = new Set(
+      open.filter((e) => e.dir === 'long' && e.type === 'call')
+          .map((e) => `${e.ticker}|call|long|${e.k}|${e.exp}`));
+    /* From the FILLS, not from a leg's `opened` — that field takes whichever
+       row the unordered query returned first, which is not necessarily the
+       earliest of a multi-fill LEAP. */
+    const firstLeap = legs
+      .filter((t) => String(t.option_type) === 'call' && String(t.direction) === 'long'
+        && leapKeys.has(`${t.ticker}|call|long|${N(t.strike)}`
+          + `|${String(t.expiry).slice(0, 10)}`))
+      .map((t) => String(t.trade_date).slice(0, 10))
+      .sort()[0] ?? '9999-12-31';
+    /** Everything invested — LEAPs and long puts — as at the END of a week. */
     const paidAsOf = (weekMonday: string) => {
       const end = new Date(Date.parse(weekMonday + 'T00:00:00Z') + 6 * 86_400_000)
         .toISOString().slice(0, 10);
@@ -371,6 +419,11 @@ Deno.serve(async (req) => {
       for (const d of paidDates) { if (d > end) break; sum += paidByDay.get(d)!; }
       return sum;
     };
+
+    /* Summed from the ledger, not from `positions`, so a long put on a name
+       with no LEAP still counts as money at work rather than vanishing. */
+    const investedTotal = Math.round(
+      [...paidByDay.values()].reduce((a, b) => a + b, 0));
 
     const bookWeekly = weeks.map((w) => {
       let c = 0;
@@ -381,8 +434,10 @@ Deno.serve(async (req) => {
          than show them blank. They are therefore the ONLY bars that still
          drift, and they roll out of the eight-week window by late September,
          taking the drift with them. Do not "fix" this into a zero. */
+      const weekEnd = new Date(Date.parse(w + 'T00:00:00Z') + 6 * 86_400_000)
+        .toISOString().slice(0, 10);
       const dated = paidAsOf(w);
-      const denom = dated > 0 ? dated : paidTotal;
+      const denom = (weekEnd >= firstLeap && dated > 0) ? dated : investedTotal;
       /* ⚠ WHICH BAR IS "NOW" IS NO LONGER THE LAST ONE. The window reaches
          forward, so the final column can be a week already sold but not yet
          begun — and the card was painting THAT one as the live week. The
@@ -426,9 +481,68 @@ Deno.serve(async (req) => {
        fact and hiding it would make a young programme look established. It is
        the DIVISOR that changes, not the series. Once eight live weeks exist
        the two definitions converge and this stops mattering. */
-    const liveWeeks = bookWeekly.filter((w) => w.credit !== 0);
+    /* ⚠ AND A WEEK THAT HAS NOT HAPPENED IS NOT A WEEK THAT RAN. The window
+       reaches forward now, so a call written today for next Friday puts a real
+       credit in a future column — $120 of it — and that column was landing in
+       the average as a complete week at 0.05%, dragging the book rate from
+       2.5% to 1.85% and Yearly from 133% to 96%. The forward bar still DRAWS,
+       because the credit is banked and hiding it would understate the week; it
+       just cannot be averaged as though it were finished. */
+    const liveWeeks = bookWeekly.filter((w) => w.credit !== 0 && w.week <= thisWeek);
     const avgPct = liveWeeks.length
       ? liveWeeks.reduce((s, w) => s + w.pct, 0) / liveWeeks.length : 0;
+
+    /* ── stock price, five windows ─────────────────────────────────────────
+       Nik, 2026-09-08: "Just like a roll check card can we do one for stock
+       price. Same layout as Roll check the only added thing I want is adding
+       1 week, 2 weeks, 3 weeks and 4 weeks filter", then "also need one for
+       today" and "remove ref lines".
+
+       ⚠ THE WINDOWS COUNT SESSIONS, NOT DAYS. A week is five trading days;
+       counting calendar days would silently shorten every window that spans a
+       holiday and would make "1 week" mean something different in July than in
+       December. Offset 0 is the latest close, so `today` is spot against it and
+       `w1` is spot against five sessions before that.
+
+       ⚠ AND THE BOOK FIGURE IS WEIGHTED BY COST. The rows already say what each
+       name did; an unweighted mean would only restate them and would call a 1%
+       KR position the equal of a 24% BABA one. Weighting by `paid` makes the
+       hero the one thing the rows cannot say — what his money did — and it uses
+       the same cost basis the ticker strip's weights do, so the two can never
+       disagree. */
+    const closeRows = new Map<string, number[]>();   // ticker -> closes, newest first
+    for (const r of closes) {
+      const t = String(r.ticker);
+      if (!closeRows.has(t)) closeRows.set(t, []);
+      closeRows.get(t)!.push(N(r.close_price));
+    }
+    const WINDOWS: [string, number][] =
+      [['today', 0], ['w1', 5], ['w2', 10], ['w3', 15], ['w4', 20]];
+    const moveFor = (t: string): Record<string, number | null> => {
+      const S0 = spot.get(t) ?? 0;
+      const cs = closeRows.get(t) ?? [];
+      const out: Record<string, number | null> = {};
+      for (const [key, back] of WINDOWS) {
+        const base = cs[back];
+        /* Null, never 0. A name with too little history has no move to report,
+           and 0% would draw a flat bar that reads as "it did not move". */
+        out[key] = (base && base > 0 && S0 > 0) ? r2((S0 / base - 1) * 100) : null;
+      }
+      return out;
+    };
+    const priceRows = positions.map((p) => ({
+      ticker: p.t, weight: p.paid, pct: moveFor(p.t),
+    }));
+    const bookMove: Record<string, number | null> = {};
+    for (const [key] of WINDOWS) {
+      let num = 0, den = 0;
+      for (const r of priceRows) {
+        const v = r.pct[key];
+        if (v === null || r.weight <= 0) continue;
+        num += v * r.weight; den += r.weight;
+      }
+      bookMove[key] = den > 0 ? r2(num / den) : null;
+    }
 
     /* ── put cover ────────────────────────────────────────────────────────
        The long puts are the hedge; the short puts pay for them. The ring is
@@ -519,8 +633,15 @@ Deno.serve(async (req) => {
           weeksToCover: putLeft > 0 && putPace > 0 ? Math.ceil(putLeft / putPace) : 0,
         }
         : null,
+      /* `asOf` is the close the windows are measured FROM, so the card can
+         say what "today" is against without the client guessing. */
+      prices: { rows: priceRows, book: bookMove,
+                asOf: (closes[0] ? String(closes[0].date).slice(0, 10) : today) },
       book: {
-        paid: paidTotal,
+        /* ⚠ `paid` IS NOW TOTAL INVESTED, and the label on the card says so.
+           Every yield on this page divides by it. */
+        paid: investedTotal,
+        leapPaid: paidTotal,
         collected: positions.reduce((s, p) => s + p.collected, 0),
         windowCredit: bookWeekly.reduce((s, w) => s + w.credit, 0),
         weekly: bookWeekly,
@@ -541,7 +662,7 @@ Deno.serve(async (req) => {
         openValue: Math.round(openValue),
         /* Gross: what the sold calls yield on the capital, before buying them
            back. The hero already carries the net as `kept`. */
-        openYield: paidTotal > 0 ? r2(openCredit / paidTotal * 100) : 0,
+        openYield: investedTotal > 0 ? r2(openCredit / investedTotal * 100) : 0,
         /* ⚠ THE OPEN LEGS DO NOT ALWAYS COVER "THIS WEEK", and the roll card
            said they did. An ISO week runs Mon-Sun, so on a SATURDAY OR SUNDAY
            the current week is the one that just ENDED and whose legs have

@@ -61,10 +61,72 @@ struct OptionsPayload: Decodable {
     /// Null until a long put is held. A ring at 0% of $0 is not an empty
     /// state, it is a card with no subject, so the page drops it.
     let putCover: PutCover?
+    /// Optional so a run against an older deployment decodes rather than throws.
+    let prices: PricesBlock?
+}
+
+/// ⚠ THE WINDOWS COUNT TRADING SESSIONS, NOT CALENDAR DAYS. A week is five
+/// sessions, so "1 week" means the same thing in a holiday week as in any
+/// other. `today` is spot against the latest close.
+struct PriceMove: Decodable {
+    let today: Double?, w1: Double?, w2: Double?, w3: Double?, w4: Double?
+    func value(_ w: PriceWindow) -> Double? {
+        switch w {
+        case .today: return today
+        case .w1:    return w1
+        case .w2:    return w2
+        case .w3:    return w3
+        case .w4:    return w4
+        }
+    }
+}
+
+enum PriceWindow: String, CaseIterable, Identifiable {
+    case today, w1, w2, w3, w4
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .today: return "Today"
+        case .w1:    return "1W"
+        case .w2:    return "2W"
+        case .w3:    return "3W"
+        case .w4:    return "4W"
+        }
+    }
+    /// What the hero says it is measuring, in words the card can print.
+    var phrase: String {
+        switch self {
+        case .today: return "today"
+        case .w1:    return "over 1 week"
+        case .w2:    return "over 2 weeks"
+        case .w3:    return "over 3 weeks"
+        case .w4:    return "over 4 weeks"
+        }
+    }
+}
+
+struct PriceRow: Decodable, Identifiable {
+    let ticker: String
+    /// Cost basis, the same weight the ticker strip uses.
+    let weight: Int
+    let pct: PriceMove
+    var id: String { ticker }
+}
+
+struct PricesBlock: Decodable {
+    let rows: [PriceRow]
+    /// Weighted by cost, so it is what his MONEY did — the one thing the rows
+    /// cannot say. Nik chose this over a plain mean, 2026-09-08.
+    let book: PriceMove
+    /// The close the windows are measured from.
+    let asOf: String
 }
 
 struct OptionsBook: Decodable {
+    /// ⚠ `paid` IS TOTAL INVESTED — LEAPs plus long puts. `leapPaid` is the
+    /// LEAP half alone, kept for anything that means the calls specifically.
     let paid: Int, collected: Int, windowCredit: Int
+    let leapPaid: Int?
     let weekly: [BookWeek]
     let avgPct: Double
     /// Weeks with a credit. The average divides by THIS, not by 8.
@@ -101,7 +163,14 @@ struct OptionsBook: Decodable {
 struct OptionsPosition: Decodable, Identifiable {
     let t: String, co: String
     let leap: String
+    /// ⚠ TWO DIFFERENT QUANTITIES THAT USED TO SHARE A FIELD. `paid` is the
+    /// LEAP's cost and only that, because `mark - paid` is its gain. `invested`
+    /// is the capital this name has to earn back — the LEAP plus its long puts
+    /// — and it is what every yield on the page divides by. Nik, 2026-09-08:
+    /// "it shuold consider the total investment of the account not just calls."
+    /// Optional so a run against an older deployment decodes rather than throws.
     let paid: Int, mark: Int
+    let invested: Int?
     /// ⚠ A CHANGE IN MARK, NOT CASH THAT MOVED. A LEAP held all week moves no
     /// cash and still gains or loses every week.
     let markWeek: Int
