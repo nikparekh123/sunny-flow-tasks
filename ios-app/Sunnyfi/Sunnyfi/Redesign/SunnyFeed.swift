@@ -211,10 +211,15 @@ final class PaneModel {
        card layer's own meaning — it is just measured against the feed rather
        than against a read pill that no longer exists. */
     var due: Int {
-        let p = newPage.page
-        let fresh = (p?.news.lead.map { $0.hours < 24 } ?? false) ? 1 : 0
-        let links = p?.news.links.filter { $0.hours < 24 }.count ?? 0
-        let acts = p?.analysts.cards.filter { $0.date == p?.date }.count ?? 0
+        guard let p = newPage.page else { return 0 }
+        /* ⚠ THE SAME PREDICATE THE TAGS USE. Inlining `hours < 24` here again
+           is how the badge and the page would come to disagree, which is the
+           defect Nik reported: a count with nothing marked. */
+        let fresh = (p.news.lead.map { NewToday.news(hours: $0.hours) } ?? false) ? 1 : 0
+        let links = p.news.links.filter { NewToday.news(hours: $0.hours) }.count
+        let acts = p.analysts.cards.filter {
+            NewToday.action(date: $0.date, pageDate: p.date)
+        }.count
         return fresh + links + acts
     }
     var pending: Set<String> {
@@ -402,7 +407,10 @@ struct SunnyPane: View {
                         + "\(p.analysts.lastTicker ?? ""), \(shortDate($0))."
                     })
             } else {
-                ForEach(p.analysts.cards) { SunnyAnalystCard(a: $0) }
+                ForEach(p.analysts.cards) {
+                    SunnyAnalystCard(a: $0,
+                                     isNew: NewToday.action(date: $0.date, pageDate: p.date))
+                }
                 if !p.analysts.rest.isEmpty { SunnyActionList(rows: p.analysts.rest) }
             }
             /* On every state of the page, with that state's own numbers — a

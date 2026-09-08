@@ -54,6 +54,10 @@ struct SunnyNewsLead: View {
                     Link(destination: URL(string: lead.url) ?? URL(string: "https://polygon.io")!) {
                         VStack(alignment: .leading, spacing: S.gap5 + 4) {
                             HStack(spacing: S.gap4) {
+                                /* First in the row, because this card is the
+                                   first thing read and the tag is the answer to
+                                   "which one is new". */
+                                if NewToday.news(hours: lead.hours) { SunnyNewTag() }
                                 /* ⚠ A PRESS RELEASE OUTRANKS AN ARTICLE — 19% of
                                    the feed and close to 100% on topic — so the
                                    KIND is printed. The only kind marker on the
@@ -148,6 +152,10 @@ struct SunnyNewsLead: View {
 
 struct SunnyAnalystCard: View {
     let a: AnalystAction
+    /// The card cannot see the payload's date, so the page hands it the answer
+    /// from `NewToday.action`. Defaulted, so the previews and the action list
+    /// that never tags are unaffected.
+    var isNew: Bool = false
 
     var body: some View {
         NewCard(name: "action-\(a.ticker)-\(a.date)") {
@@ -162,6 +170,7 @@ struct SunnyAnalystCard: View {
                             .font(S.inter(S.t11, S.wSemiN))
                             .tracking(S.track(S.t11, S.lsNew))
                             .foregroundStyle(S.mute)
+                        if isNew { SunnyNewTag() }
                         Spacer(minLength: 0)
                         Text(dayLabel(a.date).uppercased())
                             .font(S.inter(S.t11, S.wSemiN))

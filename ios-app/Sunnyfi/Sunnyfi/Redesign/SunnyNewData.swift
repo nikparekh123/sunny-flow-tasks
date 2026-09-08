@@ -43,6 +43,20 @@ final class NewPageStore {
     }
 }
 
+/// ⚠ ONE PREDICATE FOR THE COUNT AND THE TAGS. Nik, 2026-09-08: "It says 1 new
+/// but doesnt show what is new is there a way we can show a new tag on whats
+/// new so it's easy to find." The strip already knew the answer and would not
+/// say it. A badge that says 1 while nothing on the page is marked is the page
+/// contradicting itself, so the count and every NEW tag call THESE and only
+/// these — deriving "new" twice is how the two would drift apart.
+enum NewToday {
+    /// News is stamped in hours since publication. Today is the last 24.
+    static func news(hours: Int) -> Bool { hours < 24 }
+    /// An analyst action carries a date, and the payload's own date is today.
+    /// The feed is weekly, so most cards on screen are NOT new.
+    static func action(date: String, pageDate: String) -> Bool { date == pageDate }
+}
+
 struct NewPagePayload: Decodable {
     let date: String
     let dates: [NewEarningsDate]

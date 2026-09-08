@@ -164,6 +164,27 @@ struct SunnyExpandChip: View {
     }
 }
 
+// MARK: - the new tag
+
+/// ⚠ AMBER, BECAUSE AMBER ALREADY MEANS UNREAD. The strip's `New` square and a
+/// name's ring both wear it for exactly this fact — cards are waiting — so a
+/// third colour here would invent a second vocabulary for one meaning.
+///
+/// ⚠ AND IT IS A WORD, NOT A DOT. The importance dot on an analyst card is
+/// already a 5px amber circle; a second amber dot on the same row would be two
+/// different facts in one channel.
+struct SunnyNewTag: View {
+    var body: some View {
+        Text("NEW")
+            .font(S.inter(S.t11, S.wSemiN))
+            .tracking(S.track(S.t11, S.lsNew))
+            .foregroundStyle(S.warnText)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: 4).fill(S.warnWash))
+    }
+}
+
 // MARK: - a link row
 
 /// ⚠ THE HEADLINE IS THE LINK, EVERYWHERE. No teaser we did not receive, no
@@ -180,9 +201,14 @@ struct SunnyLinkRow: View {
                     .foregroundStyle(S.ink)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("\(l.publisher) \u{00B7} \(ago(l.hours))")
-                    .font(S.inter(S.t13, S.wMidSmN))
-                    .foregroundStyle(S.mute2)
+                /* The tag rides the byline, not the headline: a pill above a
+                   26/300 title would out-shout the thing it is pointing at. */
+                HStack(spacing: S.gap4) {
+                    if NewToday.news(hours: l.hours) { SunnyNewTag() }
+                    Text("\(l.publisher) \u{00B7} \(ago(l.hours))")
+                        .font(S.inter(S.t13, S.wMidSmN))
+                        .foregroundStyle(S.mute2)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
