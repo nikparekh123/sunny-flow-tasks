@@ -236,6 +236,7 @@ export default function PayoffPage() {
         <header className="po-head">
           <div className="po-brand"><span className="dia" /><span>Sunnyfi</span><span className="sl">/</span><span className="pg">Payoff</span></div>
           <nav className="po-nav">
+            <a href="/portfolio">Portfolio</a>
             <a href="/positions">Positions</a>
             <a href="/income">Income</a>
             <a className="on">Payoff</a>

@@ -20,11 +20,14 @@
 
   min-height: 100vh; background: var(--page); color: var(--ink);
   font-family: Inter, system-ui, sans-serif; font-size: 13px; line-height: 1.35;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 .po * { box-sizing: border-box; }
 .po .num, .po .tnum { font-feature-settings: 'tnum', 'zero'; font-variant-numeric: tabular-nums; }
-.po-page { width: 1530px; margin: 0 auto; padding: 0 40px 60px; display: flex; flex-direction: column; gap: 18px; }
+/* The design is drawn at 1530. Narrower screens (a 14" MacBook is 1512) get
+   the same page fluid, and the chart canvas scales as one piece: it is a
+   pixel drawing with HTML overlays, so it shrinks rather than reflows. */
+.po-page { width: 100%; max-width: 1530px; margin: 0 auto; padding: 0 40px 60px; display: flex; flex-direction: column; gap: 18px; }
 
 /* type roles */
 .po .lab { font-size: 9px; font-weight: 500; line-height: 1; letter-spacing: 1.4px; text-transform: uppercase; color: var(--mute); }
@@ -102,7 +105,8 @@
 
 /* chart card + legs card read as ONE card */
 .po-chart { background: var(--tile); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-card); padding: 16px 0 14px; position: relative; }
-.po-canvas { position: relative; width: 1450px; margin: 0 auto; }
+.po-fit { position: relative; width: 100%; overflow: hidden; }
+.po-canvas { position: relative; width: 1450px; transform-origin: 0 0; }
 .po-greeks { position: absolute; left: 24px; top: 0; z-index: 4; display: flex; gap: 34px; }
 .po-greeks .g { display: flex; flex-direction: column; gap: 6px; }
 .po-greeks .v { font-size: 17px; font-weight: 600; line-height: 1; letter-spacing: -.025em; }

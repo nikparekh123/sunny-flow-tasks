@@ -98,8 +98,7 @@ function Topbar({ route, searchOpen, onSearchClick, onSearchClose, onShare, show
       <nav className="hf-nav" aria-label="Pages">
         <a className="hf-nav-link" href="/positions">Positions</a>
         <a className="hf-nav-link" href="/income">Income</a>
-        <a className="hf-nav-link" href="/new-strategy">Strategy</a>
-        <a className="hf-nav-link on" href="/math">Math</a>
+        <a className="hf-nav-link" href="/payoff">Payoff</a>
       </nav>
       <div className="hf-actions">
         {searchOpen ? (

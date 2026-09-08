@@ -25,7 +25,7 @@ export interface PageItem {
  */
 export const SWITCHER_PAGES: PageItem[] = [
   { key: "positions", label: "Positions", href: "https://positions.sunnyfi.co" },
-  { key: "math",      label: "Math",      href: "https://www.sunnyfi.co/math" },
+  { key: "payoff",    label: "Payoff",    href: "https://www.sunnyfi.co/payoff" },
 ];
 
 export function PageSwitcher({

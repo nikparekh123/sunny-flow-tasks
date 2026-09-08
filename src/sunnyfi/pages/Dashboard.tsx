@@ -44,9 +44,9 @@ export default function Dashboard() {
         return;
       }
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key === "1") { e.preventDefault(); window.location.href = "https://positions.sunnyfi.co"; }
-      else if (e.key === "2") { e.preventDefault(); navigate("/new-strategy"); }
-      else if (e.key === "3") { e.preventDefault(); navigate("/math"); }
+      if (e.key === "1") { e.preventDefault(); navigate("/positions"); }
+      else if (e.key === "2") { e.preventDefault(); navigate("/income"); }
+      else if (e.key === "3") { e.preventDefault(); navigate("/payoff"); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

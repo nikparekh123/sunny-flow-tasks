@@ -11,7 +11,7 @@
  * distinctive pieces of the design and says not to replace it with a naive
  * pass. It has not been.
  */
-import { useMemo, useRef, useState, useCallback } from 'react';
+import { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   type Leg, type Ctx, total, bounds, density, NRM, niceStep, place, cluster,
   type LabelItem, money, priceLab, priceShort, signed1, fmtExp,
@@ -41,6 +41,15 @@ interface Pt { p: number; v: number }
 export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte, sel, rangePct, layers, closes }: ChartProps) {
   const [hoverP, setHoverP] = useState<number | null>(null);
   const raf = useRef<number | null>(null);
+  /* scale-to-fit: the 1450px drawing shrinks as one piece on narrower screens */
+  const fitRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(1);
+  useEffect(() => {
+    const el = fitRef.current; if (!el) return;
+    const ro = new ResizeObserver(() => setFit(Math.min(1, el.clientWidth / 1450)));
+    ro.observe(el); setFit(Math.min(1, el.clientWidth / 1450));
+    return () => ro.disconnect();
+  }, []);
   const spot = ctx.spot;
   const lo = spot * (1 - rangePct / 100), hi = spot * (1 + rangePct / 100);
   const x = useCallback((p: number) => ((p - lo) / (hi - lo)) * W, [lo, hi]);
@@ -136,7 +145,7 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
   /* ── hover ──────────────────────────────────────────────────────────── */
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const px = e.clientX - rect.left - OX;
+    const px = (e.clientX - rect.left) / fit - OX;
     if (raf.current) cancelAnimationFrame(raf.current);
     raf.current = requestAnimationFrame(() => {
       setHoverP(px < 0 || px > W ? null : lo + (px / W) * (hi - lo));
@@ -156,7 +165,8 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
   const gradPos = `grad-pos-${book.ticker}`, gradNeg = `grad-neg-${book.ticker}`;
 
   return (
-    <div className="po-canvas" style={{ height: canvasH }} onMouseMove={onMove} onMouseLeave={onLeave}>
+    <div className="po-fit" ref={fitRef} style={{ height: canvasH * fit }}>
+    <div className="po-canvas" style={{ height: canvasH, transform: fit < 1 ? `scale(${fit})` : undefined }} onMouseMove={onMove} onMouseLeave={onLeave}>
       <svg width={1450} height={canvasH} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
         <defs>
           <clipPath id={clipPos}><rect x={0} y={-40} width={W} height={y0 + 40} /></clipPath>
@@ -300,6 +310,7 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
           </div>
         );
       })()}
+    </div>
     </div>
   );
 }

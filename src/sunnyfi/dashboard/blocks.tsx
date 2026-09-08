@@ -57,17 +57,16 @@ import { useState } from "react";
  *  here — they go in a `.page-toolbar` row beneath the bar. */
 export function BrandBar({
   dateLabel, routeLabel = "Morning brief", active,
-  onLogo, onPortfolio, onPositions, onStrategy, onMath, onIncome,
+  onLogo, onPortfolio, onPositions, onIncome, onPayoff,
 }: {
   dateLabel?: string;
   routeLabel?: string;
-  active?: "positions" | "income" | "strategy" | "math" | "portfolio";
+  active?: "positions" | "income" | "payoff" | "portfolio";
   onLogo?: () => void;
   onPortfolio?: () => void;
   onPositions?: () => void;
-  onStrategy?: () => void;
-  onMath?: () => void;
   onIncome?: () => void;
+  onPayoff?: () => void;
 }) {
   const link = (key: typeof active) => "brandbar-nav-link" + (active === key ? " on" : "");
   return (
@@ -81,8 +80,7 @@ export function BrandBar({
         <a className={link("portfolio")} onClick={onPortfolio}>Portfolio</a>
         <a className={link("positions")} onClick={onPositions}>Positions</a>
         <a className={link("income")} onClick={onIncome}>Income</a>
-        <a className={link("strategy")} onClick={onStrategy}>Strategy</a>
-        <a className={link("math")} onClick={onMath}>Math</a>
+        <a className={link("payoff")} onClick={onPayoff}>Payoff</a>
       </nav>
       <div className="actions">
         {dateLabel && <span className="label">{dateLabel}</span>}
@@ -1566,17 +1564,17 @@ export function NewsBand({ n = "07" }: { n?: string }) {
 // ─────────────────── Tools rail (footer) ─────────────────────────
 
 export function ToolsRail({
-  onPositions, onStrategy, onMath,
+  onPositions, onIncome, onPayoff,
 }: {
   onPositions?: () => void;
-  onStrategy?: () => void;
-  onMath?: () => void;
+  onIncome?: () => void;
+  onPayoff?: () => void;
 }) {
   return (
     <div className="tools-rail">
-      <a className="tool-link" onClick={onPositions}>→ Positions</a>
-      <a className="tool-link" onClick={onStrategy}>→ Strategy</a>
-      <a className="tool-link" onClick={onMath}>→ Math</a>
+      <a className="tool-link" href="/positions" onClick={onPositions}>→ Positions</a>
+      <a className="tool-link" href="/income" onClick={onIncome}>→ Income</a>
+      <a className="tool-link" href="/payoff" onClick={onPayoff}>→ Payoff</a>
       <span className="build">v0 · Sunnyfi desk · last sync 06:42</span>
     </div>
   );

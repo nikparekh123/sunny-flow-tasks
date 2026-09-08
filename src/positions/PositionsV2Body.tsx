@@ -120,8 +120,7 @@ function PositionsBrandBar({
         onPortfolio={() => navigate("/portfolio")}
         onPositions={() => navigate("/positions")}
         onIncome={() => navigate("/income")}
-        onStrategy={() => navigate("/new-strategy")}
-        onMath={() => navigate("/math")}
+        onPayoff={() => navigate("/payoff")}
       />
       <div className="page-toolbar">
         <span style={{ marginRight: "auto" }} />

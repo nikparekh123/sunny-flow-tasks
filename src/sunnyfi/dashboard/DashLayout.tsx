@@ -15,14 +15,15 @@ import { BrandBar } from "./blocks";
 import { useNow, fmtBrandDate } from "./time";
 import "@/sunnyfi/pages/dashboard.css";
 
-type Active = "positions" | "income" | "strategy" | "math" | "portfolio";
+type Active = "positions" | "income" | "payoff" | "portfolio";
 const ROUTE_META: Record<string, { label: string; active?: Active }> = {
   "/dashboard": { label: "Morning brief" },
   "/income": { label: "Income", active: "income" },
   "/portfolio": { label: "Portfolio", active: "portfolio" },
-  "/new-strategy": { label: "New Strategy", active: "strategy" },
+  "/new-strategy": { label: "New Strategy" },
   "/positions": { label: "Positions", active: "positions" },
-  "/math": { label: "Math", active: "math" },
+  "/payoff": { label: "Payoff", active: "payoff" },
+  "/math": { label: "Math" },
 };
 
 export function DashLayout() {
@@ -45,8 +46,7 @@ export function DashLayout() {
           onPortfolio={() => navigate("/portfolio")}
           onPositions={() => navigate("/positions")}
           onIncome={() => navigate("/income")}
-          onStrategy={() => navigate("/new-strategy")}
-          onMath={() => navigate("/math")}
+          onPayoff={() => navigate("/payoff")}
         />
         <Outlet />
       </div>
