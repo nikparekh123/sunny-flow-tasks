@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-08.1';
+const BUILD = '2026-09-08.3';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -337,24 +337,74 @@ Deno.serve(async (req) => {
       .sort((a, b) => b.paid - a.paid);
 
     const paidTotal = positions.reduce((s, p) => s + p.paid, 0);
+    /* ⚠ EACH WEEK DIVIDES BY THE PREMIUM PAID AS OF THAT WEEK, NOT TODAY'S.
+       Nik, 2026-09-08: "why does it rebalance and change the % of the previous
+       weeks it shouldnt. When a new positions is added and % changes it cant
+       change weeks that have passed." He is right and it was a real defect.
+       The denominator was `paidTotal`, so buying a LEAP on a Tuesday rewrote
+       every bar back to July. A week that has closed is a fact.
+
+       The ledger is the LEAPs CURRENTLY HELD, dated by their own fills, not
+       every long call ever traded. That keeps the last bar and Yield progress
+       dividing by the same number, which is the reason this whole function
+       exists, and it stops a closed position's realized gain from shrinking a
+       past week's denominator. */
+    const openLeapKeys = new Set(
+      open.filter((e) => e.dir === 'long' && e.type === 'call')
+          .map((e) => `${e.ticker}|call|long|${e.k}|${e.exp}`));
+    const paidByDay = new Map<string, number>();
+    for (const t of legs) {
+      if (String(t.option_type) !== 'call' || String(t.direction) !== 'long') continue;
+      const key = `${t.ticker}|${t.option_type}|${t.direction}|${N(t.strike)}`
+        + `|${String(t.expiry).slice(0, 10)}`;
+      if (!openLeapKeys.has(key)) continue;
+      const d = String(t.trade_date).slice(0, 10);
+      const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
+      paidByDay.set(d, (paidByDay.get(d) ?? 0) + c);
+    }
+    const paidDates = [...paidByDay.keys()].sort();
+    /** Premium paid on the LEAPs held, as at the END of the given week. */
+    const paidAsOf = (weekMonday: string) => {
+      const end = new Date(Date.parse(weekMonday + 'T00:00:00Z') + 6 * 86_400_000)
+        .toISOString().slice(0, 10);
+      let sum = 0;
+      for (const d of paidDates) { if (d > end) break; sum += paidByDay.get(d)!; }
+      return sum;
+    };
+
     const bookWeekly = weeks.map((w) => {
       let c = 0;
       for (const p of positions) c += (creditByWeek.get(p.t)?.get(w) ?? 0);
+      /* ⚠ THE FALLBACK IS A RULING, NOT A GUARD. Before 31 Aug there were no
+         LEAPs at all — the book was still in shares — so those weeks have
+         nothing to divide by. Nik chose to keep them on today's total rather
+         than show them blank. They are therefore the ONLY bars that still
+         drift, and they roll out of the eight-week window by late September,
+         taking the drift with them. Do not "fix" this into a zero. */
+      const dated = paidAsOf(w);
+      const denom = dated > 0 ? dated : paidTotal;
       /* ⚠ WHICH BAR IS "NOW" IS NO LONGER THE LAST ONE. The window reaches
          forward, so the final column can be a week already sold but not yet
          begun — and the card was painting THAT one as the live week. The
          server says which is current; the client must not infer it from a
          position in the array. */
       return { week: w, credit: Math.round(c), current: w === thisWeek,
-               pct: paidTotal > 0 ? r2(c / paidTotal * 100) : 0 };
+               pct: denom > 0 ? r2(c / denom * 100) : 0 };
     });
     const legCount = positions.reduce((s, p) => s + p.shorts.length, 0);
     /* ⚠ THE ROLL CHECK FOOTER IS COMPUTED HERE, NOT ON THE CLIENT, for the
        reason this whole function exists: two cards that derive the same figure
-       separately will disagree eventually. `openCredit` is the credit on the
-       legs currently open, and it is the SAME number the weekly-yield card
-       charts for the week those legs cover — 5,267 at 2.70% for the week of
-       7 Sep. Deriving it twice is how those two silently drift apart. */
+       separately will disagree eventually. Both divide by the same premium
+       paid, always.
+
+       ⚠ BUT THE NUMERATORS ARE NOT THE SAME QUESTION, and they part company
+       the moment a leg is closed inside its own week. `openCredit` is the
+       credit on the legs STILL OPEN; the weekly bar is what the week EARNED,
+       closed legs included. On 8 Sep Nik bought back the NFLX 83 call for
+       0.05 after selling it at 0.65, so the week reads 6,126 and Roll check
+       reads 5,826 — the 300 is that call, kept and gone. Both are right. Do
+       not "reconcile" them by dropping closed legs from the week; that would
+       delete realized income from the yield. */
     const openCredit = positions.reduce((s, p) =>
       s + p.shorts.reduce((a, x) => a + x.credit, 0), 0);
     const openValue = positions.reduce((s, p) =>
