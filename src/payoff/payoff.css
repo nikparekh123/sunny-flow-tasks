@@ -107,7 +107,7 @@
 .po-chart { background: var(--tile); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-card); padding: 16px 0 14px; position: relative; }
 .po-fit { position: relative; width: 100%; overflow: hidden; }
 .po-canvas { position: relative; width: 1450px; transform-origin: 0 0; }
-.po-greeks { position: absolute; left: 24px; top: 0; z-index: 4; display: flex; gap: 34px; }
+.po-greeks { position: absolute; left: 24px; top: 18px; z-index: 4; display: flex; gap: 34px; }
 .po-greeks .g { display: flex; flex-direction: column; gap: 6px; }
 .po-greeks .v { font-size: 17px; font-weight: 600; line-height: 1; letter-spacing: -.025em; }
 .po-greeks .b { font-size: 10px; color: var(--mute-2); }
