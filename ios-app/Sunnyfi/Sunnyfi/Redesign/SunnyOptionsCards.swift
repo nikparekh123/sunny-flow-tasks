@@ -167,6 +167,9 @@ struct SunnyRollCheck: View {
 
     struct Bar: Identifiable {
         let id: String, ticker: String, captured: Int, itm: Bool
+        /// Which half of the list the row belongs to. A sold put and a sold
+        /// call are opposite trades and Nik reads them as two groups.
+        var isPut: Bool = false
         /// Credit minus current value, in dollars — the same quantity the
         /// percentage expresses, which is why one tap may swap them.
         var kept: Int = 0
@@ -208,10 +211,24 @@ struct SunnyRollCheck: View {
        hard way — the card said "5 legs" while he held seven LEAPs, and the
        three it could not draw (FIS, PEP, KR, whose calls expired on the
        Friday) were exactly the three needing action. */
-    private var sortedBars: [Bar] {
+    private var sortedBars: [Bar] { callBars + putBars }
+
+    /* ⚠ CALLS AND PUTS ARE TWO LISTS WITH ONE RULE, not one list. Nik,
+       2026-09-08: "Is there a way to separate the puts and calls here with a
+       small divider line." This supersedes the 2026-09-06 ruling of a single
+       sorted list; the `110P` suffix stays, because a divider groups but does
+       not label.
+
+       Worst-first still holds INSIDE each group, so each half is its own queue
+       of work. A name with no call sits with the calls: that is where the
+       missing leg would go. */
+    private var callBars: [Bar] {
         let all = rawBars
         return all.filter { !$0.covered }.sorted { $0.ticker < $1.ticker }
-             + all.filter { $0.covered }.sorted { $0.captured < $1.captured }
+             + all.filter { $0.covered && !$0.isPut }.sorted { $0.captured < $1.captured }
+    }
+    private var putBars: [Bar] {
+        rawBars.filter { $0.covered && $0.isPut }.sorted { $0.captured < $1.captured }
     }
 
     private var rawBars: [Bar] {
@@ -242,7 +259,7 @@ struct SunnyRollCheck: View {
                    other when it falls. Nik's call, 2026-09-06. */
                 else { label = "\(p.t) \(k)\(s.type == "put" ? "P" : "")" }
                 return Bar(id: "\(p.t)-\(s.id)", ticker: label,
-                           captured: s.captured, itm: s.itm,
+                           captured: s.captured, itm: s.itm, isPut: s.type == "put",
                            kept: s.credit - (s.priced == false ? s.credit : s.value))
             }
         }
@@ -365,7 +382,18 @@ struct SunnyRollCheck: View {
             .padding(.bottom, S.gap4)
             ZStack(alignment: .topLeading) {
                 VStack(spacing: S.progRowGap) {
-                    ForEach(bars) { b in rowFor(b, x: x, track: track) }
+                    ForEach(callBars) { b in rowFor(b, x: x, track: track) }
+                    /* Only when both halves exist. A lone divider under an
+                       all-calls book would announce a section that is not
+                       there. It spans the name column and the track, stopping
+                       short of the value column, so the percentages stay a
+                       single unbroken edge down the right. */
+                    if !callBars.isEmpty && !putBars.isEmpty {
+                        Rectangle().fill(S.ruleColor)
+                            .frame(width: nameCol + S.gap4 + track, height: 1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    ForEach(putBars) { b in rowFor(b, x: x, track: track) }
                 }
                 /* The lines live in the ROW box, so each carries the name
                    column plus its gap as an offset. */
