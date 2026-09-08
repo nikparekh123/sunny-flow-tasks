@@ -114,7 +114,7 @@
 .po-ylab { position: absolute; left: 0; width: 62px; text-align: right; font-size: 10px; font-weight: 500; color: var(--mute-2); transform: translateY(-50%); }
 .po-xlab { position: absolute; font-size: 11px; font-weight: 500; color: var(--mute); transform: translateX(-50%); }
 .po-tag { position: absolute; left: 80px; background: var(--tile); padding: 2px 5px; border-radius: 4px; font-size: 10px; font-weight: 500; transform: translateY(-50%); white-space: nowrap; }
-.po-lvl { position: absolute; display: flex; flex-direction: column; gap: 3px; white-space: nowrap; }
+.po-lvl { position: absolute; display: flex; flex-direction: column; gap: 3px; white-space: nowrap; line-height: 1; }
 .po-lvl .n { font-size: 9px; font-weight: 500; letter-spacing: 1.4px; text-transform: uppercase; }
 .po-lvl .v { font-size: 11px; font-weight: 600; }
 .po-chip { position: absolute; transform: translateX(-50%); padding: 6px 10px; border-radius: 7px; font-size: 11px; font-weight: 600; white-space: nowrap; }
@@ -153,8 +153,10 @@
 .po-menu .row:hover { background: var(--wash); }
 .po-menu .row .s { font-size: 13px; color: var(--mute-2); } .po-menu .row .i { font-size: 14px; font-weight: 600; }
 .po-menu .hr { height: 1px; background: var(--rule); margin: 4px 11px; }
-.po-legrow { display: flex; gap: 11px; overflow-x: auto; scrollbar-width: none; padding: 12px 2px 16px; margin: -12px 0 -14px; }
-.po-legrow::-webkit-scrollbar { display: none; }
+.po-legrow { display: flex; gap: 11px; overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--dim) transparent; padding: 12px 2px 14px; margin: -12px 0 -8px; }
+.po-legrow::-webkit-scrollbar { height: 6px; }
+.po-legrow::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 3px; }
+.po-legrow::-webkit-scrollbar-track { background: transparent; }
 .po-leg { width: 262px; flex: none; background: var(--page); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; position: relative; }
 .po-leg.off { opacity: .45; } .po-leg.off .tg { opacity: 1; }
 .po-leg.sel { box-shadow: inset 0 0 0 2px var(--ink); }
@@ -162,7 +164,8 @@
 .po-leg .tg { width: 17px; height: 17px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--hair); display: grid; place-items: center; cursor: pointer; font-size: 10px; flex: none; }
 .po-leg .tg.on { background: var(--ink); color: var(--on-ink); box-shadow: none; }
 .po-leg .tg:hover { box-shadow: inset 0 0 0 1.5px var(--ink); }
-.po-leg .side { font-size: 9px; font-weight: 500; letter-spacing: 1.4px; text-transform: uppercase; }
+/* po-side, not .side: the research stylesheet leaks a global .side background */
+.po-leg .po-side { font-size: 9px; font-weight: 500; letter-spacing: 1.4px; text-transform: uppercase; }
 .po-leg .sp { flex: 1; }
 .po-leg .ib { width: 22px; height: 22px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--rule-2); display: grid; place-items: center; cursor: pointer; font-size: 12px; }
 .po-leg .ib:hover { background: var(--wash); }

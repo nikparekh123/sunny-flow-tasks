@@ -222,8 +222,7 @@ export default function PayoffPage() {
     if (k === 'last5') return book.d5 ? `${priceLab(book.d5[0])}–${priceLab(book.d5[1])}` : '–';
     if (k === 'targets') return book.target ? priceLab(book.target.median) : 'none';
     if (k === 'cone') { const s = book.iv * ivMult * Math.sqrt(Math.max(dte, 1) / 365); return `1σ ${priceLab(book.spot * Math.exp(-s))}–${priceLab(book.spot * Math.exp(s))}`; }
-    if (k === 'hist') return '52 wk';
-    return liveLegs.some((l) => l.qty < 0 && l.kind !== 'stock') ? 'live' : 'none';
+    return '52 wk';
   };
   const layerCount = LAYER_META.filter((m) => layers[m.key]).length;
   const myPlans = plans.filter((p) => p.ticker === book.ticker);
@@ -343,7 +342,6 @@ export default function PayoffPage() {
                 <span className="b" style={{ height: m.band ? 10 : 3, background: m.ink }} />{m.name} · <span className="v num">{layerVal(m.key)}</span>
               </span>
             ))}
-            <span className="po-sw"><span className="b" style={{ height: 10, background: 'var(--assign)' }} />Assignment · <span className="v">{layerVal('assign')}</span></span>
           </div>
         </div>
 
@@ -400,7 +398,7 @@ export default function PayoffPage() {
                 <div key={l.id} className={'po-leg' + (isOff ? ' off' : '') + (selLeg === l.id ? ' sel' : '')} onClick={() => l.plan && setSelLeg(l.id)}>
                   <div className="r1">
                     <span className={'tg' + (isOff ? '' : ' on')} onClick={(e) => { e.stopPropagation(); setOff((o) => ({ ...o, [l.id]: !o[l.id] })); }}>{isOff ? '' : '✓'}</span>
-                    {l.plan ? <span className="po-tag-plan">Plan</span> : <span className={'side ' + (l.qty < 0 ? 'loss' : 'gain')}>{l.qty < 0 ? 'Sold' : 'Bought'}</span>}
+                    {l.plan ? <span className="po-tag-plan">Plan</span> : <span className={'po-side ' + (l.qty < 0 ? 'loss' : 'gain')}>{l.qty < 0 ? 'Sold' : 'Bought'}</span>}
                     <span className="sp" />
                     {l.plan
                       ? <span className="ib x" onClick={(e) => { e.stopPropagation(); removeLeg(l.id); }}>×</span>

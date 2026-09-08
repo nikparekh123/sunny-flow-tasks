@@ -45,5 +45,5 @@ export interface SavedPlan {
 export type LayerKey = 'ema' | 'sr' | 'last5' | 'targets' | 'cone' | 'hist' | 'assign';
 export type Layers = Record<LayerKey, boolean>;
 export const DEFAULT_LAYERS: Layers = {
-  ema: true, sr: true, last5: false, targets: false, cone: false, hist: false, assign: true,
+  ema: true, sr: true, last5: false, targets: false, cone: false, hist: false, assign: false,
 };

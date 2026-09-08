@@ -90,18 +90,6 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
     return out;
   }, [lo, hi]);
 
-  /* ── assignment regions ─────────────────────────────────────────────── */
-  const assign = useMemo(() => {
-    const zones: { from: number; to: number; k: number; label: string }[] = [];
-    for (const l of liveLegs) {
-      if (l.kind === 'stock' || l.qty >= 0) continue;
-      const n = -l.qty;
-      if (l.kind === 'call') zones.push({ from: Math.max(l.strike, lo), to: hi, k: l.strike, label: `${n} call${n > 1 ? 's' : ''} above ${priceShort(l.strike)}` });
-      else zones.push({ from: lo, to: Math.min(l.strike, hi), k: l.strike, label: `${n} put${n > 1 ? 's' : ''} below ${priceShort(l.strike)}` });
-    }
-    return zones.filter((z) => z.to > z.from);
-  }, [liveLegs, lo, hi]);
-
   /* ── the probability cone ───────────────────────────────────────────── */
   const cone = useMemo(() => {
     if (!layers.cone) return null;
@@ -134,13 +122,8 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
     if (layers.ema) for (const [n, p] of book.emas) if (inView(p)) items.push(lab(n, p, 'var(--mute)'));
     if (layers.sr) for (const [n, p] of book.levels) if (inView(p)) items.push(lab(n, p, 'var(--ink-2)'));
     if (layers.targets && book.target && inView(book.target.median)) items.push(lab('ANALYST MEDIAN', book.target.median, 'var(--plum)'));
-    const clustered = cluster(items);
-    if (layers.assign) for (const z of assign) if (inView(z.k)) clustered.push({
-      kind: 'assign', anchor: 'mid', l: x(z.k), w: Math.max(10, z.label.length) * 6.4,
-      name: 'ASSIGNMENT', val: z.label, nameInk: 'var(--assign)', valInk: 'var(--ink-2)',
-    });
-    return place(clustered);
-  }, [book, layers, assign, lo, hi, x]);
+    return place(cluster(items));
+  }, [book, layers, lo, hi, x]);
 
   /* ── hover ──────────────────────────────────────────────────────────── */
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -181,13 +164,6 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
           </linearGradient>
         </defs>
         <g transform={`translate(${OX},${OY})`}>
-          {/* 1 · assignment bands */}
-          {layers.assign && assign.map((z, i) => (
-            <g key={'az' + i}>
-              <rect x={x(z.from)} y={0} width={x(z.to) - x(z.from)} height={H} fill="var(--assign)" opacity={0.035} />
-              {z.k > lo && z.k < hi && <line x1={x(z.k)} x2={x(z.k)} y1={0} y2={H} stroke="var(--assign)" strokeWidth={1.5} />}
-            </g>
-          ))}
           {/* 2 · analyst target band */}
           {layers.targets && book.target && (
             <g>
