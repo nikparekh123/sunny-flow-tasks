@@ -13,6 +13,7 @@ import { Routes, Route, useLocation } from 'react-router-dom';
 import './sunnyfi.css';
 import RequireAuth from './components/RequireAuth';
 import { DashLayout } from './dashboard/DashLayout';
+const PayoffPage = lazy(() => import('@/payoff/PayoffPage'));
 
 /**
  * Neon-wipe page transition. On each route change we remount a thin neon bar
@@ -165,6 +166,9 @@ export default function Sunnyfi() {
             it renders its own (identical, same-origin) header rather than the
             shared layout. */}
         <Route path="/positions" element={<Positions />} />
+        {/* Payoff planner self-gates auth and carries its own header, like
+            Positions: Nik wants it to look different from the rest of the site. */}
+        <Route path="/payoff" element={<PayoffPage />} />
         <Route
           path="/research"
           element={

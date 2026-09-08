@@ -42,3 +42,6 @@ deno.lock
 **/xcuserdata/
 **/*.xcuserstate
 supabase/.temp/
+
+# local dev fixtures
+public/dev/
