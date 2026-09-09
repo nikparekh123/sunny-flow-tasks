@@ -63,6 +63,37 @@ struct OptionsPayload: Decodable {
     let putCover: PutCover?
     /// Optional so a run against an older deployment decodes rather than throws.
     let prices: PricesBlock?
+    let inventory: [InventoryRow]?
+    let credit: CreditBlock?
+}
+
+/// ⚠ HELD AND SOLD ARE BOTH CURRENTLY OPEN, and `held - sold` is the only
+/// derived figure on the inventory card — never stored, so a corrected count
+/// fixes every chip, both footer figures and the header in one edit.
+struct InventoryRow: Decodable, Identifiable {
+    let t: String
+    let callsHeld: Int, callsSold: Int, putsHeld: Int, putsSold: Int
+    var id: String { t }
+    var openCalls: Int { callsHeld - callsSold }
+    var openPuts: Int { putsHeld - putsSold }
+    /// What can still be sold on this name. The chip order is this, descending.
+    var room: Int { openCalls + openPuts }
+    var held: Int { callsHeld + putsHeld }
+    var sold: Int { callsSold + putsSold }
+}
+
+/// ⚠ `perShare` IS null, NOT 0, WHEN THE SIDE DID NOT TRADE THAT WEEK. Nik's
+/// ruling 2026-09-08: no bar, key still shown. Zero would say "sold at nothing"
+/// and would drag the plot's floor down, flattening the weeks that did trade.
+struct CreditWeek: Decodable, Identifiable {
+    let week: String, contracts: Int
+    let perShare: Double?
+    var id: String { week }
+}
+
+struct CreditBlock: Decodable {
+    let week: String
+    let calls: [CreditWeek], puts: [CreditWeek]
 }
 
 /// ⚠ THE WINDOWS COUNT TRADING SESSIONS, NOT CALENDAR DAYS. A week is five

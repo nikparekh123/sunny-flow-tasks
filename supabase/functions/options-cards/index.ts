@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-08.7';
+const BUILD = '2026-09-08.11';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -492,6 +492,78 @@ Deno.serve(async (req) => {
     const avgPct = liveWeeks.length
       ? liveWeeks.reduce((s, w) => s + w.pct, 0) / liveWeeks.length : 0;
 
+    /* ── inventory ─────────────────────────────────────────────────────────
+       handoff/cards/inventory.md. ONE MARK IS ONE CONTRACT — the card draws a
+       circle per contract, so the server ships COUNTS and never a percentage or
+       a ratio. `held - sold` is the only derived figure and the client does it,
+       exactly as the sheet requires: a corrected count then fixes every mark,
+       both footer figures and the header in one edit.
+
+       ⚠ HELD AND SOLD ARE BOTH *CURRENTLY OPEN*. A short call that already
+       expired is not written against anything any more, so it must not grey out
+       a LEAP that is free to sell again. This is an inventory, not a history. */
+    const inv = new Map<string, { ch: number; cs: number; ph: number; ps: number }>();
+    for (const e of open) {
+      const row = inv.get(e.ticker) ?? { ch: 0, cs: 0, ph: 0, ps: 0 };
+      const n = Math.round(Math.abs(e.n));
+      if (e.type === 'call') { if (e.dir === 'long') row.ch += n; else row.cs += n; }
+      else { if (e.dir === 'long') row.ph += n; else row.ps += n; }
+      inv.set(e.ticker, row);
+    }
+    const inventory = [...inv.entries()]
+      /* A name with nothing held has nothing to draw. A name fully SOLD still
+         gets a row — "NKE is fully worked" is a fact the card owes him. */
+      .filter(([, r]) => r.ch + r.ph > 0)
+      .map(([t, r]) => ({ t, callsHeld: r.ch, callsSold: r.cs,
+                          putsHeld: r.ph, putsSold: r.ps }))
+      .sort((a, b) => a.t.localeCompare(b.t));
+
+    /* ── average credit per share ──────────────────────────────────────────
+       handoff/cards/average-credit.md. Four weeks including this one, per side.
+
+       ⚠ PER SHARE, NEVER PER CONTRACT: credit / contracts / 100, the number
+       quoted when the trade is placed. The sheet's rule 0.1.
+
+       ⚠ BUCKETED BY THE WEEK THE LEG COVERS, not the day it was sold. Nik,
+       2026-09-03: "Which week it's sold for not the day it is sold", confirmed
+       again for this card on 2026-09-08. Every other card on the page already
+       buckets this way, so a week reads the same figure everywhere.
+
+       ⚠ OPENS ONLY. Nik, 2026-09-08. The card asks what a contract SELLS for,
+       and buying the NFLX 83 back at 0.05 does not change that it was sold at
+       0.65. Weekly yield carries the net; this carries the rate.
+
+       ⚠ A WEEK WITH NO TRADE ON A SIDE SHIPS null, NOT 0. The client draws no
+       bar and keeps the key. Zero would say "sold at nothing" and, because the
+       sheet's plot scale divides by the window's RANGE, it would drag the floor
+       down and flatten the weeks that did trade. */
+    const CREDIT_WEEKS = 4;
+    const creditWeeks: string[] = [];
+    for (let i = CREDIT_WEEKS - 1; i >= 0; i--) {
+      creditWeeks.push(new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
+        .toISOString().slice(0, 10));
+    }
+    const bucket = new Map<string, { n: number; cash: number }>();  // `${side}|${week}`
+    for (const t of allShorts) {
+      if (String(t.action) !== 'open') continue;
+      const w = weekStart(String(t.expiry).slice(0, 10));
+      const k = `${t.option_type}|${w}`;
+      const e = bucket.get(k) ?? { n: 0, cash: 0 };
+      e.n += N(t.contracts);
+      e.cash += N(t.contracts) * N(t.premium) * 100;
+      bucket.set(k, e);
+    }
+    const sideWeeks = (side: string) => creditWeeks.map((w) => {
+      const e = bucket.get(`${side}|${w}`);
+      return {
+        week: w,
+        contracts: e ? Math.round(e.n) : 0,
+        /* Two decimals, because this is a price and it is quoted in cents. */
+        perShare: e && e.n > 0 ? Math.round(e.cash / e.n) / 100 : null,
+      };
+    });
+    const credit = { week: thisWeek, calls: sideWeeks('call'), puts: sideWeeks('put') };
+
     /* ── stock price, five windows ─────────────────────────────────────────
        Nik, 2026-09-08: "Just like a roll check card can we do one for stock
        price. Same layout as Roll check the only added thing I want is adding
@@ -512,6 +584,13 @@ Deno.serve(async (req) => {
        disagree. */
     const closeRows = new Map<string, number[]>();   // ticker -> closes, newest first
     for (const r of closes) {
+      /* ⚠ TODAY'S OWN CLOSE IS NOT IN THE SERIES. Once it lands (21:30 UTC) the
+         anchor shifted onto it and `today` compared spot against ITSELF: every
+         name read 0.0% and the card said "0 of 7 up" on a day the book moved.
+         Offset 0 must always be the last close BEFORE today, which makes
+         `today` genuinely today's move and keeps the week offsets from jumping
+         a day when the close arrives. */
+      if (String(r.date).slice(0, 10) >= today) continue;
       const t = String(r.ticker);
       if (!closeRows.has(t)) closeRows.set(t, []);
       closeRows.get(t)!.push(N(r.close_price));
@@ -635,8 +714,13 @@ Deno.serve(async (req) => {
         : null,
       /* `asOf` is the close the windows are measured FROM, so the card can
          say what "today" is against without the client guessing. */
+      inventory,
+      credit,
       prices: { rows: priceRows, book: bookMove,
-                asOf: (closes[0] ? String(closes[0].date).slice(0, 10) : today) },
+                /* The close the windows are anchored to, which is the last one
+                   BEFORE today, not the newest row in the table. */
+                asOf: closes.map((r) => String(r.date).slice(0, 10))
+                        .filter((d) => d < today).sort().pop() ?? today },
       book: {
         /* ⚠ `paid` IS NOW TOTAL INVESTED, and the label on the card says so.
            Every yield on this page divides by it. */

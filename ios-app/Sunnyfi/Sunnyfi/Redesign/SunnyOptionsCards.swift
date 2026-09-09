@@ -1111,3 +1111,284 @@ struct SunnyStockPrice: View {
         }
     }
 }
+
+// MARK: - inventory
+
+/// ⚠ WHAT CAN STILL BE SOLD. handoff/cards/inventory.md, redesigned 8 Sep 2026.
+/// The first design drew one circle per contract; NKE holds 60 calls and 30 puts
+/// against that sheet's widest name of 15 and 10, so a mark per contract could
+/// not stay on one line at a legible diameter. Chips carry any count.
+///
+/// ⚠ FREE HEIGHT. 361 is a FLOOR, never a size: no pager, no scroll, no control.
+/// The list IS the card, so the card is as tall as the book.
+///
+/// ⚠ NO DIRECTION INK ANYWHERE. Capacity is not a gain and not a loss. Six inks,
+/// and the only non-ink colours are the chip wash and the two rules.
+struct SunnyInventory: View {
+    let rows: [InventoryRow]
+
+    /// Room descending, ties alphabetical. With no pager and no tabs the first
+    /// chip has to be the one he would act on.
+    private var withRoom: [InventoryRow] {
+        rows.filter { $0.room > 0 }
+            .sorted { $0.room != $1.room ? $0.room > $1.room : $0.t < $1.t }
+    }
+    /// A name with nothing left to sell takes no chip: it is one grey line at the
+    /// foot, named but not ranked.
+    private var fullySold: [InventoryRow] {
+        rows.filter { $0.room == 0 && $0.held > 0 }.sorted { $0.t < $1.t }
+    }
+    private var openCalls: Int { rows.reduce(0) { $0 + $1.openCalls } }
+    private var openPuts: Int { rows.reduce(0) { $0 + $1.openPuts } }
+    private var held: Int { rows.reduce(0) { $0 + $1.held } }
+    private var sold: Int { rows.reduce(0) { $0 + $1.sold } }
+
+    /// `10c · 30p`, and a zero side is omitted — a zero in a capacity list reads
+    /// as an instruction not to bother.
+    private func chipCount(_ r: InventoryRow) -> String {
+        [r.openCalls > 0 ? "\(r.openCalls)c" : nil,
+         r.openPuts  > 0 ? "\(r.openPuts)p"  : nil]
+            .compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+    private func chipWidth(_ r: InventoryRow) -> CGFloat {
+        12 + S.textW(r.t, S.t13, S.wSemiN) + 7
+           + S.textW(chipCount(r), S.t13, S.wMidSmN) + 12
+    }
+    /// Greedy wrap at the 323 content column. SwiftUI has no flow container that
+    /// also honours an exact 9px gap on both axes, and the sheet measures both.
+    private var chipRows: [[InventoryRow]] {
+        var out: [[InventoryRow]] = [], line: [InventoryRow] = [], w: CGFloat = 0
+        for r in withRoom {
+            let cw = chipWidth(r)
+            if !line.isEmpty && w + 9 + cw > S.content - 38 {
+                out.append(line); line = [r]; w = cw
+            } else {
+                w += (line.isEmpty ? 0 : 9) + cw; line.append(r)
+            }
+        }
+        if !line.isEmpty { out.append(line) }
+        return out
+    }
+
+    var body: some View {
+        OptCard(name: "inventory", fixedHeight: nil) {
+            OptHead(title: "Inventory", sub: "all tickers",
+                    right: "\(rows.count) names \u{00B7} \(held) contracts")
+            Spacer().frame(height: 20)
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                /* 81 is a SUM, never a stored total. */
+                Text("\(openCalls + openPuts)")
+                    .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
+                    .foregroundStyle(S.ink).sunnyLineBox(S.t22)
+                Text("can still be sold")
+                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+            }
+            Spacer().frame(height: 8)
+            Text("\(openCalls) calls \u{00B7} \(openPuts) puts \u{00B7} on \(withRoom.count) names")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+
+            Spacer().frame(height: 20)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 18)
+
+            HStack(spacing: S.gap4) {
+                Text("WHERE")
+                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                    .foregroundStyle(S.mute)
+                Spacer(minLength: 0)
+                Text("\(withRoom.count) names")
+                    .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+            }
+            Spacer().frame(height: 13)
+
+            VStack(alignment: .leading, spacing: 9) {
+                ForEach(Array(chipRows.enumerated()), id: \.offset) { _, line in
+                    HStack(spacing: 9) {
+                        ForEach(line) { r in
+                            HStack(spacing: 7) {
+                                Text(r.t)
+                                    .font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
+                                Text(chipCount(r))
+                                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+                            }
+                            .padding(.horizontal, 12).frame(height: 28)
+                            .background(Capsule().fill(S.wash))
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+
+            /* Omitted entirely when nothing is fully sold: the line is a
+               statement about names that exist, not an empty slot. */
+            if !fullySold.isEmpty {
+                Spacer().frame(height: 14)
+                Text("\(fullySold.count) name\(fullySold.count == 1 ? "" : "s") fully sold \u{00B7} "
+                     + fullySold.map(\.t).joined(separator: " \u{00B7} "))
+                    .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+            }
+
+            Spacer().frame(minHeight: 24)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 18)
+
+            /* Calls + puts = the hero. That identity is the card's only
+               self-check; if it fails, a figure is being stored somewhere it
+               should be derived. Figures are 15 here, not 19 — at 19 against a
+               22 hero the card had three competing sizes. */
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(Array([("Calls to sell", openCalls),
+                               ("Puts to sell", openPuts),
+                               ("Worked", 0)].enumerated()), id: \.offset) { i, cell in
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(cell.0.uppercased())
+                            .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                            .foregroundStyle(S.mute)
+                        Text(i == 2
+                             ? "\(held > 0 ? Int((Double(sold) / Double(held) * 100).rounded()) : 0)%"
+                             : "\(cell.1)")
+                            .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
+                            .foregroundStyle(S.ink)
+                    }
+                    .padding(.leading, i == 0 ? 0 : 16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - average credit
+
+/// ⚠ PER SHARE, NEVER PER CONTRACT. handoff/cards/average-credit.md.
+/// $0.60, not $60 — the number quoted when the trade is placed.
+///
+/// ⚠ COLOUR IS A COMPARISON THE CARD ALSO PRINTS. Each side is green at or above
+/// ITS OWN past average and red below it, and that average is printed under the
+/// figure and drawn as a line across its own plot. No sentence explains the test.
+///
+/// ⚠ THE PLOT SCALE IS PER SIDE AND TRUNCATED, so a bar is a SHAPE and not a
+/// quantity. Two consequences, both deliberate: no bar is labelled, and the two
+/// columns are NOT height-comparable to each other.
+struct SunnyAvgCredit: View {
+    let credit: CreditBlock
+
+    private static let plotH: CGFloat = 132
+
+    private func figure(_ ws: [CreditWeek]) -> Double? { ws.last?.perShare }
+    /// The mean of the three PRIOR weeks, skipping any that did not trade.
+    private func pastAvg(_ ws: [CreditWeek]) -> Double? {
+        let past = ws.dropLast().compactMap(\.perShare)
+        return past.isEmpty ? nil : past.reduce(0, +) / Double(past.count)
+    }
+    /// lo is a share of the window's own RANGE, never of its minimum: a
+    /// proportional floor only pads narrow windows and puts two different weeks
+    /// on the same stub.
+    private func scale(_ ws: [CreditWeek]) -> (lo: Double, hi: Double) {
+        let vs = ws.compactMap(\.perShare)
+        guard let mn = vs.min(), let mx = vs.max() else { return (0, 1) }
+        let r = (mx - mn) == 0 ? (mn == 0 ? 1 : mn) : (mx - mn)
+        return (mn - r * 0.35, mx + r * 0.06)
+    }
+    private func frac(_ v: Double, _ s: (lo: Double, hi: Double)) -> Double {
+        s.hi - s.lo <= 0 ? 0 : min(1, max(0, (v - s.lo) / (s.hi - s.lo)))
+    }
+    private func money2(_ v: Double) -> String { String(format: "$%.2f", v) }
+    /// "9/7" — a 146px column will not hold "Sep 7" four times.
+    private func key(_ iso: String) -> String {
+        let p = iso.split(separator: "-")
+        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]) else { return iso }
+        return "\(m)/\(d)"
+    }
+    private func headerWeek(_ iso: String) -> String {
+        let p = iso.split(separator: "-")
+        let mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]), (1...12).contains(m)
+        else { return iso }
+        return "\(mon[m - 1]) \(d)"
+    }
+
+    @ViewBuilder private func column(_ label: String, _ ws: [CreditWeek]) -> some View {
+        let fig = figure(ws), avg = pastAvg(ws), sc = scale(ws)
+        /* Ink when there is no past average to judge against — a colour with
+           nothing behind it would be an opinion the card cannot print. */
+        let ink: Color = (fig == nil || avg == nil) ? S.ink
+            : (fig! >= avg! ? S.gainText : S.lossText)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(label)
+                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                .foregroundStyle(S.mute)
+            Spacer().frame(height: 9)
+            Text(fig.map(money2) ?? "\u{2014}")
+                .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
+                .foregroundStyle(ink).sunnyLineBox(S.t22)
+            Spacer().frame(height: 8)
+            Text(avg.map { "average \(money2($0))" } ?? "no history yet")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            Spacer().frame(height: 18)
+            ZStack(alignment: .bottom) {
+                HStack(alignment: .bottom, spacing: 9) {
+                    ForEach(Array(ws.enumerated()), id: \.element.week) { i, w in
+                        /* No bar at all when the side did not trade, and the key
+                           below still prints: the gap has to read as a gap. */
+                        if let v = w.perShare {
+                            UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
+                                .fill(i == ws.count - 1 ? ink : S.barQuiet)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: max(2, Self.plotH * frac(v, sc)))
+                        } else {
+                            Color.clear.frame(maxWidth: .infinity).frame(height: 1)
+                        }
+                    }
+                }
+                if let avg {
+                    /* The same number printed above it, drawn where it falls.
+                       --ink at 1.5: an average is a rate, so it never takes the
+                       state ink. */
+                    Rectangle().fill(S.ink).frame(height: 1.5)
+                        .offset(y: -Self.plotH * frac(avg, sc))
+                }
+            }
+            .frame(height: Self.plotH, alignment: .bottom)
+            Spacer().frame(height: 9)
+            HStack(spacing: 9) {
+                ForEach(ws) { w in
+                    Text(key(w.week))
+                        .font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    var body: some View {
+        let n = min(credit.calls.count, credit.puts.count)
+        let thisN = (credit.calls.last?.contracts ?? 0) + (credit.puts.last?.contracts ?? 0)
+        let avgN = n == 0 ? 0 : (0..<n).reduce(0) {
+            $0 + credit.calls[$1].contracts + credit.puts[$1].contracts
+        } / n
+        OptCard(name: "avg-credit") {
+            OptHead(title: "Average credit", sub: "per share",
+                    right: headerWeek(credit.week))
+            /* 20 is load-bearing: at 0 the CALLS/PUTS labels read as a second
+               line of the header. */
+            Spacer().frame(height: 20)
+            HStack(alignment: .top, spacing: 15) {
+                column("CALLS", credit.calls)
+                /* The only rule on the card. It exists because the two columns
+                   are on different scales: it says these are two readings, not
+                   one four-column row. */
+                Rectangle().fill(S.ruleColorStrong)
+                    .frame(width: 1).frame(maxHeight: .infinity)
+                column("PUTS", credit.puts)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer().frame(minHeight: 20)
+            /* Contracts per WEEK, not per side — the average has to be
+               comparable to the single week beside it. */
+            Text("This week \(thisN) contracts \u{00B7} average \(avgN)")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+        }
+    }
+}

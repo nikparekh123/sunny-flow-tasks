@@ -507,11 +507,15 @@ struct SunnyPane: View {
                open" counted what the roll card could draw, not what he holds,
                and that gap is exactly what hid FIS, PEP and KR. */
             SunnyPageTitle(title: "Options", note: optionsNote(o))
-            SunnyRollCheck(book: o.book, positions: o.positions)
-            /* Directly under Roll check because it is the same layout asking
-               the other half of the question: Roll check is what the legs did,
-               this is what the stock underneath them did. */
+            /* Stock price leads the page. Nik, 2026-09-08: "First card shuold
+               be the stock price card." What the names did comes before what
+               the legs on them did. */
             if let pr = o.prices, !pr.rows.isEmpty { SunnyStockPrice(prices: pr) }
+            SunnyRollCheck(book: o.book, positions: o.positions)
+            /* The two state-of-the-book cards sit together, before the yield
+               cards: what is left to sell, then what a contract sells for. */
+            if let inv = o.inventory, !inv.isEmpty { SunnyInventory(rows: inv) }
+            if let cr = o.credit { SunnyAvgCredit(credit: cr) }
             SunnyYieldProgress(book: o.book, positions: o.positions)
             /* Directly under Yield progress on purpose: the two share the
                $164,725 denominator and answer the halves of one question,
