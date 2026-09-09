@@ -72,7 +72,18 @@ Deno.serve(async (req) => {
       D.get('option_greeks_latest?select=option_trade_id,delta,iv,last_mark'),
       D.get('ticker_names?select=ticker,name'),
       D.get('ticker_iv_daily?select=ticker,atm_iv,snapshot_date&order=snapshot_date.desc'),
-      D.get(`analyst_insights?date=gte.${ago(90)}&select=ticker,date,price_target`),
+      /* ⚠ `analyst_actions`, THE SAME FEED THE NEW PAGE CHARTS. Nik,
+         2026-09-09: "analyst target is empty we nhave that data". It was: the
+         card read `analyst_insights`, which holds a thin scattering of notes
+         and had nothing for BABA inside 90 days.
+
+         ⚠ AND NOT `analyst_consensus`, WHICH LOOKS RIGHT AND IS NOT. It holds
+         unadjusted targets: NFLX reads a 324 median and a 1,514 high against a
+         76 spot, because the split was never applied. `analyst_actions` is the
+         per-firm feed the New page already draws, so the payoff band and the
+         "TARGET CUT" cards can never tell different stories. */
+      D.get(`analyst_actions?date=gte.${ago(90)}&select=ticker,date,price_target`
+        + '&order=date.desc'),
       D.get('ticker_levels?select=ticker,kind,price'),
     ]);
 
@@ -129,21 +140,40 @@ Deno.serve(async (req) => {
     const tickers = [...held].sort();
 
     /* ── expiries per name from Polygon, in parallel ────────────────────── */
+    /* ⚠ ONE PAGE OF CONTRACTS IS NOT THE CHAIN. Nik, 2026-09-09: "if you look
+       at Baba screenshot, it stops at December 27th, but that's not true
+       because we have January 21st, 2028 right there."
+
+       Polygon returns contracts sorted by contract ticker, so a single
+       limit=1000 page on a liquid name never reaches the far expiries: BABA,
+       LULU, NFLX and PEP were all missing the very LEAP expiries the book is
+       built on. Follow `next_url` until the chain is exhausted.
+
+       ⚠ AND THE HELD EXPIRIES ARE UNIONED IN REGARDLESS. A date he holds a
+       position on can never be absent from the strip, whatever the vendor
+       returns on the day. The dot marks a position, so the dot's date has to
+       exist for the dot to land on. */
+    const MAX_PAGES = 6;
     const chains = new Map<string, string[]>();
     await Promise.all(tickers.map(async (t) => {
+      const set = new Set<string>();
       try {
         const u = new URL(`${POLY}/v3/reference/options/contracts`);
         u.searchParams.set('underlying_ticker', t);
         u.searchParams.set('expired', 'false');
         u.searchParams.set('limit', '1000');
         u.searchParams.set('apiKey', polygonKey);
-        const r = await fetch(u);
-        if (!r.ok) throw new Error(String(r.status));
-        const j = await r.json() as { results?: { expiration_date?: string }[] };
-        const set = new Set<string>();
-        for (const c of (j.results ?? [])) if (c.expiration_date) set.add(c.expiration_date);
-        chains.set(t, [...set].sort());
-      } catch { chains.set(t, []); }
+        let next: string | null = u.toString();
+        for (let page = 0; next && page < MAX_PAGES; page++) {
+          const r: Response = await fetch(next);
+          if (!r.ok) throw new Error(String(r.status));
+          const j = await r.json() as
+            { results?: { expiration_date?: string }[]; next_url?: string };
+          for (const c of (j.results ?? [])) if (c.expiration_date) set.add(c.expiration_date);
+          next = j.next_url ? `${j.next_url}&apiKey=${polygonKey}` : null;
+        }
+      } catch { /* keep whatever pages did arrive */ }
+      chains.set(t, [...set].sort());
     }));
 
     /* ── daily closes per name, ascending, for the EMAs and ranges ──────── */
@@ -227,12 +257,13 @@ Deno.serve(async (req) => {
         })
         .sort((a, b) => b.closedOn.localeCompare(a.closedOn));
 
-      /* ── analyst target, same rule as the New page ───────────────────── */
+      /* ── analyst target: the last 90 days of per-firm targets ────────── */
       const tg = (acts as Trade[])
         .filter((a) => String(a.ticker) === t && N(a.price_target) > 0)
         .map((a) => N(a.price_target)).sort((x, y) => x - y);
       const target = tg.length
-        ? { low: tg[0], median: tg[Math.floor(tg.length / 2)], high: tg[tg.length - 1], n: tg.length }
+        ? { low: r2(tg[0]), median: r2(tg[Math.floor(tg.length / 2)]),
+            high: r2(tg[tg.length - 1]), n: tg.length }
         : null;
 
       const lv = (levels as Trade[]).filter((l) => String(l.ticker) === t)
@@ -252,7 +283,8 @@ Deno.serve(async (req) => {
         closes: wk,
         d5: d5.length ? [Math.min(...d5), Math.max(...d5)] : null,
         target,
-        chain: chains.get(t) ?? [],
+        chain: [...new Set([...(chains.get(t) ?? []),
+                            ...legs.map((l) => l.expiry).filter(Boolean)])].sort(),
         legs, closed,
       };
     });

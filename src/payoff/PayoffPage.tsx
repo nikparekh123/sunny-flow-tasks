@@ -56,7 +56,6 @@ export default function PayoffPage() {
   const [planOn, setPlanOn] = useState<Record<string, boolean>>({});
   const [activePlan, setActivePlan] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [selExp, setSelExp] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [ivMult, setIvMult] = useState(1);
   const [rangePct, setRangePct] = useState(27);
@@ -92,7 +91,22 @@ export default function PayoffPage() {
     const out = [...s].sort();
     return out.length ? out : (book?.chain[0] ? [book.chain[0]] : []);
   }, [liveLegs, book]);
-  const sel = selExp && legExpiries.includes(selExp) ? selExp : legExpiries[0] ?? '';
+  /* ⚠ THE PAYOFF DATE IS ALWAYS THE NEAREST LIVE LEG EXPIRY, and cannot be
+     chosen. Nik, 2026-09-09: "I shuold be able to get this if I swtich off the
+     legs right".
+
+     He is right, and it is why the "show payoff at" pills are gone. Picking a
+     far date left the legs that expire BEFORE it still being priced at that
+     date's price: at Mar 2027 the model still charged $5.95 of intrinsic on
+     the 50 short calls expiring this Friday, because NKE was $44.95 in March.
+     The curve went flat, because the phantom short lost exactly as fast as the
+     LEAP gained.
+
+     Unchecking a leg already recomputes `legExpiries`, so turning off the
+     weeklies walks the date out to March and then to the LEAP, and every one
+     of those views is arithmetically sound. The toggle does the work a date
+     picker was doing badly. */
+  const sel = legExpiries[0] ?? '';
   const dte = sel ? Math.max(0, dteOf(sel, today)) : 0;
   const planActive = myPlanned.length > 0 || savedOnLegs.length > 0;
   const picking = selLeg != null && myPlanned.some((l) => l.id === selLeg);
@@ -113,7 +127,7 @@ export default function PayoffPage() {
 
   /* ── actions ────────────────────────────────────────────────────────── */
   const pickTicker = (t: string) => {
-    setTick(t); setSelExp(null); setActivePlan(null); setDirty(false); setElapsed(0);
+    setTick(t); setActivePlan(null); setDirty(false); setElapsed(0);
     setOpenHist(null); setAddOpen(false); setSelLeg(null);
   };
   const addLeg = (kind: 'call' | 'put' | 'stock', short: boolean) => {
@@ -285,10 +299,8 @@ export default function PayoffPage() {
             {picking && <span className="po-pill warn">Setting {editing ? legTitle(editing) : 'leg'}</span>}
             <span className="sp" />
             {legExpiries.length > 1 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="lab">show payoff at</span>
-                {legExpiries.map((e) => <span key={e} className={'po-pill' + (e === sel ? ' on' : '')} onClick={() => setSelExp(e)}>{fmtExp(e, today)}</span>)}
-              </div>
+              /* Says what moves the date, now that nothing else does. */
+              <span className="lab">turn a leg off to reach {fmtExp(legExpiries[1], today)}</span>
             )}
           </div>
           <div className="po-cal">

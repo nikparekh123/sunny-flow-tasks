@@ -94,9 +94,41 @@ export const entryOf = (leg: Leg, c: Ctx): number => {
 const T_of = (leg: Leg, elapsed: number, c: Ctx) =>
   Math.max(0, dteOf(leg.expiry, c.today) - elapsed) / 365;
 
+/**
+ * ⚠ EVERY LEG IS CALIBRATED TO ITS BROKER MARK. Nik, 2026-09-09, on the hover
+ * card: "the numbers are wrong". They were. At NKE's spot the chart read −$28
+ * while the page's own Unrealized read −$6,095, because the header uses the
+ * broker's marks and the curve was repricing everything from scratch.
+ *
+ * The gap was almost entirely the LEAP: this Black-Scholes carries NO INTEREST
+ * RATE, which on a 499-day $30 call is worth about $1.60 a share — 60 contracts
+ * of it, $6,720. Adding a rate would fix that one omission and leave every
+ * other difference from the vendor's model (dividends, borrow, skew) in place.
+ *
+ * So instead the model is corrected to the mark: `adj` is what the mark says
+ * the model is wrong by TODAY, and it is carried across the curve. It decays
+ * with the leg's remaining time, because a model error in an option's value is
+ * an error in its TIME value — at expiry the payoff is intrinsic and there is
+ * nothing left to be wrong about. At elapsed 0 the correction is exact, so the
+ * curve now passes through the broker's number at spot by construction.
+ */
+const adjOf = (leg: Leg, c: Ctx): number => {
+  if (leg.kind === 'stock' || leg.mark == null) return 0;
+  const T0 = Math.max(0, dteOf(leg.expiry, c.today)) / 365;
+  if (T0 <= 0) return 0;
+  return leg.mark - bs(c.spot, leg.strike, T0, sigOf(leg, c), leg.kind === 'call');
+};
+
+export function legValue(leg: Leg, p: number, elapsed: number, c: Ctx): number {
+  const T0 = Math.max(0, dteOf(leg.expiry, c.today)) / 365;
+  const T = T_of(leg, elapsed, c);
+  const model = bs(p, leg.strike, T, sigOf(leg, c), leg.kind === 'call');
+  return model + (T0 > 0 ? adjOf(leg, c) * (T / T0) : 0);
+}
+
 export function legPL(leg: Leg, p: number, elapsed: number, c: Ctx): number {
   if (leg.kind === 'stock') return leg.qty * (p - entryOf(leg, c));
-  return leg.qty * 100 * (bs(p, leg.strike, T_of(leg, elapsed, c), sigOf(leg, c), leg.kind === 'call') - entryOf(leg, c));
+  return leg.qty * 100 * (legValue(leg, p, elapsed, c) - entryOf(leg, c));
 }
 export const total = (p: number, elapsed: number, legs: Leg[], c: Ctx): number =>
   legs.reduce((s, l) => s + legPL(l, p, elapsed, c), 0);
@@ -107,7 +139,9 @@ export function legDelta(leg: Leg, elapsed: number, c: Ctx): number {
 }
 export function liveMark(leg: Leg, elapsed: number, c: Ctx): number {
   if (leg.kind === 'stock') return c.spot;
-  return bs(c.spot, leg.strike, T_of(leg, elapsed, c), sigOf(leg, c), leg.kind === 'call');
+  /* Calibrated, so a leg is never priced one way on the card and another on
+     the curve. At elapsed 0 this returns the broker's mark exactly. */
+  return legValue(leg, c.spot, elapsed, c);
 }
 export function intrinsic(leg: Leg, c: Ctx): number {
   if (leg.kind === 'stock') return c.spot;

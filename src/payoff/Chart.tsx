@@ -46,8 +46,13 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
   const [fit, setFit] = useState(1);
   useEffect(() => {
     const el = fitRef.current; if (!el) return;
-    const ro = new ResizeObserver(() => setFit(Math.min(1, el.clientWidth / 1450)));
-    ro.observe(el); setFit(Math.min(1, el.clientWidth / 1450));
+    /* ⚠ NEVER 0. A collapsed container — a hidden tab, a print, a parent with
+       no width yet — gave clientWidth 0, so `fit` was 0, `px` was Infinity and
+       the hover card rendered "$NaN". Width 0 means "do not scale", not
+       "scale to nothing". */
+    const calc = () => setFit(el.clientWidth > 0 ? Math.min(1, el.clientWidth / 1450) : 1);
+    const ro = new ResizeObserver(calc);
+    ro.observe(el); calc();
     return () => ro.disconnect();
   }, []);
   const spot = ctx.spot;
@@ -131,7 +136,10 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
     const px = (e.clientX - rect.left) / fit - OX;
     if (raf.current) cancelAnimationFrame(raf.current);
     raf.current = requestAnimationFrame(() => {
-      setHoverP(px < 0 || px > W ? null : lo + (px / W) * (hi - lo));
+      /* `!Number.isFinite` first: NaN fails every comparison, so a NaN px
+         slips through `px < 0 || px > W` and poisons the whole card. */
+      setHoverP(!Number.isFinite(px) || px < 0 || px > W
+        ? null : lo + (px / W) * (hi - lo));
     });
   };
   const onLeave = () => { if (raf.current) cancelAnimationFrame(raf.current); setHoverP(null); };
@@ -276,10 +284,17 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
         const flip = px > 1450 - 250;
         const pl = total(hoverP, dte, liveLegs, ctx), tod = total(hoverP, elapsed, liveLegs, ctx);
         return (
+          /* ⚠ THE P&L LEADS, NOT THE PRICE. The handoff puts the price at the
+             top; Nik, 2026-09-09: "We need to show P&L as we scrub through the
+             different prices." The price is the axis he is already pointing at,
+             so it is the support line and the answer is the headline. */
           <div className="po-hover" style={{ left: px + (flip ? -14 : 14), transform: flip ? 'translateX(-100%)' : undefined }}>
-            <div><span className="p num">{priceLab(hoverP)}</span><span className="pc num">{signed1((hoverP / spot - 1) * 100)}%</span></div>
+            <div className="hd">
+              <span className={'pl num ' + (pl < 0 ? 'loss' : 'gain')}>{money(pl)}</span>
+              <span className="at">at {fmtExp(sel, ctx.today)}</span>
+            </div>
+            <div className="sub"><span className="p num">{priceLab(hoverP)}</span><span className="pc num">{signed1((hoverP / spot - 1) * 100)}%</span></div>
             <div className="hr" />
-            <div className="r"><span className="k">{fmtExp(sel, ctx.today)}</span><span className={'v num ' + (pl < 0 ? 'loss' : 'gain')}>{money(pl)}</span></div>
             {bookOnly && <div className="r"><span className="k">Book only</span><span className={'v num ' + (total(hoverP, elapsed, bookLegs, ctx) < 0 ? 'loss' : 'gain')}>{money(total(hoverP, elapsed, bookLegs, ctx))}</span></div>}
             <div className="r"><span className="k">Today</span><span className={'v num ' + (tod < 0 ? 'loss' : 'gain')}>{money(tod)}</span></div>
             <div className="r"><span className="k">Chance above</span><span className="v num">{Math.round(chanceAbove(hoverP) * 100)}%</span></div>

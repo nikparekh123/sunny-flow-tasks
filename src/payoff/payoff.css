@@ -121,11 +121,19 @@
 .po-chip.be { background: var(--page); box-shadow: inset 0 0 0 1px var(--rule-2); }
 .po-chip.now { background: var(--neon); color: var(--on-neon); }
 .po-hover { position: absolute; top: 94px; width: 184px; background: var(--paper); border: 1px solid var(--rule-2); border-radius: 10px; box-shadow: var(--shadow-pop); padding: 12px 14px 13px; z-index: 6; pointer-events: none; }
-.po-hover .p { font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
+.po-hover .hd { display: flex; align-items: baseline; gap: 7px; }
+.po-hover .pl { font-size: 19px; font-weight: 600; letter-spacing: -.025em; }
+.po-hover .at { font-size: 11px; font-weight: 500; color: var(--mute); white-space: nowrap; }
+.po-hover .sub { margin-top: 5px; }
+.po-hover .p { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .po-hover .pc { font-size: 11px; font-weight: 500; color: var(--mute); margin-left: 6px; }
 .po-hover .hr { height: 1px; background: var(--rule-2); margin: 9px 0; }
-.po-hover .r { display: flex; justify-content: space-between; align-items: baseline; padding: 3px 0; }
-.po-hover .r .k { font-size: 11px; color: var(--mute); } .po-hover .r .v { font-size: 13px; font-weight: 600; }
+.po-hover .r { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 3px 0; }
+/* ⚠ THE VALUE NEVER SHRINKS. Without `flex: none` the label wins the squeeze
+   and the value clips its own leading minus, so a loss rendered as a gain:
+   "−$1,153" arrived on screen as "$1,153". */
+.po-hover .r .k { font-size: 11px; color: var(--mute); min-width: 0; }
+.po-hover .r .v { font-size: 13px; font-weight: 600; flex: none; white-space: nowrap; }
 .po-showing { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 10px 22px 0; }
 .po-sw { display: inline-flex; align-items: center; gap: 8px; padding: 4px 7px; margin: -4px -7px; border-radius: 6px; font-size: 12px; color: var(--ink-2); }
 .po-sw.click { cursor: pointer; } .po-sw.click:hover { background: var(--wash); }
