@@ -475,10 +475,14 @@ struct SunnyPane: View {
         guard a.contains("-fakeCover") else { return nil }
         let over = a.contains("-coverOver")
         let cost = 60225, collected = over ? 63400 : 38100
+        let left = cost - collected
+        let weeks = 26
         return PutCover(names: 5, puts: 105, cost: cost, collected: collected,
-                        left: cost - collected, pace: 2316,
+                        left: left, pace: 2316,
                         pct: Double(collected) / Double(cost) * 100,
-                        weeksToCover: max(0, Int(ceil(Double(cost - collected) / 2316))))
+                        weeksToCover: max(0, Int(ceil(Double(left) / 2316))),
+                        expiry: "2027-03-19", weeksLeft: weeks,
+                        need: left > 0 ? Int(ceil(Double(left) / Double(weeks))) : 0)
         #else
         return nil
         #endif

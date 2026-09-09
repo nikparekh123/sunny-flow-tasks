@@ -773,6 +773,12 @@ struct SunnyPutCover: View {
     /// ABSENCE, not a zero.
     let c: PutCover?
 
+    /* ⚠ THE RING'S CENTRE SWAPS TO DOLLARS ON A TAP, the same gesture Roll
+       check, Weekly yield and Stock price carry. Nik, 2026-09-09: "when you
+       tap on 4% we need to show dollar amount". The figure drops to 26 in the
+       money state because "$2,179" at 30 does not fit inside the ring. */
+    @State private var showMoney = moneyByDefault
+
     private var frac: Double {
         guard let c, c.cost > 0 else { return 0 }
         return Double(c.collected) / Double(c.cost)
@@ -781,6 +787,10 @@ struct SunnyPutCover: View {
     private var started: Bool { (c?.cost ?? 0) > 0 }
 
     var body: some View {
+        card.contentShape(Rectangle()).onTapGesture { showMoney.toggle() }
+    }
+
+    private var card: some View {
         OptCard(name: "put-cover") {
             /* No scope word. The sheet has "all tickers" there; Nik ruled it
                off on 2026-09-06 because not every position will carry a put,
@@ -798,7 +808,10 @@ struct SunnyPutCover: View {
                  : "No puts bought yet")
                 .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
                 .frame(maxWidth: .infinity, alignment: .center)
-            Spacer().frame(height: S.gap5)
+            /* 6, not 12. The two lines are one statement in two parts — what
+               has been collected, and what it takes to finish — and at the
+               wider gap they read as two unrelated notes under the ring. */
+            Spacer().frame(height: 6)
             /* One line, never a second graphic: a pace chart here would be a
                second answer competing with the ring, and the projection is one
                division. */
@@ -827,14 +840,27 @@ struct SunnyPutCover: View {
         }
     }
 
+    /* ⚠ THE LINE ASKS WHAT IT TAKES, NOT HOW LONG THE PACE WOULD TAKE. Nik,
+       2026-09-09: "the suggestion cannot be post expiry. We need to say that
+       2200 to be made to cover in 32 weeks." It read "$1,090/wk pace · full
+       cover in 45 weeks" against puts that expire in 28. Dividing what is left
+       by the realised pace answers a question whose premise is false. */
     private var paceLine: String {
         guard let c, started else {
             return "The ring fills as premium covers what the puts cost"
         }
         if covered { return "Covered \u{00B7} \(optMoney(c.pace))/wk still coming in" }
-        guard c.pace > 0 else { return "No put sold yet \u{00B7} nothing covering it" }
-        return "\(optMoney(c.pace))/wk pace \u{00B7} full cover in "
-            + "\(c.weeksToCover) week\(c.weeksToCover == 1 ? "" : "s")"
+        guard let weeks = c.weeksLeft, weeks > 0, let need = c.need, need > 0 else {
+            /* No expiry from the server, so no deadline can be stated. Fall
+               back to the plain fact rather than inventing a horizon. */
+            return "\(optMoney(c.left)) still to cover"
+        }
+        /* Already selling fast enough: say so instead of setting a target he
+           is beating. */
+        if c.pace >= need {
+            return "On pace \u{00B7} \(optMoney(c.pace))/wk covers it in \(weeks) week\(weeks == 1 ? "" : "s")"
+        }
+        return "\(optMoney(need)) a week to cover in \(weeks) week\(weeks == 1 ? "" : "s")"
     }
 
     private var ring: some View {
@@ -858,9 +884,15 @@ struct SunnyPutCover: View {
                    put there is no denominator, so the centre carries a dash in
                    --mute and the label says what has not happened rather than
                    scoring it at nothing. */
-                Text(started ? String(format: "%.0f%%", frac * 100) : "\u{2014}")
-                    .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
-                    .foregroundStyle(started ? S.gainText : S.mute).sunnyLineBox(S.t30)
+                Text(started
+                     ? (showMoney ? optMoney(c!.collected)
+                                  : String(format: "%.0f%%", frac * 100))
+                     : "\u{2014}")
+                    .font(S.inter(showMoney && started ? S.t26 : S.t30, S.wBoldN))
+                    .tracking(S.track(showMoney && started ? S.t26 : S.t30, -0.03))
+                    .foregroundStyle(started ? S.gainText : S.mute)
+                    .sunnyLineBox(showMoney && started ? S.t26 : S.t30)
+                    .lineLimit(1).minimumScaleFactor(0.7)
                 Text(started ? "COVERED" : "NO PUTS YET")
                     .font(S.inter(S.t11, S.wBoldN)).tracking(S.track(S.t11, S.lsLabel))
                     .foregroundStyle(S.mute)

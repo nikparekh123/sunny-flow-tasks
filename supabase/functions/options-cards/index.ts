@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-09.1';
+const BUILD = '2026-09-09.2';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -699,6 +699,32 @@ Deno.serve(async (req) => {
       ? putLive.reduce((a, b) => a + b, 0) / putLive.length : 0;
     const putLeft = Math.round(putCost - putCollected);
 
+    /* ⚠ THE HEDGE HAS A DEADLINE, AND A PROJECTION PAST IT IS NOT A PLAN.
+       Nik, 2026-09-09: "the suggestion cannot be post expiry. We need to say
+       that 2200 to be made to cover in 32 weeks."
+
+       The card was dividing what is left by the realised pace and printing
+       "full cover in 45 weeks". Every put in the book expires 19 Mar 2027,
+       which is 27 weeks out, so 45 weeks describes a world in which the thing
+       being paid off still exists. It does not. The question is the other way
+       round: how much a week does it take to cover BEFORE they expire.
+
+       The EARLIEST expiry sets the clock, not the furthest. When the first
+       tranche lapses the cover it provided is gone, whatever the later ones
+       are still doing. */
+    const putExpiries = open
+      .filter((e) => e.dir === 'long' && e.type === 'put')
+      .map((e) => e.exp).sort();
+    const putExpiry = putExpiries[0] ?? null;
+    const putWeeksLeft = putExpiry
+      ? Math.max(0, Math.ceil(
+          (Date.parse(putExpiry + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z'))
+          / (7 * 86_400_000)))
+      : 0;
+    /* What it takes per week to clear the remaining cost in the time left. */
+    const putNeed = putWeeksLeft > 0 && putLeft > 0
+      ? Math.ceil(putLeft / putWeeksLeft) : 0;
+
     return json(200, {
       ok: true, build: BUILD, date: today,
       /* Null when nothing is held: a ring at 0% of $0 is not an empty state,
@@ -713,6 +739,10 @@ Deno.serve(async (req) => {
           pace: Math.round(putPace),
           pct: r2(putCollected / putCost * 100),
           weeksToCover: putLeft > 0 && putPace > 0 ? Math.ceil(putLeft / putPace) : 0,
+          /* The deadline, and the rate that meets it. */
+          expiry: putExpiry,
+          weeksLeft: putWeeksLeft,
+          need: putNeed,
         }
         : null,
       /* `asOf` is the close the windows are measured FROM, so the card can

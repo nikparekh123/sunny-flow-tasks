@@ -51,6 +51,13 @@ struct PutCover: Decodable {
     let pct: Double
     /// 0 when already covered, or when no pace has been established yet.
     let weeksToCover: Int
+    /// ⚠ THE HEDGE HAS A DEADLINE. `weeksLeft` counts to the EARLIEST long-put
+    /// expiry and `need` is what it takes per week to clear `left` before it.
+    /// A projection past that date describes a world where the thing being
+    /// paid off still exists. Optional so an older deployment decodes.
+    let expiry: String?
+    let weeksLeft: Int?
+    let need: Int?
 }
 
 struct OptionsPayload: Decodable {
