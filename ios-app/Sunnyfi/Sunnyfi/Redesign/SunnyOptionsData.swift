@@ -141,6 +141,9 @@ struct PriceRow: Decodable, Identifiable {
     /// Cost basis, the same weight the ticker strip uses.
     let weight: Int
     let pct: PriceMove
+    /// The card's value column swaps to this on a tap. Optional so a run
+    /// against an older deployment decodes rather than throws.
+    let spot: Double?
     var id: String { ticker }
 }
 

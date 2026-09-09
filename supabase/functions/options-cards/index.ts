@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-08.11';
+const BUILD = '2026-09-09.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -611,6 +611,9 @@ Deno.serve(async (req) => {
     };
     const priceRows = positions.map((p) => ({
       ticker: p.t, weight: p.paid, pct: moveFor(p.t),
+      /* The card swaps its value column to this on a tap. Nik, 2026-09-09:
+         "When I tap on % can we show the stock price for each ticker". */
+      spot: r2(spot.get(p.t) ?? 0),
     }));
     const bookMove: Record<string, number | null> = {};
     for (const [key] of WINDOWS) {

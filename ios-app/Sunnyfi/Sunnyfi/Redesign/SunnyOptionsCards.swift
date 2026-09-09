@@ -991,14 +991,30 @@ struct SunnyStockPrice: View {
 
     private struct Row: Identifiable {
         let id: String, ticker: String, pct: Double
+        let spot: Double?
     }
+
+    /* ⚠ ONE TAP SWAPS THE COLUMN, the same gesture Roll check and Weekly yield
+       already carry. Nik, 2026-09-09: "When I tap on % can we show the stock
+       price for each ticker". A discrete tap, so it never competes with the
+       shell's horizontal paging drag.
+
+       ⚠ THE HERO AND THE FOOTER DO NOT SWAP. Best, Worst and Up are readings
+       ABOUT the percentages; a price in those slots would answer a question
+       nobody asked. Only the per-name column changes. */
+    /* ⚠ VERIFICATION ONLY on the launch argument, exactly as `-showMoney` is:
+       the simulator's touch bridge crashes, so `-showPrice` forces the state
+       and proves the RENDERING. It does not test the tap. */
+    @State private var showPrice = ProcessInfo.processInfo.arguments.contains("-showPrice")
 
     /// Worst first, the same queue-of-work order Roll check uses. A name with
     /// no history for this window is dropped, not drawn at zero — see the
     /// server's note on why the move is null rather than 0.
     private var rows: [Row] {
         prices.rows.compactMap { r in
-            r.pct.value(window).map { Row(id: r.ticker, ticker: r.ticker, pct: $0) }
+            r.pct.value(window).map {
+                Row(id: r.ticker, ticker: r.ticker, pct: $0, spot: r.spot)
+            }
         }.sorted { $0.pct < $1.pct }
     }
 
@@ -1006,9 +1022,16 @@ struct SunnyStockPrice: View {
         min(134, max(S.progNameCol,
                      (rows.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3))
     }
+    /* ⚠ MEASURED ACROSS BOTH STATES. Sizing to whichever is showing would
+       resize the column on every tap, and the track and all seven bars would
+       jump with it. "$138.70" is wider than "-5.0%", so the wider of the two
+       fixes the geometry once. */
     private var valCol: CGFloat {
-        max(S.progValCol,
-            (rows.map { S.textW(pctLabel($0.pct), S.t13, S.wSemiN) }.max() ?? 0) + 3)
+        let w = rows.flatMap { r -> [CGFloat] in
+            [S.textW(pctLabel(r.pct), S.t13, S.wSemiN),
+             S.textW(priceLabel(r.spot), S.t13, S.wSemiN)]
+        }.max() ?? 0
+        return max(S.progValCol, w + 3)
     }
     private var rowTrack: CGFloat {
         max(110, S.content - 38 - nameCol - valCol - 2 * S.gap4)
@@ -1019,6 +1042,12 @@ struct SunnyStockPrice: View {
     /// which is never this small.
     private func pctLabel(_ v: Double) -> String {
         String(format: "%@%.1f%%", v < 0 ? "\u{2212}" : "", abs(v))
+    }
+    /* Two decimals, the way a quote is written. An em dash when the price has
+       not arrived, never 0.00, which would read as a stock at nothing. */
+    private func priceLabel(_ v: Double?) -> String {
+        guard let v, v > 0 else { return "\u{2014}" }
+        return String(format: "$%.2f", v)
     }
 
     var body: some View {
@@ -1084,9 +1113,13 @@ struct SunnyStockPrice: View {
                                     .offset(x: x(min(r.pct, 0)))
                             }
                             .frame(width: track, height: S.progRowH)
-                            Text(pctLabel(r.pct))
+                            /* The price is a fact, not a direction, so it
+                               takes --ink and not the gain/loss ink. Only the
+                               percentage is an opinion about the day. */
+                            Text(showPrice ? priceLabel(r.spot) : pctLabel(r.pct))
                                 .font(S.inter(S.t13, S.wSemiN)).monospacedDigit()
-                                .foregroundStyle(r.pct < 0 ? S.lossText : S.gainText)
+                                .foregroundStyle(showPrice ? S.ink
+                                                 : (r.pct < 0 ? S.lossText : S.gainText))
                                 .frame(width: valCol, alignment: .trailing).lineLimit(1)
                         }
                     }
@@ -1109,6 +1142,10 @@ struct SunnyStockPrice: View {
                       ink: S.ink),
             ])
         }
+        /* A discrete tap, so it never competes with the shell's horizontal
+           paging drag. Same gesture as Roll check and Weekly yield. */
+        .contentShape(Rectangle())
+        .onTapGesture { showPrice.toggle() }
     }
 }
 
