@@ -1783,6 +1783,11 @@ struct SunnyUpsideLeft: View {
     private func gainLabel(_ share: Int) -> String {
         String(format: "%.1f%%", Double(share) / 10)
     }
+    /// The longest figure the rows will print, used to reserve the column.
+    private var widest: String {
+        block.rows.map { gainLabel($0.share) }
+            .max { S.textW($0, S.t15, S.wBoldN) < S.textW($1, S.t15, S.wBoldN) } ?? "0.0%"
+    }
 
     /// Headroom above the widest row, so nothing is ever clipped at the tick.
     private var axisMax: Double {
@@ -1823,7 +1828,15 @@ struct SunnyUpsideLeft: View {
                         .offset(x: g.size.width * CGFloat(tickFrac) - 20)
                 }
                 .frame(height: 11)
-                Color.clear.frame(width: valCol, height: 11)
+                /* The header's spacer is the WIDEST ACTUAL LABEL, drawn
+                   invisibly, so the tick stays over the same fraction the rows
+                   use however wide the figures turn out to be. */
+                Text(widest)
+                    .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
+                    .monospacedDigit().lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(minWidth: valCol, alignment: .trailing)
+                    .layoutPriority(1).opacity(0)
             }
             Spacer().frame(height: 12)
 
@@ -1847,11 +1860,19 @@ struct SunnyUpsideLeft: View {
                             }
                         }
                         .frame(height: 14)
+                        /* ⚠ minWidth AND layoutPriority, NOT A FIXED WIDTH.
+                           Nik, 2026-09-10: "I dont like % on a different line
+                           looks odd" — LULU read 14.5 with the % underneath it.
+                           A fixed frame lets the HStack hand the flexible bar
+                           its width first and squeeze whatever is left to the
+                           figure; the column has to be the rigid one and the
+                           bar the one that yields. */
                         Text(gainLabel(r.share))
                             .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
                             .monospacedDigit().foregroundStyle(S.ink)
-                            .lineLimit(1).fixedSize()
-                            .frame(width: valCol, alignment: .trailing)
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                            .frame(minWidth: valCol, alignment: .trailing)
+                            .layoutPriority(1)
                     }
                 }
             }

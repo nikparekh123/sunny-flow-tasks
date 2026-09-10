@@ -33,7 +33,8 @@ This replaces a prior buggy rule ("any IBKR trade with `last_synced_at` in the l
 
 - Project ref: `ziwoutsnuywjnsyfbzsp`
 - The CLI on this user's machine is broken (node 26 incompatibility). Don't suggest `supabase db push` or `supabase functions deploy`. Edge function deploys happen via **Dashboard → Edge Functions → \<name\> → code editor → Save**. SQL migrations are applied via **Dashboard → SQL Editor**.
-- Cron jobs: `mp-refresh-15min` (market prices), `ibkr-flex-sync-15min` (trades), `health-monitor-1min`, plus the alert-dispatcher and apns-deliver crons. All run via Postgres `pg_cron`.
+- Cron jobs: `mp-refresh-1min` (market prices + option marks, every minute 13-19 UTC Mon-Fri; was every 15 min until 2026-09-10), `ibkr-flex-sync-5min` (trades), `health-monitor`, plus the alert-dispatcher and apns-deliver crons. All run via Postgres `pg_cron`.
+- **PostgREST caps every read at 1,000 rows** (`max_rows`), silently. Any edge function reading a growing table must page with `Range` headers and a deterministic `order`, or it gets a truncated slice and reports it as fact. `options-cards` has a local `page()` helper for this; the pinned `_shared/planner.ts` `db.get` does NOT page.
 - Secrets live in `vault.decrypted_secrets`: `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `POLYGON_API_KEY`, `service_role_key`.
 
 ## iOS app

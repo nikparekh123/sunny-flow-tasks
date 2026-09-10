@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-10.1';
+const BUILD = '2026-09-10.2';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -46,10 +46,53 @@ const weekStart = (iso: string) => {
   return d.toISOString().slice(0, 10);
 };
 
+/* ⚠ POSTGREST CAPS EVERY READ AT 1,000 ROWS AND SAYS NOTHING. Found
+   2026-09-10 while costing a per-minute mark refresh, and it was already
+   corrupting two cards:
+
+     ticker_iv_daily  1,215 rows, ordered ASC, so the card got the OLDEST
+                      thousand and its volatility history stopped on 28 Aug.
+                      Every "x its usual" and the book IV were twelve days
+                      behind the market.
+     option_greeks    8,532 rows over the twelve-day window, ordered DESC, so
+                      `weekAgo` reached back about ONE DAY. The LEAP's "change
+                      this week" was a one-day change wearing a week's label,
+                      and at a one-minute capture it would have been 23 MINUTES.
+
+   `page` walks the whole result with Range headers instead. It pages until a
+   short page comes back, so it costs one extra round trip only when the table
+   is genuinely over the cap. Every paged query needs a DETERMINISTIC order or
+   a row can be seen twice or missed at a page boundary, which is why each one
+   below carries a tiebreaker. The shared `db.get` is left alone: it is pinned
+   by SHA and read by a dozen other functions. */
+const PAGE = 1000;
+async function page(url: string, key: string, path: string): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const r = await fetch(`${url}/rest/v1/${path}`, {
+      headers: {
+        apikey: key, Authorization: `Bearer ${key}`,
+        'Range-Unit': 'items', Range: `${from}-${from + PAGE - 1}`,
+      },
+    });
+    if (!r.ok) break;
+    const rows = (await r.json()) as Record<string, unknown>[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+    /* A runaway table must not hang the page. 50k rows is far past anything
+       these queries can legitimately return. */
+    if (out.length >= 50 * PAGE) break;
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const D = db(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const SB_URL = Deno.env.get('SUPABASE_URL')!;
+    const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const D = db(SB_URL, SB_KEY);
+    const P = (path: string) => page(SB_URL, SB_KEY, path);
     const today = nyToday();
     const ago = (d: number) => new Date(Date.parse(today + 'T00:00:00Z') - d * 86_400_000)
       .toISOString().slice(0, 10);
@@ -67,8 +110,9 @@ Deno.serve(async (req) => {
          paid off, this asks what the week returned on capital. The rule the
          ring does keep is the one that matters, that CALL premium never
          funds the puts. */
-      D.get('option_trades?voided_at=is.null&direction=eq.short'
-        + '&select=ticker,option_type,action,contracts,premium,trade_date,expiry&order=trade_date.asc'),
+      P('option_trades?voided_at=is.null&direction=eq.short'
+        + '&select=ticker,option_type,action,contracts,premium,trade_date,expiry'
+        + '&order=trade_date.asc,ticker.asc,expiry.asc'),
       /* ⚠ SHORT PUTS ARE A SEPARATE SERIES AND MUST STAY SEPARATE. They fund the
          long puts and nothing else. Nik, 2026-09-06, on whether the cover ring
          should count call premium: it must not, because call premium is already
@@ -79,25 +123,28 @@ Deno.serve(async (req) => {
          and its funding week still counted. Filtering to live legs the way the
          `legs` query does would quietly shrink the cost every time a tranche
          ran off, and the ring would climb for no reason. */
-      D.get('option_trades?voided_at=is.null&option_type=eq.put'
-        + '&select=ticker,direction,action,contracts,strike,premium,trade_date,expiry&order=trade_date.asc'),
+      P('option_trades?voided_at=is.null&option_type=eq.put'
+        + '&select=ticker,direction,action,contracts,strike,premium,trade_date,expiry'
+        + '&order=trade_date.asc,ticker.asc,strike.asc'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
       D.get('option_greeks_latest?select=option_trade_id,delta,last_mark'),
-      D.get(`option_greeks?captured_at=gte.${ago(12)}`
-        + '&select=option_trade_id,delta,last_mark,captured_at&order=captured_at.desc'),
+      P(`option_greeks?captured_at=gte.${ago(12)}`
+        + '&select=option_trade_id,delta,last_mark,captured_at'
+        + '&order=captured_at.desc,option_trade_id.asc'),
       D.get('ticker_names?select=ticker,name'),
       /* ⚠ SIXTY CALENDAR DAYS, NOT TWENTY-ONE ROWS. The furthest window is
          four TRADING weeks, which is 21 sessions, and 21 sessions spans more
          than 21 days across two holidays. Fetching by date and counting rows
          client-side is the only way the count stays a count of sessions. */
-      D.get(`daily_closes?date=gte.${ago(60)}&select=ticker,date,close_price`
-        + '&order=date.desc'),
+      P(`daily_closes?date=gte.${ago(60)}&select=ticker,date,close_price`
+        + '&order=date.desc,ticker.asc'),
       /* ⚠ WHAT WE HAVE, NOT A YEAR. The Premium card's build sheet asks for a
          year of IV per name; `ticker_iv_daily` holds 67 days for NKE, LULU and
          NFLX and under two weeks for the rest. Nik, 2026-09-10, chose to ship
          on the history that exists and label it honestly, so the card says
          "its own past 3 months" and `days` tells it what to print. */
-      D.get('ticker_iv_daily?select=ticker,atm_iv,snapshot_date&order=snapshot_date.asc'),
+      P('ticker_iv_daily?select=ticker,atm_iv,snapshot_date'
+        + '&order=snapshot_date.asc,ticker.asc'),
     ]);
 
     const spot = new Map<string, number>();
