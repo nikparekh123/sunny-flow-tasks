@@ -266,14 +266,18 @@ final class PaneModel {
         }
     }
 
-    func loadAll() async {
+    /// ⚠ `force` EXISTS FOR THE PULL, and only `options` reads it. Every other
+    /// store fetches on every call already; OptionsStore alone holds a
+    /// five-minute cache, so without this a pull-to-refresh would silently
+    /// return the same cards it was already showing.
+    func loadAll(force: Bool = false) async {
         async let a: Void = rail.load()
         async let b: Void = digest.load()
         async let c: Void = week.load()
         async let d: Void = planner.load()
         async let e: Void = legs.load()
         async let f: Void = newPage.load()
-        async let g: Void = options.load()
+        async let g: Void = options.load(force: force)
         _ = await (a, b, c, d, e, f, g)
         if ProcessInfo.processInfo.arguments.contains("-showPrice") {
             priceUnits = Set(rail.book.map(\.ticker))
@@ -340,6 +344,16 @@ struct SunnyPane: View {
         }
         .scrollIndicators(.hidden)
         .scrollPosition($pos)
+        /* ⚠ THE ONLY WAY TO PULL FRESH FIGURES WITHOUT QUITTING THE APP.
+           Nik, 2026-09-10, on finding the marks were an hour old: the shell's
+           `.task` fires once per launch and nothing ever called a store again,
+           so an app left open all afternoon showed whatever it fetched when it
+           was opened. The marks now refresh every minute on the server; this is
+           how they reach the glass.
+
+           It lives on the vertical scroller inside the horizontal pager, so a
+           downward pull refreshes and a sideways drag still pages. */
+        .refreshable { await m.loadAll(force: true) }
         .background(S.ground)
         .task {
             /* Verification only: -scrollTo starts the pane at a fixed offset so a

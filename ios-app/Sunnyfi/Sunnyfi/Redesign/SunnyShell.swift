@@ -43,6 +43,13 @@ struct SunnyShell: View {
        paging scroller owns the position while a finger is on it; a second value
        driving it would fight the drag mid-gesture. */
     @State private var scrolled: String?
+    /* ⚠ COMING BACK TO THE APP IS A REFRESH. Nik, 2026-09-10. The `.task`
+       below runs once per launch, so returning to a backgrounded app showed
+       figures from whenever it was last opened. `.active` on a scene that has
+       already loaded refetches; the first activation is skipped because the
+       task is already doing it. */
+    @Environment(\.scenePhase) private var phase
+    @State private var loadedOnce = false
 
     /// Deterministic states for verification, so a screenshot of "the TLT page"
     /// does not depend on a simulated drag landing on the right pixel.
@@ -79,7 +86,11 @@ struct SunnyShell: View {
             SunnyStrip(nav: nav, page: $page)
         }
         .background(S.ground)
-        .task { await model.loadAll() }
+        .task { await model.loadAll(); loadedOnce = true }
+        .onChange(of: phase) { _, now in
+            guard now == .active, loadedOnce else { return }
+            Task { await model.loadAll(force: true) }
+        }
         .onAppear { if let p = Self.argPage { page = p; scrolled = p.key } }
         .preferredColorScheme(.light)      // the token set is a light system
     }

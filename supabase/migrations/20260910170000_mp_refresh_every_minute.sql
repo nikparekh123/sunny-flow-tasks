@@ -18,9 +18,10 @@
 -- rescheduled rather than altered. health-monitor keys off the age of
 -- option_greeks, not the job name, so nothing downstream cares.
 --
--- Hours stay 13-19 UTC (Mon-Fri). Per-minute already pushes the last capture
--- from 15:45 to 15:59 ET. Adding hour 20 would capture the true close, since
--- Polygon's delay means 16:00 ET only lands at about 16:15.
+-- Hours widen to 13-20 UTC (Mon-Fri), 09:00 to 16:59 ET. The old window shut
+-- at 15:45 ET, so the last mark of the day was fifteen minutes before the
+-- close and Polygon's own delay made it more like half an hour. The extra hour
+-- is what captures the true close, which only lands at about 16:15 ET.
 do $$
 begin
   if exists (select 1 from cron.job where jobname = 'mp-refresh-15min') then
@@ -29,7 +30,7 @@ begin
   if not exists (select 1 from cron.job where jobname = 'mp-refresh-1min') then
     perform cron.schedule(
       'mp-refresh-1min',
-      '* 13-19 * * 1-5',
+      '* 13-20 * * 1-5',
       $cmd$SELECT public.cron_invoke_function('mp-refresh')$cmd$
     );
   end if;
