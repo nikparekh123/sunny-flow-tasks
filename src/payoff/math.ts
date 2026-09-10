@@ -112,18 +112,32 @@ const T_of = (leg: Leg, elapsed: number, c: Ctx) =>
  * nothing left to be wrong about. At elapsed 0 the correction is exact, so the
  * curve now passes through the broker's number at spot by construction.
  */
+/* ⚠ CACHED. The adjustment depends on the leg and the CONTEXT, never on the
+   price being plotted, but `legValue` is called once per point per curve —
+   221 × 3 × every leg. Recomputing it there put a Black-Scholes call inside
+   the innermost loop for no reason. Keyed on everything it reads. */
+const adjCache = new Map<string, number>();
 const adjOf = (leg: Leg, c: Ctx): number => {
   if (leg.kind === 'stock' || leg.mark == null) return 0;
+  const key = `${leg.id}|${leg.mark}|${leg.strike}|${leg.expiry}|${c.spot}|${c.ivMult}`;
+  const hit = adjCache.get(key);
+  if (hit !== undefined) return hit;
   const T0 = Math.max(0, dteOf(leg.expiry, c.today)) / 365;
-  if (T0 <= 0) return 0;
-  return leg.mark - bs(c.spot, leg.strike, T0, sigOf(leg, c), leg.kind === 'call');
+  const v = T0 <= 0
+    ? 0 : leg.mark - bs(c.spot, leg.strike, T0, sigOf(leg, c), leg.kind === 'call');
+  /* A spot tick invalidates every key, so the map would grow without bound. */
+  if (adjCache.size > 500) adjCache.clear();
+  adjCache.set(key, v);
+  return v;
 };
 
 export function legValue(leg: Leg, p: number, elapsed: number, c: Ctx): number {
   const T0 = Math.max(0, dteOf(leg.expiry, c.today)) / 365;
   const T = T_of(leg, elapsed, c);
   const model = bs(p, leg.strike, T, sigOf(leg, c), leg.kind === 'call');
-  return model + (T0 > 0 ? adjOf(leg, c) * (T / T0) : 0);
+  if (T0 <= 0) return model;
+  const adj = adjOf(leg, c);
+  return adj === 0 ? model : model + adj * (T / T0);
 }
 
 export function legPL(leg: Leg, p: number, elapsed: number, c: Ctx): number {

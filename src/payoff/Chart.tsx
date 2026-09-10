@@ -40,7 +40,6 @@ interface Pt { p: number; v: number }
 
 export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte, sel, rangePct, layers, closes }: ChartProps) {
   const [hoverP, setHoverP] = useState<number | null>(null);
-  const raf = useRef<number | null>(null);
   /* scale-to-fit: the 1450px drawing shrinks as one piece on narrower screens */
   const fitRef = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState(1);
@@ -76,8 +75,18 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
 
   const y = useCallback((v: number) => H - ((v - ymin) / (ymax - ymin)) * H, [ymin, ymax]);
   const y0 = y(0);
-  const path = (pts: Pt[]) => pts.map((q, i) => `${i ? 'L' : 'M'}${x(q.p).toFixed(1)},${y(q.v).toFixed(1)}`).join('');
-  const area = (pts: Pt[]) => path(pts) + `L${W},${y0.toFixed(1)}L0,${y0.toFixed(1)}Z`;
+  const path = useCallback((pts: Pt[]) =>
+    pts.map((q, i) => `${i ? 'L' : 'M'}${x(q.p).toFixed(1)},${y(q.v).toFixed(1)}`).join(''), [x, y]);
+  /* ⚠ BUILT ONCE PER CURVE, NOT ONCE PER RENDER. These are 221-point string
+     concatenations and the JSX called them on every render — which, since the
+     hover sets state, meant on every mouse move. The geometry only changes
+     when the curves or the scales do. */
+  const d = useMemo(() => {
+    const close = (p: string) => p + `L${W},${y0.toFixed(1)}L0,${y0.toFixed(1)}Z`;
+    const todayD = path(today);
+    return { today: todayD, area: close(todayD), atExp: path(atExp),
+             bookOnly: bookOnly ? path(bookOnly) : null };
+  }, [today, atExp, bookOnly, path, y0]);
 
   /* ── breakevens, in view ────────────────────────────────────────────── */
   const bes = useMemo(() => bounds(liveLegs, dte, ctx).bes.filter((b) => b > lo && b < hi), [liveLegs, dte, ctx, lo, hi]);
@@ -131,18 +140,36 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
   }, [book, layers, lo, hi, x]);
 
   /* ── hover ──────────────────────────────────────────────────────────── */
+  /* ⚠ THE POINTER IS MAPPED THROUGH THE BOX, NOT THROUGH `fit`. Nik,
+     2026-09-09: "it shows different values at different time in a matter of a
+     few seconds same place I get few different values."
+
+     Dividing by the `fit` STATE meant the reading depended on a number that is
+     measured, stored and re-measured: `.po-fit`'s height is `canvasH * fit`, so
+     every change to fit resizes the box the ResizeObserver is watching. A
+     scrollbar appearing is enough to make that settle on a slightly different
+     value, and at a fixed cursor position the price then moves on its own.
+
+     `rect.width` is the same measurement the browser just used to paint, so
+     the fraction across the box is exact whatever the scale happens to be, and
+     no stored number can drift out of step with what is on screen. */
   const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / fit - OX;
-    if (raf.current) cancelAnimationFrame(raf.current);
-    raf.current = requestAnimationFrame(() => {
-      /* `!Number.isFinite` first: NaN fails every comparison, so a NaN px
-         slips through `px < 0 || px > W` and poisons the whole card. */
-      setHoverP(!Number.isFinite(px) || px < 0 || px > W
-        ? null : lo + (px / W) * (hi - lo));
-    });
+    if (rect.width <= 0) return;
+    /* The canvas fills the box only while it is being scaled DOWN; at full
+       size it paints 1450 wide inside a box that may be wider. */
+    const painted = Math.min(rect.width, 1450);
+    const px = ((e.clientX - rect.left) / painted) * 1450 - OX;
+    /* ⚠ SET IT NOW, NOT NEXT FRAME. The rAF hop bought nothing — React already
+       batches, and mousemove does not outpace the compositor — while costing a
+       frame of latency and going SILENT whenever rAF is throttled, which is
+       every background tab. The curves are memoized, so this is cheap.
+       `!Number.isFinite` comes first: NaN fails every comparison, so a NaN px
+       slips straight through `px < 0 || px > W` and poisons the whole card. */
+    setHoverP(!Number.isFinite(px) || px < 0 || px > W
+      ? null : lo + (px / W) * (hi - lo));
   };
-  const onLeave = () => { if (raf.current) cancelAnimationFrame(raf.current); setHoverP(null); };
+  const onLeave = () => setHoverP(null);
 
   const chanceAbove = (p: number) => {
     const s = ctx.iv * ctx.ivMult * Math.sqrt(Math.max(dte, 1) / 365);
@@ -156,8 +183,9 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
   const gradPos = `grad-pos-${book.ticker}`, gradNeg = `grad-neg-${book.ticker}`;
 
   return (
-    <div className="po-fit" ref={fitRef} style={{ height: canvasH * fit }}>
-    <div className="po-canvas" style={{ height: canvasH, transform: fit < 1 ? `scale(${fit})` : undefined }} onMouseMove={onMove} onMouseLeave={onLeave}>
+    <div className="po-fit" ref={fitRef} style={{ height: canvasH * fit }}
+         onMouseMove={onMove} onMouseLeave={onLeave}>
+    <div className="po-canvas" style={{ height: canvasH, transform: fit < 1 ? `scale(${fit})` : undefined }}>
       <svg width={1450} height={canvasH} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
         <defs>
           <clipPath id={clipPos}><rect x={0} y={-40} width={W} height={y0 + 40} /></clipPath>
@@ -206,17 +234,17 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
             <line key={n + p} x1={x(p)} x2={x(p)} y1={0} y2={H} stroke="var(--ink-2)" strokeOpacity={0.5} strokeWidth={1} />
           ))}
           {/* 7 · area fill under the today curve */}
-          <path d={area(today)} fill={`url(#${gradPos})`} clipPath={`url(#${clipPos})`} />
-          <path d={area(today)} fill={`url(#${gradNeg})`} clipPath={`url(#${clipNeg})`} />
+          <path d={d.area} fill={`url(#${gradPos})`} clipPath={`url(#${clipPos})`} />
+          <path d={d.area} fill={`url(#${gradNeg})`} clipPath={`url(#${clipNeg})`} />
           {/* 8 · zero line */}
           <line x1={0} x2={W} y1={y0} y2={y0} stroke="var(--dim)" strokeWidth={1} />
           {/* 9 · book-only curve */}
-          {bookOnly && <path d={path(bookOnly)} fill="none" stroke="var(--faint)" strokeWidth={1.5} />}
+          {d.bookOnly && <path d={d.bookOnly} fill="none" stroke="var(--faint)" strokeWidth={1.5} />}
           {/* 10 · at-expiration reference, when scrubbing before expiry */}
-          {elapsed < dte && <path d={path(atExp)} fill="none" stroke="var(--mute)" strokeWidth={1.5} strokeDasharray="2 5" strokeLinecap="round" opacity={0.85} />}
+          {elapsed < dte && <path d={d.atExp} fill="none" stroke="var(--mute)" strokeWidth={1.5} strokeDasharray="2 5" strokeLinecap="round" opacity={0.85} />}
           {/* 11 · the main curve, gain above zero and loss below */}
-          <path d={path(today)} fill="none" stroke="var(--gain)" strokeWidth={3} strokeLinejoin="round" clipPath={`url(#${clipPos})`} strokeDasharray={planActive ? '9 5' : undefined} />
-          <path d={path(today)} fill="none" stroke="var(--loss)" strokeWidth={3} strokeLinejoin="round" clipPath={`url(#${clipNeg})`} strokeDasharray={planActive ? '9 5' : undefined} />
+          <path d={d.today} fill="none" stroke="var(--gain)" strokeWidth={3} strokeLinejoin="round" clipPath={`url(#${clipPos})`} strokeDasharray={planActive ? '9 5' : undefined} />
+          <path d={d.today} fill="none" stroke="var(--loss)" strokeWidth={3} strokeLinejoin="round" clipPath={`url(#${clipNeg})`} strokeDasharray={planActive ? '9 5' : undefined} />
           {/* 12 · breakeven markers */}
           {bes.map((b, i) => (
             <g key={'be' + i}>
@@ -289,10 +317,13 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
              different prices." The price is the axis he is already pointing at,
              so it is the support line and the answer is the headline. */
           <div className="po-hover" style={{ left: px + (flip ? -14 : 14), transform: flip ? 'translateX(-100%)' : undefined }}>
-            <div className="hd">
-              <span className={'pl num ' + (pl < 0 ? 'loss' : 'gain')}>{money(pl)}</span>
-              <span className="at">at {fmtExp(sel, ctx.today)}</span>
-            </div>
+            {/* ⚠ THE DATE IS AN EYEBROW, NOT A NEIGHBOUR. Side by side,
+                "−$16,140" and "at Mar 19 '27" need 165px of a 156px line, so
+                the flex row squeezed the figure and wrapped it after its MINUS
+                SIGN: a loss rendered as a gain with a stray dash above it.
+                Label over figure is the deck's own idiom anyway. */}
+            <div className="at">At {fmtExp(sel, ctx.today)}</div>
+            <div className={'pl num ' + (pl < 0 ? 'loss' : 'gain')}>{money(pl)}</div>
             <div className="sub"><span className="p num">{priceLab(hoverP)}</span><span className="pc num">{signed1((hoverP / spot - 1) * 100)}%</span></div>
             <div className="hr" />
             {bookOnly && <div className="r"><span className="k">Book only</span><span className={'v num ' + (total(hoverP, elapsed, bookLegs, ctx) < 0 ? 'loss' : 'gain')}>{money(total(hoverP, elapsed, bookLegs, ctx))}</span></div>}

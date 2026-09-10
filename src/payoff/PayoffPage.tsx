@@ -80,9 +80,29 @@ export default function PayoffPage() {
   }, [book]);
 
   /* ── derived, in the order the README gives ─────────────────────────── */
-  const ctx: Ctx | null = book ? { spot: book.spot, iv: book.iv, today, ivMult } : null;
-  const myPlanned = planned.filter((l) => l.id.startsWith(`${book?.ticker}:`));
-  const savedOnLegs = plans.filter((p) => p.ticker === book?.ticker && planOn[p.id] && p.id !== activePlan).flatMap((p) => p.legs.map((l) => ({ ...l, plan: true })));
+  /* ⚠ MEMOIZED, OR THE WHOLE CHART RECOMPUTES ON EVERY MOUSE MOVE. Nik,
+     2026-09-09: "it moves more like 99.93 it stay there and when you move
+     through payoff it shows 88.93".
+
+     A fresh object here invalidated the Chart's curve memo on every render,
+     and every hover sets state, so each pixel of movement re-evaluated three
+     221-point curves across every leg — thousands of Black-Scholes calls a
+     frame. The pointer then updates only when a frame happens to land, which
+     reads exactly as sticking and then jumping. */
+  const ctx: Ctx | null = useMemo(
+    () => (book ? { spot: book.spot, iv: book.iv, today, ivMult } : null),
+    [book, today, ivMult]);
+  /* ⚠ THESE TWO ARE MEMOIZED FOR THE SAME REASON `ctx` IS. Built inline they
+     were a fresh array on every render, so `allLegs` and then `liveLegs` were
+     fresh too, and the Chart's curve memo could never hold no matter what else
+     was stabilised. The whole chain has to be stable or none of it is. */
+  const myPlanned = useMemo(
+    () => planned.filter((l) => l.id.startsWith(`${book?.ticker}:`)),
+    [planned, book?.ticker]);
+  const savedOnLegs = useMemo(
+    () => plans.filter((p) => p.ticker === book?.ticker && planOn[p.id] && p.id !== activePlan)
+      .flatMap((p) => p.legs.map((l) => ({ ...l, plan: true }))),
+    [plans, book?.ticker, planOn, activePlan]);
   const bookLegs = useMemo(() => (book?.legs ?? []).filter((l) => !off[l.id]), [book, off]);
   const allLegs = useMemo(() => [...(book?.legs ?? []), ...myPlanned, ...savedOnLegs], [book, myPlanned, savedOnLegs]);
   const liveLegs = useMemo(() => allLegs.filter((l) => !off[l.id]), [allLegs, off]);

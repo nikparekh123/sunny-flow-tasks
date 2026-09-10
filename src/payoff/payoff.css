@@ -107,7 +107,11 @@
 .po-chart { background: var(--tile); border-radius: 14px 14px 0 0; box-shadow: var(--shadow-card); padding: 16px 0 14px; position: relative; }
 .po-fit { position: relative; width: 100%; overflow: hidden; }
 .po-canvas { position: relative; width: 1450px; transform-origin: 0 0; }
-.po-greeks { position: absolute; left: 24px; top: 18px; z-index: 4; display: flex; gap: 34px; }
+/* ⚠ `pointer-events: none`: this strip is absolutely positioned OVER the top
+   of the plot at z-index 4, so every mousemove that crossed it never reached
+   the canvas and the crosshair simply stopped following. It is a readout, not
+   a control. */
+.po-greeks { position: absolute; left: 24px; top: 18px; z-index: 4; display: flex; gap: 34px; pointer-events: none; }
 .po-greeks .g { display: flex; flex-direction: column; gap: 6px; }
 .po-greeks .v { font-size: 17px; font-weight: 600; line-height: 1; letter-spacing: -.025em; }
 .po-greeks .b { font-size: 10px; color: var(--mute-2); }
@@ -121,19 +125,21 @@
 .po-chip.be { background: var(--page); box-shadow: inset 0 0 0 1px var(--rule-2); }
 .po-chip.now { background: var(--neon); color: var(--on-neon); }
 .po-hover { position: absolute; top: 94px; width: 184px; background: var(--paper); border: 1px solid var(--rule-2); border-radius: 10px; box-shadow: var(--shadow-pop); padding: 12px 14px 13px; z-index: 6; pointer-events: none; }
-.po-hover .hd { display: flex; align-items: baseline; gap: 7px; }
-.po-hover .pl { font-size: 19px; font-weight: 600; letter-spacing: -.025em; }
-.po-hover .at { font-size: 11px; font-weight: 500; color: var(--mute); white-space: nowrap; }
-.po-hover .sub { margin-top: 5px; }
+.po-hover .at { font-size: 9px; font-weight: 500; line-height: 1; letter-spacing: 1.4px; text-transform: uppercase; color: var(--mute); }
+.po-hover .pl { font-size: 19px; font-weight: 600; line-height: 1; letter-spacing: -.025em; margin-top: 7px; white-space: nowrap; }
+.po-hover .sub { margin-top: 6px; }
 .po-hover .p { font-size: 13px; font-weight: 600; color: var(--ink-2); }
 .po-hover .pc { font-size: 11px; font-weight: 500; color: var(--mute); margin-left: 6px; }
 .po-hover .hr { height: 1px; background: var(--rule-2); margin: 9px 0; }
-.po-hover .r { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 3px 0; }
+/* ⚠ GRID, NOT FLEX. `auto` for the value means it is sized by its content
+   before the label gets any say, so no label length can squeeze a figure into
+   wrapping off its own minus sign. */
+.po-hover .r { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 10px; padding: 3px 0; }
 /* ⚠ THE VALUE NEVER SHRINKS. Without `flex: none` the label wins the squeeze
    and the value clips its own leading minus, so a loss rendered as a gain:
    "−$1,153" arrived on screen as "$1,153". */
 .po-hover .r .k { font-size: 11px; color: var(--mute); min-width: 0; }
-.po-hover .r .v { font-size: 13px; font-weight: 600; flex: none; white-space: nowrap; }
+.po-hover .r .v { font-size: 13px; font-weight: 600; white-space: nowrap; text-align: right; }
 .po-showing { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 10px 22px 0; }
 .po-sw { display: inline-flex; align-items: center; gap: 8px; padding: 4px 7px; margin: -4px -7px; border-radius: 6px; font-size: 12px; color: var(--ink-2); }
 .po-sw.click { cursor: pointer; } .po-sw.click:hover { background: var(--wash); }
