@@ -1461,3 +1461,541 @@ struct SunnyAvgCredit: View {
         }
     }
 }
+
+// MARK: - 01 · Programme
+
+/// ⚠ AM I UP, AND THEN ON WHICH NAME. handoff-final/01. Opens on All, so the
+/// all-in reading is never gated behind choosing a name.
+///
+/// ⚠ THE HERO IS THE SUM OF ITS OWN FOOTER: `banked + owed + mark == net`.
+/// Nothing here is stored; every figure is derived from the per-name rows, so a
+/// corrected component moves the hero with it. A hero that can disagree with
+/// its own footer is the one defect that would make this card worthless.
+///
+/// ⚠ SINCE 31 AUGUST, the LEAP shift. Nik, 2026-09-10. That start makes the
+/// card read −$12,488 rather than the handoff's +$15,065: most of the credits
+/// were earned before it, against shares he no longer holds.
+struct SunnyProgramme: View {
+    let block: ProgrammeBlock
+
+    @State private var sel: String? = nil          // nil = All
+
+    /// The All row is the SUM of the names, never a stored total.
+    private var all: ProgrammeRow {
+        let r = block.rows
+        return ProgrammeRow(t: "All",
+                            kept: r.reduce(0) { $0 + $1.kept },
+                            calls: r.reduce(0) { $0 + $1.calls },
+                            puts: r.reduce(0) { $0 + $1.puts },
+                            owed: r.reduce(0) { $0 + $1.owed },
+                            invested: r.reduce(0) { $0 + $1.invested })
+    }
+    private var row: ProgrammeRow {
+        sel.flatMap { s in block.rows.first { $0.t == s } } ?? all
+    }
+    /// Names by net descending, so the best-standing name reads first.
+    private var order: [ProgrammeRow] { block.rows.sorted { $0.net > $1.net } }
+
+    private func sinceLabel() -> String {
+        let p = block.since.split(separator: "-")
+        let mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]), (1...12).contains(m)
+        else { return block.since }
+        return "since \(d) \(mon[m - 1])"
+    }
+
+    var body: some View {
+        let r = row
+        let markPos = r.mark >= 0
+        let span = max(abs(r.kept) + abs(r.mark), 1)
+        OptCard(name: "programme") {
+            OptHead(title: "Programme", sub: sel == nil ? "all in" : "one name",
+                    right: sinceLabel())
+            Spacer().frame(height: 14)
+
+            /* Wraps to two rows at 361 and that is fine. */
+            SunnyChipWrap(items: ["All"] + order.map(\.t), selected: sel ?? "All") { tapped in
+                sel = tapped == "All" ? nil : tapped
+            }
+
+            Spacer().frame(height: 20)
+            Text("NET")
+                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                .foregroundStyle(S.mute)
+            Spacer().frame(height: 11)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(optMoney(r.net))
+                    .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
+                    .foregroundStyle(r.net < 0 ? S.lossText : S.gainText)
+                    .sunnyLineBox(S.t22)
+                Text("\(r.net < 0 ? "down" : "up") \(String(format: "%.1f", abs(r.pct)))%")
+                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+            }
+            Spacer().frame(height: 9)
+            Text("on \(optMoney(r.invested)) invested")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+
+            Spacer().frame(height: 20)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 18)
+
+            Text("WHAT IT IS MADE OF")
+                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                .foregroundStyle(S.mute)
+            Spacer().frame(height: 14)
+
+            /* ⚠ INK BY SIGN, NEVER BY ROW. A long call can be a gain — LULU and
+               BABA have been — so nothing here is hardcoded to loss ink. */
+            VStack(alignment: .leading, spacing: 13) {
+                ForEach(Array([("Credits kept", r.kept), ("Long calls", r.calls),
+                               ("Long puts", r.puts)].enumerated()), id: \.offset) { _, cell in
+                    HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+                        Text(cell.0).font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink)
+                        Spacer(minLength: 0)
+                        Text(optMoney(cell.1))
+                            .font(S.inter(S.t14, S.wBoldN)).tracking(S.track(S.t14, -0.02))
+                            .foregroundStyle(cell.1 < 0 ? S.lossText : S.gainText)
+                    }
+                }
+            }
+
+            Spacer().frame(height: 16)
+            GeometryReader { g in
+                HStack(spacing: 0) {
+                    Rectangle().fill(S.gainText)
+                        .frame(width: g.size.width * CGFloat(abs(r.kept)) / CGFloat(span))
+                    Rectangle().fill(markPos ? S.gainText : S.lossText)
+                        .frame(width: g.size.width * CGFloat(abs(r.mark)) / CGFloat(span))
+                    Rectangle().fill(S.wash)
+                }
+            }
+            .frame(height: 8).clipShape(RoundedRectangle(cornerRadius: 4))
+            Spacer().frame(height: 10)
+            Text("Credits are banked. The two marks move every day and are not yours until you close.")
+                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                .lineSpacing(S.t11 * 0.4).fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 20)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 18)
+            OptFooter(stats: [
+                .init(label: "Banked", value: optMoney(r.banked), ink: S.ink),
+                /* ⚠ "Owed on open" TRUNCATED TO "OWED ON OP…" at 10/700 in a
+                   third of 323. The deck settled this once already, when
+                   "Current value" became "Worth now". Banked · Owed · At mark
+                   reads as one set anyway. */
+                .init(label: "Owed", value: optMoney(r.owed), ink: S.ink),
+                .init(label: "At mark", value: optMoney(r.mark), ink: S.ink),
+            ])
+        }
+    }
+}
+
+/// The name strip. Wrapped by hand for the same reason the inventory chips are:
+/// SwiftUI has no flow container that also honours an exact gap on both axes.
+private struct SunnyChipWrap: View {
+    let items: [String]
+    let selected: String
+    let tap: (String) -> Void
+
+    private func w(_ s: String) -> CGFloat { 20 + S.textW(s, S.t11, S.wSemiN) }
+
+    private var rows: [[String]] {
+        var out: [[String]] = [], line: [String] = [], used: CGFloat = 0
+        for i in items {
+            let cw = w(i)
+            if !line.isEmpty && used + 6 + cw > S.content - 38 {
+                out.append(line); line = [i]; used = cw
+            } else { used += (line.isEmpty ? 0 : 6) + cw; line.append(i) }
+        }
+        if !line.isEmpty { out.append(line) }
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, line in
+                HStack(spacing: 6) {
+                    ForEach(line, id: \.self) { i in
+                        let on = i == selected
+                        Text(i)
+                            .font(S.inter(S.t11, S.wSemiN))
+                            .foregroundStyle(on ? S.onInk : S.mute)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(Capsule().fill(on ? S.ink : S.paper))
+                            .overlay(Capsule().stroke(on ? S.ink : S.ruleColorStrong, lineWidth: 1))
+                            .contentShape(Capsule())
+                            .onTapGesture { tap(i) }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 02 · Premium now
+
+/// ⚠ A MULTIPLE OF ITS OWN USUAL, NEVER A PERCENTILE. handoff-final/02. The
+/// rank was what made the earlier version unreadable; today's IV against the
+/// name's own median is the whole reading.
+///
+/// ⚠ THE TRACK IS THAT NAME'S OWN RANGE, so no row is comparable to any other.
+/// The bar runs from the usual line to today: its LENGTH is the distance from
+/// normal and its SIDE is the direction.
+///
+/// ⚠ AND IT SAYS THREE MONTHS BECAUSE THAT IS WHAT EXISTS. The build sheet asks
+/// for a year; `ticker_iv_daily` holds 60 days. Nik chose to ship on the real
+/// history and label it honestly rather than claim a year.
+struct SunnyPremiumNow: View {
+    let block: PremiumBlock
+
+    private static let richAt = 1.15
+
+    private var best: PremiumRow? { block.rows.first }
+    private var window: String {
+        let m = Int((Double(block.days) / 21.0).rounded())
+        return m >= 12 ? "past year" : "past \(max(m, 1)) month\(m == 1 ? "" : "s")"
+    }
+
+    var body: some View {
+        OptCard(name: "premium-now") {
+            OptHead(title: "Premium now", sub: "vs its own usual",
+                    right: fmtDayLabel(Date()))
+            Spacer().frame(height: 26)
+
+            if let b = best {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(String(format: "%.2f\u{00D7}", b.mult))
+                        .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
+                        .foregroundStyle(b.mult >= Self.richAt ? S.gainText : S.ink)
+                        .sunnyLineBox(S.t22)
+                    Text("its usual, on \(b.t)")
+                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+                }
+                Spacer().frame(height: 9)
+                Text("the best the book is paying today")
+                    .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            } else {
+                Text("\u{2014}").font(S.inter(S.t22, S.wBoldN)).foregroundStyle(S.mute)
+                Spacer().frame(height: 9)
+                Text("no name has enough history yet")
+                    .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            }
+
+            Spacer().frame(height: 26)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 22)
+
+            Text("EACH NAME ON ITS OWN \(window.uppercased())")
+                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                .foregroundStyle(S.mute)
+            Spacer().frame(height: 14)
+
+            VStack(alignment: .leading, spacing: 30) {
+                ForEach(block.rows) { r in
+                    VStack(alignment: .leading, spacing: 11) {
+                        HStack(spacing: 12) {
+                            Text(r.t)
+                                .font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
+                                .frame(width: 44, alignment: .leading)
+                            GeometryReader { g in
+                                let lo = min(r.posNow, r.posUsual), hi = max(r.posNow, r.posUsual)
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 2).fill(S.wash)
+                                    /* Rich only: everything else is --hair, so the
+                                       one row worth acting on is the only colour. */
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(r.mult >= Self.richAt ? S.gainBar : S.hair)
+                                        .frame(width: max(2, g.size.width * CGFloat(hi - lo)))
+                                        .offset(x: g.size.width * CGFloat(lo))
+                                    /* The usual, overhanging the track so it can
+                                       never be mistaken for a segment. */
+                                    Rectangle().fill(S.ink).frame(width: 2)
+                                        .frame(height: 22)
+                                        .offset(x: g.size.width * CGFloat(r.posUsual) - 1)
+                                }
+                            }
+                            .frame(height: 14)
+                            /* The bar carries the state; the figure never repeats it. */
+                            Text(String(format: "%.2f\u{00D7}", r.mult))
+                                .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
+                                .monospacedDigit().foregroundStyle(S.ink)
+                                .lineLimit(1).fixedSize()
+                                .frame(width: 46, alignment: .trailing)
+                        }
+                        Text(String(format: "%.1f%% today \u{00B7} %.1f%% usual", r.now, r.usual))
+                            .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute2)
+                            .padding(.leading, 56)
+                    }
+                }
+            }
+
+            Spacer(minLength: 26)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 22)
+            OptFooter(stats: [
+                .init(label: "Rich",
+                      value: "\(block.rows.filter { $0.mult >= Self.richAt }.count)", ink: S.ink),
+                .init(label: "Book IV",
+                      value: block.rows.isEmpty ? "\u{2014}"
+                        : String(format: "%.1f%%",
+                                 block.rows.reduce(0) { $0 + $1.now } / Double(block.rows.count)),
+                      ink: S.ink),
+                .init(label: "Readable", value: "\(block.rows.count)", ink: S.ink),
+            ])
+        }
+    }
+}
+
+/// "Wed 10 Sep" — the deck's own header date.
+func fmtDayLabel(_ d: Date) -> String {
+    let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f.string(from: d)
+}
+
+// MARK: - 03 · Upside left
+
+/// ⚠ WHAT YOU MAKE WHEN THE STOCK MAKES 10%, in the unit he would quote: NKE
+/// makes 5.2% when NKE makes 10%. handoff-final/03.
+///
+/// ⚠ THE PUTS ARE IN IT. Nik, 2026-09-10: "include puts as well". They are a
+/// third of the capital, and leaving them out read 73% where the book keeps 67.
+///
+/// ⚠ THE AXIS RUNS PAST THE TICK ON PURPOSE. A short put that goes into the
+/// money is LONG delta, so a name can make MORE than the stock does: LULU is at
+/// 123% today. The tick at 10% is the move itself, so short of it is capped and
+/// past it is more than the stock made.
+///
+/// ⚠ AND A RISING NUMBER HERE IS NOT ALWAYS GOOD NEWS. The book went 38% → 67%
+/// in two days largely because short puts went against him, which the To roll
+/// card is showing as a loss. Same fact, two cards, opposite feelings.
+struct SunnyUpsideLeft: View {
+    let block: UpsideBlock
+
+    /* ⚠ MEASURED, NOT ASSUMED. 46 fits "8.0%" and not "13.2%", so LULU wrapped
+       onto a second line and broke the row's baseline — the same lesson the
+       roll-check columns learned. A name past 100% is normal here, so the
+       column has to take its widest actual content. */
+    private var valCol: CGFloat {
+        let w = block.rows.map { S.textW(gainLabel($0.share), S.t15, S.wBoldN) }.max() ?? 0
+        return max(46, w + 3)
+    }
+    private func gainLabel(_ share: Int) -> String {
+        String(format: "%.1f%%", Double(share) / 10)
+    }
+
+    /// Headroom above the widest row, so nothing is ever clipped at the tick.
+    private var axisMax: Double {
+        let widest = Double(block.rows.map(\.share).max() ?? 100) / 10
+        return max(12, (widest * 1.05).rounded(.up))
+    }
+    private var tickFrac: Double { Double(block.move) / axisMax }
+
+    var body: some View {
+        let cappedCount = block.rows.filter { $0.share < 100 }.count
+        OptCard(name: "upside-left") {
+            OptHead(title: "Upside left", sub: "if the stock makes \(block.move)%",
+                    right: "whole book")
+            Spacer().frame(height: 26)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(String(format: "+%.1f%%", block.share * Double(block.move) / 100))
+                    .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
+                    .foregroundStyle(S.ink).sunnyLineBox(S.t22)
+                Text("is what you make")
+                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+            }
+            Spacer().frame(height: 9)
+            Text("\(optMoneyShort(block.up)) of a \(optMoneyShort(Int(Double(block.up) / max(block.share, 0.01) * 100))) move")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+
+            Spacer().frame(height: 26)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 22)
+
+            /* The tick label, over the same fraction every row repeats. */
+            HStack(spacing: 12) {
+                Color.clear.frame(width: 44, height: 11)
+                GeometryReader { g in
+                    Text("\(block.move)%")
+                        .font(S.inter(S.t10, S.wSemiN)).tracking(S.track(S.t10, S.lsLabel))
+                        .foregroundStyle(S.mute)
+                        .frame(width: 40)
+                        .offset(x: g.size.width * CGFloat(tickFrac) - 20)
+                }
+                .frame(height: 11)
+                Color.clear.frame(width: valCol, height: 11)
+            }
+            Spacer().frame(height: 12)
+
+            VStack(alignment: .leading, spacing: 22) {
+                ForEach(block.rows) { r in
+                    let gain = Double(r.share) / 10
+                    HStack(spacing: 12) {
+                        Text(r.t)
+                            .font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
+                            .frame(width: 44, alignment: .leading)
+                        GeometryReader { g in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 2).fill(S.wash)
+                                /* One exception, one colour: only the tightest
+                                   cap is inked. */
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(r.t == block.rows.first?.t ? S.lossBar : S.hair)
+                                    .frame(width: max(2, g.size.width * CGFloat(min(gain / axisMax, 1))))
+                                Rectangle().fill(S.ink).frame(width: 2).frame(height: 22)
+                                    .offset(x: g.size.width * CGFloat(tickFrac) - 1)
+                            }
+                        }
+                        .frame(height: 14)
+                        Text(gainLabel(r.share))
+                            .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
+                            .monospacedDigit().foregroundStyle(S.ink)
+                            .lineLimit(1).fixedSize()
+                            .frame(width: valCol, alignment: .trailing)
+                    }
+                }
+            }
+
+            Spacer(minLength: 26)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 22)
+            OptFooter(stats: [
+                .init(label: "If +\(block.move)%", value: optMoneyShort(block.up), ink: S.gainText),
+                /* ⚠ DELTA-ONLY. Long puts are convex, so a real fall is better
+                   than this. Left visible rather than hidden. */
+                .init(label: "If \u{2212}\(block.move)%", value: optMoneyShort(block.down), ink: S.lossText),
+                .init(label: "Capped", value: "\(cappedCount)", ink: S.ink),
+            ])
+        }
+    }
+}
+
+// MARK: - 04 · To roll
+
+/// ⚠ NO ASSIGNMENT LANGUAGE ANYWHERE. This book rolls. handoff-final/04.
+///
+/// ⚠ THE LEFT HALF IS THE LEG, THE RIGHT HALF IS THE NAME, and the right half
+/// is labelled ALL TIME because that scope change is otherwise invisible: Nik
+/// read "Kept $4,035" as belonging to the $110 put beside it and asked where
+/// the card said otherwise. It did not.
+///
+/// The label also settles the duplicate. When a name has an in-the-money call
+/// AND put they land in different groups and both carry the same history; with
+/// ALL TIME on each that reads as one standing fact stated twice, and without
+/// it, it reads as a bug.
+struct SunnyToRoll: View {
+    let block: ToRollBlock
+
+    private var calls: [RollLeg] { block.legs.filter { $0.side == "call" }.sorted { $0.loss > $1.loss } }
+    private var puts: [RollLeg] { block.legs.filter { $0.side == "put" }.sorted { $0.loss > $1.loss } }
+    private var sold: Int { block.legs.reduce(0) { $0 + $1.sold } }
+    private var buy: Int { block.legs.reduce(0) { $0 + $1.now } }
+
+    var body: some View {
+        OptCard(name: "to-roll", fixedHeight: nil) {
+            OptHead(title: "To roll", sub: "as of today", right: fmtDayLabel(Date()))
+            Spacer().frame(height: 26)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(optMoney(sold - buy))
+                    .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
+                    .foregroundStyle(sold - buy < 0 ? S.lossText : S.gainText)
+                    .sunnyLineBox(S.t22)
+                Text("to roll all \(block.legs.count)")
+                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+            }
+            Spacer().frame(height: 9)
+            Text("sold for \(optMoney(sold)) \u{00B7} buying back at \(optMoney(buy))")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+
+            Spacer().frame(height: 26)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 22)
+
+            /* ⚠ AN EMPTY GROUP IS HIDDEN, not shown as a bare heading. Today no
+               call is in the money, so CALLS would otherwise be a label with
+               nothing under it. */
+            if !calls.isEmpty { group("CALLS", calls) }
+            if !calls.isEmpty && !puts.isEmpty { Spacer().frame(height: 26) }
+            if !puts.isEmpty { group("PUTS", puts) }
+            if block.legs.isEmpty {
+                Text("Nothing is in the money")
+                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+            }
+
+            Spacer(minLength: 26)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 22)
+            OptFooter(stats: [
+                .init(label: "This week", value: optMoney(block.week), ink: S.ink),
+                .init(label: "To close", value: optMoney(buy), ink: S.lossText),
+                .init(label: "Net", value: optMoney(block.week - buy), ink: S.ink),
+            ])
+        }
+    }
+
+    @ViewBuilder private func group(_ label: String, _ legs: [RollLeg]) -> some View {
+        Text(label)
+            .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+            .foregroundStyle(S.mute)
+        Spacer().frame(height: 18)
+        VStack(alignment: .leading, spacing: 30) {
+            ForEach(legs) { l in row(l) }
+        }
+    }
+
+    @ViewBuilder private func row(_ l: RollLeg) -> some View {
+        let h = block.names[l.t]
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(l.t)
+                        .font(S.inter(S.t14, S.wBoldN)).tracking(S.track(S.t14, -0.01))
+                        .foregroundStyle(S.ink)
+                    Text("\(priceShortLabel(l.strike)) \u{00D7} \(l.n)")
+                        .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute2)
+                    Spacer(minLength: 0)
+                }
+                Spacer().frame(height: 13)
+                HStack(alignment: .firstTextBaseline, spacing: 9) {
+                    Text(optMoney(-l.loss))
+                        .font(S.inter(S.t19, S.wBoldN)).tracking(S.track(S.t19, -0.03))
+                        .foregroundStyle(S.lossText)
+                    Text("\(Int(l.lossPct.rounded()))%")
+                        .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                }
+                Spacer().frame(height: 10)
+                Text("sold \(optMoney(l.sold)) \u{2192} buy \(optMoney(l.now))")
+                    .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute2).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Rectangle().fill(S.ruleColor).frame(width: 1).frame(maxHeight: .infinity)
+
+            /* ⚠ 132 WIDE, AND DO NOT NARROW IT. "Rolled back" wraps below ~78
+               and breaks the baseline of the whole column. */
+            VStack(alignment: .leading, spacing: 11) {
+                Text("ALL TIME")
+                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                    .foregroundStyle(S.mute)
+                hist("Kept", optMoney(h?.kept ?? 0), S.ink2)
+                hist("Rolled back", optMoney(-(h?.given ?? 0)), S.lossText)
+                hist("LEAP", optMoney(h?.leap ?? 0), (h?.leap ?? 0) < 0 ? S.lossText : S.gainText)
+            }
+            .frame(width: 132, alignment: .leading)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private func hist(_ k: String, _ v: String, _ ink: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(k).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute).lineLimit(1)
+            Spacer(minLength: 0)
+            Text(v).font(S.inter(S.t12, S.wSemiN)).foregroundStyle(ink).lineLimit(1)
+        }
+    }
+}
+
+/// "$37.50" / "$110" — a strike, without cents when it has none.
+func priceShortLabel(_ v: Double) -> String {
+    v == v.rounded() ? String(format: "$%.0f", v) : String(format: "$%.2f", v)
+}

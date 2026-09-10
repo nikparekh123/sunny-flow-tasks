@@ -72,6 +72,99 @@ struct OptionsPayload: Decodable {
     let prices: PricesBlock?
     let inventory: [InventoryRow]?
     let credit: CreditBlock?
+    /* handoff-final/, 10 Sep 2026. All optional so a run against an older
+       deployment decodes rather than throws. */
+    let programme: ProgrammeBlock?
+    let premium: PremiumBlock?
+    let upside: UpsideBlock?
+    let toRoll: ToRollBlock?
+}
+
+/// ⚠ NOTHING HERE IS A STORED TOTAL. `mark`, `net` and `banked` are derived, so
+/// a corrected component moves the hero with it. The card's whole claim is that
+/// `banked + owed + mark == net`; a hero that can disagree with its own footer
+/// is the one defect that would make it worthless.
+struct ProgrammeRow: Decodable, Identifiable {
+    let t: String
+    let kept: Int, calls: Int, puts: Int, owed: Int, invested: Int
+    var id: String { t }
+    var mark: Int { calls + puts }
+    var net: Int { kept + mark }
+    /// `owed` is always <= 0, so this adds back what is still owed on open legs.
+    var banked: Int { kept - owed }
+    var pct: Double { invested > 0 ? Double(net) / Double(invested) * 100 : 0 }
+}
+
+struct ProgrammeBlock: Decodable {
+    /// ⚠ 31 AUGUST, the LEAP shift. Nik, 2026-09-10. The handoff said 20 May,
+    /// but the credits then ran back to when he still held shares while the
+    /// denominator is the LEAPs and puts he holds now.
+    let since: String
+    let rows: [ProgrammeRow]
+}
+
+/// ⚠ A MULTIPLE OF ITS OWN USUAL, NEVER A PERCENTILE. The rank is what made the
+/// earlier version unreadable.
+struct PremiumRow: Decodable, Identifiable {
+    let t: String
+    let now: Double, usual: Double, low: Double, high: Double
+    let days: Int
+    var id: String { t }
+    var mult: Double { usual > 0 ? now / usual : 0 }
+    /// Where the name's usual sits on its own range, 0...1.
+    var posUsual: Double { high > low ? (usual - low) / (high - low) : 0.5 }
+    var posNow: Double { high > low ? (now - low) / (high - low) : 0.5 }
+}
+
+struct PremiumBlock: Decodable {
+    /// How much history actually exists, so the card can label itself honestly
+    /// rather than claiming a year it does not have.
+    let days: Int
+    let rows: [PremiumRow]
+}
+
+/// `share` is how much of the LEAP's own exposure survives everything sold
+/// against it. It CAN exceed 100: a short put that goes into the money is long
+/// delta, so it adds exposure back.
+struct UpsideRow: Decodable, Identifiable {
+    let t: String, share: Int
+    var id: String { t }
+}
+
+struct UpsideBlock: Decodable {
+    let move: Int
+    let share: Double
+    /// ⚠ `down` IS DELTA-ONLY AND THEREFORE WRONG AT THE EDGES. Long puts are
+    /// convex, so a real fall is BETTER than this figure. Fixing it means
+    /// running the payoff engine, not scaling this.
+    let up: Int, down: Int
+    let rows: [UpsideRow]
+}
+
+struct RollLeg: Decodable, Identifiable {
+    let t: String, side: String
+    let n: Int
+    let strike: Double
+    let sold: Int, now: Int
+    let exp: String
+    var id: String { "\(t)-\(side)-\(strike)-\(exp)" }
+    var loss: Int { now - sold }
+    var lossPct: Double { sold > 0 ? Double(loss) / Double(sold) * 100 : 0 }
+}
+
+/// ⚠ PER NAME, NOT PER LEG, which is why the card labels it ALL TIME. Nik read
+/// "Kept $4,035" as belonging to the $110 put beside it and asked where the
+/// card said otherwise; it did not.
+struct RollName: Decodable {
+    let collected: Int, given: Int, leap: Int
+    var kept: Int { collected - given }
+}
+
+struct ToRollBlock: Decodable {
+    /// The same figure Weekly yield prints, so the page agrees with itself.
+    let week: Int
+    let legs: [RollLeg]
+    let names: [String: RollName]
 }
 
 /// ⚠ HELD AND SOLD ARE BOTH CURRENTLY OPEN, and `held - sold` is the only

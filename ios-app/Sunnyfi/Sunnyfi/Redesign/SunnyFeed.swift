@@ -520,6 +520,13 @@ struct SunnyPane: View {
                cards: what is left to sell, then what a contract sells for. */
             if let inv = o.inventory, !inv.isEmpty { SunnyInventory(rows: inv) }
             if let cr = o.credit { SunnyAvgCredit(credit: cr) }
+            /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
+               leads this group; To roll is the one that asks for a decision, so
+               it closes it. */
+            if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
+            if let pm = o.premium, !pm.rows.isEmpty { SunnyPremiumNow(block: pm) }
+            if let up = o.upside, !up.rows.isEmpty { SunnyUpsideLeft(block: up) }
+            if let tr = o.toRoll { SunnyToRoll(block: tr) }
             SunnyYieldProgress(book: o.book, positions: o.positions)
             /* Directly under Yield progress on purpose: the two share the
                $164,725 denominator and answer the halves of one question,

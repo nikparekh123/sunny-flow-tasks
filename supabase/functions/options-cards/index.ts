@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-09.2';
+const BUILD = '2026-09-10.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -54,7 +54,7 @@ Deno.serve(async (req) => {
     const ago = (d: number) => new Date(Date.parse(today + 'T00:00:00Z') - d * 86_400_000)
       .toISOString().slice(0, 10);
 
-    const [legs, allShorts, allPuts, quotes, greeks, greeksHist, names, closes] = await Promise.all([
+    const [legs, allShorts, allPuts, quotes, greeks, greeksHist, names, closes, ivHist] = await Promise.all([
       D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
         + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date'),
       /* ⚠ SHORT PUTS COUNT HERE TOO. Nik, 2026-09-08: "short calls only shuold
@@ -92,6 +92,12 @@ Deno.serve(async (req) => {
          client-side is the only way the count stays a count of sessions. */
       D.get(`daily_closes?date=gte.${ago(60)}&select=ticker,date,close_price`
         + '&order=date.desc'),
+      /* ⚠ WHAT WE HAVE, NOT A YEAR. The Premium card's build sheet asks for a
+         year of IV per name; `ticker_iv_daily` holds 67 days for NKE, LULU and
+         NFLX and under two weeks for the rest. Nik, 2026-09-10, chose to ship
+         on the history that exists and label it honestly, so the card says
+         "its own past 3 months" and `days` tells it what to print. */
+      D.get('ticker_iv_daily?select=ticker,atm_iv,snapshot_date&order=snapshot_date.asc'),
     ]);
 
     const spot = new Map<string, number>();
@@ -518,6 +524,114 @@ Deno.serve(async (req) => {
                           putsHeld: r.ph, putsSold: r.ps }))
       .sort((a, b) => a.t.localeCompare(b.t));
 
+    /* ══ THE FOUR NEW CARDS ══════════════════════════════════════════════
+       handoff-final/, 10 Sep 2026. All four derive from the same tables the
+       existing cards do, in this one function, because two cards that compute
+       the same figure separately will disagree eventually — which is the
+       reason this function exists at all. */
+
+    /* ── 01 · Programme, per name ──────────────────────────────────────────
+       ⚠ THE PROGRAMME STARTS 31 AUGUST, Nik's ruling 2026-09-10. The handoff
+       said "since 20 May", but the credits then ran back to when he still held
+       shares while `invested` is the LEAPs and puts he holds now: a May
+       numerator over a September denominator. The LEAP shift is the honest
+       start for both.
+
+       ⚠ MEMBERSHIP IS THE LEG'S FIRST OPEN, the same rule the put programme
+       learned the hard way. Filtering on trade_date alone would take the
+       buy-backs of legs sold in August without their opening credits, and
+       `kept` would go negative. */
+    const PROG_START = '2026-08-31';
+    const shortKey = (t: Record<string, unknown>) =>
+      `${t.ticker}|${t.option_type}|${N(t.strike)}|${t.expiry}`;
+    const shortOpen = new Map<string, string>();
+    for (const t of allShorts) {
+      if (String(t.action) !== 'open') continue;
+      const k = shortKey(t), d = String(t.trade_date).slice(0, 10);
+      if (!shortOpen.has(k) || d < shortOpen.get(k)!) shortOpen.set(k, d);
+    }
+    const inProg = (t: Record<string, unknown>) =>
+      (shortOpen.get(shortKey(t)) ?? '0000-00-00') >= PROG_START;
+
+    /* Gross credits and buy-backs per name. `kept` is the difference; Nik
+       confirmed 2026-09-10 that "Rolled back" is money actually paid out, not
+       money still owed on legs that are open. */
+    const grossBy = new Map<string, number>(), backBy = new Map<string, number>();
+    const grossAll = new Map<string, number>(), backAll = new Map<string, number>();
+    for (const t of allShorts) {
+      const tk = String(t.ticker), cash = N(t.contracts) * N(t.premium) * 100;
+      const isOpen = String(t.action) === 'open';
+      /* All-time, for card 04's history; programme-only for card 01. */
+      const A = isOpen ? grossAll : backAll;
+      A.set(tk, (A.get(tk) ?? 0) + cash);
+      if (!inProg(t)) continue;
+      const P = isOpen ? grossBy : backBy;
+      P.set(tk, (P.get(tk) ?? 0) + cash);
+    }
+
+    /* Long put cost and mark per name, so the components split call from put. */
+    const putCostByName = new Map<string, number>(), putMarkByName = new Map<string, number>();
+    for (const e of open) {
+      if (e.dir !== 'long' || e.type !== 'put') continue;
+      putCostByName.set(e.ticker, (putCostByName.get(e.ticker) ?? 0) + e.cash);
+      const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
+      const m = md.length ? md.reduce((a, x) => a + x.m, 0) / md.length : 0;
+      putMarkByName.set(e.ticker, (putMarkByName.get(e.ticker) ?? 0) + m * e.n * 100);
+    }
+    /* What is still owed on the open short legs, always <= 0. */
+    const owedBy = new Map<string, number>();
+    for (const p of positions) {
+      owedBy.set(p.t, -p.shorts.reduce((a, x) => a + (x.priced ? x.value : x.credit), 0));
+    }
+
+    const programme = {
+      since: PROG_START,
+      rows: positions.map((p) => {
+        const putCost = putCostByName.get(p.t) ?? 0;
+        const putMark = putMarkByName.get(p.t) ?? 0;
+        return {
+          t: p.t,
+          kept: Math.round((grossBy.get(p.t) ?? 0) - (backBy.get(p.t) ?? 0)),
+          calls: Math.round(p.mark - p.paid),
+          puts: Math.round(putMark - putCost),
+          owed: Math.round(owedBy.get(p.t) ?? 0),
+          invested: p.invested,
+        };
+      }),
+    };
+
+    /* ── 02 · Premium now, per name against its own history ────────────────
+       ⚠ NO PERCENTILE. The multiple against the name's own median is the whole
+       reading; the rank was what made the earlier version unreadable. */
+    const MIN_IV_DAYS = 20;                     // four trading weeks
+    const ivBy = new Map<string, number[]>();
+    for (const r of ivHist) {
+      const t = String(r.ticker), v = N(r.atm_iv) * 100;
+      if (v <= 0) continue;
+      if (!ivBy.has(t)) ivBy.set(t, []);
+      ivBy.get(t)!.push(v);
+    }
+    const held = new Set(positions.map((p) => p.t));
+    const premiumRows = [...ivBy.entries()]
+      .filter(([t, v]) => held.has(t) && v.length >= MIN_IV_DAYS)
+      .map(([t, v]) => {
+        const sorted = [...v].sort((a, b) => a - b);
+        const med = sorted.length % 2
+          ? sorted[(sorted.length - 1) / 2]
+          : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+        return {
+          t, now: r2(v[v.length - 1]), usual: r2(med),
+          low: r2(sorted[0]), high: r2(sorted[sorted.length - 1]),
+          days: v.length,
+        };
+      })
+      .sort((a, b) => (b.now / b.usual) - (a.now / a.usual));
+    const premium = {
+      /* The card labels itself from this rather than claiming a year. */
+      days: premiumRows.length ? Math.max(...premiumRows.map((r) => r.days)) : 0,
+      rows: premiumRows,
+    };
+
     /* ── average credit per share ──────────────────────────────────────────
        handoff/cards/average-credit.md. Four weeks including this one, per side.
 
@@ -563,6 +677,78 @@ Deno.serve(async (req) => {
       };
     });
     const credit = { week: thisWeek, calls: sideWeeks('call'), puts: sideWeeks('put') };
+
+    /* ── 03 · Upside left ──────────────────────────────────────────────────
+       ⚠ INCLUDING THE PUTS. Nik, 2026-09-10: "include puts as well". The first
+       pass measured the long calls against the short legs only and read 73%;
+       counting the puts, which are a third of the capital, the book keeps 38%.
+       His own mock said 38% and it was right where I was wrong.
+
+       ⚠ AND DELTA IS SUMMED LEG BY LEG, never averaged per side. Averaging
+       call and put deltas into one `dShort` is what produced "FIS 115%", a
+       figure no leg in the book supports. Leg by leg FIS is 67%.
+
+       `share` is how much of the LEAP's own exposure survives everything sold
+       against it: 100 means nothing has been sold away. */
+    const dOf = (e: { ids: string[] }) => {
+      const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
+      return md.length ? md.reduce((a, x) => a + x.d, 0) / md.length : 0;
+    };
+    const longCallD = new Map<string, number>(), netD = new Map<string, number>();
+    for (const e of open) {
+      const d = dOf(e) * e.n * 100 * (e.dir === 'long' ? 1 : -1);
+      netD.set(e.ticker, (netD.get(e.ticker) ?? 0) + d);
+      if (e.dir === 'long' && e.type === 'call') {
+        longCallD.set(e.ticker, (longCallD.get(e.ticker) ?? 0) + d);
+      }
+    }
+    const upsideRows = positions.map((p) => {
+      const base = longCallD.get(p.t) ?? 0;
+      return { t: p.t, share: base > 0 ? Math.round((netD.get(p.t) ?? 0) / base * 100) : 0 };
+    }).sort((a, b) => a.share - b.share);   // tightest cap first: the row to act on
+    /* Weighted by dollar exposure, which is what makes the book figure the
+       book's and not an average of seven unrelated names. */
+    let expNet = 0, expLong = 0;
+    for (const p of positions) {
+      const sp = spot.get(p.t) ?? 0;
+      expNet += (netD.get(p.t) ?? 0) * sp;
+      expLong += (longCallD.get(p.t) ?? 0) * sp;
+    }
+    const upside = {
+      move: 10,
+      share: expLong > 0 ? r2(expNet / expLong * 100) : 0,
+      /* ⚠ DELTA-ONLY, AND THEREFORE WRONG AT THE EDGES. Long puts are convex,
+         so a real 10% fall is BETTER than `down`. Fixing it means running the
+         payoff engine, not scaling this. Do not quietly "correct" it. */
+      up: Math.round(expNet * 0.10),
+      down: Math.round(-expNet * 0.10),
+      rows: upsideRows,
+    };
+
+    /* ── 04 · To roll ──────────────────────────────────────────────────────
+       ⚠ NO ASSIGNMENT LANGUAGE. This book rolls.
+
+       ⚠ THE HISTORY IS PER NAME, THE ROW IS PER LEG, and the card labels that
+       "ALL TIME" because the scope change is invisible otherwise — Nik read
+       "Kept $4,035" as belonging to the $110 put beside it and asked where the
+       card said otherwise. It did not. A name with an in-the-money call AND put
+       gets two rows carrying the same history, which the label makes read as
+       one standing fact rather than a duplicate. */
+    const toRollLegs = positions.flatMap((p) =>
+      p.shorts.filter((sh) => sh.itm).map((sh) => ({
+        t: p.t, side: sh.type, n: sh.n, strike: sh.k,
+        sold: sh.credit, now: sh.priced ? sh.value : sh.credit, exp: sh.exp,
+      })));
+    const toRoll = {
+      /* Same figure Weekly yield prints, so the page agrees with itself. */
+      week: bookWeekly.find((w) => w.current)?.credit ?? 0,
+      legs: toRollLegs,
+      names: Object.fromEntries(positions.map((p) => [p.t, {
+        collected: Math.round(grossAll.get(p.t) ?? 0),
+        given: Math.round(backAll.get(p.t) ?? 0),
+        leap: Math.round(p.mark - p.paid),
+      }])),
+    };
 
     /* ── stock price, five windows ─────────────────────────────────────────
        Nik, 2026-09-08: "Just like a roll check card can we do one for stock
@@ -749,6 +935,10 @@ Deno.serve(async (req) => {
          say what "today" is against without the client guessing. */
       inventory,
       credit,
+      programme,
+      premium,
+      upside,
+      toRoll,
       prices: { rows: priceRows, book: bookMove,
                 /* The close the windows are anchored to, which is the last one
                    BEFORE today, not the newest row in the table. */
