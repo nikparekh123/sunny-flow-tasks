@@ -39,7 +39,28 @@ export interface ChartProps {
 interface Pt { p: number; v: number }
 
 export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte, sel, rangePct, layers, closes }: ChartProps) {
-  const [hoverP, setHoverP] = useState<number | null>(null);
+  /* ⚠ THE POINTER'S POSITION IS THE STATE, NOT THE PRICE IT LANDED ON. Nik,
+     2026-09-09: "the numbers dont change when I scrub through the chart", and
+     before that "same position different values".
+
+     Storing the PRICE meant the reading was tied to a scale that moves on its
+     own. The book refetches on a timer, and the range and date sliders rescale
+     too, so `lo`/`hi` change with no mouse movement at all: the stored price
+     then sits wherever it now falls, the crosshair slides out from under the
+     cursor, and the card reports a price the pointer is no longer on. Frozen
+     price, moving values, exactly as described.
+
+     A fraction across the plot is what the pointer actually told us. It stays
+     true through any rescale, and the price is derived at render. */
+  const [hoverF, setHoverF] = useState<number | null>(null);
+  /* ⚠ TEMPORARY, AND IT EARNS ITS PLACE. The hover tracks correctly under
+     synthetic events and a benchmark, and still misbehaves on Nik's screen,
+     and none of my three browser surfaces can drive a real pointer. Rather
+     than ask him to paste console code, `/payoff?debug` prints what the
+     handler actually receives. Delete this once the cause is found. */
+  const DEBUG = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).has('debug');
+  const [dbg, setDbg] = useState({ n: 0, x: 0, w: 0, px: 0, t: 0 });
   /* scale-to-fit: the 1450px drawing shrinks as one piece on narrower screens */
   const fitRef = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState(1);
@@ -166,10 +187,14 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
        every background tab. The curves are memoized, so this is cheap.
        `!Number.isFinite` comes first: NaN fails every comparison, so a NaN px
        slips straight through `px < 0 || px > W` and poisons the whole card. */
-    setHoverP(!Number.isFinite(px) || px < 0 || px > W
-      ? null : lo + (px / W) * (hi - lo));
+    setHoverF(!Number.isFinite(px) || px < 0 || px > W ? null : px / W);
+    if (DEBUG) setDbg((d) => ({ n: d.n + 1, x: Math.round(e.clientX - rect.left),
+      w: Math.round(rect.width), px: Math.round(px), t: Date.now() % 100000 }));
   };
-  const onLeave = () => setHoverP(null);
+  const onLeave = () => setHoverF(null);
+
+  /* Derived, never stored: a rescale moves the price under a fixed pointer. */
+  const hoverP = hoverF == null ? null : lo + hoverF * (hi - lo);
 
   const chanceAbove = (p: number) => {
     const s = ctx.iv * ctx.ivMult * Math.sqrt(Math.max(dte, 1) / 365);
@@ -305,6 +330,15 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
       {/* chips below the axis */}
       {bes.map((b, i) => <div key={'bc' + i} className="po-chip be num" style={{ left: OX + x(b), top: OY + chipY + 6 }}>BE {priceLab(b)}</div>)}
       {spot > lo && spot < hi && <div className="po-chip now num" style={{ left: OX + x(spot), top: OY + chipY + 36 }}>NOW {priceLab(spot)}</div>}
+
+      {DEBUG && (
+        <div style={{ position: 'absolute', left: 8, top: 8, zIndex: 40, background: '#14170F',
+                      color: '#F4F6F2', font: '12px ui-monospace, monospace', padding: '6px 9px',
+                      borderRadius: 6, pointerEvents: 'none', whiteSpace: 'pre' }}>
+          {`moves ${dbg.n}   x ${dbg.x} of ${dbg.w}   px ${dbg.px}\n`}
+          {`hoverF ${hoverF == null ? 'null' : hoverF.toFixed(4)}   fit ${fit.toFixed(3)}   stamp ${dbg.t}`}
+        </div>
+      )}
 
       {/* hover card */}
       {hoverP != null && (() => {
