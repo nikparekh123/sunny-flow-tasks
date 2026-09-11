@@ -238,26 +238,46 @@ struct SunnyRollCheck: View {
        Worst-first still holds INSIDE each group, so each half is its own queue
        of work. A name with no call sits with the calls: that is where the
        missing leg would go. */
-    private var callBars: [Bar] {
-        let all = rawBars
-        return all.filter { !$0.covered }.sorted { $0.ticker < $1.ticker }
-             + all.filter { $0.covered && !$0.isPut }.sorted { $0.captured < $1.captured }
+    /* ⚠ EVERY NAME APPEARS ON EVERY SIDE IT CAN SELL. Nik, 2026-09-11: "we
+       need to show all tickers both we need to show puts and calls thats the
+       whole idea".
+
+       The puts half used to list only names with a put ALREADY SOLD, so the
+       five names holding long puts and nothing written against them were
+       invisible in exactly the half that would have told him to write one. The
+       calls half had the right rule and the puts half never got it.
+
+       The gate is the LADDER, not the leg: a name is a row on a side when it
+       holds contracts on that side. KR and PEP hold no long puts at all, so
+       they take no put row; printing "No put · 0 free" for them would assert
+       capacity that does not exist. Say the word if you would rather see them
+       listed as having no put protection. */
+    private func uncoveredSorted(_ put: Bool) -> [Bar] {
+        rawBars.filter { !$0.covered && $0.isPut == put }.sorted { $0.ticker < $1.ticker }
     }
-    private var putBars: [Bar] {
-        rawBars.filter { $0.covered && $0.isPut }.sorted { $0.captured < $1.captured }
+    private func coveredSorted(_ put: Bool) -> [Bar] {
+        rawBars.filter { $0.covered && $0.isPut == put }.sorted { $0.captured < $1.captured }
     }
+    private var callBars: [Bar] { uncoveredSorted(false) + coveredSorted(false) }
+    private var putBars: [Bar] { uncoveredSorted(true) + coveredSorted(true) }
 
     private var rawBars: [Bar] {
         positions.flatMap { p -> [Bar] in
-            /* A LEAP with no call against it is still a row. The card is the
-               only place the book is listed against its calls, so a name it
-               cannot draw is a name that cannot be noticed. */
-            guard !p.shorts.isEmpty else {
-                return [Bar(id: "\(p.t)-none", ticker: p.t, captured: 0,
-                            itm: false, sym: p.t, covered: false)]
-            }
+            let inv = inventory.first(where: { $0.t == p.t })
+            /* A ladder with nothing written against it is still a row. The card
+               is the only place the book is listed against its short legs, so a
+               side it cannot draw is a side that cannot be noticed. */
+            let empty: [Bar] = [(false, inv?.callsHeld ?? 0), (true, inv?.putsHeld ?? 0)]
+                .filter { side, held in
+                    held > 0 && !p.shorts.contains { ($0.type == "put") == side }
+                }
+                .map { side, _ in
+                    Bar(id: "\(p.t)-none-\(side ? "p" : "c")", ticker: p.t, captured: 0,
+                        itm: false, sym: p.t, isPut: side, covered: false)
+                }
+            guard !p.shorts.isEmpty else { return empty }
             let strikeCount = Dictionary(grouping: p.shorts, by: \.k).mapValues(\.count)
-            return p.shorts.map { s in
+            return empty + p.shorts.map { s in
                 let k = s.k.formatted(.number.precision(.fractionLength(0)))
                 let label: String
                 if p.shorts.count <= 1 { label = p.t + (s.type == "put" ? " \(k)P" : "") }
@@ -295,12 +315,14 @@ struct SunnyRollCheck: View {
        under the percentage, and "45 of 60" is wider than "−8%", so sizing on
        the percentage alone would wrap the line beneath it. */
     private var valCol: CGFloat {
-        let pct = (bars.map { S.textW($0.covered ? barePctInt($0.captured) : "No call",
+        let pct = (bars.map { S.textW($0.covered ? barePctInt($0.captured) : noneLabel($0),
                                       S.t13, S.wSemiN) }.max() ?? 0) + 3
         let words = (bars.map { S.textW(capWords($0), S.t10, S.wMidSmN) }.max() ?? 0) + 3
         return max(S.progValCol, max(pct, words))
     }
     private var uncovered: Int { rawBars.filter { !$0.covered }.count }
+    /// "No call" on the calls half, "No put" on the puts half.
+    private func noneLabel(_ b: Bar) -> String { b.isPut ? "No put" : "No call" }
 
     // MARK: capacity, folded in from the retired Inventory card
 
@@ -534,7 +556,7 @@ struct SunnyRollCheck: View {
                tap exists rather than a choice of one. */
             VStack(alignment: .trailing, spacing: 2) {
                 Text(b.covered ? (showMoney ? optMoney(b.kept) : barePctInt(b.captured))
-                               : "No call")
+                               : noneLabel(b))
                     .font(S.inter(S.t13, S.wSemiN))
                     .foregroundStyle(b.covered ? (b.captured < 0 ? S.lossText : S.gainText) : S.mute)
                     .lineLimit(1)
