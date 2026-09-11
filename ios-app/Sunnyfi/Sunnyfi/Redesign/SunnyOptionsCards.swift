@@ -160,21 +160,20 @@ private func signedPctInt(_ v: Int) -> String {
 /// what made an earlier build contradict itself: a red "rolling" bar sitting
 /// 49px above the red line it had supposedly crossed.
 struct SunnyRollCheck: View {
-    /* ⚠ THREE VARIANTS ON ONE CARD, ON PURPOSE AND TEMPORARILY. Nik,
-       2026-09-11: "Can you do all three and we will select one and delete the
-       two possible?" Inventory and To roll are gone from the page and the
-       capacity they carried has to land here. One view with a switch rather
-       than three copies, so all three read the SAME bars from the SAME data
-       and the comparison is about the form alone.
+    /* ⚠ THIS CARD ABSORBED THE INVENTORY CARD, 2026-09-11. Nik had Inventory
+       and To roll deleted and the capacity they carried folded in here. Three
+       forms were built side by side and he chose this one: the free contracts
+       sit UNDER the percentage, where the eye already lands for that row, and
+       speak in words where a ratio reads cold. "all sold" beats "0/5".
 
-       DELETE TWO OF THESE ONCE HE PICKS, and the enum with them. */
-    enum Shape { case a, b, c }
-
+       The two he rejected, so they are not re-proposed: the ratio inline after
+       the name ("BABA 15/15") cost the track 26pt of width, and painting the
+       capacity into the TRACK put a second axis in the same box as the capture
+       axis. This one costs row height and nothing else. */
     let book: OptionsBook
     let positions: [OptionsPosition]
     /// Held and sold per name, from the same payload Inventory used to render.
     var inventory: [InventoryRow] = []
-    var shape: Shape = .a
     var captureLine: Int = 75
     var giveBackLine: Int = -100
 
@@ -289,14 +288,15 @@ struct SunnyRollCheck: View {
        their widest actual content and the TRACK absorbs the difference, so the
        row still totals 323 and the plot never overflows the card. */
     private var nameCol: CGFloat {
-        min(shape == .a ? 160 : 134,
-            max(S.progNameCol,
-                (bars.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3 + capCol))
+        min(134, max(S.progNameCol,
+                     (bars.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3))
     }
+    /* ⚠ THE COLUMN TAKES THE WIDER OF ITS TWO LINES. The capacity line sits
+       under the percentage, and "45 of 60" is wider than "−8%", so sizing on
+       the percentage alone would wrap the line beneath it. */
     private var valCol: CGFloat {
         let pct = (bars.map { S.textW($0.covered ? barePctInt($0.captured) : "No call",
                                       S.t13, S.wSemiN) }.max() ?? 0) + 3
-        guard shape == .c else { return max(S.progValCol, pct) }
         let words = (bars.map { S.textW(capWords($0), S.t10, S.wMidSmN) }.max() ?? 0) + 3
         return max(S.progValCol, max(pct, words))
     }
@@ -315,17 +315,7 @@ struct SunnyRollCheck: View {
         guard held > 0 else { return nil }
         return (held, max(0, held - sold))
     }
-    /// "15/15" for A, held over still-free.
-    private func capShort(_ b: Bar) -> String {
-        guard let c = cap(b) else { return "" }
-        return "\(c.held)/\(c.free)"
-    }
-    /// B's underlay: how much of the name is already worked, 0...1.
-    private func workedFrac(_ b: Bar) -> CGFloat {
-        guard let c = cap(b), c.held > 0 else { return 0 }
-        return CGFloat(c.held - c.free) / CGFloat(c.held)
-    }
-    /// C speaks in words where a ratio would be colder than the fact.
+    /// Words, not a ratio: "all sold" beats "0/5" and "15 free" beats "15/15".
     private func capWords(_ b: Bar) -> String {
         guard let c = cap(b) else { return "" }
         if c.free == 0 { return "all sold" }
@@ -337,11 +327,7 @@ struct SunnyRollCheck: View {
         inventory.reduce(0) { $0 + max(0, $1.callsHeld - $1.callsSold)
                                  + max(0, $1.putsHeld - $1.putsSold) }
     }
-    private var capCol: CGFloat {
-        shape == .a
-            ? (bars.map { S.textW(capShort($0), S.t11, S.wMidSmN) }.max() ?? 0) + S.gap3
-            : 0
-    }
+
 
     private var rowTrack: CGFloat {
         max(110, S.content - 38 - nameCol - valCol - 2 * S.gap4)
@@ -411,7 +397,7 @@ struct SunnyRollCheck: View {
             /* ⚠ THE HEADER CARRIES THE BOOK'S SPARE CAPACITY NOW. Inventory
                is off the page, and "176 free" is the one figure of its footer
                that was not already derivable from the rows. */
-            OptHead(title: "Roll check \(shapeTag)", sub: "sold",
+            OptHead(title: "Roll check", sub: "sold",
                     right: totalFree > 0
                         ? "\(positions.count) names \u{00B7} \(totalFree) free"
                         : (uncovered == 0 ? "\(positions.count) names"
@@ -496,41 +482,17 @@ struct SunnyRollCheck: View {
         }
     }
 
-    /// Temporary, so three cards on one page can be told apart at a glance.
-    private var shapeTag: String { shape == .a ? "A" : shape == .b ? "B" : "C" }
-
     @ViewBuilder private func rowFor(_ b: Bar, x: (CGFloat) -> CGFloat,
                                      track: CGFloat) -> some View {
         let v = CGFloat(b.captured)
         let x0 = x(min(v, 0)), x1 = x(max(v, 0))
         HStack(spacing: S.gap4) {
-            /* A puts the ratio inline after the name, in mute so it never
-               competes with the name itself. */
-            HStack(spacing: S.gap3) {
-                Text(b.ticker)
-                    .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
-                    .foregroundStyle(b.covered ? S.ink : S.mute)
-                    .lineLimit(1)
-                if shape == .a, !capShort(b).isEmpty {
-                    Text(capShort(b))
-                        .font(S.inter(S.t11, S.wMidSmN)).monospacedDigit()
-                        .foregroundStyle(S.mute).lineLimit(1)
-                }
-            }
-            .frame(width: nameCol, alignment: .leading)
+            Text(b.ticker)
+                .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
+                .foregroundStyle(b.covered ? S.ink : S.mute)
+                .frame(width: nameCol, alignment: .leading).lineLimit(1)
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
-                /* ⚠ B PAINTS THE TRACK, NOT THE BAR. The shaded left portion
-                   is how much of the name is already sold, so an untouched
-                   name reads pale end to end and a fully worked one reads
-                   solid. It is a SECOND axis living in the same box as the
-                   capture axis, which is the honest cost of this variant and
-                   the thing to judge on the phone. */
-                if shape == .b, workedFrac(b) > 0 {
-                    RoundedRectangle(cornerRadius: S.radiusBar)
-                        .fill(S.ruleColor)
-                        .frame(width: max(2, track * workedFrac(b)))
-                }
                 /* ⚠ NO MARK AT ALL WHEN NOTHING IS SOLD. A 2pt sliver at the
                    zero line would read as a leg that captured nothing, which
                    is a different and wrong statement. */
@@ -576,10 +538,11 @@ struct SunnyRollCheck: View {
                     .font(S.inter(S.t13, S.wSemiN))
                     .foregroundStyle(b.covered ? (b.captured < 0 ? S.lossText : S.gainText) : S.mute)
                     .lineLimit(1)
-                /* C puts the capacity where the eye already lands for the row,
-                   and lets it speak in words where a ratio would be colder:
-                   "all sold" beats "0/5". The cost is row height. */
-                if shape == .c, !capWords(b).isEmpty {
+                /* ⚠ THE CAPACITY GOES WHERE THE EYE ALREADY LANDS. This is
+                   the whole of what the Inventory card used to say, per row
+                   and per SIDE, and it costs one muted line. A name with no
+                   ladder at all prints nothing rather than a zero. */
+                if !capWords(b).isEmpty {
                     Text(capWords(b))
                         .font(S.inter(S.t10, S.wMidSmN)).monospacedDigit()
                         .foregroundStyle(S.mute).lineLimit(1)
@@ -1282,152 +1245,12 @@ struct SunnyStockPrice: View {
     }
 }
 
-// MARK: - inventory
-
-/// ⚠ WHAT CAN STILL BE SOLD. handoff/cards/inventory.md, redesigned 8 Sep 2026.
-/// The first design drew one circle per contract; NKE holds 60 calls and 30 puts
-/// against that sheet's widest name of 15 and 10, so a mark per contract could
-/// not stay on one line at a legible diameter. Chips carry any count.
-///
-/// ⚠ FREE HEIGHT. 361 is a FLOOR, never a size: no pager, no scroll, no control.
-/// The list IS the card, so the card is as tall as the book.
-///
-/// ⚠ NO DIRECTION INK ANYWHERE. Capacity is not a gain and not a loss. Six inks,
-/// and the only non-ink colours are the chip wash and the two rules.
-struct SunnyInventory: View {
-    let rows: [InventoryRow]
-
-    /// Room descending, ties alphabetical. With no pager and no tabs the first
-    /// chip has to be the one he would act on.
-    private var withRoom: [InventoryRow] {
-        rows.filter { $0.room > 0 }
-            .sorted { $0.room != $1.room ? $0.room > $1.room : $0.t < $1.t }
-    }
-    /// A name with nothing left to sell takes no chip: it is one grey line at the
-    /// foot, named but not ranked.
-    private var fullySold: [InventoryRow] {
-        rows.filter { $0.room == 0 && $0.held > 0 }.sorted { $0.t < $1.t }
-    }
-    private var openCalls: Int { rows.reduce(0) { $0 + $1.openCalls } }
-    private var openPuts: Int { rows.reduce(0) { $0 + $1.openPuts } }
-    private var held: Int { rows.reduce(0) { $0 + $1.held } }
-    private var sold: Int { rows.reduce(0) { $0 + $1.sold } }
-
-    /// `10c · 30p`, and a zero side is omitted — a zero in a capacity list reads
-    /// as an instruction not to bother.
-    private func chipCount(_ r: InventoryRow) -> String {
-        [r.openCalls > 0 ? "\(r.openCalls)c" : nil,
-         r.openPuts  > 0 ? "\(r.openPuts)p"  : nil]
-            .compactMap { $0 }.joined(separator: " \u{00B7} ")
-    }
-    private func chipWidth(_ r: InventoryRow) -> CGFloat {
-        12 + S.textW(r.t, S.t13, S.wSemiN) + 7
-           + S.textW(chipCount(r), S.t13, S.wMidSmN) + 12
-    }
-    /// Greedy wrap at the 323 content column. SwiftUI has no flow container that
-    /// also honours an exact 9px gap on both axes, and the sheet measures both.
-    private var chipRows: [[InventoryRow]] {
-        var out: [[InventoryRow]] = [], line: [InventoryRow] = [], w: CGFloat = 0
-        for r in withRoom {
-            let cw = chipWidth(r)
-            if !line.isEmpty && w + 9 + cw > S.content - 38 {
-                out.append(line); line = [r]; w = cw
-            } else {
-                w += (line.isEmpty ? 0 : 9) + cw; line.append(r)
-            }
-        }
-        if !line.isEmpty { out.append(line) }
-        return out
-    }
-
-    var body: some View {
-        OptCard(name: "inventory", fixedHeight: nil) {
-            OptHead(title: "Inventory", sub: "all tickers",
-                    right: "\(rows.count) names \u{00B7} \(held) contracts")
-            Spacer().frame(height: 20)
-
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                /* 81 is a SUM, never a stored total. */
-                Text("\(openCalls + openPuts)")
-                    .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
-                    .foregroundStyle(S.ink).sunnyLineBox(S.t22)
-                Text("can still be sold")
-                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
-            }
-            Spacer().frame(height: 8)
-            Text("\(openCalls) calls \u{00B7} \(openPuts) puts \u{00B7} on \(withRoom.count) names")
-                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
-
-            Spacer().frame(height: 20)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            Spacer().frame(height: 18)
-
-            HStack(spacing: S.gap4) {
-                Text("WHERE")
-                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                    .foregroundStyle(S.mute)
-                Spacer(minLength: 0)
-                Text("\(withRoom.count) names")
-                    .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-            }
-            Spacer().frame(height: 13)
-
-            VStack(alignment: .leading, spacing: 9) {
-                ForEach(Array(chipRows.enumerated()), id: \.offset) { _, line in
-                    HStack(spacing: 9) {
-                        ForEach(line) { r in
-                            HStack(spacing: 7) {
-                                Text(r.t)
-                                    .font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
-                                Text(chipCount(r))
-                                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
-                            }
-                            .padding(.horizontal, 12).frame(height: 28)
-                            .background(Capsule().fill(S.wash))
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-            }
-
-            /* Omitted entirely when nothing is fully sold: the line is a
-               statement about names that exist, not an empty slot. */
-            if !fullySold.isEmpty {
-                Spacer().frame(height: 14)
-                Text("\(fullySold.count) name\(fullySold.count == 1 ? "" : "s") fully sold \u{00B7} "
-                     + fullySold.map(\.t).joined(separator: " \u{00B7} "))
-                    .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-            }
-
-            Spacer().frame(minHeight: 24)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            Spacer().frame(height: 18)
-
-            /* Calls + puts = the hero. That identity is the card's only
-               self-check; if it fails, a figure is being stored somewhere it
-               should be derived. Figures are 15 here, not 19 — at 19 against a
-               22 hero the card had three competing sizes. */
-            HStack(alignment: .top, spacing: 0) {
-                ForEach(Array([("Calls to sell", openCalls),
-                               ("Puts to sell", openPuts),
-                               ("Worked", 0)].enumerated()), id: \.offset) { i, cell in
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(cell.0.uppercased())
-                            .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                            .foregroundStyle(S.mute)
-                        Text(i == 2
-                             ? "\(held > 0 ? Int((Double(sold) / Double(held) * 100).rounded()) : 0)%"
-                             : "\(cell.1)")
-                            .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
-                            .foregroundStyle(S.ink)
-                    }
-                    .padding(.leading, i == 0 ? 0 : 16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-}
+/* ⚠ THE INVENTORY CARD AND THE TO ROLL CARD WERE DELETED HERE, 2026-09-11,
+   on Nik's instruction. Inventory's job now lives on Roll check, one muted
+   line under each percentage saying what is still free to sell on that side
+   of that name. To roll's per-leg figures were already on Roll check; what
+   went with it was the ALL TIME block, the Kept / Rolled back / LEAP trio
+   per name, and that now lives nowhere. Ask before rebuilding either. */
 
 // MARK: - average credit
 
@@ -1990,134 +1813,4 @@ struct SunnyUpsideLeft: View {
             ])
         }
     }
-}
-
-// MARK: - 04 · To roll
-
-/// ⚠ NO ASSIGNMENT LANGUAGE ANYWHERE. This book rolls. handoff-final/04.
-///
-/// ⚠ THE LEFT HALF IS THE LEG, THE RIGHT HALF IS THE NAME, and the right half
-/// is labelled ALL TIME because that scope change is otherwise invisible: Nik
-/// read "Kept $4,035" as belonging to the $110 put beside it and asked where
-/// the card said otherwise. It did not.
-///
-/// The label also settles the duplicate. When a name has an in-the-money call
-/// AND put they land in different groups and both carry the same history; with
-/// ALL TIME on each that reads as one standing fact stated twice, and without
-/// it, it reads as a bug.
-struct SunnyToRoll: View {
-    let block: ToRollBlock
-
-    private var calls: [RollLeg] { block.legs.filter { $0.side == "call" }.sorted { $0.loss > $1.loss } }
-    private var puts: [RollLeg] { block.legs.filter { $0.side == "put" }.sorted { $0.loss > $1.loss } }
-    private var sold: Int { block.legs.reduce(0) { $0 + $1.sold } }
-    private var buy: Int { block.legs.reduce(0) { $0 + $1.now } }
-
-    var body: some View {
-        OptCard(name: "to-roll", fixedHeight: nil) {
-            OptHead(title: "To roll", sub: "as of today", right: fmtDayLabel(Date()))
-            Spacer().frame(height: 26)
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(optMoney(sold - buy))
-                    .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
-                    .foregroundStyle(sold - buy < 0 ? S.lossText : S.gainText)
-                    .sunnyLineBox(S.t22)
-                Text("to roll all \(block.legs.count)")
-                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
-            }
-            Spacer().frame(height: 9)
-            Text("sold for \(optMoney(sold)) \u{00B7} buying back at \(optMoney(buy))")
-                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
-
-            Spacer().frame(height: 26)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            Spacer().frame(height: 22)
-
-            /* ⚠ AN EMPTY GROUP IS HIDDEN, not shown as a bare heading. Today no
-               call is in the money, so CALLS would otherwise be a label with
-               nothing under it. */
-            if !calls.isEmpty { group("CALLS", calls) }
-            if !calls.isEmpty && !puts.isEmpty { Spacer().frame(height: 26) }
-            if !puts.isEmpty { group("PUTS", puts) }
-            if block.legs.isEmpty {
-                Text("Nothing is in the money")
-                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
-            }
-
-            Spacer(minLength: 26)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            Spacer().frame(height: 22)
-            OptFooter(stats: [
-                .init(label: "This week", value: optMoney(block.week), ink: S.ink),
-                .init(label: "To close", value: optMoney(buy), ink: S.lossText),
-                .init(label: "Net", value: optMoney(block.week - buy), ink: S.ink),
-            ])
-        }
-    }
-
-    @ViewBuilder private func group(_ label: String, _ legs: [RollLeg]) -> some View {
-        Text(label)
-            .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-            .foregroundStyle(S.mute)
-        Spacer().frame(height: 18)
-        VStack(alignment: .leading, spacing: 30) {
-            ForEach(legs) { l in row(l) }
-        }
-    }
-
-    @ViewBuilder private func row(_ l: RollLeg) -> some View {
-        let h = block.names[l.t]
-        HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(l.t)
-                        .font(S.inter(S.t14, S.wBoldN)).tracking(S.track(S.t14, -0.01))
-                        .foregroundStyle(S.ink)
-                    Text("\(priceShortLabel(l.strike)) \u{00D7} \(l.n)")
-                        .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute2)
-                    Spacer(minLength: 0)
-                }
-                Spacer().frame(height: 13)
-                HStack(alignment: .firstTextBaseline, spacing: 9) {
-                    Text(optMoney(-l.loss))
-                        .font(S.inter(S.t19, S.wBoldN)).tracking(S.track(S.t19, -0.03))
-                        .foregroundStyle(S.lossText)
-                    Text("\(Int(l.lossPct.rounded()))%")
-                        .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
-                }
-                Spacer().frame(height: 10)
-                Text("sold \(optMoney(l.sold)) \u{2192} buy \(optMoney(l.now))")
-                    .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute2).lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Rectangle().fill(S.ruleColor).frame(width: 1).frame(maxHeight: .infinity)
-
-            /* ⚠ 132 WIDE, AND DO NOT NARROW IT. "Rolled back" wraps below ~78
-               and breaks the baseline of the whole column. */
-            VStack(alignment: .leading, spacing: 11) {
-                Text("ALL TIME")
-                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                    .foregroundStyle(S.mute)
-                hist("Kept", optMoney(h?.kept ?? 0), S.ink2)
-                hist("Rolled back", optMoney(-(h?.given ?? 0)), S.lossText)
-                hist("LEAP", optMoney(h?.leap ?? 0), (h?.leap ?? 0) < 0 ? S.lossText : S.gainText)
-            }
-            .frame(width: 132, alignment: .leading)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    @ViewBuilder private func hist(_ k: String, _ v: String, _ ink: Color) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(k).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute).lineLimit(1)
-            Spacer(minLength: 0)
-            Text(v).font(S.inter(S.t12, S.wSemiN)).foregroundStyle(ink).lineLimit(1)
-        }
-    }
-}
-
-/// "$37.50" / "$110" — a strike, without cents when it has none.
-func priceShortLabel(_ v: Double) -> String {
-    v == v.rounded() ? String(format: "$%.0f", v) : String(format: "$%.2f", v)
 }

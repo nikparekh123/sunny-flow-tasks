@@ -529,17 +529,12 @@ struct SunnyPane: View {
                be the stock price card." What the names did comes before what
                the legs on them did. */
             if let pr = o.prices, !pr.rows.isEmpty { SunnyStockPrice(prices: pr) }
-            /* ⚠ THREE SHAPES OF ONE CARD, TEMPORARILY. Nik, 2026-09-11:
-               "Can you do all three and we will select one and delete the two
-               possible?" Inventory and To roll came off the page in the same
-               change and their capacity figures fold in here. DELETE TWO once
-               he picks, and the `shape` parameter with them. */
+            /* ⚠ INVENTORY AND TO ROLL ARE GONE FROM THIS PAGE, 2026-09-11,
+               and Roll check carries the capacity now. Three forms were built
+               side by side and Nik chose the one that puts the free contracts
+               under the percentage. Do not re-add either card without asking. */
             SunnyRollCheck(book: o.book, positions: o.positions,
-                           inventory: o.inventory ?? [], shape: .a)
-            SunnyRollCheck(book: o.book, positions: o.positions,
-                           inventory: o.inventory ?? [], shape: .b)
-            SunnyRollCheck(book: o.book, positions: o.positions,
-                           inventory: o.inventory ?? [], shape: .c)
+                           inventory: o.inventory ?? [])
             /* The two state-of-the-book cards sit together, before the yield
                cards: what is left to sell, then what a contract sells for. */
             if let cr = o.credit { SunnyAvgCredit(credit: cr) }
