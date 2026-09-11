@@ -529,10 +529,19 @@ struct SunnyPane: View {
                be the stock price card." What the names did comes before what
                the legs on them did. */
             if let pr = o.prices, !pr.rows.isEmpty { SunnyStockPrice(prices: pr) }
-            SunnyRollCheck(book: o.book, positions: o.positions)
+            /* ⚠ THREE SHAPES OF ONE CARD, TEMPORARILY. Nik, 2026-09-11:
+               "Can you do all three and we will select one and delete the two
+               possible?" Inventory and To roll came off the page in the same
+               change and their capacity figures fold in here. DELETE TWO once
+               he picks, and the `shape` parameter with them. */
+            SunnyRollCheck(book: o.book, positions: o.positions,
+                           inventory: o.inventory ?? [], shape: .a)
+            SunnyRollCheck(book: o.book, positions: o.positions,
+                           inventory: o.inventory ?? [], shape: .b)
+            SunnyRollCheck(book: o.book, positions: o.positions,
+                           inventory: o.inventory ?? [], shape: .c)
             /* The two state-of-the-book cards sit together, before the yield
                cards: what is left to sell, then what a contract sells for. */
-            if let inv = o.inventory, !inv.isEmpty { SunnyInventory(rows: inv) }
             if let cr = o.credit { SunnyAvgCredit(credit: cr) }
             /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
                leads this group; To roll is the one that asks for a decision, so
@@ -540,7 +549,6 @@ struct SunnyPane: View {
             if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
             if let pm = o.premium, !pm.rows.isEmpty { SunnyPremiumNow(block: pm) }
             if let up = o.upside, !up.rows.isEmpty { SunnyUpsideLeft(block: up) }
-            if let tr = o.toRoll { SunnyToRoll(block: tr) }
             SunnyYieldProgress(book: o.book, positions: o.positions)
             /* Directly under Yield progress on purpose: the two share the
                $164,725 denominator and answer the halves of one question,

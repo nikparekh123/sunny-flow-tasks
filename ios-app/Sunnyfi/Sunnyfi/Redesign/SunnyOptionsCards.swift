@@ -160,13 +160,30 @@ private func signedPctInt(_ v: Int) -> String {
 /// what made an earlier build contradict itself: a red "rolling" bar sitting
 /// 49px above the red line it had supposedly crossed.
 struct SunnyRollCheck: View {
+    /* ⚠ THREE VARIANTS ON ONE CARD, ON PURPOSE AND TEMPORARILY. Nik,
+       2026-09-11: "Can you do all three and we will select one and delete the
+       two possible?" Inventory and To roll are gone from the page and the
+       capacity they carried has to land here. One view with a switch rather
+       than three copies, so all three read the SAME bars from the SAME data
+       and the comparison is about the form alone.
+
+       DELETE TWO OF THESE ONCE HE PICKS, and the enum with them. */
+    enum Shape { case a, b, c }
+
     let book: OptionsBook
     let positions: [OptionsPosition]
+    /// Held and sold per name, from the same payload Inventory used to render.
+    var inventory: [InventoryRow] = []
+    var shape: Shape = .a
     var captureLine: Int = 75
     var giveBackLine: Int = -100
 
     struct Bar: Identifiable {
         let id: String, ticker: String, captured: Int, itm: Bool
+        /* ⚠ THE LABEL IS NOT THE SYMBOL. `ticker` is the drawn label and may
+           read "FIS 39P" or "BABA 11 Sep"; inventory is keyed on the bare
+           name, so the row has to carry both. */
+        var sym: String = ""
         /// Which half of the list the row belongs to. A sold put and a sold
         /// call are opposite trades and Nik reads them as two groups.
         var isPut: Bool = false
@@ -238,7 +255,7 @@ struct SunnyRollCheck: View {
                cannot draw is a name that cannot be noticed. */
             guard !p.shorts.isEmpty else {
                 return [Bar(id: "\(p.t)-none", ticker: p.t, captured: 0,
-                            itm: false, covered: false)]
+                            itm: false, sym: p.t, covered: false)]
             }
             let strikeCount = Dictionary(grouping: p.shorts, by: \.k).mapValues(\.count)
             return p.shorts.map { s in
@@ -259,7 +276,8 @@ struct SunnyRollCheck: View {
                    other when it falls. Nik's call, 2026-09-06. */
                 else { label = "\(p.t) \(k)\(s.type == "put" ? "P" : "")" }
                 return Bar(id: "\(p.t)-\(s.id)", ticker: label,
-                           captured: s.captured, itm: s.itm, isPut: s.type == "put",
+                           captured: s.captured, itm: s.itm, sym: p.t,
+                           isPut: s.type == "put",
                            kept: s.credit - (s.priced == false ? s.credit : s.value))
             }
         }
@@ -271,15 +289,59 @@ struct SunnyRollCheck: View {
        their widest actual content and the TRACK absorbs the difference, so the
        row still totals 323 and the plot never overflows the card. */
     private var nameCol: CGFloat {
-        min(134, max(S.progNameCol,
-                     (bars.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3))
+        min(shape == .a ? 160 : 134,
+            max(S.progNameCol,
+                (bars.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3 + capCol))
     }
     private var valCol: CGFloat {
-        max(S.progValCol,
-            (bars.map { S.textW($0.covered ? barePctInt($0.captured) : "No call",
-                                S.t13, S.wSemiN) }.max() ?? 0) + 3)
+        let pct = (bars.map { S.textW($0.covered ? barePctInt($0.captured) : "No call",
+                                      S.t13, S.wSemiN) }.max() ?? 0) + 3
+        guard shape == .c else { return max(S.progValCol, pct) }
+        let words = (bars.map { S.textW(capWords($0), S.t10, S.wMidSmN) }.max() ?? 0) + 3
+        return max(S.progValCol, max(pct, words))
     }
     private var uncovered: Int { rawBars.filter { !$0.covered }.count }
+
+    // MARK: capacity, folded in from the retired Inventory card
+
+    /* ⚠ THE SIDE MATTERS. A call row must read the CALL ladder and a put row
+       the PUT ladder: NKE has 60 calls untouched and only 45 puts left, and
+       putting one number against the other row would invent capacity he does
+       not have. */
+    private func cap(_ b: Bar) -> (held: Int, free: Int)? {
+        guard let r = inventory.first(where: { $0.t == b.sym }) else { return nil }
+        let held = b.isPut ? r.putsHeld : r.callsHeld
+        let sold = b.isPut ? r.putsSold : r.callsSold
+        guard held > 0 else { return nil }
+        return (held, max(0, held - sold))
+    }
+    /// "15/15" for A, held over still-free.
+    private func capShort(_ b: Bar) -> String {
+        guard let c = cap(b) else { return "" }
+        return "\(c.held)/\(c.free)"
+    }
+    /// B's underlay: how much of the name is already worked, 0...1.
+    private func workedFrac(_ b: Bar) -> CGFloat {
+        guard let c = cap(b), c.held > 0 else { return 0 }
+        return CGFloat(c.held - c.free) / CGFloat(c.held)
+    }
+    /// C speaks in words where a ratio would be colder than the fact.
+    private func capWords(_ b: Bar) -> String {
+        guard let c = cap(b) else { return "" }
+        if c.free == 0 { return "all sold" }
+        if c.free == c.held { return "\(c.free) free" }
+        return "\(c.free) of \(c.held)"
+    }
+    /// Total still sellable across the book, for the header.
+    private var totalFree: Int {
+        inventory.reduce(0) { $0 + max(0, $1.callsHeld - $1.callsSold)
+                                 + max(0, $1.putsHeld - $1.putsSold) }
+    }
+    private var capCol: CGFloat {
+        shape == .a
+            ? (bars.map { S.textW(capShort($0), S.t11, S.wMidSmN) }.max() ?? 0) + S.gap3
+            : 0
+    }
 
     private var rowTrack: CGFloat {
         max(110, S.content - 38 - nameCol - valCol - 2 * S.gap4)
@@ -346,10 +408,14 @@ struct SunnyRollCheck: View {
             /* "calls sold" while it carried only calls. It carries sold puts
                too now, and a header that names one leg type while showing both
                is the same class of lie as "5 legs" was. */
-            OptHead(title: "Roll check", sub: "sold",
-                    right: uncovered == 0
-                        ? "\(positions.count) names"
-                        : "\(uncovered) with no call")
+            /* ⚠ THE HEADER CARRIES THE BOOK'S SPARE CAPACITY NOW. Inventory
+               is off the page, and "176 free" is the one figure of its footer
+               that was not already derivable from the rows. */
+            OptHead(title: "Roll check \(shapeTag)", sub: "sold",
+                    right: totalFree > 0
+                        ? "\(positions.count) names \u{00B7} \(totalFree) free"
+                        : (uncovered == 0 ? "\(positions.count) names"
+                                          : "\(uncovered) with no call"))
             Spacer().frame(height: S.gap7)
             VStack(alignment: .leading, spacing: 5) {
                 Text("CAPTURED OF CREDIT")
@@ -430,17 +496,41 @@ struct SunnyRollCheck: View {
         }
     }
 
+    /// Temporary, so three cards on one page can be told apart at a glance.
+    private var shapeTag: String { shape == .a ? "A" : shape == .b ? "B" : "C" }
+
     @ViewBuilder private func rowFor(_ b: Bar, x: (CGFloat) -> CGFloat,
                                      track: CGFloat) -> some View {
         let v = CGFloat(b.captured)
         let x0 = x(min(v, 0)), x1 = x(max(v, 0))
         HStack(spacing: S.gap4) {
-            Text(b.ticker)
-                .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
-                .foregroundStyle(b.covered ? S.ink : S.mute)
-                .frame(width: nameCol, alignment: .leading).lineLimit(1)
+            /* A puts the ratio inline after the name, in mute so it never
+               competes with the name itself. */
+            HStack(spacing: S.gap3) {
+                Text(b.ticker)
+                    .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
+                    .foregroundStyle(b.covered ? S.ink : S.mute)
+                    .lineLimit(1)
+                if shape == .a, !capShort(b).isEmpty {
+                    Text(capShort(b))
+                        .font(S.inter(S.t11, S.wMidSmN)).monospacedDigit()
+                        .foregroundStyle(S.mute).lineLimit(1)
+                }
+            }
+            .frame(width: nameCol, alignment: .leading)
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
+                /* ⚠ B PAINTS THE TRACK, NOT THE BAR. The shaded left portion
+                   is how much of the name is already sold, so an untouched
+                   name reads pale end to end and a fully worked one reads
+                   solid. It is a SECOND axis living in the same box as the
+                   capture axis, which is the honest cost of this variant and
+                   the thing to judge on the phone. */
+                if shape == .b, workedFrac(b) > 0 {
+                    RoundedRectangle(cornerRadius: S.radiusBar)
+                        .fill(S.ruleColor)
+                        .frame(width: max(2, track * workedFrac(b)))
+                }
                 /* ⚠ NO MARK AT ALL WHEN NOTHING IS SOLD. A 2pt sliver at the
                    zero line would read as a leg that captured nothing, which
                    is a different and wrong statement. */
@@ -480,11 +570,22 @@ struct SunnyRollCheck: View {
                is 50 contracts against 5. Both readings are true and neither
                is derivable from the row alone, which is the whole reason the
                tap exists rather than a choice of one. */
-            Text(b.covered ? (showMoney ? optMoney(b.kept) : barePctInt(b.captured))
-                           : "No call")
-                .font(S.inter(S.t13, S.wSemiN))
-                .foregroundStyle(b.covered ? (b.captured < 0 ? S.lossText : S.gainText) : S.mute)
-                .frame(width: valCol, alignment: .trailing).lineLimit(1)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(b.covered ? (showMoney ? optMoney(b.kept) : barePctInt(b.captured))
+                               : "No call")
+                    .font(S.inter(S.t13, S.wSemiN))
+                    .foregroundStyle(b.covered ? (b.captured < 0 ? S.lossText : S.gainText) : S.mute)
+                    .lineLimit(1)
+                /* C puts the capacity where the eye already lands for the row,
+                   and lets it speak in words where a ratio would be colder:
+                   "all sold" beats "0/5". The cost is row height. */
+                if shape == .c, !capWords(b).isEmpty {
+                    Text(capWords(b))
+                        .font(S.inter(S.t10, S.wMidSmN)).monospacedDigit()
+                        .foregroundStyle(S.mute).lineLimit(1)
+                }
+            }
+            .frame(width: valCol, alignment: .trailing)
         }
     }
 }
