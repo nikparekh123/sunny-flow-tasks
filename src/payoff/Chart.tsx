@@ -356,16 +356,21 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
                 the flex row squeezed the figure and wrapped it after its MINUS
                 SIGN: a loss rendered as a gain with a stray dash above it.
                 Label over figure is the deck's own idiom anyway. */}
-            <div className="at">P&amp;L at {fmtExp(sel, ctx.today)}</div>
-            <div className={'pl num ' + (pl < 0 ? 'loss' : 'gain')}>{money(pl)}</div>
+            {/* ⚠ THE PRICE LEADS. Nik, 2026-09-11: "share price should be on
+                top". This reverses his own call of 2026-09-09, when the price
+                was the support line and the P&L was the headline. The pointer
+                is on a price, so the price is what he is asking about; the P&L
+                is the first thing it answers. */}
+            <div className="at">Share price</div>
+            <div className="pl num">{priceLab(hoverP)}</div>
             <div className="hr" />
+            <div className="r"><span className="k">P&amp;L at {fmtExp(sel, ctx.today)}</span><span className={'v num ' + (pl < 0 ? 'loss' : 'gain')}>{money(pl)}</span></div>
             {/* ⚠ EVERY FIGURE WEARS ITS NAME. Nik, 2026-09-11: "can we make
                 this proper add share price, P&L and also delta". The card had
                 two unlabelled numbers stacked on each other, and "$45.55" over
                 "$17,946" does not say which is the stock and which is the
                 book. The date eyebrow now names the headline and the rest are
                 ordinary labelled rows. */}
-            <div className="r"><span className="k">Share price</span><span className="v num">{priceLab(hoverP)}</span></div>
             <div className="r"><span className="k">Change</span><span className={'v num ' + (hoverP < spot ? 'loss' : 'gain')}>{signed1((hoverP / spot - 1) * 100)}%</span></div>
             {/* ⚠ DELTA AT THE POINTER, NOT AT THE SPOT. The greeks strip above
                 already says what the book does on the next dollar from here;
