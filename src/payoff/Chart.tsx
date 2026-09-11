@@ -14,7 +14,7 @@
 import { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   type Leg, type Ctx, total, bounds, density, NRM, niceStep, place, cluster,
-  type LabelItem, money, priceLab, priceShort, signed1, fmtExp,
+  type LabelItem, money, priceLab, priceShort, signed, signed1, fmtExp, deltaAt,
 } from './math';
 import type { Layers, TickerBook } from './types';
 
@@ -356,12 +356,24 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
                 the flex row squeezed the figure and wrapped it after its MINUS
                 SIGN: a loss rendered as a gain with a stray dash above it.
                 Label over figure is the deck's own idiom anyway. */}
-            <div className="at">At {fmtExp(sel, ctx.today)}</div>
+            <div className="at">P&amp;L at {fmtExp(sel, ctx.today)}</div>
             <div className={'pl num ' + (pl < 0 ? 'loss' : 'gain')}>{money(pl)}</div>
-            <div className="sub"><span className="p num">{priceLab(hoverP)}</span><span className="pc num">{signed1((hoverP / spot - 1) * 100)}%</span></div>
             <div className="hr" />
+            {/* ⚠ EVERY FIGURE WEARS ITS NAME. Nik, 2026-09-11: "can we make
+                this proper add share price, P&L and also delta". The card had
+                two unlabelled numbers stacked on each other, and "$45.55" over
+                "$17,946" does not say which is the stock and which is the
+                book. The date eyebrow now names the headline and the rest are
+                ordinary labelled rows. */}
+            <div className="r"><span className="k">Share price</span><span className="v num">{priceLab(hoverP)}</span></div>
+            <div className="r"><span className="k">Change</span><span className={'v num ' + (hoverP < spot ? 'loss' : 'gain')}>{signed1((hoverP / spot - 1) * 100)}%</span></div>
+            {/* ⚠ DELTA AT THE POINTER, NOT AT THE SPOT. The greeks strip above
+                already says what the book does on the next dollar from here;
+                repeating that in a card the pointer has carried somewhere else
+                would be a figure that never moves as he scrubs. */}
+            <div className="r"><span className="k">Net delta</span><span className="v num">{signed(deltaAt(liveLegs, hoverP, elapsed, ctx))}</span></div>
             {bookOnly && <div className="r"><span className="k">Book only</span><span className={'v num ' + (total(hoverP, elapsed, bookLegs, ctx) < 0 ? 'loss' : 'gain')}>{money(total(hoverP, elapsed, bookLegs, ctx))}</span></div>}
-            <div className="r"><span className="k">Today</span><span className={'v num ' + (tod < 0 ? 'loss' : 'gain')}>{money(tod)}</span></div>
+            <div className="r"><span className="k">Value today</span><span className={'v num ' + (tod < 0 ? 'loss' : 'gain')}>{money(tod)}</span></div>
             <div className="r"><span className="k">Chance above</span><span className="v num">{Math.round(chanceAbove(hoverP) * 100)}%</span></div>
           </div>
         );

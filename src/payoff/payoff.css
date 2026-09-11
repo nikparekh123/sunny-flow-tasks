@@ -124,12 +124,11 @@
 .po-chip { position: absolute; transform: translateX(-50%); padding: 6px 10px; border-radius: 7px; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .po-chip.be { background: var(--page); box-shadow: inset 0 0 0 1px var(--rule-2); }
 .po-chip.now { background: var(--neon); color: var(--on-neon); }
-.po-hover { position: absolute; top: 94px; width: 184px; background: var(--paper); border: 1px solid var(--rule-2); border-radius: 10px; box-shadow: var(--shadow-pop); padding: 12px 14px 13px; z-index: 6; pointer-events: none; }
+/* 196, not 184: the card gained labelled rows and "Chance above" beside a
+   figure needs the extra 12px to stay off it. */
+.po-hover { position: absolute; top: 94px; width: 196px; background: var(--paper); border: 1px solid var(--rule-2); border-radius: 10px; box-shadow: var(--shadow-pop); padding: 12px 14px 13px; z-index: 6; pointer-events: none; }
 .po-hover .at { font-size: 9px; font-weight: 500; line-height: 1; letter-spacing: 1.4px; text-transform: uppercase; color: var(--mute); }
 .po-hover .pl { font-size: 19px; font-weight: 600; line-height: 1; letter-spacing: -.025em; margin-top: 7px; white-space: nowrap; }
-.po-hover .sub { margin-top: 6px; }
-.po-hover .p { font-size: 13px; font-weight: 600; color: var(--ink-2); }
-.po-hover .pc { font-size: 11px; font-weight: 500; color: var(--mute); margin-left: 6px; }
 .po-hover .hr { height: 1px; background: var(--rule-2); margin: 9px 0; }
 /* ⚠ GRID, NOT FLEX. `auto` for the value means it is sized by its content
    before the label gets any say, so no label length can squeeze a figure into

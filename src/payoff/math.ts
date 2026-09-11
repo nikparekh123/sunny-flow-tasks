@@ -212,6 +212,24 @@ export function premiumHistory(bookLegs: Leg[], planned: Leg[], c: Ctx) {
   return { got, paid, week, last, planAdd };
 }
 
+/**
+ * Net delta AT AN ARBITRARY PRICE, in share equivalents.
+ *
+ * `netGreeks` prices at the spot, which is the right question for the greeks
+ * strip: what the book does on the next dollar FROM HERE. The hover card asks
+ * a different one, because the pointer is not on the spot: what the book would
+ * be doing per dollar IF the stock were down there. On a deep-ITM LEAP book
+ * those two are far apart, which is the whole reason the curve bends.
+ */
+export function deltaAt(legs: Leg[], p: number, elapsed: number, c: Ctx): number {
+  let d = 0;
+  for (const l of legs) {
+    if (l.kind === 'stock') { d += l.qty; continue; }
+    d += l.qty * 100 * bsDelta(p, l.strike, T_of(l, elapsed, c), sigOf(l, c), l.kind === 'call');
+  }
+  return d;
+}
+
 export function netGreeks(legs: Leg[], elapsed: number, c: Ctx): { delta: number; theta: number; vega: number } {
   let d = 0, th = 0, ve = 0;
   legs.forEach((l) => {

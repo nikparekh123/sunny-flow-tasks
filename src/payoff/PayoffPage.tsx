@@ -28,6 +28,9 @@ import {
 } from './math';
 import './payoff.css';
 
+/** Where the last-read name is kept, so a reload does not reset the page. */
+const TICK_KEY = 'sunnyfi.payoff.ticker';
+
 const LAYER_META: { key: LayerKey; name: string; ink: string; band: boolean }[] = [
   { key: 'ema', name: 'EMA 20 / 50 / 200', ink: 'var(--hair)', band: false },
   { key: 'sr', name: 'Support · resistance', ink: 'var(--faint)', band: false },
@@ -50,7 +53,13 @@ export default function PayoffPage() {
   const { plans, save, update, remove } = usePlans(user?.id);
 
   /* ── state, as the README lists it ─────────────────────────────────── */
-  const [tick, setTick] = useState<string | null>(null);
+  /* ⚠ THE CHOSEN NAME SURVIVES A RELOAD. Nik, 2026-09-11: "when you refresh it
+     should stay on the same ticker and not reset". It was state with no
+     backing, so every reload landed on whichever name happened to sort first
+     and he had to click back to the one he was reading. */
+  const [tick, setTick] = useState<string | null>(() => {
+    try { return localStorage.getItem(TICK_KEY); } catch { return null; }
+  });
   const [planned, setPlanned] = useState<Leg[]>([]);
   const [seq, setSeq] = useState(1);
   const [planOn, setPlanOn] = useState<Record<string, boolean>>({});
@@ -72,7 +81,17 @@ export default function PayoffPage() {
   const today = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
   const books = data?.book ?? [];
   const book: TickerBook | undefined = books.find((b) => b.ticker === tick) ?? books[0];
-  useEffect(() => { if (!tick && books.length) setTick(books[0].ticker); }, [books, tick]);
+  /* A saved name that is no longer in the book falls back rather than sticking:
+     a position can be closed between one visit and the next. */
+  useEffect(() => {
+    if (!books.length) return;
+    if (tick && books.some((b) => b.ticker === tick)) return;
+    setTick(books[0].ticker);
+  }, [books, tick]);
+  useEffect(() => {
+    if (!tick) return;
+    try { localStorage.setItem(TICK_KEY, tick); } catch { /* private window */ }
+  }, [tick]);
   useEffect(() => {
     if (book && (book as unknown as { closes?: number[] }).closes) {
       setCloses((c) => ({ ...c, [book.ticker]: (book as unknown as { closes: number[] }).closes }));
