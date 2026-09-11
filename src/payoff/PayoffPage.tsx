@@ -421,7 +421,21 @@ export default function PayoffPage() {
             <div className="g"><span className="lab">Net delta</span><span className="v num">{signed(g.delta)}</span></div>
             <div className="g"><span className="lab">Theta</span><span className={'v num ' + (g.theta < 0 ? 'loss' : 'gain')}>{g.theta < 0 ? '−' : '+'}{money2(Math.abs(g.theta)).slice(1)}</span></div>
             <div className="g"><span className="lab">Vega</span><span className={'v num ' + (g.vega < 0 ? 'loss' : 'gain')}>{g.vega < 0 ? '−' : '+'}{money(Math.abs(g.vega)).slice(1)}</span></div>
-            <div className="g"><span className="lab">Implied vol</span><span className="v num">{(book.iv * ivMult * 100).toFixed(1)}%</span></div>
+            {/* ⚠ "Implied vol" NAMED NOBODY. Nik, 2026-09-11: "why does our IV
+                show 50 and option strat shows 39". Both are right and they
+                measure different things. This is the STOCK's ATM reading on a
+                single ~30-day contract, today NKE's 9 Oct $37 call, which spans
+                earnings and so carries the premium. OptionStrat's 39% is an
+                average over the legs of the trade, dragged down by a Mar 2027
+                put at 39%.
+
+                It also prices nothing on the book: every broker leg carries its
+                own IV. Its one job is pricing a leg he DRAFTS, which has no
+                market price yet, and it does that job well: the plan priced at
+                50% puts P&L at $39 on -$808 against OptionStrat's -$754, where
+                37% would have said -$1,608. The figure was never wrong, the
+                label just never said whose it was. */}
+            <div className="g"><span className="lab">Stock IV 30d</span><span className="v num">{(book.iv * ivMult * 100).toFixed(1)}%</span></div>
           </div>
           <Chart book={book} ctx={ctx} liveLegs={liveLegs} bookLegs={bookLegs} planActive={planActive}
             elapsed={elapsed} dte={dte} sel={sel} rangePct={rangePct} layers={layers} closes={closes[book.ticker] ?? []} />
