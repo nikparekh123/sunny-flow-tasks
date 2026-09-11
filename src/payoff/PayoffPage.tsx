@@ -155,13 +155,13 @@ export default function PayoffPage() {
     if (!ctx || !book) return null;
     const bnd = bounds(liveLegs, dte, ctx), bookBnd = planActive ? bounds(bookLegs, dte, ctx) : null;
     const ch = chance(liveLegs, dte, ctx), bookCh = planActive ? chance(bookLegs, dte, ctx) : null;
-    const g = netGreeks(liveLegs, elapsed, ctx), bookG = planActive ? netGreeks(bookLegs, elapsed, ctx) : null;
+    const g = netGreeks(liveLegs, elapsed, ctx);
     const pn = premiumNow(liveLegs, elapsed, ctx);
     const ph = premiumHistory(bookLegs, myPlanned, ctx);
     const net = liveLegs.reduce((s, l) => s + (l.kind === 'stock' ? 0 : -l.qty * 100 * entryOf(l, ctx)), 0);
     const unrl = unrealized(liveLegs, elapsed, ctx);
     const realized = book.closed.reduce((s, c) => s + c.pnl, 0);
-    return { bnd, bookBnd, ch, bookCh, g, bookG, pn, ph, net, unrl, realized };
+    return { bnd, bookBnd, ch, bookCh, g, pn, ph, net, unrl, realized };
   }, [ctx, book, liveLegs, bookLegs, myPlanned, dte, elapsed, planActive]);
 
   /* ── actions ────────────────────────────────────────────────────────── */
@@ -290,7 +290,7 @@ export default function PayoffPage() {
   }
 
   /* ── metric strip ───────────────────────────────────────────────────── */
-  const { bnd, bookBnd, ch, bookCh, g, bookG, pn, ph, net, unrl, realized } = M;
+  const { bnd, bookBnd, ch, bookCh, g, pn, ph, net, unrl, realized } = M;
   const be0 = bnd.bes[0];
   const metrics = [
     { label: planActive ? (net < 0 ? 'Plan costs' : 'Plan pays') : (net < 0 ? 'Net debit' : 'Net credit'), value: money(Math.abs(net)), sub: net < 0 ? 'debit paid' : 'credit received' },
@@ -414,9 +414,13 @@ export default function PayoffPage() {
         {/* 5 · chart card */}
         <div className="po-chart">
           <div className="po-greeks">
-            <div className="g"><span className="lab">Net delta</span><span className="v num">{signed(g.delta)}</span>{bookG && <span className="b num">book {signed(bookG.delta)}</span>}</div>
-            <div className="g"><span className="lab">Theta</span><span className={'v num ' + (g.theta < 0 ? 'loss' : 'gain')}>{g.theta < 0 ? '−' : '+'}{money2(Math.abs(g.theta)).slice(1)}</span>{bookG && <span className="b num">book {bookG.theta < 0 ? '−' : '+'}{money2(Math.abs(bookG.theta)).slice(1)}</span>}</div>
-            <div className="g"><span className="lab">Vega</span><span className={'v num ' + (g.vega < 0 ? 'loss' : 'gain')}>{g.vega < 0 ? '−' : '+'}{money(Math.abs(g.vega)).slice(1)}</span>{bookG && <span className="b num">book {bookG.vega < 0 ? '−' : '+'}{money(Math.abs(bookG.vega)).slice(1)}</span>}</div>
+            {/* ⚠ NO "book" SUB-LINE. Nik, 2026-09-11: "remove book". It
+                repeated the figure above it whenever no plan was on, and when
+                one was, it was a second number he had not asked to compare
+                against. Do not put it back without asking. */}
+            <div className="g"><span className="lab">Net delta</span><span className="v num">{signed(g.delta)}</span></div>
+            <div className="g"><span className="lab">Theta</span><span className={'v num ' + (g.theta < 0 ? 'loss' : 'gain')}>{g.theta < 0 ? '−' : '+'}{money2(Math.abs(g.theta)).slice(1)}</span></div>
+            <div className="g"><span className="lab">Vega</span><span className={'v num ' + (g.vega < 0 ? 'loss' : 'gain')}>{g.vega < 0 ? '−' : '+'}{money(Math.abs(g.vega)).slice(1)}</span></div>
             <div className="g"><span className="lab">Implied vol</span><span className="v num">{(book.iv * ivMult * 100).toFixed(1)}%</span></div>
           </div>
           <Chart book={book} ctx={ctx} liveLegs={liveLegs} bookLegs={bookLegs} planActive={planActive}
