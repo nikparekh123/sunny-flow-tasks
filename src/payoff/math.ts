@@ -135,7 +135,23 @@ export function legValue(leg: Leg, p: number, elapsed: number, c: Ctx): number {
   const T0 = Math.max(0, dteOf(leg.expiry, c.today)) / 365;
   const T = T_of(leg, elapsed, c);
   const model = bs(p, leg.strike, T, sigOf(leg, c), leg.kind === 'call');
-  if (T0 <= 0) return model;
+  /* ⚠ A LEG EXPIRING TODAY IS STILL TRADING. Found 2026-09-11 auditing the
+     page: the curve disagreed with its own Unrealized figure on six of eight
+     names, and the six were exactly the names with a leg expiring that day.
+     NKE was exact because none of its did.
+
+     `T0 <= 0` returned the bare model, which at T = 0 is intrinsic, so the
+     last few hours of time value the broker is still marking vanished off the
+     curve: FIS by $365, LULU by $125. The leg does not expire until 4pm.
+
+     So it calibrates here too, just against intrinsic rather than against a
+     model with time in it, and the correction is a STEP not a decay: the leg
+     is worth its mark today and nothing beyond today, because there is no
+     tomorrow left to decay through. */
+  if (T0 <= 0) {
+    if (elapsed > 0 || leg.mark == null) return model;
+    return model + (leg.mark - bs(c.spot, leg.strike, 0, sigOf(leg, c), leg.kind === 'call'));
+  }
   const adj = adjOf(leg, c);
   return adj === 0 ? model : model + adj * (T / T0);
 }

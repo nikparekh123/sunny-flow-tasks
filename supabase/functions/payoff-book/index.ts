@@ -24,7 +24,7 @@
 import { corsHeaders, json, db, nyToday, POLY } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-11.1';
+const BUILD = '2026-09-11.2';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -53,37 +53,59 @@ function ema(closes: number[], n: number): number | null {
 
 type Trade = Record<string, unknown>;
 
+/* ⚠ POSTGREST CAPS EVERY READ AT 1,000 ROWS AND SAYS NOTHING. `page` walks
+   the whole result with Range headers instead. Every paged query needs a
+   DETERMINISTIC order or a row can be seen twice or missed at a page boundary,
+   so each one below carries a tiebreaker. The shared `db.get` is left alone: it
+   is pinned by SHA and read by a dozen other functions. */
+const PAGE = 1000;
+async function page(url: string, key: string, path: string): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const r = await fetch(`${url}/rest/v1/${path}`, {
+      headers: {
+        apikey: key, Authorization: `Bearer ${key}`,
+        'Range-Unit': 'items', Range: `${from}-${from + PAGE - 1}`,
+      },
+    });
+    if (!r.ok) break;
+    const rows = (await r.json()) as Record<string, unknown>[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+    if (out.length >= 50 * PAGE) break;
+  }
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const D = db(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const SB_URL = Deno.env.get('SUPABASE_URL')!;
+    const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const D = db(SB_URL, SB_KEY);
+    const P = (path: string) => page(SB_URL, SB_KEY, path);
     const polygonKey = Deno.env.get('POLYGON_API_KEY') ?? '';
     const today = nyToday();
     const year = Number(today.slice(0, 4));
     const ago = (d: number) => new Date(Date.parse(today + 'T00:00:00Z') - d * 86_400_000)
       .toISOString().slice(0, 10);
 
-    const [trades, lots, quotes, greeks, names, ivs, acts, levels] = await Promise.all([
-      D.get('option_trades?voided_at=is.null'
+    const [trades, lots, quotes, greeks, names, ivs, levels] = await Promise.all([
+      /* ⚠ PAGED. PostgREST caps every read at 1,000 rows and says nothing, and
+         this table is the one the whole page is built on: it is at 826 rows and
+         climbing. The day it crosses, the oldest trades vanish, every position
+         nets wrong and nothing anywhere reports an error. Found 2026-09-11
+         auditing the page, after the same cap was caught truncating two of the
+         Options cards that morning. */
+      P('option_trades?voided_at=is.null'
         + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date,note,source'
-        + '&order=trade_date.asc'),
+        + '&order=trade_date.asc,id.asc'),
       D.get('share_lots?voided_at=is.null&qty_remaining=gt.0&select=ticker,qty_remaining,cost_per_share'),
       D.get('ticker_quotes_latest?select=ticker,spot'),
       D.get('option_greeks_latest?select=option_trade_id,delta,iv,last_mark'),
       D.get('ticker_names?select=ticker,name'),
-      D.get('ticker_iv_daily?select=ticker,atm_iv,snapshot_date&order=snapshot_date.desc'),
-      /* ⚠ `analyst_actions`, THE SAME FEED THE NEW PAGE CHARTS. Nik,
-         2026-09-09: "analyst target is empty we nhave that data". It was: the
-         card read `analyst_insights`, which holds a thin scattering of notes
-         and had nothing for BABA inside 90 days.
-
-         ⚠ AND NOT `analyst_consensus`, WHICH LOOKS RIGHT AND IS NOT. It holds
-         unadjusted targets: NFLX reads a 324 median and a 1,514 high against a
-         76 spot, because the split was never applied. `analyst_actions` is the
-         per-firm feed the New page already draws, so the payoff band and the
-         "TARGET CUT" cards can never tell different stories. */
-      D.get(`analyst_actions?date=gte.${ago(90)}&select=ticker,date,price_target`
-        + '&order=date.desc'),
+      P('ticker_iv_daily?select=ticker,atm_iv,snapshot_date'
+        + '&order=snapshot_date.desc,ticker.asc'),
       D.get('ticker_levels?select=ticker,kind,price'),
     ]);
 
@@ -138,6 +160,25 @@ Deno.serve(async (req) => {
     for (const l of lots) held.add(String(l.ticker));
 
     const tickers = [...held].sort();
+
+    /* ⚠ FETCHED HERE, FILTERED TO THE NAMES HE HOLDS, and not up in the
+       parallel block. Nik, 2026-09-09: "analyst target is empty we nhave that
+       data". Switching to `analyst_actions` fixed half of it; the other half
+       was the 1,000-row cap. Ninety days of that feed is 7,132 rows across
+       three hundred tickers, so the unfiltered read reached back only twelve
+       days and NFLX and PEP never appeared at all, though both had targets in
+       the window. Filtered to the book it is 122 rows: one small query instead
+       of eight pages of other people's companies.
+
+       ⚠ AND NOT `analyst_consensus`, WHICH LOOKS RIGHT AND IS NOT. It holds
+       unadjusted targets: NFLX reads a 324 median against a 76 spot, because
+       the split was never applied. `analyst_actions` is the per-firm feed the
+       New page already draws, so the payoff band and the "TARGET CUT" cards can
+       never tell different stories. */
+    const acts = tickers.length
+      ? await P(`analyst_actions?date=gte.${ago(90)}&ticker=in.(${tickers.join(',')})`
+          + '&select=ticker,date,price_target&order=date.desc,ticker.asc')
+      : [];
 
     /* ── expiries per name from Polygon, in parallel ────────────────────── */
     /* ⚠ ONE PAGE OF CONTRACTS IS NOT THE CHAIN. Nik, 2026-09-09: "if you look

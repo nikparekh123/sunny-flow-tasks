@@ -294,10 +294,13 @@ export default function PayoffPage() {
   const be0 = bnd.bes[0];
   const metrics = [
     { label: planActive ? (net < 0 ? 'Plan costs' : 'Plan pays') : (net < 0 ? 'Net debit' : 'Net credit'), value: money(Math.abs(net)), sub: net < 0 ? 'debit paid' : 'credit received' },
-    { label: 'Max profit', value: bnd.gainUnbounded ? 'Unlimited' : money(bnd.max), sub: bookBnd ? `book ${bookBnd.gainUnbounded ? 'unlimited' : money(bookBnd.max)}` : `at ${fmtExp(sel, today)}` },
-    { label: 'Max loss', value: bnd.lossUnbounded ? 'Unlimited' : money(bnd.min), ink: bnd.lossUnbounded ? 'var(--loss)' : undefined, sub: bookBnd ? `book ${bookBnd.lossUnbounded ? 'unlimited' : money(bookBnd.min)}` : `at ${fmtExp(sel, today)}` },
+    /* ⚠ NO "book" SUB-LINE HERE EITHER. Nik, 2026-09-11, having already had it
+       off the greeks strip. The sub now always names the date the figure is
+       measured at, which is the thing worth saying. */
+    { label: 'Max profit', value: bnd.gainUnbounded ? 'Unlimited' : money(bnd.max), sub: `at ${fmtExp(sel, today)}` },
+    { label: 'Max loss', value: bnd.lossUnbounded ? 'Unlimited' : money(bnd.min), ink: bnd.lossUnbounded ? 'var(--loss)' : undefined, sub: `at ${fmtExp(sel, today)}` },
     { label: 'Breakeven', value: be0 ? priceLab(be0) : '–', sub: be0 ? `${signed1((be0 / book.spot - 1) * 100)}% from spot${bnd.bes.length > 1 ? ` · +${bnd.bes.length - 1} more` : ''}` : 'none in range' },
-    { label: 'Chance of profit', value: `${Math.round(ch * 100)}%`, sub: bookCh != null ? `book ${Math.round(bookCh * 100)}%` : `at ${(book.iv * ivMult * 100).toFixed(1)}% vol` },
+    { label: 'Chance of profit', value: `${Math.round(ch * 100)}%`, sub: `at ${(book.iv * ivMult * 100).toFixed(1)}% vol` },
     { label: 'Realized to date', value: money(realized), sub: `${book.closed.length} closed legs` },
     { label: 'Credit collected', value: money(ph.got), sub: 'lifetime, open legs' },
     { label: pn.close >= 0 ? 'Credit to close' : 'Cost to close', value: money(Math.abs(pn.close)), sub: 'to unwind the options' },
@@ -495,10 +498,27 @@ export default function PayoffPage() {
           <div className="po-legrow" style={{ marginTop: 14 }}>
             {allLegs.map((l) => {
               const isOff = !!off[l.id];
+              /* ⚠ THE CARD DESCRIBES THE LEG TODAY, NOT AT THE SLIDER'S DATE.
+                 Nik's ruling 2026-09-11, after being caught by it twice inside
+                 ten minutes: a draft short call read "Δ 0" (the slider sat at
+                 expiration, where an out-of-the-money option's delta really is
+                 zero) and then "−$18" (the slider back on Now, where a leg just
+                 drafted has of course made nothing). Both figures were right
+                 and both were unreadable, because nothing on the card said
+                 which date it was speaking about. The chart follows the slider;
+                 the cards state what is true now.
+
+                 ⚠ AND THE CENTS ARE ROUNDED ON BOTH SIDES. A freshly drafted
+                 leg was showing about ±$20 rather than $0, because its premium
+                 is stored rounded to cents while the mark it is compared
+                 against was not. Fifty contracts turn a third of a cent into
+                 twenty dollars. */
+              const perShare = l.kind === 'stock' ? 0
+                : Math.round(((l.mark ?? liveMark(l, 0, ctx)) - entryOf(l, ctx)) * 100) / 100;
               const pl = l.kind === 'stock' ? l.qty * (book.spot - (l.basis ?? book.spot))
-                : l.qty * 100 * ((elapsed === 0 && l.mark != null ? l.mark : liveMark(l, elapsed, ctx)) - entryOf(l, ctx));
+                : l.qty * 100 * perShare;
               const mn = moneyness(l, ctx);
-              const d = Math.round(l.kind === 'stock' ? l.qty : l.qty * 100 * (liveMark(l, elapsed, ctx) > 0 ? 1 : 0) * 0 + netGreeks([l], elapsed, ctx).delta);
+              const d = Math.round(l.kind === 'stock' ? l.qty : netGreeks([l], 0, ctx).delta);
               return (
                 <div key={l.id} className={'po-leg' + (isOff ? ' off' : '') + (selLeg === l.id ? ' sel' : '')} onClick={() => l.plan && setSelLeg(l.id)}>
                   <div className="r1">
