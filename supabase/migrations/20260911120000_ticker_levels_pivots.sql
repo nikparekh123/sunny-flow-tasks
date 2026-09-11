@@ -17,12 +17,23 @@ insert into public.ticker_levels (ticker, kind, price) values
   ('BABA','S3',108.32),('BABA','S2',108.51),('BABA','S1',108.68),('BABA','Pivot',108.87),
   ('BABA','R1',109.04),('BABA','R2',109.23),('BABA','R3',109.40),
   ('LULU','S3',94.07),('LULU','S2',94.94),('LULU','S1',95.39),('LULU','Pivot',96.25),
-  ('LULU','R1',96.70),('LULU','R2',97.56),('LULU','R3',98.01)
+  ('LULU','R1',96.70),('LULU','R2',97.56),('LULU','R3',98.01),
+  ('FIS','S3',38.01),('FIS','S2',38.13),('FIS','S1',38.20),('FIS','Pivot',38.32),
+  ('FIS','R1',38.40),('FIS','R2',38.51),('FIS','R3',38.59),
+  ('KR','S3',56.09),('KR','S2',56.32),('KR','S1',56.45),('KR','Pivot',56.68),
+  ('KR','R1',56.81),('KR','R2',57.04),('KR','R3',57.17),
+  ('PEP','S3',136.58),('PEP','S2',136.71),('PEP','S1',136.82),('PEP','Pivot',136.95),
+  ('PEP','R1',137.06),('PEP','R2',137.19),('PEP','R3',137.30)
 on conflict (ticker, kind, price) do nothing;
 
--- ⚠ THESE ARE DAILY PIVOTS AND THEY ARE NARROW. NKE's seven span $0.69 on a
--- $36.62 stock. The chart's default range is the spot +/- 27%, so all seven
--- land inside about 48px of a 1362px plot and the label band collapses them
--- into one "7 LEVELS" chip. Narrowing the range slider spreads them. If the
--- chart is meant to read them at a glance at full range, weekly or monthly
--- pivots are the ones that span far enough to be worth drawing.
+-- ⚠ THESE ARE DAILY PIVOTS AND THE CHART CANNOT SEPARATE THEM. Measured at the
+-- default range, spot +/- 27%, as pixels between adjacent levels on a 1362px
+-- plot. The label band clusters anything under 34px into one "N LEVELS" chip:
+--
+--   PEP 2   BABA 4   NFLX 4   FIS 6   KR 8   NKE 8   LULU 17
+--
+-- Every one of them clusters. The range slider bottoms out at +/- 10%, and even
+-- there only LULU separates (46px); NKE reaches 21px and PEP 6px. This is a
+-- scale mismatch, not a drawing bug: a daily pivot set spans well under 3% of
+-- the price while the chart is drawn to hold a 54% move. Weekly or monthly
+-- pivots span far enough to be worth drawing at this scale.
