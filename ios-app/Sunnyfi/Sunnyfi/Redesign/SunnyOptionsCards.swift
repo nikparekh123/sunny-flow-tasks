@@ -247,11 +247,13 @@ struct SunnyRollCheck: View {
        invisible in exactly the half that would have told him to write one. The
        calls half had the right rule and the puts half never got it.
 
-       The gate is the LADDER, not the leg: a name is a row on a side when it
-       holds contracts on that side. KR and PEP hold no long puts at all, so
-       they take no put row; printing "No put · 0 free" for them would assert
-       capacity that does not exist. Say the word if you would rather see them
-       listed as having no put protection. */
+       EVERY NAME TAKES A ROW ON BOTH SIDES, with no gate at all. Nik's
+       ruling, 2026-09-11: "yes show all 7 in both". I had first excluded a
+       side a name holds nothing on, so KR and PEP had no put row; he wants the
+       absence visible, and he is right that "KR has no put protection" is
+       exactly the kind of thing a card listing the book should say out loud.
+       Such a row carries no capacity line, because there is no ladder to
+       count, so it reads as the bare name and "No put". */
     private func uncoveredSorted(_ put: Bool) -> [Bar] {
         rawBars.filter { !$0.covered && $0.isPut == put }.sorted { $0.ticker < $1.ticker }
     }
@@ -263,15 +265,12 @@ struct SunnyRollCheck: View {
 
     private var rawBars: [Bar] {
         positions.flatMap { p -> [Bar] in
-            let inv = inventory.first(where: { $0.t == p.t })
             /* A ladder with nothing written against it is still a row. The card
                is the only place the book is listed against its short legs, so a
                side it cannot draw is a side that cannot be noticed. */
-            let empty: [Bar] = [(false, inv?.callsHeld ?? 0), (true, inv?.putsHeld ?? 0)]
-                .filter { side, held in
-                    held > 0 && !p.shorts.contains { ($0.type == "put") == side }
-                }
-                .map { side, _ in
+            let empty: [Bar] = [false, true]
+                .filter { side in !p.shorts.contains { ($0.type == "put") == side } }
+                .map { side in
                     Bar(id: "\(p.t)-none-\(side ? "p" : "c")", ticker: p.t, captured: 0,
                         itm: false, sym: p.t, isPut: side, covered: false)
                 }
