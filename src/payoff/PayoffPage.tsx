@@ -169,13 +169,42 @@ export default function PayoffPage() {
     setTick(t); setActivePlan(null); setDirty(false); setElapsed(0);
     setOpenHist(null); setAddOpen(false); setSelLeg(null);
   };
+  /* ⚠ THE STRIKE LADDER IS THE VENDOR'S, NOT ARITHMETIC. Nik, 2026-09-11: "it
+     either shows 37.50 or 40 which is not true there is a strike 38 and 39 and
+     in between".
+
+     `strikeStep(spot)` was a hardcoded $2.50 under a $100 spot, so on a $36.62
+     NKE the stepper walked 37.50 to 40.00 and could not land on a strike that
+     exists. The grid is not uniform either: NKE's 18 Sep weekly runs half
+     dollars near the money and whole dollars further out, and the Jan 2028
+     LEAP is five dollars apart. Only the chain knows.
+
+     `strikeStep` survives as the fallback for an expiry Polygon did not
+     return, so the stepper always moves even when the ladder is missing. */
+  const ladder = (exp: string): number[] => book?.strikes?.[exp] ?? [];
+  const snapStrike = (exp: string, p: number): number => {
+    const list = ladder(exp);
+    if (!list.length) { const st = strikeStep(book?.spot ?? p); return Math.round(p / st) * st; }
+    return list.reduce((a, b) => (Math.abs(b - p) < Math.abs(a - p) ? b : a), list[0]);
+  };
+  const nextStrike = (exp: string, cur: number, d: number): number => {
+    const list = ladder(exp);
+    if (list.length) {
+      if (d > 0) { const k = list.find((v) => v > cur + 1e-6); if (k != null) return k; }
+      else { for (let i = list.length - 1; i >= 0; i--) if (list[i] < cur - 1e-6) return list[i]; }
+      /* Off the end of the ladder: stay put rather than invent a contract. */
+      return cur;
+    }
+    return Math.round((cur + d * strikeStep(book?.spot ?? cur)) * 100) / 100;
+  };
+
   const addLeg = (kind: 'call' | 'put' | 'stock', short: boolean) => {
     if (!book) return;
     const id = `${book.ticker}:p${seq}`; setSeq(seq + 1);
-    const st = strikeStep(book.spot);
+    const exp = sel || book.chain[0] || '';
     const leg: Leg = kind === 'stock'
       ? { id, kind, qty: short ? -100 : 100, strike: 0, expiry: '', premium: 0, mark: null, iv: null, basis: book.spot, history: [], plan: true }
-      : { id, kind, qty: short ? -1 : 1, strike: Math.round(book.spot / st) * st, expiry: sel || book.chain[0] || '', premium: 0, mark: null, iv: null, history: [], plan: true };
+      : { id, kind, qty: short ? -1 : 1, strike: snapStrike(exp, book.spot), expiry: exp, premium: 0, mark: null, iv: null, history: [], plan: true };
     if (kind !== 'stock' && ctx) leg.premium = Math.round(liveMark(leg, 0, ctx) * 100) / 100;
     setPlanned((p) => [...p, leg]); setSelLeg(id); setDirty(true); setAddOpen(false);
   };
@@ -191,14 +220,21 @@ export default function PayoffPage() {
     if (!book || !ctx) return;
     if (l.kind === 'stock') { editLeg(l.id, (x) => ({ ...x, basis: Math.round(((x.basis ?? book.spot) + d * basisStep(book.spot)) * 100) / 100 })); return; }
     editLeg(l.id, (x) => {
-      const nx = { ...x, strike: Math.round((x.strike + d * strikeStep(book.spot)) * 100) / 100 };
+      const nx = { ...x, strike: nextStrike(x.expiry, x.strike, d) };
       nx.premium = Math.round(liveMark(nx, 0, ctx) * 100) / 100;
       return nx;
     });
   };
   const setLegExpiry = (iso: string) => {
     if (!selLeg || !ctx) return;
-    editLeg(selLeg, (x) => { const nx = { ...x, expiry: iso }; nx.premium = Math.round(liveMark(nx, 0, ctx) * 100) / 100; return nx; });
+    /* ⚠ AND THE STRIKE RE-SNAPS. A $38.50 that exists on this Friday's weekly
+       is not a contract on the Jan 2028 LEAP, whose ladder is five dollars
+       apart. Moving the date has to move the strike onto the new ladder or the
+       leg quietly becomes one nobody can trade. */
+    editLeg(selLeg, (x) => {
+      const nx = { ...x, expiry: iso, strike: x.kind === 'stock' ? x.strike : snapStrike(iso, x.strike) };
+      nx.premium = Math.round(liveMark(nx, 0, ctx) * 100) / 100; return nx;
+    });
     setElapsed(0);
   };
   const removeLeg = (id: string) => {

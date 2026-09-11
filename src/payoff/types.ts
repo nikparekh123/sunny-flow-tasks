@@ -23,6 +23,10 @@ export interface TickerBook {
   d5: [number, number] | null;
   target: { low: number; median: number; high: number; n: number } | null;
   chain: string[];
+  /** The vendor's real strike ladder, per expiry, ascending. Optional so an
+      older deployment of payoff-book still decodes; the page falls back to a
+      fixed step when an expiry is missing. */
+  strikes?: Record<string, number[]>;
   legs: Leg[];
   closed: ClosedRow[];
 }

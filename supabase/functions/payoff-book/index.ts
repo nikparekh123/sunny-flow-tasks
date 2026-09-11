@@ -24,7 +24,7 @@
 import { corsHeaders, json, db, nyToday, POLY } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-08.1';
+const BUILD = '2026-09-11.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -153,10 +153,28 @@ Deno.serve(async (req) => {
        position on can never be absent from the strip, whatever the vendor
        returns on the day. The dot marks a position, so the dot's date has to
        exist for the dot to land on. */
+    /* ⚠ AND THE STRIKES COME BACK TOO, NOT JUST THE DATES. Nik, 2026-09-11:
+       "it either shows 37.50 or 40 which is not true there is a strike 38 and
+       39 and in between".
+
+       The planner's strike stepper was `strikeStep(spot)`, a hardcoded $2.50
+       under a $100 spot, so on a $36.62 NKE it walked 37.50 to 40.00 and could
+       not land on a strike that exists. Every contract is already being read
+       here to find the expiries; the strike was simply being thrown away.
+
+       Kept per expiry, because the grid is not uniform: a weekly is half-dollar
+       near the money and the LEAP is five dollars apart. Bounded to 0.4x-1.8x
+       the spot, which covers the range slider's widest setting with room, so a
+       liquid name does not ship three thousand numbers nobody can reach. */
     const MAX_PAGES = 6;
     const chains = new Map<string, string[]>();
+    const strikesBy = new Map<string, Map<string, Set<number>>>();
     await Promise.all(tickers.map(async (t) => {
       const set = new Set<string>();
+      const S = spot.get(t) ?? 0;
+      const kLo = S > 0 ? S * 0.4 : 0, kHi = S > 0 ? S * 1.8 : Infinity;
+      const ks = new Map<string, Set<number>>();
+      strikesBy.set(t, ks);
       try {
         const u = new URL(`${POLY}/v3/reference/options/contracts`);
         u.searchParams.set('underlying_ticker', t);
@@ -168,8 +186,16 @@ Deno.serve(async (req) => {
           const r: Response = await fetch(next);
           if (!r.ok) throw new Error(String(r.status));
           const j = await r.json() as
-            { results?: { expiration_date?: string }[]; next_url?: string };
-          for (const c of (j.results ?? [])) if (c.expiration_date) set.add(c.expiration_date);
+            { results?: { expiration_date?: string; strike_price?: number }[]; next_url?: string };
+          for (const c of (j.results ?? [])) {
+            if (!c.expiration_date) continue;
+            set.add(c.expiration_date);
+            const k = c.strike_price;
+            if (k == null || k < kLo || k > kHi) continue;
+            let e = ks.get(c.expiration_date);
+            if (!e) { e = new Set<number>(); ks.set(c.expiration_date, e); }
+            e.add(k);
+          }
           next = j.next_url ? `${j.next_url}&apiKey=${polygonKey}` : null;
         }
       } catch { /* keep whatever pages did arrive */ }
@@ -285,6 +311,11 @@ Deno.serve(async (req) => {
         target,
         chain: [...new Set([...(chains.get(t) ?? []),
                             ...legs.map((l) => l.expiry).filter(Boolean)])].sort(),
+        /* The real ladder the stepper walks, per expiry, ascending. An expiry
+           Polygon did not return is simply absent and the client falls back to
+           its old fixed step. */
+        strikes: Object.fromEntries([...(strikesBy.get(t) ?? new Map())]
+          .map(([e, ks]) => [e, [...ks].sort((a, b) => a - b)])),
         legs, closed,
       };
     });

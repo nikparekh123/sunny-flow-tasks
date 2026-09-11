@@ -372,7 +372,14 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
                 repeating that in a card the pointer has carried somewhere else
                 would be a figure that never moves as he scrubs. */}
             <div className="r"><span className="k">Net delta</span><span className="v num">{signed(deltaAt(liveLegs, hoverP, elapsed, ctx))}</span></div>
-            {bookOnly && <div className="r"><span className="k">Book only</span><span className={'v num ' + (total(hoverP, elapsed, bookLegs, ctx) < 0 ? 'loss' : 'gain')}>{money(total(hoverP, elapsed, bookLegs, ctx))}</span></div>}
+            {/* ⚠ THE BOOK-ONLY ROW IS GONE, AND ON PURPOSE. Nik, 2026-09-11,
+                asked what it meant and then cut it: "can we not add things
+                that I have to figure out". It also carried a real defect while
+                it lived here, evaluated at `elapsed` while the headline is at
+                `dte`, so the subtraction it existed for compared a with-plan
+                figure at expiry against a without-plan figure for today. The
+                grey book-only CURVE stays on the plot; it was only the row he
+                did not want. Do not put it back without asking. */}
             <div className="r"><span className="k">Value today</span><span className={'v num ' + (tod < 0 ? 'loss' : 'gain')}>{money(tod)}</span></div>
             <div className="r"><span className="k">Chance above</span><span className="v num">{Math.round(chanceAbove(hoverP) * 100)}%</span></div>
           </div>
