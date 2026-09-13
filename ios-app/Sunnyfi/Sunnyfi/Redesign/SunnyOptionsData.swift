@@ -352,6 +352,8 @@ struct OptionsPosition: Decodable, Identifiable {
     /// the book runs 15 long against 14 short on NFLX on purpose.
     let netDelta: Int
     let shorts: [ShortLeg]
+    /// What this name last wrote at, per share. The ranking unit of Left to sell.
+    let lastCr: Double?
     var id: String { t }
 
     struct ShortLeg: Decodable, Identifiable {
@@ -372,6 +374,19 @@ struct OptionsPosition: Decodable, Identifiable {
         let captured: Int
         let delta: Double
         let contract: String
-        var id: String { "\(n)|\(k)|\(exp)" }
+        /* ⚠ THE CREDIT PER SHARE THE LEG OPENED AT, the number quoted when the
+           trade is placed and the only one comparable against a chain. The roll
+           check prints it under an under-water strike, so the roll can be judged
+           against what the next strike out pays today, and multiplies it by the
+           captured percentage to turn that percentage into dollars. Optional so
+           a run against an older deployment decodes. */
+        let cr: Double?
+        let opened: String?
+        var id: String { "\(n)|\(k)|\(exp)|\(type ?? "")" }
+        /// Strike + side, the roll check's row label: `77C`, `37.5P`.
+        var label: String {
+            let ks = k == k.rounded() ? String(Int(k)) : String(format: "%.1f", k)
+            return ks + ((type ?? "call") == "put" ? "P" : "C")
+        }
     }
 }

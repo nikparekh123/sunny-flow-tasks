@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-12.1';
+const BUILD = '2026-09-13.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -337,8 +337,24 @@ Deno.serve(async (req) => {
               captured: (priced && credit > 0) ? Math.round((credit - value) / credit * 100) : 0,
               delta: sm.length ? r2(sm.reduce((a, x) => a + x.d, 0) / sm.length) : 0,
               contract: contractLine(s.n, s.k, s.exp, false),
+              /* ⚠ THE CREDIT PER SHARE THE LEG OPENED AT, which is the number
+                 quoted when the trade is placed and the only one comparable
+                 against a chain. The roll check reads it two ways: printed
+                 under an under-water strike, so the roll can be judged against
+                 what the next strike out pays today, and as the basis of the
+                 tap that turns a captured percentage into dollars. */
+              cr: s.n > 0 ? r2(credit / (s.n * 100)) : 0,
+              opened: s.opened,
             };
           });
+
+        /* What this name LAST wrote at, per share: the ranking unit of the roll
+           check's second view, where a name's room is worth what its own recent
+           credit says it is worth. The most recently opened short leg, not the
+           book average, because a name's own last print is what the next one
+           will look like. */
+        const lastShort = [...shorts].sort((a, b) => (a.opened < b.opened ? 1 : -1))[0];
+        const lastCr = lastShort ? lastShort.cr : 0;
 
         const wk = creditByWeek.get(t) ?? new Map();
         const collected = [...wk.values()].reduce((a, b) => a + b, 0);
@@ -399,6 +415,7 @@ Deno.serve(async (req) => {
              because Nik goes long-heavier when he is bullish, and that is
              deliberate rather than a rounding. */
           netDelta: Math.round(dLong * leap.n * 100 - dShort * shortN * 100),
+          lastCr,
           shorts,
         };
       })

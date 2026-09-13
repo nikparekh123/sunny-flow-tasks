@@ -151,426 +151,491 @@ private func signedPctInt(_ v: Int) -> String {
 
 // MARK: - 1 · Roll check
 
-/// ⚠ NOTHING HOLDS, AND NO LEG IS FILTERED. Selling weekly, every leg resolves
-/// in its expiry week: in or at the money rolls, out of it goes to the next
-/// expiry. There is no third state, no grey bar and no missing row — a reader
-/// cannot tell a filtered card from a broken one.
-///
-/// ⚠ COLOUR IS THE ACTION; THE LEVEL LINES ARE GREY. A coloured line at +75 is
-/// what made an earlier build contradict itself: a red "rolling" bar sitting
-/// 49px above the red line it had supposedly crossed.
-struct SunnyRollCheck: View {
-    /* ⚠ THIS CARD ABSORBED THE INVENTORY CARD, 2026-09-11. Nik had Inventory
-       and To roll deleted and the capacity they carried folded in here. Three
-       forms were built side by side and he chose this one: the free contracts
-       sit UNDER the percentage, where the eye already lands for that row, and
-       speak in words where a ratio reads cold. "all sold" beats "0/5".
+/* ⚠ THIS REPLACES THE PREVIOUS ROLL CHECK, 13 Sep 2026, from the `roll-check-card`
+   handoff (cards/roll-check.md, Sunny Roll Check Card.dc.html). The old card is
+   deleted, not kept beside it, and the Inventory figures it had absorbed on 11 Sep
+   come back as a view of their own rather than a line under each percentage.
 
-       The two he rejected, so they are not re-proposed: the ratio inline after
-       the name ("BABA 15/15") cost the track 26pt of width, and painting the
-       capacity into the TRACK put a second axis in the same box as the capture
-       axis. This one costs row height and nothing else. */
+   ⚠ ONE CARD, TWO QUESTIONS, THE SAME NAMES. Captured asks what the sold premium
+   has captured, strike by strike. Left to sell asks what is still writeable, name
+   by name. The switch is the end of the eyebrow line and is the only thing on it
+   you can tap: no tab band, because a tab band says the two are peers being chosen
+   between, and they are one question asked at two moments of the week.
+
+   ⚠ A STRIKE IS THE UNIT OF A ROLL, never a per-name average. NFLX's two strikes
+   are two decisions and averaging them would describe neither. Groups sort by
+   their worst leg and legs sort worst-first inside, so the rows needing a decision
+   are the rows at the top.
+
+   ⚠ THE OTHER CARDS SUPPLY THE WHY, and this card owns none of it. Prices says the
+   stock moved THROUGH the strike, which turns the strike red, and how far it ran
+   this week, which is the group's meta line. Average credit says what the leg
+   opened at. Premium now says what the IV is doing.
+
+   ⚠ AND THE FOOTER MUST NOT MOVE WHEN THE VIEW DOES. Both views carry a floor so
+   the stat band stays under the same thumb; the height between them is animated
+   rather than cut. */
+struct SunnyRollCheck: View {
     let book: OptionsBook
     let positions: [OptionsPosition]
-    /// Held and sold per name, from the same payload Inventory used to render.
+    /// Inventory — calls and puts still writeable, per name.
     var inventory: [InventoryRow] = []
-    var captureLine: Int = 75
-    var giveBackLine: Int = -100
+    /// Prices — spot, the day's move and the week's, plus the IV band.
+    var prices: [PriceRow] = []
 
-    struct Bar: Identifiable {
-        let id: String, ticker: String, captured: Int, itm: Bool
-        /* ⚠ THE LABEL IS NOT THE SYMBOL. `ticker` is the drawn label and may
-           read "FIS 39P" or "BABA 11 Sep"; inventory is keyed on the bare
-           name, so the row has to carry both. */
-        var sym: String = ""
-        /// Which half of the list the row belongs to. A sold put and a sold
-        /// call are opposite trades and Nik reads them as two groups.
-        var isPut: Bool = false
-        /// Credit minus current value, in dollars — the same quantity the
-        /// percentage expresses, which is why one tap may swap them.
-        var kept: Int = 0
-        /* ⚠ FALSE MEANS NO CALL IS SOLD, WHICH IS NOT A CAPTURE OF ZERO.
-           An uncovered name has captured nothing because there is nothing
-           to capture, and the row must say that rather than draw a bar at
-           the zero line as though a leg existed and had gone nowhere. */
-        var covered: Bool = true
+    private enum View2 { case captured, left }
+    /* ⚠ THREE STATES, NOT THE SHEET'S TWO. Nik, 2026-09-13: "we need a third one
+       which is remaining". The percentage says how much of the credit is banked,
+       the captured dollars say what that is worth, and REMAINING is what closing
+       the leg would cost today. They are the same fact stated three ways and
+       none is derivable from the row alone, which is what earns the third stop
+       rather than making it a third way of saying one thing. */
+    private enum Fig { case pct, captured, remaining }
+    @State private var view: View2 = .captured
+    @State private var fig: Fig = .pct
+    @State private var ivMult = false        // Left to sell: the word or the multiple
+    @State private var yieldUsd = false      // Left to sell: yield % or dollars
+    @State private var appeared = false
+    @State private var now = Date()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /* ⚠ THE AXIS RUNS −125 TO +100 AND THE ZERO IS NOT ITS MIDDLE. A leg can give
+       back more than the credit it took (−125 is the call having more than
+       doubled) but it can never capture more than all of it, so the two ends are
+       not symmetric and pretending they are would put +100 in the middle of a bar
+       that has nothing beyond it. */
+    private let axLo: Double = -125, axHi: Double = 100
+    private var track: CGFloat { S.content - 48 - 46 - 10 - 10 - 56 }
+    private func x(_ p: Double) -> CGFloat {
+        CGFloat((min(max(p, axLo), axHi) - axLo) / (axHi - axLo)) * track
+    }
+    private var zeroX: CGFloat { x(0) }
+
+    // MARK: the week's clock
+
+    private var etCal: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        return c
+    }
+    /* ⚠ THE WEEK IS OVER ON FRIDAY NIGHT. "kept this week" is a live figure while
+       the week is open; from Friday 20:00 ET to Monday 04:00 ET the week it refers
+       to has CLOSED, so the words leave and the figure stands alone as the week's
+       result. The same window the Prices card uses for its day chip, so the two
+       cards go quiet together. */
+    private var weekOpen: Bool {
+        let wd = etCal.component(.weekday, from: now), h = etCal.component(.hour, from: now)
+        if wd == 7 || wd == 1 { return false }
+        if wd == 6 && h >= 20 { return false }
+        if wd == 2 && h < 4 { return false }
+        return true
     }
 
-    /* ⚠ THE LABEL CARRIES THE STRIKE ONLY WHEN IT HAS TO. The sheet's bar
-       label is the ticker, which assumes one short leg per name — and Nik runs
-       two on NKE deliberately ($40 × 50 and $39 × 10), so two bars arrived
-       labelled `NKE` and `NKE`, indistinguishable. The strike is appended only
-       for a name with more than one leg, so the common case keeps the sheet's
-       form exactly and the ambiguous one stops lying. */
-    /* ⚠ THE STRIKE IS NOT ALWAYS ENOUGH TO TELL TWO LEGS APART. It was while
-       the only doubled name was NKE at 39 and 40. Then BABA went to 114 for
-       4 Sep AND 114 for 11 Sep — a roll to the same strike a week out, which is
-       the normal shape of this book — and both rows rendered "BABA 114". Two
-       identical labels on two different legs is worse than no label.
+    // MARK: borrowed readings
 
-       So the disambiguator escalates: one leg is the bare name, several legs
-       take the strike, and legs that COLLIDE on a strike also take the expiry.
-       Only the colliding ones, so NKE stays "NKE 39 / NKE 40" and does not
-       grow a date it does not need. */
-    /* ⚠ WORST FIRST, and the reference is unambiguous about it: -113, -111,
-       14, 23 … 83. The rows are a queue of work, so the leg that needs a
-       decision has to be the one your eye lands on. Unsorted meant the order
-       was whatever the book happened to return. */
-    private var bars: [Bar] {
-        sortedBars
+    private func px(_ t: String) -> PriceRow? { prices.first { $0.ticker == t } }
+    private func inv(_ t: String) -> InventoryRow? { inventory.first { $0.t == t } }
+    private func freeCalls(_ t: String) -> Int { max(0, (inv(t)?.callsHeld ?? 0) - (inv(t)?.callsSold ?? 0)) }
+    private func freePuts(_ t: String) -> Int { max(0, (inv(t)?.putsHeld ?? 0) - (inv(t)?.putsSold ?? 0)) }
+
+    /// A sold strike the stock has moved THROUGH: a call below spot, a put above it.
+    private func through(_ l: OptionsPosition.ShortLeg, _ spot: Double?) -> Bool {
+        guard let spot, spot > 0 else { return false }
+        return (l.type ?? "call") == "put" ? spot < l.k : spot > l.k
     }
 
-    /* ⚠ UNCOVERED NAMES SORT ABOVE EVERYTHING, not into the numeric order.
-       They have no captured value to sort BY, and they are the work that has
-       not started: a name with no call earns nothing this week, while a leg
-       at -28% out of the money needs no decision at all. Nik found this the
-       hard way — the card said "5 legs" while he held seven LEAPs, and the
-       three it could not draw (FIS, PEP, KR, whose calls expired on the
-       Friday) were exactly the three needing action. */
-    private var sortedBars: [Bar] { callBars + putBars }
+    // MARK: the two views' rows
 
-    /* ⚠ CALLS AND PUTS ARE TWO LISTS WITH ONE RULE, not one list. Nik,
-       2026-09-08: "Is there a way to separate the puts and calls here with a
-       small divider line." This supersedes the 2026-09-06 ruling of a single
-       sorted list; the `110P` suffix stays, because a divider groups but does
-       not label.
-
-       Worst-first still holds INSIDE each group, so each half is its own queue
-       of work. A name with no call sits with the calls: that is where the
-       missing leg would go. */
-    /* ⚠ EVERY NAME APPEARS ON EVERY SIDE IT CAN SELL. Nik, 2026-09-11: "we
-       need to show all tickers both we need to show puts and calls thats the
-       whole idea".
-
-       The puts half used to list only names with a put ALREADY SOLD, so the
-       five names holding long puts and nothing written against them were
-       invisible in exactly the half that would have told him to write one. The
-       calls half had the right rule and the puts half never got it.
-
-       EVERY NAME TAKES A ROW ON BOTH SIDES, with no gate at all. Nik's
-       ruling, 2026-09-11: "yes show all 7 in both". I had first excluded a
-       side a name holds nothing on, so KR and PEP had no put row; he wants the
-       absence visible, and he is right that "KR has no put protection" is
-       exactly the kind of thing a card listing the book should say out loud.
-       Such a row carries no capacity line, because there is no ladder to
-       count, so it reads as the bare name and "No put". */
-    private func uncoveredSorted(_ put: Bool) -> [Bar] {
-        rawBars.filter { !$0.covered && $0.isPut == put }.sorted { $0.ticker < $1.ticker }
+    /* Named for the legs, not "Group": a bare `Group` shadows SwiftUI's own and
+       the view builder then tries to construct this one. */
+    private struct LegGroup: Identifiable {
+        let id: String, t: String, meta: String, worst: Int
+        let legs: [OptionsPosition.ShortLeg]
+        let spot: Double?
     }
-    private func coveredSorted(_ put: Bool) -> [Bar] {
-        rawBars.filter { $0.covered && $0.isPut == put }.sorted { $0.captured < $1.captured }
+    private var groups: [LegGroup] {
+        positions.compactMap { p -> LegGroup? in
+            guard !p.shorts.isEmpty else { return nil }
+            let legs = p.shorts.sorted { $0.captured < $1.captured }
+            let row = px(p.t)
+            let wk = row?.pct.w1
+            let meta = [row?.spot.map { "$" + String(format: "%.2f", $0) },
+                        wk.map { signed1Pct($0) + " wk" }]
+                .compactMap { $0 }.joined(separator: " \u{00B7} ")
+            return LegGroup(id: p.t, t: p.t, meta: meta,
+                         worst: legs.first?.captured ?? 0, legs: legs, spot: row?.spot)
+        }
+        .sorted { $0.worst < $1.worst }
     }
-    private var callBars: [Bar] { uncoveredSorted(false) + coveredSorted(false) }
-    private var putBars: [Bar] { uncoveredSorted(true) + coveredSorted(true) }
+    private var allLegs: [OptionsPosition.ShortLeg] { positions.flatMap(\.shorts) }
+    private var underWater: Int { allLegs.filter { $0.captured < 0 }.count }
+    private var totalFree: Int { positions.reduce(0) { $0 + freeCalls($1.t) + freePuts($1.t) } }
+    private var kept: Int { (book.openCredit ?? 0) - (book.openValue ?? 0) }
 
-    private var rawBars: [Bar] {
-        positions.flatMap { p -> [Bar] in
-            /* A ladder with nothing written against it is still a row. The card
-               is the only place the book is listed against its short legs, so a
-               side it cannot draw is a side that cannot be noticed. */
-            let empty: [Bar] = [false, true]
-                .filter { side in !p.shorts.contains { ($0.type == "put") == side } }
-                .map { side in
-                    Bar(id: "\(p.t)-none-\(side ? "p" : "c")", ticker: p.t, captured: 0,
-                        itm: false, sym: p.t, isPut: side, covered: false)
-                }
-            guard !p.shorts.isEmpty else { return empty }
-            let strikeCount = Dictionary(grouping: p.shorts, by: \.k).mapValues(\.count)
-            return empty + p.shorts.map { s in
-                let k = s.k.formatted(.number.precision(.fractionLength(0)))
-                let label: String
-                if p.shorts.count <= 1 { label = p.t + (s.type == "put" ? " \(k)P" : "") }
-                /* ⚠ AND THE STRIKE IS DROPPED WHEN IT COLLIDES, not kept
-                   alongside the date. Two legs at 114 make "114" carry no
-                   information at all; keeping it only bought "BABA 114 11 Sep",
-                   which does not fit any sane name column. The date alone
-                   separates them. */
-                else if (strikeCount[s.k] ?? 0) > 1 {
-                    label = "\(p.t)\(s.type == "put" ? " \(k)P" : "") \(shortDay(s.exp))"
-                }
-                /* ⚠ A PUT SUFFIXES ITS STRIKE. Without it a sold 140 call and
-                   a sold 140 put on PEP render the identical row, and they are
-                   opposite trades — one is assigned when the name rises and the
-                   other when it falls. Nik's call, 2026-09-06. */
-                else { label = "\(p.t) \(k)\(s.type == "put" ? "P" : "")" }
-                return Bar(id: "\(p.t)-\(s.id)", ticker: label,
-                           captured: s.captured, itm: s.itm, sym: p.t,
-                           isPut: s.type == "put",
-                           kept: s.credit - (s.priced == false ? s.credit : s.value))
-            }
+    private struct LeftRow: Identifiable {
+        let id: String, t: String, split: String
+        let has: Bool, cr: Double, yld: Double, mult: Double
+        let word: String, rich: Bool, move: Double?
+        let free: Int, rank: Double
+    }
+    private var lefts: [LeftRow] {
+        positions.map { p -> LeftRow in
+            let fc = freeCalls(p.t), fp = freePuts(p.t), n = fc + fp
+            let row = px(p.t)
+            let spot = row?.spot ?? 0, cr = p.lastCr ?? 0
+            let yld = spot > 0 ? cr / spot * 100 : 0
+            let m = row?.iv.map { $0.usual > 0 ? $0.now / $0.usual : 1 } ?? 1
+            var parts: [String] = []
+            if fc > 0 { parts.append("\(fc) call" + (fc == 1 ? "" : "s")) }
+            if fp > 0 { parts.append("\(fp) put" + (fp == 1 ? "" : "s")) }
+            return LeftRow(
+                id: p.t, t: p.t,
+                /* ⚠ "fully written" IS AN ABSENCE, NOT A QUANTITY. "0 calls ·
+                   0 puts free" reads as two measurements that happen to be zero. */
+                split: parts.isEmpty ? "fully written" : parts.joined(separator: " \u{00B7} ") + " free",
+                has: n > 0, cr: cr, yld: yld, mult: m,
+                word: row?.ivWord ?? "", rich: row?.ivRich ?? false,
+                move: row?.pct.today, free: n,
+                /* ⚠ THE RANKING IS ROOM × WHAT IT PAYS × HOW WELL IT PAYS TODAY.
+                   Free contracts alone ranks a name you cannot get a price for
+                   above one you can. */
+                /* A name with no history ranks on room alone, below anything
+                   that has actually paid, rather than at zero. */
+                rank: cr > 0 ? Double(n) * yld * m : Double(n) * 0.0001)
+        }
+        .sorted { $0.rank > $1.rank }
+    }
+
+    // MARK: formatting
+
+    private func signed1Pct(_ v: Double) -> String {
+        let a = String(format: "%.1f", abs(v))
+        return (a == "0.0" ? "" : v < 0 ? "\u{2212}" : "+") + a + "%"
+    }
+    private func pct0(_ v: Int) -> String { (v < 0 ? "\u{2212}" : "") + "\(abs(v))%" }
+    /// The right column's three readings of one leg.
+    private func figText(_ l: OptionsPosition.ShortLeg) -> String {
+        switch fig {
+        case .pct:       return pct0(l.captured)
+        /* Credit minus what it is worth now: the money the strike has kept, or
+           given back when the option has run against you. */
+        case .captured:  return optMoney(l.credit - l.value)
+        /* What buying it back costs today, which is the credit still to be
+           captured. A leg at 100% has nothing remaining. */
+        case .remaining: return optMoney(l.value)
         }
     }
-
-    /* ⚠ THE COLUMNS ARE MEASURED, NOT ASSUMED. 46 was sized for a bare
-       ticker and 44 for "-111%"; the first label with a date in it truncated
-       to "BABA..." and -158% wrapped onto a second line. Both columns now take
-       their widest actual content and the TRACK absorbs the difference, so the
-       row still totals 323 and the plot never overflows the card. */
-    private var nameCol: CGFloat {
-        min(134, max(S.progNameCol,
-                     (bars.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3))
-    }
-    /* ⚠ THE COLUMN TAKES THE WIDER OF ITS TWO LINES. The capacity line sits
-       under the percentage, and "45 of 60" is wider than "−8%", so sizing on
-       the percentage alone would wrap the line beneath it. */
-    private var valCol: CGFloat {
-        let pct = (bars.map { S.textW($0.covered ? barePctInt($0.captured) : noneLabel($0),
-                                      S.t13, S.wSemiN) }.max() ?? 0) + 3
-        let words = (bars.map { S.textW(capWords($0), S.t10, S.wMidSmN) }.max() ?? 0) + 3
-        return max(S.progValCol, max(pct, words))
-    }
-    private var uncovered: Int { rawBars.filter { !$0.covered }.count }
-    /// "No call" on the calls half, "No put" on the puts half.
-    private func noneLabel(_ b: Bar) -> String { b.isPut ? "No put" : "No call" }
-
-    // MARK: capacity, folded in from the retired Inventory card
-
-    /* ⚠ THE SIDE MATTERS. A call row must read the CALL ladder and a put row
-       the PUT ladder: NKE has 60 calls untouched and only 45 puts left, and
-       putting one number against the other row would invent capacity he does
-       not have. */
-    private func cap(_ b: Bar) -> (held: Int, free: Int)? {
-        guard let r = inventory.first(where: { $0.t == b.sym }) else { return nil }
-        let held = b.isPut ? r.putsHeld : r.callsHeld
-        let sold = b.isPut ? r.putsSold : r.callsSold
-        guard held > 0 else { return nil }
-        return (held, max(0, held - sold))
-    }
-    /// Words, not a ratio: "all sold" beats "0/5" and "15 free" beats "15/15".
-    private func capWords(_ b: Bar) -> String {
-        guard let c = cap(b) else { return "" }
-        if c.free == 0 { return "all sold" }
-        if c.free == c.held { return "\(c.free) free" }
-        return "\(c.free) of \(c.held)"
-    }
-    /// Total still sellable across the book, for the header.
-    private var totalFree: Int {
-        inventory.reduce(0) { $0 + max(0, $1.callsHeld - $1.callsSold)
-                                 + max(0, $1.putsHeld - $1.putsSold) }
+    private func settle(_ d: Double, delay: Double = 0) -> Animation {
+        .timingCurve(0.16, 1, 0.3, 1, duration: d).delay(delay)
     }
 
-
-    private var rowTrack: CGFloat {
-        max(110, S.content - 38 - nameCol - valCol - 2 * S.gap4)
-    }
-
-    /// "11 Sep" — only ever appended when two legs share a strike.
-    private func shortDay(_ iso: String) -> String {
-        let p = iso.split(separator: "-")
-        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]), (1...12).contains(m)
-        else { return iso }
-        let mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        return "\(d) \(mon[m - 1])"
-    }
-
-    /* ⚠ ONE FORM, ALWAYS ROWS. The sheet escalates ≤5 bars → 6–10 paged →
-       11+ rows, and both of the other two are gone for reasons this shell
-       forces.
-
-       PAGED cannot exist here: it pages on a horizontal gesture and our shell
-       IS a horizontal paging ScrollView, so the card and the navigation fight
-       over every drag. Nik hit that at six legs.
-
-       BARS is gone because the FORM ITSELF MOVED. It rendered at five legs or
-       fewer, so closing one call silently changed the card's shape — Nik, on
-       dropping back to five: "I thought we changed the layout so that all
-       tickers fit and suddenly it went back to the old layout." A card that
-       re-lays-itself out as the book breathes is not a layout, it is two
-       layouts and a coin toss. Bars also crowded the labels it did keep:
-       five names across 323 put "BABA 114" and "BABA 115" shoulder to
-       shoulder under 30pt columns.
-
-       Rows show every leg at once, at any count, with the name on its own
-       line and a measured column that fits it. The sheet's own argument for
-       escalating to rows — "a card you page three times to read is a list
-       pretending to be a chart" — lands at one page in a shell that owns the
-       gesture, which means it lands at five legs too. */
-    /* ⚠ VERIFICATION ONLY, and it exists because the touch bridge is dead —
-       `-showMoney` starts the card in the dollar state so the RENDERING can be
-       checked. It does not test the tap, which cannot be driven here. */
-    @State private var showMoney = moneyByDefault
+    // MARK: body
 
     var body: some View {
-        rowsCard
-            /* A discrete tap, so it never competes with the shell's horizontal
-               paging drag. */
-            .contentShape(Rectangle())
-            .onTapGesture { showMoney.toggle() }
-    }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+                HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                    Text("Roll check").font(S.inter(S.t14, S.wBoldN))
+                        .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
+                    Text("sold").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
+                }
+                Spacer(minLength: 0)
+                /* Both counted, never stated: the header is the card's own census. */
+                Text("\(underWater) asking of \(allLegs.count) legs")
+                    .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            }
 
-    // MARK: rows
-
-    /// Free height, one row per leg. Name and value columns are `flex: none` —
-    /// the summary-lists rule, learned there when a `flex: 1` ticker slot shrank
-    /// under BABA and ate the row gap.
-    private var rowsCard: some View {
-        let hi = max(CGFloat(captureLine), CGFloat(bars.map(\.captured).max() ?? 0)) * 1.1
-        let lo = min(CGFloat(giveBackLine), CGFloat(bars.map(\.captured).min() ?? 0)) * 1.1
-        let track: CGFloat = rowTrack
-        let x = { (v: CGFloat) in track * (v - lo) / max(hi - lo, 1) }
-        return OptCard(name: "roll-check-rows", fixedHeight: nil) {
-            /* "5 legs" was true and misleading: it counted what the card
-               could draw, not what he holds. */
-            /* "calls sold" while it carried only calls. It carries sold puts
-               too now, and a header that names one leg type while showing both
-               is the same class of lie as "5 legs" was. */
-            /* ⚠ THE HEADER CARRIES THE BOOK'S SPARE CAPACITY NOW. Inventory
-               is off the page, and "176 free" is the one figure of its footer
-               that was not already derivable from the rows. */
-            OptHead(title: "Roll check", sub: "sold",
-                    right: totalFree > 0
-                        ? "\(positions.count) names \u{00B7} \(totalFree) free"
-                        : (uncovered == 0 ? "\(positions.count) names"
-                                          : "\(uncovered) with no call"))
-            Spacer().frame(height: S.gap7)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("CAPTURED OF CREDIT")
-                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                    .foregroundStyle(S.mute)
-                HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
-                    Text(optMoney(book.kept))
-                        .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
-                        .foregroundStyle(book.kept < 0 ? S.loss : S.gain)
-                        .sunnyLineBox(S.t30)
-                    Text("kept \(book.openWhen ?? "this week")")
-                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
-                }
-            }
-            Spacer().frame(height: 18)
-            HStack(spacing: S.gap4) {
-                Color.clear.frame(width: nameCol, height: 1)
-                HStack {
-                    /* No % on the axis. The eyebrow already says CAPTURED OF
-                       CREDIT, and the reference layout drops it. */
-                    Text("\(giveBackLine)".replacingOccurrences(of: "-", with: "\u{2212}"))
-                    Spacer()
-                    Text("+\(captureLine)")
-                }
-                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                .foregroundStyle(S.mute)
-                .frame(width: track)
-                Color.clear.frame(width: valCol, height: 1)
-            }
-            .padding(.bottom, S.gap4)
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: S.progRowGap) {
-                    ForEach(callBars) { b in rowFor(b, x: x, track: track) }
-                    /* Only when both halves exist. A lone divider under an
-                       all-calls book would announce a section that is not
-                       there. It spans the name column and the track, stopping
-                       short of the value column, so the percentages stay a
-                       single unbroken edge down the right. */
-                    if !callBars.isEmpty && !putBars.isEmpty {
-                        Rectangle().fill(S.ruleColor)
-                            .frame(width: nameCol + S.gap4 + track, height: 1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    ForEach(putBars) { b in rowFor(b, x: x, track: track) }
-                }
-                /* The lines live in the ROW box, so each carries the name
-                   column plus its gap as an offset. */
-                ForEach([("give", CGFloat(giveBackLine)), ("cap", CGFloat(captureLine))], id: \.0) { _, v in
-                    Rectangle().fill(S.hair).frame(width: S.refLine)
-                        .offset(x: nameCol + S.gap4 + x(v), y: -4)
-                        .frame(maxHeight: .infinity).padding(.bottom, -4)
-                }
-                Rectangle().fill(S.ruleColorStrong).frame(width: 1)
-                    .offset(x: nameCol + S.gap4 + x(0), y: -4)
-                    .frame(maxHeight: .infinity).padding(.bottom, -4)
-            }
             Spacer().frame(height: 22)
-            /* ⚠ COLLECTED AND CURRENT VALUE ARE THE HERO'S TWO HALVES, so
-               every figure on the card audits against the other two:
-               5,267 − 5,441 = −174, which is what "kept this week" says.
-               ROLLING is gone because colour no longer means moneyness and a
-               count with nothing on screen agreeing with it is a loose end.
-               Yield is GROSS — credit on the LEAP capital, before buying the
-               legs back — and it is the same 2.70% the weekly-yield card
-               charts for the week these legs cover, because the server
-               computes it once for both. */
+
+            Group {
+                if view == .captured { capturedView } else { leftView }
+            }
+            /* ⚠ A FLOOR ON BOTH VIEWS, so the footer does not travel under the
+               thumb when the question changes. */
+            .frame(minHeight: 300, alignment: .top)
+            .animation(reduceMotion ? nil : settle(0.5), value: view)
+
+            /* OptFooter draws the rule itself; adding one here gave the card two
+               hairlines 50pt apart, which reads as a band rather than an edge. */
+            Spacer().frame(height: 26)
+            /* ⚠ THE FOOTER IS THE ONE HE ALREADY HAD, which overrides the sheet's
+               Rolling / Left to sell / Kept. Nik, 2026-09-13: "bottom i need the
+               same data as before, Credit collected current value and yireld".
+               The sheet's three restate the card: ROLLING is the header's own
+               count, LEFT TO SELL is the other view's hero, and KEPT is this
+               view's hero printed twice. These three are the week's money and
+               they audit each other — collected minus worth now IS the hero. */
             OptFooter(stats: [
-                .init(label: "Collected",
-                      value: optMoney(book.openCredit ?? 0), ink: S.gainText),
-                /* "Current value" truncated to "CURRENT VA…" in a third of
-                   323 at 10px. The Long calls card already settled this
-                   wording, so both now say the same thing. */
-                .init(label: "Worth now",
-                      value: optMoney(book.openValue ?? 0), ink: S.ink),
-                .init(label: "Yield",
-                      value: String(format: "%.1f%%", book.openYield ?? 0), ink: S.ink),
+                .init(label: "Collected", value: optMoney(book.openCredit ?? 0), ink: S.gainText),
+                .init(label: "Worth now", value: optMoney(book.openValue ?? 0), ink: S.ink),
+                .init(label: "Yield", value: String(format: "%.1f%%", book.openYield ?? 0), ink: S.ink),
             ])
         }
+        .frame(width: S.content - 48, alignment: .leading)
+        .padding(EdgeInsets(top: 24, leading: 24, bottom: 28, trailing: 24))
+        .frame(width: S.content, alignment: .top)
+        .background(S.paper)
+        .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
+        .sunnyShadow(S.shadowCard)
+        .monospacedDigit()
+        .measure("roll-check")
+        /* ⚠ THE ENTRANCE IS DRIVEN BY THE DATA ARRIVING, NOT BY THE VIEW
+           APPEARING. Nik, 2026-09-13: "also animation is not there". It was
+           there and it had already finished: `onAppear` fires on the empty card
+           while the fetch is still in flight, so `appeared` was true before a
+           single bar existed and every bar rendered at full width. The flag now
+           flips one frame AFTER the first non-empty render, which is the only
+           moment a grow-from-zero has anything to grow. */
+        .task(id: allLegs.count) {
+            now = Date()
+            guard !allLegs.isEmpty, !appeared else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            appeared = true
+        }
     }
 
-    @ViewBuilder private func rowFor(_ b: Bar, x: (CGFloat) -> CGFloat,
-                                     track: CGFloat) -> some View {
-        let v = CGFloat(b.captured)
-        let x0 = x(min(v, 0)), x1 = x(max(v, 0))
-        HStack(spacing: S.gap4) {
-            Text(b.ticker)
-                .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
-                .foregroundStyle(b.covered ? S.ink : S.mute)
-                .frame(width: nameCol, alignment: .leading).lineLimit(1)
+    // MARK: eyebrow + switch, shared by both views
+
+    @ViewBuilder private func eyebrow(_ label: String, _ go: String,
+                                      _ action: @escaping () -> Void) -> some View {
+        HStack(alignment: .center, spacing: S.gap6) {
+            Text(label).font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                .foregroundStyle(S.mute)
+            Spacer(minLength: 0)
+            /* ⚠ THE SWITCH CARRIES NO UNDERLINE. Its arrow is the affordance, and
+               the dotted hint is reserved for a figure that FLIPS in place. Two
+               different promises need two different marks. */
+            HStack(spacing: 5) {
+                Text(go).font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
+                    .foregroundStyle(S.ink2)
+                Text("\u{2192}").font(S.inter(S.t11, S.wSemiN)).foregroundStyle(S.mute)
+            }
+            .padding(.vertical, 10).padding(.horizontal, 7)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: action)
+            .padding(.vertical, -10).padding(.horizontal, -7)
+        }
+        .frame(height: 12)
+    }
+
+    // MARK: captured
+
+    @ViewBuilder private var capturedView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow(fig == .remaining ? "LEFT TO CAPTURE"
+                    : fig == .captured ? "CAPTURED, IN MONEY" : "CAPTURED OF CREDIT",
+                    "Left to sell") { view = .left }
+            Spacer().frame(height: 12)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(optMoney(kept))
+                    .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.035))
+                    .foregroundStyle(kept < 0 ? S.lossText : S.gainText)
+                    .sunnyLineBox(S.t30)
+                if weekOpen {
+                    Text("kept this week")
+                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+                }
+            }
+            Spacer().frame(height: 28)
+
+            /* The two levels are ANNOTATIONS on the money axis, never gates and
+               never a money hue: +75 is three quarters of the credit banked,
+               −100 is the option having doubled. */
+            HStack(spacing: 10) {
+                Color.clear.frame(width: 46, height: 11)
+                ZStack(alignment: .leading) {
+                    Text("\u{2212}100").font(S.inter(S.t10, S.wBoldN))
+                        .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+                        .fixedSize().offset(x: x(-100) - 10)
+                    Text("+75").font(S.inter(S.t10, S.wBoldN))
+                        .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+                        .fixedSize().offset(x: x(75) - 8)
+                }
+                .frame(width: track, height: 11, alignment: .leading)
+                Color.clear.frame(width: 56, height: 11)
+            }
+            Spacer().frame(height: 14)
+
+            VStack(alignment: .leading, spacing: 26) {
+                ForEach(Array(groups.enumerated()), id: \.element.id) { gi, g in
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                            Text(g.t).font(S.inter(S.t15, S.wSemiN))
+                                .tracking(S.track(S.t15, -0.015)).foregroundStyle(S.ink)
+                            Spacer(minLength: 0)
+                            /* ⚠ THE CAUSE, NOT A REPEAT. The captured figures are
+                               the symptom; where the stock is and how far it ran
+                               is why they read as they do. */
+                            Text(g.meta).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                        }
+                        .frame(height: 15)
+                        Spacer().frame(height: 14)
+                        VStack(alignment: .leading, spacing: 16) {
+                            ForEach(Array(g.legs.enumerated()), id: \.element.id) { li, l in
+                                legRow(l, spot: g.spot, delay: Double(gi * 3 + li) * 0.018)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .transition(.opacity)
+    }
+
+    @ViewBuilder private func legRow(_ l: OptionsPosition.ShortLeg, spot: Double?,
+                                     delay: Double) -> some View {
+        let up = l.captured >= 0
+        let w = abs(x(Double(l.captured)) - zeroX)
+        let grown = reduceMotion || appeared
+        let cr = l.cr ?? 0
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                /* ⚠ A STRIKE IN LOSS INK IS ONE THE STOCK HAS MOVED THROUGH, and
+                   that is a different statement from the bar's colour. Red strike
+                   with a red bar says roll it; red strike with a green bar says it
+                   ran through and you are still ahead. */
+                Text(l.label).font(S.inter(S.t13, S.wBodyN)).tracking(S.track(S.t13, -0.01))
+                    .foregroundStyle(through(l, spot) ? S.lossText : S.ink2)
+                    .lineLimit(1)
+                /* ⚠ PRINTED ONLY UNDER AN UNDER-WATER LEG. A healthy leg's entry
+                   is not a decision, and the line exists to be read against the
+                   chain: if the next strike out pays more than this today, the
+                   roll pays for itself. */
+                Text(!up && cr > 0 ? "$" + String(format: "%.2f", cr) : "")
+                    .font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+                    .frame(height: 10, alignment: .leading)
+            }
+            .frame(width: 46, height: 26, alignment: .leading)
+
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
-                /* ⚠ NO MARK AT ALL WHEN NOTHING IS SOLD. A 2pt sliver at the
-                   zero line would read as a leg that captured nothing, which
-                   is a different and wrong statement. */
-                if b.covered {
-                    RoundedRectangle(cornerRadius: S.radiusBar)
-                        .fill(b.captured < 0 ? S.lossBar : S.gainBar)
-                        .frame(width: max(2, x1 - x0))
-                        .offset(x: x0)
+                    .frame(width: track, height: 14)
+                ForEach([-100.0, 0.0, 75.0], id: \.self) { v in
+                    Rectangle().fill(S.hair).frame(width: 1.5, height: 22)
+                        .offset(x: x(v) - 0.75)
                 }
+                RoundedRectangle(cornerRadius: S.radiusBar)
+                    .fill(up ? S.gainBar : S.lossBar)
+                    .frame(width: max(2, w), height: 14)
+                    .scaleEffect(x: grown ? 1 : 0, anchor: up ? .leading : .trailing)
+                    .offset(x: up ? zeroX : zeroX - max(2, w))
+                    .animation(settle(0.72, delay: delay), value: appeared)
+                    .animation(reduceMotion ? nil : settle(0.55), value: view)
             }
-            .frame(width: track, height: S.progRowH)
-            .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
-            /* ⚠ THE INK IS THE MONEY, AND IT WAS MONEYNESS UNTIL 2026-09-06.
-               The reference layout coloured by moneyness — JPM at +14% RED
-               because it was in the money — and I built that. Nik overruled it
-               after living with it: "Bar shuold be green for anything positive
-               which means if collected 1000 and current avlue is 250 which is
-               positive... When red is opposite of the first one - Collected
-               1000 and current value 1500."
+            .frame(width: track, height: 14)
 
-               He is right about the failure mode. Nothing was in the money, so
-               the colour channel carried NO information at all — eight green
-               rows, four of them losing money. Moneyness only speaks on the
-               days something is ITM; the sign speaks every day.
-
-               ⚠ SO THE CARD NO LONGER MARKS WHICH LEG TO ROLL, and the page
-               title carries that instead ("2 to roll"). The bar's SIDE of the
-               centre line was already the sign, so colour and position now say
-               the same thing twice — which is the price of the trade. */
-            /* "No call" takes --mute: it is neither a win nor a loss, it is
-               an absence, and giving it direction ink would rank it against
-               figures it is not comparable to. */
-            /* ⚠ ONE TAP SWAPS THE UNIT, and the two are the same fact. A
-               percentage compares legs of different sizes; the dollars say
-               what it is worth. NKE at -17% and BABA 114 at -23% look like
-               BABA is worse, and in money NKE is the larger number because it
-               is 50 contracts against 5. Both readings are true and neither
-               is derivable from the row alone, which is the whole reason the
-               tap exists rather than a choice of one. */
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(b.covered ? (showMoney ? optMoney(b.kept) : barePctInt(b.captured))
-                               : noneLabel(b))
-                    .font(S.inter(S.t13, S.wSemiN))
-                    .foregroundStyle(b.covered ? (b.captured < 0 ? S.lossText : S.gainText) : S.mute)
-                    .lineLimit(1)
-                /* ⚠ THE CAPACITY GOES WHERE THE EYE ALREADY LANDS. This is
-                   the whole of what the Inventory card used to say, per row
-                   and per SIDE, and it costs one muted line. A name with no
-                   ladder at all prints nothing rather than a zero. */
-                if !capWords(b).isEmpty {
-                    Text(capWords(b))
-                        .font(S.inter(S.t10, S.wMidSmN)).monospacedDigit()
-                        .foregroundStyle(S.mute).lineLimit(1)
+            /* ⚠ REMAINING TAKES NO DIRECTION INK. It is what the leg is worth to
+               whoever bought it, a cost to close and never a gain or a loss, so
+               colouring it would have the card arguing that owing money is a
+               win whenever the percentage happens to be green. */
+            Text(figText(l))
+                .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.015))
+                .foregroundStyle(fig == .remaining ? S.ink : (up ? S.gainText : S.lossText))
+                .lineLimit(1).fixedSize()
+                .sunnyHint()
+                .frame(width: 56, alignment: .trailing)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    fig = fig == .pct ? .captured : fig == .captured ? .remaining : .pct
                 }
-            }
-            .frame(width: valCol, alignment: .trailing)
         }
+        .frame(height: 26)
+    }
+
+    // MARK: left to sell
+
+    @ViewBuilder private var leftView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            eyebrow("LEFT TO SELL", "Captured") { view = .captured }
+            Spacer().frame(height: 12)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("\(totalFree)")
+                    .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.035))
+                    .foregroundStyle(S.ink).sunnyLineBox(S.t30)
+                Text("lots still writeable")
+                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+            }
+            Spacer().frame(height: 24)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(lefts.enumerated()), id: \.element.id) { i, r in
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(alignment: .top, spacing: 14) {
+                            Text(r.t).font(S.inter(S.t15, S.wSemiN))
+                                .tracking(S.track(S.t15, -0.015))
+                                .foregroundStyle(r.has ? S.ink : S.mute)
+                                .frame(width: 58, alignment: .leading).lineLimit(1)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(r.split).font(S.inter(S.t15, S.wSemiN))
+                                    .tracking(S.track(S.t15, -0.015))
+                                    .foregroundStyle(r.has ? S.ink2 : S.mute)
+                                    .frame(height: 15, alignment: .leading).lineLimit(1)
+                                if r.has { smallFigures(r) } else { Color.clear.frame(height: 11) }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            /* The tap on the right: the rate, and what filling the
+                               room would actually pay. */
+                            /* ⚠ A NAME THAT HAS NEVER BEEN WRITTEN HAS NO YIELD,
+                               and printing 0.0% says it was measured and pays
+                               nothing. KR holds a free call and has never sold
+                               one, so there is no last credit to rate it on: the
+                               dash is the same absence "fully written" is. */
+                            Text(r.has && r.cr > 0
+                                 ? (yieldUsd ? optMoney(Int((r.cr * 100 * Double(r.free)).rounded()))
+                                             : String(format: "%.1f%%", r.yld))
+                                 : "\u{2014}")
+                                .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
+                                .foregroundStyle(r.has && r.cr > 0 ? S.ink : S.mute)
+                                .lineLimit(1).fixedSize()
+                                .sunnyHint(on: r.has && r.cr > 0)
+                                .frame(minWidth: 37.5, alignment: .trailing)
+                                .contentShape(Rectangle())
+                                .onTapGesture { if r.has && r.cr > 0 { yieldUsd.toggle() } }
+                        }
+                        .padding(.vertical, 17)
+                        if i < lefts.count - 1 {
+                            Rectangle().fill(S.ruleColor).frame(height: 1)
+                        }
+                    }
+                    .opacity(reduceMotion || appeared ? 1 : 0)
+                    .offset(y: reduceMotion || appeared ? 0 : 4)
+                    .animation(settle(0.5, delay: Double(i) * 0.045), value: appeared)
+                }
+            }
+
+            Spacer().frame(height: 14)
+            Text(yieldUsd
+                 ? "credit if every free contract were written at the last price \u{00B7} IV against its own history"
+                 : "weekly yield on the share, last written \u{00B7} IV against its own history")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .transition(.opacity)
+    }
+
+    @ViewBuilder private func smallFigures(_ r: LeftRow) -> some View {
+        HStack(spacing: 6) {
+            /* Same rule as the yield beside it: no last credit is a fact about
+               the name, not a price of zero. */
+            Text(r.cr > 0 ? "$" + String(format: "%.2f", r.cr) : "not written yet")
+                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+            if !r.word.isEmpty {
+                Text("\u{00B7}").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                Text(ivMult ? String(format: "%.2f", r.mult) + "\u{00D7} IV" : r.word)
+                    .font(S.inter(S.t11, S.wMidSmN))
+                    .foregroundStyle(r.rich ? S.gainText : S.mute)
+                    .sunnyHint()
+                    .contentShape(Rectangle())
+                    .onTapGesture { ivMult.toggle() }
+            }
+            if let m = r.move {
+                Text("\u{00B7}").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                Text(signed1Pct(m)).font(S.inter(S.t11, S.wMidSmN))
+                    .foregroundStyle(m < 0 ? S.lossText : S.gainText)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: 11)
     }
 }
 
@@ -1342,11 +1407,17 @@ struct SunnyPrices: View {
         .sunnyShadow(S.shadowCard)
         .monospacedDigit()
         .measure("prices")
-        .onAppear {
+        /* ⚠ THE SAME FIX AS ROLL CHECK: `onAppear` fires on the EMPTY card while
+           the fetch is in flight, so the flag was true before a bar existed and
+           the grow-from-zero had nothing to grow. It flips one frame after the
+           first non-empty render instead. Once only: a window change must never
+           replay the entrance, and the flag is what keeps the two kinds of
+           motion apart. */
+        .task(id: rows.count) {
             now = Date()
-            /* Once. A window change must never replay the entrance, and the
-               flag is what keeps the two kinds of motion apart. */
-            if !appeared { appeared = true }
+            guard !rows.isEmpty, !appeared else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            appeared = true
         }
     }
 
@@ -2044,4 +2115,5 @@ struct SunnyUpsideLeft: View {
         }
     }
 }
+
 

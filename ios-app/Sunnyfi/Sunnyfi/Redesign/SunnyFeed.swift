@@ -534,7 +534,7 @@ struct SunnyPane: View {
                side by side and Nik chose the one that puts the free contracts
                under the percentage. Do not re-add either card without asking. */
             SunnyRollCheck(book: o.book, positions: o.positions,
-                           inventory: o.inventory ?? [])
+                           inventory: o.inventory ?? [], prices: o.prices?.rows ?? [])
             /* The two state-of-the-book cards sit together, before the yield
                cards: what is left to sell, then what a contract sells for. */
             if let cr = o.credit { SunnyAvgCredit(credit: cr) }
