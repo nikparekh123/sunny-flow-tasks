@@ -236,15 +236,44 @@ enum PriceWindow: String, CaseIterable, Identifiable {
     }
 }
 
+/// Today's implied volatility against the name's own median. Absent when the
+/// name has too little history for a median to mean anything.
+struct PriceIV: Decodable { let now: Double, usual: Double }
+
 struct PriceRow: Decodable, Identifiable {
     let ticker: String
     /// Cost basis, the same weight the ticker strip uses.
     let weight: Int
     let pct: PriceMove
-    /// The card's value column swaps to this on a tap. Optional so a run
-    /// against an older deployment decodes rather than throws.
+    /// The card's value column swaps to this on a tap. Nik, 2026-09-09:
+    /// "When I tap on % can we show the stock price for each ticker".
     let spot: Double?
+    /* ⚠ FOUR READINGS BORROWED FROM FOUR OTHER CARDS, and the card owns none of
+       them. The design's first rule: price is the input, what the move did to
+       you is the story. All five are optional so a run against an older
+       deployment decodes rather than throws. */
+    /// Inventory — contracts still writeable. 0 mutes the ticker.
+    let free: Int?
+    /// Upside left — net delta in share equivalents, signed. The move in
+    /// dollars is this times the per-share move.
+    let delta: Int?
+    /// Roll check — the nearest sold call and put strikes, drawn as ticks.
+    let callK: Double?
+    let putK: Double?
+    /// Premium now — the word under the ticker.
+    let iv: PriceIV?
     var id: String { ticker }
+
+    /// The thresholds Premium now prints, so the two cards cannot disagree.
+    var ivWord: String? {
+        guard let iv, iv.usual > 0 else { return nil }
+        let m = iv.now / iv.usual
+        return m >= 1.15 ? "rich IV" : m < 0.95 ? "thin IV" : "normal IV"
+    }
+    var ivRich: Bool {
+        guard let iv, iv.usual > 0 else { return false }
+        return iv.now / iv.usual >= 1.15
+    }
 }
 
 struct PricesBlock: Decodable {

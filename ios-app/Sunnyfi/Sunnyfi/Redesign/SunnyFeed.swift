@@ -528,7 +528,7 @@ struct SunnyPane: View {
             /* Stock price leads the page. Nik, 2026-09-08: "First card shuold
                be the stock price card." What the names did comes before what
                the legs on them did. */
-            if let pr = o.prices, !pr.rows.isEmpty { SunnyStockPrice(prices: pr) }
+            if let pr = o.prices, !pr.rows.isEmpty { SunnyPrices(prices: pr) }
             /* ⚠ INVENTORY AND TO ROLL ARE GONE FROM THIS PAGE, 2026-09-11,
                and Roll check carries the capacity now. Three forms were built
                side by side and Nik chose the one that puts the free contracts

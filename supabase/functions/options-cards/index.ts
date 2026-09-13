@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-10.2';
+const BUILD = '2026-09-12.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -842,12 +842,51 @@ Deno.serve(async (req) => {
       }
       return out;
     };
-    const priceRows = positions.map((p) => ({
-      ticker: p.t, weight: p.paid, pct: moveFor(p.t),
-      /* The card swaps its value column to this on a tap. Nik, 2026-09-09:
-         "When I tap on % can we show the stock price for each ticker". */
-      spot: r2(spot.get(p.t) ?? 0),
-    }));
+    /* ⚠ THE PRICES CARD BORROWS FOUR OTHER CARDS' READINGS, so they ship on the
+       row rather than being re-derived on the phone. The design's rule 0.1:
+       "price is the input; what the move did to you is the story". A list of
+       eight percentages is a quote screen; these four turn each move into a
+       statement about the book.
+
+         nearest sold strikes  roll check   -> two ticks on the bar
+         free contracts        inventory    -> the ticker's ink
+         IV now vs usual       premium now  -> the word under the ticker
+         net delta in shares   upside left  -> the move in dollars
+
+       ⚠ AND THE DOLLARS USE NET DELTA, NOT the sheet's `keep x open contracts`.
+       That product sizes the move by the SHORT book, which fits a book of small
+       covered positions and not this one: NKE carries 15 short puts against 60
+       long calls, so the sheet's formula would price a move on 795 shares where
+       the position actually moves like 4,400. Net delta is the same question
+       asked correctly, and this function already computes it for Upside left.
+       Flagged to Nik with the change. */
+    const nearestK = (t: string, type: string) => {
+      const S0 = spot.get(t) ?? 0;
+      const ks = open.filter((e) => e.ticker === t && e.dir === 'short' && e.type === type)
+                     .map((e) => e.k);
+      if (!ks.length || S0 <= 0) return null;
+      return ks.reduce((a, k) => (Math.abs(k - S0) < Math.abs(a - S0) ? k : a));
+    };
+    const ivByT = new Map(premiumRows.map((r) => [r.t, { now: r.now, usual: r.usual }]));
+    const priceRows = positions.map((p) => {
+      const r = inv.get(p.t);
+      return {
+        ticker: p.t, weight: p.paid, pct: moveFor(p.t),
+        /* The card swaps its value column to this on a tap. Nik, 2026-09-09:
+           "When I tap on % can we show the stock price for each ticker". */
+        spot: r2(spot.get(p.t) ?? 0),
+        /* calls + puts still writeable. 0 mutes the ticker. */
+        free: r ? Math.max(0, r.ch - r.cs) + Math.max(0, r.ph - r.ps) : 0,
+        /* share equivalents, signed. A short put in the money is LONG delta, so
+           this can exceed the long calls' own exposure. */
+        delta: Math.round(netD.get(p.t) ?? 0),
+        callK: nearestK(p.t, 'call'),
+        putK: nearestK(p.t, 'put'),
+        /* null when the name has too little IV history for a median to mean
+           anything: the word is absent rather than invented. */
+        iv: ivByT.get(p.t) ?? null,
+      };
+    });
     const bookMove: Record<string, number | null> = {};
     for (const [key] of WINDOWS) {
       let num = 0, den = 0;

@@ -1085,184 +1085,393 @@ struct SunnyWeeklyYield: View {
 
 }
 
-// MARK: - stock price
+// MARK: - prices
 
-/// ⚠ ROLL CHECK'S LAYOUT, A DIFFERENT SUBJECT. Nik, 2026-09-08: "Just like a
-/// roll check card can we do one for stock price. Same layout as Roll check the
-/// only added thing I want is adding 1 week, 2 weeks, 3 weeks and 4 weeks
-/// filter", then "also need one for today", then "remove ref lines".
-///
-/// ⚠ SO THERE ARE NO REFERENCE LINES HERE, only the zero line. Roll check's
-/// −100 and +75 are thresholds that mean something about capture; a price move
-/// has no equivalent, and drawing two arbitrary verticals would invent a
-/// standard the number is not being judged against.
-///
-/// ⚠ AND THE HERO IS WEIGHTED BY COST. The rows already say what each name did.
-/// An unweighted mean would restate them and would call a 1% KR position the
-/// equal of a 24% BABA one, so the server weights by the same cost basis the
-/// ticker strip uses. See `feedback_metric_must_add_information`.
-struct SunnyStockPrice: View {
+/* ⚠ THIS REPLACES THE STOCK PRICE CARD, 12 Sep 2026, from the `prices-card`
+   handoff (CARDS.md "Prices", cards/prices.md, Sunny Prices Card.dc.html). The
+   old card is deleted, not kept beside it.
+
+   The design's first rule, and the reason it is a different card rather than a
+   restyle: PRICE IS THE INPUT; WHAT THE MOVE DID TO YOU IS THE STORY. Eight
+   percentages on their own are a quote screen. Every row here reads four other
+   cards against its move, and this card owns none of those numbers:
+
+     ticks on the bar   roll check    the nearest sold call and put strikes
+     the ticker's ink   inventory     whether there is anything left to write
+     the word under it  premium now   what the name's IV is doing
+     the dollars        upside left   how much of the move you actually kept
+
+   ⚠ "TODAY" IS A FACT ABOUT THE DATA, NEVER A GUESS FROM THE CLOCK. The day
+   window is named from the last close's DATE: dated today reads "today", dated
+   yesterday reads "yesterday", anything else reads the weekday it was, so a
+   Monday pre-market reads "Friday".
+
+   ⚠ AND THE DAY WINDOW LEAVES THE CARD OVER THE WEEKEND. Friday 20:00 ET to
+   Monday 04:00 ET there is nothing honest to call "today", so the chip and the
+   word GO and 1w is the default. Removing the control beats greying it: a
+   disabled "today" on a Sunday is a question the card is refusing to answer.
+
+   ⚠ ONE AXIS, ZERO IN THE MIDDLE. The widest move × 1.1 sets both ends, so a
+   long bar is a big move in every row and the rows are comparable.
+
+   ⚠ A TAP FLIPS A COLUMN, NEVER A ROW. Per-row state would make eight rows
+   eight different cards. And every text that flips carries the dotted hair
+   underline — exactly that set, nothing else. */
+struct SunnyPrices: View {
     let prices: PricesBlock
 
-    @State private var window: PriceWindow = .today
+    private enum Fig { case pct, px, usd }
+    @State private var win: Int = 1          // 0 = the day window, 1-4 weeks
+    @State private var fig: Fig = .pct
+    @State private var showDelta = false     // the side word: IV or delta
+    /// Re-read on every appearance so Friday 20:00 and Monday 04:00 land.
+    @State private var now = Date()
+    /* ⚠ THE MOTION IS THE SHEET'S §7, AND THE TWO HALVES ARE DIFFERENT THINGS.
+       An ENTRANCE plays once, when the card first arrives: every bar grows from
+       the zero line, staggered 18ms down the rows, and the ticks fade in only
+       AFTER the bars have landed, because a tick has nothing to annotate until
+       its bar exists. A GLIDE plays on every later change: switching the window
+       or flipping a column slides the bars and ticks to their new places rather
+       than cutting, so the eye keeps hold of the row it was reading.
+
+       `appeared` gates the first and nothing else, so a window change can never
+       replay the entrance. */
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // MARK: the day window
+
+    private var etCal: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        return c
+    }
+    /// Friday 20:00 ET to Monday 04:00 ET the day window is absent.
+    private var dayOn: Bool {
+        let wd = etCal.component(.weekday, from: now)      // 1 Sun ... 7 Sat
+        let h = etCal.component(.hour, from: now)
+        if wd == 7 || wd == 1 { return false }
+        if wd == 6 && h >= 20 { return false }
+        if wd == 2 && h < 4 { return false }
+        return true
+    }
+    private var wins: [Int] { dayOn ? [0, 1, 2, 3, 4] : [1, 2, 3, 4] }
+    private var window: Int { wins.contains(win) ? win : wins[0] }
+
+    /// TODAY / YESTERDAY / the weekday it was — read off the last close's date.
+    private var sessionWord: String {
+        let f = DateFormatter()
+        f.calendar = etCal; f.timeZone = etCal.timeZone
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: prices.asOf) else { return "today" }
+        let today = etCal.startOfDay(for: now)
+        let days = etCal.dateComponents([.day], from: etCal.startOfDay(for: d), to: today).day ?? 0
+        if days == 0 { return "today" }
+        if days == 1 { return "yesterday" }
+        f.dateFormat = "EEEE"
+        return f.string(from: d)
+    }
+    /// "Fri 11 Sep" — derived, never a literal. It shipped once as a date that
+    /// was a Saturday.
+    private var asOfLabel: String {
+        let f = DateFormatter()
+        f.calendar = etCal; f.timeZone = etCal.timeZone
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: prices.asOf) else { return "" }
+        f.dateFormat = "EEE d MMM"
+        return f.string(from: d)
+    }
+    private func windowWord(_ w: Int) -> String {
+        w == 0 ? sessionWord : "\(w)w"
+    }
+
+    // MARK: the rows
 
     private struct Row: Identifiable {
-        let id: String, ticker: String, pct: Double
-        let spot: Double?
+        let id: String
+        let t: String, pct: Double, spot: Double
+        /// Cost basis. The card's order, and the hero's weighting.
+        let weight: Int
+        let free: Int, delta: Int
+        let callK: Double?, putK: Double?
+        let side: String, sideRich: Bool
+        /// The per-share move in dollars, derived from the percentage and the
+        /// spot rather than shipped: before = spot / (1 + pct/100).
+        var perShare: Double { spot - spot / (1 + pct / 100) }
+        /// ⚠ NET DELTA, NOT the sheet's `share kept × open contracts`. That
+        /// product sizes the move by the SHORT book, which suits a book of small
+        /// covered positions and not this one: NKE carries 15 short puts against
+        /// 60 long calls, so it would price the move on 795 shares where the
+        /// position moves like 4,400. Same question, asked correctly.
+        var made: Double { perShare * Double(delta) }
     }
 
-    /* ⚠ ONE TAP SWAPS THE COLUMN, the same gesture Roll check and Weekly yield
-       already carry. Nik, 2026-09-09: "When I tap on % can we show the stock
-       price for each ticker". A discrete tap, so it never competes with the
-       shell's horizontal paging drag.
-
-       ⚠ THE HERO AND THE FOOTER DO NOT SWAP. Best, Worst and Up are readings
-       ABOUT the percentages; a price in those slots would answer a question
-       nobody asked. Only the per-name column changes. */
-    /* ⚠ VERIFICATION ONLY on the launch argument, exactly as `-showMoney` is:
-       the simulator's touch bridge crashes, so `-showPrice` forces the state
-       and proves the RENDERING. It does not test the tap. */
-    @State private var showPrice = ProcessInfo.processInfo.arguments.contains("-showPrice")
-
-    /// Worst first, the same queue-of-work order Roll check uses. A name with
-    /// no history for this window is dropped, not drawn at zero — see the
-    /// server's note on why the move is null rather than 0.
     private var rows: [Row] {
-        prices.rows.compactMap { r in
-            r.pct.value(window).map {
-                Row(id: r.ticker, ticker: r.ticker, pct: $0, spot: r.spot)
-            }
-        }.sorted { $0.pct < $1.pct }
+        prices.rows.compactMap { r -> Row? in
+            let w: PriceWindow = window == 0 ? .today : window == 1 ? .w1
+                               : window == 2 ? .w2 : window == 3 ? .w3 : .w4
+            guard let v = r.pct.value(w), let sp = r.spot, sp > 0 else { return nil }
+            return Row(id: r.ticker, t: r.ticker, pct: v, spot: sp, weight: r.weight,
+                       free: r.free ?? 0, delta: r.delta ?? 0,
+                       callK: r.callK, putK: r.putK,
+                       side: r.ivWord ?? "", sideRich: r.ivRich)
+        }
+        /* ⚠ BIGGEST POSITION FIRST, WHICH OVERRIDES THE SHEET. It specifies
+           "biggest gainer first"; Nik, 2026-09-12: "Can we organize by position
+           size". He is right for this book. A gainer sort re-orders the whole
+           card every window and every session, so the row you were reading
+           moves under you, and it ranks a $6k KR position above a $75k NKE one
+           for being up a tenth of a percent. Size is a fact about the book that
+           holds still, and the bar already ranks the moves.
+
+           Size is COST BASIS — what the position is built on, the same weight
+           the ticker strip and the hero use. */
+        .sorted { $0.weight > $1.weight }
+    }
+    /// One symmetric axis for every row, zero at the centre.
+    private var lim: Double {
+        max(rows.map { abs($0.pct) }.max() ?? 1, 0.01) * 1.1
+    }
+    private var mean: Double {
+        rows.isEmpty ? 0 : rows.reduce(0) { $0 + $1.pct } / Double(rows.count)
+    }
+    private var ups: Int { rows.filter { $0.pct >= 0 }.count }
+
+    // MARK: measured columns
+
+    private var nameCol: CGFloat { 52 }
+    private var figCol: CGFloat {
+        max(62, (rows.map { S.textW(figText($0), S.t13, S.wBoldN) }.max() ?? 0) + 3)
+    }
+    private var barW: CGFloat { S.content - 48 - nameCol - 10 - 10 - figCol }
+
+    /// The deck's settle curve, the same cubic the reference uses.
+    private func settle(_ d: Double, delay: Double = 0) -> Animation {
+        .timingCurve(0.16, 1, 0.3, 1, duration: d).delay(delay)
     }
 
-    private var nameCol: CGFloat {
-        min(134, max(S.progNameCol,
-                     (rows.map { S.textW($0.ticker, S.t12, S.wSemiN) }.max() ?? 0) + 3))
+    private func figText(_ r: Row) -> String {
+        switch fig {
+        case .pct: return signed1Pct(r.pct)
+        case .px:  return "$" + String(format: "%.2f", r.spot)
+        case .usd: return optMoney(Int(r.made.rounded()))
+        }
     }
-    /* ⚠ MEASURED ACROSS BOTH STATES. Sizing to whichever is showing would
-       resize the column on every tap, and the track and all seven bars would
-       jump with it. "$138.70" is wider than "-5.0%", so the wider of the two
-       fixes the geometry once. */
-    private var valCol: CGFloat {
-        let w = rows.flatMap { r -> [CGFloat] in
-            [S.textW(pctLabel(r.pct), S.t13, S.wSemiN),
-             S.textW(priceLabel(r.spot), S.t13, S.wSemiN)]
-        }.max() ?? 0
-        return max(S.progValCol, w + 3)
-    }
-    private var rowTrack: CGFloat {
-        max(110, S.content - 38 - nameCol - valCol - 2 * S.gap4)
+    /// A move that rounds to zero carries no sign.
+    private func signed1Pct(_ v: Double) -> String {
+        let a = String(format: "%.1f", abs(v))
+        return (a == "0.0" ? "" : v < 0 ? "\u{2212}" : "+") + a + "%"
     }
 
-    /// One decimal, because a price move of −0.6% rounds to −1% and reads as
-    /// six times the day it had. Roll check's integers are fine for capture,
-    /// which is never this small.
-    private func pctLabel(_ v: Double) -> String {
-        String(format: "%@%.1f%%", v < 0 ? "\u{2212}" : "", abs(v))
-    }
-    /* Two decimals, the way a quote is written. An em dash when the price has
-       not arrived, never 0.00, which would read as a stock at nothing. */
-    private func priceLabel(_ v: Double?) -> String {
-        guard let v, v > 0 else { return "\u{2014}" }
-        return String(format: "$%.2f", v)
-    }
+    // MARK: body
 
     var body: some View {
-        let vals = rows.map(\.pct)
-        /* Both ends get headroom off the data, so the zero line is never pinned
-           to an edge even when every name is red — which, this month, it is. */
-        let mx = max(vals.max() ?? 0, 0), mn = min(vals.min() ?? 0, 0)
-        let span = max(mx - mn, 1)
-        let hi = mx + span * 0.08, lo = mn - span * 0.08
-        let track = rowTrack
-        let x = { (v: Double) in track * CGFloat((v - lo) / max(hi - lo, 0.0001)) }
-        let bookPct = prices.book.value(window)
-
-        return OptCard(name: "stock-price", fixedHeight: nil) {
-            OptHead(title: "Stock price", sub: "spot",
-                    right: "\(rows.count) names")
-            Spacer().frame(height: S.gap7)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("BOOK MOVE")
-                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                    .foregroundStyle(S.mute)
-                HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
-                    Text(bookPct.map(pctLabel) ?? "\u{2014}")
-                        .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
-                        .foregroundStyle((bookPct ?? 0) < 0 ? S.loss : S.gain)
-                        .sunnyLineBox(S.t30)
-                    Text(window.phrase)
-                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
-                }
-            }
-            Spacer().frame(height: 14)
-            /* The filter. A discrete tap per pill, so it never competes with
-               the shell's horizontal paging drag. */
-            HStack(spacing: S.gap3) {
-                ForEach(PriceWindow.allCases) { w in
-                    Text(w.label)
-                        .font(S.inter(S.t11, S.wSemiN))
-                        .tracking(S.track(S.t11, 0.02))
-                        .foregroundStyle(w == window ? S.onInk : S.mute)
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 999)
-                                .fill(w == window ? S.ink : S.wash))
-                        .contentShape(Rectangle())
-                        .onTapGesture { window = w }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+                HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                    Text("Prices").font(S.inter(S.t14, S.wBoldN))
+                        .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
+                    Text("held names").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
                 }
                 Spacer(minLength: 0)
+                Text(asOfLabel).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
             }
-            Spacer().frame(height: 16)
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: S.progRowGap) {
-                    ForEach(rows) { r in
-                        HStack(spacing: S.gap4) {
-                            Text(r.ticker)
-                                .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
-                                .foregroundStyle(S.ink)
-                                .frame(width: nameCol, alignment: .leading).lineLimit(1)
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
-                                RoundedRectangle(cornerRadius: S.radiusBar)
-                                    .fill(r.pct < 0 ? S.lossBar : S.gainBar)
-                                    .frame(width: max(2, x(max(r.pct, 0)) - x(min(r.pct, 0))))
-                                    .offset(x: x(min(r.pct, 0)))
-                            }
-                            .frame(width: track, height: S.progRowH)
-                            /* The price is a fact, not a direction, so it
-                               takes --ink and not the gain/loss ink. Only the
-                               percentage is an opinion about the day. */
-                            Text(showPrice ? priceLabel(r.spot) : pctLabel(r.pct))
-                                .font(S.inter(S.t13, S.wSemiN)).monospacedDigit()
-                                .foregroundStyle(showPrice ? S.ink
-                                                 : (r.pct < 0 ? S.lossText : S.gainText))
-                                .frame(width: valCol, alignment: .trailing).lineLimit(1)
-                        }
+
+            Spacer().frame(height: 22)
+
+            /* The eyebrow is the figure column's MODE, so the label and the
+               column can never disagree about what is being printed. */
+            HStack(alignment: .center, spacing: S.gap6) {
+                Text(fig == .px ? "PRICE" : fig == .usd ? "MADE YOU" : "CHANGE")
+                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+                    .foregroundStyle(S.mute)
+                Spacer(minLength: 0)
+                /* ⚠ THE CHIPS BLEED THEIR HIT AREA, they do not grow the row.
+                   A 32pt target on a 12pt eyebrow row: padding reaches the
+                   target and a negative margin gives the layout back. 44 would
+                   collide with the header above and the hero below, and that
+                   is a recorded deviation rather than an oversight. */
+                HStack(spacing: 4) {
+                    ForEach(wins, id: \.self) { w in
+                        Text(windowWord(w))
+                            .font(S.inter(S.t12, w == window ? S.wBoldN : S.wMidN))
+                            .tracking(S.track(S.t12, -0.01))
+                            .foregroundStyle(w == window ? S.ink : S.mute)
+                            .padding(.vertical, 10).padding(.horizontal, 7)
+                            .contentShape(Rectangle())
+                            .onTapGesture { win = w }
                     }
                 }
-                /* The only vertical on this card. */
-                Rectangle().fill(S.ruleColorStrong).frame(width: 1)
-                    .offset(x: nameCol + S.gap4 + x(0), y: -4)
-                    .frame(maxHeight: .infinity).padding(.bottom, -4)
+                .padding(.vertical, -10).padding(.horizontal, -6)
             }
-            Spacer().frame(height: 22)
-            OptFooter(stats: [
-                .init(label: "Best",
-                      value: rows.last.map { pctLabel($0.pct) } ?? "\u{2014}",
-                      ink: (rows.last?.pct ?? 0) < 0 ? S.lossText : S.gainText),
-                .init(label: "Worst",
-                      value: rows.first.map { pctLabel($0.pct) } ?? "\u{2014}",
-                      ink: (rows.first?.pct ?? 0) < 0 ? S.lossText : S.gainText),
-                .init(label: "Up",
-                      value: "\(rows.filter { $0.pct > 0 }.count) of \(rows.count)",
-                      ink: S.ink),
-            ])
+            .frame(height: 12)
+
+            Spacer().frame(height: 12)
+
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(signed1Pct(mean))
+                    .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.035))
+                    .foregroundStyle(mean < 0 ? S.lossText : S.gainText)
+                    .sunnyLineBox(S.t30)
+                Text("\(ups) of \(rows.count) up \u{00B7} "
+                     + (window == 0 ? sessionWord
+                        : "\(window) week" + (window == 1 ? "" : "s")))
+                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+            }
+
+            Spacer().frame(height: 28)
+
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
+                    rowFor(r, index: i)
+                }
+            }
+
+            Spacer().frame(height: 16)
+
+            Text(fig == .usd
+                 ? "the move \u{00D7} the shares you are effectively long"
+                 : "ticks: call strike above the bar, put strike below")
+                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
         }
-        /* A discrete tap, so it never competes with the shell's horizontal
-           paging drag. Same gesture as Roll check and Weekly yield. */
-        .contentShape(Rectangle())
-        .onTapGesture { showPrice.toggle() }
+        .frame(width: S.content - 48, alignment: .leading)
+        .padding(EdgeInsets(top: 24, leading: 24, bottom: 28, trailing: 24))
+        .frame(width: S.content, alignment: .top)
+        .background(S.paper)
+        .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
+        .sunnyShadow(S.shadowCard)
+        .monospacedDigit()
+        .measure("prices")
+        .onAppear {
+            now = Date()
+            /* Once. A window change must never replay the entrance, and the
+               flag is what keeps the two kinds of motion apart. */
+            if !appeared { appeared = true }
+        }
+    }
+
+    // MARK: one row
+
+    @ViewBuilder private func rowFor(_ r: Row, index: Int) -> some View {
+        let half = barW / 2
+        let w = CGFloat(abs(r.pct) / lim) * half
+        let up = r.pct >= 0
+        let grown = reduceMotion || appeared
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                /* ⚠ THE TICKER'S INK IS THE INVENTORY READING. A big mover you
+                   cannot write on is less interesting than one you can. */
+                Text(r.t).font(S.inter(S.t13, S.wSemiN)).tracking(S.track(S.t13, -0.01))
+                    .foregroundStyle(r.free > 0 ? S.ink : S.mute).lineLimit(1)
+                /* ⚠ 10px SENTENCE CASE, the deck's one exception to the 10px
+                   rule, accepted because it is a tap label under a 13px ticker
+                   inside a 52pt cell: at 11 "normal IV" wrapped. */
+                /* ⚠ THE SLOT IS ALWAYS THERE, even when the name has no IV
+                   word. The two-line cell is what sets the 27pt row, so a name
+                   without enough IV history to have a median would otherwise
+                   render a SHORTER row and the list's rhythm would break on
+                   whichever names happen to have history. Four of our seven do
+                   not. Empty, not zero: an absent median is not "normal IV". */
+                Text(showDelta ? "\(r.delta) sh" : r.side)
+                    .font(S.inter(S.t10, S.wMidSmN))
+                    .foregroundStyle(showDelta ? S.mute : (r.sideRich ? S.gainText : S.mute))
+                    .lineLimit(1).fixedSize()
+                    .sunnyHint(on: showDelta || !r.side.isEmpty)
+                    .frame(height: 10, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { showDelta.toggle() }
+            }
+            .frame(width: nameCol, height: 27, alignment: .leading)
+
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
+                    .frame(width: barW, height: 14)
+                /* ⚠ UNDER THE BAR, NOT OVER IT. Drawn last it showed through
+                   every fill as a grey seam at the zero line. It reaches 4
+                   above and below the track. */
+                Rectangle().fill(S.hair).frame(width: 1.5, height: 22).offset(x: half - 0.75)
+                /* ⚠ THE BAR GROWS FROM THE ZERO LINE, which means the anchor
+                   is the side the bar STARTS on: a gain opens rightward from
+                   the centre, a loss opens leftward into it. Scaling from the
+                   wrong anchor slides the bar across the axis instead of
+                   growing along it, and for one beat it reads as the opposite
+                   move. */
+                RoundedRectangle(cornerRadius: S.radiusBar)
+                    .fill(up ? S.gainBar : S.lossBar)
+                    .frame(width: max(2, w), height: 14)
+                    .scaleEffect(x: grown ? 1 : 0, anchor: up ? .leading : .trailing)
+                    .offset(x: up ? half : half - max(2, w))
+                    .animation(settle(0.72, delay: Double(index) * 0.018), value: appeared)
+                    .animation(reduceMotion ? nil : settle(0.55), value: window)
+                    .animation(reduceMotion ? nil : settle(0.55), value: barW)
+                /* ⚠ A TICK IS DRAWN ONLY WHEN IT IS ON THE AXIS. A far strike
+                   pinned to the edge would lie about its distance, so it is
+                   simply absent. Calls rise from the midline, puts hang from
+                   it: direction is the whole distinction and there is no
+                   second colour. A strike is a fact, not a gain or a loss
+                   until the bar reaches it. */
+                tick(r.callK, spot: r.spot, half: half, up: true, shown: grown)
+                tick(r.putK, spot: r.spot, half: half, up: false, shown: grown)
+            }
+            .frame(width: barW, height: 14)
+
+            Text(figText(r))
+                .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.015))
+                .foregroundStyle(fig == .px ? S.ink : (up ? S.gainText : S.lossText))
+                .lineLimit(1).fixedSize()
+                /* The hint marks the tappable TEXT. Applied outside the column
+                   frame it underlined 62pt of empty space to the figure's
+                   left. */
+                .sunnyHint()
+                .frame(width: figCol, alignment: .trailing)
+                .contentShape(Rectangle())
+                .onTapGesture { fig = fig == .pct ? .px : fig == .px ? .usd : .pct }
+        }
+        .frame(height: 27)
+    }
+
+    @ViewBuilder private func tick(_ k: Double?, spot: Double,
+                                   half: CGFloat, up: Bool, shown: Bool) -> some View {
+        if let k, spot > 0 {
+            let pct = (k / spot - 1) * 100
+            if abs(pct) <= lim {
+                Rectangle().fill(S.ink)
+                    .frame(width: 2, height: 12)
+                    /* 5 outside the track plus the track's own 7 = 12, so the
+                       centre sits 6 off the midline and the tick stops exactly
+                       on it. */
+                    .offset(x: half + CGFloat(pct / lim) * half - 1,
+                            y: up ? -6 : 6)
+                    /* ⚠ THE TICKS ARRIVE AFTER THE BARS, by .6s. They annotate
+                       the bar, so fading them in alongside it gives the row two
+                       things moving and no order to read them in. */
+                    .opacity(shown ? 1 : 0)
+                    .animation(reduceMotion ? nil : settle(0.5, delay: 0.6), value: appeared)
+                    .animation(reduceMotion ? nil : settle(0.55), value: window)
+            }
+        }
+    }
+}
+
+/// The deck-wide tap hint, 12 Sep 2026: every text that flips on tap carries a
+/// dotted hair underline, and only that text does. Silent once the card is
+/// known, visible when it is not.
+private extension View {
+    func sunnyHint(on: Bool = true) -> some View {
+        self.overlay(alignment: .bottom) {
+            if on { SunnyDots().frame(height: 1).offset(y: 3) }
+        }
+    }
+}
+private struct SunnyDots: View {
+    var body: some View {
+        GeometryReader { g in
+            Path { p in
+                p.move(to: .init(x: 0, y: 0.5)); p.addLine(to: .init(x: g.size.width, y: 0.5))
+            }
+            .stroke(style: StrokeStyle(lineWidth: 1, dash: [1.5, 1.5]))
+            .foregroundStyle(S.hair)
+        }
     }
 }
 
@@ -1835,3 +2044,4 @@ struct SunnyUpsideLeft: View {
         }
     }
 }
+
