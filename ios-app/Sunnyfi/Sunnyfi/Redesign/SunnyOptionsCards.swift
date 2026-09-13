@@ -253,9 +253,17 @@ struct SunnyRollCheck: View {
         let legs: [OptionsPosition.ShortLeg]
         let spot: Double?
     }
+    /* ⚠ A NAME WITH NOTHING SOLD IS STILL A ROW. Nik, 2026-09-13: "KR should
+       still show even if never written", and the same instruction he gave the
+       old card on 11 Sep. The sheet groups by sold leg and so drops a name that
+       has none, which hides exactly the name there is most to do about: KR holds
+       a LEAP and has never written a call against it.
+
+       Those names sort FIRST, alphabetically, because they are the work that has
+       not started, and a captured percentage cannot rank them — there is nothing
+       captured. Worst-first resumes below them. */
     private var groups: [LegGroup] {
-        positions.compactMap { p -> LegGroup? in
-            guard !p.shorts.isEmpty else { return nil }
+        positions.map { p -> LegGroup in
             let legs = p.shorts.sorted { $0.captured < $1.captured }
             let row = px(p.t)
             let wk = row?.pct.w1
@@ -263,9 +271,16 @@ struct SunnyRollCheck: View {
                         wk.map { signed1Pct($0) + " wk" }]
                 .compactMap { $0 }.joined(separator: " \u{00B7} ")
             return LegGroup(id: p.t, t: p.t, meta: meta,
-                         worst: legs.first?.captured ?? 0, legs: legs, spot: row?.spot)
+                            /* Sorts above every real reading, including a leg
+                               that has given back more than its credit. */
+                            worst: legs.first?.captured ?? Int.min, legs: legs,
+                            spot: row?.spot)
         }
-        .sorted { $0.worst < $1.worst }
+        .sorted {
+            if $0.legs.isEmpty != $1.legs.isEmpty { return $0.legs.isEmpty }
+            if $0.legs.isEmpty { return $0.t < $1.t }
+            return $0.worst < $1.worst
+        }
     }
     private var allLegs: [OptionsPosition.ShortLeg] { positions.flatMap(\.shorts) }
     private var underWater: Int { allLegs.filter { $0.captured < 0 }.count }
@@ -470,9 +485,18 @@ struct SunnyRollCheck: View {
                         }
                         .frame(height: 15)
                         Spacer().frame(height: 14)
-                        VStack(alignment: .leading, spacing: 16) {
-                            ForEach(Array(g.legs.enumerated()), id: \.element.id) { li, l in
-                                legRow(l, spot: g.spot, delay: Double(gi * 3 + li) * 0.018)
+                        if g.legs.isEmpty {
+                            /* No bar and no figure: there is no credit to have
+                               captured any of, and drawing an empty track at zero
+                               would say the leg exists and has gone nowhere. */
+                            Text("nothing sold")
+                                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+                                .frame(height: 26, alignment: .leading)
+                        } else {
+                            VStack(alignment: .leading, spacing: 16) {
+                                ForEach(Array(g.legs.enumerated()), id: \.element.id) { li, l in
+                                    legRow(l, spot: g.spot, delay: Double(gi * 3 + li) * 0.018)
+                                }
                             }
                         }
                     }
