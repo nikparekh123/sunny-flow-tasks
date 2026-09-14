@@ -2621,8 +2621,9 @@ struct SunnyIntrinsic: View {
     /// Prices' spot per name and the close it is measured from.
     let prices: [PriceRow]
     let asOf: String
-    /// Theta's net a day. The earn-back clock is paid divided by it.
-    let theta: ThetaBlock?
+    /// The book's weekly credit. Every clock on the card is a bar divided by
+    /// the average week.
+    let book: OptionsBook
 
     private enum Money: String { case inM, atM, outM }
     /* ⚠ VERIFICATION ONLY, the same device as `-rollFig`: the touch bridge
@@ -2679,17 +2680,33 @@ struct SunnyIntrinsic: View {
        Paid is DERIVED from the three rather than divided separately, so the
        identity holds at every future state rather than merely today.
 
-       The rate is Theta's NET a day, times seven — the same figure the card
-       already used for the earn-back clock, so the 40 weeks he accepted has not
-       moved. Flagged: the weekly credit pace ($4.9k) is the other candidate and
-       would read slower.
+       ⚠ THE RATE IS THE AVERAGE WEEK'S CREDIT, NOT THETA AND NOT LAST WEEK.
+       Nik, 14 Sep 2026: "use the weekly credit pace instead of theta, but avg
+       credit not the last weeks credit." It measures $5,417 — he guessed
+       $5,000 — against theta's $6,433, so the book reads 48 weeks rather than
+       40. Theta is what the book would collect if nothing moved; this is what
+       he has actually been paid, and paying a LEAP back is done with money
+       collected rather than money modelled.
 
-       ⚠ NEVER A NEGATIVE WEEK. If the book's net decay is not positive there is
-       nothing earning anything back, and every clock leaves rather than
-       printing a number that points into the past. */
+       ⚠ AVERAGED OVER THE WEEKS THAT RAN, NEVER THE CALENDAR — the divisor Nik
+       ruled on for the weekly yield, and the same `kept` figure that card
+       averages (gross less what buying legs back cost), so the two cards cannot
+       disagree about what an average week is. A week with no trade at all is
+       not a week that earned nothing; it is a week the programme had not
+       started.
+
+       Known and accepted, shared with Weekly yield: the LIVE week is in the
+       average while it is still running, so the clock drifts a little from
+       Monday to Friday.
+
+       ⚠ NEVER A NEGATIVE WEEK. With no credit history there is nothing earning
+       anything back, and every clock leaves rather than printing a number that
+       points into the past. */
     private var rateWeek: Double? {
-        guard let net = theta?.weeks.last?.net, net > 0 else { return nil }
-        return Double(net) * 7
+        let live = book.weekly.filter { ($0.gross ?? $0.credit) > 0 || ($0.bought ?? 0) > 0 }
+        guard !live.isEmpty else { return nil }
+        let mean = Double(live.reduce(0) { $0 + $1.credit }) / Double(live.count)
+        return mean > 0 ? mean : nil
     }
     private struct Clock { let wk: String; let when: String }
     private var clocks: (paid: Clock, intr: Clock, time: Clock, pnl: Clock)? {
