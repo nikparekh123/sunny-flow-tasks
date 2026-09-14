@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.6';
+const BUILD = '2026-09-14.7';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -361,6 +361,32 @@ Deno.serve(async (req) => {
                  tap that turns a captured percentage into dollars. */
               cr: s.n > 0 ? r2(credit / (s.n * 100)) : 0,
               opened: s.opened,
+              /* ⚠ WHAT IS STILL TO DECAY, NOT WHAT THE BUY-BACK COSTS. Nik,
+                 14 Sep 2026, replacing "left to capture" on the roll check.
+                 `value` is the whole cost of closing the leg; this is the part
+                 of it that is time and will come back to him by Friday if he
+                 does nothing. The rest is INTRINSIC and is gone — it is the
+                 stock having run through the strike, and no amount of waiting
+                 returns it.
+
+                 On an out-of-the-money leg the two are the SAME number, and
+                 that is the reading rather than a fault: the whole remaining
+                 cost is decay he collects. A gap between them is the intrinsic
+                 he will not get back, which is the roll signal.
+
+                 ⚠ MONEYNESS INVERTS ON A PUT, the same trap as `itm`: a call
+                 has intrinsic ABOVE its strike, a put BELOW it. Hard-coding the
+                 call rule would report every sold put as pure time value on the
+                 day it most needed rolling.
+
+                 Unpriced means unknown, and `value` falls back to the credit
+                 there, so a time value derived from it would be a guess. Zero,
+                 and `priced` already tells the card to render it as unknown. */
+              tv: priced
+                ? Math.max(0, Math.round(value
+                    - (s.type === 'put' ? Math.max(0, s.k - S) : Math.max(0, S - s.k))
+                      * s.n * 100))
+                : 0,
             };
           });
 

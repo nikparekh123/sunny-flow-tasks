@@ -190,9 +190,20 @@ struct SunnyRollCheck: View {
        the leg would cost today. They are the same fact stated three ways and
        none is derivable from the row alone, which is what earns the third stop
        rather than making it a third way of saying one thing. */
-    private enum Fig { case pct, captured, remaining }
+    private enum Fig { case pct, captured, timeValue }
     @State private var view: View2 = .captured
-    @State private var fig: Fig = .pct
+    /* ⚠ VERIFICATION ONLY, the same device as `-showMoney`: the simulator's
+       touch bridge crashes, so `-rollFig tv` forces the stop and proves the
+       RENDERING. It does not test the tap, which cannot be driven here. */
+    @State private var fig: Fig = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-rollFig"), i + 1 < a.count else { return .pct }
+        switch a[i + 1] {
+        case "tv": return .timeValue
+        case "captured": return .captured
+        default: return .pct
+        }
+    }()
     @State private var ivMult = false        // Left to sell: the word or the multiple
     @State private var yieldUsd = false      // Left to sell: yield % or dollars
     @State private var appeared = false
@@ -262,8 +273,18 @@ struct SunnyRollCheck: View {
        Those names sort FIRST, alphabetically, because they are the work that has
        not started, and a captured percentage cannot rank them — there is nothing
        captured. Worst-first resumes below them. */
+    /* ⚠ ONE ROW PER NAME, AND `positions` IS ONE ROW PER LEAP LEG. BABA held
+       two long calls at different strikes on 14 Sep 2026 and arrived here
+       twice, each copy carrying the NAME's whole short list — a duplicate
+       group id, every BABA leg drawn and counted twice, and the header's leg
+       count three too high. It nets out today and will come back the next time
+       a name is built in two tranches. */
+    private var names: [OptionsPosition] {
+        var seen = Set<String>()
+        return positions.filter { seen.insert($0.t).inserted }
+    }
     private var groups: [LegGroup] {
-        positions.map { p -> LegGroup in
+        names.map { p -> LegGroup in
             let legs = p.shorts.sorted { $0.captured < $1.captured }
             let row = px(p.t)
             let wk = row?.pct.w1
@@ -282,9 +303,11 @@ struct SunnyRollCheck: View {
             return $0.worst < $1.worst
         }
     }
-    private var allLegs: [OptionsPosition.ShortLeg] { positions.flatMap(\.shorts) }
+    private var allLegs: [OptionsPosition.ShortLeg] { names.flatMap(\.shorts) }
+    /// Summed from the legs the card lists, never a stored total.
+    private var bookTV: Int { allLegs.reduce(0) { $0 + ($1.tv ?? 0) } }
     private var underWater: Int { allLegs.filter { $0.captured < 0 }.count }
-    private var totalFree: Int { positions.reduce(0) { $0 + freeCalls($1.t) + freePuts($1.t) } }
+    private var totalFree: Int { names.reduce(0) { $0 + freeCalls($1.t) + freePuts($1.t) } }
     private var kept: Int { (book.openCredit ?? 0) - (book.openValue ?? 0) }
 
     private struct LeftRow: Identifiable {
@@ -335,9 +358,17 @@ struct SunnyRollCheck: View {
         /* Credit minus what it is worth now: the money the strike has kept, or
            given back when the option has run against you. */
         case .captured:  return optMoney(l.credit - l.value)
-        /* What buying it back costs today, which is the credit still to be
-           captured. A leg at 100% has nothing remaining. */
-        case .remaining: return optMoney(l.value)
+        /* ⚠ WHAT IS STILL TO DECAY, NOT WHAT THE BUY-BACK COSTS. Nik, 14 Sep
+           2026, replacing "left to capture" here. The buy-back cost was the
+           whole mark; this is the part of it that is TIME and comes back by
+           Friday if he does nothing. The rest is intrinsic — the stock having
+           run through the strike — and no amount of waiting returns it.
+
+           On an out-of-the-money leg the two are the same number, and that is
+           the reading rather than a fault: the whole remaining cost is decay he
+           collects. A GAP between them is the intrinsic he will not get back,
+           which is the roll signal. */
+        case .timeValue: return optMoney(l.tv ?? 0)
         }
     }
     private func settle(_ d: Double, delay: Double = 0) -> Animation {
@@ -437,16 +468,25 @@ struct SunnyRollCheck: View {
 
     @ViewBuilder private var capturedView: some View {
         VStack(alignment: .leading, spacing: 0) {
-            eyebrow(fig == .remaining ? "LEFT TO CAPTURE"
+            eyebrow(fig == .timeValue ? "TIME VALUE LEFT"
                     : fig == .captured ? "CAPTURED, IN MONEY" : "CAPTURED OF CREDIT",
                     "Left to sell") { view = .left }
             Spacer().frame(height: 12)
+            /* ⚠ THE HERO FOLLOWS THE COLUMN, because the eyebrow already
+               does. Nik, 14 Sep 2026: "add book level on top". On the time
+               value stop the hero is the whole book's time value, summed from
+               the same legs listed below it, so the card cannot disagree with
+               itself. Every other stop keeps "kept this week". */
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(optMoney(kept))
+                Text(optMoney(fig == .timeValue ? bookTV : kept))
                     .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.035))
-                    .foregroundStyle(kept < 0 ? S.lossText : S.gainText)
+                    .foregroundStyle(fig == .timeValue ? S.gainText
+                                     : (kept < 0 ? S.lossText : S.gainText))
                     .sunnyLineBox(S.t30)
-                if weekOpen {
+                if fig == .timeValue {
+                    Text("still to decay")
+                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+                } else if weekOpen {
                     Text("kept this week")
                         .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
                 }
@@ -550,19 +590,20 @@ struct SunnyRollCheck: View {
             }
             .frame(width: track, height: 14)
 
-            /* ⚠ REMAINING TAKES NO DIRECTION INK. It is what the leg is worth to
-               whoever bought it, a cost to close and never a gain or a loss, so
-               colouring it would have the card arguing that owing money is a
-               win whenever the percentage happens to be green. */
+            /* ⚠ TIME VALUE TAKES NO DIRECTION INK. It is money still to come
+               on every leg, so it is never a gain or a loss against the
+               captured reading beside it, and colouring it would have the card
+               arguing that a leg deep in the money is winning because its
+               decay is large. */
             Text(figText(l))
                 .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.015))
-                .foregroundStyle(fig == .remaining ? S.ink : (up ? S.gainText : S.lossText))
+                .foregroundStyle(fig == .timeValue ? S.ink : (up ? S.gainText : S.lossText))
                 .lineLimit(1).fixedSize()
                 .sunnyHint()
                 .frame(width: 56, alignment: .trailing)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    fig = fig == .pct ? .captured : fig == .captured ? .remaining : .pct
+                    fig = fig == .pct ? .captured : fig == .captured ? .timeValue : .pct
                 }
         }
         .frame(height: 26)
@@ -1518,7 +1559,13 @@ struct SunnyPrices: View {
     let prices: PricesBlock
 
     private enum Fig { case pct, px, usd }
-    @State private var win: Int = 1          // 0 = the day window, 1-4 weeks
+    /* ⚠ THE CARD OPENS ON THE DAY WINDOW. Nik, 14 Sep 2026: "on refresh the
+       price card keep going back to 1w vs today it needs to be always today
+       when refreshed." It defaulted to 1w, from the days when the day window
+       left the card at the weekend; it never leaves it now, and a card that
+       resets to last week every time the book reloads is answering yesterday's
+       question. */
+    @State private var win: Int = 0          // 0 = the day window, 1-4 weeks
     @State private var fig: Fig = .pct
     @State private var showDelta = false     // the side word: IV or delta
     /// Re-read on every appearance so Friday 20:00 and Monday 04:00 land.

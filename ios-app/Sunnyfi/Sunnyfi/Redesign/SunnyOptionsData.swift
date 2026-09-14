@@ -455,6 +455,13 @@ struct OptionsPosition: Decodable, Identifiable {
            a run against an older deployment decodes. */
         let cr: Double?
         let opened: String?
+        /// ⚠ WHAT IS STILL TO DECAY, not what the buy-back costs. `value` is
+        /// the whole cost of closing the leg; this is the part that is time and
+        /// comes back by expiry if nothing is done. The rest is intrinsic and
+        /// is gone. On an out-of-the-money leg the two are the SAME number, and
+        /// that is the reading: the whole remaining cost is decay he collects.
+        /// Optional so a run against an older deployment decodes.
+        let tv: Int?
         var id: String { "\(n)|\(k)|\(exp)|\(type ?? "")" }
         /// Strike + side, the roll check's row label: `77C`, `37.5P`.
         var label: String {
