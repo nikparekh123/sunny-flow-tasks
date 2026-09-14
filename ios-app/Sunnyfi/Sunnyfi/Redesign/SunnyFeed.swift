@@ -538,11 +538,11 @@ struct SunnyPane: View {
                what moved and what to do about it, how fast the book earns and
                how much of it is paid for, then the rates underneath both.
 
-               The last five are mine, and they are the STANDING position
-               rather than the week: what the vol is (which is where Average
-               credit's usual-IV tick comes from, so it follows it), whether the
-               book is up, how far the premium has paid the LEAPs back and what
-               those LEAPs are worth, and what is left of a move.
+               Eight and nine are his too: Premium now, then Intrinsic value.
+               The last four are mine, and they are the STANDING position rather
+               than the week: whether the book is up, how far the premium has
+               paid the LEAPs back and what those LEAPs are worth, and what is
+               left of a move.
 
                Two adjacencies are load-bearing and must survive a reorder:
                Yield progress with Long calls, which share the premium-paid
@@ -583,16 +583,19 @@ struct SunnyPane: View {
             if let pm = o.premium, !pm.rows.isEmpty {
                 SunnyPremiumNow(block: pm, asOf: o.prices?.asOf ?? o.date)
             }
-            /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
-               leads the standing block. */
-            if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
-            /* ⚠ DIRECTLY AFTER PROGRAMME, the `intrinsic-premium` sheet's
-               placement: Programme says whether the book is up, this says how
-               much of what it holds is real rather than time. */
+            /* ⚠ AFTER PREMIUM NOW, NOT AFTER PROGRAMME. Nik, 14 Sep 2026. The
+               sheet mounts it under Programme; these two are the pair that
+               reads THE MARKET AGAINST THE BOOK — Premium now takes today's IV
+               against each name's own usual, this takes the long legs' mark
+               against what they cost — and the handoff's own data file says so
+               by feeding both from one call. */
             if let iv = o.intrinsic, !iv.legs.isEmpty {
                 SunnyIntrinsic(block: iv, prices: o.prices?.rows ?? [],
                                asOf: o.prices?.asOf ?? o.date)
             }
+            /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
+               leads the standing block. */
+            if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
             SunnyYieldProgress(book: o.book, positions: o.positions)
             /* Directly under Yield progress on purpose: the two share the
                premium-paid denominator and answer the halves of one question,
