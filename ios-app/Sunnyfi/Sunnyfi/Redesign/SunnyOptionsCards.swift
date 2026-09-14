@@ -1079,99 +1079,231 @@ struct SunnyPutCover: View {
 
 // MARK: - 3 · Weekly yield
 
-/// ⚠ A RATE TAKES NO DIRECTION INK. Yield is a rate and an average is a rate,
-/// so every bar is --bar-quiet, the average line is --ink, and only the LIVE
-/// WEEK takes --gain-bar. And every percentage names its denominator, which is
-/// always total premium paid — the only one that makes weeks comparable.
+/* ⚠ THIS REPLACES THE PREVIOUS WEEKLY YIELD CARD, 14 Sep 2026, from the
+   `weekly-yield` handoff (cards/weekly-yield.md, Sunny Weekly Yield Card.dc.html).
+   The old card is deleted, not kept beside it.
+
+   ⚠ A RATE TAKES NO DIRECTION INK. Yield is not a gain or a loss, it is how fast
+   the book earns, so seven bars are grey, the live week is the one green, and the
+   average is an INK line rather than a green one. The only red on the card is the
+   buyback cap: the part of a week's gross that went on closing legs early, which
+   is a real loss of income and is the one thing here that earns loss ink.
+
+   ⚠ THE AVERAGE IS OF WHAT WAS KEPT, gross less buybacks, week by week and then
+   averaged. Averaging the gross and subtracting the average buyback gives the same
+   answer today and a wrong one in the first week a buyback is skipped.
+
+   ⚠ AND EACH WEEK KEEPS ITS OWN DENOMINATOR, which is where this departs from the
+   sheet. The sheet divides every week by one book-wide figure; Nik's ruling of
+   2026-09-08 is that a closed week can never be rewritten, so the server dates the
+   ledger and a week is measured against the capital that existed while it ran. The
+   week of 31 August divides by $195,510 where this week divides by $249,455, and
+   both are right. See `feedback_closed_periods_never_change`. */
 struct SunnyWeeklyYield: View {
     let book: OptionsBook
+    /// Put cover — what the hedge needs per week before the puts expire.
+    var putNeed: Int = 0
 
-    @State private var showMoney = moneyByDefault
+    /// null = the average is the reference; otherwise that week is.
+    @State private var picked: String? = nil
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var maxPct: Double { max(book.weekly.map(\.pct).max() ?? 1, 0.01) }
-
-    var body: some View {
-        card.contentShape(Rectangle()).onTapGesture { showMoney.toggle() }
+    private struct Wk: Identifiable {
+        let id: String, label: String, live: Bool
+        let gross: Double, bought: Double
+        var kept: Double { gross - bought }
     }
 
-    private var card: some View {
+    /* ⚠ THE WEEKS THAT PRE-DATE THE BOOK ARE NOT PLOTTED. Three of the eight
+       columns are zero because the structure did not exist yet, and eight
+       columns with three empty ones read as three weeks that earned nothing.
+       They age out of the window on their own. */
+    private var weeks: [Wk] {
+        book.weekly.compactMap { w -> Wk? in
+            let den = Double(w.denom ?? book.paid)
+            guard den > 0 else { return nil }
+            let g = Double(w.gross ?? w.credit), b = Double(w.bought ?? 0)
+            guard g > 0 || b > 0 else { return nil }
+            return Wk(id: w.week, label: shortWeek(w.week), live: w.current ?? false,
+                      gross: g / den * 100, bought: b / den * 100)
+        }
+    }
+    /// The axis is set by the tallest GROSS bar; every height is a share of it.
+    private var maxGross: Double { max(weeks.map(\.gross).max() ?? 1, 0.01) }
+    private var avgKept: Double {
+        weeks.isEmpty ? 0 : weeks.reduce(0) { $0 + $1.kept } / Double(weeks.count)
+    }
+    /// The week the card is reading: the picked one, else the live one.
+    private var at: Wk? {
+        if let picked, let w = weeks.first(where: { $0.id == picked }) { return w }
+        return weeks.last(where: \.live) ?? weeks.last
+    }
+    private var refValue: Double {
+        if let picked, let w = weeks.first(where: { $0.id == picked }) { return w.kept }
+        return avgKept
+    }
+    /* ⚠ THE FLOOR IS WHAT THE HEDGE NEEDS A WEEK, NOT ITS WHOLE COST OVER EIGHT.
+       The sheet spreads the combined put cost across the eight weeks plotted,
+       which is arbitrary and, on this book, wildly wrong: $46,355 over eight
+       weeks says the hedge costs 2.32% a week and puts the line above every bar.
+       The puts run to March. Put cover already computes what it takes per week
+       to clear them before they expire, and that is the honest line: $1,635, or
+       0.66%. A week whose kept height falls under it is a week the hedge outran
+       income. */
+    private var floorPct: Double {
+        let den = Double(book.paid)
+        return den > 0 ? Double(putNeed) / den * 100 : 0
+    }
+
+    private func shortWeek(_ iso: String) -> String {
+        let p = iso.split(separator: "-")
+        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]) else { return iso }
+        return "\(m)/\(d)"
+    }
+    private func pct2(_ v: Double) -> String { String(format: "%.2f%%", v) }
+    private func settle(_ d: Double, delay: Double = 0) -> Animation {
+        .timingCurve(0.16, 1, 0.3, 1, duration: d).delay(delay)
+    }
+
+    private let plotH: CGFloat = 147
+    private func y(_ v: Double) -> CGFloat { CGFloat(v / maxGross) * plotH }
+
+    var body: some View {
         OptCard(name: "weekly-yield") {
-            /* ⚠ THE WINDOW AND THE DIVISOR ARE DIFFERENT NUMBERS, and the
-               header now says so. The bars chart all eight weeks because a
-               zero week is a fact; the average divides by the weeks the book
-               actually ran, because five weeks before the position existed
-               dragged a 2.78% rate to 1.04%. */
             OptHead(title: "Weekly yield", sub: "on premium paid",
-                    right: "\(book.liveWeeks) of \(book.weekly.count) weeks")
+                    right: "\(weeks.count) week" + (weeks.count == 1 ? "" : "s"))
             Spacer().frame(height: S.gap6)
+
             VStack(alignment: .leading, spacing: 5) {
-                Text("AVERAGE")
+                /* The eyebrow is the reference the card is currently reading. */
+                Text(picked == nil ? "AVERAGE" : (at?.label ?? "").uppercased())
                     .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
                     .foregroundStyle(S.mute)
                 HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
-                    Text(String(format: "%.2f%%", book.avgPct))
+                    Text(pct2(refValue))
                         .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
                         .foregroundStyle(S.ink).sunnyLineBox(S.t30)
-                    Text("a week").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+                    Text(picked == nil ? "a week, kept" : "kept that week")
+                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+                    Spacer(minLength: 0)
+                    /* The legend explains the card's one red and does not move. */
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2).fill(S.lossBar)
+                            .frame(width: 8, height: 8)
+                        Text("bought back").font(S.inter(S.t11, S.wMidSmN))
+                            .foregroundStyle(S.mute)
+                    }
+                    .fixedSize()
                 }
             }
+
             Spacer().frame(height: 18)
             plot
+            Spacer().frame(height: S.gap4)
+
+            HStack(alignment: .top, spacing: S.gap4) {
+                ForEach(weeks) { w in
+                    let on = w.live || w.id == picked
+                    Text(w.label)
+                        .font(S.inter(S.t11, on ? S.wBoldN : S.wMidSmN))
+                        .foregroundStyle(on ? S.ink : S.mute)
+                        .lineLimit(1).fixedSize()
+                        .frame(width: 30)
+                }
+                Spacer(minLength: 0)
+            }
+
             Spacer(minLength: S.gap6)
             OptFooter(stats: [
-                .init(label: "This week", value: optMoney(book.thisWeek), ink: S.gain),
-                .init(label: "Best week", value: optMoney(book.bestWeek), ink: S.ink),
-                .init(label: "Yearly", value: String(format: "%.0f%%", book.yearly), ink: S.ink),
+                .init(label: "Kept", value: pct2(at?.kept ?? 0), ink: S.ink),
+                .init(label: "Bought back",
+                      value: (at.map { $0.bought > 0 ? "\u{2212}" : "" } ?? "")
+                             + pct2(at?.bought ?? 0),
+                      ink: (at?.bought ?? 0) > 0 ? S.lossText : S.mute),
+                /* ⚠ YEARLY DOES NOT FOLLOW THE TAP, on purpose: one week
+                   annualised is a forecast and this card makes none. */
+                .init(label: "Yearly", value: "\(Int((avgKept * 52).rounded()))%", ink: S.ink),
             ])
         }
-    }
-
-    /* ⚠ THE WEEK NUMBERS ARE GONE AND THE VALUE SITS ON THE BAR. Nik:
-       "Remove W1, ... W8 text we dont need the text also on bars can you add %
-       value on top of the bars." W1…W8 named a column without saying anything
-       about it, and the reader still had to measure a bar against a line to
-       learn the number. The figure on the bar answers it directly.
-
-       A zero week gets NO label. Five "0.0%" on five empty bars is the axis
-       row again in a worse place; the empty bar is already the whole story. */
-    private let capH: CGFloat = 14      // the figure above a bar
-    private var barMaxH: CGFloat { S.weekPlotH - capH - 4 }
-
-    private var plot: some View {
-        ZStack(alignment: .bottom) {
-            Rectangle().fill(S.ruleColor).frame(height: 1)
-            HStack(alignment: .bottom, spacing: S.gap4) {
-                ForEach(book.weekly) { w in
-                    /* Server-flagged, never the last index: the window now
-                       reaches into weeks already sold but not yet begun. */
-                    let live = w.current ?? false
-                    VStack(spacing: 4) {
-                        /* A zero week still gets no label in either unit: an
-                           empty bar is already the whole story, and "$0" eight
-                           times is the axis row again in a worse place. */
-                        Text(w.pct > 0
-                             ? (showMoney ? optMoneyShort(w.credit)
-                                          : String(format: "%.1f%%", w.pct))
-                             : "")
-                            .font(S.inter(S.t10, live ? S.wBoldN : S.wMidSmN))
-                            .foregroundStyle(live ? S.ink : S.mute)
-                            .lineLimit(1).fixedSize()
-                            .frame(height: capH)
-                        UnevenRoundedRectangle(topLeadingRadius: S.radiusBar,
-                                               bottomLeadingRadius: 1, bottomTrailingRadius: 1,
-                                               topTrailingRadius: S.radiusBar)
-                            .fill(live ? S.gainBar : S.barQuiet)
-                            .frame(height: max(1, barMaxH * w.pct / maxPct))
-                    }
-                    .frame(maxWidth: S.weekBarMax)
-                }
-            }
-            Rectangle().fill(S.ink).frame(height: S.refLine)
-                .offset(y: -barMaxH * book.avgPct / maxPct)
+        .task(id: weeks.count) {
+            guard !weeks.isEmpty, !appeared else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            appeared = true
         }
-        .frame(height: S.weekPlotH, alignment: .bottom)
     }
 
+    // MARK: the plot
+
+    @ViewBuilder private var plot: some View {
+        let grown = reduceMotion || appeared
+        ZStack(alignment: .bottomLeading) {
+            Rectangle().fill(S.ruleColor).frame(height: 1)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+
+            HStack(alignment: .bottom, spacing: S.gap4) {
+                ForEach(Array(weeks.enumerated()), id: \.element.id) { i, w in
+                    /* ⚠ THE CAP IS ANCHORED AT THE BAR'S TOP, so the grey or
+                       green left under it is what was kept. A cap drawn from the
+                       bottom would read as the week starting in the red. */
+                    ZStack(alignment: .top) {
+                        Rectangle().fill(w.live ? S.gainBar : S.barQuiet)
+                            .frame(height: max(1, y(w.gross)))
+                        if w.bought > 0 {
+                            /* ⚠ HATCHED ON A PAST WEEK, NEVER A LIGHTER RED.
+                               Solid is the live week alone, so eight caps do not
+                               read as eight exceptions — but the deck's own rule
+                               is that a provisional signal cannot be LIGHTNESS
+                               (the leg card measured a lighter fill at 2.07:1).
+                               A hatch keeps the ink and changes the texture. */
+                            Group {
+                                if w.live { Rectangle().fill(S.lossBar) }
+                                else { SunnyHatch(ink: S.lossBar, stripe: 1, gap: 2) }
+                            }
+                            .frame(height: max(1, y(w.bought)))
+                        }
+                    }
+                    .frame(width: 30, height: max(1, y(w.gross)), alignment: .top)
+                    .clipShape(UnevenRoundedRectangle(topLeadingRadius: S.radiusBar,
+                                                      bottomLeadingRadius: 1,
+                                                      bottomTrailingRadius: 1,
+                                                      topTrailingRadius: S.radiusBar))
+                    .scaleEffect(y: grown ? 1 : 0, anchor: .bottom)
+                    .animation(settle(0.72, delay: Double(i) * 0.055), value: appeared)
+                    .animation(reduceMotion ? nil : settle(0.55), value: picked)
+                    .contentShape(Rectangle())
+                    /* The tap target is the bar. No text on this card flips, so
+                       nothing here carries the dotted underline: that hint marks
+                       tappable TEXT and would be a lie on a week label. */
+                    .onTapGesture { picked = (picked == w.id) ? nil : w.id }
+                }
+                /* ⚠ LEFT-ALIGNED, NOT SPREAD. Eight columns at flex:1 in 323
+                   measure 34 and read chunky, so the bar is capped at 30 and
+                   the slack is left on the RIGHT. Spreading them instead makes
+                   the live week drift sideways every time a week is added or
+                   drops out of the window, which is the one column the eye
+                   goes to. */
+                Spacer(minLength: 0)
+            }
+            .frame(height: plotH, alignment: .bottom)
+
+            /* The average, or the week the reader picked. It SLIDES between them. */
+            Rectangle().fill(S.ink)
+                .frame(height: 1.5).clipShape(RoundedRectangle(cornerRadius: 1))
+                .offset(y: -y(refValue))
+                .opacity(grown ? 1 : 0)
+                .animation(reduceMotion ? nil : settle(0.6, delay: 0.5), value: appeared)
+                .animation(reduceMotion ? nil : settle(0.55), value: picked)
+
+            if floorPct > 0 {
+                Rectangle().fill(S.hair).frame(height: 1.5).offset(y: -y(floorPct))
+                Text("puts " + pct2(floorPct))
+                    .font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+                    .fixedSize().offset(y: -y(floorPct) - 4 - 5)
+            }
+        }
+        .frame(height: plotH)
+    }
 }
 
 // MARK: - prices
@@ -2139,5 +2271,6 @@ struct SunnyUpsideLeft: View {
         }
     }
 }
+
 
 

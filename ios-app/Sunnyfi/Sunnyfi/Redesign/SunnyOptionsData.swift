@@ -319,6 +319,18 @@ struct OptionsBook: Decodable {
         /// the current week and the card must not infer it from an index.
         /// Optional so an older payload still decodes.
         let current: Bool?
+        /* ⚠ GROSS AND BOUGHT-BACK ARE TWO FACTS, NOT ONE NET. The weekly-yield
+           card draws the week's gross credit as the bar and what it cost to
+           close legs as a red cap ON that bar, so a week that sold $9,527 and
+           spent $2,377 buying back reads as both rather than as $7,150.
+           `credit` is still the net and every other card uses it:
+           gross − bought == credit, always. Optional so an older payload
+           decodes. */
+        let gross: Int?
+        let bought: Int?
+        /// What this week was measured against. A closed week keeps its own
+        /// denominator, so a LEAP bought on a Tuesday cannot rewrite it.
+        let denom: Int?
         var id: String { week }
     }
 }

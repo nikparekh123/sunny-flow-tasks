@@ -216,10 +216,17 @@ struct SunnyPositionCard: View {
 /// nonisolated in the protocol.
 struct SunnyHatch: View {
     let ink: Color
+    /* ⚠ THE PITCH IS A PARAMETER NOW, and the defaults are the position card's
+       so nothing there moves. The weekly-yield card needs a much finer hatch —
+       1 over 2 against this card's 6 over 3 — because its caps are a few pixels
+       tall and a 6px stripe in a 5px box is a solid block. One hatch in the
+       deck, two pitches. */
+    var stripe: CGFloat = S.posHatchStripe
+    var gap: CGFloat = S.posHatchGap
 
     var body: some View {
         Canvas { ctx, size in
-            let step = S.posHatchStripe + S.posHatchGap
+            let step = stripe + gap
             let reach = size.width + size.height
             var x = -size.height
             while x < reach {
@@ -227,7 +234,7 @@ struct SunnyHatch: View {
                 p.move(to: CGPoint(x: x, y: size.height))
                 p.addLine(to: CGPoint(x: x + size.height, y: 0))
                 ctx.stroke(p, with: .color(ink),
-                           style: StrokeStyle(lineWidth: S.posHatchStripe))
+                           style: StrokeStyle(lineWidth: stripe))
                 x += step
             }
         }

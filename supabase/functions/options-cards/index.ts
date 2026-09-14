@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-13.1';
+const BUILD = '2026-09-14.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -188,6 +188,9 @@ Deno.serve(async (req) => {
 
     /* ── every credit ever, bucketed by week ────────────────────────────── */
     const creditByWeek = new Map<string, Map<string, number>>();
+    /* The same buckets split by side, for the weekly-yield card's bar and cap. */
+    const grossByWeek = new Map<string, Map<string, number>>();
+    const boughtByWeek = new Map<string, Map<string, number>>();
     const firstCredit = new Map<string, string>();
     for (const t of allShorts) {
       const tk = String(t.ticker);
@@ -195,6 +198,12 @@ Deno.serve(async (req) => {
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
       if (!creditByWeek.has(tk)) creditByWeek.set(tk, new Map());
       const m = creditByWeek.get(tk)!;
+      /* ⚠ GROSS AND BOUGHT-BACK ARE TWO FACTS, NOT ONE NET. The weekly-yield
+         card draws the week's gross credit as the bar and the cost of buying
+         legs back as a red cap ON that bar, so a week that sold $7,000 and
+         spent $1,500 closing early reads as both, not as $5,500. Netting them
+         here would make the two halves unrecoverable. `credit` stays the net,
+         because every other card on the page is built on it. */
       /* ⚠ THE WEEK A CREDIT BELONGS TO IS THE WEEK IT COVERS, NOT THE DAY IT
          WAS SOLD. Nik, 2026-09-03, after selling a BABA 114 for 11 Sep on the
          3rd and finding it nowhere: "Which week it's sold for not the day it
@@ -208,6 +217,13 @@ Deno.serve(async (req) => {
          A credit is now filed under its expiry's Monday. */
       const w = weekStart(String(t.expiry).slice(0, 10));
       m.set(w, (m.get(w) ?? 0) + c);
+      if (!grossByWeek.has(tk)) grossByWeek.set(tk, new Map());
+      if (!boughtByWeek.has(tk)) boughtByWeek.set(tk, new Map());
+      if (c > 0) {
+        const g = grossByWeek.get(tk)!; g.set(w, (g.get(w) ?? 0) + c);
+      } else if (c < 0) {
+        const b = boughtByWeek.get(tk)!; b.set(w, (b.get(w) ?? 0) - c);
+      }
       if (!firstCredit.has(tk) || d < firstCredit.get(tk)!) firstCredit.set(tk, d);
     }
 
@@ -513,8 +529,19 @@ Deno.serve(async (req) => {
          begun — and the card was painting THAT one as the live week. The
          server says which is current; the client must not infer it from a
          position in the array. */
+      let g = 0, b = 0;
+      for (const p of positions) {
+        g += (grossByWeek.get(p.t)?.get(w) ?? 0);
+        b += (boughtByWeek.get(p.t)?.get(w) ?? 0);
+      }
       return { week: w, credit: Math.round(c), current: w === thisWeek,
-               pct: denom > 0 ? r2(c / denom * 100) : 0 };
+               /* Gross sold, and what closing legs cost, charged to the week
+                  that paid for it. gross - bought === credit, always. */
+               gross: Math.round(g), bought: Math.round(b),
+               pct: denom > 0 ? r2(c / denom * 100) : 0,
+               /* The denominator this week was measured against, so the card
+                  never has to re-derive a dated ledger on the phone. */
+               denom: Math.round(denom) };
     });
     const legCount = positions.reduce((s, p) => s + p.shorts.length, 0);
     /* ⚠ THE ROLL CHECK FOOTER IS COMPUTED HERE, NOT ON THE CLIENT, for the

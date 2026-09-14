@@ -554,7 +554,7 @@ struct SunnyPane: View {
                put it draws an ABSENCE — empty track, dashes, no percentage —
                rather than a zero. */
             SunnyPutCover(c: o.putCover ?? Self.argCover)
-            SunnyWeeklyYield(book: o.book)
+            SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0)
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "
                         + "come back to this page.")
