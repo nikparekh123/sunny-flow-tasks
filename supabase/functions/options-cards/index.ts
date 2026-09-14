@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.8';
+const BUILD = '2026-09-14.9';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1458,7 +1458,15 @@ Deno.serve(async (req) => {
                   ? today
                   : (closes.map((r) => String(r.date).slice(0, 10))
                       .filter((d) => d < today).sort().pop() ?? today),
-                live: dayLive },
+                live: dayLive,
+                /* ⚠ THE LAST COMPLETED SESSION, WHICH IS NOT `asOf`. While a
+                   session is running `asOf` is TODAY — the day window is
+                   measuring against a live price — and the last thing that
+                   actually closed is the session before it. The pull-to-refresh
+                   control prints this on done: "Fri 11 Sep · 4:00 PM close" is
+                   an honest answer on a Sunday in a way "just now" is not. */
+                lastClose: closes.map((r) => String(r.date).slice(0, 10))
+                  .filter((d) => d < today).sort().pop() ?? today },
       book: {
         /* ⚠ `paid` IS NOW TOTAL INVESTED, and the label on the card says so.
            Every yield on this page divides by it. */

@@ -33,7 +33,11 @@ final class OptionsStore {
             r.setValue("application/json", forHTTPHeaderField: "Content-Type")
             r.httpBody = Data("{}".utf8)
             let (d, _) = try await URLSession.shared.data(for: r)
-            data = try JSONDecoder().decode(OptionsPayload.self, from: d)
+            let p = try JSONDecoder().decode(OptionsPayload.self, from: d)
+            data = p
+            /* ⚠ THE LOADING SCREEN NEEDS THETA BEFORE THETA ARRIVES, so the
+               last good answer is kept here rather than fetched again. */
+            SunnyWait.remember(p)
             error = nil; loadedAt = Date(); version &+= 1
         } catch { self.error = String(describing: error) }
     }
@@ -386,6 +390,10 @@ struct PricesBlock: Decodable {
     /// True while a session is running. The day window is then spot against the
     /// last close; otherwise it is the last close against the one before it.
     let live: Bool?
+    /// ⚠ THE LAST COMPLETED SESSION, WHICH IS NOT `asOf`. While a session is
+    /// running `asOf` is today; this is the thing that actually closed. The
+    /// pull control prints it on done. Optional so an older deployment decodes.
+    let lastClose: String?
 }
 
 struct OptionsBook: Decodable {

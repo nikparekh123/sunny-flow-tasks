@@ -353,7 +353,12 @@ struct SunnyPane: View {
 
            It lives on the vertical scroller inside the horizontal pager, so a
            downward pull refreshes and a sideways drag still pages. */
-        .refreshable { await m.loadAll(force: true) }
+        /* ⚠ THE PLATFORM SPINNER IS REMOVED, NOT HIDDEN, 14 Sep 2026, from the
+           `loading` handoff. `.refreshable` drew a ring, and nothing in this
+           deck spins. The control is a hairline that grows from the centre with
+           the pull, a caret that travels it while the feed answers, and the
+           real close label on done. */
+        .sunnyPullRefresh { await m.loadAll(force: true) }
         .background(S.ground)
         .task {
             /* Verification only: -scrollTo starts the pane at a fixed offset so a
@@ -605,6 +610,11 @@ struct SunnyPane: View {
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "
                         + "come back to this page.")
+        } else {
+            /* ⚠ THE PANE'S OWN LOADING STATE, and it waits 400 ms before it
+               appears: a flash of this screen on a fast load is worse than a
+               blank one. It has no done state — the page arriving is done. */
+            SunnyWaitGate(title: "Options")
         }
     }
 
