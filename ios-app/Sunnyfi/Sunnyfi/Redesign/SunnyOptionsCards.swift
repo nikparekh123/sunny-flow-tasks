@@ -2220,7 +2220,7 @@ struct SunnyAvgCredit: View {
 // MARK: - theta
 
 /// ⚠ THE INK IS THE SIGN, NOT A VERDICT. Long legs (the LEAPs and the
-/// protective puts) always PAY decay, so that side is always loss ink; short
+/// protective puts) always LOSE decay, so that side is always loss ink; short
 /// legs always COLLECT, so that side is always gain ink. Neither colour is good
 /// or bad news here — the comparison lives in the ink average line. This is the
 /// one card in the frame where colour does not move with the data.
@@ -2257,7 +2257,11 @@ struct SunnyTheta: View {
         /* Bars plot the ABSOLUTE value on each side's own scale, so both columns
            rise as the book grows even though one side is negative. */
         let lCol = PairCol(
-            label: "LONG \u{00B7} PAYS",
+            /* ⚠ LOSES, NOT PAYS. Nik, 14 Sep 2026. "Pays" reads as the long
+               side EARNING — it is the word for a dividend or a coupon — when
+               it is the side that hands money back every day. "Loses" says
+               which direction the money goes with no second reading. */
+            label: "LONG \u{00B7} LOSES",
             figure: sg(now?.long ?? 0), ink: S.lossText,
             baseline: "average \(sg(lA))",
             values: ws.map { Double(abs($0.long)) }, keys: ws.map { pairKey($0.week) },
@@ -2289,7 +2293,7 @@ struct SunnyTheta: View {
         }
     }
 
-    /* ⚠ THE RATIO ALONE FLATTERS ITSELF. "Short collects 3.9× what long pays"
+    /* ⚠ THE RATIO ALONE FLATTERS ITSELF. "Short collects 3.9× what long loses"
        is the whole story on a quiet week and half of it on a 4% week, so
        Prices' move sits beside it: decay is only free when the book sits
        still, and the move is the ABSOLUTE one because a book with one name up
@@ -2299,7 +2303,7 @@ struct SunnyTheta: View {
             ?? "book move unknown"
         guard let now, now.long < 0 else { return mv }
         let r = Double(now.short) / Double(-now.long)
-        return "short collects \(String(format: "%.1f", r))\u{00D7} what long pays \u{00B7} " + mv
+        return "short collects \(String(format: "%.1f", r))\u{00D7} what long loses \u{00B7} " + mv
     }
 }
 
