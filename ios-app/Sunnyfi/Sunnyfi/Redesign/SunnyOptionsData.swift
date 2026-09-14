@@ -107,6 +107,8 @@ struct OptionsPayload: Decodable {
     let theta: ThetaBlock?
     /// Optional so a run against an older deployment decodes rather than throws.
     let intrinsic: IntrinsicBlock?
+    /// Optional so a run against an older deployment decodes rather than throws.
+    let coverBars: CoverBarsBlock?
     /* handoff-final/, 10 Sep 2026. All optional so a run against an older
        deployment decodes rather than throws. */
     let programme: ProgrammeBlock?
@@ -185,6 +187,48 @@ struct IntrinsicRow: Decodable, Identifiable {
     let t: String
     let call: LongStrike?, put: LongStrike?
     var id: String { t }
+}
+
+/// ⚠ ONLY TIME VALUE HAS TO BE COVERED, and that is the whole idea. The rings
+/// measured credit against the whole COST of the long legs, which is the wrong
+/// denominator: a long leg's intrinsic is real money — exercising returns it —
+/// so premium only has to earn back the part that melts.
+struct CoverSide: Decodable {
+    let label: String, scope: String
+    let names: Int
+    /// mark less intrinsic, the Intrinsic card's own figure, so the two cards
+    /// read one book rather than deriving "time value" twice.
+    let time: Int
+    /// The same figure at an earlier close. Null where no leg of this side was
+    /// being priced that day: the history does not reach back yet, and a zero
+    /// would draw the ghost on the floor and claim the whole bar melted.
+    let hist: CoverHist
+    let collected: Int
+    let chist: CoverHist
+    /// This week's realised credit — the rate the gap closes from the right.
+    let pace: Int
+    /// Time value lost a day at the current theta, positive — the rate it
+    /// closes from the left.
+    let melt: Int
+
+    var gap: Int { time - collected }
+    var covered: Bool { gap <= 0 }
+    /// The two rates together. Null when neither side is moving.
+    var daysToMeet: Int? {
+        guard gap > 0 else { return 0 }
+        let perDay = Double(pace) / 7 + Double(melt)
+        return perDay > 0 ? Int((Double(gap) / perDay).rounded(.up)) : nil
+    }
+}
+struct CoverHist: Decodable {
+    let yday: Int?, week: Int?
+}
+struct CoverBarsBlock: Decodable {
+    let asOf: String
+    let sides: CoverSides
+}
+struct CoverSides: Decodable {
+    let call: CoverSide, put: CoverSide
 }
 
 struct IntrinsicBlock: Decodable {

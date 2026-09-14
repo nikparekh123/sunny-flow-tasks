@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.10';
+const BUILD = '2026-09-14.11';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1457,6 +1457,144 @@ Deno.serve(async (req) => {
     const putNeed = putWeeksLeft > 0 && putLeft > 0
       ? Math.ceil(putLeft / putWeeksLeft) : 0;
 
+    /* ── cover bars ───────────────────────────────────────────────────────
+       handoff `export 12/cover-bars`, 14 Sep 2026. These two REPLACE the rings.
+
+       ⚠ ONLY TIME VALUE HAS TO BE COVERED, and that is the whole change. The
+       rings measured credit against the whole COST of the long legs, which is
+       the wrong denominator: a long leg's intrinsic is real money — exercising
+       returns it — so premium only has to earn back the part that melts. Nik,
+       14 Sep 2026: "us saying that the whole thing will go to zero just doesn't
+       make any sense." The call side goes from 16% covered of cost to 31% of
+       time value on the same book, and the ring was telling him he was behind
+       when he was not.
+
+       ⚠ AND IT IS TWO MOVING QUANTITIES, WHICH IS WHY THE RING HAD TO GO. A ring
+       shows one fraction against a fixed whole. Here the left side shrinks every
+       day and the right grows every week, and the reader needs to see both. */
+    const coverDay = async (day: string) => {
+      const { day: d, rows } = await greeksOn(day, 'option_trade_id,last_mark');
+      const mk = new Map<string, number>();
+      for (const g of rows) {
+        const id = String(g.option_trade_id);
+        if (!mk.has(id)) mk.set(id, N(g.last_mark));
+      }
+      return { day: d, mk };
+    };
+    /* ⚠ THE SPOT OF THAT DAY, NOT TODAY'S. Intrinsic is spot against strike, so
+       a past day's time value needs that day's close — using today's would
+       report the stock's move as decay. */
+    const closeAt = new Map<string, number>();
+    for (const r of closes) {
+      closeAt.set(`${r.ticker}|${String(r.date).slice(0, 10)}`, N(r.close_price));
+    }
+    const spotOn = (t: string, d: string) => {
+      for (let i = 0; i < 7; i++) {
+        const k = `${t}|${new Date(Date.parse(d + 'T00:00:00Z') - i * 86_400_000)
+          .toISOString().slice(0, 10)}`;
+        const v = closeAt.get(k);
+        if (v && v > 0) return v;
+      }
+      return spot.get(t) ?? 0;
+    };
+    /* Every long leg's id, with what it takes to value it on a past day. */
+    type LongLeg = { ticker: string; type: string; k: number; n: number; ids: string[] };
+    const longLegs: LongLeg[] = open
+      .filter((e) => e.dir === 'long')
+      .map((e) => ({ ticker: e.ticker, type: e.type, k: e.k, n: e.n, ids: e.ids }));
+
+    /* ⚠ COMPARE THE SAME LEGS OR THE GHOST IS A LIE. `mp-refresh` covered 27
+       legs on 7 September and 66 today, so a naive then-against-now would
+       report the widening COVERAGE as time value appearing out of nowhere — and
+       a LEAP bought this morning would read as a week's melt in reverse. The
+       change is measured over the legs present in BOTH readings, and the ghost's
+       level is today's total less that change, so the line sits where it
+       honestly sits against the bar beside it. */
+    const timeOver = (mk: Map<string, number>, day: string, type: string,
+                      only?: Set<string>) => {
+      let tv = 0;
+      const seen = new Set<string>();
+      for (const e of longLegs) {
+        if (e.type !== type) continue;
+        const md = e.ids.map((i) => mk.get(i)).filter((x) => x !== undefined) as number[];
+        if (md.length !== e.ids.length) continue;          // the leg did not exist yet
+        if (only && !e.ids.every((i) => only.has(i))) continue;
+        for (const i of e.ids) seen.add(i);
+        const m = md.reduce((a, b) => a + b, 0) / md.length;
+        const S0 = spotOn(e.ticker, day);
+        const intr = type === 'put' ? Math.max(0, e.k - S0) : Math.max(0, S0 - e.k);
+        tv += Math.max(0, m - intr) * e.n * 100;
+      }
+      return { tv: Math.round(tv), ids: seen };
+    };
+    const nowMk = new Map<string, number>();
+    for (const [id, v] of mark) nowMk.set(id, v.m);
+
+    /* ⚠ AND CREDIT IS COUNTED THE WAY ITS OWN CARD COUNTS IT. The call side is
+       short-call credit on a name that holds a LEAP; the put side is the put
+       programme's, which needs `direction` and `strike` to test membership —
+       fields the shorts query does not select, so it reads `allPuts`. Getting
+       this wrong made the put ghost read zero against a real $2,214. */
+    const creditTo = (cut: string, type: string) => {
+      let c = 0;
+      if (type === 'call') {
+        for (const t of allShorts) {
+          if (String(t.option_type) !== 'call') continue;
+          if (String(t.trade_date).slice(0, 10) > cut) continue;
+          if (!leapCostBy.has(String(t.ticker))) continue;
+          c += (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
+        }
+      } else {
+        for (const t of allPuts) {
+          if (String(t.direction) !== 'short' || !inProgramme(t)) continue;
+          if (String(t.trade_date).slice(0, 10) > cut) continue;
+          c += (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
+        }
+      }
+      return Math.round(c);
+    };
+
+    const ydayDate = closes.map((r) => String(r.date).slice(0, 10))
+      .filter((d) => d < today).sort().pop() ?? ago(1);
+    const [ydayMk, weekMk] = await time('coverHist', () =>
+      Promise.all([coverDay(ydayDate), coverDay(ago(7))]));
+
+    /* This week's realised credit per side, and how many names hold that leg. */
+    const putWkTotal = [...putWeek.entries()]
+      .filter(([w]) => w === thisWeek).reduce((a, [, v]) => a + v, 0);
+    const nameCount = (type: string) =>
+      new Set(longLegs.filter((e) => e.type === type).map((e) => e.ticker)).size;
+
+    const ghost = (read: { day: string; mk: Map<string, number> }, type: string) => {
+      const then = timeOver(read.mk, read.day, type);
+      if (!then.ids.size) return null;
+      const nowSame = timeOver(nowMk, today, type, then.ids);
+      const l = ivLegs.find((x) => x.k === (type === 'put' ? 'lp' : 'lc'));
+      const now = l ? l.mark - l.intr : 0;
+      return Math.max(0, Math.round(now - (nowSame.tv - then.tv)));
+    };
+
+    const side = (type: string, label: string, scope: string,
+                  collected: number, pace: number, melt: number) => ({
+      label, scope, names: nameCount(type),
+      /* ⚠ TODAY'S FIGURE IS THE INTRINSIC CARD'S, NOT A SECOND DERIVATION. The
+         sheet requires the two cards to read one book, and two computations of
+         "time value" would disagree the first time one of them was changed. */
+      time: (() => {
+        const l = ivLegs.find((x) => x.k === (type === 'put' ? 'lp' : 'lc'));
+        return l ? l.mark - l.intr : 0;
+      })(),
+      /* Null where no leg of this side was being priced that day — the history
+         simply does not reach back yet, and a zero would draw the ghost on the
+         floor and claim the whole bar melted. */
+      hist: { yday: ghost(ydayMk, type), week: ghost(weekMk, type) },
+      collected: Math.round(collected),
+      chist: { yday: creditTo(ydayMk.day, type), week: creditTo(weekMk.day, type) },
+      pace: Math.round(pace),
+      /* Positive: the card's word is "melts", so the sign is in the label. */
+      melt: Math.abs(melt),
+    });
+
     timings.total = Date.now() - T0;
     return json(200, {
       ok: true, build: BUILD, date: today, timings,
@@ -1513,6 +1651,15 @@ Deno.serve(async (req) => {
       credit,
       theta,
       intrinsic,
+      coverBars: {
+        asOf: dayLive ? today : ydayDate,
+        sides: {
+          call: side('call', 'Call cover', 'the long calls',
+                     callCollected, callPace, thetaWeeks[thetaWeeks.length - 1]?.lc ?? 0),
+          put: side('put', 'Put cover', 'the long puts',
+                    putCollected, putWkTotal, thetaWeeks[thetaWeeks.length - 1]?.lp ?? 0),
+        },
+      },
       programme,
       premium,
       upside,

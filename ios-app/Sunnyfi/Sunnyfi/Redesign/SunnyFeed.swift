@@ -489,30 +489,9 @@ struct SunnyPane: View {
        lead was buried. Nik: "new is getting crowded... we need another
        dedicated space." The order is the sheet's: roll check first, because it
        is the only one of the three that asks for an action. */
-    /* ⚠ VERIFICATION ONLY, like `-page` and `-roomSnap`. The put cover card
-       cannot render until a long put exists, and shipping a card nobody has
-       ever seen draw is how the last two layout bugs got in. `-fakeCover`
-       feeds it one plausible book so the ring, the clamp and the footer can be
-       measured before Tuesday. DEBUG and the simulator only. */
-    private static var argCover: PutCover? {
-        #if DEBUG
-        let a = ProcessInfo.processInfo.arguments
-        guard a.contains("-fakeCover") else { return nil }
-        let over = a.contains("-coverOver")
-        let cost = 60225, collected = over ? 63400 : 38100
-        let left = cost - collected
-        let weeks = 26
-        return PutCover(names: 5, puts: 105, cost: cost, collected: collected,
-                        left: left, pace: 2316,
-                        pct: Double(collected) / Double(cost) * 100,
-                        weeksToCover: max(0, Int(ceil(Double(left) / 2316))),
-                        expiry: "2027-03-19", weeksLeft: weeks,
-                        need: left > 0 ? Int(ceil(Double(left) / Double(weeks))) : 0,
-                        free: 15, move: -0.4)
-        #else
-        return nil
-        #endif
-    }
+    /* ⚠ THE RING'S FAKE BOOK IS GONE with the rings, 14 Sep 2026. `-fakeCover`
+       existed so the put cover ring could be measured before the first put was
+       bought; there are 83 of them now and the bars read the real book. */
 
     private func optionsNote(_ o: OptionsPayload) -> String {
         if o.book.rolling > 0 {
@@ -577,8 +556,8 @@ struct SunnyPane: View {
                Both draw before their first contract exists — Nik: "Maybe we
                can show the put card also and when positions get added the
                circle develops" — but they draw an ABSENCE, not a zero. */
-            SunnyCallCover(c: o.callCover)
-            SunnyPutCover(c: o.putCover ?? Self.argCover)
+            SunnyCallCover(block: o.coverBars)
+            SunnyPutCover(block: o.coverBars)
             /* The pair frame, together: what decay earns while the book sits
                still, then what a contract sells for. */
             if let th = o.theta, !th.weeks.isEmpty { SunnyTheta(block: th) }
