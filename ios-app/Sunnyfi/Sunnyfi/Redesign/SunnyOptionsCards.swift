@@ -1308,7 +1308,14 @@ struct SunnyWeeklyYield: View {
     var putNeed: Int = 0
 
     /// null = the average is the reference; otherwise that week is.
-    @State private var picked: String? = nil
+    /* ⚠ VERIFICATION ONLY, the same device as `-rollFig`: the simulator's
+       touch bridge crashes, so `-wyPick 2026-08-17` forces a week and proves
+       the picked state RENDERS. It does not test the tap. */
+    @State private var picked: String? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-wyPick"), i + 1 < a.count else { return nil }
+        return a[i + 1]
+    }()
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -1364,6 +1371,15 @@ struct SunnyWeeklyYield: View {
         guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]) else { return iso }
         return "\(m)/\(d)"
     }
+    /// "14 Sep" — the eyebrow has the whole card's width, so the week is named
+    /// rather than keyed. The axis labels stay "9/14": four of them share 323.
+    private func longWeek(_ iso: String) -> String {
+        let p = iso.split(separator: "-")
+        let mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]), (1...12).contains(m)
+        else { return iso }
+        return "\(d) \(mon[m - 1])"
+    }
     private func pct2(_ v: Double) -> String { String(format: "%.2f%%", v) }
     private func settle(_ d: Double, delay: Double = 0) -> Animation {
         .timingCurve(0.16, 1, 0.3, 1, duration: d).delay(delay)
@@ -1379,15 +1395,22 @@ struct SunnyWeeklyYield: View {
             Spacer().frame(height: S.gap6)
 
             VStack(alignment: .leading, spacing: 5) {
-                /* The eyebrow is the reference the card is currently reading. */
-                Text(picked == nil ? "AVERAGE" : (at?.label ?? "").uppercased())
+                /* ⚠ THE EYEBROW NAMES THE WEEK IN WORDS. Nik, 14 Sep 2026:
+                   "kept that week sounds very confusing we need to write the
+                   week number so say week of 14th sep". "8/17" over "kept that
+                   week" made the reader join two halves of one sentence across
+                   a 30pt figure, and "that week" pointed at a label it did not
+                   touch. The eyebrow now says which week and the line beside
+                   the figure says only what the figure is. */
+                Text(picked == nil ? "AVERAGE"
+                     : ("WEEK OF " + longWeek(at?.id ?? "")).uppercased())
                     .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
                     .foregroundStyle(S.mute)
                 HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
                     Text(pct2(refValue))
                         .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
                         .foregroundStyle(S.ink).sunnyLineBox(S.t30)
-                    Text(picked == nil ? "a week, kept" : "kept that week")
+                    Text(picked == nil ? "a week, kept" : "kept")
                         .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
                     Spacer(minLength: 0)
                     /* The legend explains the card's one red and does not move. */
@@ -1981,6 +2004,20 @@ private struct PairFrameCard<Footer: View>: View {
     let unit: String
     let onUnit: (() -> Void)?
     let left: PairCol, right: PairCol
+    /* ⚠ THE COLUMNS SHARE A SCALE WHEN THE CARD PRINTS A RELATIONSHIP BETWEEN
+       THEM, and not otherwise. That is the rule, and it is the correction to
+       the sheet's blanket "the two columns are not height-comparable".
+
+       Nik, 14 Sep 2026, on Theta: "graph is misleading, theta for long is less
+       but still the bar is taller". He was right. Theta's two columns are two
+       halves of ONE total — the card prints Net and "short collects 3.9x what
+       long loses" — so a reader is meant to compare them, and a per-side scale
+       drew −$279 taller than +$1,084.
+
+       Average credit keeps the per-side scale, because its columns are two
+       independent books judged against their OWN pasts and the card states no
+       relationship between them. */
+    var shared = false
     @ViewBuilder let footer: () -> Footer
 
     /* Measured, not chosen: inner 323, so 146 + 15 + 1 + 15 + 146. Four bars in
@@ -2035,7 +2072,18 @@ private struct PairFrameCard<Footer: View>: View {
     /// lo is a share of the window's own RANGE, never of its minimum: a
     /// proportional floor only pads narrow windows and puts two different
     /// weeks on the same stub.
+    ///
+    /// ⚠ AND A SHARED SCALE IS ZERO-BASED, not truncated. The truncation exists
+    /// to separate four near-identical bars inside one column; across two
+    /// columns it would inflate the smaller side — long theta at 279 against
+    /// 1,319 draws 34% of the box truncated and 21% from zero, and only the
+    /// second is the ratio the footer prints.
     private func scale(_ c: PairCol) -> (lo: Double, hi: Double) {
+        if shared {
+            let all = (left.values + right.values).compactMap { $0 }
+            let mx = all.max() ?? 1
+            return (0, mx <= 0 ? 1 : mx * 1.06)
+        }
         let vs = c.values.compactMap { $0 }
         guard let mn = vs.min(), let mx = vs.max() else { return (0, 1) }
         let r = (mx - mn) == 0 ? (mn == 0 ? 1 : abs(mn)) : (mx - mn)
@@ -2278,7 +2326,7 @@ struct SunnyTheta: View {
             week: pairWeek(now?.week ?? ""),
             unit: weekly ? "a week" : "a day",
             onUnit: { weekly.toggle() },
-            left: lCol, right: sCol
+            left: lCol, right: sCol, shared: true
         ) {
             /* ⚠ NET IS THE CARD'S ANSWER, so it is the one ink line down here.
                Neither column is a result on its own: the long side paying is
