@@ -281,8 +281,13 @@ struct PricesBlock: Decodable {
     /// Weighted by cost, so it is what his MONEY did — the one thing the rows
     /// cannot say. Nik chose this over a plain mean, 2026-09-08.
     let book: PriceMove
-    /// The close the windows are measured from.
+    /// ⚠ THE DATE THE DAY WINDOW DESCRIBES, not simply the last close. It is
+    /// today while a session is running and the last close's date otherwise,
+    /// so the chip's word and its figures can never come apart.
     let asOf: String
+    /// True while a session is running. The day window is then spot against the
+    /// last close; otherwise it is the last close against the one before it.
+    let live: Bool?
 }
 
 struct OptionsBook: Decodable {

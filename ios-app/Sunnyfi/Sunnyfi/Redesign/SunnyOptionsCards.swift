@@ -1367,30 +1367,36 @@ struct SunnyPrices: View {
         c.timeZone = TimeZone(identifier: "America/New_York") ?? .current
         return c
     }
-    /// Friday 20:00 ET to Monday 04:00 ET the day window is absent.
-    private var dayOn: Bool {
-        let wd = etCal.component(.weekday, from: now)      // 1 Sun ... 7 Sat
-        let h = etCal.component(.hour, from: now)
-        if wd == 7 || wd == 1 { return false }
-        if wd == 6 && h >= 20 { return false }
-        if wd == 2 && h < 4 { return false }
-        return true
-    }
-    private var wins: [Int] { dayOn ? [0, 1, 2, 3, 4] : [1, 2, 3, 4] }
+    /* ⚠ THE DAY WINDOW NEVER LEAVES THE CARD ANY MORE. The handoff removed it
+       from Friday 20:00 ET to Monday 04:00 ET, on the argument that there is
+       nothing honest to call "today" on a Sunday. True, and the wrong
+       conclusion: the honest thing is to report the last session and NAME it.
+       Nik, 2026-09-14: "on Monday it will show the data for Friday... we have
+       to say last Friday and show the data." */
+    private var wins: [Int] { [0, 1, 2, 3, 4] }
     private var window: Int { wins.contains(win) ? win : wins[0] }
 
-    /// TODAY / YESTERDAY / the weekday it was — read off the last close's date.
+    /* ⚠ THE WORD IS THE SESSION'S OWN DATE, never the clock. Today while one is
+       running, yesterday if that is when it closed, otherwise the weekday it
+       was — and "last Friday" rather than "Friday" once a weekend sits between,
+       because on a Monday morning "Friday" alone reads as the Friday coming. */
     private var sessionWord: String {
+        if prices.live == true { return "today" }
         let f = DateFormatter()
         f.calendar = etCal; f.timeZone = etCal.timeZone
         f.dateFormat = "yyyy-MM-dd"
         guard let d = f.date(from: prices.asOf) else { return "today" }
-        let today = etCal.startOfDay(for: now)
-        let days = etCal.dateComponents([.day], from: etCal.startOfDay(for: d), to: today).day ?? 0
+        let today = etCal.startOfDay(for: now), day = etCal.startOfDay(for: d)
+        let days = etCal.dateComponents([.day], from: day, to: today).day ?? 0
         if days == 0 { return "today" }
         if days == 1 { return "yesterday" }
         f.dateFormat = "EEEE"
-        return f.string(from: d)
+        let name = f.string(from: d)
+        /* An earlier week, not merely an earlier day: on a Saturday, Friday is
+           still this week and takes no prefix. */
+        let wNow = etCal.component(.weekOfYear, from: today)
+        let wThen = etCal.component(.weekOfYear, from: day)
+        return wNow != wThen ? "last " + name : name
     }
     /// "Fri 11 Sep" — derived, never a literal. It shipped once as a date that
     /// was a Saturday.

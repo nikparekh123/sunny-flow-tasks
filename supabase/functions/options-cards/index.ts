@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.1';
+const BUILD = '2026-09-14.3';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -872,6 +872,44 @@ Deno.serve(async (req) => {
       if (!closeRows.has(t)) closeRows.set(t, []);
       closeRows.get(t)!.push(N(r.close_price));
     }
+    /* ⚠ THE DAY WINDOW IS THE LAST SESSION, NOT ALWAYS TODAY. Nik, 2026-09-14,
+       on a Monday morning showing "Friday" against 0.0% on every name: "it
+       should show data Friday and post-market... on Monday it will show the
+       data for Friday."
+
+       The window used to be spot against the last close, full stop. That is
+       today's move WHILE A SESSION IS RUNNING and it is nonsense at every other
+       hour, because outside the session the spot IS the last close and the card
+       compares a number with itself. Every evening and every morning it read
+       0.0% across the book; a Monday just makes it obvious, since the zero sits
+       under the word "Friday".
+
+       So the window reports the most recent session there is:
+
+         a session is running   spot against the last close      -> "today"
+         otherwise              the last close against the one
+                                before it                        -> that day
+
+       ⚠ AND THE TEST IS "HAS TODAY TRADED", NOT "IS THE MARKET OPEN". Bounding
+       it at 16:00 ET put the bug back between the close and the next morning:
+       daily_closes has no row for today until 17:30, so at 18:00 on a Monday
+       the card fell through to Friday's close and announced Friday again. The
+       spot holds the day's last print all evening, so from 09:30 until the next
+       session opens, today is the session to report.
+
+       ⚠ A HOLIDAY IS A WEEKDAY THAT DID NOT TRADE, and the clock cannot see
+       one. Seven names all unchanged to the cent is not a quiet session, it is
+       no session, so that reads as "not traded" and the card falls back to the
+       last real close. Cheaper and more honest than a holiday calendar. */
+    const etNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const etWd = etNow.getDay(), etMin = etNow.getHours() * 60 + etNow.getMinutes();
+    const openYet = etWd >= 1 && etWd <= 5 && etMin >= 9 * 60 + 30;
+    const anyMoved = [...spot.entries()].some(([t, S0]) => {
+      const c0 = (closeRows.get(t) ?? [])[0];
+      return S0 > 0 && c0 > 0 && Math.abs(S0 - c0) > 0.005;
+    });
+    const dayLive = openYet && anyMoved;
+
     const WINDOWS: [string, number][] =
       [['today', 0], ['w1', 5], ['w2', 10], ['w3', 15], ['w4', 20]];
     const moveFor = (t: string): Record<string, number | null> => {
@@ -879,10 +917,14 @@ Deno.serve(async (req) => {
       const cs = closeRows.get(t) ?? [];
       const out: Record<string, number | null> = {};
       for (const [key, back] of WINDOWS) {
-        const base = cs[back];
-        /* Null, never 0. A name with too little history has no move to report,
-           and 0% would draw a flat bar that reads as "it did not move". */
-        out[key] = (base && base > 0 && S0 > 0) ? r2((S0 / base - 1) * 100) : null;
+        /* ⚠ THE WEEK WINDOWS SHIFT WITH THE DAY WINDOW. When the day window is
+           reporting Friday rather than a live today, "1 week" has to mean the
+           week ending Friday too, or the card draws one row measured to Friday
+           beside four measured to now and calls them the same axis. */
+        const now = dayLive ? S0 : cs[0];
+        const base = cs[dayLive ? back : back + 1];
+        out[key] = (base && base > 0 && now && now > 0)
+          ? r2((now / base - 1) * 100) : null;
       }
       return out;
     };
@@ -1070,10 +1112,15 @@ Deno.serve(async (req) => {
       upside,
       toRoll,
       prices: { rows: priceRows, book: bookMove,
-                /* The close the windows are anchored to, which is the last one
-                   BEFORE today, not the newest row in the table. */
-                asOf: closes.map((r) => String(r.date).slice(0, 10))
-                        .filter((d) => d < today).sort().pop() ?? today },
+                /* ⚠ THE DATE THE DAY WINDOW DESCRIBES, which is today while a
+                   session is running and the last close's date otherwise. The
+                   card names the chip from this and never from its own clock,
+                   so "Friday" and Friday's figures can never come apart. */
+                asOf: dayLive
+                  ? today
+                  : (closes.map((r) => String(r.date).slice(0, 10))
+                      .filter((d) => d < today).sort().pop() ?? today),
+                live: dayLive },
       book: {
         /* ⚠ `paid` IS NOW TOTAL INVESTED, and the label on the card says so.
            Every yield on this page divides by it. */
