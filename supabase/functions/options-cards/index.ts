@@ -97,9 +97,51 @@ Deno.serve(async (req) => {
     const ago = (d: number) => new Date(Date.parse(today + 'T00:00:00Z') - d * 86_400_000)
       .toISOString().slice(0, 10);
 
-    const [legs, allShorts, allPuts, quotes, greeks, greeksHist, names, closes, ivHist] = await Promise.all([
-      D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
-        + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date'),
+    /* ⚠ THE PAYLOAD CARRIES ITS OWN TIMINGS, and they stay. Added 14 Sep 2026
+       when the page went from under a second to seven and the new loading
+       screen made it visible; one call then named the culprit exactly, with no
+       guessing and no deploy cycle. A query that quietly grows is the failure
+       mode this function has had twice now — the 1,000-row cap was the first —
+       so the measurement is cheap insurance, not scaffolding. */
+    const T0 = Date.now();
+    const timings: Record<string, number> = {};
+    const time = async <X>(k: string, f: () => Promise<X>): Promise<X> => {
+      const t = Date.now();
+      const r = await f();
+      timings[k] = Date.now() - t;
+      return r;
+    };
+
+    /* ⚠ ONE DAY, ONE PAGE — NEVER A WINDOW. `mp-refresh` writes every leg every
+       minute, so 1,000 rows of `option_greeks` ordered newest-first covers
+       roughly ten minutes and therefore every leg many times over. Paging a
+       WINDOW of the same table is what made this page take seven seconds:
+       twelve days is 62,432 rows and 63 round trips to build a map of one
+       number per leg, and the whole rest of the function measured 360 ms.
+
+       Walks up to five days from `from` in `step` direction so a weekend or a
+       holiday still answers rather than shipping an empty map. */
+    const greeksOn = async (from: string, select: string, step = -1) => {
+      for (let i = 0; i < 5; i++) {
+        const d = new Date(Date.parse(from + 'T00:00:00Z') + i * step * 86_400_000)
+          .toISOString().slice(0, 10);
+        const nd = new Date(Date.parse(d + 'T00:00:00Z') + 86_400_000)
+          .toISOString().slice(0, 10);
+        const r = await fetch(`${SB_URL}/rest/v1/option_greeks`
+          + `?captured_at=gte.${d}T00:00:00Z&captured_at=lt.${nd}T00:00:00Z`
+          + `&select=${select}&order=captured_at.desc&limit=1000`, {
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        });
+        if (!r.ok) continue;
+        const rows = (await r.json()) as Record<string, unknown>[];
+        if (rows.length) return { day: d, rows };
+      }
+      return { day: from, rows: [] as Record<string, unknown>[] };
+    };
+
+    const [legs, allShorts, allPuts, quotes, greeks, names, closes, ivHist] = await Promise.all([
+      time('legs', () => D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
+        + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date')),
       /* ⚠ SHORT PUTS COUNT HERE TOO. Nik, 2026-09-08: "short calls only shuold
          also include short puts as well." The weekly bars were calls-only
          while Roll check's footer summed both, so the same week read 2.7% on
@@ -110,9 +152,9 @@ Deno.serve(async (req) => {
          paid off, this asks what the week returned on capital. The rule the
          ring does keep is the one that matters, that CALL premium never
          funds the puts. */
-      P('option_trades?voided_at=is.null&direction=eq.short'
+      time('allShorts', () => P('option_trades?voided_at=is.null&direction=eq.short'
         + '&select=ticker,option_type,action,contracts,premium,trade_date,expiry'
-        + '&order=trade_date.asc,ticker.asc,expiry.asc'),
+        + '&order=trade_date.asc,ticker.asc,expiry.asc')),
       /* ⚠ SHORT PUTS ARE A SEPARATE SERIES AND MUST STAY SEPARATE. They fund the
          long puts and nothing else. Nik, 2026-09-06, on whether the cover ring
          should count call premium: it must not, because call premium is already
@@ -123,29 +165,27 @@ Deno.serve(async (req) => {
          and its funding week still counted. Filtering to live legs the way the
          `legs` query does would quietly shrink the cost every time a tranche
          ran off, and the ring would climb for no reason. */
-      P('option_trades?voided_at=is.null&option_type=eq.put'
+      time('allPuts', () => P('option_trades?voided_at=is.null&option_type=eq.put'
         + '&select=ticker,direction,action,contracts,strike,premium,trade_date,expiry'
-        + '&order=trade_date.asc,ticker.asc,strike.asc'),
-      D.get('ticker_quotes_latest?select=ticker,spot'),
-      D.get('option_greeks_latest?select=option_trade_id,delta,last_mark'),
-      P(`option_greeks?captured_at=gte.${ago(12)}`
-        + '&select=option_trade_id,delta,last_mark,captured_at'
-        + '&order=captured_at.desc,option_trade_id.asc'),
-      D.get('ticker_names?select=ticker,name'),
+        + '&order=trade_date.asc,ticker.asc,strike.asc')),
+      time('quotes', () => D.get('ticker_quotes_latest?select=ticker,spot')),
+      time('greeksLatest', () => D.get('option_greeks_latest?select=option_trade_id,delta,last_mark')),
+      time('names', () => D.get('ticker_names?select=ticker,name')),
       /* ⚠ SIXTY CALENDAR DAYS, NOT TWENTY-ONE ROWS. The furthest window is
          four TRADING weeks, which is 21 sessions, and 21 sessions spans more
          than 21 days across two holidays. Fetching by date and counting rows
          client-side is the only way the count stays a count of sessions. */
-      P(`daily_closes?date=gte.${ago(60)}&select=ticker,date,close_price`
-        + '&order=date.desc,ticker.asc'),
+      time('closes', () => P(`daily_closes?date=gte.${ago(60)}&select=ticker,date,close_price`
+        + '&order=date.desc,ticker.asc')),
       /* ⚠ WHAT WE HAVE, NOT A YEAR. The Premium card's build sheet asks for a
          year of IV per name; `ticker_iv_daily` holds 67 days for NKE, LULU and
          NFLX and under two weeks for the rest. Nik, 2026-09-10, chose to ship
          on the history that exists and label it honestly, so the card says
          "its own past 3 months" and `days` tells it what to print. */
-      P('ticker_iv_daily?select=ticker,atm_iv,snapshot_date'
-        + '&order=snapshot_date.asc,ticker.asc'),
+      time('ivHist', () => P('ticker_iv_daily?select=ticker,atm_iv,snapshot_date'
+        + '&order=snapshot_date.asc,ticker.asc')),
     ]);
+    timings.fetchAll = Date.now() - T0;
 
     const spot = new Map<string, number>();
     for (const q of quotes) spot.set(String(q.ticker), N(q.spot));
@@ -153,12 +193,23 @@ Deno.serve(async (req) => {
     for (const n of names) co.set(String(n.ticker), String(n.name));
     const mark = new Map<string, { d: number; m: number }>();
     for (const g of greeks) mark.set(String(g.option_trade_id), { d: N(g.delta), m: N(g.last_mark) });
-    /* The oldest reading inside the window, per leg — `markWeek` needs a week
-       ago and the LEAPs are days old, so this is the furthest back available
-       rather than exactly seven days. It reads 0 until a week of history
-       exists, which is honest and self-healing. */
+    /* ⚠ ONE SESSION SEVEN DAYS BACK, NOT THE OLDEST OF TWELVE DAYS. This used
+       to page a twelve-day window and keep the furthest-back reading per leg,
+       because the LEAPs were days old and a true week did not exist yet. They
+       are weeks old now, so the honest reading is available — and the window
+       was costing 62,432 rows and 63 round trips for a map of sixty numbers.
+
+       `markWeek` says "change this week" and now means exactly that. A leg with
+       no reading that day reads 0, which is the same self-healing behaviour the
+       window had for anything younger than it: UBER's LEAP was bought today and
+       correctly shows no weekly change at all. */
+    const weekAgoRead = await time('weekAgo', () =>
+      greeksOn(ago(7), 'option_trade_id,last_mark'));
     const weekAgo = new Map<string, number>();
-    for (const g of greeksHist) weekAgo.set(String(g.option_trade_id), N(g.last_mark));
+    for (const g of weekAgoRead.rows) {
+      const id = String(g.option_trade_id);
+      if (!weekAgo.has(id)) weekAgo.set(id, N(g.last_mark));
+    }
 
     /* ── net every open leg on its contract key ─────────────────────────── */
     type Leg = {
@@ -1068,8 +1119,9 @@ Deno.serve(async (req) => {
        ones that have since expired — a week's theta is what the book carried
        THAT week, not what survives today. */
     const thLegs = new Map<string, { dir: string; n: number; exp: string }>();
-    for (const t of await P(`option_trades?voided_at=is.null&expiry=gte.${thWeeks[0]}`
-      + '&select=id,direction,contracts,expiry&order=id.asc')) {
+    for (const t of await time('thetaLegs', () =>
+      P(`option_trades?voided_at=is.null&expiry=gte.${thWeeks[0]}`
+        + '&select=id,direction,contracts,expiry&order=id.asc'))) {
       thLegs.set(String(t.id), {
         dir: String(t.direction), n: N(t.contracts), exp: String(t.expiry).slice(0, 10),
       });
@@ -1078,31 +1130,19 @@ Deno.serve(async (req) => {
     /* The newest reading per leg on one day. Walks back up to four days so a
        holiday or a short week still answers rather than shipping a zero. */
     const thetaOn = async (day: string) => {
-      for (let back = 0; back < 5; back++) {
-        const d = dayShift(day, -back);
-        const r = await fetch(`${SB_URL}/rest/v1/option_greeks`
-          + `?captured_at=gte.${d}T00:00:00Z&captured_at=lt.${dayShift(d, 1)}T00:00:00Z`
-          + '&select=option_trade_id,theta,last_mark'
-          + '&order=captured_at.desc&limit=1000', {
-          headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
-        });
-        if (!r.ok) continue;
-        const rows = (await r.json()) as Record<string, unknown>[];
-        if (!rows.length) continue;
-        const seen = new Map<string, number>();
-        for (const g of rows) {
-          const id = String(g.option_trade_id);
-          if (seen.has(id) || g.theta === null) continue;
-          /* THE CAP. Never more than the option is worth. */
-          seen.set(id, Math.max(N(g.theta), -Math.abs(N(g.last_mark))));
-        }
-        return { day: d, th: seen };
+      const { day: d, rows } = await greeksOn(day, 'option_trade_id,theta,last_mark');
+      const seen = new Map<string, number>();
+      for (const g of rows) {
+        const id = String(g.option_trade_id);
+        if (seen.has(id) || g.theta === null) continue;
+        /* THE CAP. Never more than the option is worth. */
+        seen.set(id, Math.max(N(g.theta), -Math.abs(N(g.last_mark))));
       }
-      return { day, th: new Map<string, number>() };
+      return { day: d, th: seen };
     };
 
-    const thRead = await Promise.all(
-      thWeeks.map((w) => thetaOn(dayShift(w, thOffset))));
+    const thRead = await time('thetaDays', () => Promise.all(
+      thWeeks.map((w) => thetaOn(dayShift(w, thOffset)))));
     const thetaWeeks = thWeeks.map((w, i) => {
       let long = 0, short = 0;
       for (const [id, th] of thRead[i].th) {
@@ -1401,8 +1441,9 @@ Deno.serve(async (req) => {
     const putNeed = putWeeksLeft > 0 && putLeft > 0
       ? Math.ceil(putLeft / putWeeksLeft) : 0;
 
+    timings.total = Date.now() - T0;
     return json(200, {
-      ok: true, build: BUILD, date: today,
+      ok: true, build: BUILD, date: today, timings,
       /* Null when nothing is held: a ring at 0% of $0 is not an empty state,
          it is a card with no subject. The client drops it entirely. */
       putCover: putContracts > 0 && putCost > 0
