@@ -2051,6 +2051,11 @@ private struct PairCol {
     let figure: String
     let ink: Color
     let baseline: String
+    /// ⚠ WHAT THE SIDE IS MADE OF, one line under the average. Both columns
+    /// carry it or neither does: this frame's discipline is that the two are
+    /// twins, and a line on one side only would make that side look like the
+    /// one with a problem. nil on a card with no split to show.
+    var madeOf: String? = nil
     /// oldest first, live LAST. nil where the side did not trade that week.
     let values: [Double?]
     let keys: [String]
@@ -2174,6 +2179,11 @@ private struct PairFrameCard<Footer: View>: View {
             Text(c.baseline)
                 .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
                 .lineLimit(1).minimumScaleFactor(0.85)
+            if let m = c.madeOf {
+                Spacer().frame(height: 7)
+                Text(m).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute2)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
             Spacer().frame(height: 18)
             ZStack(alignment: .bottom) {
                 HStack(alignment: .bottom, spacing: 9) {
@@ -2378,12 +2388,14 @@ struct SunnyTheta: View {
             label: "LONG \u{00B7} LOSES",
             figure: sg(now?.long ?? 0), ink: S.lossText,
             baseline: "average \(sg(lA))",
+            madeOf: madeOf("LEAPs", now?.lc, "puts", now?.lp),
             values: ws.map { Double(abs($0.long)) }, keys: ws.map { pairKey($0.week) },
             ref: Double(abs(lA)), usual: nil)
         let sCol = PairCol(
             label: "SHORT \u{00B7} COLLECTS",
             figure: sg(now?.short ?? 0), ink: S.gainText,
             baseline: "average \(sg(sA))",
+            madeOf: madeOf("calls", now?.sc, "puts", now?.sp),
             values: ws.map { Double(abs($0.short)) }, keys: ws.map { pairKey($0.week) },
             ref: Double(abs(sA)), usual: nil)
         let net = (now?.long ?? 0) + (now?.short ?? 0)
@@ -2405,6 +2417,15 @@ struct SunnyTheta: View {
                 .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
                 .lineLimit(1).minimumScaleFactor(0.85)
         }
+    }
+
+    /* ⚠ UNSIGNED, BECAUSE THE EYEBROW ALREADY SAYS THE DIRECTION. "LOSES" over
+       "LEAPs $164 · puts $154" needs no minus on each part, and two signs in a
+       146pt column is two glyphs spent restating the label. Measured at 122 of
+       146 on the long side, 116 on the short. */
+    private func madeOf(_ a: String, _ av: Int?, _ b: String, _ bv: Int?) -> String? {
+        guard let av, let bv, av != 0 || bv != 0 else { return nil }
+        return "\(a) \(optMoney(abs(av))) \u{00B7} \(b) \(optMoney(abs(bv)))"
     }
 
     /* ⚠ THE RATIO ALONE FLATTERS ITSELF. "Short collects 3.9× what long loses"

@@ -287,6 +287,12 @@ struct ThetaWeek: Decodable, Identifiable {
     /// number of days into itself, or a Monday would be compared to a Friday.
     let on: String
     let long: Int, short: Int
+    /// ⚠ WHAT EACH SIDE IS MADE OF. The long side is the LEAPs and the
+    /// protective puts, and they cost almost the same to hold on a fifth of the
+    /// capital — the hedge burns about four times faster per dollar, which
+    /// nothing else in the deck prices in daily terms. Optional so a run
+    /// against an older deployment decodes rather than throws.
+    let lc: Int?, lp: Int?, sc: Int?, sp: Int?
     var id: String { week }
     var net: Int { long + short }
 }

@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.9';
+const BUILD = '2026-09-14.10';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1118,12 +1118,13 @@ Deno.serve(async (req) => {
     /* The direction and size of every leg alive in the window, including the
        ones that have since expired — a week's theta is what the book carried
        THAT week, not what survives today. */
-    const thLegs = new Map<string, { dir: string; n: number; exp: string }>();
+    const thLegs = new Map<string, { dir: string; type: string; n: number; exp: string }>();
     for (const t of await time('thetaLegs', () =>
       P(`option_trades?voided_at=is.null&expiry=gte.${thWeeks[0]}`
-        + '&select=id,direction,contracts,expiry&order=id.asc'))) {
+        + '&select=id,direction,option_type,contracts,expiry&order=id.asc'))) {
       thLegs.set(String(t.id), {
-        dir: String(t.direction), n: N(t.contracts), exp: String(t.expiry).slice(0, 10),
+        dir: String(t.direction), type: String(t.option_type),
+        n: N(t.contracts), exp: String(t.expiry).slice(0, 10),
       });
     }
 
@@ -1144,15 +1145,30 @@ Deno.serve(async (req) => {
     const thRead = await time('thetaDays', () => Promise.all(
       thWeeks.map((w) => thetaOn(dayShift(w, thOffset)))));
     const thetaWeeks = thWeeks.map((w, i) => {
-      let long = 0, short = 0;
+      /* ⚠ EACH SIDE SPLIT BY WHAT IT IS MADE OF, 14 Sep 2026. The long side is
+         the LEAPs AND the protective puts, and they cost almost the same to
+         hold — $164 against $154 — on a fifth of the capital, so the hedge
+         burns roughly four times faster per dollar. Nothing else in the deck
+         prices the protection in daily terms. The short side splits the same
+         way so the two columns stay twins. */
+      let long = 0, short = 0, lc = 0, lp = 0, sc = 0, sp = 0;
       for (const [id, th] of thRead[i].th) {
         const leg = thLegs.get(id);
         /* A leg that had already expired before that week was not in the book. */
         if (!leg || leg.exp < w) continue;
         const cash = th * leg.n * 100;
-        if (leg.dir === 'long') long += cash; else short -= cash;
+        if (leg.dir === 'long') {
+          long += cash;
+          if (leg.type === 'put') lp += cash; else lc += cash;
+        } else {
+          short -= cash;
+          if (leg.type === 'put') sp -= cash; else sc -= cash;
+        }
       }
-      return { week: w, on: thRead[i].day, long: Math.round(long), short: Math.round(short) };
+      return {
+        week: w, on: thRead[i].day, long: Math.round(long), short: Math.round(short),
+        lc: Math.round(lc), lp: Math.round(lp), sc: Math.round(sc), sp: Math.round(sp),
+      };
     });
     /* ⚠ THE ABSOLUTE MOVE, NOT THE NET ONE. Decay is only free when the book
        sits still, and a book where one name ran 6% up and another 6% down has
