@@ -511,25 +511,27 @@ struct SunnyRollCheck: View {
         let up = l.captured >= 0
         let w = abs(x(Double(l.captured)) - zeroX)
         let grown = reduceMotion || appeared
-        let cr = l.cr ?? 0
         HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                /* ⚠ A STRIKE IN LOSS INK IS ONE THE STOCK HAS MOVED THROUGH, and
-                   that is a different statement from the bar's colour. Red strike
-                   with a red bar says roll it; red strike with a green bar says it
-                   ran through and you are still ahead. */
-                Text(l.label).font(S.inter(S.t13, S.wBodyN)).tracking(S.track(S.t13, -0.01))
-                    .foregroundStyle(through(l, spot) ? S.lossText : S.ink2)
-                    .lineLimit(1)
-                /* ⚠ PRINTED ONLY UNDER AN UNDER-WATER LEG. A healthy leg's entry
-                   is not a decision, and the line exists to be read against the
-                   chain: if the next strike out pays more than this today, the
-                   roll pays for itself. */
-                Text(!up && cr > 0 ? "$" + String(format: "%.2f", cr) : "")
-                    .font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
-                    .frame(height: 10, alignment: .leading)
-            }
-            .frame(width: 46, height: 26, alignment: .leading)
+            /* ⚠ A STRIKE IN LOSS INK IS ONE THE STOCK HAS MOVED THROUGH, and
+               that is a different statement from the bar's colour. Red strike
+               with a red bar says roll it; red strike with a green bar says it
+               ran through and you are still ahead.
+
+               ⚠ THE CREDIT PER SHARE UNDER THE STRIKE IS GONE, 14 Sep 2026, on
+               Nik's instruction: "lets remove that data point doesn't make much
+               sense thinking about it now". It printed the price the leg was
+               sold at, and only on an under-water leg, so six of eighteen rows
+               carried it and twelve did not — which read as data missing rather
+               than as a rule. `lastCr` still feeds the Left to sell view, where
+               a name's own last print IS the ranking unit.
+
+               The 26 stays. It held two lines and now holds one, and dropping
+               it to fit the strike alone would re-space every row on the card
+               for a line that was only ever on a third of them. */
+            Text(l.label).font(S.inter(S.t13, S.wBodyN)).tracking(S.track(S.t13, -0.01))
+                .foregroundStyle(through(l, spot) ? S.lossText : S.ink2)
+                .lineLimit(1)
+                .frame(width: 46, height: 26, alignment: .leading)
 
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
@@ -1351,7 +1353,18 @@ struct SunnyWeeklyYield: View {
                     HStack(spacing: 6) {
                         RoundedRectangle(cornerRadius: 2).fill(S.lossBar)
                             .frame(width: 8, height: 8)
-                        Text("bought back").font(S.inter(S.t11, S.wMidSmN))
+                        /* ⚠ "BOUGHT BACK" NAMED THE WRONG WEEK. Nik, 14 Sep:
+                           "we haven't bought anything back this week". He had
+                           not — the $2,377 capping the 9/14 bar is six closes
+                           he made on the 10th and 11th, on NKE 37.5 puts and
+                           LULU 97 puts that EXPIRE on the 18th. The bar buckets
+                           by the week a leg covers, his own ruling of 3 Sep, so
+                           the money paid to close those legs has to sit in the
+                           same bar as the credit it cancels or the week would
+                           show a credit he no longer holds.
+                           "Closed early" describes the LEG rather than dating
+                           the trade, which is the claim that was wrong. */
+                        Text("closed early").font(S.inter(S.t11, S.wMidSmN))
                             .foregroundStyle(S.mute)
                     }
                     .fixedSize()
@@ -1377,7 +1390,10 @@ struct SunnyWeeklyYield: View {
             Spacer(minLength: S.gap6)
             OptFooter(stats: [
                 .init(label: "Kept", value: pct2(at?.kept ?? 0), ink: S.ink),
-                .init(label: "Bought back",
+                /* ⚠ MEASURED, NOT GUESSED: "CLOSED EARLY" is 90.5 at 10/700
+                   with .13em tracking, against 91.67 of slot. "PAID TO CLOSE"
+                   was 91.9 and would have truncated. */
+                .init(label: "Closed early",
                       value: (at.map { $0.bought > 0 ? "\u{2212}" : "" } ?? "")
                              + pct2(at?.bought ?? 0),
                       ink: (at?.bought ?? 0) > 0 ? S.lossText : S.mute),
