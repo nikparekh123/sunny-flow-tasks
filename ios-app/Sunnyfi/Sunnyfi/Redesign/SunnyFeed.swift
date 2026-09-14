@@ -580,10 +580,19 @@ struct SunnyPane: View {
             if let cr = o.credit { SunnyAvgCredit(credit: cr, premium: o.premium) }
             /* The vol Average credit's usual-IV tick is borrowed from, so it
                follows the card that quotes it. */
-            if let pm = o.premium, !pm.rows.isEmpty { SunnyPremiumNow(block: pm) }
+            if let pm = o.premium, !pm.rows.isEmpty {
+                SunnyPremiumNow(block: pm, asOf: o.prices?.asOf ?? o.date)
+            }
             /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
                leads the standing block. */
             if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
+            /* ⚠ DIRECTLY AFTER PROGRAMME, the `intrinsic-premium` sheet's
+               placement: Programme says whether the book is up, this says how
+               much of what it holds is real rather than time. */
+            if let iv = o.intrinsic, !iv.legs.isEmpty {
+                SunnyIntrinsic(block: iv, prices: o.prices?.rows ?? [],
+                               asOf: o.prices?.asOf ?? o.date)
+            }
             SunnyYieldProgress(book: o.book, positions: o.positions)
             /* Directly under Yield progress on purpose: the two share the
                premium-paid denominator and answer the halves of one question,

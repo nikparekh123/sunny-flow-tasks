@@ -82,7 +82,15 @@ private struct OptHead: View {
 /// are short BY MEASUREMENT: "Roll up and out" wrapped in the 100pt slot and
 /// pushed the card 10pt past its L.
 private struct OptFooter: View {
-    struct Stat { let label: String; let value: String; let ink: Color }
+    /* ⚠ A NAME BESIDE A FIGURE IS A SUFFIX, NOT PART OF THE FIGURE. Premium
+       now's "−$15 LULU" truncated to "−$15 L…" when the whole string rendered
+       at 19/700: the slot is 91.67 and a four-letter ticker at figure size does
+       not fit beside four digits. At 11/400 in --mute it does, and it reads as
+       an annotation rather than a second figure. */
+    struct Stat {
+        let label: String; let value: String; let ink: Color
+        var suffix: String? = nil
+    }
     let stats: [Stat]
     var body: some View {
         VStack(spacing: 0) {
@@ -95,10 +103,14 @@ private struct OptFooter: View {
                             .font(S.inter(S.t10, S.wBoldN))
                             .tracking(S.track(S.t10, S.lsLabel))
                             .foregroundStyle(S.mute).lineLimit(1)
-                        Text(s.value)
+                        (Text(s.value)
                             .font(S.inter(S.t19, S.wBoldN))
                             .tracking(S.track(S.t19, -0.025))
-                            .foregroundStyle(s.ink).lineLimit(1)
+                            .foregroundStyle(s.ink)
+                         + Text(s.suffix.map { " " + $0 } ?? "")
+                            .font(S.inter(S.t11, S.wMidSmN))
+                            .foregroundStyle(S.mute))
+                            .lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, i == 0 ? 0 : S.statRulePad)
@@ -2527,6 +2539,359 @@ private struct SunnyChipWrap: View {
     }
 }
 
+// MARK: - intrinsic value
+
+/* ⚠ NEW CARD, 14 Sep 2026, from the `intrinsic-premium` handoff
+   (cards/intrinsic-value.md). It exists because a mark is not a whole: the
+   earlier build printed $214,000 and the only sane question was "against
+   what?".
+
+   ⚠ THE THREE SHARES SUM TO THE WHOLE, to the dollar, on the hero and on every
+   leg. Intrinsic is what exercising today returns, time is the rest of the
+   mark, lost is what the mark is below what was paid.
+
+   ⚠ AND THE WHOLE IS max(paid, mark) — the one amendment to the sheet, forced
+   by the book and flagged to Nik. The sheet says PAID IS THE WHOLE and cuts it
+   three ways, which holds only while a leg is DOWN. The long puts are up
+   $1,677 today; there intrinsic + time already exceed paid, the shares would
+   sum past 100% and the bar would draw off its own track. With the whole as
+   max(paid, mark) the down case is unchanged — paid is the larger and the
+   segments are the sheet's exactly — and the up case is defined: mark is the
+   whole, the two real segments fill it, a hair tick marks where paid falls,
+   and the third figure is a GAIN.
+
+   ⚠ EVERY FIGURE IS PRINTED, NOTHING IS BEHIND A TAP. The only taps are the
+   moneyness pills, which change WHICH ROWS YOU LOOK AT, and the unit word,
+   which changes what the table's figures measure. Neither changes what a
+   dollar figure says. */
+struct SunnyIntrinsic: View {
+    let block: IntrinsicBlock
+    /// Prices' spot per name and the close it is measured from. Moneyness is
+    /// spot against strike; this card holds the strikes and reads the spot.
+    let prices: [PriceRow]
+    let asOf: String
+
+    private enum Money: String { case inM, atM, outM }
+    /* ⚠ VERIFICATION ONLY, the same device as `-rollFig`: the touch bridge
+       crashes, so `-ivFilter at` and `-ivDays` force the states. */
+    @State private var filter: Money? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-ivFilter"), i + 1 < a.count else { return nil }
+        switch a[i + 1] {
+        case "in": return .inM
+        case "at": return .atM
+        case "out": return .outM
+        default: return nil
+        }
+    }()
+    @State private var days = ProcessInfo.processInfo.arguments.contains("-ivDays")
+    @State private var now = Date()
+
+    /// ±2% of the strike is AT it. The band is the sheet's and is the only
+    /// place `--warn` appears on the options page.
+    private static let atBand = 0.02
+    private static let cellW: CGFloat = 92
+
+    private func spot(_ t: String) -> Double? {
+        guard let v = prices.first(where: { $0.ticker == t })?.spot, v > 0 else { return nil }
+        return v
+    }
+
+    /* ⚠ SIGNED IN THE HOLDER'S FAVOUR. A long call above its strike and a long
+       put below it both read +, so the reader never has to remember which
+       direction is good for which leg. */
+    private func money(_ s: Double, _ k: Double, call: Bool) -> (state: Money, dist: Double) {
+        guard k > 0 else { return (.outM, 0) }
+        let d = (call ? s - k : k - s) / k
+        return (abs(d) <= Self.atBand ? .atM : d > 0 ? .inM : .outM, d)
+    }
+    private func dot(_ m: Money) -> Color {
+        switch m { case .inM: return S.gainBar; case .atM: return S.warn; case .outM: return S.lossBar }
+    }
+    private func daysTo(_ iso: String) -> Int {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let f = DateFormatter(); f.calendar = c; f.timeZone = c.timeZone
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: iso) else { return 0 }
+        return max(0, c.dateComponents([.day], from: c.startOfDay(for: now),
+                                       to: c.startOfDay(for: d)).day ?? 0)
+    }
+
+    private struct Cell { let state: Money?; let text: String }
+    private func cell(_ r: IntrinsicRow, call: Bool) -> Cell {
+        guard let leg = call ? r.call : r.put else { return Cell(state: nil, text: "\u{2014}") }
+        guard let s = spot(r.t) else { return Cell(state: nil, text: "\u{2014}") }
+        let m = money(s, leg.k, call: call)
+        return Cell(state: m.state,
+                    text: days ? "\(daysTo(leg.exp))d" : signedPct0(m.dist * 100))
+    }
+    /// Rows in → at → out by the CALL column, alphabetical inside. The LEAP is
+    /// the position; the put is the hedge, and filtering the put column never
+    /// re-sorts the rows under the reader.
+    private var rows: [IntrinsicRow] {
+        let rank: (Money?) -> Int = { m in
+            switch m { case .inM: return 0; case .atM: return 1; case .outM: return 2; case nil: return 3 }
+        }
+        return block.rows.sorted {
+            let a = rank(cell($0, call: true).state), b = rank(cell($1, call: true).state)
+            return a == b ? $0.t < $1.t : a < b
+        }
+    }
+
+    private var total: (whole: Int, intr: Int, time: Int, pnl: Int, paid: Int) {
+        let mark = block.legs.reduce(0) { $0 + $1.mark }
+        let paid = block.legs.reduce(0) { $0 + $1.paid }
+        let intr = block.legs.reduce(0) { $0 + $1.intr }
+        return (max(paid, mark), intr, mark - intr, mark - paid, paid)
+    }
+
+    var body: some View {
+        let t = total
+        OptCard(name: "intrinsic") {
+            OptHead(title: "Intrinsic value", sub: "the long legs, now",
+                    right: ivDay(asOf))
+            Spacer().frame(height: 20)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text("PAID").font(S.inter(S.t10, S.wBoldN))
+                    .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+                Spacer(minLength: 0)
+                Text(optMoney(t.paid))
+                    .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.015))
+                    .foregroundStyle(S.ink)
+            }
+            Spacer().frame(height: 10)
+            splitBar(whole: t.whole, intr: t.intr, time: t.time, pnl: t.pnl, paid: t.paid, h: 10)
+            Spacer().frame(height: 16)
+            HStack(alignment: .top, spacing: 0) {
+                share("Intrinsic", S.gainBar, optMoney(t.intr), S.gainText, t.intr, t.whole,
+                      pad: 0, of: t.pnl < 0 ? "paid" : "mark")
+                share("Time", nil, optMoney(t.time), S.ink, t.time, t.whole,
+                      pad: 12, of: t.pnl < 0 ? "paid" : "mark")
+                t.pnl < 0
+                    ? share("Lost", S.lossBar, optMoney(t.pnl), S.lossText, -t.pnl, t.whole,
+                            pad: 12, of: t.pnl < 0 ? "paid" : "mark")
+                    : share("Gained", S.gainBar, "+" + optMoney(t.pnl), S.gainText, t.pnl, t.whole,
+                            pad: 12, of: "mark")
+            }
+
+            Spacer().frame(height: 24)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 22)
+
+            VStack(alignment: .leading, spacing: 26) {
+                ForEach(block.legs) { l in legBlock(l) }
+            }
+
+            Spacer(minLength: 8)
+            Spacer().frame(height: 24)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 22)
+
+            filterRow
+            Spacer().frame(height: 18)
+            table
+        }
+        .task(id: asOf) { now = Date() }
+    }
+
+    /* The bar and its legend are one object: the swatch is the segment's own
+       fill, and the hatched swatch is the same hatch, so the legend IS the bar. */
+    @ViewBuilder
+    private func splitBar(whole: Int, intr: Int, time: Int, pnl: Int,
+                          paid: Int, h: CGFloat) -> some View {
+        let W = max(1, Double(whole))
+        GeometryReader { g in
+            let w = g.size.width
+            HStack(spacing: 0) {
+                Rectangle().fill(S.gainBar).frame(width: w * CGFloat(Double(intr) / W))
+                SunnyHatch(ink: S.hair, stripe: 1, gap: 2)
+                    .frame(width: w * CGFloat(Double(time) / W))
+                if pnl < 0 {
+                    Rectangle().fill(S.lossBar).frame(width: w * CGFloat(Double(-pnl) / W))
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(height: h)
+            /* ⚠ ON AN UP LEG THE WHOLE IS THE MARK, so paid no longer ends the
+               bar and has to be marked inside it, or the reader loses the one
+               reference the card is built on. */
+            .overlay(alignment: .leading) {
+                if pnl > 0 {
+                    Rectangle().fill(S.paper).frame(width: 1.5, height: h)
+                        .offset(x: w * CGFloat(Double(paid) / W))
+                }
+            }
+        }
+        .frame(height: h)
+        .clipShape(RoundedRectangle(cornerRadius: S.radiusBar, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: S.radiusBar, style: .continuous).fill(S.wash))
+    }
+
+    @ViewBuilder
+    private func share(_ label: String, _ swatch: Color?, _ fig: String, _ ink: Color,
+                       _ part: Int, _ whole: Int, pad: CGFloat, of: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                if let swatch {
+                    RoundedRectangle(cornerRadius: 2).fill(swatch).frame(width: 8, height: 8)
+                } else {
+                    SunnyHatch(ink: S.hair, stripe: 1, gap: 2)
+                        .frame(width: 8, height: 8)
+                        .clipShape(RoundedRectangle(cornerRadius: 2))
+                }
+                Text(label.uppercased()).font(S.inter(S.t10, S.wBoldN))
+                    .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+                    .lineLimit(1)
+            }
+            Text(fig).font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
+                .foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.8)
+            /* ⚠ THE WORD NAMES THE DENOMINATOR, because the denominator moves.
+               While the block is down the whole is PAID and the three shares
+               are of it; once it is up the whole is the MARK and saying "of
+               paid" would be a percentage of the wrong number. Every
+               percentage on this deck names its reference. */
+            Text("\(whole > 0 ? Int((Double(part) / Double(whole) * 100).rounded()) : 0)% of \(of)")
+                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, pad)
+    }
+
+    @ViewBuilder
+    private func legBlock(_ l: IntrinsicLeg) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(l.label).font(S.inter(S.t13, S.wSemiN))
+                    .tracking(S.track(S.t13, -0.01)).foregroundStyle(S.ink)
+                Text(l.sub).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                Spacer(minLength: 0)
+                (Text(optMoney(l.paid)).font(S.inter(S.t13, S.wBoldN))
+                    .foregroundStyle(S.ink)
+                 + Text(" paid").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute))
+                    .lineLimit(1)
+            }
+            splitBar(whole: l.whole, intr: l.intr, time: l.time, pnl: l.pnl, paid: l.paid, h: 8)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                legFig(optMoney(l.intr), S.gainText, "intrinsic")
+                Spacer(minLength: 0)
+                legFig(optMoney(l.time), S.ink, "time")
+                Spacer(minLength: 0)
+                l.pnl < 0 ? legFig(optMoney(l.pnl), S.lossText, "lost")
+                          : legFig("+" + optMoney(l.pnl), S.gainText, "gained")
+            }
+        }
+    }
+    private func legFig(_ fig: String, _ ink: Color, _ word: String) -> Text {
+        Text(fig).font(S.inter(S.t11, S.wSemiN)).foregroundStyle(ink)
+            + Text(" " + word).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+    }
+
+    /* ⚠ THE PILLS ARE PILLS, so they carry no dotted underline — their shape is
+       the affordance. The unit word is the card's one underlined text. */
+    private var filterRow: some View {
+        HStack(spacing: 6) {
+            pill(nil, "All")
+            pill(.inM, "In")
+            pill(.atM, "At")
+            pill(.outM, "Out")
+            Spacer(minLength: 0)
+            Text(days ? "show % from strike" : "show days left")
+                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                .lineLimit(1).fixedSize()
+                .sunnyHint()
+                .padding(.vertical, 10).contentShape(Rectangle())
+                .onTapGesture { days.toggle() }
+                .padding(.vertical, -10)
+        }
+    }
+    @ViewBuilder private func pill(_ m: Money?, _ label: String) -> some View {
+        let on = filter == m
+        HStack(spacing: 6) {
+            if let m {
+                Circle().fill(dot(m)).frame(width: 7, height: 7)
+            }
+            Text(label).font(S.inter(S.t11, S.wSemiN))
+                .foregroundStyle(on ? S.onInk : S.mute)
+        }
+        .padding(.vertical, 5).padding(.horizontal, 10)
+        .background(
+            Capsule().fill(on ? S.ink : S.paper)
+                .overlay(Capsule().stroke(on ? S.ink : S.ruleColorStrong, lineWidth: 1)))
+        .contentShape(Capsule())
+        .onTapGesture { filter = m }
+    }
+
+    private var table: some View {
+        let rs = rows
+        /* ⚠ A FILTER DIMS, IT NEVER HIDES. The rows keep their place, so the
+           reader sees how many are NOT that state, and the header counts both
+           columns because a name can be in on one leg and out on the other. */
+        let nc = rs.filter { cell($0, call: true).state != nil }.count
+        let np = rs.filter { cell($0, call: false).state != nil }.count
+        let hc = rs.filter { cell($0, call: true).state == filter }.count
+        let hp = rs.filter { cell($0, call: false).state == filter }.count
+        let head = filter.map { f in
+            "\(hc) of \(nc) \u{00B7} \(hp) of \(np) \(f == .inM ? "in" : f == .atM ? "at" : "out")"
+        } ?? "Where spot sits"
+        return VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                col(head, width: nil)
+                col("LONG CALL", width: Self.cellW)
+                col("LONG PUT", width: Self.cellW)
+            }
+            ForEach(rs) { r in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(r.t).font(S.inter(S.t12, S.wSemiN))
+                        .tracking(S.track(S.t12, -0.01)).foregroundStyle(S.ink)
+                        .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1)
+                    moneyCell(cell(r, call: true))
+                    moneyCell(cell(r, call: false))
+                }
+            }
+        }
+    }
+    @ViewBuilder private func col(_ s: String, width: CGFloat?) -> some View {
+        Text(s.uppercased()).font(S.inter(S.t10, S.wBoldN))
+            .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+            .lineLimit(1).minimumScaleFactor(0.8)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+            .frame(width: width, alignment: .leading)
+    }
+    @ViewBuilder private func moneyCell(_ c: Cell) -> some View {
+        HStack(spacing: 6) {
+            if let s = c.state {
+                Circle().fill(dot(s)).frame(width: 8, height: 8)
+            } else {
+                /* A name with no put prints a dash, never an empty cell — an
+                   empty cell reads as data that failed to arrive. */
+                Color.clear.frame(width: 8, height: 8)
+            }
+            Text(c.text).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .frame(width: Self.cellW, alignment: .leading)
+        .opacity(c.state == nil ? 0.5 : (filter != nil && filter != c.state ? 0.25 : 1))
+    }
+}
+
+/// "+23%" / "−8%" — a distance that rounds to zero carries no sign.
+private func signedPct0(_ v: Double) -> String {
+    let a = Int(abs(v).rounded())
+    return (a == 0 ? "" : v < 0 ? "\u{2212}" : "+") + "\(a)%"
+}
+/// "Fri 11 Sep" from the server's ISO close date. Every date on a card is
+/// derived or it is wrong.
+private func ivDay(_ iso: String) -> String {
+    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+    guard let d = f.date(from: iso) else { return iso }
+    let o = DateFormatter(); o.dateFormat = "EEE d MMM"
+    return o.string(from: d)
+}
+
 // MARK: - 02 · Premium now
 
 /// ⚠ A MULTIPLE OF ITS OWN USUAL, NEVER A PERCENTILE. handoff-final/02. The
@@ -2542,10 +2907,43 @@ private struct SunnyChipWrap: View {
 /// history and label it honestly rather than claim a year.
 struct SunnyPremiumNow: View {
     let block: PremiumBlock
+    /// Prices' last close, so every date on the card is derived.
+    let asOf: String
 
     private static let richAt = 1.15
 
+    /* ⚠ THE FIGURE COLUMN FLIPS, NOT A ROW. Prices' rule. Card-local and it
+       survives the pull. `-pnPay` forces it: the touch bridge crashes. */
+    @State private var pay = ProcessInfo.processInfo.arguments.contains("-pnPay")
+
     private var best: PremiumRow? { block.rows.first }
+
+    /* The names paying most and least against their OWN usual, in dollars a
+       contract. Both are the same subtraction, so neither can be the other's
+       opposite by accident. Rows with no priced contract sit out. */
+    private var extremes: (most: PremiumRow?, least: PremiumRow?) {
+        let priced = block.rows.filter { $0.pay != nil && $0.payU != nil }
+        guard !priced.isEmpty else { return (nil, nil) }
+        let d: (PremiumRow) -> Int = { ($0.pay ?? 0) - ($0.payU ?? 0) }
+        return (priced.max { d($0) < d($1) }, priced.min { d($0) < d($1) })
+    }
+    private func payStat(_ label: String, _ r: PremiumRow?, _ ink: Color) -> OptFooter.Stat {
+        guard let r, let p = r.pay, let u = r.payU else {
+            return .init(label: label, value: "\u{2014}", ink: S.mute)
+        }
+        let d = p - u
+        return .init(label: label, value: (d < 0 ? "\u{2212}" : "+") + optMoney(abs(d)),
+                     ink: d == 0 ? S.ink : ink, suffix: r.t)
+    }
+    /* "falling · 55 free" — Prices' direction then Left to sell's room. Under
+       half a percent either way is flat: a book does not move by 0.2%. */
+    private func subRight(_ r: PremiumRow) -> String {
+        let mv = r.move ?? 0
+        let dir = abs(mv) < 0.5 ? "flat" : mv > 0 ? "rising" : "falling"
+        let f = r.free ?? 0
+        return "\(dir) \u{00B7} " + (f > 0 ? "\(f) free" : "fully written")
+    }
+
     private var window: String {
         let m = Int((Double(block.days) / 21.0).rounded())
         return m >= 12 ? "past year" : "past \(max(m, 1)) month\(m == 1 ? "" : "s")"
@@ -2554,7 +2952,7 @@ struct SunnyPremiumNow: View {
     var body: some View {
         OptCard(name: "premium-now") {
             OptHead(title: "Premium now", sub: "vs its own usual",
-                    right: fmtDayLabel(Date()))
+                    right: ivDay(asOf))
             Spacer().frame(height: 26)
 
             if let b = best {
@@ -2610,16 +3008,41 @@ struct SunnyPremiumNow: View {
                                 }
                             }
                             .frame(height: 14)
-                            /* The bar carries the state; the figure never repeats it. */
-                            Text(String(format: "%.2f\u{00D7}", r.mult))
+                            /* The bar carries the state; the figure never
+                               repeats it. Tapping any figure flips EVERY one:
+                               per-row state would make five rows five cards. */
+                            Text(pay && r.pay != nil
+                                 ? optMoney(r.pay!)
+                                 : String(format: "%.2f\u{00D7}", r.mult))
                                 .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
                                 .monospacedDigit().foregroundStyle(S.ink)
                                 .lineLimit(1).fixedSize()
+                                .sunnyHint(on: r.pay != nil)
                                 .frame(width: 46, alignment: .trailing)
+                                .contentShape(Rectangle())
+                                .onTapGesture { if r.pay != nil { pay.toggle() } }
                         }
-                        Text(String(format: "%.1f%% today \u{00B7} %.1f%% usual", r.now, r.usual))
-                            .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute2)
-                            .padding(.leading, 56)
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Text(pay && r.pay != nil && r.payU != nil
+                                 ? "\(optMoney(r.pay!)) today \u{00B7} \(optMoney(r.payU!)) usual"
+                                 : String(format: "%.1f%% today \u{00B7} %.1f%% usual", r.now, r.usual))
+                                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute2)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            /* ⚠ RICH WITH NO ROOM IS NOISE. The green lights
+                               only when the name is rich AND has contracts left
+                               to write: IV you cannot sell into is a fact about
+                               the market, not an action. And rich-and-falling
+                               is fear while rich-and-rising is chase — the same
+                               multiple, a different trade — so Prices' week
+                               move sits in front of the count. */
+                            Text(subRight(r))
+                                .font(S.inter(S.t11, S.wMidSmN))
+                                .foregroundStyle((r.free ?? 0) > 0 && r.mult >= Self.richAt
+                                                 ? S.gainText : S.mute2)
+                                .lineLimit(1).fixedSize()
+                        }
+                        .padding(.leading, 56)
                     }
                 }
             }
@@ -2627,15 +3050,19 @@ struct SunnyPremiumNow: View {
             Spacer(minLength: 26)
             Rectangle().fill(S.ruleColorStrong).frame(height: 1)
             Spacer().frame(height: 22)
+            /* ⚠ THE FOOTER ANSWERS THE CARD'S OWN QUESTION NOW. It read
+               `Rich 1 · Book IV 41.9% · Readable 5`: the hero restated, a mean
+               of five IVs with no reference — on a card whose whole premise is
+               that an IV means nothing without the name's own usual — and a
+               count of its own rows. It now says whether anyone is paying more
+               than usual, who, and by how much, in dollars a contract, which is
+               the unit the figure tap already speaks. */
             OptFooter(stats: [
-                .init(label: "Rich",
-                      value: "\(block.rows.filter { $0.mult >= Self.richAt }.count)", ink: S.ink),
-                .init(label: "Book IV",
-                      value: block.rows.isEmpty ? "\u{2014}"
-                        : String(format: "%.1f%%",
-                                 block.rows.reduce(0) { $0 + $1.now } / Double(block.rows.count)),
+                .init(label: "Above usual",
+                      value: "\(block.rows.filter { $0.mult > 1 }.count) of \(block.rows.count)",
                       ink: S.ink),
-                .init(label: "Readable", value: "\(block.rows.count)", ink: S.ink),
+                payStat("Paying most", extremes.most, S.gainText),
+                payStat("Paying least", extremes.least, S.lossText),
             ])
         }
     }

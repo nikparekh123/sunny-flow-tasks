@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.7';
+const BUILD = '2026-09-14.8';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -748,6 +748,13 @@ Deno.serve(async (req) => {
       days: premiumRows.length ? Math.max(...premiumRows.map((r) => r.days)) : 0,
       rows: premiumRows,
     };
+    /* Filled in below, once spot and the free counts exist: what a 30-delta
+       weekly call pays a contract at today's IV and at the name's own usual,
+       the name's 1-week move, and how many contracts are still writeable. The
+       row is the card's, so the card reads one object rather than four. */
+    type PremRow = typeof premiumRows[number] & {
+      pay?: number; payU?: number; free?: number; move?: number | null;
+    };
 
     /* ── average credit per share ──────────────────────────────────────────
        handoff/cards/average-credit.md. Four weeks including this one, per side.
@@ -1117,6 +1124,106 @@ Deno.serve(async (req) => {
       move: absW1.length ? r2(absW1.reduce((a, b) => a + b, 0) / absW1.length) : null,
     };
 
+    /* ── intrinsic value ──────────────────────────────────────────────────
+       handoff `export 9/intrinsic-premium`, 14 Sep 2026. What the long legs
+       are worth today, and how much of that is real rather than time.
+
+       ⚠ THE LONG LEGS ONLY. Short legs were on the first design and came off:
+       their intrinsic is money OWED, which inverts every colour on the card.
+       Short-leg moneyness is the roll check's job.
+
+       ⚠ THE WHOLE IS max(paid, mark), NOT PAID — and that is an amendment to
+       the sheet, forced by the book. The sheet says "PAID IS THE WHOLE" and
+       cuts it into intrinsic + time + lost, which only works while the leg is
+       DOWN. The long puts are UP $1,377 today, and there intrinsic + time
+       already exceed paid, so the three shares would sum past 100% and the bar
+       would draw off its own track.
+
+       With the whole as max(paid, mark) the down case is unchanged — paid is
+       the larger, and the segments are exactly the sheet's 66/30/3 — and the
+       up case is defined: mark is the whole, the two real segments fill it,
+       and the third figure is a GAIN rather than a loss. `cost` is shipped
+       either way so the client can mark where paid falls inside an up bar.
+       Flagged to Nik with the build. */
+    const longLeg = (type: string, label: string, unit: string) => {
+      /* `mk` and not `mark`: the module already has a `mark` map of every
+         leg's price, and shadowing it here would read as the same thing. */
+      let mk = 0, paid = 0, intr = 0, n = 0;
+      for (const e of open) {
+        if (e.dir !== 'long' || e.type !== type) continue;
+        const S0 = spot.get(e.ticker) ?? 0;
+        const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
+        /* An unpriced leg is not a worthless one: it marks at what it cost,
+           the same fallback Programme uses, so a LEAP bought this morning
+           reads 0 rather than a total loss. */
+        const m = md.length
+          ? md.reduce((a, x) => a + x.m, 0) / md.length
+          : (e.n > 0 ? e.cash / (e.n * 100) : 0);
+        mk += m * e.n * 100;
+        paid += e.cash;
+        n += e.n;
+        /* ⚠ MONEYNESS INVERTS ON A PUT. A call is real above its strike, a put
+           below it; the call rule alone would report every protective put as
+           pure time value on the day it is worth most. */
+        const iv = type === 'put' ? Math.max(0, e.k - S0) : Math.max(0, S0 - e.k);
+        intr += iv * e.n * 100;
+      }
+      return {
+        k: type === 'put' ? 'lp' : 'lc', label,
+        sub: `${Math.round(n)} ${unit}${Math.round(n) === 1 ? '' : 's'}`,
+        mark: Math.round(mk), paid: Math.round(paid), intr: Math.round(Math.min(intr, mk)),
+      };
+    };
+    const ivLegs = [longLeg('call', 'Long calls', 'LEAP'), longLeg('put', 'Long puts', 'put')]
+      .filter((l) => l.paid > 0);
+
+    /* One row a name, one strike a side. Every name in this book holds a
+       single long-call strike and at most one long-put strike; if a name is
+       ever built in two tranches the LARGEST by contracts is the row, because
+       the dot is about where the position sits and the position is the block. */
+    const kOf = (t: string, type: string) => {
+      const legs = open.filter((e) => e.ticker === t && e.dir === 'long' && e.type === type);
+      if (!legs.length) return null;
+      const best = legs.reduce((a, b) => (b.n > a.n ? b : a));
+      return { k: r2(best.k), exp: best.exp };
+    };
+    const ivRows = [...new Set(positions.map((p) => p.t))].map((t) => ({
+      t, call: kOf(t, 'call'), put: kOf(t, 'put'),
+    })).filter((r) => r.call || r.put);
+
+    const intrinsic = { legs: ivLegs, rows: ivRows };
+
+    /* ── what a 30-delta weekly call pays ─────────────────────────────────
+       Premium now's figure tap and its whole footer. The same contract priced
+       twice — at today's IV and at the name's own usual — so the difference is
+       vol and nothing else: same spot, same tenor, same delta.
+
+       ⚠ THE ASSUMPTIONS ARE STATED BECAUSE THEY ARE CHOICES. Seven days,
+       because the book sells weeklies; zero rate and no dividend, the same
+       simplification the payoff planner makes; delta fixed at 0.30, so the
+       strike moves with the vol rather than the delta. None of these is
+       measurable from the book — flagged to Nik. */
+    const D30 = -0.5244005127080407;          // the d1 at which N(d1) = 0.30
+    const PAY_T = 7 / 365;
+    function ncdf(x: number): number {
+      const a1 = .254829592, a2 = -.284496736, a3 = 1.421413741,
+            a4 = -1.453152027, a5 = 1.061405429, p = .3275911;
+      const sg = x < 0 ? -1 : 1, z = Math.abs(x) / Math.SQRT2, t = 1 / (1 + p * z);
+      const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-z * z);
+      return .5 * (1 + sg * y);
+    }
+    /* Delta is fixed, so the strike is derived rather than searched for:
+       d1 = (ln(S/K) + v²T/2) / (v√T) at d1 = D30 gives
+       K = S · exp(v²T/2 − D30·v√T), and the price collapses to
+       0.30·S − K·N(d1 − v√T). */
+    const pay30 = (S0: number, ivPct: number) => {
+      const v = ivPct / 100;
+      if (S0 <= 0 || v <= 0) return 0;
+      const sq = v * Math.sqrt(PAY_T);
+      const K = S0 * Math.exp(v * v * PAY_T / 2 - D30 * sq);
+      return Math.max(0, Math.round((0.30 * S0 - K * ncdf(D30 - sq)) * 100));
+    };
+
     /* ── the two cover rings' borrowed marks ──────────────────────────────
        handoff `export 7/cover-rings`, 14 Sep 2026. Both rings print the SAME
        two figures under the arc, so they are computed once here rather than
@@ -1184,6 +1291,16 @@ Deno.serve(async (req) => {
        there is silence, not a stop; short calls are written every week. */
     const callPace = callNames.reduce((a, [t]) => a + (callWkBy.get(t) ?? 0), 0);
     const callLeft = Math.round(callCost - callCollected);
+
+    /* Premium now's rows are finished here: `pay30` needs spot and the free
+       counts need the inventory, and both are built above this line. */
+    for (const r of premiumRows as PremRow[]) {
+      const S0 = spot.get(r.t) ?? 0, inv0 = inv.get(r.t);
+      r.pay = pay30(S0, r.now);
+      r.payU = pay30(S0, r.usual);
+      r.free = inv0 ? Math.max(0, inv0.ch - inv0.cs) + Math.max(0, inv0.ph - inv0.ps) : 0;
+      r.move = priceRows.find((x) => x.ticker === r.t)?.pct.w1 ?? null;
+    }
 
     /* ── put cover ────────────────────────────────────────────────────────
        The long puts are the hedge; the short puts pay for them. The ring is
@@ -1327,6 +1444,7 @@ Deno.serve(async (req) => {
       inventory,
       credit,
       theta,
+      intrinsic,
       programme,
       premium,
       upside,

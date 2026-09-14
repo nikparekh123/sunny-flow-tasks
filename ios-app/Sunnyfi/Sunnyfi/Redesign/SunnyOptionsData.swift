@@ -96,6 +96,8 @@ struct OptionsPayload: Decodable {
     let credit: CreditBlock?
     /// Optional so a run against an older deployment decodes rather than throws.
     let theta: ThetaBlock?
+    /// Optional so a run against an older deployment decodes rather than throws.
+    let intrinsic: IntrinsicBlock?
     /* handoff-final/, 10 Sep 2026. All optional so a run against an older
        deployment decodes rather than throws. */
     let programme: ProgrammeBlock?
@@ -133,11 +135,51 @@ struct PremiumRow: Decodable, Identifiable {
     let t: String
     let now: Double, usual: Double, low: Double, high: Double
     let days: Int
+    /// ⚠ WHAT A 30-DELTA WEEKLY CALL PAYS A CONTRACT, priced twice — at today's
+    /// IV and at the name's own usual — so the difference is vol and nothing
+    /// else: same spot, same tenor, same delta. The assumptions are choices and
+    /// are stated on the server: seven days because the book sells weeklies,
+    /// zero rate, no dividend. Optional so an older deployment decodes.
+    let pay: Int?, payU: Int?
+    /// Borrowed: Left to sell's writeable contracts, and Prices' 1-week move.
+    let free: Int?, move: Double?
     var id: String { t }
     var mult: Double { usual > 0 ? now / usual : 0 }
     /// Where the name's usual sits on its own range, 0...1.
     var posUsual: Double { high > low ? (usual - low) / (high - low) : 0.5 }
     var posNow: Double { high > low ? (now - low) / (high - low) : 0.5 }
+}
+
+/// ⚠ THE LONG LEGS ONLY. A short leg's intrinsic is money OWED, which inverts
+/// every colour on the card; short-leg moneyness is the roll check's job.
+struct IntrinsicLeg: Decodable, Identifiable {
+    let k: String, label: String, sub: String
+    let mark: Int, paid: Int, intr: Int
+    var id: String { k }
+    /// Derived, never stored: the rest of the mark once intrinsic is out.
+    var time: Int { mark - intr }
+    /// Signed. Negative is lost, positive is gained.
+    var pnl: Int { mark - paid }
+    /// ⚠ THE WHOLE IS max(paid, mark), NOT PAID. The sheet cuts PAID into
+    /// intrinsic + time + lost, which only holds while the leg is DOWN. The
+    /// long puts are up today, and there intrinsic + time already exceed paid,
+    /// so the three shares would sum past 100% and the bar would draw off its
+    /// own track. Down, the two are the same thing and nothing changes.
+    var whole: Int { max(paid, mark) }
+}
+
+struct LongStrike: Decodable {
+    let k: Double, exp: String
+}
+
+struct IntrinsicRow: Decodable, Identifiable {
+    let t: String
+    let call: LongStrike?, put: LongStrike?
+    var id: String { t }
+}
+
+struct IntrinsicBlock: Decodable {
+    let legs: [IntrinsicLeg], rows: [IntrinsicRow]
 }
 
 struct PremiumBlock: Decodable {
