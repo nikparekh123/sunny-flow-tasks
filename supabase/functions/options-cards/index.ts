@@ -1476,6 +1476,17 @@ Deno.serve(async (req) => {
           pace: Math.round(callPace),
           pct: r2(callCollected / callCost * 100),
           weeksToCover: callLeft > 0 && callPace > 0 ? Math.ceil(callLeft / callPace) : 0,
+          /* ⚠ THE WEEK IT IS COVERED, NOT A COUNT OF WEEKS. Nik, 14 Sep 2026:
+             "add there the apprx date when the investment will be covered". A
+             count makes the reader do arithmetic the card has already done, and
+             do it wrong — he read 36 weeks as early May and it is the 24th.
+             Derived from THIS week's Monday, so it always names a Monday and
+             the ring's tap and this line are one division stated twice. */
+          by: callLeft > 0 && callPace > 0
+            ? new Date(Date.parse(thisWeek + 'T00:00:00Z')
+                + Math.ceil(callLeft / callPace) * 7 * 86_400_000)
+                .toISOString().slice(0, 10)
+            : null,
           free: freeCalls,
           move: coverMove,
         }

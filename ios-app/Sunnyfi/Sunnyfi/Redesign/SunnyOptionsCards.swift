@@ -1214,15 +1214,21 @@ struct SunnyCallCover: View {
             emptyLine: "No LEAP calls held yet")
     }
 
+    /* ⚠ THE DATE, NOT THE COUNT. Nik, 14 Sep 2026: "add there the apprx date
+       when the investment will be covered". "In 36 weeks" makes the reader do
+       arithmetic the card has already done — he read it as early May and it is
+       the 24th. Always on rather than behind the tap: the line is the same
+       width either way, and the tap's "36 wk" then has something to agree
+       with. Measured at 294.5 of 323 at 12/400. */
     private var line: String {
         guard let c, c.cost > 0 else {
             return "The ring fills as credit covers what the LEAPs cost"
         }
         if c.left <= 0 { return "Covered \u{00B7} \(optMoney(c.pace))/wk still coming in" }
-        guard c.pace > 0, c.weeksToCover > 0 else {
+        guard c.pace > 0, c.weeksToCover > 0, let by = c.by else {
             return "\(optMoney(c.left)) to cover \u{00B7} no pace yet"
         }
-        return "\(optMoney(c.pace))/wk pace \u{00B7} full cover in \(c.weeksToCover) week\(c.weeksToCover == 1 ? "" : "s")"
+        return "\(optMoney(c.pace))/wk pace \u{00B7} covered the week of \(coverDay(by))"
     }
 }
 
@@ -1274,14 +1280,30 @@ struct SunnyPutCover: View {
             return "The ring fills as premium covers what the puts cost"
         }
         if c.left <= 0 { return "Covered \u{00B7} \(optMoney(c.pace))/wk still coming in" }
-        guard let weeks = c.weeksLeft, weeks > 0, let need = c.need, need > 0 else {
+        /* ⚠ ON THIS RING THE DATE IS A DEADLINE, NOT A FORECAST. The call ring
+           projects a pace forward and names the week it lands; here the date is
+           the EARLIEST long-put expiry, which is when the cover being paid for
+           stops existing. Same shape, opposite direction, so the word is "by"
+           and never "covered the week of". */
+        guard let weeks = c.weeksLeft, weeks > 0, let need = c.need, need > 0,
+              let exp = c.expiry else {
             return "\(optMoney(c.left)) still to cover"
         }
+        _ = weeks
         if c.pace >= need {
-            return "On pace \u{00B7} \(optMoney(c.pace))/wk covers it in \(weeks) week\(weeks == 1 ? "" : "s")"
+            return "On pace \u{00B7} \(optMoney(c.pace))/wk covers it by \(coverDay(exp))"
         }
-        return "\(optMoney(need)) a week to cover in \(weeks) week\(weeks == 1 ? "" : "s")"
+        return "\(optMoney(need)) a week to cover by \(coverDay(exp))"
     }
+}
+
+/// "24 May 2027" — a date the reader can put in a diary, never a week count.
+private func coverDay(_ iso: String) -> String {
+    let p = iso.split(separator: "-")
+    let mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    guard p.count == 3, let y = Int(p[0]), let m = Int(p[1]), let d = Int(p[2]),
+          (1...12).contains(m) else { return iso }
+    return "\(d) \(mon[m - 1]) \(y)"
 }
 
 /// "−2.2%" / "+0.4%" / "0.0%" — the plus stays here, because the move word is

@@ -80,6 +80,11 @@ struct CallCover: Decodable {
     let pct: Double
     /// 0 when already covered, or when no pace has been established yet.
     let weeksToCover: Int
+    /// ⚠ THE WEEK IT IS COVERED, not a count of weeks. A count makes the reader
+    /// do arithmetic the card has already done, and do it wrong: Nik read 36
+    /// weeks as early May and it is the 24th. Always a Monday, derived from
+    /// this week's. Null when there is no pace to project from.
+    let by: String?
     let free: Int?
     let move: Double?
 }
