@@ -939,6 +939,13 @@ enum S {
     static let coverRingD: CGFloat = 176     // 323 inner leaves 73.5 of air each side
     static let coverStroke: CGFloat = 18     // thick enough to read as a quantity
     static let coverTrack = wash             // the part of the cost with no news yet
+    /* The ticks outside the ring, 14 Sep 2026: one per contract still writeable
+       on that side. r = 92 is 4 clear of the disc's 88 edge, so a tick never
+       touches the stroke — which is why the arc must be drawn with
+       `strokeBorder` / `inset(by:)` and not a centred `stroke`. */
+    static let coverTickR: CGFloat = 92
+    static let coverTickW: CGFloat = 1.5     // a tick is CAPACITY, --hair, never green
+    static let coverTickH: CGFloat = 5
 
     static let durBar: Double = 0.72
     static let barStagger: Double = 0.055

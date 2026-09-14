@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.3';
+const BUILD = '2026-09-14.5';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -984,6 +984,74 @@ Deno.serve(async (req) => {
       bookMove[key] = den > 0 ? r2(num / den) : null;
     }
 
+    /* ── the two cover rings' borrowed marks ──────────────────────────────
+       handoff `export 7/cover-rings`, 14 Sep 2026. Both rings print the SAME
+       two figures under the arc, so they are computed once here rather than
+       twice on the phone.
+
+       ⚠ THE TICKS ARE CAPACITY, PER SIDE. Prices ships `free` as calls PLUS
+       puts in one number because its job is "is this name worked"; a ring may
+       only count its own side, or the call ring would wear the put ring's
+       room as its own. */
+    const freeCalls = [...inv.values()].reduce((a, r) => a + Math.max(0, r.ch - r.cs), 0);
+    const freePuts = [...inv.values()].reduce((a, r) => a + Math.max(0, r.ph - r.ps), 0);
+    /* ⚠ THE MOVE WORD IS THE ONE PRICES PRINTS ON SCREEN, and that is the
+       EQUAL-WEIGHT mean, not `bookMove`. `bookMove` weights by cost basis and
+       the Prices CARD averages its rows flat, so the two disagree — −2.2%
+       against −1.4% today. Shipping the weighted one would have put a figure
+       under both rings that contradicts the card three above them, which is
+       the exact defect one shared function exists to prevent. Caught by
+       rendering the page, not by reading the payload. */
+    const w1s = priceRows.map((r) => r.pct.w1).filter((v): v is number => v !== null);
+    const coverMove = w1s.length
+      ? r2(w1s.reduce((a, b) => a + b, 0) / w1s.length) : null;
+
+    /* ── call cover ───────────────────────────────────────────────────────
+       The twin of the put ring, and the book-level reading of Yield progress:
+       what the LEAP calls cost, against the short-call credit banked toward
+       paying for them.
+
+       ⚠ AGGREGATED BY NAME, NEVER BY LEG. `positions` is one row per long-call
+       LEG — BABA holds two, opened at different strikes — and each row carries
+       the NAME's `collected` and `week`. Summing the rows would count BABA's
+       credit twice and read the ring 3 points high.
+
+       ⚠ CALL PREMIUM ONLY, the other half of Nik's 2026-09-06 rule. He ruled
+       that call premium must not fund the put ring; the same dollar cannot run
+       the other way either, so a short PUT credit is the put ring's and is not
+       in here. Programme's per-name `collected` is every short credit, so it
+       reads above this on the four names that have sold puts. Flagged.
+
+       ⚠ AND THE NAME MUST HOLD A LEAP. META, NVDA and eleven others carry
+       short-call history from the share era; NVDA's is −$40,402 of buy-backs.
+       Credit with nothing to pay off is not cover. */
+    const leapCostBy = new Map<string, number>();
+    for (const e of open) {
+      if (e.dir !== 'long' || e.type !== 'call') continue;
+      leapCostBy.set(e.ticker, (leapCostBy.get(e.ticker) ?? 0) + e.cash);
+    }
+    const callCrBy = new Map<string, number>(), callWkBy = new Map<string, number>();
+    for (const t of allShorts) {
+      if (String(t.option_type) !== 'call') continue;
+      const tk = String(t.ticker);
+      if (!leapCostBy.has(tk)) continue;
+      const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
+      callCrBy.set(tk, (callCrBy.get(tk) ?? 0) + c);
+      /* Bucketed by the week the leg COVERS, the rule every card here uses. */
+      if (weekStart(String(t.expiry).slice(0, 10)) === thisWeek) {
+        callWkBy.set(tk, (callWkBy.get(tk) ?? 0) + c);
+      }
+    }
+    const callNames = [...leapCostBy.entries()].filter(([, v]) => v > 0);
+    const callCost = callNames.reduce((a, [, v]) => a + v, 0);
+    const callCollected = callNames.reduce((a, [t]) => a + (callCrBy.get(t) ?? 0), 0);
+    /* ⚠ THE PACE IS THIS WEEK, NOT AN AVERAGE. The sheet's `week` field, and
+       the same figure Weekly yield draws as its live bar. The put ring averages
+       its live weeks because short puts are written in tranches and a zero week
+       there is silence, not a stop; short calls are written every week. */
+    const callPace = callNames.reduce((a, [t]) => a + (callWkBy.get(t) ?? 0), 0);
+    const callLeft = Math.round(callCost - callCollected);
+
     /* ── put cover ────────────────────────────────────────────────────────
        The long puts are the hedge; the short puts pay for them. The ring is
        one against the other, for the whole book.
@@ -1101,6 +1169,24 @@ Deno.serve(async (req) => {
           expiry: putExpiry,
           weeksLeft: putWeeksLeft,
           need: putNeed,
+          /* Borrowed: the ticks outside the ring, and the move word under it. */
+          free: freePuts,
+          move: coverMove,
+        }
+        : null,
+      /* ⚠ NULL UNTIL A LEAP IS HELD, the same rule as the put ring: a ring at
+         0% of $0 is a card with no subject, and the page drops it. */
+      callCover: callCost > 0
+        ? {
+          names: callNames.length,
+          cost: Math.round(callCost),
+          collected: Math.round(callCollected),
+          left: callLeft,
+          pace: Math.round(callPace),
+          pct: r2(callCollected / callCost * 100),
+          weeksToCover: callLeft > 0 && callPace > 0 ? Math.ceil(callLeft / callPace) : 0,
+          free: freeCalls,
+          move: coverMove,
         }
         : null,
       /* `asOf` is the close the windows are measured FROM, so the card can

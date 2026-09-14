@@ -58,6 +58,26 @@ struct PutCover: Decodable {
     let expiry: String?
     let weeksLeft: Int?
     let need: Int?
+    /// Borrowed, 14 Sep 2026 (`cover-rings`): the ticks outside the ring are
+    /// PUTS still writeable, never calls-plus-puts the way Prices ships `free`,
+    /// or the hedge would wear the call side's room as its own. `move` is the
+    /// book's 1-week move exactly as Prices prints it.
+    let free: Int?
+    let move: Double?
+}
+
+/// ⚠ THE TWIN OF THE PUT RING, and the book-level reading of Yield progress:
+/// what the LEAP calls cost against the short-call credit banked toward them.
+/// `collected` is CALL premium only — short-put credit is the put ring's, the
+/// other half of Nik's 2026-09-06 rule. Null until a LEAP is held.
+struct CallCover: Decodable {
+    let names: Int
+    let cost: Int, collected: Int, left: Int, pace: Int
+    let pct: Double
+    /// 0 when already covered, or when no pace has been established yet.
+    let weeksToCover: Int
+    let free: Int?
+    let move: Double?
 }
 
 struct OptionsPayload: Decodable {
@@ -68,6 +88,8 @@ struct OptionsPayload: Decodable {
     /// Null until a long put is held. A ring at 0% of $0 is not an empty
     /// state, it is a card with no subject, so the page drops it.
     let putCover: PutCover?
+    /// Optional so a run against an older deployment decodes rather than throws.
+    let callCover: CallCover?
     /// Optional so a run against an older deployment decodes rather than throws.
     let prices: PricesBlock?
     let inventory: [InventoryRow]?

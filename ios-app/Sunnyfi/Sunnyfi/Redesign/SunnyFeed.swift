@@ -496,7 +496,8 @@ struct SunnyPane: View {
                         pct: Double(collected) / Double(cost) * 100,
                         weeksToCover: max(0, Int(ceil(Double(left) / 2316))),
                         expiry: "2027-03-19", weeksLeft: weeks,
-                        need: left > 0 ? Int(ceil(Double(left) / Double(weeks))) : 0)
+                        need: left > 0 ? Int(ceil(Double(left) / Double(weeks))) : 0,
+                        free: 15, move: -0.4)
         #else
         return nil
         #endif
@@ -553,8 +554,16 @@ struct SunnyPane: View {
                when positions get added the circle develops". Before the first
                put it draws an ABSENCE — empty track, dashes, no percentage —
                rather than a zero. */
-            SunnyPutCover(c: o.putCover ?? Self.argCover)
             SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0)
+            /* ⚠ THE TWO RINGS SIT TOGETHER AND CLOSE THE PAGE, 14 Sep 2026,
+               the `cover-rings` sheets' placement: call directly before put.
+               Read as a pair they say what fraction of each half of the book
+               has paid for itself, on the same disc at the same scale.
+               Both draw before their first contract exists — Nik: "Maybe we
+               can show the put card also and when positions get added the
+               circle develops" — but they draw an ABSENCE, not a zero. */
+            SunnyCallCover(c: o.callCover)
+            SunnyPutCover(c: o.putCover ?? Self.argCover)
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "
                         + "come back to this page.")

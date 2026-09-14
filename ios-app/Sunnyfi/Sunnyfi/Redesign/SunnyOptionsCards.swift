@@ -923,158 +923,318 @@ struct SunnyLeapGains: View {
     }
 }
 
-// MARK: - 2c · Put cover
+// MARK: - 2c · The cover rings — Call cover, then Put cover
 
-/// The hedge, and whether it is paying for itself. Build sheet:
-/// handoff/cards/put-cover.md, and every measurement here is from it.
-///
-/// ⚠ THE CIRCLE IS THE COMBINED COST OF EVERY PUT, AND THE AMOUNT IS PRINTED.
-/// Not a target, not 100% of a rate. A ring with no amount on it is a
-/// percentage wearing a costume; the reason this card may be a ring at all is
-/// that its whole is real money.
-///
-/// ⚠ THE ARC CLAMPS AT FULL, THE NUMBER CARRIES THE OVERAGE. Past twelve
-/// o'clock an arc overwrites its own start, so 105% would draw as 5%. At
-/// collected ≥ cost the arc stops closed, the centre prints the true figure,
-/// and the third stat flips to OVER.
-///
-/// ⚠ ONE SERIES, SO ONE COLOUR, and NO PER-NAME ROWS. The moment it lists
-/// names it is another ranking card and the options family already has three.
-/// Which names are in it is the header count.
-struct SunnyPutCover: View {
-    /// Null before the first put is bought. The card still draws — Nik asked
-    /// to watch the circle develop as the book is built — but it draws an
+/* ⚠ THESE TWO REPLACE THE 2 SEP PUT COVER CARD AND ADD ITS TWIN, 14 Sep 2026,
+   from the `cover-rings` handoff (cards/call-cover.md, cards/put-cover.md,
+   cover-data.js). The old single put ring is deleted, not kept beside them.
+
+   ⚠ THEY ARE TWINS AND MUST LOOK IT. Same disc, stroke, ticks, centre, lines,
+   footer, height. A reader who has learned one has learned the other, so the
+   geometry lives once in `CoverRingCard` and the two cards are the words that
+   differ: title, scope, count, third stat, and which week the move word is
+   allowed to shout on.
+
+   ⚠ ONE CALL, ONE TICK. Both read the same `options-cards` payload, so the two
+   rings can never be a minute apart or disagree about the book's week.
+
+   ⚠ WHAT CHANGED FROM THE SHEET, AND WHY — both flagged to Nik:
+
+   1. THE PUT PACE LINE KEEPS ITS DEADLINE. The sheet reverts to "full cover in
+      N weeks"; Nik ruled that out on 2026-09-09 ("the suggestion cannot be post
+      expiry") and the reason still stands — at today's figures that line would
+      read 40 weeks against puts that expire in 27. The call ring takes the
+      sheet's line unchanged, because its LEAPs run 70 weeks out and 38 weeks is
+      inside them.
+
+   2. THE PUT CARD STILL HAS NO SCOPE WORD. The sheet prints "all tickers"; four
+      of seven names hold a put, so the whole book is not in it. The call ring's
+      "all LEAPs" IS true of all seven, so that one ships.
+
+   3. THE MOVE WORD IS THE EQUAL-WEIGHT MEAN, which is what the Prices card's
+      hero prints — its rows are averaged flat on the phone and never read the
+      server's cost-weighted `book`. The first build here shipped the weighted
+      figure and put −2.2% under two rings sitting below a card reading −1.4%.
+      Caught by rendering the page. */
+
+/// The geometry both rings are. Nothing here knows whether it is calls or puts.
+private struct CoverRingCard: View {
+    let name: String
+    let title: String, scope: String, count: String
+    /// null before the first contract of that side is held: the card draws an
     /// ABSENCE, not a zero.
-    let c: PutCover?
+    let started: Bool
+    let cost: Int, collected: Int, left: Int, pace: Int
+    /// The centre's second state, and the only thing the tap changes.
+    let weeks: Int?
+    let paceLine: String
+    /// Contracts still writeable on THIS side — the ticks outside the ring.
+    let free: Int, freeWord: String
+    /// The book's week, and whether this ring is the one it is good news for.
+    let move: Double?, moveHot: Bool
+    let costLabel: String, leftLabel: String
+    let emptyFigure: String, emptyLabel: String, emptyLine: String
 
-    /* ⚠ THE RING'S CENTRE SWAPS TO DOLLARS ON A TAP, the same gesture Roll
-       check, Weekly yield and Stock price carry. Nik, 2026-09-09: "when you
-       tap on 4% we need to show dollar amount". The figure drops to 26 in the
-       money state because "$2,179" at 30 does not fit inside the ring. */
-    @State private var showMoney = moneyByDefault
+    /* Card-local, and it survives a pull: the tap answers HOW LONG, the arc
+       answers HOW FAR, and a refresh must not reset the question he asked. */
+    @State private var weeksMode = false
+    @State private var grown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var frac: Double {
-        guard let c, c.cost > 0 else { return 0 }
-        return Double(c.collected) / Double(c.cost)
-    }
-    private var covered: Bool { (c?.left ?? 1) <= 0 }
-    private var started: Bool { (c?.cost ?? 0) > 0 }
+    private var frac: Double { cost > 0 ? Double(collected) / Double(cost) : 0 }
+    private var covered: Bool { started && left <= 0 }
 
     var body: some View {
-        card.contentShape(Rectangle()).onTapGesture { showMoney.toggle() }
-    }
-
-    private var card: some View {
-        OptCard(name: "put-cover") {
-            /* No scope word. The sheet has "all tickers" there; Nik ruled it
-               off on 2026-09-06 because not every position will carry a put,
-               and naming the whole book when five of seven are in it is the
-               same lie "5 legs" was. The count already says the size. */
-            OptHead(title: "Put cover", sub: "",
-                    right: started
-                        ? "\(c!.names) name\(c!.names == 1 ? "" : "s") \u{00B7} \(c!.puts) put\(c!.puts == 1 ? "" : "s")"
-                        : "none yet")
+        OptCard(name: name) {
+            OptHead(title: title, sub: scope, right: count)
             Spacer().frame(height: 20)
             ring
             Spacer().frame(height: 14)
             Text(started
-                 ? "\(optMoney(c!.collected)) of \(optMoney(c!.cost)) collected"
-                 : "No puts bought yet")
+                 ? "\(optMoney(collected)) of \(optMoney(cost)) collected"
+                 : emptyLine)
                 .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
                 .frame(maxWidth: .infinity, alignment: .center)
-            /* 6, not 12. The two lines are one statement in two parts — what
-               has been collected, and what it takes to finish — and at the
-               wider gap they read as two unrelated notes under the ring. */
-            Spacer().frame(height: 6)
-            /* One line, never a second graphic: a pace chart here would be a
-               second answer competing with the ring, and the projection is one
-               division. */
+                .lineLimit(1)
+            /* 11 then 6: the amount and the pace are two halves of one
+               statement, the free/move line is the borrowed note under both. */
+            Spacer().frame(height: S.gap5)
             Text(paceLine)
                 .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .lineLimit(1)
+                .lineLimit(1).minimumScaleFactor(0.85)
+            Spacer().frame(height: 6)
+            borrowedLine
+                .frame(maxWidth: .infinity, alignment: .center)
+                .lineLimit(1).minimumScaleFactor(0.85)
             Spacer(minLength: S.gap7)
-            /* ⚠ AN ABSENT VALUE IS A DASH, NEVER A ZERO. "$0" at 19/700 in a
-               footer slot reads as a measured nothing — the book was priced
-               and came to zero — which is a different and false statement. A
-               dash cannot be mistaken for a measurement. */
+            /* ⚠ AN ABSENT VALUE IS A DASH, NEVER A ZERO. "$0" at 19/700 reads
+               as a measured nothing, which is a different and false claim. */
             OptFooter(stats: started
                 ? [
-                    .init(label: "Put cost", value: optMoney(c!.cost), ink: S.ink),
-                    .init(label: "Collected", value: optMoney(c!.collected), ink: S.gainText),
+                    .init(label: costLabel, value: optMoney(cost), ink: S.ink),
+                    .init(label: "Collected", value: optMoney(collected), ink: S.gainText),
                     covered
-                        ? .init(label: "Over", value: "+" + optMoney(-c!.left), ink: S.gainText)
-                        : .init(label: "To cover", value: optMoney(c!.left), ink: S.ink),
+                        ? .init(label: "Over", value: "+" + optMoney(-left), ink: S.gainText)
+                        : .init(label: leftLabel, value: optMoney(left), ink: S.ink),
                 ]
                 : [
-                    .init(label: "Put cost", value: "\u{2014}", ink: S.mute),
+                    .init(label: costLabel, value: "\u{2014}", ink: S.mute),
                     .init(label: "Collected", value: "\u{2014}", ink: S.mute),
-                    .init(label: "To cover", value: "\u{2014}", ink: S.mute),
+                    .init(label: leftLabel, value: "\u{2014}", ink: S.mute),
                 ])
         }
+        /* ⚠ DRIVEN BY DATA ARRIVAL, NOT BY onAppear. The card mounts empty
+           while the fetch is in flight, so an onAppear entrance grows an arc
+           that has nothing to grow to and is over before the figures land. */
+        .task(id: collected) {
+            guard started, !grown else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            if reduceMotion { grown = true }
+            else { withAnimation(S.easeSettle(0.9).delay(0.08)) { grown = true } }
+        }
+    }
+
+    /* The book's week, with the move word in direction ink only on the week
+       this particular ring is the good news. */
+    private var borrowedLine: some View {
+        let head = Text("\(free) \(freeWord) still writeable")
+            .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+        guard let move else { return head }
+        let word = Text("book \(signedPct1(move)) this week")
+            .font(S.inter(S.t12, moveHot ? S.wSemiN : S.wMidSmN))
+            .foregroundStyle(moveHot ? (move < 0 ? S.lossText : S.gainText) : S.mute)
+        return head
+            + Text(" \u{00B7} ").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            + word
+    }
+
+    private var ring: some View {
+        ZStack {
+            /* ⚠ strokeBorder, NOT stroke. A centred stroke on a 176 circle
+               draws 194 wide and would put the 92pt ticks INSIDE the band.
+               Inset by half the width and the disc is the 176 the sheet
+               measured, outer edge 88, ticks 4 clear of it. */
+            Circle().strokeBorder(S.coverTrack, lineWidth: S.coverStroke)
+            /* ⚠ CLAMPED AT 1. Trim past 1 wraps and the arc eats its own tail,
+               so 105% would draw as 5%. The centre figure carries the overage.
+               And NO ARC AT ALL before the first contract: a 0.001 stub is a
+               green pip at twelve claiming a start that has not happened. */
+            if started {
+                Circle()
+                    .inset(by: S.coverStroke / 2)
+                    .trim(from: 0, to: grown ? max(0.004, min(frac, 1)) : 0)
+                    .stroke(S.gainBar,
+                            style: StrokeStyle(lineWidth: S.coverStroke, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            ticks
+            /* ⚠ A SIBLING OF THE ARC, NEVER ROTATED WITH IT. Inside the
+               rotated element the figure sits on its side. */
+            centre
+        }
+        .frame(width: S.coverRingD, height: S.coverRingD)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    /* ⚠ CAPACITY, NOT COVER, SO --hair AND NEVER GREEN. A green tick would
+       read as a second series on a card whose whole claim is one. */
+    private var ticks: some View {
+        ZStack {
+            if free > 0 {
+                ForEach(0..<free, id: \.self) { i in
+                    Rectangle().fill(S.hair)
+                        .frame(width: S.coverTickW, height: S.coverTickH)
+                        .offset(y: -S.coverTickR)
+                        .rotationEffect(.degrees(Double(i) / Double(free) * 360))
+                        .opacity(grown ? 1 : 0)
+                        .animation(reduceMotion ? nil
+                                   : .easeOut(duration: 0.4).delay(0.3 + Double(i) * 0.04),
+                                   value: grown)
+                }
+            }
+        }
+    }
+
+    private var centre: some View {
+        VStack(spacing: 3) {
+            /* ⚠ "0%" WOULD READ AS FAILING AT SOMETHING. Before the first
+               contract there is no denominator, so the centre carries a dash
+               and the label says what has not happened. */
+            Text(started
+                 ? (weeksMode ? weeksFigure : String(format: "%.0f%%", frac * 100))
+                 : emptyFigure)
+                .font(S.inter(S.t30, S.wBoldN))
+                .tracking(S.track(S.t30, -0.03))
+                .foregroundStyle(started ? S.gainText : S.mute)
+                .sunnyLineBox(S.t30)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            /* ⚠ THE LABEL IS THE HINT, THE FIGURE IS WHAT CHANGES. One dotted
+               underline per tap target, and a dotted line under a 30pt numeral
+               reads as a rule rather than a hint. */
+            Text(started ? (weeksMode ? "TO COVER" : "COVERED") : emptyLabel)
+                .font(S.inter(S.t11, S.wBoldN)).tracking(S.track(S.t11, S.lsLabel))
+                .foregroundStyle(S.mute)
+                .sunnyHint(on: started)
+        }
+        .frame(width: 140, height: 44)
+        .contentShape(Rectangle())
+        .onTapGesture { if started { weeksMode.toggle() } }
+    }
+
+    /* Covered is 0 weeks, not "no answer"; no pace at all is the dash. */
+    private var weeksFigure: String {
+        if covered { return "0 wk" }
+        guard let weeks, weeks > 0 else { return "\u{2014}" }
+        return "\(weeks) wk"
+    }
+}
+
+/// ⚠ THE CIRCLE IS WHAT THE LEAP CALLS COST, AND THE AMOUNT IS PRINTED. The
+/// same figure Programme prints as paid and Weekly yield divides by. A ring
+/// with no amount on it is a percentage wearing a costume; the reason this can
+/// be a ring at all is that its whole is real money.
+///
+/// ⚠ AND NO PER-NAME ROWS. Which name is lagging is Yield progress's job.
+struct SunnyCallCover: View {
+    let c: CallCover?
+
+    var body: some View {
+        CoverRingCard(
+            name: "call-cover",
+            title: "Call cover", scope: c == nil ? "" : "all LEAPs",
+            count: c.map { "\($0.names) name\($0.names == 1 ? "" : "s")" } ?? "none yet",
+            started: (c?.cost ?? 0) > 0,
+            cost: c?.cost ?? 0, collected: c?.collected ?? 0,
+            left: c?.left ?? 0, pace: c?.pace ?? 0,
+            weeks: c?.weeksToCover,
+            paceLine: line,
+            free: c?.free ?? 0, freeWord: (c?.free ?? 0) == 1 ? "call" : "calls",
+            move: c?.move,
+            /* ⚠ AN UP WEEK IS THIS RING'S GOOD WEEK: a running stock is the
+               week the short calls are paid for by the LEAP under them. */
+            moveHot: (c?.move ?? 0) > 0,
+            costLabel: "LEAP cost", leftLabel: "Left",
+            emptyFigure: "\u{2014}", emptyLabel: "NO LEAPS YET",
+            emptyLine: "No LEAP calls held yet")
+    }
+
+    private var line: String {
+        guard let c, c.cost > 0 else {
+            return "The ring fills as credit covers what the LEAPs cost"
+        }
+        if c.left <= 0 { return "Covered \u{00B7} \(optMoney(c.pace))/wk still coming in" }
+        guard c.pace > 0, c.weeksToCover > 0 else {
+            return "\(optMoney(c.left)) to cover \u{00B7} no pace yet"
+        }
+        return "\(optMoney(c.pace))/wk pace \u{00B7} full cover in \(c.weeksToCover) week\(c.weeksToCover == 1 ? "" : "s")"
+    }
+}
+
+/// ⚠ THE CIRCLE IS THE COMBINED COST OF EVERY PUT, AND THE AMOUNT IS PRINTED.
+///
+/// ⚠ CUMULATIVE AND IT NEVER RESETS. Nik, 2026-09-06: "It's a continous process
+/// when new stock is added new puts are added so not it never resets its
+/// continuous." Buying a tranche raises `cost` and drops the ring; the weeklies
+/// climb it back. `collected` is short-PUT premium only — call premium is the
+/// call ring's numerator and one dollar cannot discharge two obligations.
+///
+/// ⚠ A DOWN WEEK IS THIS CARD'S GOOD WEEK. The move word takes loss ink only
+/// when the book is down, because that is the week the hedge is paying for
+/// itself. It is the one card in the family where red is reassurance.
+struct SunnyPutCover: View {
+    let c: PutCover?
+
+    var body: some View {
+        CoverRingCard(
+            name: "put-cover",
+            /* ⚠ NO SCOPE WORD. The sheet has "all tickers"; Nik ruled it off on
+               2026-09-06 because not every position carries a put, and naming
+               the whole book when four of seven are in it is a lie the count
+               already corrects. */
+            title: "Put cover", scope: "",
+            count: c.map { "\($0.names) name\($0.names == 1 ? "" : "s") \u{00B7} \($0.puts) put\($0.puts == 1 ? "" : "s")" } ?? "none yet",
+            started: (c?.cost ?? 0) > 0,
+            cost: c?.cost ?? 0, collected: c?.collected ?? 0,
+            left: c?.left ?? 0, pace: c?.pace ?? 0,
+            weeks: c?.weeksToCover,
+            paceLine: line,
+            free: c?.free ?? 0, freeWord: (c?.free ?? 0) == 1 ? "put" : "puts",
+            move: c?.move,
+            moveHot: (c?.move ?? 0) < 0,
+            costLabel: "Put cost", leftLabel: "To cover",
+            emptyFigure: "\u{2014}", emptyLabel: "NO PUTS YET",
+            emptyLine: "No puts bought yet")
     }
 
     /* ⚠ THE LINE ASKS WHAT IT TAKES, NOT HOW LONG THE PACE WOULD TAKE. Nik,
        2026-09-09: "the suggestion cannot be post expiry. We need to say that
        2200 to be made to cover in 32 weeks." It read "$1,090/wk pace · full
        cover in 45 weeks" against puts that expire in 28. Dividing what is left
-       by the realised pace answers a question whose premise is false. */
-    private var paceLine: String {
-        guard let c, started else {
+       by the realised pace answers a question whose premise is false, and the
+       cover-rings sheet reverting to that line does not change the arithmetic:
+       today it would print 40 weeks against an expiry 27 weeks out. */
+    private var line: String {
+        guard let c, c.cost > 0 else {
             return "The ring fills as premium covers what the puts cost"
         }
-        if covered { return "Covered \u{00B7} \(optMoney(c.pace))/wk still coming in" }
+        if c.left <= 0 { return "Covered \u{00B7} \(optMoney(c.pace))/wk still coming in" }
         guard let weeks = c.weeksLeft, weeks > 0, let need = c.need, need > 0 else {
-            /* No expiry from the server, so no deadline can be stated. Fall
-               back to the plain fact rather than inventing a horizon. */
             return "\(optMoney(c.left)) still to cover"
         }
-        /* Already selling fast enough: say so instead of setting a target he
-           is beating. */
         if c.pace >= need {
             return "On pace \u{00B7} \(optMoney(c.pace))/wk covers it in \(weeks) week\(weeks == 1 ? "" : "s")"
         }
         return "\(optMoney(need)) a week to cover in \(weeks) week\(weeks == 1 ? "" : "s")"
     }
+}
 
-    private var ring: some View {
-        ZStack {
-            Circle()
-                .stroke(S.coverTrack, lineWidth: S.coverStroke)
-            /* ⚠ CLAMPED AT 1. Trim past 1 wraps and the arc eats its own tail.
-               And NO ARC AT ALL before the first put: a 0.001 stub would be a
-               green pip at twelve o'clock claiming a start that has not
-               happened. */
-            if started {
-                Circle()
-                    .trim(from: 0, to: max(0.001, min(frac, 1)))
-                    .stroke(S.gainBar,
-                            style: StrokeStyle(lineWidth: S.coverStroke, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-            }
-            /* The figure is a SIBLING of the arc, never rotated with it. */
-            VStack(spacing: 3) {
-                /* ⚠ "0%" WOULD READ AS FAILING AT SOMETHING. Before the first
-                   put there is no denominator, so the centre carries a dash in
-                   --mute and the label says what has not happened rather than
-                   scoring it at nothing. */
-                Text(started
-                     ? (showMoney ? optMoney(c!.collected)
-                                  : String(format: "%.0f%%", frac * 100))
-                     : "\u{2014}")
-                    .font(S.inter(showMoney && started ? S.t26 : S.t30, S.wBoldN))
-                    .tracking(S.track(showMoney && started ? S.t26 : S.t30, -0.03))
-                    .foregroundStyle(started ? S.gainText : S.mute)
-                    .sunnyLineBox(showMoney && started ? S.t26 : S.t30)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                Text(started ? "COVERED" : "NO PUTS YET")
-                    .font(S.inter(S.t11, S.wBoldN)).tracking(S.track(S.t11, S.lsLabel))
-                    .foregroundStyle(S.mute)
-            }
-        }
-        .frame(width: S.coverRingD, height: S.coverRingD)
-        .frame(maxWidth: .infinity, alignment: .center)
-    }
+/// "−2.2%" / "+0.4%" / "0.0%" — the plus stays here, because the move word is
+/// a direction and the line has no bar to read the sign off.
+private func signedPct1(_ v: Double) -> String {
+    let a = String(format: "%.1f", abs(v))
+    if a == "0.0" { return "0.0%" }
+    return (v < 0 ? "\u{2212}" : "+") + a + "%"
 }
 
 // MARK: - 3 · Weekly yield
