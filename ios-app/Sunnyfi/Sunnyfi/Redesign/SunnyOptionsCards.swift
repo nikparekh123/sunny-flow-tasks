@@ -133,20 +133,52 @@ private var moneyByDefault: Bool {
     ProcessInfo.processInfo.arguments.contains("-showMoney")
 }
 
-/// "$4.2k" — the weekly-yield labels sit over 30pt bars and a full
-/// "$4,243" collides with its neighbour at eight columns.
-func optMoneyShort(_ v: Int) -> String {
-    let a = abs(v)
-    let s = a >= 1000
-        ? "$" + String(format: "%.1f", Double(a) / 1000).replacingOccurrences(of: ".0", with: "") + "k"
-        : "$\(a)"
-    return v < 0 ? "\u{2212}" + s : s
-}
+/// ⚠ NO LONGER A SECOND RULE. It existed because the weekly-yield labels sit
+/// over 30pt bars and a full "$4,243" collided with its neighbour at eight
+/// columns; `optMoney` abbreviates everywhere now, so the two agree by
+/// construction and a figure cannot read one way on one card and another way
+/// on the next. Kept as a name so its callers still read as deliberate.
+func optMoneyShort(_ v: Int) -> String { optMoney(v) }
 
+/// ⚠ K AND M, NOT SEVEN DIGITS. Nik, 14 Sep 2026: "use K and M and not use
+/// 10,056 use 10K or 1k, only use specific numbers when it really necessary".
+/// Every card in the deck reads money through this one function, so the rule
+/// is enforced in one place rather than card by card.
+///
+/// The ladder is significant figures, not a fixed unit:
+///   under $1,000   exact      $228    — "$0.2k" is worse than the number
+///   under $100k    one place  $32.7k  — a week's credit needs the hundreds
+///   under $1m      whole      $209k   — the hundreds are noise against 200,000
+///   above          two places $1.25m
+///
+/// ⚠ AND A ROUNDED IDENTITY CAN BE OUT BY ONE IN THE LAST PLACE. $46.4k less
+/// $2.2k prints as $44.2k where the exact answer is $44.1k. That is inherent to
+/// rounding a subtraction and is accepted: the figures are read, not summed on
+/// the page. Nothing that must audit to the dollar — the loading screen's
+/// counter, a per-share credit — goes through here.
 func optMoney(_ v: Int) -> String {
     let a = abs(v)
-    let s = a >= 1000 ? "$\(a / 1000),\(String(format: "%03d", a % 1000))" : "$\(a)"
+    let s: String
+    switch a {
+    case ..<1_000:
+        s = "$\(a)"
+    case ..<100_000:
+        s = "$" + trimZero(String(format: "%.1f", Double(a) / 1_000)) + "k"
+    case ..<1_000_000:
+        s = "$\(Int((Double(a) / 1_000).rounded()))k"
+    default:
+        s = "$" + trimZero(String(format: "%.2f", Double(a) / 1_000_000)) + "m"
+    }
     return v < 0 ? "\u{2212}" + s : s
+}
+/// "10.0" -> "10", "1.20" -> "1.2". A trailing zero in an abbreviation reads as
+/// precision the abbreviation does not have.
+private func trimZero(_ s: String) -> String {
+    guard s.contains(".") else { return s }
+    var out = s
+    while out.hasSuffix("0") { out.removeLast() }
+    if out.hasSuffix(".") { out.removeLast() }
+    return out
 }
 /* ⚠ THE MINUS STAYS, THE PLUS GOES. Nik asked for "remove the + and - sign"
    and I removed both, which made -28% render as "28%" in red — a number
@@ -2563,35 +2595,34 @@ private struct SunnyChipWrap: View {
 
 // MARK: - intrinsic value
 
-/* ⚠ NEW CARD, 14 Sep 2026, from the `intrinsic-premium` handoff
-   (cards/intrinsic-value.md). It exists because a mark is not a whole: the
-   earlier build printed $214,000 and the only sane question was "against
-   what?".
+/* ⚠ THIS REPLACES THE SPLIT-BAR INTRINSIC VALUE CARD OF THE SAME MORNING,
+   14 Sep 2026, from the `intrinsic-bars` handoff. The old one laid the three
+   shares along one horizontal bar and repeated them per leg; a reader could not
+   tell the whole from a share. Standing them beside a Paid bar makes the sum
+   visible, and the per-leg blocks are gone — the puts are 1% of paid and two
+   more bars of the same three colours doubled the ink for a rounding error.
 
-   ⚠ THE THREE SHARES SUM TO THE WHOLE, to the dollar, on the hero and on every
-   leg. Intrinsic is what exercising today returns, time is the rest of the
-   mark, lost is what the mark is below what was paid.
+   ⚠ PAID IS A BAR, AND THE OTHER THREE ARE CUT FROM IT. Intrinsic + time +
+   lost = paid to the dollar, and the three heights sum to the first.
 
-   ⚠ AND THE WHOLE IS max(paid, mark) — the one amendment to the sheet, forced
-   by the book and flagged to Nik. The sheet says PAID IS THE WHOLE and cuts it
-   three ways, which holds only while a leg is DOWN. The long puts are up
-   $1,677 today; there intrinsic + time already exceed paid, the shares would
-   sum past 100% and the bar would draw off its own track. With the whole as
-   max(paid, mark) the down case is unchanged — paid is the larger and the
-   segments are the sheet's exactly — and the up case is defined: mark is the
-   whole, the two real segments fill it, a hair tick marks where paid falls,
-   and the third figure is a GAIN.
+   ⚠ TWO CLOCKS, AND THAT IS ALL THE PROSE. Over Paid and Intrinsic: how long
+   the book's own net theta takes to earn back everything spent on the long
+   legs, and the date. Over Time: when the time value is gone, which is the
+   EARLIEST long call expiry — a floor for the whole share, not an average.
+   Nothing over Lost, because nothing brings it back.
 
-   ⚠ EVERY FIGURE IS PRINTED, NOTHING IS BEHIND A TAP. The only taps are the
-   moneyness pills, which change WHICH ROWS YOU LOOK AT, and the unit word,
-   which changes what the table's figures measure. Neither changes what a
-   dollar figure says. */
+   ⚠ AND THE PLOT'S WHOLE IS max(paid, mark), the same amendment the split bar
+   needed and for the same reason: the sheet fixes Paid at full height and cuts
+   the rest from it, which only holds while the long side is DOWN. Up, intrinsic
+   and time already exceed paid and the two bars would draw off the top of the
+   plot. Down — as it is today — paid is the larger and nothing changes. */
 struct SunnyIntrinsic: View {
     let block: IntrinsicBlock
-    /// Prices' spot per name and the close it is measured from. Moneyness is
-    /// spot against strike; this card holds the strikes and reads the spot.
+    /// Prices' spot per name and the close it is measured from.
     let prices: [PriceRow]
     let asOf: String
+    /// Theta's net a day. The earn-back clock is paid divided by it.
+    let theta: ThetaBlock?
 
     private enum Money: String { case inM, atM, outM }
     /* ⚠ VERIFICATION ONLY, the same device as `-rollFig`: the touch bridge
@@ -2608,217 +2639,208 @@ struct SunnyIntrinsic: View {
     }()
     @State private var days = ProcessInfo.processInfo.arguments.contains("-ivDays")
     @State private var now = Date()
+    @State private var grown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// ±2% of the strike is AT it. The band is the sheet's and is the only
-    /// place `--warn` appears on the options page.
+    /// ±2% of the strike is AT it, and `--warn` means that and nothing else.
     private static let atBand = 0.02
-    private static let cellW: CGFloat = 92
+    private static let plotH: CGFloat = 132
+
+    // MARK: the four figures
+
+    private var sums: (paid: Int, mark: Int, intr: Int, time: Int, pnl: Int, whole: Int) {
+        let mark = block.legs.reduce(0) { $0 + $1.mark }
+        let paid = block.legs.reduce(0) { $0 + $1.paid }
+        let intr = block.legs.reduce(0) { $0 + $1.intr }
+        return (paid, mark, intr, mark - intr, mark - paid, max(paid, mark))
+    }
+    private func frac(_ n: Int, _ whole: Int) -> Double {
+        whole > 0 ? min(1, max(0, Double(n) / Double(whole))) : 0
+    }
+    private func pct(_ n: Int, _ whole: Int) -> String {
+        "\(whole > 0 ? Int((Double(n) / Double(whole) * 100).rounded()) : 0)%"
+    }
+
+    // MARK: the two clocks
+
+    /// ⚠ NEVER A NEGATIVE WEEK. If the book's net decay is not positive there is
+    /// nothing earning the premium back and the clock says so with a dash
+    /// rather than a number pointing into the past.
+    private var earnBack: (wk: String, when: String)? {
+        guard let t = theta?.weeks.last else { return nil }
+        let net = t.net
+        guard net > 0 else { return nil }
+        let days = Double(sums.paid) / Double(net)
+        guard days.isFinite, days > 0, days < 40_000 else { return nil }
+        return ("\(Int((days / 7).rounded())) wk", dayPlus(days))
+    }
+    /// The EARLIEST long call expiry. Time value melts to zero by then on that
+    /// leg, so it is the floor for the whole share rather than its average.
+    private var expiry: (wk: String, when: String)? {
+        guard let e = block.rows.compactMap({ $0.call?.exp }).min() else { return nil }
+        return ("\(Int((Double(daysTo(e)) / 7).rounded())) wk", coverDay(e))
+    }
+
+    private var etCal: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        return c
+    }
+    private func daysTo(_ iso: String) -> Int {
+        let f = DateFormatter(); f.calendar = etCal; f.timeZone = etCal.timeZone
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: iso) else { return 0 }
+        return max(0, etCal.dateComponents([.day], from: etCal.startOfDay(for: now),
+                                           to: etCal.startOfDay(for: d)).day ?? 0)
+    }
+    private func dayPlus(_ n: Double) -> String {
+        let d = etCal.date(byAdding: .day, value: Int(n.rounded()),
+                           to: etCal.startOfDay(for: now)) ?? now
+        let f = DateFormatter(); f.calendar = etCal; f.timeZone = etCal.timeZone
+        f.dateFormat = "d MMM yyyy"
+        return f.string(from: d)
+    }
+
+    // MARK: the pills
 
     private func spot(_ t: String) -> Double? {
         guard let v = prices.first(where: { $0.ticker == t })?.spot, v > 0 else { return nil }
         return v
     }
-
-    /* ⚠ SIGNED IN THE HOLDER'S FAVOUR. A long call above its strike and a long
-       put below it both read +, so the reader never has to remember which
-       direction is good for which leg. */
-    private func money(_ s: Double, _ k: Double, call: Bool) -> (state: Money, dist: Double) {
+    /* Signed in the holder's favour: a long call above its strike reads +. */
+    private func money(_ s: Double, _ k: Double) -> (state: Money, dist: Double) {
         guard k > 0 else { return (.outM, 0) }
-        let d = (call ? s - k : k - s) / k
+        let d = (s - k) / k
         return (abs(d) <= Self.atBand ? .atM : d > 0 ? .inM : .outM, d)
     }
     private func dot(_ m: Money) -> Color {
         switch m { case .inM: return S.gainBar; case .atM: return S.warn; case .outM: return S.lossBar }
     }
-    private func daysTo(_ iso: String) -> Int {
-        var c = Calendar(identifier: .gregorian)
-        c.timeZone = TimeZone(identifier: "America/New_York") ?? .current
-        let f = DateFormatter(); f.calendar = c; f.timeZone = c.timeZone
-        f.dateFormat = "yyyy-MM-dd"
-        guard let d = f.date(from: iso) else { return 0 }
-        return max(0, c.dateComponents([.day], from: c.startOfDay(for: now),
-                                       to: c.startOfDay(for: d)).day ?? 0)
+    private struct Pill: Identifiable {
+        let id: String, t: String, state: Money, text: String
+    }
+    /// In → at → out, alphabetical inside. The long CALLS only: the puts are
+    /// the roll check's job and 1% of paid.
+    private var pills: [Pill] {
+        let rank: (Money) -> Int = { m in
+            switch m { case .inM: return 0; case .atM: return 1; case .outM: return 2 }
+        }
+        return block.rows.compactMap { r -> Pill? in
+            guard let c = r.call, let s = spot(r.t) else { return nil }
+            let m = money(s, c.k)
+            return Pill(id: r.t, t: r.t, state: m.state,
+                        text: days ? "\(daysTo(c.exp))d" : signedPct0(m.dist * 100))
+        }
+        .sorted { rank($0.state) == rank($1.state) ? $0.t < $1.t : rank($0.state) < rank($1.state) }
     }
 
-    private struct Cell { let state: Money?; let text: String }
-    private func cell(_ r: IntrinsicRow, call: Bool) -> Cell {
-        guard let leg = call ? r.call : r.put else { return Cell(state: nil, text: "\u{2014}") }
-        guard let s = spot(r.t) else { return Cell(state: nil, text: "\u{2014}") }
-        let m = money(s, leg.k, call: call)
-        return Cell(state: m.state,
-                    text: days ? "\(daysTo(leg.exp))d" : signedPct0(m.dist * 100))
-    }
-    /// Rows in → at → out by the CALL column, alphabetical inside. The LEAP is
-    /// the position; the put is the hedge, and filtering the put column never
-    /// re-sorts the rows under the reader.
-    private var rows: [IntrinsicRow] {
-        let rank: (Money?) -> Int = { m in
-            switch m { case .inM: return 0; case .atM: return 1; case .outM: return 2; case nil: return 3 }
-        }
-        return block.rows.sorted {
-            let a = rank(cell($0, call: true).state), b = rank(cell($1, call: true).state)
-            return a == b ? $0.t < $1.t : a < b
-        }
-    }
-
-    private var total: (whole: Int, intr: Int, time: Int, pnl: Int, paid: Int) {
-        let mark = block.legs.reduce(0) { $0 + $1.mark }
-        let paid = block.legs.reduce(0) { $0 + $1.paid }
-        let intr = block.legs.reduce(0) { $0 + $1.intr }
-        return (max(paid, mark), intr, mark - intr, mark - paid, paid)
-    }
+    // MARK: body
 
     var body: some View {
-        let t = total
+        let s = sums
         OptCard(name: "intrinsic") {
-            OptHead(title: "Intrinsic value", sub: "the long legs, now",
-                    right: ivDay(asOf))
+            OptHead(title: "Intrinsic value", sub: "the long legs", right: ivDay(asOf))
             Spacer().frame(height: 20)
 
-            HStack(alignment: .firstTextBaseline) {
-                Text("PAID").font(S.inter(S.t10, S.wBoldN))
-                    .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
-                Spacer(minLength: 0)
-                Text(optMoney(t.paid))
-                    .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.015))
-                    .foregroundStyle(S.ink)
-            }
-            Spacer().frame(height: 10)
-            splitBar(whole: t.whole, intr: t.intr, time: t.time, pnl: t.pnl, paid: t.paid, h: 10)
-            Spacer().frame(height: 16)
-            HStack(alignment: .top, spacing: 0) {
-                share("Intrinsic", S.gainBar, optMoney(t.intr), S.gainText, t.intr, t.whole,
-                      pad: 0, of: t.pnl < 0 ? "paid" : "mark")
-                share("Time", nil, optMoney(t.time), S.ink, t.time, t.whole,
-                      pad: 12, of: t.pnl < 0 ? "paid" : "mark")
-                t.pnl < 0
-                    ? share("Lost", S.lossBar, optMoney(t.pnl), S.lossText, -t.pnl, t.whole,
-                            pad: 12, of: t.pnl < 0 ? "paid" : "mark")
-                    : share("Gained", S.gainBar, "+" + optMoney(t.pnl), S.gainText, t.pnl, t.whole,
-                            pad: 12, of: "mark")
-            }
-
-            Spacer().frame(height: 24)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            Spacer().frame(height: 22)
-
-            VStack(alignment: .leading, spacing: 26) {
-                ForEach(block.legs) { l in legBlock(l) }
+            HStack(alignment: .top, spacing: 12) {
+                column("PAID", optMoney(s.paid), S.ink, "100%",
+                       frac(s.paid, s.whole), .solid(S.ink), earnBack, 0)
+                column("INTRINSIC", optMoney(s.intr), S.gainText, pct(s.intr, s.whole),
+                       frac(s.intr, s.whole), .solid(S.gainBar), earnBack, 1)
+                column("TIME", optMoney(s.time), S.ink, pct(s.time, s.whole),
+                       frac(s.time, s.whole), .hatch, expiry, 2)
+                s.pnl < 0
+                    ? column("LOST", optMoney(s.pnl), S.lossText, pct(-s.pnl, s.whole),
+                             frac(-s.pnl, s.whole), .solid(S.lossBar), nil, 3)
+                    : column("GAINED", "+" + optMoney(s.pnl), S.gainText, pct(s.pnl, s.whole),
+                             frac(s.pnl, s.whole), .solid(S.gainBar), nil, 3)
             }
 
             Spacer(minLength: 8)
-            Spacer().frame(height: 24)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
             Spacer().frame(height: 22)
-
-            filterRow
+            Rectangle().fill(S.ruleColor).frame(height: 1)
             Spacer().frame(height: 18)
-            table
+            filterRow
+            Spacer().frame(height: 14)
+            pillRow
         }
-        .task(id: asOf) { now = Date() }
+        .task(id: asOf) {
+            now = Date()
+            guard !grown else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            grown = true
+        }
     }
 
-    /* The bar and its legend are one object: the swatch is the segment's own
-       fill, and the hatched swatch is the same hatch, so the legend IS the bar. */
-    @ViewBuilder
-    private func splitBar(whole: Int, intr: Int, time: Int, pnl: Int,
-                          paid: Int, h: CGFloat) -> some View {
-        let W = max(1, Double(whole))
-        GeometryReader { g in
-            let w = g.size.width
-            HStack(spacing: 0) {
-                Rectangle().fill(S.gainBar).frame(width: w * CGFloat(Double(intr) / W))
-                SunnyHatch(ink: S.hair, stripe: 1, gap: 2)
-                    .frame(width: w * CGFloat(Double(time) / W))
-                if pnl < 0 {
-                    Rectangle().fill(S.lossBar).frame(width: w * CGFloat(Double(-pnl) / W))
-                }
-                Spacer(minLength: 0)
-            }
-            .frame(height: h)
-            /* ⚠ ON AN UP LEG THE WHOLE IS THE MARK, so paid no longer ends the
-               bar and has to be marked inside it, or the reader loses the one
-               reference the card is built on. */
-            .overlay(alignment: .leading) {
-                if pnl > 0 {
-                    Rectangle().fill(S.paper).frame(width: 1.5, height: h)
-                        .offset(x: w * CGFloat(Double(paid) / W))
-                }
-            }
-        }
-        .frame(height: h)
-        .clipShape(RoundedRectangle(cornerRadius: S.radiusBar, style: .continuous))
-        .background(
-            RoundedRectangle(cornerRadius: S.radiusBar, style: .continuous).fill(S.wash))
-    }
+    private enum Fill { case solid(Color), hatch }
 
+    /* ⚠ THE EYEBROWS CARRY NO SWATCH: the bar directly above each one is the
+       swatch. And the share sits ABOVE the column while the dollars sit below,
+       the same reading as Call cover — fraction on top, money underneath. */
     @ViewBuilder
-    private func share(_ label: String, _ swatch: Color?, _ fig: String, _ ink: Color,
-                       _ part: Int, _ whole: Int, pad: CGFloat, of: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 6) {
-                if let swatch {
-                    RoundedRectangle(cornerRadius: 2).fill(swatch).frame(width: 8, height: 8)
-                } else {
-                    SunnyHatch(ink: S.hair, stripe: 1, gap: 2)
-                        .frame(width: 8, height: 8)
-                        .clipShape(RoundedRectangle(cornerRadius: 2))
+    private func column(_ label: String, _ fig: String, _ ink: Color, _ share: String,
+                        _ f: Double, _ fill: Fill,
+                        _ clock: (wk: String, when: String)?, _ i: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(share).font(S.inter(S.t12, S.wSemiN)).foregroundStyle(S.ink2)
+                .frame(maxWidth: .infinity, alignment: .center).lineLimit(1)
+            Spacer().frame(height: 6)
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            /* 52 is what makes room for the two-line clock above a full-height
+               bar; at anything less the clock sits on the share rule. */
+            Spacer().frame(height: 52)
+            ZStack(alignment: .bottom) {
+                Color.clear.frame(height: Self.plotH)
+                bar(fill)
+                    /* A 0% share still prints a sliver, so the column reads as
+                       measured-and-tiny rather than absent. */
+                    .frame(height: max(3, Self.plotH * f))
+                    .scaleEffect(y: grown || reduceMotion ? 1 : 0, anchor: .bottom)
+                    .animation(reduceMotion ? nil
+                               : S.easeSettle(S.durBar).delay(Double(i) * 0.07), value: grown)
+                if let clock {
+                    /* The clock rides its bar's top and travels with it. It may
+                       overhang the column, which is how "24 May 2027" fits in
+                       71.75pt. */
+                    VStack(spacing: 2) {
+                        Text(clock.wk).font(S.inter(S.t12, S.wBoldN))
+                            .tracking(S.track(S.t12, -0.01)).foregroundStyle(S.ink)
+                        Text(clock.when).font(S.inter(S.t10, S.wMidSmN))
+                            .foregroundStyle(S.mute)
+                    }
+                    .fixedSize()
+                    .offset(y: -(max(3, Self.plotH * f) + 7))
+                    .animation(reduceMotion ? nil : S.easeSettle(0.55), value: f)
                 }
-                Text(label.uppercased()).font(S.inter(S.t10, S.wBoldN))
-                    .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
-                    .lineLimit(1)
             }
+            .frame(height: Self.plotH)
+            Spacer().frame(height: 14)
+            Text(label).font(S.inter(S.t10, S.wBoldN))
+                .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Spacer().frame(height: 8)
             Text(fig).font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
-                .foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.8)
-            /* ⚠ THE WORD NAMES THE DENOMINATOR, because the denominator moves.
-               While the block is down the whole is PAID and the three shares
-               are of it; once it is up the whole is the MARK and saying "of
-               paid" would be a percentage of the wrong number. Every
-               percentage on this deck names its reference. */
-            Text("\(whole > 0 ? Int((Double(part) / Double(whole) * 100).rounded()) : 0)% of \(of)")
-                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute).lineLimit(1)
+                .foregroundStyle(ink).lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, pad)
     }
 
-    @ViewBuilder
-    private func legBlock(_ l: IntrinsicLeg) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(l.label).font(S.inter(S.t13, S.wSemiN))
-                    .tracking(S.track(S.t13, -0.01)).foregroundStyle(S.ink)
-                Text(l.sub).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-                Spacer(minLength: 0)
-                (Text(optMoney(l.paid)).font(S.inter(S.t13, S.wBoldN))
-                    .foregroundStyle(S.ink)
-                 + Text(" paid").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute))
-                    .lineLimit(1)
-            }
-            splitBar(whole: l.whole, intr: l.intr, time: l.time, pnl: l.pnl, paid: l.paid, h: 8)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                legFig(optMoney(l.intr), S.gainText, "intrinsic")
-                Spacer(minLength: 0)
-                legFig(optMoney(l.time), S.ink, "time")
-                Spacer(minLength: 0)
-                l.pnl < 0 ? legFig(optMoney(l.pnl), S.lossText, "lost")
-                          : legFig("+" + optMoney(l.pnl), S.gainText, "gained")
-            }
+    @ViewBuilder private func bar(_ f: Fill) -> some View {
+        switch f {
+        case .solid(let c):
+            UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2).fill(c)
+        case .hatch:
+            /* ⚠ 2 OVER 3, NOT THE SPLIT BAR'S 1 OVER 2. At 132pt the fine hatch
+               reads as flat grey and the time share stops looking like time. */
+            SunnyHatch(ink: S.hair, stripe: 2, gap: 3)
+                .background(S.wash)
+                .clipShape(UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2))
         }
     }
-    private func legFig(_ fig: String, _ ink: Color, _ word: String) -> Text {
-        Text(fig).font(S.inter(S.t11, S.wSemiN)).foregroundStyle(ink)
-            + Text(" " + word).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-    }
 
-    /* ⚠ THE PILLS ARE PILLS, so they carry no dotted underline — their shape is
-       the affordance. The unit word is the card's one underlined text. */
     private var filterRow: some View {
         HStack(spacing: 6) {
-            pill(nil, "All")
-            pill(.inM, "In")
-            pill(.atM, "At")
-            pill(.outM, "Out")
+            pill(nil, "All"); pill(.inM, "In"); pill(.atM, "At"); pill(.outM, "Out")
             Spacer(minLength: 0)
             Text(days ? "show % from strike" : "show days left")
                 .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
@@ -2832,71 +2854,33 @@ struct SunnyIntrinsic: View {
     @ViewBuilder private func pill(_ m: Money?, _ label: String) -> some View {
         let on = filter == m
         HStack(spacing: 6) {
-            if let m {
-                Circle().fill(dot(m)).frame(width: 7, height: 7)
-            }
+            if let m { Circle().fill(dot(m)).frame(width: 7, height: 7) }
             Text(label).font(S.inter(S.t11, S.wSemiN))
                 .foregroundStyle(on ? S.onInk : S.mute)
         }
         .padding(.vertical, 5).padding(.horizontal, 10)
-        .background(
-            Capsule().fill(on ? S.ink : S.paper)
-                .overlay(Capsule().stroke(on ? S.ink : S.ruleColorStrong, lineWidth: 1)))
+        .background(Capsule().fill(on ? S.ink : S.paper)
+            .overlay(Capsule().stroke(on ? S.ink : S.ruleColorStrong, lineWidth: 1)))
         .contentShape(Capsule())
         .onTapGesture { filter = m }
     }
 
-    private var table: some View {
-        let rs = rows
-        /* ⚠ A FILTER DIMS, IT NEVER HIDES. The rows keep their place, so the
-           reader sees how many are NOT that state, and the header counts both
-           columns because a name can be in on one leg and out on the other. */
-        let nc = rs.filter { cell($0, call: true).state != nil }.count
-        let np = rs.filter { cell($0, call: false).state != nil }.count
-        let hc = rs.filter { cell($0, call: true).state == filter }.count
-        let hp = rs.filter { cell($0, call: false).state == filter }.count
-        let head = filter.map { f in
-            "\(hc) of \(nc) \u{00B7} \(hp) of \(np) \(f == .inM ? "in" : f == .atM ? "at" : "out")"
-        } ?? "Where spot sits"
-        return VStack(alignment: .leading, spacing: 11) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                col(head, width: nil)
-                col("LONG CALL", width: Self.cellW)
-                col("LONG PUT", width: Self.cellW)
-            }
-            ForEach(rs) { r in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(r.t).font(S.inter(S.t12, S.wSemiN))
-                        .tracking(S.track(S.t12, -0.01)).foregroundStyle(S.ink)
-                        .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1)
-                    moneyCell(cell(r, call: true))
-                    moneyCell(cell(r, call: false))
+    /* ⚠ A FILTER DIMS, IT NEVER HIDES. The row keeps its shape, so the reader
+       sees how many names are NOT that state. */
+    private var pillRow: some View {
+        SunnyWrap(spacing: 8, lineSpacing: 8) {
+            ForEach(pills) { p in
+                HStack(spacing: 7) {
+                    Circle().fill(dot(p.state)).frame(width: 8, height: 8)
+                    Text(p.t).font(S.inter(S.t12, S.wSemiN)).foregroundStyle(S.ink)
+                    Text(p.text).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
                 }
+                .padding(.vertical, 7).padding(.horizontal, 11)
+                .background(Capsule().stroke(S.ruleColorStrong, lineWidth: 1))
+                .opacity(filter != nil && filter != p.state ? 0.25 : 1)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.55), value: filter)
             }
         }
-    }
-    @ViewBuilder private func col(_ s: String, width: CGFloat?) -> some View {
-        Text(s.uppercased()).font(S.inter(S.t10, S.wBoldN))
-            .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
-            .lineLimit(1).minimumScaleFactor(0.8)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
-            .frame(width: width, alignment: .leading)
-    }
-    @ViewBuilder private func moneyCell(_ c: Cell) -> some View {
-        HStack(spacing: 6) {
-            if let s = c.state {
-                Circle().fill(dot(s)).frame(width: 8, height: 8)
-            } else {
-                /* A name with no put prints a dash, never an empty cell — an
-                   empty cell reads as data that failed to arrive. */
-                Color.clear.frame(width: 8, height: 8)
-            }
-            Text(c.text).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .frame(width: Self.cellW, alignment: .leading)
-        .opacity(c.state == nil ? 0.5 : (filter != nil && filter != c.state ? 0.25 : 1))
     }
 }
 
@@ -2912,6 +2896,51 @@ private func ivDay(_ iso: String) -> String {
     guard let d = f.date(from: iso) else { return iso }
     let o = DateFormatter(); o.dateFormat = "EEE d MMM"
     return o.string(from: d)
+}
+
+/// A wrapping row. SwiftUI has no flex-wrap, and the pill count is the card's
+/// height, so the rows have to be laid out rather than guessed at.
+struct SunnyWrap: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    private func rows(_ sub: Subviews, _ w: CGFloat) -> [[Int]] {
+        var out: [[Int]] = [[]], x: CGFloat = 0
+        for (i, v) in sub.enumerated() {
+            let s = v.sizeThatFits(.unspecified).width
+            if !out[out.count - 1].isEmpty && x + spacing + s > w {
+                out.append([i]); x = s
+            } else {
+                if !out[out.count - 1].isEmpty { x += spacing }
+                out[out.count - 1].append(i); x += s
+            }
+        }
+        return out
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews,
+                      cache: inout ()) -> CGSize {
+        let w = proposal.width ?? 0
+        let rs = rows(subviews, w)
+        let h = rs.reduce(0.0) { acc, r in
+            acc + (r.map { subviews[$0].sizeThatFits(.unspecified).height }.max() ?? 0)
+        } + lineSpacing * CGFloat(max(0, rs.count - 1))
+        return CGSize(width: w, height: h)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
+                       subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for r in rows(subviews, bounds.width) {
+            var x = bounds.minX
+            let rh = r.map { subviews[$0].sizeThatFits(.unspecified).height }.max() ?? 0
+            for i in r {
+                let s = subviews[i].sizeThatFits(.unspecified)
+                subviews[i].place(at: CGPoint(x: x, y: y + (rh - s.height) / 2),
+                                  proposal: ProposedViewSize(s))
+                x += s.width + spacing
+            }
+            y += rh + lineSpacing
+        }
+    }
 }
 
 // MARK: - 02 · Premium now

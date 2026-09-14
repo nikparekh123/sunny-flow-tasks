@@ -596,7 +596,7 @@ struct SunnyPane: View {
                by feeding both from one call. */
             if let iv = o.intrinsic, !iv.legs.isEmpty {
                 SunnyIntrinsic(block: iv, prices: o.prices?.rows ?? [],
-                               asOf: o.prices?.asOf ?? o.date)
+                               asOf: o.prices?.asOf ?? o.date, theta: o.theta)
             }
             /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
                leads the standing block. */
