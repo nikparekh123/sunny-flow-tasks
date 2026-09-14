@@ -2695,17 +2695,26 @@ struct SunnyIntrinsic: View {
        not a week that earned nothing; it is a week the programme had not
        started.
 
-       Known and accepted, shared with Weekly yield: the LIVE week is in the
-       average while it is still running, so the clock drifts a little from
-       Monday to Friday.
+       ⚠ AND COMPLETED WEEKS ONLY. Nik, 14 Sep 2026. The live week is a
+       fraction of itself until Friday, so counting it made the average light on
+       a Monday and full by the close, and the clock drifted a week across every
+       week. Dropping it costs one week of staleness and buys a figure that only
+       moves when a week actually ends — the right trade for a projection.
 
-       ⚠ NEVER A NEGATIVE WEEK. With no credit history there is nothing earning
-       anything back, and every clock leaves rather than printing a number that
-       points into the past. */
+       ⚠ THIS NOW DIFFERS FROM WEEKLY YIELD BY ONE WEEK, and deliberately: that
+       card's average line is a reading OF the weeks it draws, so the live bar
+       belongs in it. This is a RATE projected forward, where a half-finished
+       week is not a rate. Flagged to Nik with the change.
+
+       ⚠ NEVER A NEGATIVE WEEK, AND NEVER ONE BUILT ON NOTHING. Before the first
+       week closes there is no average to project, so the clocks leave rather
+       than quoting a partial week as if it were a rate. */
     private var rateWeek: Double? {
-        let live = book.weekly.filter { ($0.gross ?? $0.credit) > 0 || ($0.bought ?? 0) > 0 }
-        guard !live.isEmpty else { return nil }
-        let mean = Double(live.reduce(0) { $0 + $1.credit }) / Double(live.count)
+        let done = book.weekly.filter {
+            $0.current != true && (($0.gross ?? $0.credit) > 0 || ($0.bought ?? 0) > 0)
+        }
+        guard !done.isEmpty else { return nil }
+        let mean = Double(done.reduce(0) { $0 + $1.credit }) / Double(done.count)
         return mean > 0 ? mean : nil
     }
     private struct Clock { let wk: String; let when: String }
@@ -2718,7 +2727,14 @@ struct SunnyIntrinsic: View {
            comes back off. Either way the printed weeks match the printed
            dollars, which is the whole point of one rate. */
         let wp = max(0, s.pnl < 0 ? wi + wt + wl : wi + wt - wl)
-        return (clock(wp), clock(wi), clock(wt), clock(wl))
+        /* ⚠ LOST IS THE ONE CLOCK THAT LOOKS BACKWARDS, so it carries no date.
+           Nik, 14 Sep 2026: "reframe this, cost 3 weeks of income, no need for
+           dates." The other three are a projection — this much income and the
+           bar is covered on that date. The loss is already spent: dating it
+           would say the market takes it again in October. Same unit, opposite
+           direction, and the sub-line is what says so. */
+        return (clock(wp), clock(wi), clock(wt),
+                Clock(wk: "\(wl) wk", when: "of income"))
     }
     private func clock(_ weeks: Int) -> Clock {
         Clock(wk: "\(weeks) wk", when: dayPlus(Double(weeks) * 7))
