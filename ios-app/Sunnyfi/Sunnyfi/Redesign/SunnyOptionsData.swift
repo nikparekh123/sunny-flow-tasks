@@ -94,6 +94,8 @@ struct OptionsPayload: Decodable {
     let prices: PricesBlock?
     let inventory: [InventoryRow]?
     let credit: CreditBlock?
+    /// Optional so a run against an older deployment decodes rather than throws.
+    let theta: ThetaBlock?
     /* handoff-final/, 10 Sep 2026. All optional so a run against an older
        deployment decodes rather than throws. */
     let programme: ProgrammeBlock?
@@ -210,7 +212,39 @@ struct InventoryRow: Decodable, Identifiable {
 struct CreditWeek: Decodable, Identifiable {
     let week: String, contracts: Int
     let perShare: Double?
+    /// ⚠ THE CASH, SO THE CARD DIVIDES AND NEVER STORES AN AVERAGE. The blend
+    /// across weeks is sum(cash) / sum(contracts) — a week with 105 contracts
+    /// is not worth the same as a week with 46. Optional so a run against an
+    /// older deployment decodes rather than throws.
+    let cash: Int?
     var id: String { week }
+    /// What one contract sold for that week. The unit the book is in: it holds
+    /// LEAPs, not shares, so the contract price is the fill he sees.
+    var perContract: Double? {
+        guard let cash, contracts > 0 else { return nil }
+        return Double(cash) / Double(contracts)
+    }
+}
+
+/// ⚠ A DAY'S DECAY, AND THE INK IS THE SIGN. `long` is what the LEAPs and the
+/// protective puts pay every day and is always negative; `short` is what the
+/// sold legs collect and is always positive. Neither is good or bad news — the
+/// comparison is the average line, not the hue.
+struct ThetaWeek: Decodable, Identifiable {
+    let week: String
+    /// The day this week was actually read at — every week is measured the same
+    /// number of days into itself, or a Monday would be compared to a Friday.
+    let on: String
+    let long: Int, short: Int
+    var id: String { week }
+    var net: Int { long + short }
+}
+
+struct ThetaBlock: Decodable {
+    let weeks: [ThetaWeek]
+    /// Prices' mean ABSOLUTE 1-week move. Decay is only free when the book sits
+    /// still, and a book with one name up 6% and another down 6% has not.
+    let move: Double?
 }
 
 struct CreditBlock: Decodable {

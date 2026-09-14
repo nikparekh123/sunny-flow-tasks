@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.5';
+const BUILD = '2026-09-14.6';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -765,6 +765,12 @@ Deno.serve(async (req) => {
         contracts: e ? Math.round(e.n) : 0,
         /* Two decimals, because this is a price and it is quoted in cents. */
         perShare: e && e.n > 0 ? Math.round(e.cash / e.n) / 100 : null,
+        /* ⚠ THE CASH, SO THE CARD CAN DIVIDE AND NEVER STORE AN AVERAGE. The
+           `credit-theta` sheet, 14 Sep 2026: the blend across weeks is
+           sum(cash) / sum(contracts), never the mean of weekly averages, and a
+           week with 160 contracts is not worth the same as a week with 120.
+           `perShare` stays because it is the number quoted at the desk. */
+        cash: e ? Math.round(e.cash) : 0,
       };
     });
     const credit = { week: thisWeek, calls: sideWeeks('call'), puts: sideWeeks('put') };
@@ -984,6 +990,107 @@ Deno.serve(async (req) => {
       bookMove[key] = den > 0 ? r2(num / den) : null;
     }
 
+    /* ── theta, a day ─────────────────────────────────────────────────────
+       handoff `export 8/credit-theta`, 14 Sep 2026. The long legs (the LEAPs
+       and the protective puts) PAY decay every day; the short legs COLLECT it.
+       The card is one against the other, four weeks of shape behind each.
+
+       ⚠ TWO CORRECTIONS THE SHEET DOES NOT KNOW ABOUT, both forced by the data
+       and both flagged to Nik.
+
+       1 · A DAY'S DECAY CANNOT EXCEED WHAT THE OPTION IS WORTH. Black-Scholes
+       theta goes to infinity as expiry approaches, and the vendor ships it raw:
+       a KR 59 call marked at $0.76 on its expiry day reported theta −2.20 a
+       share, which says it will lose three times its own value by tomorrow.
+       Summed, that read $5,533 a DAY of collect on a book that takes about
+       $7,000 a WEEK in credit. Capping each leg at its own remaining mark is
+       the arithmetic floor: an option cannot decay past zero.
+
+       2 · EVERY WEEK IS MEASURED ON THE SAME WEEKDAY. A weekly's theta on its
+       expiry Friday is most of its value; on the Monday it is a fraction of
+       that. Taking "the last reading of the week" put the live week's Monday
+       beside four past Fridays and called them a series. Each week is read at
+       the same offset into the week that today sits at, so the four bars are
+       the same measurement four times, and the live figure is always today's.
+
+       ⚠ ONE PAGE PER DAY IS ENOUGH, and that is why this does not page the
+       whole table. `mp-refresh` writes every leg every minute, so 1,000 rows
+       ordered newest-first covers roughly ten minutes and therefore every leg
+       many times over. Paging five weeks of `option_greeks` would be 55,000
+       rows and 55 round trips for four numbers. */
+    const TH_WEEKS = 4;
+    const thWeeks: string[] = [];
+    for (let i = TH_WEEKS - 1; i >= 0; i--) {
+      thWeeks.push(new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
+        .toISOString().slice(0, 10));
+    }
+    /* How far into the week today is. Capped at Friday: there are no readings
+       at the weekend and a Sunday would ask every past week for a Sunday. */
+    const thOffset = Math.min(4, Math.max(0, Math.round(
+      (Date.parse(today + 'T00:00:00Z') - Date.parse(thisWeek + 'T00:00:00Z')) / 86_400_000)));
+    const dayShift = (d: string, n: number) =>
+      new Date(Date.parse(d + 'T00:00:00Z') + n * 86_400_000).toISOString().slice(0, 10);
+
+    /* The direction and size of every leg alive in the window, including the
+       ones that have since expired — a week's theta is what the book carried
+       THAT week, not what survives today. */
+    const thLegs = new Map<string, { dir: string; n: number; exp: string }>();
+    for (const t of await P(`option_trades?voided_at=is.null&expiry=gte.${thWeeks[0]}`
+      + '&select=id,direction,contracts,expiry&order=id.asc')) {
+      thLegs.set(String(t.id), {
+        dir: String(t.direction), n: N(t.contracts), exp: String(t.expiry).slice(0, 10),
+      });
+    }
+
+    /* The newest reading per leg on one day. Walks back up to four days so a
+       holiday or a short week still answers rather than shipping a zero. */
+    const thetaOn = async (day: string) => {
+      for (let back = 0; back < 5; back++) {
+        const d = dayShift(day, -back);
+        const r = await fetch(`${SB_URL}/rest/v1/option_greeks`
+          + `?captured_at=gte.${d}T00:00:00Z&captured_at=lt.${dayShift(d, 1)}T00:00:00Z`
+          + '&select=option_trade_id,theta,last_mark'
+          + '&order=captured_at.desc&limit=1000', {
+          headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        });
+        if (!r.ok) continue;
+        const rows = (await r.json()) as Record<string, unknown>[];
+        if (!rows.length) continue;
+        const seen = new Map<string, number>();
+        for (const g of rows) {
+          const id = String(g.option_trade_id);
+          if (seen.has(id) || g.theta === null) continue;
+          /* THE CAP. Never more than the option is worth. */
+          seen.set(id, Math.max(N(g.theta), -Math.abs(N(g.last_mark))));
+        }
+        return { day: d, th: seen };
+      }
+      return { day, th: new Map<string, number>() };
+    };
+
+    const thRead = await Promise.all(
+      thWeeks.map((w) => thetaOn(dayShift(w, thOffset))));
+    const thetaWeeks = thWeeks.map((w, i) => {
+      let long = 0, short = 0;
+      for (const [id, th] of thRead[i].th) {
+        const leg = thLegs.get(id);
+        /* A leg that had already expired before that week was not in the book. */
+        if (!leg || leg.exp < w) continue;
+        const cash = th * leg.n * 100;
+        if (leg.dir === 'long') long += cash; else short -= cash;
+      }
+      return { week: w, on: thRead[i].day, long: Math.round(long), short: Math.round(short) };
+    });
+    /* ⚠ THE ABSOLUTE MOVE, NOT THE NET ONE. Decay is only free when the book
+       sits still, and a book where one name ran 6% up and another 6% down has
+       not sat still even though its net move is zero. */
+    const absW1 = priceRows.map((r) => r.pct.w1)
+      .filter((v): v is number => v !== null).map(Math.abs);
+    const theta = {
+      weeks: thetaWeeks,
+      move: absW1.length ? r2(absW1.reduce((a, b) => a + b, 0) / absW1.length) : null,
+    };
+
     /* ── the two cover rings' borrowed marks ──────────────────────────────
        handoff `export 7/cover-rings`, 14 Sep 2026. Both rings print the SAME
        two figures under the arc, so they are computed once here rather than
@@ -1193,6 +1300,7 @@ Deno.serve(async (req) => {
          say what "today" is against without the client guessing. */
       inventory,
       credit,
+      theta,
       programme,
       premium,
       upside,

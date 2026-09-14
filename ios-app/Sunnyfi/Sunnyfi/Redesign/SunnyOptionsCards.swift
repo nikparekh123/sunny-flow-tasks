@@ -1891,137 +1891,368 @@ private struct SunnyDots: View {
    went with it was the ALL TIME block, the Kept / Rolled back / LEAP trio
    per name, and that now lives nowhere. Ask before rebuilding either. */
 
-// MARK: - average credit
+// MARK: - the pair frame · Average credit, then Theta
 
-/// ⚠ PER SHARE, NEVER PER CONTRACT. handoff/cards/average-credit.md.
-/// $0.60, not $60 — the number quoted when the trade is placed.
-///
-/// ⚠ COLOUR IS A COMPARISON THE CARD ALSO PRINTS. Each side is green at or above
-/// ITS OWN past average and red below it, and that average is printed under the
-/// figure and drawn as a line across its own plot. No sentence explains the test.
-///
-/// ⚠ THE PLOT SCALE IS PER SIDE AND TRUNCATED, so a bar is a SHAPE and not a
-/// quantity. Two consequences, both deliberate: no bar is labelled, and the two
-/// columns are NOT height-comparable to each other.
-struct SunnyAvgCredit: View {
-    let credit: CreditBlock
+/* ⚠ ONE FRAME, TWO QUESTIONS, 14 Sep 2026, from the `credit-theta` handoff
+   (cards/average-credit.md, cards/theta.md, credit-theta-data.js). Average
+   credit REPLACES the 8 Sep card; Theta is new.
 
-    private static let plotH: CGFloat = 132
+   ⚠ NEITHER SIDE IS THE ANSWER, THE COMPARISON IS — so there is no 30pt hero
+   on either card, only two 22s. A reader who has learned "figure over its own
+   baseline, four bars, ink line" on one card reads the other with no
+   instruction, which is the whole reason they share a frame.
 
-    private func figure(_ ws: [CreditWeek]) -> Double? { ws.last?.perShare }
-    /// The mean of the three PRIOR weeks, skipping any that did not trade.
-    private func pastAvg(_ ws: [CreditWeek]) -> Double? {
-        let past = ws.dropLast().compactMap(\.perShare)
-        return past.isEmpty ? nil : past.reduce(0, +) / Double(past.count)
+   ⚠ THE BARS ARE SHAPE, NOT QUANTITY. The scale is per side and TRUNCATED
+   (floor = the window's minimum less 35% of its range, ceiling = its maximum
+   plus 6%), because calls running $56 to $73 on a zero-based axis draw as four
+   identical slabs. Two consequences, both accepted: no bar is labelled, and the
+   two columns are NOT height-comparable to each other. */
+
+/// One side of the frame: a figure, the average it is judged against, and four
+/// weeks of shape with that average drawn across them.
+private struct PairCol {
+    let label: String
+    let figure: String
+    let ink: Color
+    let baseline: String
+    /// oldest first, live LAST. nil where the side did not trade that week.
+    let values: [Double?]
+    let keys: [String]
+    /// The height the ink line sits at, in the same units as `values`.
+    let ref: Double?
+    /// Average credit only: where this week's figure would sit at usual IV.
+    let usual: Double?
+}
+
+private struct PairFrameCard<Footer: View>: View {
+    let name: String
+    let title: String
+    let week: String
+    /// The unit word beside the title. Tappable only on Theta, and only then
+    /// does it carry the dotted underline — one hint per target, on the
+    /// control, never on what it changes.
+    let unit: String
+    let onUnit: (() -> Void)?
+    let left: PairCol, right: PairCol
+    @ViewBuilder let footer: () -> Footer
+
+    /* Measured, not chosen: inner 323, so 146 + 15 + 1 + 15 + 146. Four bars in
+       a 146 column at gap 9 is 29.75 each, which is also the usual-IV tick's
+       width because that tick spans the live bar and nothing else. */
+    private var colW: CGFloat { (S.content - 38 - 15 - 1 - 15) / 2 }
+    private var barW: CGFloat { (colW - 3 * 9) / 4 }
+    private var plotH: CGFloat { 132 }
+
+    @State private var appeared = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        OptCard(name: name) {
+            HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+                HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                    Text(title).font(S.inter(S.t14, S.wBoldN))
+                        .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
+                    Text(unit).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
+                        .sunnyHint(on: onUnit != nil)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onUnit?() }
+                }
+                Spacer(minLength: 0)
+                Text(week).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            }
+            /* 20 is load-bearing: at 0 the two eyebrows read as a second line
+               of the header rather than the tops of two columns. */
+            Spacer().frame(height: 20)
+            HStack(alignment: .top, spacing: 15) {
+                column(left)
+                /* The card's only rule. It exists because the two columns are
+                   on different scales: it says these are two readings, not one
+                   four-column row. */
+                Rectangle().fill(S.ruleColorStrong)
+                    .frame(width: 1).frame(maxHeight: .infinity)
+                column(right)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 20)
+            VStack(alignment: .leading, spacing: 6) { footer() }
+        }
+        /* Driven by data arrival. onAppear fires on the empty card while the
+           fetch is in flight, so the grow-from-zero has nothing to grow. */
+        .task(id: left.figure + right.figure) {
+            guard !appeared else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            appeared = true
+        }
     }
+
     /// lo is a share of the window's own RANGE, never of its minimum: a
-    /// proportional floor only pads narrow windows and puts two different weeks
-    /// on the same stub.
-    private func scale(_ ws: [CreditWeek]) -> (lo: Double, hi: Double) {
-        let vs = ws.compactMap(\.perShare)
+    /// proportional floor only pads narrow windows and puts two different
+    /// weeks on the same stub.
+    private func scale(_ c: PairCol) -> (lo: Double, hi: Double) {
+        let vs = c.values.compactMap { $0 }
         guard let mn = vs.min(), let mx = vs.max() else { return (0, 1) }
-        let r = (mx - mn) == 0 ? (mn == 0 ? 1 : mn) : (mx - mn)
+        let r = (mx - mn) == 0 ? (mn == 0 ? 1 : abs(mn)) : (mx - mn)
         return (mn - r * 0.35, mx + r * 0.06)
     }
     private func frac(_ v: Double, _ s: (lo: Double, hi: Double)) -> Double {
         s.hi - s.lo <= 0 ? 0 : min(1, max(0, (v - s.lo) / (s.hi - s.lo)))
     }
-    private func money2(_ v: Double) -> String { String(format: "$%.2f", v) }
-    /// "9/7" — a 146px column will not hold "Sep 7" four times.
-    private func key(_ iso: String) -> String {
-        let p = iso.split(separator: "-")
-        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]) else { return iso }
-        return "\(m)/\(d)"
-    }
-    private func headerWeek(_ iso: String) -> String {
-        let p = iso.split(separator: "-")
-        let mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-        guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]), (1...12).contains(m)
-        else { return iso }
-        return "\(mon[m - 1]) \(d)"
-    }
 
-    @ViewBuilder private func column(_ label: String, _ ws: [CreditWeek]) -> some View {
-        let fig = figure(ws), avg = pastAvg(ws), sc = scale(ws)
-        /* Ink when there is no past average to judge against — a colour with
-           nothing behind it would be an opinion the card cannot print. */
-        let ink: Color = (fig == nil || avg == nil) ? S.ink
-            : (fig! >= avg! ? S.gainText : S.lossText)
+    @ViewBuilder private func column(_ c: PairCol) -> some View {
+        let sc = scale(c)
         VStack(alignment: .leading, spacing: 0) {
-            Text(label)
+            Text(c.label)
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                .foregroundStyle(S.mute)
+                .foregroundStyle(S.mute).lineLimit(1)
             Spacer().frame(height: 9)
-            Text(fig.map(money2) ?? "\u{2014}")
+            Text(c.figure)
                 .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
-                .foregroundStyle(ink).sunnyLineBox(S.t22)
+                .foregroundStyle(c.ink).sunnyLineBox(S.t22)
+                .lineLimit(1).minimumScaleFactor(0.8)
             Spacer().frame(height: 8)
-            Text(avg.map { "average \(money2($0))" } ?? "no history yet")
+            Text(c.baseline)
                 .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                .lineLimit(1).minimumScaleFactor(0.85)
             Spacer().frame(height: 18)
             ZStack(alignment: .bottom) {
                 HStack(alignment: .bottom, spacing: 9) {
-                    ForEach(Array(ws.enumerated()), id: \.element.week) { i, w in
+                    ForEach(Array(c.values.enumerated()), id: \.offset) { i, v in
                         /* No bar at all when the side did not trade, and the key
                            below still prints: the gap has to read as a gap. */
-                        if let v = w.perShare {
+                        if let v {
                             UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
-                                .fill(i == ws.count - 1 ? ink : S.barQuiet)
+                                .fill(i == c.values.count - 1 ? c.ink : S.barQuiet)
                                 .frame(maxWidth: .infinity)
-                                .frame(height: max(2, Self.plotH * frac(v, sc)))
+                                .frame(height: max(2, plotH * frac(v, sc)))
+                                .scaleEffect(y: appeared || reduceMotion ? 1 : 0, anchor: .bottom)
+                                .animation(reduceMotion ? nil
+                                           : S.easeSettle(S.durBar).delay(Double(i) * 0.07),
+                                           value: appeared)
                         } else {
                             Color.clear.frame(maxWidth: .infinity).frame(height: 1)
                         }
                     }
                 }
-                if let avg {
+                if let ref = c.ref {
                     /* The same number printed above it, drawn where it falls.
                        --ink at 1.5: an average is a rate, so it never takes the
                        state ink. */
-                    Rectangle().fill(S.ink).frame(height: 1.5)
-                        .offset(y: -Self.plotH * frac(avg, sc))
+                    Rectangle().fill(S.ink).frame(height: S.refLine)
+                        .offset(y: -plotH * frac(ref, sc))
+                        .opacity(appeared || reduceMotion ? 1 : 0)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.6).delay(0.45),
+                                   value: appeared)
+                }
+                /* ⚠ THE USUAL-IV TICK SPANS THE LIVE BAR AND NOTHING ELSE. It
+                   is where this week's credit would sit at the book's usual IV,
+                   so the gap from tick to bar top is how much of the week is
+                   IV rather than writing. --hair, because it annotates the
+                   money axis and is not a second series. */
+                if let u = c.usual {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        Rectangle().fill(S.hair)
+                            .frame(width: barW, height: S.refLine)
+                    }
+                    .offset(y: -plotH * frac(u, sc))
+                    .opacity(appeared || reduceMotion ? 1 : 0)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.6).delay(0.6),
+                               value: appeared)
                 }
             }
-            .frame(height: Self.plotH, alignment: .bottom)
+            .frame(height: plotH, alignment: .bottom)
             Spacer().frame(height: 9)
             HStack(spacing: 9) {
-                ForEach(ws) { w in
-                    Text(key(w.week))
-                        .font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
-                        .frame(maxWidth: .infinity)
+                ForEach(Array(c.keys.enumerated()), id: \.offset) { _, k in
+                    Text(k).font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+                        .frame(maxWidth: .infinity).lineLimit(1)
                 }
             }
         }
+    }
+}
+
+/// "9/7" — a 146pt column will not hold "Sep 7" four times.
+private func pairKey(_ iso: String) -> String {
+    let p = iso.split(separator: "-")
+    guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]) else { return iso }
+    return "\(m)/\(d)"
+}
+private func pairWeek(_ iso: String) -> String {
+    let p = iso.split(separator: "-")
+    let mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    guard p.count == 3, let m = Int(p[1]), let d = Int(p[2]), (1...12).contains(m)
+    else { return iso }
+    return "\(mon[m - 1]) \(d)"
+}
+
+// MARK: - average credit
+
+/// ⚠ PER CONTRACT, FULL STOP — $56, never $0.56. The 14 Sep sheet's rule 3, and
+/// the reason the old per-share tap is gone: the book holds LEAPs, not shares,
+/// so the per-share quote was a broker convention with no referent here. This
+/// card now has no tap at all, and therefore no dotted underline anywhere.
+///
+/// ⚠ THE AVERAGE IS CREDIT ÷ CONTRACTS, NEVER THE MEAN OF WEEKLY AVERAGES. A
+/// week with 105 contracts is not worth the same as a week with 46, and the two
+/// methods give different answers the moment the weeks differ in size. The
+/// server ships the cash and the count; this card divides.
+///
+/// ⚠ COLOUR IS A COMPARISON THE CARD ALSO PRINTS. Each side is green at or
+/// above ITS OWN prior blend and red below it, and that blend is printed under
+/// the figure and drawn as a line across its own plot. No sentence explains it.
+struct SunnyAvgCredit: View {
+    let credit: CreditBlock
+    /// Premium now's readings, reduced to one book multiple. Null before any
+    /// name has enough IV history for a median to mean anything.
+    let premium: PremiumBlock?
+
+    /* The book's IV against its usual, one number: the mean of now/usual over
+       the names that have a usual. Five of seven today — FIS and KR reach
+       twenty days of history on 23 and 29 September and join then. */
+    private var ivMult: Double? {
+        let rs = (premium?.rows ?? []).filter { $0.usual > 0 }
+        guard !rs.isEmpty else { return nil }
+        return rs.reduce(0) { $0 + $1.now / $1.usual } / Double(rs.count)
+    }
+
+    /// Summed from the weeks themselves, never averaged from averages.
+    private func blend(_ ws: [CreditWeek]) -> Double? {
+        let past = ws.dropLast()
+        let n = past.reduce(0) { $0 + $1.contracts }
+        let c = past.reduce(0) { $0 + ($1.cash ?? 0) }
+        return n > 0 ? Double(c) / Double(n) : nil
+    }
+
+    private func col(_ label: String, _ ws: [CreditWeek]) -> PairCol {
+        let fig = ws.last?.perContract, b = blend(ws)
+        /* Ink when there is no prior blend to judge against — a colour with
+           nothing behind it would be an opinion the card cannot print. */
+        let ink: Color = (fig == nil || b == nil) ? S.ink
+            : (fig! >= b! ? S.gainText : S.lossText)
+        return PairCol(
+            label: label,
+            figure: fig.map { optMoney(Int($0.rounded())) } ?? "\u{2014}",
+            ink: ink,
+            baseline: b.map { "average \(optMoney(Int($0.rounded())))" } ?? "no history yet",
+            values: ws.map(\.perContract), keys: ws.map { pairKey($0.week) },
+            ref: b,
+            usual: (fig != nil && ivMult != nil && ivMult! > 0) ? fig! / ivMult! : nil)
     }
 
     var body: some View {
         let n = min(credit.calls.count, credit.puts.count)
         let thisN = (credit.calls.last?.contracts ?? 0) + (credit.puts.last?.contracts ?? 0)
-        let avgN = n == 0 ? 0 : (0..<n).reduce(0) {
+        /* Contracts per WEEK, not per side, and over the PRIOR weeks only — the
+           average has to be comparable to the single week beside it. */
+        let priorN = n <= 1 ? 0 : (0..<(n - 1)).reduce(0) {
             $0 + credit.calls[$1].contracts + credit.puts[$1].contracts
-        } / n
-        OptCard(name: "avg-credit") {
-            OptHead(title: "Average credit", sub: "per share",
-                    right: headerWeek(credit.week))
-            /* 20 is load-bearing: at 0 the CALLS/PUTS labels read as a second
-               line of the header. */
-            Spacer().frame(height: 20)
-            HStack(alignment: .top, spacing: 15) {
-                column("CALLS", credit.calls)
-                /* The only rule on the card. It exists because the two columns
-                   are on different scales: it says these are two readings, not
-                   one four-column row. */
-                Rectangle().fill(S.ruleColorStrong)
-                    .frame(width: 1).frame(maxHeight: .infinity)
-                column("PUTS", credit.puts)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            Spacer().frame(minHeight: 20)
-            /* Contracts per WEEK, not per side — the average has to be
-               comparable to the single week beside it. */
-            Text("This week \(thisN) contracts \u{00B7} average \(avgN)")
+        } / (n - 1)
+        PairFrameCard(
+            name: "avg-credit", title: "Average credit",
+            week: pairWeek(credit.week),
+            unit: "per contract", onUnit: nil,
+            left: col("CALLS", credit.calls), right: col("PUTS", credit.puts)
+        ) {
+            Text("This week \(thisN) contract\(thisN == 1 ? "" : "s") \u{00B7} average \(priorN)")
                 .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                .lineLimit(1)
+            /* The tick's legend, and the only reason a reader can tell the hair
+               line above from the ink one. */
+            if let m = ivMult, m > 0 {
+                HStack(spacing: 6) {
+                    Rectangle().fill(S.hair).frame(width: 12, height: S.refLine)
+                    Text("at usual IV \u{00B7} book \(String(format: "%.2f", m))\u{00D7}")
+                        .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                }
+            }
         }
+    }
+}
+
+// MARK: - theta
+
+/// ⚠ THE INK IS THE SIGN, NOT A VERDICT. Long legs (the LEAPs and the
+/// protective puts) always PAY decay, so that side is always loss ink; short
+/// legs always COLLECT, so that side is always gain ink. Neither colour is good
+/// or bad news here — the comparison lives in the ink average line. This is the
+/// one card in the frame where colour does not move with the data.
+///
+/// ⚠ A DAY IS THE UNIT, A WEEK IS THE TAP. Theta is quoted per day, so the card
+/// opens per day; the tap multiplies every dollar by 7 and nothing else moves.
+/// The bars do not change — shape is shape at any unit.
+///
+/// ⚠ AND TWO THINGS THE SERVER HAD TO CORRECT, both flagged to Nik: a day's
+/// decay is capped at what the option is still worth (raw Black-Scholes theta
+/// runs to infinity at expiry and summed to $5,533 a day on a book that takes
+/// $7,000 a week), and every week is read the same number of days into itself,
+/// or a live Monday would be charted beside four past Fridays.
+struct SunnyTheta: View {
+    let block: ThetaBlock
+
+    /* Card-local, and it survives a pull. */
+    @State private var weekly = false
+
+    private var mul: Int { weekly ? 7 : 1 }
+    private func sg(_ v: Int) -> String {
+        let x = v * mul
+        return (x < 0 ? "" : "+") + optMoney(x)
+    }
+
+    var body: some View {
+        let ws = block.weeks
+        let now = ws.last
+        let prior = ws.dropLast()
+        /* A PLAIN mean: theta is already a rate, so there is no contract count
+           to weight the weeks by. */
+        let lA = prior.isEmpty ? 0 : prior.reduce(0) { $0 + $1.long } / prior.count
+        let sA = prior.isEmpty ? 0 : prior.reduce(0) { $0 + $1.short } / prior.count
+        /* Bars plot the ABSOLUTE value on each side's own scale, so both columns
+           rise as the book grows even though one side is negative. */
+        let lCol = PairCol(
+            label: "LONG \u{00B7} PAYS",
+            figure: sg(now?.long ?? 0), ink: S.lossText,
+            baseline: "average \(sg(lA))",
+            values: ws.map { Double(abs($0.long)) }, keys: ws.map { pairKey($0.week) },
+            ref: Double(abs(lA)), usual: nil)
+        let sCol = PairCol(
+            label: "SHORT \u{00B7} COLLECTS",
+            figure: sg(now?.short ?? 0), ink: S.gainText,
+            baseline: "average \(sg(sA))",
+            values: ws.map { Double(abs($0.short)) }, keys: ws.map { pairKey($0.week) },
+            ref: Double(abs(sA)), usual: nil)
+        let net = (now?.long ?? 0) + (now?.short ?? 0)
+        PairFrameCard(
+            name: "theta", title: "Theta",
+            week: pairWeek(now?.week ?? ""),
+            unit: weekly ? "a week" : "a day",
+            onUnit: { weekly.toggle() },
+            left: lCol, right: sCol
+        ) {
+            /* ⚠ NET IS THE CARD'S ANSWER, so it is the one ink line down here.
+               Neither column is a result on its own: the long side paying is
+               the cost of holding the position the short side collects
+               against, and they are one trade. */
+            Text("Net \(sg(net)) \(weekly ? "a week" : "a day") \u{00B7} average \(sg(lA + sA))")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink)
+                .lineLimit(1).minimumScaleFactor(0.85)
+            Text(coverLine(now))
+                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                .lineLimit(1).minimumScaleFactor(0.85)
+        }
+    }
+
+    /* ⚠ THE RATIO ALONE FLATTERS ITSELF. "Short collects 3.9× what long pays"
+       is the whole story on a quiet week and half of it on a 4% week, so
+       Prices' move sits beside it: decay is only free when the book sits
+       still, and the move is the ABSOLUTE one because a book with one name up
+       6% and another down 6% has not sat still. */
+    private func coverLine(_ now: ThetaWeek?) -> String {
+        let mv = block.move.map { "book moved \(String(format: "%.1f", $0))%" }
+            ?? "book move unknown"
+        guard let now, now.long < 0 else { return mv }
+        let r = Double(now.short) / Double(-now.long)
+        return "short collects \(String(format: "%.1f", r))\u{00D7} what long pays \u{00B7} " + mv
     }
 }
 

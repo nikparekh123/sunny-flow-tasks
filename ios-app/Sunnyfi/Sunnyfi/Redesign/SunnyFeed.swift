@@ -360,8 +360,14 @@ struct SunnyPane: View {
                screenshot of "TLT at 900" does not depend on a simulated drag
                landing on the right pixel. */
             guard let y = startAt else { return }
-            try? await Task.sleep(for: .seconds(6))   // let the cards land first
-            pos.scrollTo(y: y)
+            /* ⚠ ONCE IS NOT ENOUGH. A single scroll at six seconds landed on a
+               page the fetch then re-laid out, and the pane came back at the
+               top — which reads as the argument being ignored. Three attempts
+               across the first twenty seconds survive the second layout. */
+            for _ in 0..<3 {
+                try? await Task.sleep(for: .seconds(6))
+                pos.scrollTo(y: y)
+            }
         }
     }
 
@@ -538,12 +544,18 @@ struct SunnyPane: View {
                            inventory: o.inventory ?? [], prices: o.prices?.rows ?? [])
             /* The two state-of-the-book cards sit together, before the yield
                cards: what is left to sell, then what a contract sells for. */
-            if let cr = o.credit { SunnyAvgCredit(credit: cr) }
+            if let cr = o.credit { SunnyAvgCredit(credit: cr, premium: o.premium) }
             /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
                leads this group; To roll is the one that asks for a decision, so
                it closes it. */
             if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
             if let pm = o.premium, !pm.rows.isEmpty { SunnyPremiumNow(block: pm) }
+            /* ⚠ DIRECTLY AFTER PREMIUM NOW, the `credit-theta` sheet's
+               placement: Premium now says what the market is paying for vol,
+               Theta says what the book earns from it standing still. Average
+               credit stays up by Roll check — the two share a frame, not a
+               bucket. */
+            if let th = o.theta, !th.weeks.isEmpty { SunnyTheta(block: th) }
             if let up = o.upside, !up.rows.isEmpty { SunnyUpsideLeft(block: up) }
             SunnyYieldProgress(book: o.book, positions: o.positions)
             /* Directly under Yield progress on purpose: the two share the
