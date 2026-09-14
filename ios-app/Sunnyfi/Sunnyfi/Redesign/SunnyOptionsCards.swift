@@ -2661,24 +2661,50 @@ struct SunnyIntrinsic: View {
         "\(whole > 0 ? Int((Double(n) / Double(whole) * 100).rounded()) : 0)%"
     }
 
-    // MARK: the two clocks
+    // MARK: the four clocks
 
-    /// ⚠ NEVER A NEGATIVE WEEK. If the book's net decay is not positive there is
-    /// nothing earning the premium back and the clock says so with a dash
-    /// rather than a number pointing into the past.
-    private var earnBack: (wk: String, when: String)? {
-        guard let t = theta?.weeks.last else { return nil }
-        let net = t.net
-        guard net > 0 else { return nil }
-        let days = Double(sums.paid) / Double(net)
-        guard days.isFinite, days > 0, days < 40_000 else { return nil }
-        return ("\(Int((days / 7).rounded())) wk", dayPlus(days))
+    /* ⚠ EVERY CLOCK IS THE SAME QUESTION AT THE SAME RATE: how many weeks of
+       the book's own income it takes to cover THAT bar. Nik, 14 Sep 2026: "we
+       can't say overall it's going to take 40 weeks but the time value will
+       take 71 weeks, that just doesn't make any sense."
+
+       He was right, and the sheet's design was the cause. It put an EARN-BACK
+       clock over Paid and Intrinsic and an EXPIRY DATE over Time — two
+       different units in the same slot, on the same card, in the same type. A
+       reader compares them because they look identical, and they cannot be
+       compared at all.
+
+       One rate everywhere, and the weeks then inherit the bars' own arithmetic:
+       intrinsic + time + lost = paid in dollars, so 14 + 24 + 2 = 40 in weeks.
+       Paid is DERIVED from the three rather than divided separately, so the
+       identity holds at every future state rather than merely today.
+
+       The rate is Theta's NET a day, times seven — the same figure the card
+       already used for the earn-back clock, so the 40 weeks he accepted has not
+       moved. Flagged: the weekly credit pace ($4.9k) is the other candidate and
+       would read slower.
+
+       ⚠ NEVER A NEGATIVE WEEK. If the book's net decay is not positive there is
+       nothing earning anything back, and every clock leaves rather than
+       printing a number that points into the past. */
+    private var rateWeek: Double? {
+        guard let net = theta?.weeks.last?.net, net > 0 else { return nil }
+        return Double(net) * 7
     }
-    /// The EARLIEST long call expiry. Time value melts to zero by then on that
-    /// leg, so it is the floor for the whole share rather than its average.
-    private var expiry: (wk: String, when: String)? {
-        guard let e = block.rows.compactMap({ $0.call?.exp }).min() else { return nil }
-        return ("\(Int((Double(daysTo(e)) / 7).rounded())) wk", coverDay(e))
+    private struct Clock { let wk: String; let when: String }
+    private var clocks: (paid: Clock, intr: Clock, time: Clock, pnl: Clock)? {
+        guard let r = rateWeek, r > 0 else { return nil }
+        let s = sums
+        let w: (Int) -> Int = { max(0, Int((Double(abs($0)) / r).rounded())) }
+        let wi = w(s.intr), wt = w(s.time), wl = w(s.pnl)
+        /* Down, paid is the three added; up, the gain is already inside mark and
+           comes back off. Either way the printed weeks match the printed
+           dollars, which is the whole point of one rate. */
+        let wp = max(0, s.pnl < 0 ? wi + wt + wl : wi + wt - wl)
+        return (clock(wp), clock(wi), clock(wt), clock(wl))
+    }
+    private func clock(_ weeks: Int) -> Clock {
+        Clock(wk: "\(weeks) wk", when: dayPlus(Double(weeks) * 7))
     }
 
     private var etCal: Calendar {
@@ -2743,17 +2769,22 @@ struct SunnyIntrinsic: View {
             Spacer().frame(height: 20)
 
             HStack(alignment: .top, spacing: 12) {
+                let k = clocks
                 column("PAID", optMoney(s.paid), S.ink, "100%",
-                       frac(s.paid, s.whole), .solid(S.ink), earnBack, 0)
+                       frac(s.paid, s.whole), .solid(S.ink), k?.paid, 0)
                 column("INTRINSIC", optMoney(s.intr), S.gainText, pct(s.intr, s.whole),
-                       frac(s.intr, s.whole), .solid(S.gainBar), earnBack, 1)
+                       frac(s.intr, s.whole), .solid(S.gainBar), k?.intr, 1)
                 column("TIME", optMoney(s.time), S.ink, pct(s.time, s.whole),
-                       frac(s.time, s.whole), .hatch, expiry, 2)
+                       frac(s.time, s.whole), .hatch, k?.time, 2)
+                /* ⚠ AND LOST CARRIES ONE TOO, on Nik's instruction: the loss is
+                   worth two weeks of income, and a bar with no clock beside
+                   three that have one reads as the one the card cannot answer
+                   for. */
                 s.pnl < 0
                     ? column("LOST", optMoney(s.pnl), S.lossText, pct(-s.pnl, s.whole),
-                             frac(-s.pnl, s.whole), .solid(S.lossBar), nil, 3)
+                             frac(-s.pnl, s.whole), .solid(S.lossBar), k?.pnl, 3)
                     : column("GAINED", "+" + optMoney(s.pnl), S.gainText, pct(s.pnl, s.whole),
-                             frac(s.pnl, s.whole), .solid(S.gainBar), nil, 3)
+                             frac(s.pnl, s.whole), .solid(S.gainBar), k?.pnl, 3)
             }
 
             Spacer(minLength: 8)
@@ -2780,7 +2811,7 @@ struct SunnyIntrinsic: View {
     @ViewBuilder
     private func column(_ label: String, _ fig: String, _ ink: Color, _ share: String,
                         _ f: Double, _ fill: Fill,
-                        _ clock: (wk: String, when: String)?, _ i: Int) -> some View {
+                        _ clock: Clock?, _ i: Int) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(share).font(S.inter(S.t12, S.wSemiN)).foregroundStyle(S.ink2)
                 .frame(maxWidth: .infinity, alignment: .center).lineLimit(1)
