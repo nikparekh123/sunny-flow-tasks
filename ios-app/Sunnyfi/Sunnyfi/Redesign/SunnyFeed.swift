@@ -532,6 +532,29 @@ struct SunnyPane: View {
                open" counted what the roll card could draw, not what he holds,
                and that gap is exactly what hid FIS, PEP and KR. */
             SunnyPageTitle(title: "Options", note: optionsNote(o))
+            /* ⚠ THE ORDER IS NIK'S, 14 Sep 2026, and the first seven are his
+               exactly: Prices, Roll check, Weekly yield, Call cover, Put cover,
+               Theta, Average credit. It reads as three questions in order —
+               what moved and what to do about it, how fast the book earns and
+               how much of it is paid for, then the rates underneath both.
+
+               The last five are mine, and they are the STANDING position
+               rather than the week: what the vol is (which is where Average
+               credit's usual-IV tick comes from, so it follows it), whether the
+               book is up, how far the premium has paid the LEAPs back and what
+               those LEAPs are worth, and what is left of a move.
+
+               Two adjacencies are load-bearing and must survive a reorder:
+               Yield progress with Long calls, which share the premium-paid
+               denominator and answer the halves of one question; and Call cover
+               directly before Put cover, which are twins on one scale.
+
+               One adjacency was BROKEN by this order and that is deliberate:
+               the credit-theta sheet mounts Theta after Premium now. Nik put
+               Theta at 6 and Average credit at 7 instead, so the two cards that
+               share a frame now sit together, which is the better pairing of
+               the two. Flagged with the change. */
+
             /* Stock price leads the page. Nik, 2026-09-08: "First card shuold
                be the stock price card." What the names did comes before what
                the legs on them did. */
@@ -542,33 +565,8 @@ struct SunnyPane: View {
                under the percentage. Do not re-add either card without asking. */
             SunnyRollCheck(book: o.book, positions: o.positions,
                            inventory: o.inventory ?? [], prices: o.prices?.rows ?? [])
-            /* The two state-of-the-book cards sit together, before the yield
-               cards: what is left to sell, then what a contract sells for. */
-            if let cr = o.credit { SunnyAvgCredit(credit: cr, premium: o.premium) }
-            /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
-               leads this group; To roll is the one that asks for a decision, so
-               it closes it. */
-            if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
-            if let pm = o.premium, !pm.rows.isEmpty { SunnyPremiumNow(block: pm) }
-            /* ⚠ DIRECTLY AFTER PREMIUM NOW, the `credit-theta` sheet's
-               placement: Premium now says what the market is paying for vol,
-               Theta says what the book earns from it standing still. Average
-               credit stays up by Roll check — the two share a frame, not a
-               bucket. */
-            if let th = o.theta, !th.weeks.isEmpty { SunnyTheta(block: th) }
-            if let up = o.upside, !up.rows.isEmpty { SunnyUpsideLeft(block: up) }
-            SunnyYieldProgress(book: o.book, positions: o.positions)
-            /* Directly under Yield progress on purpose: the two share the
-               $164,725 denominator and answer the halves of one question,
-               how much the premium has paid back and what the LEAP is worth. */
-            SunnyLeapGains(book: o.book, positions: o.positions)
-            /* Always shown now. Nik: "Maybe we can show the put card also and
-               when positions get added the circle develops". Before the first
-               put it draws an ABSENCE — empty track, dashes, no percentage —
-               rather than a zero. */
             SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0)
-            /* ⚠ THE TWO RINGS SIT TOGETHER AND CLOSE THE PAGE, 14 Sep 2026,
-               the `cover-rings` sheets' placement: call directly before put.
+            /* ⚠ CALL DIRECTLY BEFORE PUT, the `cover-rings` sheets' placement.
                Read as a pair they say what fraction of each half of the book
                has paid for itself, on the same disc at the same scale.
                Both draw before their first contract exists — Nik: "Maybe we
@@ -576,6 +574,22 @@ struct SunnyPane: View {
                circle develops" — but they draw an ABSENCE, not a zero. */
             SunnyCallCover(c: o.callCover)
             SunnyPutCover(c: o.putCover ?? Self.argCover)
+            /* The pair frame, together: what decay earns while the book sits
+               still, then what a contract sells for. */
+            if let th = o.theta, !th.weeks.isEmpty { SunnyTheta(block: th) }
+            if let cr = o.credit { SunnyAvgCredit(credit: cr, premium: o.premium) }
+            /* The vol Average credit's usual-IV tick is borrowed from, so it
+               follows the card that quotes it. */
+            if let pm = o.premium, !pm.rows.isEmpty { SunnyPremiumNow(block: pm) }
+            /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
+               leads the standing block. */
+            if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
+            SunnyYieldProgress(book: o.book, positions: o.positions)
+            /* Directly under Yield progress on purpose: the two share the
+               premium-paid denominator and answer the halves of one question,
+               how much the premium has paid back and what the LEAP is worth. */
+            SunnyLeapGains(book: o.book, positions: o.positions)
+            if let up = o.upside, !up.rows.isEmpty { SunnyUpsideLeft(block: up) }
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "
                         + "come back to this page.")
