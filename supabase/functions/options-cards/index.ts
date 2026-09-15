@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.14';
+const BUILD = '2026-09-14.15';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -187,12 +187,38 @@ Deno.serve(async (req) => {
     ]);
     timings.fetchAll = Date.now() - T0;
 
+    /* ⚠ AN EMPTY GREEKS READ IS A FAILURE, NOT A BOOK WITH NO PRICES. The shared
+       `db.get` swallows every error and returns [] — `if (!r.ok) return []` and a
+       bare `catch { return [] }` — so a 5xx or a dropped connection on this one
+       read reaches here as "nothing is priced". Every mark-derived figure then
+       falls back and ships as fact: Roll check reports 0 legs asking because
+       captured is 0 on an unpriced leg, Long legs reports +$0 because m = cost,
+       Programme's mark is 0, the cover bars are empty. Nothing in the payload
+       says so, and the app draws it. Caught 14 Sep 2026, on a day the project's
+       REST layer was intermittently refusing connections.
+
+       So: read it again, and if it is still empty while the book holds open
+       legs, answer with an error. The client already handles that — it prints
+       "The book did not answer" and keeps the last good figures — and a card
+       that says nothing beats a card that says the wrong thing. */
+    let greeksRows = greeks;
+    if (!greeksRows.length) {
+      greeksRows = await time('greeksRetry', () =>
+        D.get('option_greeks_latest?select=option_trade_id,delta,last_mark'));
+    }
+    if (!greeksRows.length && legs.length) {
+      return json(503, {
+        ok: false, build: BUILD, date: today,
+        error: 'option marks unavailable',
+      });
+    }
+
     const spot = new Map<string, number>();
     for (const q of quotes) spot.set(String(q.ticker), N(q.spot));
     const co = new Map<string, string>();
     for (const n of names) co.set(String(n.ticker), String(n.name));
     const mark = new Map<string, { d: number; m: number }>();
-    for (const g of greeks) mark.set(String(g.option_trade_id), { d: N(g.delta), m: N(g.last_mark) });
+    for (const g of greeksRows) mark.set(String(g.option_trade_id), { d: N(g.delta), m: N(g.last_mark) });
     /* ⚠ ONE SESSION SEVEN DAYS BACK, NOT THE OLDEST OF TWELVE DAYS. This used
        to page a twelve-day window and keep the furthest-back reading per leg,
        because the LEAPs were days old and a true week did not exist yet. They
