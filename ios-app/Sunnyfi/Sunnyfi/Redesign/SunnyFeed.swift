@@ -295,6 +295,7 @@ struct SunnyPane: View {
     let page: SunnyPage
     let m: PaneModel
     var startAt: CGFloat? = nil
+    @AppStorage("sunnyfi.opt.folded") private var foldedRaw = ""
 
     @State private var pos = ScrollPosition()
     /// Expand-in-place state for the news gate's chip. Per view, not per model:
@@ -501,94 +502,94 @@ struct SunnyPane: View {
         return "\(names) name\(names == 1 ? "" : "s"), \(o.book.legs) sold"
     }
 
+    /* ⚠ THE PAGE IS FOUR BUCKETS NOW, 14 Sep 2026, and the order inside them
+       is still built on Nik's. His run — Prices, Roll check, Weekly yield, Call
+       cover, Put cover, Theta, Average credit, then Premium now and Intrinsic
+       value — survives almost intact; three cards travel.
+
+       Premium now comes up beside Roll check, because deciding what to sell and
+       seeing what it pays is one act. Yield progress joins the two cover cards,
+       because it is the same question by name. And PRICES DROPS FROM FIRST TO
+       NINTH, which is the one worth arguing about: he put it first on purpose
+       ("First card shuold be the stock price card", 2026-09-08). The case for
+       moving it is that a price is an input rather than a decision, and every
+       card in This week already carries the move where it bears on something.
+       Shown to him as a sketch before it was built and approved there. If it
+       ever reads wrong, pin Prices above the first header rather than folding
+       it back into the old flat order.
+
+       ⚠ TWO ADJACENCIES ARE LOAD-BEARING AND STILL HOLD. Call cover directly
+       before Put cover, twins on one scale. And Yield progress with the two of
+       them, which is the pairing that replaced its old one with Long calls —
+       that card is deleted and the shared denominator moved here. */
+    private func optionCards(_ o: OptionsPayload, _ b: OptBucket) -> [AnyView] {
+        var out: [AnyView] = []
+        func add<V: View>(_ v: V) { out.append(AnyView(v)) }
+        switch b {
+        case .week:
+            /* ⚠ INVENTORY AND TO ROLL ARE GONE FROM THIS PAGE, 2026-09-11, and
+               Roll check carries the capacity now. Do not re-add either card
+               without asking. */
+            add(SunnyRollCheck(book: o.book, positions: o.positions,
+                               inventory: o.inventory ?? [], prices: o.prices?.rows ?? []))
+            if let pm = o.premium, !pm.rows.isEmpty {
+                add(SunnyPremiumNow(block: pm, asOf: o.prices?.asOf ?? o.date))
+            }
+            add(SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0))
+        case .track:
+            /* Both draw before their first contract exists — Nik: "Maybe we can
+               show the put card also and when positions get added the circle
+               develops" — but they draw an ABSENCE, not a zero. */
+            add(SunnyCallCover(block: o.coverBars))
+            add(SunnyPutCover(block: o.coverBars))
+            if let yp = o.yieldProgress, !yp.names.isEmpty { add(SunnyYieldProgress(block: yp)) }
+        case .costs:
+            /* The pair frame, together: what decay earns while the book sits
+               still, then what a contract sells for. */
+            if let th = o.theta, !th.weeks.isEmpty { add(SunnyTheta(block: th)) }
+            if let cr = o.credit { add(SunnyAvgCredit(credit: cr, premium: o.premium)) }
+        case .stands:
+            if let pr = o.prices, !pr.rows.isEmpty { add(SunnyPrices(prices: pr)) }
+            if let pr = o.programme, !pr.rows.isEmpty {
+                add(SunnyProgramme(block: pr, legs: o.longLegs?.legs ?? []))
+            }
+            if let ll = o.longLegs, !ll.legs.isEmpty { add(SunnyLongLegs(block: ll)) }
+            if let iv = o.intrinsic, !iv.legs.isEmpty {
+                add(SunnyIntrinsic(block: iv, prices: o.prices?.rows ?? [],
+                                   asOf: o.prices?.asOf ?? o.date, book: o.book))
+            }
+        }
+        return out
+    }
+
     @ViewBuilder
     private var optionsPage: some View {
         if let o = m.options.data, !o.positions.isEmpty {
             /* ⚠ THE NOTE TAKES THE URGENT THING ONLY WHEN THE CARD IS NOT
                ALREADY SAYING IT. Roll check headlines its own uncovered count
-               now ("3 with no call"), and both are on screen at once, so a
-               note that also led with uncovered would spend the page's one
-               summary line repeating the card two rows below it.
+               now ("3 with no call"), and both are on screen at once, so a note
+               that also led with uncovered would spend the page's one summary
+               line repeating the card two rows below it.
 
                Rolling is the exception: no card puts it in a header, so the
                note carries it. With nothing to roll it falls back to the shape
-               of the book, which is the one fact no card states — "5 legs
-               open" counted what the roll card could draw, not what he holds,
-               and that gap is exactly what hid FIS, PEP and KR. */
+               of the book, which is the one fact no card states. */
             SunnyPageTitle(title: "Options", note: optionsNote(o))
-            /* ⚠ THE ORDER IS NIK'S, 14 Sep 2026, and the first seven are his
-               exactly: Prices, Roll check, Weekly yield, Call cover, Put cover,
-               Theta, Average credit. It reads as three questions in order —
-               what moved and what to do about it, how fast the book earns and
-               how much of it is paid for, then the rates underneath both.
-
-               Eight and nine are his too: Premium now, then Intrinsic value.
-               The last four are mine, and they are the STANDING position rather
-               than the week: whether the book is up, how far the premium has
-               paid the LEAPs back and what those LEAPs are worth, and what is
-               left of a move.
-
-               Two adjacencies are load-bearing and must survive a reorder:
-               Yield progress with Long calls, which share the premium-paid
-               denominator and answer the halves of one question; and Call cover
-               directly before Put cover, which are twins on one scale.
-
-               One adjacency was BROKEN by this order and that is deliberate:
-               the credit-theta sheet mounts Theta after Premium now. Nik put
-               Theta at 6 and Average credit at 7 instead, so the two cards that
-               share a frame now sit together, which is the better pairing of
-               the two. Flagged with the change. */
-
-            /* Stock price leads the page. Nik, 2026-09-08: "First card shuold
-               be the stock price card." What the names did comes before what
-               the legs on them did. */
-            if let pr = o.prices, !pr.rows.isEmpty { SunnyPrices(prices: pr) }
-            /* ⚠ INVENTORY AND TO ROLL ARE GONE FROM THIS PAGE, 2026-09-11,
-               and Roll check carries the capacity now. Three forms were built
-               side by side and Nik chose the one that puts the free contracts
-               under the percentage. Do not re-add either card without asking. */
-            SunnyRollCheck(book: o.book, positions: o.positions,
-                           inventory: o.inventory ?? [], prices: o.prices?.rows ?? [])
-            SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0)
-            /* ⚠ CALL DIRECTLY BEFORE PUT, the `cover-rings` sheets' placement.
-               Read as a pair they say what fraction of each half of the book
-               has paid for itself, on the same disc at the same scale.
-               Both draw before their first contract exists — Nik: "Maybe we
-               can show the put card also and when positions get added the
-               circle develops" — but they draw an ABSENCE, not a zero. */
-            SunnyCallCover(block: o.coverBars)
-            SunnyPutCover(block: o.coverBars)
-            /* The pair frame, together: what decay earns while the book sits
-               still, then what a contract sells for. */
-            if let th = o.theta, !th.weeks.isEmpty { SunnyTheta(block: th) }
-            if let cr = o.credit { SunnyAvgCredit(credit: cr, premium: o.premium) }
-            /* The vol Average credit's usual-IV tick is borrowed from, so it
-               follows the card that quotes it. */
-            if let pm = o.premium, !pm.rows.isEmpty {
-                SunnyPremiumNow(block: pm, asOf: o.prices?.asOf ?? o.date)
+            ForEach(OptBucket.allCases, id: \.self) { b in
+                let cards = optionCards(o, b)
+                if !cards.isEmpty {
+                    VStack(alignment: .leading, spacing: S.shellPaneGap) {
+                        SunnyBucketHead(title: b.title, count: cards.count,
+                                        folded: folded.contains(b.rawValue)) {
+                            withAnimation(S.easeSettle(0.3)) { fold(b) }
+                        }
+                        if !folded.contains(b.rawValue) {
+                            ForEach(Array(cards.enumerated()), id: \.offset) { _, c in c }
+                        }
+                    }
+                    .padding(.top, 10)
+                }
             }
-            /* ⚠ AFTER PREMIUM NOW, NOT AFTER PROGRAMME. Nik, 14 Sep 2026. The
-               sheet mounts it under Programme; these two are the pair that
-               reads THE MARKET AGAINST THE BOOK — Premium now takes today's IV
-               against each name's own usual, this takes the long legs' mark
-               against what they cost — and the handoff's own data file says so
-               by feeding both from one call. */
-            if let iv = o.intrinsic, !iv.legs.isEmpty {
-                SunnyIntrinsic(block: iv, prices: o.prices?.rows ?? [],
-                               asOf: o.prices?.asOf ?? o.date, book: o.book)
-            }
-            /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
-               leads the standing block. */
-            if let pr = o.programme, !pr.rows.isEmpty {
-                SunnyProgramme(block: pr, legs: o.longLegs?.legs ?? [])
-            }
-            if let yp = o.yieldProgress, !yp.names.isEmpty {
-                SunnyYieldProgress(block: yp)
-            }
-            /* Directly after Yield progress, the sheet's slot: that card says
-               how much of each name's time value the premium has paid for,
-               this one says what the long legs themselves did. */
-            if let ll = o.longLegs, !ll.legs.isEmpty { SunnyLongLegs(block: ll) }
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "
                         + "come back to this page.")
@@ -600,7 +601,16 @@ struct SunnyPane: View {
         }
     }
 
-    // MARK: a name page
+    /* One string rather than four flags: the set is small, it has to survive a
+       relaunch, and `AppStorage` cannot take a key built at runtime. */
+    private var folded: Set<String> {
+        Set(foldedRaw.split(separator: ",").map(String.init))
+    }
+    private func fold(_ b: OptBucket) {
+        var s = folded
+        if s.contains(b.rawValue) { s.remove(b.rawValue) } else { s.insert(b.rawValue) }
+        foldedRaw = s.sorted().joined(separator: ",")
+    }
 
     @ViewBuilder
     private var namePage: some View {
@@ -692,4 +702,89 @@ struct SunnyPane: View {
         }
     }
 
+}
+
+// MARK: - the section headers
+
+/* ⚠ TWELVE CARDS IS TOO MANY TO SCROLL BLIND. Nik, 14 Sep 2026: "I think we
+   have too many cards... now that we have all the cards how can we organize
+   this". The page is now four buckets, each one a question he would actually
+   ask, with the cards that answer it under it.
+
+   ⚠ THE BUCKET IS THE QUESTION, NOT THE PLUMBING. His first instinct was
+   market / short legs / long legs / combination, which is how the POSITIONS
+   are built. Sorted that way five of the twelve land in "combination", because
+   most of this book's cards are about the two sides meeting — the axis that
+   separates the sides puts the majority of the deck in the leftover pile.
+   Sorted by what the reader is asking, the four buckets take 3, 3, 2 and 4.
+
+   ⚠ AND THE HEADER IS THE FILTER. A bucket folds, and the fold is remembered,
+   so a bucket he never reads on a Monday is folded once and the page is nine
+   cards from then on. That is the hiding a chip row would have given, without
+   a second control to learn. */
+enum OptBucket: String, CaseIterable {
+    case week, track, costs, stands
+    var title: String {
+        switch self {
+        case .week:   return "THIS WEEK"
+        case .track:  return "AM I ON TRACK"
+        case .costs:  return "WHAT IT COSTS"
+        case .stands: return "WHERE IT STANDS"
+        }
+    }
+}
+
+/* Sits on the BOARD, not on a card, so it can never read as another card: no
+   paper, no radius, no shadow. The label is the deck's eyebrow, the same
+   10/700 uppercase that names a block inside a card. */
+struct SunnyBucketHead: View {
+    let title: String
+    let count: Int
+    let folded: Bool
+    let tap: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: S.gap3) {
+                Text(title)
+                    .font(S.inter(S.t10, S.wBoldN))
+                    .tracking(S.track(S.t10, S.lsLabel))
+                    .foregroundStyle(S.mute)
+                Spacer(minLength: 8)
+                Text("\(count)")
+                    .font(S.inter(S.t10, S.wBoldN))
+                    .foregroundStyle(S.mute)
+                Chevron(down: !folded).frame(width: 7, height: 5)
+            }
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: tap)
+        .padding(.vertical, -6)
+    }
+
+    /// Drawn rather than an SF Symbol: at 5pt a symbol's optical weight does
+    /// not match Inter's 700 beside it, and the deck has one symbol in it.
+    private struct Chevron: View {
+        let down: Bool
+        var body: some View {
+            GeometryReader { g in
+                Path { p in
+                    let w = g.size.width, h = g.size.height
+                    if down {
+                        p.move(to: .init(x: 0, y: 0))
+                        p.addLine(to: .init(x: w / 2, y: h))
+                        p.addLine(to: .init(x: w, y: 0))
+                    } else {
+                        p.move(to: .init(x: 1, y: 0))
+                        p.addLine(to: .init(x: 1 + h, y: w / 2))
+                        p.addLine(to: .init(x: 1, y: w))
+                    }
+                }
+                .stroke(S.mute, style: StrokeStyle(lineWidth: 1.4,
+                                                   lineCap: .round, lineJoin: .round))
+            }
+        }
+    }
 }
