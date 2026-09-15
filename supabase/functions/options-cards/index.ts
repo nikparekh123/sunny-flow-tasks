@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.12';
+const BUILD = '2026-09-14.14';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1706,10 +1706,85 @@ Deno.serve(async (req) => {
       }
       : null;
 
+    /* ── long legs, by name ───────────────────────────────────────────────
+       handoff `export 14/long-legs-programme`, 14 Sep 2026. The long-leg cousin
+       of Prices: every long POSITION's move, where Prices shows every held
+       stock's. One ledger, two cards — Programme derives its Long calls, Long
+       puts and invested from these same legs, so the two can never disagree.
+
+       ⚠ THE WINDOWS COUNT SESSIONS, NOT DAYS, and they are Prices' own offsets:
+       5, 10 and 20 closes back from the same anchor. The sheet says "Friday
+       closes", but the point it gives for them is that a reader can lay this
+       card beside Prices and see whether the LEAP moved with the name — and
+       Prices counts sessions, because a week is five trading days and calendar
+       arithmetic silently shortens any window that spans a holiday. Counting
+       Fridays here would put the two cards on different axes.
+
+       ⚠ AND A LEG YOUNGER THAN A WINDOW CARRIES ITS COST. Every LEAP in this
+       book was bought on 31 August or later, so 20 sessions back predates all
+       of them: that window reads as the position's whole life, not as a zero.
+       An unpriced slot would otherwise draw a bar out of nothing. */
+    const sessions = [...new Set(closes
+      .map((r) => String(r.date).slice(0, 10))
+      .filter((d) => d < today))].sort().reverse();
+    /* The same shift Prices applies: while a session is running the anchor is
+       today's spot, so the window offsets count from the last close; outside
+       one the anchor IS the last close and every offset moves back a day. */
+    const llBack = (n: number) => sessions[dayLive ? n - 1 : n] ?? sessions.at(-1) ?? today;
+    const llRead = await time('longLegDays', () => Promise.all(
+      [5, 10, 20].map((n) => coverDay(llBack(n)))));
+
+    const llLegs = open
+      .filter((e) => e.dir === 'long')
+      .map((e) => {
+        /* Per contract, in dollars: the card multiplies by `n` itself. */
+        const cost = e.n > 0 ? e.cash / e.n : 0;
+        const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
+        const m = md.length ? md.reduce((a, x) => a + x.m, 0) / md.length * 100 : cost;
+        const at = (r: { mk: Map<string, number> }) => {
+          const w = e.ids.map((i) => r.mk.get(i)).filter((x) => x !== undefined) as number[];
+          /* Every id or none: a position half-priced on a past day would report
+             the missing half as free. */
+          return w.length === e.ids.length && w.length
+            ? w.reduce((a, b) => a + b, 0) / w.length * 100
+            : cost;
+        };
+        /* ⚠ TO THE CENT, NOT THE DOLLAR. These are per-contract figures the
+           card multiplies by `n`, so rounding here is multiplied too: whole
+           dollars put the footer's Paid $14 away from Intrinsic value's, and
+           the sheet requires the two to agree. */
+        return {
+          t: e.ticker,
+          k: `${r2(e.k)}${e.type === 'put' ? 'P' : 'C'}`,
+          n: Math.round(e.n),
+          cost: r2(cost),
+          m: r2(m),
+          w1: r2(at(llRead[0])),
+          w2: r2(at(llRead[1])),
+          w4: r2(at(llRead[2])),
+        };
+      })
+      .filter((l) => l.n > 0);
+
+    const longLegsBlock = llLegs.length
+      ? { asOf: dayLive ? today : ydayDate, legs: llLegs }
+      : null;
+
     timings.total = Date.now() - T0;
     return json(200, {
       ok: true, build: BUILD, date: today, timings,
       yieldProgress,
+      longLegs: longLegsBlock,
+      /* ⚠ THE TWO RATES, NOT ONE NET. Programme apportions theta to a name by
+         its share of kept (the short side) and of invested (the long side),
+         which cannot be done from a single netted figure. Short is positive,
+         long negative, both a day, both the whole book. Spread in here because
+         `programme` is built before the theta weeks are read. */
+      programme: {
+        ...programme,
+        thetaShortDay: thetaWeeks[thetaWeeks.length - 1]?.short ?? 0,
+        thetaLongDay: thetaWeeks[thetaWeeks.length - 1]?.long ?? 0,
+      },
       /* Null when nothing is held: a ring at 0% of $0 is not an empty state,
          it is a card with no subject. The client drops it entirely. */
       putCover: putContracts > 0 && putCost > 0
@@ -1772,7 +1847,6 @@ Deno.serve(async (req) => {
                     putCollected, putWkTotal, thetaWeeks[thetaWeeks.length - 1]?.lp ?? 0),
         },
       },
-      programme,
       premium,
       toRoll,
       prices: { rows: priceRows, book: bookMove,

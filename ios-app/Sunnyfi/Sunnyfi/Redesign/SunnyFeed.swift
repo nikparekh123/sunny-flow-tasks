@@ -579,14 +579,16 @@ struct SunnyPane: View {
             }
             /* handoff-final/, 10 Sep 2026. Programme answers "am I up" and so
                leads the standing block. */
-            if let pr = o.programme, !pr.rows.isEmpty { SunnyProgramme(block: pr) }
+            if let pr = o.programme, !pr.rows.isEmpty {
+                SunnyProgramme(block: pr, legs: o.longLegs?.legs ?? [])
+            }
             if let yp = o.yieldProgress, !yp.names.isEmpty {
                 SunnyYieldProgress(block: yp)
             }
-            /* Directly under Yield progress on purpose: the two share the
-               premium-paid denominator and answer the halves of one question,
-               how much the premium has paid back and what the LEAP is worth. */
-            SunnyLeapGains(book: o.book, positions: o.positions)
+            /* Directly after Yield progress, the sheet's slot: that card says
+               how much of each name's time value the premium has paid for,
+               this one says what the long legs themselves did. */
+            if let ll = o.longLegs, !ll.legs.isEmpty { SunnyLongLegs(block: ll) }
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "
                         + "come back to this page.")

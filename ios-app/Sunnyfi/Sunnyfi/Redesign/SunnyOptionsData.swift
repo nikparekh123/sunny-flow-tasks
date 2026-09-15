@@ -108,6 +108,7 @@ struct OptionsPayload: Decodable {
     /// Optional so a run against an older deployment decodes rather than throws.
     let intrinsic: IntrinsicBlock?
     let yieldProgress: YieldProgressBlock?
+    let longLegs: LongLegsBlock?
     /// Optional so a run against an older deployment decodes rather than throws.
     let coverBars: CoverBarsBlock?
     /* handoff-final/, 10 Sep 2026. All optional so a run against an older
@@ -133,6 +134,10 @@ struct ProgrammeRow: Decodable, Identifiable {
 }
 
 struct ProgrammeBlock: Decodable {
+    /// ⚠ TWO RATES, NOT ONE NET. Programme apportions theta to a name by its
+    /// share of kept (short) and of invested (long), which a single netted
+    /// figure cannot do. Short is positive, long negative, both a day.
+    let thetaShortDay: Int, thetaLongDay: Int
     /// ⚠ 31 AUGUST, the LEAP shift. Nik, 2026-09-10. The handoff said 20 May,
     /// but the credits then ran back to when he still held shares while the
     /// denominator is the LEAPs and puts he holds now.
@@ -148,6 +153,94 @@ struct ProgrammeBlock: Decodable {
 /// road whose end was the wrong place. Intrinsic is money exercising returns;
 /// only the part that melts has to be earned back. Call cover's rule, one name
 /// at a time, and the two cards read one book.
+/// ⚠ ONE LEDGER, TWO CARDS. `export 14`, 14 Sep 2026. Long legs draws these;
+/// Programme derives its Long calls, Long puts and invested from the same
+/// array, so the two cards cannot disagree by a dollar. Never give Programme
+/// its own copy of those three figures.
+///
+/// Every figure is PER CONTRACT in dollars, to the cent. Whole dollars here
+/// are multiplied by `n` and put the footer's Paid $14 away from Intrinsic
+/// value's.
+struct LongLeg: Decodable, Identifiable {
+    let t: String, k: String, n: Int
+    let cost: Double, m: Double, w1: Double, w2: Double, w4: Double
+    var id: String { "\(t)|\(k)" }
+    /// The side is the last letter of the strike and nothing else about it is
+    /// read. A row is a name and a side, never a strike.
+    var isCall: Bool { !k.hasSuffix("P") }
+    /// A leg younger than a window carries its cost in the missing slot, so
+    /// `life` and that window read the same rather than drawing out of nothing.
+    func at(_ w: LongWindow) -> Double {
+        switch w {
+        case .w1: return w1
+        case .w2: return w2
+        case .w4: return w4
+        case .life: return cost
+        }
+    }
+}
+
+enum LongWindow: String, CaseIterable {
+    case w1, w2, w4, life
+    var word: String {
+        switch self {
+        case .w1: return "1w"
+        case .w2: return "2w"
+        case .w4: return "4w"
+        case .life: return "life"
+        }
+    }
+    var phrase: String { self == .life ? "since bought" : "over \(word)" }
+}
+
+struct LongLegsBlock: Decodable {
+    let asOf: String
+    let legs: [LongLeg]
+}
+
+/// One name and one side: every long call on PEP is ONE position. The strike is
+/// a fact about the contract; the reader's question is about the name.
+struct LongPosition: Identifiable {
+    let t: String, isCall: Bool, legs: [LongLeg]
+    var id: String { "\(t)|\(isCall)" }
+    var side: String { isCall ? "Calls" : "Puts" }
+    var n: Int { legs.reduce(0) { $0 + $1.n } }
+    var paid: Double { legs.reduce(0) { $0 + $1.cost * Double($1.n) } }
+    var now: Double { legs.reduce(0) { $0 + $1.m * Double($1.n) } }
+    func then(_ w: LongWindow) -> Double {
+        legs.reduce(0) { $0 + $1.at(w) * Double($1.n) }
+    }
+    func made(_ w: LongWindow) -> Double { now - then(w) }
+    /// Nil where the window has no base to measure from, rather than a zero
+    /// that would draw a bar.
+    func change(_ w: LongWindow) -> Double? {
+        let t0 = then(w)
+        return t0 > 0 ? now / t0 - 1 : nil
+    }
+    /// The average mark a contract, the figure column's third reading.
+    var markEach: Double { n > 0 ? now / Double(n) : 0 }
+
+    static func all(_ legs: [LongLeg]) -> [LongPosition] {
+        var out: [LongPosition] = []
+        for t in legs.map(\.t).reduced() {
+            for call in [true, false] {
+                let ls = legs.filter { $0.t == t && $0.isCall == call }
+                if !ls.isEmpty { out.append(LongPosition(t: t, isCall: call, legs: ls)) }
+            }
+        }
+        return out
+    }
+}
+
+private extension Array where Element == String {
+    /// First-seen order, no duplicates.
+    func reduced() -> [String] {
+        var seen = Set<String>(), out: [String] = []
+        for x in self where seen.insert(x).inserted { out.append(x) }
+        return out
+    }
+}
+
 struct YieldName: Decodable, Identifiable {
     /// ⚠ CLAMPED AT ZERO BY THE SERVER. KR's LEAP is $26 deep in the money and
     /// marks below intrinsic, so its raw time value is −$109. A negative bar

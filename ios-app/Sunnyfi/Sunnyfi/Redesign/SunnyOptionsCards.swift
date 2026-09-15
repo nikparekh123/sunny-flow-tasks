@@ -1021,129 +1021,247 @@ private struct SunnyVDash: View {
     }
 }
 
-// MARK: - 2b · Long calls
+// MARK: - 2d · Long legs, by name
 
-/// The other half of Yield progress. That card asks how much of the LEAP the
-/// premium has paid back; this one asks what the LEAP itself is worth. Same
-/// denominator, same row geometry, opposite question.
-///
-/// ⚠ THE BARS DIVERGE OFF A CENTRE LINE, which Yield progress does not need
-/// because paid-back cannot go backwards. A gain can, so zero has to be a
-/// place on the track rather than the left edge. Geometry is the roll-check
-/// card's, not a third invention.
-///
-/// ⚠ AND THE SCALE IS SYMMETRIC AROUND ZERO, floored at ±5%. Fitting the axis
-/// to the data alone would make a book that moved 0.3% look identical to one
-/// that moved 30%, which is the "winner within them" failure Yield progress
-/// just had, one card over.
-struct SunnyLeapGains: View {
-    let book: OptionsBook
-    let positions: [OptionsPosition]
+/* ⚠ NEW CARD, from `export 14`, 14 Sep 2026. The long-leg cousin of Prices:
+   that card shows every held STOCK's move, this one every long POSITION's.
 
-    @State private var showMoney = moneyByDefault
+   ⚠ A ROW IS A NAME AND A SIDE, NEVER A STRIKE. Every long call on NKE is one
+   position, Σ mark × n against Σ then × n, and the row says "Calls", not
+   "30C · Jan 28 · ×60". The strike is a fact about the contract; the reader's
+   question is about the name. The contract count is not printed either.
 
-    private var rows: [(t: String, pct: Double, gain: Int)] {
-        positions.map { p in
-            (p.t, p.paid > 0 ? Double(p.mark - p.paid) / Double(p.paid) * 100 : 0,
-             p.mark - p.paid)
-        }.sorted { $0.pct > $1.pct }
-    }
-    private var paid: Int { positions.reduce(0) { $0 + $1.paid } }
-    private var worth: Int { positions.reduce(0) { $0 + $1.mark } }
-    private var gain: Int { worth - paid }
-    private var bookPct: Double { paid > 0 ? Double(gain) / Double(paid) * 100 : 0 }
-    /// Symmetric, so the centre line is genuinely the centre.
-    private var span: Double { max(5, (rows.map { abs($0.pct) }.max() ?? 5) * 1.1) }
-    /* Measured for the same reason the roll check's is: the fixed 44 was sized
-       for "-111%" and "+10.9%" wrapped onto a second line in it. */
-    private var valCol: CGFloat {
-        max(S.progValCol,
-            (rows.map { S.textW(showMoney ? optMoney($0.gain) : pct($0.pct),
-                                S.t13, S.wSemiN) }.max() ?? 0) + 3)
-    }
-    private var track: CGFloat {
-        max(110, S.content - 38 - S.progNameCol - valCol - 2 * S.gap4)
-    }
+   ⚠ THE NAME IS A HEADING, NOT A PREFIX, which is Roll check's rule. Printed
+   once with its window net on the right, and the Calls and Puts rows belong to
+   it. A ticker repeated on two rows spends the widest column on the one word
+   that does not change.
 
-    private func x(_ v: Double) -> CGFloat {
-        track * CGFloat((v + span) / (2 * span))
+   ⚠ ONE AXIS FROM ZERO FOR THE WHOLE CARD. Symmetric, a hair line at the
+   middle, and the largest move on the card times 1.1 is the half track. Every
+   bar is read against every other, not against its own row, so NKE's −11.8%
+   and BABA's +8.8% are the same distance apart here as in the book. A window
+   tap re-derives the axis and every bar moves, not only the ones whose figure
+   changed. */
+struct SunnyLongLegs: View {
+    let block: LongLegsBlock
+
+    /* Both survive a pull: a reading the user chose, not state the data owns. */
+    @AppStorage("sunnyfi.ll.win") private var winRaw = LongWindow.life.rawValue
+    @AppStorage("sunnyfi.ll.mode") private var modeRaw = 0
+    @State private var grown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var win: LongWindow { LongWindow(rawValue: winRaw) ?? .life }
+
+    private static let sideCol: CGFloat = 46
+    private static let figCol: CGFloat = 62
+    private static let colGap: CGFloat = 10
+    private static let barH: CGFloat = 14
+    private static let rowGap: CGFloat = 16
+    private static let groupGap: CGFloat = 26
+
+    /// Ranked by what the name made over the window, best first.
+    private var groups: [(t: String, rows: [LongPosition], made: Double)] {
+        let all = LongPosition.all(block.legs)
+        return Dictionary(grouping: all, by: \.t)
+            .map { (t: $0.key,
+                    rows: $0.value.sorted { $0.isCall && !$1.isCall },
+                    made: $0.value.reduce(0) { $0 + $1.made(win) }) }
+            .sorted { $0.made > $1.made }
     }
-    private func pct(_ v: Double) -> String {
-        (v > 0 ? "+" : v < 0 ? "\u{2212}" : "") + String(format: "%.1f%%", abs(v))
+    /// ⚠ CARD-WIDE, NEVER PER ROW. A row normalised to itself would make every
+    /// position look the same size.
+    private var lim: Double {
+        let m = LongPosition.all(block.legs)
+            .compactMap { $0.change(win) }.map(abs).max() ?? 0
+        return max(m * 1.1, 0.01)
+    }
+    private var sumPaid: Double { LongPosition.all(block.legs).reduce(0) { $0 + $1.paid } }
+    private var sumNow: Double { LongPosition.all(block.legs).reduce(0) { $0 + $1.now } }
+    private var sumMade: Double { LongPosition.all(block.legs).reduce(0) { $0 + $1.made(win) } }
+    private var upCount: Int {
+        groups.filter { $0.made > 0 }.count
     }
 
     var body: some View {
-        card.contentShape(Rectangle()).onTapGesture { showMoney.toggle() }
-    }
-
-    private var card: some View {
-        OptCard(name: "leap-gains") {
-            OptHead(title: "Long calls", sub: "", right: "\(optMoney(paid)) paid")
-            Spacer().frame(height: S.gap7)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("BOOK GAIN")
-                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                    .foregroundStyle(S.mute)
-                HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
-                    /* A gain is signed P&L, not a rate, so it DOES take
-                       direction ink. The weekly-yield card's "a rate takes no
-                       direction ink" rule does not reach this figure. */
-                    Text(pct(bookPct))
-                        .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
-                        .foregroundStyle(gain < 0 ? S.loss : S.gain)
-                        .sunnyLineBox(S.t30)
-                    Text("unrealised").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+        OptCard(name: "long-legs", fixedHeight: nil) {
+            OptHead(title: "Long legs", sub: "by name", right: ivDay(block.asOf))
+            Spacer().frame(height: 22)
+            switchRow
+            Spacer().frame(height: 12)
+            hero
+            Spacer().frame(height: 28)
+            VStack(alignment: .leading, spacing: Self.groupGap) {
+                ForEach(Array(groups.enumerated()), id: \.element.t) { gi, g in
+                    group(g, from: offset(before: gi))
                 }
             }
-            Spacer().frame(height: 18)
-            HStack(spacing: S.gap4) {
-                Color.clear.frame(width: S.progNameCol, height: 1)
-                HStack {
-                    Text(pct(-span)); Spacer(); Text(pct(span))
-                }
-                .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                .foregroundStyle(S.mute)
-                .frame(width: track)
-                Color.clear.frame(width: valCol, height: 1)
-            }
-            .padding(.bottom, S.gap4)
-            ZStack(alignment: .topLeading) {
-                VStack(spacing: S.progRowGap) {
-                    ForEach(rows, id: \.t) { r in
-                        let x0 = x(min(r.pct, 0)), x1 = x(max(r.pct, 0))
-                        HStack(spacing: S.gap4) {
-                            Text(r.t)
-                                .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
-                                .foregroundStyle(S.ink)
-                                .frame(width: S.progNameCol, alignment: .leading).lineLimit(1)
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
-                                RoundedRectangle(cornerRadius: S.radiusBar)
-                                    .fill(r.pct < 0 ? S.lossBar : S.gainBar)
-                                    .frame(width: max(2, x1 - x0))
-                                    .offset(x: x0)
-                            }
-                            .frame(width: track, height: S.progRowH)
-                            .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
-                            Text(showMoney ? optMoney(r.gain) : pct(r.pct))
-                                .font(S.inter(S.t13, S.wSemiN))
-                                .foregroundStyle(r.pct < 0 ? S.lossText : S.gainText)
-                                .frame(width: valCol, alignment: .trailing)
-                        }
-                    }
-                }
-                Rectangle().fill(S.ruleColorStrong).frame(width: 1)
-                    .offset(x: S.progNameCol + S.gap4 + x(0), y: -4)
-                    .frame(maxHeight: .infinity).padding(.bottom, -4)
-            }
-            Spacer(minLength: S.gap7)
+            Spacer(minLength: 26)
+            /* ⚠ THE FOOTER IS THE LEDGER AND A WINDOW TAP DOES NOT TOUCH IT.
+               Paid is a fixed point; the card closes on it whichever window is
+               picked. It equals Programme's invested and Intrinsic value's
+               Paid to the dollar, and the three must never drift. */
             OptFooter(stats: [
-                .init(label: "Paid", value: optMoney(paid), ink: S.ink),
-                .init(label: "Worth now", value: optMoney(worth), ink: S.ink),
-                .init(label: "Gain", value: optMoney(gain), ink: gain < 0 ? S.loss : S.gain),
+                .init(label: "Paid", value: optMoney(Int(sumPaid.rounded())), ink: S.ink),
+                .init(label: "Mark", value: optMoney(Int(sumNow.rounded())), ink: S.ink),
+                .init(label: "Since bought",
+                      value: signedPct1(sumPaid > 0 ? sumNow / sumPaid - 1 : 0),
+                      ink: sumNow >= sumPaid ? S.gainText : S.lossText),
             ])
         }
+        .task(id: block.legs.count) {
+            guard !grown else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            grown = true
+        }
     }
+
+    /// How many bars are above this group, so the entrance stagger runs down
+    /// the whole card rather than restarting inside every name.
+    private func offset(before gi: Int) -> Int {
+        groups.prefix(gi).reduce(0) { $0 + $1.rows.count }
+    }
+
+    // MARK: the switch row
+
+    /* Prices' switch pattern: the mode word on the left, the four windows on
+       the right. The picked window is ink and bold, the rest muted — and it is
+       NOT underlined. Four adjacent underlined words read as a heading rule;
+       the hint belongs to the figure column, which is the only text control. */
+    private var switchRow: some View {
+        HStack(spacing: 0) {
+            Text(modeEyebrow).font(S.inter(S.t10, S.wBoldN))
+                .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+            Spacer(minLength: 8)
+            HStack(spacing: 0) {
+                ForEach(LongWindow.allCases, id: \.self) { w in
+                    Text(w.word)
+                        .font(S.inter(S.t12, win == w ? S.wBoldN : S.wMidN))
+                        .tracking(S.track(S.t12, -0.01))
+                        .foregroundStyle(win == w ? S.ink : S.mute)
+                        .padding(.vertical, 10).padding(.horizontal, 7)
+                        .contentShape(Rectangle())
+                        .onTapGesture { winRaw = w.rawValue }
+                }
+            }
+            .padding(.vertical, -10).padding(.trailing, -7)
+        }
+    }
+
+    private var modeEyebrow: String {
+        switch modeRaw {
+        case 1:  return "MADE YOU"
+        case 2:  return "MARK"
+        default: return "CHANGE"
+        }
+    }
+
+    // MARK: the hero
+
+    private var hero: some View {
+        HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+            Text(signedMoney(sumMade)).font(S.inter(S.t30, S.wBoldN))
+                .tracking(S.track(S.t30, -0.035))
+                .foregroundStyle(sumMade >= 0 ? S.gainText : S.lossText)
+            Text("\(upCount) of \(groups.count) up · \(win.phrase)")
+                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+                .lineLimit(1).minimumScaleFactor(0.75)
+        }
+    }
+
+    // MARK: a name
+
+    @ViewBuilder
+    private func group(_ g: (t: String, rows: [LongPosition], made: Double),
+                       from base: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                Text(g.t).font(S.inter(S.t15, S.wSemiN))
+                    .tracking(S.track(S.t15, -0.015)).foregroundStyle(S.ink)
+                Spacer(minLength: 8)
+                Text(signedMoney(g.made)).font(S.inter(S.t12, S.wMidSmN))
+                    .foregroundStyle(g.made >= 0 ? S.gainText : S.lossText)
+            }
+            Spacer().frame(height: 16)
+            VStack(alignment: .leading, spacing: Self.rowGap) {
+                ForEach(Array(g.rows.enumerated()), id: \.element.id) { i, p in
+                    row(p, i: base + i)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func row(_ p: LongPosition, i: Int) -> some View {
+        let ch = p.change(win)
+        HStack(spacing: Self.colGap) {
+            Text(p.side).font(S.inter(S.t13, S.wBodyN))
+                .tracking(S.track(S.t13, -0.01)).foregroundStyle(S.ink)
+                .lineLimit(1).frame(width: Self.sideCol, alignment: .leading)
+            bar(ch, i: i).frame(height: Self.barH).frame(maxWidth: .infinity)
+            Text(figure(p, ch)).font(S.inter(S.t13, S.wBoldN))
+                .tracking(S.track(S.t13, -0.015))
+                .foregroundStyle(modeRaw == 2 ? S.ink
+                                 : ((ch ?? 0) >= 0 ? S.gainText : S.lossText))
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(width: Self.figCol, alignment: .trailing)
+                .sunnyHint()
+                .padding(.vertical, 8).contentShape(Rectangle())
+                .onTapGesture { modeRaw = (modeRaw + 1) % 3 }
+                .padding(.vertical, -8)
+        }
+    }
+
+    @ViewBuilder private func bar(_ ch: Double?, i: Int) -> some View {
+        GeometryReader { g in
+            let half = g.size.width / 2
+            let w = half * CGFloat(min(1, abs(ch ?? 0) / lim))
+            let up = (ch ?? 0) >= 0
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 4).fill(S.wash)
+                    .frame(width: g.size.width, height: Self.barH)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(up ? S.gainBar : S.lossBar)
+                    .frame(width: w, height: Self.barH)
+                    .offset(x: up ? half : half - w)
+                    /* The fill grows FROM the zero line, so a loss opens to the
+                       left and a gain to the right. */
+                    .scaleEffect(x: grown || reduceMotion ? 1 : 0,
+                                 anchor: up ? .leading : .trailing)
+                    .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
+                        .delay(Double(i) * S.barStagger), value: grown)
+                    .animation(reduceMotion ? nil : S.easeSettle(0.55), value: w)
+                    .animation(.easeInOut(duration: 0.3), value: up)
+                /* ⚠ THE ZERO IS DRAWN OVER THE FILL, and it bleeds 4 above and
+                   below, so a bar that has only just left zero still shows
+                   which side of it the position is on. */
+                Rectangle().fill(S.hair)
+                    .frame(width: 1.5, height: Self.barH + 8)
+                    .offset(x: half - 0.75, y: -4)
+            }
+        }
+    }
+
+    // MARK: the figure column
+
+    /* ⚠ A TAP FLIPS A COLUMN, NEVER A ROW. Three readings of the same position:
+       what it changed, what that was worth, and what a contract is worth now.
+       The eyebrow follows so the column is always named. */
+    private func figure(_ p: LongPosition, _ ch: Double?) -> String {
+        switch modeRaw {
+        case 1:  return signedMoney(p.made(win))
+        case 2:  return optMoney(Int(p.markEach.rounded()))
+        default: return ch.map { signedPct1($0) } ?? "\u{2014}"
+        }
+    }
+}
+
+private func signedMoney(_ v: Double) -> String {
+    let i = Int(v.rounded())
+    return (i < 0 ? "" : "+") + optMoney(i)
+}
+private func signedPct1(_ f: Double) -> String {
+    let p = f * 100
+    return (p < 0 ? "\u{2212}" : "+") + String(format: "%.1f", abs(p)) + "%"
 }
 
 // MARK: - 2c · The cover bars — Call cover, then Put cover
@@ -2521,37 +2639,89 @@ struct SunnyTheta: View {
 
 // MARK: - 01 · Programme
 
-/// ⚠ AM I UP, AND THEN ON WHICH NAME. handoff-final/01. Opens on All, so the
-/// all-in reading is never gated behind choosing a name.
-///
-/// ⚠ THE HERO IS THE SUM OF ITS OWN FOOTER: `banked + owed + mark == net`.
-/// Nothing here is stored; every figure is derived from the per-name rows, so a
-/// corrected component moves the hero with it. A hero that can disagree with
-/// its own footer is the one defect that would make this card worthless.
-///
-/// ⚠ SINCE 31 AUGUST, the LEAP shift. Nik, 2026-09-10. That start makes the
-/// card read −$12,488 rather than the handoff's +$15,065: most of the credits
-/// were earned before it, against shares he no longer holds.
+/* ⚠ REBUILT FROM `export 14`, 14 Sep 2026. Am I up, all in or one name.
+
+   ⚠ THE TWO LEGS ARE ONE TRADE, SO ONLY THE NET IS A RESULT. Credits kept plus
+   the long calls at mark plus the long puts at mark. That is the hero and the
+   only figure at 22; the three parts are printed under it as what it is made
+   of, never as three results of their own.
+
+   ⚠ ONLY KEPT IS BANKED. The two marks move every day, which the note says in
+   words and the bar says again in geometry.
+
+   ⚠ STORE KEPT AND OWED, DERIVE EVERYTHING ELSE. Long calls, long puts and
+   invested are read off the LONG LEGS ledger, the same array that card draws,
+   so Programme and Long legs cannot disagree by a dollar and `invested` equals
+   Long legs' Paid and Intrinsic value's Paid. The All row is the sum of the
+   names, never a stored total.
+
+   ⚠ AND INK IS BY SIGN, NEVER BY ROW. A long call can be a gain, so nothing
+   here is hardcoded to loss ink; a hardcoded one printed +$1,180 in red.
+
+   ⚠ SINCE 31 AUGUST, the LEAP shift. Nik, 2026-09-10. That start makes the card
+   read against the LEAPs and puts he holds now rather than against credits
+   earned on shares he no longer owns. */
 struct SunnyProgramme: View {
     let block: ProgrammeBlock
+    /// The ledger Long legs draws. One ledger, two cards.
+    let legs: [LongLeg]
 
     @State private var sel: String? = nil          // nil = All
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The All row is the SUM of the names, never a stored total.
-    private var all: ProgrammeRow {
-        let r = block.rows
-        return ProgrammeRow(t: "All",
-                            kept: r.reduce(0) { $0 + $1.kept },
-                            calls: r.reduce(0) { $0 + $1.calls },
-                            puts: r.reduce(0) { $0 + $1.puts },
-                            owed: r.reduce(0) { $0 + $1.owed },
-                            invested: r.reduce(0) { $0 + $1.invested })
+    struct PgRow: Identifiable {
+        let t: String
+        let kept: Int, owed: Int, calls: Int, puts: Int, inv: Int
+        var id: String { t }
+        var mark: Int { calls + puts }
+        var net: Int { kept + mark }
+        /// `owed` is always <= 0: what the open short legs would cost to close.
+        var banked: Int { kept + owed }
+        var pct: Double { inv > 0 ? Double(net) / Double(inv) * 100 : 0 }
     }
-    private var row: ProgrammeRow {
-        sel.flatMap { s in block.rows.first { $0.t == s } } ?? all
+
+    /// Every name that has either a credit history or a long leg. A hedge-only
+    /// name belongs on this card — its mark is part of the programme — and it
+    /// reads Credits kept +$0 rather than being dropped.
+    private var rows: [PgRow] {
+        let names = Set(block.rows.map(\.t)).union(legs.map(\.t))
+        return names.map { t in
+            let src = block.rows.first { $0.t == t }
+            let mine = legs.filter { $0.t == t }
+            let pnl: (Bool) -> Int = { call in
+                Int(mine.filter { $0.isCall == call }
+                    .reduce(0.0) { $0 + ($1.m - $1.cost) * Double($1.n) }.rounded())
+            }
+            return PgRow(t: t,
+                         kept: src?.kept ?? 0, owed: src?.owed ?? 0,
+                         calls: pnl(true), puts: pnl(false),
+                         inv: Int(mine.reduce(0.0) { $0 + $1.cost * Double($1.n) }.rounded()))
+        }
     }
+    private var all: PgRow {
+        let r = rows
+        return PgRow(t: "All",
+                     kept: r.reduce(0) { $0 + $1.kept }, owed: r.reduce(0) { $0 + $1.owed },
+                     calls: r.reduce(0) { $0 + $1.calls }, puts: r.reduce(0) { $0 + $1.puts },
+                     inv: r.reduce(0) { $0 + $1.inv })
+    }
+    private var row: PgRow { sel.flatMap { s in rows.first { $0.t == s } } ?? all }
     /// Names by net descending, so the best-standing name reads first.
-    private var order: [ProgrammeRow] { block.rows.sorted { $0.net > $1.net } }
+    private var order: [PgRow] { rows.sorted { $0.net > $1.net } }
+
+    /* ⚠ APPORTIONED, NOT SPLIT EVENLY. The short side belongs to a name by its
+       share of the credits it has kept; the long side by its share of the money
+       invested. A single netted book figure could not be divided at all, which
+       is why the server ships the two rates rather than their sum. */
+    private var theta: Int {
+        let a = all
+        let short = a.kept != 0
+            ? Double(block.thetaShortDay) * Double(row.kept) / Double(a.kept) : 0
+        let long = a.inv > 0
+            ? Double(block.thetaLongDay) * Double(row.inv) / Double(a.inv) : 0
+        return sel == nil ? block.thetaShortDay + block.thetaLongDay
+                          : Int((short + long).rounded())
+    }
 
     private func sinceLabel() -> String {
         let p = block.since.split(separator: "-")
@@ -2563,14 +2733,15 @@ struct SunnyProgramme: View {
 
     var body: some View {
         let r = row
-        let markPos = r.mark >= 0
-        let span = max(abs(r.kept) + abs(r.mark), 1)
-        OptCard(name: "programme") {
-            OptHead(title: "Programme", sub: sel == nil ? "all in" : "one name",
+        OptCard(name: "programme", fixedHeight: nil) {
+            OptHead(title: sel ?? "Programme", sub: sel == nil ? "all in" : "one name",
                     right: sinceLabel())
             Spacer().frame(height: 14)
 
-            /* Wraps to two rows at 361 and that is fine. */
+            /* ⚠ THE PILLS ARE THE SWITCH, SO THEY CARRY NO UNDERLINE. A filled
+               pill is its own state, and this is the one card in the deck with
+               no tap hint anywhere: every figure on it is printed, nothing
+               flips. */
             SunnyChipWrap(items: ["All"] + order.map(\.t), selected: sel ?? "All") { tapped in
                 sel = tapped == "All" ? nil : tapped
             }
@@ -2588,8 +2759,13 @@ struct SunnyProgramme: View {
                 Text("\(r.net < 0 ? "down" : "up") \(String(format: "%.1f", abs(r.pct)))%")
                     .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
             }
-            Spacer().frame(height: 9)
-            Text("on \(optMoney(r.invested)) invested")
+            Spacer().frame(height: 8)
+            Text("on \(optMoney(r.inv)) invested")
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            Spacer().frame(height: 6)
+            /* The rate the two sides run at while nothing is traded: the shorts
+               collect decay, the longs pay it. */
+            Text("theta \(theta < 0 ? "\u{2212}" : "+")\(optMoney(abs(theta))) a day")
                 .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
 
             Spacer().frame(height: 20)
@@ -2600,9 +2776,6 @@ struct SunnyProgramme: View {
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
                 .foregroundStyle(S.mute)
             Spacer().frame(height: 14)
-
-            /* ⚠ INK BY SIGN, NEVER BY ROW. A long call can be a gain — LULU and
-               BABA have been — so nothing here is hardcoded to loss ink. */
             VStack(alignment: .leading, spacing: 13) {
                 ForEach(Array([("Credits kept", r.kept), ("Long calls", r.calls),
                                ("Long puts", r.puts)].enumerated()), id: \.offset) { _, cell in
@@ -2617,34 +2790,61 @@ struct SunnyProgramme: View {
             }
 
             Spacer().frame(height: 16)
-            GeometryReader { g in
-                HStack(spacing: 0) {
-                    Rectangle().fill(S.gainText)
-                        .frame(width: g.size.width * CGFloat(abs(r.kept)) / CGFloat(span))
-                    Rectangle().fill(markPos ? S.gainText : S.lossText)
-                        .frame(width: g.size.width * CGFloat(abs(r.mark)) / CGFloat(span))
-                    Rectangle().fill(S.wash)
-                }
-            }
-            .frame(height: 8).clipShape(RoundedRectangle(cornerRadius: 4))
+            makeUpBar(r)
             Spacer().frame(height: 10)
             Text("Credits are banked. The two marks move every day and are not yours until you close.")
                 .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
                 .lineSpacing(S.t11 * 0.4).fixedSize(horizontal: false, vertical: true)
 
+            /* ⚠ ONE RULE, NOT TWO. `OptFooter` draws its own, and this card was
+               drawing a second one 18pt above it. Every other card in the deck
+               lets the footer carry the line. */
             Spacer(minLength: 20)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            Spacer().frame(height: 18)
             OptFooter(stats: [
                 .init(label: "Banked", value: optMoney(r.banked), ink: S.ink),
                 /* ⚠ "Owed on open" TRUNCATED TO "OWED ON OP…" at 10/700 in a
-                   third of 323. The deck settled this once already, when
-                   "Current value" became "Worth now". Banked · Owed · At mark
-                   reads as one set anyway. */
+                   third of 323. Banked · Owed · At mark reads as one set. */
                 .init(label: "Owed", value: optMoney(r.owed), ink: S.ink),
                 .init(label: "At mark", value: optMoney(r.mark), ink: S.ink),
             ])
         }
+    }
+
+    /* ⚠ THE GREEN IS CUT BY NAME, AND THE CUTS ARE A SECOND PICKER. In the All
+       view every name that has kept something is its own segment, proportional
+       to what it kept, so the bar says which names the banked money came from
+       as well as how much of the net is banked at all. Tapping a cut selects
+       that name; tapping the single cut in a one-name view goes back to All.
+
+       ⚠ AND IT USES TEXT INKS, NOT BAR INKS. At 8pt tall `--gain-bar` reads
+       lighter than the figures above it and the bar stopped looking like the
+       same quantity. */
+    @ViewBuilder private func makeUpBar(_ r: PgRow) -> some View {
+        let span = CGFloat(max(abs(r.kept) + abs(r.mark), 1))
+        let cuts: [PgRow] = sel == nil
+            ? order.filter { $0.kept > 0 }
+            : [r]
+        GeometryReader { g in
+            let keptW = g.size.width * CGFloat(abs(r.kept)) / span
+            HStack(spacing: 0) {
+                HStack(spacing: 2) {
+                    ForEach(cuts) { c in
+                        Rectangle().fill(S.gainText)
+                            .frame(width: max(0, keptW * CGFloat(c.kept)
+                                              / CGFloat(max(1, cuts.reduce(0) { $0 + $1.kept }))))
+                            .contentShape(Rectangle())
+                            .onTapGesture { sel = (sel == nil) ? c.t : nil }
+                    }
+                }
+                .frame(width: keptW, alignment: .leading)
+                Rectangle().fill(r.mark >= 0 ? S.gainText : S.lossText)
+                    .frame(width: g.size.width * CGFloat(abs(r.mark)) / span)
+                    .animation(.easeInOut(duration: 0.3), value: r.mark >= 0)
+                Rectangle().fill(S.wash)
+            }
+            .animation(reduceMotion ? nil : S.easeSettle(0.55), value: keptW)
+        }
+        .frame(height: 8).clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 
