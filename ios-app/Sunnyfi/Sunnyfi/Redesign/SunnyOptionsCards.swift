@@ -1114,12 +1114,7 @@ private struct CoverBarsCard: View {
                 /* ⚠ THE GHOST IS WHERE IT WAS, and it is never exaggerated. A
                    day's melt is under half a per cent of the bar, so the line
                    sits almost on the cap and the FIGURE carries the reading. */
-                if let g = ghostAt, g != v {
-                    dashed(S.mute)
-                        .padding(.horizontal, -10)
-                        .offset(y: -h(g))
-                        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: g)
-                }
+                if let g = ghostAt { ghost(g, over: v) }
                 clock(time: time, level: max(h(v), h(ghostAt ?? v)))
             }
             .frame(height: Self.plotH)
@@ -1134,6 +1129,39 @@ private struct CoverBarsCard: View {
                 .lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /* ⚠ THE GHOST NEVER MOVES TO BE SEEN. It marks where the bar was, and on
+       Collected that level is always BELOW the cap, inside the fill. Lifting it
+       into clear air would put it above the bar, and a line above the bar
+       already means something on this card: it is what Time value looks like
+       when it has melted down to meet it. Same drawing, opposite reading.
+
+       So it stays at its level and changes colour instead, cutting the fill in
+       the card's own paper where it crosses. And when the move is thinner than
+       the line itself, there is no line to draw: at 3pt of separation the dash
+       reads as a second edge on the bar rather than as a level, which is what
+       the put card showed at $2.2k collected against $0 a week ago. The figure
+       over the bar already says what changed. */
+    private static let ghostGap: CGFloat = 4
+
+    @ViewBuilder private func ghost(_ g: Int, over v: Int) -> some View {
+        let gy = h(g), by = h(v)
+        if abs(gy - by) >= Self.ghostGap {
+            ZStack {
+                dashed(S.mute)
+                /* The mask keeps the dash phase of the line underneath, so the
+                   paper segments land exactly on the mute ones. Insetting a
+                   narrower line instead would restart the dash and the two
+                   would not line up. */
+                if gy < by {
+                    dashed(S.paper).mask(Rectangle().padding(.horizontal, 10))
+                }
+            }
+            .padding(.horizontal, -10)
+            .offset(y: -gy)
+            .animation(reduceMotion ? nil : S.easeSettle(0.55), value: gy)
+        }
     }
 
     @ViewBuilder private func bar(time: Bool) -> some View {
