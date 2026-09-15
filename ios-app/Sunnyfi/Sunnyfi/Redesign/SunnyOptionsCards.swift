@@ -221,7 +221,12 @@ struct SunnyPositions: View {
     /* Both survive a pull: a reading the user chose, not state the data owns.
        `mode` is shared across all four tabs on purpose. */
     @AppStorage("sunnyfi.pos.tab") private var tabRaw = "sc"
-    @AppStorage("sunnyfi.pos.usd") private var usdMode = false
+    /* ⚠ THREE READINGS, NOT TWO. Nik, 15 Sep 2026: "Percentage should show %,
+       Dollar should show Dollar, Time value should show time value remaining".
+       The sheet has two; the third is the one figure neither of the others
+       carries — what is still to decay, which on a sold leg is the money that
+       comes back by expiry if nothing is done. 0 = %, 1 = $, 2 = time value. */
+    @AppStorage("sunnyfi.pos.fig") private var figMode = 0
     @State private var appeared = false
     /// Re-read on the tick so Friday 20:00 and Monday 04:00 land without a reload.
     @State private var now = Date()
@@ -266,6 +271,10 @@ struct SunnyPositions: View {
     /// One entry per open short contract line on the picked side.
     private struct Sold {
         let t: String, k: Double, n: Int, pct: Double, cr: Double
+        /// What is still to decay — not what the buy-back costs.
+        let tv: Double
+        /// The whole cost of closing the leg: intrinsic plus what is left to decay.
+        let value: Double
         /// What the strike has kept (+) or given back (−).
         var usd: Double { pct / 100 * cr * 100 * Double(n) }
         var credit: Double { cr * 100 * Double(n) }
@@ -275,7 +284,8 @@ struct SunnyPositions: View {
             p.shorts.compactMap { s -> Sold? in
                 let isCall = (s.type ?? "call") == "call"
                 guard isCall == tab.isCall, let cr = s.cr else { return nil }
-                return Sold(t: p.t, k: s.k, n: s.n, pct: Double(s.captured), cr: cr)
+                return Sold(t: p.t, k: s.k, n: s.n, pct: Double(s.captured), cr: cr,
+                            tv: Double(s.tv ?? 0), value: Double(s.value))
             }
         }
         .sorted { $0.pct < $1.pct }
@@ -285,19 +295,26 @@ struct SunnyPositions: View {
     /// position, Σ mark × n against Σ cost × n.
     private struct Bought {
         let t: String, ks: [String], n: Int, now: Double, paid: Double
+        /// Mark less intrinsic: the part of a long leg that still melts.
+        let tv: Double
         var ch: Double { paid > 0 ? now / paid - 1 : 0 }
         var made: Double { now - paid }
     }
     private var boughtPositions: [Bought] {
-        var by: [String: (ks: [String], n: Int, now: Double, paid: Double)] = [:]
+        var by: [String: (ks: [String], n: Int, now: Double, paid: Double, tv: Double)] = [:]
         for l in legs where l.isCall == tab.isCall {
-            var g = by[l.t] ?? ([], 0, 0, 0)
+            var g = by[l.t] ?? ([], 0, 0, 0, 0)
             g.ks.append(String(l.k.dropLast()))
             g.n += l.n; g.now += l.m * Double(l.n); g.paid += l.cost * Double(l.n)
+            /* ⚠ MONEYNESS INVERTS ON A PUT, the deck's most repeated trap. */
+            let strike = Double(l.k.dropLast()) ?? 0
+            let spot = prices.first { $0.ticker == l.t }?.spot ?? 0
+            let intr = (l.isCall ? Swift.max(0, spot - strike) : Swift.max(0, strike - spot)) * 100
+            g.tv += Swift.max(0, l.m - intr) * Double(l.n)
             by[l.t] = g
         }
         return by.map { Bought(t: $0.key, ks: $0.value.ks, n: $0.value.n,
-                               now: $0.value.now, paid: $0.value.paid) }
+                               now: $0.value.now, paid: $0.value.paid, tv: $0.value.tv) }
             .sorted { $0.ch < $1.ch }
     }
 
@@ -305,14 +322,18 @@ struct SunnyPositions: View {
         if tab.sold {
             return soldLegs.map { l in
                 Row(t: l.t, k: trimZero(String(format: "%.2f", l.k)), v: l.pct,
-                    fig: usdMode ? signedMoney(l.usd) : barePctInt(Int(l.pct.rounded())),
+                    fig: figMode == 2 ? optMoney(Int(l.tv.rounded()))
+                       : figMode == 1 ? signedMoney(l.usd)
+                       : barePctInt(Int(l.pct.rounded())),
                     through: movedThrough(l.t, l.k))
             }
         }
         return boughtPositions.map { p in
             Row(t: p.t, k: p.ks.count == 1 ? p.ks[0] : "\(p.ks.count) strikes",
                 v: p.ch * 100,
-                fig: usdMode ? signedMoney(p.made) : signedPct1(p.ch),
+                fig: figMode == 2 ? optMoney(Int(p.tv.rounded()))
+                   : figMode == 1 ? signedMoney(p.made)
+                   : signedPct1(p.ch),
                 through: false)
         }
     }
@@ -367,15 +388,60 @@ struct SunnyPositions: View {
         return true
     }
 
+    private var tvSum: Double {
+        tab.sold ? soldLegs.reduce(0) { $0 + $1.tv }
+                 : boughtPositions.reduce(0) { $0 + $1.tv }
+    }
+    /* ⚠ THE HERO IS THE COLUMN, SUMMED. Nik, 15 Sep 2026: "on tapping the right
+       numbers the main number isnt changing". It always printed dollars while
+       the rows flipped underneath it, so in per-cent mode the card showed a
+       column of percentages under a figure in money and the two looked like
+       different questions. Every mode now has a hero that is the same reading
+       as the rows above the fold. */
+    private var heroText: String {
+        switch figMode {
+        case 1: return signedMoney(tab.sold ? keptSum : madeSum)
+        case 2: return optMoney(Int(tvSum.rounded()))
+        default:
+            if tab.sold {
+                return barePctInt(Int((creditSum > 0 ? keptSum / creditSum * 100 : 0).rounded()))
+            }
+            return signedPct1(paidSum > 0 ? madeSum / paidSum : 0)
+        }
+    }
+    /* Time value left is neither a gain nor a loss — it is what has not decayed
+       yet — so it takes ink, not a direction colour. */
+    private var heroInk: Color {
+        if figMode == 2 { return S.ink }
+        return (tab.sold ? keptSum : madeSum) < 0 ? S.lossText : S.gainText
+    }
     private var hero: Double { tab.sold ? keptSum : madeSum }
+    /* ⚠ NOTHING IS KEPT WHILE THE LEG IS OPEN. Nik, 15 Sep 2026: "we need to
+       change kept this week as we havent closed those". The hero said "kept
+       this week" over a figure that is the mark, not the ledger — it would only
+       be kept if every leg were closed at that moment, and a word that says
+       banked over a number that moves every minute is the worst kind of wrong.
+       Every reading on a sold tab is unrealised and now says so.
+
+       The time value hero names what it is a part of: the whole cost of closing
+       the side today, which is intrinsic plus what is left to decay. That is the
+       only denominator time value is genuinely inside — against the credit it
+       can exceed the whole, because a leg that moved against you is worth more
+       than it was sold for. */
+    private var closeCost: Double { soldLegs.reduce(0) { $0 + $1.value } }
     private var heroSub: String {
-        if tab.sold { return weekOpen ? "kept this week" : "" }
+        if tab.sold {
+            return figMode == 2 ? "of \(optMoney(Int(closeCost.rounded()))) to close"
+                                : "unrealised"
+        }
+        if figMode == 2 { return "still to melt" }
         let up = boughtPositions.filter { $0.made >= 0 }.count
         return "\(up) of \(boughtPositions.count) up · since bought"
     }
     private var eyebrow: String {
-        tab.sold ? (usdMode ? "KEPT OF CREDIT" : "CAPTURED OF CREDIT")
-                 : (usdMode ? "MADE YOU" : "CHANGE SINCE BOUGHT")
+        if figMode == 2 { return "TIME VALUE LEFT" }
+        return tab.sold ? (figMode == 1 ? "KEPT OF CREDIT" : "CAPTURED OF CREDIT")
+                        : (figMode == 1 ? "MADE YOU" : "CHANGE SINCE BOUGHT")
     }
     private var meta: String {
         let n = rows.count
@@ -401,9 +467,9 @@ struct SunnyPositions: View {
                 .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
             Spacer().frame(height: 12)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(signedMoney(hero)).font(S.inter(S.t30, S.wBoldN))
+                Text(heroText).font(S.inter(S.t30, S.wBoldN))
                     .tracking(S.track(S.t30, -0.035))
-                    .foregroundStyle(hero < 0 ? S.lossText : S.gainText)
+                    .foregroundStyle(heroInk)
                     .sunnyLineBox(S.t30)
                 if !heroSub.isEmpty {
                     Text(heroSub).font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
@@ -533,15 +599,21 @@ struct SunnyPositions: View {
             }
             .frame(height: Self.barH)
 
+            /* ⚠ THE HINT GOES ON THE GLYPHS, NOT ON THE COLUMN. `sunnyHint` is a
+               bottom overlay, so applied after the 56pt frame it drew a dotted
+               rule the width of the whole figure column — a heading rule, not a
+               mark on a word. On the text it hugs the number, which is what the
+               sheet's `text-decoration` does. The frame comes after, so the
+               column still right-aligns. */
             Text(r.fig).font(S.inter(S.t13, S.wBoldN))
                 .tracking(S.track(S.t13, -0.015))
-                .foregroundStyle(r.up ? S.gainText : S.lossText)
+                .foregroundStyle(figMode == 2 ? S.ink : (r.up ? S.gainText : S.lossText))
                 .lineLimit(1).minimumScaleFactor(0.7)
                 .sunnyLineBox(S.t13)
-                .frame(width: Self.figCol, alignment: .trailing)
                 .sunnyHint()
+                .frame(width: Self.figCol, alignment: .trailing)
                 .padding(.vertical, 8).contentShape(Rectangle())
-                .onTapGesture { usdMode.toggle() }
+                .onTapGesture { figMode = (figMode + 1) % 3 }
                 .padding(.vertical, -8)
         }
         .frame(height: Self.barH)
@@ -567,13 +639,24 @@ struct SunnyPositions: View {
             }
         }
     }
+    /* ⚠ THE YIELD'S DENOMINATOR IS THE CAPITAL, NOT THE CREDIT. Nik, 15 Sep
+       2026: "it need to be collected currently in calls open / total invested in
+       calls bought". It read kept ÷ collected, which is the share of the credit
+       still yours — the same reading the rows already carry, and it printed 21%
+       under a column headed CAPTURED OF CREDIT saying the same thing. Against
+       what the long legs on that side COST it becomes a real yield: the open
+       calls pay 2.3% of what the LEAPs cost, the open puts 6.7% of the hedge.
+       That is the figure the word promises, and it is why the word stays. */
+    private var investedSum: Double {
+        legs.filter { $0.isCall == tab.isCall }
+            .reduce(0) { $0 + $1.cost * Double($1.n) }
+    }
     private var stats: [(String, String, Color)] {
         if tab.sold {
-            let yield = creditSum > 0 ? keptSum / creditSum * 100 : 0
+            let yield = investedSum > 0 ? creditSum / investedSum * 100 : 0
             return [("COLLECTED", optMoney(Int(creditSum.rounded())), S.ink),
                     ("WORTH NOW", optMoney(Int((creditSum - keptSum).rounded())), S.ink),
-                    ("YIELD", barePctInt(Int(yield.rounded())),
-                     keptSum < 0 ? S.lossText : S.gainText)]
+                    ("YIELD", String(format: "%.1f%%", yield), S.ink)]
         }
         return [("PAID", optMoney(Int(paidSum.rounded())), S.ink),
                 ("WORTH NOW", optMoney(Int(nowSum.rounded())), S.ink),
