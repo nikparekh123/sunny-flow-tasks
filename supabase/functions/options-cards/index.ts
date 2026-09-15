@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.11';
+const BUILD = '2026-09-14.12';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -859,52 +859,27 @@ Deno.serve(async (req) => {
     });
     const credit = { week: thisWeek, calls: sideWeeks('call'), puts: sideWeeks('put') };
 
-    /* ── 03 · Upside left ──────────────────────────────────────────────────
-       ⚠ INCLUDING THE PUTS. Nik, 2026-09-10: "include puts as well". The first
-       pass measured the long calls against the short legs only and read 73%;
-       counting the puts, which are a third of the capital, the book keeps 38%.
-       His own mock said 38% and it was right where I was wrong.
+    /* ── net delta per name ───────────────────────────────────────────────
+       What is left of a name's exposure once everything sold against it is
+       counted. Prices draws it as the row's `delta`.
 
-       ⚠ AND DELTA IS SUMMED LEG BY LEG, never averaged per side. Averaging
-       call and put deltas into one `dShort` is what produced "FIS 115%", a
-       figure no leg in the book supports. Leg by leg FIS is 67%.
+       ⚠ DELTA IS SUMMED LEG BY LEG, never averaged per side. Averaging call
+       and put deltas into one `dShort` is what produced "FIS 115%", a figure no
+       leg in the book supports.
 
-       `share` is how much of the LEAP's own exposure survives everything sold
-       against it: 100 means nothing has been sold away. */
+       ⚠ THE UPSIDE LEFT CARD IS GONE, 14 Sep 2026, Nik: "lets remove the upside
+       left card dont need it anymore". Its `share` per name, the book's kept
+       percentage and the two 10% figures went with it; only this map survives,
+       because Prices reads it. */
     const dOf = (e: { ids: string[] }) => {
       const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
       return md.length ? md.reduce((a, x) => a + x.d, 0) / md.length : 0;
     };
-    const longCallD = new Map<string, number>(), netD = new Map<string, number>();
+    const netD = new Map<string, number>();
     for (const e of open) {
       const d = dOf(e) * e.n * 100 * (e.dir === 'long' ? 1 : -1);
       netD.set(e.ticker, (netD.get(e.ticker) ?? 0) + d);
-      if (e.dir === 'long' && e.type === 'call') {
-        longCallD.set(e.ticker, (longCallD.get(e.ticker) ?? 0) + d);
-      }
     }
-    const upsideRows = positions.map((p) => {
-      const base = longCallD.get(p.t) ?? 0;
-      return { t: p.t, share: base > 0 ? Math.round((netD.get(p.t) ?? 0) / base * 100) : 0 };
-    }).sort((a, b) => a.share - b.share);   // tightest cap first: the row to act on
-    /* Weighted by dollar exposure, which is what makes the book figure the
-       book's and not an average of seven unrelated names. */
-    let expNet = 0, expLong = 0;
-    for (const p of positions) {
-      const sp = spot.get(p.t) ?? 0;
-      expNet += (netD.get(p.t) ?? 0) * sp;
-      expLong += (longCallD.get(p.t) ?? 0) * sp;
-    }
-    const upside = {
-      move: 10,
-      share: expLong > 0 ? r2(expNet / expLong * 100) : 0,
-      /* ⚠ DELTA-ONLY, AND THEREFORE WRONG AT THE EDGES. Long puts are convex,
-         so a real 10% fall is BETTER than `down`. Fixing it means running the
-         payoff engine, not scaling this. Do not quietly "correct" it. */
-      up: Math.round(expNet * 0.10),
-      down: Math.round(-expNet * 0.10),
-      rows: upsideRows,
-    };
 
     /* ── 04 · To roll ──────────────────────────────────────────────────────
        ⚠ NO ASSIGNMENT LANGUAGE. This book rolls.
@@ -1118,13 +1093,15 @@ Deno.serve(async (req) => {
     /* The direction and size of every leg alive in the window, including the
        ones that have since expired — a week's theta is what the book carried
        THAT week, not what survives today. */
-    const thLegs = new Map<string, { dir: string; type: string; n: number; exp: string }>();
+    const thLegs = new Map<string, {
+      dir: string; type: string; n: number; exp: string; ticker: string;
+    }>();
     for (const t of await time('thetaLegs', () =>
       P(`option_trades?voided_at=is.null&expiry=gte.${thWeeks[0]}`
-        + '&select=id,direction,option_type,contracts,expiry&order=id.asc'))) {
+        + '&select=id,ticker,direction,option_type,contracts,expiry&order=id.asc'))) {
       thLegs.set(String(t.id), {
         dir: String(t.direction), type: String(t.option_type),
-        n: N(t.contracts), exp: String(t.expiry).slice(0, 10),
+        n: N(t.contracts), exp: String(t.expiry).slice(0, 10), ticker: String(t.ticker),
       });
     }
 
@@ -1595,9 +1572,144 @@ Deno.serve(async (req) => {
       melt: Math.abs(melt),
     });
 
+    /* ── yield progress, by name ──────────────────────────────────────────
+       handoff `export 13/yield-progress`, 14 Sep 2026. Call cover taken apart:
+       one row a name, that name's time value over the premium collected
+       against it, on one scale for the whole card.
+
+       ⚠ THE DENOMINATOR IS TIME VALUE, NOT WHAT WAS PAID. The 2 Sep card read
+       `collected / paid` and ranked every name against the book's average — a
+       card about how far along each name was on a road whose end was the wrong
+       place. Intrinsic is real money that exercising returns; only the part
+       that melts has to be earned back. Same correction as the cover bars.
+
+       ⚠ AND THE PACE IS CALL CREDIT ONLY, bucketed by the week the leg COVERS.
+       That is `callWkBy`, the same map Call cover sums, so the rows' clocks
+       roll up to the book's. Put credit is spoken for by the put programme and
+       one dollar cannot discharge two debts.
+
+       ⚠ NEGATIVE TIME VALUE IS CLAMPED TO ZERO, per leg. KR's LEAP is $26 deep
+       in the money and marks $1.09 a share BELOW intrinsic, which is ordinary
+       for something that deep: time value is −$109. Nik, 14 Sep 2026: "yes
+       clamp it". A negative bar has no width and a ratio against a negative
+       number says nothing, and the truth of the row is that premium has
+       nothing left to earn back there. So the name reads covered with no wash
+       bar at all.
+
+       ⚠ WHICH IS WHY THIS SUM IS $109 ABOVE CALL COVER'S. That card takes
+       today's figure from the Intrinsic value card, which subtracts Σintrinsic
+       from Σmark at BOOK level and so lets KR's −$109 net against the rest.
+       Both print $106k. Flagged to Nik with the build; if he wants them equal
+       to the dollar, the fix is to clamp in `longLeg` too. */
+    const ypTime = new Map<string, number>();
+    for (const e of open) {
+      if (e.dir !== 'long' || e.type !== 'call') continue;
+      if (!leapCostBy.has(e.ticker)) continue;
+      const S0 = spot.get(e.ticker) ?? 0;
+      const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
+      /* An unpriced leg marks at what it cost, the deck's fallback: a LEAP
+         bought this morning is not a worthless one. */
+      const m = md.length
+        ? md.reduce((a, x) => a + x.m, 0) / md.length
+        : (e.n > 0 ? e.cash / (e.n * 100) : 0);
+      const tv = Math.max(0, m - Math.max(0, S0 - e.k)) * e.n * 100;
+      ypTime.set(e.ticker, (ypTime.get(e.ticker) ?? 0) + tv);
+    }
+
+    /* This week's long-call decay, per name, positive. Same reading Theta's
+       last week draws as `lc`, split by ticker rather than by side. */
+    const ypMelt = new Map<string, number>();
+    for (const [id, th] of thRead[thRead.length - 1].th) {
+      const leg = thLegs.get(id);
+      if (!leg || leg.dir !== 'long' || leg.type !== 'call') continue;
+      if (leg.exp < thisWeek || !leapCostBy.has(leg.ticker)) continue;
+      ypMelt.set(leg.ticker, (ypMelt.get(leg.ticker) ?? 0) - th * leg.n * 100);
+    }
+
+    /* Roll check's own test, on the name: a short CALL bought back for more
+       than it was sold for. It marks the ticker, never the figure — a roll is
+       not a loss on the LEAP, it is why that name's bar is lagging. */
+    const ypRoll = new Map<string, boolean>();
+    for (const p of positions) {
+      ypRoll.set(p.t, p.shorts.some((sh) => sh.type === 'call' && sh.priced && sh.captured < 0));
+    }
+
+    const ypRows = callNames.map(([t]) => {
+      const time0 = Math.round(ypTime.get(t) ?? 0);
+      return {
+        t,
+        time: time0,
+        collected: Math.round(callCrBy.get(t) ?? 0),
+        pace: Math.round(callWkBy.get(t) ?? 0),
+        melt: Math.round(Math.abs(ypMelt.get(t) ?? 0)),
+        rolling: ypRoll.get(t) === true,
+        /* ⚠ A DATE FROM THE LEDGER, NOT FROM TODAY'S FIGURES. Filled below,
+           and only for a name that is actually covered — walking history for a
+           name that has never crossed is a day of reads for a null. */
+        coveredOn: null as string | null,
+      };
+    });
+
+    /* That name's banked call credit as at the close of `cut`. The same sum
+       `callCrBy` makes, stopped at a date. */
+    const ypCreditOn = (t: string, cut: string) => {
+      let c = 0;
+      for (const sh of allShorts) {
+        if (String(sh.option_type) !== 'call' || String(sh.ticker) !== t) continue;
+        if (String(sh.trade_date).slice(0, 10) > cut) continue;
+        c += (String(sh.action) === 'open' ? 1 : -1) * N(sh.contracts) * N(sh.premium) * 100;
+      }
+      return c;
+    };
+
+    /* ⚠ AND THE WALK ONLY RUNS WHEN SOMETHING CROSSED. `option_greeks` reaches
+       back to the day each LEAP was bought (31 Aug at the earliest — the book
+       is two weeks old), so a crossing can be dated, but every day costs a
+       read. Today nothing is covered and this loop does not execute at all. */
+    const ypChasing = ypRows.filter((r) => r.collected < r.time);
+    const ypCovered = ypRows.filter((r) => r.collected >= r.time);
+    if (ypCovered.length) {
+      const want = new Map(ypCovered.map((r) => [r.t, r]));
+      for (let back = 1; back <= 20 && want.size; back++) {
+        const d = dayShift(today, -back);
+        const { day, mk } = await coverDay(d);
+        if (day !== d) continue;             // no reading that day: a holiday
+        for (const [t, row] of [...want]) {
+          let tv = 0, saw = false;
+          for (const e of open) {
+            if (e.ticker !== t || e.dir !== 'long' || e.type !== 'call') continue;
+            const md = e.ids.map((i) => mk.get(i)).filter((x) => x !== undefined) as number[];
+            if (md.length !== e.ids.length) continue;    // not held that day
+            saw = true;
+            const m = md.reduce((a, b) => a + b, 0) / md.length;
+            tv += Math.max(0, m - Math.max(0, spotOn(t, day) - e.k)) * e.n * 100;
+          }
+          /* The day it was NOT yet covered is the day before the crossing, so
+             the row keeps the LAST day it was still covered. */
+          if (!saw || ypCreditOn(t, day) < tv) want.delete(t);
+          else row.coveredOn = day;
+        }
+      }
+    }
+
+    const yieldProgress = ypRows.length
+      ? {
+        asOf: dayLive ? today : ydayDate,
+        /* Covered names first by how far past, then the chasers by how close.
+           The one sort; a tap never re-ranks the card. */
+        names: [
+          ...ypCovered.sort((a, b) =>
+            (b.time > 0 ? b.collected / b.time : Infinity)
+            - (a.time > 0 ? a.collected / a.time : Infinity)),
+          ...ypChasing.sort((a, b) => b.collected / b.time - a.collected / a.time),
+        ],
+      }
+      : null;
+
     timings.total = Date.now() - T0;
     return json(200, {
       ok: true, build: BUILD, date: today, timings,
+      yieldProgress,
       /* Null when nothing is held: a ring at 0% of $0 is not an empty state,
          it is a card with no subject. The client drops it entirely. */
       putCover: putContracts > 0 && putCost > 0
@@ -1662,7 +1774,6 @@ Deno.serve(async (req) => {
       },
       programme,
       premium,
-      upside,
       toRoll,
       prices: { rows: priceRows, book: bookMove,
                 /* ⚠ THE DATE THE DAY WINDOW DESCRIBES, which is today while a

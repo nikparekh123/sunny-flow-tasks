@@ -107,13 +107,13 @@ struct OptionsPayload: Decodable {
     let theta: ThetaBlock?
     /// Optional so a run against an older deployment decodes rather than throws.
     let intrinsic: IntrinsicBlock?
+    let yieldProgress: YieldProgressBlock?
     /// Optional so a run against an older deployment decodes rather than throws.
     let coverBars: CoverBarsBlock?
     /* handoff-final/, 10 Sep 2026. All optional so a run against an older
        deployment decodes rather than throws. */
     let programme: ProgrammeBlock?
     let premium: PremiumBlock?
-    let upside: UpsideBlock?
     let toRoll: ToRollBlock?
 }
 
@@ -142,6 +142,44 @@ struct ProgrammeBlock: Decodable {
 
 /// ⚠ A MULTIPLE OF ITS OWN USUAL, NEVER A PERCENTILE. The rank is what made the
 /// earlier version unreadable.
+/// ⚠ ONE ROW A NAME, AND THE DENOMINATOR IS TIME VALUE. `export 13`,
+/// 14 Sep 2026. The 2 Sep card read `collected / paid` and ranked every name
+/// against the book's average — a card about how far along each name was on a
+/// road whose end was the wrong place. Intrinsic is money exercising returns;
+/// only the part that melts has to be earned back. Call cover's rule, one name
+/// at a time, and the two cards read one book.
+struct YieldName: Decodable, Identifiable {
+    /// ⚠ CLAMPED AT ZERO BY THE SERVER. KR's LEAP is $26 deep in the money and
+    /// marks below intrinsic, so its raw time value is −$109. A negative bar
+    /// has no width and a ratio against a negative number says nothing; the
+    /// truth is that premium has nothing left to earn back there.
+    let t: String, time: Int, collected: Int, pace: Int, melt: Int
+    let rolling: Bool
+    /// The close at which this name's credit first crossed its time value.
+    /// From the ledger, never recomputed here; null while it is still chasing.
+    let coveredOn: String?
+    var id: String { t }
+
+    var covered: Bool { collected >= time }
+    /// The gap the premium still has to close, in dollars.
+    var gap: Int { time - collected }
+    /// ⚠ NIL WHERE TIME VALUE IS ZERO, and the card prints the dollar gap
+    /// instead. A percentage of nothing is not a reading.
+    var ratio: Double? { time > 0 ? Double(collected) / Double(time) : nil }
+    /// Both forces at once: premium landing at this name's pace and its own
+    /// time value melting. The same division Call cover does for the book.
+    var days: Int? {
+        let perDay = Double(pace) / 7 + Double(melt)
+        guard gap > 0, perDay > 0 else { return nil }
+        return Int((Double(gap) / perDay).rounded(.up))
+    }
+}
+
+struct YieldProgressBlock: Decodable {
+    let asOf: String
+    let names: [YieldName]
+}
+
 struct PremiumRow: Decodable, Identifiable {
     let t: String
     let now: Double, usual: Double, low: Double, high: Double
@@ -240,24 +278,6 @@ struct PremiumBlock: Decodable {
     /// rather than claiming a year it does not have.
     let days: Int
     let rows: [PremiumRow]
-}
-
-/// `share` is how much of the LEAP's own exposure survives everything sold
-/// against it. It CAN exceed 100: a short put that goes into the money is long
-/// delta, so it adds exposure back.
-struct UpsideRow: Decodable, Identifiable {
-    let t: String, share: Int
-    var id: String { t }
-}
-
-struct UpsideBlock: Decodable {
-    let move: Int
-    let share: Double
-    /// ⚠ `down` IS DELTA-ONLY AND THEREFORE WRONG AT THE EDGES. Long puts are
-    /// convex, so a real fall is BETTER than this figure. Fixing it means
-    /// running the payoff engine, not scaling this.
-    let up: Int, down: Int
-    let rows: [UpsideRow]
 }
 
 struct RollLeg: Decodable, Identifiable {

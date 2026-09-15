@@ -750,137 +750,273 @@ struct SunnyRollCheck: View {
     }
 }
 
-// MARK: - 2 · Yield progress
+// MARK: - 2 · Yield progress, by name
 
-/// ⚠ SORT IS BEST FIRST, and that is why the card has NO SUMMARY FOOTER of its
-/// own beyond the three stats: row 1 IS the leader. The white rule inside each
-/// fill is where that name stood last week — a fixed 1.5pt rule, because a
-/// proportional slice measured 2.3–5.3px across the book and died at that width.
+/* ⚠ THIS REPLACES THE 2 SEP YIELD PROGRESS CARD, from the `export 13` handoff,
+   14 Sep 2026. One bar a name against `collected / paid`, a book-average line
+   and a % ↔ weeks tap: all deleted.
+
+   ⚠ THE DENOMINATOR IS THAT NAME'S TIME VALUE, NOT WHAT WAS PAID FOR IT. The
+   old card measured how far along each name was on a road whose end was the
+   wrong place. A LEAP's intrinsic value is real money that exercising returns;
+   only the time value melts, so only the time value has to be earned back.
+   Same correction as the cover bars, one name at a time, and the two cards
+   read one book: Σ time and Σ collected here are Call cover's two bars.
+
+   ⚠ TWO BARS A ROW, ONE SCALE FOR THE WHOLE CARD. The largest single figure on
+   the book — whichever name, whichever bar — is the full track, and every other
+   bar is a share of it. A per-row scale would show only the ratio and hide that
+   BABA's cover is worth six times FIS's. That is the same reason the rings
+   became bars: a quotient cannot say which side moved, or how big it was.
+
+   ⚠ AND THE CARD HAS NO SUMMARY OF ITS ROWS. It is a ranking, so row one is the
+   leader and a book ratio would only restate what the rows already say. The
+   hero is the book's collected in dollars; the footer is the denominator and
+   the two speeds of the chase. */
 struct SunnyYieldProgress: View {
-    let book: OptionsBook
-    let positions: [OptionsPosition]
+    let block: YieldProgressBlock
 
-    private var rows: [(t: String, pct: Double, last: Double)] {
-        positions.map { p in
-            let cap = p.invested ?? p.paid
-            let pct = cap > 0 ? Double(p.collected) / Double(cap) * 100 : 0
-            let prior = p.collected - p.week
-            let last = cap > 0 ? Double(prior) / Double(cap) * 100 : 0
-            return (p.t, pct, last)
-        }.sorted { $0.pct > $1.pct }
+    /* ⚠ ONE SORT, AND A TAP NEVER RE-RANKS THE CARD. The server ships the rows
+       already ordered: covered names by how far past, then the chasers by how
+       close. Re-sorting here on a tap would make every row move when the reader
+       asked one question about one column. */
+    private var rows: [YieldName] { block.names }
+
+    /// The largest single figure anywhere on the card. Both bars of every row
+    /// are a share of this, which is what makes the rows comparable.
+    private var top: Double {
+        Double(max(1, rows.map { max($0.time, $0.collected) }.max() ?? 1))
     }
-    private var bookPct: Double {
-        book.paid > 0 ? Double(book.collected) / Double(book.paid) * 100 : 0
-    }
-    /* ⚠ THE DENOMINATOR IS 100, NOT THE LEADER. It used to be
-       max(best, bookAverage), which made the best name's bar full-width by
-       construction: NFLX at 16.9% filled the track and read as "winning",
-       when all it means is it is 16.9% of the way to paying its LEAP back.
-       Nik: "change from winner within them to racing to 100%". Every bar is
-       now its true share of a fully repaid LEAP, so the bars are SHORT and
-       that is the honest picture. The track's right edge is 100%. */
-    private let fullPct: Double = 100
-    private let track: CGFloat = 217   // 323 − 46 − 44 − 8 − 8
+    private var sumTime: Int { rows.reduce(0) { $0 + $1.time } }
+    private var sumColl: Int { rows.reduce(0) { $0 + $1.collected } }
+    private var sumPace: Int { rows.reduce(0) { $0 + $1.pace } }
+    private var sumMelt: Int { rows.reduce(0) { $0 + $1.melt } }
+    private var coveredCount: Int { rows.filter(\.covered).count }
+
+    /* Both survive a refresh: they are a reading the user chose, not state the
+       data owns. Shared across every row, because a tap flips a column. */
+    @AppStorage("sunnyfi.yp.fig") private var asMoney = false
+    @AppStorage("sunnyfi.yp.when") private var asDate = false
+    @State private var grown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let nameCol: CGFloat = 58
+    private static let figCol: CGFloat = 64
+    private static let colGap: CGFloat = 10
+    private static let barH: CGFloat = 8
+    private static let barGap: CGFloat = 2
+    private static let rowGap: CGFloat = 14
+    /// 323 − 58 − 10 − 10 − 64.
+    private static let track: CGFloat = 181
 
     var body: some View {
-        OptCard(name: "yield-progress") {
-            /* ⚠ THE SUB IS GONE AND THE DENOMINATOR CARRIES THE WHOLE JOB.
-               The sheet's header was "Yield progress · premium paid back · of
-               $162,235 paid", which wrapped the title onto a second line at
-               323. Nik's call: drop the sub, keep "$162,235 paid". The rule is
-               that every percentage NAMES its denominator, not that it takes
-               three phrases to do it — and "paid back" was already said by the
-               hero's own label two rows down. */
-            OptHead(title: "Yield progress", sub: "",
-                    /* "paid" now covers the puts too, so the word is
-                       "invested" — the label has to match the number. */
-                    right: "\(optMoney(book.paid)) invested")
-            Spacer().frame(height: S.gap7)
-            VStack(alignment: .leading, spacing: 5) {
-                Text("BOOK AVERAGE")
-                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                    .foregroundStyle(S.mute)
-                HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
-                    Text(String(format: "%.1f%%", bookPct))
-                        .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
-                        .foregroundStyle(S.ink).sunnyLineBox(S.t30)
-                    Text("paid back").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+        OptCard(name: "yield-progress", fixedHeight: nil) {
+            OptHead(title: "Yield progress", sub: "by name", right: ivDay(block.asOf))
+            Spacer().frame(height: 18)
+            hero
+            Spacer().frame(height: 22)
+            VStack(alignment: .leading, spacing: Self.rowGap) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
+                    row(r, i: i)
                 }
             }
-            Spacer().frame(height: 18)
-            /* ⚠ THE AXIS IS NOT DECORATION. Rescaling to 100 makes every bar
-               short, and a short bar with no end marked reads as a broken
-               chart rather than an early one. Same axis row as the roll-check
-               card, one page across. */
-            HStack(spacing: S.gap4) {
-                Color.clear.frame(width: S.progNameCol, height: 1)
-                HStack { Spacer(); Text("100% = PAID BACK") }
-                    .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                    .foregroundStyle(S.mute)
-                    .frame(width: track)
-                Color.clear.frame(width: S.progValCol, height: 1)
-            }
-            .padding(.bottom, S.gap4)
-            rowsBlock
-            Spacer(minLength: S.gap7)
+            Spacer().frame(height: Self.rowGap)
+            legend
+            Spacer(minLength: 18)
             OptFooter(stats: [
-                .init(label: "This week", value: optMoney(book.thisWeek), ink: S.gain),
-                .init(label: "Collected", value: optMoney(book.collected), ink: S.ink),
-                .init(label: "Legs", value: "\(book.legs)", ink: S.ink),
+                .init(label: "Time value", value: optMoney(sumTime), ink: S.ink),
+                /* ⚠ THE MELT FIGURE IS INK, NOT RED, the cover bars' rule.
+                   Time value melting is the target coming closer, not money
+                   the book lost this week. */
+                .init(label: "Melts a week", value: optMoney(-sumMelt * 7), ink: S.ink),
+                .init(label: "This week", value: "+" + optMoney(sumPace), ink: S.gainText),
             ])
+        }
+        .task(id: sumColl) {
+            guard !grown else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            grown = true
         }
     }
 
-    private var rowsBlock: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(spacing: S.progRowGap) {
-                ForEach(rows, id: \.t) { r in
-                    HStack(spacing: S.gap4) {
-                        /* ⚠ NAME AND VALUE COLUMNS ARE flex:none. The
-                           summary-lists rule, learned there when a flex:1
-                           ticker slot shrank under BABA and ate the row gap. */
-                        Text(r.t)
-                            .font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
-                            .foregroundStyle(S.ink)
-                            .frame(width: S.progNameCol, alignment: .leading)
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
-                            RoundedRectangle(cornerRadius: S.radiusBar).fill(S.gainBar)
-                                .frame(width: max(2, track * r.pct / fullPct))
-                                /* ⚠ TWO TONES, NOT A GAP. Last week used to be
-                                   a 1.5pt --paper rule inset from the bar's
-                                   tip, which worked when the leader filled the
-                                   track. Against a 100% denominator the bars
-                                   are short and most of the paid-back happened
-                                   THIS week, so the rule landed near the start
-                                   and severed every bar into two: NFLX and BABA
-                                   read as two separate bars. Prior weeks now
-                                   take --gain-span and this week keeps
-                                   --gain-bar, which says the same thing in one
-                                   continuous bar. */
-                                .overlay(alignment: .leading) {
-                                    if r.last > 0 {
-                                        Rectangle().fill(S.gainSpan)
-                                            .frame(width: max(1, track * r.last / fullPct))
-                                    }
-                                }
-                                .clipShape(RoundedRectangle(cornerRadius: S.radiusBar))
-                        }
-                        .frame(width: track, height: S.progRowH)
-                        Text(String(format: "%.1f%%", r.pct))
-                            .font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
-                            .frame(width: S.progValCol, alignment: .trailing)
-                    }
-                }
+    // MARK: the hero
+
+    /* ⚠ THE QUANTITY, NOT THE RATIO. The rows already carry the ratio, and a
+       book ratio would hide that seven names are behind. This is the same
+       figure Call cover draws as its green bar, and it is green for the same
+       reason. */
+    private var hero: some View {
+        VStack(alignment: .leading, spacing: S.gap3) {
+            Text("BOOK").font(S.inter(S.t10, S.wBoldN))
+                .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+            HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                Text(optMoney(sumColl)).font(S.inter(S.t34, S.wBoldN))
+                    .tracking(S.track(S.t34, S.lsTighter)).foregroundStyle(S.gainText)
+                Text("collected · \(coveredCount) of \(rows.count) covered")
+                    .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
-            /* The book average, positioned in the ROW BOX, so it carries the
-               name column plus its gap as an offset. --ink, because an average
-               is a rate and a rate takes no direction ink. */
-            Rectangle().fill(S.ink)
-                .frame(width: S.refLine)
-                .offset(x: S.progNameCol + S.gap4 + track * bookPct / fullPct, y: -4)
-                .frame(maxHeight: .infinity)
-                .padding(.bottom, -4)
+        }
+    }
+
+    // MARK: a row
+
+    @ViewBuilder private func row(_ r: YieldName, i: Int) -> some View {
+        HStack(spacing: Self.colGap) {
+            HStack(spacing: S.gap3) {
+                Text(r.t).font(S.inter(S.t13, S.wBoldN))
+                    .tracking(S.track(S.t13, -0.01)).foregroundStyle(S.ink)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                /* ⚠ THE SLOT ALWAYS EXISTS so every ticker keeps one left edge.
+                   A roll is why a bar lags — money went out to buy the call
+                   back — and it marks the NAME, never the figure: a roll is not
+                   a loss on the LEAP. The only red on the card. */
+                Circle().strokeBorder(S.lossBar, lineWidth: 1)
+                    .frame(width: 5, height: 5)
+                    .opacity(r.rolling ? 1 : 0)
+            }
+            .frame(width: Self.nameCol, alignment: .leading)
+
+            bars(r, i: i).frame(width: Self.track, height: Self.barH * 2 + Self.barGap)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(figure(r)).font(S.inter(S.t13, S.wBoldN))
+                    .tracking(S.track(S.t13, -0.01))
+                    .foregroundStyle(r.covered ? S.gainText : S.ink2)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .sunnyHint()
+                    .padding(.vertical, 6).contentShape(Rectangle())
+                    .onTapGesture { asMoney.toggle() }
+                    .padding(.vertical, -6)
+                Text(word(r)).font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .sunnyHint()
+                    .padding(.vertical, 6).contentShape(Rectangle())
+                    .onTapGesture { asDate.toggle() }
+                    .padding(.vertical, -6)
+            }
+            .frame(width: Self.figCol, alignment: .trailing)
+        }
+    }
+
+    @ViewBuilder private func bars(_ r: YieldName, i: Int) -> some View {
+        let wT = Self.track * CGFloat(min(1, Double(r.time) / top))
+        let wC = Self.track * CGFloat(min(1, Double(r.collected) / top))
+        ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: Self.barGap) {
+                /* The wash carries its edge on top, right and bottom only: the
+                   left edge is the axis every bar starts from, and a line there
+                   would read as a tick rather than the bar's own outline. */
+                UnevenRoundedRectangle(bottomTrailingRadius: S.radiusPip,
+                                       topTrailingRadius: S.radiusPip)
+                    .fill(S.wash)
+                    .overlay(
+                        UnevenRoundedRectangle(bottomTrailingRadius: S.radiusPip,
+                                               topTrailingRadius: S.radiusPip)
+                            .stroke(S.ruleColorStrong, lineWidth: 1))
+                    .frame(width: wT, height: Self.barH)
+                    .scaleEffect(x: grown || reduceMotion ? 1 : 0, anchor: .leading)
+                    .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
+                        .delay(Double(i) * S.barStagger), value: grown)
+                UnevenRoundedRectangle(bottomTrailingRadius: S.radiusPip,
+                                       topTrailingRadius: S.radiusPip)
+                    .fill(S.gainBar)
+                    .frame(width: wC, height: Self.barH)
+                    .scaleEffect(x: grown || reduceMotion ? 1 : 0, anchor: .leading)
+                    .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
+                        .delay(Double(i) * S.barStagger + 0.07), value: grown)
+            }
+            .frame(width: Self.track, alignment: .leading)
+            /* ⚠ WHERE TIME VALUE ENDS, AND IT IS INK, NOT HAIR. The green
+               either stops short of this line or runs through it, and that is
+               the whole reading of the row. On the cover bars the target
+               crosses a 12pt gap and hair is enough; here it crosses an 8pt
+               green bar, and hair vanished against it. */
+            if r.time > 0 {
+                SunnyVDash(ink: S.ink)
+                    .frame(width: 1, height: Self.barH * 2 + Self.barGap + 8)
+                    .offset(x: wT, y: -4)
+                    .opacity(grown || reduceMotion ? 1 : 0)
+                    .animation(reduceMotion ? nil : S.easeSettle(0.4).delay(0.5), value: grown)
+            }
+        }
+        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: top)
+    }
+
+    // MARK: the two columns that flip
+
+    /* ⚠ A NAME WITH NO TIME VALUE PRINTS THE DOLLAR GAP IN BOTH MODES. Nik,
+       14 Sep 2026, on KR: "yes clamp it". At a denominator of zero the ratio is
+       not large, it is undefined, and "∞%" is not a reading. */
+    private func figure(_ r: YieldName) -> String {
+        guard let ra = r.ratio, !asMoney else {
+            let d = r.collected - r.time
+            return (d < 0 ? "\u{2212}" : "+") + optMoney(abs(d))
+        }
+        return "\(Int((ra * 100).rounded()))%"
+    }
+
+    private func word(_ r: YieldName) -> String {
+        if r.covered {
+            /* A covered name with no date in the ledger stays "covered" rather
+               than printing an empty second reading. */
+            guard asDate, let on = r.coveredOn else { return "covered" }
+            return "since " + ypShortDate(on)
+        }
+        guard let d = r.days else { return "no pace" }
+        /* ⚠ DATED FROM TODAY, so a chaser's date moves a day at midnight even
+           when the data has not changed. */
+        if asDate { return ypShortDate(Date().addingTimeInterval(Double(d) * 86_400)) }
+        return "\(max(1, Int((Double(d) / 7).rounded(.up)))) wk"
+    }
+
+    // MARK: the legend
+
+    private var legend: some View {
+        HStack(spacing: 14) {
+            swatch(fill: S.wash, edge: true, word: "time value")
+            swatch(fill: S.gainBar, edge: false, word: "collected")
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, Self.nameCol + Self.colGap)
+    }
+
+    private func swatch(fill: Color, edge: Bool, word: String) -> some View {
+        HStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 1).fill(fill)
+                .frame(width: 10, height: Self.barH)
+                .overlay(edge
+                    ? RoundedRectangle(cornerRadius: 1)
+                        .stroke(S.ruleColorStrong, lineWidth: 1) : nil)
+            Text(word).font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+        }
+    }
+}
+
+/// "8 Oct" — the meet date and the covered-since date. No weekday: `ivDay`'s
+/// "Thu 8 Oct" is the header's form, and at 10pt in a 64pt column it truncates.
+private func ypShortDate(_ d: Date) -> String {
+    let f = DateFormatter(); f.dateFormat = "d MMM"
+    return f.string(from: d)
+}
+private func ypShortDate(_ iso: String) -> String {
+    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+    guard let d = f.date(from: iso) else { return iso }
+    return ypShortDate(d)
+}
+
+/// The target line: the vertical twin of `SunnyDash`, 3/3 so it cannot be
+/// confused with the 1.5/1.5 tap hint under the figures beside it.
+private struct SunnyVDash: View {
+    let ink: Color
+    var body: some View {
+        GeometryReader { g in
+            Path { p in
+                p.move(to: .init(x: 0.5, y: 0))
+                p.addLine(to: .init(x: 0.5, y: g.size.height))
+            }
+            .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            .foregroundStyle(ink)
         }
     }
 }
@@ -3149,144 +3285,3 @@ struct SunnyPremiumNow: View {
 func fmtDayLabel(_ d: Date) -> String {
     let f = DateFormatter(); f.dateFormat = "EEE d MMM"; return f.string(from: d)
 }
-
-// MARK: - 03 · Upside left
-
-/// ⚠ WHAT YOU MAKE WHEN THE STOCK MAKES 10%, in the unit he would quote: NKE
-/// makes 5.2% when NKE makes 10%. handoff-final/03.
-///
-/// ⚠ THE PUTS ARE IN IT. Nik, 2026-09-10: "include puts as well". They are a
-/// third of the capital, and leaving them out read 73% where the book keeps 67.
-///
-/// ⚠ THE AXIS RUNS PAST THE TICK ON PURPOSE. A short put that goes into the
-/// money is LONG delta, so a name can make MORE than the stock does: LULU is at
-/// 123% today. The tick at 10% is the move itself, so short of it is capped and
-/// past it is more than the stock made.
-///
-/// ⚠ AND A RISING NUMBER HERE IS NOT ALWAYS GOOD NEWS. The book went 38% → 67%
-/// in two days largely because short puts went against him, which the To roll
-/// card is showing as a loss. Same fact, two cards, opposite feelings.
-struct SunnyUpsideLeft: View {
-    let block: UpsideBlock
-
-    /* ⚠ MEASURED, NOT ASSUMED. 46 fits "8.0%" and not "13.2%", so LULU wrapped
-       onto a second line and broke the row's baseline — the same lesson the
-       roll-check columns learned. A name past 100% is normal here, so the
-       column has to take its widest actual content. */
-    private var valCol: CGFloat {
-        let w = block.rows.map { S.textW(gainLabel($0.share), S.t15, S.wBoldN) }.max() ?? 0
-        return max(46, w + 3)
-    }
-    private func gainLabel(_ share: Int) -> String {
-        String(format: "%.1f%%", Double(share) / 10)
-    }
-    /// The longest figure the rows will print, used to reserve the column.
-    private var widest: String {
-        block.rows.map { gainLabel($0.share) }
-            .max { S.textW($0, S.t15, S.wBoldN) < S.textW($1, S.t15, S.wBoldN) } ?? "0.0%"
-    }
-
-    /// Headroom above the widest row, so nothing is ever clipped at the tick.
-    private var axisMax: Double {
-        let widest = Double(block.rows.map(\.share).max() ?? 100) / 10
-        return max(12, (widest * 1.05).rounded(.up))
-    }
-    private var tickFrac: Double { Double(block.move) / axisMax }
-
-    var body: some View {
-        let cappedCount = block.rows.filter { $0.share < 100 }.count
-        OptCard(name: "upside-left") {
-            OptHead(title: "Upside left", sub: "if the stock makes \(block.move)%",
-                    right: "whole book")
-            Spacer().frame(height: 26)
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(String(format: "+%.1f%%", block.share * Double(block.move) / 100))
-                    .font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
-                    .foregroundStyle(S.ink).sunnyLineBox(S.t22)
-                Text("is what you make")
-                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
-            }
-            Spacer().frame(height: 9)
-            Text("\(optMoneyShort(block.up)) of a \(optMoneyShort(Int(Double(block.up) / max(block.share, 0.01) * 100))) move")
-                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
-
-            Spacer().frame(height: 26)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            Spacer().frame(height: 22)
-
-            /* The tick label, over the same fraction every row repeats. */
-            HStack(spacing: 12) {
-                Color.clear.frame(width: 44, height: 11)
-                GeometryReader { g in
-                    Text("\(block.move)%")
-                        .font(S.inter(S.t10, S.wSemiN)).tracking(S.track(S.t10, S.lsLabel))
-                        .foregroundStyle(S.mute)
-                        .frame(width: 40)
-                        .offset(x: g.size.width * CGFloat(tickFrac) - 20)
-                }
-                .frame(height: 11)
-                /* The header's spacer is the WIDEST ACTUAL LABEL, drawn
-                   invisibly, so the tick stays over the same fraction the rows
-                   use however wide the figures turn out to be. */
-                Text(widest)
-                    .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
-                    .monospacedDigit().lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(minWidth: valCol, alignment: .trailing)
-                    .layoutPriority(1).opacity(0)
-            }
-            Spacer().frame(height: 12)
-
-            VStack(alignment: .leading, spacing: 22) {
-                ForEach(block.rows) { r in
-                    let gain = Double(r.share) / 10
-                    HStack(spacing: 12) {
-                        Text(r.t)
-                            .font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
-                            .frame(width: 44, alignment: .leading)
-                        GeometryReader { g in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 2).fill(S.wash)
-                                /* One exception, one colour: only the tightest
-                                   cap is inked. */
-                                RoundedRectangle(cornerRadius: 2)
-                                    .fill(r.t == block.rows.first?.t ? S.lossBar : S.hair)
-                                    .frame(width: max(2, g.size.width * CGFloat(min(gain / axisMax, 1))))
-                                Rectangle().fill(S.ink).frame(width: 2).frame(height: 22)
-                                    .offset(x: g.size.width * CGFloat(tickFrac) - 1)
-                            }
-                        }
-                        .frame(height: 14)
-                        /* ⚠ minWidth AND layoutPriority, NOT A FIXED WIDTH.
-                           Nik, 2026-09-10: "I dont like % on a different line
-                           looks odd" — LULU read 14.5 with the % underneath it.
-                           A fixed frame lets the HStack hand the flexible bar
-                           its width first and squeeze whatever is left to the
-                           figure; the column has to be the rigid one and the
-                           bar the one that yields. */
-                        Text(gainLabel(r.share))
-                            .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
-                            .monospacedDigit().foregroundStyle(S.ink)
-                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                            .frame(minWidth: valCol, alignment: .trailing)
-                            .layoutPriority(1)
-                    }
-                }
-            }
-
-            Spacer(minLength: 26)
-            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            Spacer().frame(height: 22)
-            OptFooter(stats: [
-                .init(label: "If +\(block.move)%", value: optMoneyShort(block.up), ink: S.gainText),
-                /* ⚠ DELTA-ONLY. Long puts are convex, so a real fall is better
-                   than this. Left visible rather than hidden. */
-                .init(label: "If \u{2212}\(block.move)%", value: optMoneyShort(block.down), ink: S.lossText),
-                .init(label: "Capped", value: "\(cappedCount)", ink: S.ink),
-            ])
-        }
-    }
-}
-
-
-
