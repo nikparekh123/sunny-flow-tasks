@@ -33,36 +33,58 @@
 
 import SwiftUI
 
+/* ⚠ THE STRIP IS RETIRED, 14 Sep 2026, from the `glass-nav` handoff. The app's
+   navigation is one Liquid Glass tab bar with TWO destinations, New and
+   Options, and no names.
+
+   ⚠ WHICH MEANS THE NAME PAGES ARE NO LONGER REACHABLE. The strip was the only
+   way into them. The sheet's own argument is that the feed carries the names
+   now — Prices, Long legs and Yield progress all list every one — and that if a
+   third destination is ever argued for it belongs in a page, not on the bar.
+   `SunnyPane` still renders `.name` and `nav.pages` still builds the list, so
+   nothing is deleted; there is simply no door. Flagged to Nik with the build.
+
+   ⚠ AND THE PAGER IS RETIRED WITH IT. Swiping between pages existed because the
+   strip had many destinations in a row. With two, the tab bar is the switch and
+   the horizontal scroller would only fight the vertical one. That takes
+   `PaneModel`'s reason for existing away too, but it stays: the tab bar keeps
+   both pages alive, so the stores still have to be shared rather than held as
+   each pane's own state.
+
+   ⚠ DO NOT DRAW THE GLASS. The reference's rgba(28,30,26,.8) over a 22px blur
+   is the WEB stand-in so the mock reads like the device. On device the system
+   renders the real material, its refraction and its light/dark adaptation, and
+   `.tabBarMinimizeBehavior(.onScrollDown)` gives the compact-on-down rule, the
+   spring and the thresholds. The sheet's --gn-threshold, --gn-top-zone and .55s
+   spring are that behaviour's approximation; re-implementing them here would
+   replace the real thing with a copy of its description. */
 struct SunnyShell: View {
-    @State private var page: SunnyPage = .new
-    /// ⚠ THE STORES LIVE HERE NOW, not inside the pane. A pager lays the pages
-    /// side by side, so more than one pane exists at once — see PaneModel.
+    @State private var page: SunnyPage = .options
+    /// ⚠ THE STORES LIVE HERE, not inside the pane: both tabs are alive at once,
+    /// and stores held as a pane's own `@State` would be fetched twice and
+    /// mutate independently — a Read on one copy would leave the other still
+    /// showing the card as unread.
     @State private var model = PaneModel()
     private var nav: SunnyNav { model.nav }
-    /* ⚠ THE SCROLLER'S PAGE IS THE SOURCE OF TRUTH, and `page` follows it. A
-       paging scroller owns the position while a finger is on it; a second value
-       driving it would fight the drag mid-gesture. */
-    @State private var scrolled: String?
-    /* ⚠ COMING BACK TO THE APP IS A REFRESH. Nik, 2026-09-10. The `.task`
-       below runs once per launch, so returning to a backgrounded app showed
-       figures from whenever it was last opened. `.active` on a scene that has
-       already loaded refetches; the first activation is skipped because the
-       task is already doing it. */
+    /* Bumped when the ALREADY ACTIVE tab is tapped. The pane watches it and
+       returns to the top; a plain selection binding cannot see that tap,
+       because the value it writes is the value already there. */
+    @State private var toTop = 0
+    /* ⚠ COMING BACK TO THE APP IS A REFRESH. Nik, 2026-09-10. The `.task` below
+       runs once per launch, so returning to a backgrounded app showed figures
+       from whenever it was last opened. */
     @Environment(\.scenePhase) private var phase
     @State private var loadedOnce = false
 
-    /// Deterministic states for verification, so a screenshot of "the TLT page"
-    /// does not depend on a simulated drag landing on the right pixel.
-    ///   -page TLT     open that name's page instead of New
-    ///   -scrollTo 900 start the pane at that offset
-    ///   -swipe 2      move two pages forward once the book has loaded
+    /// Deterministic states for verification, so a screenshot does not depend on
+    /// a simulated gesture landing on the right pixel.
+    ///   -page NEW|OPTIONS   open that destination
+    ///   -scrollTo 900       start the pane at that offset
+    ///   -navTint white      the bar's tint, for comparing the two readings
     private static var argPage: SunnyPage? {
         let a = ProcessInfo.processInfo.arguments
         guard let i = a.firstIndex(of: "-page"), i + 1 < a.count else { return nil }
-        let k = a[i + 1].uppercased()
-        if k == "NEW" { return .new }
-        if k == "OPTIONS" { return .options }
-        return .name(k)
+        return a[i + 1].uppercased() == "NEW" ? .new : .options
     }
     private static var argScroll: CGFloat? {
         let a = ProcessInfo.processInfo.arguments
@@ -70,95 +92,69 @@ struct SunnyShell: View {
               let v = Double(a[i + 1]) else { return nil }
         return CGFloat(v)
     }
-    /// ⚠ VERIFICATION ONLY. The touch bridge is dead, so a real drag cannot be
-    /// driven; this moves the page the way a completed swipe would and leaves
-    /// the scroller to follow. What it does NOT prove is the paging scroller's
-    /// own feel under a finger.
-    private static var argSwipe: Int? {
-        let a = ProcessInfo.processInfo.arguments
-        guard let i = a.firstIndex(of: "-swipe"), i + 1 < a.count else { return nil }
-        return Int(a[i + 1])
+    private static var argTintWhite: Bool {
+        ProcessInfo.processInfo.arguments.contains("-navTintWhite")
+    }
+
+    /// Writing the value that is already there is the re-tap.
+    private var selection: Binding<SunnyPage> {
+        Binding(get: { page }, set: { p in
+            if p == page { toTop += 1 } else { page = p }
+        })
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            pager.frame(maxHeight: .infinity)
-            SunnyStrip(nav: nav, page: $page)
+        TabView(selection: selection) {
+            Tab(value: SunnyPage.new) {
+                SunnyPane(page: .new, m: model, startAt: Self.argScroll, toTop: toTop)
+            } label: {
+                /* ⚠ NO CAPTION. The reference bar is two monotone icons and
+                   nothing else; with two destinations the bar does not need to
+                   say where you are. The title is empty rather than absent so
+                   the item still exists, and the name moves to the
+                   accessibility label where a screen reader still reads it. */
+                Label("", systemImage: "bookmark")
+                    .accessibilityLabel("New")
+            }
+            Tab(value: SunnyPage.options) {
+                SunnyPane(page: .options, m: model, startAt: Self.argScroll, toTop: toTop)
+            } label: {
+                /* The deck's own mark for a position: a short leg written
+                   against a long one. No SF Symbol says that, so it ships as a
+                   custom symbol and takes the system's weight change with every
+                   other tab item. */
+                Label("", image: "sunny.options")
+                    .accessibilityLabel("Options")
+            }
         }
+        /* The system's rule, not ours: compacts on scroll down, reopens on
+           scroll up, with its own thresholds and spring. */
+        .tabBarMinimizeBehavior(.onScrollDown)
+        /* ⚠ THE TWO SIGNAL DOTS ARE NOT ON THE BAR, and this was measured, not
+           assumed. The sheet asks for a 5px amber dot over New when something is
+           waiting to be read and a violet one over Options when a leg needs
+           rolling, and says "never a red or green, never a number".
+
+           `.badge(1)` draws the system's red pill WITH the count. `.badge(" ")`
+           drops the count and leaves a red dot, which is the right shape. But
+           the colour cannot be moved: `UITabBarItem.appearance().badgeColor`
+           set in the app's `init`, before any item exists, is ignored by the
+           Liquid Glass bar — it stayed red in both places. There is no per-tab
+           badge tint in SwiftUI, and the appearance proxy is global anyway, so
+           even if it worked both dots would share one colour.
+
+           That leaves red dots, which the sheet forbids, or a hand-drawn bar,
+           which it also forbids. So neither: `nav.pending` and `nav.rolling`
+           still carry both facts and the pages state them — Roll check
+           headlines the count, the New page prints its own. Flagged to Nik. */
+        .tint(Self.argTintWhite ? .white : S.ink)
         .background(S.ground)
         .task { await model.loadAll(); loadedOnce = true }
         .onChange(of: phase) { _, now in
             guard now == .active, loadedOnce else { return }
             Task { await model.loadAll(force: true) }
         }
-        .onAppear { if let p = Self.argPage { page = p; scrolled = p.key } }
+        .onAppear { if let p = Self.argPage { page = p } }
         .preferredColorScheme(.light)      // the token set is a light system
-    }
-
-    /* ⚠ THE PAGES ARE LAID OUT SIDE BY SIDE AND THE FINGER MOVES THEM. Nik asked
-       three times for the swipe to feel native, and it could not while the pane
-       was one view swapping its contents: a transition can only start when the
-       finger has already left the glass, so the page never tracked the drag and
-       every version of it read as fake however it was eased.
-
-       This is the platform's own paged scroller — it tracks, it rubber-bands at
-       both ends, it takes a flick's velocity — and it costs what the pane was
-       structured to avoid: more than one pane alive at once. `PaneModel` is the
-       answer to that. The stores are shared, so a second pane is view
-       construction and not a second fetch, and `LazyHStack` only builds the
-       pages either side of the one being looked at.
-
-       ⚠ AND THERE IS NO DRAG GESTURE ANY MORE. The hand-rolled one had to guess
-       at a 60pt threshold and a 1.6x dominance ratio to avoid eating the
-       vertical scroll. The paging scroller resolves that itself, the way every
-       other iOS pager does. */
-    private var pager: some View {
-        GeometryReader { g in
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
-                    ForEach(nav.pages, id: \.key) { p in
-                        SunnyPane(page: p, m: model, startAt: Self.argScroll)
-                            .frame(width: g.size.width)
-                            .id(p.key)
-                    }
-                }
-                .scrollTargetLayout()
-            }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: $scrolled)
-            .scrollIndicators(.hidden)
-            /* The strip and the pager are two views of one position, so each
-               follows the other. `guard` on equality keeps that from looping. */
-            .onChange(of: scrolled) { _, k in
-                guard let k, k != page.key else { return }
-                page = k == SunnyPage.new.key ? .new : .name(k)
-            }
-            .onChange(of: page) { _, p in
-                guard scrolled != p.key else { return }
-                withAnimation(S.easeOut(S.durPage)) { scrolled = p.key }
-            }
-            .onChange(of: nav.pages.count) { _, _ in
-                if scrolled == nil { scrolled = page.key }
-                guard let by = Self.argSwipe else { return }
-                for _ in 0 ..< abs(by) { step(by > 0 ? 1 : -1) }
-                print("SWIPE \(by) -> \(page.key)   order " + nav.pages.map(\.key).joined(separator: ","))
-            }
-        }
-    }
-
-    /* ⚠ IT WALKS `nav.pages`, WHICH IS THE STRIP'S OWN ORDER — New, then the
-       flagged names, then the rest. Swiping from New lands on the first circle
-       after it, which is what the strip is showing.
-
-       ⚠ AND IT STOPS AT BOTH ENDS RATHER THAN WRAPPING. Wrapping puts New one
-       swipe left of the last name, so a swipe past the end silently teleports
-       across the whole strip; a page that does not move says *that was the end*
-       without having to be told. */
-    private func step(_ by: Int) {
-        let ps = nav.pages
-        guard let i = ps.firstIndex(of: page) else { return }
-        let j = i + by
-        guard ps.indices.contains(j) else { return }
-        page = ps[j]
     }
 }

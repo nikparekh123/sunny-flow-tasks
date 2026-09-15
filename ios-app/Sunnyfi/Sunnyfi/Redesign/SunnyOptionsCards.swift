@@ -193,560 +193,392 @@ private func signedPctInt(_ v: Int) -> String {
     (v > 0 ? "+" : v < 0 ? "\u{2212}" : "") + "\(abs(v))%"
 }
 
-// MARK: - 1 · Roll check
+// MARK: - 1 · Positions, four tabs
 
-/* ⚠ THIS REPLACES THE PREVIOUS ROLL CHECK, 13 Sep 2026, from the `roll-check-card`
-   handoff (cards/roll-check.md, Sunny Roll Check Card.dc.html). The old card is
-   deleted, not kept beside it, and the Inventory figures it had absorbed on 11 Sep
-   come back as a view of their own rather than a line under each percentage.
+/* ⚠ ONE CARD IN PLACE OF TWO, from `export 17`, 15 Sep 2026. Roll check asked
+   how each SOLD leg was doing; Long legs asked how each BOUGHT position was
+   doing. That is one question with two switches — side (call or put) and
+   direction (sold or bought) — and a switch is a tab, not a card. Both are
+   deleted; nothing of either survives but this.
 
-   ⚠ ONE CARD, TWO QUESTIONS, THE SAME NAMES. Captured asks what the sold premium
-   has captured, strike by strike. Left to sell asks what is still writeable, name
-   by name. The switch is the end of the eyebrow line and is the only thing on it
-   you can tap: no tab band, because a tab band says the two are peers being chosen
-   between, and they are one question asked at two moments of the week.
+   ⚠ ONE FLAT LIST, WORST FIRST. No name headings and no groups. A sold row is a
+   CONTRACT LINE, because NFLX 77 and NFLX 81 are two separate decisions; a
+   bought row is a NAME AND SIDE, because every long call on NKE is one
+   position. Both sort ascending, so what needs a look is at the top. The "name
+   is a heading" grouping the two old cards shared is retired: with a tab already
+   fixing the side, the ticker column is short enough to carry the strike.
 
-   ⚠ A STRIKE IS THE UNIT OF A ROLL, never a per-name average. NFLX's two strikes
-   are two decisions and averaging them would describe neither. Groups sort by
-   their worst leg and legs sort worst-first inside, so the rows needing a decision
-   are the rows at the top.
-
-   ⚠ THE OTHER CARDS SUPPLY THE WHY, and this card owns none of it. Prices says the
-   stock moved THROUGH the strike, which turns the strike red, and how far it ran
-   this week, which is the group's meta line. Average credit says what the leg
-   opened at. Premium now says what the IV is doing.
-
-   ⚠ AND THE FOOTER MUST NOT MOVE WHEN THE VIEW DOES. Both views carry a floor so
-   the stat band stays under the same thumb; the height between them is animated
-   rather than cut. */
-struct SunnyRollCheck: View {
-    let book: OptionsBook
+   ⚠ TWO TAPS, NOT FIVE. The tabs, and the figure column. Roll check's left-side
+   switch, its IV and yield taps and Long legs' window words are gone — Left to
+   sell is Inventory's reading, and the windows asked a second question the hero
+   already answers. */
+struct SunnyPositions: View {
     let positions: [OptionsPosition]
-    /// Inventory — calls and puts still writeable, per name.
-    var inventory: [InventoryRow] = []
-    /// Prices — spot, the day's move and the week's, plus the IV band.
-    var prices: [PriceRow] = []
+    let legs: [LongLeg]
+    let prices: [PriceRow]
+    let asOf: String
 
-    private enum View2 { case captured, left }
-    /* ⚠ THREE STATES, NOT THE SHEET'S TWO. Nik, 2026-09-13: "we need a third one
-       which is remaining". The percentage says how much of the credit is banked,
-       the captured dollars say what that is worth, and REMAINING is what closing
-       the leg would cost today. They are the same fact stated three ways and
-       none is derivable from the row alone, which is what earns the third stop
-       rather than making it a third way of saying one thing. */
-    private enum Fig { case pct, captured, timeValue }
-    @State private var view: View2 = .captured
-    /* ⚠ VERIFICATION ONLY, the same device as `-showMoney`: the simulator's
-       touch bridge crashes, so `-rollFig tv` forces the stop and proves the
-       RENDERING. It does not test the tap, which cannot be driven here. */
-    @State private var fig: Fig = {
-        let a = ProcessInfo.processInfo.arguments
-        guard let i = a.firstIndex(of: "-rollFig"), i + 1 < a.count else { return .pct }
-        switch a[i + 1] {
-        case "tv": return .timeValue
-        case "captured": return .captured
-        default: return .pct
-        }
-    }()
-    @State private var ivMult = false        // Left to sell: the word or the multiple
-    @State private var yieldUsd = false      // Left to sell: yield % or dollars
+    /* Both survive a pull: a reading the user chose, not state the data owns.
+       `mode` is shared across all four tabs on purpose. */
+    @AppStorage("sunnyfi.pos.tab") private var tabRaw = "sc"
+    @AppStorage("sunnyfi.pos.usd") private var usdMode = false
     @State private var appeared = false
+    /// Re-read on the tick so Friday 20:00 and Monday 04:00 land without a reload.
     @State private var now = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /* ⚠ THE AXIS RUNS −125 TO +100 AND THE ZERO IS NOT ITS MIDDLE. A leg can give
-       back more than the credit it took (−125 is the call having more than
-       doubled) but it can never capture more than all of it, so the two ends are
-       not symmetric and pretending they are would put +100 in the middle of a bar
-       that has nothing beyond it. */
-    private let axLo: Double = -125, axHi: Double = 100
-    private var track: CGFloat { S.content - 48 - 46 - 10 - 10 - 56 }
-    private func x(_ p: Double) -> CGFloat {
-        CGFloat((min(max(p, axLo), axHi) - axLo) / (axHi - axLo)) * track
-    }
-    private var zeroX: CGFloat { x(0) }
+    // MARK: geometry, from the sheet
 
-    // MARK: the week's clock
+    private static let nameCol: CGFloat = 70
+    private static let figCol: CGFloat = 56
+    private static let colGap: CGFloat = 10
+    private static let barH: CGFloat = 14
+    private static let rowGap: CGFloat = 16
+    private static let stagger: Double = 0.040
 
-    private var etCal: Calendar {
-        var c = Calendar(identifier: .gregorian)
-        c.timeZone = TimeZone(identifier: "America/New_York") ?? .current
-        return c
+    // MARK: the four tabs
+
+    private enum Tab: String, CaseIterable {
+        case sc, sp, bc, bp
+        var label: String {
+            switch self {
+            case .sc: return "Calls sold"
+            case .sp: return "Puts sold"
+            case .bc: return "Calls bought"
+            case .bp: return "Puts bought"
+            }
+        }
+        var sold: Bool { self == .sc || self == .sp }
+        var isCall: Bool { self == .sc || self == .bc }
+        var scope: String { "\(isCall ? "calls" : "puts") \(sold ? "sold" : "bought")" }
     }
-    /* ⚠ THE WEEK IS OVER ON FRIDAY NIGHT. "kept this week" is a live figure while
-       the week is open; from Friday 20:00 ET to Monday 04:00 ET the week it refers
-       to has CLOSED, so the words leave and the figure stands alone as the week's
-       result. The same window the Prices card uses for its day chip, so the two
-       cards go quiet together. */
+    private var tab: Tab { Tab(rawValue: tabRaw) ?? .sc }
+
+    // MARK: the rows
+
+    private struct Row: Identifiable {
+        let t: String, k: String, v: Double, fig: String
+        let through: Bool
+        var id: String { "\(t)|\(k)" }
+        var up: Bool { v >= 0 }
+    }
+
+    /// One entry per open short contract line on the picked side.
+    private struct Sold {
+        let t: String, k: Double, n: Int, pct: Double, cr: Double
+        /// What the strike has kept (+) or given back (−).
+        var usd: Double { pct / 100 * cr * 100 * Double(n) }
+        var credit: Double { cr * 100 * Double(n) }
+    }
+    private var soldLegs: [Sold] {
+        positions.flatMap { p in
+            p.shorts.compactMap { s -> Sold? in
+                let isCall = (s.type ?? "call") == "call"
+                guard isCall == tab.isCall, let cr = s.cr else { return nil }
+                return Sold(t: p.t, k: s.k, n: s.n, pct: Double(s.captured), cr: cr)
+            }
+        }
+        .sorted { $0.pct < $1.pct }
+    }
+
+    /// One entry per name on the picked side: every long call on a name is one
+    /// position, Σ mark × n against Σ cost × n.
+    private struct Bought {
+        let t: String, ks: [String], n: Int, now: Double, paid: Double
+        var ch: Double { paid > 0 ? now / paid - 1 : 0 }
+        var made: Double { now - paid }
+    }
+    private var boughtPositions: [Bought] {
+        var by: [String: (ks: [String], n: Int, now: Double, paid: Double)] = [:]
+        for l in legs where l.isCall == tab.isCall {
+            var g = by[l.t] ?? ([], 0, 0, 0)
+            g.ks.append(String(l.k.dropLast()))
+            g.n += l.n; g.now += l.m * Double(l.n); g.paid += l.cost * Double(l.n)
+            by[l.t] = g
+        }
+        return by.map { Bought(t: $0.key, ks: $0.value.ks, n: $0.value.n,
+                               now: $0.value.now, paid: $0.value.paid) }
+            .sorted { $0.ch < $1.ch }
+    }
+
+    private var rows: [Row] {
+        if tab.sold {
+            return soldLegs.map { l in
+                Row(t: l.t, k: trimZero(String(format: "%.2f", l.k)), v: l.pct,
+                    fig: usdMode ? signedMoney(l.usd) : barePctInt(Int(l.pct.rounded())),
+                    through: movedThrough(l.t, l.k))
+            }
+        }
+        return boughtPositions.map { p in
+            Row(t: p.t, k: p.ks.count == 1 ? p.ks[0] : "\(p.ks.count) strikes",
+                v: p.ch * 100,
+                fig: usdMode ? signedMoney(p.made) : signedPct1(p.ch),
+                through: false)
+        }
+    }
+
+    /* ⚠ A STRIKE THE STOCK HAS MOVED THROUGH: a call below spot, a put above
+       it. Red ticker with a red bar says roll it; red ticker with a green bar
+       says it ran through but you are still ahead. A name with no close never
+       turns red. */
+    private func movedThrough(_ t: String, _ k: Double) -> Bool {
+        guard let spot = prices.first(where: { $0.ticker == t })?.spot, spot > 0 else { return false }
+        return tab.isCall ? spot > k : spot < k
+    }
+
+    // MARK: the axis
+
+    private struct Axis { let min: Double, max: Double, lo: Double, hi: Double }
+    /* ⚠ THE SOLD AXIS IS FIXED AND IT IS ROLL CHECK'S. +75 is three quarters of
+       the credit banked; −100 is the call having doubled against you, the spot
+       at the leg's break-even. The bought axis is Long legs': symmetric, so one
+       name's fall reads against another's rise. */
+    private var axis: Axis {
+        guard !tab.sold else { return Axis(min: -125, max: 100, lo: -100, hi: 75) }
+        let biggest = rows.map { abs($0.v) }.max() ?? 10
+        let lim = max(10, (biggest * 1.1 / 10).rounded(.up) * 10)
+        return Axis(min: -lim, max: lim, lo: -lim, hi: lim)
+    }
+    /// A value's place on the track, 0...1. Past the end it clamps and the
+    /// figure carries the truth.
+    private func x(_ a: Axis, _ v: Double) -> CGFloat {
+        CGFloat((Swift.max(a.min, Swift.min(a.max, v)) - a.min) / (a.max - a.min))
+    }
+
+    // MARK: the hero and the footer
+
+    private var keptSum: Double { soldLegs.reduce(0) { $0 + $1.usd } }
+    private var creditSum: Double { soldLegs.reduce(0) { $0 + $1.credit } }
+    private var madeSum: Double { boughtPositions.reduce(0) { $0 + $1.made } }
+    private var paidSum: Double { boughtPositions.reduce(0) { $0 + $1.paid } }
+    private var nowSum: Double { boughtPositions.reduce(0) { $0 + $1.now } }
+
+    /* ⚠ THE WEEK IS OVER ON FRIDAY NIGHT. "kept this week" is live while the
+       week is open; from Friday 20:00 ET to Monday 04:00 ET the words leave and
+       the figure stands alone, because it is the week's result now rather than a
+       running total. The same window Prices uses for its day chip. */
     private var weekOpen: Bool {
-        let wd = etCal.component(.weekday, from: now), h = etCal.component(.hour, from: now)
-        if wd == 7 || wd == 1 { return false }
-        if wd == 6 && h >= 20 { return false }
-        if wd == 2 && h < 4 { return false }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let wd = cal.component(.weekday, from: now), h = cal.component(.hour, from: now)
+        if wd == 7 || wd == 1 { return false }          // Sat, Sun
+        if wd == 6 && h >= 20 { return false }          // Fri night
+        if wd == 2 && h < 4 { return false }            // before Mon pre-market
         return true
     }
 
-    // MARK: borrowed readings
-
-    private func px(_ t: String) -> PriceRow? { prices.first { $0.ticker == t } }
-    private func inv(_ t: String) -> InventoryRow? { inventory.first { $0.t == t } }
-    private func freeCalls(_ t: String) -> Int { max(0, (inv(t)?.callsHeld ?? 0) - (inv(t)?.callsSold ?? 0)) }
-    private func freePuts(_ t: String) -> Int { max(0, (inv(t)?.putsHeld ?? 0) - (inv(t)?.putsSold ?? 0)) }
-
-    /// A sold strike the stock has moved THROUGH: a call below spot, a put above it.
-    private func through(_ l: OptionsPosition.ShortLeg, _ spot: Double?) -> Bool {
-        guard let spot, spot > 0 else { return false }
-        return (l.type ?? "call") == "put" ? spot < l.k : spot > l.k
+    private var hero: Double { tab.sold ? keptSum : madeSum }
+    private var heroSub: String {
+        if tab.sold { return weekOpen ? "kept this week" : "" }
+        let up = boughtPositions.filter { $0.made >= 0 }.count
+        return "\(up) of \(boughtPositions.count) up · since bought"
     }
-
-    // MARK: the two views' rows
-
-    /* Named for the legs, not "Group": a bare `Group` shadows SwiftUI's own and
-       the view builder then tries to construct this one. */
-    private struct LegGroup: Identifiable {
-        let id: String, t: String, meta: String, worst: Int
-        let legs: [OptionsPosition.ShortLeg]
-        let spot: Double?
+    private var eyebrow: String {
+        tab.sold ? (usdMode ? "KEPT OF CREDIT" : "CAPTURED OF CREDIT")
+                 : (usdMode ? "MADE YOU" : "CHANGE SINCE BOUGHT")
     }
-    /* ⚠ A NAME WITH NOTHING SOLD IS STILL A ROW. Nik, 2026-09-13: "KR should
-       still show even if never written", and the same instruction he gave the
-       old card on 11 Sep. The sheet groups by sold leg and so drops a name that
-       has none, which hides exactly the name there is most to do about: KR holds
-       a LEAP and has never written a call against it.
-
-       Those names sort FIRST, alphabetically, because they are the work that has
-       not started, and a captured percentage cannot rank them — there is nothing
-       captured. Worst-first resumes below them. */
-    /* ⚠ ONE ROW PER NAME, AND `positions` IS ONE ROW PER LEAP LEG. BABA held
-       two long calls at different strikes on 14 Sep 2026 and arrived here
-       twice, each copy carrying the NAME's whole short list — a duplicate
-       group id, every BABA leg drawn and counted twice, and the header's leg
-       count three too high. It nets out today and will come back the next time
-       a name is built in two tranches. */
-    private var names: [OptionsPosition] {
-        var seen = Set<String>()
-        return positions.filter { seen.insert($0.t).inserted }
+    private var meta: String {
+        let n = rows.count
+        return tab.sold ? "\(n) leg\(n == 1 ? "" : "s")" : "\(n) position\(n == 1 ? "" : "s")"
     }
-    private var groups: [LegGroup] {
-        names.map { p -> LegGroup in
-            let legs = p.shorts.sorted { $0.captured < $1.captured }
-            let row = px(p.t)
-            let wk = row?.pct.w1
-            let meta = [row?.spot.map { "$" + String(format: "%.2f", $0) },
-                        wk.map { signed1Pct($0) + " wk" }]
-                .compactMap { $0 }.joined(separator: " \u{00B7} ")
-            return LegGroup(id: p.t, t: p.t, meta: meta,
-                            /* Sorts above every real reading, including a leg
-                               that has given back more than its credit. */
-                            worst: legs.first?.captured ?? Int.min, legs: legs,
-                            spot: row?.spot)
-        }
-        .sorted {
-            if $0.legs.isEmpty != $1.legs.isEmpty { return $0.legs.isEmpty }
-            if $0.legs.isEmpty { return $0.t < $1.t }
-            return $0.worst < $1.worst
-        }
-    }
-    private var allLegs: [OptionsPosition.ShortLeg] { names.flatMap(\.shorts) }
-    /// Summed from the legs the card lists, never a stored total.
-    private var bookTV: Int { allLegs.reduce(0) { $0 + ($1.tv ?? 0) } }
-    private var underWater: Int { allLegs.filter { $0.captured < 0 }.count }
-    private var totalFree: Int { names.reduce(0) { $0 + freeCalls($1.t) + freePuts($1.t) } }
-    private var kept: Int { (book.openCredit ?? 0) - (book.openValue ?? 0) }
-
-    private struct LeftRow: Identifiable {
-        let id: String, t: String, split: String
-        let has: Bool, cr: Double, yld: Double, mult: Double
-        let word: String, rich: Bool, move: Double?
-        let free: Int, rank: Double
-    }
-    private var lefts: [LeftRow] {
-        positions.map { p -> LeftRow in
-            let fc = freeCalls(p.t), fp = freePuts(p.t), n = fc + fp
-            let row = px(p.t)
-            let spot = row?.spot ?? 0, cr = p.lastCr ?? 0
-            let yld = spot > 0 ? cr / spot * 100 : 0
-            let m = row?.iv.map { $0.usual > 0 ? $0.now / $0.usual : 1 } ?? 1
-            var parts: [String] = []
-            if fc > 0 { parts.append("\(fc) call" + (fc == 1 ? "" : "s")) }
-            if fp > 0 { parts.append("\(fp) put" + (fp == 1 ? "" : "s")) }
-            return LeftRow(
-                id: p.t, t: p.t,
-                /* ⚠ "fully written" IS AN ABSENCE, NOT A QUANTITY. "0 calls ·
-                   0 puts free" reads as two measurements that happen to be zero. */
-                split: parts.isEmpty ? "fully written" : parts.joined(separator: " \u{00B7} ") + " free",
-                has: n > 0, cr: cr, yld: yld, mult: m,
-                word: row?.ivWord ?? "", rich: row?.ivRich ?? false,
-                move: row?.pct.today, free: n,
-                /* ⚠ THE RANKING IS ROOM × WHAT IT PAYS × HOW WELL IT PAYS TODAY.
-                   Free contracts alone ranks a name you cannot get a price for
-                   above one you can. */
-                /* A name with no history ranks on room alone, below anything
-                   that has actually paid, rather than at zero. */
-                rank: cr > 0 ? Double(n) * yld * m : Double(n) * 0.0001)
-        }
-        .sorted { $0.rank > $1.rank }
-    }
-
-    // MARK: formatting
-
-    private func signed1Pct(_ v: Double) -> String {
-        let a = String(format: "%.1f", abs(v))
-        return (a == "0.0" ? "" : v < 0 ? "\u{2212}" : "+") + a + "%"
-    }
-    private func pct0(_ v: Int) -> String { (v < 0 ? "\u{2212}" : "") + "\(abs(v))%" }
-    /// The right column's three readings of one leg.
-    private func figText(_ l: OptionsPosition.ShortLeg) -> String {
-        switch fig {
-        case .pct:       return pct0(l.captured)
-        /* Credit minus what it is worth now: the money the strike has kept, or
-           given back when the option has run against you. */
-        case .captured:  return optMoney(l.credit - l.value)
-        /* ⚠ WHAT IS STILL TO DECAY, NOT WHAT THE BUY-BACK COSTS. Nik, 14 Sep
-           2026, replacing "left to capture" here. The buy-back cost was the
-           whole mark; this is the part of it that is TIME and comes back by
-           Friday if he does nothing. The rest is intrinsic — the stock having
-           run through the strike — and no amount of waiting returns it.
-
-           On an out-of-the-money leg the two are the same number, and that is
-           the reading rather than a fault: the whole remaining cost is decay he
-           collects. A GAP between them is the intrinsic he will not get back,
-           which is the roll signal. */
-        case .timeValue: return optMoney(l.tv ?? 0)
-        }
-    }
-    private func settle(_ d: Double, delay: Double = 0) -> Animation {
-        .timingCurve(0.16, 1, 0.3, 1, duration: d).delay(delay)
-    }
-
-    // MARK: body
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
                 HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-                    Text("Roll check").font(S.inter(S.t14, S.wBoldN))
+                    Text("Positions").font(S.inter(S.t14, S.wBoldN))
                         .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
-                    Text("sold").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
+                    Text(tab.scope).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
                 }
                 Spacer(minLength: 0)
-                /* Both counted, never stated: the header is the card's own census. */
-                Text("\(underWater) asking of \(allLegs.count) legs")
-                    .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                Text(meta).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
             }
-
+            Spacer().frame(height: 18)
+            tabRow
             Spacer().frame(height: 22)
 
-            Group {
-                if view == .captured { capturedView } else { leftView }
+            Text(eyebrow).font(S.inter(S.t10, S.wBoldN))
+                .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
+            Spacer().frame(height: 12)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(signedMoney(hero)).font(S.inter(S.t30, S.wBoldN))
+                    .tracking(S.track(S.t30, -0.035))
+                    .foregroundStyle(hero < 0 ? S.lossText : S.gainText)
+                    .sunnyLineBox(S.t30)
+                if !heroSub.isEmpty {
+                    Text(heroSub).font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
             }
-            /* ⚠ A FLOOR ON BOTH VIEWS, so the footer does not travel under the
-               thumb when the question changes. */
-            .frame(minHeight: 300, alignment: .top)
-            .animation(reduceMotion ? nil : settle(0.5), value: view)
+            Spacer().frame(height: 28)
 
-            /* OptFooter draws the rule itself; adding one here gave the card two
-               hairlines 50pt apart, which reads as a band rather than an edge. */
+            marks
+            Spacer().frame(height: 14)
+            VStack(alignment: .leading, spacing: Self.rowGap) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in row(r, i: i) }
+            }
+
             Spacer().frame(height: 26)
-            /* ⚠ THE FOOTER IS THE ONE HE ALREADY HAD, which overrides the sheet's
-               Rolling / Left to sell / Kept. Nik, 2026-09-13: "bottom i need the
-               same data as before, Credit collected current value and yireld".
-               The sheet's three restate the card: ROLLING is the header's own
-               count, LEFT TO SELL is the other view's hero, and KEPT is this
-               view's hero printed twice. These three are the week's money and
-               they audit each other — collected minus worth now IS the hero. */
-            OptFooter(stats: [
-                .init(label: "Collected", value: optMoney(book.openCredit ?? 0), ink: S.gainText),
-                .init(label: "Worth now", value: optMoney(book.openValue ?? 0), ink: S.ink),
-                .init(label: "Yield", value: String(format: "%.1f%%", book.openYield ?? 0), ink: S.ink),
-            ])
+            Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+            Spacer().frame(height: 18)
+            footer
         }
         .frame(width: S.content - 48, alignment: .leading)
         .padding(EdgeInsets(top: 24, leading: 24, bottom: 28, trailing: 24))
         .frame(width: S.content, alignment: .top)
         .background(S.paper)
         .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
-        .sunnyShadow(S.shadowCard)
+        .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
-        .measure("roll-check")
-        /* ⚠ THE ENTRANCE IS DRIVEN BY THE DATA ARRIVING, NOT BY THE VIEW
-           APPEARING. Nik, 2026-09-13: "also animation is not there". It was
-           there and it had already finished: `onAppear` fires on the empty card
-           while the fetch is still in flight, so `appeared` was true before a
-           single bar existed and every bar rendered at full width. The flag now
-           flips one frame AFTER the first non-empty render, which is the only
-           moment a grow-from-zero has anything to grow. */
-        .task(id: allLegs.count) {
+        .measure("positions")
+        .task(id: rows.count) {
             now = Date()
-            guard !allLegs.isEmpty, !appeared else { return }
+            guard !appeared, !rows.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(20))
             appeared = true
         }
     }
 
-    // MARK: eyebrow + switch, shared by both views
-
-    @ViewBuilder private func eyebrow(_ label: String, _ go: String,
-                                      _ action: @escaping () -> Void) -> some View {
-        HStack(alignment: .center, spacing: S.gap6) {
-            Text(label).font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                .foregroundStyle(S.mute)
-            Spacer(minLength: 0)
-            /* ⚠ THE SWITCH CARRIES NO UNDERLINE. Its arrow is the affordance, and
-               the dotted hint is reserved for a figure that FLIPS in place. Two
-               different promises need two different marks. */
-            HStack(spacing: 5) {
-                Text(go).font(S.inter(S.t12, S.wSemiN)).tracking(S.track(S.t12, -0.01))
-                    .foregroundStyle(S.ink2)
-                Text("\u{2192}").font(S.inter(S.t11, S.wSemiN)).foregroundStyle(S.mute)
-            }
-            .padding(.vertical, 10).padding(.horizontal, 7)
-            .contentShape(Rectangle())
-            .onTapGesture(perform: action)
-            .padding(.vertical, -10).padding(.horizontal, -7)
-        }
-        .frame(height: 12)
-    }
-
-    // MARK: captured
-
-    @ViewBuilder private var capturedView: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            eyebrow(fig == .timeValue ? "TIME VALUE LEFT"
-                    : fig == .captured ? "CAPTURED, IN MONEY" : "CAPTURED OF CREDIT",
-                    "Left to sell") { view = .left }
-            Spacer().frame(height: 12)
-            /* ⚠ THE HERO FOLLOWS THE COLUMN, because the eyebrow already
-               does. Nik, 14 Sep 2026: "add book level on top". On the time
-               value stop the hero is the whole book's time value, summed from
-               the same legs listed below it, so the card cannot disagree with
-               itself. Every other stop keeps "kept this week". */
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(optMoney(fig == .timeValue ? bookTV : kept))
-                    .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.035))
-                    .foregroundStyle(fig == .timeValue ? S.gainText
-                                     : (kept < 0 ? S.lossText : S.gainText))
-                    .sunnyLineBox(S.t30)
-                if fig == .timeValue {
-                    Text("still to decay")
-                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
-                } else if weekOpen {
-                    Text("kept this week")
-                        .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+    /* ⚠ THE TABS ARE NOT UNDERLINED. The picked one is bold ink with a 2pt line
+       sitting on the rule, the rest muted — the deck's dotted hair marks text
+       that FLIPS, not text that navigates, and an underline on four adjacent
+       words reads as a heading rule. */
+    private var tabRow: some View {
+        HStack(alignment: .bottom, spacing: 0) {
+            ForEach(Array(Tab.allCases.enumerated()), id: \.element) { i, t in
+                if i > 0 { Spacer(minLength: 4) }
+                VStack(spacing: 0) {
+                    Text(t.label)
+                        .font(S.inter(S.t12, t == tab ? S.wBoldN : S.wMidN))
+                        .tracking(S.track(S.t12, -0.01))
+                        .foregroundStyle(t == tab ? S.ink : S.mute)
+                        .lineLimit(1)
+                    Spacer().frame(height: 10)
+                    Rectangle().fill(t == tab ? S.ink : S.ruleColor)
+                        .frame(height: t == tab ? 2 : 1)
                 }
-            }
-            Spacer().frame(height: 28)
-
-            /* The two levels are ANNOTATIONS on the money axis, never gates and
-               never a money hue: +75 is three quarters of the credit banked,
-               −100 is the option having doubled. */
-            HStack(spacing: 10) {
-                Color.clear.frame(width: 46, height: 11)
-                ZStack(alignment: .leading) {
-                    Text("\u{2212}100").font(S.inter(S.t10, S.wBoldN))
-                        .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
-                        .fixedSize().offset(x: x(-100) - 10)
-                    Text("+75").font(S.inter(S.t10, S.wBoldN))
-                        .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
-                        .fixedSize().offset(x: x(75) - 8)
-                }
-                .frame(width: track, height: 11, alignment: .leading)
-                Color.clear.frame(width: 56, height: 11)
-            }
-            Spacer().frame(height: 14)
-
-            VStack(alignment: .leading, spacing: 26) {
-                ForEach(Array(groups.enumerated()), id: \.element.id) { gi, g in
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-                            Text(g.t).font(S.inter(S.t15, S.wSemiN))
-                                .tracking(S.track(S.t15, -0.015)).foregroundStyle(S.ink)
-                            Spacer(minLength: 0)
-                            /* ⚠ THE CAUSE, NOT A REPEAT. The captured figures are
-                               the symptom; where the stock is and how far it ran
-                               is why they read as they do. */
-                            Text(g.meta).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
-                        }
-                        .frame(height: 15)
-                        Spacer().frame(height: 14)
-                        if g.legs.isEmpty {
-                            /* No bar and no figure: there is no credit to have
-                               captured any of, and drawing an empty track at zero
-                               would say the leg exists and has gone nowhere. */
-                            Text("nothing sold")
-                                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
-                                .frame(height: 26, alignment: .leading)
-                        } else {
-                            VStack(alignment: .leading, spacing: 16) {
-                                ForEach(Array(g.legs.enumerated()), id: \.element.id) { li, l in
-                                    legRow(l, spot: g.spot, delay: Double(gi * 3 + li) * 0.018)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .transition(.opacity)
-    }
-
-    @ViewBuilder private func legRow(_ l: OptionsPosition.ShortLeg, spot: Double?,
-                                     delay: Double) -> some View {
-        let up = l.captured >= 0
-        let w = abs(x(Double(l.captured)) - zeroX)
-        let grown = reduceMotion || appeared
-        HStack(alignment: .center, spacing: 10) {
-            /* ⚠ A STRIKE IN LOSS INK IS ONE THE STOCK HAS MOVED THROUGH, and
-               that is a different statement from the bar's colour. Red strike
-               with a red bar says roll it; red strike with a green bar says it
-               ran through and you are still ahead.
-
-               ⚠ THE CREDIT PER SHARE UNDER THE STRIKE IS GONE, 14 Sep 2026, on
-               Nik's instruction: "lets remove that data point doesn't make much
-               sense thinking about it now". It printed the price the leg was
-               sold at, and only on an under-water leg, so six of eighteen rows
-               carried it and twelve did not — which read as data missing rather
-               than as a rule. `lastCr` still feeds the Left to sell view, where
-               a name's own last print IS the ranking unit.
-
-               The 26 stays. It held two lines and now holds one, and dropping
-               it to fit the strike alone would re-space every row on the card
-               for a line that was only ever on a third of them. */
-            Text(l.label).font(S.inter(S.t13, S.wBodyN)).tracking(S.track(S.t13, -0.01))
-                .foregroundStyle(through(l, spot) ? S.lossText : S.ink2)
-                .lineLimit(1)
-                .frame(width: 46, height: 26, alignment: .leading)
-
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: S.radiusBar).fill(S.wash)
-                    .frame(width: track, height: 14)
-                ForEach([-100.0, 0.0, 75.0], id: \.self) { v in
-                    Rectangle().fill(S.hair).frame(width: 1.5, height: 22)
-                        .offset(x: x(v) - 0.75)
-                }
-                RoundedRectangle(cornerRadius: S.radiusBar)
-                    .fill(up ? S.gainBar : S.lossBar)
-                    .frame(width: max(2, w), height: 14)
-                    .scaleEffect(x: grown ? 1 : 0, anchor: up ? .leading : .trailing)
-                    .offset(x: up ? zeroX : zeroX - max(2, w))
-                    .animation(settle(0.72, delay: delay), value: appeared)
-                    .animation(reduceMotion ? nil : settle(0.55), value: view)
-            }
-            .frame(width: track, height: 14)
-
-            /* ⚠ TIME VALUE TAKES NO DIRECTION INK. It is money still to come
-               on every leg, so it is never a gain or a loss against the
-               captured reading beside it, and colouring it would have the card
-               arguing that a leg deep in the money is winning because its
-               decay is large. */
-            Text(figText(l))
-                .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.015))
-                .foregroundStyle(fig == .timeValue ? S.ink : (up ? S.gainText : S.lossText))
-                .lineLimit(1).fixedSize()
-                .sunnyHint()
-                .frame(width: 56, alignment: .trailing)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    fig = fig == .pct ? .captured : fig == .captured ? .timeValue : .pct
+                    withAnimation(reduceMotion ? nil : S.easeSettle(0.55)) { tabRaw = t.rawValue }
                 }
+            }
         }
-        .frame(height: 26)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: tabRaw)
     }
 
-    // MARK: left to sell
-
-    @ViewBuilder private var leftView: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            eyebrow("LEFT TO SELL", "Captured") { view = .captured }
-            Spacer().frame(height: 12)
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("\(totalFree)")
-                    .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.035))
-                    .foregroundStyle(S.ink).sunnyLineBox(S.t30)
-                Text("lots still writeable")
-                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+    /// The two outer axis values, centred on their lines.
+    private var marks: some View {
+        HStack(spacing: Self.colGap) {
+            Color.clear.frame(width: Self.nameCol, height: 11)
+            GeometryReader { g in
+                ZStack(alignment: .topLeading) {
+                    mark(String(Int(abs(axis.lo))), lead: true)
+                        .position(x: g.size.width * x(axis, axis.lo), y: 5.5)
+                    mark("+" + String(Int(axis.hi)), lead: false)
+                        .position(x: g.size.width * x(axis, axis.hi), y: 5.5)
+                }
             }
-            Spacer().frame(height: 24)
+            .frame(height: 11)
+            Color.clear.frame(width: Self.figCol, height: 11)
+        }
+        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: tabRaw)
+    }
+    private func mark(_ s: String, lead: Bool) -> some View {
+        Text(lead ? "\u{2212}" + s : s)
+            .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
+            .foregroundStyle(S.mute).sunnyLineBox(S.t10).fixedSize()
+    }
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(lefts.enumerated()), id: \.element.id) { i, r in
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .top, spacing: 14) {
-                            Text(r.t).font(S.inter(S.t15, S.wSemiN))
-                                .tracking(S.track(S.t15, -0.015))
-                                .foregroundStyle(r.has ? S.ink : S.mute)
-                                .frame(width: 58, alignment: .leading).lineLimit(1)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(r.split).font(S.inter(S.t15, S.wSemiN))
-                                    .tracking(S.track(S.t15, -0.015))
-                                    .foregroundStyle(r.has ? S.ink2 : S.mute)
-                                    .frame(height: 15, alignment: .leading).lineLimit(1)
-                                if r.has { smallFigures(r) } else { Color.clear.frame(height: 11) }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            /* The tap on the right: the rate, and what filling the
-                               room would actually pay. */
-                            /* ⚠ A NAME THAT HAS NEVER BEEN WRITTEN HAS NO YIELD,
-                               and printing 0.0% says it was measured and pays
-                               nothing. KR holds a free call and has never sold
-                               one, so there is no last credit to rate it on: the
-                               dash is the same absence "fully written" is. */
-                            Text(r.has && r.cr > 0
-                                 ? (yieldUsd ? optMoney(Int((r.cr * 100 * Double(r.free)).rounded()))
-                                             : String(format: "%.1f%%", r.yld))
-                                 : "\u{2014}")
-                                .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
-                                .foregroundStyle(r.has && r.cr > 0 ? S.ink : S.mute)
-                                .lineLimit(1).fixedSize()
-                                .sunnyHint(on: r.has && r.cr > 0)
-                                .frame(minWidth: 37.5, alignment: .trailing)
-                                .contentShape(Rectangle())
-                                .onTapGesture { if r.has && r.cr > 0 { yieldUsd.toggle() } }
-                        }
-                        .padding(.vertical, 17)
-                        if i < lefts.count - 1 {
-                            Rectangle().fill(S.ruleColor).frame(height: 1)
-                        }
+    @ViewBuilder private func row(_ r: Row, i: Int) -> some View {
+        HStack(spacing: Self.colGap) {
+            /* ⚠ EVERY CELL TAKES ITS LINE BOX, which is the sheet's
+               `line-height: 1`. Without it a 13pt Text reserves ~16pt of its
+               own leading, the row is sized by the text rather than by the bar,
+               and the pitch measured 32 against the sheet's 30 — two points
+               over on every row, thirty over the card. */
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(r.t).font(S.inter(S.t13, S.wSemiN))
+                    .tracking(S.track(S.t13, -0.015))
+                    .foregroundStyle(r.through ? S.lossText : S.ink)
+                    .sunnyLineBox(S.t13)
+                Text(r.k).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                    .sunnyLineBox(S.t11)
+                Spacer(minLength: 0)
+            }
+            .lineLimit(1).frame(width: Self.nameCol, alignment: .leading)
+
+            GeometryReader { g in
+                let zero = g.size.width * x(axis, 0)
+                let px = g.size.width * x(axis, r.v)
+                ZStack(alignment: .topLeading) {
+                    RoundedRectangle(cornerRadius: 4).fill(S.wash)
+                        .frame(width: g.size.width, height: Self.barH)
+                    RoundedRectangle(cornerRadius: 4).fill(r.up ? S.gainBar : S.lossBar)
+                        .frame(width: abs(px - zero), height: Self.barH)
+                        .offset(x: Swift.min(zero, px))
+                        .scaleEffect(x: appeared || reduceMotion ? 1 : 0,
+                                     anchor: r.up ? .leading : .trailing)
+                        .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
+                            .delay(Double(i) * Self.stagger), value: appeared)
+                        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: r.v)
+                        .animation(.easeInOut(duration: 0.3), value: r.up)
+                    /* The three reference lines, reaching 4 above and below. */
+                    ForEach([axis.lo, 0, axis.hi], id: \.self) { v in
+                        Rectangle().fill(S.hair)
+                            .frame(width: 1.5, height: Self.barH + 8)
+                            .offset(x: g.size.width * x(axis, v) - 0.75, y: -4)
+                            .animation(reduceMotion ? nil : S.easeSettle(0.55), value: tabRaw)
                     }
-                    .opacity(reduceMotion || appeared ? 1 : 0)
-                    .offset(y: reduceMotion || appeared ? 0 : 4)
-                    .animation(settle(0.5, delay: Double(i) * 0.045), value: appeared)
                 }
             }
+            .frame(height: Self.barH)
 
-            Spacer().frame(height: 14)
-            Text(yieldUsd
-                 ? "credit if every free contract were written at the last price \u{00B7} IV against its own history"
-                 : "weekly yield on the share, last written \u{00B7} IV against its own history")
-                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
-                .fixedSize(horizontal: false, vertical: true)
+            Text(r.fig).font(S.inter(S.t13, S.wBoldN))
+                .tracking(S.track(S.t13, -0.015))
+                .foregroundStyle(r.up ? S.gainText : S.lossText)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .sunnyLineBox(S.t13)
+                .frame(width: Self.figCol, alignment: .trailing)
+                .sunnyHint()
+                .padding(.vertical, 8).contentShape(Rectangle())
+                .onTapGesture { usdMode.toggle() }
+                .padding(.vertical, -8)
         }
-        .transition(.opacity)
+        .frame(height: Self.barH)
+        .opacity(appeared || reduceMotion ? 1 : 0)
+        .animation(reduceMotion ? nil : S.easeSettle(0.4).delay(Double(i) * Self.stagger),
+                   value: appeared)
     }
 
-    @ViewBuilder private func smallFigures(_ r: LeftRow) -> some View {
-        HStack(spacing: 6) {
-            /* Same rule as the yield beside it: no last credit is a fact about
-               the name, not a price of zero. */
-            Text(r.cr > 0 ? "$" + String(format: "%.2f", r.cr) : "not written yet")
-                .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-            if !r.word.isEmpty {
-                Text("\u{00B7}").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-                Text(ivMult ? String(format: "%.2f", r.mult) + "\u{00D7} IV" : r.word)
-                    .font(S.inter(S.t11, S.wMidSmN))
-                    .foregroundStyle(r.rich ? S.gainText : S.mute)
-                    .sunnyHint()
-                    .contentShape(Rectangle())
-                    .onTapGesture { ivMult.toggle() }
+    /* ⚠ THE FOOTER FOLLOWS THE TAB, and its Paid must equal Programme's invested
+       and Intrinsic value's Paid to the dollar — all three read one ledger. */
+    private var footer: some View {
+        HStack(alignment: .top, spacing: S.gap6) {
+            ForEach(Array(stats.enumerated()), id: \.offset) { _, s in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(s.0).font(S.inter(S.t10, S.wBoldN))
+                        .tracking(S.track(S.t10, S.lsLabel))
+                        .foregroundStyle(S.mute).lineLimit(1)
+                    Text(s.1).font(S.inter(S.t19, S.wBoldN))
+                        .tracking(S.track(S.t19, -0.025))
+                        .foregroundStyle(s.2).lineLimit(1).minimumScaleFactor(0.7)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let m = r.move {
-                Text("\u{00B7}").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-                Text(signed1Pct(m)).font(S.inter(S.t11, S.wMidSmN))
-                    .foregroundStyle(m < 0 ? S.lossText : S.gainText)
-            }
-            Spacer(minLength: 0)
         }
-        .frame(height: 11)
+    }
+    private var stats: [(String, String, Color)] {
+        if tab.sold {
+            let yield = creditSum > 0 ? keptSum / creditSum * 100 : 0
+            return [("COLLECTED", optMoney(Int(creditSum.rounded())), S.ink),
+                    ("WORTH NOW", optMoney(Int((creditSum - keptSum).rounded())), S.ink),
+                    ("YIELD", barePctInt(Int(yield.rounded())),
+                     keptSum < 0 ? S.lossText : S.gainText)]
+        }
+        return [("PAID", optMoney(Int(paidSum.rounded())), S.ink),
+                ("WORTH NOW", optMoney(Int(nowSum.rounded())), S.ink),
+                ("DIFFERENCE", signedMoney(nowSum - paidSum),
+                 nowSum >= paidSum ? S.gainText : S.lossText)]
     }
 }
 
@@ -1021,241 +853,8 @@ private struct SunnyVDash: View {
     }
 }
 
-// MARK: - 2d · Long legs, by name
-
-/* ⚠ NEW CARD, from `export 14`, 14 Sep 2026. The long-leg cousin of Prices:
-   that card shows every held STOCK's move, this one every long POSITION's.
-
-   ⚠ A ROW IS A NAME AND A SIDE, NEVER A STRIKE. Every long call on NKE is one
-   position, Σ mark × n against Σ then × n, and the row says "Calls", not
-   "30C · Jan 28 · ×60". The strike is a fact about the contract; the reader's
-   question is about the name. The contract count is not printed either.
-
-   ⚠ THE NAME IS A HEADING, NOT A PREFIX, which is Roll check's rule. Printed
-   once with its window net on the right, and the Calls and Puts rows belong to
-   it. A ticker repeated on two rows spends the widest column on the one word
-   that does not change.
-
-   ⚠ ONE AXIS FROM ZERO FOR THE WHOLE CARD. Symmetric, a hair line at the
-   middle, and the largest move on the card times 1.1 is the half track. Every
-   bar is read against every other, not against its own row, so NKE's −11.8%
-   and BABA's +8.8% are the same distance apart here as in the book. A window
-   tap re-derives the axis and every bar moves, not only the ones whose figure
-   changed. */
-struct SunnyLongLegs: View {
-    let block: LongLegsBlock
-
-    /* Both survive a pull: a reading the user chose, not state the data owns. */
-    @AppStorage("sunnyfi.ll.win") private var winRaw = LongWindow.life.rawValue
-    @AppStorage("sunnyfi.ll.mode") private var modeRaw = 0
-    @State private var grown = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var win: LongWindow { LongWindow(rawValue: winRaw) ?? .life }
-
-    private static let sideCol: CGFloat = 46
-    private static let figCol: CGFloat = 62
-    private static let colGap: CGFloat = 10
-    private static let barH: CGFloat = 14
-    private static let rowGap: CGFloat = 16
-    private static let groupGap: CGFloat = 26
-
-    /// Ranked by what the name made over the window, best first.
-    private var groups: [(t: String, rows: [LongPosition], made: Double)] {
-        let all = LongPosition.all(block.legs)
-        return Dictionary(grouping: all, by: \.t)
-            .map { (t: $0.key,
-                    rows: $0.value.sorted { $0.isCall && !$1.isCall },
-                    made: $0.value.reduce(0) { $0 + $1.made(win) }) }
-            .sorted { $0.made > $1.made }
-    }
-    /// ⚠ CARD-WIDE, NEVER PER ROW. A row normalised to itself would make every
-    /// position look the same size.
-    private var lim: Double {
-        let m = LongPosition.all(block.legs)
-            .compactMap { $0.change(win) }.map(abs).max() ?? 0
-        return max(m * 1.1, 0.01)
-    }
-    private var sumPaid: Double { LongPosition.all(block.legs).reduce(0) { $0 + $1.paid } }
-    private var sumNow: Double { LongPosition.all(block.legs).reduce(0) { $0 + $1.now } }
-    private var sumMade: Double { LongPosition.all(block.legs).reduce(0) { $0 + $1.made(win) } }
-    private var upCount: Int {
-        groups.filter { $0.made > 0 }.count
-    }
-
-    var body: some View {
-        OptCard(name: "long-legs", fixedHeight: nil) {
-            OptHead(title: "Long legs", sub: "by name", right: ivDay(block.asOf))
-            Spacer().frame(height: 22)
-            switchRow
-            Spacer().frame(height: 12)
-            hero
-            Spacer().frame(height: 28)
-            VStack(alignment: .leading, spacing: Self.groupGap) {
-                ForEach(Array(groups.enumerated()), id: \.element.t) { gi, g in
-                    group(g, from: offset(before: gi))
-                }
-            }
-            Spacer(minLength: 26)
-            /* ⚠ THE FOOTER IS THE LEDGER AND A WINDOW TAP DOES NOT TOUCH IT.
-               Paid is a fixed point; the card closes on it whichever window is
-               picked. It equals Programme's invested and Intrinsic value's
-               Paid to the dollar, and the three must never drift. */
-            OptFooter(stats: [
-                .init(label: "Paid", value: optMoney(Int(sumPaid.rounded())), ink: S.ink),
-                .init(label: "Mark", value: optMoney(Int(sumNow.rounded())), ink: S.ink),
-                .init(label: "Since bought",
-                      value: signedPct1(sumPaid > 0 ? sumNow / sumPaid - 1 : 0),
-                      ink: sumNow >= sumPaid ? S.gainText : S.lossText),
-            ])
-        }
-        .task(id: block.legs.count) {
-            guard !grown else { return }
-            try? await Task.sleep(for: .milliseconds(20))
-            grown = true
-        }
-    }
-
-    /// How many bars are above this group, so the entrance stagger runs down
-    /// the whole card rather than restarting inside every name.
-    private func offset(before gi: Int) -> Int {
-        groups.prefix(gi).reduce(0) { $0 + $1.rows.count }
-    }
-
-    // MARK: the switch row
-
-    /* Prices' switch pattern: the mode word on the left, the four windows on
-       the right. The picked window is ink and bold, the rest muted — and it is
-       NOT underlined. Four adjacent underlined words read as a heading rule;
-       the hint belongs to the figure column, which is the only text control. */
-    private var switchRow: some View {
-        HStack(spacing: 0) {
-            Text(modeEyebrow).font(S.inter(S.t10, S.wBoldN))
-                .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
-            Spacer(minLength: 8)
-            HStack(spacing: 0) {
-                ForEach(LongWindow.allCases, id: \.self) { w in
-                    Text(w.word)
-                        .font(S.inter(S.t12, win == w ? S.wBoldN : S.wMidN))
-                        .tracking(S.track(S.t12, -0.01))
-                        .foregroundStyle(win == w ? S.ink : S.mute)
-                        .padding(.vertical, 10).padding(.horizontal, 7)
-                        .contentShape(Rectangle())
-                        .onTapGesture { winRaw = w.rawValue }
-                }
-            }
-            .padding(.vertical, -10).padding(.trailing, -7)
-        }
-    }
-
-    private var modeEyebrow: String {
-        switch modeRaw {
-        case 1:  return "MADE YOU"
-        case 2:  return "MARK"
-        default: return "CHANGE"
-        }
-    }
-
-    // MARK: the hero
-
-    private var hero: some View {
-        HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-            Text(signedMoney(sumMade)).font(S.inter(S.t30, S.wBoldN))
-                .tracking(S.track(S.t30, -0.035))
-                .foregroundStyle(sumMade >= 0 ? S.gainText : S.lossText)
-            Text("\(upCount) of \(groups.count) up · \(win.phrase)")
-                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
-                .lineLimit(1).minimumScaleFactor(0.75)
-        }
-    }
-
-    // MARK: a name
-
-    @ViewBuilder
-    private func group(_ g: (t: String, rows: [LongPosition], made: Double),
-                       from base: Int) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-                Text(g.t).font(S.inter(S.t15, S.wSemiN))
-                    .tracking(S.track(S.t15, -0.015)).foregroundStyle(S.ink)
-                Spacer(minLength: 8)
-                Text(signedMoney(g.made)).font(S.inter(S.t12, S.wMidSmN))
-                    .foregroundStyle(g.made >= 0 ? S.gainText : S.lossText)
-            }
-            Spacer().frame(height: 16)
-            VStack(alignment: .leading, spacing: Self.rowGap) {
-                ForEach(Array(g.rows.enumerated()), id: \.element.id) { i, p in
-                    row(p, i: base + i)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder private func row(_ p: LongPosition, i: Int) -> some View {
-        let ch = p.change(win)
-        HStack(spacing: Self.colGap) {
-            Text(p.side).font(S.inter(S.t13, S.wBodyN))
-                .tracking(S.track(S.t13, -0.01)).foregroundStyle(S.ink)
-                .lineLimit(1).frame(width: Self.sideCol, alignment: .leading)
-            bar(ch, i: i).frame(height: Self.barH).frame(maxWidth: .infinity)
-            Text(figure(p, ch)).font(S.inter(S.t13, S.wBoldN))
-                .tracking(S.track(S.t13, -0.015))
-                .foregroundStyle(modeRaw == 2 ? S.ink
-                                 : ((ch ?? 0) >= 0 ? S.gainText : S.lossText))
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .frame(width: Self.figCol, alignment: .trailing)
-                .sunnyHint()
-                .padding(.vertical, 8).contentShape(Rectangle())
-                .onTapGesture { modeRaw = (modeRaw + 1) % 3 }
-                .padding(.vertical, -8)
-        }
-    }
-
-    @ViewBuilder private func bar(_ ch: Double?, i: Int) -> some View {
-        GeometryReader { g in
-            let half = g.size.width / 2
-            let w = half * CGFloat(min(1, abs(ch ?? 0) / lim))
-            let up = (ch ?? 0) >= 0
-            ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 4).fill(S.wash)
-                    .frame(width: g.size.width, height: Self.barH)
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(up ? S.gainBar : S.lossBar)
-                    .frame(width: w, height: Self.barH)
-                    .offset(x: up ? half : half - w)
-                    /* The fill grows FROM the zero line, so a loss opens to the
-                       left and a gain to the right. */
-                    .scaleEffect(x: grown || reduceMotion ? 1 : 0,
-                                 anchor: up ? .leading : .trailing)
-                    .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
-                        .delay(Double(i) * S.barStagger), value: grown)
-                    .animation(reduceMotion ? nil : S.easeSettle(0.55), value: w)
-                    .animation(.easeInOut(duration: 0.3), value: up)
-                /* ⚠ THE ZERO IS DRAWN OVER THE FILL, and it bleeds 4 above and
-                   below, so a bar that has only just left zero still shows
-                   which side of it the position is on. */
-                Rectangle().fill(S.hair)
-                    .frame(width: 1.5, height: Self.barH + 8)
-                    .offset(x: half - 0.75, y: -4)
-            }
-        }
-    }
-
-    // MARK: the figure column
-
-    /* ⚠ A TAP FLIPS A COLUMN, NEVER A ROW. Three readings of the same position:
-       what it changed, what that was worth, and what a contract is worth now.
-       The eyebrow follows so the column is always named. */
-    private func figure(_ p: LongPosition, _ ch: Double?) -> String {
-        switch modeRaw {
-        case 1:  return signedMoney(p.made(win))
-        case 2:  return optMoney(Int(p.markEach.rounded()))
-        default: return ch.map { signedPct1($0) } ?? "\u{2014}"
-        }
-    }
-}
-
-private func signedMoney(_ v: Double) -> String {
+/// A signed figure in the deck's k/M form.
+func signedMoney(_ v: Double) -> String {
     let i = Int(v.rounded())
     return (i < 0 ? "" : "+") + optMoney(i)
 }
@@ -3253,7 +2852,9 @@ private func signedPct0(_ v: Double) -> String {
 }
 /// "Fri 11 Sep" from the server's ISO close date. Every date on a card is
 /// derived or it is wrong.
-private func ivDay(_ iso: String) -> String {
+/// "Mon 14 Sep". The deck's one date form, on every card header and on
+/// the Options page title.
+func ivDay(_ iso: String) -> String {
     let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
     guard let d = f.date(from: iso) else { return iso }
     let o = DateFormatter(); o.dateFormat = "EEE d MMM"
