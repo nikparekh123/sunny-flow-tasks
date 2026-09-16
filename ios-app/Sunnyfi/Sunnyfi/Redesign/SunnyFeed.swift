@@ -545,8 +545,9 @@ struct SunnyPane: View {
             /* ⚠ CALL DIRECTLY BEFORE PUT, and one tile over the pair. Read
                together they say what fraction of each half of the book has paid
                for itself, on the same scale. */
-            SunnyCallCover(block: o.coverBars)
-            SunnyPutCover(block: o.coverBars)
+            if let cb = o.coverBars, cb.sides.call.time > 0 || cb.sides.put.time > 0 {
+                SunnyCoverage(block: cb)
+            }
             if let yp = o.yieldProgress, !yp.names.isEmpty {
                 SunnyYieldProgress(block: yp)
             }

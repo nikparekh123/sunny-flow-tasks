@@ -228,6 +228,8 @@ struct SunnyPositions: View {
        comes back by expiry if nothing is done. 0 = %, 1 = $, 2 = time value. */
     @AppStorage("sunnyfi.pos.fig") private var figMode = 0
     @State private var appeared = false
+    /// One tab change per drag, cleared when the next drag starts.
+    @State private var swiped = false
     /// Re-read on the tick so Friday 20:00 and Monday 04:00 land without a reload.
     @State private var now = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -480,9 +482,18 @@ struct SunnyPositions: View {
 
             marks
             Spacer().frame(height: 14)
+            /* ⚠ A NEW TAB IS A NEW LIST, NOT THE OLD ONE CHANGED. Without the
+               `.id`, SwiftUI diffs two unrelated sets inside one ForEach: the
+               handful of rows whose id happens to survive animate their bar
+               from a call's captured to a put's, the rest slide as the list
+               re-lays out, and the switch reads as a morph. Nik, 15 Sep 2026:
+               "Moving from calls sold to put sold there is a weird animation".
+               The sheet's own rule is that the rows RE-ENTER on a tab change,
+               because they are different rows. */
             VStack(alignment: .leading, spacing: Self.rowGap) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in row(r, i: i) }
             }
+            .id(tabRaw)
 
             Spacer().frame(height: 26)
             Rectangle().fill(S.ruleColorStrong).frame(height: 1)
@@ -490,16 +501,80 @@ struct SunnyPositions: View {
             footer
         }
         .frame(width: S.content - 48, alignment: .leading)
+        /* ⚠ THE GESTURE SITS ON THE CONTENT, ABOVE THE CARD'S CHROME. Attached
+           after the background and the shadow it never saw a drag at all — the
+           shadow helper wraps the view in an `AnyView` and the hit test stopped
+           finding it. On the content, with an explicit shape so the gaps
+           between rows are live too, it gets the same drag the scroller does. */
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            /* ⚠ IT ACTS ON CHANGE, NOT ON END. The page's scroller claims the
+               pan and CANCELS this one, and a cancelled gesture never delivers
+               `onEnded` — with the move in there the swipe did nothing at all,
+               through a plain gesture and a simultaneous one alike. `onChanged`
+               arrives before the cancellation, so the latch fires the move the
+               moment the drag is unambiguous and then ignores the rest of it.
+
+               ⚠ AND THE DOMINANCE TEST IS WHAT PROTECTS THE SCROLL. 48pt across
+               and 1.6x more horizontal than vertical, the ratio the retired
+               hand-rolled pager settled on; a vertical flick that happens to
+               start on the card never passes it. */
+            DragGesture(minimumDistance: 20)
+                .onChanged { g in
+                    let dx = g.translation.width, dy = g.translation.height
+                    if abs(dx) < 5 && abs(dy) < 5 { swiped = false; return }
+                    guard !swiped, abs(dx) > 48, abs(dx) > abs(dy) * 1.6 else { return }
+                    swiped = true
+                    let all = Tab.allCases
+                    guard let i = all.firstIndex(of: tab) else { return }
+                    let j = i + (dx < 0 ? 1 : -1)
+                    /* Stops at both ends rather than wrapping: a tab that does
+                       not move says THAT WAS THE END without being told. */
+                    guard all.indices.contains(j) else { return }
+                    withAnimation(reduceMotion ? nil : S.easeSettle(0.55)) {
+                        tabRaw = all[j].rawValue
+                    }
+                }
+                .onEnded { _ in swiped = false }
+        )
         .padding(EdgeInsets(top: 24, leading: 24, bottom: 28, trailing: 24))
         .frame(width: S.content, alignment: .top)
         .background(S.paper)
         .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
         .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
+        /* ⚠ SWIPE MOVES THE TAB, AND IT MUST NOT EAT THE PAGE'S SCROLL. Nik,
+           15 Sep 2026: "can i swipe on the card to go to next tab?". The card
+           lives inside a vertical scroller, so a bare drag gesture would steal
+           every vertical flick that happened to start on it — the same fight
+           the retired hand-rolled pager had. Two guards: 24pt before the
+           gesture engages at all, and the move only happens when the drag is
+           HORIZONTALLY DOMINANT by 1.6x, the ratio that shell settled on.
+
+           ⚠ AND IT STOPS AT BOTH ENDS RATHER THAN WRAPPING. Wrapping puts Puts
+           bought one swipe left of Calls sold, so a swipe past the end silently
+           teleports across the whole card; a tab that does not move says THAT
+           WAS THE END without having to be told. */
+        /* ⚠ SIMULTANEOUS, NOT EXCLUSIVE. A plain `.gesture` loses every drag to
+           the page's scroller and the swipe did nothing at all; a high-priority
+           one would win them all and kill vertical scrolling over the card.
+           Simultaneous lets the scroller keep doing its job while this watches
+           the same drag, and the dominance test below is what stops a vertical
+           flick from changing the tab on its way past. */
         .measure("positions")
         .task(id: rows.count) {
             now = Date()
             guard !appeared, !rows.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(20))
+            appeared = true
+        }
+        /* The entrance plays again for the new rows: cleared, then set on the
+           next beat so the fade and the bar growth both have somewhere to run
+           from. Without the reset the new list arrives already at full opacity
+           and full width, which is the other half of the morph. */
+        .task(id: tabRaw) {
+            guard appeared else { return }
+            appeared = false
             try? await Task.sleep(for: .milliseconds(20))
             appeared = true
         }
@@ -513,21 +588,32 @@ struct SunnyPositions: View {
         HStack(alignment: .bottom, spacing: 0) {
             ForEach(Array(Tab.allCases.enumerated()), id: \.element) { i, t in
                 if i > 0 { Spacer(minLength: 4) }
+                /* ⚠ ONE RULE UNDER THE ROW, AND THE LINE INSIDE THE PADDING. The
+                   rule used to be drawn per word, so it broke in the gaps between
+                   the four tabs, and the picked tab's 2pt line was stacked under
+                   the padding, making that tab 2pt taller than its neighbours.
+                   The sheet's row is 22 with one rule along its bottom and the
+                   line drawn on top of it. */
                 VStack(spacing: 0) {
                     Text(t.label)
                         .font(S.inter(S.t12, t == tab ? S.wBoldN : S.wMidN))
                         .tracking(S.track(S.t12, -0.01))
                         .foregroundStyle(t == tab ? S.ink : S.mute)
                         .lineLimit(1)
+                        .sunnyLineBox(S.t12)
                     Spacer().frame(height: 10)
-                    Rectangle().fill(t == tab ? S.ink : S.ruleColor)
-                        .frame(height: t == tab ? 2 : 1)
+                }
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(t == tab ? S.ink : .clear).frame(height: 2)
                 }
                 .contentShape(Rectangle())
                 .onTapGesture {
                     withAnimation(reduceMotion ? nil : S.easeSettle(0.55)) { tabRaw = t.rawValue }
                 }
             }
+        }
+        .background(alignment: .bottom) {
+            Rectangle().fill(S.ruleColor).frame(height: 1)
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: tabRaw)
     }
@@ -586,7 +672,12 @@ struct SunnyPositions: View {
                                      anchor: r.up ? .leading : .trailing)
                         .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
                             .delay(Double(i) * Self.stagger), value: appeared)
-                        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: r.v)
+                        /* ⚠ NO VALUE GLIDE ACROSS A TAB. Within a tab a pull
+                           moves a bar and it should slide; between tabs the row
+                           is a different contract entirely and sliding from one
+                           to the other is meaningless. Keying the glide on the
+                           tab as well as the value confines it to the pull. */
+                        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: "\(tabRaw)|\(r.v)")
                         .animation(.easeInOut(duration: 0.3), value: r.up)
                     /* The three reference lines, reaching 4 above and below. */
                     ForEach([axis.lo, 0, axis.hi], id: \.self) { v in
@@ -605,10 +696,17 @@ struct SunnyPositions: View {
                mark on a word. On the text it hugs the number, which is what the
                sheet's `text-decoration` does. The frame comes after, so the
                column still right-aligns. */
+            /* ⚠ NO SCALE FACTOR UNDER A LINE BOX. Pinning the height to 13pt is
+               smaller than the text's own ~16pt line, and SwiftUI counts that as
+               "does not fit" — with `minimumScaleFactor` allowed it shrank every
+               figure to 79%: digits measured 7.67pt against Prices' 9.67 at the
+               same 13/700. Nik, 16 Sep 2026: "why so small". The widest figure
+               fits the 56pt column at full size, so the scale factor was only
+               ever doing harm. */
             Text(r.fig).font(S.inter(S.t13, S.wBoldN))
                 .tracking(S.track(S.t13, -0.015))
                 .foregroundStyle(figMode == 2 ? S.ink : (r.up ? S.gainText : S.lossText))
-                .lineLimit(1).minimumScaleFactor(0.7)
+                .lineLimit(1)
                 .sunnyLineBox(S.t13)
                 .sunnyHint()
                 .frame(width: Self.figCol, alignment: .trailing)
@@ -654,7 +752,12 @@ struct SunnyPositions: View {
     private var stats: [(String, String, Color)] {
         if tab.sold {
             let yield = investedSum > 0 ? creditSum / investedSum * 100 : 0
-            return [("COLLECTED", optMoney(Int(creditSum.rounded())), S.ink),
+            /* ⚠ "OPEN CREDIT", NOT "COLLECTED". Nik, 16 Sep 2026: "keep banked,
+               rename positions to open credit". This figure is the credit on the
+               legs open right now; Coverage's Collected is everything banked
+               against the long legs since they were bought. Two quantities under
+               one word read as a mismatch between the cards. */
+            return [("OPEN CREDIT", optMoney(Int(creditSum.rounded())), S.ink),
                     ("WORTH NOW", optMoney(Int((creditSum - keptSum).rounded())), S.ink),
                     ("YIELD", String(format: "%.1f%%", yield), S.ink)]
         }
@@ -946,280 +1049,291 @@ private func signedPct1(_ f: Double) -> String {
     return (p < 0 ? "\u{2212}" : "+") + String(format: "%.1f", abs(p)) + "%"
 }
 
-// MARK: - 2c · The cover bars — Call cover, then Put cover
+// MARK: - 2c · Coverage, two tabs
 
-/* ⚠ THESE TWO REPLACE THE COVER RINGS, 14 Sep 2026, from the `cover-bars`
-   handoff. Both ring components, the SVG arc, the ticks, the move word and the
-   centre tap are deleted.
+/* ⚠ ONE CARD IN PLACE OF CALL COVER AND PUT COVER, from `export 18`, 16 Sep
+   2026. The two cover-bars cards asked one question of two sides of the book,
+   and a side is a switch, not a card — the Positions rule. The puts' whole is a
+   fraction of the calls', so a tab gives each side its own 132pt scale without
+   the two ever being read against each other.
 
-   ⚠ ONLY TIME VALUE HAS TO BE COVERED, and that is the whole change. The rings
-   measured credit against the whole COST of the long legs. Nik, 14 Sep 2026:
-   "us saying that the whole thing will go to zero just doesn't make any sense."
-   He is right: a long leg's intrinsic is real money — exercising returns it —
-   so premium only has to earn back the part that melts. The call side reads 31%
-   of time value where the ring read 16% of cost, and 13 weeks to meet where the
-   ring said 36. The ring was telling him he was behind when he was not.
+   ⚠ ONLY TIME VALUE HAS TO BE COVERED, unchanged from the bars and the reason the
+   rings died. A long leg's intrinsic is real money that exercising returns; the
+   left bar is time value and never cost or mark.
 
-   ⚠ AND THAT IS WHY THE RING HAD TO GO, which was his diagnosis too. A ring
-   shows one fraction against a FIXED whole; here the left side shrinks every
-   day and the right grows every week, and a reader has to see both move. Two
-   bars show the quantities; a ring would show only their quotient, which cannot
-   say which side moved.
+   ⚠ THE COLOUR CHANGE IS THE TARGET. Collected is `--gain-bar` up to time value's
+   level and `--gain-text` past it, so the seam between the two greens sits exactly
+   at the Time bar's cap and "reached or not yet" is one edge. The dashed target
+   and the ghost line are retired: a day's melt is under half a per cent of the
+   bar, and it now reads as a share over the Time bar instead.
 
-   ⚠ THE TALLER BAR IS THE PLOT, whichever it is. Fixing Time at full height
-   would cap Collected at 100% and the card could never show him ahead. */
-private struct CoverBarsCard: View {
-    let name: String
-    let side: CoverSide
-    let asOf: String
+   ⚠ NOTHING UNMOUNTS ON A TAB. The same three bars glide to the other side's
+   heights so the eye keeps the frame and reads the change. That is the opposite
+   of Positions, whose tabs swap in different ROWS; here the rows are the same two
+   bars with different values. */
+struct SunnyCoverage: View {
+    let block: CoverBarsBlock
 
-    /* ⚠ ONE COMPARE FOR BOTH CARDS. The sheet's rule: tapping the word on
-       either card moves both ghosts. `AppStorage` is how two sibling views
-       share a switch without threading a binding through the feed. */
+    @AppStorage("sunnyfi.cov.tab") private var tab = 0
+    /// Shared name with the cover bars it replaces, so a reader's compare
+    /// choice survives the swap.
     @AppStorage("sunnyfi.cover.week") private var byWeek = false
     @State private var grown = false
-    @State private var now = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let plotH: CGFloat = 132
-    private static let inset: CGFloat = 34
-    private static let colGap: CGFloat = 12
+    private static let inset: CGFloat = 28
+    private static let colGap: CGFloat = 24
+    private static let lift: CGFloat = 7
+    private static let bleed: CGFloat = 6
 
-    private var hist: Int? { byWeek ? side.hist.week : side.hist.yday }
-    private var chist: Int? { byWeek ? side.chist.week : side.chist.yday }
-    /// The taller of the two sets the scale; everything else is a share of it.
-    private var top: Double { Double(max(max(side.time, side.collected), 1)) }
-    private func h(_ v: Int) -> CGFloat {
-        max(3, Self.plotH * CGFloat(min(1, max(0, Double(v) / top))))
-    }
+    private var s: CoverSide { tab == 1 ? block.sides.put : block.sides.call }
+    /// The taller bar is the plot; the other is a share of it.
+    private var top: Double { Double(max(s.time, s.collected, 1)) }
+    private func h(_ v: Int) -> CGFloat { Self.plotH * CGFloat(max(0, Double(v)) / top) }
+    private var over: Int { s.collected - s.time }
 
     var body: some View {
-        OptCard(name: name) {
-            OptHead(title: side.label, sub: side.scope,
-                    right: ivDay(asOf))
-            Spacer().frame(height: 20)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+                HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
+                    Text("Coverage").font(S.inter(S.t14, S.wBoldN))
+                        .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
+                    Text(s.scope).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
+                }
+                Spacer(minLength: 0)
+                Text(ivDay(block.asOf)).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            }
+            Spacer().frame(height: 18)
+            tabRow
+            Spacer().frame(height: 26)
             HStack(alignment: .top, spacing: Self.colGap) {
                 column(time: true)
                 column(time: false)
             }
             .padding(.horizontal, Self.inset)
-            Spacer(minLength: 8)
+            Spacer().frame(height: 22)
+            Rectangle().fill(S.ruleColor).frame(height: 1)
+            Spacer().frame(height: 14)
             footer
         }
-        .task(id: side.time) {
-            now = Date()
+        .frame(width: S.content - 48, alignment: .leading)
+        .padding(EdgeInsets(top: 24, leading: 24, bottom: 28, trailing: 24))
+        .frame(width: S.content, alignment: .top)
+        .background(S.paper)
+        .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
+        .sunnyShadow(S.shadowCardL)
+        .monospacedDigit()
+        .measure("coverage")
+        .task(id: s.time) {
             guard !grown else { return }
             try? await Task.sleep(for: .milliseconds(20))
             grown = true
         }
     }
 
+    /* ⚠ POSITIONS' TAB ROW, WITH TWO WORDS. The picked one is bold ink with a 2pt
+       line sitting on the rule; tabs are never underlined — the line is the state,
+       and a dotted hint under two words 28pt apart would read as a heading rule. */
+    private var tabRow: some View {
+        HStack(alignment: .bottom, spacing: 28) {
+            ForEach(Array(["Calls", "Puts"].enumerated()), id: \.offset) { i, label in
+                /* ⚠ THE LINE SITS INSIDE THE PADDING, ON THE RULE. The row is 22:
+                   12 of word and 10 below it, and the picked tab's 2pt line is drawn
+                   over the bottom of that 10 — CSS's inset box-shadow. Stacked under
+                   the padding instead it made the row 24 and the card 2pt tall. */
+                VStack(spacing: 0) {
+                    Text(label)
+                        .font(S.inter(S.t12, tab == i ? S.wBoldN : S.wMidN))
+                        .tracking(S.track(S.t12, -0.01))
+                        .foregroundStyle(tab == i ? S.ink : S.mute)
+                        .sunnyLineBox(S.t12)
+                    Spacer().frame(height: 10)
+                }
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(tab == i ? S.ink : .clear).frame(height: 2)
+                }
+                .fixedSize()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(reduceMotion ? nil : S.easeSettle(0.55)) { tab = i }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .background(alignment: .bottom) {
+            Rectangle().fill(S.ruleColor).frame(height: 1)
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: tab)
+    }
+
     // MARK: a column
 
     @ViewBuilder private func column(time: Bool) -> some View {
-        let v = time ? side.time : side.collected
-        let ghostAt = time ? hist : chist
-        VStack(alignment: .leading, spacing: 0) {
-            /* ⚠ 100% IS ALWAYS OVER TIME VALUE. It is the reference — collected
-               is measured against it — and moving it to whichever bar is taller
-               would make the share mean two different things on two days. */
+        VStack(spacing: 0) {
+            /* ⚠ 100% IS ALWAYS OVER TIME VALUE, even when Collected is the taller
+               bar. Collected's share is of time value, and moving the reference
+               would make the percentage mean two things on two days. */
             Text(time ? "100%" : sharePct)
                 .font(S.inter(S.t12, S.wSemiN))
-                .foregroundStyle(!time && side.covered ? S.gainText : S.ink2)
-                .frame(maxWidth: .infinity, alignment: .center).lineLimit(1)
+                .foregroundStyle(!time && s.covered ? S.gainText : S.ink2)
+                .sunnyLineBox(S.t12)
+                .frame(maxWidth: .infinity)
             Spacer().frame(height: 6)
             Rectangle().fill(S.ruleColorStrong).frame(height: 1)
-            /* 52 is what makes room for a two-line clock above a full bar. */
             Spacer().frame(height: 52)
             ZStack(alignment: .bottom) {
                 Color.clear.frame(height: Self.plotH)
-                bar(time: time).frame(height: h(v))
-                    .scaleEffect(y: grown || reduceMotion ? 1 : 0, anchor: .bottom)
-                    .animation(reduceMotion ? nil
-                               : S.easeSettle(S.durBar).delay(time ? 0 : 0.07), value: grown)
-                /* ⚠ THE TARGET REACHES ACROSS THE GAP. A dashed hair line at
-                   time value's level, starting inside the column gap so it
-                   reads as coming FROM the Time bar — the green bar is visibly
-                   reaching for something. */
-                if !time {
-                    dashed(S.hair)
-                        .padding(.leading, -(Self.colGap + 10))
-                        .offset(y: -h(side.time))
-                        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: side.time)
-                }
-                /* ⚠ THE GHOST IS WHERE IT WAS, and it is never exaggerated. A
-                   day's melt is under half a per cent of the bar, so the line
-                   sits almost on the cap and the FIGURE carries the reading. */
-                if let g = ghostAt { ghost(g, over: v) }
-                clock(time: time, level: max(h(v), h(ghostAt ?? v)))
+                if time { timeBar } else { collectedBars }
+                clock(time: time)
             }
             .frame(height: Self.plotH)
             Spacer().frame(height: 14)
             Text(time ? "TIME VALUE" : "COLLECTED")
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                .foregroundStyle(S.mute).lineLimit(1).minimumScaleFactor(0.8)
+                .foregroundStyle(S.mute).sunnyLineBox(S.t10).lineLimit(1)
             Spacer().frame(height: 8)
-            Text(optMoney(v)).font(S.inter(S.t15, S.wBoldN))
-                .tracking(S.track(S.t15, -0.02))
+            Text(optMoney(time ? s.time : s.collected))
+                .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
                 .foregroundStyle(time ? S.ink : S.gainText)
-                .lineLimit(1).minimumScaleFactor(0.7)
+                .sunnyLineBox(S.t15).lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        /* ⚠ CENTRED, NOT LEADING. At 116.5 wide a left-aligned figure floated off
+           the bar it names. */
+        .frame(maxWidth: .infinity)
     }
 
-    /* ⚠ THE GHOST NEVER MOVES TO BE SEEN. It marks where the bar was, and on
-       Collected that level is always BELOW the cap, inside the fill. Lifting it
-       into clear air would put it above the bar, and a line above the bar
-       already means something on this card: it is what Time value looks like
-       when it has melted down to meet it. Same drawing, opposite reading.
-
-       So it stays at its level and changes colour instead, cutting the fill in
-       the card's own paper where it crosses. And when the move is thinner than
-       the line itself, there is no line to draw: at 3pt of separation the dash
-       reads as a second edge on the bar rather than as a level, which is what
-       the put card showed at $2.2k collected against $0 a week ago. The figure
-       over the bar already says what changed. */
-    private static let ghostGap: CGFloat = 4
-
-    @ViewBuilder private func ghost(_ g: Int, over v: Int) -> some View {
-        let gy = h(g), by = h(v)
-        if abs(gy - by) >= Self.ghostGap {
-            ZStack {
-                dashed(S.mute)
-                /* The mask keeps the dash phase of the line underneath, so the
-                   paper segments land exactly on the mute ones. Insetting a
-                   narrower line instead would restart the dash and the two
-                   would not line up. */
-                if gy < by {
-                    dashed(S.paper).mask(Rectangle().padding(.horizontal, 10))
-                }
-            }
-            .padding(.horizontal, -10)
-            .offset(y: -gy)
-            .animation(reduceMotion ? nil : S.easeSettle(0.55), value: gy)
-        }
-    }
-
-    @ViewBuilder private func bar(time: Bool) -> some View {
-        if time {
-            /* A hollow wash with a hair edge, not a hatch: at 121 wide a
-               slanted fill reads as texture rather than quantity. */
-            UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
-                .fill(S.wash)
-                .overlay(
-                    UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
-                        .stroke(S.hair, lineWidth: 1))
-        } else {
-            UnevenRoundedRectangle(topLeadingRadius: 2, topTrailingRadius: 2)
-                .fill(S.gainBar)
-        }
-    }
-    private func dashed(_ c: Color) -> some View {
-        Rectangle().fill(.clear).frame(height: 1)
+    private var timeBar: some View {
+        UnevenRoundedRectangle(topLeadingRadius: S.radiusPip, topTrailingRadius: S.radiusPip)
+            .fill(S.wash)
             .overlay(
-                Rectangle().fill(.clear)
-                    .overlay(SunnyDash(ink: c))
-                    .frame(height: 1), alignment: .bottom)
-            .frame(maxWidth: .infinity)
+                /* The edge runs over the top and down both sides, never along the
+                   bottom: the floor is the axis, not the bar's outline. */
+                TimeEdge(radius: S.radiusPip).stroke(S.ruleColorStrong, lineWidth: 1))
+            .frame(height: max(3, h(s.time)))
+            .scaleEffect(y: grown || reduceMotion ? 1 : 0, anchor: .bottom)
+            .animation(reduceMotion ? nil : S.easeSettle(S.durBar), value: grown)
+            .animation(reduceMotion ? nil : S.easeSettle(0.55), value: h(s.time))
     }
 
-    // MARK: the two clocks
+    @ViewBuilder private var collectedBars: some View {
+        let isOver = over > 0
+        ZStack(alignment: .bottom) {
+            /* ⚠ THE BASE STOPS AT THE TIME LINE. With an overage above it, its top
+               corners go square and the overage carries the cap. */
+            UnevenRoundedRectangle(topLeadingRadius: isOver ? 0 : S.radiusPip,
+                                   topTrailingRadius: isOver ? 0 : S.radiusPip)
+                .fill(S.gainBar)
+                .frame(height: max(3, h(min(s.collected, s.time))))
+                .scaleEffect(y: grown || reduceMotion ? 1 : 0, anchor: .bottom)
+                .animation(reduceMotion ? nil : S.easeSettle(S.durBar).delay(0.07), value: grown)
+            if isOver {
+                /* The deeper green past the line. `--gain-text` is a text token used
+                   as a fill here on purpose: it is the "+$560 over" figure standing
+                   up, so the dark cap and the words read as one fact. */
+                UnevenRoundedRectangle(topLeadingRadius: S.radiusPip, topTrailingRadius: S.radiusPip)
+                    .fill(S.gainText)
+                    .frame(height: h(over))
+                    .offset(y: -h(s.time))
+                    .scaleEffect(y: grown || reduceMotion ? 1 : 0, anchor: .bottom)
+                    .animation(reduceMotion ? nil : S.easeSettle(S.durBar).delay(0.14), value: grown)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .bottom)
+        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: s.collected)
+        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: tab)
+    }
 
-    @ViewBuilder private func clock(time: Bool, level: CGFloat) -> some View {
+    // MARK: the clocks
+
+    @ViewBuilder private func clock(time: Bool) -> some View {
+        let level = time ? h(s.time) : h(max(s.collected, s.time))
         VStack(spacing: 2) {
-            Text(time ? meltFigure : meetTop)
-                .font(S.inter(S.t12, S.wBoldN)).tracking(S.track(S.t12, -0.01))
-                .foregroundStyle(!time && side.covered ? S.gainText : S.ink)
             if time {
-                /* The card's one tap, and its one dotted underline. */
+                Text(meltShare).font(S.inter(S.t12, S.wBoldN))
+                    .tracking(S.track(S.t12, -0.01)).foregroundStyle(S.ink)
+                    .sunnyLineBox(S.t12)
+                /* The card's one hint, on the control and never on what it changes. */
                 Text(byWeek ? "since last week" : "since yesterday")
                     .font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+                    .sunnyLineBox(S.t10)
                     .sunnyHint()
                     .padding(.vertical, 8).contentShape(Rectangle())
                     .onTapGesture { byWeek.toggle() }
                     .padding(.vertical, -8)
             } else {
+                Text(meetTop).font(S.inter(S.t12, S.wBoldN))
+                    .tracking(S.track(S.t12, -0.01))
+                    .foregroundStyle(s.covered ? S.gainText : S.ink)
+                    .sunnyLineBox(S.t12)
                 Text(meetBottom).font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+                    .sunnyLineBox(S.t10)
             }
         }
         .fixedSize()
-        .offset(y: -(level + 7))
+        .padding(.horizontal, -Self.bleed)
+        .offset(y: -(level + Self.lift))
+        .frame(maxHeight: .infinity, alignment: .bottom)
         .animation(reduceMotion ? nil : S.easeSettle(0.55), value: level)
     }
 
     private var sharePct: String {
-        side.time > 0
-            ? "\(Int((Double(side.collected) / Double(side.time) * 100).rounded()))%"
-            : "\u{2014}"
+        s.time > 0 ? "\(Int((Double(s.collected) / Double(s.time) * 100).rounded()))%" : "\u{2014}"
     }
-    /* ⚠ THE MELT FIGURE IS INK, NOT RED. Time value melting is not money the
-       book lost this week — it is the target getting closer. */
-    private var meltFigure: String {
-        guard let g = hist else { return "\u{2014}" }
-        let d = side.time - g
-        return (d < 0 ? "\u{2212}" : "+") + optMoney(abs(d))
+    /* ⚠ THE MELT READS AS A SHARE, NOT DOLLARS. The dollars are already under the
+       bar, and a share is the same fraction on both sides so the reading survives
+       the tab. Ink, never red: melting time value is the target coming closer. */
+    private var meltShare: String {
+        guard let prev = byWeek ? s.hist.week : s.hist.yday, prev > 0 else { return "\u{2014}" }
+        let f = Double(s.time - prev) / Double(prev) * 100
+        return (f < 0 ? "\u{2212}" : "+") + String(format: "%.1f%%", abs(f))
     }
     private var meetTop: String {
-        if side.covered { return "covered" }
-        guard let d = side.daysToMeet, d > 0 else { return "\u{2014}" }
+        if s.covered { return "covered" }
+        guard let d = s.daysToMeet else { return "\u{2014}" }
         return "\(Int((Double(d) / 7).rounded())) wk"
     }
     private var meetBottom: String {
-        if side.covered { return "+" + optMoney(-side.gap) + " over" }
-        guard let d = side.daysToMeet, d > 0 else { return "no pace yet" }
-        var c = Calendar(identifier: .gregorian)
-        c.timeZone = TimeZone(identifier: "America/New_York") ?? .current
-        let day = c.date(byAdding: .day, value: d, to: c.startOfDay(for: now)) ?? now
-        let f = DateFormatter(); f.calendar = c; f.timeZone = c.timeZone
-        f.dateFormat = "d MMM yyyy"
-        return f.string(from: day)
+        if s.covered { return "+" + optMoney(over) + " over" }
+        guard let d = s.daysToMeet else { return "no pace yet" }
+        let f = DateFormatter(); f.dateFormat = "d MMM yyyy"
+        return f.string(from: Date().addingTimeInterval(Double(d) * 86_400))
     }
 
-    /* The two rates that close the gap, one from each side. */
+    // MARK: the footer
+
+    /* The two speeds of the same chase: the left bar coming down, the right one
+       coming up. Their sum is what the meet clock divides by. */
     private var footer: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            (Text("\u{2212}" + optMoney(side.melt * 7))
-                .font(S.inter(S.t11, S.wSemiN)).foregroundStyle(S.ink)
-             + Text(" melts a week").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute))
-            Spacer(minLength: 10)
-            (Text("+" + optMoney(side.pace))
-                .font(S.inter(S.t11, S.wSemiN)).foregroundStyle(S.gainText)
-             + Text(" collected a week").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute))
-        }
-        .lineLimit(1).minimumScaleFactor(0.85)
-    }
-}
-
-/// A 1pt dashed rule. The deck's dotted hint is 1.5/1.5; a ghost is a longer
-/// dash so the two marks cannot be confused at a glance.
-private struct SunnyDash: View {
-    let ink: Color
-    var body: some View {
-        GeometryReader { g in
-            Path { p in
-                p.move(to: .init(x: 0, y: 0.5))
-                p.addLine(to: .init(x: g.size.width, y: 0.5))
+        HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(optMoney(-s.melt * 7)).font(S.inter(S.t11, S.wSemiN)).foregroundStyle(S.ink)
+                Text("melts a week").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
             }
-            .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            .foregroundStyle(ink)
+            Spacer(minLength: 0)
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(s.covered ? "still coming in a week" : "collected a week")
+                    .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                Text("+" + optMoney(s.pace)).font(S.inter(S.t11, S.wSemiN)).foregroundStyle(S.gainText)
+            }
         }
+        .sunnyLineBox(S.t11)
     }
 }
 
-struct SunnyCallCover: View {
-    let block: CoverBarsBlock?
-    var body: some View {
-        if let b = block, b.sides.call.time > 0 {
-            CoverBarsCard(name: "call-cover", side: b.sides.call, asOf: b.asOf)
-        }
-    }
-}
-struct SunnyPutCover: View {
-    let block: CoverBarsBlock?
-    var body: some View {
-        if let b = block, b.sides.put.time > 0 {
-            CoverBarsCard(name: "put-cover", side: b.sides.put, asOf: b.asOf)
-        }
+/// Top and both sides of the time bar, open at the floor.
+private struct TimeEdge: Shape {
+    let radius: CGFloat
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let x0 = r.minX + 0.5, x1 = r.maxX - 0.5, y0 = r.minY + 0.5, yb = r.maxY
+        p.move(to: CGPoint(x: x0, y: yb))
+        p.addLine(to: CGPoint(x: x0, y: y0 + radius))
+        p.addQuadCurve(to: CGPoint(x: x0 + radius, y: y0), control: CGPoint(x: x0, y: y0))
+        p.addLine(to: CGPoint(x: x1 - radius, y: y0))
+        p.addQuadCurve(to: CGPoint(x: x1, y: y0 + radius), control: CGPoint(x: x1, y: y0))
+        p.addLine(to: CGPoint(x: x1, y: yb))
+        return p
     }
 }
 
