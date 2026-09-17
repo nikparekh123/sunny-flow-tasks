@@ -270,16 +270,32 @@ final class PaneModel {
     /// store fetches on every call already; OptionsStore alone holds a
     /// five-minute cache, so without this a pull-to-refresh would silently
     /// return the same cards it was already showing.
+    /* ⚠ OPTIONS FIRST, AND ONLY WHAT IS ON SCREEN. Nik, 17 Sep 2026: "sometimes
+       it takes around 15secs to load". This fired seven requests at once and the
+       page waited in a queue behind itself: options-cards answers in under a
+       second alone and took 2.4-4.5s with the other six hitting the same small
+       database.
+
+       Two of the six fed nothing visible any more. `rail` (sunny-rail) and `legs`
+       (position-legs) built the ticker strip and the per-name pages, and the glass
+       nav retired both — so every launch and every return to the app paid for two
+       requests nobody could see, the second-slowest among them.
+
+       So the landing page loads alone, then the New page's four follow. Nothing on
+       the New page is slower for it: those four cards sit behind a tab the reader
+       has not opened yet.
+
+       ⚠ IF THE NAME PAGES COME BACK, SO DO `rail` AND `legs`. `book(_:)`,
+       `position(_:)` and `nav` still read them; they are simply never filled. */
     func loadAll(force: Bool = false) async {
-        async let a: Void = rail.load()
+        await options.load(force: force)
         async let b: Void = digest.load()
         async let c: Void = week.load()
         async let d: Void = planner.load()
-        async let e: Void = legs.load()
         async let f: Void = newPage.load()
-        async let g: Void = options.load(force: force)
-        _ = await (a, b, c, d, e, f, g)
+        _ = await (b, c, d, f)
         if ProcessInfo.processInfo.arguments.contains("-showPrice") {
+            await rail.load()
             priceUnits = Set(rail.book.map(\.ticker))
         }
     }
