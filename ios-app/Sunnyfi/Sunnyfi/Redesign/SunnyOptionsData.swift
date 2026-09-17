@@ -335,6 +335,12 @@ struct CoverSide: Decodable {
     /// would draw the ghost on the floor and claim the whole bar melted.
     let hist: CoverHist
     let collected: Int
+    /// ⚠ CREDIT ON LEGS STILL OPEN, and it is NOT part of `collected`. Nik,
+    /// 17 Sep 2026: everywhere but Positions, Weekly yield and Credit & theta
+    /// counts settled legs only, because an open leg's credit can still be
+    /// handed back. The card draws this as a lighter cap above the solid bar.
+    /// Optional so a run against an older deployment decodes rather than throws.
+    let open: Int?
     let chist: CoverHist
     /// This week's realised credit — the rate the gap closes from the right.
     let pace: Int

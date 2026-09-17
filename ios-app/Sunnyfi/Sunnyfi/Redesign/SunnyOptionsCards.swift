@@ -1089,9 +1089,14 @@ struct SunnyCoverage: View {
 
     private var s: CoverSide { tab == 1 ? block.sides.put : block.sides.call }
     /// The taller bar is the plot; the other is a share of it.
-    private var top: Double { Double(max(s.time, s.collected, 1)) }
+    /* The taller stack is the plot, and the cap is part of the stack: leaving
+       it out clipped the lighter segment the moment collected plus open passed
+       time value. */
+    private var top: Double { Double(max(s.time, s.collected + max(0, s.open ?? 0), 1)) }
     private func h(_ v: Int) -> CGFloat { Self.plotH * CGFloat(max(0, Double(v)) / top) }
     private var over: Int { s.collected - s.time }
+    /// Credit taken on legs still open: real cash, not earned yet.
+    private var openCr: Int { max(0, s.open ?? 0) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1195,7 +1200,7 @@ struct SunnyCoverage: View {
             Spacer().frame(height: 8)
             Text(optMoney(time ? s.time : s.collected))
                 .font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
-                .foregroundStyle(time ? S.ink : S.gainText)
+                .foregroundStyle(time ? S.ink : (s.collected < 0 ? S.lossText : S.gainText))
                 .sunnyLineBox(S.t15).lineLimit(1)
         }
         /* ⚠ CENTRED, NOT LEADING. At 116.5 wide a left-aligned figure floated off
@@ -1218,11 +1223,12 @@ struct SunnyCoverage: View {
 
     @ViewBuilder private var collectedBars: some View {
         let isOver = over > 0
+        let cap = openCr
         ZStack(alignment: .bottom) {
             /* ⚠ THE BASE STOPS AT THE TIME LINE. With an overage above it, its top
                corners go square and the overage carries the cap. */
-            UnevenRoundedRectangle(topLeadingRadius: isOver ? 0 : S.radiusPip,
-                                   topTrailingRadius: isOver ? 0 : S.radiusPip)
+            UnevenRoundedRectangle(topLeadingRadius: (isOver || cap > 0) ? 0 : S.radiusPip,
+                                   topTrailingRadius: (isOver || cap > 0) ? 0 : S.radiusPip)
                 .fill(S.gainBar)
                 .frame(height: max(3, h(min(s.collected, s.time))))
                 .scaleEffect(y: grown || reduceMotion ? 1 : 0, anchor: .bottom)
@@ -1237,6 +1243,18 @@ struct SunnyCoverage: View {
                     .offset(y: -h(s.time))
                     .scaleEffect(y: grown || reduceMotion ? 1 : 0, anchor: .bottom)
                     .animation(reduceMotion ? nil : S.easeSettle(S.durBar).delay(0.14), value: grown)
+            }
+            /* ⚠ THE LIGHTER CAP IS NOT EARNED YET. Nik, 17 Sep 2026: the solid
+               bar is settled credit, and what this week's open legs have taken
+               in sits above it, in the same green at a third of its weight, so
+               it reads as the same money in a different state. */
+            if cap > 0 {
+                UnevenRoundedRectangle(topLeadingRadius: S.radiusPip, topTrailingRadius: S.radiusPip)
+                    .fill(S.gainBar.opacity(0.32))
+                    .frame(height: max(3, h(cap)))
+                    .offset(y: -h(max(s.collected, 0)))
+                    .scaleEffect(y: grown || reduceMotion ? 1 : 0, anchor: .bottom)
+                    .animation(reduceMotion ? nil : S.easeSettle(S.durBar).delay(0.2), value: grown)
             }
         }
         .frame(maxWidth: .infinity, alignment: .bottom)
@@ -1314,7 +1332,13 @@ struct SunnyCoverage: View {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(s.covered ? "still coming in a week" : "collected a week")
                     .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-                Text("+" + optMoney(s.pace)).font(S.inter(S.t11, S.wSemiN)).foregroundStyle(S.gainText)
+                /* ⚠ THE SIGN COMES FROM THE FIGURE. A week that spent more
+                   buying legs back than it took in is negative, and a hardcoded
+                   "+" printed "+−$507". Since 17 Sep the put side can run
+                   negative: rolls cost more than the new credits. */
+                Text(signedMoney(Double(s.pace)))
+                    .font(S.inter(S.t11, S.wSemiN))
+                    .foregroundStyle(s.pace < 0 ? S.lossText : S.gainText)
             }
         }
         .sunnyLineBox(S.t11)

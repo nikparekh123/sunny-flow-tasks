@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-17.2';
+const BUILD = '2026-09-17.3';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -263,13 +263,74 @@ Deno.serve(async (req) => {
     }
     const open = [...byKey.values()].filter((e) => e.n > 0.0001);
 
+    /* ── ONE START DATE, AND ONLY WHAT IS CLOSED ──────────────────────────
+       Nik, 17 Sep 2026, after finding Coverage reading $32.7k collected while
+       Programme read $15.4k kept:
+
+         "every number on each card should start from the same date ... what if
+          we start everything from 31st august 2026"
+         "only the roll check card should calculate what is not closed,
+          everywhere else we need to calculate only what's closed ... so this
+          week's open calls and puts sold will not be part of the calculation"
+
+       1 · THE DATE IS 31 AUGUST 2026, the stock-replacement shift. Checked
+          against the book: every LEAP the page charts was bought on or after
+          that day, so the ~$19.6k the cut drops is call premium earned against
+          SHARES he no longer owns. Nothing LEAP-era is lost.
+
+       2 · A LEG IS IN OR OUT BY WHEN IT WAS OPENED, never by the date of a
+          single trade. Filtering on trade_date alone takes the buy-backs of
+          legs sold in August without their opening credits, and every "kept"
+          goes negative. This was already true of the Programme card, whose
+          PROG_START this rule generalises to the whole page.
+
+       3 · SETTLED MEANS EXPIRED OR BOUGHT BACK TO FLAT. A credit on a leg
+          still open is not yours: it can still be bought back for more than it
+          was sold for. Every card counts settled credit only.
+
+       4 · THREE EXCEPTIONS, all his: Positions (the card whose whole job is
+          what is open), Weekly yield ("it will automatically start adding
+          yield for next week as I start rolling"), and Credit & theta, which
+          measures the RATE a contract sold at and knows that at the sale. */
+    const BOOK_START = '2026-08-31';
+    const shortKey = (t: Record<string, unknown>) =>
+      `${t.ticker}|${t.option_type}|${N(t.strike)}|${t.expiry}`;
+    const shortOpened = new Map<string, string>();
+    const shortLeft = new Map<string, number>();
+    for (const t of allShorts) {
+      const k = shortKey(t), d = String(t.trade_date).slice(0, 10);
+      if (String(t.action) === 'open') {
+        if (!shortOpened.has(k) || d < shortOpened.get(k)!) shortOpened.set(k, d);
+        shortLeft.set(k, (shortLeft.get(k) ?? 0) + N(t.contracts));
+      } else {
+        shortLeft.set(k, (shortLeft.get(k) ?? 0) - N(t.contracts));
+      }
+    }
+    const inBook = (t: Record<string, unknown>) =>
+      (shortOpened.get(shortKey(t)) ?? '9999-99-99') >= BOOK_START;
+    /* Every short leg of this book, all-time meaning since 31 Aug. */
+    const bookShorts = allShorts.filter(inBook);
+    /* Expired, or bought back to flat. Both are closed. */
+    const isSettled = (t: Record<string, unknown>) => {
+      const k = shortKey(t);
+      return String(t.expiry).slice(0, 10) < today || (shortLeft.get(k) ?? 0) <= 0.0001;
+    };
+    /* And the same question asked of a past date, for the history walks: a leg
+       is settled AS AT `cut` when it had expired by then. */
+    const settledBy = (t: Record<string, unknown>, cut: string) =>
+      String(t.expiry).slice(0, 10) <= cut;
+
     /* ── every credit ever, bucketed by week ────────────────────────────── */
     const creditByWeek = new Map<string, Map<string, number>>();
     /* The same buckets split by side, for the weekly-yield card's bar and cap. */
     const grossByWeek = new Map<string, Map<string, number>>();
     const boughtByWeek = new Map<string, Map<string, number>>();
     const firstCredit = new Map<string, string>();
-    for (const t of allShorts) {
+    /* The same buckets again, counting only legs that have settled. Every card
+       but Weekly yield, Positions and Credit & theta reads these. */
+    const settledByWeek = new Map<string, Map<string, number>>();
+    const openByWeek = new Map<string, Map<string, number>>();
+    for (const t of bookShorts) {
       const tk = String(t.ticker);
       const d = String(t.trade_date).slice(0, 10);
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
@@ -294,6 +355,10 @@ Deno.serve(async (req) => {
          A credit is now filed under its expiry's Monday. */
       const w = weekStart(String(t.expiry).slice(0, 10));
       m.set(w, (m.get(w) ?? 0) + c);
+      const done = isSettled(t) ? settledByWeek : openByWeek;
+      if (!done.has(tk)) done.set(tk, new Map());
+      const dm = done.get(tk)!;
+      dm.set(w, (dm.get(w) ?? 0) + c);
       if (!grossByWeek.has(tk)) grossByWeek.set(tk, new Map());
       if (!boughtByWeek.has(tk)) boughtByWeek.set(tk, new Map());
       if (c > 0) {
@@ -476,7 +541,13 @@ Deno.serve(async (req) => {
         const lastCr = lastShort ? lastShort.cr : 0;
 
         const wk = creditByWeek.get(t) ?? new Map();
-        const collected = [...wk.values()].reduce((a, b) => a + b, 0);
+        /* ⚠ SETTLED ONLY, 17 Sep 2026. `creditByWeek` still carries every leg
+           of this book because Weekly yield draws the live week; what a name
+           has EARNED is the settled half. */
+        const wkDone = settledByWeek.get(t) ?? new Map();
+        const collected = [...wkDone.values()].reduce((a, b) => a + b, 0);
+        const collectedOpen = [...(openByWeek.get(t) ?? new Map()).values()]
+          .reduce((a, b) => a + b, 0);
         const weekly = weeks.map((w) => Math.round(wk.get(w) ?? 0));
         /* ⚠ THE CLOCK STARTS WHEN THE LEAP OPENED, not at the first credit.
            `collected` is every credit ever, Nik's ruling, and NKE's run back to
@@ -507,6 +578,9 @@ Deno.serve(async (req) => {
              `option_greeks` exists for a leg opened days ago. */
           markWeek: prev > 0 ? Math.round((m - prev) * leap.n * 100) : 0,
           collected: Math.round(collected),
+          /* Taken in on legs still open. Not earned, so no card adds it to
+             `collected`; Coverage draws it as a lighter cap. */
+          collectedOpen: Math.round(collectedOpen),
           /* ⚠ THE SHEET'S INVARIANT NEEDED SPLITTING, not breaking. It says
              `weekly[] must sum to collected, checked numerically`, which holds
              only while a name's whole history fits the eight-week window. It
@@ -735,31 +809,23 @@ Deno.serve(async (req) => {
        learned the hard way. Filtering on trade_date alone would take the
        buy-backs of legs sold in August without their opening credits, and
        `kept` would go negative. */
-    const PROG_START = '2026-08-31';
-    const shortKey = (t: Record<string, unknown>) =>
-      `${t.ticker}|${t.option_type}|${N(t.strike)}|${t.expiry}`;
-    const shortOpen = new Map<string, string>();
-    for (const t of allShorts) {
-      if (String(t.action) !== 'open') continue;
-      const k = shortKey(t), d = String(t.trade_date).slice(0, 10);
-      if (!shortOpen.has(k) || d < shortOpen.get(k)!) shortOpen.set(k, d);
-    }
-    const inProg = (t: Record<string, unknown>) =>
-      (shortOpen.get(shortKey(t)) ?? '0000-00-00') >= PROG_START;
+    /* The programme's own start IS the page's start now: one date, set where
+       `BOOK_START` is defined. `inProg` survives as the name the rows below
+       read. */
+    const PROG_START = BOOK_START;
+    const inProg = inBook;
 
     /* Gross credits and buy-backs per name. `kept` is the difference; Nik
        confirmed 2026-09-10 that "Rolled back" is money actually paid out, not
        money still owed on legs that are open. */
     const grossBy = new Map<string, number>(), backBy = new Map<string, number>();
-    const grossAll = new Map<string, number>(), backAll = new Map<string, number>();
-    for (const t of allShorts) {
+    /* What the open legs have taken in but not yet earned: the lighter cap on
+       Coverage's bar, and nothing else. */
+    const grossOpenBy = new Map<string, number>(), backOpenBy = new Map<string, number>();
+    for (const t of bookShorts) {
       const tk = String(t.ticker), cash = N(t.contracts) * N(t.premium) * 100;
       const isOpen = String(t.action) === 'open';
-      /* All-time, for card 04's history; programme-only for card 01. */
-      const A = isOpen ? grossAll : backAll;
-      A.set(tk, (A.get(tk) ?? 0) + cash);
-      if (!inProg(t)) continue;
-      const P = isOpen ? grossBy : backBy;
+      const P = isSettled(t) ? (isOpen ? grossBy : backBy) : (isOpen ? grossOpenBy : backOpenBy);
       P.set(tk, (P.get(tk) ?? 0) + cash);
     }
 
@@ -833,57 +899,9 @@ Deno.serve(async (req) => {
       pay?: number; payU?: number; free?: number; move?: number | null;
     };
 
-    /* ── average credit per share ──────────────────────────────────────────
-       handoff/cards/average-credit.md. Four weeks including this one, per side.
-
-       ⚠ PER SHARE, NEVER PER CONTRACT: credit / contracts / 100, the number
-       quoted when the trade is placed. The sheet's rule 0.1.
-
-       ⚠ BUCKETED BY THE WEEK THE LEG COVERS, not the day it was sold. Nik,
-       2026-09-03: "Which week it's sold for not the day it is sold", confirmed
-       again for this card on 2026-09-08. Every other card on the page already
-       buckets this way, so a week reads the same figure everywhere.
-
-       ⚠ OPENS ONLY. Nik, 2026-09-08. The card asks what a contract SELLS for,
-       and buying the NFLX 83 back at 0.05 does not change that it was sold at
-       0.65. Weekly yield carries the net; this carries the rate.
-
-       ⚠ A WEEK WITH NO TRADE ON A SIDE SHIPS null, NOT 0. The client draws no
-       bar and keeps the key. Zero would say "sold at nothing" and, because the
-       sheet's plot scale divides by the window's RANGE, it would drag the floor
-       down and flatten the weeks that did trade. */
-    const CREDIT_WEEKS = 4;
-    const creditWeeks: string[] = [];
-    for (let i = CREDIT_WEEKS - 1; i >= 0; i--) {
-      creditWeeks.push(new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
-        .toISOString().slice(0, 10));
-    }
-    const bucket = new Map<string, { n: number; cash: number }>();  // `${side}|${week}`
-    for (const t of allShorts) {
-      if (String(t.action) !== 'open') continue;
-      const w = weekStart(String(t.expiry).slice(0, 10));
-      const k = `${t.option_type}|${w}`;
-      const e = bucket.get(k) ?? { n: 0, cash: 0 };
-      e.n += N(t.contracts);
-      e.cash += N(t.contracts) * N(t.premium) * 100;
-      bucket.set(k, e);
-    }
-    const sideWeeks = (side: string) => creditWeeks.map((w) => {
-      const e = bucket.get(`${side}|${w}`);
-      return {
-        week: w,
-        contracts: e ? Math.round(e.n) : 0,
-        /* Two decimals, because this is a price and it is quoted in cents. */
-        perShare: e && e.n > 0 ? Math.round(e.cash / e.n) / 100 : null,
-        /* ⚠ THE CASH, SO THE CARD CAN DIVIDE AND NEVER STORE AN AVERAGE. The
-           `credit-theta` sheet, 14 Sep 2026: the blend across weeks is
-           sum(cash) / sum(contracts), never the mean of weekly averages, and a
-           week with 160 contracts is not worth the same as a week with 120.
-           `perShare` stays because it is the number quoted at the desk. */
-        cash: e ? Math.round(e.cash) : 0,
-      };
-    });
-    const credit = { week: thisWeek, calls: sideWeeks('call'), puts: sideWeeks('put') };
+    /* ⚠ AVERAGE CREDIT IS GONE, 17 Sep 2026. Credit & theta replaced it, and
+       it reads the weekly buckets in `creditTrend` instead of a four-week
+       per-share block of its own. */
 
     /* ── net delta per name ───────────────────────────────────────────────
        What is left of a name's exposure once everything sold against it is
@@ -926,8 +944,8 @@ Deno.serve(async (req) => {
       week: bookWeekly.find((w) => w.current)?.credit ?? 0,
       legs: toRollLegs,
       names: Object.fromEntries(positions.map((p) => [p.t, {
-        collected: Math.round(grossAll.get(p.t) ?? 0),
-        given: Math.round(backAll.get(p.t) ?? 0),
+        collected: Math.round(grossBy.get(p.t) ?? 0),
+        given: Math.round(backBy.get(p.t) ?? 0),
         leap: Math.round(p.mark - p.paid),
       }])),
     };
@@ -1237,7 +1255,7 @@ Deno.serve(async (req) => {
       puts: { n: number; cash: number; notional: number };
       back: number; names: Set<string>;
     }>();
-    for (const t of allShorts) {
+    for (const t of bookShorts) {
       const w = weekStart(String(t.expiry).slice(0, 10));
       if (w < thWeeks[0] || w > thisWeek) continue;
       const e = trCredit.get(w) ?? {
@@ -1588,12 +1606,16 @@ Deno.serve(async (req) => {
       leapCostBy.set(e.ticker, (leapCostBy.get(e.ticker) ?? 0) + e.cash);
     }
     const callCrBy = new Map<string, number>(), callWkBy = new Map<string, number>();
-    for (const t of allShorts) {
+    /* Settled and open kept apart: Coverage draws the first as its bar and the
+       second as the lighter cap above it. */
+    const callCrOpenBy = new Map<string, number>();
+    for (const t of bookShorts) {
       if (String(t.option_type) !== 'call') continue;
       const tk = String(t.ticker);
       if (!leapCostBy.has(tk)) continue;
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
-      callCrBy.set(tk, (callCrBy.get(tk) ?? 0) + c);
+      if (isSettled(t)) callCrBy.set(tk, (callCrBy.get(tk) ?? 0) + c);
+      else callCrOpenBy.set(tk, (callCrOpenBy.get(tk) ?? 0) + c);
       /* Bucketed by the week the leg COVERS, the rule every card here uses. */
       if (weekStart(String(t.expiry).slice(0, 10)) === thisWeek) {
         callWkBy.set(tk, (callWkBy.get(tk) ?? 0) + c);
@@ -1650,7 +1672,11 @@ Deno.serve(async (req) => {
        would have taken those closes without their opens, and the ring would
        have read −$3,035 collected against a negative cost. A position is in
        the programme when it was OPENED into it. */
-    const PUT_START = '2026-09-01';
+    /* ⚠ ONE DATE FOR THE PAGE, 17 Sep 2026: the put programme starts where
+       everything else starts. It ran from 1 Sep because that was when the
+       first hedge of this book was read as "the programme"; the FIS puts of
+       26 Aug and the NKE puts of 31 Aug are the same hedge and belong in it. */
+    const PUT_START = BOOK_START;
     const putKey = (t: Record<string, unknown>) =>
       `${t.ticker}|${t.direction}|${N(t.strike)}|${t.expiry}`;
     const firstOpen = new Map<string, string>();
@@ -1677,12 +1703,25 @@ Deno.serve(async (req) => {
 
     /* Short-put credits, bucketed by the week they COVER, same rule the call
        side uses. */
-    const putWeek = new Map<string, number>();
+    const putWeek = new Map<string, number>(), putWeekOpen = new Map<string, number>();
+    /* Settled only, the page rule. A short put still open has taken cash in
+       that could still be handed back, so it does not pay for the hedge yet;
+       it waits in `putWeekOpen` and Coverage draws it as the lighter cap. */
+    const putLeft2 = new Map<string, number>();
+    for (const t of allPuts) {
+      if (String(t.direction) !== 'short') continue;
+      const k = putKey(t);
+      putLeft2.set(k, (putLeft2.get(k) ?? 0)
+        + (String(t.action) === 'open' ? 1 : -1) * N(t.contracts));
+    }
     for (const t of allPuts) {
       if (String(t.direction) !== 'short' || !inProgramme(t)) continue;
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
       const w = weekStart(String(t.expiry).slice(0, 10));
-      putWeek.set(w, (putWeek.get(w) ?? 0) + c);
+      const done = String(t.expiry).slice(0, 10) < today
+        || (putLeft2.get(putKey(t)) ?? 0) <= 0.0001;
+      const M = done ? putWeek : putWeekOpen;
+      M.set(w, (M.get(w) ?? 0) + c);
     }
     const putCollected = [...putWeek.values()].reduce((a, b) => a + b, 0);
     /* Pace is the realised rate over the weeks that actually ran, never over
@@ -1799,9 +1838,9 @@ Deno.serve(async (req) => {
     const creditTo = (cut: string, type: string) => {
       let c = 0;
       if (type === 'call') {
-        for (const t of allShorts) {
+        for (const t of bookShorts) {
           if (String(t.option_type) !== 'call') continue;
-          if (String(t.trade_date).slice(0, 10) > cut) continue;
+          if (String(t.trade_date).slice(0, 10) > cut || !settledBy(t, cut)) continue;
           if (!leapCostBy.has(String(t.ticker))) continue;
           c += (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
         }
@@ -1836,7 +1875,7 @@ Deno.serve(async (req) => {
     };
 
     const side = (type: string, label: string, scope: string,
-                  collected: number, pace: number, melt: number) => ({
+                  collected: number, pace: number, melt: number, open: number) => ({
       label, scope, names: nameCount(type),
       /* ⚠ TODAY'S FIGURE IS THE INTRINSIC CARD'S, NOT A SECOND DERIVATION. The
          sheet requires the two cards to read one book, and two computations of
@@ -1850,6 +1889,10 @@ Deno.serve(async (req) => {
          floor and claim the whole bar melted. */
       hist: { yday: ghost(ydayMk, type), week: ghost(weekMk, type) },
       collected: Math.round(collected),
+      /* ⚠ THE LIGHTER CAP, 17 Sep 2026. Credit taken on legs that are still
+         open: real cash, not yet earned, and it can still be handed back. Nik
+         asked for it drawn above the solid bar rather than inside it. */
+      open: Math.round(open),
       chist: { yday: creditTo(ydayMk.day, type), week: creditTo(weekMk.day, type) },
       pace: Math.round(pace),
       /* Positive: the card's word is "melts", so the sign is in the label. */
@@ -1924,6 +1967,7 @@ Deno.serve(async (req) => {
         t,
         time: time0,
         collected: Math.round(callCrBy.get(t) ?? 0),
+        open: Math.round(callCrOpenBy.get(t) ?? 0),
         pace: Math.round(callWkBy.get(t) ?? 0),
         melt: Math.round(Math.abs(ypMelt.get(t) ?? 0)),
         rolling: ypRoll.get(t) === true,
@@ -1938,9 +1982,9 @@ Deno.serve(async (req) => {
        `callCrBy` makes, stopped at a date. */
     const ypCreditOn = (t: string, cut: string) => {
       let c = 0;
-      for (const sh of allShorts) {
+      for (const sh of bookShorts) {
         if (String(sh.option_type) !== 'call' || String(sh.ticker) !== t) continue;
-        if (String(sh.trade_date).slice(0, 10) > cut) continue;
+        if (String(sh.trade_date).slice(0, 10) > cut || !settledBy(sh, cut)) continue;
         c += (String(sh.action) === 'open' ? 1 : -1) * N(sh.contracts) * N(sh.premium) * 100;
       }
       return c;
@@ -2119,7 +2163,6 @@ Deno.serve(async (req) => {
       /* `asOf` is the close the windows are measured FROM, so the card can
          say what "today" is against without the client guessing. */
       inventory,
-      credit,
       theta,
       creditTrend,
       intrinsic,
@@ -2127,9 +2170,11 @@ Deno.serve(async (req) => {
         asOf: dayLive ? today : ydayDate,
         sides: {
           call: side('call', 'Call cover', 'the long calls',
-                     callCollected, callPace, thetaWeeks[thetaWeeks.length - 1]?.lc ?? 0),
+                     callCollected, callPace, thetaWeeks[thetaWeeks.length - 1]?.lc ?? 0,
+                     callNames.reduce((a, [t]) => a + (callCrOpenBy.get(t) ?? 0), 0)),
           put: side('put', 'Put cover', 'the long puts',
-                    putCollected, putWkTotal, thetaWeeks[thetaWeeks.length - 1]?.lp ?? 0),
+                    putCollected, putWkTotal, thetaWeeks[thetaWeeks.length - 1]?.lp ?? 0,
+                    [...putWeekOpen.values()].reduce((a, b) => a + b, 0)),
         },
       },
       premium,

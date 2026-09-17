@@ -216,18 +216,24 @@ struct SunnyCreditTheta: View {
                 }
                 .fixedSize()
             } else {
+                /* ⚠ THE RATE LEFT, THE MONEY RIGHT, the same shape as Theta.
+                   Nik, 17 Sep 2026, after mistaking 1.24% for Weekly yield's
+                   2.19%: the dollars belong on the card, but not as the reading.
+                   Per contract they fell $422 to $35 as the book moved from NVDA
+                   to eight cheaper names while the rate held, so dollars would
+                   have drawn a collapse that did not happen. The band word moves
+                   to the legend row, where there is room for its three words. */
                 let p = now?.blend
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     big(p.map(pctText) ?? "\u{2013}")
                     small("of strike", weight: S.wMidSmN, ink: S.mute)
                 }
                 Spacer(minLength: 0)
-                if let p, let lo = block.credit.usualLo, let hi = block.credit.usualHi {
-                    small(p > hi ? "above your usual" : (p < lo ? "below your usual" : "in your usual range"),
-                          weight: S.wSemiN,
-                          ink: p > hi ? S.gainText : (p < lo ? S.lossText : S.mute))
-                        .fixedSize()
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    big(signedMoney(Double((now?.calls.cash ?? 0) + (now?.puts.cash ?? 0))))
+                    small("taken", weight: S.wMidSmN, ink: S.mute)
                 }
+                .fixedSize()
             }
         }
         .frame(height: 22)
@@ -251,13 +257,24 @@ struct SunnyCreditTheta: View {
     private var legend: some View {
         HStack(spacing: 14) {
             if tab == 0 {
-                entry(filled: true, "Long pays", optMoney(now?.long ?? 0))
+                /* ⚠ LOSES, NOT PAYS. Nik, 14 Sep 2026 on the retired Theta card and
+                   again on this one, 17 Sep: "pays" reads as the long side EARNING,
+                   the word for a dividend, when it is the side handing money back
+                   every day. */
+                entry(filled: true, "Long loses", optMoney(now?.long ?? 0))
                 entry(filled: false, "Short collects", signedMoney(Double(now?.short ?? 0)))
             } else {
                 entry(filled: true, "Calls", now?.calls.pct.map(pctText) ?? "\u{2013}")
                 entry(filled: false, "Puts", now?.puts.pct.map(pctText) ?? "\u{2013}")
             }
             Spacer(minLength: 0)
+            if tab == 1, let p = now?.blend,
+               let lo = block.credit.usualLo, let hi = block.credit.usualHi {
+                Text(p > hi ? "above your usual" : (p < lo ? "below your usual" : "your usual range"))
+                    .font(S.inter(S.t11, S.wSemiN))
+                    .foregroundStyle(p > hi ? S.gainText : (p < lo ? S.lossText : S.mute))
+                    .sunnyLineBox(S.t11).fixedSize()
+            }
         }
         .frame(height: 11)
     }
