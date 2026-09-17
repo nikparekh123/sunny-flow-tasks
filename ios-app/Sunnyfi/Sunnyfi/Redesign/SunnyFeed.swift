@@ -570,11 +570,10 @@ struct SunnyPane: View {
             if let pr = o.programme, !pr.rows.isEmpty {
                 SunnyProgramme(block: pr, legs: o.longLegs?.legs ?? [])
             }
-            if let th = o.theta, !th.weeks.isEmpty {
-                SunnyTheta(block: th)
-            }
-            if let cr = o.credit {
-                SunnyAvgCredit(credit: cr, premium: o.premium)
+            /* ⚠ CREDIT & THETA REPLACES THETA AND AVERAGE CREDIT, 17 Sep 2026,
+               in their place at the end of the run. */
+            if let ct = o.creditTrend, ct.weeks.count > 1 {
+                SunnyCreditTheta(block: ct)
             }
         } else if m.options.error != nil {
             SunnyPageNote("The book did not answer. It will try again when you "

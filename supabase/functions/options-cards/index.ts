@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-14.15';
+const BUILD = '2026-09-17.2';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
          ring does keep is the one that matters, that CALL premium never
          funds the puts. */
       time('allShorts', () => P('option_trades?voided_at=is.null&direction=eq.short'
-        + '&select=ticker,option_type,action,contracts,premium,trade_date,expiry'
+        + '&select=ticker,option_type,action,contracts,premium,strike,trade_date,expiry'
         + '&order=trade_date.asc,ticker.asc,expiry.asc')),
       /* ⚠ SHORT PUTS ARE A SEPARATE SERIES AND MUST STAY SEPARATE. They fund the
          long puts and nothing else. Nik, 2026-09-06, on whether the cover ring
@@ -1103,7 +1103,10 @@ Deno.serve(async (req) => {
        ordered newest-first covers roughly ten minutes and therefore every leg
        many times over. Paging five weeks of `option_greeks` would be 55,000
        rows and 55 round trips for four numbers. */
-    const TH_WEEKS = 4;
+    /* ⚠ TWELVE WEEKS, 17 Sep 2026: Credit & theta draws the trend, so the
+       weekly lens needs twelve readings. Theta and Coverage still read the
+       last one only. */
+    const TH_WEEKS = 12;
     const thWeeks: string[] = [];
     for (let i = TH_WEEKS - 1; i >= 0; i--) {
       thWeeks.push(new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
@@ -1134,15 +1137,17 @@ Deno.serve(async (req) => {
     /* The newest reading per leg on one day. Walks back up to four days so a
        holiday or a short week still answers rather than shipping a zero. */
     const thetaOn = async (day: string) => {
-      const { day: d, rows } = await greeksOn(day, 'option_trade_id,theta,last_mark');
+      const { day: d, rows } = await greeksOn(day, 'option_trade_id,theta,last_mark,iv');
       const seen = new Map<string, number>();
+      const ivs = new Map<string, number>();
       for (const g of rows) {
         const id = String(g.option_trade_id);
         if (seen.has(id) || g.theta === null) continue;
         /* THE CAP. Never more than the option is worth. */
         seen.set(id, Math.max(N(g.theta), -Math.abs(N(g.last_mark))));
+        if (g.iv !== null && N(g.iv) > 0) ivs.set(id, N(g.iv));
       }
-      return { day: d, th: seen };
+      return { day: d, th: seen, iv: ivs };
     };
 
     const thRead = await time('thetaDays', () => Promise.all(
@@ -1154,7 +1159,7 @@ Deno.serve(async (req) => {
          burns roughly four times faster per dollar. Nothing else in the deck
          prices the protection in daily terms. The short side splits the same
          way so the two columns stay twins. */
-      let long = 0, short = 0, lc = 0, lp = 0, sc = 0, sp = 0;
+      let long = 0, short = 0, lc = 0, lp = 0, sc = 0, sp = 0, ivN = 0, ivW = 0;
       for (const [id, th] of thRead[i].th) {
         const leg = thLegs.get(id);
         /* A leg that had already expired before that week was not in the book. */
@@ -1166,11 +1171,16 @@ Deno.serve(async (req) => {
         } else {
           short -= cash;
           if (leg.type === 'put') sp -= cash; else sc -= cash;
+          /* The short legs' IV, weighted by contracts. What the sold side is
+             being paid on, read at the same close as its theta. */
+          const v = thRead[i].iv.get(id);
+          if (v) { ivN += v * leg.n; ivW += leg.n; }
         }
       }
       return {
         week: w, on: thRead[i].day, long: Math.round(long), short: Math.round(short),
         lc: Math.round(lc), lp: Math.round(lp), sc: Math.round(sc), sp: Math.round(sp),
+        iv: ivW > 0 ? ivN / ivW : null,
       };
     });
     /* ⚠ THE ABSOLUTE MOVE, NOT THE NET ONE. Decay is only free when the book
@@ -1179,8 +1189,256 @@ Deno.serve(async (req) => {
     const absW1 = priceRows.map((r) => r.pct.w1)
       .filter((v): v is number => v !== null).map(Math.abs);
     const theta = {
-      weeks: thetaWeeks,
+      /* The retired Theta card drew four. */
+      weeks: thetaWeeks.slice(-4).map(({ iv: _iv, ...w }) => w),
       move: absW1.length ? r2(absW1.reduce((a, b) => a + b, 0) / absW1.length) : null,
+    };
+
+    /* ── credit & theta, the trend ───────────────────────────────────────
+       handoff `export 19/credit-theta`, 17 Sep 2026, with Nik's rulings on
+       the same day, which replace the sheet where they differ:
+
+       1 · THE RATIO IS THE THETA READING. Short collects ÷ what the LEAP calls
+          AND the long puts pay. 3.5× and above is comfortable, 2× to 3.5× is
+          watch, under 2× is danger: "anything less than 2 is not worth".
+       2 · CREDIT IS A PERCENT OF STRIKE, never dollars a contract. The book
+          turned over from NVDA to eight cheaper names and $/contract fell
+          from 422 to 35 while % of strike held 0.5 to 1.7. Dollars measured
+          the stock price, not the premium.
+       3 · NO RSI. Twelve weeks is too few for a 14-bucket RSI, which pins at
+          0 or 100 on this much history. The trend is the last 2 weeks against
+          the 6 before, in words: Strengthening · Holding · Turning · Weakening.
+       4 · ONE LINE, AND A SECOND WHEN TWO THINGS ARE MOVING. Below 2× the
+          line says which side did it, and any single name under 2× is named
+          even when the book is fine.
+
+       Credit buckets by the week the leg COVERS and counts opens only, the
+       same rules as the retired Average credit card. Weekly only for now;
+       Monthly and Quarterly wait until there is history to cut. */
+    const TR_PRIOR = 6, TR_RECENT = 2;
+    const pctOf = (a: number, b: number) => (b ? (a - b) / Math.abs(b) * 100 : 0);
+    const mean = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+    /* The state of a series: recent mean against prior mean, and whether the
+       last step agrees. A move under 10% either way is holding. */
+    const stateOf = (vals: (number | null)[]) => {
+      const v = vals.filter((x): x is number => x !== null);
+      if (v.length < TR_RECENT + 2) return 'Holding';
+      const recent = mean(v.slice(-TR_RECENT));
+      const prior = mean(v.slice(-(TR_RECENT + TR_PRIOR), -TR_RECENT));
+      const ch = pctOf(recent, prior);
+      const step = pctOf(v[v.length - 1], v[v.length - 2]);
+      if (Math.abs(ch) < 10) return 'Holding';
+      if (ch > 0) return step < -10 ? 'Turning' : 'Strengthening';
+      return step > 10 ? 'Turning' : 'Weakening';
+    };
+
+    const trCredit = new Map<string, {
+      calls: { n: number; cash: number; notional: number };
+      puts: { n: number; cash: number; notional: number };
+      back: number; names: Set<string>;
+    }>();
+    for (const t of allShorts) {
+      const w = weekStart(String(t.expiry).slice(0, 10));
+      if (w < thWeeks[0] || w > thisWeek) continue;
+      const e = trCredit.get(w) ?? {
+        calls: { n: 0, cash: 0, notional: 0 }, puts: { n: 0, cash: 0, notional: 0 },
+        back: 0, names: new Set<string>(),
+      };
+      const n = N(t.contracts), cash = n * N(t.premium) * 100;
+      if (String(t.action) === 'open') {
+        const side = String(t.option_type) === 'put' ? e.puts : e.calls;
+        side.n += n; side.cash += cash; side.notional += n * N(t.strike) * 100;
+        e.names.add(String(t.ticker));
+      } else {
+        e.back += cash;
+      }
+      trCredit.set(w, e);
+    }
+    const pctStrike = (s: { cash: number; notional: number }) =>
+      s.notional > 0 ? s.cash / s.notional * 100 : null;
+
+    const trWeeks = thetaWeeks.map((tw) => {
+      const c = trCredit.get(tw.week);
+      const side = (x?: { n: number; cash: number; notional: number }) => ({
+        n: Math.round(x?.n ?? 0), cash: Math.round(x?.cash ?? 0),
+        notional: Math.round(x?.notional ?? 0),
+      });
+      return {
+        week: tw.week, on: tw.on,
+        short: tw.short, long: tw.long, lc: tw.lc, lp: tw.lp, sc: tw.sc, sp: tw.sp,
+        /* null before the book held a long leg, not infinity. */
+        ratio: tw.long < 0 ? r2(tw.short / -tw.long) : null,
+        iv: tw.iv === null ? null : r2(tw.iv * 100),
+        calls: side(c?.calls), puts: side(c?.puts),
+        back: Math.round(c?.back ?? 0),
+      };
+    });
+    const blendPct = (w: typeof trWeeks[number]) => {
+      const nl = w.calls.notional + w.puts.notional;
+      return nl > 0 ? r2((w.calls.cash + w.puts.cash) / nl * 100) : null;
+    };
+
+    /* Each name's ratio today, from the same live reading. */
+    const liveRead = thRead[thRead.length - 1];
+    const byName = new Map<string, { short: number; lc: number; lp: number }>();
+    for (const [id, th] of liveRead.th) {
+      const leg = thLegs.get(id);
+      if (!leg || leg.exp < thisWeek) continue;
+      const e = byName.get(leg.ticker) ?? { short: 0, lc: 0, lp: 0 };
+      const cash = th * leg.n * 100;
+      if (leg.dir === 'long') { if (leg.type === 'put') e.lp += cash; else e.lc += cash; }
+      else e.short -= cash;
+      byName.set(leg.ticker, e);
+    }
+    const thNames = [...byName.entries()].map(([t, e]) => ({
+      t, short: Math.round(e.short), lc: Math.round(e.lc), lp: Math.round(e.lp),
+      ratio: (e.lc + e.lp) < 0 ? r2(e.short / -(e.lc + e.lp)) : null,
+    })).sort((a, b) => a.t.localeCompare(b.t));
+
+    const usd = (v: number) => '$' + Math.round(Math.abs(v)).toLocaleString('en-US');
+    const fx = (v: number) => (v >= 10 ? v.toFixed(0) : v.toFixed(1)) + '×';
+    const joinNames = (a: string[]) =>
+      a.length <= 1 ? (a[0] ?? '') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+
+    /* ── the theta lines ── */
+    const thetaLines: string[] = [];
+    {
+      const nowW = trWeeks[trWeeks.length - 1];
+      const thenW = trWeeks[Math.max(0, trWeeks.length - 3)];
+      const shortCh = pctOf(nowW.short, thenW.short);
+      const longCh = pctOf(-nowW.long, -thenW.long);
+      const dayLabel = (iso: string) => {
+        const d = new Date(iso + 'T12:00:00Z');
+        return `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`;
+      };
+      /* ⚠ THE PART THAT MOVED THE MOST DOLLARS IS NAMED, AND ITS OWN CHANGE
+         IS PRINTED. Printing the whole side's 205% beside "long puts" said the
+         puts tripled, when the puts were new and the side grew because of them.
+         A part that was zero two weeks ago is a new leg, and says so. */
+      const part = (a: number, b: number, a0: number, b0: number, na: string, nb: string) => {
+        const useA = Math.abs(a - a0) >= Math.abs(b - b0);
+        const now = Math.abs(useA ? a : b), then = Math.abs(useA ? a0 : b0);
+        return { who: useA ? na : nb, now, isNew: then === 0 && now > 0, ch: pctOf(now, then) };
+      };
+      const sPart = part(nowW.sc, nowW.sp, thenW.sc, thenW.sp, 'Short calls', 'Short puts');
+      const lPart = part(nowW.lc, nowW.lp, thenW.lc, thenW.lp, 'LEAPs', 'Long puts');
+      const since = dayLabel(thenW.week);
+      const ivCh = (nowW.iv !== null && thenW.iv !== null) ? pctOf(nowW.iv, thenW.iv) : 0;
+      const shortLine = () => {
+        if (sPart.isNew) return `${sPart.who} sold since ${since} collect ${usd(sPart.now)} a day`;
+        const base = `${sPart.who} collect ${Math.abs(Math.round(sPart.ch))}% ${sPart.ch >= 0 ? 'more' : 'less'}`;
+        /* IV named only when it moved the same way, by 10% or more. */
+        if (Math.abs(ivCh) >= 10 && Math.sign(ivCh) === Math.sign(sPart.ch)) {
+          return `${base} \u00B7 IV ${ivCh > 0 ? 'up' : 'down'} ${Math.abs(Math.round(ivCh))}%`;
+        }
+        return `${base} than 2 weeks ago`;
+      };
+      const longLine = () => lPart.isNew
+        ? `${lPart.who} bought since ${since} cost ${usd(lPart.now)} a day`
+        : `${lPart.who} cost ${Math.abs(Math.round(lPart.ch))}% ${lPart.ch >= 0 ? 'more' : 'less'} a day than 2 weeks ago`;
+      const low = thNames.filter((x) => x.ratio !== null && x.ratio < 2)
+        .sort((a, b) => (a.ratio ?? 0) - (b.ratio ?? 0));
+      const lowLine = () => {
+        if (low.length === 1) {
+          const x = low[0];
+          const what = x.lp <= x.lc ? 'puts' : 'LEAPs';
+          return `${x.t} below 2× on its own · ${what} cost ${usd(Math.min(x.lp, x.lc))} a day`;
+        }
+        return `${joinNames(low.slice(0, 3).map((x) => x.t))} below 2× on their own`;
+      };
+      /* Short shrinking and long growing hurt the ratio equally, so the
+         bigger percentage is the cause. */
+      const shortCaused = -shortCh >= longCh;
+      if (nowW.ratio !== null && nowW.ratio < 2) {
+        thetaLines.push(shortCaused
+          ? `Below 2\u00D7 \u00B7 ${sPart.who.toLowerCase()} collect ${Math.abs(Math.round(sPart.ch))}% less`
+          : lPart.isNew
+            ? `Below 2\u00D7 \u00B7 ${lPart.who === 'LEAPs' ? 'LEAPs' : 'long puts'} bought since ${since}`
+            : `Below 2\u00D7 \u00B7 ${lPart.who === 'LEAPs' ? 'LEAPs' : 'long puts'} cost ${Math.abs(Math.round(lPart.ch))}% more`);
+        if (low.length) thetaLines.push(lowLine());
+      } else {
+        const movers: { size: number; line: string }[] = [];
+        if (Math.abs(shortCh) >= 15) movers.push({ size: Math.abs(shortCh), line: shortLine() });
+        if (Math.abs(longCh) >= 15) movers.push({ size: Math.abs(longCh), line: longLine() });
+        movers.sort((a, b) => b.size - a.size);
+        if (movers.length) thetaLines.push(movers[0].line);
+        else if (thenW.ratio !== null && nowW.ratio !== null) {
+          thetaLines.push(`Holding near ${fx(thenW.ratio)} from 2 weeks ago`);
+        }
+        if (low.length) thetaLines.push(lowLine());
+        else if (movers.length > 1) thetaLines.push(movers[1].line);
+      }
+    }
+
+    /* ── the credit lines ── */
+    const creditLines: string[] = [];
+    const bl = trWeeks.map(blendPct);
+    const hist = [...trCredit.entries()].sort(([a], [b]) => a.localeCompare(b));
+    {
+      const recentW = trWeeks.slice(-TR_RECENT), priorW = trWeeks.slice(-(TR_RECENT + TR_PRIOR), -TR_RECENT);
+      const sum = (ws: typeof trWeeks, k: 'calls' | 'puts') => ws.reduce((a, w) => ({
+        cash: a.cash + w[k].cash, notional: a.notional + w[k].notional, n: a.n + w[k].n,
+      }), { cash: 0, notional: 0, n: 0 });
+      const side = (k: 'calls' | 'puts') => {
+        const r = pctStrike(sum(recentW, k)), p = pctStrike(sum(priorW, k));
+        return { k, ch: r !== null && p !== null ? pctOf(r, p) : 0 };
+      };
+      const sides = [side('calls'), side('puts')].sort((a, b) => Math.abs(b.ch) - Math.abs(a.ch));
+      const top = sides[0];
+      if (Math.abs(top.ch) < 10) {
+        const nowPct = bl[bl.length - 1];
+        creditLines.push(nowPct !== null ? `Credit holding at ${nowPct.toFixed(2)}% of strike` : 'Credit holding');
+      } else {
+        creditLines.push(`${top.k === 'calls' ? 'Calls' : 'Puts'} sold pay ${Math.abs(Math.round(top.ch))}% ${top.ch > 0 ? 'more' : 'less'} than the 6 weeks prior`);
+      }
+      /* The second line is the first cause that moved, most telling first. */
+      const up = top.ch >= 0;
+      const ivR = mean(recentW.map((w) => w.iv).filter((x): x is number => x !== null));
+      const ivP = mean(priorW.map((w) => w.iv).filter((x): x is number => x !== null));
+      const ivCh = ivR && ivP ? pctOf(ivR, ivP) : 0;
+      const nR = mean(recentW.map((w) => w.calls.n + w.puts.n));
+      const nP = mean(priorW.map((w) => w.calls.n + w.puts.n));
+      const nCh = pctOf(nR, nP);
+      const bR = recentW.reduce((a, w) => a + w.back, 0);
+      const bP = mean(priorW.map((w) => w.back)) * TR_RECENT;
+      const namesR = new Set<string>(), namesP = new Set<string>();
+      for (const w of recentW) for (const t of trCredit.get(w.week)?.names ?? []) namesR.add(t);
+      for (const w of priorW) for (const t of trCredit.get(w.week)?.names ?? []) namesP.add(t);
+      const fresh = [...namesR].filter((t) => !namesP.has(t)).sort();
+      const mv2 = bookMove.w2;
+      const causes: string[] = [];
+      if (Math.abs(ivCh) >= 10) causes.push(`IV on the legs sold ${ivCh > 0 ? 'up' : 'down'} ${Math.abs(Math.round(ivCh))}%`);
+      if (mv2 !== null && mv2 !== undefined && Math.abs(mv2) >= 3 && (mv2 > 0) === up) {
+        causes.push(`Stocks ${mv2 > 0 ? 'up' : 'down'} ${Math.abs(mv2).toFixed(1)}% in 2 weeks, LEAPs ${mv2 > 0 ? 'rising' : 'falling'}`);
+      }
+      if (fresh.length) causes.push(`New names sold: ${joinNames(fresh.slice(0, 3))}`);
+      if (Math.abs(nCh) >= 25) causes.push(`Writing ${Math.abs(Math.round(nCh))}% ${nCh > 0 ? 'more' : 'fewer'} contracts a week`);
+      if (bR >= 200 && bR > bP * 1.5) causes.push(`Buybacks ${usd(bR)} in 2 weeks, up from ${usd(bP)}`);
+      if (creditLines.length && causes.length) creditLines.push(causes[0]);
+    }
+    /* The usual range: the middle half of every week's blend on record. */
+    const allBl = hist.map(([, e]) => {
+      const nl = e.calls.notional + e.puts.notional;
+      return nl > 0 ? (e.calls.cash + e.puts.cash) / nl * 100 : null;
+    }).filter((x): x is number => x !== null).sort((a, b) => a - b);
+    const q = (p: number) => {
+      if (!allBl.length) return null;
+      const i = (allBl.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+      return r2(allBl[lo] + (allBl[hi] - allBl[lo]) * (i - lo));
+    };
+    const creditTrend = {
+      asOf: liveRead.day,
+      weeks: trWeeks,
+      names: thNames,
+      theta: {
+        state: stateOf(trWeeks.map((w) => (w.ratio === null ? null : Math.min(w.ratio, 6)))),
+        lines: thetaLines,
+      },
+      credit: {
+        state: stateOf(bl),
+        lines: creditLines,
+        usualLo: q(0.25), usualHi: q(0.75), usualWeeks: allBl.length,
+      },
     };
 
     /* ── intrinsic value ──────────────────────────────────────────────────
@@ -1863,6 +2121,7 @@ Deno.serve(async (req) => {
       inventory,
       credit,
       theta,
+      creditTrend,
       intrinsic,
       coverBars: {
         asOf: dayLive ? today : ydayDate,

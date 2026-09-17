@@ -29,8 +29,8 @@ enum SunnyWait {
     private static let closeKey = "sunnyfi.wait.lastClose"
 
     static func remember(_ o: OptionsPayload) {
-        if let w = o.theta?.weeks.last {
-            UserDefaults.standard.set(w.net, forKey: netKey)
+        if let w = o.creditTrend?.weeks.last {
+            UserDefaults.standard.set(w.short + w.long, forKey: netKey)
         }
         if let c = o.prices?.lastClose {
             UserDefaults.standard.set(c, forKey: closeKey)
