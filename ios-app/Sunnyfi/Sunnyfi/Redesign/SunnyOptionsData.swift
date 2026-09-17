@@ -120,16 +120,21 @@ struct OptionsPayload: Decodable {
 
 /// ⚠ NOTHING HERE IS A STORED TOTAL. `mark`, `net` and `banked` are derived, so
 /// a corrected component moves the hero with it. The card's whole claim is that
-/// `banked + owed + mark == net`; a hero that can disagree with its own footer
+/// `banked + open + mark == net`; a hero that can disagree with its own footer
 /// is the one defect that would make it worthless.
 struct ProgrammeRow: Decodable, Identifiable {
     let t: String
-    let kept: Int, calls: Int, puts: Int, owed: Int, invested: Int
+    let kept: Int, calls: Int, puts: Int, invested: Int
+    /// ⚠ OPEN REPLACES OWED, 17 Sep 2026. Credit taken on short legs that are
+    /// still open: not earned, never added to `kept`, and the same money
+    /// Coverage draws as its lighter cap. Optional so a run against an older
+    /// deployment decodes rather than throws.
+    let open: Int?
     var id: String { t }
     var mark: Int { calls + puts }
     var net: Int { kept + mark }
-    /// `owed` is always <= 0, so this adds back what is still owed on open legs.
-    var banked: Int { kept - owed }
+    /// Settled credit is the banked figure now; nothing open is in it.
+    var banked: Int { kept }
     var pct: Double { invested > 0 ? Double(net) / Double(invested) * 100 : 0 }
 }
 

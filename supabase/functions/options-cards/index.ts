@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-17.3';
+const BUILD = '2026-09-17.5';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -852,6 +852,11 @@ Deno.serve(async (req) => {
         return {
           t: p.t,
           kept: Math.round((grossBy.get(p.t) ?? 0) - (backBy.get(p.t) ?? 0)),
+          /* ⚠ OPEN REPLACES OWED, 17 Sep 2026. "Owed" was what it would cost to
+             close the open short legs, a figure about legs this page no longer
+             counts. `open` is the credit those legs took in and have not
+             earned: the same money Coverage draws as its lighter cap. */
+          open: Math.round((grossOpenBy.get(p.t) ?? 0) - (backOpenBy.get(p.t) ?? 0)),
           calls: Math.round(p.mark - p.paid),
           puts: Math.round(putMark - putCost),
           owed: Math.round(owedBy.get(p.t) ?? 0),
@@ -1125,10 +1130,16 @@ Deno.serve(async (req) => {
        weekly lens needs twelve readings. Theta and Coverage still read the
        last one only. */
     const TH_WEEKS = 12;
+    /* ⚠ AND NO WEEK BEFORE THE BOOK. Nik, 17 Sep 2026, asked for 31 August on
+       this card too: the weeks before it are the NVDA book, a different
+       position answering a different question. Three points today, twelve by
+       December. */
+    const TH_FLOOR = weekStart(BOOK_START);
     const thWeeks: string[] = [];
     for (let i = TH_WEEKS - 1; i >= 0; i--) {
-      thWeeks.push(new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
-        .toISOString().slice(0, 10));
+      const w = new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
+        .toISOString().slice(0, 10);
+      if (w >= TH_FLOOR) thWeeks.push(w);
     }
     /* How far into the week today is. Capped at Friday: there are no readings
        at the weekend and a Sunday would ask every past week for a Sunday. */
@@ -1354,6 +1365,7 @@ Deno.serve(async (req) => {
       const longLine = () => lPart.isNew
         ? `${lPart.who} bought since ${since} cost ${usd(lPart.now)} a day`
         : `${lPart.who} cost ${Math.abs(Math.round(lPart.ch))}% ${lPart.ch >= 0 ? 'more' : 'less'} a day than 2 weeks ago`;
+      const twoBack = trWeeks.length >= 3;
       const low = thNames.filter((x) => x.ratio !== null && x.ratio < 2)
         .sort((a, b) => (a.ratio ?? 0) - (b.ratio ?? 0));
       const lowLine = () => {
@@ -1376,12 +1388,15 @@ Deno.serve(async (req) => {
         if (low.length) thetaLines.push(lowLine());
       } else {
         const movers: { size: number; line: string }[] = [];
-        if (Math.abs(shortCh) >= 15) movers.push({ size: Math.abs(shortCh), line: shortLine() });
-        if (Math.abs(longCh) >= 15) movers.push({ size: Math.abs(longCh), line: longLine() });
+        if (twoBack && Math.abs(shortCh) >= 15) movers.push({ size: Math.abs(shortCh), line: shortLine() });
+        if (twoBack && Math.abs(longCh) >= 15) movers.push({ size: Math.abs(longCh), line: longLine() });
         movers.sort((a, b) => b.size - a.size);
         if (movers.length) thetaLines.push(movers[0].line);
-        else if (thenW.ratio !== null && nowW.ratio !== null) {
+        else if (twoBack && thenW.ratio !== null && nowW.ratio !== null) {
           thetaLines.push(`Holding near ${fx(thenW.ratio)} from 2 weeks ago`);
+        } else if (nowW.ratio !== null) {
+          thetaLines.push(`Short covers long ${fx(nowW.ratio)} \u00B7 ${trWeeks.length} `
+            + `week${trWeeks.length === 1 ? '' : 's'} of history so far`);
         }
         if (low.length) thetaLines.push(lowLine());
         else if (movers.length > 1) thetaLines.push(movers[1].line);
@@ -1403,7 +1418,18 @@ Deno.serve(async (req) => {
       };
       const sides = [side('calls'), side('puts')].sort((a, b) => Math.abs(b.ch) - Math.abs(a.ch));
       const top = sides[0];
-      if (Math.abs(top.ch) < 10) {
+      /* ⚠ NO COMPARISON WITHOUT SOMETHING TO COMPARE TO. With the page cut to
+         31 Aug the prior window is one week or none, and dividing by it printed
+         "Puts sold pay 186% more than the 6 weeks prior" off two data points.
+         The card says what it has instead. */
+      const priorReal = priorW.filter((w) => blendPct(w) !== null).length;
+      if (priorReal < 2) {
+        const nowPct = bl[bl.length - 1];
+        const runW = trWeeks.filter((w) => blendPct(w) !== null).length;
+        creditLines.push(nowPct !== null
+          ? `${nowPct.toFixed(2)}% of strike \u00B7 ${runW} week${runW === 1 ? '' : 's'} of history so far`
+          : 'No credit yet this week');
+      } else if (Math.abs(top.ch) < 10) {
         const nowPct = bl[bl.length - 1];
         creditLines.push(nowPct !== null ? `Credit holding at ${nowPct.toFixed(2)}% of strike` : 'Credit holding');
       } else {

@@ -151,3 +151,34 @@ lives in PREMIUM_UNREALIZED.
 - **How it has performed (§2)** — REALIZED is the hero (closed only). PREMIUM_TOTAL (with the realized/open split) and COST_TOTAL shown as breakdowns.
 - **Historical performance (§5)** — REALIZED booked per session (a realizing event on its date).
 - Code: `NvPnL` + `NvDerive.pnl(...)` in `NvdaModels.swift` is the ONE implementation; screens read its named fields.
+
+---
+
+## The options page: one start date, and only what is closed (17 Sep 2026)
+
+Nik's ruling, after Coverage read $32.7k collected on the same day Programme
+read $15.4k kept. It governs every card the options page draws.
+
+**1 · The book starts 31 August 2026.** The stock-replacement shift. Every LEAP
+the page charts was bought on or after that day, so the ~$19.6k the cut drops is
+call premium earned against shares he no longer owns. No card reaches back past
+it, including the Credit & theta charts, which therefore start with three weekly
+points and fill up.
+
+**2 · A leg is in or out by when it was OPENED**, never by the date of a single
+trade. Filtering on trade_date alone takes the buy-backs of legs sold in August
+without their opening credits and every "kept" goes negative.
+
+**3 · Settled means expired or bought back to flat.** Credit on a leg that is
+still open is not earned: it can still be handed back for more than it was sold
+for. This is REALIZED as defined above, applied card by card.
+
+**4 · Three exceptions, all his.** Positions (the card whose whole job is what is
+open), Weekly yield ("it will automatically start adding yield for next week as I
+start rolling"), and Credit & theta, which measures the RATE a contract sold at
+and knows that at the sale.
+
+**What each card shows:** Coverage draws settled credit as the solid bar and open
+credit as a lighter cap above it. Yield progress counts settled only. Programme's
+footer is BANKED (settled) · OPEN (credit on open legs) · AT MARK; the OWED slot,
+which priced closing the open legs, is gone. Weekly yield stays live.

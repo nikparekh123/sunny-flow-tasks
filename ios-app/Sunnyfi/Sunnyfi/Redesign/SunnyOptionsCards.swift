@@ -2076,12 +2076,12 @@ struct SunnyProgramme: View {
 
     struct PgRow: Identifiable {
         let t: String
-        let kept: Int, owed: Int, calls: Int, puts: Int, inv: Int
+        let kept: Int, open: Int, calls: Int, puts: Int, inv: Int
         var id: String { t }
         var mark: Int { calls + puts }
         var net: Int { kept + mark }
-        /// `owed` is always <= 0: what the open short legs would cost to close.
-        var banked: Int { kept + owed }
+        /// ⚠ BANKED IS SETTLED CREDIT, 17 Sep 2026. Nothing open counts.
+        var banked: Int { kept }
         var pct: Double { inv > 0 ? Double(net) / Double(inv) * 100 : 0 }
     }
 
@@ -2098,7 +2098,7 @@ struct SunnyProgramme: View {
                     .reduce(0.0) { $0 + ($1.m - $1.cost) * Double($1.n) }.rounded())
             }
             return PgRow(t: t,
-                         kept: src?.kept ?? 0, owed: src?.owed ?? 0,
+                         kept: src?.kept ?? 0, open: src?.open ?? 0,
                          calls: pnl(true), puts: pnl(false),
                          inv: Int(mine.reduce(0.0) { $0 + $1.cost * Double($1.n) }.rounded()))
         }
@@ -2106,7 +2106,7 @@ struct SunnyProgramme: View {
     private var all: PgRow {
         let r = rows
         return PgRow(t: "All",
-                     kept: r.reduce(0) { $0 + $1.kept }, owed: r.reduce(0) { $0 + $1.owed },
+                     kept: r.reduce(0) { $0 + $1.kept }, open: r.reduce(0) { $0 + $1.open },
                      calls: r.reduce(0) { $0 + $1.calls }, puts: r.reduce(0) { $0 + $1.puts },
                      inv: r.reduce(0) { $0 + $1.inv })
     }
@@ -2207,9 +2207,13 @@ struct SunnyProgramme: View {
             Spacer(minLength: 20)
             OptFooter(stats: [
                 .init(label: "Banked", value: optMoney(r.banked), ink: S.ink),
-                /* ⚠ "Owed on open" TRUNCATED TO "OWED ON OP…" at 10/700 in a
+                /* ⚠ "Open", NOT "Owed", 17 Sep 2026: what the open legs took
+                   in, the figure Coverage caps its bar with. The old slot said
+                   what closing them would cost, a fact about legs no card on
+                   this page counts any more.
+                   ⚠ "Owed on open" TRUNCATED TO "OWED ON OP…" at 10/700 in a
                    third of 323. Banked · Owed · At mark reads as one set. */
-                .init(label: "Owed", value: optMoney(r.owed), ink: S.ink),
+                .init(label: "Open", value: optMoney(r.open), ink: S.ink),
                 .init(label: "At mark", value: optMoney(r.mark), ink: S.ink),
             ])
         }
