@@ -1849,9 +1849,12 @@ struct SunnyProgramme: View {
         return names.map { t in
             let src = block.rows.first { $0.t == t }
             let mine = legs.filter { $0.t == t }
+            /* Mark against what the held contracts cost, plus what was already
+               realized selling some back: the side's whole result, so moving a
+               loss out of `cost` does not move the net. */
             let pnl: (Bool) -> Int = { call in
                 Int(mine.filter { $0.isCall == call }
-                    .reduce(0.0) { $0 + ($1.m - $1.cost) * Double($1.n) }.rounded())
+                    .reduce(0.0) { $0 + ($1.m - $1.cost) * Double($1.n) + ($1.rz ?? 0) }.rounded())
             }
             return PgRow(t: t,
                          kept: src?.kept ?? 0, open: src?.open ?? 0,

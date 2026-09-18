@@ -7,9 +7,16 @@
 //  same six places on every tile, then the tags. It retires Roll check's Left
 //  to sell, the last place that reading lived.
 //
-//  ⚠ THE STAR AND THE TAGS ARE PLACEHOLDER RULES, the sheet's, shipped as
-//  written until Nik settles them. The card prints them and nothing else
-//  depends on them. Do not add a fourth tag or a second star.
+//  ⚠ THE STAR IS A RECOMMENDATION, and there can be several. Nik, 18 Sep 2026:
+//  "which one should we pick to sell, that's the whole idea of it".
+//    · Sold tabs, SELL THIS NEXT: free contracts, credit at or over the floor,
+//      IV not thin.
+//    · Calls bought, ADD TO THIS: under water (adding costs less than he paid)
+//      and not out of the money.
+//    · Puts bought, ADD PUTS HERE: the name's calls are not fully covered, fewer
+//      puts held than calls.
+//  The tags are still the sheet's placeholders. The floor is his own
+//  average credit over strike since 31 Aug, one per side (18 Sep 2026).
 //
 
 import SwiftUI
@@ -18,8 +25,10 @@ import SwiftUI
 
 struct InventoryCard: Decodable {
     let asOf: String
-    /// A written leg should pay this much of the share a week. Placeholder.
-    let floor: Double
+    /// ⚠ HIS OWN AVERAGE, ONE PER SIDE, credit over strike since 31 Aug. Nik,
+    /// 18 Sep 2026: the floor is Credit & theta's figure; puts pay more than
+    /// calls on this book, so one floor would pass every put and fail every call.
+    let floor: InvFloor
     let sold: InvSides
     let lots: [String: [InvLot]]
     let today: [String: Double]
@@ -27,6 +36,7 @@ struct InventoryCard: Decodable {
 }
 
 struct InvSides: Decodable { let calls: [InvSold]; let puts: [InvSold] }
+struct InvFloor: Decodable { let calls: Double?; let puts: Double? }
 
 struct InvSold: Decodable, Identifiable {
     let t: String
@@ -85,6 +95,9 @@ struct SunnyInventory: View {
     private static let inner: CGFloat = S.content - 48          // 313
 
     private var soldRows: [InvSold] { tab == .sc ? block.sold.calls : block.sold.puts }
+    /// The tab's floor. With no history yet it is infinite, so nothing is starred
+    /// and every credit reads under it rather than over a floor of zero.
+    private var floor: Double { (tab == .sp ? block.floor.puts : block.floor.calls) ?? .infinity }
     private var boughtRows: [LongLeg] { legs.filter { $0.isCall == (tab == .bc) } }
     private func key(_ l: LongLeg) -> String { "\(l.t) \(l.k)" }
 
@@ -297,14 +310,14 @@ struct SunnyInventory: View {
     // MARK: sold
 
     @ViewBuilder private func soldTile(_ x: InvSold, no: Int, tags ts: [String]) -> some View {
-        let star = x.free > 0 && (x.cr ?? 0) >= block.floor && x.ivw != "thin"
+        let star = x.free > 0 && (x.cr ?? 0) >= floor && x.ivw != "thin"
         nameRow(no: no, t: x.t, k: nil, mny: nil, star: star)
         Spacer().frame(height: 16)
         cells([
             Cell(label: "Sold", value: "\(x.sold) of \(x.held)", ink: S.ink),
             Cell(label: "Free", value: "\(x.free)", ink: x.free > 0 ? S.ink : S.mute),
             Cell(label: "Credit", value: x.cr.map { String(format: "%.1f%%", $0) } ?? "\u{2013}",
-                 ink: x.cr == nil ? S.mute : ((x.cr ?? 0) >= block.floor ? S.gainText : S.lossText)),
+                 ink: x.cr == nil ? S.mute : ((x.cr ?? 0) >= floor ? S.gainText : S.lossText)),
             Cell(label: "Week", value: x.mv.map(move) ?? "\u{2013}",
                  ink: x.mv == nil || abs(x.mv ?? 0) < 0.05 ? S.mute : ((x.mv ?? 0) < 0 ? S.lossText : S.gainText)),
             Cell(label: x.ivw.map { "IV \u{00B7} \($0)" } ?? "IV",
@@ -338,7 +351,7 @@ struct SunnyInventory: View {
         let book = legs.reduce(0.0) { $0 + $1.cost * Double($1.n) }
         let pr = protection(l)
         let lots = block.lots[k] ?? []
-        nameRow(no: no, t: l.t, k: l.k, mny: mny, star: l.m < l.cost && mny != "out")
+        nameRow(no: no, t: l.t, k: l.k, mny: mny, star: star(l, mny: mny))
         Spacer().frame(height: 16)
         cells([
             Cell(label: "Held", value: "\(l.n)", ink: S.ink, tap: lots.isEmpty ? nil : {
@@ -385,6 +398,13 @@ struct SunnyInventory: View {
         if !ts.isEmpty { tags(ts) }
     }
 
+    private func star(_ l: LongLeg, mny: String) -> Bool {
+        if l.isCall { return l.m < l.cost && mny != "out" }
+        let calls = legs.filter { $0.t == l.t && $0.isCall }.reduce(0) { $0 + $1.n }
+        let puts = legs.filter { $0.t == l.t && !$0.isCall }.reduce(0) { $0 + $1.n }
+        return calls > puts
+    }
+
     /// Biggest · Underwater · Newest.
     private func boughtTags(_ P: [LongLeg]) -> [[String]] {
         let size = P.map { $0.cost * Double($0.n) }
@@ -420,10 +440,10 @@ struct SunnyInventory: View {
         let stats: [(String, String, Color)]
         if tab.sold {
             let L = soldRows
-            let above = L.filter { ($0.cr ?? 0) >= block.floor }.count
+            let above = L.filter { ($0.cr ?? 0) >= floor }.count
             stats = [("SOLD", "\(L.reduce(0) { $0 + $1.sold })", S.ink),
                      ("FREE", "\(L.reduce(0) { $0 + $1.free })", S.ink),
-                     ("ABOVE \(String(format: "%.2f", block.floor))%", "\(above) of \(L.count)",
+                     ("ABOVE \(floor.isFinite ? String(format: "%.2f", floor) : "\u{2013}")%", "\(above) of \(L.count)",
                       above == L.count && !L.isEmpty ? S.gainText : S.ink)]
         } else {
             let P = boughtRows

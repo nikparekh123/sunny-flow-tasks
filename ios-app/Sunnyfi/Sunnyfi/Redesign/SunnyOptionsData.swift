@@ -172,6 +172,12 @@ struct ProgrammeBlock: Decodable {
 struct LongLeg: Decodable, Identifiable {
     let t: String, k: String, n: Int
     let cost: Double, m: Double, w1: Double, w2: Double, w4: Double
+    /// ⚠ REALIZED ON CONTRACTS ALREADY SOLD BACK, dollars, negative a loss.
+    /// Nik, 18 Sep 2026: `cost` is now what the contracts still held cost, first
+    /// in first out, so a round trip's loss no longer hides inside the price.
+    /// Performance adds this back to its side's row so the net does not move.
+    /// Optional so a run against an older deployment decodes.
+    let rz: Double?
     var id: String { "\(t)|\(k)" }
     /// The side is the last letter of the strike and nothing else about it is
     /// read. A row is a name and a side, never a strike.

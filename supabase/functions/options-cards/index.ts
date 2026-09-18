@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-18.1';
+const BUILD = '2026-09-18.3';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -241,6 +241,8 @@ Deno.serve(async (req) => {
     type Leg = {
       ticker: string; type: string; dir: string; k: number; exp: string;
       n: number; cash: number; ids: string[]; opened: string;
+      /** Long legs only: realized on contracts already sold back, dollars. */
+      rz?: number;
     };
     const byKey = new Map<string, Leg>();
     for (const t of legs) {
@@ -262,6 +264,45 @@ Deno.serve(async (req) => {
       byKey.set(key, e);
     }
     const open = [...byKey.values()].filter((e) => e.n > 0.0001);
+
+    /* ⚠ WHAT THE CONTRACTS STILL HELD COST, FIRST IN FIRST OUT. Nik, 18 Sep
+       2026. `cash / n` folded the loss on contracts already sold back into the
+       price of the ones left: FIS 37.5P read $387.50 when the ten he holds
+       were bought at $3.69, because five bought on 26 Aug were sold at a loss
+       on 1 Sep; NFLX 75P read $730.63 against $700 paid. That loss is
+       REALIZED and ships as `rz` beside the leg, so Performance still counts
+       it and the net does not move; it just stops being called a price. */
+    const fifoOf = (e: Leg) => {
+      const fills = legs
+        .filter((t) => String(t.ticker) === e.ticker && String(t.option_type) === e.type
+          && String(t.direction) === e.dir && N(t.strike) === e.k
+          && String(t.expiry).slice(0, 10) === e.exp)
+        .sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
+      const lots: [string, number, number][] = fills
+        .filter((t) => String(t.action) === 'open')
+        .map((t) => [String(t.trade_date).slice(0, 10), N(t.contracts), r2(N(t.premium) * 100)]);
+      let sold = fills.filter((t) => String(t.action) !== 'open')
+        .reduce((a, t) => a + N(t.contracts), 0);
+      while (sold > 0.0001 && lots.length) {
+        const take = Math.min(sold, lots[0][1]);
+        lots[0][1] -= take; sold -= take;
+        if (lots[0][1] <= 0.0001) lots.shift();
+      }
+      const held = lots.reduce((a, l) => a + l[1], 0);
+      const cost = lots.reduce((a, l) => a + l[1] * l[2], 0);
+      return { lots, held, cost };
+    };
+
+    /* Priced once, here, so every card that reads a long leg's cost (Positions'
+       Paid, Programme, Intrinsic's Paid, Coverage) agrees to the dollar. */
+    for (const e of open) {
+      if (e.dir !== 'long') continue;
+      const ff = fifoOf(e);
+      if (ff.held <= 0.0001) continue;
+      /* Proceeds of what was sold less the first-in lots it came out of. */
+      e.rz = ff.cost - e.cash;
+      e.cash = ff.cost;
+    }
 
     /* ── ONE START DATE, AND ONLY WHAT IS CLOSED ──────────────────────────
        Nik, 17 Sep 2026, after finding Coverage reading $32.7k collected while
@@ -2093,6 +2134,9 @@ Deno.serve(async (req) => {
       .map((e) => {
         /* Per contract, in dollars: the card multiplies by `n` itself. */
         const cost = e.n > 0 ? e.cash / e.n : 0;
+        /* Realized on contracts already sold: what they fetched less what the
+           first-in lots they came out of cost. Negative is a loss. */
+        const rz = e.rz ?? 0;
         const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
         const m = md.length ? md.reduce((a, x) => a + x.m, 0) / md.length * 100 : cost;
         const at = (r: { mk: Map<string, number> }) => {
@@ -2116,6 +2160,7 @@ Deno.serve(async (req) => {
           w1: r2(at(llRead[0])),
           w2: r2(at(llRead[1])),
           w4: r2(at(llRead[2])),
+          rz: Math.round(rz),
         };
       })
       .filter((l) => l.n > 0);
@@ -2165,7 +2210,9 @@ Deno.serve(async (req) => {
       }
       return [{
         t: r.t, held, sold,
-        cr: last && sp > 0 ? r2(N(last.premium) / sp * 100) : null,
+        /* ⚠ CREDIT OVER STRIKE, NOT OVER SPOT. Nik, 18 Sep 2026: the floor is
+           Credit & theta's figure, and that card divides by strike. */
+        cr: last && N(last.strike) > 0 ? r2(N(last.premium) / N(last.strike) * 100) : null,
         mv: pr?.pct.w1 ?? null,
         iv: iv ? r2(iv.now) : null,
         ivw: mult === null ? null : mult >= 1.15 ? 'rich' : mult < 0.95 ? 'thin' : 'normal',
@@ -2180,23 +2227,8 @@ Deno.serve(async (req) => {
     for (const e of open) {
       if (e.dir !== 'long' || e.n <= 0) continue;
       const key = legKeyOf(e);
-      /* FIFO: every fill on this contract, oldest first, then the sales taken
-         off the front. What is left is what he still holds, at what it cost. */
-      const fills = legs
-        .filter((t) => String(t.ticker) === e.ticker && String(t.option_type) === e.type
-          && String(t.direction) === 'long' && N(t.strike) === e.k
-          && String(t.expiry).slice(0, 10) === e.exp)
-        .sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
-      const lots: [string, number, number][] = fills
-        .filter((t) => String(t.action) === 'open')
-        .map((t) => [String(t.trade_date).slice(0, 10), N(t.contracts), r2(N(t.premium) * 100)]);
-      let sold = fills.filter((t) => String(t.action) !== 'open')
-        .reduce((a, t) => a + N(t.contracts), 0);
-      while (sold > 0 && lots.length) {
-        const take = Math.min(sold, lots[0][1]);
-        lots[0][1] -= take; sold -= take;
-        if (lots[0][1] <= 0.0001) lots.shift();
-      }
+      /* FIFO, the same helper the long legs price from. */
+      const lots = fifoOf(e).lots;
       invLots[key] = [...(invLots[key] ?? []), ...lots.map((l) => [l[0], Math.round(l[1]), l[2]] as [string, number, number])];
       const now = e.ids.map((i) => mark.get(i)?.m).filter((x): x is number => x !== undefined);
       const then = e.ids.map((i) => invPrev.mk.get(i)).filter((x): x is number => x !== undefined);
@@ -2214,9 +2246,19 @@ Deno.serve(async (req) => {
     }
     const inventoryCard = {
       asOf: dayLive ? today : ydayDate,
-      /* The sheet's floor: a written leg should pay 1.24% of the share a week.
-         A placeholder the design ships with, to be settled with Nik. */
-      floor: 1.24,
+      /* ⚠ THE FLOOR IS HIS OWN AVERAGE, ONE PER SIDE. Nik, 18 Sep 2026: credit
+         over strike across every contract sold since the book began, the same
+         sum Credit & theta draws, so it moves as the weeks do. Puts pay more
+         than calls on this book (1.32% against 1.00% on the day it was set);
+         one floor would pass every put and fail every call. */
+      floor: (() => {
+        const f = (k: 'calls' | 'puts') => {
+          const c = trWeeks.reduce((a, w) => a + w[k].cash, 0);
+          const nl = trWeeks.reduce((a, w) => a + w[k].notional, 0);
+          return nl > 0 ? r2(c / nl * 100) : null;
+        };
+        return { calls: f('calls'), puts: f('puts') };
+      })(),
       sold: { calls: invSold('call'), puts: invSold('put') },
       lots: invLots, today: invToday, moneyness: invMny,
     };
