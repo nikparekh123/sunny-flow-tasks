@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-18.6';
+const BUILD = '2026-09-18.9';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -490,7 +490,9 @@ Deno.serve(async (req) => {
         const S = spot.get(t) ?? 0;
         const paid = leap.cash;
         const md = leap.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
-        const dLong = md.length ? md.reduce((s, x) => s + x.d, 0) / md.length : 0;
+        /* Real deltas only: a fill with no reading must not average in as 0. */
+        const dl = leap.ids.map((i) => greeksDelta.get(i)).filter((x): x is number => x !== undefined);
+        const dLong = dl.length ? dl.reduce((a, b) => a + b, 0) / dl.length : 0;
         /* ⚠ AN UNPRICED LEAP IS NOT A WORTHLESS ONE. This fell back to 0,
            so a LEAP bought minutes ago reported mark = $0 and the Long calls
            card showed LULU at -100.0% on the day it was opened. Same mistake
@@ -543,7 +545,10 @@ Deno.serve(async (req) => {
                  price change and never a dollar. It is the MONEY; `itm` is the
                  ACTION, and they disagree often on purpose. */
               captured: (priced && credit > 0) ? Math.round((credit - value) / credit * 100) : 0,
-              delta: sm.length ? r2(sm.reduce((a, x) => a + x.d, 0) / sm.length) : 0,
+              delta: (() => {
+                const ds = s.ids.map((i) => greeksDelta.get(i)).filter((x): x is number => x !== undefined);
+                return ds.length ? r2(ds.reduce((a, b) => a + b, 0) / ds.length) : 0;
+              })(),
               contract: contractLine(s.n, s.k, s.exp, false),
               /* ⚠ THE CREDIT PER SHARE THE LEG OPENED AT, which is the number
                  quoted when the trade is placed and the only one comparable
@@ -970,9 +975,13 @@ Deno.serve(async (req) => {
        left card dont need it anymore". Its `share` per name, the book's kept
        percentage and the two 10% figures went with it; only this map survives,
        because Prices reads it. */
+    /* ⚠ ONLY THE DELTAS THE VENDOR SENT. `mark.d` reads a missing delta as 0,
+       and averaged over a leg's fills that diluted the real ones: one NKE fill
+       with no reading put its 60 LEAPs at two thirds of their delta, and the
+       name's net read 2,000 shares against a true 2,934 (18 Sep 2026). */
     const dOf = (e: { ids: string[] }) => {
-      const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
-      return md.length ? md.reduce((a, x) => a + x.d, 0) / md.length : 0;
+      const ds = e.ids.map((i) => greeksDelta.get(i)).filter((x): x is number => x !== undefined);
+      return ds.length ? ds.reduce((a, b) => a + b, 0) / ds.length : 0;
     };
     const netD = new Map<string, number>();
     for (const e of open) {
@@ -2196,6 +2205,26 @@ Deno.serve(async (req) => {
          today        each long leg's mark against the last close's mark
          moneyness    spot against the long strike, at the money inside 2% */
     const invPrev = await time('invToday', () => coverDay(llBack(1)));
+    /* ⚠ THE NET HE CARRIES INTO NEXT WEEK, NOT THE ONE EXPIRING. Nik, 18 Sep
+       2026. On an expiry day an option near its strike swings between counting
+       as nothing and counting as a hundred shares: BABA's net read +660 and +72
+       an hour apart, both true, because six 110 calls expiring that afternoon
+       went deep in the money. From 15:00 ET on its expiry day a leg is left out,
+       so "Net if sold" reads the book that will still exist on Monday. Prices
+       keeps the whole book; the two agree every other hour of the week.
+       Deltas are the vendor's where it sent one; a leg without is left out
+       rather than counted as zero. */
+    const etHour = Number(new Date().toLocaleString('en-US',
+      { timeZone: 'America/New_York', hour: 'numeric', hour12: false }));
+    const expiringNow = (exp: string) => exp === today && etHour >= 15;
+    const invNet = new Map<string, number>();
+    for (const e of open) {
+      if (expiringNow(e.exp)) continue;
+      const ds = e.ids.map((i) => greeksDelta.get(i)).filter((x): x is number => x !== undefined);
+      if (!ds.length) continue;
+      const d = ds.reduce((a, b) => a + b, 0) / ds.length * e.n * 100 * (e.dir === 'long' ? 1 : -1);
+      invNet.set(e.ticker, (invNet.get(e.ticker) ?? 0) + d);
+    }
     const invSold = (type: 'call' | 'put') => inventory.flatMap((r) => {
       const held = type === 'call' ? r.callsHeld : r.putsHeld;
       const sold = type === 'call' ? r.callsSold : r.putsSold;
@@ -2225,7 +2254,7 @@ Deno.serve(async (req) => {
       let dn = 0, dw = 0;
       for (const e of open) {
         if (e.ticker !== r.t || e.type !== type || e.dir !== 'short') continue;
-        const ds = e.ids.map((i) => mark.get(i)?.d)
+        const ds = e.ids.map((i) => greeksDelta.get(i))
           .filter((x): x is number => x !== undefined);
         if (!ds.length) continue;
         dn += ds.reduce((a, b) => a + b, 0) / ds.length * Math.abs(e.n);
@@ -2245,10 +2274,10 @@ Deno.serve(async (req) => {
         ivw: mult === null ? null : mult >= 1.15 ? 'rich' : mult < 0.95 ? 'thin' : 'normal',
         dl: dw > 0 ? r2(dn / dw) : null,
         dSold: Math.round(sSh), dHeld: Math.round(hSh), dUnpriced: unpriced,
-        /* ⚠ NET SHARES FOR THE NAME, Prices' own figure: every leg, calls and
-           puts together, what is left of the exposure. Nik, 18 Sep 2026: "net
-           shares on the shared line". */
-        net: pr ? pr.delta : null,
+        /* ⚠ NET SHARES FOR THE NAME: every leg, calls and puts together, what
+           is left of the exposure, less whatever expires this afternoon. Nik,
+           18 Sep 2026: "net shares on the shared line". */
+        net: invNet.has(r.t) ? Math.round(invNet.get(r.t)!) : null,
       }];
     });
     const invLots: Record<string, [string, number, number][]> = {};
