@@ -80,7 +80,17 @@ enum S {
 
     /// rgba(20, 23, 15, α) is the one raw colour the lint permits, because every
     /// shadow in the system is built from it.
-    static func shadowInk(_ a: Double) -> Color { Color(red: 20/255, green: 23/255, blue: 15/255).opacity(a) }
+    /* ⚠ DARK SHADOWS ARE BLACKER AND DEEPER. `export 20/DARK-MODE.md`: on the
+       night paper the light alphas vanish, so each layer resolves to pure black
+       at .35 to .45. On --board #0E100D they are barely there, which is right:
+       a dark card is separated by its paper, not its shadow. */
+    static func shadowInk(_ a: Double) -> Color {
+        Color(UIColor { tc in
+            tc.userInterfaceStyle == .dark
+                ? UIColor(white: 0, alpha: a <= 0.05 ? 0.38 : 0.43)
+                : UIColor(red: 20/255, green: 23/255, blue: 15/255, alpha: a)
+        })
+    }
     static let shadowCard  = [SunnyShadow(shadowInk(0.05), 2, 1), SunnyShadow(shadowInk(0.05), 16, 6)]
     static let shadowCardL = [SunnyShadow(shadowInk(0.07), 4, 2), SunnyShadow(shadowInk(0.08), 22, 9)]
     static let shadowFlat  = [SunnyShadow(shadowInk(0.05), 2, 1)]
@@ -91,30 +101,43 @@ enum S {
     // MARK: rules — ALWAYS a child view with a height, never a border (SPEC 04)
     static let rule:      CGFloat = 1
     static let ruleHeavy: CGFloat = 2
-    static let ruleColor       = hex(0xE7E9E5)
-    static let ruleColorStrong = hex(0xDEE0DB)
+    static let ruleColor       = dyn(0xE7E9E5, 0x2C2F29)
+    static let ruleColorStrong = dyn(0xDEE0DB, 0x383C35)
     static let ruleColorInk    = hex(0x14170F)
 
     // MARK: neutrals
-    static let paper  = hex(0xFFFFFF)
-    static let ground = hex(0xF7F8F6)
-    static let wash   = hex(0xF0F1EE)
-    static let band   = hex(0xEDEFEA)
-    static let ink    = hex(0x14170F)
-    static let ink2   = hex(0x3C423A)
-    static let ink3   = hex(0x4A5046)
-    static let mute   = hex(0x5D6359)
-    static let mute2  = hex(0x6B7166)
+    /* ⚠ THE NIGHT THEME IS THE TOKENS, NOT THE CARDS. `export 20`, 18 Sep 2026:
+       every token in the sheet's [data-theme="dark"] block resolves against the
+       trait, so no card carries a dark variant and none branches on the theme.
+       Tokens outside that block keep their light value on purpose (the ink
+       card's ladder, the breached put floor's red). */
+    static let paper  = dyn(0xFFFFFF, 0x1B1D19)
+    static let ground = dyn(0xF7F8F6, 0x0E100D)
+    static let wash   = dyn(0xF0F1EE, 0x24271F)
+    static let band   = dyn(0xEDEFEA, 0x272A24)
+    static let ink    = dyn(0x14170F, 0xF2F3EE)
+    static let ink2   = dyn(0x3C423A, 0xCBCFC6)
+    static let ink3   = dyn(0x4A5046, 0xB7BCB1)
+    static let mute   = dyn(0x5D6359, 0x9EA49A)
+    static let mute2  = dyn(0x6B7166, 0x8E948A)
     static let faint  = hex(0x8A9086)
-    static let hair   = hex(0xC2C7BE)
+    static let hair   = dyn(0xC2C7BE, 0x52574E)
+    /// Text on an `--ink` ground: the picked pill. It flips with the theme,
+    /// because on the night theme the ink ground is near-white. The sheet's
+    /// `--paper-ink`; `paperInk` below is the retired digest's and unrelated.
+    static let pillInk = dyn(0xF4F6F2, 0x14170F)
+    /// Credit & theta's three hues, none of which means P&L, lifted for night.
+    static let ctFill    = dyn(0x1E6E68, 0x3DA69E)
+    static let ctOutline = dyn(0x7C3A66, 0xC58AB4)
+    static let ctRsi     = dyn(0x2A4A6E, 0x7FA6D4)
 
     // MARK: gain / loss / attention
-    static let gainBar = hex(0x00A945), gain = hex(0x00722F), gainText = hex(0x00631F)
+    static let gainBar = dyn(0x00A945, 0x24B24E), gain = dyn(0x00722F, 0x45BD62), gainText = dyn(0x00631F, 0x58CC74)
     static let gainDeep = hex(0x00541F), gainQuiet = hex(0x1C5232)
     static let gainSpan = hex(0x8FBFA1), gainWash = hex(0xDFF3E6)
-    static let lossBar = hex(0xC4001A), loss = hex(0xA80016), lossText = hex(0x8E0014)
+    static let lossBar = dyn(0xC4001A, 0xDC4A57), loss = dyn(0xA80016, 0xE85C69), lossText = dyn(0x8E0014, 0xF27380)
     static let lossQuiet = hex(0x6E1A22), lossTick = hex(0x8A1F14), lossWash = hex(0xFBE4E6)
-    static let warn = hex(0xE08600), warnText = hex(0x7A4700), warnDeep = hex(0x5C3300)
+    static let warn = dyn(0xE08600, 0xF2A93B), warnText = hex(0x7A4700), warnDeep = hex(0x5C3300)
     static let warnWash = hex(0xFBEEDC), warnChip = hex(0xF4D9AE)
     static let doGround = hex(0xFBF5E4), doLabel = hex(0x55502F), doBody = hex(0x4C4835)
 
@@ -764,7 +787,7 @@ enum S {
     // delta, performance) → the FIGURE takes --loss. Unsigned (an average, a
     // strike) → the READING takes --loss-text and the figure stays --ink. Never
     // both: one red slot per row.
-    static let tileGround = hex(0xF5F5F7)
+    static let tileGround = dyn(0xF5F5F7, 0x212420)
     /// Classes A and B. C keeps a smaller padding because three support lines
     /// already give the row its height — at 26 a C row measures 108.7 and the
     /// option cards run past 500.
@@ -910,7 +933,7 @@ enum S {
     // ⚠ --board #E8EAE6 is deliberately NOT carried over. The sheet says it is
     // "the ground these cards lay out on, there is no shell here" — and here
     // there IS a shell, so they sit on S.ground like every other card.
-    static let barQuiet   = hex(0xDDE0DA)   // measured, but not an exception
+    static let barQuiet   = dyn(0xDDE0DA, 0x3A3E37)   // measured, but not an exception
     // the zero line on a row plot is S.ruleColorStrong, already declared
     static let refLine: CGFloat = 1.5       // a line laid ACROSS a series
     static let levelKey: CGFloat = 9        // the dash in a level marker
@@ -1035,7 +1058,7 @@ enum S {
     //
     // ⚠ NO GREEN AND NO RED, EVER. They are gain and loss on every card in the
     // deck; a green ring on a name whose card prints a loss argues with the card.
-    static let assign = hex(0x5B4B8A)
+    static let assign = dyn(0x5B4B8A, 0xB39DDB)
     static let ringRest: CGFloat = 1
     static let ringEvent: CGFloat = 1.5
     /// ⚠ ONE STOP, NO SPREAD, UNDER 9 so the band does not clip it. The shell's
@@ -1060,7 +1083,7 @@ enum S {
     static let tShellCount: CGFloat = 21           // 700, −.03em. the New count
     static let tShellCaption: CGFloat = 12         // 600, −.01em
 
-    static let shellHair = hex(0xE7E9E5)
+    static let shellHair = dyn(0xE7E9E5, 0x2C2F29)
     static let shellCountClear = hex(0x8A9086)    // the New count when nothing is due
     static let shellEmptyInk   = hex(0x3C423A)    // empty-page body at 300 — legal at 15
 
@@ -1068,7 +1091,7 @@ enum S {
     /// ring around NKE reads as *NKE is down*, not *NKE has something to read*.
     /// #2A4A6E appears nowhere else except the [note] verdict, so it carries no
     /// direction. Ring, glow and the due count all share it.
-    static let update = hex(0x2A4A6E)
+    static let update = dyn(0x2A4A6E, 0x7FA6D4)
 
     /// ⚠ THE ACTIVE HALO IS GONE (26 Aug 2026). It was a ground-coloured spacer
     /// plus an outer ink ring, and at 60px that read as a target reticle rather
@@ -1088,6 +1111,16 @@ enum S {
     static let shellGlow = [SunnyShadow(hex(0x2A4A6E).opacity(0.34), 5, 0),
                             SunnyShadow(hex(0x2A4A6E).opacity(0.18), 9, 0)]
     static let durRing: Double = 0.18             // the shell's only motion
+
+    /// A token with a night value. Resolves against the trait the shell sets.
+    static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
+        func ui(_ v: UInt32) -> UIColor {
+            UIColor(red: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255,
+                    blue: CGFloat(v & 0xFF) / 255, alpha: 1)
+        }
+        let l = ui(light), d = ui(dark)
+        return Color(UIColor { $0.userInterfaceStyle == .dark ? d : l })
+    }
 
     static func hex(_ v: UInt32) -> Color {
         Color(red: Double((v >> 16) & 0xFF) / 255,

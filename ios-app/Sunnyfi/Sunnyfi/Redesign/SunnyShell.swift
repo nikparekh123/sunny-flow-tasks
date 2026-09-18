@@ -75,6 +75,13 @@ struct SunnyShell: View {
        from whenever it was last opened. */
     @Environment(\.scenePhase) private var phase
     @State private var loadedOnce = false
+    /* ⚠ DARK AT NIGHT, ON ITS OWN. `export 20/DARK-MODE.md`, 18 Sep 2026: "the
+       white cards are too bright to read after dark". One setting for the app,
+       `auto | light | dark`, default auto, and the tokens do the rest. The
+       clock is re-read every minute, so a page left open goes dark at 19:00
+       and comes back at 07:00 without a reload. */
+    @AppStorage("sunnyfi.theme") private var themePref = "auto"
+    @State private var themeClock = Date()
 
     /// Deterministic states for verification, so a screenshot does not depend on
     /// a simulated gesture landing on the right pixel.
@@ -155,6 +162,34 @@ struct SunnyShell: View {
             Task { await model.loadAll(force: true) }
         }
         .onAppear { if let p = Self.argPage { page = p } }
-        .preferredColorScheme(.light)      // the token set is a light system
+        .preferredColorScheme(Self.resolveTheme(Self.argTheme ?? themePref, now: themeClock))
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                themeClock = Date()
+            }
+        }
     }
+
+    /* ⚠ AUTO IS THE NIGHT WINDOW, OR THE PHONE'S OWN DARK MODE. The sheet: "on
+       device, auto follows the system appearance first and the 19:00 to 07:00
+       local window when there is none". An iPhone always has an appearance, so
+       taken literally the clock would never run, and a phone left in light mode
+       would stay bright at midnight, which is the complaint. Either one turns
+       it dark. Local time, not ET: the market decides what the cards say, the
+       reader's clock decides how bright they are. The screen's trait is read,
+       not the window's, because the window's is the override set here. */
+    static func resolveTheme(_ pref: String, now: Date) -> ColorScheme {
+        if pref == "dark" { return .dark }
+        if pref == "light" { return .light }
+        let h = Calendar.current.component(.hour, from: now)
+        if h >= 19 || h < 7 { return .dark }
+        return UIScreen.main.traitCollection.userInterfaceStyle == .dark ? .dark : .light
+    }
+    /// `-theme dark` / `-theme light`: verification only.
+    private static let argTheme: String? = {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: "-theme"), i + 1 < a.count else { return nil }
+        return a[i + 1]
+    }()
 }

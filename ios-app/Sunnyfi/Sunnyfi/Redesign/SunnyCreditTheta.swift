@@ -81,9 +81,9 @@ struct SunnyCreditTheta: View {
     private static let axisH: CGFloat = 22
     private static let stripH: CGFloat = 60
     private static let stripW: CGFloat = 285
-    private static let fillInk = S.driftBack                     // #1E6E68
-    private static let outlineInk = S.hex(0x7C3A66)              // --drift-turn-2
-    private static let stripInk = S.update                       // #2A4A6E
+    private static let fillInk = S.ctFill                        // --ct-fill
+    private static let outlineInk = S.ctOutline                  // --ct-outline
+    private static let stripInk = S.ctRsi                        // --ct-rsi
     private static let dim = 0.35
 
     /// The ratio strip's ceiling. A week at 15× is "comfortable" and nothing

@@ -553,6 +553,11 @@ struct SunnyPane: View {
                Long legs' slot under Yield progress closes with it. */
             SunnyPositions(positions: o.positions, legs: o.longLegs?.legs ?? [],
                            prices: o.prices?.rows ?? [], asOf: o.prices?.asOf ?? o.date)
+            /* ⚠ INVENTORY, DIRECTLY AFTER POSITIONS, 18 Sep 2026 (`export 20`). The
+               true book behind the same four tabs; it is Left to sell's new home. */
+            if let inv = o.inventoryCard {
+                SunnyInventory(block: inv, legs: o.longLegs?.legs ?? [])
+            }
             SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0)
             if let iv = o.intrinsic, !iv.legs.isEmpty {
                 SunnyIntrinsic(block: iv, prices: o.prices?.rows ?? [],
@@ -564,11 +569,12 @@ struct SunnyPane: View {
             if let cb = o.coverBars, cb.sides.call.time > 0 || cb.sides.put.time > 0 {
                 SunnyCoverage(block: cb)
             }
-            if let yp = o.yieldProgress, !yp.names.isEmpty {
-                SunnyYieldProgress(block: yp)
-            }
+            /* ⚠ PERFORMANCE REPLACES PROGRAMME, AND YIELD PROGRESS'S SLOT
+               CLOSES, 18 Sep 2026 (`export 20`). Its question is the fourth row
+               of what the programme is made of. */
             if let pr = o.programme, !pr.rows.isEmpty {
-                SunnyProgramme(block: pr, legs: o.longLegs?.legs ?? [])
+                SunnyProgramme(block: pr, legs: o.longLegs?.legs ?? [],
+                               cover: o.yieldProgress?.names ?? [])
             }
             /* ⚠ CREDIT & THETA REPLACES THETA AND AVERAGE CREDIT, 17 Sep 2026,
                in their place at the end of the run. */

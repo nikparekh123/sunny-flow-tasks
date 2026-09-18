@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-17.5';
+const BUILD = '2026-09-18.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2124,11 +2124,109 @@ Deno.serve(async (req) => {
       ? { asOf: dayLive ? today : ydayDate, legs: llLegs }
       : null;
 
+    /* ── inventory, four tabs ─────────────────────────────────────────────
+       handoff `export 20/performance-inventory`, 18 Sep 2026. The true book
+       behind Positions' four tabs, one numbered tile a name (sold) or a
+       position (bought). It retires Roll check's Left to sell, the last place
+       that reading lived. Every figure is borrowed from a card that already
+       owns it, so the page cannot disagree with itself:
+
+         held, sold   the inventory counts above (open legs only)
+         cr           the LAST credit written on the name and side since the
+                      book began, as a week's yield on the share: premium / spot
+         mv           Prices' 1w for the name
+         iv, ivw      Premium now's IV, worded by Prices' own rule (1.15 / 0.95)
+         dl           the open short legs' delta, contract-weighted
+         lots         the ledger's fills for each long leg, oldest first, less
+                      whatever was sold back, first in first out
+         today        each long leg's mark against the last close's mark
+         moneyness    spot against the long strike, at the money inside 2% */
+    const invPrev = await time('invToday', () => coverDay(llBack(1)));
+    const invSold = (type: 'call' | 'put') => inventory.flatMap((r) => {
+      const held = type === 'call' ? r.callsHeld : r.putsHeld;
+      const sold = type === 'call' ? r.callsSold : r.putsSold;
+      if (held + sold === 0) return [];
+      const last = bookShorts
+        .filter((x) => String(x.ticker) === r.t && String(x.option_type) === type
+          && String(x.action) === 'open')
+        .sort((a, b) => String(b.trade_date).localeCompare(String(a.trade_date)))[0];
+      const sp = spot.get(r.t) ?? 0;
+      const pr = priceRows.find((p) => p.ticker === r.t);
+      const iv = ivByT.get(r.t);
+      const mult = iv && iv.usual > 0 ? iv.now / iv.usual : null;
+      let dn = 0, dw = 0;
+      for (const e of open) {
+        if (e.ticker !== r.t || e.type !== type || e.dir !== 'short') continue;
+        const ds = e.ids.map((i) => mark.get(i)?.d)
+          .filter((x): x is number => x !== undefined);
+        if (!ds.length) continue;
+        dn += ds.reduce((a, b) => a + b, 0) / ds.length * Math.abs(e.n);
+        dw += Math.abs(e.n);
+      }
+      return [{
+        t: r.t, held, sold,
+        cr: last && sp > 0 ? r2(N(last.premium) / sp * 100) : null,
+        mv: pr?.pct.w1 ?? null,
+        iv: iv ? r2(iv.now) : null,
+        ivw: mult === null ? null : mult >= 1.15 ? 'rich' : mult < 0.95 ? 'thin' : 'normal',
+        dl: dw > 0 ? r2(dn / dw) : null,
+      }];
+    });
+    const invLots: Record<string, [string, number, number][]> = {};
+    const invToday: Record<string, number> = {};
+    const invMny: Record<string, string> = {};
+    const legKeyOf = (e: { ticker: string; k: number; type: string }) =>
+      `${e.ticker} ${r2(e.k)}${e.type === 'put' ? 'P' : 'C'}`;
+    for (const e of open) {
+      if (e.dir !== 'long' || e.n <= 0) continue;
+      const key = legKeyOf(e);
+      /* FIFO: every fill on this contract, oldest first, then the sales taken
+         off the front. What is left is what he still holds, at what it cost. */
+      const fills = legs
+        .filter((t) => String(t.ticker) === e.ticker && String(t.option_type) === e.type
+          && String(t.direction) === 'long' && N(t.strike) === e.k
+          && String(t.expiry).slice(0, 10) === e.exp)
+        .sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)));
+      const lots: [string, number, number][] = fills
+        .filter((t) => String(t.action) === 'open')
+        .map((t) => [String(t.trade_date).slice(0, 10), N(t.contracts), r2(N(t.premium) * 100)]);
+      let sold = fills.filter((t) => String(t.action) !== 'open')
+        .reduce((a, t) => a + N(t.contracts), 0);
+      while (sold > 0 && lots.length) {
+        const take = Math.min(sold, lots[0][1]);
+        lots[0][1] -= take; sold -= take;
+        if (lots[0][1] <= 0.0001) lots.shift();
+      }
+      invLots[key] = [...(invLots[key] ?? []), ...lots.map((l) => [l[0], Math.round(l[1]), l[2]] as [string, number, number])];
+      const now = e.ids.map((i) => mark.get(i)?.m).filter((x): x is number => x !== undefined);
+      const then = e.ids.map((i) => invPrev.mk.get(i)).filter((x): x is number => x !== undefined);
+      if (now.length && then.length) {
+        const a = now.reduce((x, y) => x + y, 0) / now.length;
+        const b = then.reduce((x, y) => x + y, 0) / then.length;
+        if (b > 0) invToday[key] = r2((a / b - 1) * 100);
+      }
+      const sp = spot.get(e.ticker) ?? 0;
+      if (sp > 0 && e.k > 0) {
+        const d = (sp - e.k) / e.k;
+        invMny[key] = Math.abs(d) <= 0.02 ? 'at'
+          : (e.type === 'put' ? d < 0 : d > 0) ? 'in' : 'out';
+      }
+    }
+    const inventoryCard = {
+      asOf: dayLive ? today : ydayDate,
+      /* The sheet's floor: a written leg should pay 1.24% of the share a week.
+         A placeholder the design ships with, to be settled with Nik. */
+      floor: 1.24,
+      sold: { calls: invSold('call'), puts: invSold('put') },
+      lots: invLots, today: invToday, moneyness: invMny,
+    };
+
     timings.total = Date.now() - T0;
     return json(200, {
       ok: true, build: BUILD, date: today, timings,
       yieldProgress,
       longLegs: longLegsBlock,
+      inventoryCard,
       /* ⚠ THE TWO RATES, NOT ONE NET. Programme apportions theta to a name by
          its share of kept (the short side) and of invested (the long side),
          which cannot be done from a single netted figure. Short is positive,

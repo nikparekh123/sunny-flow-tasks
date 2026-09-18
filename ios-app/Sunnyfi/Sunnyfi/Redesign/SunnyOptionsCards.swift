@@ -228,6 +228,12 @@ struct SunnyPositions: View {
        comes back by expiry if nothing is done. 0 = %, 1 = $, 2 = time value. */
     @AppStorage("sunnyfi.pos.fig") private var figMode = 0
     @State private var appeared = false
+    /* ⚠ A TAB CHANGE IS A QUIETER ENTRANCE THAN THE FIRST ONE. Nik, 18 Sep
+       2026: "make it a little more subtle". The first load still grows every
+       bar from nothing, the deck's entrance; a tab switch now starts the bars
+       at 92% and fades the rows in over a quarter second with a short capped
+       stagger, so the new list settles into place instead of redrawing. */
+    @State private var soft = false
     /// One tab change per drag, cleared when the next drag starts.
     @State private var swiped = false
     /// Re-read on the tick so Friday 20:00 and Monday 04:00 land without a reload.
@@ -574,6 +580,7 @@ struct SunnyPositions: View {
            and full width, which is the other half of the morph. */
         .task(id: tabRaw) {
             guard appeared else { return }
+            soft = true
             appeared = false
             try? await Task.sleep(for: .milliseconds(20))
             appeared = true
@@ -668,10 +675,12 @@ struct SunnyPositions: View {
                     RoundedRectangle(cornerRadius: 4).fill(r.up ? S.gainBar : S.lossBar)
                         .frame(width: abs(px - zero), height: Self.barH)
                         .offset(x: Swift.min(zero, px))
-                        .scaleEffect(x: appeared || reduceMotion ? 1 : 0,
+                        .scaleEffect(x: appeared || reduceMotion ? 1 : (soft ? 0.92 : 0),
                                      anchor: r.up ? .leading : .trailing)
-                        .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
-                            .delay(Double(i) * Self.stagger), value: appeared)
+                        .animation(reduceMotion ? nil : (soft
+                            ? S.easeSettle(0.35).delay(softDelay(i))
+                            : S.easeSettle(S.durBar).delay(Double(i) * Self.stagger)),
+                                   value: appeared)
                         /* ⚠ NO VALUE GLIDE ACROSS A TAB. Within a tab a pull
                            moves a bar and it should slide; between tabs the row
                            is a different contract entirely and sliding from one
@@ -716,9 +725,15 @@ struct SunnyPositions: View {
         }
         .frame(height: Self.barH)
         .opacity(appeared || reduceMotion ? 1 : 0)
-        .animation(reduceMotion ? nil : S.easeSettle(0.4).delay(Double(i) * Self.stagger),
+        .animation(reduceMotion ? nil : (soft
+            ? .easeOut(duration: 0.25).delay(softDelay(i))
+            : S.easeSettle(0.4).delay(Double(i) * Self.stagger)),
                    value: appeared)
     }
+
+    /// 15ms a row, never more than 0.15s in all: fifteen rows at the first
+    /// load's 40ms took over a second to arrive, which is what read as loud.
+    private func softDelay(_ i: Int) -> Double { Swift.min(Double(i) * 0.015, 0.15) }
 
     /* ⚠ THE FOOTER FOLLOWS THE TAB, and its Paid must equal Programme's invested
        and Intrinsic value's Paid to the dollar — all three read one ledger. */
@@ -768,276 +783,12 @@ struct SunnyPositions: View {
     }
 }
 
-// MARK: - 2 · Yield progress, by name
+// MARK: - 2 · Yield progress — RETIRED 18 Sep 2026
 
-/* ⚠ THIS REPLACES THE 2 SEP YIELD PROGRESS CARD, from the `export 13` handoff,
-   14 Sep 2026. One bar a name against `collected / paid`, a book-average line
-   and a % ↔ weeks tap: all deleted.
-
-   ⚠ THE DENOMINATOR IS THAT NAME'S TIME VALUE, NOT WHAT WAS PAID FOR IT. The
-   old card measured how far along each name was on a road whose end was the
-   wrong place. A LEAP's intrinsic value is real money that exercising returns;
-   only the time value melts, so only the time value has to be earned back.
-   Same correction as the cover bars, one name at a time, and the two cards
-   read one book: Σ time and Σ collected here are Call cover's two bars.
-
-   ⚠ TWO BARS A ROW, ONE SCALE FOR THE WHOLE CARD. The largest single figure on
-   the book — whichever name, whichever bar — is the full track, and every other
-   bar is a share of it. A per-row scale would show only the ratio and hide that
-   BABA's cover is worth six times FIS's. That is the same reason the rings
-   became bars: a quotient cannot say which side moved, or how big it was.
-
-   ⚠ AND THE CARD HAS NO SUMMARY OF ITS ROWS. It is a ranking, so row one is the
-   leader and a book ratio would only restate what the rows already say. The
-   hero is the book's collected in dollars; the footer is the denominator and
-   the two speeds of the chase. */
-struct SunnyYieldProgress: View {
-    let block: YieldProgressBlock
-
-    /* ⚠ ONE SORT, AND A TAP NEVER RE-RANKS THE CARD. The server ships the rows
-       already ordered: covered names by how far past, then the chasers by how
-       close. Re-sorting here on a tap would make every row move when the reader
-       asked one question about one column. */
-    private var rows: [YieldName] { block.names }
-
-    /// The largest single figure anywhere on the card. Both bars of every row
-    /// are a share of this, which is what makes the rows comparable.
-    private var top: Double {
-        Double(max(1, rows.map { max($0.time, $0.collected) }.max() ?? 1))
-    }
-    private var sumTime: Int { rows.reduce(0) { $0 + $1.time } }
-    private var sumColl: Int { rows.reduce(0) { $0 + $1.collected } }
-    private var sumPace: Int { rows.reduce(0) { $0 + $1.pace } }
-    private var sumMelt: Int { rows.reduce(0) { $0 + $1.melt } }
-    private var coveredCount: Int { rows.filter(\.covered).count }
-
-    /* Both survive a refresh: they are a reading the user chose, not state the
-       data owns. Shared across every row, because a tap flips a column. */
-    @AppStorage("sunnyfi.yp.fig") private var asMoney = false
-    @AppStorage("sunnyfi.yp.when") private var asDate = false
-    @State private var grown = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private static let nameCol: CGFloat = 58
-    private static let figCol: CGFloat = 64
-    private static let colGap: CGFloat = 10
-    private static let barH: CGFloat = 8
-    private static let barGap: CGFloat = 2
-    private static let rowGap: CGFloat = 14
-    /// 323 − 58 − 10 − 10 − 64.
-    private static let track: CGFloat = 181
-
-    var body: some View {
-        OptCard(name: "yield-progress", fixedHeight: nil) {
-            OptHead(title: "Yield progress", sub: "by name", right: ivDay(block.asOf))
-            Spacer().frame(height: 18)
-            hero
-            Spacer().frame(height: 22)
-            VStack(alignment: .leading, spacing: Self.rowGap) {
-                ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
-                    row(r, i: i)
-                }
-            }
-            Spacer().frame(height: Self.rowGap)
-            legend
-            Spacer(minLength: 18)
-            OptFooter(stats: [
-                .init(label: "Time value", value: optMoney(sumTime), ink: S.ink),
-                /* ⚠ THE MELT FIGURE IS INK, NOT RED, the cover bars' rule.
-                   Time value melting is the target coming closer, not money
-                   the book lost this week. */
-                .init(label: "Melts a week", value: optMoney(-sumMelt * 7), ink: S.ink),
-                .init(label: "This week", value: "+" + optMoney(sumPace), ink: S.gainText),
-            ])
-        }
-        .task(id: sumColl) {
-            guard !grown else { return }
-            try? await Task.sleep(for: .milliseconds(20))
-            grown = true
-        }
-    }
-
-    // MARK: the hero
-
-    /* ⚠ THE QUANTITY, NOT THE RATIO. The rows already carry the ratio, and a
-       book ratio would hide that seven names are behind. This is the same
-       figure Call cover draws as its green bar, and it is green for the same
-       reason. */
-    private var hero: some View {
-        VStack(alignment: .leading, spacing: S.gap3) {
-            Text("BOOK").font(S.inter(S.t10, S.wBoldN))
-                .tracking(S.track(S.t10, S.lsLabel)).foregroundStyle(S.mute)
-            HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
-                Text(optMoney(sumColl)).font(S.inter(S.t34, S.wBoldN))
-                    .tracking(S.track(S.t34, S.lsTighter)).foregroundStyle(S.gainText)
-                Text("collected · \(coveredCount) of \(rows.count) covered")
-                    .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-            }
-        }
-    }
-
-    // MARK: a row
-
-    @ViewBuilder private func row(_ r: YieldName, i: Int) -> some View {
-        HStack(spacing: Self.colGap) {
-            HStack(spacing: S.gap3) {
-                Text(r.t).font(S.inter(S.t13, S.wBoldN))
-                    .tracking(S.track(S.t13, -0.01)).foregroundStyle(S.ink)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                /* ⚠ THE SLOT ALWAYS EXISTS so every ticker keeps one left edge.
-                   A roll is why a bar lags — money went out to buy the call
-                   back — and it marks the NAME, never the figure: a roll is not
-                   a loss on the LEAP. The only red on the card. */
-                Circle().strokeBorder(S.lossBar, lineWidth: 1)
-                    .frame(width: 5, height: 5)
-                    .opacity(r.rolling ? 1 : 0)
-            }
-            .frame(width: Self.nameCol, alignment: .leading)
-
-            bars(r, i: i).frame(width: Self.track, height: Self.barH * 2 + Self.barGap)
-
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(figure(r)).font(S.inter(S.t13, S.wBoldN))
-                    .tracking(S.track(S.t13, -0.01))
-                    .foregroundStyle(r.covered ? S.gainText : S.ink2)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .sunnyHint()
-                    .padding(.vertical, 6).contentShape(Rectangle())
-                    .onTapGesture { asMoney.toggle() }
-                    .padding(.vertical, -6)
-                Text(word(r)).font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .sunnyHint()
-                    .padding(.vertical, 6).contentShape(Rectangle())
-                    .onTapGesture { asDate.toggle() }
-                    .padding(.vertical, -6)
-            }
-            .frame(width: Self.figCol, alignment: .trailing)
-        }
-    }
-
-    @ViewBuilder private func bars(_ r: YieldName, i: Int) -> some View {
-        let wT = Self.track * CGFloat(min(1, Double(r.time) / top))
-        let wC = Self.track * CGFloat(min(1, Double(r.collected) / top))
-        ZStack(alignment: .topLeading) {
-            VStack(alignment: .leading, spacing: Self.barGap) {
-                /* The wash carries its edge on top, right and bottom only: the
-                   left edge is the axis every bar starts from, and a line there
-                   would read as a tick rather than the bar's own outline. */
-                UnevenRoundedRectangle(bottomTrailingRadius: S.radiusPip,
-                                       topTrailingRadius: S.radiusPip)
-                    .fill(S.wash)
-                    .overlay(
-                        UnevenRoundedRectangle(bottomTrailingRadius: S.radiusPip,
-                                               topTrailingRadius: S.radiusPip)
-                            .stroke(S.ruleColorStrong, lineWidth: 1))
-                    .frame(width: wT, height: Self.barH)
-                    .scaleEffect(x: grown || reduceMotion ? 1 : 0, anchor: .leading)
-                    .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
-                        .delay(Double(i) * S.barStagger), value: grown)
-                UnevenRoundedRectangle(bottomTrailingRadius: S.radiusPip,
-                                       topTrailingRadius: S.radiusPip)
-                    .fill(S.gainBar)
-                    .frame(width: wC, height: Self.barH)
-                    .scaleEffect(x: grown || reduceMotion ? 1 : 0, anchor: .leading)
-                    .animation(reduceMotion ? nil : S.easeSettle(S.durBar)
-                        .delay(Double(i) * S.barStagger + 0.07), value: grown)
-            }
-            .frame(width: Self.track, alignment: .leading)
-            /* ⚠ WHERE TIME VALUE ENDS, AND IT IS INK, NOT HAIR. The green
-               either stops short of this line or runs through it, and that is
-               the whole reading of the row. On the cover bars the target
-               crosses a 12pt gap and hair is enough; here it crosses an 8pt
-               green bar, and hair vanished against it. */
-            if r.time > 0 {
-                SunnyVDash(ink: S.ink)
-                    .frame(width: 1, height: Self.barH * 2 + Self.barGap + 8)
-                    .offset(x: wT, y: -4)
-                    .opacity(grown || reduceMotion ? 1 : 0)
-                    .animation(reduceMotion ? nil : S.easeSettle(0.4).delay(0.5), value: grown)
-            }
-        }
-        .animation(reduceMotion ? nil : S.easeSettle(0.55), value: top)
-    }
-
-    // MARK: the two columns that flip
-
-    /* ⚠ A NAME WITH NO TIME VALUE PRINTS THE DOLLAR GAP IN BOTH MODES. Nik,
-       14 Sep 2026, on KR: "yes clamp it". At a denominator of zero the ratio is
-       not large, it is undefined, and "∞%" is not a reading. */
-    private func figure(_ r: YieldName) -> String {
-        guard let ra = r.ratio, !asMoney else {
-            let d = r.collected - r.time
-            return (d < 0 ? "\u{2212}" : "+") + optMoney(abs(d))
-        }
-        return "\(Int((ra * 100).rounded()))%"
-    }
-
-    private func word(_ r: YieldName) -> String {
-        if r.covered {
-            /* A covered name with no date in the ledger stays "covered" rather
-               than printing an empty second reading. */
-            guard asDate, let on = r.coveredOn else { return "covered" }
-            return "since " + ypShortDate(on)
-        }
-        guard let d = r.days else { return "no pace" }
-        /* ⚠ DATED FROM TODAY, so a chaser's date moves a day at midnight even
-           when the data has not changed. */
-        if asDate { return ypShortDate(Date().addingTimeInterval(Double(d) * 86_400)) }
-        return "\(max(1, Int((Double(d) / 7).rounded(.up)))) wk"
-    }
-
-    // MARK: the legend
-
-    private var legend: some View {
-        HStack(spacing: 14) {
-            swatch(fill: S.wash, edge: true, word: "time value")
-            swatch(fill: S.gainBar, edge: false, word: "collected")
-            Spacer(minLength: 0)
-        }
-        .padding(.leading, Self.nameCol + Self.colGap)
-    }
-
-    private func swatch(fill: Color, edge: Bool, word: String) -> some View {
-        HStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 1).fill(fill)
-                .frame(width: 10, height: Self.barH)
-                .overlay(edge
-                    ? RoundedRectangle(cornerRadius: 1)
-                        .stroke(S.ruleColorStrong, lineWidth: 1) : nil)
-            Text(word).font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
-        }
-    }
-}
-
-/// "8 Oct" — the meet date and the covered-since date. No weekday: `ivDay`'s
-/// "Thu 8 Oct" is the header's form, and at 10pt in a 64pt column it truncates.
-private func ypShortDate(_ d: Date) -> String {
-    let f = DateFormatter(); f.dateFormat = "d MMM"
-    return f.string(from: d)
-}
-private func ypShortDate(_ iso: String) -> String {
-    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
-    guard let d = f.date(from: iso) else { return iso }
-    return ypShortDate(d)
-}
-
-/// The target line: the vertical twin of `SunnyDash`, 3/3 so it cannot be
-/// confused with the 1.5/1.5 tap hint under the figures beside it.
-private struct SunnyVDash: View {
-    let ink: Color
-    var body: some View {
-        GeometryReader { g in
-            Path { p in
-                p.move(to: .init(x: 0.5, y: 0))
-                p.addLine(to: .init(x: 0.5, y: g.size.height))
-            }
-            .stroke(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-            .foregroundStyle(ink)
-        }
-    }
-}
+/* ⚠ FOLDED INTO PERFORMANCE. `export 20`: Yield progress asked one more question
+   of the names Programme already lists, has this name's credit earned back its
+   LEAP's time value, so it is the fourth row of WHAT IT IS MADE OF and not a
+   card. The server's `yieldProgress` block stays as that row's source. */
 
 /// A signed figure in the deck's k/M form.
 func signedMoney(_ v: Double) -> String {
@@ -2015,8 +1766,9 @@ struct SunnyPrices: View {
 
 /// The deck-wide tap hint, 12 Sep 2026: every text that flips on tap carries a
 /// dotted hair underline, and only that text does. Silent once the card is
-/// known, visible when it is not.
-private extension View {
+/// known, visible when it is not. Shared with Inventory, whose Held figure is
+/// its one underline.
+extension View {
     func sunnyHint(on: Bool = true) -> some View {
         self.overlay(alignment: .bottom) {
             if on { SunnyDots().frame(height: 1).offset(y: 3) }
@@ -2070,6 +1822,10 @@ struct SunnyProgramme: View {
     let block: ProgrammeBlock
     /// The ledger Long legs draws. One ledger, two cards.
     let legs: [LongLeg]
+    /// ⚠ PERFORMANCE, 18 Sep 2026 (`export 20`): Yield progress's names, the
+    /// source of the fourth row. Time value is Intrinsic's; collected is the
+    /// settled credit ledger, the same one `kept` reads.
+    var cover: [YieldName] = []
 
     @State private var sel: String? = nil          // nil = All
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -2139,7 +1895,7 @@ struct SunnyProgramme: View {
     var body: some View {
         let r = row
         OptCard(name: "programme", fixedHeight: nil) {
-            OptHead(title: sel ?? "Programme", sub: sel == nil ? "all in" : "one name",
+            OptHead(title: sel ?? "Performance", sub: sel == nil ? "all in" : "one name",
                     right: sinceLabel())
             Spacer().frame(height: 14)
 
@@ -2152,9 +1908,12 @@ struct SunnyProgramme: View {
             }
 
             Spacer().frame(height: 20)
+            /* ⚠ EVERY LINE TAKES ITS LINE BOX, the sheet's `line-height: 1`.
+               Without it each 13 to 14pt row reserved ~17 and the card ran 24
+               over the measured 520.8. */
             Text("NET")
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                .foregroundStyle(S.mute)
+                .foregroundStyle(S.mute).sunnyLineBox(S.t10)
             Spacer().frame(height: 11)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(optMoney(r.net))
@@ -2166,12 +1925,12 @@ struct SunnyProgramme: View {
             }
             Spacer().frame(height: 8)
             Text("on \(optMoney(r.inv)) invested")
-                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute).sunnyLineBox(S.t12)
             Spacer().frame(height: 6)
             /* The rate the two sides run at while nothing is traded: the shorts
                collect decay, the longs pay it. */
             Text("theta \(theta < 0 ? "\u{2212}" : "+")\(optMoney(abs(theta))) a day")
-                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute).sunnyLineBox(S.t12)
 
             Spacer().frame(height: 20)
             Rectangle().fill(S.ruleColorStrong).frame(height: 1)
@@ -2179,7 +1938,7 @@ struct SunnyProgramme: View {
 
             Text("WHAT IT IS MADE OF")
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
-                .foregroundStyle(S.mute)
+                .foregroundStyle(S.mute).sunnyLineBox(S.t10)
             Spacer().frame(height: 14)
             VStack(alignment: .leading, spacing: 13) {
                 ForEach(Array([("Credits kept", r.kept), ("Long calls", r.calls),
@@ -2191,15 +1950,20 @@ struct SunnyProgramme: View {
                             .font(S.inter(S.t14, S.wBoldN)).tracking(S.track(S.t14, -0.02))
                             .foregroundStyle(cell.1 < 0 ? S.lossText : S.gainText)
                     }
+                    .frame(height: S.t14)
                 }
+                coveredRow
             }
 
             Spacer().frame(height: 16)
             makeUpBar(r)
             Spacer().frame(height: 10)
+            /* Line-height 1.4, measured: two lines are 30.8, so the gap between
+               them is what is left of 15.4 after the font's own line. */
             Text("Credits are banked. The two marks move every day and are not yours until you close.")
                 .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-                .lineSpacing(S.t11 * 0.4).fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(max(0, S.t11 * 1.4 - (S.interUI(S.t11, S.wMidSmN)?.lineHeight ?? 13.3)))
+                .fixedSize(horizontal: false, vertical: true)
 
             /* ⚠ ONE RULE, NOT TWO. `OptFooter` draws its own, and this card was
                drawing a second one 18pt above it. Every other card in the deck
@@ -2217,6 +1981,46 @@ struct SunnyProgramme: View {
                 .init(label: "At mark", value: optMoney(r.mark), ink: S.ink),
             ])
         }
+    }
+
+    /* ⚠ THE FOURTH ROW: COVER, WHICH IS PROGRESS AND NEVER LOSS. `export 20`.
+       All prints the book's collected OF its time value in dollars, because a
+       book ratio hides the names still behind. A name prints its share with
+       the clock as a note. `--ink` until time value is earned back,
+       `--gain-text` after, and never red: a name that has not caught up yet
+       has not lost anything. The denominator is time value, never what was
+       paid; intrinsic is real money and does not need covering. */
+    @ViewBuilder private var coveredRow: some View {
+        let c = coverReading
+        HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
+            Text(c.label).font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink)
+            Spacer(minLength: 0)
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text(c.note).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                Text(c.value)
+                    .font(S.inter(S.t14, S.wBoldN)).tracking(S.track(S.t14, -0.02))
+                    .foregroundStyle(c.ink)
+            }
+            .lineLimit(1).fixedSize()
+        }
+        .frame(height: S.t14)
+    }
+
+    private var coverReading: (label: String, note: String, value: String, ink: Color) {
+        if sel == nil {
+            let time = cover.reduce(0) { $0 + $1.time }
+            let got = cover.reduce(0) { $0 + $1.collected }
+            return ("Collected", "of \(optMoney(time)) time value", optMoney(got),
+                    time > 0 && got >= time ? S.gainText : S.ink)
+        }
+        guard let n = cover.first(where: { $0.t == sel }), n.time > 0,
+              let ratio = n.ratio else {
+            return ("Covered", "no long call to cover", "\u{2013}", S.mute)
+        }
+        let pct = "\(Int((ratio * 100).rounded()))%"
+        if ratio >= 1 { return ("Covered", "time value earned back", pct, S.gainText) }
+        let note = n.days.map { "\(max(1, Int((Double($0) / 7).rounded()))) wk to go" } ?? "no pace yet"
+        return ("Covered", note, pct, S.ink)
     }
 
     /* ⚠ THE GREEN IS CUT BY NAME, AND THE CUTS ARE A SECOND PICKER. In the All
@@ -2284,9 +2088,13 @@ private struct SunnyChipWrap: View {
                 HStack(spacing: 6) {
                     ForEach(line, id: \.self) { i in
                         let on = i == selected
+                        /* 23 tall, the sheet's: 5 + 11 at line-height 1 + 5 + the
+                           1px border each side. At the font's own line it was 23.3,
+                           and two rows put the card 0.6 over. */
                         Text(i)
                             .font(S.inter(S.t11, S.wSemiN))
-                            .foregroundStyle(on ? S.onInk : S.mute)
+                            .foregroundStyle(on ? S.pillInk : S.mute)
+                            .frame(height: S.t11 + 2)
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .background(Capsule().fill(on ? S.ink : S.paper))
                             .overlay(Capsule().stroke(on ? S.ink : S.ruleColorStrong, lineWidth: 1))
@@ -2627,7 +2435,7 @@ struct SunnyIntrinsic: View {
         HStack(spacing: 6) {
             if let m { Circle().fill(dot(m)).frame(width: 7, height: 7) }
             Text(label).font(S.inter(S.t11, S.wSemiN))
-                .foregroundStyle(on ? S.onInk : S.mute)
+                .foregroundStyle(on ? S.pillInk : S.mute)
         }
         .padding(.vertical, 5).padding(.horizontal, 10)
         .background(Capsule().fill(on ? S.ink : S.paper)
