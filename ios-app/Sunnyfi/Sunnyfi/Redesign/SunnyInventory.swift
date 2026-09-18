@@ -9,7 +9,7 @@
 //
 //  ⚠ THE STAR IS A RECOMMENDATION, and there can be several. Nik, 18 Sep 2026:
 //  "which one should we pick to sell, that's the whole idea of it".
-//    · Sold tabs, SELL THIS NEXT: free contracts, credit at or over the floor,
+//    · Sold, SELL THIS NEXT, per side: free contracts, credit at or over the floor,
 //      IV not thin.
 //    · Calls bought, ADD TO THIS: under water (adding costs less than he paid)
 //      and not out of the money.
@@ -33,7 +33,12 @@ struct InventoryCard: Decodable {
     let lots: [String: [InvLot]]
     let today: [String: Double]
     let moneyness: [String: String]
+    /// Reports before the Friday the next sale would cover, held names only.
+    /// Optional so a run against an older deployment decodes.
+    let earnings: [String: InvEarn]?
 }
+
+struct InvEarn: Decodable { let d: String; let est: Bool }
 
 struct InvSides: Decodable { let calls: [InvSold]; let puts: [InvSold] }
 struct InvFloor: Decodable { let calls: Double?; let puts: Double? }
@@ -50,8 +55,31 @@ struct InvSold: Decodable, Identifiable {
     let ivw: String?
     /// The open short legs' delta, contract-weighted.
     let dl: Double?
+    /// The last credit in dollars a contract, for "if sold now".
+    let lastCr: Int?
+    /// ⚠ DELTA IN SHARES, sold against held. Nik, 18 Sep 2026: "344/2000". How
+    /// many shares of movement the written legs give away, against how many the
+    /// held legs carry. `dUnpriced` counts legs with no delta reading, which are
+    /// left out rather than read as zero. Optional for an older deployment.
+    let dSold: Int?, dHeld: Int?, dUnpriced: Int?
+    /// Net shares for the whole name, Prices' figure: every leg, both sides.
+    let net: Int?
     var id: String { t }
     var free: Int { max(0, held - sold) }
+    /// Every free contract written at the last credit. An estimate.
+    var ifSold: Int { free * (lastCr ?? 0) }
+}
+
+/// ⚠ ONE TILE A NAME, CALLS AND PUTS SIDE BY SIDE. Nik, 18 Sep 2026: "can we
+/// merge calls sold and put sold and have one card". Week and IV belong to the
+/// name, so two tabs printed half of every tile twice.
+struct InvSoldName: Identifiable {
+    let t: String
+    let calls: InvSold?, puts: InvSold?
+    var id: String { t }
+    var either: InvSold? { calls ?? puts }
+    var free: Int { (calls?.free ?? 0) + (puts?.free ?? 0) }
+    var ifSold: Int { (calls?.ifSold ?? 0) + (puts?.ifSold ?? 0) }
 }
 
 /// One fill still held: [date in, contracts, cost a contract].
@@ -73,31 +101,45 @@ struct SunnyInventory: View {
     let legs: [LongLeg]
 
     enum Tab: Int, CaseIterable {
-        case sc, sp, bc, bp
+        case sold, bc, bp
         var label: String {
             switch self {
-            case .sc: return "Calls sold"
-            case .sp: return "Puts sold"
+            case .sold: return "Sold"
             case .bc: return "Calls bought"
             case .bp: return "Puts bought"
             }
         }
-        var sold: Bool { self == .sc || self == .sp }
+        var isSold: Bool { self == .sold }
     }
 
-    @AppStorage("sunnyfi.inv.tab") private var tabRaw = 0
+    /// A new key: the four-tab card stored 0 to 3, and a stale 3 would open on
+    /// nothing.
+    @AppStorage("sunnyfi.inv.tab3") private var tabRaw = 0
     /// Which bought positions show their lots. Survives the pull and a tab trip.
     @State private var open: Set<String> = []
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var tab: Tab { Tab(rawValue: tabRaw) ?? .sc }
+    private var tab: Tab { Tab(rawValue: tabRaw) ?? .sold }
     private static let inner: CGFloat = S.content - 48          // 313
 
-    private var soldRows: [InvSold] { tab == .sc ? block.sold.calls : block.sold.puts }
-    /// The tab's floor. With no history yet it is infinite, so nothing is starred
+    /// Every name with either side, in the book's order.
+    private var soldNames: [InvSoldName] {
+        let ts = Set(block.sold.calls.map(\.t) + block.sold.puts.map(\.t)).sorted()
+        return ts.map { t in
+            InvSoldName(t: t, calls: block.sold.calls.first { $0.t == t },
+                        puts: block.sold.puts.first { $0.t == t })
+        }
+    }
+    /// A side's floor. With no history yet it is infinite, so nothing is starred
     /// and every credit reads under it rather than over a floor of zero.
-    private var floor: Double { (tab == .sp ? block.floor.puts : block.floor.calls) ?? .infinity }
+    private func floor(_ puts: Bool) -> Double { (puts ? block.floor.puts : block.floor.calls) ?? .infinity }
+    /// SELL THIS NEXT, per side: free contracts, credit at or over the side's
+    /// floor, IV not thin.
+    private func starSide(_ x: InvSold?, puts: Bool) -> Bool {
+        guard let x else { return false }
+        return x.free > 0 && (x.cr ?? 0) >= floor(puts) && x.ivw != "thin"
+    }
     private var boughtRows: [LongLeg] { legs.filter { $0.isCall == (tab == .bc) } }
     private func key(_ l: LongLeg) -> String { "\(l.t) \(l.k)" }
 
@@ -107,16 +149,16 @@ struct SunnyInventory: View {
             Spacer().frame(height: 18)
             tabRow
             Spacer().frame(height: 22)
-            Text(tab.sold ? "LEFT TO SELL" : "INVESTED")
+            Text(tab.isSold ? "LEFT TO SELL" : "INVESTED")
                 .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
                 .foregroundStyle(S.mute).sunnyLineBox(S.t10)
             Spacer().frame(height: 12)
             hero
             Spacer().frame(height: 26)
             VStack(spacing: 8) {
-                if tab.sold {
-                    let tags = soldTags
-                    ForEach(Array(soldRows.enumerated()), id: \.element.id) { i, r in
+                if tab.isSold {
+                    let names = soldNames, tags = soldTags(names)
+                    ForEach(Array(names.enumerated()), id: \.element.id) { i, r in
                         tile(i) { soldTile(r, no: i + 1, tags: tags[i]) }
                     }
                 } else {
@@ -158,7 +200,7 @@ struct SunnyInventory: View {
                 Text(tab.label.lowercased()).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
             }
             Spacer(minLength: 0)
-            Text(tab.sold ? plural(soldRows.count, "name") : plural(boughtRows.count, "position"))
+            Text(tab.isSold ? plural(soldNames.count, "name") : plural(boughtRows.count, "position"))
                 .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
         }
         .frame(height: 17)
@@ -193,9 +235,11 @@ struct SunnyInventory: View {
 
     private var hero: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            if tab.sold {
-                big("\(soldRows.reduce(0) { $0 + $1.free })")
-                Text("lots still writeable").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
+            if tab.isSold {
+                let names = soldNames
+                big("\(names.reduce(0) { $0 + $1.free })")
+                Text("free \u{00B7} \(optMoney(names.reduce(0) { $0 + $1.ifSold })) if sold now")
+                    .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.ink2)
             } else {
                 let cost = boughtRows.reduce(0.0) { $0 + $1.cost * Double($1.n) }
                 let mark = boughtRows.reduce(0.0) { $0 + $1.m * Double($1.n) }
@@ -309,36 +353,148 @@ struct SunnyInventory: View {
 
     // MARK: sold
 
-    @ViewBuilder private func soldTile(_ x: InvSold, no: Int, tags ts: [String]) -> some View {
-        let star = x.free > 0 && (x.cr ?? 0) >= floor && x.ivw != "thin"
-        nameRow(no: no, t: x.t, k: nil, mny: nil, star: star)
+    /* ⚠ A TWO-COLUMN TABLE, NOT SIX CELLS. The rows are the four readings a
+       side owns; the columns are calls and puts; the star sits on the side
+       worth writing, so a name can say "puts, not calls". Week and IV follow
+       under a rule, once, because they are the name's. */
+    @ViewBuilder private func soldTile(_ x: InvSoldName, no: Int, tags ts: [String]) -> some View {
+        let e = block.earnings?[x.t]
+        HStack(alignment: .center, spacing: 8) {
+            (Text("\(no). ").foregroundColor(S.mute) + Text(x.t).foregroundColor(S.ink))
+                .font(S.inter(S.t15, S.wSemiN)).tracking(S.track(S.t15, -0.015))
+                .sunnyLineBox(S.t15)
+            Spacer(minLength: 0)
+            if let e {
+                HStack(spacing: 5) {
+                    Circle().fill(S.warn).frame(width: 7, height: 7)
+                    Text("earnings \(weekday(e.d))\(e.est ? " (est.)" : "")")
+                        .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                        .sunnyLineBox(S.t11)
+                }
+            }
+        }
+        .lineLimit(1).frame(height: 15)
         Spacer().frame(height: 16)
-        cells([
-            Cell(label: "Sold", value: "\(x.sold) of \(x.held)", ink: S.ink),
-            Cell(label: "Free", value: "\(x.free)", ink: x.free > 0 ? S.ink : S.mute),
-            Cell(label: "Credit", value: x.cr.map { String(format: "%.1f%%", $0) } ?? "\u{2013}",
-                 ink: x.cr == nil ? S.mute : ((x.cr ?? 0) >= floor ? S.gainText : S.lossText)),
-            Cell(label: "Week", value: x.mv.map(move) ?? "\u{2013}",
-                 ink: x.mv == nil || abs(x.mv ?? 0) < 0.05 ? S.mute : ((x.mv ?? 0) < 0 ? S.lossText : S.gainText)),
-            Cell(label: x.ivw.map { "IV \u{00B7} \($0)" } ?? "IV",
-                 value: x.iv.map { "\(Int($0.rounded()))%" } ?? "\u{2013}", ink: x.iv == nil ? S.mute : S.ink),
-            Cell(label: "Delta", value: x.dl.map { ($0 < 0 ? "\u{2212}" : "") + String(format: "%.2f", abs($0)) } ?? "\u{2013}",
-                 ink: x.dl == nil ? S.mute : S.ink),
-        ])
+        VStack(alignment: .leading, spacing: 12) {
+            sideRow("", x.calls, x.puts, head: true) { _, _ in ("", S.ink) }
+            sideRow("Free", x.calls, x.puts) { s, _ in
+                guard let s else { return ("\u{2013}", S.mute) }
+                return ("\(s.free) of \(s.held)", s.free > 0 ? S.ink : S.mute)
+            }
+            sideRow("Credit", x.calls, x.puts) { s, puts in
+                guard let s, let cr = s.cr else { return ("\u{2013}", S.mute) }
+                return (String(format: "%.2f%%", cr), cr >= floor(puts) ? S.gainText : S.lossText)
+            }
+            /* ⚠ WHAT THE NET WOULD BE IF THIS SIDE'S FREE CONTRACTS WERE SOLD.
+               Nik, 18 Sep 2026: "just say current delta and if added what it
+               would be". Current sits on the shared line; this row is the
+               after. A contract not yet written has no delta, so it is taken at
+               0.30, the 30-delta weekly Premium now prices with: a sold call
+               takes 30 shares off the net, a sold put adds 30. */
+            sideRow("Net if sold", x.calls, x.puts) { s, puts in
+                guard let s, s.free > 0, let net = x.either?.net else { return ("\u{2013}", S.mute) }
+                let after = net + (puts ? 1 : -1) * s.free * Self.newDelta
+                /* Now → after, so the change reads in the row. Nik, 18 Sep 2026:
+                   the current figure on the shared line was too easy to miss.
+                   Signs only when negative, and no unit, to fit the column. */
+                let f: (Int) -> String = { ($0 < 0 ? "\u{2212}" : "") + abs($0).formatted() }
+                return ("\(f(net)) \u{2192} \(f(after))", S.ink)
+            }
+            sideRow("If sold now", x.calls, x.puts) { s, _ in
+                guard let s, s.free > 0, s.lastCr != nil else { return ("\u{2013}", S.mute) }
+                return (optMoney(s.ifSold), S.ink)
+            }
+        }
+        Spacer().frame(height: 14)
+        Rectangle().fill(S.ruleColorStrong).frame(height: 1)
+        Spacer().frame(height: 12)
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            let w = x.either?.mv
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Week").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                Text(w.map(move) ?? "\u{2013}").font(S.inter(S.t12, S.wSemiN))
+                    .foregroundStyle(w == nil || abs(w ?? 0) < 0.05 ? S.mute : ((w ?? 0) < 0 ? S.lossText : S.gainText))
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(x.either?.ivw.map { "IV \u{00B7} \($0)" } ?? "IV")
+                    .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                Text(x.either?.iv.map { "\(Int($0.rounded()))%" } ?? "\u{2013}")
+                    .font(S.inter(S.t12, S.wSemiN)).foregroundStyle(x.either?.iv == nil ? S.mute : S.ink)
+            }
+            Spacer(minLength: 0)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Net").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                Text(x.either?.net.map(shares) ?? "\u{2013}")
+                    .font(S.inter(S.t12, S.wSemiN)).foregroundStyle(S.ink)
+            }
+        }
+        .lineLimit(1).frame(height: 12)
         if !ts.isEmpty { tags(ts) }
     }
 
-    /// Most free · Best credit · Weakest stock, worn by the name that earns each.
-    private var soldTags: [[String]] {
-        let L = soldRows
+    /// One row of the sold table: a label, then the calls and puts figures in
+    /// two fixed columns. The head row prints the side names with their stars.
+    private func sideRow(_ label: String, _ c: InvSold?, _ p: InvSold?, head: Bool = false,
+                         _ fig: @escaping (InvSold?, Bool) -> (String, Color)) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                .frame(width: 85, alignment: .leading)
+            ForEach([false, true], id: \.self) { puts in
+                let side = puts ? p : c
+                Group {
+                    if head {
+                        HStack(spacing: 5) {
+                            Text(puts ? "Puts" : "Calls").font(S.inter(S.t12, S.wSemiN))
+                                .foregroundStyle(side == nil ? S.mute : S.ink2)
+                            if starSide(side, puts: puts) {
+                                Image(systemName: "star.fill").font(.system(size: 11))
+                                    .foregroundStyle(S.warn)
+                                    .accessibilityLabel("sell \(puts ? "puts" : "calls") next")
+                            }
+                        }
+                    } else {
+                        let f = fig(side, puts)
+                        Text(f.0).font(S.inter(S.t14, S.wSemiN))
+                            .tracking(S.track(S.t14, -0.01)).foregroundStyle(f.1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .lineLimit(1)
+        .frame(height: head ? 12 : 14)
+    }
+
+    /// The delta a contract not yet written is taken at, in shares a contract.
+    private static let newDelta = 30
+    private func shares(_ v: Int) -> String {
+        (v < 0 ? "\u{2212}" : "+") + abs(v).formatted() + " sh"
+    }
+
+    /// Most free · Best credit · Weakest stock. Best credit is judged against
+    /// each side's own floor, so a put is not favoured for paying put rates.
+    private func soldTags(_ L: [InvSoldName]) -> [[String]] {
         let mf = L.map(\.free).max() ?? 0
-        let bc = L.compactMap(\.cr).max()
-        let ws = L.compactMap(\.mv).min()
+        let over: (InvSoldName) -> Double? = { x in
+            [(x.calls?.cr).map { $0 - floor(false) }, (x.puts?.cr).map { $0 - floor(true) }]
+                .compactMap { $0 }.max()
+        }
+        let bc = L.compactMap(over).max()
+        let ws = L.compactMap { $0.either?.mv }.min()
         return L.map { x in
             [(x.free == mf && mf > 0) ? "Most free" : nil,
-             (x.cr != nil && x.cr == bc) ? "Best credit" : nil,
-             (x.mv != nil && x.mv == ws) ? "Weakest stock" : nil].compactMap { $0 }
+             (bc != nil && over(x) == bc) ? "Best credit" : nil,
+             (ws != nil && x.either?.mv == ws) ? "Weakest stock" : nil].compactMap { $0 }
         }
+    }
+
+    private func weekday(_ iso: String) -> String {
+        let p = iso.split(separator: "-")
+        guard p.count == 3, let y = Int(p[0]), let m = Int(p[1]), let d = Int(p[2]) else { return iso }
+        var c = DateComponents(); c.year = y; c.month = m; c.day = d; c.hour = 12
+        let cal = Calendar(identifier: .gregorian)
+        guard let date = cal.date(from: c) else { return iso }
+        return ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][cal.component(.weekday, from: date) - 1]
     }
 
     // MARK: bought
@@ -438,13 +594,11 @@ struct SunnyInventory: View {
 
     private var footer: some View {
         let stats: [(String, String, Color)]
-        if tab.sold {
-            let L = soldRows
-            let above = L.filter { ($0.cr ?? 0) >= floor }.count
-            stats = [("SOLD", "\(L.reduce(0) { $0 + $1.sold })", S.ink),
-                     ("FREE", "\(L.reduce(0) { $0 + $1.free })", S.ink),
-                     ("ABOVE \(floor.isFinite ? String(format: "%.2f", floor) : "\u{2013}")%", "\(above) of \(L.count)",
-                      above == L.count && !L.isEmpty ? S.gainText : S.ink)]
+        if tab.isSold {
+            let L = soldNames
+            stats = [("FREE CALLS", "\(L.reduce(0) { $0 + ($1.calls?.free ?? 0) })", S.ink),
+                     ("FREE PUTS", "\(L.reduce(0) { $0 + ($1.puts?.free ?? 0) })", S.ink),
+                     ("IF SOLD NOW", optMoney(L.reduce(0) { $0 + $1.ifSold }), S.ink)]
         } else {
             let P = boughtRows
             let cost = P.reduce(0.0) { $0 + $1.cost * Double($1.n) }

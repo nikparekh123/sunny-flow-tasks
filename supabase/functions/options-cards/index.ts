@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-18.3';
+const BUILD = '2026-09-18.6';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -219,6 +219,15 @@ Deno.serve(async (req) => {
     for (const n of names) co.set(String(n.ticker), String(n.name));
     const mark = new Map<string, { d: number; m: number }>();
     for (const g of greeksRows) mark.set(String(g.option_trade_id), { d: N(g.delta), m: N(g.last_mark) });
+    /* Delta where the vendor actually sent one. `mark.d` reads a missing delta
+       as 0, which for a share count would say "no exposure" when it means "no
+       reading"; Inventory's share delta reads this map instead. */
+    const greeksDelta = new Map<string, number>();
+    for (const g of greeksRows) {
+      if (g.delta !== null && g.delta !== undefined && g.delta !== '') {
+        greeksDelta.set(String(g.option_trade_id), N(g.delta));
+      }
+    }
     /* ⚠ ONE SESSION SEVEN DAYS BACK, NOT THE OLDEST OF TWELVE DAYS. This used
        to page a twelve-day window and keep the furthest-back reading per leg,
        because the LEAPs were days old and a true week did not exist yet. They
@@ -2199,6 +2208,20 @@ Deno.serve(async (req) => {
       const pr = priceRows.find((p) => p.ticker === r.t);
       const iv = ivByT.get(r.t);
       const mult = iv && iv.usual > 0 ? iv.now / iv.usual : null;
+      /* ⚠ DELTA IN SHARES, SOLD AGAINST HELD. Nik, 18 Sep 2026: "344/2000,
+         344 is what is sold and 2000 total delta position". A contract's delta
+         alone says nothing about exposure; shares do. Both are magnitudes: how
+         many shares of movement the written legs give away, against how many
+         the held legs carry. A leg with no delta reading counts nothing and is
+         reported, never guessed. */
+      let sSh = 0, hSh = 0, unpriced = 0;
+      for (const e of open) {
+        if (e.ticker !== r.t || e.type !== type) continue;
+        const ds = e.ids.map((i) => greeksDelta.get(i)).filter((x): x is number => x !== undefined);
+        if (!ds.length) { unpriced++; continue; }
+        const sh = Math.abs(ds.reduce((a, b) => a + b, 0) / ds.length) * Math.abs(e.n) * 100;
+        if (e.dir === 'short') sSh += sh; else hSh += sh;
+      }
       let dn = 0, dw = 0;
       for (const e of open) {
         if (e.ticker !== r.t || e.type !== type || e.dir !== 'short') continue;
@@ -2213,10 +2236,19 @@ Deno.serve(async (req) => {
         /* ⚠ CREDIT OVER STRIKE, NOT OVER SPOT. Nik, 18 Sep 2026: the floor is
            Credit & theta's figure, and that card divides by strike. */
         cr: last && N(last.strike) > 0 ? r2(N(last.premium) / N(last.strike) * 100) : null,
+        /* The same last credit in dollars a contract, for "if sold now": free
+           contracts times what the last one fetched. An estimate, and labelled
+           as one; the next strike and IV decide the real figure. */
+        lastCr: last ? Math.round(N(last.premium) * 100) : null,
         mv: pr?.pct.w1 ?? null,
         iv: iv ? r2(iv.now) : null,
         ivw: mult === null ? null : mult >= 1.15 ? 'rich' : mult < 0.95 ? 'thin' : 'normal',
         dl: dw > 0 ? r2(dn / dw) : null,
+        dSold: Math.round(sSh), dHeld: Math.round(hSh), dUnpriced: unpriced,
+        /* ⚠ NET SHARES FOR THE NAME, Prices' own figure: every leg, calls and
+           puts together, what is left of the exposure. Nik, 18 Sep 2026: "net
+           shares on the shared line". */
+        net: pr ? pr.delta : null,
       }];
     });
     const invLots: Record<string, [string, number, number][]> = {};
@@ -2244,7 +2276,30 @@ Deno.serve(async (req) => {
           : (e.type === 'put' ? d < 0 : d > 0) ? 'in' : 'out';
       }
     }
+    /* ⚠ EARNINGS BEFORE THE NEXT EXPIRY. Nik, 18 Sep 2026: selling into a
+       report is a different risk, so the Sold tile flags it. The window runs to
+       the Friday the next sale would cover: this Friday from Monday to
+       Thursday, next Friday from Friday on. The dates are the calendar's
+       estimates until confirmed, and the flag says so. */
+    const nextFri = (() => {
+      const d = new Date(today + 'T12:00:00Z');
+      /* On a Friday the next sale is already next week's. */
+      const add = (5 - d.getUTCDay() + 7) % 7 || 7;
+      d.setUTCDate(d.getUTCDate() + add);
+      return d.toISOString().slice(0, 10);
+    })();
+    const earnRows = await time('earnings', () => D.get(`earnings_events?report_date=gte.${today}`
+      + `&report_date=lte.${nextFri}&select=ticker,report_date,date_estimated&order=report_date.asc`));
+    const invEarn: Record<string, { d: string; est: boolean }> = {};
+    const heldNames = new Set(inventory.map((r) => r.t));
+    for (const r of earnRows) {
+      const t = String(r.ticker);
+      if (!heldNames.has(t)) continue;
+      if (!invEarn[t]) invEarn[t] = { d: String(r.report_date).slice(0, 10), est: r.date_estimated === true };
+    }
+
     const inventoryCard = {
+      earnings: invEarn,
       asOf: dayLive ? today : ydayDate,
       /* ⚠ THE FLOOR IS HIS OWN AVERAGE, ONE PER SIDE. Nik, 18 Sep 2026: credit
          over strike across every contract sold since the book began, the same
