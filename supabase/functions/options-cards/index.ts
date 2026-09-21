@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-21.1';
+const BUILD = '2026-09-21.3';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2424,12 +2424,84 @@ Deno.serve(async (req) => {
       lots: invLots, today: invToday, moneyness: invMny,
     };
 
+    /* ALLOCATION (export 23, 21 Sep 2026). Where the capital sits, a name at a
+       time: what went in against what it is worth now.
+
+       ⚠ EVERYTHING BOUGHT, NOT SHARES ALONE. The sheet counts shares only; on
+       this book that is NKE, FIS and KR and misses the LEAPs, which is most of
+       the money. Nik, 21 Sep: shares + long calls + long puts.
+         shares  inv = open lots × their cost, now = held × spot
+         longs   inv = what the contracts still held cost (FIFO, the `open`
+                 legs' cash, the figure Positions calls PAID), now = mark,
+                 an unpriced leg at its cost the way every card here does.
+
+       ⚠ TLT IS NOT ON IT. The dip gate is its own strategy (Nik, 21 Sep).
+
+       ⚠ NOW IS LIVE, not last night's close: the same spot and the same marks
+       Positions' WORTH NOW reads, so the two cards agree on the minute. */
+    /* ⚠ SHARES HELD = EVERY SHARE BOUGHT LESS EVERY SHARE SOLD, not the lots'
+       `qty_remaining`. The lots are only used up by the nightly FIFO reconcile
+       (09:30 UTC), so a sale this morning still reads as held until tomorrow:
+       on 21 Sep NKE 2,000 and FIS 500 were sold at the open and the card showed
+       $99k of shares IBKR had at 0. KR is the other case: its call was assigned
+       on 18 Sep with no lot to match, and today's buy covered it. Bought less
+       sold is 0 on both, the IBKR answer. The cost of what is left is the
+       newest lots that cover it (FIFO sold the oldest). A name below 0 is a
+       seed gap from before the book, not a short, and holds nothing. */
+    const [allocLots, allocSells] = await Promise.all([
+      time('allocLots', () => P('share_lots?voided_at=is.null'
+        + '&select=ticker,qty_original,cost_per_share,acquired_date&order=acquired_date.asc,id.asc')),
+      time('allocSells', () => P('share_sells?voided_at=is.null'
+        + '&select=ticker,quantity&order=id.asc')),
+    ]);
+    const alloc = new Map<string, { inv: number; now: number; sh: number }>();
+    const alOf = (t: string) => {
+      let a = alloc.get(t);
+      if (!a) { a = { inv: 0, now: 0, sh: 0 }; alloc.set(t, a); }
+      return a;
+    };
+    const soldSh = new Map<string, number>();
+    for (const x of allocSells) soldSh.set(String(x.ticker), (soldSh.get(String(x.ticker)) ?? 0) + N(x.quantity));
+    const lotsBy = new Map<string, { q: number; c: number }[]>();
+    for (const l of allocLots) {
+      const t = String(l.ticker);
+      if (!lotsBy.has(t)) lotsBy.set(t, []);
+      lotsBy.get(t)!.push({ q: N(l.qty_original), c: N(l.cost_per_share) });
+    }
+    for (const [t, ls] of lotsBy) {
+      if (t === 'TLT') continue;
+      let held = ls.reduce((a, l) => a + l.q, 0) - (soldSh.get(t) ?? 0);
+      if (held <= 0) continue;
+      const a = alOf(t);
+      for (let i = ls.length - 1; i >= 0 && held > 0; i--) {
+        const q = Math.min(held, ls[i].q);
+        a.sh += q; a.inv += q * ls[i].c; a.now += q * (spot.get(t) || ls[i].c);
+        held -= q;
+      }
+    }
+    for (const e of open) {
+      if (e.dir !== 'long' || e.ticker === 'TLT') continue;
+      const md = e.ids.map((i) => mark.get(i)).filter(Boolean) as { d: number; m: number }[];
+      const m = md.length
+        ? md.reduce((x, y) => x + y.m, 0) / md.length
+        : (e.n > 0 ? e.cash / (e.n * 100) : 0);
+      const a = alOf(e.ticker);
+      a.inv += e.cash; a.now += m * e.n * 100;
+    }
+    const allocationCard = {
+      asOf: today,
+      book: [...alloc.entries()]
+        .filter(([, a]) => a.inv > 0)
+        .map(([t, a]) => ({ t, inv: Math.round(a.inv), now: Math.round(a.now), sh: a.sh })),
+    };
+
     timings.total = Date.now() - T0;
     return json(200, {
       ok: true, build: BUILD, date: today, timings,
       yieldProgress,
       longLegs: longLegsBlock,
       inventoryCard,
+      allocationCard,
       /* ⚠ THE TWO RATES, NOT ONE NET. Programme apportions theta to a name by
          its share of kept (the short side) and of invested (the long side),
          which cannot be done from a single netted figure. Short is positive,

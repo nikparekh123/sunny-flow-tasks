@@ -108,6 +108,9 @@ struct OptionsPayload: Decodable {
     /// Inventory, four tabs (`export 20`). Optional so a run against an older
     /// deployment decodes rather than throws.
     let inventoryCard: InventoryCard?
+    /// Allocation (`export 23`). Optional so a run against an older
+    /// deployment decodes rather than throws.
+    let allocationCard: AllocationCard?
     /// Optional so a run against an older deployment decodes rather than throws.
     let intrinsic: IntrinsicBlock?
     let yieldProgress: YieldProgressBlock?

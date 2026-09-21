@@ -576,6 +576,11 @@ struct SunnyPane: View {
                 SunnyProgramme(block: pr, legs: o.longLegs?.legs ?? [],
                                cover: o.yieldProgress?.names ?? [])
             }
+            /* ⚠ ALLOCATION, DIRECTLY AFTER PERFORMANCE, 21 Sep 2026 (`export 23`).
+               The ledger of what the programme made, then where the cash is. */
+            if let al = o.allocationCard, !al.book.isEmpty {
+                SunnyAllocation(block: al)
+            }
             /* ⚠ CREDIT & THETA REPLACES THETA AND AVERAGE CREDIT, 17 Sep 2026,
                in their place at the end of the run. */
             if let ct = o.creditTrend, ct.weeks.count > 1 {

@@ -129,6 +129,13 @@ enum S {
     /// Credit & theta's three hues, none of which means P&L, lifted for night.
     static let ctFill    = dyn(0x1E6E68, 0x3DA69E)
     static let ctOutline = dyn(0x7C3A66, 0xC58AB4)
+    /// Allocation (export 23): a name's ink by rank, biggest darkest. Ordinal,
+    /// never P&L, never text. `--al-rank-1` … `--al-rank-8`, both themes.
+    static let alRank: [Color] = [
+        dyn(0x14170F, 0xF2F3EE), dyn(0x33382F, 0xD3D6CE), dyn(0x4F554B, 0xB5B9B0),
+        dyn(0x6A716A, 0x979C92), dyn(0x9AA096, 0x6E736A), dyn(0xB4B9B0, 0x575C53),
+        dyn(0xCCD0C8, 0x43473F), dyn(0xE0E3DC, 0x32352F),
+    ]
     static let ctRsi     = dyn(0x2A4A6E, 0x7FA6D4)
 
     // MARK: gain / loss / attention
