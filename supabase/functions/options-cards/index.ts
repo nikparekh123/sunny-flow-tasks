@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-18.9';
+const BUILD = '2026-09-21.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2273,6 +2273,17 @@ Deno.serve(async (req) => {
         iv: iv ? r2(iv.now) : null,
         ivw: mult === null ? null : mult >= 1.15 ? 'rich' : mult < 0.95 ? 'thin' : 'normal',
         dl: dw > 0 ? r2(dn / dw) : null,
+        /* ⚠ THE CREDIT THOSE OPEN LEGS TOOK, $ A CONTRACT, weighted. `cr` is the
+           last leg's rate; this is what the whole open side is paid. Export 22's
+           `cc`, and the `$` lens the card opens on. */
+        cc: (() => {
+          let cash = 0, n = 0;
+          for (const e of open) {
+            if (e.ticker !== r.t || e.type !== type || e.dir !== 'short') continue;
+            cash += e.cash; n += e.n;
+          }
+          return n > 0 ? Math.round(cash / n) : null;
+        })(),
         dSold: Math.round(sSh), dHeld: Math.round(hSh), dUnpriced: unpriced,
         /* ⚠ NET SHARES FOR THE NAME: every leg, calls and puts together, what
            is left of the exposure, less whatever expires this afternoon. Nik,
@@ -2327,7 +2338,73 @@ Deno.serve(async (req) => {
       if (!invEarn[t]) invEarn[t] = { d: String(r.report_date).slice(0, 10), est: r.date_estimated === true };
     }
 
+    /* ── inventory's trend ────────────────────────────────────────────────
+       `export 22`, 20 Sep 2026. Twelve weeks of three series a side: what the
+       book COULD have written (can), what it DID (sold), and what those legs
+       took in (usd). One row of history a week, Monday-keyed, oldest first.
+
+       ⚠ A WEEK'S SOLD IS WHAT IT WAS WRITTEN FOR, not what was open on the day:
+       a leg counts in the week its expiry covers, the rule every other card on
+       this page buckets by. The live week is the ledger above, so the panel's
+       last point, the Total row and the legend cannot disagree.
+
+       ⚠ CAN IS THE CAPACITY THE BOOK HAD THAT WEEK: the long contracts held by
+       that Friday, which is not today's count — UBER's LEAP was bought on 14
+       Sep and cannot have carried a call in August. Puts count the full held
+       number, same as calls (Nik, 21 Sep: a third hid the real figure).
+
+       ⚠ AND NOT BEFORE 31 AUGUST. The page's start rule: twelve weeks are asked
+       for, the weeks before the book existed are not invented. */
+    const PUT_SHARE = 1;
+    const INV_WEEKS = 12;
+    const invWeekKeys: string[] = [];
+    for (let i = INV_WEEKS - 1; i >= 0; i--) {
+      const w = new Date(Date.parse(thisWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
+        .toISOString().slice(0, 10);
+      if (w >= weekStart(BOOK_START)) invWeekKeys.push(w);
+    }
+    /* Every long trade ever, for the capacity a past week had. `legs` only
+       carries what is open today. */
+    const longAll = await time('longAll', () => P('option_trades?voided_at=is.null'
+      + '&direction=eq.long&select=ticker,option_type,contracts,action,trade_date,expiry'
+      + '&order=trade_date.asc'));
+    const invWeeks = invWeekKeys.map((w) => {
+      const fri = dayShift(w, 4);
+      const side = (type: 'call' | 'put') => {
+        let sold = 0, usd = 0;
+        for (const t of bookShorts) {
+          if (String(t.option_type) !== type) continue;
+          if (weekStart(String(t.expiry).slice(0, 10)) !== w) continue;
+          /* ⚠ WRITTEN, NOT STILL OPEN. He buys his weeklies back rather than
+             letting them expire, so netting the closes read every past week as
+             "sold 0" beside a real credit. A past week's sold is what was
+             WRITTEN for it; the live week is replaced by the ledger, which is
+             what is open right now. */
+          if (String(t.action) !== 'open') continue;
+          sold += N(t.contracts); usd += N(t.contracts) * N(t.premium) * 100;
+        }
+        /* Held by that Friday: opened on or before it, not closed by it, and
+           not expired before it. */
+        let held = 0;
+        for (const t of longAll) {
+          if (String(t.option_type) !== type) continue;
+          const d = String(t.trade_date).slice(0, 10);
+          if (d > fri || String(t.expiry).slice(0, 10) < w) continue;
+          held += (String(t.action) === 'open' ? 1 : -1) * N(t.contracts);
+        }
+        held = Math.max(0, held);
+        return {
+          sold: Math.max(0, Math.round(sold)),
+          can: Math.round(type === 'put' ? held * PUT_SHARE : held),
+          usd: Math.max(0, Math.round(usd)),
+        };
+      };
+      return { w, calls: side('call'), puts: side('put') };
+    });
+
     const inventoryCard = {
+      putShare: r2(PUT_SHARE),
+      weeks: invWeeks,
       earnings: invEarn,
       asOf: dayLive ? today : ydayDate,
       /* ⚠ THE FLOOR IS HIS OWN AVERAGE, ONE PER SIDE. Nik, 18 Sep 2026: credit

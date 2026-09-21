@@ -610,8 +610,9 @@ struct SunnyCreditTheta: View {
     }
 }
 
-private extension Path {
-    /// The curve closed down to the floor, for the filled series.
+extension Path {
+    /// The curve closed down to the floor, for the filled series. Shared with
+    /// Inventory's trend, which fills its Sold curve the same way.
     func closed(to floor: CGFloat, _ p: [CGPoint]) -> Path {
         var out = self
         guard let a = p.first, let b = p.last else { return out }

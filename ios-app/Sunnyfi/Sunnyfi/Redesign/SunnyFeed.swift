@@ -556,7 +556,7 @@ struct SunnyPane: View {
             /* ⚠ INVENTORY, DIRECTLY AFTER POSITIONS, 18 Sep 2026 (`export 20`). The
                true book behind the same four tabs; it is Left to sell's new home. */
             if let inv = o.inventoryCard {
-                SunnyInventory(block: inv, legs: o.longLegs?.legs ?? [])
+                SunnyInventory(block: inv)
             }
             SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0)
             if let iv = o.intrinsic, !iv.legs.isEmpty {
