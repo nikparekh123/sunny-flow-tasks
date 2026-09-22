@@ -15,6 +15,11 @@ final class OptionsStore {
     private(set) var error: String?
     private(set) var loading = false
     private var loadedAt: Date?
+    /// Freshness (hold until seen): Inventory's figures that moved on a pull.
+    let invFresh = FreshTrack()
+    let posFresh = FreshTrack()
+    let alFresh = FreshTrack()
+    let wyFresh = FreshTrack()
 
     /// Version bumps on every load so a screen model can key its cache off it.
     private(set) var version = 0
@@ -34,12 +39,87 @@ final class OptionsStore {
             r.httpBody = Data("{}".utf8)
             let (d, _) = try await URLSession.shared.data(for: r)
             let p = try JSONDecoder().decode(OptionsPayload.self, from: d)
+            /* Verification only: `-freshTest` starts from a doctored copy of this
+               pull, so the real one lands as a change and every card's marks can
+               be seen without waiting for a trade. */
+            if data == nil, ProcessInfo.processInfo.arguments.contains("-freshTest"),
+               let old = Self.doctored(d) {
+                posFresh.observe(SunnyPositions.freshFigs(old.positions, old.longLegs?.legs ?? []))
+                if let al = old.allocationCard { alFresh.observe(SunnyAllocation.freshFigs(al)) }
+                wyFresh.observe(SunnyWeeklyYield.freshFigs(old.book))
+                data = old
+            }
+            /* The first load is the baseline and marks nothing. */
+            invFresh.landed(data?.inventoryCard.flatMap { o in
+                p.inventoryCard.map { Self.invDiff(o, $0) } } ?? [:])
+            posFresh.observe(SunnyPositions.freshFigs(p.positions, p.longLegs?.legs ?? []))
+            if let al = p.allocationCard {
+                alFresh.observe(SunnyAllocation.freshFigs(al), closeKey: ("a:#total", "inv"))
+            }
+            wyFresh.observe(SunnyWeeklyYield.freshFigs(p.book))
             data = p
             /* ⚠ THE LOADING SCREEN NEEDS THETA BEFORE THETA ARRIVES, so the
                last good answer is kept here rather than fetched again. */
             SunnyWait.remember(p)
             error = nil; loadedAt = Date(); version &+= 1
         } catch { self.error = String(describing: error) }
+    }
+
+    /// `-freshTest`'s baseline: one fewer call sold on the first name, $1k less
+    /// invested on the first allocation name, the first short leg missing, and
+    /// the last week's credit $100 lower.
+    static func doctored(_ d: Data) -> OptionsPayload? {
+        guard var j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
+        if var inv = j["inventoryCard"] as? [String: Any], var sold = inv["sold"] as? [String: Any],
+           var calls = sold["calls"] as? [[String: Any]], let i = calls.firstIndex(where: { ($0["sold"] as? Int ?? 0) > 0 }) {
+            calls[i]["sold"] = (calls[i]["sold"] as? Int ?? 1) - 1
+            sold["calls"] = calls; inv["sold"] = sold; j["inventoryCard"] = inv
+        }
+        if var al = j["allocationCard"] as? [String: Any], var book = al["book"] as? [[String: Any]], !book.isEmpty {
+            book[0]["inv"] = (book[0]["inv"] as? Double ?? 0) + 1000
+            al["book"] = book; j["allocationCard"] = al
+        }
+        if var ps = j["positions"] as? [[String: Any]],
+           let i = ps.firstIndex(where: { ($0["shorts"] as? [Any])?.isEmpty == false }),
+           var sh = ps[i]["shorts"] as? [Any] {
+            sh.removeFirst(); ps[i]["shorts"] = sh; j["positions"] = ps
+        }
+        if var bk = j["book"] as? [String: Any], var wk = bk["weekly"] as? [[String: Any]],
+           let i = wk.lastIndex(where: { ($0["current"] as? Bool) == true }) {
+            for f in ["credit", "gross"] { if let v = wk[i][f] as? Int { wk[i][f] = v - 100 } }
+            bk["weekly"] = wk; j["book"] = bk
+        }
+        guard let out = try? JSONSerialization.data(withJSONObject: j) else { return nil }
+        return try? JSONDecoder().decode(OptionsPayload.self, from: out)
+    }
+
+    /// Inventory, per side and name: `sold` and the credit (`cr`, which the $
+    /// and % lenses both print from). A new name is `added`; a gone name marks
+    /// only the Total. The Total is marked when a row on its side moved and
+    /// the total itself moved.
+    static func invDiff(_ a: InventoryCard, _ b: InventoryCard) -> [String: Set<String>] {
+        var out: [String: Set<String>] = [:]
+        for (k, o, n) in [("c", a.sold.calls, b.sold.calls), ("p", a.sold.puts, b.sold.puts)] {
+            var any = false
+            for r in n {
+                guard let q = o.first(where: { $0.t == r.t }) else {
+                    out["\(k):\(r.t)"] = ["added"]; any = true; continue
+                }
+                var f: Set<String> = []
+                if q.sold != r.sold { f.insert("sold") }
+                if q.cc != r.cc || q.cr != r.cr { f.insert("cr") }
+                if !f.isEmpty { out["\(k):\(r.t)"] = f; any = true }
+            }
+            if o.contains(where: { q in !n.contains { $0.t == q.t } }) { any = true }
+            guard any else { continue }
+            let sold = { (x: [InvSold]) in x.reduce(0) { $0 + $1.sold } }
+            let usd = { (x: [InvSold]) in x.reduce(0) { $0 + $1.sold * ($1.cc ?? 0) } }
+            var t: Set<String> = []
+            if sold(o) != sold(n) { t.insert("sold") }
+            if usd(o) != usd(n) { t.insert("cr") }
+            if !t.isEmpty { out["\(k):#total"] = t }
+        }
+        return out
     }
 }
 
@@ -111,6 +191,8 @@ struct OptionsPayload: Decodable {
     /// Allocation (`export 23`). Optional so a run against an older
     /// deployment decodes rather than throws.
     let allocationCard: AllocationCard?
+    /// The roll sheet's chain (`export 24`). Optional for the same reason.
+    let rollCard: RollCard?
     /// Optional so a run against an older deployment decodes rather than throws.
     let intrinsic: IntrinsicBlock?
     let yieldProgress: YieldProgressBlock?

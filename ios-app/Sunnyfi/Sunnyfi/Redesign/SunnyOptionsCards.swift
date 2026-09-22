@@ -60,6 +60,9 @@ private struct OptCard<Content: View>: View {
 private struct OptHead: View {
     let title: String, sub: String
     var right: String? = nil
+    /// Freshness: the stamp rides after `right`.
+    var fresh: FreshTrack? = nil
+    var updating = false
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: S.gap6) {
             HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
@@ -69,8 +72,11 @@ private struct OptHead: View {
                     Text(sub).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
                 }
             }
+            .fixedSize()
             Spacer(minLength: 0)
-            if let right {
+            if let fresh {
+                FreshMeta(meta: right ?? "", metaInk: S.ink2, track: fresh, updating: updating)
+            } else if let right {
                 Text(right).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
             }
         }
@@ -217,6 +223,32 @@ struct SunnyPositions: View {
     let legs: [LongLeg]
     let prices: [PriceRow]
     let asOf: String
+    /// Freshness: a new or closed leg and a changed contract count, held until
+    /// the card is seen. The % move is the market and never marks.
+    var fresh: FreshTrack? = nil
+    var updating = false
+    /// The roll sheet's chain: next Friday's write on a name (`export 24`).
+    var roll: RollCard? = nil
+
+    /// The figures Freshness watches: contracts per row, and rows per tab.
+    static func freshFigs(_ ps: [OptionsPosition], _ legs: [LongLeg]) -> [String: [String: String]] {
+        var n: [String: Int] = [:]
+        for p in ps {
+            for s in p.shorts where s.cr != nil {
+                let tab = (s.type ?? "call") == "call" ? "sc" : "sp"
+                n["\(tab):\(p.t)|\(trimZero(String(format: "%.2f", s.k)))", default: 0] += s.n
+            }
+        }
+        for l in legs { n["\(l.isCall ? "bc" : "bp"):\(l.t)", default: 0] += l.n }
+        var out = n.mapValues { ["n": String($0)] }
+        for t in ["sc", "sp", "bc", "bp"] {
+            out["\(t):#meta"] = ["n": String(n.keys.filter { $0.hasPrefix(t + ":") }.count)]
+        }
+        return out
+    }
+    private func fr(_ key: String, _ own: Color) -> Color {
+        fresh?.isMarked("\(tabRaw):\(key)", "n") == true ? S.warn : own
+    }
 
     /* Both survive a pull: a reading the user chose, not state the data owns.
        `mode` is shared across all four tabs on purpose. */
@@ -238,6 +270,9 @@ struct SunnyPositions: View {
     @State private var swiped = false
     /// Re-read on the tick so Friday 20:00 and Monday 04:00 land without a reload.
     @State private var now = Date()
+    /* ⚠ A 450 ms HOLD OPENS THE SHEET AND THE TAP THAT FOLLOWS IS EATEN, or the
+       figure column would flip under it. Sold tabs only. */
+    @State private var rollKey: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: geometry, from the sheet
@@ -272,6 +307,9 @@ struct SunnyPositions: View {
     private struct Row: Identifiable {
         let t: String, k: String, v: Double, fig: String
         let through: Bool
+        /// Carried for the roll sheet: its size and the week it expires in.
+        var n: Int = 0
+        var exp: String? = nil
         var id: String { "\(t)|\(k)" }
         var up: Bool { v >= 0 }
     }
@@ -279,6 +317,8 @@ struct SunnyPositions: View {
     /// One entry per open short contract line on the picked side.
     private struct Sold {
         let t: String, k: Double, n: Int, pct: Double, cr: Double
+        /// The leg's expiry, carried for the roll sheet's "next Friday".
+        let exp: String
         /// What is still to decay — not what the buy-back costs.
         let tv: Double
         /// The whole cost of closing the leg: intrinsic plus what is left to decay.
@@ -293,7 +333,7 @@ struct SunnyPositions: View {
                 let isCall = (s.type ?? "call") == "call"
                 guard isCall == tab.isCall, let cr = s.cr else { return nil }
                 return Sold(t: p.t, k: s.k, n: s.n, pct: Double(s.captured), cr: cr,
-                            tv: Double(s.tv ?? 0), value: Double(s.value))
+                            exp: s.exp, tv: Double(s.tv ?? 0), value: Double(s.value))
             }
         }
         .sorted { $0.pct < $1.pct }
@@ -333,7 +373,7 @@ struct SunnyPositions: View {
                     fig: figMode == 2 ? optMoney(Int(l.tv.rounded()))
                        : figMode == 1 ? signedMoney(l.usd)
                        : barePctInt(Int(l.pct.rounded())),
-                    through: movedThrough(l.t, l.k))
+                    through: movedThrough(l.t, l.k), n: l.n, exp: l.exp)
             }
         }
         return boughtPositions.map { p in
@@ -342,7 +382,7 @@ struct SunnyPositions: View {
                 fig: figMode == 2 ? optMoney(Int(p.tv.rounded()))
                    : figMode == 1 ? signedMoney(p.made)
                    : signedPct1(p.ch),
-                through: false)
+                through: false, n: p.n)
         }
     }
 
@@ -464,8 +504,9 @@ struct SunnyPositions: View {
                         .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
                     Text(tab.scope).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
                 }
+                .fixedSize()
                 Spacer(minLength: 0)
-                Text(meta).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                FreshMeta(meta: meta, metaInk: fr("#meta", S.mute), track: fresh, updating: updating)
             }
             Spacer().frame(height: 18)
             tabRow
@@ -507,6 +548,7 @@ struct SunnyPositions: View {
             footer
         }
         .frame(width: S.content - 48, alignment: .leading)
+        .modifier(OptionalFreshSeen(track: fresh))
         /* ⚠ THE GESTURE SITS ON THE CONTENT, ABOVE THE CARD'S CHROME. Attached
            after the background and the shadow it never saw a drag at all — the
            shadow helper wraps the view in an `AnyView` and the hit test stopped
@@ -546,6 +588,10 @@ struct SunnyPositions: View {
         .padding(EdgeInsets(top: 24, leading: 24, bottom: 28, trailing: 24))
         .frame(width: S.content, alignment: .top)
         .background(S.paper)
+        /* ⚠ THE SHEET IS THE CARD'S, CLIPPED BY THE CARD. Mounted before the
+           clip shape so its 16pt top corners sit inside the card's 22 and the
+           scrim covers exactly the card, never the page. */
+        .overlay(alignment: .bottom) { rollOverlay }
         .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
         .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
@@ -578,6 +624,7 @@ struct SunnyPositions: View {
            next beat so the fade and the bar growth both have somewhere to run
            from. Without the reset the new list arrives already at full opacity
            and full width, which is the other half of the morph. */
+        .onChange(of: tabRaw) { _, _ in rollKey = nil }
         .task(id: tabRaw) {
             guard appeared else { return }
             soft = true
@@ -648,6 +695,30 @@ struct SunnyPositions: View {
             .foregroundStyle(S.mute).sunnyLineBox(S.t10).fixedSize()
     }
 
+    /// The write on this name for the first Friday after the pressed leg's
+    /// own expiry. The floor is his own average on that side.
+    private func quote(for r: Row) -> RollQuote? {
+        guard tab.sold, let roll, let name = roll.names[r.t] else { return nil }
+        let floor = (tab.isCall ? roll.floor.calls : roll.floor.puts) ?? 1.06
+        return RollMath.quote(t: r.t, call: tab.isCall, n: r.n, after: r.exp,
+                              name: name, floor: floor)
+    }
+
+    private func closeRoll() {
+        withAnimation(reduceMotion ? nil : S.easeSettle(0.32)) { rollKey = nil }
+    }
+
+    @ViewBuilder private var rollOverlay: some View {
+        if let key = rollKey, let r = rows.first(where: { $0.id == key }),
+           let q = quote(for: r) {
+            ZStack(alignment: .bottom) {
+                S.rsScrim.onTapGesture { closeRoll() }
+                SunnyRollSheet(q: q, onClose: closeRoll)
+                    .transition(.move(edge: .bottom))
+            }
+        }
+    }
+
     @ViewBuilder private func row(_ r: Row, i: Int) -> some View {
         HStack(spacing: Self.colGap) {
             /* ⚠ EVERY CELL TAKES ITS LINE BOX, which is the sheet's
@@ -714,13 +785,19 @@ struct SunnyPositions: View {
                ever doing harm. */
             Text(r.fig).font(S.inter(S.t13, S.wBoldN))
                 .tracking(S.track(S.t13, -0.015))
-                .foregroundStyle(figMode == 2 ? S.ink : (r.up ? S.gainText : S.lossText))
+                .foregroundStyle(fr(tab.sold ? r.id : r.t,
+                                    figMode == 2 ? S.ink : (r.up ? S.gainText : S.lossText)))
                 .lineLimit(1)
                 .sunnyLineBox(S.t13)
                 .sunnyHint()
                 .frame(width: Self.figCol, alignment: .trailing)
                 .padding(.vertical, 8).contentShape(Rectangle())
                 .onTapGesture { figMode = (figMode + 1) % 3 }
+                /* Sold tabs only; a bought row has no week to write. */
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    guard tab.sold, quote(for: r) != nil else { return }
+                    withAnimation(reduceMotion ? nil : S.easeSettle(0.32)) { rollKey = r.id }
+                }
                 .padding(.vertical, -8)
         }
         .frame(height: Self.barH)
@@ -1138,6 +1215,22 @@ struct SunnyWeeklyYield: View {
     let book: OptionsBook
     /// Put cover — what the hedge needs per week before the puts expire.
     var putNeed: Int = 0
+    /// Freshness: the average, the live week's kept and closed early, yearly.
+    var fresh: FreshTrack? = nil
+    var updating = false
+
+    /// The figures Freshness watches, as printed, independent of a picked week.
+    static func freshFigs(_ b: OptionsBook) -> [String: [String: String]] {
+        let v = SunnyWeeklyYield(book: b)
+        let live = v.weeks.last(where: \.live) ?? v.weeks.last
+        return ["w:avg": ["v": v.pct2(v.avgKept)],
+                "w:kept": ["v": v.pct2(live?.kept ?? 0)],
+                "w:closed": ["v": v.pct2(live?.bought ?? 0)],
+                "w:yearly": ["v": "\(Int((v.avgKept * 52).rounded()))"]]
+    }
+    private func fr(_ key: String, _ own: Color, live: Bool = true) -> Color {
+        live && fresh?.isMarked("w:\(key)", "v") == true ? S.warn : own
+    }
 
     /// null = the average is the reference; otherwise that week is.
     /* ⚠ VERIFICATION ONLY, the same device as `-rollFig`: the simulator's
@@ -1223,7 +1316,8 @@ struct SunnyWeeklyYield: View {
     var body: some View {
         OptCard(name: "weekly-yield") {
             OptHead(title: "Weekly yield", sub: "on premium paid",
-                    right: "\(weeks.count) week" + (weeks.count == 1 ? "" : "s"))
+                    right: "\(weeks.count) week" + (weeks.count == 1 ? "" : "s"),
+                    fresh: fresh, updating: updating)
             Spacer().frame(height: S.gap6)
 
             VStack(alignment: .leading, spacing: 5) {
@@ -1241,7 +1335,7 @@ struct SunnyWeeklyYield: View {
                 HStack(alignment: .firstTextBaseline, spacing: S.gap3) {
                     Text(pct2(refValue))
                         .font(S.inter(S.t30, S.wBoldN)).tracking(S.track(S.t30, -0.03))
-                        .foregroundStyle(S.ink).sunnyLineBox(S.t30)
+                        .foregroundStyle(fr("avg", S.ink, live: picked == nil)).sunnyLineBox(S.t30)
                     Text(picked == nil ? "a week, kept" : "kept")
                         .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
                     Spacer(minLength: 0)
@@ -1285,19 +1379,23 @@ struct SunnyWeeklyYield: View {
 
             Spacer(minLength: S.gap6)
             OptFooter(stats: [
-                .init(label: "Kept", value: pct2(at?.kept ?? 0), ink: S.ink),
+                .init(label: "Kept", value: pct2(at?.kept ?? 0),
+                      ink: fr("kept", S.ink, live: at?.live ?? false)),
                 /* ⚠ MEASURED, NOT GUESSED: "CLOSED EARLY" is 90.5 at 10/700
                    with .13em tracking, against 91.67 of slot. "PAID TO CLOSE"
                    was 91.9 and would have truncated. */
                 .init(label: "Closed early",
                       value: (at.map { $0.bought > 0 ? "\u{2212}" : "" } ?? "")
                              + pct2(at?.bought ?? 0),
-                      ink: (at?.bought ?? 0) > 0 ? S.lossText : S.mute),
+                      ink: fr("closed", (at?.bought ?? 0) > 0 ? S.lossText : S.mute,
+                              live: at?.live ?? false)),
                 /* ⚠ YEARLY DOES NOT FOLLOW THE TAP, on purpose: one week
                    annualised is a forecast and this card makes none. */
-                .init(label: "Yearly", value: "\(Int((avgKept * 52).rounded()))%", ink: S.ink),
+                .init(label: "Yearly", value: "\(Int((avgKept * 52).rounded()))%",
+                      ink: fr("yearly", S.ink)),
             ])
         }
+        .modifier(OptionalFreshSeen(track: fresh))
         .task(id: weeks.count) {
             guard !weeks.isEmpty, !appeared else { return }
             try? await Task.sleep(for: .milliseconds(20))

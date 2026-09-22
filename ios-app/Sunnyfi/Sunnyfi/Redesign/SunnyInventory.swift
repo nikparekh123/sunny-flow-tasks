@@ -56,6 +56,9 @@ struct InvWeekSide: Decodable { let sold: Int, can: Int, usd: Int }
 
 struct SunnyInventory: View {
     let block: InventoryCard
+    /// Freshness: what the last pulls changed, held until the card is seen.
+    let fresh: FreshTrack
+    let updating: Bool
 
     @AppStorage("sunnyfi.inv.side") private var putsTab = false
     /// The credit lens: $ a contract, or % on the share against the floor.
@@ -74,6 +77,10 @@ struct SunnyInventory: View {
     private static let dim = 0.35
 
     private var puts: Bool { putsTab }
+    /// A figure's ink: --warn while its change is held, its own ink otherwise.
+    private func fr(_ t: String, _ fig: String, _ own: Color) -> Color {
+        fresh.isMarked("\(puts ? "p" : "c"):\(t)", fig) ? S.warn : own
+    }
     private var floor: Double { (puts ? block.floor.puts : block.floor.calls) ?? .infinity }
     private var side: [InvSold] { puts ? block.sold.puts : block.sold.calls }
     private func week(_ w: InvWeek) -> InvWeekSide { puts ? w.puts : w.calls }
@@ -127,6 +134,7 @@ struct SunnyInventory: View {
         .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
         .measure("inventory")
+        .freshSeen(fresh)
         .onAppear { if !appeared { appeared = true; redraw() } }
     }
 
@@ -149,8 +157,9 @@ struct SunnyInventory: View {
                     .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
                 Text("open now").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
             }
+            .fixedSize()
             Spacer(minLength: 0)
-            Text("\(n) name\(n == 1 ? "" : "s")").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            FreshMeta(meta: "\(n) name\(n == 1 ? "" : "s")", track: fresh, updating: updating)
         }
         .frame(height: 17)
     }
@@ -214,7 +223,7 @@ struct SunnyInventory: View {
                 .frame(width: Self.nameCol, alignment: .leading)
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("\(r.sold)").font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
-                    .foregroundStyle(r.over ? S.lossText : (r.sold > 0 ? S.ink : S.mute))
+                    .foregroundStyle(fr(r.t, "sold", r.over ? S.lossText : (r.sold > 0 ? S.ink : S.mute)))
                 Text("of \(r.can)").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
             }
             .lineLimit(1).fixedSize()
@@ -229,11 +238,12 @@ struct SunnyInventory: View {
     /// The $ lens reads the total taken in, with the per-contract price after it
     /// in brackets (Nik, 21 Sep). The % lens is credit over strike, unchanged.
     @ViewBuilder private func credit(_ r: Row) -> some View {
-        let ink: Color = {
+        let own: Color = {
             guard r.sold > 0 else { return S.mute }
             guard pct else { return S.ink }
             return (r.cr ?? 0) >= floor ? S.gainText : S.lossText
         }()
+        let ink = fr(r.t, "cr", own)
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             if r.sold > 0, !pct, let cc = r.cc {
                 Text(optMoney(r.sold * cc)).font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.02))
@@ -264,7 +274,7 @@ struct SunnyInventory: View {
                 .frame(width: Self.nameCol, alignment: .leading)
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("\(sold)").font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
-                    .foregroundStyle(S.ink)
+                    .foregroundStyle(fr("#total", "sold", S.ink))
                 Text("of \(can)").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
             }
             .lineLimit(1).fixedSize()
@@ -272,7 +282,7 @@ struct SunnyInventory: View {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(n == 0 ? "\u{2013}" : (pct ? String(format: "%.2f%%", cr) : optMoney(usd)))
                     .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.02))
-                    .foregroundStyle(n == 0 ? S.mute : (pct ? (cr >= floor ? S.gainText : S.lossText) : S.ink))
+                    .foregroundStyle(fr("#total", "cr", n == 0 ? S.mute : (pct ? (cr >= floor ? S.gainText : S.lossText) : S.ink)))
                 Text(pct || n == 0 ? "avg" : "(\(optMoney(Int(cc.rounded()))) avg)")
                     .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
             }

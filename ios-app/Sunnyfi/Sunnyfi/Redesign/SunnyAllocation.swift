@@ -57,6 +57,19 @@ func alPct(_ n: Double) -> String {
 
 struct SunnyAllocation: View {
     let block: AllocationCard
+    /// Freshness: INVESTED moves only on a trade; NOW is the market and never marks.
+    var fresh: FreshTrack? = nil
+    var updating = false
+
+    static func freshFigs(_ b: AllocationCard) -> [String: [String: String]] {
+        var out: [String: [String: String]] = [:]
+        for x in b.book { out["a:\(x.t)"] = ["inv": usdM(x.inv)] }
+        out["a:#total"] = ["inv": usdM(b.book.reduce(0) { $0 + $1.inv })]
+        return out
+    }
+    private func fr(_ t: String, _ own: Color) -> Color {
+        fresh?.isMarked("a:\(t)", "inv") == true ? S.warn : own
+    }
 
     /// `lens` and `sel` are state; they survive a refresh of the feed.
     @AppStorage("sunnyfi.alloc.byNow") private var byNow = false
@@ -117,6 +130,7 @@ struct SunnyAllocation: View {
         .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
         .measure("allocation")
+        .modifier(OptionalFreshSeen(track: fresh))
         .onAppear { appeared = true }
         .onChange(of: rs.map(\.t)) { _, names in
             if let s = sel, !names.contains(s) { sel = nil }
@@ -132,8 +146,9 @@ struct SunnyAllocation: View {
                     .tracking(S.track(S.t14, -0.01)).foregroundStyle(S.ink)
                 Text("by name").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.ink2)
             }
+            .fixedSize()
             Spacer(minLength: 0)
-            Text("\(n) name\(n == 1 ? "" : "s")").font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            FreshMeta(meta: "\(n) name\(n == 1 ? "" : "s")", track: fresh, updating: updating)
         }
         .frame(height: 17)
     }
@@ -223,7 +238,7 @@ struct SunnyAllocation: View {
             Text(share < 0.5 ? "<1%" : "\(Int(share.rounded()))%")
                 .font(S.inter(S.t12, S.wSemiN)).foregroundStyle(S.ink2).sunnyLineBox(S.t12)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(usdM(r.inv)).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            Text(usdM(r.inv)).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(fr(r.t, S.mute))
                 .lineLimit(1).sunnyLineBox(S.t12)
                 .frame(width: Self.invCol, alignment: .trailing)
             Text(usdM(r.now)).font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.02))
@@ -246,7 +261,7 @@ struct SunnyAllocation: View {
                 .foregroundStyle(S.mute).sunnyLineBox(S.t12)
                 .frame(width: Self.nameCol, alignment: .leading)
             Spacer(minLength: 0)
-            Text(usdM(tInv)).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            Text(usdM(tInv)).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(fr("#total", S.mute))
                 .lineLimit(1).sunnyLineBox(S.t12)
                 .frame(width: Self.invCol, alignment: .trailing)
             Text(usdM(tNow)).font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.02))

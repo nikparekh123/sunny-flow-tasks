@@ -129,6 +129,19 @@ enum S {
     /// Credit & theta's three hues, none of which means P&L, lifted for night.
     static let ctFill    = dyn(0x1E6E68, 0x3DA69E)
     static let ctOutline = dyn(0x7C3A66, 0xC58AB4)
+    /// Roll sheet (export 24): the band's four zone tints, the scrim and the
+    /// sheet's upward shadow. Tints only, never patterns.
+    static let rsZoneSafe  = dyn(0xCDEBD7, 0x1F3A2A)
+    static let rsZoneRisk  = dyn(0xF7DCDC, 0x40232A)
+    static let rsZoneRisk2 = dyn(0xF0C4C4, 0x532A32)
+    static let rsZonePast  = dyn(0xE3E5E0, 0x2C2F29)
+    static let rsScrim = Color(UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor(white: 0, alpha: 0.55)
+        : UIColor(red: 20 / 255, green: 23 / 255, blue: 15 / 255, alpha: 0.28) })
+    static let rsShadow = Color(UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor(white: 0, alpha: 0.5)
+        : UIColor(red: 20 / 255, green: 23 / 255, blue: 15 / 255, alpha: 0.12) })
+
     /// Allocation (export 23): a name's ink by rank, biggest darkest. Ordinal,
     /// never P&L, never text. `--al-rank-1` … `--al-rank-8`, both themes.
     static let alRank: [Color] = [

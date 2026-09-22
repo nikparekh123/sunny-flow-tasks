@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-21.3';
+const BUILD = '2026-09-22.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2495,6 +2495,108 @@ Deno.serve(async (req) => {
         .map(([t, a]) => ({ t, inv: Math.round(a.inv), now: Math.round(a.now), sh: a.sh })),
     };
 
+    /* ROLL SHEET (export 24, 22 Sep 2026): long-press a sold leg and the sheet
+       asks what to write on that name next Friday. Per name: the one standard
+       deviation move, the 20-day average, days to earnings, today's net delta,
+       and the five strikes at or beyond spot with their open interest, live
+       mid and delta.
+
+       ⚠ NEXT FRIDAY IS THE FIRST FRIDAY AFTER THE LEG EXPIRES, so both of the
+       coming Fridays ship and the card picks by the leg it was opened from.
+
+       ⚠ THE PREMIUM IS THE LIVE MID (Nik, 22 Sep, decision a). The sheet's
+       reference build used the credit the OLD leg opened at, which answers
+       the floor test with last week's price.
+
+       ⚠ AND THE FLOOR IS HIS OWN, PER SIDE (decision c): Inventory's, which is
+       his average credit over strike since the book began, not a fixed 1.06.
+       Puts pay more than calls on this book and one floor would fail every
+       call. */
+    const chain = await time('chain', () => P('option_chain_next?select='
+      + 'ticker,expiry,side,strike,mid,delta,iv,oi,spot&order=ticker.asc,expiry.asc,side.asc,strike.asc'));
+    /* ⚠ INVENTORY'S EARNINGS READ STOPS AT NEXT FRIDAY, this one does not: the
+       sheet's footer counts the days to the next report whenever it is. */
+    const rollEarnRows = await time('rollEarn', () => P(`earnings_events?report_date=gte.${today}`
+      + '&select=ticker,report_date&order=report_date.asc'));
+    const earnBy = new Map<string, string>();
+    for (const e of rollEarnRows) {
+      const t = String(e.ticker);
+      if (!earnBy.has(t)) earnBy.set(t, String(e.report_date));
+    }
+    const days = (d: string) =>
+      Math.round((Date.parse(d + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86_400_000);
+
+    const rollCard = (() => {
+      type Strike = { k: number; oi: number | null; mid: number; dl: number | null };
+      const byName = new Map<string, {
+        spot: number; avg20: number | null; earn: number | null; delta: number | null;
+        weeks: { w: string; sd: number | null; calls: Strike[]; puts: Strike[] }[];
+      }>();
+      /* The 20-day average is Prices' own closes, newest 20 with a row. */
+      const closesBy = new Map<string, number[]>();
+      for (const c of closes) {
+        const t = String(c.ticker), v = N(c.close_price);
+        if (!(v > 0)) continue;
+        const a = closesBy.get(t) ?? [];
+        if (a.length < 20) { a.push(v); closesBy.set(t, a); }
+      }
+      for (const row of chain) {
+        const t = String(row.ticker);
+        const w = String(row.expiry);
+        const sp = N(row.spot);
+        let rec = byName.get(t);
+        if (!rec) {
+          const cl = closesBy.get(t) ?? [];
+          const er = earnBy.get(t);
+          rec = {
+            spot: sp,
+            avg20: cl.length ? r2(cl.reduce((a, b) => a + b, 0) / cl.length) : null,
+            earn: er ? days(er) : null,
+            delta: invNet.has(t) ? Math.round(invNet.get(t)!) : null,
+            weeks: [],
+          };
+          byName.set(t, rec);
+        }
+        if (sp > 0) rec.spot = sp;
+        let wk = rec.weeks.find((x) => x.w === w);
+        if (!wk) { wk = { w, sd: null, calls: [], puts: [] }; rec.weeks.push(wk); }
+        const st: Strike = {
+          k: N(row.strike), oi: row.oi === null ? null : Math.round(N(row.oi)),
+          mid: N(row.mid), dl: row.delta === null ? null : r2(N(row.delta)),
+        };
+        (String(row.side) === 'call' ? wk.calls : wk.puts).push(st);
+        /* ⚠ ONE SD FROM THE CHAIN'S OWN IV, at the strike nearest spot on that
+           week. `ticker_iv_daily` holds under two weeks for half these names
+           and none of it is dated to this expiry. */
+        const iv = row.iv === null ? null : N(row.iv);
+        if (iv && sp > 0) {
+          const dte = Math.max(1, days(w));
+          const cand = r2(sp * iv * Math.sqrt(dte / 365));
+          const near = Math.abs(N(row.strike) - sp);
+          const bestSoFar = (wk as { _near?: number })._near ?? Infinity;
+          if (near < bestSoFar) { wk.sd = cand; (wk as { _near?: number })._near = near; }
+        }
+      }
+      const out: Record<string, unknown> = {};
+      for (const [t, rec] of byName) {
+        const weeks = rec.weeks.map((wk) => {
+          delete (wk as { _near?: number })._near;
+          /* Five strikes outward from spot: at or above for a call, at or
+             below for a put, the way the sheet's tiles read. */
+          const calls = wk.calls.filter((x) => x.k >= rec.spot).sort((a, b) => a.k - b.k).slice(0, 5);
+          const puts = wk.puts.filter((x) => x.k <= rec.spot).sort((a, b) => b.k - a.k).slice(0, 5)
+            .sort((a, b) => a.k - b.k);
+          return { w: wk.w, sd: wk.sd, calls, puts };
+        }).sort((a, b) => a.w.localeCompare(b.w));
+        out[t] = { spot: r2(rec.spot), avg20: rec.avg20, earn: rec.earn, delta: rec.delta, weeks };
+      }
+      return {
+        asOf: today,
+        floor: inventoryCard.floor,
+        names: out,
+      };
+    })();
+
     timings.total = Date.now() - T0;
     return json(200, {
       ok: true, build: BUILD, date: today, timings,
@@ -2502,6 +2604,7 @@ Deno.serve(async (req) => {
       longLegs: longLegsBlock,
       inventoryCard,
       allocationCard,
+      rollCard,
       /* ⚠ THE TWO RATES, NOT ONE NET. Programme apportions theta to a name by
          its share of kept (the short side) and of invested (the long side),
          which cannot be done from a single netted figure. Short is positive,

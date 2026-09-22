@@ -552,13 +552,17 @@ struct SunnyPane: View {
                that is one question with two switches, and a switch is a tab.
                Long legs' slot under Yield progress closes with it. */
             SunnyPositions(positions: o.positions, legs: o.longLegs?.legs ?? [],
-                           prices: o.prices?.rows ?? [], asOf: o.prices?.asOf ?? o.date)
+                           prices: o.prices?.rows ?? [], asOf: o.prices?.asOf ?? o.date,
+                           fresh: m.options.posFresh, updating: m.options.loading,
+                           roll: o.rollCard)
             /* ⚠ INVENTORY, DIRECTLY AFTER POSITIONS, 18 Sep 2026 (`export 20`). The
                true book behind the same four tabs; it is Left to sell's new home. */
             if let inv = o.inventoryCard {
-                SunnyInventory(block: inv)
+                SunnyInventory(block: inv, fresh: m.options.invFresh,
+                               updating: m.options.loading)
             }
-            SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0)
+            SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0,
+                             fresh: m.options.wyFresh, updating: m.options.loading)
             if let iv = o.intrinsic, !iv.legs.isEmpty {
                 SunnyIntrinsic(block: iv, prices: o.prices?.rows ?? [],
                                asOf: o.prices?.asOf ?? o.date, book: o.book)
@@ -579,7 +583,8 @@ struct SunnyPane: View {
             /* ⚠ ALLOCATION, DIRECTLY AFTER PERFORMANCE, 21 Sep 2026 (`export 23`).
                The ledger of what the programme made, then where the cash is. */
             if let al = o.allocationCard, !al.book.isEmpty {
-                SunnyAllocation(block: al)
+                SunnyAllocation(block: al, fresh: m.options.alFresh,
+                                updating: m.options.loading)
             }
             /* ⚠ CREDIT & THETA REPLACES THETA AND AVERAGE CREDIT, 17 Sep 2026,
                in their place at the end of the run. */
