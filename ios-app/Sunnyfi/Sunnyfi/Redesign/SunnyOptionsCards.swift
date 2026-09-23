@@ -273,6 +273,7 @@ struct SunnyPositions: View {
     /* ⚠ A 450 ms HOLD OPENS THE SHEET AND THE TAP THAT FOLLOWS IS EATEN, or the
        figure column would flip under it. Sold tabs only. */
     @State private var rollKey: String? = nil
+    /// The detent, measured off the sheet's own content on this device.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: geometry, from the sheet
@@ -588,13 +589,15 @@ struct SunnyPositions: View {
         .padding(EdgeInsets(top: 24, leading: 24, bottom: 28, trailing: 24))
         .frame(width: S.content, alignment: .top)
         .background(S.paper)
-        /* ⚠ THE SHEET IS THE CARD'S, CLIPPED BY THE CARD. Mounted before the
-           clip shape so its 16pt top corners sit inside the card's 22 and the
-           scrim covers exactly the card, never the page. */
-        .overlay(alignment: .bottom) { rollOverlay }
         .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
         .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
+        /* The roll sheet rises from the screen's bottom edge (Nik, 23 Sep). A
+           clear full-screen cover carries it, presented without the system's
+           own slide so the host can fade its dim and rise the panel itself. */
+        .fullScreenCover(isPresented: rollOpen) {
+            rollHost.presentationBackground(.clear)
+        }
         /* ⚠ SWIPE MOVES THE TAB, AND IT MUST NOT EAT THE PAGE'S SCROLL. Nik,
            15 Sep 2026: "can i swipe on the card to go to next tab?". The card
            lives inside a vertical scroller, so a bare drag gesture would steal
@@ -704,18 +707,19 @@ struct SunnyPositions: View {
                               name: name, floor: floor)
     }
 
-    private func closeRoll() {
-        withAnimation(reduceMotion ? nil : S.easeSettle(0.32)) { rollKey = nil }
+    /// Present and dismiss without the cover's own slide; the host animates.
+    private func setRoll(_ key: String?) {
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) { rollKey = key }
+    }
+    private var rollOpen: Binding<Bool> {
+        Binding(get: { rollKey != nil }, set: { if !$0 { setRoll(nil) } })
     }
 
-    @ViewBuilder private var rollOverlay: some View {
+    @ViewBuilder private var rollHost: some View {
         if let key = rollKey, let r = rows.first(where: { $0.id == key }),
            let q = quote(for: r) {
-            ZStack(alignment: .bottom) {
-                S.rsScrim.onTapGesture { closeRoll() }
-                SunnyRollSheet(q: q, onClose: closeRoll)
-                    .transition(.move(edge: .bottom))
-            }
+            RollSheetHost(q: q) { setRoll(nil) }
         }
     }
 
@@ -796,7 +800,7 @@ struct SunnyPositions: View {
                 /* Sold tabs only; a bought row has no week to write. */
                 .onLongPressGesture(minimumDuration: 0.45) {
                     guard tab.sold, quote(for: r) != nil else { return }
-                    withAnimation(reduceMotion ? nil : S.easeSettle(0.32)) { rollKey = r.id }
+                    setRoll(r.id)
                 }
                 .padding(.vertical, -8)
         }
@@ -902,7 +906,9 @@ private func signedPct1(_ f: Double) -> String {
 struct SunnyCoverage: View {
     let block: CoverBarsBlock
 
-    @AppStorage("sunnyfi.cov.tab") private var tab = 0
+    /* A new key, not "sunnyfi.cov.tab": that one stored the old order, where
+       2 meant All, and would have opened the reordered card on Puts. */
+    @AppStorage("sunnyfi.cov.lens") private var tab = 0
     /// Shared name with the cover bars it replaces, so a reader's compare
     /// choice survives the swap.
     @AppStorage("sunnyfi.cover.week") private var byWeek = false
@@ -915,7 +921,43 @@ struct SunnyCoverage: View {
     private static let lift: CGFloat = 7
     private static let bleed: CGFloat = 6
 
-    private var s: CoverSide { tab == 1 ? block.sides.put : block.sides.call }
+    /* ⚠ ALL IS THE FIRST TAB AND THE DEFAULT (Nik, 23 Sep 2026). The book is
+       one book; the sides are the split. */
+    private var s: CoverSide {
+        switch tab {
+        case 1: return block.sides.call
+        case 2: return block.sides.put
+        default: return both
+        }
+    }
+
+    /* ⚠ THE THIRD TAB IS THE TWO SIDES ADDED, not a third figure from the
+       server (Nik, 23 Sep 2026: "one more tab saying All"). Every figure on
+       this card is a sum over legs, so calls plus puts is the same card read
+       over both: time value, collected, the open cap, the pace and the melt.
+
+       ⚠ A MISSING HISTORY MAKES THE PAIR MISSING. The melt share divides by an
+       earlier close, and a side with no leg priced that day ships null. Adding
+       it as zero would halve the previous total and report a melt that never
+       happened, so the pair is null unless both sides carry the day. */
+    private var both: CoverSide {
+        let c = block.sides.call, p = block.sides.put
+        func pair(_ a: Int?, _ b: Int?) -> Int? {
+            guard let a, let b else { return nil }
+            return a + b
+        }
+        return CoverSide(
+            label: "All", scope: "calls and puts",
+            names: max(c.names, p.names),
+            time: c.time + p.time,
+            hist: CoverHist(yday: pair(c.hist.yday, p.hist.yday),
+                            week: pair(c.hist.week, p.hist.week)),
+            collected: c.collected + p.collected,
+            open: pair(c.open ?? 0, p.open ?? 0),
+            chist: CoverHist(yday: pair(c.chist.yday, p.chist.yday),
+                             week: pair(c.chist.week, p.chist.week)),
+            pace: c.pace + p.pace, melt: c.melt + p.melt)
+    }
     /// The taller bar is the plot; the other is a share of it.
     /* The taller stack is the plot, and the cap is part of the stack: leaving
        it out clipped the lighter segment the moment collected plus open passed
@@ -970,7 +1012,7 @@ struct SunnyCoverage: View {
        and a dotted hint under two words 28pt apart would read as a heading rule. */
     private var tabRow: some View {
         HStack(alignment: .bottom, spacing: 28) {
-            ForEach(Array(["Calls", "Puts"].enumerated()), id: \.offset) { i, label in
+            ForEach(Array(["All", "Calls", "Puts"].enumerated()), id: \.offset) { i, label in
                 /* ⚠ THE LINE SITS INSIDE THE PADDING, ON THE RULE. The row is 22:
                    12 of word and 10 below it, and the picked tab's 2pt line is drawn
                    over the bottom of that 10 — CSS's inset box-shadow. Stacked under

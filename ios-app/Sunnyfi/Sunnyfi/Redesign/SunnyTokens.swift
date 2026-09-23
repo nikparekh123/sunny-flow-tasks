@@ -129,18 +129,29 @@ enum S {
     /// Credit & theta's three hues, none of which means P&L, lifted for night.
     static let ctFill    = dyn(0x1E6E68, 0x3DA69E)
     static let ctOutline = dyn(0x7C3A66, 0xC58AB4)
-    /// Roll sheet (export 24): the band's four zone tints, the scrim and the
-    /// sheet's upward shadow. Tints only, never patterns.
-    static let rsZoneSafe  = dyn(0xCDEBD7, 0x1F3A2A)
-    static let rsZoneRisk  = dyn(0xF7DCDC, 0x40232A)
-    static let rsZoneRisk2 = dyn(0xF0C4C4, 0x532A32)
-    static let rsZonePast  = dyn(0xE3E5E0, 0x2C2F29)
-    static let rsScrim = Color(UIColor { $0.userInterfaceStyle == .dark
-        ? UIColor(white: 0, alpha: 0.55)
-        : UIColor(red: 20 / 255, green: 23 / 255, blue: 15 / 255, alpha: 0.28) })
-    static let rsShadow = Color(UIColor { $0.userInterfaceStyle == .dark
-        ? UIColor(white: 0, alpha: 0.5)
-        : UIColor(red: 20 / 255, green: 23 / 255, blue: 15 / 255, alpha: 0.12) })
+    /// Roll sheet (export 26, locked 23 Sep 2026): a glass panel inside the
+    /// Positions card. Solid zone inks on a 12pt bar; glass 50% white ± 6.
+    private static func rgba(_ r: Int, _ g: Int, _ b: Int, _ a: CGFloat) -> UIColor {
+        UIColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: a)
+    }
+    private static func dynA(_ l: UIColor, _ d: UIColor) -> Color {
+        Color(UIColor { $0.userInterfaceStyle == .dark ? d : l })
+    }
+    /// break-even → the nearer of ±1 SD / 20-day: `--loss-bar` at .45.
+    static let rsZoneRisk  = dynA(rgba(196, 0, 26, 0.45), rgba(220, 74, 87, 0.45))
+    /// The band's empty track, and the 1pt ring painted over the zones.
+    static let rsTrack     = dyn(0xDEE0DB, 0x383C35)
+    static let rsTrackEdge = dynA(rgba(20, 23, 15, 0.18), rgba(255, 255, 255, 0.18))
+    /// ⚠ ONE GLASS LAYER: the sheet. The tiles are a thin ink fill on it,
+    /// never an outline and never a second glass (presentation spec, 23 Sep).
+    static let rsTileFill  = dynA(rgba(20, 23, 15, 0.06), rgba(255, 255, 255, 0.08))
+    /// The tint laid into the sheet's Liquid Glass: white .5 by day; the dark
+    /// glass colour by night, or light type would sit on a light panel.
+    static let rsGlassTint = dynA(rgba(255, 255, 255, 0.5), rgba(50, 54, 46, 0.5))
+    /// Light on purpose: the rows are meant to read through the glass.
+    static let rsScrim   = dynA(rgba(20, 23, 15, 0.12), rgba(0, 0, 0, 0.3))
+    static let rsShadow1 = dynA(rgba(20, 23, 15, 0.18), rgba(0, 0, 0, 0.55))
+    static let rsShadow2 = dynA(rgba(20, 23, 15, 0.08), rgba(0, 0, 0, 0.3))
 
     /// Allocation (export 23): a name's ink by rank, biggest darkest. Ordinal,
     /// never P&L, never text. `--al-rank-1` … `--al-rank-8`, both themes.

@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-22.1';
+const BUILD = '2026-09-23.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2534,11 +2534,21 @@ Deno.serve(async (req) => {
       }>();
       /* The 20-day average is Prices' own closes, newest 20 with a row. */
       const closesBy = new Map<string, number[]>();
+      /* Newest first, dated, deep enough for the month the split reads. */
+      const monthBy = new Map<string, { d: string; c: number }[]>();
       for (const c of closes) {
         const t = String(c.ticker), v = N(c.close_price);
         if (!(v > 0)) continue;
         const a = closesBy.get(t) ?? [];
         if (a.length < 20) { a.push(v); closesBy.set(t, a); }
+        const m = monthBy.get(t) ?? [];
+        if (m.length < 23) { m.push({ d: String(c.date), c: v }); monthBy.set(t, m); }
+      }
+      /* LEAP calls held a name: what the call write is sized against. */
+      const leapsBy = new Map<string, number>();
+      for (const e of open) {
+        if (e.dir !== 'long' || e.type !== 'call') continue;
+        leapsBy.set(e.ticker, (leapsBy.get(e.ticker) ?? 0) + e.n);
       }
       for (const row of chain) {
         const t = String(row.ticker);
@@ -2577,8 +2587,31 @@ Deno.serve(async (req) => {
           if (near < bestSoFar) { wk.sd = cand; (wk as { _near?: number })._near = near; }
         }
       }
+      /* ⚠ THE CALL WRITE IS SPLIT (Nik, 23 Sep 2026). Part at the money, the
+         rest at 1 SD, the at-the-money share set by the last month's move:
+         fell 10%+ → 20%, −10..+5% → 30%, +5..+15% → 50%, above that 60%
+         (the cap). Earnings before the expiry overrides to 20%: a report is
+         the jump that runs over at-the-money calls. Tested from 60 real
+         52-week lows (research/call-split): the further from the money, the
+         less the calls gave back in a recovery, and this rule was the most
+         consistent winner over all-at-the-money (t 4.2). Calls only. */
+      const shareOf = (m: number | null) => {
+        if (m === null) return { share: 0.3, why: 'flat' };
+        if (m <= -0.10) return { share: 0.2, why: 'fell' };
+        if (m < 0.05) return { share: 0.3, why: 'flat' };
+        if (m < 0.15) return { share: 0.5, why: 'up' };
+        return { share: 0.6, why: 'up a lot' };
+      };
+      const nearest = (xs: Strike[], target: number) =>
+        xs.length ? xs.reduce((a, b) => Math.abs(b.k - target) < Math.abs(a.k - target) ? b : a) : null;
       const out: Record<string, unknown> = {};
       for (const [t, rec] of byName) {
+        /* Today against 21 trading days ago. The newest close is yesterday's
+           in the session and today's after the close is captured. */
+        const mo = monthBy.get(t) ?? [];
+        const back = mo.length && mo[0].d === today ? 21 : 20;
+        const move21 = mo.length > back && rec.spot > 0 ? r2((rec.spot / mo[back].c - 1) * 100) : null;
+        const held = leapsBy.get(t) ?? 0;
         const weeks = rec.weeks.map((wk) => {
           delete (wk as { _near?: number })._near;
           /* Five strikes outward from spot: at or above for a call, at or
@@ -2586,9 +2619,19 @@ Deno.serve(async (req) => {
           const calls = wk.calls.filter((x) => x.k >= rec.spot).sort((a, b) => a.k - b.k).slice(0, 5);
           const puts = wk.puts.filter((x) => x.k <= rec.spot).sort((a, b) => b.k - a.k).slice(0, 5)
             .sort((a, b) => a.k - b.k);
-          return { w: wk.w, sd: wk.sd, calls, puts };
+          /* ⚠ THE 1 SD STRIKE COMES FROM THE WHOLE CHAIN, not the five tiles:
+             BABA's lands seventh out on 23 Sep. */
+          const sdCall = wk.sd ? nearest(wk.calls.filter((x) => x.k > rec.spot), rec.spot + wk.sd) : null;
+          const sdPut = wk.sd ? nearest(wk.puts.filter((x) => x.k < rec.spot), rec.spot - wk.sd) : null;
+          const earnIn = rec.earn !== null && rec.earn >= 0 && rec.earn <= days(wk.w);
+          const base = shareOf(move21 === null ? null : move21 / 100);
+          const pick = earnIn ? { share: 0.2, why: 'earnings' } : base;
+          const atm = Math.floor(held * pick.share + 0.5);
+          return { w: wk.w, sd: wk.sd, calls, puts, sdCall, sdPut,
+                   split: { share: pick.share, why: pick.why, atm, sd: held - atm } };
         }).sort((a, b) => a.w.localeCompare(b.w));
-        out[t] = { spot: r2(rec.spot), avg20: rec.avg20, earn: rec.earn, delta: rec.delta, weeks };
+        out[t] = { spot: r2(rec.spot), avg20: rec.avg20, earn: rec.earn, delta: rec.delta,
+                   move21, held, weeks };
       }
       return {
         asOf: today,

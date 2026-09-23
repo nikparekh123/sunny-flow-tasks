@@ -34,7 +34,7 @@ const json = (status: number, body: unknown) =>
     status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-const BUILD = '2026-09-22.1';
+const BUILD = '2026-09-23.1';
 /** Strikes within this much of spot, each side. Five tiles need far less; the
     band is wide enough that a big day does not empty it before the next run. */
 const BAND_PCT = 12;
@@ -120,6 +120,8 @@ Deno.serve(async (req) => {
     }
 
     const weeks = fridays(today, 2);
+    /* One stamp for the whole run, so the rows it did NOT touch can be found. */
+    const runAt = new Date().toISOString();
     const rows: Record<string, unknown>[] = [];
     const notes: string[] = [];
 
@@ -151,7 +153,7 @@ Deno.serve(async (req) => {
             delta: c.greeks?.delta ?? null,
             iv: c.implied_volatility ?? null,
             oi: c.open_interest ?? null,
-            spot, snapshot_at: new Date().toISOString(),
+            spot, snapshot_at: runAt,
           });
         }
         notes.push(`${ticker} ${expiry}: ${kept}`);
@@ -160,8 +162,8 @@ Deno.serve(async (req) => {
 
     if (!dryRun && rows.length) {
       /* One upsert a chunk; the primary key is (ticker, expiry, side, strike),
-         so a run rewrites the band in place and yesterday's far strikes age
-         out on their own. */
+         so a run rewrites the band in place. Strikes that left the band are
+         NOT rewritten, which is why the delete below exists. */
       for (let i = 0; i < rows.length; i += 500) {
         const r = await fetch(`${SB_URL}/rest/v1/option_chain_next?on_conflict=ticker,expiry,side,strike`, {
           method: 'POST',
@@ -173,6 +175,25 @@ Deno.serve(async (req) => {
         });
         if (!r.ok) return json(502, { ok: false, build: BUILD, error: (await r.text()).slice(0, 300) });
       }
+      /* ⚠ A STRIKE THAT LEFT THE BAND MUST LEAVE THE TABLE. The upsert only
+         rewrites what is still within 12% of spot, so on 23 Sep BABA's 126-130
+         calls sat on at yesterday's prices, priced off a spot of 116.51 while
+         it traded 111. The roll sheet's 1 SD pick reads that far out. Every row
+         this run did not write, and every week that has expired, goes. */
+      const del = async (q: string) => {
+        const r = await fetch(`${SB_URL}/rest/v1/option_chain_next?${q}`, {
+          method: 'DELETE', headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` },
+        });
+        if (!r.ok) notes.push(`delete ${q}: HTTP ${r.status}`);
+      };
+      /* Only the name-weeks this run rewrote: a name Polygon failed on keeps
+         its last good chain rather than losing it. */
+      const done = new Set(rows.map((r) => `${r.ticker}|${r.expiry}`));
+      for (const k of done) {
+        const [tk, ex] = k.split('|');
+        await del(`ticker=eq.${tk}&expiry=eq.${ex}&snapshot_at=lt.${encodeURIComponent(runAt)}`);
+      }
+      await del(`expiry=lt.${today}`);
     }
 
     return json(200, {
