@@ -179,10 +179,12 @@ struct SunnyPositionsPrices: View {
     private var model: (legs: [Leg], loud: [Leg], names: [Name], lim: Double) {
         var shown: [Leg], loud: [Leg]
         if tab.sold {
-            let all = soldAll.map { l -> Leg in var x = l; x.quiet = l.call != tab.isCall; return x }
-            loud = all.filter { !$0.quiet }
-            let ts = Set(loud.map(\.t))
-            shown = all.filter { ts.contains($0.t) }
+            /* ⚠ THE TAB'S SIDE ONLY. The sheet drew the other side quiet so a
+               name read whole; Nik, 23 Sep 2026: "dont show puts on calls
+               sold". A grey put a point from a call pushed the call's label
+               off its own bar (NFLX 72P beside 73C). */
+            loud = soldAll.filter { $0.call == tab.isCall }
+            shown = loud
         } else {
             shown = boughtAll; loud = shown
         }
