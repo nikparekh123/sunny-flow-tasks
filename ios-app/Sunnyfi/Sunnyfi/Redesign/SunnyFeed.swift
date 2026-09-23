@@ -544,22 +544,11 @@ struct SunnyPane: View {
                are — no card carries the date except in its own header. It
                scrolls away with the feed, like every other page title. */
             SunnyPageTitle(title: "Today", note: ivDay(o.date))
-            /* ⚠ POSITIONS + PRICES, ON TRIAL, 23 Sep 2026 (final cards). It will
-               replace Prices and Positions; Nik wants to see it first, so both
-               old cards stay below it until he says. */
+            /* ⚠ POSITIONS + PRICES REPLACES PRICES AND POSITIONS, 23 Sep 2026
+               (final cards). Nik: "remove the old positions and prices cards".
+               One name is one block, its price and every strike on it. */
             SunnyPositionsPrices(positions: o.positions, legs: o.longLegs?.legs ?? [],
                                  prices: o.prices, roll: o.rollCard)
-            if let pr = o.prices, !pr.rows.isEmpty {
-                SunnyPrices(prices: pr)
-            }
-            /* ⚠ POSITIONS REPLACES ROLL CHECK AND LONG LEGS, 15 Sep 2026. Both
-               asked how a position is doing, of opposite sides of the book;
-               that is one question with two switches, and a switch is a tab.
-               Long legs' slot under Yield progress closes with it. */
-            SunnyPositions(positions: o.positions, legs: o.longLegs?.legs ?? [],
-                           prices: o.prices?.rows ?? [], asOf: o.prices?.asOf ?? o.date,
-                           fresh: m.options.posFresh, updating: m.options.loading,
-                           roll: o.rollCard)
             /* ⚠ INVENTORY, DIRECTLY AFTER POSITIONS, 18 Sep 2026 (`export 20`). The
                true book behind the same four tabs; it is Left to sell's new home. */
             if let inv = o.inventoryCard {
@@ -581,21 +570,12 @@ struct SunnyPane: View {
             /* ⚠ PERFORMANCE REPLACES PROGRAMME, AND YIELD PROGRESS'S SLOT
                CLOSES, 18 Sep 2026 (`export 20`). Its question is the fourth row
                of what the programme is made of. */
-            /* ⚠ THE BOOK, ON TRIAL, 23 Sep 2026 (final cards). It will replace
-               Performance and Allocation; both stay under it until Nik says. */
+            /* ⚠ THE BOOK REPLACES PERFORMANCE AND ALLOCATION, 23 Sep 2026
+               (final cards). Nik: "also remove the old allocation and
+               performance card". Two rankings of one book, two tabs. */
             if o.programme?.rows.isEmpty == false || o.allocationCard?.book.isEmpty == false {
                 SunnyBook(programme: o.programme, legs: o.longLegs?.legs ?? [],
                           allocation: o.allocationCard)
-            }
-            if let pr = o.programme, !pr.rows.isEmpty {
-                SunnyProgramme(block: pr, legs: o.longLegs?.legs ?? [],
-                               cover: o.yieldProgress?.names ?? [])
-            }
-            /* ⚠ ALLOCATION, DIRECTLY AFTER PERFORMANCE, 21 Sep 2026 (`export 23`).
-               The ledger of what the programme made, then where the cash is. */
-            if let al = o.allocationCard, !al.book.isEmpty {
-                SunnyAllocation(block: al, fresh: m.options.alFresh,
-                                updating: m.options.loading)
             }
             /* ⚠ CREDIT & THETA REPLACES THETA AND AVERAGE CREDIT, 17 Sep 2026,
                in their place at the end of the run. */
