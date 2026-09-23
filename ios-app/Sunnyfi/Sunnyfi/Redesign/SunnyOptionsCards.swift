@@ -1984,7 +1984,10 @@ struct SunnyProgramme: View {
     /// Every name that has either a credit history or a long leg. A hedge-only
     /// name belongs on this card — its mark is part of the programme — and it
     /// reads Credits kept +$0 rather than being dropped.
-    private var rows: [PgRow] {
+    private var rows: [PgRow] { Self.pgRows(block, legs) }
+    /// ⚠ ONE DERIVATION, TWO CARDS. The Book's Performance tab reads these
+    /// rows, so the two cannot disagree by a dollar.
+    static func pgRows(_ block: ProgrammeBlock, _ legs: [LongLeg]) -> [PgRow] {
         let names = Set(block.rows.map(\.t)).union(legs.map(\.t))
         return names.map { t in
             let src = block.rows.first { $0.t == t }

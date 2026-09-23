@@ -153,6 +153,16 @@ enum S {
     static let rsShadow1 = dynA(rgba(20, 23, 15, 0.18), rgba(0, 0, 0, 0.55))
     static let rsShadow2 = dynA(rgba(20, 23, 15, 0.08), rgba(0, 0, 0, 0.3))
 
+    /// Positions + Prices (final cards, 23 Sep 2026): the window's path on a
+    /// ladder is the roll sheet's zone tints; today's segment one step deeper.
+    static let ppWashSafe  = dyn(0xA9DDBB, 0x245F3A)
+    static let ppWashRisk  = dyn(0xF3BFBF, 0x5A2A31)
+    static let ppTodaySafe = dyn(0x6FBF8E, 0x3A9A5E)
+    static let ppTodayRisk = dyn(0xE99C9C, 0xA54A57)
+    /// The Reporting block: a translucent warn wash, heavier by night or it
+    /// vanishes on the dark paper. Not the NEW tag's solid.
+    static let ppReportWash = dynA(rgba(224, 134, 0, 0.10), rgba(242, 169, 59, 0.18))
+
     /// Allocation (export 23): a name's ink by rank, biggest darkest. Ordinal,
     /// never P&L, never text. `--al-rank-1` … `--al-rank-8`, both themes.
     static let alRank: [Color] = [

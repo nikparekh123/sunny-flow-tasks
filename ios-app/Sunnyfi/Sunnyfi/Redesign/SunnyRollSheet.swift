@@ -36,6 +36,10 @@ struct RollChainName: Decodable {
     /// The name's net delta now, share equivalents. Null when no leg is priced.
     let delta: Double?
     let weeks: [RollChainWeek]
+    /// Today against 21 sessions ago, %. What the call split reads.
+    let move21: Double?
+    /// LEAP calls held on the name: the size of the week's call write.
+    let held: Int?
 }
 
 struct RollChainWeek: Decodable {
@@ -44,6 +48,22 @@ struct RollChainWeek: Decodable {
     let sd: Double?
     let calls: [RollChainStrike]
     let puts: [RollChainStrike]
+    /// The strike nearest spot ± 1 SD, from the whole chain, not the five.
+    let sdCall: RollChainStrike?
+    let sdPut: RollChainStrike?
+    /// The call write's split for this week (server, 23 Sep 2026).
+    let split: RollSplit?
+}
+
+/// ⚠ THE CALL WRITE IS SPLIT. Part at the money, the rest at 1 SD; the share
+/// at the money follows the last month (20 / 30 / 50 / 60%), and earnings
+/// before the expiry overrides to 20%. Counts round half up server-side.
+struct RollSplit: Decodable {
+    let share: Double
+    /// `fell` · `flat` · `up` · `up a lot` · `earnings`
+    let why: String
+    let atm: Int
+    let sd: Int
 }
 
 struct RollChainStrike: Decodable {
@@ -71,8 +91,38 @@ struct RollQuote {
     /// Packed x of each level, 0...100 of the track.
     let x: (spot: Double, k: Double, be: Double, tgt: Double, avg: Double)
     let zones: [RollZone]
+    /// The two-leg call write (final cards, 23 Sep 2026). Nil on a put, or
+    /// where the name holds no LEAP call to size the write against: the sheet
+    /// then draws the one-leg reading it always did.
+    var write: RollWrite? = nil
 
-    func fig(_ v: Double) -> String { wide ? rsF0(v) : rsF2(v) }
+    /// ⚠ ONE DECIMAL ON THE BAND (Nik, 23 Sep 2026: "keep the decimal to one
+    /// not two"). Two decimals crowded the band into dropping them entirely,
+    /// and NKE's 20-day then printed "37" beside a break-even of "37.38".
+    func fig(_ v: Double) -> String { wide ? rsF0(v) : rsF1(v) }
+}
+
+/// ⚠ TWO LEGS, ONE HERO. Two strikes have two prices a share, so the hero is
+/// the week's credit in dollars and each leg carries its own price and its %
+/// of strike. The floor test is the at-the-money leg's alone: under 1% at
+/// 1 SD is the design, not a warning.
+struct RollWrite {
+    struct Leg { let n: Int, k: Double, cr: Double, onK: Double, atm: Bool }
+    enum Tone { case ink, loss, mute }
+    struct Level { let id: String, p: Double, fig: String, word: String, tone: Tone, x: Double }
+    struct Tile { let k: Double, oi: Int?, chosen: Bool }
+    let legs: [Leg]
+    let share: Double
+    /// `down 6% this month` · `up 13% this month` · `earnings Thu`
+    let why: String
+    let leaps: Int
+    let total: Double
+    let levels: [Level]
+    let spotX: Double
+    let zones: [RollZone]
+    let span: Double
+    let tiles: [Tile]
+    let deltaAfter: Double?
 }
 
 struct RollZone: Identifiable {
@@ -127,7 +177,7 @@ enum RollMath {
             return (P, X, gap)
         }
         var wide = false
-        var (P, X, gap) = pack(rsF2)
+        var (P, X, gap) = pack(rsF1)
         if gap < minGap { wide = true; (P, X, gap) = pack(rsF0) }
 
         let lo = P.first!.p, hi = P.last!.p
@@ -162,8 +212,186 @@ enum RollMath {
             deltaNow: name.delta, deltaAfter: after, oi: side,
             span: span, wide: wide,
             x: (X["spot"] ?? 0, X["k"] ?? 0, X["be"] ?? 0, X["tgt"] ?? 0, X["avg"] ?? 0),
-            zones: zones)
+            zones: zones,
+            write: call ? write(name: name, week: week, spot: spot, sd: sd, avg: avg) : nil)
     }
+
+    /// THE CALL WRITE, TWO LEGS. The split is the server's (the counts, the
+    /// share, the reason); the prices are the chain's live mids, and the
+    /// levels pack the way the one-leg band does, with the 1 SD STRIKE as a
+    /// level of its own.
+    static func write(name: RollChainName, week: RollChainWeek, spot: Double,
+                      sd: Double, avg: Double) -> RollWrite? {
+        guard let split = week.split, let held = name.held, held > 0,
+              let atmPick = week.calls.first(where: { $0.k >= spot }) else { return nil }
+        let ks = (week.calls + (week.sdCall.map { [$0] } ?? [])).map(\.k)
+        let sortedK = Array(Set(ks)).sorted()
+        /* The chain's own strike spacing, for the merge test. */
+        let step = zip(sortedK, sortedK.dropFirst()).map { $1 - $0 }.filter { $0 > 0 }.min() ?? 1
+        /* ⚠ THE 1 SD STRIKE IS NEVER THE AT-THE-MONEY ONE. On a quiet week the
+           nearest strike to spot + sd can be the first one out; then it is the
+           next strike up, or the write would be one leg drawn twice. */
+        var sdPick = week.sdCall
+        if sdPick == nil || sdPick!.k <= atmPick.k {
+            sdPick = week.calls.filter { $0.k > atmPick.k }.min { $0.k < $1.k }
+        }
+
+        var legs: [RollWrite.Leg] = []
+        if split.atm > 0, atmPick.mid > 0 {
+            legs.append(.init(n: split.atm, k: atmPick.k, cr: atmPick.mid,
+                              onK: atmPick.mid / atmPick.k * 100, atm: true))
+        }
+        if split.sd > 0, let p = sdPick, p.mid > 0 {
+            legs.append(.init(n: split.sd, k: p.k, cr: p.mid, onK: p.mid / p.k * 100, atm: false))
+        }
+        guard !legs.isEmpty else { return nil }
+        let atm = legs.first { $0.atm }, sdLeg = legs.first { !$0.atm }
+        let total = legs.reduce(0) { $0 + $1.cr * 100 * Double($1.n) }
+
+        /* THE REASON, one short clause. */
+        let why: String
+        if split.why == "earnings", let e = name.earn {
+            why = "earnings " + rsWeekday(inDays: e)
+        } else if let m = name.move21 {
+            why = (m < 0 ? "down " : "up ") + "\(Int(abs(m).rounded()))% this month"
+        } else {
+            why = "no month yet"
+        }
+
+        /* THE BAND. Spot · the at-the-money strike · its break-even · the 1 SD
+           mark (merged with the strike when within a step) · the 20-day. The
+           1 SD leg's own break-even sits under a label's width from its strike
+           and would only crowd the band. */
+        let kA = atm?.k ?? atmPick.k
+        let be = atm.map { $0.k + $0.cr }
+        let tgt = spot + sd
+        let merge = sdLeg.map { abs(tgt - $0.k) <= step } ?? false
+        var lv: [(id: String, p: Double, word: String, tone: RollWrite.Tone)] = [
+            ("spot", spot, "", .ink),
+            ("k", kA, atm != nil ? "strike" : "at the money", .ink)]
+        if let be { lv.append(("be", be, "break-even", .ink)) }
+        if let s = sdLeg, merge {
+            lv.append(("sd", s.k, "1 SD strike", .loss))
+        } else {
+            lv.append(("tgt", tgt, "+1 SD", .loss))
+            if let s = sdLeg { lv.append(("k2", s.k, "strike", .ink)) }
+        }
+        lv.append(("avg", avg, "20-day", .mute))
+
+        /* ⚠ BIG FIGURES, PER LEVEL. A figure drops its decimals only when it
+           is the wider part of its own label; when the word is wider the
+           decimals are free and stay, so two levels never print one figure.
+           Strikes are strikes; spot keeps its decimals always. */
+        func pack(_ f: (Double) -> String) -> (P: [RollWrite.Level], gap: Double) {
+            let raw = lv.enumerated().map { i, l -> (Int, RollWrite.Level, Double) in
+                let strike = l.id == "k" || l.id == "sd" || l.id == "k2"
+                let a = rsF1(l.p)
+                let fig = strike ? rsK(l.p) : l.id == "spot" ? a
+                    : (Double(a.count) * 9 > Double(l.word.count) * 6.7 ? f(l.p) : a)
+                return (i, RollWrite.Level(id: l.id, p: l.p, fig: fig, word: l.word,
+                                           tone: l.tone, x: 0), labelW(fig, l.word))
+            }.sorted { $0.1.p != $1.1.p ? $0.1.p < $1.1.p : $0.0 < $1.0 }
+            let gap = (track - raw.reduce(0) { $0 + $1.2 }) / Double(max(1, raw.count - 1))
+            var cur = 0.0, out: [RollWrite.Level] = []
+            for r in raw {
+                let x = (cur + r.2 / 2) / track * 100
+                out.append(.init(id: r.1.id, p: r.1.p, fig: r.1.fig, word: r.1.word, tone: r.1.tone, x: x))
+                cur += r.2 + gap
+            }
+            return (out, gap)
+        }
+        var (P, gap) = pack(rsF1)
+        if gap < minGap { (P, gap) = pack(rsF0) }
+        let lo = P.first!.p, hi = P.last!.p
+        func xOf(_ p: Double) -> Double? {
+            if let q = P.first(where: { $0.p == p && $0.id != "spot" }) ?? P.first(where: { $0.p == p }) {
+                return q.x
+            }
+            return p >= hi ? 100 : p <= lo ? 0 : nil
+        }
+        /* Zones from the at-the-money strike outward: safe to break-even, risk
+           to the nearer of the 1 SD mark and the 20-day, risk-2 to the farther,
+           past to the edge. With no at-the-money leg the safe zone is empty. */
+        let tgtP = merge ? sdLeg!.k : tgt
+        let near = min(tgtP, avg), far = max(tgtP, avg)
+        let c1 = be ?? kA, c2 = max(c1, near), c3 = max(c2, far)
+        func seg(_ a: Double, _ b: Double, _ tone: RollZone.Tone, toEdge: Bool = false) -> RollZone? {
+            guard let xa = xOf(a), let xb = toEdge ? 100 : xOf(b) else { return nil }
+            return RollZone(l: min(xa, xb), w: abs(xb - xa), tone: tone)
+        }
+        let zones = [seg(kA, c1, .safe), seg(c1, c2, .risk), seg(c2, c3, .risk2),
+                     seg(c3, hi, .past, toEdge: true)].compactMap { $0 }.filter { $0.w > 0.5 }
+
+        /* OPEN INTEREST: five tiles, both chosen strikes always among them.
+           The nearest four at or above the at-the-money strike, then the 1 SD
+           strike when it is not already the fifth. */
+        var pool = week.calls.filter { $0.k >= kA }
+        if let s = sdPick, !pool.contains(where: { $0.k == s.k }) { pool.append(s) }
+        pool.sort { $0.k < $1.k }
+        var pick = Array(pool.prefix(5))
+        if let s = sdLeg, !pick.contains(where: { $0.k == s.k }),
+           let full = pool.first(where: { $0.k == s.k }) {
+            pick = Array(pool.prefix(4)) + [full]
+        }
+        let chosen = Set(legs.map(\.k))
+        let tiles = pick.map { RollWrite.Tile(k: $0.k, oi: $0.oi, chosen: chosen.contains($0.k)) }
+
+        /* Delta after BOTH legs: each short call takes its contract delta off. */
+        var after: Double? = name.delta
+        for l in legs {
+            let dl = l.atm ? atmPick.dl : sdPick?.dl
+            after = after.flatMap { a in dl.map { a - $0 * Double(l.n) * 100 } }
+        }
+
+        return RollWrite(legs: legs, share: split.share, why: why, leaps: held, total: total,
+                         levels: P.filter { $0.id != "spot" },
+                         spotX: P.first { $0.id == "spot" }?.x ?? 0,
+                         zones: zones, span: (hi - spot) / spot * 100, tiles: tiles,
+                         deltaAfter: after)
+    }
+}
+
+/// The weekday a report falls on, `days` from today in New York: `Thu`.
+func rsWeekday(inDays days: Int) -> String {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+    let d = cal.date(byAdding: .day, value: days, to: Date()) ?? Date()
+    let f = DateFormatter()
+    f.calendar = cal; f.timeZone = cal.timeZone; f.locale = Locale(identifier: "en_US_POSIX")
+    f.dateFormat = "EEE"
+    return f.string(from: d)
+}
+
+/// ⚠ THE EARNINGS WORD. `today` · `tomorrow` · `this Thu` · `next Wed` inside
+/// this Monday-to-Sunday week and the next, which is when it is LOUD; later,
+/// the date: `15 Oct`. Nil when nothing is scheduled.
+func rsEarnWord(inDays days: Int?) -> (word: String, loud: Bool)? {
+    guard let days, days >= 0 else { return nil }
+    if days == 0 { return ("today", true) }
+    if days == 1 { return ("tomorrow", true) }
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+    cal.firstWeekday = 2
+    let today = cal.startOfDay(for: Date())
+    guard let d = cal.date(byAdding: .day, value: days, to: today),
+          let wk0 = cal.dateInterval(of: .weekOfYear, for: today)?.start,
+          let wkD = cal.dateInterval(of: .weekOfYear, for: d)?.start else { return nil }
+    let weeks = (cal.dateComponents([.day], from: wk0, to: wkD).day ?? 0) / 7
+    let f = DateFormatter()
+    f.calendar = cal; f.timeZone = cal.timeZone; f.locale = Locale(identifier: "en_US_POSIX")
+    f.dateFormat = "EEE"
+    if weeks == 0 { return ("this " + f.string(from: d), true) }
+    if weeks == 1 { return ("next " + f.string(from: d), true) }
+    f.dateFormat = "d MMM"
+    return (f.string(from: d), false)
+}
+
+/// `$2,120`: whole dollars with a thousands comma, true minus.
+func rsUsd0(_ v: Double) -> String {
+    let f = NumberFormatter()
+    f.numberStyle = .decimal; f.maximumFractionDigits = 0; f.locale = Locale(identifier: "en_US")
+    let s = f.string(from: NSNumber(value: abs(v).rounded())) ?? String(Int(abs(v).rounded()))
+    return (v < 0 ? "\u{2212}$" : "$") + s
 }
 
 /// `88.4` · `1.2` · `90.2`: no trailing zeros anywhere on the sheet.
@@ -173,7 +401,13 @@ func rsF2(_ v: Double) -> String {
     if s.hasSuffix(".") { s.removeLast() }
     return s
 }
-/// Big figures on the band: `144`, not `143.73`.
+/// The band's figures: `37.4`, `104.6`, `106` (a trailing zero goes).
+func rsF1(_ v: Double) -> String {
+    var s = String(format: "%.1f", v)
+    if s.hasSuffix(".0") { s.removeLast(2) }
+    return s
+}
+/// Big figures on the band, only if one decimal still cannot fit: `144`.
 func rsF0(_ v: Double) -> String { String(Int(v.rounded())) }
 /// Strikes: an integer when whole, else two decimals. `102.5` stays.
 func rsK(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : rsF2(v) }
@@ -215,6 +449,10 @@ struct SunnyRollSheet: View {
             hero.rsRise(shown, rise(60))
             Spacer().frame(height: 6)
             order.rsRise(shown, rise(90))
+            if let w = q.write {
+                Spacer().frame(height: 22)
+                writeBlock(w)
+            }
             Spacer().frame(height: 28)
             byFri
             Spacer().frame(height: 14)
@@ -263,30 +501,62 @@ struct SunnyRollSheet: View {
     // MARK: header · three lines
 
     /// `NFLX is 79 · 2.05% vs 1.06 floor`: the % is the only colour up here.
-    private var context: some View {
+    /// Calls: `BABA is 111.04 · 15 LEAPs`, the % moved onto the first leg.
+    @ViewBuilder private var context: some View {
+        if let w = q.write {
+            (Text(q.t).font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
+             + Text(" is ").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+             + Text(rsF2(q.spot)).font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
+             + Text(" \u{00B7} \(w.leaps) LEAP\(w.leaps == 1 ? "" : "s")")
+                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute))
+                .lineLimit(1).fixedSize()
+                .frame(height: 15.5, alignment: .leading)
+        } else {
+            oneLegContext
+        }
+    }
+    private var oneLegContext: some View {
         (Text(q.t).font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
          + Text(" is ").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
-         + Text(q.fig(q.spot)).font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
+         + Text(rsF2(q.spot)).font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
          + Text(" \u{00B7} ").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
          + Text(rsF2(q.onK) + "%").font(S.inter(S.t13, S.wBoldN))
             .foregroundStyle(q.ok ? S.gainText : S.lossText)
-         + Text(" vs " + rsF2(q.floor) + " floor").font(S.inter(S.t13, S.wMidSmN))
+         + Text(" vs " + String(format: "%.2f", q.floor) + " floor").font(S.inter(S.t13, S.wMidSmN))
             .foregroundStyle(S.mute))
             .lineLimit(1).fixedSize()
             .frame(height: 15.5, alignment: .leading)
     }
 
+    /// ⚠ CALLS: THE WEEK'S CREDIT IN DOLLARS. Two legs have two prices a
+    /// share, so "a share" moved into the leg lines. Puts keep "a share".
     private var hero: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(rsF2(q.cr)).font(S.inter(34, S.wBoldN)).tracking(S.track(34, -0.03))
+            Text(q.write.map { rsUsd0($0.total) } ?? rsF2(q.cr))
+                .font(S.inter(34, S.wBoldN)).tracking(S.track(34, -0.03))
                 .foregroundStyle(S.ink).sunnyLineBox(34)
-            Text("a share").font(S.inter(15, S.wMidSmN)).foregroundStyle(S.mute)
+            Text(q.write.map { "next Fri \u{00B7} \($0.leaps) call\($0.leaps == 1 ? "" : "s")" }
+                 ?? "a share")
+                .font(S.inter(15, S.wMidSmN)).foregroundStyle(S.mute)
         }
+        .lineLimit(1)
         .frame(height: 34, alignment: .leading)
     }
 
     /// Its own line, always: beside the hero it clipped on `112.5 calls`.
-    private var order: some View {
+    /// Calls: the split and its reason, `30% at the money · down 6% this month`.
+    @ViewBuilder private var order: some View {
+        if let w = q.write {
+            (Text("\(Int((w.share * 100).rounded()))% at the money")
+                .font(S.inter(S.t13, S.wBoldN)).foregroundStyle(S.ink)
+             + Text(" \u{00B7} " + w.why).font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute))
+                .lineLimit(1).fixedSize()
+                .frame(height: 15.5, alignment: .leading)
+        } else {
+            oneLegOrder
+        }
+    }
+    private var oneLegOrder: some View {
         (Text("sell ").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
          + Text(rsK(q.k) + (q.call ? " calls" : " puts")).font(S.inter(S.t13, S.wBoldN))
             .foregroundStyle(S.ink)
@@ -301,12 +571,54 @@ struct SunnyRollSheet: View {
             .foregroundStyle(S.mute)
     }
 
+    /* THE WRITE, calls only: one line a leg, never truncated. count × strike ·
+       the word · credit a share · % of strike. The first leg carries the floor
+       test in its %; the second's % is plain mute. A one-LEAP name is one line. */
+    private static let legCol: CGFloat = 72, legPct: CGFloat = 44
+
+    private func writeBlock(_ w: RollWrite) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                eyebrow("The write")
+                Spacer(minLength: 0)
+                Text("a share \u{00B7} " + String(format: "%.2f", q.floor) + " floor")
+                    .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+            }
+            .lineLimit(1)
+            .frame(width: Self.inner, height: 14.5)
+            .rsRise(shown, rise(110))
+            Spacer().frame(height: 12)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(w.legs.enumerated()), id: \.offset) { i, l in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("\(l.n) \u{00D7} " + rsK(l.k))
+                            .font(S.inter(15, S.wBoldN)).tracking(S.track(15, -0.01))
+                            .foregroundStyle(S.ink)
+                            .frame(width: Self.legCol, alignment: .leading)
+                        Text(l.atm ? "at the money" : "at 1 SD")
+                            .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(String(format: "%.2f", l.cr))
+                            .font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
+                        Text(String(format: "%.2f%%", l.onK))
+                            .font(S.inter(S.t13, l.atm ? S.wBoldN : S.wSemiN))
+                            .foregroundStyle(l.atm ? (l.onK >= q.floor ? S.gainText : S.lossText) : S.mute)
+                            .frame(width: Self.legPct, alignment: .trailing)
+                    }
+                    .lineLimit(1)
+                    .frame(width: Self.inner, height: 15)
+                    .rsRise(shown, rise(130 + Double(i) * 30))
+                }
+            }
+        }
+    }
+
     /// `BY FRI` and the span, the one place distance is summed up.
     private var byFri: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             eyebrow("By Fri")
             Spacer(minLength: 0)
-            Text((q.span < 0 ? "\u{2212}" : "+") + String(format: "%.1f", abs(q.span))
+            Text((span < 0 ? "\u{2212}" : "+") + String(format: "%.1f", abs(span))
                  + "% end to end")
                 .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
         }
@@ -320,7 +632,15 @@ struct SunnyRollSheet: View {
         let x: Double, v: String, word: String, ink: Color, tick: Color, delay: Double
     }
     private var levels: [Level] {
-        [Level(x: q.x.k, v: rsK(q.k), word: "strike", ink: S.ink, tick: S.ink, delay: 200),
+        if let w = q.write {
+            return w.levels.enumerated().map { i, l in
+                let ink: Color = l.tone == .loss ? S.lossText : l.tone == .mute ? S.mute : S.ink
+                let tick: Color = l.tone == .loss ? S.lossBar : l.tone == .mute ? S.hair : S.ink
+                return Level(x: l.x, v: l.fig, word: l.word, ink: ink, tick: tick,
+                             delay: 200 + Double(i) * 40)
+            }
+        }
+        return [Level(x: q.x.k, v: rsK(q.k), word: "strike", ink: S.ink, tick: S.ink, delay: 200),
          Level(x: q.x.be, v: q.fig(q.be), word: "break-even", ink: S.ink, tick: S.ink, delay: 240),
          Level(x: q.x.tgt, v: q.fig(q.tgt), word: (q.call ? "+" : "\u{2212}") + "1 SD",
                ink: S.lossText, tick: S.lossBar, delay: 280),
@@ -333,12 +653,13 @@ struct SunnyRollSheet: View {
     private var graph: some View {
         ZStack(alignment: .topLeading) {
             band.position(x: Self.inner / 2, y: 34 + 6)
-            Text(q.fig(q.spot)).font(S.inter(S.t13, S.wBoldN)).foregroundStyle(S.ink)
+            Text(q.fig(q.spot))
+                .font(S.inter(S.t13, S.wBoldN)).foregroundStyle(S.ink)
                 .fixedSize()
-                .position(x: at(q.x.spot), y: 7.75)
+                .position(x: at(spotX), y: 7.75)
                 .rsRise(shown, rise(180))
             tick(S.ink)
-                .position(x: at(q.x.spot), y: 18 + 5)
+                .position(x: at(spotX), y: 18 + 5)
                 .rsRise(shown, rise(180))
             ForEach(Array(levels.enumerated()), id: \.offset) { _, lv in
                 tick(lv.tick)
@@ -357,6 +678,10 @@ struct SunnyRollSheet: View {
         .frame(width: Self.inner, height: Self.graphH, alignment: .topLeading)
     }
 
+    private var spotX: Double { q.write?.spotX ?? q.x.spot }
+    private var zones: [RollZone] { q.write?.zones ?? q.zones }
+    private var span: Double { q.write?.span ?? q.span }
+
     private func tick(_ c: Color) -> some View {
         Rectangle().fill(c).frame(width: 2, height: 10)
     }
@@ -365,7 +690,7 @@ struct SunnyRollSheet: View {
     private var band: some View {
         ZStack(alignment: .leading) {
             Rectangle().fill(S.rsTrack)
-            ForEach(q.zones) { z in
+            ForEach(zones) { z in
                 Rectangle().fill(tone(z.tone))
                     .frame(width: at(z.w))
                     .offset(x: at(z.l))
@@ -392,10 +717,13 @@ struct SunnyRollSheet: View {
         .frame(width: Self.inner, height: 14.5)
     }
 
-    /// Five strikes, a faint fill each, none highlighted: a table, not buttons.
+    /// Five strikes, a faint fill each: a table, not buttons. On the call
+    /// write the two chosen strikes keep the fill and take a 1.5 ink ring.
     private var tiles: some View {
-        HStack(spacing: 6) {
-            ForEach(Array(q.oi.enumerated()), id: \.offset) { _, o in
+        let ts: [RollWrite.Tile] = q.write?.tiles
+            ?? q.oi.map { RollWrite.Tile(k: $0.k, oi: $0.oi, chosen: false) }
+        return HStack(spacing: 6) {
+            ForEach(Array(ts.enumerated()), id: \.offset) { _, o in
                 VStack(spacing: 4) {
                     Text(rsK(o.k)).font(S.inter(15, S.wBoldN)).tracking(S.track(15, -0.01))
                         .foregroundStyle(S.ink)
@@ -403,10 +731,16 @@ struct SunnyRollSheet: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                /* A 6% ink fill on the glass, never a glass of its own and
-                   never an outline: glass on glass muddies the hierarchy. */
+                /* A 6% ink fill on the glass, never a glass of its own:
+                   glass on glass muddies the hierarchy. */
                 .background(S.rsTileFill,
                             in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay {
+                    if o.chosen {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(S.ink, lineWidth: 1.5)
+                    }
+                }
             }
         }
         .frame(width: Self.inner)
@@ -420,19 +754,45 @@ struct SunnyRollSheet: View {
                wider than the sheet's "120 → 90", and the reference's ellipsis
                then cut the after figure, the one number the line is for. When
                the sentence does not fit it drops "positive". */
-            ViewThatFits(in: .horizontal) {
-                deltaLine(long: true)
-                deltaLine(long: false)
+            if let w = q.write {
+                /* ⚠ AFTER BOTH LEGS, and the sign word is gone: the arrow
+                   carries it, and "positive" pushed the row past the column. */
+                /* ⚠ THE WORDS GO BEFORE THE FIGURES DO. A real book runs
+                   "383 → −1117" beside "earnings in 1 day" and the row ran
+                   past the column; it drops to "Delta" and then the figures. */
+                if let now = q.deltaNow, let after = w.deltaAfter {
+                    ViewThatFits(in: .horizontal) {
+                        ForEach(["Delta, both legs \u{00B7} ", "Delta ", ""], id: \.self) { word in
+                            (Text(word).font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+                             + Text("\(Int(now.rounded())) \u{2192} \(rsSigned(after))")
+                                .font(S.inter(S.t13, S.wBoldN)).foregroundStyle(S.ink))
+                                .lineLimit(1).fixedSize()
+                        }
+                    }
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    deltaLine(long: true)
+                    deltaLine(long: false)
+                }
             }
             Spacer(minLength: 0)
             if let e = q.earn {
-                Text("earnings in \(e) day\(e == 1 ? "" : "s")")
+                Text(earnText(e))
                     .font(S.inter(S.t13, S.wSemiN))
                     .foregroundStyle(e <= 7 ? S.warn : S.mute)
                     .lineLimit(1).fixedSize()
             }
         }
         .frame(width: Self.inner, height: 15.5, alignment: .leading)
+    }
+
+    /// Inside a week, the count; past it, the date word (`earnings 12 Nov`).
+    /// The put sheet keeps the count it always had.
+    private func earnText(_ e: Int) -> String {
+        if e == 0 { return "earnings today" }
+        if e <= 7 || q.write == nil { return "earnings in \(e) day\(e == 1 ? "" : "s")" }
+        return "earnings " + (rsEarnWord(inDays: e)?.word ?? "in \(e) days")
     }
 
     @ViewBuilder private func deltaLine(long: Bool) -> some View {
@@ -471,7 +831,7 @@ struct RollSheetHost: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The panel's measured height; a drag past 30% of it closes.
-    private static let height: CGFloat = 463
+    private static let height: CGFloat = 520
 
     var body: some View {
         GeometryReader { g in
