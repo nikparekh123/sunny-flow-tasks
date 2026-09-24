@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-23.1';
+const BUILD = '2026-09-24.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -454,6 +454,17 @@ Deno.serve(async (req) => {
     for (const m of creditByWeek.values()) {
       for (const [w, c] of m) if (c !== 0 && w > lastWeek && w <= capWeek) lastWeek = w;
     }
+    /* ⚠ NEXT WEEK ALWAYS HAS A COLUMN, sold or not (Nik, 24 Sep 2026: "create
+       a ghost outline for next week in weekly yield and then fill up as we
+       start executing"). Next Friday is the roll sheet's: Monday to Friday the
+       Friday after this week's, on a weekend the coming one. */
+    const ghostFri = (() => {
+      const d = new Date(today + 'T12:00:00Z'), wd = d.getUTCDay();
+      d.setUTCDate(d.getUTCDate() + (5 - wd + 7) % 7 + (wd === 6 || wd === 0 ? 0 : 7));
+      return d.toISOString().slice(0, 10);
+    })();
+    const ghostWeek = weekStart(ghostFri);
+    if (ghostWeek > lastWeek && ghostWeek <= capWeek) lastWeek = ghostWeek;
     const weeks: string[] = [];
     for (let i = 7; i >= 0; i--) {
       weeks.push(new Date(Date.parse(lastWeek + 'T00:00:00Z') - i * 7 * 86_400_000)
@@ -767,6 +778,8 @@ Deno.serve(async (req) => {
         b += (boughtByWeek.get(p.t)?.get(w) ?? 0);
       }
       return { week: w, credit: Math.round(c), current: w === thisWeek,
+               /* Set on next week's bar once the roll sheet's chain is read. */
+               plan: null as number | null,
                /* Gross sold, and what closing legs cost, charged to the week
                   that paid for it. gross - bought === credit, always. */
                gross: Math.round(g), bought: Math.round(b),
@@ -2605,6 +2618,8 @@ Deno.serve(async (req) => {
       const nearest = (xs: Strike[], target: number) =>
         xs.length ? xs.reduce((a, b) => Math.abs(b.k - target) < Math.abs(a.k - target) ? b : a) : null;
       const out: Record<string, unknown> = {};
+      /* The ghost: next Friday's call write still to do, at today's prices. */
+      let ghostLeft = 0, ghostNames = 0;
       for (const [t, rec] of byName) {
         /* Today against 21 trading days ago. The newest close is yesterday's
            in the session and today's after the close is captured. */
@@ -2627,12 +2642,32 @@ Deno.serve(async (req) => {
           const base = shareOf(move21 === null ? null : move21 / 100);
           const pick = earnIn ? { share: 0.2, why: 'earnings' } : base;
           const atm = Math.floor(held * pick.share + 0.5);
+          /* ⚠ THE GHOST COUNTS WHAT IS LEFT. Calls already sold for next Friday
+             are in the week's gross already; each counts toward the strike it
+             sits nearer, and only the rest is priced (the roll sheet's rule). */
+          if (wk.w === ghostFri && held > 0 && calls.length) {
+            const a = calls[0];
+            let s = sdCall && sdCall.k > a.k ? sdCall : calls.find((x) => x.k > a.k) ?? null;
+            if (s && !(s.mid > 0)) s = null;
+            let dA = 0, dS = 0;
+            for (const e of open) {
+              if (e.ticker !== t || e.dir === 'long' || e.type !== 'call' || e.exp !== ghostFri) continue;
+              if (!s || Math.abs(e.k - a.k) <= Math.abs(e.k - s.k)) dA += e.n; else dS += e.n;
+            }
+            const left = Math.max(0, held - dA - dS);
+            const lA = Math.min(left, Math.max(0, atm - dA)), lS = left - lA;
+            ghostLeft += lA * a.mid * 100 + (s ? lS * s.mid * 100 : 0);
+            ghostNames++;
+          }
           return { w: wk.w, sd: wk.sd, calls, puts, sdCall, sdPut,
                    split: { share: pick.share, why: pick.why, atm, sd: held - atm } };
         }).sort((a, b) => a.w.localeCompare(b.w));
         out[t] = { spot: r2(rec.spot), avg20: rec.avg20, earn: rec.earn, delta: rec.delta,
                    move21, held, weeks };
       }
+      /* Next week's bar: what it has booked, plus the calls still to write. */
+      const gw = bookWeekly.find((w) => w.week === ghostWeek);
+      if (gw && ghostNames > 0) gw.plan = Math.round(gw.gross + ghostLeft);
       return {
         asOf: today,
         floor: inventoryCard.floor,

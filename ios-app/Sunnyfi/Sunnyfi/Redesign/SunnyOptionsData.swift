@@ -663,6 +663,10 @@ struct OptionsBook: Decodable {
         /// What this week was measured against. A closed week keeps its own
         /// denominator, so a LEAP bought on a Tuesday cannot rewrite it.
         let denom: Int?
+        /// ⚠ THE GHOST, next week only (Nik, 24 Sep 2026): what the week has
+        /// booked plus the calls still to write at today's prices. The bar
+        /// fills toward it as he sells. Null on every other week.
+        let plan: Int?
         var id: String { week }
     }
 }

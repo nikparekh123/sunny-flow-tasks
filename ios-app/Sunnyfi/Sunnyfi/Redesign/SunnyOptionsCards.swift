@@ -1288,7 +1288,11 @@ struct SunnyWeeklyYield: View {
     private struct Wk: Identifiable {
         let id: String, label: String, live: Bool
         let gross: Double, bought: Double
+        /// Next week's ghost, the same units as `gross`. 0 elsewhere.
+        var plan: Double = 0
         var kept: Double { gross - bought }
+        /// Nothing sold yet: the column is the outline alone.
+        var ghostOnly: Bool { gross <= 0 && bought <= 0 }
     }
 
     /* ⚠ THE WEEKS THAT PRE-DATE THE BOOK ARE NOT PLOTTED. Three of the eight
@@ -1300,15 +1304,18 @@ struct SunnyWeeklyYield: View {
             let den = Double(w.denom ?? book.paid)
             guard den > 0 else { return nil }
             let g = Double(w.gross ?? w.credit), b = Double(w.bought ?? 0)
-            guard g > 0 || b > 0 else { return nil }
+            let p = Double(w.plan ?? 0)
+            guard g > 0 || b > 0 || p > 0 else { return nil }
             return Wk(id: w.week, label: shortWeek(w.week), live: w.current ?? false,
-                      gross: g / den * 100, bought: b / den * 100)
+                      gross: g / den * 100, bought: b / den * 100, plan: p / den * 100)
         }
     }
     /// The axis is set by the tallest GROSS bar; every height is a share of it.
-    private var maxGross: Double { max(weeks.map(\.gross).max() ?? 1, 0.01) }
+    private var maxGross: Double { max(weeks.map { max($0.gross, $0.plan) }.max() ?? 1, 0.01) }
+    /// A ghost with nothing sold is a plan, not a week that ran: it stays out.
     private var avgKept: Double {
-        weeks.isEmpty ? 0 : weeks.reduce(0) { $0 + $1.kept } / Double(weeks.count)
+        let ran = weeks.filter { !$0.ghostOnly }
+        return ran.isEmpty ? 0 : ran.reduce(0) { $0 + $1.kept } / Double(ran.count)
     }
     /// The week the card is reading: the picked one, else the live one.
     private var at: Wk? {
@@ -1357,7 +1364,8 @@ struct SunnyWeeklyYield: View {
     var body: some View {
         OptCard(name: "weekly-yield") {
             OptHead(title: "Weekly yield", sub: "on premium paid",
-                    right: "\(weeks.count) week" + (weeks.count == 1 ? "" : "s"),
+                    right: "\(weeks.filter { !$0.ghostOnly }.count) week"
+                        + (weeks.filter { !$0.ghostOnly }.count == 1 ? "" : "s"),
                     fresh: fresh, updating: updating)
             Spacer().frame(height: S.gap6)
 
@@ -1459,7 +1467,7 @@ struct SunnyWeeklyYield: View {
                        bottom would read as the week starting in the red. */
                     ZStack(alignment: .top) {
                         Rectangle().fill(w.live ? S.gainBar : S.barQuiet)
-                            .frame(height: max(1, y(w.gross)))
+                            .frame(height: w.ghostOnly ? 0 : max(1, y(w.gross)))
                         if w.bought > 0 {
                             /* ⚠ HATCHED ON A PAST WEEK, NEVER A LIGHTER RED.
                                Solid is the live week alone, so eight caps do not
@@ -1482,6 +1490,22 @@ struct SunnyWeeklyYield: View {
                     .scaleEffect(y: grown ? 1 : 0, anchor: .bottom)
                     .animation(settle(0.72, delay: Double(i) * 0.055), value: appeared)
                     .animation(reduceMotion ? nil : settle(0.55), value: picked)
+                    /* ⚠ THE GHOST: next week's plan as a dashed outline the bar
+                       fills into. Calls only; the part already booked is the
+                       solid bar inside it, so the gap is what is left to sell. */
+                    .frame(width: 30, height: max(y(w.gross), y(w.plan)), alignment: .bottom)
+                    .overlay(alignment: .bottom) {
+                        if w.plan > 0 {
+                            UnevenRoundedRectangle(topLeadingRadius: S.radiusBar,
+                                                   bottomLeadingRadius: 1,
+                                                   bottomTrailingRadius: 1,
+                                                   topTrailingRadius: S.radiusBar)
+                                .strokeBorder(S.mute, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                                .frame(width: 30, height: y(w.plan))
+                                .opacity(grown ? 1 : 0)
+                                .animation(settle(0.5, delay: 0.6), value: appeared)
+                        }
+                    }
                     .contentShape(Rectangle())
                     /* The tap target is the bar. No text on this card flips, so
                        nothing here carries the dotted underline: that hint marks
