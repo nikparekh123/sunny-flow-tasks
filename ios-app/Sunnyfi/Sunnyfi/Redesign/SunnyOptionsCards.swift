@@ -1312,10 +1312,18 @@ struct SunnyWeeklyYield: View {
     }
     /// The axis is set by the tallest GROSS bar; every height is a share of it.
     private var maxGross: Double { max(weeks.map { max($0.gross, $0.plan) }.max() ?? 1, 0.01) }
-    /// A ghost with nothing sold is a plan, not a week that ran: it stays out.
+    /* ⚠ A WEEK THAT HAS NOT HAPPENED IS NOT A WEEK THAT RAN. Next week's bar
+       takes a credit the moment one call is sold for it, and counted as a
+       whole week that sliver dragged the average from 2.08% to 1.69% (24 Sep).
+       The average, Yearly and the week count read up to the live week only;
+       the forward bar still draws. The server's rule for the same figure. */
+    private var ran: [Wk] {
+        let live = weeks.last(where: \.live)?.id ?? "9999"
+        return weeks.filter { !$0.ghostOnly && $0.id <= live }
+    }
     private var avgKept: Double {
-        let ran = weeks.filter { !$0.ghostOnly }
-        return ran.isEmpty ? 0 : ran.reduce(0) { $0 + $1.kept } / Double(ran.count)
+        let r = ran
+        return r.isEmpty ? 0 : r.reduce(0) { $0 + $1.kept } / Double(r.count)
     }
     /// The week the card is reading: the picked one, else the live one.
     private var at: Wk? {
@@ -1364,8 +1372,7 @@ struct SunnyWeeklyYield: View {
     var body: some View {
         OptCard(name: "weekly-yield") {
             OptHead(title: "Weekly yield", sub: "on premium paid",
-                    right: "\(weeks.filter { !$0.ghostOnly }.count) week"
-                        + (weeks.filter { !$0.ghostOnly }.count == 1 ? "" : "s"),
+                    right: "\(ran.count) week" + (ran.count == 1 ? "" : "s"),
                     fresh: fresh, updating: updating)
             Spacer().frame(height: S.gap6)
 

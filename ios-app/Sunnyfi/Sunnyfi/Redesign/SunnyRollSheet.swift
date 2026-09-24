@@ -983,9 +983,10 @@ struct RollSheetHost: View {
             ZStack(alignment: .bottom) {
                 /* The dim fades in .25s, the panel rises in .32s (the spec's
                    two timings), and the dim is light on purpose. */
-                S.rsScrim
-                    .opacity(up ? 1 : 0)
-                    .animation(reduceMotion ? nil : S.easeSettle(0.25), value: up)
+                /* ⚠ NO DIM (Nik, 24 Sep 2026: "why does it have a black film
+                   behind it"; chose to remove it). The layer stays, clear, so a
+                   tap anywhere outside the glass still closes it. */
+                Color.clear
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { close() }

@@ -548,13 +548,14 @@ struct SunnyPane: View {
                (final cards). Nik: "remove the old positions and prices cards".
                One name is one block, its price and every strike on it. */
             SunnyPositionsPrices(positions: o.positions, legs: o.longLegs?.legs ?? [],
-                                 prices: o.prices, roll: o.rollCard,
-                                 refresh: { await m.options.load(force: true) })
+                                 prices: o.prices, roll: o.rollCard)
             /* ⚠ INVENTORY, DIRECTLY AFTER POSITIONS, 18 Sep 2026 (`export 20`). The
                true book behind the same four tabs; it is Left to sell's new home. */
             if let inv = o.inventoryCard {
                 SunnyInventory(block: inv, fresh: m.options.invFresh,
-                               updating: m.options.loading)
+                               updating: m.options.loading,
+                               roll: o.rollCard, positions: o.positions,
+                               refresh: { await m.options.load(force: true) })
             }
             SunnyWeeklyYield(book: o.book, putNeed: o.putCover?.need ?? 0,
                              fresh: m.options.wyFresh, updating: m.options.loading)

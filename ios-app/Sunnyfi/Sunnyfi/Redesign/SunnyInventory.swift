@@ -59,6 +59,15 @@ struct SunnyInventory: View {
     /// Freshness: what the last pulls changed, held until the card is seen.
     let fresh: FreshTrack
     let updating: Bool
+    /* ⚠ THE ROLL SHEET OPENS HERE, FROM A HELD TICKER (Nik, 24 Sep 2026: "long
+       press makes more sense on the inventory card vs position card... the long
+       press can be on the ticker"). The tab picks the side: Calls writes calls,
+       Puts writes puts. */
+    var roll: RollCard? = nil
+    /// The open short legs, for what is already sold for next Friday.
+    var positions: [OptionsPosition] = []
+    /// Reloads the book when the sheet opens, so a fill minutes old counts.
+    var refresh: (() async -> Void)? = nil
 
     @AppStorage("sunnyfi.inv.side") private var putsTab = false
     /// The credit lens: $ a contract, or % on the share against the floor.
@@ -67,6 +76,11 @@ struct SunnyInventory: View {
     @State private var appeared = false
     @State private var drawn: CGFloat = 0
     @State private var dots = false
+    /// The name and side the sheet is open on. A name, not a row index: the
+    /// reload on open can reorder the rows.
+    @State private var rollSel: (t: String, call: Bool, n: Int)? = nil
+    @State private var live: [String: RollLive] = [:]
+    @State private var fetching: String? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let inner: CGFloat = S.content - 48          // 313
@@ -134,6 +148,9 @@ struct SunnyInventory: View {
         .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
         .measure("inventory")
+        .fullScreenCover(isPresented: rollOpen) {
+            rollHost.presentationBackground(.clear)
+        }
         .freshSeen(fresh)
         .onAppear { if !appeared { appeared = true; redraw() } }
     }
@@ -216,11 +233,60 @@ struct SunnyInventory: View {
         .overlay(alignment: .bottom) { Rectangle().fill(S.ruleColor).frame(height: 1) }
     }
 
+    // MARK: the roll sheet
+
+    /// Next Friday's write on this name and side, on the live chain when it
+    /// has landed. Calls already sold for that Friday count as done.
+    private func quote(_ t: String, call: Bool, n: Int) -> RollQuote? {
+        guard let roll, let cached = roll.names[t] else { return nil }
+        let name = live[t].map { cached.merged($0) } ?? cached
+        let floor = (call ? roll.floor.calls : roll.floor.puts) ?? 1.06
+        let target = RollMath.targetFriday()
+        let done = positions.filter { $0.t == t }.flatMap(\.shorts)
+            .filter { ((($0.type ?? "call") == "call") == call) && $0.exp == target }
+            .map { (n: $0.n, k: $0.k) }
+        return RollMath.quote(t: t, call: call, n: max(1, n), name: name, floor: floor, done: done)
+    }
+    /// Open on the cached figures at once, then read the chain and the book
+    /// live and let the sheet settle onto them.
+    private func open(_ t: String, call: Bool, n: Int) {
+        setRoll((t, call, n))
+        fetching = t
+        Task {
+            async let chain = RollLive.fetch(t)
+            await refresh?()
+            if let c = await chain { live[t] = c }
+            if fetching == t { fetching = nil }
+        }
+    }
+    private func setRoll(_ v: (t: String, call: Bool, n: Int)?) {
+        var tr = Transaction(); tr.disablesAnimations = true
+        withTransaction(tr) { rollSel = v }
+    }
+    private var rollOpen: Binding<Bool> {
+        Binding(get: { rollSel != nil }, set: { if !$0 { setRoll(nil) } })
+    }
+    @ViewBuilder private var rollHost: some View {
+        if let s = rollSel, let q = quote(s.t, call: s.call, n: s.n) {
+            RollSheetHost(q: q, updating: fetching == s.t) { setRoll(nil) }
+        }
+    }
+
     private func row(_ r: Row) -> some View {
         HStack(spacing: Self.colGap) {
+            /* ⚠ THE DOTTED UNDERLINE SAYS "HOLD ME" HERE (Nik, 24 Sep 2026:
+               "underline the tickers to indicate to long press"). */
             Text(r.t).font(S.inter(S.t15, S.wSemiN)).tracking(S.track(S.t15, -0.015))
                 .foregroundStyle(S.ink).lineLimit(1).sunnyLineBox(S.t15)
+                .sunnyHint(on: roll?.names[r.t] != nil)
                 .frame(width: Self.nameCol, alignment: .leading)
+                .padding(.vertical, 13).contentShape(Rectangle())
+                /* Hold the ticker 450 ms: next Friday's write on this side. */
+                .onLongPressGesture(minimumDuration: 0.45) {
+                    guard quote(r.t, call: !puts, n: r.sold) != nil else { return }
+                    open(r.t, call: !puts, n: r.sold)
+                }
+                .padding(.vertical, -13)
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("\(r.sold)").font(S.inter(S.t22, S.wBoldN)).tracking(S.track(S.t22, -0.03))
                     .foregroundStyle(fr(r.t, "sold", r.over ? S.lossText : (r.sold > 0 ? S.ink : S.mute)))
