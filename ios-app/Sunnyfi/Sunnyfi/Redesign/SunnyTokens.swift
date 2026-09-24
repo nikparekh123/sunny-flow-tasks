@@ -149,7 +149,9 @@ enum S {
     /// glass colour by night, or light type would sit on a light panel.
     static let rsGlassTint = dynA(rgba(255, 255, 255, 0.5), rgba(50, 54, 46, 0.5))
     /// Light on purpose: the rows are meant to read through the glass.
-    static let rsScrim   = dynA(rgba(20, 23, 15, 0.12), rgba(0, 0, 0, 0.3))
+    /// ⚠ ONE STRENGTH BY DAY AND NIGHT (Nik, 24 Sep 2026): the night value
+    /// was 30% black and read as a black film.
+    static let rsScrim   = dynA(rgba(20, 23, 15, 0.14), rgba(0, 0, 0, 0.14))
     static let rsShadow1 = dynA(rgba(20, 23, 15, 0.18), rgba(0, 0, 0, 0.55))
     static let rsShadow2 = dynA(rgba(20, 23, 15, 0.08), rgba(0, 0, 0, 0.3))
 

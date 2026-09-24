@@ -983,10 +983,13 @@ struct RollSheetHost: View {
             ZStack(alignment: .bottom) {
                 /* The dim fades in .25s, the panel rises in .32s (the spec's
                    two timings), and the dim is light on purpose. */
-                /* ⚠ NO DIM (Nik, 24 Sep 2026: "why does it have a black film
-                   behind it"; chose to remove it). The layer stays, clear, so a
-                   tap anywhere outside the glass still closes it. */
-                Color.clear
+                /* ⚠ THE FILM FOLLOWS THE SHEET (Nik, 24 Sep 2026: he wants the
+                   film, not the way it faded in on its own). It darkens on the
+                   same curve the glass rises on, lightens as the glass is
+                   dragged down, and is gone when it closes: never a separate
+                   entrance. */
+                S.rsScrim
+                    .opacity(up ? max(0, 1 - Double(max(0, drag)) / Double(Self.height)) : 0)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { close() }

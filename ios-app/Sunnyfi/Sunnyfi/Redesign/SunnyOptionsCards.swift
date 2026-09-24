@@ -227,8 +227,6 @@ struct SunnyPositions: View {
     /// the card is seen. The % move is the market and never marks.
     var fresh: FreshTrack? = nil
     var updating = false
-    /// The roll sheet's chain: next Friday's write on a name (`export 24`).
-    var roll: RollCard? = nil
 
     /// The figures Freshness watches: contracts per row, and rows per tab.
     static func freshFigs(_ ps: [OptionsPosition], _ legs: [LongLeg]) -> [String: [String: String]] {
@@ -270,10 +268,6 @@ struct SunnyPositions: View {
     @State private var swiped = false
     /// Re-read on the tick so Friday 20:00 and Monday 04:00 land without a reload.
     @State private var now = Date()
-    /* ⚠ A 450 ms HOLD OPENS THE SHEET AND THE TAP THAT FOLLOWS IS EATEN, or the
-       figure column would flip under it. Sold tabs only. */
-    @State private var rollKey: String? = nil
-    /// The detent, measured off the sheet's own content on this device.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: geometry, from the sheet
@@ -308,7 +302,7 @@ struct SunnyPositions: View {
     private struct Row: Identifiable {
         let t: String, k: String, v: Double, fig: String
         let through: Bool
-        /// Carried for the roll sheet: its size and the week it expires in.
+        /// The leg's size and expiry.
         var n: Int = 0
         var exp: String? = nil
         var id: String { "\(t)|\(k)" }
@@ -318,7 +312,7 @@ struct SunnyPositions: View {
     /// One entry per open short contract line on the picked side.
     private struct Sold {
         let t: String, k: Double, n: Int, pct: Double, cr: Double
-        /// The leg's expiry, carried for the roll sheet's "next Friday".
+        /// The leg's expiry.
         let exp: String
         /// What is still to decay — not what the buy-back costs.
         let tv: Double
@@ -592,12 +586,6 @@ struct SunnyPositions: View {
         .clipShape(RoundedRectangle(cornerRadius: S.radiusCard, style: .continuous))
         .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
-        /* The roll sheet rises from the screen's bottom edge (Nik, 23 Sep). A
-           clear full-screen cover carries it, presented without the system's
-           own slide so the host can fade its dim and rise the panel itself. */
-        .fullScreenCover(isPresented: rollOpen) {
-            rollHost.presentationBackground(.clear)
-        }
         /* ⚠ SWIPE MOVES THE TAB, AND IT MUST NOT EAT THE PAGE'S SCROLL. Nik,
            15 Sep 2026: "can i swipe on the card to go to next tab?". The card
            lives inside a vertical scroller, so a bare drag gesture would steal
@@ -627,7 +615,6 @@ struct SunnyPositions: View {
            next beat so the fade and the bar growth both have somewhere to run
            from. Without the reset the new list arrives already at full opacity
            and full width, which is the other half of the morph. */
-        .onChange(of: tabRaw) { _, _ in rollKey = nil }
         .task(id: tabRaw) {
             guard appeared else { return }
             soft = true
@@ -696,30 +683,6 @@ struct SunnyPositions: View {
         Text(lead ? "\u{2212}" + s : s)
             .font(S.inter(S.t10, S.wBoldN)).tracking(S.track(S.t10, S.lsLabel))
             .foregroundStyle(S.mute).sunnyLineBox(S.t10).fixedSize()
-    }
-
-    /// The write on this name for the first Friday after the pressed leg's
-    /// own expiry. The floor is his own average on that side.
-    private func quote(for r: Row) -> RollQuote? {
-        guard tab.sold, let roll, let name = roll.names[r.t] else { return nil }
-        let floor = (tab.isCall ? roll.floor.calls : roll.floor.puts) ?? 1.06
-        return RollMath.quote(t: r.t, call: tab.isCall, n: r.n, name: name, floor: floor)
-    }
-
-    /// Present and dismiss without the cover's own slide; the host animates.
-    private func setRoll(_ key: String?) {
-        var t = Transaction(); t.disablesAnimations = true
-        withTransaction(t) { rollKey = key }
-    }
-    private var rollOpen: Binding<Bool> {
-        Binding(get: { rollKey != nil }, set: { if !$0 { setRoll(nil) } })
-    }
-
-    @ViewBuilder private var rollHost: some View {
-        if let key = rollKey, let r = rows.first(where: { $0.id == key }),
-           let q = quote(for: r) {
-            RollSheetHost(q: q) { setRoll(nil) }
-        }
     }
 
     @ViewBuilder private func row(_ r: Row, i: Int) -> some View {
@@ -796,11 +759,6 @@ struct SunnyPositions: View {
                 .frame(width: Self.figCol, alignment: .trailing)
                 .padding(.vertical, 8).contentShape(Rectangle())
                 .onTapGesture { figMode = (figMode + 1) % 3 }
-                /* Sold tabs only; a bought row has no week to write. */
-                .onLongPressGesture(minimumDuration: 0.45) {
-                    guard tab.sold, quote(for: r) != nil else { return }
-                    setRoll(r.id)
-                }
                 .padding(.vertical, -8)
         }
         .frame(height: Self.barH)
