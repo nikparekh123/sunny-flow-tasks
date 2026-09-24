@@ -31,13 +31,22 @@ struct SunnyPositionsPrices: View {
     let legs: [LongLeg]
     let prices: PricesBlock?
     let roll: RollCard?
+    /// Reloads the book (positions included) when the sheet opens, so a
+    /// fill from minutes ago is counted. The page passes the store's load.
+    var refresh: (() async -> Void)? = nil
 
     @AppStorage("sunnyfi.pp.tab") private var tabRaw = "sc"
     /// 0 = %, 1 = $, 2 = time value. Shared across the four tabs.
     @AppStorage("sunnyfi.pp.mode") private var mode = 0
     /// 0 = the session, 1…4 = weeks back. Card-local, shared across tabs.
     @State private var win = 0
-    @State private var rollKey: String? = nil
+    /* ⚠ THE PRESSED LEG ITSELF, NOT ITS PLACE IN THE LIST. The sheet reloads
+       the book on open, and a fill that lands adds a leg and shifts every
+       index after it; a key into the list would then close the sheet. */
+    @State private var rollLeg: Leg? = nil
+    /// The live chain per name, read each time the sheet opens.
+    @State private var live: [String: RollLive] = [:]
+    @State private var fetching: String? = nil
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -471,7 +480,7 @@ struct SunnyPositionsPrices: View {
                         /* ⚠ PRICE, MOVE AND DATE AT ONE SIZE, price and date in
                            ink (Nik, 23 Sep 2026). The loud earnings word keeps
                            its warn ink: it is the one that asks for attention. */
-                        Text(String(format: "$%.2f", s)).font(S.inter(S.t13, S.wMidSmN))
+                        Text(String(format: "$%.2f", s)).font(S.inter(S.t13, S.wBoldN))
                             .foregroundStyle(S.ink)
                     }
                     if let mv = n.price.move {
@@ -498,7 +507,7 @@ struct SunnyPositionsPrices: View {
                        expires first, the one being rolled. */
                     .onLongPressGesture(minimumDuration: 0.45) {
                         guard tab.sold, let l = rollLeg(n), quote(for: l) != nil else { return }
-                        setRoll(l.id)
+                        open(l)
                     }
                     .padding(.vertical, -8).padding(.leading, -12)
             }
@@ -609,7 +618,7 @@ struct SunnyPositionsPrices: View {
             .onTapGesture { flip() }
             .onLongPressGesture(minimumDuration: 0.45) {
                 guard l.sold, quote(for: l) != nil else { return }
-                setRoll(l.id)
+                open(l)
             }
             .position(x: lx, y: Self.ladderH / 2)
     }
@@ -633,20 +642,38 @@ struct SunnyPositionsPrices: View {
     /// Next Friday's write on the pressed leg's name and side, the first Friday
     /// after the leg expires. A quiet leg quotes its own side.
     private func quote(for l: Leg) -> RollQuote? {
-        guard l.sold, let roll, let name = roll.names[l.t] else { return nil }
+        guard l.sold, let roll, let cached = roll.names[l.t] else { return nil }
+        let name = live[l.t].map { cached.merged($0) } ?? cached
         let floor = (l.call ? roll.floor.calls : roll.floor.puts) ?? 1.06
-        return RollMath.quote(t: l.t, call: l.call, n: l.n, after: l.exp, name: name, floor: floor)
+        /* What is already sold on this side for next Friday, by strike. */
+        let target = RollMath.targetFriday()
+        let done = soldAll.filter { $0.t == l.t && $0.call == l.call && $0.exp == target }
+            .map { (n: $0.n, k: $0.strike) }
+        return RollMath.quote(t: l.t, call: l.call, n: l.n, name: name, floor: floor, done: done)
     }
-    private func setRoll(_ key: String?) {
+
+    /// Open on the cached figures at once, then read the chain and the book
+    /// live and let the sheet settle onto them.
+    private func open(_ l: Leg) {
+        setRoll(l)
+        fetching = l.t
+        Task {
+            async let chain = RollLive.fetch(l.t)
+            await refresh?()
+            if let c = await chain { live[l.t] = c }
+            if fetching == l.t { fetching = nil }
+        }
+    }
+    private func setRoll(_ key: Leg?) {
         var t = Transaction(); t.disablesAnimations = true
-        withTransaction(t) { rollKey = key }
+        withTransaction(t) { rollLeg = key }
     }
     private var rollOpen: Binding<Bool> {
-        Binding(get: { rollKey != nil }, set: { if !$0 { setRoll(nil) } })
+        Binding(get: { rollLeg != nil }, set: { if !$0 { setRoll(nil) } })
     }
     @ViewBuilder private var rollHost: some View {
-        if let key = rollKey, let l = soldAll.first(where: { $0.id == key }), let q = quote(for: l) {
-            RollSheetHost(q: q) { setRoll(nil) }
+        if let l = rollLeg, let q = quote(for: l) {
+            RollSheetHost(q: q, updating: fetching == l.t) { setRoll(nil) }
         }
     }
 }

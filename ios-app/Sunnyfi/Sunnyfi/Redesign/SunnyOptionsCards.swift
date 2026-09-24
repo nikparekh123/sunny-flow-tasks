@@ -703,8 +703,7 @@ struct SunnyPositions: View {
     private func quote(for r: Row) -> RollQuote? {
         guard tab.sold, let roll, let name = roll.names[r.t] else { return nil }
         let floor = (tab.isCall ? roll.floor.calls : roll.floor.puts) ?? 1.06
-        return RollMath.quote(t: r.t, call: tab.isCall, n: r.n, after: r.exp,
-                              name: name, floor: floor)
+        return RollMath.quote(t: r.t, call: tab.isCall, n: r.n, name: name, floor: floor)
     }
 
     /// Present and dismiss without the cover's own slide; the host animates.

@@ -52,7 +52,9 @@ struct RollChainWeek: Decodable {
     let sdCall: RollChainStrike?
     let sdPut: RollChainStrike?
     /// The call write's split for this week (server, 23 Sep 2026).
-    let split: RollSplit?
+    var split: RollSplit? = nil
+    /// Live only: every call strike at or above spot, for the 1 SD fallback.
+    var above: [RollChainStrike]? = nil
 }
 
 /// ⚠ THE CALL WRITE IS SPLIT. Part at the money, the rest at 1 SD; the share
@@ -71,6 +73,49 @@ struct RollChainStrike: Decodable {
     let oi: Int?
     let mid: Double
     let dl: Double?
+    /// The live read carries each strike's IV; the cached card does not.
+    var iv: Double? = nil
+}
+
+/// ⚠ LIVE, EVERY TIME THE SHEET OPENS (Nik, 24 Sep 2026: "Refresh every time
+/// we open the pop up"). He saw BABA at 110 and a write at 112, because the
+/// app had loaded at yesterday's 111. `chain-next` with a ticker reads Polygon
+/// there and then and writes nothing; its prices are worked out from the
+/// chain's IV at the current spot, within ~3% of IBKR's mid where the last
+/// trade was 7% out.
+struct RollLive: Decodable {
+    let spot: Double?
+    let asOf: String?
+    let weeks: [RollChainWeek]
+
+    static func fetch(_ t: String) async -> RollLive? {
+        var r = URLRequest(url: URL(string: Secrets.supabaseURL + "/functions/v1/chain-next")!)
+        r.httpMethod = "POST"
+        r.timeoutInterval = 15
+        r.setValue(Secrets.supabasePublishableKey, forHTTPHeaderField: "apikey")
+        r.setValue("Bearer " + Secrets.supabasePublishableKey, forHTTPHeaderField: "Authorization")
+        r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        r.httpBody = try? JSONSerialization.data(withJSONObject: ["ticker": t])
+        guard let (d, _) = try? await URLSession.shared.data(for: r),
+              let live = try? JSONDecoder().decode(RollLive.self, from: d),
+              live.spot != nil, !live.weeks.isEmpty else { return nil }
+        return live
+    }
+}
+
+extension RollChainName {
+    /// The cached name with the live spot and chain laid over it. The month's
+    /// move is re-read against the new spot from the same close 21 sessions back.
+    func merged(_ l: RollLive) -> RollChainName {
+        guard let ls = l.spot, ls > 0 else { return self }
+        let m = move21.flatMap { m -> Double? in
+            guard spot > 0 else { return nil }
+            let c21 = spot / (1 + m / 100)
+            return (ls / c21 - 1) * 100
+        }
+        return RollChainName(spot: ls, avg20: avg20, earn: earn, delta: delta,
+                             weeks: l.weeks, move21: m, held: held)
+    }
 }
 
 // MARK: - the arithmetic
@@ -123,6 +168,12 @@ struct RollWrite {
     let span: Double
     let tiles: [Tile]
     let deltaAfter: Double?
+    /// ⚠ WHAT IS ALREADY SOLD FOR THAT FRIDAY (Nik, 24 Sep: "I may execute
+    /// part of the order and that needs to be reflected"). The legs above are
+    /// what is LEFT; these are what he has written already, by strike.
+    let done: [(n: Int, k: Double)]
+    var doneN: Int { done.reduce(0) { $0 + $1.n } }
+    var leftN: Int { legs.reduce(0) { $0 + $1.n } }
 }
 
 struct RollZone: Identifiable {
@@ -143,10 +194,59 @@ enum RollMath {
         max(Double(fig.count) * 9, Double(word.count) * 6.7)
     }
 
-    /// The write on this name for the first Friday after `after`.
-    static func quote(t: String, call: Bool, n: Int, after: String?,
-                      name: RollChainName, floor: Double) -> RollQuote? {
-        let wk = name.weeks.first { after == nil || $0.w > after! } ?? name.weeks.last
+    /// ⚠ NEVER MORE THAN A WEEK OUT (Nik, 24 Sep 2026: "it should not suggest
+    /// anything more than a week"). The target is next Friday, whatever leg was
+    /// pressed: Monday to Friday it is the Friday after this week's; on a
+    /// weekend it is the coming one. A leg already written for next Friday no
+    /// longer points at the week after; the sheet shows what is done instead.
+    static func targetFriday(_ now: Date = Date()) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let today = cal.startOfDay(for: now)
+        let wd = cal.component(.weekday, from: today)          // 1 Sun … 7 Sat
+        let toFri = (6 - wd + 7) % 7
+        let weekend = wd == 7 || wd == 1
+        let d = cal.date(byAdding: .day, value: toFri + (weekend ? 0 : 7), to: today) ?? today
+        let f = DateFormatter()
+        f.calendar = cal; f.timeZone = cal.timeZone; f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: d)
+    }
+
+    /// Days from today in New York to an ISO date.
+    static func daysTo(_ iso: String) -> Int {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let f = DateFormatter()
+        f.calendar = cal; f.timeZone = cal.timeZone; f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: iso) else { return 0 }
+        return cal.dateComponents([.day], from: cal.startOfDay(for: Date()), to: d).day ?? 0
+    }
+
+    /// ⚠ THE SPLIT, the server's rule restated so a live spot can re-read it:
+    /// fell 10%+ → 20% at the money, −10..+5 → 30%, +5..+15 → 50%, above → 60%;
+    /// earnings on or before the expiry → 20%. Counts round half up.
+    static func split(held: Int, move: Double?, earn: Int?, week: String) -> RollSplit {
+        var share = 0.3, why = "flat"
+        if let m = move {
+            if m <= -10 { share = 0.2; why = "fell" }
+            else if m < 5 { share = 0.3; why = "flat" }
+            else if m < 15 { share = 0.5; why = "up" }
+            else { share = 0.6; why = "up a lot" }
+        }
+        if let e = earn, e >= 0, e <= daysTo(week) { share = 0.2; why = "earnings" }
+        let atm = Int((Double(held) * share + 0.5).rounded(.down))
+        return RollSplit(share: share, why: why, atm: atm, sd: held - atm)
+    }
+
+    /// The write on this name for next Friday. `done` is what is already sold
+    /// on that side for that Friday, by strike.
+    static func quote(t: String, call: Bool, n: Int, name: RollChainName, floor: Double,
+                      done: [(n: Int, k: Double)] = []) -> RollQuote? {
+        let target = targetFriday()
+        let wk = name.weeks.first { $0.w == target }
+            ?? name.weeks.first { daysTo($0.w) >= 0 } ?? name.weeks.last
         guard let week = wk, let sd = week.sd, sd > 0 else { return nil }
         let spot = name.spot
         /* The strike is the nearest chain strike at or beyond spot on the leg's
@@ -213,7 +313,7 @@ enum RollMath {
             span: span, wide: wide,
             x: (X["spot"] ?? 0, X["k"] ?? 0, X["be"] ?? 0, X["tgt"] ?? 0, X["avg"] ?? 0),
             zones: zones,
-            write: call ? write(name: name, week: week, spot: spot, sd: sd, avg: avg) : nil)
+            write: call ? write(name: name, week: week, spot: spot, sd: sd, avg: avg, done: done) : nil)
     }
 
     /// THE CALL WRITE, TWO LEGS. The split is the server's (the counts, the
@@ -221,10 +321,11 @@ enum RollMath {
     /// levels pack the way the one-leg band does, with the 1 SD STRIKE as a
     /// level of its own.
     static func write(name: RollChainName, week: RollChainWeek, spot: Double,
-                      sd: Double, avg: Double) -> RollWrite? {
-        guard let split = week.split, let held = name.held, held > 0,
+                      sd: Double, avg: Double, done: [(n: Int, k: Double)] = []) -> RollWrite? {
+        guard let held = name.held, held > 0,
               let atmPick = week.calls.first(where: { $0.k >= spot }) else { return nil }
-        let ks = (week.calls + (week.sdCall.map { [$0] } ?? [])).map(\.k)
+        let split = Self.split(held: held, move: name.move21, earn: name.earn, week: week.w)
+        let ks = (week.calls + (week.above ?? []) + (week.sdCall.map { [$0] } ?? [])).map(\.k)
         let sortedK = Array(Set(ks)).sorted()
         /* The chain's own strike spacing, for the merge test. */
         let step = zip(sortedK, sortedK.dropFirst()).map { $1 - $0 }.filter { $0 > 0 }.min() ?? 1
@@ -233,18 +334,31 @@ enum RollMath {
            next strike up, or the write would be one leg drawn twice. */
         var sdPick = week.sdCall
         if sdPick == nil || sdPick!.k <= atmPick.k {
-            sdPick = week.calls.filter { $0.k > atmPick.k }.min { $0.k < $1.k }
+            sdPick = ((week.above ?? []) + week.calls).filter { $0.k > atmPick.k }.min { $0.k < $1.k }
         }
 
+        /* ⚠ PARTIAL FILLS. The plan is sized on every LEAP; what he has
+           already sold for this Friday counts toward whichever of the two
+           strikes it sits nearer, and only the rest is suggested. More than the
+           plan at one strike comes out of the other. */
+        let kSd = sdPick?.k ?? atmPick.k
+        var doneAtm = 0, doneSd = 0
+        for d in done {
+            if abs(d.k - atmPick.k) <= abs(d.k - kSd) { doneAtm += d.n } else { doneSd += d.n }
+        }
+        let left = max(0, held - doneAtm - doneSd)
+        let leftAtm = min(left, max(0, split.atm - doneAtm))
+        let leftSd = left - leftAtm
+
         var legs: [RollWrite.Leg] = []
-        if split.atm > 0, atmPick.mid > 0 {
-            legs.append(.init(n: split.atm, k: atmPick.k, cr: atmPick.mid,
+        if leftAtm > 0, atmPick.mid > 0 {
+            legs.append(.init(n: leftAtm, k: atmPick.k, cr: atmPick.mid,
                               onK: atmPick.mid / atmPick.k * 100, atm: true))
         }
-        if split.sd > 0, let p = sdPick, p.mid > 0 {
-            legs.append(.init(n: split.sd, k: p.k, cr: p.mid, onK: p.mid / p.k * 100, atm: false))
+        if leftSd > 0, let p = sdPick, p.mid > 0 {
+            legs.append(.init(n: leftSd, k: p.k, cr: p.mid, onK: p.mid / p.k * 100, atm: false))
         }
-        guard !legs.isEmpty else { return nil }
+        guard !legs.isEmpty || !done.isEmpty else { return nil }
         let atm = legs.first { $0.atm }, sdLeg = legs.first { !$0.atm }
         let total = legs.reduce(0) { $0 + $1.cr * 100 * Double($1.n) }
 
@@ -325,7 +439,8 @@ enum RollMath {
         /* OPEN INTEREST: five tiles, both chosen strikes always among them.
            The nearest four at or above the at-the-money strike, then the 1 SD
            strike when it is not already the fifth. */
-        var pool = week.calls.filter { $0.k >= kA }
+        var pool = Array(Dictionary(((week.above ?? []) + week.calls).map { ($0.k, $0) },
+                                    uniquingKeysWith: { a, _ in a }).values).filter { $0.k >= kA }
         if let s = sdPick, !pool.contains(where: { $0.k == s.k }) { pool.append(s) }
         pool.sort { $0.k < $1.k }
         var pick = Array(pool.prefix(5))
@@ -343,11 +458,15 @@ enum RollMath {
             after = after.flatMap { a in dl.map { a - $0 * Double(l.n) * 100 } }
         }
 
+        /* Strikes already sold are grouped, biggest first. */
+        var byK: [Double: Int] = [:]
+        for d in done { byK[d.k, default: 0] += d.n }
+        let doneRows = byK.map { (n: $0.value, k: $0.key) }.sorted { $0.k < $1.k }
         return RollWrite(legs: legs, share: split.share, why: why, leaps: held, total: total,
                          levels: P.filter { $0.id != "spot" },
                          spotX: P.first { $0.id == "spot" }?.x ?? 0,
                          zones: zones, span: (hi - spot) / spot * 100, tiles: tiles,
-                         deltaAfter: after)
+                         deltaAfter: after, done: doneRows)
     }
 }
 
@@ -420,6 +539,8 @@ func rsOI(_ v: Int?) -> String {
 
 struct SunnyRollSheet: View {
     let q: RollQuote
+    /// True while the live read is out; the figures are the cached ones.
+    var updating = false
     let onClose: () -> Void
     @State private var shown = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -508,7 +629,9 @@ struct SunnyRollSheet: View {
              + Text(" is ").font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
              + Text(rsF2(q.spot)).font(S.inter(S.t13, S.wSemiN)).foregroundStyle(S.ink)
              + Text(" \u{00B7} \(w.leaps) LEAP\(w.leaps == 1 ? "" : "s")")
-                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute))
+                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.mute)
+             + Text(updating ? " \u{00B7} updating" : "")
+                .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.warn))
                 .lineLimit(1).fixedSize()
                 .frame(height: 15.5, alignment: .leading)
         } else {
@@ -523,7 +646,9 @@ struct SunnyRollSheet: View {
          + Text(rsF2(q.onK) + "%").font(S.inter(S.t13, S.wBoldN))
             .foregroundStyle(q.ok ? S.gainText : S.lossText)
          + Text(" vs " + String(format: "%.2f", q.floor) + " floor").font(S.inter(S.t13, S.wMidSmN))
-            .foregroundStyle(S.mute))
+            .foregroundStyle(S.mute)
+         + Text(updating ? " \u{00B7} updating" : "")
+            .font(S.inter(S.t13, S.wMidSmN)).foregroundStyle(S.warn))
             .lineLimit(1).fixedSize()
             .frame(height: 15.5, alignment: .leading)
     }
@@ -532,10 +657,13 @@ struct SunnyRollSheet: View {
     /// share, so "a share" moved into the leg lines. Puts keep "a share".
     private var hero: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(q.write.map { rsUsd0($0.total) } ?? rsF2(q.cr))
+            Text(q.write.map { $0.legs.isEmpty ? "Written" : rsUsd0($0.total) } ?? rsF2(q.cr))
                 .font(S.inter(34, S.wBoldN)).tracking(S.track(34, -0.03))
                 .foregroundStyle(S.ink).sunnyLineBox(34)
-            Text(q.write.map { "next Fri \u{00B7} \($0.leaps) call\($0.leaps == 1 ? "" : "s")" }
+            Text(q.write.map { w in
+                     w.legs.isEmpty ? "next Fri \u{00B7} \(w.doneN) of \(w.leaps) calls"
+                     : w.doneN > 0 ? "next Fri \u{00B7} \(w.leftN) of \(w.leaps) left"
+                     : "next Fri \u{00B7} \(w.leaps) call\(w.leaps == 1 ? "" : "s")" }
                  ?? "a share")
                 .font(S.inter(15, S.wMidSmN)).foregroundStyle(S.mute)
         }
@@ -608,6 +736,22 @@ struct SunnyRollSheet: View {
                     .lineLimit(1)
                     .frame(width: Self.inner, height: 15)
                     .rsRise(shown, rise(130 + Double(i) * 30))
+                }
+                /* What he has already written for this Friday, muted: the
+                   suggestion above is only what is left. */
+                ForEach(Array(w.done.enumerated()), id: \.offset) { i, d in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text("\(d.n) \u{00D7} " + rsK(d.k))
+                            .font(S.inter(15, S.wBoldN)).tracking(S.track(15, -0.01))
+                            .foregroundStyle(S.mute)
+                            .frame(width: Self.legCol, alignment: .leading)
+                        Text("already sold")
+                            .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .lineLimit(1)
+                    .frame(width: Self.inner, height: 15)
+                    .rsRise(shown, rise(130 + Double(w.legs.count + i) * 30))
                 }
             }
         }
@@ -825,6 +969,7 @@ private func rsSigned(_ v: Double) -> String {
    under the footer that read as a gap; this host owns its own height. */
 struct RollSheetHost: View {
     let q: RollQuote
+    var updating = false
     let onDismissed: () -> Void
     @State private var up = false
     @State private var drag: CGFloat = 0
@@ -845,7 +990,7 @@ struct RollSheetHost: View {
                     .contentShape(Rectangle())
                     .onTapGesture { close() }
                 if up {
-                    SunnyRollSheet(q: q, onClose: close)
+                    SunnyRollSheet(q: q, updating: updating, onClose: close)
                         .offset(y: max(0, drag))
                         .gesture(
                             DragGesture()
