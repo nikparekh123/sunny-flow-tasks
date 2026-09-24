@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-24.1';
+const BUILD = '2026-09-24.2';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1707,6 +1707,8 @@ Deno.serve(async (req) => {
     /* Settled and open kept apart: Coverage draws the first as its bar and the
        second as the lighter cap above it. */
     const callCrOpenBy = new Map<string, number>();
+    /* Net call credit by the week it covers, for Coverage's rate. */
+    const callWeek = new Map<string, number>();
     for (const t of bookShorts) {
       if (String(t.option_type) !== 'call') continue;
       const tk = String(t.ticker);
@@ -1714,6 +1716,8 @@ Deno.serve(async (req) => {
       const c = (String(t.action) === 'open' ? 1 : -1) * N(t.contracts) * N(t.premium) * 100;
       if (isSettled(t)) callCrBy.set(tk, (callCrBy.get(tk) ?? 0) + c);
       else callCrOpenBy.set(tk, (callCrOpenBy.get(tk) ?? 0) + c);
+      callWeek.set(weekStart(String(t.expiry).slice(0, 10)),
+                   (callWeek.get(weekStart(String(t.expiry).slice(0, 10))) ?? 0) + c);
       /* Bucketed by the week the leg COVERS, the rule every card here uses. */
       if (weekStart(String(t.expiry).slice(0, 10)) === thisWeek) {
         callWkBy.set(tk, (callWkBy.get(tk) ?? 0) + c);
@@ -1827,6 +1831,17 @@ Deno.serve(async (req) => {
     const putLive = [...putWeek.values()].filter((v) => v !== 0);
     const putPace = putLive.length
       ? putLive.reduce((a, b) => a + b, 0) / putLive.length : 0;
+    /* ⚠ COVERAGE'S RATE IS THE AVERAGE FINISHED WEEK, PER SIDE (Nik, 24 Sep
+       2026, "the calculation for weeks is not right"). It read THIS week:
+       calls counted this week's open legs, puts only the expired ones, so the
+       put clock read $0 all week and quoted 37 weeks off melt alone, and every
+       clock jumped with each day's trades. Intrinsic value already divides by
+       the average finished week; both cards now use one rate. A finished week
+       is one before this one with a credit on that side. */
+    const avgDone = (m: Map<string, number>) => {
+      const v = [...m.entries()].filter(([w, c]) => w < thisWeek && c !== 0).map(([, c]) => c);
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+    };
     const putLeft = Math.round(putCost - putCollected);
 
     /* ⚠ THE HEDGE HAS A DEADLINE, AND A PROJECTION PAST IT IS NOT A PLAN.
@@ -1957,9 +1972,7 @@ Deno.serve(async (req) => {
     const [ydayMk, weekMk] = await time('coverHist', () =>
       Promise.all([coverDay(ydayDate), coverDay(ago(7))]));
 
-    /* This week's realised credit per side, and how many names hold that leg. */
-    const putWkTotal = [...putWeek.entries()]
-      .filter(([w]) => w === thisWeek).reduce((a, [, v]) => a + v, 0);
+    /* How many names hold each side's long leg. */
     const nameCount = (type: string) =>
       new Set(longLegs.filter((e) => e.type === type).map((e) => e.ticker)).size;
 
@@ -2750,10 +2763,11 @@ Deno.serve(async (req) => {
         asOf: dayLive ? today : ydayDate,
         sides: {
           call: side('call', 'Call cover', 'the long calls',
-                     callCollected, callPace, thetaWeeks[thetaWeeks.length - 1]?.lc ?? 0,
+                     callCollected, avgDone(callWeek), thetaWeeks[thetaWeeks.length - 1]?.lc ?? 0,
                      callNames.reduce((a, [t]) => a + (callCrOpenBy.get(t) ?? 0), 0)),
           put: side('put', 'Put cover', 'the long puts',
-                    putCollected, putWkTotal, thetaWeeks[thetaWeeks.length - 1]?.lp ?? 0,
+                    putCollected, avgDone(new Map([...putWeek.entries()].map(([w, v]) =>
+                      [w, v + (putWeekOpen.get(w) ?? 0)]))), thetaWeeks[thetaWeeks.length - 1]?.lp ?? 0,
                     [...putWeekOpen.values()].reduce((a, b) => a + b, 0)),
         },
       },

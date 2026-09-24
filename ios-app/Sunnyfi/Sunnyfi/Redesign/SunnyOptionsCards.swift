@@ -1510,7 +1510,12 @@ struct SunnyWeeklyYield: View {
                     /* The tap target is the bar. No text on this card flips, so
                        nothing here carries the dotted underline: that hint marks
                        tappable TEXT and would be a lie on a week label. */
-                    .onTapGesture { picked = (picked == w.id) ? nil : w.id }
+                    /* ⚠ THE GHOST IS NOT A WEEK TO READ until something is sold
+                       into it: picking it printed Kept 0.00% (Nik, 24 Sep). */
+                    .onTapGesture {
+                        guard !w.ghostOnly else { return }
+                        picked = (picked == w.id) ? nil : w.id
+                    }
                 }
                 /* ⚠ LEFT-ALIGNED, NOT SPREAD. Eight columns at flex:1 in 323
                    measure 34 and read chunky, so the bar is capped at 30 and
@@ -2394,8 +2399,12 @@ struct SunnyIntrinsic: View {
        week closes there is no average to project, so the clocks leave rather
        than quoting a partial week as if it were a rate. */
     private var rateWeek: Double? {
+        /* ⚠ FINISHED MEANS BEFORE THIS WEEK, not "not current": the window
+           reaches forward, and next week's ghost gains a credit the moment a
+           call is sold for it. That week has not run. */
+        let now = book.weekly.first { $0.current == true }?.week ?? "9999"
         let done = book.weekly.filter {
-            $0.current != true && (($0.gross ?? $0.credit) > 0 || ($0.bought ?? 0) > 0)
+            $0.week < now && (($0.gross ?? $0.credit) > 0 || ($0.bought ?? 0) > 0)
         }
         guard !done.isEmpty else { return nil }
         let mean = Double(done.reduce(0) { $0 + $1.credit }) / Double(done.count)
