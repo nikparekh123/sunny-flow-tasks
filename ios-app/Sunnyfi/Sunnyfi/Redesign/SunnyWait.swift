@@ -123,10 +123,10 @@ struct SunnyLoadingScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(.vertical, 40)
-        /* ⚠ --tile-ground, NOT --paper. The screen is a STATE, not a card: it
-           sits where the pane sits and takes the tile grey so the cards' white
-           reads as arrival when they land. */
-        .background(S.tileGround)
+        /* ⚠ NO GROUND OF ITS OWN (Nik, 27 Sep 2026: "remove that gray patch
+           and just have a black background for loading screen"). The tile
+           grey read as a patch on the dark page; the screen now sits straight
+           on the page's own ground, black by night. */
         /* THE CLOCK. 100ms, and the tape glides between ticks on a linear
            transition of the same length, so the ruler is continuous. */
         .task(id: t0) {

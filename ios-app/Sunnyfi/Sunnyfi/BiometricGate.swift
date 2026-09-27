@@ -2,10 +2,9 @@
 //  BiometricGate.swift
 //  Sunnyfi
 //
-//  Shown when AppLock.isLocked == true. Auto-prompts for biometric
-//  on appear; user can re-trigger with the big button. If biometric
-//  fails repeatedly (or isn't enrolled), falls through to the
-//  10-digit pincode entry — same flow as initial sign-in.
+//  Shown when AppLock.isLocked == true. An empty screen in the app's
+//  own ground while the system Face ID prompt runs; Unlock and the
+//  10-digit code appear only after a cancelled or failed scan.
 //
 
 import SwiftUI
@@ -15,60 +14,51 @@ struct BiometricGate: View {
     let auth: AuthStore
     @State private var showPincodeFallback: Bool = false
     @State private var didAutoPrompt: Bool = false
+    /// Set when Face ID was cancelled or failed: only then is anything drawn.
+    @State private var failed: Bool = false
+    @AppStorage("sunnyfi.theme") private var themePref = "auto"
 
+    /* ⚠ NO LOCK SCREEN, JUST FACE ID (Nik, 27 Sep 2026: "we don't need a full
+       screen for Face ID, usually just the top thing that verifies... the full
+       screen turns on white in dark mode"). The gate is the app's own ground in
+       the app's own theme, empty, while the system's Face ID prompt runs at the
+       top. It read white because it followed the old Ink appearance setting,
+       not the theme the pages use. Only a cancelled or failed scan draws a way
+       back in: Unlock, and the 10-digit code. */
     var body: some View {
         ZStack {
-            Ink.canvas.ignoresSafeArea()
-
-            VStack(spacing: 24) {
-                Spacer()
-
-                Image(systemName: lock.biometricKind.icon)
-                    .font(.system(size: 64, weight: .regular))
-                    .foregroundStyle(Ink.text)
-
-                Text("Sunnyfi is locked")
-                    .font(InkFont.serif(22)).tracking(22 * -0.01)
-                    .foregroundStyle(Ink.text)
-
-                Text("Unlock with \(lock.biometricKind.label).")
-                    .font(InkFont.display(13, .light))
-                    .foregroundStyle(Ink.dim)
-
-                Spacer()
-
-                Button {
-                    Task { await tryBiometric() }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: lock.biometricKind.icon)
-                            .font(.system(size: 16, weight: .semibold))
-                        Text("Unlock")
-                            .font(InkFont.mono(13, .medium)).tracking(13 * 0.08)
+            S.ground.ignoresSafeArea()
+            if failed {
+                VStack(spacing: 18) {
+                    Spacer()
+                    Button {
+                        Task { await tryBiometric() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: lock.biometricKind.icon)
+                                .font(.system(size: 15, weight: .semibold))
+                            Text("Unlock").font(S.inter(S.t14, S.wSemiN))
+                        }
+                        .foregroundStyle(S.ink)
+                        .padding(.horizontal, 22).padding(.vertical, 12)
+                        .background(Capsule().fill(S.wash))
                     }
-                    .foregroundStyle(Ink.invertText)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Capsule().fill(Ink.invertBg))
+                    .buttonStyle(.plain)
+                    Button {
+                        showPincodeFallback = true
+                    } label: {
+                        Text("Use 10-digit code instead")
+                            .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 48)
                 }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 24)
-
-                Button {
-                    showPincodeFallback = true
-                } label: {
-                    Text("Use 10-digit code instead")
-                        .font(InkFont.mono(11, .medium)).tracking(11 * 0.1)
-                        .foregroundStyle(Ink.dim)
-                }
-                .padding(.bottom, 30)
+                .transition(.opacity)
             }
-            .padding()
         }
-        .preferredColorScheme(AppPrefs.shared.appearance.colorScheme)
+        .preferredColorScheme(SunnyShell.resolveTheme(themePref, now: Date()))
         .task {
-            // Auto-prompt once on first appearance so the user doesn't
-            // have to tap to get the system dialog.
+            // Face ID straight away: the system prompt is the whole screen.
             if !didAutoPrompt {
                 didAutoPrompt = true
                 await tryBiometric()
@@ -84,10 +74,7 @@ struct BiometricGate: View {
 
     private func tryBiometric() async {
         let ok = await lock.authenticate()
-        if !ok {
-            // No-op: button stays available. iOS shows its own error
-            // (user cancelled / face not recognized / etc.).
-        }
+        withAnimation(.easeOut(duration: 0.2)) { failed = !ok }
     }
 }
 
