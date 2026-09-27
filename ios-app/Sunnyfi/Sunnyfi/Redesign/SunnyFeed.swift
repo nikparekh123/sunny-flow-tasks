@@ -544,11 +544,12 @@ struct SunnyPane: View {
                are — no card carries the date except in its own header. It
                scrolls away with the feed, like every other page title. */
             SunnyPageTitle(title: "Today", note: ivDay(o.date))
-            /* ⚠ POSITIONS + PRICES REPLACES PRICES AND POSITIONS, 23 Sep 2026
-               (final cards). Nik: "remove the old positions and prices cards".
-               One name is one block, its price and every strike on it. */
-            SunnyPositionsPrices(positions: o.positions, legs: o.longLegs?.legs ?? [],
-                                 prices: o.prices, roll: o.rollCard)
+            /* ⚠ POSITIONS AS NOTES REPLACES POSITIONS + PRICES, 27 Sep 2026
+               (handoff 17). Nik: "Replace the position card to this". One box a
+               name, one sentence a line. The ladder card stays in the code. */
+            SunnyPositionsNotes(positions: o.positions, legs: o.longLegs?.legs ?? [],
+                                prices: o.prices, roll: o.rollCard,
+                                intrinsic: o.intrinsic, weekly: o.book.weekly)
             /* ⚠ INVENTORY, DIRECTLY AFTER POSITIONS, 18 Sep 2026 (`export 20`). The
                true book behind the same four tabs; it is Left to sell's new home. */
             if let inv = o.inventoryCard {

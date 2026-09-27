@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-24.2';
+const BUILD = '2026-09-27.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2171,7 +2171,9 @@ Deno.serve(async (req) => {
        one the anchor IS the last close and every offset moves back a day. */
     const llBack = (n: number) => sessions[dayLive ? n - 1 : n] ?? sessions.at(-1) ?? today;
     const llRead = await time('longLegDays', () => Promise.all(
-      [5, 10, 20].map((n) => coverDay(llBack(n)))));
+      /* 15 added 27 Sep 2026: the Positions note's last-4-weeks view reads
+         one line a week, so it needs every week back, not 1, 2 and 4. */
+      [5, 10, 20, 15].map((n) => coverDay(llBack(n)))));
 
     const llLegs = open
       .filter((e) => e.dir === 'long')
@@ -2204,6 +2206,7 @@ Deno.serve(async (req) => {
           w1: r2(at(llRead[0])),
           w2: r2(at(llRead[1])),
           w4: r2(at(llRead[2])),
+          w3: r2(at(llRead[3])),
           rz: Math.round(rz),
         };
       })
