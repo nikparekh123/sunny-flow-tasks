@@ -1416,6 +1416,18 @@ struct SunnyWeeklyYield: View {
                 }
                 Spacer(minLength: 0)
             }
+            /* The two tones, named once (Nik, 28 Sep 2026). */
+            Spacer().frame(height: 10)
+            HStack(spacing: 14) {
+                ForEach([("calls", 1.0), ("puts", 0.5)], id: \.0) { word, a in
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2).fill(S.gainBar.opacity(a))
+                            .frame(width: 8, height: 8)
+                        Text(word).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
+                    }
+                }
+            }
+            .fixedSize()
 
             Spacer(minLength: S.gap6)
             OptFooter(stats: [
@@ -1457,14 +1469,15 @@ struct SunnyWeeklyYield: View {
                        green left under it is what was kept. A cap drawn from the
                        bottom would read as the week starting in the red. */
                     ZStack(alignment: .top) {
-                        /* ⚠ CALLS BELOW, PUTS ABOVE, ONE COLOUR IN TWO TONES
-                           (Nik, 27 Sep 2026). The week's own ink for the calls,
-                           a lighter shade of it for the puts on top; the
-                           closed-early cap still sits over the whole bar. */
+                        /* ⚠ PUTS BELOW, CALLS ABOVE, ONE COLOUR IN TWO TONES
+                           (Nik, 27-28 Sep 2026). The week's own ink for the
+                           calls, a lighter shade for the puts at the base, so
+                           the closed-early cap, which hangs from the top,
+                           never hides the puts. */
                         VStack(spacing: 0) {
+                            Rectangle().fill(w.live ? S.gainBar : S.barQuiet)
                             Rectangle().fill((w.live ? S.gainBar : S.barQuiet).opacity(0.5))
                                 .frame(height: w.ghostOnly ? 0 : y(min(w.put, w.gross)))
-                            Rectangle().fill(w.live ? S.gainBar : S.barQuiet)
                         }
                         .frame(height: w.ghostOnly ? 0 : max(1, y(w.gross)))
                         if w.bought > 0 {
