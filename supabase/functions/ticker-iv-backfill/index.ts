@@ -54,6 +54,7 @@ const MAX_SPREAD = 0.12;          // strikes disagreeing by more than 12 vol poi
 const DIV_Q: Record<string, number> = {
   PEP: 0.036, KR: 0.019, FIS: 0.022, BABA: 0.010,
   NKE: 0.022, NFLX: 0, LULU: 0, TLT: 0.041,
+  SPY: 0.012, QQQ: 0.006, IWM: 0.011, SMH: 0.004,
 };
 
 const cors = {

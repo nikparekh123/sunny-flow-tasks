@@ -262,9 +262,14 @@ Deno.serve(async (req) => {
     ));
     // Union held tickers with option-leg tickers (we want quotes for both
     // — the user might hold options on something they don't own outright).
+    /* The market tapes are quoted every minute too (Nik, 28 Sep 2026): SPY,
+       QQQ, IWM are read like the book's names, never held. Every reader of
+       ticker_quotes looks a name up, so an extra row adds no card row. */
+    const MARKET = ['SPY', 'QQQ', 'IWM'];
     const allTickers = Array.from(new Set([
       ...heldTickers,
       ...openLegs.map((l) => l.ticker.toUpperCase()),
+      ...MARKET,
     ]));
 
     // ─── 3. Per-leg option snapshot calls ───────────────────────

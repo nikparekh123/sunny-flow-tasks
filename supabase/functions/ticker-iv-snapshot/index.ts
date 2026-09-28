@@ -245,6 +245,11 @@ Deno.serve(async (req) => {
     // Reference tapes (SMH, QQQ) are always included so the Today screen's
     // 5-session cards have real closes + IV even though they aren't held.
     const REFERENCE_TICKERS = ['SMH', 'QQQ'];
+    /* ⚠ SHARE PRICE ONLY (Nik, 28 Sep 2026: "SPY, QQQ and IWM share price
+       only, no options for now... we will get options only when we enter a
+       position"). Their daily closes are kept; no IV is read for them. QQQ
+       keeps the IV it already had as a Today reference tape. */
+    const PRICE_ONLY = ['SPY', 'IWM'];
     const heldTickers = Array.from(new Set([
       ...(trades ?? [])
         .filter((t) => (t as { action: string }).action === 'open')
@@ -279,7 +284,7 @@ Deno.serve(async (req) => {
     const closesByTicker = new Map<string, number[]>();
     const aggFrom = new Date(startedAt.getTime() - 120 * 86400000).toISOString().slice(0, 10);
     const aggTo = snapshotDate;
-    for (const tk of heldTickers) {
+    for (const tk of [...heldTickers, ...PRICE_ONLY]) {
       try {
         const aggUrl = `https://api.polygon.io/v2/aggs/ticker/${tk}/range/1/day/${aggFrom}/${aggTo}`
           + `?adjusted=true&sort=asc&limit=200&apiKey=${polygonKey}`;
