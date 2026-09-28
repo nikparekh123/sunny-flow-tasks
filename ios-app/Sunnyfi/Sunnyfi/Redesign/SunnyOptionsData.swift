@@ -663,6 +663,8 @@ struct OptionsBook: Decodable {
            decodes. */
         let gross: Int?
         let bought: Int?
+        /// The puts' share of `gross` (27 Sep 2026). Optional for older payloads.
+        let grossPut: Int?
         /// What this week was measured against. A closed week keeps its own
         /// denominator, so a LEAP bought on a Tuesday cannot rewrite it.
         let denom: Int?

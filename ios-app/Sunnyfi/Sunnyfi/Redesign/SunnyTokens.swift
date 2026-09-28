@@ -175,10 +175,16 @@ enum S {
     static let ctRsi     = dyn(0x2A4A6E, 0x7FA6D4)
 
     // MARK: gain / loss / attention
-    static let gainBar = dyn(0x00A945, 0x24B24E), gain = dyn(0x00722F, 0x45BD62), gainText = dyn(0x00631F, 0x58CC74)
+    /* ⚠ TEXT GREEN AND RED ARE SOFT BY NIGHT (Nik, 27 Sep 2026: "almost
+       everywhere text is hard when in green or red"). The saturated night inks
+       (#58CC74, #F27380) glowed on the dark paper; text now takes a paler,
+       calmer tint and the bars keep the strong ones. Day inks unchanged. If
+       this still reads badly, the fallback he chose is ink figures with the
+       colour on bars only. */
+    static let gainBar = dyn(0x00A945, 0x24B24E), gain = dyn(0x00722F, 0x45BD62), gainText = dyn(0x00631F, 0x9BDDAA)
     static let gainDeep = hex(0x00541F), gainQuiet = hex(0x1C5232)
     static let gainSpan = hex(0x8FBFA1), gainWash = hex(0xDFF3E6)
-    static let lossBar = dyn(0xC4001A, 0xDC4A57), loss = dyn(0xA80016, 0xE85C69), lossText = dyn(0x8E0014, 0xF27380)
+    static let lossBar = dyn(0xC4001A, 0xDC4A57), loss = dyn(0xA80016, 0xE85C69), lossText = dyn(0x8E0014, 0xF2A6AC)
     static let lossQuiet = hex(0x6E1A22), lossTick = hex(0x8A1F14), lossWash = hex(0xFBE4E6)
     static let warn = dyn(0xE08600, 0xF2A93B), warnText = hex(0x7A4700), warnDeep = hex(0x5C3300)
     static let warnWash = hex(0xFBEEDC), warnChip = hex(0xF4D9AE)

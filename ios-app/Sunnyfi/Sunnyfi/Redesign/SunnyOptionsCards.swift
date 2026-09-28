@@ -199,6 +199,24 @@ private func signedPctInt(_ v: Int) -> String {
     (v > 0 ? "+" : v < 0 ? "\u{2212}" : "") + "\(abs(v))%"
 }
 
+/* ⚠ A NAME'S LEGS SIT TOGETHER, AND THE BIGGEST CREDIT LEADS (Nik, 27 Sep
+   2026: "FIS and FIS should be one after another... organize by highest
+   credit first"). Names by their total credit on the side, largest first; a
+   name's legs by their own credit, largest first. Worst-first is retired. */
+private extension Array {
+    func byName(credit: KeyPath<Element, Double>, name: KeyPath<Element, String>) -> [Element] {
+        var tot: [String: Double] = [:]
+        for e in self { tot[e[keyPath: name], default: 0] += e[keyPath: credit] }
+        return sorted { a, b in
+            let ta = tot[a[keyPath: name]] ?? 0, tb = tot[b[keyPath: name]] ?? 0
+            if a[keyPath: name] != b[keyPath: name] {
+                return ta != tb ? ta > tb : a[keyPath: name] < b[keyPath: name]
+            }
+            return a[keyPath: credit] > b[keyPath: credit]
+        }
+    }
+}
+
 // MARK: - 1 · Positions, four tabs
 
 /* ⚠ ONE CARD IN PLACE OF TWO, from `export 17`, 15 Sep 2026. Roll check asked
@@ -272,8 +290,14 @@ struct SunnyPositions: View {
 
     // MARK: geometry, from the sheet
 
-    private static let nameCol: CGFloat = 70
-    private static let figCol: CGFloat = 56
+    /* ⚠ PRICES' ROW, EXACTLY (Nik, 27 Sep 2026: "match Prices exactly").
+       The ticker over its strike in a 52 column, a 27 row, the figure in a
+       column as wide as its widest figure and never under 62. */
+    private static let nameCol: CGFloat = 52
+    private static let rowH: CGFloat = 27
+    private var figCol: CGFloat {
+        max(62, (rows.map { S.textW($0.fig, S.t15, S.wMidN) }.max() ?? 0) + 3)
+    }
     private static let colGap: CGFloat = 10
     private static let barH: CGFloat = 14
     private static let rowGap: CGFloat = 16
@@ -331,7 +355,7 @@ struct SunnyPositions: View {
                             exp: s.exp, tv: Double(s.tv ?? 0), value: Double(s.value))
             }
         }
-        .sorted { $0.pct < $1.pct }
+        .byName(credit: \.credit, name: \.t)
     }
 
     /// One entry per name on the picked side: every long call on a name is one
@@ -358,7 +382,7 @@ struct SunnyPositions: View {
         }
         return by.map { Bought(t: $0.key, ks: $0.value.ks, n: $0.value.n,
                                now: $0.value.now, paid: $0.value.paid, tv: $0.value.tv) }
-            .sorted { $0.ch < $1.ch }
+            .sorted { $0.paid > $1.paid }
     }
 
     private var rows: [Row] {
@@ -675,7 +699,7 @@ struct SunnyPositions: View {
                 }
             }
             .frame(height: 11)
-            Color.clear.frame(width: Self.figCol, height: 11)
+            Color.clear.frame(width: figCol, height: 11)
         }
         .animation(reduceMotion ? nil : S.easeSettle(0.55), value: tabRaw)
     }
@@ -692,16 +716,16 @@ struct SunnyPositions: View {
                own leading, the row is sized by the text rather than by the bar,
                and the pitch measured 32 against the sheet's 30 — two points
                over on every row, thirty over the card. */
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
+            /* The strike sits where Prices puts its IV word: 10/400 under the
+               13/600 ticker, 4 between. */
+            VStack(alignment: .leading, spacing: 4) {
                 Text(r.t).font(S.inter(S.t13, S.wSemiN))
-                    .tracking(S.track(S.t13, -0.015))
+                    .tracking(S.track(S.t13, -0.01))
                     .foregroundStyle(r.through ? S.lossText : S.ink)
-                    .sunnyLineBox(S.t13)
-                Text(r.k).font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
-                    .sunnyLineBox(S.t11)
-                Spacer(minLength: 0)
+                Text(r.k).font(S.inter(S.t10, S.wMidSmN)).foregroundStyle(S.mute)
+                    .fixedSize().frame(height: 10, alignment: .leading)
             }
-            .lineLimit(1).frame(width: Self.nameCol, alignment: .leading)
+            .lineLimit(1).frame(width: Self.nameCol, height: Self.rowH, alignment: .leading)
 
             GeometryReader { g in
                 let zero = g.size.width * x(axis, 0)
@@ -749,19 +773,18 @@ struct SunnyPositions: View {
                same 13/700. Nik, 16 Sep 2026: "why so small". The widest figure
                fits the 56pt column at full size, so the scale factor was only
                ever doing harm. */
-            Text(r.fig).font(S.inter(S.t13, S.wBoldN))
-                .tracking(S.track(S.t13, -0.015))
+            /* 15/500 on both lists (Nik, 27 Sep 2026). */
+            Text(r.fig).font(S.inter(S.t15, S.wMidN))
+                .tracking(S.track(S.t15, -0.015))
                 .foregroundStyle(fr(tab.sold ? r.id : r.t,
                                     figMode == 2 ? S.ink : (r.up ? S.gainText : S.lossText)))
-                .lineLimit(1)
-                .sunnyLineBox(S.t13)
+                .lineLimit(1).fixedSize()
                 .sunnyHint()
-                .frame(width: Self.figCol, alignment: .trailing)
-                .padding(.vertical, 8).contentShape(Rectangle())
+                .frame(width: figCol, alignment: .trailing)
+                .contentShape(Rectangle())
                 .onTapGesture { figMode = (figMode + 1) % 3 }
-                .padding(.vertical, -8)
         }
-        .frame(height: Self.barH)
+        .frame(height: Self.rowH)
         .opacity(appeared || reduceMotion ? 1 : 0)
         .animation(reduceMotion ? nil : (soft
             ? .easeOut(duration: 0.25).delay(softDelay(i))
@@ -1246,6 +1269,8 @@ struct SunnyWeeklyYield: View {
     private struct Wk: Identifiable {
         let id: String, label: String, live: Bool
         let gross: Double, bought: Double
+        /// The puts' share of gross, same units. Calls are the rest.
+        var put: Double = 0
         /// Next week's ghost, the same units as `gross`. 0 elsewhere.
         var plan: Double = 0
         var kept: Double { gross - bought }
@@ -1265,7 +1290,8 @@ struct SunnyWeeklyYield: View {
             let p = Double(w.plan ?? 0)
             guard g > 0 || b > 0 || p > 0 else { return nil }
             return Wk(id: w.week, label: shortWeek(w.week), live: w.current ?? false,
-                      gross: g / den * 100, bought: b / den * 100, plan: p / den * 100)
+                      gross: g / den * 100, bought: b / den * 100,
+                      put: Double(w.grossPut ?? 0) / den * 100, plan: p / den * 100)
         }
     }
     /// The axis is set by the tallest GROSS bar; every height is a share of it.
@@ -1431,8 +1457,16 @@ struct SunnyWeeklyYield: View {
                        green left under it is what was kept. A cap drawn from the
                        bottom would read as the week starting in the red. */
                     ZStack(alignment: .top) {
-                        Rectangle().fill(w.live ? S.gainBar : S.barQuiet)
-                            .frame(height: w.ghostOnly ? 0 : max(1, y(w.gross)))
+                        /* ⚠ CALLS BELOW, PUTS ABOVE, ONE COLOUR IN TWO TONES
+                           (Nik, 27 Sep 2026). The week's own ink for the calls,
+                           a lighter shade of it for the puts on top; the
+                           closed-early cap still sits over the whole bar. */
+                        VStack(spacing: 0) {
+                            Rectangle().fill((w.live ? S.gainBar : S.barQuiet).opacity(0.5))
+                                .frame(height: w.ghostOnly ? 0 : y(min(w.put, w.gross)))
+                            Rectangle().fill(w.live ? S.gainBar : S.barQuiet)
+                        }
+                        .frame(height: w.ghostOnly ? 0 : max(1, y(w.gross)))
                         if w.bought > 0 {
                             /* ⚠ HATCHED ON A PAST WEEK, NEVER A LIGHTER RED.
                                Solid is the live week alone, so eight caps do not
@@ -1679,7 +1713,7 @@ struct SunnyPrices: View {
 
     private var nameCol: CGFloat { 52 }
     private var figCol: CGFloat {
-        max(62, (rows.map { S.textW(figText($0), S.t13, S.wBoldN) }.max() ?? 0) + 3)
+        max(62, (rows.map { S.textW(figText($0), S.t15, S.wMidN) }.max() ?? 0) + 3)
     }
     private var barW: CGFloat { S.content - 48 - nameCol - 10 - 10 - figCol }
 
@@ -1859,8 +1893,9 @@ struct SunnyPrices: View {
             }
             .frame(width: barW, height: 14)
 
+            /* 15/500 on both lists (Nik, 27 Sep 2026). */
             Text(figText(r))
-                .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.015))
+                .font(S.inter(S.t15, S.wMidN)).tracking(S.track(S.t15, -0.015))
                 .foregroundStyle(fig == .px ? S.ink : (up ? S.gainText : S.lossText))
                 .lineLimit(1).fixedSize()
                 /* The hint marks the tappable TEXT. Applied outside the column

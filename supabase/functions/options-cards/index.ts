@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-27.1';
+const BUILD = '2026-09-27.2';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -375,6 +375,9 @@ Deno.serve(async (req) => {
     /* The same buckets split by side, for the weekly-yield card's bar and cap. */
     const grossByWeek = new Map<string, Map<string, number>>();
     const boughtByWeek = new Map<string, Map<string, number>>();
+    /* Gross sold on puts alone, so Weekly yield can split each bar into its
+       calls and its puts (Nik, 27 Sep 2026). Calls are gross less this. */
+    const grossPutByWeek = new Map<string, Map<string, number>>();
     const firstCredit = new Map<string, string>();
     /* The same buckets again, counting only legs that have settled. Every card
        but Weekly yield, Positions and Credit & theta reads these. */
@@ -413,6 +416,10 @@ Deno.serve(async (req) => {
       if (!boughtByWeek.has(tk)) boughtByWeek.set(tk, new Map());
       if (c > 0) {
         const g = grossByWeek.get(tk)!; g.set(w, (g.get(w) ?? 0) + c);
+        if (String(t.option_type) === 'put') {
+          if (!grossPutByWeek.has(tk)) grossPutByWeek.set(tk, new Map());
+          const gp = grossPutByWeek.get(tk)!; gp.set(w, (gp.get(w) ?? 0) + c);
+        }
       } else if (c < 0) {
         const b = boughtByWeek.get(tk)!; b.set(w, (b.get(w) ?? 0) - c);
       }
@@ -772,8 +779,9 @@ Deno.serve(async (req) => {
          begun — and the card was painting THAT one as the live week. The
          server says which is current; the client must not infer it from a
          position in the array. */
-      let g = 0, b = 0;
+      let g = 0, b = 0, gp = 0;
       for (const p of positions) {
+        gp += (grossPutByWeek.get(p.t)?.get(w) ?? 0);
         g += (grossByWeek.get(p.t)?.get(w) ?? 0);
         b += (boughtByWeek.get(p.t)?.get(w) ?? 0);
       }
@@ -783,6 +791,8 @@ Deno.serve(async (req) => {
                /* Gross sold, and what closing legs cost, charged to the week
                   that paid for it. gross - bought === credit, always. */
                gross: Math.round(g), bought: Math.round(b),
+               /* The puts' share of gross; the calls' is gross - grossPut. */
+               grossPut: Math.round(gp),
                pct: denom > 0 ? r2(c / denom * 100) : 0,
                /* The denominator this week was measured against, so the card
                   never has to re-derive a dated ledger on the phone. */

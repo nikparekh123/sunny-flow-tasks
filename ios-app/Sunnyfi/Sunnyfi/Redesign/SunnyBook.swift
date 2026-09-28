@@ -150,9 +150,11 @@ struct SunnyBook: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(row.fig1).font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.02))
+                    /* 15/500, every list's right-hand figure (Nik, 27 Sep 2026). */
+                    Text(row.fig1).font(S.inter(S.t15, S.wMidN)).tracking(S.track(S.t15, -0.02))
                         .foregroundStyle(row.ink1)
-                    Text(row.fig2).font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
+                    Text(row.fig2).font(S.inter(S.t15, S.wMidN)).tracking(S.track(S.t15, -0.02))
+                        .foregroundStyle(S.mute)
                         .frame(minWidth: 60, alignment: .trailing)
                 }
                 .lineLimit(1)
@@ -178,14 +180,18 @@ struct SunnyBook: View {
             Spacer().frame(height: 22)
             Rectangle().fill(S.ruleColorStrong).frame(height: 1)
             Spacer().frame(height: 18)
-            HStack(alignment: .top, spacing: 14) {
-                ForEach(Array(r.stats.enumerated()), id: \.offset) { _, s in
-                    VStack(alignment: .leading, spacing: 7) {
+            /* ⚠ THE DECK'S FOOTER, NOT THE SHEET'S SMALLER ONE (Nik, 28 Sep
+               2026: the Book's 15pt stats looked unlike every other card's).
+               Label 10/700 over 19/700, 5 between, columns inset as OptFooter. */
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(Array(r.stats.enumerated()), id: \.offset) { i, s in
+                    VStack(alignment: .leading, spacing: 5) {
                         label(s.0)
-                        Text(s.1).font(S.inter(S.t15, S.wBoldN)).tracking(S.track(S.t15, -0.02))
-                            .foregroundStyle(s.2).lineLimit(1).sunnyLineBox(S.t15)
+                        Text(s.1).font(S.inter(S.t19, S.wBoldN)).tracking(S.track(S.t19, -0.025))
+                            .foregroundStyle(s.2).lineLimit(1).minimumScaleFactor(0.8)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, i == 0 ? 0 : S.statRulePad)
                 }
             }
         }

@@ -312,12 +312,13 @@ struct SunnyInventory: View {
         let ink = fr(r.t, "cr", own)
         HStack(alignment: .firstTextBaseline, spacing: 4) {
             if r.sold > 0, !pct, let cc = r.cc {
-                Text(optMoney(r.sold * cc)).font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.02))
+                /* 15/500, the lists' figure (Nik, 27 Sep 2026). */
+                Text(optMoney(r.sold * cc)).font(S.inter(S.t15, S.wMidN)).tracking(S.track(S.t15, -0.02))
                     .foregroundStyle(ink)
                 Text("(\(optMoney(cc)))").font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
             } else {
                 Text(r.sold > 0 && pct ? (r.cr.map { String(format: "%.2f%%", $0) } ?? "\u{2013}") : "\u{2013}")
-                    .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.02))
+                    .font(S.inter(S.t15, S.wMidN)).tracking(S.track(S.t15, -0.02))
                     .foregroundStyle(ink)
             }
         }
@@ -347,7 +348,7 @@ struct SunnyInventory: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(n == 0 ? "\u{2013}" : (pct ? String(format: "%.2f%%", cr) : optMoney(usd)))
-                    .font(S.inter(S.t13, S.wBoldN)).tracking(S.track(S.t13, -0.02))
+                    .font(S.inter(S.t15, S.wMidN)).tracking(S.track(S.t15, -0.02))
                     .foregroundStyle(fr("#total", "cr", n == 0 ? S.mute : (pct ? (cr >= floor ? S.gainText : S.lossText) : S.ink)))
                 Text(pct || n == 0 ? "avg" : "(\(optMoney(Int(cc.rounded()))) avg)")
                     .font(S.inter(S.t11, S.wMidSmN)).foregroundStyle(S.mute)
