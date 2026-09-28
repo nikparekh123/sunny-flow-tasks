@@ -102,8 +102,14 @@ private struct OptFooter: View {
         VStack(spacing: 0) {
             Rectangle().fill(S.ruleColor).frame(height: 1)
             Spacer().frame(height: 14)
+            /* ⚠ EQUAL GAPS, NOT EQUAL THIRDS (Nik, 28 Sep 2026: "we need equal
+               spacing"). Thirds left a wide hole after a short figure and a
+               narrow one after a long one. Each stat hugs its content; the
+               first sits flush left, the last flush right, and the gaps
+               between them are equal. */
             HStack(alignment: .top, spacing: 0) {
                 ForEach(Array(stats.enumerated()), id: \.offset) { i, s in
+                    if i > 0 { Spacer(minLength: 12) }
                     VStack(alignment: .leading, spacing: 5) {
                         Text(s.label.uppercased())
                             .font(S.inter(S.t10, S.wBoldN))
@@ -118,8 +124,7 @@ private struct OptFooter: View {
                             .foregroundStyle(S.mute))
                             .lineLimit(1)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, i == 0 ? 0 : S.statRulePad)
+                    .fixedSize()
                 }
             }
         }
@@ -798,18 +803,20 @@ struct SunnyPositions: View {
 
     /* ⚠ THE FOOTER FOLLOWS THE TAB, and its Paid must equal Programme's invested
        and Intrinsic value's Paid to the dollar — all three read one ledger. */
+    /// Equal gaps between the stats, first flush left, last flush right.
     private var footer: some View {
-        HStack(alignment: .top, spacing: S.gap6) {
-            ForEach(Array(stats.enumerated()), id: \.offset) { _, s in
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(stats.enumerated()), id: \.offset) { i, s in
+                if i > 0 { Spacer(minLength: 12) }
                 VStack(alignment: .leading, spacing: 5) {
                     Text(s.0).font(S.inter(S.t10, S.wBoldN))
                         .tracking(S.track(S.t10, S.lsLabel))
                         .foregroundStyle(S.mute).lineLimit(1)
                     Text(s.1).font(S.inter(S.t19, S.wBoldN))
                         .tracking(S.track(S.t19, -0.025))
-                        .foregroundStyle(s.2).lineLimit(1).minimumScaleFactor(0.7)
+                        .foregroundStyle(s.2).lineLimit(1)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize()
             }
         }
     }
@@ -1476,7 +1483,9 @@ struct SunnyWeeklyYield: View {
                            never hides the puts. */
                         VStack(spacing: 0) {
                             Rectangle().fill(w.live ? S.gainBar : S.barQuiet)
-                            Rectangle().fill((w.live ? S.gainBar : S.barQuiet).opacity(0.5))
+                            /* Puts are the light green on every week, past ones
+                               too (Nik, 28 Sep 2026); calls keep the week's ink. */
+                            Rectangle().fill(S.gainBar.opacity(0.5))
                                 .frame(height: w.ghostOnly ? 0 : y(min(w.put, w.gross)))
                         }
                         .frame(height: w.ghostOnly ? 0 : max(1, y(w.gross)))

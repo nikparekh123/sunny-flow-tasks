@@ -185,13 +185,13 @@ struct SunnyBook: View {
                Label 10/700 over 19/700, 5 between, columns inset as OptFooter. */
             HStack(alignment: .top, spacing: 0) {
                 ForEach(Array(r.stats.enumerated()), id: \.offset) { i, s in
+                    if i > 0 { Spacer(minLength: 12) }
                     VStack(alignment: .leading, spacing: 5) {
                         label(s.0)
                         Text(s.1).font(S.inter(S.t19, S.wBoldN)).tracking(S.track(S.t19, -0.025))
-                            .foregroundStyle(s.2).lineLimit(1).minimumScaleFactor(0.8)
+                            .foregroundStyle(s.2).lineLimit(1)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, i == 0 ? 0 : S.statRulePad)
+                    .fixedSize()
                 }
             }
         }
