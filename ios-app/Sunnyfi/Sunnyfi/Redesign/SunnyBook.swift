@@ -22,10 +22,18 @@ struct SunnyBook: View {
     let programme: ProgrammeBlock?
     let legs: [LongLeg]
     let allocation: AllocationCard?
+    /// Long legs closed since the book began, per name (28 Sep 2026).
+    var closed: ClosedCard? = nil
+    /// For a name's detail sheet: its open short legs, expiries, spot.
+    var positions: [OptionsPosition] = []
+    var intrinsic: IntrinsicBlock? = nil
+    var prices: [PriceRow] = []
 
     @AppStorage("sunnyfi.book.tab") private var tabRaw = "perf"
     /// The ledger expanded past five. Shared across tabs, survives a pull.
     @State private var more = false
+    /// The name whose detail sheet is open.
+    @State private var sheetT: String? = nil
     @State private var appeared = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -55,10 +63,11 @@ struct SunnyBook: View {
         var r = Read()
         if perf {
             guard let block = programme else { return r }
-            let rs = SunnyProgramme.pgRows(block, legs)
+            let rs = perfRows(block)
             let kept = rs.reduce(0) { $0 + $1.kept }, open = rs.reduce(0) { $0 + $1.open }
-            let mark = rs.reduce(0) { $0 + $1.mark }, inv = rs.reduce(0) { $0 + $1.inv }
-            let net = kept + mark
+            let mark = rs.reduce(0) { $0 + $1.atMark }, inv = rs.reduce(0) { $0 + $1.inv }
+            let done = rs.reduce(0) { $0 + $1.closed }
+            let net = kept + done + mark
             let pct = inv > 0 ? Double(net) / Double(inv) * 100 : 0
             r.scope = "performance"; r.meta = sinceLabel(block.since); r.eyebrow = "NET"
             r.hero = signedMoney(Double(net)); r.heroInk = net < 0 ? S.lossText : S.gainText
@@ -67,11 +76,16 @@ struct SunnyBook: View {
             r.colName = "NAME"; r.col1 = "NET %"; r.col2 = "NET $"
             /* Every name with cash invested, best return first. */
             r.rows = rs.filter { $0.inv > 0 }.sorted { $0.pct > $1.pct }.map {
-                Row(t: $0.t, mid: "", fig1: bkPct1($0.pct), ink1: $0.pct < 0 ? S.lossText : S.gainText,
+                Row(t: $0.t, mid: $0.closed == 0 ? "" : "closed " + signedMoney(Double($0.closed)),
+                    fig1: bkPct1($0.pct), ink1: $0.pct < 0 ? S.lossText : S.gainText,
                     fig2: signedMoney(Double($0.net)))
             }
+            /* ⚠ CLOSED IS ITS OWN STAT (Nik, 28 Sep 2026). What selling long legs
+               back realized, IBKR's figure where it has one; AT MARK is now the
+               legs still held alone. Banked + Closed + At mark = Net. */
             r.stats = [("BANKED", optMoney(kept), S.ink),
                        ("OPEN", optMoney(open), S.ink),
+                       ("CLOSED", signedMoney(Double(done)), done < 0 ? S.lossText : S.gainText),
                        ("AT MARK", signedMoney(Double(mark)), mark < 0 ? S.lossText : S.gainText)]
         } else {
             guard let al = allocation else { return r }
@@ -145,8 +159,11 @@ struct SunnyBook: View {
                     HStack(alignment: .firstTextBaseline, spacing: S.gap4) {
                         Text(row.t).font(S.inter(S.t15, S.wSemiN)).tracking(S.track(S.t15, -0.015))
                             .foregroundStyle(S.ink)
+                            /* The ticker opens its detail: bought, sold, closed. */
+                            .sunnyHint()
                         if !row.mid.isEmpty {
-                            Text(row.mid).font(S.inter(S.t12, S.wSemiN)).foregroundStyle(S.ink2)
+                            Text(row.mid).font(S.inter(S.t12, perf ? S.wMidSmN : S.wSemiN))
+                                .foregroundStyle(perf ? S.mute : S.ink2)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -160,6 +177,8 @@ struct SunnyBook: View {
                 .lineLimit(1)
                 .frame(height: 15)
                 .padding(.vertical, 10)
+                .contentShape(Rectangle())
+                .onTapGesture { openSheet(row.t) }
                 .overlay(alignment: .bottom) { Rectangle().fill(S.ruleColor).frame(height: 1) }
                 .opacity(appeared || reduceMotion ? 1 : 0)
                 .animation(reduceMotion ? nil : S.easeSettle(0.4).delay(Double(i) * 0.04), value: appeared)
@@ -203,10 +222,69 @@ struct SunnyBook: View {
         .sunnyShadow(S.shadowCardL)
         .monospacedDigit()
         .measure("book")
+        .fullScreenCover(isPresented: sheetOpen) {
+            sheetHost.presentationBackground(.clear)
+        }
         .task(id: "\(tabRaw)|\(more)") {
             appeared = false
             try? await Task.sleep(for: .milliseconds(20))
             appeared = true
+        }
+    }
+
+    // MARK: performance rows
+
+    /// One row a name: kept and open from the ledger, the legs still held at
+    /// mark against average cost, and what closing long legs realized. The
+    /// closed ledger replaces the legs' `rz`, which only covered legs still
+    /// partly held and so dropped every fully closed hedge from the net.
+    private struct PerfRow {
+        let t: String, kept: Int, open: Int, atMark: Int, closed: Int, inv: Int
+        var net: Int { kept + closed + atMark }
+        var pct: Double { inv > 0 ? Double(net) / Double(inv) * 100 : 0 }
+    }
+    private func perfRows(_ block: ProgrammeBlock) -> [PerfRow] {
+        let names = Set(block.rows.map(\.t)).union(legs.map(\.t))
+            .union(closed?.names.keys.map { $0 } ?? [])
+        return names.map { t in
+            let src = block.rows.first { $0.t == t }
+            let mine = legs.filter { $0.t == t }
+            let mark = mine.reduce(0.0) { $0 + ($1.m - $1.cost) * Double($1.n) }
+            let done = closed.map { $0.names[t]?.total ?? 0 }
+                ?? Int(mine.reduce(0.0) { $0 + ($1.rz ?? 0) }.rounded())
+            return PerfRow(t: t, kept: src?.kept ?? 0, open: src?.open ?? 0,
+                           atMark: Int(mark.rounded()), closed: done,
+                           inv: Int(mine.reduce(0.0) { $0 + $1.cost * Double($1.n) }.rounded()))
+        }
+    }
+
+    // MARK: the detail sheet
+
+    private func openSheet(_ t: String) {
+        var tr = Transaction(); tr.disablesAnimations = true
+        withTransaction(tr) { sheetT = t }
+    }
+    private var sheetOpen: Binding<Bool> {
+        Binding(get: { sheetT != nil }, set: { if !$0 {
+            var tr = Transaction(); tr.disablesAnimations = true
+            withTransaction(tr) { sheetT = nil }
+        } })
+    }
+    @ViewBuilder private var sheetHost: some View {
+        if let t = sheetT {
+            let row = programme?.rows.first { $0.t == t }
+            GlassSheetHost(content: { close in
+                SunnyNameSheet(t: t, spot: prices.first { $0.ticker == t }?.spot,
+                               legs: legs.filter { $0.t == t },
+                               shorts: positions.first { $0.t == t }?.shorts ?? [],
+                               closed: closed?.names[t],
+                               intrinsic: intrinsic?.rows.first { $0.t == t },
+                               banked: row?.kept ?? 0, openCredit: row?.open ?? 0,
+                               onClose: close)
+            }, onDismissed: {
+                var tr = Transaction(); tr.disablesAnimations = true
+                withTransaction(tr) { sheetT = nil }
+            })
         }
     }
 

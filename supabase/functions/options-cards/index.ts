@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-09-27.2';
+const BUILD = '2026-10-02.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -141,7 +141,8 @@ Deno.serve(async (req) => {
 
     const [legs, allShorts, allPuts, quotes, greeks, names, closes, ivHist] = await Promise.all([
       time('legs', () => D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
-        + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date')),
+        + '&select=id,ticker,option_type,direction,action,contracts,strike,expiry,premium,trade_date,'
+        + 'executed_at,realized_pl,realized_pl_source')),
       /* ⚠ SHORT PUTS COUNT HERE TOO. Nik, 2026-09-08: "short calls only shuold
          also include short puts as well." The weekly bars were calls-only
          while Roll check's footer summed both, so the same week read 2.7% on
@@ -302,15 +303,49 @@ Deno.serve(async (req) => {
       return { lots, held, cost };
     };
 
+    /* ⚠ AVERAGE COST, IBKR'S METHOD, REPLACES FIFO (Nik, 28 Sep 2026: "use
+       IBKR's number"). IBKR booked his 10 NKE 37.5P sold at 4.45 as +$404,
+       which is his average cost ($4.04), not the first-in lot ($3.87, +$580).
+       Realized and the cost of what is still held must follow one method or
+       the net drifts by the difference, so both are average now: a close
+       realizes (price − running average) on its contracts and leaves the
+       average of what remains unchanged. Where the 09:00 Daily Flex has
+       delivered IBKR's own figure (`realized_pl`, source 'ibkr') it replaces
+       the computed one; the gap is commissions, which the book does not
+       record. */
+    type Close = { d: string; n: number; px: number; avg: number; rz: number; src: string };
+    const avgOf = (e: Leg) => {
+      const fills = legs
+        .filter((t) => String(t.ticker) === e.ticker && String(t.option_type) === e.type
+          && String(t.direction) === e.dir && N(t.strike) === e.k
+          && String(t.expiry).slice(0, 10) === e.exp)
+        .sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date))
+          || String(a.executed_at ?? '').localeCompare(String(b.executed_at ?? ''))
+          || (String(a.action) === 'open' ? -1 : 1));
+      let qty = 0, cost = 0, rz = 0;
+      const closes: Close[] = [];
+      for (const t of fills) {
+        const n = N(t.contracts), px = N(t.premium) * 100;
+        if (String(t.action) === 'open') { qty += n; cost += n * px; continue; }
+        const avg = qty > 0 ? cost / qty : 0;
+        const ib = t.realized_pl === null || t.realized_pl === undefined ? null : N(t.realized_pl);
+        const r = ib !== null && String(t.realized_pl_source) === 'ibkr' ? ib : n * (px - avg);
+        rz += r;
+        closes.push({ d: String(t.trade_date).slice(0, 10), n, px, avg, rz: r,
+                      src: ib !== null ? 'ibkr' : 'avg' });
+        cost -= n * avg; qty -= n;
+      }
+      return { held: Math.max(0, qty), cost: Math.max(0, cost), rz, closes };
+    };
+
     /* Priced once, here, so every card that reads a long leg's cost (Positions'
        Paid, Programme, Intrinsic's Paid, Coverage) agrees to the dollar. */
     for (const e of open) {
       if (e.dir !== 'long') continue;
-      const ff = fifoOf(e);
-      if (ff.held <= 0.0001) continue;
-      /* Proceeds of what was sold less the first-in lots it came out of. */
-      e.rz = ff.cost - e.cash;
-      e.cash = ff.cost;
+      const av = avgOf(e);
+      if (av.held <= 0.0001) continue;
+      e.rz = av.rz;
+      e.cash = av.cost;
     }
 
     /* ── ONE START DATE, AND ONLY WHAT IS CLOSED ──────────────────────────
@@ -343,6 +378,34 @@ Deno.serve(async (req) => {
           yield for next week as I start rolling"), and Credit & theta, which
           measures the RATE a contract sold at and knows that at the sale. */
     const BOOK_START = '2026-08-31';
+
+    /* ── CLOSED: long legs sold back, per name (Nik, 28 Sep 2026) ─────────
+       The Book's Performance tab shows what closing long legs realized, and a
+       name's detail sheet lists each one. Every long contract, open or fully
+       closed, since the book began; realized is IBKR's figure where the Daily
+       Flex delivered it, else average cost. */
+    const closedBy: Record<string, { calls: number; puts: number; legs: {
+      k: string; exp: string; n: number; avg: number; px: number; rz: number; d: string; src: string }[] }> = {};
+    for (const e of byKey.values()) {
+      if (e.dir !== 'long') continue;
+      const cs = avgOf(e).closes.filter((c) => c.d >= BOOK_START);
+      if (!cs.length) continue;
+      const n = cs.reduce((a, c) => a + c.n, 0);
+      const rz = cs.reduce((a, c) => a + c.rz, 0);
+      const rec = closedBy[e.ticker] ?? (closedBy[e.ticker] = { calls: 0, puts: 0, legs: [] });
+      if (e.type === 'put') rec.puts += rz; else rec.calls += rz;
+      rec.legs.push({
+        k: `${r2(e.k)}${e.type === 'put' ? 'P' : 'C'}`, exp: e.exp, n: Math.round(n),
+        avg: r2(cs.reduce((a, c) => a + c.avg * c.n, 0) / n),
+        px: r2(cs.reduce((a, c) => a + c.px * c.n, 0) / n),
+        rz: Math.round(rz), d: cs[cs.length - 1].d,
+        src: cs.every((c) => c.src === 'ibkr') ? 'ibkr' : cs.some((c) => c.src === 'ibkr') ? 'mixed' : 'avg',
+      });
+    }
+    for (const r of Object.values(closedBy)) {
+      r.calls = Math.round(r.calls); r.puts = Math.round(r.puts);
+      r.legs.sort((a, b) => b.d.localeCompare(a.d));
+    }
     const shortKey = (t: Record<string, unknown>) =>
       `${t.ticker}|${t.option_type}|${N(t.strike)}|${t.expiry}`;
     const shortOpened = new Map<string, string>();
@@ -1958,6 +2021,21 @@ Deno.serve(async (req) => {
        programme's, which needs `direction` and `strike` to test membership —
        fields the shorts query does not select, so it reads `allPuts`. Getting
        this wrong made the put ghost read zero against a real $2,214. */
+    /* ⚠ COVERAGE COUNTS THE BOUGHT LEGS TOO (Nik, 2 Oct 2026: "Calls sold
+       and bought... puts sold and bought, so it calculates everything").
+       What selling a bought leg back realized, since the book began, joins
+       the side's Collected: IBKR's figure where stored, else average cost,
+       the Book's CLOSED figure. Closed legs only; an open leg's mark is not
+       collected. Dated, so "since yesterday" and "since last week" compare
+       like with like. */
+    const rzTo = (cut: string, type: string) => {
+      let r = 0;
+      for (const e of byKey.values()) {
+        if (e.dir !== 'long' || e.type !== type) continue;
+        for (const c of avgOf(e).closes) if (c.d >= BOOK_START && c.d <= cut) r += c.rz;
+      }
+      return Math.round(r);
+    };
     const creditTo = (cut: string, type: string) => {
       let c = 0;
       if (type === 'call') {
@@ -2014,7 +2092,8 @@ Deno.serve(async (req) => {
          open: real cash, not yet earned, and it can still be handed back. Nik
          asked for it drawn above the solid bar rather than inside it. */
       open: Math.round(open),
-      chist: { yday: creditTo(ydayMk.day, type), week: creditTo(weekMk.day, type) },
+      chist: { yday: creditTo(ydayMk.day, type) + rzTo(ydayMk.day, type),
+               week: creditTo(weekMk.day, type) + rzTo(weekMk.day, type) },
       pace: Math.round(pace),
       /* Positive: the card's word is "melts", so the sign is in the label. */
       melt: Math.abs(melt),
@@ -2709,6 +2788,7 @@ Deno.serve(async (req) => {
       inventoryCard,
       allocationCard,
       rollCard,
+      closedCard: { since: BOOK_START, names: closedBy },
       /* ⚠ THE TWO RATES, NOT ONE NET. Programme apportions theta to a name by
          its share of kept (the short side) and of invested (the long side),
          which cannot be done from a single netted figure. Short is positive,
@@ -2775,11 +2855,11 @@ Deno.serve(async (req) => {
       coverBars: {
         asOf: dayLive ? today : ydayDate,
         sides: {
-          call: side('call', 'Call cover', 'the long calls',
-                     callCollected, avgDone(callWeek), thetaWeeks[thetaWeeks.length - 1]?.lc ?? 0,
+          call: side('call', 'Call cover', 'calls sold and bought',
+                     callCollected + rzTo(today, 'call'), avgDone(callWeek), thetaWeeks[thetaWeeks.length - 1]?.lc ?? 0,
                      callNames.reduce((a, [t]) => a + (callCrOpenBy.get(t) ?? 0), 0)),
-          put: side('put', 'Put cover', 'the long puts',
-                    putCollected, avgDone(new Map([...putWeek.entries()].map(([w, v]) =>
+          put: side('put', 'Put cover', 'puts sold and bought',
+                    putCollected + rzTo(today, 'put'), avgDone(new Map([...putWeek.entries()].map(([w, v]) =>
                       [w, v + (putWeekOpen.get(w) ?? 0)]))), thetaWeeks[thetaWeeks.length - 1]?.lp ?? 0,
                     [...putWeekOpen.values()].reduce((a, b) => a + b, 0)),
         },

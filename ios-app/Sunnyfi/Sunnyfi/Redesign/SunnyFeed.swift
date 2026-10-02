@@ -582,7 +582,9 @@ struct SunnyPane: View {
                performance card". Two rankings of one book, two tabs. */
             if o.programme?.rows.isEmpty == false || o.allocationCard?.book.isEmpty == false {
                 SunnyBook(programme: o.programme, legs: o.longLegs?.legs ?? [],
-                          allocation: o.allocationCard)
+                          allocation: o.allocationCard, closed: o.closedCard,
+                          positions: o.positions, intrinsic: o.intrinsic,
+                          prices: o.prices?.rows ?? [])
             }
             /* ⚠ CREDIT & THETA REPLACES THETA AND AVERAGE CREDIT, 17 Sep 2026,
                in their place at the end of the run. */

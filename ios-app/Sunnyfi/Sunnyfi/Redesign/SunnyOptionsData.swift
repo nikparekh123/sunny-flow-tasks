@@ -193,6 +193,8 @@ struct OptionsPayload: Decodable {
     let allocationCard: AllocationCard?
     /// The roll sheet's chain (`export 24`). Optional for the same reason.
     let rollCard: RollCard?
+    /// Long legs closed since the book began, per name (28 Sep 2026).
+    let closedCard: ClosedCard?
     /// Optional so a run against an older deployment decodes rather than throws.
     let intrinsic: IntrinsicBlock?
     let yieldProgress: YieldProgressBlock?

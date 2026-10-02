@@ -1145,6 +1145,17 @@ async function upsertOption(
     closes_trade_id: null as string | null,
   };
 
+  /* ⚠ IBKR'S OWN REALIZED ON A CLOSE, when the report carries it (the 09:00
+     Daily Flex does; the intraday TCF does not). Set only when present, so a
+     later TCF pass never wipes what the daily report wrote. The app shows it
+     as the closed P&L on the name (Nik, 28 Sep 2026: "use IBKR's number"). */
+  const optPnlRaw = t.fifoPnlRealized ?? '';
+  const optPnl = optPnlRaw !== '' ? Number(optPnlRaw) : NaN;
+  if (action === 'close' && Number.isFinite(optPnl)) {
+    row.realized_pl = optPnl;
+    row.realized_pl_source = 'ibkr';
+  }
+
   // For closes (C/A/Ex/Ep): link to the matching open via closes_trade_id.
   // iOS's "remaining contracts" math depends on this FK to subtract closes
   // from opens; without it, every IBKR close is orphaned and the position

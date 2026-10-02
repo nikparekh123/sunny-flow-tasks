@@ -998,8 +998,10 @@ struct SunnyCoverage: View {
        line sitting on the rule; tabs are never underlined — the line is the state,
        and a dotted hint under two words 28pt apart would read as a heading rule. */
     private var tabRow: some View {
-        HStack(alignment: .bottom, spacing: 28) {
-            ForEach(Array(["All", "Calls", "Puts"].enumerated()), id: \.offset) { i, label in
+        /* ⚠ EACH SIDE COUNTS SOLD AND BOUGHT (Nik, 2 Oct 2026): Collected is the
+           credit on legs sold plus what selling bought legs back realized. */
+        HStack(alignment: .bottom, spacing: 22) {
+            ForEach(Array(["All", "Calls sold + bought", "Puts sold + bought"].enumerated()), id: \.offset) { i, label in
                 /* ⚠ THE LINE SITS INSIDE THE PADDING, ON THE RULE. The row is 22:
                    12 of word and 10 below it, and the picked tab's 2pt line is drawn
                    over the bottom of that 10 — CSS's inset box-shadow. Stacked under
