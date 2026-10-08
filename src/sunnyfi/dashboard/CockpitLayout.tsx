@@ -47,7 +47,6 @@ export interface CockpitProps {
   formalGreeting?: boolean;
   onPositions?: () => void;
   onStrategy?: () => void;
-  onMath?: () => void;
   onIncome?: () => void;
   onLogo?: () => void;
 }

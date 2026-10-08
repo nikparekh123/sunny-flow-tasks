@@ -191,10 +191,9 @@ Deno.serve(async (req) => {
     { feed: 'intel-sync',           warnHours: 30,  critHours: 50 },
     { feed: 'earnings-sync',        warnHours: 30,  critHours: 50 },
     // weekday only — the grace has to clear a weekend, and a long one
-    { feed: 'income-scanner',       warnHours: 80,  critHours: 110 },
     { feed: 'ticker-iv-snapshot',   warnHours: 80,  critHours: 110 },
-    { feed: 'daily-theta-snapshot', warnHours: 80,  critHours: 110 },
-    { feed: 'position-snapshot',    warnHours: 80,  critHours: 110 },
+    // income-scanner, daily-theta-snapshot and position-snapshot were retired
+    // in the 8 Oct 2026 cleanup: nothing on screen read what they wrote.
   ];
   const { data: beats, error: beatErr } = await supabase
     .from('sync_heartbeat')

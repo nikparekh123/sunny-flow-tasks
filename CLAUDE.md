@@ -34,6 +34,7 @@ This replaces a prior buggy rule ("any IBKR trade with `last_synced_at` in the l
 - Project ref: `ziwoutsnuywjnsyfbzsp`
 - The CLI on this user's machine is broken (node 26 incompatibility). Don't suggest `supabase db push` or `supabase functions deploy`. Edge function deploys happen via **Dashboard → Edge Functions → \<name\> → code editor → Save**. SQL migrations are applied via **Dashboard → SQL Editor**.
 - Cron jobs: `mp-refresh-1min` (market prices + option marks, every minute 13-20 UTC Mon-Fri = 09:00-16:59 ET; was every 15 min to 15:45 ET until 2026-09-10), `ibkr-flex-sync-5min` (trades), `health-monitor`, plus the alert-dispatcher and apns-deliver crons. All run via Postgres `pg_cron`.
+- **Cleanup 2026-10-08:** 19 dead crons unscheduled (definitions saved in `archive.retired_cron`), 24 dead edge functions deleted (code still in git history), 60 tables + 5 views + 31 SQL functions moved to the `archive` schema (listed in `archive.retired_objects`, drop after 2026-11-07). Restore one with `alter table archive.x set schema public`. Gone: NVDA/TLT mirrors and planners, income scanner, digest/week/rail/legs endpoints, snapshot crons, the web task manager, research, snowball, old strategy and math pages, and the iOS per-name pages.
 - **PostgREST caps every read at 1,000 rows** (`max_rows`), silently. Any edge function reading a growing table must page with `Range` headers and a deterministic `order`, or it gets a truncated slice and reports it as fact. `options-cards` has a local `page()` helper for this; the pinned `_shared/planner.ts` `db.get` does NOT page.
 - Secrets live in `vault.decrypted_secrets`: `IBKR_FLEX_TOKEN`, `IBKR_FLEX_QUERY_ID`, `POLYGON_API_KEY`, `service_role_key`.
 
@@ -61,10 +62,9 @@ This replaces a prior buggy rule ("any IBKR trade with `last_synced_at` in the l
 ## What's "in production" (per Jun 2026)
 
 - IBKR Flex sync every 15 min, soft-deletes via voided_at, lifecycle codes A/Ex/Ep handled
-- Today landing tab with per-event pinning + IV bucket (requires `option_iv_daily_change` view applied to prod)
 - SyncIndicator (orbit-style freshness pill)
 - Settings → "Manual entry (use sparingly)" toggle
-- BGTaskScheduler 15-min hint + remote push (APNs via apns-deliver cron, devices in push_devices table)
+- Remote push (APNs via apns-deliver cron, devices in push_devices table)
 - App lock + biometric gate + onboarding
 - macro_events + earnings_events tables seeded
 - Privacy policy live at nikparekh123.github.io/sunny-flow-tasks/privacy
@@ -74,4 +74,4 @@ This replaces a prior buggy rule ("any IBKR trade with `last_synced_at` in the l
 - #7 Notification permission prompt bug (real bug, found during smoke test)
 - #11 Hard cutover — wipe manual trades + IBKR backfill (runbook ready, awaiting trigger)
 - ~~#17 FIFO share consumption reconcile~~ — DONE 2026-07-22: `reconcile_share_fifo()` consumes lots FIFO + books `realized_pl`; nightly cron 09:30 UTC, idempotent via `share_sells.fifo_reconciled_at`.
-- #19 Snapshot pipeline debug (daily_theta + position_history empty despite cron "success") — suppressed in health-monitor for now
+- ~~#19 Snapshot pipeline~~ — RETIRED 2026-10-08 (crons, functions and tables archived; nothing read them).

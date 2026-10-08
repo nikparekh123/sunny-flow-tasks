@@ -7,7 +7,7 @@
 //  ⚠ ADDED BESIDE PERFORMANCE AND ALLOCATION, NOT IN PLACE OF THEM. Nik,
 //  23 Sep: "let me just first see it, how it looks, and then we remove it."
 //
-//  ⚠ ONE DERIVATION, TWO CARDS. Performance rows are `SunnyProgramme.pgRows`
+//  ⚠ ONE DERIVATION, TWO CARDS. Performance rows are `pgRows`
 //  and Allocation rows are the server's `allocationCard.book`, the same two
 //  sources the old cards read, so neither tab can disagree with its card.
 //

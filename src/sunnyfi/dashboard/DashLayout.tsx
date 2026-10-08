@@ -23,7 +23,6 @@ const ROUTE_META: Record<string, { label: string; active?: Active }> = {
   "/new-strategy": { label: "New Strategy" },
   "/positions": { label: "Positions", active: "positions" },
   "/payoff": { label: "Payoff", active: "payoff" },
-  "/math": { label: "Math" },
 };
 
 export function DashLayout() {

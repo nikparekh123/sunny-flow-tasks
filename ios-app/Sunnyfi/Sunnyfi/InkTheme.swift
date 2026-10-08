@@ -80,35 +80,6 @@ enum Ink {
     static let radiusElement: CGFloat = 12
 }
 
-// MARK: - Relevance (Law 2 — opacity is relevance)
-
-enum InkRelevance: Double {
-    // The NVDA·TLT pages' relevance ladder (the app lifts the DS defaults of
-    // .68/.42/.26 to near-opaque — "we removed the transparency").
-    case r1 = 1.0, r2 = 0.99, r3 = 0.97, r4 = 0.94
-}
-
-extension View {
-    /// Fade a whole element by its relevance rank. Never below r4, never hidden.
-    /// (The global "fade off" accessibility switch pins everything to r1 — handled
-    /// where the switch lives, not here.)
-    /// Relevance no longer fades text. Rank is carried by size, weight and
-    /// position; opacity made the lower rungs unreadable on a phone. The ladder
-    /// stays so call sites keep compiling and intent stays documented.
-    func inkRelevance(_ r: InkRelevance) -> some View { opacity(1.0) }
-}
-
-// MARK: - Motion (DS easing only — no bounce/spring)
-
-enum InkMotion {
-    static func ease(_ duration: Double) -> Animation { .timingCurve(0.4, 0, 0.2, 1, duration: duration) }
-    static let fast   = ease(0.16)   // selection / hover
-    static let mid    = ease(0.25)   // relevance change, bar height
-    static let countUp = 0.82        // figure roll (ease-out cubic, in the count-up view)
-    static let barGrow = 0.90        // bar grow-in
-    static let pulse   = 2.5         // live-dot pulse period
-}
-
 // MARK: - Type — Inter (prose) · Newsreader (serif headings) · IBM Plex Mono (every number)
 //
 // RULE: every number is mono; prose is Inter; editorial headings are Newsreader.

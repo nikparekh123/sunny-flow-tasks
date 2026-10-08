@@ -62,7 +62,6 @@ export default function Dashboard() {
       showNews={true}
       onPositions={() => navigate("/positions")}
       onStrategy={() => navigate("/new-strategy")}
-      onMath={() => navigate("/math")}
       onIncome={() => navigate("/income")}
       onLogo={() => navigate("/dashboard")}
     />

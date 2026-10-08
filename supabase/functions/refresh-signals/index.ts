@@ -8,8 +8,11 @@
  *   • 5-day  rate of change %
  *   • 21-day rate of change %
  *
- * Per-ticker Polygon aggregates call (1/req per ticker) throttled to
- * the free-tier limit (5/min ≙ 13s between calls).
+ * One Polygon aggregates call per ticker, eight at a time.
+ *
+ * ⚠ THE 13s FREE-TIER PAUSE IS GONE (8 Oct 2026). The plan is paid now, and
+ * the pause pushed 16+ tickers past the 150s request limit, so every run since
+ * 8 Jul timed out before its single upsert and wrote nothing.
  *
  * Required Supabase secrets:
  *   POLYGON_API_KEY
@@ -21,8 +24,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers':
     'authorization, x-client-info, apikey, content-type',
 };
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function mean(xs: number[]): number {
   return xs.reduce((s, x) => s + x, 0) / xs.length;
@@ -107,14 +108,7 @@ Deno.serve(async (req) => {
 
     const out: Array<Record<string, unknown>> = [];
     const errors: string[] = [];
-    let firstCall = true;
-
-    for (const ticker of tickers) {
-      // Free tier: 5 calls / minute. Pause 13s between calls (skip on
-      // the first to keep the function snappy when there's just one).
-      if (!firstCall) await sleep(13_000);
-      firstCall = false;
-
+    const one = async (ticker: string) => {
       try {
         const url =
           `https://api.polygon.io/v2/aggs/ticker/${encodeURIComponent(ticker)}` +
@@ -123,13 +117,13 @@ Deno.serve(async (req) => {
         const resp = await fetch(url);
         if (!resp.ok) {
           errors.push(`${ticker}: HTTP ${resp.status}`);
-          continue;
+          return;
         }
         const json = (await resp.json()) as PolyResponse;
         const bars = json.results ?? [];
         if (bars.length < 30) {
           errors.push(`${ticker}: only ${bars.length} bars`);
-          continue;
+          return;
         }
         const closes = bars.map((b) => b.c);
         const lastIdx = closes.length - 1;
@@ -170,6 +164,9 @@ Deno.serve(async (req) => {
       } catch (e) {
         errors.push(`${ticker}: ${(e as Error).message}`);
       }
+    };
+    for (let i = 0; i < tickers.length; i += 8) {
+      await Promise.all(tickers.slice(i, i + 8).map(one));
     }
 
     if (out.length > 0) {

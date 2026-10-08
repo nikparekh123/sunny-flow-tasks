@@ -32,11 +32,6 @@ struct SunnyfiApp: App {
         //     options.experimental.enableLogs = true
         // }
 
-        // Register the BG task handler at process launch (before
-        // application(_:didFinishLaunchingWithOptions:) returns, per
-        // Apple's docs). Safe if the Info.plist entry isn't there —
-        // it logs + no-ops.
-        BackgroundRefresh.register()
     }
 
     var body: some Scene {
@@ -45,10 +40,6 @@ struct SunnyfiApp: App {
                 .task { auth.start() }
                 .onChange(of: scenePhase) { _, newPhase in
                     lock.onScenePhaseChange(newPhase)
-                    if newPhase == .background {
-                        // Each time we background, queue another BG fetch.
-                        BackgroundRefresh.schedule()
-                    }
                 }
         }
     }

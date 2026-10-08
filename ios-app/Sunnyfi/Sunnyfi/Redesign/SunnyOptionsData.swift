@@ -18,7 +18,6 @@ final class OptionsStore {
     /// Freshness (hold until seen): Inventory's figures that moved on a pull.
     let invFresh = FreshTrack()
     let posFresh = FreshTrack()
-    let alFresh = FreshTrack()
     let wyFresh = FreshTrack()
 
     /// Version bumps on every load so a screen model can key its cache off it.
@@ -45,7 +44,6 @@ final class OptionsStore {
             if data == nil, ProcessInfo.processInfo.arguments.contains("-freshTest"),
                let old = Self.doctored(d) {
                 posFresh.observe(SunnyPositions.freshFigs(old.positions, old.longLegs?.legs ?? []))
-                if let al = old.allocationCard { alFresh.observe(SunnyAllocation.freshFigs(al)) }
                 wyFresh.observe(SunnyWeeklyYield.freshFigs(old.book))
                 data = old
             }
@@ -53,9 +51,6 @@ final class OptionsStore {
             invFresh.landed(data?.inventoryCard.flatMap { o in
                 p.inventoryCard.map { Self.invDiff(o, $0) } } ?? [:])
             posFresh.observe(SunnyPositions.freshFigs(p.positions, p.longLegs?.legs ?? []))
-            if let al = p.allocationCard {
-                alFresh.observe(SunnyAllocation.freshFigs(al), closeKey: ("a:#total", "inv"))
-            }
             wyFresh.observe(SunnyWeeklyYield.freshFigs(p.book))
             data = p
             /* ⚠ THE LOADING SCREEN NEEDS THETA BEFORE THETA ARRIVES, so the
@@ -300,49 +295,6 @@ enum LongWindow: String, CaseIterable {
 struct LongLegsBlock: Decodable {
     let asOf: String
     let legs: [LongLeg]
-}
-
-/// One name and one side: every long call on PEP is ONE position. The strike is
-/// a fact about the contract; the reader's question is about the name.
-struct LongPosition: Identifiable {
-    let t: String, isCall: Bool, legs: [LongLeg]
-    var id: String { "\(t)|\(isCall)" }
-    var side: String { isCall ? "Calls" : "Puts" }
-    var n: Int { legs.reduce(0) { $0 + $1.n } }
-    var paid: Double { legs.reduce(0) { $0 + $1.cost * Double($1.n) } }
-    var now: Double { legs.reduce(0) { $0 + $1.m * Double($1.n) } }
-    func then(_ w: LongWindow) -> Double {
-        legs.reduce(0) { $0 + $1.at(w) * Double($1.n) }
-    }
-    func made(_ w: LongWindow) -> Double { now - then(w) }
-    /// Nil where the window has no base to measure from, rather than a zero
-    /// that would draw a bar.
-    func change(_ w: LongWindow) -> Double? {
-        let t0 = then(w)
-        return t0 > 0 ? now / t0 - 1 : nil
-    }
-    /// The average mark a contract, the figure column's third reading.
-    var markEach: Double { n > 0 ? now / Double(n) : 0 }
-
-    static func all(_ legs: [LongLeg]) -> [LongPosition] {
-        var out: [LongPosition] = []
-        for t in legs.map(\.t).reduced() {
-            for call in [true, false] {
-                let ls = legs.filter { $0.t == t && $0.isCall == call }
-                if !ls.isEmpty { out.append(LongPosition(t: t, isCall: call, legs: ls)) }
-            }
-        }
-        return out
-    }
-}
-
-private extension Array where Element == String {
-    /// First-seen order, no duplicates.
-    func reduced() -> [String] {
-        var seen = Set<String>(), out: [String] = []
-        for x in self where seen.insert(x).inserted { out.append(x) }
-        return out
-    }
 }
 
 struct YieldName: Decodable, Identifiable {

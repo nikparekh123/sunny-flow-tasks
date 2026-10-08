@@ -2,37 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import Auth from '@/pages/Auth';
 import { usePositions } from './usePositions';
-import { AllocationTreemap, type AllocView } from './AllocationTreemap';
-import { PnLByPosition } from './PnLByPosition';
-import { PositionsTable } from './PositionsTable';
 import { CsvUploadModal } from './CsvUploadModal';
 import { PositionDetailModal } from './PositionDetailModal';
 import { PositionInsightModal } from './PositionInsightModal';
-import { TradesLogMatrix } from './TradesLogMatrix';
-import { ExpiryCalendar } from './ExpiryCalendar';
-import { RealizedSummary } from './RealizedSummary';
-import { StockInsightsStrip } from './StockInsightsStrip';
 import { PositionsV2Body } from './PositionsV2Body';
-import { useUnrealizedPL } from './metrics/useUnrealizedPL';
 import { useLiveLegs } from './metrics/useLiveLegs';
 import { useMasterQuotes } from './metrics/useEnrichedRows';
-import { fmtUSD, fmtPct } from './types';
-import { AnimatedNumber } from '@/sunnyfi/lib/animation';
 import { toast } from 'sonner';
-import { PageSwitcher } from '@/sunnyfi/components/PageSwitcher';
 import './positions.css';
 
 const DASHBOARD_URL = 'https://www.sunnyfi.co/dashboard';
-const TREEMAP_HEIGHT = 600;
-const COMPANION_MAX = 10;
-
-const LS_ALLOC = 'np:allocView';
-const LS_POS = 'np:posView';
-function readLS<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
-  if (typeof window === 'undefined') return fallback;
-  const v = window.localStorage.getItem(key);
-  return v && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
-}
 
 export default function PositionsPage() {
   const { user, loading } = useAuth();
@@ -68,18 +47,6 @@ export default function PositionsPage() {
     () => ({ ...rawPortfolio, rows: decorate(rawPortfolio.rows) }),
     [rawPortfolio, decorate],
   );
-  const [allocView, setAllocView] = useState<AllocView>(() =>
-    readLS<AllocView>(LS_ALLOC, ['sector', 'stock', 'strategy', 'pnl'] as const, 'sector'),
-  );
-  const [posView, setPosView] = useState<'table' | 'trades' | 'timeline'>(() =>
-    readLS<'table' | 'trades' | 'timeline'>(LS_POS, ['table', 'trades', 'timeline'] as const, 'table'),
-  );
-  useEffect(() => {
-    try { window.localStorage.setItem(LS_ALLOC, allocView); } catch { /* private mode */ }
-  }, [allocView]);
-  useEffect(() => {
-    try { window.localStorage.setItem(LS_POS, posView); } catch { /* private mode */ }
-  }, [posView]);
   const [showUpload, setShowUpload] = useState(false);
   // Two-layer modal: ticker click opens insight (read), insight's action
   // buttons promote to the write modal in either 'open' or 'close' tab.
@@ -137,249 +104,39 @@ export default function PositionsPage() {
     }
   };
 
-  // SOT: read unrealized P&L from the atom hook (A1 − A2), not from
-  // portfolio.total_pnl, so this page reads the same number as the rest
-  // of the app.
-  const unrealized = useUnrealizedPL();
-  const isDown = unrealized.total < 0;
   // SOT: per-ticker live-leg count via useLiveLegs (A11) — used by
-  // both V2 and V1 layouts to decide whether the detail modal opens
+  // the V2 body to decide whether the detail modal opens
   // on the Close tab vs the Open tab.
   const { byTicker: liveCountByTicker } = useLiveLegs();
 
-  // The redesigned (Navi editorial) body is now the DEFAULT. The old
-  // layout is still reachable via ?v1=1 as a safety fallback. The modal
-  // stack stays shared inside .np-app either way — the new body renders
-  // its own .dash shell nested within.
-  const useV2 = typeof window === 'undefined'
-    || new URLSearchParams(window.location.search).get('v1') !== '1';
-
   return (
     <div className="np-app">
-      {useV2 ? (
-        <PositionsV2Body
-          portfolio={portfolio}
-          liveByTicker={liveByTicker}
-          overlayByTicker={overlayByTicker}
-          signalsByTicker={signalsByTicker}
-          realizedByTicker={realizedByTicker}
-          tradesByTicker={tradesByTicker}
-          shareSellsByTicker={shareSellsByTicker}
-          dailyCloses={dailyCloses}
-          onUpload={() => setShowUpload(true)}
-          onRefresh={handleRefresh}
-          refreshing={refreshPrices.isPending}
-          onTickerClick={(t) => setInsightTicker(t)}
-          onSharesCellClick={(t) => setDetail({ ticker: t, tab: 'shares' })}
-          onOpenSlotClick={(t, mode) => {
-            const hasLive = (liveCountByTicker.get(t) ?? 0) > 0;
-            // An explicit "+" add-slot always opens the Open tab; clicking an
-            // existing live leg defaults to Close (edit/close that leg).
-            setDetail({ ticker: t, tab: mode ?? (hasLive ? 'close' : 'open') });
-          }}
-          onResolveCellClick={(t, open) => setDetail({ ticker: t, tab: 'resolve', resolveTrade: open })}
-          onDashboard={() => { window.location.href = DASHBOARD_URL; }}
-          onStrategy={() => { window.location.href = 'https://www.sunnyfi.co/new-strategy'; }}
-        />
-      ) : (
-      <>
-      {/* Top bar */}
-      <header className="np-top">
-        <div className="np-brand-row">
-          <a className="np-brand" href={DASHBOARD_URL} title="Back to dashboard">
-            Sunnyfi<span className="cursor" />
-          </a>
-          <span className="np-crumb-sep">/</span>
-          <span className="np-crumb"><PageSwitcher current="positions" variant="np" /></span>
-        </div>
-        <div className="np-actions">
-          <button
-            className="np-btn ghost"
-            onClick={handleRefresh}
-            disabled={refreshPrices.isPending}
-          >
-            ↻ {refreshPrices.isPending ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button className="np-btn neon" onClick={() => setShowUpload(true)}>
-            ↑ Upload positions
-          </button>
-        </div>
-      </header>
-
-      <div className="np-stage">
-        {/* Hero */}
-        <div className="np-hero">
-          <div className="np-hero-label">Total portfolio value</div>
-          <div className="np-hero-value">
-            {portfolio.rows.length === 0
-              ? '$0'
-              : <AnimatedNumber value={portfolio.total_market_value} format={fmtUSD} duration={1400} />}
-          </div>
-          {portfolio.rows.length > 0 && (
-            <div className={'np-hero-pl' + (isDown ? '' : ' up')}>
-              <div>
-                <span className="np-hero-pl-amt">
-                  <AnimatedNumber value={unrealized.total} format={fmtUSD} delay={200} />
-                </span>
-                <span className="np-hero-pl-label" style={{ marginLeft: 10 }}>
-                  unrealized
-                </span>
-              </div>
-              <span className="np-hero-pl-pct">
-                <AnimatedNumber value={unrealized.totalPct} format={fmtPct} delay={300} />
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Allocation */}
-        <div className="np-section">
-          <div className="np-section-hd">
-            <div className="np-section-title">Allocation</div>
-            <div className="np-toggle">
-              <button
-                className={allocView === 'stock' ? 'on' : ''}
-                onClick={() => setAllocView('stock')}
-              >
-                By stock
-              </button>
-              <button
-                className={allocView === 'sector' ? 'on' : ''}
-                onClick={() => setAllocView('sector')}
-              >
-                By sector
-              </button>
-              <button
-                className={allocView === 'strategy' ? 'on' : ''}
-                onClick={() => setAllocView('strategy')}
-              >
-                By strategy
-              </button>
-              <button
-                className={allocView === 'pnl' ? 'on' : ''}
-                onClick={() => setAllocView('pnl')}
-              >
-                P&amp;L by position
-              </button>
-            </div>
-          </div>
-          {allocView === 'pnl' ? (
-            <PnLByPosition
-              rows={portfolio.rows}
-              tradesByTicker={tradesByTicker}
-              onTickerClick={(t) => setInsightTicker(t)}
-            />
-          ) : (
-            <AllocationTreemap
-              rows={portfolio.rows}
-              view={allocView}
-              height={TREEMAP_HEIGHT}
-              maxItems={COMPANION_MAX}
-              overlayByTicker={overlayByTicker}
-            />
-          )}
-        </div>
-
-        {/* Stock insights strip — between Allocation and Positions */}
-        {portfolio.rows.length > 0 && (
-          <div className="np-section">
-            <StockInsightsStrip
-              rows={portfolio.rows}
-              signalsByTicker={signalsByTicker}
-              liveByTicker={liveByTicker}
-              overlayByTicker={overlayByTicker}
-              dailyCloses={dailyCloses}
-              onSetEarnings={(ticker, date) =>
-                setEarningsDate.mutate({ ticker, earnings_date: date })
-              }
-            />
-          </div>
-        )}
-
-        {/* Positions */}
-        <div className="np-section">
-          <div className="np-section-hd">
-            <div className="np-section-title">
-              {posView === 'table'
-                ? `Positions · ${portfolio.rows.length}`
-                : posView === 'trades'
-                  ? 'Trades'
-                  : 'Calendar'}
-            </div>
-            <div className="np-view-toggle">
-              <button
-                className={posView === 'table' ? 'on' : ''}
-                onClick={() => setPosView('table')}
-              >
-                Positions
-              </button>
-              <button
-                className={posView === 'trades' ? 'on' : ''}
-                onClick={() => setPosView('trades')}
-              >
-                Trades
-              </button>
-              <button
-                className={posView === 'timeline' ? 'on' : ''}
-                onClick={() => setPosView('timeline')}
-              >
-                Calendar
-              </button>
-            </div>
-          </div>
-          {posView === 'table' && (
-            <PositionsTable
-              rows={portfolio.rows}
-              onUpload={() => setShowUpload(true)}
-              loading={isLoading}
-              overlayByTicker={overlayByTicker}
-              onTickerClick={(t) => setInsightTicker(t)}
-            />
-          )}
-          {posView === 'trades' && (
-            <TradesLogMatrix
-              rows={portfolio.rows}
-              tradesByTicker={tradesByTicker}
-              liveByTicker={liveByTicker}
-              realizedByTicker={realizedByTicker}
-              shareSellsByTicker={shareSellsByTicker}
-              onTickerClick={(t) => setInsightTicker(t)}
-              onSharesCellClick={(t) =>
-                setDetail({ ticker: t, tab: 'shares' })
-              }
-              onOpenSlotClick={(t) => {
-                const hasLive = (liveCountByTicker.get(t) ?? 0) > 0;
-                setDetail({ ticker: t, tab: hasLive ? 'close' : 'open' });
-              }}
-              onResolveCellClick={(t, open) =>
-                setDetail({ ticker: t, tab: 'resolve', resolveTrade: open })
-              }
-            />
-          )}
-          {posView === 'timeline' && (
-            <ExpiryCalendar
-              rows={portfolio.rows}
-              tradesByTicker={tradesByTicker}
-              onTickerClick={(t) => setInsightTicker(t)}
-            />
-          )}
-        </div>
-
-        {/* Strategy buckets — relocated from the top. Plain dump for now;
-            redesign later. */}
-        {portfolio.rows.length > 0 && (
-          <div className="np-section">
-            <RealizedSummary
-              portfolio={portfolio}
-              overlayByTicker={overlayByTicker}
-              realizedByTicker={realizedByTicker}
-              liveByTicker={liveByTicker}
-            />
-          </div>
-        )}
-      </div>
-      </>
-      )}
+      {/* The modal stack stays shared inside .np-app; the V2 body renders
+          its own .dash shell nested within. */}
+      <PositionsV2Body
+        portfolio={portfolio}
+        liveByTicker={liveByTicker}
+        overlayByTicker={overlayByTicker}
+        signalsByTicker={signalsByTicker}
+        realizedByTicker={realizedByTicker}
+        tradesByTicker={tradesByTicker}
+        shareSellsByTicker={shareSellsByTicker}
+        dailyCloses={dailyCloses}
+        onUpload={() => setShowUpload(true)}
+        onRefresh={handleRefresh}
+        refreshing={refreshPrices.isPending}
+        onTickerClick={(t) => setInsightTicker(t)}
+        onSharesCellClick={(t) => setDetail({ ticker: t, tab: 'shares' })}
+        onOpenSlotClick={(t, mode) => {
+          const hasLive = (liveCountByTicker.get(t) ?? 0) > 0;
+          // An explicit "+" add-slot always opens the Open tab; clicking an
+          // existing live leg defaults to Close (edit/close that leg).
+          setDetail({ ticker: t, tab: mode ?? (hasLive ? 'close' : 'open') });
+        }}
+        onResolveCellClick={(t, open) => setDetail({ ticker: t, tab: 'resolve', resolveTrade: open })}
+        onDashboard={() => { window.location.href = DASHBOARD_URL; }}
+        onStrategy={() => { window.location.href = 'https://www.sunnyfi.co/new-strategy'; }}
+      />
 
       <CsvUploadModal
         open={showUpload}

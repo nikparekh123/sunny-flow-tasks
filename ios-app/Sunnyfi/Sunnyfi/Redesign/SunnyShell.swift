@@ -33,6 +33,12 @@
 
 import SwiftUI
 
+/// The two destinations on the tab bar.
+enum SunnyPage: Hashable {
+    case new
+    case options
+}
+
 /* ⚠ THE STRIP IS RETIRED, 14 Sep 2026, from the `glass-nav` handoff. The app's
    navigation is one Liquid Glass tab bar with TWO destinations, New and
    Options, and no names.
@@ -41,8 +47,7 @@ import SwiftUI
    way into them. The sheet's own argument is that the feed carries the names
    now — Prices, Long legs and Yield progress all list every one — and that if a
    third destination is ever argued for it belongs in a page, not on the bar.
-   `SunnyPane` still renders `.name` and `nav.pages` still builds the list, so
-   nothing is deleted; there is simply no door. Flagged to Nik with the build.
+   The name pages themselves were deleted in the 8 Oct 2026 cleanup.
 
    ⚠ AND THE PAGER IS RETIRED WITH IT. Swiping between pages existed because the
    strip had many destinations in a row. With two, the tab bar is the switch and
@@ -65,7 +70,6 @@ struct SunnyShell: View {
     /// mutate independently — a Read on one copy would leave the other still
     /// showing the card as unread.
     @State private var model = PaneModel()
-    private var nav: SunnyNav { model.nav }
     /* Bumped when the ALREADY ACTIVE tab is tapped. The pane watches it and
        returns to the top; a plain selection binding cannot see that tap,
        because the value it writes is the value already there. */

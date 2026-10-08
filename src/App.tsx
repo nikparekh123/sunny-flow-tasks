@@ -6,34 +6,22 @@ import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AuthProvider } from '@/hooks/useAuth';
-import Index from './pages/Index.tsx';
-const RulesPage = lazy(() => import('./pages/RulesPage.tsx'));
-const NotFound = lazy(() => import('./pages/NotFound.tsx'));
 
-// One repo serves three apps via different hostnames:
-//   sunnyfi.co / www.sunnyfi.co → Sunnyfi (Landing, Dashboard, Research, …)
-//   todos.sunnyfi.co            → Tasks (default)
-//   positions.sunnyfi.co        → Positions
-// Hostname is detected at first paint; each app is lazy-loaded so users
-// only download the bundle for the host they're on.
+// Every host renders the Sunnyfi app (sunnyfi.co, www.sunnyfi.co, localhost,
+// preview deploys). The legacy positions.sunnyfi.co subdomain is bounced to
+// www.sunnyfi.co/positions below; ?app=positions (local dev) still renders
+// PositionsPage on its own. Each app is lazy-loaded.
 const PositionsPage = lazy(() => import('./positions/PositionsPage'));
 const Sunnyfi = lazy(() => import('./sunnyfi/Sunnyfi'));
 
-type App = 'tasks' | 'positions' | 'sunnyfi';
+type App = 'positions' | 'sunnyfi';
 
 function detectApp(): App {
-  if (typeof window === 'undefined') return 'tasks';
-  // Local dev: ?app=positions / ?app=sunnyfi overrides hostname detection.
-  const override = new URLSearchParams(window.location.search).get('app');
-  if (override === 'positions' || override === 'sunnyfi' || override === 'tasks') {
-    return override;
-  }
-  const h = window.location.hostname;
-  if (h.startsWith('positions.')) return 'positions';
-  if (h.startsWith('todos.')) return 'tasks';
-  if (h === 'sunnyfi.co' || h === 'www.sunnyfi.co') return 'sunnyfi';
-  // Anything else (localhost, preview deploys) defaults to the tasks app.
-  return 'tasks';
+  if (typeof window === 'undefined') return 'sunnyfi';
+  // Local dev: ?app=positions overrides hostname detection.
+  if (new URLSearchParams(window.location.search).get('app') === 'positions') return 'positions';
+  if (window.location.hostname.startsWith('positions.')) return 'positions';
+  return 'sunnyfi';
 }
 
 const queryClient = new QueryClient({
@@ -51,18 +39,6 @@ const SuspenseFallback = () => (
   </div>
 );
 
-function TasksApp() {
-  return (
-    <Suspense fallback={<SuspenseFallback />}>
-      <Routes>
-        <Route path="/" element={<Index />} />
-        <Route path="/rules" element={<RulesPage />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </Suspense>
-  );
-}
-
 const App = () => {
   const which = detectApp();
 
@@ -78,24 +54,18 @@ const App = () => {
     return null;
   }
 
-  let content: React.ReactNode;
-  if (which === 'positions') {
-    content = (
+  const content =
+    which === 'positions' ? (
       <Suspense fallback={<SuspenseFallback />}>
         <Routes>
           <Route path="*" element={<PositionsPage />} />
         </Routes>
       </Suspense>
-    );
-  } else if (which === 'sunnyfi') {
-    content = (
+    ) : (
       <Suspense fallback={<SuspenseFallback />}>
         <Sunnyfi />
       </Suspense>
     );
-  } else {
-    content = <TasksApp />;
-  }
 
   return (
     <QueryClientProvider client={queryClient}>

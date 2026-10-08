@@ -1,15 +1,14 @@
 /**
- * Entry point for the sunnyfi.co (research-hub) app inside the merged repo.
- * The hostname switch in App.tsx renders this when host is sunnyfi.co or
- * www.sunnyfi.co.
+ * Entry point for the sunnyfi.co app. App.tsx renders this for every host
+ * (except the legacy positions.* redirect / ?app=positions dev override).
  *
- * Each sub-page is lazy-loaded so visiting /research doesn't pay the cost
- * of Reader / Dashboard / Landing / TagArea bundles, etc. Suspense shows a
+ * Each sub-page is lazy-loaded so visiting one page doesn't pay the cost
+ * of the Dashboard / Landing / Income bundles, etc. Suspense shows a
  * tiny inline fallback during the chunk fetch (usually <100ms on a warm
  * cache).
  */
 import { lazy, Suspense, Component, useState, useEffect, useRef, type ReactNode, type ErrorInfo } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import './sunnyfi.css';
 import RequireAuth from './components/RequireAuth';
 import { DashLayout } from './dashboard/DashLayout';
@@ -96,13 +95,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorState> {
 const Landing      = lazy(() => import('./pages/Landing'));
 const Dashboard    = lazy(() => import('./pages/Dashboard'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
-const Index        = lazy(() => import('./pages/Index'));
-const Reader       = lazy(() => import('./pages/Reader'));
-const TagArea      = lazy(() => import('./pages/TagArea'));
-const Snowball     = lazy(() => import('./pages/Snowball'));
-const Strategy     = lazy(() => import('./pages/Strategy'));
 const NewStrategy  = lazy(() => import('./pages/NewStrategy'));
-const MathPage     = lazy(() => import('./pages/Math'));
 const Income       = lazy(() => import('./pages/Income'));
 const Portfolio    = lazy(() => import('./pages/Portfolio'));
 const Health       = lazy(() => import('./pages/Health'));
@@ -136,7 +129,6 @@ export default function Sunnyfi() {
       void import('./pages/Income');
       void import('./pages/Portfolio');
       void import('./pages/NewStrategy');
-      void import('./pages/Math');
       void import('../positions/PositionsPage');
     }, 1200);
     return () => clearTimeout(t);
@@ -169,54 +161,9 @@ export default function Sunnyfi() {
         {/* Payoff planner self-gates auth and carries its own header, like
             Positions: Nik wants it to look different from the rest of the site. */}
         <Route path="/payoff" element={<PayoffPage />} />
-        <Route
-          path="/research"
-          element={
-            <RequireAuth>
-              <Index />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/research/tags/:tag"
-          element={
-            <RequireAuth>
-              <TagArea />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/research/reports/:id"
-          element={
-            <RequireAuth>
-              <Reader />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/snowball"
-          element={
-            <RequireAuth>
-              <Snowball />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/strategy"
-          element={
-            <RequireAuth>
-              <Strategy />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/math"
-          element={
-            <RequireAuth>
-              <MathPage />
-            </RequireAuth>
-          }
-        />
+        {/* Unknown paths (incl. retired /research, /strategy, /math, /snowball)
+            go to the landing page instead of rendering blank. */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>
     </ErrorBoundary>

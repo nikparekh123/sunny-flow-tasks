@@ -7,7 +7,7 @@
 const SUNNYFI_LOGIN_URL = 'https://sunnyfi.co';
 
 export default function Auth() {
-  const here = typeof window !== 'undefined' ? window.location.href : 'https://todos.sunnyfi.co';
+  const here = typeof window !== 'undefined' ? window.location.href : 'https://www.sunnyfi.co';
   const loginHref = `${SUNNYFI_LOGIN_URL}?next=${encodeURIComponent(here)}`;
 
   return (
@@ -31,7 +31,7 @@ export default function Auth() {
             className="text-[14px] font-bold tracking-[0.5px]"
             style={{ color: 'var(--owl-text-primary)' }}
           >
-            S To dos
+            Sunnyfi
           </div>
         </div>
 
@@ -49,7 +49,7 @@ export default function Auth() {
           className="mt-3"
           style={{ fontSize: 13, color: 'var(--owl-text-muted)', lineHeight: 1.55 }}
         >
-          Use your Sunnyfi login. Once you're in, your task app session
+          Use your Sunnyfi login. Once you're in, your session
           carries over automatically.
         </p>
 
