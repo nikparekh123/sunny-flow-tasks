@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-10-02.1';
+const BUILD = '2026-10-09.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -2705,21 +2705,17 @@ Deno.serve(async (req) => {
           if (near < bestSoFar) { wk.sd = cand; (wk as { _near?: number })._near = near; }
         }
       }
-      /* ⚠ THE CALL WRITE IS SPLIT (Nik, 23 Sep 2026). Part at the money, the
-         rest at 1 SD, the at-the-money share set by the last month's move:
-         fell 10%+ → 20%, −10..+5% → 30%, +5..+15% → 50%, above that 60%
-         (the cap). Earnings before the expiry overrides to 20%: a report is
-         the jump that runs over at-the-money calls. Tested from 60 real
-         52-week lows (research/call-split): the further from the money, the
-         less the calls gave back in a recovery, and this rule was the most
-         consistent winner over all-at-the-money (t 4.2). Calls only. */
-      const shareOf = (m: number | null) => {
-        if (m === null) return { share: 0.3, why: 'flat' };
-        if (m <= -0.10) return { share: 0.2, why: 'fell' };
-        if (m < 0.05) return { share: 0.3, why: 'flat' };
-        if (m < 0.15) return { share: 0.5, why: 'up' };
-        return { share: 0.6, why: 'up a lot' };
-      };
+      /* ⚠ THE CALL WRITE IS SPLIT (Nik, 9 Oct 2026). A third at the money,
+         the rest at 0.6 SD; a name up 15%+ on the month puts the rest at 1 SD.
+         Earnings before the expiry overrides to 20% at the money: a report is
+         the jump that runs over at-the-money calls. Replaces the 23 Sep month
+         tilt (20/30/50/60% ATM, rest at 1 SD): on the seven book names, real
+         marks Sep 2024 to Oct 2026, the tilt earned +4.3%/yr of stock value and
+         this split +7.2%, better on all seven, with the same share of losing
+         weeks (research/book-split). Calls only. */
+      const shareOf = (m: number | null) =>
+        m !== null && m >= 0.15 ? { share: 1 / 3, why: 'up a lot', out: 1.0 }
+                                : { share: 1 / 3, why: 'flat', out: 0.6 };
       const nearest = (xs: Strike[], target: number) =>
         xs.length ? xs.reduce((a, b) => Math.abs(b.k - target) < Math.abs(a.k - target) ? b : a) : null;
       const out: Record<string, unknown> = {};
@@ -2745,14 +2741,16 @@ Deno.serve(async (req) => {
           const sdPut = wk.sd ? nearest(wk.puts.filter((x) => x.k < rec.spot), rec.spot - wk.sd) : null;
           const earnIn = rec.earn !== null && rec.earn >= 0 && rec.earn <= days(wk.w);
           const base = shareOf(move21 === null ? null : move21 / 100);
-          const pick = earnIn ? { share: 0.2, why: 'earnings' } : base;
+          const pick = earnIn ? { share: 0.2, why: 'earnings', out: base.out } : base;
+          /* The out-of-the-money leg's strike, from the whole chain. */
+          const otmCall = wk.sd ? nearest(wk.calls.filter((x) => x.k > rec.spot && x.mid > 0), rec.spot + pick.out * wk.sd) : null;
           const atm = Math.floor(held * pick.share + 0.5);
           /* ⚠ THE GHOST COUNTS WHAT IS LEFT. Calls already sold for next Friday
              are in the week's gross already; each counts toward the strike it
              sits nearer, and only the rest is priced (the roll sheet's rule). */
           if (wk.w === ghostFri && held > 0 && calls.length) {
             const a = calls[0];
-            let s = sdCall && sdCall.k > a.k ? sdCall : calls.find((x) => x.k > a.k) ?? null;
+            let s = otmCall && otmCall.k > a.k ? otmCall : calls.find((x) => x.k > a.k) ?? null;
             if (s && !(s.mid > 0)) s = null;
             let dA = 0, dS = 0;
             for (const e of open) {
@@ -2764,8 +2762,11 @@ Deno.serve(async (req) => {
             ghostLeft += lA * a.mid * 100 + (s ? lS * s.mid * 100 : 0);
             ghostNames++;
           }
+          /* The OTM strike rides along with the five tiles, so the cached
+             sheet can price it before the live read lands. */
+          if (otmCall && !calls.some((x) => x.k === otmCall.k)) calls.push(otmCall);
           return { w: wk.w, sd: wk.sd, calls, puts, sdCall, sdPut,
-                   split: { share: pick.share, why: pick.why, atm, sd: held - atm } };
+                   split: { share: r2(pick.share), why: pick.why, atm, sd: held - atm, out: pick.out } };
         }).sort((a, b) => a.w.localeCompare(b.w));
         out[t] = { spot: r2(rec.spot), avg20: rec.avg20, earn: rec.earn, delta: rec.delta,
                    move21, held, weeks };

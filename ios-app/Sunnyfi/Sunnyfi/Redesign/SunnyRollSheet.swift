@@ -57,15 +57,20 @@ struct RollChainWeek: Decodable {
     var above: [RollChainStrike]? = nil
 }
 
-/// ⚠ THE CALL WRITE IS SPLIT. Part at the money, the rest at 1 SD; the share
-/// at the money follows the last month (20 / 30 / 50 / 60%), and earnings
-/// before the expiry overrides to 20%. Counts round half up server-side.
+/// ⚠ THE CALL WRITE IS SPLIT (Nik, 9 Oct 2026). A third at the money, the
+/// rest at 0.6 SD. Earnings before the expiry overrides to 20% at the money; a
+/// name up 15%+ on the month moves its out-of-the-money leg out to 1 SD.
+/// Replaced the 20 / 30 / 50 / 60% month tilt with the OTM leg at 1 SD, which
+/// earned +4.3%/yr against +7.2% for this split on the seven book names, real
+/// marks Sep 2024 to Oct 2026 (research/book-split). Counts round half up.
 struct RollSplit: Decodable {
     let share: Double
-    /// `fell` · `flat` · `up` · `up a lot` · `earnings`
+    /// `flat` · `up a lot` · `earnings`
     let why: String
     let atm: Int
     let sd: Int
+    /// How far out the out-of-the-money leg sits, in standard deviations.
+    var out: Double? = nil
 }
 
 struct RollChainStrike: Decodable {
@@ -158,6 +163,8 @@ struct RollWrite {
     struct Tile { let k: Double, oi: Int?, chosen: Bool }
     let legs: [Leg]
     let share: Double
+    /// The out-of-the-money leg's distance, in standard deviations.
+    let out: Double
     /// `down 6% this month` · `up 13% this month` · `earnings Thu`
     let why: String
     let leaps: Int
@@ -225,19 +232,15 @@ enum RollMath {
     }
 
     /// ⚠ THE SPLIT, the server's rule restated so a live spot can re-read it:
-    /// fell 10%+ → 20% at the money, −10..+5 → 30%, +5..+15 → 50%, above → 60%;
-    /// earnings on or before the expiry → 20%. Counts round half up.
+    /// a third at the money, the rest at 0.6 SD; up 15%+ on the month puts the
+    /// rest at 1 SD instead; earnings on or before the expiry → 20% at the
+    /// money. Counts round half up.
     static func split(held: Int, move: Double?, earn: Int?, week: String) -> RollSplit {
-        var share = 0.3, why = "flat"
-        if let m = move {
-            if m <= -10 { share = 0.2; why = "fell" }
-            else if m < 5 { share = 0.3; why = "flat" }
-            else if m < 15 { share = 0.5; why = "up" }
-            else { share = 0.6; why = "up a lot" }
-        }
+        var share = 1.0 / 3.0, why = "flat", out = 0.6
+        if let m = move, m >= 15 { out = 1.0; why = "up a lot" }
         if let e = earn, e >= 0, e <= daysTo(week) { share = 0.2; why = "earnings" }
         let atm = Int((Double(held) * share + 0.5).rounded(.down))
-        return RollSplit(share: share, why: why, atm: atm, sd: held - atm)
+        return RollSplit(share: share, why: why, atm: atm, sd: held - atm, out: out)
     }
 
     /// The write on this name for next Friday. `done` is what is already sold
@@ -329,11 +332,17 @@ enum RollMath {
         let sortedK = Array(Set(ks)).sorted()
         /* The chain's own strike spacing, for the merge test. */
         let step = zip(sortedK, sortedK.dropFirst()).map { $1 - $0 }.filter { $0 > 0 }.min() ?? 1
-        /* ⚠ THE 1 SD STRIKE IS NEVER THE AT-THE-MONEY ONE. On a quiet week the
-           nearest strike to spot + sd can be the first one out; then it is the
-           next strike up, or the write would be one leg drawn twice. */
-        var sdPick = week.sdCall
-        if sdPick == nil || sdPick!.k <= atmPick.k {
+        /* ⚠ THE OUT-OF-THE-MONEY LEG: the strike nearest spot + 0.6 SD (1 SD
+           after a 15% month), from every call strike the chain gave us. It is
+           never the at-the-money one; on a quiet week the nearest can be the
+           first one out, and then it is the next strike up, or the write would
+           be one leg drawn twice. */
+        let out = split.out ?? 0.6
+        let otmPool = ((week.above ?? []) + week.calls + (week.sdCall.map { [$0] } ?? []))
+            .filter { $0.k > atmPick.k && $0.mid > 0 }
+        let aim = spot + out * sd
+        var sdPick = otmPool.min { abs($0.k - aim) < abs($1.k - aim) }
+        if sdPick == nil {
             sdPick = ((week.above ?? []) + week.calls).filter { $0.k > atmPick.k }.min { $0.k < $1.k }
         }
 
@@ -379,7 +388,9 @@ enum RollMath {
         let kA = atm?.k ?? atmPick.k
         let be = atm.map { $0.k + $0.cr }
         let tgt = spot + sd
-        let merge = sdLeg.map { abs(tgt - $0.k) <= step } ?? false
+        /* The +1 SD mark merges with the second strike only when that leg IS
+           the 1 SD one; at 0.6 SD it stays a level of its own. */
+        let merge = out >= 1 && (sdLeg.map { abs(tgt - $0.k) <= step } ?? false)
         var lv: [(id: String, p: Double, word: String, tone: RollWrite.Tone)] = [
             ("spot", spot, "", .ink),
             ("k", kA, atm != nil ? "strike" : "at the money", .ink)]
@@ -462,7 +473,7 @@ enum RollMath {
         var byK: [Double: Int] = [:]
         for d in done { byK[d.k, default: 0] += d.n }
         let doneRows = byK.map { (n: $0.value, k: $0.key) }.sorted { $0.k < $1.k }
-        return RollWrite(legs: legs, share: split.share, why: why, leaps: held, total: total,
+        return RollWrite(legs: legs, share: split.share, out: out, why: why, leaps: held, total: total,
                          levels: P.filter { $0.id != "spot" },
                          spotX: P.first { $0.id == "spot" }?.x ?? 0,
                          zones: zones, span: (hi - spot) / spot * 100, tiles: tiles,
@@ -723,7 +734,7 @@ struct SunnyRollSheet: View {
                             .font(S.inter(15, S.wBoldN)).tracking(S.track(15, -0.01))
                             .foregroundStyle(S.ink)
                             .frame(width: Self.legCol, alignment: .leading)
-                        Text(l.atm ? "at the money" : "at 1 SD")
+                        Text(l.atm ? "at the money" : (w.out >= 1 ? "at 1 SD" : "at 0.6 SD"))
                             .font(S.inter(S.t12, S.wMidSmN)).foregroundStyle(S.mute)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text(String(format: "%.2f", l.cr))
