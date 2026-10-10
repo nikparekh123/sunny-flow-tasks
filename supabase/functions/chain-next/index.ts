@@ -23,6 +23,13 @@
  *
  * Run by `chain-next-15min` (pg_cron, market hours). POST { dry_run: true } to
  * see what it would write without writing it.
+ *
+ * ⚠ THETA DATA, LIVE (9 Oct 2026). With the MARKS_SOURCE secret at `theta` (or
+ * a body of {source:"theta"}), each chain comes from Theta Data's real-time
+ * NBBO through our Fly.io terminal (infra/theta) and is reshaped into the
+ * Polygon snapshot shape, so everything below it is unchanged. Real bid and ask
+ * mean the Black-Scholes stand-in in midOf is no longer needed on that path. A
+ * chain Theta cannot answer falls back to Polygon.
  */
 
 const corsHeaders = {
@@ -34,7 +41,96 @@ const json = (status: number, body: unknown) =>
     status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-const BUILD = '2026-09-24.1';
+const BUILD = '2026-10-09.1';
+
+const THETA_URL = Deno.env.get('THETA_URL') ?? '';
+const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
+type TRow = { contract: { right: string; strike: number; expiration: string };
+              data: Array<Record<string, number | string>> };
+async function thetaGet(path: string): Promise<TRow[]> {
+  const r = await fetch(`${THETA_URL}${path}&format=json`, {
+    headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(15_000) });
+  if (!r.ok) return [];
+  return ((await r.json())?.response ?? []) as TRow[];
+}
+/** The stock price the chain's own quotes imply: C - P + K at the strike
+    where the call and put are closest in price (both two-sided). Theta's
+    `underlying_price` can come from a different moment than the option quotes
+    (after the 9 Oct close it read 35.11 against quotes implying 34.73), and
+    every IV and "1 SD" below is only as right as the spot it uses. */
+function impliedSpot(rows: Array<{ side: string; k: number; bid: number; ask: number }>, T: number): number | null {
+  const by = new Map<number, { c?: number; p?: number }>();
+  for (const r of rows) {
+    if (!(r.bid > 0 && r.ask > 0)) continue;
+    const e = by.get(r.k) ?? {}; e[r.side === 'call' ? 'c' : 'p'] = (r.bid + r.ask) / 2; by.set(r.k, e);
+  }
+  let best: number | null = null, gap = Infinity;
+  for (const [k, e] of by) {
+    if (e.c == null || e.p == null) continue;
+    if (Math.abs(e.c - e.p) < gap) { gap = Math.abs(e.c - e.p); best = e.c - e.p + k * Math.exp(-0.04 * T); }
+  }
+  return best;
+}
+/** IV from a price, by bisection on the same Black-Scholes the sheet prices with. */
+function ivFrom(call: boolean, px: number, S: number, K: number, T: number): number | undefined {
+  const intrinsic = Math.max(0, call ? S - K : K - S);
+  if (!(px > intrinsic + 0.005) || T <= 0) return undefined;
+  let lo = 0.01, hi = 4;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (bs(call, S, K, T, m) < px) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+}
+
+function deltaOf(call: boolean, S: number, K: number, T: number, v: number): number {
+  const d1 = (Math.log(S / K) + 0.5 * v * v * T) / (v * Math.sqrt(T));
+  return call ? ncdf(d1) : ncdf(d1) - 1;
+}
+
+/** One expiry's chain from Theta, in Polygon's snapshot shape. */
+async function thetaChain(ticker: string, expiry: string): Promise<Snap[]> {
+  const ex = expiry.replaceAll('-', '');
+  const [gr, oi] = await Promise.all([
+    thetaGet(`/v3/option/snapshot/quote?symbol=${ticker}&expiration=${ex}`),
+    thetaGet(`/v3/option/snapshot/open_interest?symbol=${ticker}&expiration=${ex}`),
+  ]);
+  const key = (r: TRow) => `${r.contract.right.toLowerCase()}|${Number(r.contract.strike)}`;
+  const oiBy = new Map(oi.map((r) => [key(r), Number(r.data?.[0]?.open_interest)]));
+  const out: Snap[] = [];
+  const flat = gr.filter((r) => r.data?.[0]).map((r) => ({
+    side: r.contract.right.toLowerCase(), k: Number(r.contract.strike),
+    bid: Number(r.data[0].bid), ask: Number(r.data[0].ask) }));
+  /* The quote endpoint carries no underlying price; this stays as the last
+     resort only if Theta ever adds one. */
+  const S0 = Number(gr.find((r) => Number(r.data?.[0]?.underlying_price) > 0)?.data[0].underlying_price);
+  const Sx = impliedSpot(flat, yearsTo(expiry));
+  /* ⚠ THE IMPLIED SPOT WINS WHENEVER THERE IS ONE. Theta's stock price comes
+     from its FREE stock tier and is not reliable: on 9 Oct it read BABA at
+     57.00 on every contract while BABA traded 111 and its own option quotes
+     said so. Its underlying_price is used only when no strike has a two-sided
+     call and put to work the spot out from. */
+  const S = Sx ?? S0;
+  const T = yearsTo(expiry);
+  for (const r of gr) {
+    const d = r.data?.[0]; if (!d) continue;
+    const bid = Number(d.bid), ask = Number(d.ask);
+    const side = r.contract.right.toLowerCase();
+    const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : ask > 0 ? ask / 2 : undefined;
+    const iv = mid != null && S > 0 ? ivFrom(side === 'call', mid, S, Number(r.contract.strike), T) : undefined;
+    out.push({
+      details: { contract_type: side, strike_price: Number(r.contract.strike), expiration_date: expiry },
+      /* Delta from the same Black-Scholes and IV, never Theta's own greeks,
+         which ride on its unreliable underlying price. */
+      greeks: { delta: iv && S > 0 ? deltaOf(side === 'call', S, Number(r.contract.strike), T, iv) : undefined },
+      /* The IV is worked out here from the mid at the implied spot, so the
+         price, the IV and the 1 SD all describe the same market. */
+      implied_volatility: iv,
+      open_interest: Number.isFinite(oiBy.get(key(r))) ? oiBy.get(key(r)) : undefined,
+      /* A one-sided market (no bid) marks at half the ask, as mp-refresh does. */
+      last_quote: { bid: bid > 0 ? bid : undefined, ask: ask > 0 ? ask : undefined, midpoint: mid },
+      underlying_asset: { price: S > 0 ? S : undefined },
+    });
+  }
+  return out;
+}
 /** Strikes within this much of spot, each side. Five tiles need far less; the
     band is wide enough that a big day does not empty it before the next run. */
 const BAND_PCT = 12;
@@ -107,6 +203,7 @@ const nyToday = () =>
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   const t0 = Date.now();
+  let src = 'polygon';
   try {
     const SB_URL = Deno.env.get('SUPABASE_URL')!;
     const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -117,6 +214,27 @@ Deno.serve(async (req) => {
     try { body = await req.json(); } catch { /* cron sends none */ }
     const dryRun = body.dry_run === true;
     const today0 = nyToday();
+    const useTheta = String(body.source ?? Deno.env.get('MARKS_SOURCE') ?? 'polygon').toLowerCase() === 'theta'
+      && !!THETA_URL && !!THETA_KEY;
+    src = useTheta ? 'theta' : 'polygon';
+    /** One expiry's chain: Theta when on (falling back to Polygon if it has
+        nothing), otherwise Polygon. `null` means the call itself failed. */
+    const chain = async (ticker: string, expiry: string): Promise<Snap[] | null> => {
+      if (useTheta) {
+        /* No two-sided call and put to find the spot from: fall back. */
+        try {
+          const t = await thetaChain(ticker, expiry);
+          if (t.some((c) => c.underlying_asset?.price)) return t;
+        } catch { /* fall back */ }
+      }
+      const u = new URL(`https://api.polygon.io/v3/snapshot/options/${ticker}`);
+      u.searchParams.set('expiration_date', expiry);
+      u.searchParams.set('limit', '250');
+      u.searchParams.set('apiKey', POLY);
+      const r = await fetch(u.toString());
+      if (!r.ok) return null;
+      return ((await r.json()) as { results?: Snap[] }).results ?? [];
+    };
 
     /* ⚠ LIVE, ONE NAME (24 Sep 2026). The roll sheet asks for this every time
        it opens: Nik saw BABA at 110 and a write at 112, because the app had
@@ -129,13 +247,8 @@ Deno.serve(async (req) => {
       const weeksOut = [];
       let spotOut: number | null = null;
       for (const expiry of fridays(today0, 2)) {
-        const u = new URL(`https://api.polygon.io/v3/snapshot/options/${ticker}`);
-        u.searchParams.set('expiration_date', expiry);
-        u.searchParams.set('limit', '250');
-        u.searchParams.set('apiKey', POLY);
-        const r = await fetch(u.toString());
-        if (!r.ok) continue;
-        const items = ((await r.json()) as { results?: Snap[] }).results ?? [];
+        const items = await chain(ticker, expiry);
+        if (!items) continue;
         const spot = items.find((c) => c.underlying_asset?.price)?.underlying_asset?.price ?? null;
         if (!spot) continue;
         spotOut = spot;
@@ -170,7 +283,7 @@ Deno.serve(async (req) => {
           above: up,
         });
       }
-      return json(200, { ok: true, build: BUILD, ticker, asOf: new Date().toISOString(),
+      return json(200, { ok: true, build: BUILD, source: src, ticker, asOf: new Date().toISOString(),
                          spot: spotOut, weeks: weeksOut });
     }
 
@@ -210,14 +323,8 @@ Deno.serve(async (req) => {
 
     for (const ticker of [...names].sort()) {
       for (const expiry of weeks) {
-        const u = new URL(`https://api.polygon.io/v3/snapshot/options/${ticker}`);
-        u.searchParams.set('expiration_date', expiry);
-        u.searchParams.set('limit', '250');
-        u.searchParams.set('apiKey', POLY);
-        const r = await fetch(u.toString());
-        if (!r.ok) { notes.push(`${ticker} ${expiry}: HTTP ${r.status}`); continue; }
-        const d = await r.json() as { results?: Snap[] };
-        const items = d.results ?? [];
+        const items = await chain(ticker, expiry);
+        if (!items) { notes.push(`${ticker} ${expiry}: no chain`); continue; }
         const spot = items.find((c) => c.underlying_asset?.price)?.underlying_asset?.price ?? null;
         if (!spot) { notes.push(`${ticker} ${expiry}: no spot`); continue; }
         let kept = 0;
@@ -280,7 +387,7 @@ Deno.serve(async (req) => {
     }
 
     return json(200, {
-      ok: true, build: BUILD, dryRun, names: [...names].sort(), weeks,
+      ok: true, build: BUILD, source: src, dryRun, names: [...names].sort(), weeks,
       rows: rows.length, ms: Date.now() - t0, notes,
     });
   } catch (e) {

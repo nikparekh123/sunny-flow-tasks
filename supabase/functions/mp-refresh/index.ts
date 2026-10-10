@@ -25,6 +25,24 @@
  *
  * Required Supabase secret: POLYGON_API_KEY (shared with refresh-prices,
  * option-chain, etc.)
+ *
+ * ⚠ THETA DATA, LIVE (Nik, 9 Oct 2026). Option marks can now come from Theta
+ * Data's Options Standard feed, real-time NBBO instead of Polygon's 15-minute
+ * delay, through our Theta Terminal on Fly.io (infra/theta). The source is the
+ * MARKS_SOURCE secret, `polygon` until the Monday comparison against IBKR, then
+ * `theta`; flipping it back is the whole rollback. A body of {"compare":true}
+ * pulls both, writes nothing, and returns the differences leg by leg.
+ *
+ * Theta is asked once per (ticker, expiry) for every strike's NBBO quote and
+ * open interest. The spot is the one the quotes imply (put-call parity at the
+ * strike nearest the money) and every greek is worked out here from the mid,
+ * because Theta's own underlying price, and so its greeks, can be wrong (BABA
+ * at 57 against 111 on 9 Oct). A leg Theta has no quote for falls back to
+ * Polygon for that run.
+ *
+ * ⚠ EVERY 30 SECONDS (Nik, 9 Oct 2026). The cron still fires each minute in
+ * market hours; a cron call refreshes twice, the second pass 30s after the
+ * first. A manual call refreshes once.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -83,6 +101,86 @@ interface OpenTradeRow {
   strike: number;
   expiry: string;     // 'YYYY-MM-DD'
   closes_trade_id: string | null;
+}
+
+// ─── Theta Data (via the Fly.io gate) ───────────────────────────
+interface ThetaRow {
+  contract: { symbol: string; expiration: string; right: string; strike: number };
+  data: Array<Record<string, number | string>>;
+}
+const THETA_URL = Deno.env.get('THETA_URL') ?? '';
+const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
+async function theta(path: string): Promise<ThetaRow[]> {
+  const r = await fetch(`${THETA_URL}${path}${path.includes('?') ? '&' : '?'}format=json`, {
+    headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(20_000),
+  });
+  if (r.status === 472 || r.status === 404) return [];   // no data for that query
+  if (!r.ok) throw new Error(`theta ${r.status} ${(await r.text()).slice(0, 120)}`);
+  const j = await r.json();
+  return (j?.response ?? []) as ThetaRow[];
+}
+/** Run `fns` at most `n` at a time. */
+async function pool<T>(fns: Array<() => Promise<T>>, n: number): Promise<T[]> {
+  const out: T[] = new Array(fns.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, fns.length) }, async () => {
+    while (i < fns.length) { const k = i++; out[k] = await fns[k](); }
+  }));
+  return out;
+}
+const ND = (x: number) => Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+function NC(x: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+    + 0.254829592) * t * Math.exp(-x * x / 2);
+  return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+}
+const RATE = 0.04;
+function bsPrice(call: boolean, S: number, K: number, T: number, v: number): number {
+  const sq = v * Math.sqrt(T), d1 = (Math.log(S / K) + (RATE + v * v / 2) * T) / sq, d2 = d1 - sq;
+  return call ? S * NC(d1) - K * Math.exp(-RATE * T) * NC(d2)
+              : K * Math.exp(-RATE * T) * NC(-d2) - S * NC(-d1);
+}
+/** ⚠ EVERY GREEK IS WORKED OUT HERE, from the live mid at the option-implied
+    spot. Theta's own greeks use its `underlying_price`, which read BABA at
+    57.00 against a real 111 on 9 Oct, so its delta and IV were nonsense for
+    that name. Vega is per vol point and theta per calendar day, Polygon's units. */
+function greeksFrom(call: boolean, mid: number, S: number, K: number, T: number) {
+  const intrinsic = Math.max(0, call ? S - K : K - S);
+  if (!(S > 0 && K > 0 && T > 0) || !(mid > intrinsic * Math.exp(-RATE * T) + 0.005)) return null;
+  let lo = 0.01, hi = 4;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (bsPrice(call, S, K, T, m) < mid) lo = m; else hi = m; }
+  const v = (lo + hi) / 2, sq = v * Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (RATE + v * v / 2) * T) / sq, d2 = d1 - sq;
+  const decay = -S * ND(d1) * v / (2 * Math.sqrt(T));
+  const carry = RATE * K * Math.exp(-RATE * T);
+  return {
+    iv: v,
+    delta: call ? NC(d1) : NC(d1) - 1,
+    gamma: ND(d1) / (S * sq),
+    vega: S * ND(d1) * Math.sqrt(T) / 100,
+    theta: (call ? decay - carry * NC(d2) : decay + carry * NC(-d2)) / 365,
+  };
+}
+const legKey = (right: string, strike: number) => `${right.toLowerCase()}|${Number(strike).toFixed(3)}`;
+/** The stock price a chain's own quotes imply: C - P + K at the strike where
+    call and put are closest (both two-sided). ⚠ Theta's `underlying_price` is
+    from its FREE stock tier and read BABA at 57.00 against a real 111 on
+    9 Oct, so it is never used for a spot. */
+function impliedSpot(rows: ThetaRow[], T: number): number | null {
+  const by = new Map<number, { c?: number; p?: number }>();
+  for (const r of rows) {
+    const d = r.data?.[0]; if (!d) continue;
+    const bid = Number(d.bid), ask = Number(d.ask);
+    if (!(bid > 0 && ask > 0)) continue;
+    const k = Number(r.contract.strike), e = by.get(k) ?? {};
+    e[r.contract.right.toLowerCase() === 'call' ? 'c' : 'p'] = (bid + ask) / 2; by.set(k, e);
+  }
+  let best: number | null = null, gap = Infinity;
+  for (const [k, e] of by) {
+    if (e.c == null || e.p == null) continue;
+    if (Math.abs(e.c - e.p) < gap) { gap = Math.abs(e.c - e.p); best = e.c - e.p + k * Math.exp(-0.04 * T); }
+  }
+  return best;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -181,7 +279,22 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+  let body: { source?: string; compare?: boolean; passes?: number } = {};
+  try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is fine */ }
+  const t0 = Date.now();
+  const fromCron = req.headers.get('user-agent')?.includes('pg_net') ?? false;
+  const passes = Math.max(1, Math.min(2, body.passes ?? (fromCron ? 2 : 1)));
+  const first = await refresh(req, body);
+  if (passes < 2 || body.compare) return first;
+  /* The second pass lands 30s after the first one STARTED. */
+  await new Promise((r) => setTimeout(r, 30_000 - Math.min(29_000, Date.now() - t0)));
+  return await refresh(req, body);
+});
+
+async function refresh(req: Request, body: { source?: string; compare?: boolean }): Promise<Response> {
   const now = new Date().toISOString();
+  const source = (body.source ?? Deno.env.get('MARKS_SOURCE') ?? 'polygon').toLowerCase();
+  const useTheta = (source === 'theta' || body.compare) && !!THETA_URL && !!THETA_KEY;
   const supabaseUrl    = Deno.env.get('SUPABASE_URL')!;
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const polygonKey     = Deno.env.get('POLYGON_API_KEY');
@@ -291,7 +404,76 @@ Deno.serve(async (req) => {
     // query-param auth; Polygon itself accepts both. So Bearer is the
     // strict superset that works against either backend.
     const authHeaders = { Authorization: `Bearer ${polygonKey}` };
+
+    /* THETA, one call per (ticker, expiry) for every strike's NBBO + first-
+       order greeks, one for open interest. Two groups at a time = the plan's
+       four concurrent requests. */
+    type TV = { mark: number | null; delta: number | null; theta: number | null; vega: number | null;
+                gamma: number | null; iv: number | null; oi: number | null; underlying: number | null;
+                bid: number | null; ask: number | null };
+    const thetaBy = new Map<string, TV>();
+    let thetaErr: string | null = null;
+    if (useTheta) {
+      const groups = [...new Set(openLegs.map((l) => `${l.ticker.toUpperCase()}|${l.expiry}`))];
+      try {
+        const res = await pool(groups.map((g) => async () => {
+          const [t, e] = g.split('|'); const ex = e.replaceAll('-', '');
+          const [gr, oi] = await Promise.all([
+            theta(`/v3/option/snapshot/quote?symbol=${t}&expiration=${ex}`),
+            theta(`/v3/option/snapshot/open_interest?symbol=${t}&expiration=${ex}`).catch(() => [] as ThetaRow[]),
+          ]);
+          return { t, e, gr, oi };
+        }), 2);
+        /* ⚠ ONE SPOT PER NAME, FROM ITS NEAREST EXPIRY. Parity on a two-year
+           LEAP gives the forward, not today's price (BABA's Jan 2028 chain
+           implied 117.75 against 111.4), so every expiry of a name is priced
+           against the spot its nearest weekly implies. */
+        const yrs = (e: string) => Math.max(1 / 365, (Date.parse(`${e}T20:00:00Z`) - Date.now()) / (365 * 864e5));
+        const spotOf = new Map<string, number>();
+        for (const { t, e, gr } of [...res].sort((a, b) => a.e.localeCompare(b.e))) {
+          if (spotOf.has(t)) continue;
+          const sx = impliedSpot(gr, yrs(e));
+          if (sx != null) spotOf.set(t, sx);
+        }
+        for (const { t, e, gr, oi } of res) {
+          const oiBy = new Map(oi.map((r) => [legKey(r.contract.right, r.contract.strike),
+                                             Number(r.data?.[0]?.open_interest)]));
+          const T = Math.max(1 / 365, (Date.parse(`${e}T20:00:00Z`) - Date.now()) / (365 * 864e5));
+          const Sx = spotOf.get(t) ?? null;
+          for (const r of gr) {
+            const d = r.data?.[0]; if (!d) continue;
+            const bid = Number(d.bid), ask = Number(d.ask);
+            /* The midpoint is the mark (27 Aug ruling). A one-sided market
+               with no bid marks at half the ask; no quote at all falls back. */
+            const mark = bid > 0 && ask > 0 ? (bid + ask) / 2 : ask > 0 ? ask / 2 : null;
+            const k = legKey(r.contract.right, r.contract.strike);
+            const fin = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+            const g = mark != null && Sx != null
+              ? greeksFrom(r.contract.right.toLowerCase() === 'call', mark, Sx, Number(r.contract.strike), T)
+              : null;
+            thetaBy.set(`${t}|${e}|${k}`, {
+              mark, bid: fin(bid), ask: fin(ask),
+              delta: g?.delta ?? null, theta: g?.theta ?? null, vega: g?.vega ?? null,
+              gamma: g?.gamma ?? null, iv: g?.iv ?? null,
+              oi: fin(oiBy.get(k)) ?? null, underlying: Sx,
+            });
+          }
+        }
+      } catch (err) { thetaErr = (err as Error).message; }
+    }
+    const thetaOf = (leg: OpenTradeRow) =>
+      thetaBy.get(`${leg.ticker.toUpperCase()}|${leg.expiry}|${legKey(leg.option_type, leg.strike)}`);
+    const compareRows: Array<Record<string, unknown>> = [];
+    let thetaUsed = 0;
+
     for (const leg of openLegs) {
+      const tv = thetaOf(leg);
+      if (useTheta && !body.compare && tv && tv.mark != null) {
+        thetaUsed++;
+        legResults.push({ id: leg.id, delta: tv.delta, gamma: tv.gamma, theta: tv.theta, vega: tv.vega,
+                          iv: tv.iv, oi: tv.oi, vol: null, last_mark: tv.mark, underlying: tv.underlying });
+        continue;
+      }
       const occ = occSymbol(leg.ticker.toUpperCase(), leg.expiry, leg.option_type, leg.strike);
       const url = `https://api.polygon.io/v3/snapshot/options/${leg.ticker.toUpperCase()}/${occ}`;
       try {
@@ -304,6 +486,14 @@ Deno.serve(async (req) => {
         const s = data.results;
         if (!s) {
           legFailures.push({ id: leg.id, ticker: leg.ticker, occ, reason: 'no results' });
+          continue;
+        }
+        if (body.compare) {
+          compareRows.push({ leg: occ, polygon: pickPremium(s), theta: tv?.mark ?? null,
+                             bid: tv?.bid ?? null, ask: tv?.ask ?? null,
+                             delta_p: s.greeks?.delta ?? null, delta_t: tv?.delta ?? null,
+                             iv_p: s.implied_volatility ?? null, iv_t: tv?.iv ?? null,
+                             spot_p: s.underlying_asset?.price ?? null, spot_t: tv?.underlying ?? null });
           continue;
         }
         legResults.push({
@@ -323,6 +513,13 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (body.compare) {
+      await finishRun('ok', { legs_total: openLegs.length, legs_updated: 0, error_text: 'compare only, nothing written' });
+      return new Response(JSON.stringify({ ok: true, compare: true, theta_error: thetaErr,
+        legs: openLegs.length, theta_quoted: [...thetaBy.values()].filter((v) => v.mark != null).length,
+        rows: compareRows }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     // ─── 4. Stock snapshot — one batched call for all tickers ───
     const stockResults: Array<{ ticker: string; spot: number | null; day_change_pct: number | null }> = [];
     if (allTickers.length > 0) {
@@ -339,12 +536,19 @@ Deno.serve(async (req) => {
             stockResults.push({ ticker: t, spot: null, day_change_pct: null });
             continue;
           }
-          const spot = positive(it.lastTrade?.p)
+          /* With Theta on, a name with an option leg takes its spot from the
+             option chain (live), not Polygon's delayed stock snapshot. */
+          const liveSpot = useTheta
+            ? openLegs.filter((l) => l.ticker.toUpperCase() === t).map((l) => thetaOf(l)?.underlying)
+                .find((v) => typeof v === 'number' && v > 0) ?? null
+            : null;
+          const spot = liveSpot
+            ?? positive(it.lastTrade?.p)
             ?? positive(it.lastQuote?.p)
             ?? positive(it.day?.c)
             ?? positive(it.prevDay?.c);
           // Polygon returns this field directly; if absent, derive from spot vs prevDay.
-          let day = it.todaysChangePerc;
+          let day = liveSpot != null ? undefined : it.todaysChangePerc;
           if (typeof day !== 'number' && spot != null) {
             const prev = positive(it.prevDay?.c);
             if (prev != null) day = ((spot - prev) / prev) * 100;
@@ -395,6 +599,7 @@ Deno.serve(async (req) => {
 
     const summary = {
       ok: true,
+      source: useTheta ? 'theta' : 'polygon', theta_used: thetaUsed, theta_error: thetaErr,
       legs: { total: openLegs.length, updated: legResults.length, failed: legFailures.length, failures: legFailures.slice(0, 10) },
       tickers: { total: allTickers.length, updated: stockResults.filter((r) => r.spot != null).length },
       timestamp: now,
@@ -438,4 +643,4 @@ Deno.serve(async (req) => {
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   }
-});
+}
