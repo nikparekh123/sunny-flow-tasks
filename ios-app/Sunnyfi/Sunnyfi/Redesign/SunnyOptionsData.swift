@@ -15,6 +15,13 @@ final class OptionsStore {
     private(set) var error: String?
     private(set) var loading = false
     private var loadedAt: Date?
+    /// A quiet refresh in flight. Kept apart from `loading`, which the cards
+    /// print as "updating": a refresh every 30 seconds must not flicker it.
+    private var inFlight = false
+    /// What the freshness marks compare against: the last payload the reader
+    /// asked for (open, return, pull), not the last quiet tick. A figure that
+    /// moved while the app sat open is marked on the next look, not lost.
+    private var freshBase: OptionsPayload?
     /// Freshness (hold until seen): Inventory's figures that moved on a pull.
     let invFresh = FreshTrack()
     let posFresh = FreshTrack()
@@ -23,10 +30,13 @@ final class OptionsStore {
     /// Version bumps on every load so a screen model can key its cache off it.
     private(set) var version = 0
 
-    func load(force: Bool = false) async {
-        if loading { return }
+    /// `quiet`: the in-app 30-second refresh. It swaps the figures in place,
+    /// shows no "updating", and leaves the freshness marks to the next real look.
+    func load(force: Bool = false, quiet: Bool = false) async {
+        if loading || inFlight { return }
         if !force, let at = loadedAt, Date().timeIntervalSince(at) < 300 { return }
-        loading = true; defer { loading = false }
+        if quiet { inFlight = true } else { loading = true }
+        defer { if quiet { inFlight = false } else { loading = false } }
         do {
             var r = URLRequest(url: URL(string: Secrets.supabaseURL
                 + "/functions/v1/options-cards")!)
@@ -48,10 +58,13 @@ final class OptionsStore {
                 data = old
             }
             /* The first load is the baseline and marks nothing. */
-            invFresh.landed(data?.inventoryCard.flatMap { o in
-                p.inventoryCard.map { Self.invDiff(o, $0) } } ?? [:])
-            posFresh.observe(SunnyPositions.freshFigs(p.positions, p.longLegs?.legs ?? []))
-            wyFresh.observe(SunnyWeeklyYield.freshFigs(p.book))
+            if !quiet {
+                invFresh.landed((freshBase ?? data)?.inventoryCard.flatMap { o in
+                    p.inventoryCard.map { Self.invDiff(o, $0) } } ?? [:])
+                posFresh.observe(SunnyPositions.freshFigs(p.positions, p.longLegs?.legs ?? []))
+                wyFresh.observe(SunnyWeeklyYield.freshFigs(p.book))
+                freshBase = p
+            }
             data = p
             /* ⚠ THE LOADING SCREEN NEEDS THETA BEFORE THETA ARRIVES, so the
                last good answer is kept here rather than fetched again. */

@@ -165,6 +165,20 @@ struct SunnyShell: View {
             guard now == .active, loadedOnce else { return }
             Task { await model.loadAll(force: true) }
         }
+        /* ⚠ LIVE WHILE OPEN (Nik, 10 Oct 2026: "make the app refresh while it's
+           open"). Every 30 seconds in market hours, the pace the server marks
+           at, the Options figures are fetched again and swapped in place. Keyed
+           on the scene phase, so it stops the moment the app is backgrounded and
+           costs nothing outside 9:00-17:00 New York on a weekday. Quiet: no
+           "updating" flicker, and the freshness marks wait for a real look. */
+        .task(id: phase) {
+            guard phase == .active else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                if Task.isCancelled { break }
+                if loadedOnce, Self.marketOpen() { await model.options.load(force: true, quiet: true) }
+            }
+        }
         .onAppear { if let p = Self.argPage { page = p } }
         .preferredColorScheme(Self.resolveTheme(Self.argTheme ?? themePref, now: themeClock))
         .task {
@@ -173,6 +187,17 @@ struct SunnyShell: View {
                 themeClock = Date()
             }
         }
+    }
+
+    /// Weekday, 9:00 to 17:00 in New York: when the server is marking.
+    /// `-liveAnyHour` (verification only) ignores the clock.
+    static func marketOpen(_ now: Date = Date()) -> Bool {
+        if ProcessInfo.processInfo.arguments.contains("-liveAnyHour") { return true }
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let wd = cal.component(.weekday, from: now)          // 1 Sun … 7 Sat
+        let h = cal.component(.hour, from: now)
+        return (2...6).contains(wd) && (9..<17).contains(h)
     }
 
     /* ⚠ AUTO IS THE NIGHT WINDOW, OR THE PHONE'S OWN DARK MODE. The sheet: "on
