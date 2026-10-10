@@ -140,82 +140,6 @@ struct SunnySeam: View {
     }
 }
 
-// MARK: - the expand chip
-
-/// ⚠ THE 44pt TARGET IS REACHED BY OVERHANG, NEVER BY PADDING THE LABEL.
-/// Padding to 44 pushes the text off grid — the same recipe CHROME.md §5 fixes
-/// with a ::before. In SwiftUI that is a `contentShape` on a taller frame.
-struct SunnyExpandChip: View {
-    let label: String
-    let tap: () -> Void
-
-    var body: some View {
-        Text(label.uppercased())
-            .font(S.inter(S.t11, S.wSemiN))
-            .tracking(S.track(S.t11, S.lsNew))
-            .foregroundStyle(S.mute)
-            .sunnyLineBox(S.t11)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 7)
-            .overlay(Capsule().strokeBorder(S.hair, lineWidth: 1))
-            .frame(height: S.hitMin)
-            .contentShape(Rectangle())
-            .onTapGesture(perform: tap)
-    }
-}
-
-// MARK: - the new tag
-
-/// ⚠ AMBER, BECAUSE AMBER ALREADY MEANS UNREAD. The strip's `New` square and a
-/// name's ring both wear it for exactly this fact — cards are waiting — so a
-/// third colour here would invent a second vocabulary for one meaning.
-///
-/// ⚠ AND IT IS A WORD, NOT A DOT. The importance dot on an analyst card is
-/// already a 5px amber circle; a second amber dot on the same row would be two
-/// different facts in one channel.
-struct SunnyNewTag: View {
-    var body: some View {
-        Text("NEW")
-            .font(S.inter(S.t11, S.wSemiN))
-            .tracking(S.track(S.t11, S.lsNew))
-            .foregroundStyle(S.warnText)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(RoundedRectangle(cornerRadius: 4).fill(S.warnWash))
-    }
-}
-
-// MARK: - a link row
-
-/// ⚠ THE HEADLINE IS THE LINK, EVERYWHERE. No teaser we did not receive, no
-/// summary we wrote, no sentiment we cannot compute — the feed ships a title
-/// and a url, and the url is what is being paid for.
-struct SunnyLinkRow: View {
-    let l: NewsLink
-
-    var body: some View {
-        Link(destination: URL(string: l.url) ?? URL(string: "https://polygon.io")!) {
-            VStack(alignment: .leading, spacing: S.gap2) {
-                (Text(l.title) + Text("  \u{2197}").foregroundColor(S.mute2))
-                    .font(S.inter(S.t15, S.wMidSmN))
-                    .foregroundStyle(S.ink)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                /* The tag rides the byline, not the headline: a pill above a
-                   26/300 title would out-shout the thing it is pointing at. */
-                HStack(spacing: S.gap4) {
-                    if NewToday.news(hours: l.hours) { SunnyNewTag() }
-                    Text("\(l.publisher) \u{00B7} \(ago(l.hours))")
-                        .font(S.inter(S.t13, S.wMidSmN))
-                        .foregroundStyle(S.mute2)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - empty-section prose
 
 /// ⚠ AN EMPTY SECTION STATES ITS LAST DATE. Without one, an empty feed and a
@@ -271,36 +195,4 @@ func shortDate(_ iso: String) -> String {
     let p = iso.split(separator: "-")
     guard p.count == 3 else { return iso }
     return "\(Int(p[2]) ?? 0) \(expShort(iso).split(separator: " ").first.map(String.init) ?? "")"
-}
-
-// MARK: - the filtered list
-
-/// ⚠ EVERY EXPANDED ROW NAMES WHY THE ITEM WAS HELD BACK. A filtered list that
-/// does not say why is a second silent gate — the count already told him
-/// something was withheld.
-struct SunnyFilteredList: View {
-    let rows: [NewsBlock.Filtered.Row]
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { i, r in
-                if i > 0 { Rectangle().fill(S.ruleColor).frame(height: 1) }
-                Link(destination: URL(string: r.url) ?? URL(string: "https://polygon.io")!) {
-                    VStack(alignment: .leading, spacing: S.gap2) {
-                        Text(r.title)
-                            .font(S.inter(S.t14, S.wMidSmN))
-                            .foregroundStyle(S.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("\(r.ticker) \u{00B7} \(r.reason ?? "held back")")
-                            .font(S.inter(S.t13, S.wMidSmN))
-                            .foregroundStyle(S.mute2)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, S.t13)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .measure("filtered-list")
-    }
 }

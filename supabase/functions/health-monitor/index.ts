@@ -188,7 +188,7 @@ Deno.serve(async (req) => {
      reading — the same reason rows_written is never the trigger. */
   const FEEDS: Array<{ feed: string; warnHours: number; critHours: number }> = [
     // daily, every day
-    { feed: 'intel-sync',           warnHours: 30,  critHours: 50 },
+    // intel-sync (Benzinga news + analysts) retired 9 Oct 2026: Nik cancelled the feed.
     { feed: 'earnings-sync',        warnHours: 30,  critHours: 50 },
     // weekday only — the grace has to clear a weekend, and a long one
     { feed: 'ticker-iv-snapshot',   warnHours: 80,  critHours: 110 },

@@ -12,11 +12,18 @@
  *
  * ⚠ THE DRIFT IS THE FLOOR. It is the one block that is never empty, which is
  * why a dead week still has a page. Nothing else may be padded to fill space.
+ *
+ * ⚠ NEWS AND ANALYSTS ARE OFF (9 Oct 2026). Nik cancelled the Benzinga news
+ * and analyst add-ons and chose to take both off the New tab. The four feeds
+ * (name_news, analyst_actions, analyst_insights, guidance_events) are no longer
+ * read here, so news, analysts, targets, room, drift and the guidance rows come
+ * back empty; the response keeps its shape so a build already on the phone still
+ * decodes it. The page is now the earnings dates and the earnings card.
  */
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-08-29.1';
+const BUILD = '2026-10-09.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 /* PostgREST caps every response at 1000 rows and `limit` cannot lift it. The
    first build asked for every analyst action and got the newest 1000 across the
@@ -92,13 +99,12 @@ Deno.serve(async (req) => {
     const [lots, quotes, news, acts, insights, earn, guide, closes, legs, book] = await Promise.all([
       Promise.resolve(lotRows),
       D.get('ticker_quotes_latest?select=ticker,spot,day_change_pct'),
-      D.get(`name_news?published=gte.${ago(8)}&select=ticker,id,published,title,publisher,url`
-        + '&order=published.desc'),
-      page(D, `analyst_actions?select=*&order=date.desc&ticker=in.(${inList})`),
-      D.get('analyst_insights?select=*&order=date.desc'),
+      Promise.resolve([] as Record<string, unknown>[]),   // name_news: off, 9 Oct
+      Promise.resolve([] as Record<string, unknown>[]),   // analyst_actions: off
+      Promise.resolve([] as Record<string, unknown>[]),   // analyst_insights: off
       D.get(`earnings_events?report_date=gte.${today}`
         + '&select=ticker,report_date,report_time,date_estimated,source&order=report_date.asc'),
-      D.get('guidance_events?select=*&order=date.desc'),
+      Promise.resolve([] as Record<string, unknown>[]),   // guidance_events: off
       page(D, 'daily_closes?select=ticker,date,close_price&order=date.asc'
         + `&date=gte.${ago(320)}&ticker=in.(${inList})`),
       D.get(`option_trades?voided_at=is.null&expiry=gte.${today}`
@@ -564,7 +570,7 @@ Deno.serve(async (req) => {
       const support = shortAfter
         ? { text: `Inside the ${shortAfter[1].type} you sold, ${said(shortAfter[1].expiry)}`, red: true }
         : longAfter
-        ? { text: `Inside the ${longAfter[1].type} you bought, ${said(longAfter[1].expiry)} — covered`,
+        ? { text: `Inside the ${longAfter[1].type} you bought, ${said(longAfter[1].expiry)}, covered`,
             red: false }
         : null;
       return {

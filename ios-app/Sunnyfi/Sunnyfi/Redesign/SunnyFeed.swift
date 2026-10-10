@@ -54,9 +54,6 @@ struct SunnyPane: View {
     var toTop: Int = 0
 
     @State private var pos = ScrollPosition()
-    /// Expand-in-place state for the news gate's chip. Per view, not per model:
-    /// it is a reading position, not a fact about the book.
-    @State private var showFiltered = false
 
     // MARK: body
 
@@ -142,89 +139,20 @@ struct SunnyPane: View {
 
            ⚠ AND THE PAGE RUNS ON TWO CLOCKS. The lead says TODAY, the analyst
            seam says THIS WEEK, and the header date is a DAY. */
+        /* ⚠ NEWS AND ANALYSTS ARE OFF (9 Oct 2026). Nik cancelled the Benzinga
+           news and analyst feeds and chose to take them off this page: the news
+           lead and links, the analyst cards, the room, the median target and
+           the drift are gone. What is left is the report dates and the
+           earnings card, which now come from Nasdaq's calendar. */
         if let p = m.newPage.page {
             SunnyNewTitle(date: p.date)
             SunnyDateRow(dates: p.dates)
 
-            /* News carries NO SEAM: a 26/300 headline under the date row is
-               self-evidently news, and a heading over the first block on a page
-               is a partition with nothing on the other side. */
-            SunnyNewsLead(lead: p.news.lead, filtered: p.news.filtered.count,
-                          onChip: { showFiltered.toggle() },
-                          chipLabel: showFiltered ? "Fewer" : "See them")
-            if p.news.lead != nil {
-                VStack(alignment: .leading, spacing: S.gap7) {
-                    ForEach(p.news.links) { SunnyLinkRow(l: $0) }
-                }
-                .padding(.top, S.gap3)
-                HStack(spacing: S.gap6) {
-                    /* ⚠ THE FILTERED COUNT IS ALWAYS SHOWN AND NAMED. A silent
-                       gate on a paid feed looks broken. */
-                    Text("\(p.news.filtered.count) filtered")
-                        .font(S.inter(S.t14, S.wMidSmN))
-                        .foregroundStyle(S.mute2)
-                    SunnyExpandChip(label: showFiltered ? "Fewer" : "See them") {
-                        showFiltered.toggle()
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
-            if showFiltered { SunnyFilteredList(rows: p.news.filtered.rows) }
-
-            SunnySeam(label: "This week · analysts", count: p.analysts.count)
-            if p.analysts.cards.isEmpty {
-                /* ⚠ AN EMPTY SECTION STATES ITS LAST DATE. Without one, an
-                   empty feed and a broken feed are indistinguishable. */
-                SunnyEmptyNote(
-                    line: "No firm has moved on any of your names this week.",
-                    last: p.analysts.last.map {
-                        "Last was \(p.analysts.lastFirm ?? "a firm") on "
-                        + "\(p.analysts.lastTicker ?? ""), \(shortDate($0))."
-                    })
-            } else {
-                ForEach(p.analysts.cards) {
-                    SunnyAnalystCard(a: $0,
-                                     isNew: NewToday.action(date: $0.date, pageDate: p.date))
-                }
-                if !p.analysts.rest.isEmpty { SunnyActionList(rows: p.analysts.rest) }
-            }
-            /* On every state of the page, with that state's own numbers — a
-               standing fact, not an arrival. */
-            /* ⚠ THE ROOM DOES NOT REPLACE THE MEDIAN. It did, and that was
-               wrong. The two answer different questions: the room is the
-               spread of opinion and how it MOVED, the median is the single
-               number and the distance from today's price to it. Demoting the
-               median to an `else` branch meant it could never render at all,
-               because `room` always has rows — so a card whose own comment
-               says "on every state of the page" was invisible for weeks.
-
-               Nik, 2026-09-03: "we use to have this on the new page and then
-               it was removed I want to keep this always as a view." Both now
-               render, room first because movement is the newer information and
-               the median is the standing fact underneath it. */
-            if let room = p.room, !room.rows.isEmpty {
-                SunnyRoomCard(r: room)
-            }
-            if !p.targets.rows.isEmpty {
-                SunnyTargetCard(t: p.targets)
-            }
-
-            SunnySeam(label: "Earnings & guidance", count: p.earnings.count)
+            SunnySeam(label: "Earnings", count: p.earnings.count)
             if p.earnings.rows.isEmpty {
-                SunnyEmptyNote(line: "Nothing reports inside 30 days, and no guide has changed.",
-                               last: nil)
+                SunnyEmptyNote(line: "Nothing reports inside 60 days.", last: nil)
             } else {
                 SunnyEarningsCard(e: p.earnings)
-            }
-
-            /* ⚠ THE NEVER-EMPTY BLOCK, AND IT GOES LAST. On a dead week it and
-               the room are the page. It came back as a slope chart because the
-               single blended cut share could not tell a REGIME BREAK from a
-               name that has always been unloved, and those are opposite
-               situations to sell calls into. */
-            if let drift = p.drift, !drift.rows.isEmpty {
-                SunnySeam(label: "The drift", count: nil)
-                SunnyDriftCard(d: drift)
             }
         } else if m.newPage.error != nil {
             SunnyPageNote("The feed did not answer. It will try again when you "
