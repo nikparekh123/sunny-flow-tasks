@@ -30,11 +30,19 @@
  * announces (NKE on 9 Oct): the stored date stays until a real one arrives.
  *
  * ⚠ SANITY GATE: anything outside [today - 30d, today + 400d] is dropped.
+ *
+ * ⚠ JPM IS ALWAYS IN, held or not (12 Oct 2026). Earnings season, for the
+ * new app's season card, starts the day JPMorgan reports and runs 6 weeks
+ * (Nik's rule); the `earnings_season` view reads JPM's rows. Names outside the
+ * book are stored with scope_tag 'other', so nothing that lists the book's
+ * reports picks them up.
  */
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-10-09.1';
+const BUILD = '2026-10-12.1';
+/* Not in the book, but always synced: JPM's report date starts earnings season. */
+const ANCHORS = ['JPM'];
 const AHEAD = 400;
 const BEHIND = 30;
 const SAME_QUARTER = 45;
@@ -82,8 +90,9 @@ Deno.serve(async (req) => {
       D.get(`option_trades?voided_at=is.null&expiry=gte.${ymd(today)}&select=ticker`),
       D.get('positions?select=ticker'),
     ]);
-    const names = body.tickers ?? [...new Set([...legs, ...pos]
-      .map((r) => String(r.ticker ?? '').toUpperCase()).filter(Boolean))].sort();
+    const book = new Set([...legs, ...pos]
+      .map((r) => String(r.ticker ?? '').toUpperCase()).filter(Boolean));
+    const names = body.tickers ?? [...new Set([...book, ...ANCHORS])].sort();
 
     const found: Row[] = [];
     const none: string[] = [];
@@ -96,7 +105,7 @@ Deno.serve(async (req) => {
         const j = await r.json();
         const row = parse(t, String(j?.data?.reportText ?? ''));
         if (!row || row.report_date < from || row.report_date > to) { none.push(t); continue; }
-        found.push(row);
+        found.push({ ...row, scope_tag: book.has(t) ? 'position' : 'other' });
       } catch (e) { errors.push(`${t} ${String(e).slice(0, 60)}`); }
     }
 
