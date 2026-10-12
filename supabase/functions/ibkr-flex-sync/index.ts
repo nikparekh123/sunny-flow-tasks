@@ -1167,6 +1167,18 @@ async function upsertOption(
     row.realized_pl_source = 'ibkr';
   }
 
+  /* ⚠ IBKR'S COMMISSION AND NET CASH, IN IBKR'S SIGN (12 Oct 2026). Commission
+     is negative (a cost); net cash is what the fill moved, commission
+     included: positive when we sold, negative when we bought. The new app's
+     live account value moves by today's net cash until the next morning's
+     Daily Flex re-anchors it, and its reports count trades and commission.
+     Set only when present, like realized above, so an empty field in one
+     report never wipes what another wrote. */
+  const comm = t.commission !== '' ? Number(t.commission) : NaN;
+  if (Number.isFinite(comm)) row.commission = comm;
+  const cash = t.netCash !== '' ? Number(t.netCash) : NaN;
+  if (Number.isFinite(cash)) row.net_cash = cash;
+
   // For closes (C/A/Ex/Ep): link to the matching open via closes_trade_id.
   // iOS's "remaining contracts" math depends on this FK to subtract closes
   // from opens; without it, every IBKR close is orphaned and the position
