@@ -8,6 +8,7 @@
  * primes this hook for free.
  */
 import { useMemo } from "react";
+import { fetchAll } from "@/lib/fetchAll";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { OptionTrade, PositionRow } from "../types";
@@ -46,11 +47,10 @@ export function usePortfolioGreeks(filter?: AtomFilter): UsePortfolioGreeksResul
   const tradesQ = useQuery({
     queryKey: ["mp_trades"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      return fetchAll<OptionTrade>(() => supabase
         .from("option_trades" as never)
-        .select("*");
-      if (error) throw error;
-      return (data ?? []) as unknown as OptionTrade[];
+        .select("*")
+        .order("id", { ascending: true }));
     },
     staleTime: 60_000,
   });
@@ -58,8 +58,8 @@ export function usePortfolioGreeks(filter?: AtomFilter): UsePortfolioGreeksResul
     queryKey: ["mp_greeks"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("option_greeks" as never)
-        .select("option_trade_id, delta, gamma, theta, vega");
+        .from("option_greeks_latest" as never)
+        .select("option_trade_id, delta, gamma, theta, vega, iv, open_interest, volume, last_mark, captured_at");
       if (error) throw error;
       return (data ?? []) as unknown as LegGreek[];
     },
@@ -69,8 +69,8 @@ export function usePortfolioGreeks(filter?: AtomFilter): UsePortfolioGreeksResul
     queryKey: ["mp_quotes"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("ticker_quotes" as never)
-        .select("ticker, beta");
+        .from("ticker_quotes_latest" as never)
+        .select("ticker, spot, day_change_pct, beta, captured_at");
       if (error) throw error;
       return (data ?? []) as unknown as TickerQuote[];
     },

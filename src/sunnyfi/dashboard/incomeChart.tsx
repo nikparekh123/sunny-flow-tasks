@@ -18,6 +18,7 @@
  * dashboard card), buildSeries (testable bucketing).
  */
 import { useMemo, useState } from "react";
+import { fetchAll } from "@/lib/fetchAll";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -52,12 +53,10 @@ function useIncomeTradesAll() {
   return useQuery({
     queryKey: ["income_trades_all"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      return fetchAll<IncTrade>(() => supabase
         .from("option_trades" as never)
         .select("ticker, trade_date, action, option_type, direction, contracts, premium")
-        .returns<IncTrade[]>();
-      if (error) throw error;
-      return data ?? [];
+        .order("id", { ascending: true }));
     },
     staleTime: 5 * 60 * 1000,
   });

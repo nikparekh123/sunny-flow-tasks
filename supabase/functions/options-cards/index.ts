@@ -23,7 +23,7 @@
 import { corsHeaders, json, db, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-10-09.1';
+const BUILD = '2026-10-12.1';
 const N = (v: unknown) => (v === null || v === undefined || v === '' ? 0 : Number(v));
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1347,8 +1347,12 @@ Deno.serve(async (req) => {
           if (leg.type === 'put') sp -= cash; else sc -= cash;
           /* The short legs' IV, weighted by contracts. What the sold side is
              being paid on, read at the same close as its theta. */
+          /* ⚠ NOT ON ITS EXPIRY DAY (12 Oct 2026). A leg read on the day it
+             expires reports an IV that means nothing (28 Sep's averaged 72%
+             against 39% either side), and Credit & theta then printed
+             "IV down 49%" for two weeks. Its theta still counts above. */
           const v = thRead[i].iv.get(id);
-          if (v) { ivN += v * leg.n; ivW += leg.n; }
+          if (v && leg.exp > thRead[i].day) { ivN += v * leg.n; ivW += leg.n; }
         }
       }
       return {

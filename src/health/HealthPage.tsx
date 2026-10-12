@@ -100,7 +100,9 @@ export function HealthPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("option_greeks" as never)
-        .select("captured_at");
+        .select("captured_at")
+        .order("captured_at", { ascending: false })
+        .limit(1);
       if (error) throw error;
       return (data ?? []) as unknown as FreshnessRow[];
     },
@@ -112,7 +114,9 @@ export function HealthPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("ticker_quotes" as never)
-        .select("captured_at");
+        .select("captured_at")
+        .order("captured_at", { ascending: false })
+        .limit(1);
       if (error) throw error;
       return (data ?? []) as unknown as FreshnessRow[];
     },

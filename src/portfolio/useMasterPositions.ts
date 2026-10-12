@@ -16,6 +16,7 @@
  * Greeks + quotes within a heartbeat.
  */
 import { useMemo } from "react";
+import { fetchAll } from "@/lib/fetchAll";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Company } from "./data";
@@ -69,11 +70,10 @@ export function useMasterPositions(): UseMasterPositionsResult {
   const tradesQ = useQuery({
     queryKey: ["mp_trades"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      return fetchAll<OptionTradeRow>(() => supabase
         .from("option_trades" as never)
-        .select("id, ticker, trade_date, action, option_type, direction, contracts, strike, premium, expiry, closes_trade_id");
-      if (error) throw error;
-      return (data ?? []) as unknown as OptionTradeRow[];
+        .select("*")
+        .order("id", { ascending: true }));
     },
     staleTime: STALE_MS,
   });
@@ -82,7 +82,7 @@ export function useMasterPositions(): UseMasterPositionsResult {
     queryKey: ["mp_greeks"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("option_greeks" as never)
+        .from("option_greeks_latest" as never)
         .select("option_trade_id, delta, gamma, theta, vega, iv, open_interest, volume, last_mark, captured_at");
       if (error) throw error;
       return (data ?? []) as unknown as Array<OptionGreeksRow & { captured_at: string }>;
@@ -94,7 +94,7 @@ export function useMasterPositions(): UseMasterPositionsResult {
     queryKey: ["mp_quotes"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("ticker_quotes" as never)
+        .from("ticker_quotes_latest" as never)
         .select("ticker, spot, day_change_pct, beta, captured_at");
       if (error) throw error;
       return (data ?? []) as unknown as Array<TickerQuoteRow & { captured_at: string }>;

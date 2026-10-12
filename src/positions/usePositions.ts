@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo } from 'react';
+import { fetchAll } from "@/lib/fetchAll";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import {
@@ -61,12 +62,11 @@ export function usePositions() {
   const { data: trades = [] } = useQuery({
     queryKey: ['option_trades'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      return fetchAll<OptionTrade>(() => supabase
         .from('option_trades' as never)
         .select('*')
-        .order('trade_date', { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as unknown as OptionTrade[];
+        .order('trade_date', { ascending: false })
+        .order('id', { ascending: true }));
     },
   });
 
@@ -76,11 +76,11 @@ export function usePositions() {
   const { data: dailyCloses = [] } = useQuery({
     queryKey: ['daily_closes'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      return fetchAll<DailyClose>(() => supabase
         .from('daily_closes' as never)
-        .select('*');
-      if (error) throw error;
-      return (data ?? []) as unknown as DailyClose[];
+        .select('*')
+        .order('ticker', { ascending: true })
+        .order('date', { ascending: true }));
     },
   });
 

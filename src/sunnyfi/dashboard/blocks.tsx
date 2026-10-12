@@ -17,6 +17,7 @@
  *   • Section headers use <Section n="01">...</Section>.
  */
 import { useMemo } from "react";
+import { fetchAll } from "@/lib/fetchAll";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Spark, AnimatedBar, HairRow, Section } from "./atoms";
@@ -35,8 +36,8 @@ function useMpQuotes() {
     queryKey: ["mp_quotes"],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from("ticker_quotes" as never)
-        .select("ticker, spot");
+        .from("ticker_quotes_latest" as never)
+        .select("ticker, spot, day_change_pct, beta, captured_at");
       if (error) throw error;
       return (data ?? []) as unknown as Array<{ ticker: string; spot: number | null }>;
     },
@@ -272,12 +273,10 @@ function useAttentionTrades() {
   return useQuery({
     queryKey: ["dash_attention_trades"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      return fetchAll<AttentionTrade>(() => supabase
         .from("option_trades" as never)
         .select("id, ticker, action, option_type, direction, contracts, strike, premium, expiry, closes_trade_id")
-        .returns<AttentionTrade[]>();
-      if (error) throw error;
-      return data ?? [];
+        .order("id", { ascending: true }));
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -500,13 +499,15 @@ function usePulseCloses() {
   return useQuery({
     queryKey: ["dash_pulse_closes"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      /* The last ~9 months, every row: the whole table ordered oldest-first
+         was capped at 1,000 rows, all from 2024. */
+      const since = new Date(Date.now() - 270 * 86_400_000).toISOString().slice(0, 10);
+      return fetchAll<PulseDailyClose>(() => supabase
         .from("daily_closes" as never)
         .select("ticker, date, close_price")
+        .gte("date", since)
         .order("date", { ascending: true })
-        .returns<PulseDailyClose[]>();
-      if (error) throw error;
-      return data ?? [];
+        .order("ticker", { ascending: true }));
     },
     staleTime: 10 * 60 * 1000,
   });
@@ -783,12 +784,10 @@ function useIncomeTrades() {
   return useQuery({
     queryKey: ["dash_income_trades"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      return fetchAll<IncomeTrade>(() => supabase
         .from("option_trades" as never)
         .select("ticker, trade_date, action, option_type, direction, contracts, premium")
-        .returns<IncomeTrade[]>();
-      if (error) throw error;
-      return data ?? [];
+        .order("id", { ascending: true }));
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -1154,12 +1153,10 @@ function useRiskTrades() {
   return useQuery({
     queryKey: ["dash_risk_trades"],
     queryFn: async () => {
-      const { data, error } = await supabase
+      return fetchAll<RiskTradeRow>(() => supabase
         .from("option_trades" as never)
         .select("id, ticker, action, option_type, direction, contracts, strike, premium, closes_trade_id")
-        .returns<RiskTradeRow[]>();
-      if (error) throw error;
-      return data ?? [];
+        .order("id", { ascending: true }));
     },
     staleTime: 5 * 60 * 1000,
   });
