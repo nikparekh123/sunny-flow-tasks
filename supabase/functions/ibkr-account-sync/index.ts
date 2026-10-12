@@ -20,6 +20,11 @@
  * is this close plus today's moves, worked out by the Home payload.
  *
  * Body: { dry_run?: true } parses and returns the summary without writing.
+ *
+ * ⚠ DEPLOY WITH verify_jwt = false, like every cron-called function here.
+ * pg_cron's cron_invoke_function sends the vault's sb_secret key, which is
+ * not a JWT, so a verify_jwt function answers 401 to every scheduled call
+ * (12 Oct 2026: the first deploys did exactly that).
  */
 const IBKR_BASE = 'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
 const IBKR_GET_BASE = 'https://gdcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
