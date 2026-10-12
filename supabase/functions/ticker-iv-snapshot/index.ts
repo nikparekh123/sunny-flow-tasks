@@ -18,6 +18,12 @@
  *     → fetch IV for the chosen contract
  *
  * Required Supabase secret: POLYGON_API_KEY (same one mp-refresh uses).
+ *
+ * ⚠ THE IV NOW COMES FROM THETA DATA (12 Oct 2026). Polygon's option
+ * snapshots answer 403 since the plan changed, so the ATM 30-day IV is worked
+ * out here: Theta's NBBO for the expiry nearest 30 days, the call nearest the
+ * money, and Black-Scholes inverted on its mid at the option-implied spot.
+ * Daily closes and dividends still come from Polygon's history, which works.
  */
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -55,10 +61,68 @@ interface SnapshotResult {
   error?: string;
 }
 
+/* ───────── Theta Data, via the Fly.io gate ───────── */
+const THETA_URL = Deno.env.get('THETA_URL') ?? '';
+const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
+async function thetaJson(path: string): Promise<Array<Record<string, unknown>>> {
+  const r = await fetch(`${THETA_URL}${path}&format=json`, {
+    headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(20_000) });
+  if (!r.ok) throw new Error(`theta ${r.status}`);
+  return ((await r.json())?.response ?? []) as Array<Record<string, unknown>>;
+}
+function ncdf(x: number): number {
+  const t = 1 / (1 + 0.3275911 * Math.abs(x) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+    + 0.254829592) * t * Math.exp(-x * x / 2);
+  return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
+}
+function bsCall(S: number, K: number, T: number, v: number, r = 0.04): number {
+  const sq = v * Math.sqrt(T), d1 = (Math.log(S / K) + (r + v * v / 2) * T) / sq;
+  return S * ncdf(d1) - K * Math.exp(-r * T) * ncdf(d1 - sq);
+}
+/** ATM ~30-day call IV for `tk` from Theta: nearest-30-day expiry inside the
+    window, spot from put-call parity on that chain, IV inverted from the mid. */
+async function thetaAtmIv(tk: string, startedAt: Date): Promise<{ iv: number; occ: string } | null> {
+  const ex = (await thetaJson(`/v3/option/list/expirations?symbol=${tk}`)).map((x) => String(x.expiration));
+  const dte = (e: string) => (Date.parse(`${e}T20:00:00Z`) - startedAt.getTime()) / 864e5;
+  const inWin = ex.filter((e) => Math.abs(dte(e) - TARGET_DTE) <= DTE_WINDOW);
+  if (!inWin.length) return null;
+  const exp = inWin.sort((a, b) => Math.abs(dte(a) - TARGET_DTE) - Math.abs(dte(b) - TARGET_DTE))[0];
+  const T = dte(exp) / 365;
+  const rows = await thetaJson(`/v3/option/snapshot/quote?symbol=${tk}&expiration=${exp.replaceAll('-', '')}`);
+  const by = new Map<number, { c?: number; p?: number }>();
+  for (const r of rows) {
+    const c = r.contract as { right: string; strike: number };
+    const d = (r.data as Array<Record<string, number>>)?.[0];
+    if (!d || !(d.bid > 0 && d.ask > 0)) continue;
+    const e = by.get(c.strike) ?? {}; e[c.right.toLowerCase() === 'call' ? 'c' : 'p'] = (d.bid + d.ask) / 2;
+    by.set(c.strike, e);
+  }
+  let S: number | null = null, gap = Infinity;
+  for (const [k, e] of by) {
+    if (e.c == null || e.p == null) continue;
+    if (Math.abs(e.c - e.p) < gap) { gap = Math.abs(e.c - e.p); S = e.c - e.p + k * Math.exp(-0.04 * T); }
+  }
+  if (S == null) return null;
+  const calls = [...by.entries()].filter(([, e]) => e.c != null).sort((a, b) => Math.abs(a[0] - S!) - Math.abs(b[0] - S!));
+  if (!calls.length) return null;
+  const [K, e] = calls[0];
+  const mid = e.c!;
+  if (!(mid > Math.max(0, S - K * Math.exp(-0.04 * T)) + 0.005)) return null;
+  let lo = 0.01, hi = 4;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (bsCall(S, K, T, m) < mid) lo = m; else hi = m; }
+  const occ = `O:${tk}${exp.slice(2, 4)}${exp.slice(5, 7)}${exp.slice(8, 10)}C${String(Math.round(K * 1000)).padStart(8, '0')}`;
+  return { iv: (lo + hi) / 2, occ };
+}
+
 /* ───────── HV30: annualized stdev of log returns ───────── */
 function hv30FromCloses(closes: number[]): number | null {
   // Need at least 2 closes to make 1 return; use up to last HV_DAYS+1
   // closes to make HV_DAYS returns. Caller passes oldest → newest.
+  /* ⚠ THE LAST 31 CLOSES ONLY (fixed 12 Oct 2026). The callers pass ~120
+     days of bars and this used every one of them, so "HV30" was a 4-month
+     volatility; on NFLX that read 79% against a true 30-day 33%. */
+  closes = closes.slice(-(HV_DAYS + 1));
   if (closes.length < 3) return null;
   const returns: number[] = [];
   for (let i = 1; i < closes.length; i++) {
@@ -309,6 +373,28 @@ Deno.serve(async (req) => {
       } catch { /* skip this ticker's closes; HV30 stays null for it */ }
     }
 
+    /* ⚠ POLYGON IS RATE-LIMITED NOW (12 Oct 2026: 5 calls a minute after the
+       plan change), so most names get no bars above. Their closes come from our
+       own daily_closes, which the 17:30 capture writes from the live spot. */
+    const short = [...heldTickers, ...PRICE_ONLY].filter((tk) => (closesByTicker.get(tk)?.length ?? 0) < HV_DAYS + 1);
+    if (short.length) {
+      /* One query a name, newest 45 first: one query for all of them would
+         hit PostgREST's silent 1,000-row cap. */
+      const by = new Map<string, number[]>();
+      await Promise.all(short.map(async (tk) => {
+        const { data: dc } = await admin.from('daily_closes')
+          .select('date, close_price').eq('ticker', tk).lte('date', snapshotDate)
+          .order('date', { ascending: false }).limit(45);
+        const cl = ((dc ?? []) as Array<{ close_price: number }>)
+          .map((r) => Number(r.close_price)).filter((v) => v > 0).reverse();
+        if (cl.length) by.set(tk, cl);
+      }));
+      for (const [tk, cl] of by) {
+        if (cl.length > (closesByTicker.get(tk)?.length ?? 0)) closesByTicker.set(tk, cl);
+        if (!spotByTicker.has(tk) && cl.length) spotByTicker.set(tk, cl[cl.length - 1]);
+      }
+    }
+
     // ── 4. For each ticker: ATM-30d IV + HV30, then upsert ────
     const targetExpFrom = new Date(startedAt.getTime() + (TARGET_DTE - DTE_WINDOW) * 86400000)
       .toISOString().slice(0, 10);
@@ -325,27 +411,10 @@ Deno.serve(async (req) => {
       const hv30 = hv30FromCloses(closes);
 
       try {
-        // 4a. Find candidate contracts in the strike + expiry window.
-        const strikeMin = (spot * (1 - STRIKE_WINDOW_PCT)).toFixed(2);
-        const strikeMax = (spot * (1 + STRIKE_WINDOW_PCT)).toFixed(2);
-        const refUrl = `https://api.polygon.io/v3/reference/options/contracts`
-          + `?underlying_ticker=${tk}`
-          + `&expiration_date.gte=${targetExpFrom}`
-          + `&expiration_date.lte=${targetExpTo}`
-          + `&strike_price.gte=${strikeMin}`
-          + `&strike_price.lte=${strikeMax}`
-          + `&contract_type=call`
-          + `&limit=250`
-          + `&apiKey=${polygonKey}`;
-        const refResp = await fetch(refUrl);
-        if (!refResp.ok) throw new Error(`contracts ${refResp.status}`);
-        const refJson = await refResp.json() as { results?: PolyContractRef[] };
-        const candidates = refJson.results ?? [];
-
-        const picked = pickAtm30dContract(candidates, spot, startedAt);
-        if (!picked) {
-          results.push({ ticker: tk, atm_iv: null, hv30, contract_used: null, error: 'no ATM-30d candidate in window' });
-          // Still write HV30 so the spread column has a value down the line.
+        // 4a/4b. ATM ~30-day IV from Theta (Polygon's snapshot is 403 now).
+        const got = THETA_URL && THETA_KEY ? await thetaAtmIv(tk, startedAt) : null;
+        if (!got) {
+          results.push({ ticker: tk, atm_iv: null, hv30, contract_used: null, error: 'no ATM-30d quote from Theta' });
           if (hv30 != null) {
             await admin.from('ticker_iv_daily').upsert({
               ticker: tk, snapshot_date: snapshotDate,
@@ -354,17 +423,8 @@ Deno.serve(async (req) => {
           }
           continue;
         }
-
-        // 4b. Fetch that contract's snapshot for IV.
-        const snapUrl = `https://api.polygon.io/v3/snapshot/options/${tk}/${picked.ticker}?apiKey=${polygonKey}`;
-        const snapResp = await fetch(snapUrl);
-        if (!snapResp.ok) throw new Error(`snapshot ${snapResp.status}`);
-        const snapJson = await snapResp.json() as { results?: PolyOptionSnap };
-        const iv = snapJson.results?.implied_volatility ?? null;
-        if (iv == null) {
-          results.push({ ticker: tk, atm_iv: null, hv30, contract_used: picked.ticker, error: 'no IV in snapshot' });
-          continue;
-        }
+        const iv = got.iv;
+        const picked = { ticker: got.occ };
 
         // 4c. Upsert.
         const { error: upErr } = await admin

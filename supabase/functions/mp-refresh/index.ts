@@ -520,45 +520,71 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
         rows: compareRows }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // ─── 4. Stock snapshot — one batched call for all tickers ───
+    // ─── 4. Stock prices ────────────────────────────────────────
+    /* ⚠ POLYGON'S SNAPSHOTS ARE GONE (12 Oct 2026). From the open every stock
+       and option snapshot answered 403 "not entitled": the plan changed when
+       the add-ons were cancelled, and only daily history still works. So with
+       Theta on, every spot is the one the option quotes imply: a name with a
+       leg uses the spot already worked out for its legs, any other name (the
+       SPY/QQQ/IWM tapes) asks Theta for its nearest expiry and works it out
+       the same way. The day's change is against the last stored close in
+       daily_closes. Polygon's snapshot stays as the last resort, for the day
+       the plan allows it again. */
     const stockResults: Array<{ ticker: string; spot: number | null; day_change_pct: number | null }> = [];
     if (allTickers.length > 0) {
-      const sUrl = new URL('https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers');
-      sUrl.searchParams.set('tickers', allTickers.join(','));
-      // Bearer header (see above); no apiKey query param.
-      const sResp = await fetch(sUrl.toString(), { headers: authHeaders });
-      if (sResp.ok) {
-        const sData = (await sResp.json()) as PolyStockResp;
-        const items = sData.tickers ?? sData.results ?? [];
-        for (const t of allTickers) {
-          const it = items.find((x) => x.ticker?.toUpperCase() === t);
-          if (!it) {
-            stockResults.push({ ticker: t, spot: null, day_change_pct: null });
-            continue;
-          }
-          /* With Theta on, a name with an option leg takes its spot from the
-             option chain (live), not Polygon's delayed stock snapshot. */
-          const liveSpot = useTheta
-            ? openLegs.filter((l) => l.ticker.toUpperCase() === t).map((l) => thetaOf(l)?.underlying)
-                .find((v) => typeof v === 'number' && v > 0) ?? null
-            : null;
-          const spot = liveSpot
-            ?? positive(it.lastTrade?.p)
-            ?? positive(it.lastQuote?.p)
-            ?? positive(it.day?.c)
-            ?? positive(it.prevDay?.c);
-          // Polygon returns this field directly; if absent, derive from spot vs prevDay.
-          let day = liveSpot != null ? undefined : it.todaysChangePerc;
-          if (typeof day !== 'number' && spot != null) {
-            const prev = positive(it.prevDay?.c);
-            if (prev != null) day = ((spot - prev) / prev) * 100;
-          }
-          stockResults.push({
-            ticker: t,
-            spot,
-            day_change_pct: typeof day === 'number' ? day : null,
-          });
+      const spotBy = new Map<string, number>();
+      if (useTheta) {
+        for (const l of openLegs) {
+          const u = thetaOf(l)?.underlying;
+          if (typeof u === 'number' && u > 0 && !spotBy.has(l.ticker.toUpperCase())) spotBy.set(l.ticker.toUpperCase(), u);
         }
+        const rest = allTickers.filter((t) => !spotBy.has(t));
+        await pool(rest.map((t) => async () => {
+          try {
+            const ex = (await fetch(`${THETA_URL}/v3/option/list/expirations?symbol=${t}&format=json`,
+              { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(15_000) })
+              .then((r) => r.ok ? r.json() : { response: [] })).response as Array<{ expiration: string }>;
+            const next = ex.map((x) => x.expiration).filter((e) => e > estToday).sort()[0];
+            if (!next) return;
+            const rows = await theta(`/v3/option/snapshot/quote?symbol=${t}&expiration=${next.replaceAll('-', '')}`);
+            const T = Math.max(1 / 365, (Date.parse(`${next}T20:00:00Z`) - Date.now()) / (365 * 864e5));
+            const sx = impliedSpot(rows, T);
+            if (sx != null) spotBy.set(t, sx);
+          } catch { /* that name keeps its last good quote */ }
+        }), 3);
+      }
+      /* Polygon only for what Theta could not price. */
+      const polyBy = new Map<string, PolyStockTicker>();
+      const missing = allTickers.filter((t) => !spotBy.has(t));
+      if (missing.length) {
+        try {
+          const sUrl = new URL('https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers');
+          sUrl.searchParams.set('tickers', missing.join(','));
+          const sResp = await fetch(sUrl.toString(), { headers: authHeaders });
+          if (sResp.ok) {
+            const sData = (await sResp.json()) as PolyStockResp;
+            for (const it of sData.tickers ?? sData.results ?? []) polyBy.set(String(it.ticker).toUpperCase(), it);
+          }
+        } catch { /* keep last good quotes */ }
+      }
+      /* The previous close each name's day change is measured against. */
+      const prevBy = new Map<string, number>();
+      const since = new Date(Date.now() - 12 * 864e5).toISOString().slice(0, 10);
+      const { data: closes } = await admin.from('daily_closes')
+        .select('ticker, date, close_price').in('ticker', allTickers)
+        .lt('date', estToday).gte('date', since).order('date', { ascending: false });
+      for (const c of (closes ?? []) as Array<{ ticker: string; close_price: number }>) {
+        if (!prevBy.has(c.ticker) && Number(c.close_price) > 0) prevBy.set(c.ticker, Number(c.close_price));
+      }
+      for (const t of allTickers) {
+        const it = polyBy.get(t);
+        const spot = spotBy.get(t)
+          ?? (it ? positive(it.lastTrade?.p) ?? positive(it.lastQuote?.p) ?? positive(it.day?.c) ?? positive(it.prevDay?.c) : null);
+        const prev = prevBy.get(t) ?? (it ? positive(it.prevDay?.c) : null);
+        stockResults.push({
+          ticker: t, spot,
+          day_change_pct: spot != null && prev != null ? ((spot - prev) / prev) * 100 : null,
+        });
       }
     }
 
