@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-12.1';
+const BUILD = '2026-10-12.2';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -120,9 +120,9 @@ async function build(): Promise<{ payload: Row; ms: number }> {
   const now = ny();
   const today = now.date;
 
-  const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs] = await Promise.all([
+  const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots] = await Promise.all([
     page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
-      + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl'),
+      + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source'),
     get('option_greeks_live?select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
     get('ticker_quotes_live?select=ticker,spot,day_change_pct,captured_at'),
     get('market_live?select=*'),
@@ -133,6 +133,8 @@ async function build(): Promise<{ payload: Row; ms: number }> {
     get('earnings_season?select=*&order=starts.desc&limit=6'),
     page(`daily_closes?date=gte.${addDays(today, -45)}&order=date.asc&select=ticker,date,close_price`),
     get('ibkr_sync_runs?status=eq.success&order=finished_at.desc&limit=1&select=finished_at'),
+    get(`share_sells?voided_at=is.null&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,realized_pl`),
+    get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date`),
   ]);
 
   // ── Trading days (calendar-aware) ──
@@ -175,6 +177,56 @@ async function build(): Promise<{ payload: Row; ms: number }> {
   }
   legs.sort((a, b) => a.ticker.localeCompare(b.ticker) || a.expiry.localeCompare(b.expiry) || a.strike - b.strike);
   const book = [...new Set(legs.map((l) => l.ticker))].sort();
+
+  /* ── REALIZED, per docs/PNL_GLOSSARY.md (Nik chose the glossary for the
+     header, 12 Oct 2026). Only what closed: sold options bought back or
+     expired, bought options sold or expired, and shares sold. IBKR's AVERAGE
+     cost (28 Sep ruling), and IBKR's own realized_pl wherever the Daily Flex
+     delivered it (it carries commissions and handles assignments: an assigned
+     option books 0, its premium lives in the share sale). Booked on the close
+     date, or the expiry date for a leg left to expire. A leg is in or out by
+     when it was OPENED: nothing opened before 31 Aug 2026 counts. */
+  type Ev = { d: string; ticker: string; kind: 'calls sold' | 'puts sold' | 'calls bought' | 'puts bought' | 'shares'; amt: number };
+  const realized: Ev[] = [];
+  const heldCost = new Map<string, { n: number; cost: number }>();
+  for (const [k, rows] of groups) {
+    const fills = [...rows].sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date))
+      || String(a.executed_at ?? '').localeCompare(String(b.executed_at ?? ''))
+      || (a.action === 'open' ? -1 : 1));
+    const firstOpen = fills.find((f) => f.action === 'open');
+    if (!firstOpen || String(firstOpen.trade_date) < BOOK_START) continue;
+    const f0 = fills[0];
+    const short = f0.direction === 'short';
+    const kind = `${f0.option_type === 'call' ? 'calls' : 'puts'} ${short ? 'sold' : 'bought'}` as Ev['kind'];
+    let qty = 0, cost = 0;
+    for (const t of fills) {
+      const n = Number(t.contracts), px = Number(t.premium) * 100;
+      if (t.action === 'open') { qty += n; cost += n * px; continue; }
+      const avg = qty > 0 ? cost / qty : 0;
+      const ib = t.realized_pl != null && t.realized_pl_source === 'ibkr' ? Number(t.realized_pl) : null;
+      const amt = ib ?? (short ? n * (avg - px) : n * (px - avg));
+      realized.push({ d: String(t.trade_date), ticker: String(f0.ticker).toUpperCase(), kind, amt });
+      cost -= n * avg; qty -= n;
+    }
+    if (qty > 0.0001 && String(f0.expiry) < today) {
+      realized.push({ d: String(f0.expiry), ticker: String(f0.ticker).toUpperCase(), kind, amt: short ? cost : -cost });
+    } else if (qty > 0.0001) {
+      heldCost.set(k, { n: qty, cost });
+    }
+  }
+  /* Shares sold count only when the lot was bought inside the book: the
+     31 Aug / 1 Sep unwind of the old share blocks is history, the September
+     put assignments sold on the 21st are not. */
+  for (const s of sells) {
+    const t = String(s.ticker).toUpperCase(), d = String(s.trade_date);
+    if (!lots.some((l) => String(l.ticker).toUpperCase() === t && String(l.acquired_date) <= d)) continue;
+    realized.push({ d, ticker: t, kind: 'shares', amt: Number(s.realized_pl ?? 0) });
+  }
+  /* Average cost of what is still held, IBKR's method, for every open leg. */
+  for (const l of legs) {
+    const h = heldCost.get(`${l.ticker}|${l.type}|${l.side === 'sold' ? 'short' : 'long'}|${l.strike}|${l.expiry}`);
+    if (h && h.n > 0) l.avg = Math.round(h.cost / h.n / 100 * 10000) / 10000;
+  }
 
   // Contract marks (either side), for valuing IBKR's positions.
   const markOf = new Map<string, { mark: number; at: string }>();
@@ -237,6 +289,27 @@ async function build(): Promise<{ payload: Row; ms: number }> {
       .filter((d) => String(d.report_date) >= from && String(d.report_date) <= D)
       .reduce((s, d) => s + Number(d[f] ?? 0), 0);
     const monthStart = today.slice(0, 8) + '01';
+    const realizedSince = (from: string) => r2(realized.filter((e) => e.d >= from && e.d <= today)
+      .reduce((s, e) => s + e.amt, 0));
+    /* UNREALIZED, glossary: open positions only, paper only. Bought legs at
+       mark against their average cost; sold legs at minus their mark (the
+       premium on an open short is NOT in it, it is PREMIUM_UNREALIZED);
+       shares at spot against IBKR's cost basis. */
+    let unrealized = 0, tvSold = 0;
+    for (const l of legs) {
+      const m = l.mark ?? 0;
+      unrealized += l.side === 'bought' ? (m - l.avg) * l.n * 100 : -m * l.n * 100;
+      if (l.side === 'sold') {
+        const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
+        const intrinsic = l.type === 'call' ? Math.max(0, S - l.strike) : Math.max(0, l.strike - S);
+        tvSold += Math.max(0, m - intrinsic) * l.n * 100;
+      }
+    }
+    for (const p of posD) {
+      if (p.asset_category !== 'STK') continue;
+      const spot = spotOf.get(String(p.symbol).toUpperCase()) ?? Number(p.mark_price);
+      unrealized += Number(p.position) * spot - Number(p.cost_basis_money ?? 0);
+    }
     account = {
       ok: true,
       value: r2(value),
@@ -246,10 +319,15 @@ async function build(): Promise<{ payload: Row; ms: number }> {
       cash: r2(Number(anchor.cash) + cashIn),
       /* Both accounts, net (Nik: never one account alone). Commission and
          interest in IBKR's sign: negative is a cost. */
-      month: { from: monthStart,
+      /* Nik, 12 Oct 2026: Realized = the glossary's REALIZED for the period;
+         Unrealized = paper P&L now (the same in both periods); Time value =
+         what is left in the options he sold. */
+      unrealized: r2(unrealized),
+      time_value_sold: r2(tvSold),
+      month: { from: monthStart, realized: realizedSince(monthStart),
         commission: r2(sum(monthStart, 'commissions') + commToday),
         interest: r2(sum(monthStart, 'interest_accrued')) },
-      book: { from: BOOK_START,
+      book: { from: BOOK_START, realized: realizedSince(BOOK_START),
         commission: r2(sum(BOOK_START, 'commissions') + commToday),
         interest: r2(sum(BOOK_START, 'interest_accrued')) },
       ibkr_close: { date: D, value: r2(navD), accounts: Number(anchor.accounts) },
