@@ -283,6 +283,21 @@ Deno.serve(async (req) => {
   try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is fine */ }
   const t0 = Date.now();
   const fromCron = req.headers.get('user-agent')?.includes('pg_net') ?? false;
+  /* ⚠ NEW YORK DECIDES, NOT THE CRON (12 Oct 2026). pg_cron speaks UTC, so a
+     fixed 13-20 UTC window is 9:00-16:59 in summer but 8:00-15:59 once the
+     clocks go back on 1 Nov, and the 4:00 close would never be marked. The
+     cron now fires 13-21 UTC and a scheduled call outside 9:00-16:59 New
+     York on a weekday returns at once. A manual call always runs. */
+  if (fromCron) {
+    const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
+      weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date()).map((x) => [x.type, x.value]));
+    const mins = Number(p.hour) * 60 + Number(p.minute);
+    if (['Sat', 'Sun'].includes(p.weekday) || mins < 9 * 60 || mins >= 17 * 60) {
+      return new Response(JSON.stringify({ ok: true, skipped: 'outside 9:00-16:59 New York' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+  }
   const passes = Math.max(1, Math.min(2, body.passes ?? (fromCron ? 2 : 1)));
   const first = await refresh(req, body);
   if (passes < 2 || body.compare) return first;

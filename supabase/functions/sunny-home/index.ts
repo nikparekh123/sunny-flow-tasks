@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-12.4';
+const BUILD = '2026-10-13.4';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -115,14 +115,86 @@ async function pricedMove(ticker: string, reportDate: string, time: string | nul
   return r2(straddle / S * 100);
 }
 
-async function build(): Promise<{ payload: Row; ms: number }> {
+
+// ── Black-Scholes for the roll (r = 4%, no dividend: the backend's standard) ──
+const RATE = 0.04;
+const ncdf = (x: number) => { const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - p : p; };
+const npdf = (x: number) => Math.exp(-x * x / 2) / Math.sqrt(2 * Math.PI);
+function bsCall(S: number, K: number, T: number, v: number) {
+  const d1 = (Math.log(S / K) + (RATE + v * v / 2) * T) / (v * Math.sqrt(T)), d2 = d1 - v * Math.sqrt(T);
+  return { price: S * ncdf(d1) - K * Math.exp(-RATE * T) * ncdf(d2), delta: ncdf(d1),
+           thetaDay: (-(S * npdf(d1) * v) / (2 * Math.sqrt(T)) - RATE * K * Math.exp(-RATE * T) * ncdf(d2)) / 365 };
+}
+function ivCall(mid: number, S: number, K: number, T: number): number | null {
+  if (!(mid > Math.max(0, S - K * Math.exp(-RATE * T)))) return null;
+  let lo = 0.01, hi = 3;
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (bsCall(S, K, T, m).price > mid) hi = m; else lo = m; }
+  return (lo + hi) / 2;
+}
+
+type LegLite = { ticker: string; strike: number; expiry: string; n: number; mark: number | null; iv: number | null;
+                 delta: number | null; theta: number | null; underlying: number | null };
+/** The roll for a dragging LEAP: next January a year further out, at the
+ *  strike nearest 0.725 delta (Nik: "around 70 to 75 delta"). */
+const ROLL_DELTA = 0.725;
+async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, commPer: number): Promise<Row> {
+  const exps = (await thetaJson(`/v3/option/list/expirations?symbol=${l.ticker}`))
+    .map((r) => String(r.expiration ?? r.date ?? '')).filter(Boolean)
+    .map((e) => e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`).sort();
+  const wantYear = Number(l.expiry.slice(0, 4)) + 1;
+  const exp = exps.find((e) => e.startsWith(`${wantYear}-01`)) ?? exps.filter((e) => e > l.expiry).at(-1);
+  if (!exp) return { error: 'no later expiry listed' };
+  const ex = exp.replaceAll('-', '');
+  const [q, oi, oiOld] = await Promise.all([
+    thetaJson(`/v3/option/snapshot/quote?symbol=${l.ticker}&expiration=${ex}`),
+    thetaJson(`/v3/option/snapshot/open_interest?symbol=${l.ticker}&expiration=${ex}`),
+    thetaJson(`/v3/option/snapshot/open_interest?symbol=${l.ticker}&expiration=${l.expiry.replaceAll('-', '')}`),
+  ]);
+  const T = Math.max(1 / 365, (Date.parse(exp + 'T20:00:00Z') - Date.now()) / (365 * 864e5));
+  const rows = q.filter((r) => r.data?.[0]).map((r) => ({ side: String(r.contract.right).toLowerCase(),
+    k: Number(r.contract.strike), bid: Number(r.data[0].bid), ask: Number(r.data[0].ask) }));
+  const S = impliedSpot(rows, T) ?? l.underlying ?? 0;
+  let pick: Row | null = null;
+  for (const r of rows.filter((x) => x.side === 'call' && x.bid > 0 && x.ask > 0)) {
+    const mid = (r.bid + r.ask) / 2, v = ivCall(mid, S, r.k, T);
+    if (v == null) continue;
+    const g = bsCall(S, r.k, T, v);
+    if (!pick || Math.abs(g.delta - ROLL_DELTA) < Math.abs(Number(pick.delta) - ROLL_DELTA)) pick = { k: r.k, mid, iv: v, ...g };
+  }
+  if (!pick) return { error: 'no priced call on ' + exp };
+  const oiOf = (rs: Row[], k: number) => Number(rs.find((r) => String(r.contract.right).toLowerCase() === 'call'
+    && Number(r.contract.strike) === k)?.data?.[0]?.open_interest ?? NaN) || null;
+  const n = l.n, oldMark = l.mark ?? 0;
+  const newTh = Math.abs(Number(pick.thetaDay)) * n * 100;
+  return {
+    close: { expiry: l.expiry, strike: l.strike, contracts: n, price: r2(oldMark) },
+    open: { expiry: exp, strike: Number(pick.k), contracts: n, price: r2(Number(pick.mid)) },
+    net_debit: Math.round((Number(pick.mid) - oldMark) * n * 100),
+    commission_fees: r2(commPer * n * 2),
+    theta_day: { old: Math.round(oldTh), new: Math.round(newTh) },
+    time_value_left: { old: Math.round(Math.max(0, oldMark - Math.max(0, S - l.strike)) * n * 100),
+                       new: Math.round(Math.max(0, Number(pick.mid) - Math.max(0, S - Number(pick.k))) * n * 100) },
+    iv: { old: l.iv, new: r2(Number(pick.iv)) },
+    delta: { old: l.delta, new: r2(Number(pick.delta)) },
+    open_interest: { old: oiOf(oiOld, l.strike), new: oiOf(oi, Number(pick.k)) },
+    book_ratio: { now: thL > 0 ? r2(thS / thL) : null, after: thL - oldTh + newTh > 0 ? r2(thS / (thL - oldTh + newTh)) : null },
+    spot: r2(S),
+  };
+}
+
+async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: Row; ms: number }> {
+  let checkSummary: Row[] | null = null;
   const t0 = Date.now();
   const now = ny();
   const today = now.date;
 
-  const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots] = await Promise.all([
+  const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
+         openChecks] = await Promise.all([
     page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
-      + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source'),
+      + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
     get('option_greeks_live?select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
     get('ticker_quotes_live?select=ticker,spot,day_change_pct,captured_at'),
     get('market_live?select=*'),
@@ -135,6 +207,10 @@ async function build(): Promise<{ payload: Row; ms: number }> {
     get('ibkr_sync_runs?status=eq.success&order=finished_at.desc&limit=1&select=finished_at'),
     get(`share_sells?voided_at=is.null&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,realized_pl`),
     get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date`),
+    get(`reports?shown_on=gte.${addDays(today, -1)}&select=kind,period_start,payload`),
+    get(`macro_events?event_date=gte.${today}&event_date=lte.${addDays(today, 21)}&importance=gte.3`
+      + '&category=in.(inflation,jobs,rates)&order=event_date.asc&select=event_date,event_time,name'),
+    get('theta_checks?status=eq.open&select=*&order=found_on.asc'),
   ]);
 
   // ── Trading days (calendar-aware) ──
@@ -186,7 +262,10 @@ async function build(): Promise<{ payload: Row; ms: number }> {
      option books 0, its premium lives in the share sale). Booked on the close
      date, or the expiry date for a leg left to expire. A leg is in or out by
      when it was OPENED: nothing opened before 31 Aug 2026 counts. */
-  type Ev = { d: string; ticker: string; kind: 'calls sold' | 'puts sold' | 'calls bought' | 'puts bought' | 'shares'; amt: number };
+  /* `leg` names the line on the report ("NKE 36C"), `how` says how it closed,
+     `basis` is the credit (sold) or cost (bought) behind it, for "kept 92%". */
+  type Ev = { d: string; ticker: string; kind: 'calls sold' | 'puts sold' | 'calls bought' | 'puts bought' | 'shares';
+              amt: number; leg: string; how: 'expired' | 'closed' | 'assigned' | 'exercised' | 'sold'; basis: number; exp?: string };
   const realized: Ev[] = [];
   const heldCost = new Map<string, { n: number; cost: number }>();
   for (const [k, rows] of groups) {
@@ -198,6 +277,8 @@ async function build(): Promise<{ payload: Row; ms: number }> {
     const f0 = fills[0];
     const short = f0.direction === 'short';
     const kind = `${f0.option_type === 'call' ? 'calls' : 'puts'} ${short ? 'sold' : 'bought'}` as Ev['kind'];
+    const leg = `${String(f0.ticker).toUpperCase()} ${r2(Number(f0.strike))}${f0.option_type === 'call' ? 'C' : 'P'}`;
+    const exp = String(f0.expiry);
     let qty = 0, cost = 0;
     for (const t of fills) {
       const n = Number(t.contracts), px = Number(t.premium) * 100;
@@ -205,11 +286,15 @@ async function build(): Promise<{ payload: Row; ms: number }> {
       const avg = qty > 0 ? cost / qty : 0;
       const ib = t.realized_pl != null && t.realized_pl_source === 'ibkr' ? Number(t.realized_pl) : null;
       const amt = ib ?? (short ? n * (avg - px) : n * (px - avg));
-      realized.push({ d: String(t.trade_date), ticker: String(f0.ticker).toUpperCase(), kind, amt });
+      const code = String(t.note ?? '').match(/IBKR (A|Ex|Ep) lifecycle/)?.[1];
+      const how = code === 'Ep' ? 'expired' : code === 'A' ? 'assigned' : code === 'Ex' ? 'exercised' : 'closed';
+      realized.push({ d: String(t.trade_date), ticker: String(f0.ticker).toUpperCase(), kind, amt, leg, how,
+        basis: n * avg, exp });
       cost -= n * avg; qty -= n;
     }
     if (qty > 0.0001 && String(f0.expiry) < today) {
-      realized.push({ d: String(f0.expiry), ticker: String(f0.ticker).toUpperCase(), kind, amt: short ? cost : -cost });
+      realized.push({ d: exp, ticker: String(f0.ticker).toUpperCase(), kind, amt: short ? cost : -cost, leg,
+        how: 'expired', basis: cost, exp });
     } else if (qty > 0.0001) {
       heldCost.set(k, { n: qty, cost });
     }
@@ -220,7 +305,8 @@ async function build(): Promise<{ payload: Row; ms: number }> {
   for (const s of sells) {
     const t = String(s.ticker).toUpperCase(), d = String(s.trade_date);
     if (!lots.some((l) => String(l.ticker).toUpperCase() === t && String(l.acquired_date) <= d)) continue;
-    realized.push({ d, ticker: t, kind: 'shares', amt: Number(s.realized_pl ?? 0) });
+    realized.push({ d, ticker: t, kind: 'shares', amt: Number(s.realized_pl ?? 0), leg: `${t} shares`, how: 'sold',
+      basis: 0 });
   }
   /* Average cost of what is still held, IBKR's method, for every open leg. */
   for (const l of legs) {
@@ -512,7 +598,7 @@ async function build(): Promise<{ payload: Row; ms: number }> {
   };
   const theta2w = all.map((_, i) => avg10(thetaDaily, i));
   const delta2w = all.map((_, i) => avg10(deltaDaily, i));
-  const peakAt = theta2w.reduce((b, v, i) => (v != null && (b < 0 || v > (theta2w[b] ?? -1)) ? i : b), -1);
+  const peakAt = theta2w.reduce<number>((b, v, i) => (v != null && (b < 0 || v > (theta2w[b] ?? -1)) ? i : b), -1);
   const history = {
     from: winStart, live_today: !!livePoint,
     days: all.map((p) => p.d),
@@ -758,6 +844,225 @@ async function build(): Promise<{ payload: Row; ms: number }> {
   const fresh = { marks: maxAt(greeks) || null, quotes: maxAt(quotes) || null, market: maxAt(market) || null,
                   trades: runs[0]?.finished_at ?? null, account_close: anchor?.report_date ?? null };
 
+  // ════════════════════════════════════════════════════════════════════════
+  // REPORTS (block 06): weekly every Monday for the week before, monthly on
+  // the 1st for the month before; a Monday the 1st brings the monthly only.
+  // Built once, when IBKR's statement for the period's last day is in, and
+  // saved, so history can come later. Shown all day on its day.
+  // ════════════════════════════════════════════════════════════════════════
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
+    'November', 'December'];
+  const shortDate = (iso: string) => `${MON[Number(iso.slice(5, 7)) - 1]} ${Number(iso.slice(8, 10))}`;
+  const isoWeek = (iso: string) => {
+    const d = new Date(iso + 'T12:00:00Z'); const wd = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - wd + 3);
+    const y0 = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+    return 1 + Math.round(((d.getTime() - y0.getTime()) / 864e5 - 3 + ((y0.getUTCDay() + 6) % 7)) / 7);
+  };
+  const lastTradingOnOrBefore = (d: string) => { let x = d; while (!isTrading(x)) x = addDays(x, -1); return x; };
+  const due: { kind: 'weekly' | 'monthly'; from: string; to: string; label: string; mark: string }[] = [];
+  if (today.endsWith('-01')) {
+    const to = addDays(today, -1), from = to.slice(0, 8) + '01';
+    due.push({ kind: 'monthly', from, to, label: `${MONTH[Number(from.slice(5, 7)) - 1]} ${from.slice(0, 4)}`,
+               mark: MON[Number(from.slice(5, 7)) - 1] });
+  } else if (new Date(today + 'T12:00:00Z').getUTCDay() === 1) {
+    const from = addDays(today, -7), to = addDays(today, -3);
+    due.push({ kind: 'weekly', from, to, label: `Week ${isoWeek(from)} · ${shortDate(from)} - ${shortDate(lastTradingOnOrBefore(to))}`,
+               mark: String(isoWeek(from)) });
+  }
+  const reportsOut: Row[] = [];
+  for (const r of due) {
+    const have = savedReports.find((x) => x.kind === r.kind && String(x.period_start) === r.from);
+    if (have) { reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, ...have.payload }); continue; }
+    const lastDay = lastTradingOnOrBefore(r.to);
+    if (!acctDays.some((d) => String(d.report_date) >= lastDay && Number(d.accounts) >= 2)) {
+      reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, pending: 'waiting for IBKR statement' });
+      continue;
+    }
+    const ev = realized.filter((e) => e.d >= r.from && e.d <= r.to);
+    const byLeg = new Map<string, { leg: string; how: string; exp: string | null; amt: number; basis: number; kind: string }>();
+    for (const e of ev) {
+      const k = `${e.leg}|${e.how}|${e.exp ?? ''}`;
+      const x = byLeg.get(k) ?? { leg: e.leg, how: e.how, exp: e.exp ?? null, amt: 0, basis: 0, kind: e.kind };
+      x.amt += e.amt; x.basis += e.basis; byLeg.set(k, x);
+    }
+    const lines = [...byLeg.values()].sort((a, b) => b.amt - a.amt)
+      .map((x) => ({ leg: x.leg, how: x.how, exp: x.exp, amount: r2(x.amt), kind: x.kind }));
+    const realizedTotal = r2(ev.reduce((s, e) => s + e.amt, 0));
+    const inP = acctDays.filter((d) => String(d.report_date) >= r.from && String(d.report_date) <= r.to);
+    const commission = r2(inP.reduce((s, d) => s + Number(d.commissions ?? 0), 0));
+    const interest = r2(inP.reduce((s, d) => s + Number(d.interest_accrued ?? 0), 0));
+    const fills = trades.filter((t) => String(t.trade_date) >= r.from && String(t.trade_date) <= r.to
+      && !/lifecycle/.test(String(t.note ?? ''))).length;
+    const best = [...byLeg.values()].filter((x) => x.kind === 'calls sold' || x.kind === 'puts sold')
+      .sort((a, b) => b.amt - a.amt)[0];
+    const horizon = addDays(today, r.kind === 'weekly' ? 7 : 14);
+    const payloadR = {
+      period: { from: r.from, to: r.to },
+      /* Kept: realized after commission and interest, in IBKR's sign. */
+      kept: r2(realizedTotal + commission + interest),
+      realized: realizedTotal, lines,
+      commission, trades: fills, commission_each: fills ? r2(commission / fills) : null,
+      interest,
+      unrealized_now: account.ok ? account.unrealized : null,
+      best: best ? { leg: best.leg, amount: r2(best.amt), how: best.how, exp: best.exp,
+                     kept_pct: best.basis > 0 ? Math.round(best.amt / best.basis * 100) : null } : null,
+      coming_up: {
+        earnings: earnings.filter((e) => e.date >= today && e.date <= horizon)
+          .map((e) => ({ date: e.date, ticker: e.ticker, time: e.time })),
+        market: cal.filter((c) => String(c.date) >= today && String(c.date) <= horizon)
+          .map((c) => ({ date: c.date, kind: c.kind, name: c.name, closes: c.closes })),
+        macro: macro.filter((m) => String(m.event_date) <= horizon)
+          .map((m) => ({ date: m.event_date, time: m.event_time, name: m.name })),
+        longs: legs.filter((l) => l.side === 'bought').map((l) => ({
+          leg: `${l.ticker} ${l.expiry.slice(0, 7)} ${l.strike}${l.type === 'call' ? 'C' : 'P'}`, expiry: l.expiry,
+          months: Math.max(0, Math.round((Date.parse(l.expiry) - Date.parse(today)) / (30.44 * 864e5))),
+          since_bought_pct: l.mark != null && l.avg > 0 ? Math.round((l.mark / l.avg - 1) * 100) : null })),
+      },
+      built_from: { ibkr_close: lastDay },
+    };
+    await fetch(`${URL_}/rest/v1/reports?on_conflict=kind,period_start`, {
+      method: 'POST', headers: { ...H, Prefer: 'resolution=ignore-duplicates,return=minimal' },
+      body: JSON.stringify([{ kind: r.kind, period_start: r.from, period_end: r.to, shown_on: today, payload: payloadR }]),
+    });
+    reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, ...payloadR });
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // LAST WEEK (block 09): Friday 4:00 PM to Monday 4:00 AM, each index's week
+  // against the move its weekly straddle priced in at the close before.
+  // ════════════════════════════════════════════════════════════════════════
+  const weekend = (now.wd === 'Fri' && now.mins >= 16 * 60) || now.wd === 'Sat' || now.wd === 'Sun'
+    || (now.wd === 'Mon' && now.mins < 4 * 60);
+  let lastWeek: Row | null = null;
+  if (weekend) {
+    const anchorDay = now.wd === 'Mon' ? addDays(today, -3) : today;
+    const wk = weekStartOf(anchorDay);
+    const lastT = lastTradingOnOrBefore(addDays(wk, 4));
+    const priorT = prevTrading(wk);
+    const stored = await get(`index_weekly?week_start=eq.${wk}&select=*`);
+    const rowsLW: Row[] = [];
+    for (const sym of ['SPY', 'QQQ', 'IWM']) {
+      let row = stored.find((x) => x.symbol === sym);
+      if (!row) {
+        const pc = closes.find((c) => c.ticker === sym && String(c.date) === priorT);
+        const cl = closes.find((c) => c.ticker === sym && String(c.date) === lastT);
+        const closeNow = cl ? Number(cl.close_price) : num(mk(sym)?.regular_price);
+        if (!pc || closeNow == null) continue;
+        const prior = Number(pc.close_price);
+        let straddle: number | null = null, atmK: number | null = null;
+        const q = await thetaJson(`/v3/option/history/eod?symbol=${sym}&expiration=${lastT.replaceAll('-', '')}`
+          + `&start_date=${priorT.replaceAll('-', '')}&end_date=${priorT.replaceAll('-', '')}`).catch(() => []);
+        const quotesLW = q.filter((x) => x.data?.[0]).map((x) => ({ side: String(x.contract.right).toLowerCase(),
+          k: Number(x.contract.strike), bid: Number(x.data[0].bid), ask: Number(x.data[0].ask) }));
+        for (const x of quotesLW) if (atmK == null || Math.abs(x.k - prior) < Math.abs(atmK - prior)) atmK = x.k;
+        const c = quotesLW.find((x) => x.k === atmK && x.side === 'call'), p = quotesLW.find((x) => x.k === atmK && x.side === 'put');
+        if (c && p && c.ask > 0 && p.ask > 0) straddle = (c.bid + c.ask) / 2 + (p.bid + p.ask) / 2;
+        row = { week_start: wk, symbol: sym, prior_close_date: priorT, close_date: lastT, prior_close: prior,
+          close: closeNow, change_pct: r2((closeNow / prior - 1) * 100), expiry: lastT, atm_strike: atmK,
+          straddle: straddle == null ? null : r2(straddle),
+          priced_move_pct: straddle == null ? null : r2(straddle / prior * 100) };
+        /* Kept only once the week's close is final; a Friday evening before the
+           17:30 close capture uses the tape and tries again. */
+        if (cl && straddle != null) {
+          await fetch(`${URL_}/rest/v1/index_weekly?on_conflict=week_start,symbol`, {
+            method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify([row]) });
+        }
+      }
+      rowsLW.push({ symbol: sym, change_pct: num(row.change_pct), priced_move_pct: num(row.priced_move_pct),
+                    close: num(row.close) });
+    }
+    const vix = closeSeries('^VIX');
+    const vEnd = vix.find((x) => x.d === lastT)?.c ?? num(mk('^VIX')?.regular_price);
+    const vPrior = vix.find((x) => x.d === priorT)?.c ?? null;
+    lastWeek = { week_start: wk, from: wk, to: lastT, rows: rowsLW,
+      vix: vEnd == null ? null : { close: vEnd, change_pct: vPrior ? r2((vEnd / vPrior - 1) * 100) : null } };
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // THETA CHECK (block 07), mode 'theta_check', after every close. Asleep
+  // until a LEAP drags: its theta a day up 50% or more on a month ago, or it
+  // alone pulls the book's 2-week ratio under 2× (Nik took both proposals).
+  // A finding carries its fix: the roll to the next January a year further
+  // out at 70 to 75 delta (Nik, 12 Oct 2026: "around 70 to 75 delta, not
+  // 90"; 0.9 put NKE into a $47,550 debit, new capital, not a roll).
+  // ════════════════════════════════════════════════════════════════════════
+  /* Once per trading day, after the close. pg_cron speaks UTC, so it fires at
+     20:25 and 21:25 to cover EDT and EST; whichever lands after 4:15 New York
+     runs, and only once (the heartbeat says whether today already ran). */
+  const ranToday = mode === 'theta_check'
+    ? (await get("sync_heartbeat?feed=eq.theta-check&select=ran_at"))[0]?.ran_at : null;
+  const checkDue = mode === 'theta_check' && isTrading(today) && now.mins >= 16 * 60 + 15
+    && !(ranToday && ny(new Date(String(ranToday))).date === today);
+  if (mode === 'theta_check' && !checkDue) checkSummary = [{ skipped: 'not after the close, or already ran today' }];
+  if (checkDue) {
+    const ratioNow = history.theta.now;
+    const thS = livePoint?.thS ?? all.at(-1)?.thS ?? 0, thL = livePoint?.thL ?? all.at(-1)?.thL ?? 0;
+    const monthAgo = days.length > 21 ? days[days.length - 21] : days[0];
+    const commPerContract = (() => {
+      const c = trades.filter((t) => t.commission != null);
+      const n = c.reduce((s, t) => s + Number(t.contracts), 0);
+      return n ? Math.abs(c.reduce((s, t) => s + Number(t.commission), 0)) / n : 0.7;
+    })();
+    const found: Row[] = [];
+    for (const l of legs.filter((x) => x.side === 'bought' && x.type === 'call')) {
+      const ids = (groups.get(`${l.ticker}|call|long|${l.strike}|${l.expiry}`) ?? [])
+        .filter((t) => t.action === 'open').map((t) => String(t.id));
+      const nowTh = Math.abs(l.theta ?? 0) * l.n * 100;
+      const then = greekOn(ids, monthAgo);
+      const thenDay = then ? monthAgo : null;
+      const thenTh = then ? Math.abs(Number(then.theta ?? 0)) * l.n * 100 : null;
+      const growth = thenTh && thenTh > 0 ? nowTh / thenTh - 1 : null;
+      const without = thL - nowTh > 0 ? thS / (thL - nowTh) : null;
+      const trigger = growth != null && growth >= 0.5 ? 'growth'
+        : (ratioNow != null && ratioNow < 2 && without != null && without >= 2) ? 'ratio' : null;
+      found.push({ l, nowTh, thenTh, thenDay, growth, without, trigger });
+    }
+    const existing = openChecks;
+    for (const c of existing) {
+      const f = found.find((x) => x.l.ticker === c.ticker && x.l.strike === Number(c.strike) && x.l.expiry === String(c.expiry));
+      const why = !f ? 'closed or rolled' : !f.trigger ? 'back under the trigger' : null;
+      const body = why ? { status: 'resolved', resolved_on: today, resolved_why: why, last_checked: today }
+        /* Comes back to Home only a step worse: another 0.25× off the book. */
+        : { last_checked: today, theta_now: r2(f!.nowTh), ratio_now: ratioNow, ratio_without: f!.without && r2(f!.without),
+            ...(ratioNow != null && c.ratio_at_card != null && ratioNow <= Number(c.ratio_at_card) - 0.25
+              ? { card_on: today, ratio_at_card: ratioNow } : {}) };
+      await fetch(`${URL_}/rest/v1/theta_checks?id=eq.${c.id}`, { method: 'PATCH', headers: H, body: JSON.stringify(body) });
+    }
+    for (const f of found.filter((x) => x.trigger)) {
+      const l = f.l as Leg;
+      if (existing.some((c) => c.ticker === l.ticker && Number(c.strike) === l.strike && String(c.expiry) === l.expiry)) continue;
+      const roll = await rollFor(l, f.nowTh, thS, thL, commPerContract).catch((e) => ({ error: String(e).slice(0, 120) }));
+      await fetch(`${URL_}/rest/v1/theta_checks`, {
+        method: 'POST', headers: { ...H, Prefer: 'return=minimal' },
+        body: JSON.stringify([{ ticker: l.ticker, option_type: 'call', strike: l.strike, expiry: l.expiry, contracts: l.n,
+          trigger: f.trigger, found_on: today, card_on: today, theta_now: r2(f.nowTh), theta_then: f.thenTh && r2(f.thenTh),
+          then_date: f.thenDay, growth_pct: f.growth == null ? null : Math.round(f.growth * 100),
+          ratio_now: ratioNow, ratio_without: f.without && r2(f.without), ratio_at_card: ratioNow, roll, last_checked: today }]),
+      });
+    }
+    await fetch(`${URL_}/rest/v1/sync_heartbeat?on_conflict=feed`, {
+      method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify([{ feed: 'theta-check', ran_at: new Date().toISOString(),
+        rows_written: found.filter((x) => x.trigger).length,
+        detail: `${found.length} LEAPs · ${found.filter((x) => x.trigger).length} dragging` }]),
+    });
+    checkSummary = found.map((f) => ({ leg: `${f.l.ticker} ${f.l.strike}C ${f.l.expiry}`, theta: r2(f.nowTh),
+      then: f.thenTh && r2(f.thenTh), growth_pct: f.growth == null ? null : Math.round(f.growth * 100),
+      without: f.without && r2(f.without), trigger: f.trigger }));
+  }
+
+  // ── Theta check (block 07): what the after-close run found ──
+  const checksNow = mode === 'theta_check' ? await get('theta_checks?status=eq.open&select=*&order=found_on.asc') : openChecks;
+  const thetaChecks = checksNow.map((c) => ({
+    ticker: c.ticker, leg: `${c.ticker} ${String(c.expiry).slice(0, 7)} ${Number(c.strike)}${c.option_type === 'call' ? 'C' : 'P'}`,
+    trigger: c.trigger, found_on: c.found_on, card_today: String(c.card_on) === today,
+    theta_now: num(c.theta_now), theta_then: num(c.theta_then), growth_pct: num(c.growth_pct),
+    ratio_now: num(c.ratio_now), ratio_without: num(c.ratio_without), roll: c.roll,
+  }));
+
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
     calendar: cal.filter((c) => String(c.date) >= today)
@@ -765,26 +1070,27 @@ async function build(): Promise<{ payload: Row; ms: number }> {
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
     fresh, account, indices, overnight, watchlist, portfolio, legs, risk,
     history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
-    deck: { earnings, season: seasonOut },
+    deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
+    theta_checks: thetaChecks, last_week: lastWeek, ...(checkSummary ? { theta_check_run: checkSummary } : {}),
   };
   return { payload, ms: Date.now() - t0 };
 }
 
 Deno.serve(async (req) => {
-  let body: { passes?: number } = {};
+  let body: { passes?: number; mode?: 'theta_check' } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* cron sends {} */ }
   try {
     const n = ny();
     const live = !['Sat', 'Sun'].includes(n.wd) && n.mins >= 4 * 60 && n.mins < 20 * 60;
-    const passes = body.passes ?? (live ? 2 : (n.mins % 10 === 0 ? 1 : 0));
+    const passes = body.mode === 'theta_check' ? 1 : body.passes ?? (live ? 2 : (n.mins % 10 === 0 ? 1 : 0));
     const out: Row[] = [];
     for (let i = 0; i < passes; i++) {
       /* mp-refresh writes at :00 and :30 and takes 2-4 s; build just after. */
-      if (live && !body.passes) {
+      if (live && !body.passes && !body.mode) {
         const wait = ((i === 0 ? 6_000 : 36_000) - (Date.now() % 60_000) + 60_000) % 60_000;
         if (wait < 40_000) await new Promise((r) => setTimeout(r, wait));
       }
-      const { payload, ms } = await build();
+      const { payload, ms } = await build(body.mode ?? 'tick');
       const w = await fetch(`${URL_}/rest/v1/home_snapshot?on_conflict=id`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify([{ id: 1, payload, built_at: payload.built_at, build: BUILD, ms }]),
