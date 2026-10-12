@@ -14,7 +14,7 @@
  *   │  ┌─────────────────────┐   ┌─────────────────────────────┐  │
  *   │  │ AttentionBlock      │   │ PortfolioBlockCompact       │  │
  *   │  │ CalendarBlock       │   │ IncomeMix (compact)         │  │
- *   │  │ BNFBlock            │   │ MacroBlock (compact)        │  │
+ *   │  │                     │   │ MacroBlock (compact)        │  │
  *   │  │                     │   │ RiskBlock (compact)         │  │
  *   │  └─────────────────────┘   └─────────────────────────────┘  │
  *   │─────────────────────────────────────────────────────────────│
@@ -29,7 +29,7 @@
  */
 import {
   Greeting, MarketsClock, TickerStrip,
-  AttentionBlock, CalendarBlock, BNFBlock,
+  AttentionBlock, CalendarBlock,
   PortfolioBlockCompact, MacroBlock, RiskBlock,
   NewsBand,
 } from "./blocks";
@@ -46,7 +46,6 @@ export interface CockpitProps {
   showNews?: boolean;
   formalGreeting?: boolean;
   onPositions?: () => void;
-  onStrategy?: () => void;
   onIncome?: () => void;
   onLogo?: () => void;
 }
@@ -59,7 +58,6 @@ export function CockpitLayout({
   todayHighlight = "neon",
   showNews = true,
   formalGreeting = true,
-  onStrategy,
 }: CockpitProps) {
   const now = useNow(60_000);
   const dateLabel = fmtBrandDate(now);
@@ -101,9 +99,6 @@ export function CockpitLayout({
             <AttentionBlock n="01" />
             <div style={{ marginTop: 56 }}>
               <CalendarBlock n="02" highlight={todayHighlight} compact />
-            </div>
-            <div style={{ marginTop: 56 }}>
-              <BNFBlock n="03" compact onOpenScanner={onStrategy} />
             </div>
           </div>
 

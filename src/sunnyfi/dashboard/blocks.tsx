@@ -155,32 +155,10 @@ export function MarketsClock({
 
 // ─────────────────── Ticker strip ────────────────────────────────
 
-/** TickerStrip pulls SPY / QQQ / IWM from bnf_universe_latest (the same
- *  view the BNF page uses). 10Y / VIX / DXY are not in our cache yet —
- *  rendered as muted placeholders until a later pass extends the macro
- *  backfill. The live-dot decorates SPY only — it's our headline. */
-
-interface TickerLatestRow {
-  ticker: string;
-  latest_close: number;
-  today_intraday_pct: number | null;
-}
-
-function useTickerData() {
-  return useQuery({
-    queryKey: ["dash_ticker_strip"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("bnf_universe_latest" as never)
-        .select("ticker, latest_close, today_intraday_pct")
-        .in("ticker", ["SPY", "QQQ", "IWM"])
-        .returns<TickerLatestRow[]>();
-      if (error) throw error;
-      return data ?? [];
-    },
-    staleTime: 60_000,
-  });
-}
+/** TickerStrip: SPY / QQQ / IWM and 10Y / VIX / DXY, all live from the
+ *  quote-macro function. The BNF scanner's price cache it used to fall back
+ *  to was retired with the New Strategy page (12 Oct 2026). The live-dot
+ *  decorates SPY only — it's our headline. */
 
 type MacroLabel = "10Y" | "VIX" | "DXY";
 interface MacroQuote { price: number | null; changePct: number | null; source: string | null }
@@ -218,9 +196,7 @@ function fmtChangePct(v: number | null): { txt: string; tone: "pos" | "neg" } {
 }
 
 export function TickerStrip({ compact = false }: { compact?: boolean }) {
-  const { data: live = [] } = useTickerData();
   const { data: macro = null } = useMacroData();
-  const byTicker = new Map(live.map((r) => [r.ticker, r]));
 
   // Live rows first. 10Y / VIX / DXY remain placeholders until the cache
   // gets those instruments in a future pass — render as muted "—".
@@ -234,15 +210,10 @@ export function TickerStrip({ compact = false }: { compact?: boolean }) {
   }> = [];
   for (const sym of ["SPY", "QQQ", "IWM"] as const) {
     const q = macro?.[sym];
-    const r = byTicker.get(sym);
     if (q && q.price != null) {
       // Live Yahoo quote — accurate today % + price.
       const ch = fmtChangePct(q.changePct);
       rows.push({ ticker: sym, price: q.price.toFixed(2), change: ch.txt, tone: ch.tone, live: sym === "SPY" });
-    } else if (r) {
-      // Cache fallback (nightly close) when the live quote is unavailable.
-      const ch = fmtChangePct(r.today_intraday_pct);
-      rows.push({ ticker: sym, price: r.latest_close.toFixed(2), change: ch.txt, tone: ch.tone, live: sym === "SPY" });
     } else {
       rows.push({ ticker: sym, price: "—", change: "—", tone: "pos", live: false, muted: true });
     }
@@ -1021,7 +992,7 @@ export function CalendarBlock({
 
 // ─────────────────── § 04 Macro zoom (live) ──────────────────────
 //
-// Six live ETF rows pulled from bnf_universe_data (SPY/QQQ/IWM cover
+// Six live ETF rows, live from quote-macro (SPY/QQQ/IWM cover
 // broad indices; KWEB/SMH/ARKK proxy China, semis, innovation —
 // preserves the "around the world" feel). 10Y / VIX / DXY render as
 // muted placeholders until those instruments land in the cache.
@@ -1030,74 +1001,30 @@ export function CalendarBlock({
 // deviation — quick canned phrases driven by simple thresholds, not
 // model-generated commentary.
 
-interface MacroLatestRow {
-  ticker: string;
-  latest_close: number;
-  today_intraday_pct: number | null;
-  deviation_pct: number | null;
-}
-interface MacroCloseRow {
-  ticker: string;
-  date: string;
-  close: number;
-}
-
-// Six live tickers from the bnf_universe_data cache. 10Y / VIX / DXY
-// dropped from the visible list until they're in the cache — empty
-// placeholder rows added more noise than they earned.
+// Six live tickers. 10Y / VIX / DXY are on the ticker strip instead.
 const MACRO_TICKERS = ["SPY", "QQQ", "IWM", "KWEB", "SMH", "ARKK"] as const;
 
-function useMacroLatest() {
-  return useQuery({
-    queryKey: ["dash_macro_latest"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("bnf_universe_latest" as never)
-        .select("ticker, latest_close, today_intraday_pct, deviation_pct")
-        .in("ticker", MACRO_TICKERS as unknown as string[])
-        .returns<MacroLatestRow[]>();
-      if (error) throw error;
-      return data ?? [];
-    },
-    staleTime: 5 * 60 * 1000,
-  });
+interface MacroLive {
+  price: number | null;
+  changePct: number | null;
+  /** Last 30 daily closes, oldest first, for the sparkline. */
+  closes?: number[];
+  /** Today's price against the 25-day average, %. */
+  sma25DevPct?: number | null;
 }
 
-function useMacroSparks() {
-  return useQuery({
-    queryKey: ["dash_macro_sparks"],
-    queryFn: async () => {
-      // 30 trading days of closes per macro ticker — enough to draw a
-      // smooth sparkline at the row's small height.
-      const cutoff = new Date();
-      cutoff.setUTCDate(cutoff.getUTCDate() - 45);
-      const { data, error } = await supabase
-        .from("bnf_universe_data" as never)
-        .select("ticker, date, close")
-        .in("ticker", MACRO_TICKERS as unknown as string[])
-        .gte("date", cutoff.toISOString().slice(0, 10))
-        .order("date", { ascending: true })
-        .returns<MacroCloseRow[]>();
-      if (error) throw error;
-      return data ?? [];
-    },
-    staleTime: 10 * 60 * 1000,
-  });
-}
-
-/** Live today-% for the macro tickers via the quote-macro edge function
- *  (Yahoo). The cache's today_intraday_pct goes stale between nightly
- *  updates, so the % change is pulled live; SMA25 deviation still comes
- *  from the cache (needs history). */
+/** Live today-% plus 30 days of closes and the SMA25 deviation for the
+ *  macro tickers, all from the quote-macro function (Yahoo). These came from
+ *  the BNF scanner's price cache until it was retired (12 Oct 2026). */
 function useMacroLiveQuotes() {
   return useQuery({
     queryKey: ["dash_macro_live"],
     queryFn: async () => {
       const { data, error } = await supabase.functions.invoke("quote-macro", {
-        body: { tickers: MACRO_TICKERS },
+        body: { tickers: MACRO_TICKERS, history: true },
       });
       if (error) throw error;
-      return (data as { items?: Record<string, { changePct: number | null; price: number | null }> } | null)?.items ?? null;
+      return (data as { items?: Record<string, MacroLive> } | null)?.items ?? null;
     },
     staleTime: 2 * 60_000,
     refetchInterval: 5 * 60_000,
@@ -1144,35 +1071,17 @@ function fmtSignedPct(v: number | null): { txt: string; tone: "pos" | "neg" } {
 }
 
 export function MacroBlock({ n = "04", compact = false }: { n?: string; compact?: boolean }) {
-  const { data: latest = [] } = useMacroLatest();
-  const { data: sparkRows = [] } = useMacroSparks();
-
-  // Build per-ticker close series for the sparkline.
-  const closesByTicker = useMemo(() => {
-    const m = new Map<string, number[]>();
-    const sorted = [...sparkRows].sort((a, b) => a.date.localeCompare(b.date));
-    for (const r of sorted) {
-      const arr = m.get(r.ticker) ?? [];
-      arr.push(r.close);
-      m.set(r.ticker, arr);
-    }
-    return m;
-  }, [sparkRows]);
-
-  const latestByTicker = new Map(latest.map((r) => [r.ticker, r]));
   const { data: live = null } = useMacroLiveQuotes();
 
   return (
     <div>
       <Section n={n}>Macro zoom</Section>
       {MACRO_TICKERS.map((t, i) => {
-        const r = latestByTicker.get(t);
-        const series = closesByTicker.get(t);
-        // Prefer the live % change (Yahoo) over the cache's stale intraday.
-        const liveChg = live?.[t]?.changePct ?? null;
-        const todayPct = liveChg != null ? liveChg : (r?.today_intraday_pct ?? null);
+        const q = live?.[t];
+        const series = q?.closes;
+        const todayPct = q?.changePct ?? null;
         const ch = fmtSignedPct(todayPct);
-        const note = macroInsight(t, todayPct, r?.deviation_pct ?? null);
+        const note = macroInsight(t, todayPct, q?.sma25DevPct ?? null);
         return (
           <div
             key={t}
@@ -1193,104 +1102,6 @@ export function MacroBlock({ n = "04", compact = false }: { n?: string; compact?
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ─────────────────── § 05 BNF Strategy (live) ────────────────────
-
-interface BNFRow {
-  ticker: string;
-  sector: string | null;
-  deviation_pct: number | null;
-  borderline: boolean | null;
-}
-
-function useBNFCandidates() {
-  return useQuery({
-    queryKey: ["dash_bnf"],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("bnf_candidates" as never)
-        .select("ticker, sector, deviation_pct, borderline")
-        .order("deviation_pct", { ascending: true })
-        .limit(4)
-        .returns<BNFRow[]>();
-      if (error) throw error;
-      return data ?? [];
-    },
-    staleTime: 5 * 60 * 1000,
-  });
-}
-
-export function BNFBlock({
-  n = "05", compact = false, onOpenScanner,
-}: { n?: string; compact?: boolean; onOpenScanner?: () => void }) {
-  const { data: picks = [] } = useBNFCandidates();
-
-  // Short sector labels for the compact card.
-  const shortSector = (s: string | null): string => {
-    if (!s) return "—";
-    if (s.startsWith("Communication")) return "Comm";
-    if (s.startsWith("Consumer Discretionary")) return "Cons Disc";
-    if (s.startsWith("Consumer Staples")) return "Staples";
-    if (s.startsWith("Information")) return "Tech";
-    if (s.startsWith("Technology")) return "Tech";
-    if (s.startsWith("Financial")) return "Fin";
-    if (s.startsWith("Industrial")) return "Indus";
-    if (s.startsWith("Health")) return "Health";
-    if (s.startsWith("Real Estate")) return "REIT";
-    if (s.startsWith("Materials")) return "Materials";
-    if (s.startsWith("Energy")) return "Energy";
-    if (s.startsWith("Utilities")) return "Util";
-    return s;
-  };
-
-  return (
-    <div>
-      <Section
-        n={n}
-        right={compact ? `${picks.length} picks` : `${picks.length} picks · mean-reversion`}
-      >
-        BNF · today
-      </Section>
-      {picks.length === 0 ? (
-        <div style={{ padding: "20px 0", color: "var(--fg3)", fontSize: 13 }}>
-          No candidates today. Run the scanner from the Strategy page.
-        </div>
-      ) : (
-        <div style={compact ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } : undefined}>
-          {picks.map((p) => {
-            const dev = p.deviation_pct;
-            const devLabel = dev != null
-              ? `${dev >= 0 ? "+" : "−"}${Math.abs(dev).toFixed(1)}%`
-              : "—";
-            const status = p.borderline ? "near miss" : "ready";
-            const chipClass = p.borderline ? "warn" : "neon";
-            const meta = compact
-              ? `${devLabel} · ${shortSector(p.sector)}`
-              : `${shortSector(p.sector)} · ${devLabel} from SMA25`;
-            return (
-              <div key={p.ticker} className="bnf-tile" style={compact ? undefined : { marginBottom: 10 }}>
-                <div className="head">
-                  <span className="ticker-name hero num-mono" style={{ fontSize: compact ? 22 : 26, fontWeight: 700 }}>
-                    {p.ticker}
-                  </span>
-                  <span className={"chip " + chipClass} style={compact ? { fontSize: 8 } : undefined}>
-                    {status}
-                  </span>
-                </div>
-                <div className="label" style={{ marginTop: 6 }}>{meta}</div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <div style={{ marginTop: 14 }}>
-        <span className="pill" onClick={onOpenScanner} role={onOpenScanner ? "button" : undefined}>
-          → Open scanner
-        </span>
-      </div>
     </div>
   );
 }

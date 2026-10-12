@@ -95,7 +95,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorState> {
 const Landing      = lazy(() => import('./pages/Landing'));
 const Dashboard    = lazy(() => import('./pages/Dashboard'));
 const AuthCallback = lazy(() => import('./pages/AuthCallback'));
-const NewStrategy  = lazy(() => import('./pages/NewStrategy'));
 const Income       = lazy(() => import('./pages/Income'));
 const Portfolio    = lazy(() => import('./pages/Portfolio'));
 const Health       = lazy(() => import('./pages/Health'));
@@ -128,7 +127,6 @@ export default function Sunnyfi() {
       void import('./pages/Dashboard');
       void import('./pages/Income');
       void import('./pages/Portfolio');
-      void import('./pages/NewStrategy');
       void import('../positions/PositionsPage');
     }, 1200);
     return () => clearTimeout(t);
@@ -149,7 +147,6 @@ export default function Sunnyfi() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/income" element={<Income />} />
           <Route path="/portfolio" element={<Portfolio />} />
-          <Route path="/new-strategy" element={<NewStrategy />} />
           {/* /health is a hidden diagnostic route — no nav link, type
               the URL to access. Surfaces mp-refresh pipeline status. */}
           <Route path="/health" element={<Health />} />

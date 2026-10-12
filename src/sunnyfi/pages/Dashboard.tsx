@@ -61,7 +61,6 @@ export default function Dashboard() {
       areaFill={true}
       showNews={true}
       onPositions={() => navigate("/positions")}
-      onStrategy={() => navigate("/new-strategy")}
       onIncome={() => navigate("/income")}
       onLogo={() => navigate("/dashboard")}
     />

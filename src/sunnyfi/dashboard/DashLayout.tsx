@@ -20,7 +20,6 @@ const ROUTE_META: Record<string, { label: string; active?: Active }> = {
   "/dashboard": { label: "Morning brief" },
   "/income": { label: "Income", active: "income" },
   "/portfolio": { label: "Portfolio", active: "portfolio" },
-  "/new-strategy": { label: "New Strategy" },
   "/positions": { label: "Positions", active: "positions" },
   "/payoff": { label: "Payoff", active: "payoff" },
 };

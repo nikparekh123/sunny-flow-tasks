@@ -135,7 +135,6 @@ export default function PositionsPage() {
         }}
         onResolveCellClick={(t, open) => setDetail({ ticker: t, tab: 'resolve', resolveTrade: open })}
         onDashboard={() => { window.location.href = DASHBOARD_URL; }}
-        onStrategy={() => { window.location.href = 'https://www.sunnyfi.co/new-strategy'; }}
       />
 
       <CsvUploadModal

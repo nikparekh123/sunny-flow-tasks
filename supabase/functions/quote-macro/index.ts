@@ -14,6 +14,12 @@
  * Response shape:
  *   { items: { "10Y": { price, changePct, source }, "VIX": {...}, "DXY": {...} } }
  *   price/changePct are null when both sources fail for that symbol.
+ *
+ * ⚠ HISTORY FOR THE DASHBOARD'S MACRO ZOOM (12 Oct 2026). With {history:true}
+ * each extra ticker also carries `closes` (its last 30 daily closes, oldest
+ * first) and `sma25DevPct` (today's price against its 25-day average). These
+ * came from the BNF scanner's price cache, which was retired with the New
+ * Strategy page; Yahoo's daily chart is the same data without the cache.
  */
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,6 +63,22 @@ async function fromPolygon(ticker: string, key: string): Promise<Quote | null> {
   }
 }
 
+/** Last 30 daily closes from Yahoo, oldest first. */
+async function yahooCloses(symbol: string): Promise<number[]> {
+  try {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=3mo&interval=1d`;
+    const resp = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (compatible; Sunnyfi/1.0)" } });
+    if (!resp.ok) return [];
+    const data = await resp.json() as {
+      chart?: { result?: Array<{ indicators?: { quote?: Array<{ close?: Array<number | null> }> } }> };
+    };
+    const c = data.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    return c.filter((v): v is number => typeof v === "number" && v > 0).slice(-30);
+  } catch {
+    return [];
+  }
+}
+
 async function fromYahoo(symbol: string): Promise<Quote | null> {
   try {
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`;
@@ -87,8 +109,10 @@ Deno.serve(async (req) => {
   // live from Yahoo so the dashboard's index quotes reflect today, not the
   // nightly cache. The Yahoo symbol is the ticker itself for stocks/ETFs.
   let extra: string[] = [];
+  let history = false;
   try {
     const body = await req.json();
+    history = body?.history === true;
     if (Array.isArray(body?.tickers)) {
       extra = body.tickers
         .filter((t: unknown): t is string => typeof t === "string")
@@ -111,12 +135,17 @@ Deno.serve(async (req) => {
   );
   const tickerQuotes = await Promise.all(
     extra.map(async (t) => {
-      const q = await fromYahoo(t);
-      return [t, q ?? { price: null, changePct: null, source: null }] as const;
+      const [q, closes] = await Promise.all([fromYahoo(t), history ? yahooCloses(t) : Promise.resolve([])]);
+      const base = q ?? { price: null, changePct: null, source: null };
+      if (!history) return [t, base] as const;
+      const last25 = closes.slice(-25);
+      const sma = last25.length >= 20 ? last25.reduce((a, b) => a + b, 0) / last25.length : null;
+      const px = base.price ?? closes[closes.length - 1] ?? null;
+      return [t, { ...base, closes, sma25DevPct: sma && px ? (px / sma - 1) * 100 : null }] as const;
     }),
   );
 
-  const items = Object.fromEntries([...macro, ...tickerQuotes]) as Record<string, Quote>;
+  const items = Object.fromEntries([...macro, ...tickerQuotes]) as Record<string, Quote & { closes?: number[]; sma25DevPct?: number | null }>;
   return new Response(JSON.stringify({ items, timestamp: new Date().toISOString() }), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });

@@ -68,7 +68,6 @@ export interface PositionsV2BodyProps {
   onOpenSlotClick: (ticker: string, mode?: 'open' | 'close') => void;
   onResolveCellClick: (ticker: string, open: OptionTrade) => void;
   onDashboard: () => void;
-  onStrategy: () => void;
 }
 
 const BUCKET_META: Record<Bucket, { name: string; dot: string }> = {
