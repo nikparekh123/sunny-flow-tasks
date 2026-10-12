@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
           code: 'cron.mp_refresh_stale',
           ok: false,
           severity: 'warn',
-          detail: `Market data last refreshed ${Math.round(ageMin)}m ago — slightly delayed; usually resolves on its own.`,
+          detail: `Market data last refreshed ${Math.round(ageMin)}m ago. Slightly delayed; usually resolves on its own.`,
           meta: { last_captured_at: g?.[0]?.captured_at ?? null, age_minutes: Math.round(ageMin) },
         });
       } else {
@@ -155,7 +155,7 @@ Deno.serve(async (req) => {
           code: 'cron.ibkr_flex_stale',
           ok: false,
           severity: 'warn',
-          detail: `IBKR sync last completed ${Math.round(ageMin)}m ago — slightly delayed; usually resolves on its own.`,
+          detail: `IBKR sync last completed ${Math.round(ageMin)}m ago. Slightly delayed; usually resolves on its own.`,
           meta: { last_finished_at: ibkr?.[0]?.finished_at ?? null, age_minutes: Math.round(ageMin) },
         });
       } else {
@@ -190,8 +190,14 @@ Deno.serve(async (req) => {
     // daily, every day
     // intel-sync (Benzinga news + analysts) retired 9 Oct 2026: Nik cancelled the feed.
     { feed: 'earnings-sync',        warnHours: 30,  critHours: 50 },
+    /* The new app's daily feeds (12-13 Oct 2026). */
+    { feed: 'ibkr-account-sync',    warnHours: 30,  critHours: 50 },
+    { feed: 'market-calendar',      warnHours: 30,  critHours: 50 },
+    { feed: 'macro-sync',           warnHours: 30,  critHours: 50 },
+    { feed: 'dividends-sync',       warnHours: 30,  critHours: 50 },
     // weekday only — the grace has to clear a weekend, and a long one
     { feed: 'ticker-iv-snapshot',   warnHours: 80,  critHours: 110 },
+    { feed: 'theta-check',          warnHours: 80,  critHours: 110 },
     // income-scanner, daily-theta-snapshot and position-snapshot were retired
     // in the 8 Oct 2026 cleanup: nothing on screen read what they wrote.
   ];
@@ -221,8 +227,38 @@ Deno.serve(async (req) => {
         meta });
     } else if (ageH > f.warnHours) {
       findings.push({ code, ok: false, severity: 'warn',
-        detail: `${f.feed} last reported ${Math.round(ageH)}h ago — one run behind.`,
+        detail: `${f.feed} last reported ${Math.round(ageH)}h ago, one run behind.`,
         meta });
+    } else {
+      findings.push({ code, ok: true, detail: '' });
+    }
+  }
+
+  /* ⚠ THE LIVE FEEDS ARE JUDGED IN MINUTES, AND ONLY WHEN THEY SHOULD BE
+     LIVE (13 Oct 2026). market-tape and sunny-home write every 30 s from 4:00
+     to 20:00 New York on weekdays; sunny-home also rebuilds every 10 minutes
+     outside that. A tape that stops at 20:00 is closed, not stale. */
+  const inExtended = isWeekday && minsET >= (4 * 60 + 5) && minsET < (20 * 60);
+  const LIVE: Array<{ feed: string; warnMin: number; critMin: number; offWarnMin?: number; offCritMin?: number }> = [
+    { feed: 'market-tape', warnMin: 5, critMin: 15 },
+    { feed: 'sunny-home',  warnMin: 5, critMin: 15, offWarnMin: 30, offCritMin: 60 },
+  ];
+  for (const f of LIVE) {
+    const code = `feed.${f.feed.replace(/-/g, '_')}_stale`;
+    const warnMin = inExtended ? f.warnMin : f.offWarnMin, critMin = inExtended ? f.critMin : f.offCritMin;
+    if (beatErr || warnMin === undefined || critMin === undefined) {
+      if (!beatErr) findings.push({ code, ok: true, detail: '' });
+      continue;
+    }
+    const hb = (beats ?? []).find((b) => b.feed === f.feed);
+    const ageMin = hb?.ran_at ? (now.getTime() - new Date(hb.ran_at as string).getTime()) / 60_000 : critMin + 1;
+    const meta = { last_ran_at: hb?.ran_at ?? null, age_minutes: Math.round(ageMin), detail: hb?.detail ?? null };
+    if (ageMin > critMin) {
+      findings.push({ code, ok: false, severity: 'critical',
+        detail: `${f.feed} has not updated in ${Math.round(ageMin)} minutes.`, meta });
+    } else if (ageMin > warnMin) {
+      findings.push({ code, ok: false, severity: 'warn',
+        detail: `${f.feed} last updated ${Math.round(ageMin)} minutes ago.`, meta });
     } else {
       findings.push({ code, ok: true, detail: '' });
     }
@@ -294,6 +330,20 @@ function titleForCode(code: string, sev: 'warn' | 'critical' = 'critical'): stri
       return sev === 'warn' ? 'Theta snapshot one run behind' : 'Theta snapshot has stopped';
     case 'feed.position_snapshot_stale':
       return sev === 'warn' ? 'Position snapshot one run behind' : 'Position snapshot has stopped';
+    case 'feed.ibkr_account_sync_stale':
+      return sev === 'warn' ? 'Account value one day behind' : 'Account value has stopped updating';
+    case 'feed.market_calendar_stale':
+      return sev === 'warn' ? 'Market calendar one run behind' : 'Market calendar has stopped';
+    case 'feed.macro_sync_stale':
+      return sev === 'warn' ? 'Macro dates one run behind' : 'Macro dates have stopped';
+    case 'feed.dividends_sync_stale':
+      return sev === 'warn' ? 'Dividend dates one run behind' : 'Dividend dates have stopped';
+    case 'feed.theta_check_stale':
+      return sev === 'warn' ? 'Theta check one run behind' : 'Theta check has stopped';
+    case 'feed.market_tape_stale':
+      return sev === 'warn' ? 'Index prices delayed' : 'Index prices have stopped';
+    case 'feed.sunny_home_stale':
+      return sev === 'warn' ? 'Home data delayed' : 'Home data has stopped';
     default:                                    return code;
   }
 }

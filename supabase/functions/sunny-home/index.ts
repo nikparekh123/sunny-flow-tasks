@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-13.4';
+const BUILD = '2026-10-13.6';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -140,7 +140,7 @@ type LegLite = { ticker: string; strike: number; expiry: string; n: number; mark
 /** The roll for a dragging LEAP: next January a year further out, at the
  *  strike nearest 0.725 delta (Nik: "around 70 to 75 delta"). */
 const ROLL_DELTA = 0.725;
-async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, commPer: number): Promise<Row> {
+async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, commPer: number, spotNow: number | null): Promise<Row> {
   const exps = (await thetaJson(`/v3/option/list/expirations?symbol=${l.ticker}`))
     .map((r) => String(r.expiration ?? r.date ?? '')).filter(Boolean)
     .map((e) => e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`).sort();
@@ -156,7 +156,9 @@ async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, comm
   const T = Math.max(1 / 365, (Date.parse(exp + 'T20:00:00Z') - Date.now()) / (365 * 864e5));
   const rows = q.filter((r) => r.data?.[0]).map((r) => ({ side: String(r.contract.right).toLowerCase(),
     k: Number(r.contract.strike), bid: Number(r.data[0].bid), ask: Number(r.data[0].ask) }));
-  const S = impliedSpot(rows, T) ?? l.underlying ?? 0;
+  /* ⚠ OUR LIVE SPOT, NOT THIS CHAIN'S PARITY: a year-plus out, dividends
+     drag parity (NKE Jan 2029 read 34.01 against 35.33). */
+  const S = spotNow ?? l.underlying ?? impliedSpot(rows, T) ?? 0;
   let pick: Row | null = null;
   for (const r of rows.filter((x) => x.side === 'call' && x.bid > 0 && x.ask > 0)) {
     const mid = (r.bid + r.ask) / 2, v = ivCall(mid, S, r.k, T);
@@ -192,7 +194,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   const today = now.date;
 
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
-         openChecks] = await Promise.all([
+         openChecks, divs] = await Promise.all([
     page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
     get('option_greeks_live?select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
@@ -211,6 +213,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     get(`macro_events?event_date=gte.${today}&event_date=lte.${addDays(today, 21)}&importance=gte.3`
       + '&category=in.(inflation,jobs,rates)&order=event_date.asc&select=event_date,event_time,name'),
     get('theta_checks?status=eq.open&select=*&order=found_on.asc'),
+    get(`dividends?ex_date=gte.${today}&ex_date=lte.${addDays(today, 45)}&select=ticker,ex_date,cash_amount&order=ex_date.asc`),
   ]);
 
   // ── Trading days (calendar-aware) ──
@@ -915,6 +918,12 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
           .map((c) => ({ date: c.date, kind: c.kind, name: c.name, closes: c.closes })),
         macro: macro.filter((m) => String(m.event_date) <= horizon)
           .map((m) => ({ date: m.event_date, time: m.event_time, name: m.name })),
+        /* Ex-dividend on a name with calls sold: early assignment gets likely
+           the day before. */
+        ex_dividend: divs.filter((d) => String(d.ex_date) <= horizon && book.includes(String(d.ticker)))
+          .map((d) => ({ date: d.ex_date, ticker: d.ticker, amount: num(d.cash_amount),
+            calls_sold: legs.filter((l) => l.ticker === d.ticker && l.side === 'sold' && l.type === 'call')
+              .reduce((s, l) => s + l.n, 0) })),
         longs: legs.filter((l) => l.side === 'bought').map((l) => ({
           leg: `${l.ticker} ${l.expiry.slice(0, 7)} ${l.strike}${l.type === 'call' ? 'C' : 'P'}`, expiry: l.expiry,
           months: Math.max(0, Math.round((Date.parse(l.expiry) - Date.parse(today)) / (30.44 * 864e5))),
@@ -928,6 +937,98 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     });
     reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, ...payloadR });
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // WRITES SHEET (block 14): next Friday's write on every name, by TODAY'S
+  // roll-sheet rule, not the design's (Nik, 12 Oct 2026: "stays as we have it
+  // today"). Calls: a third at the money, the rest at 0.6 SD, the rest at 1 SD
+  // after a 15%+ month, 20% at the money when a report falls on or before the
+  // expiry. Puts: the nearest strike at or below spot. Sized on every LEAP
+  // (calls) and every put bought (puts); what is already sold for that
+  // Friday counts toward the strike it sits nearer, and only the rest is
+  // suggested (partial fills). Chains: option_chain_next, every 15 min.
+  // ════════════════════════════════════════════════════════════════════════
+  const chainRows = await page('option_chain_next?select=ticker,expiry,side,strike,mid,delta,iv,oi,spot'
+    + '&order=ticker.asc,expiry.asc,side.asc,strike.asc');
+  /* Next Friday: Monday to Friday the Friday after this week's; on a weekend
+     the coming one. A holiday Friday moves it to that week's last session. */
+  const nextFri = (() => { const d = new Date(today + 'T12:00:00Z'), wd = d.getUTCDay();
+    d.setUTCDate(d.getUTCDate() + (5 - wd + 7) % 7 + (wd === 6 || wd === 0 ? 0 : 7));
+    return d.toISOString().slice(0, 10); })();
+  const targetExp = lastTradingOnOrBefore(nextFri);
+  const dte = Math.max(1, Math.round((Date.parse(targetExp) - Date.parse(today)) / 864e5));
+  type CS = { k: number; mid: number; delta: number | null; iv: number | null; oi: number | null };
+  const nearestK = (xs: CS[], target: number) => xs.length
+    ? xs.reduce((a, b) => (Math.abs(b.k - target) < Math.abs(a.k - target) ? b : a)) : null;
+  const writes = [];
+  for (const t of book) {
+    const ls = legs.filter((l) => l.ticker === t);
+    const leapN = ls.filter((l) => l.side === 'bought' && l.type === 'call').reduce((s, l) => s + l.n, 0);
+    const putsN = ls.filter((l) => l.side === 'bought' && l.type === 'put').reduce((s, l) => s + l.n, 0);
+    if (!leapN && !putsN) continue;
+    const rows = chainRows.filter((r) => r.ticker === t && String(r.expiry) === targetExp);
+    if (!rows.length) { writes.push({ ticker: t, expiry: targetExp, error: 'no chain cached for this Friday' }); continue; }
+    const cs = (side: string): CS[] => rows.filter((r) => r.side === side).map((r) => ({ k: Number(r.strike),
+      mid: Number(r.mid ?? 0), delta: num(r.delta), iv: num(r.iv), oi: num(r.oi) }));
+    const calls = cs('call'), puts = cs('put');
+    const spot = spotOf.get(t) ?? Number(rows.find((r) => r.spot)?.spot ?? 0);
+    /* One SD from the chain's own IV at the strike nearest spot. */
+    const ivRow = [...calls, ...puts].filter((x) => x.iv).sort((a, b) => Math.abs(a.k - spot) - Math.abs(b.k - spot))[0];
+    const sd = ivRow?.iv ? spot * ivRow.iv * Math.sqrt(dte / 365) : null;
+    /* The month: today against 20 sessions back (21 once today's close is in). */
+    const mo = closeSeries(t).reverse();
+    const back = mo.length && mo[0].d === today ? 21 : 20;
+    const move21 = mo.length > back && spot > 0 ? (spot / mo[back].c - 1) * 100 : null;
+    const earnRow = upcomingEarn.get(t);
+    const earnIn = !!earnRow && String(earnRow.report_date) >= today && String(earnRow.report_date) <= targetExp;
+    const share = earnIn ? 0.2 : 1 / 3, out = move21 != null && move21 >= 15 ? 1.0 : 0.6;
+    const atmN = Math.floor(leapN * share + 0.5);
+    const atm = calls.filter((x) => x.k >= spot && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
+    let otm = sd ? nearestK(calls.filter((x) => x.k > spot && x.mid > 0), spot + out * sd) : null;
+    if (atm && otm && otm.k <= atm.k) otm = calls.filter((x) => x.k > atm.k && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
+    const sd1 = sd ? nearestK(calls.filter((x) => x.k > spot), spot + sd) : null;
+    const put = puts.filter((x) => x.k <= spot && x.mid > 0).sort((a, b) => b.k - a.k)[0] ?? null;
+    /* Already sold for that Friday: each counts toward the nearer strike. */
+    const sold = ls.filter((l) => l.side === 'sold' && l.expiry === targetExp);
+    let doneAtm = 0, doneOtm = 0;
+    for (const l of sold.filter((x) => x.type === 'call')) {
+      if (!otm || !atm || Math.abs(l.strike - atm.k) <= Math.abs(l.strike - otm.k)) doneAtm += l.n; else doneOtm += l.n;
+    }
+    const donePuts = sold.filter((x) => x.type === 'put').reduce((s, l) => s + l.n, 0);
+    const left = Math.max(0, leapN - doneAtm - doneOtm);
+    const leftAtm = Math.min(left, Math.max(0, atmN - doneAtm)), leftOtm = left - leftAtm;
+    const leftPuts = Math.max(0, putsN - donePuts);
+    const plan = [
+      atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta, note: 'at the money' } : null,
+      otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta, note: out === 1 ? 'at 1 SD' : 'at 0.6 SD' } : null,
+      put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta, note: 'at the money' } : null,
+    ].filter(Boolean) as { type: string; n: number; strike: number; mid: number; delta: number | null; note: string }[];
+    const deltaNow = ls.reduce((s, l) => s + (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100, 0);
+    const deltaAfter = deltaNow - plan.reduce((s, p) => s + (p.delta ?? 0) * p.n * 100, 0);
+    const putK = put?.k ?? sold.find((x) => x.type === 'put')?.strike ?? null;
+    writes.push({
+      ticker: t, expiry: targetExp, spot: r2(spot), sd: sd == null ? null : r2(sd),
+      move_21d_pct: move21 == null ? null : r2(move21),
+      split: { atm_share: r2(share), out_sd: out, why: earnIn ? 'earnings' : out === 1 ? 'up a lot' : 'flat' },
+      earnings: earnIn ? { date: earnRow!.report_date, time: earnRow!.report_time ?? null } : null,
+      ex_dividend: (() => { const d = divs.find((x) => x.ticker === t && String(x.ex_date) <= targetExp);
+        return d ? { date: d.ex_date, amount: num(d.cash_amount) } : null; })(),
+      plan: plan.map((p) => ({ ...p, mid: r2(p.mid), credit: Math.round(p.mid * p.n * 100) })),
+      expected: Math.round(plan.reduce((s, p) => s + p.mid * p.n * 100, 0)),
+      already: sold.map((l) => ({ type: l.type, n: l.n, strike: l.strike, credit: Math.round(l.avg * l.n * 100) })),
+      collected: Math.round(sold.reduce((s, l) => s + l.avg * l.n * 100, 0)),
+      calls: { sold: doneAtm + doneOtm, of: leapN }, puts: { sold: donePuts, of: putsN },
+      written: left === 0 && leftPuts === 0,
+      delta: { now: Math.round(deltaNow), after: Math.round(deltaAfter) },
+      /* The By Fri bar: put strike, price, the call strike, the 1 SD call. */
+      bar: { put: putK, spot: r2(spot), call: atm?.k ?? sold.find((x) => x.type === 'call')?.strike ?? null,
+             sd1: sd1?.k ?? null, breakeven: atm ? r2(atm.k + atm.mid) : null,
+             to_put_pct: putK ? r2((spot - putK) / spot * 100) : null,
+             to_sd1_pct: sd1 ? r2((sd1.k - spot) / spot * 100) : null },
+    });
+  }
+  /* Least filled first, as the chips run (block 14). */
+  writes.sort((a: Row, b: Row) => ((a.calls?.of ? a.calls.sold / a.calls.of : 1) - (b.calls?.of ? b.calls.sold / b.calls.of : 1)));
 
   // ════════════════════════════════════════════════════════════════════════
   // LAST WEEK (block 09): Friday 4:00 PM to Monday 4:00 AM, each index's week
@@ -1034,7 +1135,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     for (const f of found.filter((x) => x.trigger)) {
       const l = f.l as Leg;
       if (existing.some((c) => c.ticker === l.ticker && Number(c.strike) === l.strike && String(c.expiry) === l.expiry)) continue;
-      const roll = await rollFor(l, f.nowTh, thS, thL, commPerContract).catch((e) => ({ error: String(e).slice(0, 120) }));
+      const roll = await rollFor(l, f.nowTh, thS, thL, commPerContract, spotOf.get(l.ticker) ?? null).catch((e) => ({ error: String(e).slice(0, 120) }));
       await fetch(`${URL_}/rest/v1/theta_checks`, {
         method: 'POST', headers: { ...H, Prefer: 'return=minimal' },
         body: JSON.stringify([{ ticker: l.ticker, option_type: 'call', strike: l.strike, expiry: l.expiry, contracts: l.n,
@@ -1071,6 +1172,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     fresh, account, indices, overnight, watchlist, portfolio, legs, risk,
     history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
+    writes: { expiry: targetExp, names: writes },
     theta_checks: thetaChecks, last_week: lastWeek, ...(checkSummary ? { theta_check_run: checkSummary } : {}),
   };
   return { payload, ms: Date.now() - t0 };
