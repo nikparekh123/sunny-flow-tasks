@@ -300,8 +300,12 @@ Deno.serve(async (req) => {
        legs have all run off still has rows in `option_trades`, and pulling its
        chain every quarter hour would pay Polygon to watch a book that is not
        there. */
-    const trades = await rest('option_trades?voided_at=is.null'
-      + '&select=ticker,option_type,strike,expiry,direction,action,contracts&limit=10000');
+    /* ⚠ ONLY UNEXPIRED ROWS (12 Oct 2026). `limit=10000` never worked:
+       PostgREST caps a read at 1,000 rows, silently, and option_trades
+       crossed 1,000 on 9 Oct. Whether a leg is still open only needs the
+       rows for contracts not yet expired, which is a few hundred at most. */
+    const trades = await rest(`option_trades?voided_at=is.null&expiry=gte.${today}`
+      + '&select=ticker,option_type,strike,expiry,direction,action,contracts&order=id.asc');
     const net = new Map<string, number>();
     for (const t of trades) {
       const key = [t.ticker, t.option_type, t.strike, t.expiry, t.direction].join('|');

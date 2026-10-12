@@ -345,19 +345,31 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
   try {
 
     // ─── 1. Read open option legs with remaining contracts > 0 ──
-    const { data: tradeRows, error: tradesErr } = await admin
-      .from('option_trades')
-      .select('id, ticker, action, option_type, direction, contracts, strike, expiry, closes_trade_id');
-    if (tradesErr) throw tradesErr;
+    /* ⚠ PAGED (12 Oct 2026). PostgREST returns at most 1,000 rows a request,
+       silently. option_trades crossed 1,000 on 9 Oct and the newest legs
+       (BABA 111/114, LULU 94, two LEAP lots) fell off the end and were never
+       marked, which is what made Credit & theta read 56% low. */
+    const tradeRows: OpenTradeRow[] = [];
+    for (let from = 0; from < 50_000; from += 1000) {
+      const { data, error: tradesErr } = await admin
+        .from('option_trades')
+        .select('id, ticker, action, option_type, direction, contracts, strike, expiry, closes_trade_id')
+        .is('voided_at', null)
+        .order('id', { ascending: true })
+        .range(from, from + 999);
+      if (tradesErr) throw tradesErr;
+      tradeRows.push(...((data ?? []) as OpenTradeRow[]));
+      if (!data || data.length < 1000) break;
+    }
 
-    const remaining = remainingByOpenId((tradeRows ?? []) as OpenTradeRow[]);
+    const remaining = remainingByOpenId(tradeRows);
     // Today in US-Eastern (the market clock) as 'YYYY-MM-DD'. Skip legs
     // whose expiry is already past — Polygon 404s expired contracts, and
     // an expired leg isn't a live position anyway.
     const estToday = new Date().toLocaleDateString('en-CA', {
       timeZone: 'America/New_York',
     });
-    const openLegs = (tradeRows ?? []).filter(
+    const openLegs = tradeRows.filter(
       (t) => t.action === 'open'
         && (remaining.get(t.id) ?? 0) > 0
         && t.expiry >= estToday,

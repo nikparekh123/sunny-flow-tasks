@@ -55,8 +55,22 @@ Deno.serve(async (req) => {
   const queued: { category: string; dedup_key: string; title: string }[] = [];
 
   // Pull everything we need in parallel.
-  const [{ data: trades }, { data: quotes }, { data: positions }] = await Promise.all([
-    supabase.from('option_trades').select('id, ticker, action, option_type, direction, contracts, strike, expiry, closes_trade_id, voided_at'),
+  /* ⚠ PAGED (12 Oct 2026). PostgREST returns at most 1,000 rows a request,
+   silently, and option_trades crossed 1,000 on 9 Oct: the newest legs fell
+   off the end of every whole-table read. */
+  const tradeAll: Record<string, any>[] = [];
+  for (let from = 0; from < 50_000; from += 1000) {
+    const { data: pg, error: pgErr } = await supabase
+      .from('option_trades')
+      .select('id, ticker, action, option_type, direction, contracts, strike, expiry, closes_trade_id, voided_at')
+      .order('id', { ascending: true })
+      .range(from, from + 999);
+    if (pgErr) throw pgErr;
+    tradeAll.push(...(pg ?? []));
+    if (!pg || pg.length < 1000) break;
+  }
+  const trades = tradeAll;
+  const [{ data: quotes }, { data: positions }] = await Promise.all([
     supabase.from('ticker_quotes_latest').select('ticker, spot'),
     /* Held positions only. Without the filter this warned about earnings for
        every ticker ever entered, INTU included, which Nik has not owned since

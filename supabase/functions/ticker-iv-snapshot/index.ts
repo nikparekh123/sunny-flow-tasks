@@ -286,11 +286,21 @@ Deno.serve(async (req) => {
 
   try {
     // ── 1. Find tickers with open option positions ────────────
-    const { data: trades, error: tradesErr } = await admin
-      .from('option_trades')
-      .select('ticker, action, contracts, closes_trade_id, voided_at')
-      .is('voided_at', null);
-    if (tradesErr) throw tradesErr;
+    /* ⚠ PAGED (12 Oct 2026). PostgREST returns at most 1,000 rows a request,
+   silently, and option_trades crossed 1,000 on 9 Oct: the newest legs fell
+   off the end of every whole-table read. */
+    const trades: Record<string, any>[] = [];
+    for (let from = 0; from < 50_000; from += 1000) {
+      const { data: pg, error: pgErr } = await admin
+        .from('option_trades')
+        .select('id, ticker, action, contracts, closes_trade_id, voided_at')
+        .is('voided_at', null)
+        .order('id', { ascending: true })
+        .range(from, from + 999);
+      if (pgErr) throw pgErr;
+      trades.push(...(pg ?? []));
+      if (!pg || pg.length < 1000) break;
+    }
 
     // Build remaining-contracts map (mirror mp-refresh logic).
     const opens = new Map<string, { ticker: string; contracts: number }>();

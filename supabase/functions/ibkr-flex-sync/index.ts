@@ -739,10 +739,21 @@ async function auditBook(
   asOf: string; drift: unknown[]; overClosed: unknown[];
   expiredOpen: unknown[]; preHistory: unknown[]; compared: boolean;
 }> {
-  const { data: trades } = await supabase
-    .from('option_trades')
-    .select('ticker,option_type,direction,strike,expiry,action,contracts,trade_date')
-    .is('voided_at', null);
+  /* ⚠ PAGED (12 Oct 2026). PostgREST returns at most 1,000 rows a request,
+   silently, and option_trades crossed 1,000 on 9 Oct: the newest legs fell
+   off the end of every whole-table read. */
+  const trades: Record<string, any>[] = [];
+  for (let from = 0; from < 50_000; from += 1000) {
+    const { data: pg, error: pgErr } = await supabase
+      .from('option_trades')
+      .select('id,ticker,option_type,direction,strike,expiry,action,contracts,trade_date')
+      .is('voided_at', null)
+      .order('id', { ascending: true })
+      .range(from, from + 999);
+    if (pgErr) throw pgErr;
+    trades.push(...(pg ?? []));
+    if (!pg || pg.length < 1000) break;
+  }
 
   type Agg = { opened: number; closed: number; net: number };
   /* TWO books. `book` is everything, which is what the self-checks want. `asOf`
