@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-12.2';
+const BUILD = '2026-10-12.4';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -127,11 +127,11 @@ async function build(): Promise<{ payload: Row; ms: number }> {
     get('ticker_quotes_live?select=ticker,spot,day_change_pct,captured_at'),
     get('market_live?select=*'),
     get(`account_value_daily?report_date=gte.${addDays(BOOK_START, -5)}&order=report_date.desc`),
-    get(`market_calendar?date=gte.${addDays(today, -10)}&date=lte.${addDays(today, 120)}&order=date.asc`),
+    get(`market_calendar?date=gte.${addDays(BOOK_START, -40)}&date=lte.${addDays(today, 120)}&order=date.asc`),
     get(`earnings_events?report_date=gte.${addDays(today, -1)}&report_date=lte.${addDays(today, 70)}`
       + '&select=ticker,report_date,report_time,date_estimated,source&order=report_date.asc'),
     get('earnings_season?select=*&order=starts.desc&limit=6'),
-    page(`daily_closes?date=gte.${addDays(today, -45)}&order=date.asc&select=ticker,date,close_price`),
+    page(`daily_closes?date=gte.${[addDays(today, -45), addDays(BOOK_START, -7)].sort()[0]}&order=date.asc&select=ticker,date,close_price`),
     get('ibkr_sync_runs?status=eq.success&order=finished_at.desc&limit=1&select=finished_at'),
     get(`share_sells?voided_at=is.null&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,realized_pl`),
     get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date`),
@@ -361,9 +361,14 @@ async function build(): Promise<{ payload: Row; ms: number }> {
 
   // ── Portfolio: exposure per name, moves per range ──
   const sharesNow = new Map<string, number>();
+  const shareCost = new Map<string, number>();
   if (anchor) {
-    const posD = await get(`account_positions_daily?report_date=eq.${anchor.report_date}&asset_category=eq.STK&select=symbol,position`);
-    for (const p of posD) sharesNow.set(String(p.symbol).toUpperCase(), (sharesNow.get(String(p.symbol).toUpperCase()) ?? 0) + Number(p.position));
+    const posD = await get(`account_positions_daily?report_date=eq.${anchor.report_date}&asset_category=eq.STK&select=symbol,position,cost_basis_money`);
+    for (const p of posD) {
+      const t = String(p.symbol).toUpperCase();
+      sharesNow.set(t, (sharesNow.get(t) ?? 0) + Number(p.position));
+      shareCost.set(t, (shareCost.get(t) ?? 0) + Number(p.cost_basis_money ?? 0));
+    }
   }
   const names = [...new Set([...book, ...sharesNow.keys()])].sort();
   const portfolio = names.map((t) => {
@@ -399,6 +404,316 @@ async function build(): Promise<{ payload: Row; ms: number }> {
         .map(([t, e]) => ({ ticker: t, sold: Math.round(e.soldD), long: Math.round(e.longD), pct: r2(e.soldD / e.longD * 100) }))
         .sort((a, b) => b.pct - a.pct) },
   };
+
+  // ════════════════════════════════════════════════════════════════════════
+  // THE CARDS' HISTORY: one point per trading day, from leg_marks_daily.
+  // ════════════════════════════════════════════════════════════════════════
+  const monthsBack = (iso: string, m: number) => {
+    const [y, mo] = iso.split('-').map(Number);
+    const d = new Date(Date.UTC(y, mo - 1 - m, 1));
+    return d.toISOString().slice(0, 10);
+  };
+  /* Rolling 3 calendar months (block 15), never before the book: Nik took the
+     proposal to start the charts on 1 Sep 2026. */
+  const winStart = [monthsBack(today, 2), '2026-09-01'].sort().at(-1)!;
+  const days: string[] = [];
+  for (let d = winStart; d < today; d = addDays(d, 1)) if (isTrading(d)) days.push(d);
+  const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
+  const lmd = await page(`leg_marks_daily?day=gte.${marksFrom}&order=day.asc,option_trade_id.asc`
+    + '&select=option_trade_id,day,mark,delta,theta,underlying');
+  const markDay = new Map<string, Map<string, Row>>();      // day -> trade id -> row
+  for (const r of lmd) {
+    const d = String(r.day);
+    (markDay.get(d) ?? markDay.set(d, new Map()).get(d)!).set(String(r.option_trade_id), r);
+  }
+  const closeOn = (t: string, d: string): number | null => {
+    let best: number | null = null;
+    for (const c of closes) if (c.ticker === t && String(c.date) <= d) best = Number(c.close_price);
+    return best;
+  };
+  type DayLeg = { key: string; ticker: string; type: string; short: boolean; strike: number; expiry: string; n: number; ids: string[] };
+  /** The book as it stood at the close of `d`: pooled per contract. */
+  const legsAt = (d: string): DayLeg[] => {
+    const out: DayLeg[] = [];
+    for (const [k, rows] of groups) {
+      const f = rows[0];
+      if (String(f.expiry) < d) continue;
+      let n = 0; const ids: string[] = [];
+      for (const t of rows) {
+        if (String(t.trade_date) > d) continue;
+        if (t.action === 'open') { n += Number(t.contracts); ids.push(String(t.id)); } else n -= Number(t.contracts);
+      }
+      if (n > 0.0001) out.push({ key: k, ticker: String(f.ticker).toUpperCase(), type: f.option_type,
+        short: f.direction === 'short', strike: Number(f.strike), expiry: String(f.expiry), n, ids });
+    }
+    return out;
+  };
+  /* A leg's greeks on `d`: that day's last capture, else the latest before. */
+  const greekOn = (ids: string[], d: string): Row | null => {
+    for (let back = 0; back < 6; back++) {
+      const m = markDay.get(addDays(d, -back)); if (!m) continue;
+      for (const id of ids) { const r = m.get(id); if (r) return r; }
+    }
+    return null;
+  };
+  type Point = { d: string; thS: number; thL: number; dS: number; dL: number; longMV: number; shortMV: number;
+                 thLongBy: Record<string, number> };
+  const pointOf = (d: string, live: boolean): Point => {
+    const p: Point = { d, thS: 0, thL: 0, dS: 0, dL: 0, longMV: 0, shortMV: 0, thLongBy: {} };
+    const ls = live
+      ? legs.map((l) => ({ ticker: l.ticker, type: l.type, short: l.side === 'sold', n: l.n,
+          g: { theta: l.theta, delta: l.delta, mark: l.mark } as Row, key: `${l.ticker}|${l.type}|${l.strike}|${l.expiry}` }))
+      : legsAt(d).map((l) => ({ ticker: l.ticker, type: l.type, short: l.short, n: l.n, g: greekOn(l.ids, d) ?? {},
+          key: `${l.ticker}|${l.type}|${l.strike}|${l.expiry}` }));
+    for (const l of ls) {
+      const th = Math.abs(Number(l.g.theta ?? 0)) * l.n * 100;
+      const mv = Number(l.g.mark ?? 0) * l.n * 100;
+      if (l.short) { p.thS += th; p.shortMV += mv; } else {
+        p.thL += th; p.longMV += mv; p.thLongBy[l.key] = (p.thLongBy[l.key] ?? 0) + th;
+      }
+      if (l.type === 'call' && l.g.delta != null) {
+        const dl = Math.abs(Number(l.g.delta)) * l.n * 100;
+        if (l.short) p.dS += dl; else p.dL += dl;
+      }
+    }
+    return p;
+  };
+  const series = days.map((d) => pointOf(d, false));
+  /* ⚠ IBKR'S CLOSING VALUES WIN FOR THE VALUE SIDE. Our end-of-day option
+     mids put single days of Sold vs Bought thousands off IBKR's (1 Oct: -6.1K
+     against IBKR's -1.4K); IBKR's daily statement carries every position's
+     closing value, so a day it covers takes those. Greeks have no IBKR twin. */
+  const ibkrMV = new Map<string, { long: number; short: number }>();
+  for (const r of await page(`account_positions_daily?report_date=gte.${winStart}&asset_category=eq.OPT`
+      + '&order=report_date.asc,account_id.asc,conid.asc&select=report_date,position,position_value')) {
+    const d = String(r.report_date), e = ibkrMV.get(d) ?? { long: 0, short: 0 };
+    if (Number(r.position) > 0) e.long += Number(r.position_value); else e.short -= Number(r.position_value);
+    ibkrMV.set(d, e);
+  }
+  for (const p of series) {
+    const e = ibkrMV.get(p.d);
+    if (e) { p.longMV = e.long; p.shortMV = e.short; }
+  }
+  const livePoint = isTrading(today) ? pointOf(today, true) : null;
+  const all = livePoint ? [...series, livePoint] : series;
+  /* The 2-week average: the mean of the last ten daily ratios (block 15: it
+     smooths the Monday-to-Friday sawtooth so only the trend shows). */
+  const avg10 = (arr: (number | null)[], i: number) => {
+    const xs = arr.slice(Math.max(0, i - 9), i + 1).filter((x): x is number => x != null && isFinite(x));
+    return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null;
+  };
+  const thetaDaily = all.map((p) => (p.thL > 0 ? p.thS / p.thL : null));
+  const deltaDaily = all.map((p) => (p.dL > 0 ? p.dS / p.dL * 100 : null));
+  const trendOf = (arr: (number | null)[]) => {
+    const now = arr.at(-1), then = arr.length > 5 ? arr[arr.length - 6] : null;
+    if (now == null || then == null || then === 0) return 'steady';
+    const ch = (now - then) / Math.abs(then);
+    return ch < -0.05 ? 'downslope' : ch > 0.05 ? 'climbing' : 'steady';
+  };
+  const theta2w = all.map((_, i) => avg10(thetaDaily, i));
+  const delta2w = all.map((_, i) => avg10(deltaDaily, i));
+  const peakAt = theta2w.reduce((b, v, i) => (v != null && (b < 0 || v > (theta2w[b] ?? -1)) ? i : b), -1);
+  const history = {
+    from: winStart, live_today: !!livePoint,
+    days: all.map((p) => p.d),
+    theta: { daily: thetaDaily.map((x) => (x == null ? null : r2(x))), avg2w: theta2w.map((x) => (x == null ? null : r2(x))),
+      now: theta2w.at(-1) == null ? null : r2(theta2w.at(-1)!), trend: trendOf(theta2w),
+      peak: peakAt >= 0 ? { d: all[peakAt].d, v: r2(theta2w[peakAt]!), at_right_edge: peakAt >= all.length * 0.9 } : null,
+      short: all.map((p) => Math.round(p.thS)), long: all.map((p) => Math.round(p.thL)) },
+    delta: { daily: deltaDaily.map((x) => (x == null ? null : Math.round(x))), avg2w: delta2w.map((x) => (x == null ? null : Math.round(x))),
+      now: delta2w.at(-1) == null ? null : Math.round(delta2w.at(-1)!), trend: trendOf(delta2w),
+      sold: all.map((p) => Math.round(p.dS)), long: all.map((p) => Math.round(p.dL)) },
+  };
+
+  // ── Payback (block 18): what the LEAPs cost, split, and how it comes back ──
+  const leapLots: { ticker: string; k: number; d: string; n: number; tv: number; intr: number }[] = [];
+  for (const l of legs.filter((x) => x.side === 'bought' && x.type === 'call')) {
+    const rows = groups.get(`${l.ticker}|call|long|${l.strike}|${l.expiry}`) ?? [];
+    for (const t of rows.filter((r) => r.action === 'open').sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date)))) {
+      const d = String(t.trade_date);
+      const S = Number(markDay.get(d)?.get(String(t.id))?.underlying ?? NaN) || closeOn(l.ticker, d) || 0;
+      const intr = Math.max(0, S - l.strike), prem = Number(t.premium);
+      leapLots.push({ ticker: l.ticker, k: l.strike, d, n: Number(t.contracts), intr, tv: Math.max(0, prem - intr) });
+    }
+  }
+  /* Only what is still held: a LEAP sold leaves both targets (block 18). A
+     lot's share of a partly-sold leg is scaled to what remains. */
+  for (const l of legs.filter((x) => x.side === 'bought' && x.type === 'call')) {
+    const mine = leapLots.filter((x) => x.ticker === l.ticker && x.k === l.strike);
+    const bought = mine.reduce((s, x) => s + x.n, 0);
+    if (bought > l.n) { const f = l.n / bought; for (const x of mine) x.n *= f; }
+  }
+  const premiumBy = (t: string, from: string, to: string) => realized
+    .filter((e) => e.ticker === t && (e.kind === 'calls sold' || e.kind === 'puts sold') && e.d >= from && e.d <= to)
+    .reduce((s, e) => s + e.amt, 0);
+  const paybackOn = (d: string, live: boolean) => {
+    let tvT = 0, inT = 0, inPaid = 0;
+    const firstBy = new Map<string, string>();
+    for (const x of leapLots) {
+      if (x.d > d) continue;
+      tvT += x.tv * x.n * 100; inT += x.intr * x.n * 100;
+      const S = live ? (spotOf.get(x.ticker) ?? closeOn(x.ticker, d) ?? 0) : (closeOn(x.ticker, d) ?? 0);
+      inPaid += (Math.max(0, S - x.k) - x.intr) * x.n * 100;
+      if (!firstBy.has(x.ticker) || x.d < firstBy.get(x.ticker)!) firstBy.set(x.ticker, x.d);
+    }
+    let tvPaid = 0;
+    for (const [t, from] of firstBy) tvPaid += premiumBy(t, from, d);
+    return { d, tvT: Math.round(tvT), inT: Math.round(inT), tvPaid: Math.round(tvPaid), inPaid: Math.round(inPaid) };
+  };
+  const firstLeap = leapLots.map((x) => x.d).sort()[0] ?? null;
+  const payDays = firstLeap ? [...days.filter((d) => d >= firstLeap)] : [];
+  const paySeries = payDays.map((d) => paybackOn(d, false));
+  if (firstLeap && isTrading(today)) paySeries.push(paybackOn(today, true));
+  const paceOf = (f: 'tvPaid' | 'inPaid') => {
+    if (paySeries.length < 2) return null;
+    const now = paySeries.at(-1)!, i0 = Math.max(0, paySeries.length - 1 - 25);
+    const weeks = Math.max(1, (paySeries.length - 1 - i0) / 5);
+    return Math.round((now[f] - paySeries[i0][f]) / weeks);
+  };
+  const payback = paySeries.length ? {
+    now: paySeries.at(-1), pace_tv: paceOf('tvPaid'), pace_intr: paceOf('inPaid'),
+    series: paySeries.map((p) => [p.d, p.tvT, p.tvPaid, p.inT, p.inPaid]),
+    new_leap_days: [...new Set(leapLots.map((x) => x.d))].sort(),
+  } : null;
+
+  // ── Yield (block 17): every short credit, filed under the week it covers ──
+  const weekStartOf = (iso: string) => { const d = new Date(iso + 'T12:00:00Z'); const wd = (d.getUTCDay() + 6) % 7; return addDays(iso, -wd); };
+  const yieldWeeks = new Map<string, { cs: number; cb: number; ps: number; pb: number; month: string }>();
+  for (const [, rows] of groups) {
+    const f = rows[0];
+    if (f.direction !== 'short') continue;
+    const firstOpen = rows.filter((r) => r.action === 'open').map((r) => String(r.trade_date)).sort()[0];
+    if (!firstOpen || firstOpen < BOOK_START) continue;
+    const exp = String(f.expiry), w = weekStartOf(exp);
+    const e = yieldWeeks.get(w) ?? { cs: 0, cb: 0, ps: 0, pb: 0, month: exp.slice(0, 7) };
+    for (const t of rows) {
+      const c = Number(t.contracts) * Number(t.premium) * 100;
+      if (f.option_type === 'call') { if (t.action === 'open') e.cs += c; else e.cb += c; }
+      else { if (t.action === 'open') e.ps += c; else e.pb += c; }
+    }
+    yieldWeeks.set(w, e);
+  }
+  /* The divisor is what is invested in the long legs still held, as at the
+     end of that week: the current app's rule, so both apps agree. */
+  const investedAsOf = (end: string) => {
+    let s = 0;
+    for (const l of legs.filter((x) => x.side === 'bought')) {
+      for (const t of groups.get(`${l.ticker}|${l.type}|long|${l.strike}|${l.expiry}`) ?? []) {
+        if (String(t.trade_date) > end) continue;
+        s += (t.action === 'open' ? 1 : -1) * Number(t.contracts) * Number(t.premium) * 100;
+      }
+    }
+    return s;
+  };
+  const investedNow = investedAsOf(today);
+  const yieldOut = [...yieldWeeks].sort((a, b) => a[0].localeCompare(b[0])).map(([w, e]) => {
+    const inv = investedAsOf(addDays(w, 6)) || investedNow;
+    return { week: w, fri: addDays(w, 4), month: e.month, calls_sold: Math.round(e.cs), calls_back: Math.round(e.cb),
+             puts_sold: Math.round(e.ps), puts_back: Math.round(e.pb), invested: Math.round(inv) };
+  });
+
+  // ── Inventory (block 14): the shelf, now and per week covered ──
+  const invNow = new Map<string, { cH: number; cS: number; pH: number; pS: number; credit: number }>();
+  for (const l of legs) {
+    const e = invNow.get(l.ticker) ?? { cH: 0, cS: 0, pH: 0, pS: 0, credit: 0 };
+    if (l.type === 'call') { if (l.side === 'bought') e.cH += l.n; else e.cS += l.n; }
+    else { if (l.side === 'bought') e.pH += l.n; else e.pS += l.n; }
+    if (l.side === 'sold') e.credit += l.avg * l.n * 100;
+    invNow.set(l.ticker, e);
+  }
+  const invRows = [...invNow].map(([t, e]) => ({ ticker: t, calls_max: e.cH, calls_sold: e.cS, puts_max: e.pH,
+    puts_sold: e.pS, credit_open: Math.round(e.credit) }));
+  /* Per week covered, the most contracts that were ON at once: a roll closes
+     one strike and opens another, so counting every sale would put a fully
+     covered week over its own max. Fills replay in order, closes first on a
+     tie, and the peak of the running count is the week's bar. */
+  const invWeeks = [...yieldWeeks.keys()].sort().map((w) => {
+    const peak = (type: string) => {
+      const fills: Row[] = [];
+      for (const [, rows] of groups) {
+        const f = rows[0];
+        if (f.direction === 'short' && f.option_type === type && weekStartOf(String(f.expiry)) === w) fills.push(...rows);
+      }
+      fills.sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date))
+        || String(a.executed_at ?? '').localeCompare(String(b.executed_at ?? ''))
+        || (a.action === 'close' ? -1 : 1));
+      let on = 0, max = 0;
+      for (const t of fills) { on += (t.action === 'open' ? 1 : -1) * Number(t.contracts); max = Math.max(max, on); }
+      return max;
+    };
+    return { week: w, fri: addDays(w, 4), calls: peak('call'), puts: peak('put') };
+  });
+  const inventory = {
+    calls_max: invRows.reduce((s, r) => s + r.calls_max, 0), calls_sold: invRows.reduce((s, r) => s + r.calls_sold, 0),
+    puts_max: invRows.reduce((s, r) => s + r.puts_max, 0), puts_sold: invRows.reduce((s, r) => s + r.puts_sold, 0),
+    credit_open: invRows.reduce((s, r) => s + r.credit_open, 0),
+    by: invRows.filter((r) => r.calls_max + r.puts_max > 0)
+      .sort((a, b) => (a.calls_max ? a.calls_sold / a.calls_max : 1) - (b.calls_max ? b.calls_sold / b.calls_max : 1)),
+    weeks: invWeeks,
+  };
+
+  // ── Sold vs Bought (block 19): per trading day, so any period adds up ──
+  /* Longs: the change in value of everything bought, plus its cash (a buy is
+     not a gain, a sale is not a loss). Shorts: REALIZED premium on calls and
+     puts sold, on the day it settled. Each side keeps its own bar. */
+  const longCash = new Map<string, number>();
+  for (const [, rows] of groups) {
+    const f = rows[0];
+    /* Every bought leg, whenever opened: the value side counts every long
+       held, so its cash must too (an Aug put sold on 1 Oct read -$12K). */
+    if (f.direction === 'short') continue;
+    for (const t of rows) {
+      const d = String(t.trade_date);
+      const c = t.net_cash != null ? Number(t.net_cash)
+        : (t.action === 'open' ? -1 : 1) * Number(t.contracts) * Number(t.premium) * 100;
+      longCash.set(d, (longCash.get(d) ?? 0) + c);
+    }
+  }
+  const sbDays = all.map((p, i) => {
+    const prev = i > 0 ? all[i - 1].longMV : null;
+    const longs = prev == null ? null : p.longMV - prev + (longCash.get(p.d) ?? 0);
+    const shorts = realized.filter((e) => e.d === p.d && (e.kind === 'calls sold' || e.kind === 'puts sold'))
+      .reduce((s, e) => s + e.amt, 0);
+    return [p.d, longs == null ? null : Math.round(longs), Math.round(shorts)];
+  });
+  const soldVsBought = {
+    days: sbDays,
+    open_credit: Math.round(legs.filter((l) => l.side === 'sold').reduce((s, l) => s + l.avg * l.n * 100, 0)),
+  };
+
+  // ── Performance (block 20): realized by month, name and kind; open by name ──
+  const perfMap = new Map<string, number>();
+  for (const e of realized) {
+    const k = `${e.d.slice(0, 7)}|${e.ticker}|${e.kind}`;
+    perfMap.set(k, (perfMap.get(k) ?? 0) + e.amt);
+  }
+  const unrealBy = new Map<string, number>();
+  for (const l of legs) {
+    const m = l.mark ?? 0;
+    const u = l.side === 'bought' ? (m - l.avg) * l.n * 100 : (l.avg - m) * l.n * 100;
+    const kind = `${l.type === 'call' ? 'calls' : 'puts'} ${l.side}`;
+    const k = `${l.opened.slice(0, 7)}|${l.ticker}|${kind}`;
+    unrealBy.set(k, (unrealBy.get(k) ?? 0) + u);
+  }
+  const performance = {
+    realized: [...perfMap].map(([k, v]) => [...k.split('|'), Math.round(v)]),
+    /* Open P&L by the month each leg was opened (Unrealized filter). Here a
+       sold leg counts its credit against its mark, as on the Positions card. */
+    unrealized: [...unrealBy].map(([k, v]) => [...k.split('|'), Math.round(v)]),
+  };
+
+  // ── Allocation (block 21): one holding per company, plus Cash ──
+  const holdings = names.map((t) => {
+    const ls = legs.filter((l) => l.ticker === t);
+    const sh = sharesNow.get(t) ?? 0;
+    const spot = spotOf.get(t) ?? 0;
+    const now = sh * spot + ls.reduce((s, l) => s + (l.side === 'sold' ? -1 : 1) * (l.mark ?? 0) * l.n * 100, 0);
+    /* Invested nets the credit of open sold legs against the cost of the
+       bought ones, so Now minus Invested is the name's open P&L. */
+    const invested = ls.reduce((s, l) => s + (l.side === 'sold' ? -1 : 1) * l.avg * l.n * 100, 0) + (shareCost.get(t) ?? 0);
+    return { ticker: t, now: Math.round(now), invested: Math.round(invested) };
+  }).sort((a, b) => b.now - a.now);
+  const allocation = { holdings, cash: account.ok ? Math.round(Number(account.cash)) : null };
 
   // ── Deck inputs ──
   const upcomingEarn = new Map<string, Row>();
@@ -449,6 +764,7 @@ async function build(): Promise<{ payload: Row; ms: number }> {
       .map((c) => ({ date: c.date, kind: c.kind, closes: c.closes, name: c.name })),
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
     fresh, account, indices, overnight, watchlist, portfolio, legs, risk,
+    history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut },
   };
   return { payload, ms: Date.now() - t0 };
