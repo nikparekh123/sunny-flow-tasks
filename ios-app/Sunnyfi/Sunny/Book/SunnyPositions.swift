@@ -74,7 +74,7 @@ struct SunnyPositions: View {
     let home: HomePayload
     @State private var pick = DebugPreset.string("pos.pick") ?? "ALL"
     @State private var mode: PMode = PMode.preset(DebugPreset.string("pos.mode"))
-    @State private var page: String? = DebugPreset.string("pos.page")
+    @State private var page: String?
     @State private var legSel: [String: String] = [:]
     @State private var tallest: CGFloat = 0
     @Environment(HomeRouter.self) private var router
@@ -104,6 +104,12 @@ struct SunnyPositions: View {
                     }
             } else {
                 PTickerCards(home: home, L: L, ticker: pick, mode: $mode, legSel: $legSel, page: $page, measuring: false)
+                    .task {
+                        // Audit preset: a scroll position set before layout is ignored, so set it after.
+                        guard let p = DebugPreset.string("pos.page") else { return }
+                        try? await Task.sleep(for: .milliseconds(300))
+                        page = p
+                    }
                     .id(pick)
                     .transition(.opacity)
             }

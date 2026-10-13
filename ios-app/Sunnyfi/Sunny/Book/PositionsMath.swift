@@ -167,13 +167,19 @@ enum TimeStrip {
         var out = [TimeSlot(el: 0, date: t.date, minutes: nil, open: false, noon: false)]
         let end = PMath.expiryClose(expiry)
         if long {
-            let days = Int(ceil(end.timeIntervalSince(now) / 86400))
-            for i in 1...max(1, days) {
+            // One stop a day, then the expiry itself as the last stop. Counting
+            // days with ceil ran a partial day one past it (Jan 22 for a Jan 21 expiry).
+            let full = max(0, end.timeIntervalSince(now) / 86400)
+            var i = 1
+            while true {
                 let d = MarketClock.addDays(t.date, i).iso
-                let el = min(Double(i), end.timeIntervalSince(now) / 86400)
-                out.append(TimeSlot(el: el, date: d, minutes: nil, open: false, noon: false))
+                if d >= expiry {
+                    out.append(TimeSlot(el: full, date: expiry, minutes: nil, open: false, noon: false))
+                    return out
+                }
+                out.append(TimeSlot(el: Double(i), date: d, minutes: nil, open: false, noon: false))
+                i += 1
             }
-            return out
         }
         var day = t.date, wd = t.weekday
         while day <= expiry {
