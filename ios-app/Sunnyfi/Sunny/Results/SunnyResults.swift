@@ -319,7 +319,7 @@ struct SunnyPerformance: View {
         .foregroundStyle(S.ink)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .sCardSurface(glow: unrealized)
+        .sCardSurface(glow: unrealized, glass: false)   // the busiest card stays paper
         .onAppear {
             guard !started else { return }
             started = true

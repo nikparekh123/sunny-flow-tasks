@@ -284,7 +284,7 @@ struct PTickerCards: View {
                         }
                         .frame(width: cw)
                         .frame(maxHeight: .infinity, alignment: .top)
-                        .sCardSurface()
+                        .sCardSurface(glass: false)   // strike table and payoff labels stay on paper
                         .id(k.rawValue)
                     }
                 }

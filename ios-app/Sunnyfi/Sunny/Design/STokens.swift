@@ -154,6 +154,10 @@ enum S {
     static let rowCardWidth: CGFloat = 341    // cards in a snap row, next one peeks
     static let margin: CGFloat = 20
     static let rCard: CGFloat = 20
+    /// Trial, Nik 13 Oct 2026: the glance cards (Inventory, Yield, Payback, Sold vs
+    /// Bought, Allocation) in the Theta and Delta glass. Set to false to put them
+    /// back on the design's solid paper cards (nothing else changes).
+    static let glassCards = true
     static let rDeck: CGFloat = 24
     static let rChip: CGFloat = 16
     static let rPanel: CGFloat = 18

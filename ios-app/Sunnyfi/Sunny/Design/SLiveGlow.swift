@@ -77,23 +77,41 @@ struct SGlowLayer: View {
 }
 
 extension View {
-    /// A solid paper card surface: radius, 1 pt line, and the live glow
-    /// under the content when `glow` is on.
-    func sCardSurface(radius: CGFloat = S.rCard, glow: Bool = true) -> some View {
-        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        return self
-            .background {
-                ZStack {
-                    shape.fill(S.paper)
-                    if glow { SGlowLayer() }
-                }
-                .clipShape(shape)
-            }
-            .overlay(shape.strokeBorder(S.line, lineWidth: 1))
+    /// Every card's surface. Glass cards (Nik's 13 Oct 2026 trial, `S.glassCards`)
+    /// take the Theta and Delta recipe: Liquid Glass with the live glow behind it.
+    /// `glass: false` keeps the design's solid paper card (radius, 1 pt line, glow
+    /// under the content) for cards read line by line: Positions ticker cards,
+    /// Performance, Portfolio and Watchlist.
+    func sCardSurface(radius: CGFloat = S.rCard, glow: Bool = true, glass: Bool = true) -> some View {
+        modifier(SCardSurface(radius: radius, glow: glow, glass: glass && S.glassCards))
     }
 
     /// The live glow alone, for a card that draws its own surface (glass).
     func sunnyGlow(radius: CGFloat = S.rCard) -> some View {
         background { SGlowLayer().clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous)) }
+    }
+}
+
+private struct SCardSurface: ViewModifier {
+    let radius: CGFloat
+    let glow: Bool
+    let glass: Bool
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        if glass {
+            content
+                .glassEffect(.regular, in: .rect(cornerRadius: radius))
+                .background { if glow { SGlowLayer().clipShape(shape) } }
+        } else {
+            content
+                .background {
+                    ZStack {
+                        shape.fill(S.paper)
+                        if glow { SGlowLayer() }
+                    }
+                    .clipShape(shape)
+                }
+                .overlay(shape.strokeBorder(S.line, lineWidth: 1))
+        }
     }
 }

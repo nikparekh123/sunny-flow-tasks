@@ -41,7 +41,7 @@ struct SunnyPortfolio: View {
         .foregroundStyle(S.ink)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .sCardSurface()
+        .sCardSurface(glass: false)   // heat-map colours are judged against paper
     }
 
     // MARK: Range filter

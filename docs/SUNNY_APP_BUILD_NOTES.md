@@ -118,6 +118,11 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 26. **All positions card.** Its own height, not stretched to the ticker cards: a small gap
     under the title, room at the bottom (Nik, 13 Oct 2026).
 
+27. **Glass cards (trial).** Nik, 13 Oct 2026: the glance cards (Inventory, Yield, Payback,
+    Sold vs Bought, Allocation) take the Theta and Delta glass; Positions ticker cards,
+    Performance, Portfolio and Watchlist stay on the design's paper. One switch,
+    `S.glassCards`, puts them all back on paper; per card, `sCardSurface(glass: false)`.
+
 ## Still open
 
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old
