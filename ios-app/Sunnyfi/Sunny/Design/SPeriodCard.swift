@@ -102,12 +102,14 @@ struct SPeriodHeader: View {
 
     var body: some View {
         // The arrows sit beside the label; the number runs the full width under them.
-        VStack(alignment: .leading, spacing: 12) {
+        // The row is the arrows' 44 pt, so they sit inside the card's padding and
+        // clear the number (the design's 28 pt row with negative padding did not).
+        VStack(alignment: .leading, spacing: 8) {
             Text(label).sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.muted)
-                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: arrows ? 44 : 28, alignment: .leading)
                 .overlay(alignment: .trailing) {
                     if arrows {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 8) {
                             SArrowButton(left: true) { period.step(-1) }
                                 .disabled(!canGoBack).opacity(canGoBack ? 1 : 0.35)
                             SArrowButton(left: false) { period.step(1) }
@@ -115,7 +117,7 @@ struct SPeriodHeader: View {
                         }
                     }
                 }
-                .padding(.vertical, -4)
+                .padding(.vertical, arrows ? 0 : -4)
             Button(action: onTap) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(hero).sType(.largeNumber).foregroundStyle(heroColor)
@@ -133,37 +135,19 @@ struct SPeriodHeader: View {
     }
 }
 
-/// The arrow's corner before the 45° turn: left and bottom edges (pointing
-/// left once turned), or top and right edges (pointing right).
-struct SChevron: Shape {
-    let left: Bool
-    func path(in r: CGRect) -> Path {
-        var p = Path(), h: CGFloat = 0.75
-        if left {
-            p.move(to: CGPoint(x: h, y: 0)); p.addLine(to: CGPoint(x: h, y: r.height - h)); p.addLine(to: CGPoint(x: r.width, y: r.height - h))
-        } else {
-            p.move(to: CGPoint(x: 0, y: h)); p.addLine(to: CGPoint(x: r.width - h, y: h)); p.addLine(to: CGPoint(x: r.width - h, y: r.height))
-        }
-        return p
-    }
-}
-
 struct SArrowButton: View {
     let left: Bool
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            // The design's chevron: a 7 pt corner of 1.5 pt strokes turned 45°,
-            // nudged 2 pt toward the middle (about 10 pt tall). The SF chevron
-            // at 10 pt drew 8.7 pt and thinner, which read too small.
-            SChevron(left: left)
-                .stroke(S.ink, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))
-                .frame(width: 7, height: 7)
-                .rotationEffect(.degrees(45))
-                .offset(x: left ? 2 : -2)
-                .frame(width: 28, height: 28)
+            // Apple's own size (Nik, 13 Oct 2026: the design's 28 pt read too small
+            // next to iOS's back buttons): a 44 pt glass circle, 17 pt semibold chevron.
+            Image(systemName: left ? "chevron.left" : "chevron.right")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(S.ink)
+                .frame(width: 44, height: 44)
                 .glassEffect(.regular.interactive(), in: .circle)
-                .contentShape(Circle().inset(by: -8))
+                .contentShape(Circle())
         }
         .buttonStyle(SPressStyle())
         .accessibilityLabel(left ? "Earlier" : "Later")

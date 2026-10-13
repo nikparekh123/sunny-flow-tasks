@@ -185,11 +185,10 @@ struct SunnyWritesSheet: View {
                     VStack(alignment: .leading, spacing: 16) {
                         HStack(spacing: 12) {
                             Button { withAnimation(S.standard(0.45)) { ticker = nil } } label: {
-                                // The design's back chevron: a 9 pt corner of 1.5 pt strokes, turned 45°.
-                                SChevron(left: true)
-                                    .stroke(S.ink, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))
-                                    .frame(width: 9, height: 9).rotationEffect(.degrees(45)).offset(x: 2)
-                                    .frame(width: 40, height: 40)
+                                // Apple's back button size: 44 pt circle, 17 pt semibold chevron.
+                                Image(systemName: "chevron.left").font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(S.ink)
+                                    .frame(width: 44, height: 44)
                                     .glassEffect(.regular.interactive(), in: .circle)
                             }
                             .buttonStyle(SPressStyle())

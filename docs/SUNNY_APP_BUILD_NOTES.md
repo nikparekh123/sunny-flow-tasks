@@ -101,9 +101,9 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     change per share, then the current price, on both. Block 10 had Portfolio's $ as the
     move's effect on the book. The summary line is about the stocks too: the biggest gainer,
     the biggest loser, then the next biggest move, by % ("NKE up 1.8%. BABA down 0.5%, ...").
-23. **Period arrows.** Drawn as the phone design draws them (a 7 pt corner of 1.5 pt strokes,
-    turned 45°), not SF chevron.left at 10 pt, which read too small. Same for the Writes back
-    button (9 pt).
+23. **Period arrows at Apple's size.** Nik, 13 Oct 2026: the design's 28 pt arrows read too
+    small next to iOS's own back buttons. Built as 44 pt glass circles with a 17 pt semibold
+    chevron, 8 apart; the Writes sheet back button matches (design 40 pt).
 
 ## Still open
 
