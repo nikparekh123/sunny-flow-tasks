@@ -586,9 +586,9 @@ struct AccountChart: View {
                     Stat(label: "Held", value: m.c.sharesValue[i] ?? 0)]
         case .dividends?:
             let paid = (m.c.dividendsCum[i] ?? 0) - (m.c.dividendsCum[s] ?? 0)
-            let next = m.c.dividends.next.map { F.day($0.payDate ?? $0.exDate) } ?? "None"
+            let next = m.c.dividends.next.map { F.day($0.payDate ?? $0.exDate) } ?? "-"
             return [Stat(label: "Paid", value: paid),
-                    Stat(label: "Yield", text: m.c.dividends.yieldPct.map { F.pct($0, places: 1) } ?? "None"),
+                    Stat(label: "Yield", text: m.c.dividends.yieldPct.map { F.pct($0, places: 1) } ?? "-"),
                     Stat(label: "Next", text: next)]
         case let g?:
             let r = m.realized(g, half, i) - m.realized(g, half, s)

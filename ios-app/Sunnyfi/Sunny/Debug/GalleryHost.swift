@@ -44,6 +44,8 @@ struct GalleryHost: View {
                 StatusLine(store: store).padding(.horizontal, S.margin)
                 AccountChart(home: home)
             }
+        case "chart":
+            AccountChart(home: home)
         case "deck":
             SunnyDeck(cards: DeckBuilder.cards(home), today: home.today) { _ in }.padding(.horizontal, S.margin)
         case "today":
