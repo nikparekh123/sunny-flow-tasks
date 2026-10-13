@@ -65,6 +65,20 @@ enum S {
         ? UIColor(hex: 0xF5F5F7) : UIColor(hex: 0x1D1D1F).withAlphaComponent(0.9) })
     static let chipOnInk = dyn(0xFFFFFF, 0x1C1C1E)
 
+    // Deck card tones (block 03). Dark mode keeps the three filled tones, so
+    // these do not swap; the frosted cards use S.frost and S.ink.
+    static let deckYellow = Color(hex: 0xF7CE46)
+    static let deckInk    = Color(hex: 0x1D1D1F)
+    static let deckGreen  = Color(hex: 0x3B873D)
+
+    // The receipt desk and paper (UI Kit §27).
+    static let desk       = dyn(0xE6E3DC, 0x0A0A0A)
+    static let deskInk    = dyn(0x1D1D1F, 0xF5F5F7)
+    static let receiptInk = Color(hex: 0x1D1D1F)
+    static let receiptNote = Color(hex: 0x5E5E62)
+    static let receiptRed = Color(hex: 0xD63437)
+    static let receiptMuted = Color(hex: 0x6E6E73)
+
     /// A figure on the chart and its stats: red when below zero, else ink.
     static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }
 

@@ -8,9 +8,8 @@
 //  ⚠ INTER SHIPS AS ONE VARIABLE FONT. A weight is the `wght` axis, set on the
 //  font descriptor; SwiftUI's `.weight()` cannot reach it on a custom font.
 //  ⚠ CSS LINE HEIGHT IS THE WHOLE LINE BOX; SwiftUI's `lineSpacing` is extra
-//  space ON TOP of the font's natural line. So the extra is measured against
-//  Inter's own advance at that size, and a single-line style whose box is
-//  tighter than the font (Display 40/40) gets a fixed frame instead.
+//  space ON TOP of the font's natural line, and a fixed frame truncates a
+//  wrapped title. iOS 26's `.lineHeight(.exact(points:))` is the CSS box.
 //
 
 import SwiftUI
@@ -88,10 +87,38 @@ private struct STypeModifier: ViewModifier {
     let t: SType
     let tabular: Bool
     func body(content: Content) -> some View {
+        // iOS 26's exact line height is CSS's line box, multi-line included.
         content
             .font(t.font(tabular: tabular))
             .tracking(t.tracking * t.size)
-            .lineSpacing(t.lineSpacing)
-            .frame(height: t.tight ? t.line : nil)
+            .lineHeight(.exact(points: t.line))
+    }
+}
+
+// MARK: - Receipt mono
+
+/// The printed receipt's face (UI Kit §27: IBM Plex Mono on the paper and the
+/// desk label). Inter everywhere else. Only Regular and Medium ship in the
+/// app, so the receipt's 600 and 700 set in Medium.
+struct SMono {
+    let size: CGFloat
+    var weight: CGFloat = 400
+    var line: CGFloat? = nil
+    var tracking: CGFloat = 0           // em
+
+    func uiFont(tabular: Bool = true) -> UIFont {
+        let face = weight >= 500 ? "IBMPlexMono-Medium" : "IBMPlexMono-Regular"
+        return UIFont(name: face, size: size)
+            ?? .monospacedSystemFont(ofSize: size, weight: weight >= 500 ? .semibold : .regular)
+    }
+}
+
+extension View {
+    func sMono(_ size: CGFloat, _ weight: CGFloat = 400, line: CGFloat? = nil, tracking: CGFloat = 0) -> some View {
+        let m = SMono(size: size, weight: weight, line: line, tracking: tracking)
+        let f = m.uiFont()
+        return self.font(Font(f))
+            .tracking(tracking * size)
+            .lineHeight(line.map { .exact(points: $0) })
     }
 }

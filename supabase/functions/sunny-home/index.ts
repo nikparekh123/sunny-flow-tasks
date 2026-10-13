@@ -915,9 +915,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
                mark: String(isoWeek(from)) });
   }
   const reportsOut: Row[] = [];
+  /* What was borrowed at the period's last close, for the receipt's
+     interest note ("margin on 21K borrowed"). */
+  const borrowedAt = (d: string) => {
+    const h = savedHistory.filter((x) => String(x.day) <= d).at(-1);
+    return h && Number(h.cash) < 0 ? Math.round(-Number(h.cash)) : 0;
+  };
   for (const r of due) {
     const have = savedReports.find((x) => x.kind === r.kind && String(x.period_start) === r.from);
-    if (have) { reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, ...have.payload }); continue; }
+    if (have) { reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, borrowed: borrowedAt(r.to), ...have.payload }); continue; }
     const lastDay = lastTradingOnOrBefore(r.to);
     if (!acctDays.some((d) => String(d.report_date) >= lastDay && Number(d.accounts) >= 2)) {
       reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, pending: 'waiting for IBKR statement' });
@@ -975,7 +981,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
       method: 'POST', headers: { ...H, Prefer: 'resolution=ignore-duplicates,return=minimal' },
       body: JSON.stringify([{ kind: r.kind, period_start: r.from, period_end: r.to, shown_on: today, payload: payloadR }]),
     });
-    reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, ...payloadR });
+    reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, borrowed: borrowedAt(r.to), ...payloadR });
   }
 
   step('reports');

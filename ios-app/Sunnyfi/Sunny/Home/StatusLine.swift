@@ -122,7 +122,7 @@ struct StatusLine: View {
             let home = store.home
             let st = MarketStatus.at(ctx.date, calendar: home?.calendar ?? [], held415: home?.tradeTo415 ?? [])
             HStack(spacing: 8) {
-                Circle().fill(dot(st.tone)).frame(width: 6, height: 6)
+                Circle().fill(dot(st.tone)).frame(width: 8, height: 8)
                 Text(st.text)
                     .sType(.kicker.sized(13, line: 13).weighted(600), tabular: false)
                     .foregroundStyle(textColor(st.tone))

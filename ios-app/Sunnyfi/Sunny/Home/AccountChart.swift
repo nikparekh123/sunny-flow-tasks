@@ -790,10 +790,12 @@ struct SFilterIcon: Shape {
     }
 }
 
-/// The × on the title pill: two 8 pt bars crossed in a 20 pt box.
+/// A ×: two bars crossed at the centre. `half` is half a bar's length
+/// (4 on the chart's title pill, 6 on a deck card's dismiss).
 struct SCross: Shape {
+    var half: CGFloat = 4
     func path(in rect: CGRect) -> Path {
-        let c = CGPoint(x: rect.midX, y: rect.midY), d = 4 / 2.squareRoot()
+        let c = CGPoint(x: rect.midX, y: rect.midY), d = half / 2.squareRoot()
         return Path { p in
             p.move(to: CGPoint(x: c.x - d, y: c.y - d)); p.addLine(to: CGPoint(x: c.x + d, y: c.y + d))
             p.move(to: CGPoint(x: c.x + d, y: c.y - d)); p.addLine(to: CGPoint(x: c.x - d, y: c.y + d))

@@ -24,6 +24,8 @@ struct HomePayload: Decodable {
     let chart: Chart?
     let deck: Deck
     let lastWeek: LastWeek?
+    /// Every open theta check (block 15's breathing tile), not only today's card.
+    let thetaChecks: [Deck.ThetaCheck]?
 }
 
 struct CalendarDay: Decodable, Hashable {
@@ -131,7 +133,7 @@ struct Deck: Decodable {
         var id: String { ticker + date }
         let ticker: String
         let date: String
-        let time: String?
+        let time: String?          // amc | bmo | nil
         let estimated: Bool
         let callsOn: Int
         let putsOn: Int
@@ -149,8 +151,75 @@ struct Deck: Decodable {
         let only: Only?
         struct Only: Decodable { let ticker: String; let date: String }
     }
-    struct Report: Decodable { let kind: String; let label: String; let mark: String; let pending: String? }
-    struct ThetaCheck: Decodable { let ticker: String; let leg: String; let trigger: String; let foundOn: String; let cardToday: Bool }
+
+    /// A weekly or monthly report (block 06), as saved on its day.
+    struct Report: Decodable {
+        let kind: String                 // weekly | monthly
+        let label: String
+        let mark: String
+        let pending: String?
+        let period: Period?
+        let kept: Double?
+        let realized: Double?
+        let lines: [Line]?
+        let commission: Double?
+        let trades: Int?
+        let commissionEach: Double?
+        let interest: Double?
+        let borrowed: Double?
+        let unrealizedNow: Double?
+        let best: Best?
+        let comingUp: ComingUp?
+
+        struct Period: Decodable { let from: String; let to: String }
+        struct Line: Decodable { let leg: String; let how: String; let exp: String?; let amount: Double; let kind: String }
+        struct Best: Decodable { let leg: String; let amount: Double; let how: String; let exp: String?; let keptPct: Double? }
+        struct ComingUp: Decodable {
+            let earnings: [Earn]?
+            let market: [Market]?
+            let macro: [Macro]?
+            let exDividend: [ExDiv]?
+            let longs: [Long]?
+            struct Earn: Decodable { let date: String; let ticker: String; let time: String? }
+            struct Market: Decodable { let date: String; let kind: String; let name: String; let closes: String? }
+            struct Macro: Decodable { let date: String; let time: String?; let name: String }
+            struct ExDiv: Decodable { let date: String; let ticker: String; let amount: Double?; let callsSold: Int? }
+            struct Long: Decodable { let leg: String; let expiry: String; let months: Int; let sinceBoughtPct: Double? }
+        }
+    }
+
+    /// A LEAP whose theta drags (block 07), with the roll that fixes it.
+    struct ThetaCheck: Decodable, Identifiable {
+        var id: String { leg }
+        let ticker: String
+        let leg: String
+        let trigger: String              // growth | ratio
+        let foundOn: String
+        let cardToday: Bool
+        let thetaNow: Double?
+        let thetaThen: Double?
+        let growthPct: Double?
+        let ratioNow: Double?
+        let ratioWithout: Double?
+        let roll: Roll?
+
+        struct Roll: Decodable {
+            let error: String?
+            let close: Side?
+            let open: Side?
+            let netDebit: Double?
+            let commissionFees: Double?
+            let thetaDay: Pair?
+            let timeValueLeft: Pair?
+            let iv: Pair?
+            let delta: Pair?
+            let openInterest: Pair?
+            let bookRatio: Ratio?
+            struct Side: Decodable { let expiry: String; let strike: Double; let contracts: Int; let price: Double? }
+            struct Pair: Decodable { let old: Double?; let new: Double? }
+            struct Ratio: Decodable { let now: Double?; let after: Double? }
+        }
+    }
 }
 
 // MARK: - Mixed arrays ([date, group, flag, amount])
