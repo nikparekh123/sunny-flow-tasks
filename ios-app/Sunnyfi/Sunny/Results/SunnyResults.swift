@@ -256,12 +256,17 @@ struct SunnyPerformance: View {
         let tot: Double = list.reduce(0.0) { $0 + $1.up - $1.dn }
         let series: [Double] = ms.map { m in D.keys.reduce(0.0) { $0 + monthNet(D, $1, m) } }
         let pIdx = period
-        let prev: Double? = pIdx.flatMap { $0 > 0 ? series[$0 - 1] : nil }
+        // Months with something in them for this selection. Best month, per month
+        // and the "vs" line only count those; before the first, it is the first
+        // month on record.
+        let has: [Bool] = ms.map { m in D.values.contains { tys in Self.types.contains { on($0.key) && tys[$0.key]?[m] != nil } } }
+        let firstData = has.firstIndex(of: true)
+        let prev: Double? = pIdx.flatMap { p in p > 0 && (firstData.map { $0 < p } ?? false) ? series[p - 1] : nil }
         let delta = prev.map { tot - $0 }
         let pctRaw = prev.flatMap { abs($0) >= 100 ? Int((abs(delta!) / abs($0) * 100).rounded()) : nil }
         let pct = pctRaw.flatMap { $0 <= 300 ? $0 : nil }
         let ytd = series.reduce(0, +)
-        let bestIx = series.indices.max { series[$0] < series[$1] } ?? 0
+        let bestIx: Int? = series.indices.filter { has[$0] }.max { series[$0] < series[$1] }
         let monthName = { (ym: String) in Periods.monthNames[(Int(ym.suffix(2)) ?? 1) - 1] }
         let mu = max(1, list.map(\.up).max() ?? 1), md = max(0, list.map(\.dn).max() ?? 0), span = mu + md
         let x0 = md / span
@@ -275,7 +280,7 @@ struct SunnyPerformance: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(per.map { "\(monthName($0).uppercased()) \($0.prefix(4))" } ?? "YTD \(year)")
                             .sType(SType(size: 15, weight: 600, line: 20, tracking: 0.02), tabular: false)
-                        Text(per == nil ? "\(ms.first.map(monthName) ?? "Jan") to \(ms.last.map(monthName) ?? "")"
+                        Text(none ? "" : per == nil ? "\(ms.first.map(monthName) ?? "Jan") to \(ms.last.map(monthName) ?? "")"
                              : delta == nil ? "first month on record"
                              : "vs \(monthName(ms[pIdx! - 1]).uppercased()) · \(F.moneyDelta(delta!))" + (pct.map { " · \($0)%" } ?? ""))
                             .sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
@@ -285,14 +290,15 @@ struct SunnyPerformance: View {
                 }
             }
             VStack(alignment: .leading, spacing: 0) {
-                let n = Double(max(1, ms.count))
-                let lossMonths = series[bestIx] < 0
+                let n = Double(max(1, ms.count - (firstData ?? 0)))
+                let lossMonths = bestIx.map { series[$0] < 0 } ?? false
+                let best = bestIx.map { monthName(ms[$0]) } ?? "-"
                 if unrealized && !realized {
                     SStatLine(items: [(F.moneyK(ytd), "open", ytd < 0 ? S.red : S.ink),
-                                      (ms.isEmpty ? "-" : monthName(ms[bestIx]), lossMonths ? "least open loss" : "best month opened", lossMonths ? S.red : S.green)])
+                                      (best, lossMonths ? "least open loss" : "best month opened", lossMonths ? S.red : S.green)])
                 } else {
                     SStatLine(items: [(F.moneyK(ytd), "ytd", ytd < 0 ? S.red : S.ink), (F.moneyK(ytd / n), "per mo", ytd < 0 ? S.red : S.ink),
-                                      (ms.isEmpty ? "-" : monthName(ms[bestIx]), lossMonths ? "smallest loss" : "best month", lossMonths ? S.red : S.green)])
+                                      (best, lossMonths ? "smallest loss" : "best month", bestIx == nil ? S.ink : lossMonths ? S.red : S.green)])
                 }
                 SInlineInsight(lead: list.first.map { "\($0.t) \(unrealized && !realized ? "leads your open book." : "is your best performer.")" } ?? "Nothing yet.",
                                rest: "Companies rank by the period you pick. The strip on each row shows each month. Tap a row to focus on it.")

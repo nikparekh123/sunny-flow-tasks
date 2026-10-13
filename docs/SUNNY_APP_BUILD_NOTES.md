@@ -57,8 +57,9 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     measures within half a point of the design.
 12. **Deck arrow.** The web Inter has no → glyph, so the browser falls back, and the PNG
     screens and the live file draw it differently. Built in Inter, per "Inter only".
-13. **Theta check name.** The design says "the Nike longs"; the payload has tickers only and
-    every other card uses them ("NFLX reports after close"). Built as "the NKE longs".
+13. **Company names.** The design says "the Nike longs" and "39.1% in Nike"; the payload has
+    tickers only and every other card uses them ("NFLX reports after close"). Built with
+    tickers: "the NKE longs", "34.4% in NKE".
 14. **Deck title wrap.** The design balances deck titles ("Time to roll / the NKE longs")
     and keeps subs from ending on one word. SwiftUI has neither, so the breaks are worked out
     in code (SWrap).
