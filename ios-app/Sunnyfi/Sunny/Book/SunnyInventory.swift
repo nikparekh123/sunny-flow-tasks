@@ -27,7 +27,8 @@ struct SunnyInventory: View {
         VStack(alignment: .leading, spacing: 20) {
             SPeriodHeader(label: "Inventory", hero: hero(pickedCol), heroValue: Double(pickedCol?.calls ?? inv.callsSold),
                           heroColor: inv.callsMax > 0 && inv.callsSold > inv.callsMax && pickedCol == nil ? S.red : S.ink,
-                          sub: sub(pickedCol), onTap: {}, period: P)
+                          sub: sub(pickedCol), onTap: {}, period: P,
+                          canGoBack: Periods.canGoBack(P, today: home.today, start: Periods.bookStart(home)))
             VStack(alignment: .leading, spacing: 0) {
                 SStatLine(items: stats)
                 SInlineInsight(lead: insight.lead, rest: insight.rest)
@@ -105,7 +106,7 @@ struct SunnyInventory: View {
                 return make(i, "W\(i + 1)", w?.calls, w?.puts, f == fri)
             }
         }
-        return (0..<12).map { m in
+        return Periods.months(a, start: Periods.bookStart(home)).map { m in
             let ym = String(format: "%@-%02d", a, m + 1)
             let w = inv.weeks.filter { $0.fri.hasPrefix(ym) }.sorted { $0.fri < $1.fri }.last
             return make(m, Periods.monthNames[m], w?.calls, w?.puts, today.hasPrefix(ym))

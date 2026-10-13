@@ -176,6 +176,7 @@ struct Writes: Decodable {
 // MARK: - Theta and Delta (blocks 15, 16)
 
 struct History: Decodable {
+    let from: String?
     let days: [String]
     let theta: Series
     let delta: Series

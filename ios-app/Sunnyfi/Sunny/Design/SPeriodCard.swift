@@ -55,6 +55,20 @@ enum Periods {
         }
         return out
     }
+    /// The book's first day (1 Sep 2026): Month view starts at its month, and
+    /// the back arrow stops there (Nik, 13 Oct 2026: no empty Jan to Aug).
+    static func bookStart(_ h: HomePayload) -> String { h.history.from ?? h.history.days.first ?? "2026-09-01" }
+    /// Month indices (0 = Jan) shown for a year: from the book's first month on.
+    static func months(_ year: String, start: String) -> [Int] {
+        let sy = String(start.prefix(4)), sm = Int(start.dropFirst(5).prefix(2)) ?? 1
+        if year < sy { return [] }
+        return year == sy ? Array((sm - 1)..<12) : Array(0..<12)
+    }
+    /// Is there an earlier week-month (Week) or year (Month) with the book in it?
+    static func canGoBack(_ s: PeriodState, today: String, start: String) -> Bool {
+        let a = anchor(s, today: today)
+        return s.view == .month ? a > String(start.prefix(4)) : a > String(start.prefix(7))
+    }
     /// This week's Friday (the coming one at the weekend).
     static func thisFriday(_ today: String) -> String {
         var d = MarketClock.addDays(today, 0)
@@ -83,6 +97,8 @@ struct SPeriodHeader: View {
     let onTap: () -> Void
     @Bindable var period: PeriodState
     var arrows = true
+    /// False when the period on screen is the book's first (no earlier data).
+    var canGoBack = true
 
     var body: some View {
         // The arrows sit beside the label; the number runs the full width under them.
@@ -93,6 +109,7 @@ struct SPeriodHeader: View {
                     if arrows {
                         HStack(spacing: 4) {
                             SArrowButton(left: true) { period.step(-1) }
+                                .disabled(!canGoBack).opacity(canGoBack ? 1 : 0.35)
                             SArrowButton(left: false) { period.step(1) }
                                 .disabled(period.back == 0).opacity(period.back == 0 ? 0.35 : 1)
                         }
@@ -243,18 +260,30 @@ struct SBarChart: View {
                     .zIndex(1)
                 }
                 .frame(width: inner, height: Self.H)
+                // Room for the grey box's rounded ends (top -10, bottom -8), which
+                // the scroll view would otherwise cut flat; layout height unchanged.
+                .padding(.vertical, 12)
             }
             .contentMargins(.horizontal, 20, for: .scrollContent)
             .scrollIndicators(.hidden)
             .padding(.horizontal, -20)
+            .padding(.vertical, -12)
             .onAppear {
                 if let now = columns.first(where: \.isNow)?.id { proxy.scrollTo(now, anchor: .center) }
+            }
+            // Week to Month (or back): land on this month or week, never on the start.
+            .onChange(of: columns.map(\.label)) { _, _ in
+                guard let now = columns.first(where: \.isNow)?.id ?? columns.last?.id else { return }
+                Task { @MainActor in proxy.scrollTo(now, anchor: .center) }
             }
         }
     }
 
     private func column(_ col: SBarColumn) -> some View {
         let fade = picked != nil && picked != col.id
+        // The grey box and bold label sit on the picked column, or on this
+        // week (this month) when nothing is picked (phone design: isNow follows the pick).
+        let lit = picked.map { $0 == col.id } ?? col.isNow
         return Button {
             withAnimation(S.standard(0.35)) { onPick(picked == col.id ? nil : col.id) }
         } label: {
@@ -282,15 +311,15 @@ struct SBarChart: View {
                     }
                 }
                 Text(col.label)
-                    .sType(SType(size: 12, weight: col.isNow ? 700 : 600, line: 12, tracking: 0), tabular: false)
-                    .foregroundStyle(col.isNow ? S.ink : S.muted)
+                    .sType(SType(size: 12, weight: lit ? 700 : 600, line: 12, tracking: 0), tabular: false)
+                    .foregroundStyle(lit ? S.ink : S.muted)
                     .frame(height: 14)
             }
             .frame(width: Self.colW)
             .background {
-                if col.isNow {
+                if lit {
                     RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.pGrid)
-                        .padding(.horizontal, -12).padding(.top, -10).padding(.bottom, -12)
+                        .padding(.horizontal, -12).padding(.top, -10).padding(.bottom, -8)
                 }
             }
             .opacity(fade ? 0.35 : 1)

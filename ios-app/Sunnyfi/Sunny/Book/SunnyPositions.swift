@@ -387,13 +387,14 @@ struct PSideCard: View {
             }
             PFlatChart(C: C, W: W, CW: CW, now: px, selected: l.id, dist: PDist.of(l))
             PTimeStripView(slots: slots, si: $si, long: !sold, width: width)
+                .id(l.id)   // a new strike opens on Now, never the last strike's time
             VStack(spacing: 2) {
                 ForEach(L) { x in
                     let d = PDist.of(x)
                     let v = mode == .pct ? PF.pct(x.pct) : mode == .usd ? PF.usd(x.g) : PF.usd(x.tv)
                     PRow(name: PF.strike(x.k), qty: "×\(x.q)", dist: "\(d.v) \(d.m)", distColor: d.c, value: v,
                          valueColor: mode == .tv ? S.ink : x.g >= 0 ? S.green : S.red, nameW: 96,
-                         selected: x.id == l.id, tap: { withAnimation(S.standard(0.3)) { sel = x.id } },
+                         selected: x.id == l.id, tap: { withAnimation(S.standard(0.3)) { sel = x.id; si = nil } },
                          wash: changed.contains(x.id))
                 }
             }
@@ -492,12 +493,14 @@ enum PDist {
 }
 
 enum PTime {
-    /// The strip's starting stop: Exp, or a preset ("now", a weekday 2-6 at
+    /// The strip's starting stop: Now (Nik, 13 Oct 2026: a strike always opens
+    /// on today's view, not Exp), or an audit preset ("exp", a weekday 2-6 at
     /// noon, or "d<N>" days out).
     static func presetSlot(_ s: [TimeSlot]) -> Int {
         let last = s.count - 1
-        guard let p = DebugPreset.string("pos.slot") else { return last }
+        guard let p = DebugPreset.string("pos.slot") else { return 0 }
         if p == "now" { return 0 }
+        if p == "exp" { return last }
         if p.hasPrefix("d"), let n = Int(p.dropFirst()) { return min(last, n) }
         if let wd = Int(p) {
             return s.firstIndex { $0.minutes == 12 * 60 && DeckBuilder.weekday($0.date) == wd } ?? last

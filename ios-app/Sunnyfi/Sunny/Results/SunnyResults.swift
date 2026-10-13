@@ -41,7 +41,7 @@ struct SunnySoldBought: View {
                 return Col(id: i, label: "W\(i + 1)", agg: agg(r.filter { $0.d >= mon && $0.d <= f }), now: f == fri)
             }
         }
-        return (0..<12).map { m in
+        return Periods.months(a, start: Periods.bookStart(home)).map { m in
             let ym = String(format: "%@-%02d", a, m + 1)
             return Col(id: m, label: Periods.monthNames[m], agg: agg(r.filter { $0.d.hasPrefix(ym) }), now: today.hasPrefix(ym))
         }
@@ -62,7 +62,7 @@ struct SunnySoldBought: View {
             SPeriodHeader(label: "Sold vs Bought", hero: X == nil ? "-" : F.moneyK(net), heroValue: net,
                           heroColor: X == nil ? S.ink : net < 0 ? S.red : S.green,
                           sub: "\(label) · net" + (current && X != nil ? " · \(F.moneyK(home.soldVsBought.openCredit)) open" : ""),
-                          onTap: {}, period: P)
+                          onTap: {}, period: P, canGoBack: Periods.canGoBack(P, today: home.today, start: Periods.bookStart(home)))
             VStack(alignment: .leading, spacing: 0) {
                 if let X {
                     SStatLine(items: [(F.moneyK(q(X.chg)), X.chg < 0 ? "longs lost" : "longs added", X.chg < 0 ? S.red : S.green),
@@ -107,6 +107,7 @@ struct SunnySoldBought: View {
                 HStack(alignment: .top, spacing: 40) {
                     ForEach(cs, id: \.id) { c in
                         let fade = pick != nil && pick != c.id
+                        let lit = pick.map { $0 == c.id } ?? c.now   // the grey box follows the pick
                         Button { withAnimation(S.standard(0.35)) { P.picked["svb"] = pick == c.id ? nil : c.id } } label: {
                             VStack(spacing: 0) {
                                 HStack(alignment: .bottom, spacing: 6) {
@@ -134,12 +135,12 @@ struct SunnySoldBought: View {
                                     }
                                 }
                                 .frame(height: CGFloat(dnH), alignment: .top)
-                                Text(c.label).sType(SType(size: 12, weight: c.now ? 700 : 600, line: 12, tracking: 0), tabular: false)
-                                    .foregroundStyle(c.now ? S.ink : S.muted).frame(height: 14).padding(.top, 12)
+                                Text(c.label).sType(SType(size: 12, weight: lit ? 700 : 600, line: 12, tracking: 0), tabular: false)
+                                    .foregroundStyle(lit ? S.ink : S.muted).frame(height: 14).padding(.top, 12)
                             }
                             .frame(width: 80)
                             .background {
-                                if c.now { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.pGrid).padding(.horizontal, -12).padding(.top, -10).padding(.bottom, -8) }
+                                if lit { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.pGrid).padding(.horizontal, -12).padding(.top, -10).padding(.bottom, -8) }
                             }
                             .opacity(fade ? 0.35 : 1)
                             .contentShape(Rectangle())
@@ -154,6 +155,10 @@ struct SunnySoldBought: View {
             .scrollIndicators(.hidden)
             .padding(.horizontal, -20)
             .onAppear { if let n = cs.first(where: \.now)?.id { proxy.scrollTo(n, anchor: .center) } }
+            .onChange(of: cs.map(\.label)) { _, _ in
+                guard let n = cs.first(where: \.now)?.id ?? cs.last?.id else { return }
+                Task { @MainActor in proxy.scrollTo(n, anchor: .center) }
+            }
         }
     }
 

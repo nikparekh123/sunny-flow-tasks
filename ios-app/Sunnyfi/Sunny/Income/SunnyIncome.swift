@@ -56,7 +56,7 @@ struct SunnyYield: View {
                 Col(id: i, label: "W\(i + 1)", rows: home.yield.filter { $0.fri == f }, now: f == fri)
             }
         }
-        return (0..<12).map { m in
+        return Periods.months(a, start: Periods.bookStart(home)).map { m in
             let ym = String(format: "%@-%02d", a, m + 1)
             return Col(id: m, label: Periods.monthNames[m], rows: home.yield.filter { $0.month == ym }, now: today.hasPrefix(ym))
         }
@@ -78,7 +78,8 @@ struct SunnyYield: View {
         VStack(alignment: .leading, spacing: 20) {
             SPeriodHeader(label: "Yield", hero: tot.any ? fmt(net) : "-", heroValue: net,
                           heroColor: tot.any && net < 0 ? S.red : S.ink, sub: "\(label) · \(word)",
-                          onTap: { withAnimation(.smooth(duration: S.roll)) { mode = mode.next } }, period: P)
+                          onTap: { withAnimation(.smooth(duration: S.roll)) { mode = mode.next } }, period: P,
+                          canGoBack: Periods.canGoBack(P, today: home.today, start: Periods.bookStart(home)))
             VStack(alignment: .leading, spacing: 0) {
                 if tot.any {
                     SStatLine(items: [(fmt(r(tot.sold)), "sold", S.ink), (fmt(r(tot.back)), "closed early", S.red),
