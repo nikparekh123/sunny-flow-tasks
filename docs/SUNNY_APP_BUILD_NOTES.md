@@ -105,6 +105,15 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     small next to iOS's own back buttons. Built as 44 pt glass circles with a 17 pt semibold
     chevron, 8 apart; the Writes sheet back button matches (design 40 pt).
 
+24. **One combined Payback.** Nik, 13 Oct 2026, replacing block 18's two lines: everything
+    realized since the first LEAP (sold premium, puts and calls bought, shares, any close,
+    book-wide) plus the change in the LEAPs' intrinsic, against the whole LEAP cost (time
+    value plus intrinsic at purchase). One line, one pace, one date; below zero is not drawn
+    (Nik: leave as is). Rows: Made and Intrinsic. sunny-home adds `all_real` to each series row
+    and `pace_all` (v28).
+25. **Inline insight edge to edge.** The line and the opened gradient run to the card edges, as
+    the design draws them; a clip after the negative padding had cut them to the text margins.
+
 ## Still open
 
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old

@@ -130,45 +130,43 @@ struct SunnyYield: View {
 
 // MARK: - Payback
 
+/// One Payback (Nik, 13 Oct 2026): everything made since the first LEAP (sold
+/// premium, puts and calls bought, shares, any close) plus the change in the
+/// LEAPs' intrinsic, against the whole LEAP cost. Replaces block 18's two lines
+/// (time value by premium, intrinsic by the stocks). Below zero is not drawn.
 struct SunnyPayback: View {
     let home: HomePayload
     let words: HomePayload
     @State private var mode: PMode = PMode.preset(DebugPreset.string("pb.mode"))
-    @State private var hidden: Set<String> = DebugPreset.set("pb.hide")
 
-    private var pb: Payback { home.payback }
-
-    private struct Side {
-        let key: String, name: String, color: Color
-        let target: Double, paid: Double, pace: Double
+    private struct All {
+        let target: Double, made: Double, intr: Double, pace: Double
+        var paid: Double { made + intr }
         var pct: Double { target > 0 ? paid / target * 100 : 0 }
         var weeks: Int? { pace > 0 ? Int(ceil(max(0, target - paid) / pace)) : nil }
         var done: Bool { target > 0 && paid >= target }
     }
-    private var sides: [Side] {
-        [Side(key: "tv", name: "Time value", color: S.green, target: pb.now.tvT, paid: pb.now.tvPaid, pace: pb.paceTv),
-         Side(key: "in", name: "Intrinsic", color: S.blue, target: pb.now.inT, paid: pb.now.inPaid, pace: pb.paceIntr)]
+    private static func all(_ p: Payback) -> All {
+        All(target: p.now.tvT + p.now.inT, made: p.now.allReal ?? p.now.tvPaid, intr: p.now.inPaid,
+            pace: p.paceAll ?? (p.paceTv + p.paceIntr))
     }
+    private var pb: Payback { home.payback }
     private func dateIn(_ weeks: Int) -> String { MarketClock.addDays(home.today, weeks * 7).iso }
     private func short(_ iso: String) -> String { "\(Int(iso.suffix(2)) ?? 0) \(F.day(iso).prefix(3)) \(iso.dropFirst(2).prefix(2))" }
+    private func long(_ iso: String) -> String { "\(Int(iso.suffix(2)) ?? 0) \(F.day(iso).prefix(3)) \(iso.prefix(4))" }
 
     var body: some View {
-        let s = sides, tv = s[0], intr = s[1]
-        let first = s.filter { $0.weeks != nil && !$0.done }.min { $0.weeks! < $1.weeks! }
-        let noLeaps = tv.target <= 0 && intr.target <= 0
+        let a = Self.all(pb)
+        let none = a.target <= 0
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Payback").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false).foregroundStyle(S.muted)
                 Button { withAnimation(.smooth(duration: S.roll)) { mode = mode.next } } label: {
                     VStack(alignment: .leading, spacing: 6) {
-                        if noLeaps {
-                            Text("-").sType(.largeNumber)
-                        } else {
-                            (heroPart(tv) + Text("  ·  ").font(SType(size: 34, weight: 500, line: 34, tracking: 0).font()).foregroundStyle(S.muted)
-                             + heroPart(intr))
-                                .sType(.largeNumber).lineLimit(1).minimumScaleFactor(0.6)
-                        }
-                        Text(noLeaps ? "nothing to pay back" : heroSub(first))
+                        Text(none ? "-" : hero(a)).sType(.largeNumber)
+                            .foregroundStyle(none ? S.ink : a.paid < 0 ? S.red : S.green)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                        Text(none ? "nothing to pay back" : heroSub(a))
                             .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
                             .foregroundStyle(S.muted).lineLimit(1)
                     }
@@ -177,20 +175,22 @@ struct SunnyPayback: View {
                 }
                 .buttonStyle(SPressStyle())
             }
-            if noLeaps {
+            if none {
                 SStatLine(items: [("-", "no LEAPs held", S.ink)])
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    // "$4.7K tv / wk · $3.1K intr / wk · 18 Nov 26 time value first"; once one
-                    // side is paid back, the other is "next".
-                    let next = s.contains { $0.done } ? "next" : "first"
-                    SStatLine(items: [(F.moneyK(tv.pace), "tv / wk", tv.pace < 0 ? S.red : S.green),
-                                      (F.moneyK(intr.pace), "intr / wk", intr.pace < 0 ? S.red : S.blue)]
-                              + (first.map { [(short(dateIn($0.weeks!)), "\($0.name.lowercased()) \(next)", S.ink)] } ?? []))
+                    SStatLine(items: [(F.moneyK(a.pace), "/ wk", a.pace < 0 ? S.red : S.green)]
+                              + (a.done ? [("", "paid back", S.green)]
+                                 : a.weeks.map { [(short(dateIn($0)), "paid back", S.ink)] } ?? [("no date", "at this pace", S.ink)]))
                     SInlineInsight(lead: insight.lead, rest: insight.rest)
                 }
-                chart
-                VStack(spacing: 0) { ForEach(s, id: \.key) { row($0) } }
+                chart(a)
+                VStack(spacing: 0) {
+                    row("Made", F.moneyK(a.made), a.made < 0 ? S.red : S.ink, S.green,
+                        "everything realized since the first LEAP")
+                    row("Intrinsic", F.moneyK(a.intr), a.intr < 0 ? S.red : S.ink, S.blue,
+                        "the stocks' move since each LEAP was bought")
+                }
             }
         }
         .foregroundStyle(S.ink)
@@ -199,79 +199,54 @@ struct SunnyPayback: View {
         .sCardSurface()
     }
 
-    private func heroPart(_ x: Side) -> Text {
-        let c: Color = x.paid < 0 ? S.red : x.color
+    private func hero(_ a: All) -> String {
         switch mode {
-        case .pct: return Text(Self.pct(x.pct)).foregroundStyle(c)
-        case .usd: return Text(PF.usd(x.paid)).foregroundStyle(c)
-        case .tv: return Text(x.done ? "done" : x.weeks.map { "\($0) wk" } ?? "-").foregroundStyle(c)
+        case .pct: return Self.pct(a.pct)
+        case .usd: return PF.usd(a.paid)
+        case .tv: return a.done ? "done" : a.weeks.map { "\($0) wk" } ?? "-"
         }
     }
+    private func heroSub(_ a: All) -> String {
+        switch mode {
+        case .pct: return "of the LEAP cost paid back"
+        case .usd: return "of \(F.moneyK(a.target)) the LEAPs cost"
+        case .tv: return a.done ? "paid back" : a.weeks.map { "paid back by \(long(dateIn($0)))" } ?? "no date at this pace"
+        }
+    }
+
     /// "42%", "18.6%", "100%": one place, no trailing .0, no minus sign.
     static func pct(_ v: Double) -> String {
         let r = (abs(v) * 10).rounded() / 10
         return (r == r.rounded() ? String(Int(r)) : String(format: "%.1f", r)) + "%"
     }
-    /// The first day the side reached its target, from the daily series.
-    private func paidOn(_ x: Side) -> String? {
-        let (t, p) = x.key == "tv" ? (1, 2) : (3, 4)
-        return pb.series.first { r in
-            guard let tv = r[safe: t]?.number, let pv = r[safe: p]?.number else { return false }
-            return tv > 0 && pv >= tv
-        }?.first?.string
-    }
-    private func heroSub(_ first: Side?) -> String {
-        switch mode {
-        case .pct: return "time value · intrinsic paid back"
-        case .usd: return "of \(F.moneyK(sides[0].target)) time value · \(F.moneyK(sides[1].target)) intrinsic"
-        case .tv:
-            guard let f = first, let w = f.weeks else { return "no date at this pace" }
-            let d = dateIn(w)
-            return "\(f.name.lowercased()) pays back first · \(Int(d.suffix(2)) ?? 0) \(F.day(d).prefix(3)) \(d.prefix(4))"
-        }
-    }
 
-    private func row(_ x: Side) -> some View {
-        let note: String = x.done ? paidOn(x).map { "Paid back · \(short($0))" } ?? "Paid back" : x.weeks.map { "\(F.moneyK(x.pace)) / wk · \(short(dateIn($0)))" } ?? "no date at this pace"
-        return Button {
-            withAnimation(.easeOut(duration: 0.15)) { if hidden.contains(x.key) { hidden.remove(x.key) } else { hidden.insert(x.key) } }
-        } label: {
-            VStack(spacing: 8) {
-                HStack {
-                    Circle().fill(x.color).frame(width: 8, height: 8)
-                    Text(x.name).sType(SType(size: 15, weight: 600, line: 15, tracking: 0), tabular: false)
-                    Spacer()
-                    Text(Self.pct(x.pct)).sType(SType(size: 15, weight: 700, line: 15, tracking: 0))
-                        .foregroundStyle(x.paid < 0 ? S.red : x.done ? S.green : S.ink)
-                }
-                HStack {
-                    Text("\(F.moneyK(x.paid)) of \(F.moneyK(x.target))")
-                    Spacer()
-                    Text(note).foregroundStyle(x.done ? S.green : S.muted)
-                }
-                .sType(SType(size: 13, weight: 500, line: 13, tracking: 0))
-                .foregroundStyle(S.muted)
+    private func row(_ name: String, _ value: String, _ tone: Color, _ dot: Color, _ note: String) -> some View {
+        VStack(spacing: 8) {
+            HStack {
+                Circle().fill(dot).frame(width: 8, height: 8)
+                Text(name).sType(SType(size: 15, weight: 600, line: 15, tracking: 0), tabular: false)
+                Spacer()
+                Text(value).sType(SType(size: 15, weight: 700, line: 15, tracking: 0)).foregroundStyle(tone)
             }
-            .frame(height: 60)
-            .overlay(alignment: .bottom) { Rectangle().fill(S.pGrid).frame(height: 1) }
-            .opacity(hidden.contains(x.key) ? 0.4 : 1)
-            .contentShape(Rectangle())
+            Text(note).sType(SType(size: 13, weight: 500, line: 13, tracking: 0), tabular: false)
+                .foregroundStyle(S.muted).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .buttonStyle(.plain)
-        .accessibilityHint(hidden.contains(x.key) ? "Shows its line" : "Hides its line")
+        .frame(height: 60)
+        .overlay(alignment: .bottom) { Rectangle().fill(S.pGrid).frame(height: 1) }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Chart
 
-    private var chart: some View {
-        let ser = pb.series.compactMap { r -> (d: String, tvT: Double, tvP: Double, inT: Double, inP: Double)? in
+    private func chart(_ a: All) -> some View {
+        let ser = pb.series.compactMap { r -> (d: String, pct: Double)? in
             guard r.count >= 5, let d = r[0].string else { return nil }
-            return (d, r[1].number ?? 0, r[2].number ?? 0, r[3].number ?? 0, r[4].number ?? 0)
+            let target = (r[1].number ?? 0) + (r[3].number ?? 0)
+            let made = r.count >= 6 ? (r[5].number ?? 0) : (r[2].number ?? 0)
+            return (d, target > 0 ? (made + (r[4].number ?? 0)) / target * 100 : 0)
         }
-        let s = sides
         let start = ser.first?.d ?? home.today
-        let ends = s.compactMap { $0.done ? nil : $0.weeks.map { dateIn($0) } }
-        let endIso = ([home.today] + ends.map { min($0, dateIn(52)) }).max()!
+        let endIso = ([home.today] + [a.weeks.map { min(dateIn($0), dateIn(52)) }].compactMap { $0 }).max()!
         let day = { (iso: String) -> Double in PMath.nyDate(iso, minutes: 0).timeIntervalSince1970 / 86400 }
         let d0 = day(start), d1 = max(day(endIso), d0 + 1)
         return GeometryReader { g in
@@ -285,31 +260,22 @@ struct SunnyPayback: View {
                         let y = CGFloat(i) / 4 * H
                         ctx.fill(Path(CGRect(x: 0, y: y, width: W, height: 1)), with: .color(i == 0 ? S.ink.opacity(0.35) : S.pGrid))
                     }
-                    let steps = { (pct: (Int) -> Double) -> Path in
+                    if !ser.isEmpty {
                         var p = Path()
                         for (i, r) in ser.enumerated() {
-                            let x = X(r.d), y = Y(pct(i))
+                            let x = X(r.d), y = Y(r.pct)
                             if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
                             else { p.addLine(to: CGPoint(x: x, y: p.currentPoint?.y ?? y)); p.addLine(to: CGPoint(x: x, y: y)) }
                         }
-                        return p
-                    }
-                    let tvPct = { (i: Int) in ser[i].tvT > 0 ? ser[i].tvP / ser[i].tvT * 100 : 0 }
-                    let inPct = { (i: Int) in ser[i].inT > 0 ? ser[i].inP / ser[i].inT * 100 : 0 }
-                    if !hidden.contains("tv"), !ser.isEmpty {
-                        var f = steps(tvPct); f.addLine(to: CGPoint(x: X(ser.last!.d), y: H)); f.addLine(to: CGPoint(x: X(ser[0].d), y: H)); f.closeSubpath()
+                        var f = p; f.addLine(to: CGPoint(x: X(ser.last!.d), y: H)); f.addLine(to: CGPoint(x: X(ser[0].d), y: H)); f.closeSubpath()
                         ctx.fill(f, with: .linearGradient(Gradient(colors: [S.green.opacity(0.22), S.green.opacity(0)]),
                                                           startPoint: .zero, endPoint: CGPoint(x: 0, y: H)))
-                        ctx.stroke(steps(tvPct), with: .color(S.green), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
-                    }
-                    if !hidden.contains("in"), !ser.isEmpty {
-                        ctx.stroke(steps(inPct), with: .color(S.blue), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
+                        ctx.stroke(p, with: .color(S.green), style: StrokeStyle(lineWidth: 2, lineJoin: .round))
                     }
                     // At the current pace to 100%.
-                    for x in s where !hidden.contains(x.key) && !x.done {
-                        guard let w = x.weeks else { continue }
-                        var p = Path(); p.move(to: CGPoint(x: nowX, y: Y(x.pct))); p.addLine(to: CGPoint(x: X(dateIn(w)), y: Y(100)))
-                        ctx.stroke(p, with: .color(x.color.opacity(0.7)), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [3, 4]))
+                    if let w = a.weeks, !a.done {
+                        var p = Path(); p.move(to: CGPoint(x: nowX, y: Y(a.pct))); p.addLine(to: CGPoint(x: X(dateIn(w)), y: Y(100)))
+                        ctx.stroke(p, with: .color(S.green.opacity(0.7)), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [3, 4]))
                     }
                     var n = Path(); n.move(to: CGPoint(x: nowX, y: 0)); n.addLine(to: CGPoint(x: nowX, y: H))
                     ctx.stroke(n, with: .color(S.ink.opacity(0.4)), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
@@ -319,9 +285,9 @@ struct SunnyPayback: View {
                     }
                 }
                 .frame(width: W, height: H)
-                ForEach(s.filter { !hidden.contains($0.key) && !$0.done && $0.weeks != nil }, id: \.key) { x in
-                    Circle().fill(x.color).frame(width: 10, height: 10).overlay(Circle().stroke(S.paper, lineWidth: 2))
-                        .position(x: X(dateIn(x.weeks!)), y: 0)
+                if let w = a.weeks, !a.done {
+                    Circle().fill(S.green).frame(width: 10, height: 10).overlay(Circle().stroke(S.paper, lineWidth: 2))
+                        .position(x: X(dateIn(w)), y: 0)
                 }
                 VStack(alignment: .trailing, spacing: 0) {
                     ForEach([100, 75, 50, 25, 0], id: \.self) { v in
@@ -345,7 +311,7 @@ struct SunnyPayback: View {
         }
         .frame(height: 200)
         .accessibilityElement()
-        .accessibilityLabel("Payback. Time value \(PF.pct(s[0].pct)), intrinsic \(PF.pct(s[1].pct)) paid back.")
+        .accessibilityLabel("Payback. \(Self.pct(a.pct)) of the LEAP cost \(a.paid < 0 ? "behind" : "paid back").")
     }
 
     private func monthTicks(_ d0: Double, _ d1: Double) -> [String] {
@@ -360,12 +326,14 @@ struct SunnyPayback: View {
         return out.filter { let x = PMath.nyDate($0, minutes: 0).timeIntervalSince1970 / 86400; return x > d0 + 3 && x < d1 - 3 }
     }
 
-    /// Payback faster or slower this week.
+    /// Ahead or behind, and whether the pace closes the gap.
     private var insight: (lead: String, rest: String) {
-        let w = words.payback
-        guard w.now.tvT > 0, w.paceTv != 0 else { return ("Time value is not paying back yet.", "") }
-        let weeks = Int(ceil(max(0, w.now.tvT - w.now.tvPaid) / max(w.paceTv, 1)))
-        return ("Time value \(PF.pct(w.now.tvPaid / w.now.tvT * 100)) paid back.",
-                w.paceTv > 0 ? "At \(F.moneyK(w.paceTv)) a week, done in \(weeks) weeks." : "Selling is not keeping pace.")
+        let a = Self.all(words.payback)
+        guard a.target > 0 else { return ("Nothing to pay back yet.", "") }
+        let lead = a.paid >= 0 ? "\(Self.pct(a.pct)) of the LEAPs paid back." : "\(F.moneyK(a.paid)) behind on the LEAPs."
+        let rest = a.pace > 0
+            ? "At \(F.moneyK(a.pace)) a week, done in \(a.weeks ?? 0) weeks."
+            : "Income is \(F.moneyK(a.made)) so far, but the stocks are \(F.moneyK(a.intr)) under where the LEAPs were bought."
+        return (lead, rest)
     }
 }

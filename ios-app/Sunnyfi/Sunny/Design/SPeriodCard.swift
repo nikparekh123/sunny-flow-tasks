@@ -376,7 +376,7 @@ struct SLegend: View {
 struct SInlineInsight: View {
     let lead: String
     let rest: String
-    @State private var open = false
+    @State private var open = DebugPreset.bool("insight.open")
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -408,8 +408,10 @@ struct SInlineInsight: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.horizontal, -20)
+        // Clip first, then widen: clipping after the negative padding cut the
+        // line and gradient back to the text margins instead of the card edges.
         .clipped()
+        .padding(.horizontal, -20)
     }
 
     private var insightFill: some View {

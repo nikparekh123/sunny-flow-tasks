@@ -208,12 +208,15 @@ struct Risk: Decodable {
 
 struct Payback: Decodable {
     let now: Now
-    /// [day, time value target, time value paid back, intrinsic target, intrinsic paid back]
+    /// [day, time value target, time value paid back, intrinsic target, intrinsic paid back,
+    /// all realized since the first LEAP]
     let series: [[Scalar]]
     let paceTv: Double
     let paceIntr: Double
+    /// The combined pace (all realized plus the intrinsic change), a week.
+    let paceAll: Double?
     let newLeapDays: [String]?
-    struct Now: Decodable { let d: String; let inT: Double; let tvT: Double; let inPaid: Double; let tvPaid: Double }
+    struct Now: Decodable { let d: String; let inT: Double; let tvT: Double; let inPaid: Double; let tvPaid: Double; let allReal: Double? }
 }
 
 // MARK: - Sold vs Bought, Performance, Allocation (blocks 19-21)

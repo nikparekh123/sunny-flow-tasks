@@ -685,21 +685,28 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     }
     let tvPaid = 0;
     for (const [t, from] of firstBy) tvPaid += premiumBy(t, from, d);
-    return { d, tvT: Math.round(tvT), inT: Math.round(inT), tvPaid: Math.round(tvPaid), inPaid: Math.round(inPaid) };
+    /* Combined Payback (Nik, 13 Oct 2026): everything made since the first LEAP,
+       sold premium, puts and calls bought, shares, any close, book-wide; the card
+       adds the intrinsic change and sets it against the whole LEAP cost. */
+    const first = [...firstBy.values()].sort()[0];
+    const allReal = first ? realized.filter((e) => e.d >= first && e.d <= d).reduce((s, e) => s + e.amt, 0) : 0;
+    return { d, tvT: Math.round(tvT), inT: Math.round(inT), tvPaid: Math.round(tvPaid), inPaid: Math.round(inPaid),
+      allReal: Math.round(allReal) };
   };
   const firstLeap = leapLots.map((x) => x.d).sort()[0] ?? null;
   const payDays = firstLeap ? [...days.filter((d) => d >= firstLeap)] : [];
   const paySeries = payDays.map((d) => paybackOn(d, false));
   if (firstLeap && isTrading(today)) paySeries.push(paybackOn(today, true));
-  const paceOf = (f: 'tvPaid' | 'inPaid') => {
+  const paceOf = (f: 'tvPaid' | 'inPaid' | 'all') => {
     if (paySeries.length < 2) return null;
+    const v = (p: typeof paySeries[number]) => f === 'all' ? p.allReal + p.inPaid : p[f];
     const now = paySeries.at(-1)!, i0 = Math.max(0, paySeries.length - 1 - 25);
     const weeks = Math.max(1, (paySeries.length - 1 - i0) / 5);
-    return Math.round((now[f] - paySeries[i0][f]) / weeks);
+    return Math.round((v(now) - v(paySeries[i0])) / weeks);
   };
   const payback = paySeries.length ? {
-    now: paySeries.at(-1), pace_tv: paceOf('tvPaid'), pace_intr: paceOf('inPaid'),
-    series: paySeries.map((p) => [p.d, p.tvT, p.tvPaid, p.inT, p.inPaid]),
+    now: paySeries.at(-1), pace_tv: paceOf('tvPaid'), pace_intr: paceOf('inPaid'), pace_all: paceOf('all'),
+    series: paySeries.map((p) => [p.d, p.tvT, p.tvPaid, p.inT, p.inPaid, p.allReal]),
     new_leap_days: [...new Set(leapLots.map((x) => x.d))].sort(),
   } : null;
 
