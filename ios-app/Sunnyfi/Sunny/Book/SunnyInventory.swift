@@ -32,12 +32,13 @@ struct SunnyInventory: View {
                 SStatLine(items: stats)
                 SInlineInsight(lead: insight.lead, rest: insight.rest)
             }
-            SViewToggle(period: P)
-            if inv.callsMax > 0 || inv.putsMax > 0 {
+            // No LEAPs held: header and stat line only, no chart (block 14 tile).
+            if inv.callsMax > 0 {
+                SViewToggle(period: P)
                 SBarChart(columns: cols.map(\.col), caps: caps, picked: pick) { P.picked["inv"] = $0 }
                 SLegend(rows: legend, hidden: $hidden)
             }
-            chips
+            if inv.by.contains(where: { $0.callsMax > 0 }) { chips }
         }
         .foregroundStyle(S.ink)
         .padding(20)
@@ -129,7 +130,8 @@ struct SunnyInventory: View {
     // MARK: Chips → the Writes sheet
 
     private var chips: some View {
-        let order = inv.by.filter { $0.callsMax > 0 || $0.putsMax > 0 }.sorted {
+        // Chips count calls ("NFLX 0 of 17"); a name with no calls has none (block 14, No LEAPs).
+        let order = inv.by.filter { $0.callsMax > 0 }.sorted {
             let a = $0.callsMax > 0 ? Double($0.callsSold) / Double($0.callsMax) : 1
             let b = $1.callsMax > 0 ? Double($1.callsSold) / Double($1.callsMax) : 1
             return a != b ? a < b : $0.ticker < $1.ticker
@@ -297,12 +299,15 @@ struct WriteCard: View {
                             + Text(PF.count(n.delta.after)).font(bold).foregroundStyle(n.delta.after < 0 ? S.red : S.ink)
                     }
                 }
-                .sType(SType(size: 15, weight: 500, line: 15, tracking: 0))
-                Spacer()
+                .sType(SType(size: 15, weight: 500, line: 20, tracking: 0))
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                // The chips never shrink; a long delta wraps instead (block 14 tile).
                 HStack(spacing: 8) {
                     if n.calls.of > 0 { held("Calls", "\(n.calls.sold) / \(n.calls.of)") }
                     if n.puts.of > 0 { held("Puts", "\(n.puts.sold) / \(n.puts.of)") }
                 }
+                .fixedSize()
             }
             .frame(minHeight: 24)
         }
@@ -408,6 +413,16 @@ struct WriteCard: View {
             mk.append((sd, fx(sd), "call 1 SD", S.red))
         }
         mk.sort { $0.v < $1.v }
+        // Two marks on one strike (a call sold right at the 1 SD strike) share
+        // one tick and one value, or the tall tick runs through the other's text.
+        var merged: [(v: Double, value: String, label: String, color: Color)] = []
+        for m in mk {
+            if let last = merged.last, last.value == m.value {
+                merged[merged.count - 1] = (m.v, m.value, last.label + " · " + m.label.replacingOccurrences(of: "call ", with: ""),
+                                            m.label == "call 1 SD" ? m.color : last.color)
+            } else { merged.append(m) }
+        }
+        mk = merged
         var head: [String] = []
         if hasP, let put = b.put { head.append(String(format: "%.1f%% to put", abs(put - px) / px * 100)) }
         if hasC { head.append(String(format: "%.1f%% to 1 SD", abs(sd - px) / px * 100)) }
