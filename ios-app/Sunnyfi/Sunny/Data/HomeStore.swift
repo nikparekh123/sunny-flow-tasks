@@ -104,7 +104,7 @@ final class HomeStore {
             case "cantReach": health = .cantReach
             default: break
             }
-            if let t = DebugPreset.string("store.toast") { showToast(t.replacingOccurrences(of: "_", with: " ")) }
+            if let t = DebugPreset.string("store.toast") { showToast(t.replacingOccurrences(of: "_", with: " "), hold: 600) }
             #endif
         } catch {
             loadError = String(describing: error)
@@ -134,11 +134,11 @@ final class HomeStore {
         return d
     }()
 
-    private func showToast(_ t: String) {
+    private func showToast(_ t: String, hold: Double = 2) {
         toastTask?.cancel()
         toast = t
         toastTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .seconds(hold))
             guard !Task.isCancelled else { return }
             self.toast = nil
             self.changedLegs = []

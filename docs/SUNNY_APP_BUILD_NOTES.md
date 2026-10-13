@@ -64,9 +64,20 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     and keeps subs from ending on one word. SwiftUI has neither, so the breaks are worked out
     in code (SWrap).
 
+15. **Toast.** Built as the UI Kit draws it (44 pt glass pill, green check, 13/600); the phone
+    file never shows it and the Build Blocks tile is a dark bar.
+16. **Payback %.** One decimal with a trailing .0 dropped ("42%", "18.6%"), as the phone file
+    rounds it.
+
 ## Still open
 
 - **App icon.** The new target has no icon yet.
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old
   app until the new one takes that bundle id at ship.
 - **Live checks.** The 30 s tick, the glow and the toast need a look during market hours.
+- **Story line (block 22).** The phone file rotates one line under the old account header
+  ("Good morning. 56 calls and 14 puts are open."). Block 02b replaced that header and its
+  design has no slot for it, so it is not built. Needs Nik's call on where it goes.
+- **Last week (block 09).** `index_weekly` was empty because sunny-home went live after the
+  last weekend. Admin mode `last_week` filled Oct 5 - 9; next Friday after the close is the
+  first real run.

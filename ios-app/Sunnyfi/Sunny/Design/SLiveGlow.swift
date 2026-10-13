@@ -33,7 +33,7 @@ struct SGlowLayer: View {
         GeometryReader { g in
             Circle()
                 .fill(RadialGradient(colors: [scheme == .dark ? S.glowMoon : S.glowSun, .clear],
-                                     center: .center, startRadius: 0, endRadius: 70 * 0.68))   // clear at 68% of the radius
+                                     center: .center, startRadius: 0, endRadius: 70 * (2 as CGFloat).squareRoot() * 0.68))   // CSS circle: clear at 68% of the far-corner radius
                 .frame(width: 140, height: 140)
                 .scaleEffect(scale)
                 .opacity(opacity)
@@ -42,7 +42,20 @@ struct SGlowLayer: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .onChange(of: pulse) { _, _ in fire() }
+        .onAppear {
+            // Audit preset: the glow as it stands t seconds after an update.
+            if let t = DebugPreset.double("glow.at") { (opacity, scale) = Self.at(t) }
+        }
         .onDisappear { run?.cancel() }
+    }
+
+    /// Opacity and scale t seconds into a pulse, as `fire()` animates them.
+    static func at(_ t: Double) -> (Double, CGFloat) {
+        let ease = { (x: Double) in 1 - pow(1 - min(1, max(0, x)), 3) }
+        let scale = 0.6 + 0.4 * ease(t / 0.9)
+        if t < 1 { return (ease(t / 0.6), scale) }
+        if t < 3.5 { return (1 - 0.55 * ease((t - 1) / 2.4), scale) }
+        return (max(0, 0.45 * (1 - (t - 3.5) / 90)), scale)
     }
 
     private func fire() {

@@ -134,12 +134,18 @@ struct PullSunrise: View {
 struct SunnyToast: View {
     let text: String
     var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(S.green).frame(width: 6, height: 6)
-            Text(text).sType(.label, tabular: false).foregroundStyle(S.ink)
+        // UI Kit toast: 44 tall glass pill, a 24 pt green check, 13/600 ink.
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(S.green))
+            Text(text).sType(SType(size: 13, weight: 600, line: 13, tracking: 0), tabular: false).foregroundStyle(S.ink)
         }
-        .padding(.horizontal, 12).frame(height: 32)
+        .padding(.leading, 12).padding(.trailing, 16).frame(height: 44)
         .glassEffect(.regular, in: .capsule)
+        .shadow(color: .black.opacity(0.14), radius: 16, y: 12)
         .accessibilityAddTraits(.updatesFrequently)
     }
 }
