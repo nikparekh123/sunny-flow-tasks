@@ -156,7 +156,6 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
     });
     if (layers.ema) for (const [n, p] of book.emas) if (inView(p)) items.push(lab(n, p, 'var(--mute)'));
     if (layers.sr) for (const [n, p] of book.levels) if (inView(p)) items.push(lab(n, p, 'var(--ink-2)'));
-    if (layers.targets && book.target && inView(book.target.median)) items.push(lab('ANALYST MEDIAN', book.target.median, 'var(--plum)'));
     return place(cluster(items));
   }, [book, layers, lo, hi, x]);
 
@@ -225,16 +224,6 @@ export function Chart({ book, ctx, liveLegs, bookLegs, planActive, elapsed, dte,
           </linearGradient>
         </defs>
         <g transform={`translate(${OX},${OY})`}>
-          {/* 2 · analyst target band */}
-          {layers.targets && book.target && (
-            <g>
-              <rect x={x(Math.max(book.target.low, lo))} y={0} width={Math.max(0, x(Math.min(book.target.high, hi)) - x(Math.max(book.target.low, lo)))} height={H} fill="var(--plum)" opacity={0.05} />
-              {book.target.median > lo && book.target.median < hi && <line x1={x(book.target.median)} x2={x(book.target.median)} y1={0} y2={H} stroke="var(--plum)" strokeWidth={1.5} />}
-              {[book.target.low, book.target.high].filter((p) => p > lo && p < hi).map((p) => (
-                <line key={p} x1={x(p)} x2={x(p)} y1={0} y2={H} stroke="var(--plum)" strokeWidth={1} strokeDasharray="3 3" />
-              ))}
-            </g>
-          )}
           {/* 3 · y gridlines */}
           {ygrid.map((v) => <line key={'g' + v} x1={0} x2={W} y1={y(v)} y2={y(v)} stroke="var(--grid)" strokeWidth={1} />)}
           {/* 4 · probability cone */}

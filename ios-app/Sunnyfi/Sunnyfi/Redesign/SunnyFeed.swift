@@ -32,9 +32,11 @@ final class PaneModel {
     /* ⚠ OPTIONS FIRST. Nik, 17 Sep 2026: "sometimes it takes around 15secs to
        load". Requests fired together queued behind each other on the same small
        database, so the landing page loads alone and the New page follows. */
+    /* ⚠ THE NEW PAGE IS GONE (Nik, 13 Oct 2026: "remove the news page and all
+       analyst ratings, keep the history data in the backend"). Only Options
+       loads; the tables behind the New page keep their history. */
     func loadAll(force: Bool = false) async {
         await options.load(force: force)
-        await newPage.load()
     }
 }
 

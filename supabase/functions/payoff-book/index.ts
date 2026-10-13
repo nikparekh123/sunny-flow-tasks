@@ -161,24 +161,9 @@ Deno.serve(async (req) => {
 
     const tickers = [...held].sort();
 
-    /* ⚠ FETCHED HERE, FILTERED TO THE NAMES HE HOLDS, and not up in the
-       parallel block. Nik, 2026-09-09: "analyst target is empty we nhave that
-       data". Switching to `analyst_actions` fixed half of it; the other half
-       was the 1,000-row cap. Ninety days of that feed is 7,132 rows across
-       three hundred tickers, so the unfiltered read reached back only twelve
-       days and NFLX and PEP never appeared at all, though both had targets in
-       the window. Filtered to the book it is 122 rows: one small query instead
-       of eight pages of other people's companies.
-
-       ⚠ AND NOT `analyst_consensus`, WHICH LOOKS RIGHT AND IS NOT. It holds
-       unadjusted targets: NFLX reads a 324 median against a 76 spot, because
-       the split was never applied. `analyst_actions` is the per-firm feed the
-       New page already draws, so the payoff band and the "TARGET CUT" cards can
-       never tell different stories. */
-    const acts = tickers.length
-      ? await P(`analyst_actions?date=gte.${ago(90)}&ticker=in.(${tickers.join(',')})`
-          + '&select=ticker,date,price_target&order=date.desc,ticker.asc')
-      : [];
+    /* Analyst targets are no longer read (Nik, 13 Oct 2026: "remove the news
+       page and all analyst ratings, keep the history data in the backend").
+       analyst_actions keeps its rows; nothing on screen draws them. */
 
     /* ── expiries per name from Polygon, in parallel ────────────────────── */
     /* ⚠ ONE PAGE OF CONTRACTS IS NOT THE CHAIN. Nik, 2026-09-09: "if you look
@@ -324,14 +309,6 @@ Deno.serve(async (req) => {
         })
         .sort((a, b) => b.closedOn.localeCompare(a.closedOn));
 
-      /* ── analyst target: the last 90 days of per-firm targets ────────── */
-      const tg = (acts as Trade[])
-        .filter((a) => String(a.ticker) === t && N(a.price_target) > 0)
-        .map((a) => N(a.price_target)).sort((x, y) => x - y);
-      const target = tg.length
-        ? { low: r2(tg[0]), median: r2(tg[Math.floor(tg.length / 2)]),
-            high: r2(tg[tg.length - 1]), n: tg.length }
-        : null;
 
       const lv = (levels as Trade[]).filter((l) => String(l.ticker) === t)
         .map((l) => [String(l.kind).toUpperCase(), N(l.price)] as [string, number]);
@@ -349,7 +326,6 @@ Deno.serve(async (req) => {
            source for a year of closes. */
         closes: wk,
         d5: d5.length ? [Math.min(...d5), Math.max(...d5)] : null,
-        target,
         chain: [...new Set([...(chains.get(t) ?? []),
                             ...legs.map((l) => l.expiry).filter(Boolean)])].sort(),
         /* The real ladder the stepper walks, per expiry, ascending. An expiry

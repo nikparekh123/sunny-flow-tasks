@@ -35,7 +35,6 @@ const LAYER_META: { key: LayerKey; name: string; ink: string; band: boolean }[] 
   { key: 'ema', name: 'EMA 20 / 50 / 200', ink: 'var(--hair)', band: false },
   { key: 'sr', name: 'Support · resistance', ink: 'var(--faint)', band: false },
   { key: 'last5', name: 'Last 5 days', ink: 'var(--ink-3)', band: true },
-  { key: 'targets', name: 'Analyst target', ink: 'var(--plum)', band: true },
   { key: 'cone', name: 'Probability cone', ink: 'var(--update)', band: true },
   { key: 'hist', name: 'Time at price', ink: 'var(--hair)', band: true },
 ];
@@ -312,7 +311,6 @@ export default function PayoffPage() {
     if (k === 'ema') return book.emas.find((e) => e[0] === 'EMA 20') ? priceLab(book.emas.find((e) => e[0] === 'EMA 20')![1]) : '–';
     if (k === 'sr') return book.levels.length ? `${priceLab(Math.min(...book.levels.map((l) => l[1])))}–${priceLab(Math.max(...book.levels.map((l) => l[1])))}` : 'none set';
     if (k === 'last5') return book.d5 ? `${priceLab(book.d5[0])}–${priceLab(book.d5[1])}` : '–';
-    if (k === 'targets') return book.target ? priceLab(book.target.median) : 'none';
     if (k === 'cone') { const s = book.iv * ivMult * Math.sqrt(Math.max(dte, 1) / 365); return `1σ ${priceLab(book.spot * Math.exp(-s))}–${priceLab(book.spot * Math.exp(s))}`; }
     return '52 wk';
   };

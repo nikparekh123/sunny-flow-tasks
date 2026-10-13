@@ -18,7 +18,6 @@
  *   │  │                     │   │ RiskBlock (compact)         │  │
  *   │  └─────────────────────┘   └─────────────────────────────┘  │
  *   │─────────────────────────────────────────────────────────────│
- *   │  NewsBand                                                    │
  *   │─────────────────────────────────────────────────────────────│
  *   │  ToolsRail                                                   │
  *   └─────────────────────────────────────────────────────────────┘
@@ -31,7 +30,6 @@ import {
   Greeting, MarketsClock, TickerStrip,
   AttentionBlock, CalendarBlock,
   PortfolioBlockCompact, MacroBlock, RiskBlock,
-  NewsBand,
 } from "./blocks";
 import { IncomeWeekly } from "./incomeChart";
 import { useNow, marketClock, fmtBrandDate } from "./time";
@@ -121,7 +119,6 @@ export function CockpitLayout({
 
       {showNews && (
         <div className="row" style={{ marginTop: 64 }}>
-          <NewsBand n="07" />
         </div>
       )}
     </>

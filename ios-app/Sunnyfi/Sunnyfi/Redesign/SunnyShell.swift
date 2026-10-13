@@ -115,49 +115,10 @@ struct SunnyShell: View {
     }
 
     var body: some View {
-        TabView(selection: selection) {
-            Tab(value: SunnyPage.new) {
-                SunnyPane(page: .new, m: model, startAt: Self.argScroll, toTop: toTop)
-            } label: {
-                /* ⚠ NO CAPTION. The reference bar is two monotone icons and
-                   nothing else; with two destinations the bar does not need to
-                   say where you are. The title is empty rather than absent so
-                   the item still exists, and the name moves to the
-                   accessibility label where a screen reader still reads it. */
-                Label("", systemImage: "bookmark")
-                    .accessibilityLabel("New")
-            }
-            Tab(value: SunnyPage.options) {
-                SunnyPane(page: .options, m: model, startAt: Self.argScroll, toTop: toTop)
-            } label: {
-                /* The deck's own mark for a position: a short leg written
-                   against a long one. No SF Symbol says that, so it ships as a
-                   custom symbol and takes the system's weight change with every
-                   other tab item. */
-                Label("", image: "sunny.options")
-                    .accessibilityLabel("Options")
-            }
-        }
-        /* The system's rule, not ours: compacts on scroll down, reopens on
-           scroll up, with its own thresholds and spring. */
-        .tabBarMinimizeBehavior(.onScrollDown)
-        /* ⚠ THE TWO SIGNAL DOTS ARE NOT ON THE BAR, and this was measured, not
-           assumed. The sheet asks for a 5px amber dot over New when something is
-           waiting to be read and a violet one over Options when a leg needs
-           rolling, and says "never a red or green, never a number".
-
-           `.badge(1)` draws the system's red pill WITH the count. `.badge(" ")`
-           drops the count and leaves a red dot, which is the right shape. But
-           the colour cannot be moved: `UITabBarItem.appearance().badgeColor`
-           set in the app's `init`, before any item exists, is ignored by the
-           Liquid Glass bar — it stayed red in both places. There is no per-tab
-           badge tint in SwiftUI, and the appearance proxy is global anyway, so
-           even if it worked both dots would share one colour.
-
-           That leaves red dots, which the sheet forbids, or a hand-drawn bar,
-           which it also forbids. So neither: `nav.pending` and `nav.rolling`
-           still carry both facts and the pages state them — Roll check
-           headlines the count, the New page prints its own. Flagged to Nik. */
+        /* ⚠ ONE PAGE, NO TAB BAR (13 Oct 2026). The New tab went with the news
+           page Nik removed, and a bar with a single destination is noise, so
+           Options is the whole app until the new Sunny app replaces it. */
+        SunnyPane(page: .options, m: model, startAt: Self.argScroll, toTop: toTop)
         .tint(Self.argTintWhite ? .white : S.ink)
         .background(S.ground)
         .task { await model.loadAll(); loadedOnce = true }
