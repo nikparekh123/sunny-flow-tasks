@@ -356,6 +356,7 @@ struct SunnyPerformance: View {
             .padding(.horizontal, 12).frame(height: 32)
             .background { if on { Capsule().fill(S.chipOn) } }
             .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
+            .contentShape(Capsule().inset(by: -6))
         }
         .buttonStyle(SPressStyle())
         .accessibilityAddTraits(on ? .isSelected : [])
@@ -380,7 +381,7 @@ struct SunnyPerformance: View {
             (t.name, focus.map { pv($0, t.key) } ?? list.reduce(0) { $0 + pv($1.t, t.key) })
         }
         let topT = typeTotals.max { $0.1 < $1.1 }
-        let money = { (v: Double) -> Text in Text(F.moneyK(v)).fontWeight(.semibold).foregroundColor(v < 0 ? S.red : S.yellowInk) }
+        let money = { (v: Double) -> Text in Text(F.moneyK(v)).fontWeight(.semibold).foregroundColor(v < 0 ? S.red : S.sumHead) }
         var sentence = Text("")
         if none {
             sentence = Text("Turn on Realized or Unrealized to see how your positions performed.")
@@ -398,12 +399,13 @@ struct SunnyPerformance: View {
         }
         return VStack(alignment: .leading, spacing: 4) {
             Text(head).sType(SType(size: 12, weight: 700, line: 16, tracking: 0), tabular: false).lineLimit(2)
+                .foregroundStyle(S.sumHead)
             sentence.sType(SType(size: 13, weight: 400, line: 18, tracking: 0)).lineLimit(2)
+                .foregroundStyle(S.sumText)
         }
-        .foregroundStyle(S.yellowInk)
         .padding(.top, 12).padding(.bottom, 13).padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.yellowTint))
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.sumBox))
         .id(head)
         .transition(.opacity)
     }

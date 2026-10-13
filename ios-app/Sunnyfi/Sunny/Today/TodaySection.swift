@@ -25,7 +25,7 @@ struct SunnyQuickNav: View {
                         .lineLimit(1)
                         .frame(maxWidth: .infinity).frame(height: 32)
                         .glassEffect(.regular.interactive(), in: .capsule)
-                        .contentShape(Capsule())
+                        .contentShape(Capsule().inset(by: -6))
                 }
                 .buttonStyle(SPressStyle())
                 .accessibilityHint("Scrolls to \(s.rawValue)")

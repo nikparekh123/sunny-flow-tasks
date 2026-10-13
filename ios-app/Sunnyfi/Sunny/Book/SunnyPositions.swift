@@ -127,7 +127,7 @@ struct SunnyPositions: View {
             .padding(.horizontal, 12).frame(height: 32)
             .background { if on { Capsule().fill(S.ink).shadow(color: .black.opacity(0.14), radius: 6, y: 4) } }
             .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
-            .contentShape(Capsule())
+            .contentShape(Capsule().inset(by: -6))
         }
         .buttonStyle(SPressStyle())
         .accessibilityLabel(room.map { "\(t), \($0) to breakeven" } ?? t)

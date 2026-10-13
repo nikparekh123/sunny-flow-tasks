@@ -14,6 +14,7 @@
 //
 
 import Foundation
+import Network
 import Observation
 import Supabase
 
@@ -44,6 +45,19 @@ final class HomeStore {
 
     private var inFlight: Task<Void, Never>?
     private var lastAttemptFailedOffline = false
+    private let path = NWPathMonitor()
+
+    init() {
+        // Back online: refresh at once (block 01).
+        path.pathUpdateHandler = { [weak self] p in
+            guard p.status == .satisfied else { return }
+            Task { @MainActor in
+                guard let self, self.health == .offline else { return }
+                await self.refresh(.tick)
+            }
+        }
+        path.start(queue: DispatchQueue(label: "sunny.path"))
+    }
 
     // MARK: Loading
 

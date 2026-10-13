@@ -51,6 +51,12 @@ enum S {
     // Rank ramp, Performance (UI Kit §01)
     static let rank: [Color] = [0x1F5F21, 0x2E7A30, 0x3B873D, 0x4FA051, 0x65C466].map { Color(hex: $0) }
     static let unrealizedTint = Color(hex: 0xA9E1AA)
+    // Performance's summary box (block 20): soft yellow; dark is a dim
+    // yellow wash with a yellow heading and light text.
+    static let sumBox  = dynA(0xFDF3D1, 1, 0xF7CE46, 0.14)
+    static let sumHead = dyn(0x6B5B2E, 0xF7CE46)
+    static let sumText = dyn(0x6B5B2E, 0xD9D9DC)
+
     /// Yield's closing cost: the light top of each bar (block 17).
     static let callsBack = dyn(0xA9E1AA, 0x2F6B33)
     static let putsBack  = dyn(0xA9C2F7, 0x2A4C8F)

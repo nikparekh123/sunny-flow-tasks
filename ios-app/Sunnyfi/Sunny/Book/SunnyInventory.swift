@@ -146,6 +146,7 @@ struct SunnyInventory: View {
                         .foregroundStyle(S.ink)
                         .padding(.horizontal, 12).frame(height: 32)
                         .background(Capsule().fill(S.surface))
+                        .contentShape(Capsule().inset(by: -6))
                         .overlay(alignment: .bottom) {
                             if c.callsSold > c.callsMax { Capsule().fill(S.red).frame(height: 2).padding(.horizontal, 12) }
                         }
