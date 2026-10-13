@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-13.10';
+const BUILD = '2026-10-13.13';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -201,7 +201,7 @@ async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, comm
   };
 }
 
-async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
+async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
   let checkSummary: Row[] | null = null;
   /* Where the build's time goes, returned with the timings (no data). */
   const steps: Record<string, number> = {};
@@ -221,7 +221,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
 
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
-         openChecks, divs, posAll, lmd, chainRows] = await Promise.all([
+         openChecks, divs, posAll, lmd, chainRows, savedHistory] = await Promise.all([
     page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
     /* One row per leg ever marked: grows with every trade, so paged. */
@@ -235,23 +235,25 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     get('earnings_season?select=*&order=starts.desc&limit=6'),
     page(`daily_closes?date=gte.${[addDays(today, -45), addDays(BOOK_START, -7)].sort()[0]}&order=date.asc,ticker.asc&select=ticker,date,close_price`),
     get('ibkr_sync_runs?status=eq.success&order=finished_at.desc&limit=1&select=finished_at'),
-    get(`share_sells?voided_at=is.null&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,realized_pl`),
-    get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date`),
+    get(`share_sells?voided_at=is.null&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,price,realized_pl`),
+    get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share`),
     get(`reports?shown_on=gte.${addDays(today, -1)}&select=kind,period_start,payload`),
     get(`macro_events?event_date=gte.${today}&event_date=lte.${addDays(today, 21)}&importance=gte.3`
       + '&category=in.(inflation,jobs,rates)&order=event_date.asc&select=event_date,event_time,name'),
     get('theta_checks?status=eq.open&select=*&order=found_on.asc'),
-    get(`dividends?ex_date=gte.${today}&ex_date=lte.${addDays(today, 45)}&select=ticker,ex_date,cash_amount&order=ex_date.asc`),
+    get(`dividends?ex_date=gte.${today}&ex_date=lte.${addDays(today, 45)}&select=ticker,ex_date,pay_date,cash_amount&order=ex_date.asc`),
     /* ⚠ ONE ROUND TRIP (audit, 13 Oct 2026). These used to wait their turn
        mid-build and cost ~0.3 s of a 0.55 s build. IBKR's daily positions
        cover both the live value's anchor and the value side's history. */
-    page(`account_positions_daily?report_date=gte.${addDays(winStart, -10)}&order=report_date.asc,account_id.asc,conid.asc`
+    page(`account_positions_daily?report_date=gte.${[addDays(winStart, -10), addDays(BOOK_START, -3)].sort()[0]}&order=report_date.asc,account_id.asc,conid.asc`
       + '&select=report_date,account_id,conid,symbol,underlying,asset_category,put_call,strike,expiry,multiplier,position,'
       + 'mark_price,position_value,cost_basis_money'),
     page(`leg_marks_daily?day=gte.${marksFrom}&order=day.asc,option_trade_id.asc`
       + '&select=option_trade_id,day,mark,delta,theta,underlying'),
     page('option_chain_next?select=ticker,expiry,side,strike,mid,delta,iv,oi,spot'
       + '&order=ticker.asc,expiry.asc,side.asc,strike.asc'),
+    page('account_history?order=day.asc&select=day,nav,cash,margin,interest_cum,commission_cum,dividends_cum,'
+      + 'realized_cum,unrealized,time_value,capital_long,shares_value,groups'),
   ]);
 
   step('reads');
@@ -446,6 +448,9 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
                stale_anchor: stale },
       market_value: r2(mvNow),
       cash: r2(Number(anchor.cash) + cashIn),
+      /* Block 02 (handoff 19): Market value is renamed Margin, account value
+         plus net borrowed across both accounts (Nik, 13 Oct 2026). */
+      margin: r2(value + Math.max(0, -(Number(anchor.cash) + cashIn))),
       /* Both accounts, net (Nik: never one account alone). Commission and
          interest in IBKR's sign: negative is a cost. */
       /* Nik, 12 Oct 2026: Realized = the glossary's REALIZED for the period;
@@ -1202,6 +1207,205 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     ratio_now: num(c.ratio_now), ratio_without: num(c.ratio_without), roll: c.roll,
   }));
 
+  // ════════════════════════════════════════════════════════════════════════
+  // ACCOUNT CHART (block 02b, handoff 19). One point per trading day since
+  // 1 Sep 2026, from IBKR's closes (both accounts) and IBKR's closing position
+  // values; mode 'history' rebuilds the stored rows each morning, every tick
+  // reads them and adds today's live point. Nik's rulings, 13 Oct 2026:
+  //   Margin = account value + net borrowed (both accounts' cash netted)
+  //   Unrealized and Time value are levels at the day, not changes
+  //   Sold and Bought return on capital divide by the money in long options
+  //     (the Yield card's divisor); Shares and Dividends by the shares' value
+  //   Kept full credit = a position that expired or closed at $0.00
+  //   TLT's shares count from 1 Sep
+  // A group's line is its P&L since the close before 1 Sep: the change in
+  // value of what it holds plus the cash its trades moved. Only differences
+  // are ever shown, so the base cancels out of every range.
+  // ════════════════════════════════════════════════════════════════════════
+  const CHART_START = '2026-09-01';
+  type GK = 'cs' | 'ps' | 'cb' | 'pb' | 'sh';
+  const GK_LIST: GK[] = ['cs', 'ps', 'cb', 'pb', 'sh'];
+  const zero = (): Record<GK, number> => ({ cs: 0, ps: 0, cb: 0, pb: 0, sh: 0 });
+  const gOf = (type: string, short: boolean): GK => (type === 'call' ? (short ? 'cs' : 'cb') : (short ? 'ps' : 'pb'));
+  const kindG: Record<string, GK> = { 'calls sold': 'cs', 'puts sold': 'ps', 'calls bought': 'cb', 'puts bought': 'pb', shares: 'sh' };
+  /* Cash each group's trades moved, by day, after the base close. */
+  const cashBy = new Map<string, Record<GK, number>>();
+  const addCash = (d: string, g: GK, c: number) => { const e = cashBy.get(d) ?? zero(); e[g] += c; cashBy.set(d, e); };
+  /* ⚠ SEPTEMBER'S FILLS CARRY NO COMMISSION OF THEIR OWN (IBKR's per-fill
+     commission is stored from 12 Oct on). IBKR's daily statement has each
+     day's total, so the part no fill carries is spread over that day's
+     uncommissioned fills by contracts (a share trade counts as one), and every
+     day's lines then match IBKR's account change less interest and fees. */
+  const isLife = (t: Row) => /lifecycle/.test(String(t.note ?? ''));
+  const dayComm = new Map(acctDays.map((d) => [String(d.report_date), Number(d.commissions ?? 0)]));
+  const carried = new Map<string, number>(), units = new Map<string, number>();
+  for (const t of trades) {
+    const d = String(t.trade_date); if (d <= BOOK_START || isLife(t)) continue;
+    if (t.commission != null) carried.set(d, (carried.get(d) ?? 0) + Number(t.commission));
+    else units.set(d, (units.get(d) ?? 0) + Number(t.contracts));
+  }
+  for (const l of lots) if (String(l.acquired_date) > BOOK_START) units.set(String(l.acquired_date), (units.get(String(l.acquired_date)) ?? 0) + 1);
+  for (const s of sells) if (String(s.trade_date) > BOOK_START) units.set(String(s.trade_date), (units.get(String(s.trade_date)) ?? 0) + 1);
+  const commPerUnit = (d: string) => {
+    const u = units.get(d) ?? 0; if (!u || !dayComm.has(d)) return 0;
+    return Math.min(0, dayComm.get(d)! - (carried.get(d) ?? 0)) / u;
+  };
+  for (const t of trades) {
+    const d = String(t.trade_date); if (d <= BOOK_START) continue;
+    const short = t.direction === 'short', sells = short === (t.action === 'open');
+    const cash = t.net_cash != null ? Number(t.net_cash)
+      : (sells ? 1 : -1) * Number(t.premium) * Number(t.contracts) * 100
+        + (t.commission == null && !isLife(t) ? commPerUnit(d) * Number(t.contracts) : Number(t.commission ?? 0));
+    addCash(d, gOf(t.option_type, short), cash);
+  }
+  for (const l of lots) if (String(l.acquired_date) > BOOK_START) addCash(String(l.acquired_date), 'sh', -Number(l.qty_original ?? 0) * Number(l.cost_per_share ?? 0) + commPerUnit(String(l.acquired_date)));
+  for (const s of sells) if (String(s.trade_date) > BOOK_START) addCash(String(s.trade_date), 'sh', Number(s.quantity ?? 0) * Number(s.price ?? 0) + commPerUnit(String(s.trade_date)));
+  const cashBetween = (a: string, b: string) => {        // (a, b]
+    const out = zero();
+    for (const [d, e] of cashBy) if (d > a && d <= b) for (const g of GK_LIST) out[g] += e[g];
+    return out;
+  };
+  const realBy = (upTo: string) => {
+    const out = zero();
+    for (const e of realized) if (e.d <= upTo && e.d > BOOK_START) out[kindG[e.kind]] += e.amt;
+    return out;
+  };
+  const posByDay = new Map<string, Row[]>();
+  for (const p of posAll) (posByDay.get(String(p.report_date)) ?? posByDay.set(String(p.report_date), []).get(String(p.report_date))!).push(p);
+  /* What each group held at a close, at IBKR's marks and cost. */
+  const snapOf = (d: string) => {
+    const mv = zero(), un = zero(), tv = zero(); let capLong = 0, shVal = 0; const tick = new Set<string>();
+    for (const p of posByDay.get(d) ?? []) {
+      const q = Number(p.position), m = Number(p.multiplier ?? 1), v = Number(p.position_value ?? 0), cb = Number(p.cost_basis_money ?? 0);
+      if (p.asset_category === 'OPT') {
+        const type = p.put_call === 'C' ? 'call' : 'put', g = gOf(type, q < 0);
+        mv[g] += v; un[g] += q < 0 ? v : v - cb;
+        const S = closeOn(String(p.underlying).toUpperCase(), d) ?? 0, K = Number(p.strike);
+        const intr = type === 'call' ? Math.max(0, S - K) : Math.max(0, K - S);
+        tv[g] += Math.abs(q) * m * Math.max(0, Number(p.mark_price ?? 0) - intr);
+        if (q > 0) capLong += cb;
+      } else if (p.asset_category === 'STK' && q !== 0) {
+        mv.sh += v; un.sh += v - cb; shVal += v; tick.add(String(p.symbol));
+      }
+    }
+    return { mv, un, tv, capLong, shVal, tickers: tick.size, has: posByDay.has(d) };
+  };
+  const navDays = acctDays.filter((d) => Number(d.accounts) >= 2).map((d) => String(d.report_date)).sort();
+  const lastClose = navDays.at(-1) ?? null;
+  const baseDay = [...navDays].reverse().find((d) => d < CHART_START) ?? null;
+  const base = baseDay ? snapOf(baseDay) : null;
+  const navOf = new Map(acctDays.map((d) => [String(d.report_date), d]));
+  const cum = (f: string, upTo: string) => acctDays
+    .filter((d) => String(d.report_date) > BOOK_START && String(d.report_date) <= upTo)
+    .reduce((s, d) => s + Number(d[f] ?? 0), 0);
+  const rowFor = (d: string) => {
+    const a = navOf.get(d)!, sn = snapOf(d), cash = Number(a.cash ?? 0), nav = Number(a.nav);
+    const cashSum = cashBetween(baseDay ?? BOOK_START, d), rl = realBy(d);
+    const groups: Record<string, Record<string, number>> = {};
+    for (const g of GK_LIST) {
+      groups[g] = { line: r2(sn.mv[g] - (base?.mv[g] ?? 0) + cashSum[g]), real: r2(rl[g]), unreal: r2(sn.un[g]),
+                    tv: r2(sn.tv[g]), mv: r2(sn.mv[g]) };
+    }
+    groups.sh.tickers = sn.tickers;
+    return { day: d, nav: r2(nav), cash: r2(cash), margin: r2(nav + Math.max(0, -cash)),
+      interest_cum: r2(cum('interest_accrued', d)), commission_cum: r2(cum('commissions', d)),
+      dividends_cum: r2(cum('dividends', d)), realized_cum: r2(GK_LIST.reduce((s, g) => s + rl[g], 0)),
+      unrealized: r2(GK_LIST.reduce((s, g) => s + sn.un[g], 0)),
+      time_value: r2(sn.tv.cs + sn.tv.ps), capital_long: r2(sn.capLong), shares_value: r2(sn.shVal), groups };
+  };
+  let chartRows: Row[] = savedHistory;
+  if (mode === 'history') {
+    const built = navDays.filter((d) => d >= CHART_START && isTrading(d) && posByDay.has(d)).map(rowFor);
+    if (built.length) {
+      const w = await fetch(`${URL_}/rest/v1/account_history?on_conflict=day`, {
+        method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(built.map((b) => ({ ...b, built_at: new Date().toISOString() }))) });
+      if (!w.ok) throw new Error(`account_history ${w.status} ${(await w.text()).slice(0, 160)}`);
+    }
+    chartRows = built;
+    checkSummary = [{ history_days: built.length, from: built[0]?.day ?? null, to: built.at(-1)?.day ?? null }];
+    await fetch(`${URL_}/rest/v1/sync_heartbeat?on_conflict=feed`, {
+      method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify([{ feed: 'account-history', ran_at: new Date().toISOString(), rows_written: built.length,
+        detail: `${built.length} days to ${built.at(-1)?.day ?? 'none'}` }]) });
+  }
+  /* Today's point, live until IBKR's statement replaces it next morning. */
+  let livePt: Row | null = null;
+  const lastRow = chartRows.at(-1);
+  if (account.ok && isTrading(today) && lastRow && String(lastRow.day) < today) {
+    const mv = zero(), un = zero(), tv = zero();
+    for (const l of legs) {
+      const g = gOf(l.type, l.side === 'sold'), m = l.mark ?? 0, sgn = l.side === 'sold' ? -1 : 1;
+      mv[g] += sgn * m * l.n * 100;
+      un[g] += l.side === 'sold' ? -m * l.n * 100 : (m - l.avg) * l.n * 100;
+      const S = spotOf.get(l.ticker) ?? l.underlying ?? 0;
+      tv[g] += Math.max(0, m - (l.type === 'call' ? Math.max(0, S - l.strike) : Math.max(0, l.strike - S))) * l.n * 100;
+    }
+    let shVal = 0, shCost = 0;
+    for (const [t, q] of sharesNow) { shVal += q * (spotOf.get(t) ?? 0); shCost += shareCost.get(t) ?? 0; }
+    mv.sh = shVal; un.sh = shVal - shCost;
+    const since = cashBetween(String(lastRow.day), today), rl = realBy(today);
+    const groups: Record<string, Record<string, number>> = {};
+    for (const g of GK_LIST) {
+      const prev = (lastRow.groups as Record<string, Record<string, number>>)[g];
+      groups[g] = { line: r2(Number(prev.line) + (mv[g] - Number(prev.mv)) + since[g]), real: r2(rl[g]),
+                    unreal: r2(un[g]), tv: r2(tv[g]), mv: r2(mv[g]) };
+    }
+    groups.sh.tickers = sharesNow.size;
+    const commToday = trades.filter((t) => String(t.trade_date) > String(lastRow.day)).reduce((s, t) => s + Number(t.commission ?? 0), 0);
+    livePt = { day: today, nav: account.value, cash: account.cash,
+      margin: r2(Number(account.value) + Math.max(0, -Number(account.cash))),
+      interest_cum: lastRow.interest_cum, commission_cum: r2(Number(lastRow.commission_cum) + commToday),
+      dividends_cum: lastRow.dividends_cum, realized_cum: r2(GK_LIST.reduce((s, g) => s + rl[g], 0)),
+      unrealized: account.unrealized, time_value: account.time_value_sold,
+      capital_long: r2(legs.filter((l) => l.side === 'bought').reduce((s, l) => s + l.avg * l.n * 100, 0)),
+      shares_value: r2(shVal), groups };
+  }
+  const pts = livePt ? [...chartRows, livePt] : chartRows;
+  /* Closed positions, for Kept full credit (sold) and Closed in profit
+     (bought): one per position, dated when it went flat or expired. */
+  const closedPos: (string | number)[][] = [];
+  for (const [, rows] of groups) {
+    const f = rows[0], short = f.direction === 'short';
+    const firstOpen = rows.filter((r) => r.action === 'open').map((r) => String(r.trade_date)).sort()[0];
+    if (!firstOpen || firstOpen < BOOK_START) continue;
+    const net = rows.reduce((s, r) => s + (r.action === 'open' ? 1 : -1) * Number(r.contracts), 0);
+    const closes = rows.filter((r) => r.action === 'close');
+    let when: string | null = null;
+    if (net <= 0 && closes.length) when = closes.map((r) => String(r.trade_date)).sort().at(-1)!;
+    else if (net > 0 && String(f.expiry) < today) when = String(f.expiry);
+    if (!when) continue;
+    const leg = `${String(f.ticker).toUpperCase()} ${r2(Number(f.strike))}${f.option_type === 'call' ? 'C' : 'P'}`;
+    const amt = realized.filter((e) => e.leg === leg && e.exp === String(f.expiry) && e.kind === `${f.option_type === 'call' ? 'calls' : 'puts'} ${short ? 'sold' : 'bought'}`)
+      .reduce((s, e) => s + e.amt, 0);
+    const flag = short ? (closes.every((r) => Number(r.premium) === 0) ? 1 : 0) : (amt > 0 ? 1 : 0);
+    closedPos.push([when, gOf(f.option_type, short), flag, Math.round(amt)]);
+  }
+  closedPos.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  /* Dividends: paid days from IBKR, trailing-year yield on the shares held,
+     and the next declared payment on a held name. */
+  const paidDays = acctDays.filter((d) => Number(d.dividends ?? 0) > 0 && String(d.report_date) > BOOK_START)
+    .map((d) => [String(d.report_date), r2(Number(d.dividends))]);
+  const yearPaid = acctDays.filter((d) => String(d.report_date) > addDays(today, -365)).reduce((s, d) => s + Number(d.dividends ?? 0), 0);
+  const shNow = Number(livePt?.shares_value ?? lastRow?.shares_value ?? 0);
+  const nextDiv = divs.filter((d) => sharesNow.has(String(d.ticker))).sort((a, b) => String(a.pay_date ?? a.ex_date).localeCompare(String(b.pay_date ?? b.ex_date)))[0];
+  const col = (f: string) => pts.map((p) => (p[f] == null ? null : Number(p[f])));
+  const gcol = (g: GK, f: string) => pts.map((p) => Number((p.groups as Record<string, Record<string, number>>)[g]?.[f] ?? 0));
+  const chart = pts.length ? {
+    from: String(pts[0].day), to: String(pts.at(-1)!.day), last_close: lastClose, live_last: !!livePt,
+    days: pts.map((p) => String(p.day)),
+    nav: col('nav'), margin: col('margin'), realized_cum: col('realized_cum'), unrealized: col('unrealized'),
+    time_value: col('time_value'), interest_cum: col('interest_cum'), commission_cum: col('commission_cum'),
+    dividends_cum: col('dividends_cum'), capital_long: col('capital_long'), shares_value: col('shares_value'),
+    groups: Object.fromEntries(GK_LIST.map((g) => [g, { line: gcol(g, 'line'), real: gcol(g, 'real'),
+      unreal: gcol(g, 'unreal'), tv: gcol(g, 'tv') }])),
+    shares_tickers: pts.map((p) => Number((p.groups as Record<string, Record<string, number>>).sh?.tickers ?? 0)),
+    closed: closedPos,
+    dividends: { paid: paidDays, yield_pct: shNow > 0 ? r2(yearPaid / shNow * 100) : null,
+      next: nextDiv ? { ticker: nextDiv.ticker, ex_date: nextDiv.ex_date, pay_date: nextDiv.pay_date ?? null,
+                        amount: num(nextDiv.cash_amount) } : null },
+  } : null;
+
   step('theta_check');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
@@ -1209,7 +1413,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
       .map((c) => ({ date: c.date, kind: c.kind, closes: c.closes, name: c.name })),
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
     fresh, account, indices, overnight, watchlist, portfolio, legs, risk,
-    history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
+    chart, history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
     writes: { expiry: targetExp, names: writes },
     theta_checks: thetaChecks, last_week: lastWeek, ...(checkSummary ? { theta_check_run: checkSummary } : {}),
@@ -1219,11 +1423,12 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
 
 /* ⚠ WHO MAY CALL (audit, 13 Oct 2026). verify_jwt is off so pg_cron can call
    in, so the function checks instead: the scheduler's x-cron-key (vault
-   `cron_secret`, secret CRON_SECRET), the service-role key, or, where `users`
+   `cron_secret`, secret CRON_SECRET; sent as x-admin-key for a manual
+   admin call), the service-role key, or, where `users`
    is set, a signed-in user of the app or website. Anyone else gets a 401. */
 async function callerOk(req: Request, users: boolean): Promise<boolean> {
   const cron = Deno.env.get('CRON_SECRET');
-  if (cron && req.headers.get('x-cron-key') === cron) return true;
+  if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return true;
   const auth = req.headers.get('authorization') ?? '';
   if (auth && auth === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) return true;
   if (!users || !auth.startsWith('Bearer ')) return false;
@@ -1237,12 +1442,12 @@ const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allow
 
 Deno.serve(async (req) => {
   if (req.method !== 'OPTIONS' && !(await callerOk(req, false))) return refused();
-  let body: { passes?: number; mode?: 'theta_check' } = {};
+  let body: { passes?: number; mode?: 'theta_check' | 'history' } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* cron sends {} */ }
   try {
     const n = ny();
     const live = !['Sat', 'Sun'].includes(n.wd) && n.mins >= 4 * 60 && n.mins < 20 * 60;
-    const passes = body.mode === 'theta_check' ? 1 : body.passes ?? (live ? 2 : (n.mins % 10 === 0 ? 1 : 0));
+    const passes = body.mode ? 1 : body.passes ?? (live ? 2 : (n.mins % 10 === 0 ? 1 : 0));
     const out: Row[] = [];
     for (let i = 0; i < passes; i++) {
       /* mp-refresh writes at :00 and :30 and takes 2-4 s; build just after. */

@@ -29,7 +29,7 @@
 const IBKR_BASE = 'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
 const IBKR_GET_BASE = 'https://gdcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
 const QUERY_ID = '1670350';
-const BUILD = '2026-10-13.1';
+const BUILD = '2026-10-13.2';
 
 function matchTag(xml: string, tag: string): string | null {
   const m = xml.match(new RegExp(`<${tag}>([^<]+)</${tag}>`));
@@ -46,8 +46,11 @@ function rows(block: string, tag: string): Record<string, string>[] {
 const num = (v?: string) => (v === undefined || v === '' ? null : Number(v));
 const iso = (d?: string) => (d && /^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : null);
 
-async function fetchReport(token: string, q: string): Promise<string> {
-  const send = await (await fetch(`${IBKR_BASE}/SendRequest?t=${token}&q=${q}&v=3`)).text();
+async function fetchReport(token: string, q: string, from?: string, to?: string): Promise<string> {
+  /* An explicit window (yyyyMMdd), for a one-off backfill past the query's own
+     30 days. IBKR's Flex service takes fd/td on SendRequest. */
+  const win = from && to ? `&fd=${from}&td=${to}` : '';
+  const send = await (await fetch(`${IBKR_BASE}/SendRequest?t=${token}&q=${q}&v=3${win}`)).text();
   const ref = matchTag(send, 'ReferenceCode');
   if (matchTag(send, 'Status') !== 'Success' || !ref) throw new Error(`SendRequest: ${send.slice(0, 300)}`);
   let xml = '';
@@ -63,11 +66,12 @@ async function fetchReport(token: string, q: string): Promise<string> {
 
 /* ⚠ WHO MAY CALL (audit, 13 Oct 2026). verify_jwt is off so pg_cron can call
    in, so the function checks instead: the scheduler's x-cron-key (vault
-   `cron_secret`, secret CRON_SECRET), the service-role key, or, where `users`
+   `cron_secret`, secret CRON_SECRET; sent as x-admin-key for a manual
+   admin call), the service-role key, or, where `users`
    is set, a signed-in user of the app or website. Anyone else gets a 401. */
 async function callerOk(req: Request, users: boolean): Promise<boolean> {
   const cron = Deno.env.get('CRON_SECRET');
-  if (cron && req.headers.get('x-cron-key') === cron) return true;
+  if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return true;
   const auth = req.headers.get('authorization') ?? '';
   if (auth && auth === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) return true;
   if (!users || !auth.startsWith('Bearer ')) return false;
@@ -84,13 +88,16 @@ Deno.serve(async (req) => {
   const url = Deno.env.get('SUPABASE_URL')!;
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const h = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
-  let body: { dry_run?: boolean } = {};
+  let body: { dry_run?: boolean; from?: string; to?: string } = {};
   /* ⚠ FIGURES ONLY FOR THE SERVICE-ROLE KEY (audit, 13 Oct 2026). verify_jwt
      is off for pg_cron, so the reply to anyone else carries no account data. */
-  const isAdmin = req.headers.get('authorization') === `Bearer ${key}`;
+  const isAdmin = req.headers.get('authorization') === `Bearer ${key}`
+    || (!!Deno.env.get('CRON_SECRET') && req.headers.get('x-admin-key') === Deno.env.get('CRON_SECRET'));
   try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is fine */ }
   try {
-    const xml = await fetchReport(Deno.env.get('IBKR_FLEX_TOKEN')!, QUERY_ID);
+    /* A window is admin-only: it is a backfill, not the morning run. */
+    const win = isAdmin && /^\d{8}$/.test(body.from ?? '') && /^\d{8}$/.test(body.to ?? '') ? [body.from!, body.to!] : [];
+    const xml = await fetchReport(Deno.env.get('IBKR_FLEX_TOKEN')!, QUERY_ID, win[0], win[1]);
 
     const days: Record<string, unknown>[] = [];
     const positions: Record<string, unknown>[] = [];

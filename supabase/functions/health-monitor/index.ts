@@ -24,11 +24,12 @@ const corsHeaders = {
 
 /* ⚠ WHO MAY CALL (audit, 13 Oct 2026). verify_jwt is off so pg_cron can call
    in, so the function checks instead: the scheduler's x-cron-key (vault
-   `cron_secret`, secret CRON_SECRET), the service-role key, or, where `users`
+   `cron_secret`, secret CRON_SECRET; sent as x-admin-key for a manual
+   admin call), the service-role key, or, where `users`
    is set, a signed-in user of the app or website. Anyone else gets a 401. */
 async function callerOk(req: Request, users: boolean): Promise<boolean> {
   const cron = Deno.env.get('CRON_SECRET');
-  if (cron && req.headers.get('x-cron-key') === cron) return true;
+  if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return true;
   const auth = req.headers.get('authorization') ?? '';
   if (auth && auth === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) return true;
   if (!users || !auth.startsWith('Bearer ')) return false;
@@ -214,6 +215,7 @@ Deno.serve(async (req) => {
     { feed: 'market-calendar',      warnHours: 30,  critHours: 50 },
     { feed: 'macro-sync',           warnHours: 30,  critHours: 50 },
     { feed: 'dividends-sync',       warnHours: 30,  critHours: 50 },
+    { feed: 'account-history',      warnHours: 30,  critHours: 50 },
     // weekday only — the grace has to clear a weekend, and a long one
     { feed: 'ticker-iv-snapshot',   warnHours: 80,  critHours: 110 },
     { feed: 'theta-check',          warnHours: 80,  critHours: 110 },
@@ -355,6 +357,8 @@ function titleForCode(code: string, sev: 'warn' | 'critical' = 'critical'): stri
       return sev === 'warn' ? 'Market calendar one run behind' : 'Market calendar has stopped';
     case 'feed.macro_sync_stale':
       return sev === 'warn' ? 'Macro dates one run behind' : 'Macro dates have stopped';
+    case 'feed.account_history_stale':
+      return sev === 'warn' ? 'Account chart one day behind' : 'Account chart has stopped updating';
     case 'feed.dividends_sync_stale':
       return sev === 'warn' ? 'Dividend dates one run behind' : 'Dividend dates have stopped';
     case 'feed.theta_check_stale':

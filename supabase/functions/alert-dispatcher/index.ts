@@ -45,11 +45,12 @@ interface PositionRow    { ticker: string; earnings_date: string | null; }
 
 /* ⚠ WHO MAY CALL (audit, 13 Oct 2026). verify_jwt is off so pg_cron can call
    in, so the function checks instead: the scheduler's x-cron-key (vault
-   `cron_secret`, secret CRON_SECRET), the service-role key, or, where `users`
+   `cron_secret`, secret CRON_SECRET; sent as x-admin-key for a manual
+   admin call), the service-role key, or, where `users`
    is set, a signed-in user of the app or website. Anyone else gets a 401. */
 async function callerOk(req: Request, users: boolean): Promise<boolean> {
   const cron = Deno.env.get('CRON_SECRET');
-  if (cron && req.headers.get('x-cron-key') === cron) return true;
+  if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return true;
   const auth = req.headers.get('authorization') ?? '';
   if (auth && auth === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) return true;
   if (!users || !auth.startsWith('Bearer ')) return false;
@@ -288,7 +289,8 @@ Deno.serve(async (req) => {
 
   /* ⚠ THE ITEMS ARE FOR THE SERVICE-ROLE KEY ONLY (audit, 13 Oct 2026):
      verify_jwt is off for pg_cron, and each item names a position. */
-  const isAdmin = req.headers.get('authorization') === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`;
+  const isAdmin = req.headers.get('authorization') === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+    || (!!Deno.env.get('CRON_SECRET') && req.headers.get('x-admin-key') === Deno.env.get('CRON_SECRET'));
   return new Response(
     JSON.stringify(isAdmin ? { ok: true, queued: queued.length, items: queued } : { ok: true, queued: queued.length }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

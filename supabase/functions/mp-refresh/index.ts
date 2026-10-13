@@ -288,11 +288,12 @@ function remainingByOpenId(trades: OpenTradeRow[]): Map<string, number> {
 // ─── Handler ────────────────────────────────────────────────────
 /* ⚠ WHO MAY CALL (audit, 13 Oct 2026). verify_jwt is off so pg_cron can call
    in, so the function checks instead: the scheduler's x-cron-key (vault
-   `cron_secret`, secret CRON_SECRET), the service-role key, or, where `users`
+   `cron_secret`, secret CRON_SECRET; sent as x-admin-key for a manual
+   admin call), the service-role key, or, where `users`
    is set, a signed-in user of the app or website. Anyone else gets a 401. */
 async function callerOk(req: Request, users: boolean): Promise<boolean> {
   const cron = Deno.env.get('CRON_SECRET');
-  if (cron && req.headers.get('x-cron-key') === cron) return true;
+  if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return true;
   const auth = req.headers.get('authorization') ?? '';
   if (auth && auth === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) return true;
   if (!users || !auth.startsWith('Bearer ')) return false;
@@ -320,7 +321,8 @@ Deno.serve(async (req) => {
      York on a weekday returns at once. A manual call always runs. */
   /* Compare mode lists every leg and its marks: service-role key only
      (audit, 13 Oct 2026; verify_jwt is off for pg_cron). */
-  if (body.compare && req.headers.get('authorization') !== `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) {
+  if (body.compare && req.headers.get('authorization') !== `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+      && !(Deno.env.get('CRON_SECRET') && req.headers.get('x-admin-key') === Deno.env.get('CRON_SECRET'))) {
     return new Response(JSON.stringify({ ok: false, error: 'compare needs the service-role key' }),
       { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
