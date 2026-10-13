@@ -106,7 +106,6 @@ struct SunnySoldBought: View {
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 40) {
                     ForEach(cs, id: \.id) { c in
-                        let fade = pick != nil && pick != c.id
                         let lit = pick.map { $0 == c.id } ?? c.now   // the grey box follows the pick
                         Button { withAnimation(S.standard(0.35)) { P.picked["svb"] = pick == c.id ? nil : c.id } } label: {
                             VStack(spacing: 0) {
@@ -142,7 +141,6 @@ struct SunnySoldBought: View {
                             .background {
                                 if lit { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(S.pGrid).padding(.horizontal, -12).padding(.top, -10).padding(.bottom, -8) }
                             }
-                            .opacity(fade ? 0.35 : 1)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)

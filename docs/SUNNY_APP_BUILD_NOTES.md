@@ -92,6 +92,11 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     Unrealized differs by design: the glossary counts open shorts at full value and keeps
     their open premium apart (about $7.3K), where IBKR nets shorts against their sale price.
 
+21. **Picked week or month.** Nik, 13 Oct 2026: the grey box moves to the picked column and
+    nothing else changes; the other columns are not dimmed (block 14 says "other weeks fade").
+    Month view starts at the book's first month (Sep 2026) and opens on now; the back arrow
+    stops at the book start. A positions strike opens on Today, not Exp.
+
 ## Still open
 
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old

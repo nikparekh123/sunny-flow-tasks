@@ -280,7 +280,6 @@ struct SBarChart: View {
     }
 
     private func column(_ col: SBarColumn) -> some View {
-        let fade = picked != nil && picked != col.id
         // The grey box and bold label sit on the picked column, or on this
         // week (this month) when nothing is picked (phone design: isNow follows the pick).
         let lit = picked.map { $0 == col.id } ?? col.isNow
@@ -322,7 +321,7 @@ struct SBarChart: View {
                         .padding(.horizontal, -12).padding(.top, -10).padding(.bottom, -8)
                 }
             }
-            .opacity(fade ? 0.35 : 1)
+            // No fade on the other columns (Nik, 13 Oct 2026): the grey box marks the pick.
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
