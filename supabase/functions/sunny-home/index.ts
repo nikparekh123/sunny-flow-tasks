@@ -201,7 +201,7 @@ async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, comm
   };
 }
 
-async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
+async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 'tick'): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
   let checkSummary: Row[] | null = null;
   /* Where the build's time goes, returned with the timings (no data). */
   const steps: Record<string, number> = {};
@@ -1093,11 +1093,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
   // LAST WEEK (block 09): Friday 4:00 PM to Monday 4:00 AM, each index's week
   // against the move its weekly straddle priced in at the close before.
   // ════════════════════════════════════════════════════════════════════════
+  /* mode 'last_week' (admin only) builds the week before this one on any
+     day, so the priced-move pipeline can be checked away from a weekend. */
   const weekend = (now.wd === 'Fri' && now.mins >= 16 * 60) || now.wd === 'Sat' || now.wd === 'Sun'
-    || (now.wd === 'Mon' && now.mins < 4 * 60);
+    || (now.wd === 'Mon' && now.mins < 4 * 60) || mode === 'last_week';
   let lastWeek: Row | null = null;
   if (weekend) {
-    const anchorDay = now.wd === 'Mon' ? addDays(today, -3) : today;
+    const anchorDay = mode === 'last_week' ? addDays(today, -7) : now.wd === 'Mon' ? addDays(today, -3) : today;
     const wk = weekStartOf(anchorDay);
     const lastT = lastTradingOnOrBefore(addDays(wk, 4));
     const priorT = prevTrading(wk);
@@ -1468,7 +1470,7 @@ const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allow
 
 Deno.serve(async (req) => {
   if (req.method !== 'OPTIONS' && !(await callerOk(req, false))) return refused();
-  let body: { passes?: number; mode?: 'theta_check' | 'history' } = {};
+  let body: { passes?: number; mode?: 'theta_check' | 'history' | 'last_week' } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* cron sends {} */ }
   try {
     const n = ny();
