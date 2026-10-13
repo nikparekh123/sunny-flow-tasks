@@ -65,11 +65,14 @@ final class AppLock {
 
     // MARK: - Preferences (UserDefaults-backed)
 
-    var biometricEnabled: Bool {
-        get { UserDefaults.standard.object(forKey: "biometricEnabled") as? Bool ?? false }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "biometricEnabled")
-            if !newValue { isLocked = false }   // disabling = unlock now
+    // Stored, not computed: @Observable only tracks stored properties, and the
+    // root view decides lock vs Home from these. A computed UserDefaults
+    // wrapper never told the view it changed, so Continue on the first-run
+    // screen did nothing (13 Oct 2026, Nik's phone).
+    var biometricEnabled: Bool = UserDefaults.standard.object(forKey: "biometricEnabled") as? Bool ?? false {
+        didSet {
+            UserDefaults.standard.set(biometricEnabled, forKey: "biometricEnabled")
+            if !biometricEnabled { isLocked = false }   // disabling = unlock now
         }
     }
 
@@ -192,8 +195,7 @@ final class AppLock {
 
     // MARK: - Onboarding flag
 
-    var onboardingDone: Bool {
-        get { UserDefaults.standard.bool(forKey: "onboardingDone") }
-        set { UserDefaults.standard.set(newValue, forKey: "onboardingDone") }
+    var onboardingDone: Bool = UserDefaults.standard.bool(forKey: "onboardingDone") {
+        didSet { UserDefaults.standard.set(onboardingDone, forKey: "onboardingDone") }
     }
 }
