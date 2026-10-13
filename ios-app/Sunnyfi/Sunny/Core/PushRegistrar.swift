@@ -41,14 +41,21 @@ final class PushRegistrar {
     /// Reading it from Bundle.main means it cannot drift from the target again.
     private let bundleId = Bundle.main.bundleIdentifier ?? "com.sunnyfi.app"
 
-    /// Are we a debug/simulator build (sandbox APNs) or a TestFlight /
-    /// App Store build (production APNs)? Affects which APNs server
-    /// the worker has to use for this device.
+    /// Which APNs server the worker must use for this device's token: the one
+    /// the app is SIGNED for, read from its provisioning profile. A Release
+    /// build installed with a development profile (how Nik's phone is set up
+    /// since the 13 Oct 2026 launch) gets sandbox tokens; "not DEBUG" had
+    /// reported it as production, and Apple would reject every alert. App
+    /// Store builds carry no embedded profile and are production.
     private var environment: String {
         #if DEBUG
         return "sandbox"
         #else
-        return "production"
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .isoLatin1),
+              let key = text.range(of: "<key>aps-environment</key>") else { return "production" }
+        return text[key.upperBound...].prefix(80).contains("development") ? "sandbox" : "production"
         #endif
     }
 
