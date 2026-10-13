@@ -124,15 +124,16 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     `S.glassCards`, puts them all back on paper; per card, `sCardSurface(glass: false)`.
     Tried and turned off the same day (Nik: "go back to how it was"): `S.glassCards` is false.
 
+28. **Deck swipe.** A UIKit pan that only takes sideways drags (`DeckSwipe`), not a SwiftUI
+    DragGesture: a drag starting on the deck held the page's vertical scroll (Nik, 13 Oct 2026).
+
 ## Still open
 
-- **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old
-  app until the new one takes that bundle id at ship.
-- **On Nik's iPhone (13 Oct, step 1).** Installed beside the old app with `xcrun devicectl`.
-  Xcode on this Mac has no Apple account signed in, and the only profile on the Mac is the
-  wildcard one, which cannot carry push, so this build overrides `CODE_SIGN_ENTITLEMENTS` with
-  an empty file. Before the takeover (step 2), Xcode needs the Apple account in Settings,
-  Accounts, so automatic signing can make a profile with push for `com.sunnyfi.app`.
+- **Launched (13 Oct 2026, step 2).** Sunny took over `com.sunnyfi.app` at 2.0 (3) and replaced
+  the old Sunnyfi app on Nik's iPhone in place; the `.next` test copy was removed. Signed with
+  the existing Xcode-managed profile "iOS Team Provisioning Profile: com.sunnyfi.app" (push,
+  development, until Jun 2027). The old Sunnyfi target moved to `com.sunnyfi.legacy`, its code
+  kept for now. The app re-registers for push on every launch when alerts are allowed.
 - **Live checks.** The 30 s tick, the glow and the toast need a look during market hours.
 - **Last week (block 09).** `index_weekly` was empty because sunny-home went live after the
   last weekend. Admin mode `last_week` filled Oct 5 - 9; next Friday after the close is the

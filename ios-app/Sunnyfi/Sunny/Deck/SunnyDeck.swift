@@ -59,7 +59,11 @@ struct SunnyDeck: View {
                 }
                 .frame(height: n > 1 ? 216 : 184, alignment: .top)
                 .frame(maxWidth: .infinity)
-                .simultaneousGesture(swipe(n))
+                // A UIKit pan that only takes sideways drags. SwiftUI's DragGesture,
+                // even as a simultaneous gesture, held the page's vertical scroll
+                // whenever the drag started on the deck (Nik, 13 Oct 2026).
+                .gesture(DeckSwipe(onStart: { if held == nil { held = cards } },
+                                   onEnd: { dx in swiped(dx, n) }))
                 .accessibilityElement(children: .contain)
                 .accessibilityAdjustableAction { dir in go(dir == .increment ? 1 : -1, n) }
             }
@@ -68,17 +72,12 @@ struct SunnyDeck: View {
         .animation(S.standard(0.5), value: cards.map(\.id))
     }
 
-    private func swipe(_ n: Int) -> some Gesture {
-        DragGesture(minimumDistance: 12)
-            .onChanged { _ in if held == nil { held = cards } }
-            .onEnded { v in
-                let dx = v.translation.width, dy = v.translation.height
-                if abs(dx) > 40, abs(dx) > abs(dy) {
-                    lastSwipe = Date()
-                    go(dx < 0 ? 1 : -1, n)
-                }
-                withAnimation(S.standard(0.5)) { held = nil }
-            }
+    private func swiped(_ dx: CGFloat, _ n: Int) {
+        if abs(dx) > 40 {
+            lastSwipe = Date()
+            go(dx < 0 ? 1 : -1, n)
+        }
+        withAnimation(S.standard(0.5)) { held = nil }
     }
 
     private func go(_ d: Int, _ n: Int) {
@@ -213,5 +212,76 @@ struct SunnyDeckCard: View {
             .overlay(Circle().strokeBorder(rim, lineWidth: 0.5))
             .shadow(color: .black.opacity(card.tone == .yellow ? 0.06 : 0), radius: 1.5, y: 1)
             .accessibilityHidden(true)
+    }
+}
+
+// MARK: - Sideways swipe that never holds the page
+
+/// Begins only once a drag is clearly sideways; a mostly vertical drag fails
+/// it at once, so the page's own scroll runs untouched. Taps still reach the
+/// card (touches are only cancelled once a sideways swipe has begun).
+struct DeckSwipe: UIGestureRecognizerRepresentable {
+    let onStart: () -> Void
+    let onEnd: (CGFloat) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+    func makeUIGestureRecognizer(context: Context) -> DeckSwipeRecognizer {
+        let r = DeckSwipeRecognizer()
+        r.delegate = context.coordinator
+        return r
+    }
+    func handleUIGestureRecognizerAction(_ r: DeckSwipeRecognizer, context: Context) {
+        switch r.state {
+        case .began: onStart()
+        case .ended: onEnd(r.dx)
+        case .cancelled: onEnd(0)
+        default: break
+        }
+    }
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
+    }
+}
+
+final class DeckSwipeRecognizer: UIGestureRecognizer {
+    private var start: CGPoint = .zero
+    private weak var touched: UIView?
+    private(set) var dx: CGFloat = 0
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard touches.count == 1, let t = touches.first else { state = .failed; return }
+        start = t.location(in: view); touched = t.view; dx = 0
+    }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard let t = touches.first else { return }
+        let p = t.location(in: view), d = CGPoint(x: p.x - start.x, y: p.y - start.y)
+        dx = d.x
+        if state == .possible {
+            guard hypot(d.x, d.y) > 10 else { return }
+            if abs(d.y) >= abs(d.x) { state = .failed; return }   // vertical: the page scrolls
+            state = .began
+            holdPage()
+        } else {
+            state = .changed
+        }
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = (state == .began || state == .changed) ? .ended : .failed
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = (state == .began || state == .changed) ? .cancelled : .failed
+    }
+    override func reset() { dx = 0 }
+
+    /// A sideways swipe holds the page still (every enclosing scroll view).
+    private func holdPage() {
+        var v = touched ?? view
+        while let s = v {
+            if let sv = s as? UIScrollView {
+                sv.panGestureRecognizer.isEnabled = false
+                sv.panGestureRecognizer.isEnabled = true
+            }
+            v = s.superview
+        }
     }
 }

@@ -117,6 +117,13 @@ final class PushAppDelegate: NSObject, UIApplicationDelegate {
         // Set the notification delegate so taps on a notification
         // route through us (for deep-linking later).
         UNUserNotificationCenter.current().delegate = self
+        // Re-register on every launch once alerts are allowed (Apple's advice):
+        // keeps push_devices fresh and survives the takeover of com.sunnyfi.app,
+        // where first-run setup (the only other registration point) is skipped.
+        UNUserNotificationCenter.current().getNotificationSettings { s in
+            guard s.authorizationStatus == .authorized || s.authorizationStatus == .provisional else { return }
+            Self.registrar.requestSystemRegistration()
+        }
         return true
     }
 
