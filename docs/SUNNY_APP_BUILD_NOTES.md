@@ -95,7 +95,8 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 21. **Picked week or month.** Nik, 13 Oct 2026: the grey box moves to the picked column and
     nothing else changes; the other columns are not dimmed (block 14 says "other weeks fade").
     Month view starts at the book's first month (Sep 2026) and opens on now; the back arrow
-    stops at the book start. A positions strike opens on Today, not Exp.
+    stops at the book start. A positions strike opens on Today, not Exp. Performance's month
+    chips start in September too; the LEAPs bought on 31 Aug count in September.
 
 22. **Portfolio and Watchlist tap states.** Nik, 13 Oct 2026: % change, then the stock's $
     change per share, then the current price, on both. Block 10 had Portfolio's $ as the

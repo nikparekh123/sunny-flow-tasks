@@ -854,9 +854,12 @@ struct ScrubGesture: UIGestureRecognizerRepresentable {
 final class ScrubRecognizer: UIGestureRecognizer {
     private var start: CGPoint = .zero
     private var decided = false
+    /// The view the finger landed on: the scroll views to hold are above it.
+    private weak var touched: UIView?
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         guard touches.count == 1, let t = touches.first else { state = .failed; return }
+        touched = t.view
         start = t.location(in: view)
         decided = false
         state = .began
@@ -880,14 +883,16 @@ final class ScrubRecognizer: UIGestureRecognizer {
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .cancelled }
     override func reset() { decided = false }
 
-    /// Cancel the enclosing scroll view's pan so the page holds still.
+    /// Cancel every enclosing scroll view's pan so the page, and a sideways
+    /// card row (Theta and Delta), hold still while scrubbing. Walks up from
+    /// the touched view: the recognizer's own view can sit above the scroll
+    /// views in SwiftUI's hierarchy, which let the Risk row slide (13 Oct 2026).
     private func holdPage() {
-        var v = view?.superview
+        var v = touched ?? view
         while let s = v {
             if let sv = s as? UIScrollView {
                 sv.panGestureRecognizer.isEnabled = false
                 sv.panGestureRecognizer.isEnabled = true
-                return
             }
             v = s.superview
         }
