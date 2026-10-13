@@ -130,13 +130,23 @@ Deno.serve(async (req) => {
   // When ?debug=true (or {debug:true} body), return the raw IBKR XML
   // (first ~3KB) plus parsed trade count in the response. Use to verify
   // what IBKR is actually serving without needing dashboard access.
-  const debug: boolean = body.debug === true;
+  /* ⚠ PREVIEW AND DEBUG ARE ADMIN-ONLY (audit, 13 Oct 2026). This function
+     runs with verify_jwt off for pg_cron, so anyone holding its URL could ask
+     for a dry run and read every parsed trade, or debug and read the raw
+     report. Both now need the service-role key itself as the bearer; any
+     other caller gets the plain run summary. */
+  const isAdmin = req.headers.get('authorization') === `Bearer ${serviceKey}`;
+  const debug: boolean = body.debug === true && isAdmin;
   // Dry-run: parse + report but DON'T touch the DB. No insert/update,
   // no void, no audit row. The response includes the parsed trade
   // list so the caller can review what would have been written.
   // Ignored for cron triggers — only manual/backfill operators get
   // preview mode.
-  const dryRun: boolean = body.dry_run === true && trigger !== 'cron';
+  const dryRun: boolean = body.dry_run === true && trigger !== 'cron' && isAdmin;
+  if (body.dry_run === true && !isAdmin) {
+    return new Response(JSON.stringify({ ok: false, error: 'dry_run needs the service-role key' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
 
   // ── 0. Window + slot gating (cron-only) ─────────────────────
   // Manual/backfill triggers always run. Cron triggers only run

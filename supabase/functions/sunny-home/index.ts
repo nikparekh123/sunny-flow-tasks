@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-13.7';
+const BUILD = '2026-10-13.10';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -42,17 +42,29 @@ async function get(q: string): Promise<Row[]> {
   if (!r.ok) throw new Error(`${q.split('?')[0]} ${r.status} ${(await r.text()).slice(0, 160)}`);
   return await r.json();
 }
-/** PostgREST caps a read at 1,000 rows, silently: page anything that grows. */
+/** PostgREST caps a read at 1,000 rows, silently: page anything that grows.
+ *  The first page asks for the total, and the rest are fetched side by side
+ *  (audit, 13 Oct 2026: sequential pages were most of the build). The query
+ *  must carry a deterministic order, or pages can overlap. */
 async function page(q: string): Promise<Row[]> {
-  const out: Row[] = [];
-  for (let from = 0; from < 100_000; from += 1000) {
-    const r = await fetch(`${URL_}/rest/v1/${q}`, { headers: { ...H, Range: `${from}-${from + 999}` } });
+  const one = async (from: number, count = false) => {
+    const r = await fetch(`${URL_}/rest/v1/${q}`, { headers: { ...H, Range: `${from}-${from + 999}`,
+      ...(count ? { Prefer: 'count=exact' } : {}) } });
     if (!r.ok) throw new Error(`${q.split('?')[0]} ${r.status} ${(await r.text()).slice(0, 160)}`);
-    const rows = await r.json() as Row[];
-    out.push(...rows);
-    if (rows.length < 1000) break;
+    return { rows: await r.json() as Row[], total: Number((r.headers.get('content-range') ?? '').split('/')[1]) };
+  };
+  const first = await one(0, true);
+  if (first.rows.length < 1000) return first.rows;
+  const total = Number.isFinite(first.total) && first.total > 0 ? Math.min(first.total, 100_000) : null;
+  if (total == null) {             // no count: fall back to one page at a time
+    const out = [...first.rows];
+    for (let from = 1000; from < 100_000; from += 1000) {
+      const { rows } = await one(from); out.push(...rows); if (rows.length < 1000) break;
+    }
+    return out;
   }
-  return out;
+  const rest = await Promise.all(Array.from({ length: Math.ceil(total / 1000) - 1 }, (_, i) => one((i + 1) * 1000)));
+  return [...first.rows, ...rest.flatMap((x) => x.rows)];
 }
 
 function ny(d = new Date()) {
@@ -189,17 +201,31 @@ async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, comm
   };
 }
 
-async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: Row; ms: number }> {
+async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
   let checkSummary: Row[] | null = null;
+  /* Where the build's time goes, returned with the timings (no data). */
+  const steps: Record<string, number> = {};
+  let tStep = Date.now();
+  const step = (label: string) => { const n = Date.now(); steps[label] = n - tStep; tStep = n; };
   const t0 = Date.now();
   const now = ny();
   const today = now.date;
+  const monthsBack = (iso: string, m: number) => {
+    const [y, mo] = iso.split('-').map(Number);
+    const d = new Date(Date.UTC(y, mo - 1 - m, 1));
+    return d.toISOString().slice(0, 10);
+  };
+  /* Rolling 3 calendar months (block 15), never before the book: Nik took the
+     proposal to start the charts on 1 Sep 2026. */
+  const winStart = [monthsBack(today, 2), '2026-09-01'].sort().at(-1)!;
+  const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
 
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
-         openChecks, divs] = await Promise.all([
+         openChecks, divs, posAll, lmd, chainRows] = await Promise.all([
     page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
-    get('option_greeks_live?select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
+    /* One row per leg ever marked: grows with every trade, so paged. */
+    page('option_greeks_live?order=option_trade_id.asc&select=option_trade_id,last_mark,iv,delta,gamma,theta,vega,underlying,captured_at'),
     get('ticker_quotes_live?select=ticker,spot,day_change_pct,captured_at'),
     get('market_live?select=*'),
     get(`account_value_daily?report_date=gte.${addDays(BOOK_START, -5)}&order=report_date.desc`),
@@ -207,7 +233,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     get(`earnings_events?report_date=gte.${addDays(today, -1)}&report_date=lte.${addDays(today, 70)}`
       + '&select=ticker,report_date,report_time,date_estimated,source&order=report_date.asc'),
     get('earnings_season?select=*&order=starts.desc&limit=6'),
-    page(`daily_closes?date=gte.${[addDays(today, -45), addDays(BOOK_START, -7)].sort()[0]}&order=date.asc&select=ticker,date,close_price`),
+    page(`daily_closes?date=gte.${[addDays(today, -45), addDays(BOOK_START, -7)].sort()[0]}&order=date.asc,ticker.asc&select=ticker,date,close_price`),
     get('ibkr_sync_runs?status=eq.success&order=finished_at.desc&limit=1&select=finished_at'),
     get(`share_sells?voided_at=is.null&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,realized_pl`),
     get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date`),
@@ -216,8 +242,19 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
       + '&category=in.(inflation,jobs,rates)&order=event_date.asc&select=event_date,event_time,name'),
     get('theta_checks?status=eq.open&select=*&order=found_on.asc'),
     get(`dividends?ex_date=gte.${today}&ex_date=lte.${addDays(today, 45)}&select=ticker,ex_date,cash_amount&order=ex_date.asc`),
+    /* ⚠ ONE ROUND TRIP (audit, 13 Oct 2026). These used to wait their turn
+       mid-build and cost ~0.3 s of a 0.55 s build. IBKR's daily positions
+       cover both the live value's anchor and the value side's history. */
+    page(`account_positions_daily?report_date=gte.${addDays(winStart, -10)}&order=report_date.asc,account_id.asc,conid.asc`
+      + '&select=report_date,account_id,conid,symbol,underlying,asset_category,put_call,strike,expiry,multiplier,position,'
+      + 'mark_price,position_value,cost_basis_money'),
+    page(`leg_marks_daily?day=gte.${marksFrom}&order=day.asc,option_trade_id.asc`
+      + '&select=option_trade_id,day,mark,delta,theta,underlying'),
+    page('option_chain_next?select=ticker,expiry,side,strike,mid,delta,iv,oi,spot'
+      + '&order=ticker.asc,expiry.asc,side.asc,strike.asc'),
   ]);
 
+  step('reads');
   // ── Trading days (calendar-aware) ──
   const closed = new Set(cal.filter((c) => c.kind === 'closed').map((c) => String(c.date)));
   const isTrading = (d: string) => {
@@ -331,12 +368,13 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   for (const q of quotes) if (q.spot != null) spotOf.set(String(q.ticker).toUpperCase(), Number(q.spot));
   for (const m of market) if (m.price != null && !spotOf.has(String(m.symbol))) spotOf.set(String(m.symbol), Number(m.price));
 
+  step('legs+realized');
   // ── Account: IBKR's last close, moved by today's prices and fills ──
   const anchor = acctDays.find((d) => Number(d.accounts) >= 2) ?? null;
   let account: Row = { ok: false, why: 'no IBKR daily statement yet' };
   if (anchor) {
     const D = String(anchor.report_date);
-    const posD = await get(`account_positions_daily?report_date=eq.${D}&select=*`);
+    const posD = posAll.filter((p) => String(p.report_date) === D);
     let moveHeld = 0, mvNow = 0, unpriced = 0;
     for (const p of posD) {
       const q = Number(p.position), m = Number(p.multiplier ?? 1), was = Number(p.mark_price);
@@ -426,6 +464,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     };
   }
 
+  step('account');
   // ── Market: Today row, overnight, watchlist ──
   const mk = (s: string) => market.find((m) => m.symbol === s);
   const closeSeries = (t: string) => closes.filter((c) => c.ticker === t).map((c) => ({ d: String(c.date), c: Number(c.close_price) }));
@@ -454,7 +493,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   const sharesNow = new Map<string, number>();
   const shareCost = new Map<string, number>();
   if (anchor) {
-    const posD = await get(`account_positions_daily?report_date=eq.${anchor.report_date}&asset_category=eq.STK&select=symbol,position,cost_basis_money`);
+    const posD = posAll.filter((p) => String(p.report_date) === String(anchor.report_date) && p.asset_category === 'STK');
     for (const p of posD) {
       const t = String(p.symbol).toUpperCase();
       sharesNow.set(t, (sharesNow.get(t) ?? 0) + Number(p.position));
@@ -472,6 +511,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
              ranges: ranges(t, spot, num(q?.day_change_pct)) };
   });
 
+  step('market+portfolio');
   // ── Risk: Theta and Delta now (history comes from the daily roll-up) ──
   const tick = new Map<string, { collect: number; lose: number; longD: number; soldD: number }>();
   let thShort = 0, thLong = 0, dLong = 0, dSold = 0;
@@ -496,22 +536,12 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
         .sort((a, b) => b.pct - a.pct) },
   };
 
+  step('risk');
   // ════════════════════════════════════════════════════════════════════════
   // THE CARDS' HISTORY: one point per trading day, from leg_marks_daily.
   // ════════════════════════════════════════════════════════════════════════
-  const monthsBack = (iso: string, m: number) => {
-    const [y, mo] = iso.split('-').map(Number);
-    const d = new Date(Date.UTC(y, mo - 1 - m, 1));
-    return d.toISOString().slice(0, 10);
-  };
-  /* Rolling 3 calendar months (block 15), never before the book: Nik took the
-     proposal to start the charts on 1 Sep 2026. */
-  const winStart = [monthsBack(today, 2), '2026-09-01'].sort().at(-1)!;
   const days: string[] = [];
   for (let d = winStart; d < today; d = addDays(d, 1)) if (isTrading(d)) days.push(d);
-  const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
-  const lmd = await page(`leg_marks_daily?day=gte.${marksFrom}&order=day.asc,option_trade_id.asc`
-    + '&select=option_trade_id,day,mark,delta,theta,underlying');
   const markDay = new Map<string, Map<string, Row>>();      // day -> trade id -> row
   for (const r of lmd) {
     const d = String(r.day);
@@ -575,8 +605,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
      against IBKR's -1.4K); IBKR's daily statement carries every position's
      closing value, so a day it covers takes those. Greeks have no IBKR twin. */
   const ibkrMV = new Map<string, { long: number; short: number }>();
-  for (const r of await page(`account_positions_daily?report_date=gte.${winStart}&asset_category=eq.OPT`
-      + '&order=report_date.asc,account_id.asc,conid.asc&select=report_date,position,position_value')) {
+  for (const r of posAll.filter((x) => String(x.report_date) >= winStart && x.asset_category === 'OPT')) {
     const d = String(r.report_date), e = ibkrMV.get(d) ?? { long: 0, short: 0 };
     if (Number(r.position) > 0) e.long += Number(r.position_value); else e.short -= Number(r.position_value);
     ibkrMV.set(d, e);
@@ -616,6 +645,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
       sold: all.map((p) => Math.round(p.dS)), long: all.map((p) => Math.round(p.dL)) },
   };
 
+  step('history');
   // ── Payback (block 18): what the LEAPs cost, split, and how it comes back ──
   const leapLots: { ticker: string; k: number; d: string; n: number; tv: number; intr: number }[] = [];
   for (const l of legs.filter((x) => x.side === 'bought' && x.type === 'call')) {
@@ -806,6 +836,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   }).sort((a, b) => b.now - a.now);
   const allocation = { holdings, cash: account.ok ? Math.round(Number(account.cash)) : null };
 
+  step('cards');
   // ── Deck inputs ──
   const upcomingEarn = new Map<string, Row>();
   for (const e of earn) {
@@ -849,6 +880,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   const fresh = { marks: maxAt(greeks) || null, quotes: maxAt(quotes) || null, market: maxAt(market) || null,
                   trades: runs[0]?.finished_at ?? null, account_close: anchor?.report_date ?? null };
 
+  step('deck');
   // ════════════════════════════════════════════════════════════════════════
   // REPORTS (block 06): weekly every Monday for the week before, monthly on
   // the 1st for the month before; a Monday the 1st brings the monthly only.
@@ -940,6 +972,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     reportsOut.push({ kind: r.kind, label: r.label, mark: r.mark, ...payloadR });
   }
 
+  step('reports');
   // ════════════════════════════════════════════════════════════════════════
   // WRITES SHEET (block 14): next Friday's write on every name, by TODAY'S
   // roll-sheet rule, not the design's (Nik, 12 Oct 2026: "stays as we have it
@@ -951,8 +984,6 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   // Friday counts toward the strike it sits nearer, and only the rest is
   // suggested (partial fills). Chains: option_chain_next, every 15 min.
   // ════════════════════════════════════════════════════════════════════════
-  const chainRows = await page('option_chain_next?select=ticker,expiry,side,strike,mid,delta,iv,oi,spot'
-    + '&order=ticker.asc,expiry.asc,side.asc,strike.asc');
   /* Next Friday: Monday to Friday the Friday after this week's; on a weekend
      the coming one. A holiday Friday moves it to that week's last session. */
   const nextFri = (() => { const d = new Date(today + 'T12:00:00Z'), wd = d.getUTCDay();
@@ -1035,6 +1066,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   /* Least filled first, as the chips run (block 14). */
   writes.sort((a: Row, b: Row) => ((a.calls?.of ? a.calls.sold / a.calls.of : 1) - (b.calls?.of ? b.calls.sold / b.calls.of : 1)));
 
+  step('writes');
   // ════════════════════════════════════════════════════════════════════════
   // LAST WEEK (block 09): Friday 4:00 PM to Monday 4:00 AM, each index's week
   // against the move its weekly straddle priced in at the close before.
@@ -1095,6 +1127,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   // out at 70 to 75 delta (Nik, 12 Oct 2026: "around 70 to 75 delta, not
   // 90"; 0.9 put NKE into a $47,550 debit, new capital, not a roll).
   // ════════════════════════════════════════════════════════════════════════
+  step('last_week');
   /* Once per trading day, after the close. pg_cron speaks UTC, so it fires at
      20:25 and 21:25 to cover EDT and EST; whichever lands after 4:15 New York
      runs, and only once (the heartbeat says whether today already ran). */
@@ -1169,6 +1202,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     ratio_now: num(c.ratio_now), ratio_without: num(c.ratio_without), roll: c.roll,
   }));
 
+  step('theta_check');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
     calendar: cal.filter((c) => String(c.date) >= today)
@@ -1180,7 +1214,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     writes: { expiry: targetExp, names: writes },
     theta_checks: thetaChecks, last_week: lastWeek, ...(checkSummary ? { theta_check_run: checkSummary } : {}),
   };
-  return { payload, ms: Date.now() - t0 };
+  return { payload, ms: Date.now() - t0, steps };
 }
 
 Deno.serve(async (req) => {
@@ -1197,13 +1231,13 @@ Deno.serve(async (req) => {
         const wait = ((i === 0 ? 6_000 : 36_000) - (Date.now() % 60_000) + 60_000) % 60_000;
         if (wait < 40_000) await new Promise((r) => setTimeout(r, wait));
       }
-      const { payload, ms } = await build(body.mode ?? 'tick');
+      const { payload, ms, steps } = await build(body.mode ?? 'tick');
       const w = await fetch(`${URL_}/rest/v1/home_snapshot?on_conflict=id`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify([{ id: 1, payload, built_at: payload.built_at, build: BUILD, ms }]),
       });
       if (!w.ok) throw new Error(`home_snapshot ${w.status} ${(await w.text()).slice(0, 160)}`);
-      out.push({ ms, legs: (payload.legs as unknown[]).length, value: (payload.account as Row).value ?? null });
+      out.push({ ms, steps, legs: (payload.legs as unknown[]).length, value: (payload.account as Row).value ?? null });
     }
     if (out.length) {
       await fetch(`${URL_}/rest/v1/sync_heartbeat?on_conflict=feed`, {
@@ -1213,7 +1247,7 @@ Deno.serve(async (req) => {
       });
     }
     /* Timings only: the payload leaves through home_snapshot, never here. */
-    return new Response(JSON.stringify({ ok: true, build: BUILD, passes: out.map((o) => ({ ms: o.ms, legs: o.legs })) }),
+    return new Response(JSON.stringify({ ok: true, build: BUILD, passes: out.map((o) => ({ ms: o.ms, steps: o.steps, legs: o.legs })) }),
       { headers: { 'Content-Type': 'application/json' } });
   } catch (e) {
     return new Response(JSON.stringify({ ok: false, build: BUILD, error: String(e).slice(0, 300) }),

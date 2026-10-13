@@ -135,30 +135,41 @@ function NC(x: number): number {
   return x >= 0 ? (1 + y) / 2 : (1 - y) / 2;
 }
 const RATE = 0.04;
-function bsPrice(call: boolean, S: number, K: number, T: number, v: number): number {
-  const sq = v * Math.sqrt(T), d1 = (Math.log(S / K) + (RATE + v * v / 2) * T) / sq, d2 = d1 - sq;
-  return call ? S * NC(d1) - K * Math.exp(-RATE * T) * NC(d2)
-              : K * Math.exp(-RATE * T) * NC(-d2) - S * NC(-d1);
+/* ⚠ DIVIDENDS ARE IN THE MODEL (audit, 13 Oct 2026), the escrowed way: each
+   leg is priced on spot LESS the present value of the dividends expected
+   before ITS expiry (see `pvDivs`), with q left at 0. Tested on three NKE legs
+   against IBKR's own greeks: no dividends put the Jan 2028 LEAP's theta at
+   -0.0065 (IBKR -0.0077), a flat trailing yield at -0.0051, escrowed at
+   -0.0080; the Mar 2027 put -0.0103 / -0.0111 / -0.0084 (IBKR -0.0088); a
+   weekly is untouched (no ex-date before Friday) and still matches. The long
+   side's theta is the Theta ratio's denominator. `q` stays for the record. */
+function bsPrice(call: boolean, S: number, K: number, T: number, v: number, q = 0): number {
+  const sq = v * Math.sqrt(T), d1 = (Math.log(S / K) + (RATE - q + v * v / 2) * T) / sq, d2 = d1 - sq;
+  const Sq = S * Math.exp(-q * T);
+  return call ? Sq * NC(d1) - K * Math.exp(-RATE * T) * NC(d2)
+              : K * Math.exp(-RATE * T) * NC(-d2) - Sq * NC(-d1);
 }
 /** ⚠ EVERY GREEK IS WORKED OUT HERE, from the live mid at the option-implied
     spot. Theta's own greeks use its `underlying_price`, which read BABA at
     57.00 against a real 111 on 9 Oct, so its delta and IV were nonsense for
     that name. Vega is per vol point and theta per calendar day, Polygon's units. */
-function greeksFrom(call: boolean, mid: number, S: number, K: number, T: number) {
-  const intrinsic = Math.max(0, call ? S - K : K - S);
-  if (!(S > 0 && K > 0 && T > 0) || !(mid > intrinsic * Math.exp(-RATE * T) + 0.005)) return null;
+function greeksFrom(call: boolean, mid: number, S: number, K: number, T: number, q = 0) {
+  const eq = Math.exp(-q * T), er = Math.exp(-RATE * T);
+  const floor = Math.max(0, call ? S * eq - K * er : K * er - S * eq);
+  if (!(S > 0 && K > 0 && T > 0) || !(mid > floor + 0.005)) return null;
   let lo = 0.01, hi = 4;
-  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (bsPrice(call, S, K, T, m) < mid) lo = m; else hi = m; }
+  for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; if (bsPrice(call, S, K, T, m, q) < mid) lo = m; else hi = m; }
   const v = (lo + hi) / 2, sq = v * Math.sqrt(T);
-  const d1 = (Math.log(S / K) + (RATE + v * v / 2) * T) / sq, d2 = d1 - sq;
-  const decay = -S * ND(d1) * v / (2 * Math.sqrt(T));
-  const carry = RATE * K * Math.exp(-RATE * T);
+  const d1 = (Math.log(S / K) + (RATE - q + v * v / 2) * T) / sq, d2 = d1 - sq;
+  const decay = -S * eq * ND(d1) * v / (2 * Math.sqrt(T));
+  const carry = RATE * K * er;
   return {
     iv: v,
-    delta: call ? NC(d1) : NC(d1) - 1,
-    gamma: ND(d1) / (S * sq),
-    vega: S * ND(d1) * Math.sqrt(T) / 100,
-    theta: (call ? decay - carry * NC(d2) : decay + carry * NC(-d2)) / 365,
+    delta: call ? eq * NC(d1) : eq * (NC(d1) - 1),
+    gamma: eq * ND(d1) / (S * sq),
+    vega: S * eq * ND(d1) * Math.sqrt(T) / 100,
+    theta: (call ? decay - carry * NC(d2) + q * S * eq * NC(d1)
+                 : decay + carry * NC(-d2) - q * S * eq * NC(-d1)) / 365,
   };
 }
 const legKey = (right: string, strike: number) => `${right.toLowerCase()}|${Number(strike).toFixed(3)}`;
@@ -288,6 +299,12 @@ Deno.serve(async (req) => {
      clocks go back on 1 Nov, and the 4:00 close would never be marked. The
      cron now fires 13-21 UTC and a scheduled call outside 9:00-16:59 New
      York on a weekday returns at once. A manual call always runs. */
+  /* Compare mode lists every leg and its marks: service-role key only
+     (audit, 13 Oct 2026; verify_jwt is off for pg_cron). */
+  if (body.compare && req.headers.get('authorization') !== `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) {
+    return new Response(JSON.stringify({ ok: false, error: 'compare needs the service-role key' }),
+      { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
   if (fromCron) {
     const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
       weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
@@ -462,11 +479,76 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
           const sx = impliedSpot(gr, yrs(e));
           if (sx != null) spotOf.set(t, sx);
         }
+        /* ⚠ A NAME HOLDING ONLY LONG-DATED LEGS ASKS FOR ITS NEAREST LISTED
+           EXPIRY (audit, 13 Oct 2026). KR's only leg is the Jan 2028 LEAP, and
+           parity two years out is dragged down by the dividends paid before
+           then: 61.74 against IBKR's 62.56 close. Anything whose nearest held
+           expiry is over 45 days away now prices off the nearest weekly. */
+        const farOnly = [...spotOf.keys()].filter((t) => {
+          const e = res.filter((r) => r.t === t).map((r) => r.e).sort()[0];
+          return (Date.parse(`${e}T20:00:00Z`) - Date.now()) / 864e5 > 45;
+        });
+        await pool(farOnly.map((t) => async () => {
+          try {
+            const ex = (await fetch(`${THETA_URL}/v3/option/list/expirations?symbol=${t}&format=json`,
+              { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(15_000) })
+              .then((r) => r.ok ? r.json() : { response: [] })).response as Array<{ expiration: string }>;
+            const next = ex.map((x) => x.expiration).filter((e) => e > estToday).sort()[0];
+            if (!next) return;
+            const rows = await theta(`/v3/option/snapshot/quote?symbol=${t}&expiration=${next.replaceAll('-', '')}`);
+            const sx = impliedSpot(rows, yrs(next));
+            if (sx != null) spotOf.set(t, sx);
+          } catch { /* keep the long-dated estimate */ }
+        }), 2);
+        /* Expected dividends per name: every declared ex-date still ahead, then
+           the last regular dividend repeated at its own cadence (frequency, or
+           the gap between the last two). Regular cash dividends only. */
+        const divPlan = new Map<string, Array<{ d: number; amt: number }>>();
+        try {
+          const since = new Date(Date.now() - 800 * 864e5).toISOString().slice(0, 10);
+          const { data: dv } = await admin.from('dividends')
+            .select('ticker, ex_date, cash_amount, frequency, dividend_type')
+            .in('ticker', [...spotOf.keys()]).gte('ex_date', since).order('ex_date', { ascending: true });
+          const by = new Map<string, Array<{ ex: string; amt: number; freq: number | null }>>();
+          for (const d of (dv ?? []) as Array<{ ticker: string; ex_date: string; cash_amount: number | null;
+                                                frequency: number | null; dividend_type: string | null }>) {
+            if (d.dividend_type && d.dividend_type !== 'CD') continue;      // specials do not repeat
+            if (!(Number(d.cash_amount) > 0)) continue;
+            (by.get(d.ticker) ?? by.set(d.ticker, []).get(d.ticker)!).push(
+              { ex: d.ex_date, amt: Number(d.cash_amount), freq: d.frequency });
+          }
+          const now0 = Date.parse(`${estToday}T12:00:00Z`);
+          for (const [t, rows] of by) {
+            const plan: Array<{ d: number; amt: number }> = rows.filter((r) => r.ex > estToday)
+              .map((r) => ({ d: Date.parse(`${r.ex}T12:00:00Z`), amt: r.amt }));
+            const past = rows.filter((r) => r.ex <= estToday);
+            const last = past.at(-1), prev = past.at(-2);
+            const gap = last?.freq && last.freq > 0 ? 365 / last.freq
+              : last && prev ? (Date.parse(last.ex) - Date.parse(prev.ex)) / 864e5 : null;
+            if (last && gap && gap >= 25) {
+              let d = Date.parse(`${last.ex}T12:00:00Z`) + gap * 864e5;
+              const lastDeclared = plan.length ? Math.max(...plan.map((p) => p.d)) : 0;
+              while (d < now0 + 3 * 365 * 864e5) {
+                if (d > now0 && d > lastDeclared + gap * 0.5 * 864e5) plan.push({ d, amt: last.amt });
+                d += gap * 864e5;
+              }
+            }
+            divPlan.set(t, plan.sort((a, b) => a.d - b.d));
+          }
+        } catch { /* no dividends: priced as before */ }
+        /** PV of the dividends expected before `expiry`, at the model's rate. */
+        const pvDivs = (t: string, expiry: string) => {
+          const end = Date.parse(`${expiry}T20:00:00Z`), now1 = Date.now();
+          return (divPlan.get(t) ?? []).filter((x) => x.d > now1 && x.d < end)
+            .reduce((s, x) => s + x.amt * Math.exp(-RATE * (x.d - now1) / (365 * 864e5)), 0);
+        };
         for (const { t, e, gr, oi } of res) {
           const oiBy = new Map(oi.map((r) => [legKey(r.contract.right, r.contract.strike),
                                              Number(r.data?.[0]?.open_interest)]));
           const T = Math.max(1 / 365, (Date.parse(`${e}T20:00:00Z`) - Date.now()) / (365 * 864e5));
           const Sx = spotOf.get(t) ?? null;
+          /* Priced on spot less the dividends due before this expiry. */
+          const Sd = Sx != null ? Math.max(0.01, Sx - pvDivs(t, e)) : null;
           for (const r of gr) {
             const d = r.data?.[0]; if (!d) continue;
             const bid = Number(d.bid), ask = Number(d.ask);
@@ -475,8 +557,8 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
             const mark = bid > 0 && ask > 0 ? (bid + ask) / 2 : ask > 0 ? ask / 2 : null;
             const k = legKey(r.contract.right, r.contract.strike);
             const fin = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
-            const g = mark != null && Sx != null
-              ? greeksFrom(r.contract.right.toLowerCase() === 'call', mark, Sx, Number(r.contract.strike), T)
+            const g = mark != null && Sd != null
+              ? greeksFrom(r.contract.right.toLowerCase() === 'call', mark, Sd, Number(r.contract.strike), T)
               : null;
             thetaBy.set(`${t}|${e}|${k}`, {
               mark, bid: fin(bid), ask: fin(ask),

@@ -267,8 +267,11 @@ Deno.serve(async (req) => {
     });
   }
 
+  /* ⚠ THE ITEMS ARE FOR THE SERVICE-ROLE KEY ONLY (audit, 13 Oct 2026):
+     verify_jwt is off for pg_cron, and each item names a position. */
+  const isAdmin = req.headers.get('authorization') === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`;
   return new Response(
-    JSON.stringify({ ok: true, queued: queued.length, items: queued }),
+    JSON.stringify(isAdmin ? { ok: true, queued: queued.length, items: queued } : { ok: true, queued: queued.length }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   );
 });

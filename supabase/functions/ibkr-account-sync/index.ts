@@ -29,7 +29,7 @@
 const IBKR_BASE = 'https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
 const IBKR_GET_BASE = 'https://gdcdyn.interactivebrokers.com/AccountManagement/FlexWebService';
 const QUERY_ID = '1670350';
-const BUILD = '2026-10-12.1';
+const BUILD = '2026-10-13.1';
 
 function matchTag(xml: string, tag: string): string | null {
   const m = xml.match(new RegExp(`<${tag}>([^<]+)</${tag}>`));
@@ -66,6 +66,9 @@ Deno.serve(async (req) => {
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const h = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };
   let body: { dry_run?: boolean } = {};
+  /* ⚠ FIGURES ONLY FOR THE SERVICE-ROLE KEY (audit, 13 Oct 2026). verify_jwt
+     is off for pg_cron, so the reply to anyone else carries no account data. */
+  const isAdmin = req.headers.get('authorization') === `Bearer ${key}`;
   try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is fine */ }
   try {
     const xml = await fetchReport(Deno.env.get('IBKR_FLEX_TOKEN')!, QUERY_ID);
@@ -132,6 +135,8 @@ Deno.serve(async (req) => {
       positions_at_last_close: positions.filter((p) => p.report_date === last).length,
     };
 
+    if (body.dry_run && !isAdmin) return new Response(JSON.stringify({ ok: false, error: 'dry_run needs the service-role key' }),
+      { status: 403, headers: { 'Content-Type': 'application/json' } });
     if (body.dry_run) return new Response(JSON.stringify({ ok: true, build: BUILD, dry_run: true, summary }),
       { headers: { 'Content-Type': 'application/json' } });
 
@@ -155,11 +160,14 @@ Deno.serve(async (req) => {
       headers: { ...h, Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify([{
         feed: 'ibkr-account-sync', ran_at: new Date().toISOString(), rows_written: days.length,
-        detail: `${summary.accounts.length} accounts · ${summary.days} days to ${last} · close ${summary.last_close_value}`,
+        /* No figures here: sync_heartbeat is readable by the app's signed-in
+           user and was, until 13 Oct, by anyone. */
+        detail: `${summary.accounts.length} accounts · ${summary.days} days to ${last}`,
       }]),
     });
 
-    return new Response(JSON.stringify({ ok: true, build: BUILD, summary }),
+    return new Response(JSON.stringify(isAdmin ? { ok: true, build: BUILD, summary }
+      : { ok: true, build: BUILD, days: summary.days, to: summary.to }),
       { headers: { 'Content-Type': 'application/json' } });
   } catch (e) {
     return new Response(JSON.stringify({ ok: false, build: BUILD, error: String(e) }),
