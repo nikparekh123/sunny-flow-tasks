@@ -69,9 +69,13 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 16. **Payback %.** One decimal with a trailing .0 dropped ("42%", "18.6%"), as the phone file
     rounds it.
 
+17. **App icon (handoff 21).** Built as an Icon Composer file, `Sunny/App/AppIcon.icon`, from
+    the layer SVGs: light, dark (with the glow) and tinted (rays and horizon at 55%). Group
+    translucency is off and the glow has no glass, or the orange washed out and the glow
+    showed a glass rim. Checked with Icon Composer's ictool renders against the PNGs.
+
 ## Still open
 
-- **App icon.** The new target has no icon yet.
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old
   app until the new one takes that bundle id at ship.
 - **Live checks.** The 30 s tick, the glow and the toast need a look during market hours.
