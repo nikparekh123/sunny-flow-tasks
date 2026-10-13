@@ -76,6 +76,18 @@ struct HomeView: View {
                         .padding(.horizontal, S.margin)
                         .id("inventory")
                         .sEnter(6)
+
+                    SunnySectionTitle(title: "Risk").id(HomeRouter.Section.risk)
+                    SunnyRisk(home: home).id("risk")
+
+                    SunnySectionTitle(title: "Income").id(HomeRouter.Section.income)
+                    SunnyYield(home: home, words: words).padding(.horizontal, S.margin).id("yield")
+                    SunnyPayback(home: home, words: words).padding(.horizontal, S.margin).id("payback")
+
+                    SunnySectionTitle(title: "Results").id(HomeRouter.Section.results)
+                    SunnySoldBought(home: home).padding(.horizontal, S.margin).id("svb")
+                    SunnyPerformance(words: words).padding(.horizontal, S.margin).id("performance")
+                    SunnyAllocation(home: home, words: words).padding(.horizontal, S.margin).id("allocation")
                 }
                 .padding(.top, 14)
                 .padding(.bottom, 40)

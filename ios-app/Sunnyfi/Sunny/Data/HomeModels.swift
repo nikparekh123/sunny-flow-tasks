@@ -30,6 +30,12 @@ struct HomePayload: Decodable {
     let inventory: Inventory
     let writes: Writes
     let yield: [YieldWeek]
+    let history: History
+    let risk: Risk
+    let payback: Payback
+    let soldVsBought: SoldVsBought
+    let performance: Performance
+    let allocation: Allocation
     /// Every open theta check (block 15's breathing tile), not only today's card.
     let thetaChecks: [Deck.ThetaCheck]?
 }
@@ -165,6 +171,68 @@ struct Writes: Decodable {
         }
         struct Earn: Decodable { let date: String; let time: String? }
     }
+}
+
+// MARK: - Theta and Delta (blocks 15, 16)
+
+struct History: Decodable {
+    let days: [String]
+    let theta: Series
+    let delta: Series
+    struct Series: Decodable {
+        let avg2w: [Double]
+        let now: Double?
+        let trend: String?
+    }
+}
+
+struct Risk: Decodable {
+    let theta: Theta
+    let delta: Delta
+    struct Theta: Decodable {
+        let long: Double
+        let short: Double
+        let by: [By]
+        struct By: Decodable { let ticker: String; let net: Double; let collect: Double; let lose: Double }
+    }
+    struct Delta: Decodable {
+        let long: Double
+        let sold: Double
+        let by: [By]
+        struct By: Decodable { let ticker: String; let pct: Double; let long: Double; let sold: Double }
+    }
+}
+
+// MARK: - Payback (block 18)
+
+struct Payback: Decodable {
+    let now: Now
+    /// [day, time value target, time value paid back, intrinsic target, intrinsic paid back]
+    let series: [[Scalar]]
+    let paceTv: Double
+    let paceIntr: Double
+    let newLeapDays: [String]?
+    struct Now: Decodable { let d: String; let inT: Double; let tvT: Double; let inPaid: Double; let tvPaid: Double }
+}
+
+// MARK: - Sold vs Bought, Performance, Allocation (blocks 19-21)
+
+struct SoldVsBought: Decodable {
+    /// [day, longs' change in value (unrealized), shorts realized]
+    let days: [[Scalar]]
+    let openCredit: Double
+}
+
+struct Performance: Decodable {
+    /// [yyyy-MM, ticker, type, $]
+    let realized: [[Scalar]]
+    let unrealized: [[Scalar]]
+}
+
+struct Allocation: Decodable {
+    let cash: Double?
+    let holdings: [Holding]
+    struct Holding: Decodable, Identifiable { var id: String { ticker }; let ticker: String; let now: Double; let invested: Double }
 }
 
 // MARK: - Yield (block 17)
