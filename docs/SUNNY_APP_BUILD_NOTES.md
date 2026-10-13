@@ -89,6 +89,11 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old
   app until the new one takes that bundle id at ship.
+- **On Nik's iPhone (13 Oct, step 1).** Installed beside the old app with `xcrun devicectl`.
+  Xcode on this Mac has no Apple account signed in, and the only profile on the Mac is the
+  wildcard one, which cannot carry push, so this build overrides `CODE_SIGN_ENTITLEMENTS` with
+  an empty file. Before the takeover (step 2), Xcode needs the Apple account in Settings,
+  Accounts, so automatic signing can make a profile with push for `com.sunnyfi.app`.
 - **Live checks.** The 30 s tick, the glow and the toast need a look during market hours.
 - **Last week (block 09).** `index_weekly` was empty because sunny-home went live after the
   last weekend. Admin mode `last_week` filled Oct 5 - 9; next Friday after the close is the
