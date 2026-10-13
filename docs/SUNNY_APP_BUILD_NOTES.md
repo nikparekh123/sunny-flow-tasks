@@ -105,14 +105,17 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     small next to iOS's own back buttons. Built as 44 pt glass circles with a 17 pt semibold
     chevron, 8 apart; the Writes sheet back button matches (design 40 pt).
 
-24. **One combined Payback.** Nik, 13 Oct 2026, replacing block 18's two lines: everything
-    realized since the first LEAP (sold premium, puts and calls bought, shares, any close,
-    book-wide) plus the change in the LEAPs' intrinsic, against the whole LEAP cost (time
-    value plus intrinsic at purchase). One line, one pace, one date; below zero is not drawn
-    (Nik: leave as is). Rows: Made and Intrinsic. sunny-home adds `all_real` to each series row
-    and `pace_all` (v28).
+24. **Payback = made vs the LEAP cost.** Nik, 13 Oct 2026, replacing block 18's two lines: the
+    target is what the LEAPs cost (time value plus intrinsic when bought, $214K), drawn as a
+    line on top; "made" is everything realized since the first LEAP (sold premium, puts and
+    calls bought, shares, any close) plus the premium in hand on open shorts, and it climbs to
+    the target at the last five weeks' pace, dotted to a date. Intrinsic is not in it.
+    sunny-home: series rows carry `all_real` and `held`, plus `pace_made` (v29).
 25. **Inline insight edge to edge.** The line and the opened gradient run to the card edges, as
     the design draws them; a clip after the negative padding had cut them to the text margins.
+
+26. **All positions card.** Its own height, not stretched to the ticker cards: a small gap
+    under the title, room at the bottom (Nik, 13 Oct 2026).
 
 ## Still open
 

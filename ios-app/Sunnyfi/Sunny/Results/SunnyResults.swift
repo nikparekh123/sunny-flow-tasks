@@ -198,10 +198,13 @@ struct SunnyPerformance: View {
         T(key: "shares", name: "Shares", color: Color(hex: 0xF2A93B)),
     ]
 
-    /// Months from the first with data to now (yyyy-MM).
+    /// The book's first month (Sep 2026). The LEAPs bought on 31 Aug count in it,
+    /// so there is no August chip (Nik, 13 Oct 2026: everything starts in September).
+    private var startMonth: String { String(Periods.bookStart(words).prefix(7)) }
+    /// Months from the book's first to now (yyyy-MM).
     private var months: [String] {
         let all = (words.performance.realized + words.performance.unrealized).compactMap { $0.first?.string }
-        let first = all.min() ?? String(words.today.prefix(7)), last = String(words.today.prefix(7))
+        let first = max(all.min() ?? String(words.today.prefix(7)), startMonth), last = String(words.today.prefix(7))
         var out: [String] = [], m = first
         while m <= last {
             out.append(m)
@@ -217,7 +220,8 @@ struct SunnyPerformance: View {
         var d: [String: [String: [String: Double]]] = [:]
         let add = { (rows: [[Scalar]]) in
             for r in rows where r.count >= 4 {
-                guard let m = r[0].string, let t = r[1].string, let k = r[2].string, let v = r[3].number else { continue }
+                guard let m0 = r[0].string, let t = r[1].string, let k = r[2].string, let v = r[3].number else { continue }
+                let m = max(m0, startMonth)
                 d[t, default: [:]][k, default: [:]][m, default: 0] += v
             }
         }

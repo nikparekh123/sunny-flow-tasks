@@ -215,8 +215,11 @@ struct Payback: Decodable {
     let paceIntr: Double
     /// The combined pace (all realized plus the intrinsic change), a week.
     let paceAll: Double?
+    /// Made (realized plus premium in hand), a week, over the last five weeks.
+    let paceMade: Double?
     let newLeapDays: [String]?
-    struct Now: Decodable { let d: String; let inT: Double; let tvT: Double; let inPaid: Double; let tvPaid: Double; let allReal: Double? }
+    struct Now: Decodable { let d: String; let inT: Double; let tvT: Double; let inPaid: Double; let tvPaid: Double
+                            let allReal: Double?; let held: Double? }
 }
 
 // MARK: - Sold vs Bought, Performance, Allocation (blocks 19-21)

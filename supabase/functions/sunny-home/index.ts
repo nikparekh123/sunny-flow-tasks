@@ -312,6 +312,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   type Ev = { d: string; ticker: string; kind: 'calls sold' | 'puts sold' | 'calls bought' | 'puts bought' | 'shares';
               amt: number; leg: string; how: 'expired' | 'closed' | 'assigned' | 'exercised' | 'sold'; basis: number; exp?: string };
   const realized: Ev[] = [];
+  /* Premium in hand on open shorts, as dated cash moves: the credit on the
+     sale, taken back out when the leg closes or expires (its result is then in
+     `realized`). Payback's "made" = realized + this (Nik, 13 Oct 2026). */
+  const heldFlows: { d: string; amt: number }[] = [];
   const heldCost = new Map<string, { n: number; cost: number }>();
   for (const [k, rows] of groups) {
     const fills = [...rows].sort((a, b) => String(a.trade_date).localeCompare(String(b.trade_date))
@@ -327,8 +331,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     let qty = 0, cost = 0;
     for (const t of fills) {
       const n = Number(t.contracts), px = Number(t.premium) * 100;
-      if (t.action === 'open') { qty += n; cost += n * px; continue; }
+      if (t.action === 'open') { qty += n; cost += n * px; if (short) heldFlows.push({ d: String(t.trade_date), amt: n * px }); continue; }
       const avg = qty > 0 ? cost / qty : 0;
+      if (short) heldFlows.push({ d: String(t.trade_date), amt: -n * avg });
       const ib = t.realized_pl != null && t.realized_pl_source === 'ibkr' ? Number(t.realized_pl) : null;
       const amt = ib ?? (short ? n * (avg - px) : n * (px - avg));
       const code = String(t.note ?? '').match(/IBKR (A|Ex|Ep) lifecycle/)?.[1];
@@ -340,6 +345,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     if (qty > 0.0001 && String(f0.expiry) < today) {
       realized.push({ d: exp, ticker: String(f0.ticker).toUpperCase(), kind, amt: short ? cost : -cost, leg,
         how: 'expired', basis: cost, exp });
+      if (short) heldFlows.push({ d: exp, amt: -cost });
     } else if (qty > 0.0001) {
       heldCost.set(k, { n: qty, cost });
     }
@@ -690,23 +696,25 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        adds the intrinsic change and sets it against the whole LEAP cost. */
     const first = [...firstBy.values()].sort()[0];
     const allReal = first ? realized.filter((e) => e.d >= first && e.d <= d).reduce((s, e) => s + e.amt, 0) : 0;
+    const held = first ? heldFlows.filter((e) => e.d >= first && e.d <= d).reduce((s, e) => s + e.amt, 0) : 0;
     return { d, tvT: Math.round(tvT), inT: Math.round(inT), tvPaid: Math.round(tvPaid), inPaid: Math.round(inPaid),
-      allReal: Math.round(allReal) };
+      allReal: Math.round(allReal), held: Math.round(held) };
   };
   const firstLeap = leapLots.map((x) => x.d).sort()[0] ?? null;
   const payDays = firstLeap ? [...days.filter((d) => d >= firstLeap)] : [];
   const paySeries = payDays.map((d) => paybackOn(d, false));
   if (firstLeap && isTrading(today)) paySeries.push(paybackOn(today, true));
-  const paceOf = (f: 'tvPaid' | 'inPaid' | 'all') => {
+  const paceOf = (f: 'tvPaid' | 'inPaid' | 'all' | 'made') => {
     if (paySeries.length < 2) return null;
-    const v = (p: typeof paySeries[number]) => f === 'all' ? p.allReal + p.inPaid : p[f];
+    const v = (p: typeof paySeries[number]) => f === 'all' ? p.allReal + p.inPaid : f === 'made' ? p.allReal + p.held : p[f];
     const now = paySeries.at(-1)!, i0 = Math.max(0, paySeries.length - 1 - 25);
     const weeks = Math.max(1, (paySeries.length - 1 - i0) / 5);
     return Math.round((v(now) - v(paySeries[i0])) / weeks);
   };
   const payback = paySeries.length ? {
     now: paySeries.at(-1), pace_tv: paceOf('tvPaid'), pace_intr: paceOf('inPaid'), pace_all: paceOf('all'),
-    series: paySeries.map((p) => [p.d, p.tvT, p.tvPaid, p.inT, p.inPaid, p.allReal]),
+    pace_made: paceOf('made'),
+    series: paySeries.map((p) => [p.d, p.tvT, p.tvPaid, p.inT, p.inPaid, p.allReal, p.held]),
     new_leap_days: [...new Set(leapLots.map((x) => x.d))].sort(),
   } : null;
 

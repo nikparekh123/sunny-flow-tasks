@@ -91,17 +91,10 @@ struct SunnyPositions: View {
             if tks.isEmpty {
                 empty.padding(.horizontal, S.margin)
             } else if pick == "ALL" || !tks.contains(where: { $0.t == pick }) {
-                PAllCard(L: L, tks: tks, mode: $mode, minHeight: tallest)
+                // Its own height (Nik, 13 Oct 2026): no longer stretched to the ticker
+                // cards, a small gap under the title and some room at the bottom.
+                PAllCard(L: L, tks: tks, mode: $mode, minHeight: 0)
                     .padding(.horizontal, S.margin)
-                    .background(alignment: .top) {
-                        // The first ticker's cards, laid out unseen, so All matches their height.
-                        PTickerCards(home: home, L: L, ticker: tks[0].t, mode: $mode, legSel: $legSel, page: .constant(nil), measuring: true)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .hidden()
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tallest = $0 }
-                            .allowsHitTesting(false)
-                            .accessibilityHidden(true)
-                    }
             } else {
                 PTickerCards(home: home, L: L, ticker: pick, mode: $mode, legSel: $legSel, page: $page, measuring: false)
                     .task {
@@ -198,8 +191,7 @@ struct PAllCard: View {
                         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.7).delay(Double(i) * 0.07), value: shown)
                 }
             }
-            .padding(.vertical, 8)
-            .frame(maxHeight: .infinity, alignment: .center)
+            .padding(.top, 4).padding(.bottom, 12)
         }
         .foregroundStyle(S.ink)
         .padding(20)
