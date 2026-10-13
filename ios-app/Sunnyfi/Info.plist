@@ -6,8 +6,6 @@
 	<array>
 		<string>com.sunnyfi.app.refresh</string>
 	</array>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Inter.ttf</string>
