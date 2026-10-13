@@ -34,6 +34,8 @@ struct PTicker: Identifiable {
     var id: String { t }
     let t: String
     let room: Double              // % to the nearest sold breakeven, ∞ without shorts
+    let credit: Double            // premium on the sold legs still open
+    let paid: Double              // premium paid for the long legs
     var status: Status { room <= 0 ? .past : room < 2 ? .near : .safe }
     enum Status { case past, near, safe }
     var dot: Color { switch status { case .past: S.red; case .near: S.yellowDeep; case .safe: S.green } }
@@ -48,10 +50,22 @@ enum PBook {
             let px = L.first { $0.t == t }!.px
             let rc = sc.isEmpty ? Double.infinity : (PMath.beShortCalls(sc) - px) / px * 100
             let rp = sp.isEmpty ? Double.infinity : (px - PMath.beShortPuts(sp)) / px * 100
-            return PTicker(t: t, room: min(rc, rp))
+            let mine = L.filter { $0.t == t }
+            return PTicker(t: t, room: min(rc, rp),
+                           credit: mine.filter(\.sold).reduce(0) { $0 + $1.base },
+                           paid: mine.filter { !$0.sold }.reduce(0) { $0 + $1.base })
         }
-        .sorted { $0.room != $1.room ? $0.room < $1.room : $0.t < $1.t }
+        // Biggest open credit first (Nik, 13 Oct 2026: "sort positions by
+        // premium size", open credit); names with only longs go last, by
+        // what was paid.
+        .sorted {
+            if $0.credit != $1.credit { return $0.credit > $1.credit }
+            if $0.paid != $1.paid { return $0.paid > $1.paid }
+            return $0.t < $1.t
+        }
     }
+    /// The worst name in the book: least room to its short breakeven.
+    static func worst(_ tks: [PTicker]) -> PTicker? { tks.min { $0.room < $1.room } }
 }
 
 // MARK: - The block
@@ -100,7 +114,7 @@ struct SunnyPositions: View {
     private func chips(_ tks: [PTicker]) -> some View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
-                chip("All", dot: tks[0].dot, room: nil, on: pick == "ALL") { pick = "ALL" }
+                chip("All", dot: (PBook.worst(tks) ?? tks[0]).dot, room: nil, on: pick == "ALL") { pick = "ALL" }
                 ForEach(tks) { x in
                     chip(x.t, dot: x.dot, room: x.room.isFinite && x.room > 0 ? String(format: "%.1f%%", x.room) : nil,
                          on: pick == x.t) { pick = x.t; page = nil }

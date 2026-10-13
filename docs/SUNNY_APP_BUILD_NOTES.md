@@ -47,6 +47,10 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
    after a 15% month, 20% at the money with earnings before expiry; puts about 30% of puts
    bought at the nearest strike at or below spot), not the design's 20% / 1 SD / 3% OTM.
 
+10. **Positions chip order.** Block 12 says least room to the short breakeven first. Nik,
+    13 Oct: sort by premium size, the open credit on the sold legs, biggest first; names with
+    only longs go last. The dot still shows the room; the All chip's dot is the worst name.
+
 ## Still open
 
 - **App icon.** The new target has no icon yet.
