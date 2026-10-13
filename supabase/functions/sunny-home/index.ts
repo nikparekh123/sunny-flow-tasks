@@ -20,11 +20,13 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-13.6';
+const BUILD = '2026-10-13.7';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
 const TRADE_TO_415 = ['SPY', 'QQQ', 'IWM', 'DIA'];
+/* The weekly put write as a share of the puts bought (Nik, 13 Oct 2026). */
+const PUT_SHARE = 0.3;
 
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -944,7 +946,8 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
   // today"). Calls: a third at the money, the rest at 0.6 SD, the rest at 1 SD
   // after a 15%+ month, 20% at the money when a report falls on or before the
   // expiry. Puts: the nearest strike at or below spot. Sized on every LEAP
-  // (calls) and every put bought (puts); what is already sold for that
+  // (calls); puts at about 30% of the puts bought (Nik, 13 Oct 2026: "around
+  // 30%", the put programme's smaller weekly quantity); what is already sold for that
   // Friday counts toward the strike it sits nearer, and only the rest is
   // suggested (partial fills). Chains: option_chain_next, every 15 min.
   // ════════════════════════════════════════════════════════════════════════
@@ -997,7 +1000,9 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
     const donePuts = sold.filter((x) => x.type === 'put').reduce((s, l) => s + l.n, 0);
     const left = Math.max(0, leapN - doneAtm - doneOtm);
     const leftAtm = Math.min(left, Math.max(0, atmN - doneAtm)), leftOtm = left - leftAtm;
-    const leftPuts = Math.max(0, putsN - donePuts);
+    /* Puts: about 30% of the puts bought, rounded half up (NKE 20 -> 6). */
+    const putTarget = Math.floor(putsN * PUT_SHARE + 0.5);
+    const leftPuts = Math.max(0, putTarget - donePuts);
     const plan = [
       atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta, note: 'at the money' } : null,
       otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta, note: out === 1 ? 'at 1 SD' : 'at 0.6 SD' } : null,
@@ -1017,7 +1022,7 @@ async function build(mode: 'tick' | 'theta_check' = 'tick'): Promise<{ payload: 
       expected: Math.round(plan.reduce((s, p) => s + p.mid * p.n * 100, 0)),
       already: sold.map((l) => ({ type: l.type, n: l.n, strike: l.strike, credit: Math.round(l.avg * l.n * 100) })),
       collected: Math.round(sold.reduce((s, l) => s + l.avg * l.n * 100, 0)),
-      calls: { sold: doneAtm + doneOtm, of: leapN }, puts: { sold: donePuts, of: putsN },
+      calls: { sold: doneAtm + doneOtm, of: leapN }, puts: { sold: donePuts, of: putTarget, bought: putsN },
       written: left === 0 && leftPuts === 0,
       delta: { now: Math.round(deltaNow), after: Math.round(deltaAfter) },
       /* The By Fri bar: put strike, price, the call strike, the 1 SD call. */
