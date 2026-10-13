@@ -74,14 +74,14 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     translucency is off and the glow has no glass, or the orange washed out and the glow
     showed a glass rim. Checked with Icon Composer's ictool renders against the PNGs.
 
+18. **Story line (block 22).** Not built. Nik, 13 Oct: the account value replaced it, so the
+    rotating line under the header is not wanted.
+
 ## Still open
 
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old
   app until the new one takes that bundle id at ship.
 - **Live checks.** The 30 s tick, the glow and the toast need a look during market hours.
-- **Story line (block 22).** The phone file rotates one line under the old account header
-  ("Good morning. 56 calls and 14 puts are open."). Block 02b replaced that header and its
-  design has no slot for it, so it is not built. Needs Nik's call on where it goes.
 - **Last week (block 09).** `index_weekly` was empty because sunny-home went live after the
   last weekend. Admin mode `last_week` filled Oct 5 - 9; next Friday after the close is the
   first real run.
