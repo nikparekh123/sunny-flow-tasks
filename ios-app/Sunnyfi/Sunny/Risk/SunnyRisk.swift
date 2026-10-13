@@ -60,7 +60,7 @@ struct SunnyMountain: View {
                 Text(kind == .theta ? "Theta" : "Delta").sType(.sectionTitle, tabular: false)
                 if noLongs || n == 0 {
                     Text("-").sType(.largeNumber).padding(.top, 6).frame(height: 40, alignment: .bottom)
-                    Text(kind == .theta ? "no long theta" : "no long delta")
+                    Text(kind == .theta ? "Now · no long theta" : "Now · no long delta")
                         .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.muted)
                 } else {
                     let h = hero(idx)
@@ -76,7 +76,7 @@ struct SunnyMountain: View {
                 }
             }
             if !noLongs && n > 1 { chart(idx, dragging: scrub != nil || pre != nil) }
-            tiles
+            if !tileData.isEmpty { tiles }   // Delta with no longs: no mountain, no tiles
         }
         .foregroundStyle(S.ink)
         .padding(20)
