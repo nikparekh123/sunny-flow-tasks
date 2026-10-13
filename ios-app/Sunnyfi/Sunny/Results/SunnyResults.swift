@@ -437,7 +437,9 @@ struct SunnyPerformance: View {
                 let v = r.up - r.dn
                 Button { withAnimation(S.standard(0.3)) { focus = focus == r.t ? nil : r.t } } label: {
                     HStack(spacing: 10) {
-                        Text(r.t).sType(SType(size: 12, weight: 700, line: 14, tracking: 0), tabular: false).frame(width: 40, alignment: .leading)
+                        Text(r.t).sType(SType(size: 12, weight: 700, line: 14, tracking: 0), tabular: false)
+                            .lineLimit(1).minimumScaleFactor(0.75)   // five letters (GOOGL) fit the 40 pt column
+                            .frame(width: 40, alignment: .leading)
                         GeometryReader { g in
                             let w = g.size.width, zx = CGFloat(x0) * w
                             ZStack(alignment: .leading) {
