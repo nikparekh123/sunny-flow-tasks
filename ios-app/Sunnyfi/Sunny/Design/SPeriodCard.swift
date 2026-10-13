@@ -133,14 +133,34 @@ struct SPeriodHeader: View {
     }
 }
 
+/// The arrow's corner before the 45° turn: left and bottom edges (pointing
+/// left once turned), or top and right edges (pointing right).
+struct SChevron: Shape {
+    let left: Bool
+    func path(in r: CGRect) -> Path {
+        var p = Path(), h: CGFloat = 0.75
+        if left {
+            p.move(to: CGPoint(x: h, y: 0)); p.addLine(to: CGPoint(x: h, y: r.height - h)); p.addLine(to: CGPoint(x: r.width, y: r.height - h))
+        } else {
+            p.move(to: CGPoint(x: 0, y: h)); p.addLine(to: CGPoint(x: r.width - h, y: h)); p.addLine(to: CGPoint(x: r.width - h, y: r.height))
+        }
+        return p
+    }
+}
+
 struct SArrowButton: View {
     let left: Bool
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Image(systemName: left ? "chevron.left" : "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(S.ink)
+            // The design's chevron: a 7 pt corner of 1.5 pt strokes turned 45°,
+            // nudged 2 pt toward the middle (about 10 pt tall). The SF chevron
+            // at 10 pt drew 8.7 pt and thinner, which read too small.
+            SChevron(left: left)
+                .stroke(S.ink, style: StrokeStyle(lineWidth: 1.5, lineCap: .butt, lineJoin: .miter))
+                .frame(width: 7, height: 7)
+                .rotationEffect(.degrees(45))
+                .offset(x: left ? 2 : -2)
                 .frame(width: 28, height: 28)
                 .glassEffect(.regular.interactive(), in: .circle)
                 .contentShape(Circle().inset(by: -8))

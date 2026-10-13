@@ -97,6 +97,13 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     Month view starts at the book's first month (Sep 2026) and opens on now; the back arrow
     stops at the book start. A positions strike opens on Today, not Exp.
 
+22. **Portfolio and Watchlist tap states.** Nik, 13 Oct 2026: % change, then the stock's $
+    change per share, then the current price, on both. Block 10 had Portfolio's $ as the
+    move's effect on the book; that number now lives only in the summary line.
+23. **Period arrows.** Drawn as the phone design draws them (a 7 pt corner of 1.5 pt strokes,
+    turned 45°), not SF chevron.left at 10 pt, which read too small. Same for the Writes back
+    button (9 pt).
+
 ## Still open
 
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old

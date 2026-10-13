@@ -134,7 +134,10 @@ struct SunnyPortfolio: View {
 
     /// One block: ticker 15 + value 13 at 84 × 60 and up, 12 + 11 at 46 × 36,
     /// ticker 10 only at 28 × 18, blank below.
-    private func tile(_ it: Item, w: CGFloat, h: CGFloat, label: String?, fill: Bool = false, impact: Bool = true,
+    // Tap cycles % change → the stock's $ change per share → price, on both
+    // Portfolio and Watchlist (Nik, 13 Oct 2026; block 10 had $ as the move's
+    // effect on the book). The summary line still ranks by effect on the book.
+    private func tile(_ it: Item, w: CGFloat, h: CGFloat, label: String?, fill: Bool = false, impact: Bool = false,
                       tap: @escaping () -> Void) -> some View {
         let tier = w >= 84 && h >= 60 ? 2 : w >= 46 && h >= 36 ? 1 : w >= 28 && h >= 18 ? 0 : -1
         let (bg, white) = heat(it.pct)
