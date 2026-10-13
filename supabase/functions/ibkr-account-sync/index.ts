@@ -61,7 +61,26 @@ async function fetchReport(token: string, q: string): Promise<string> {
   return xml;
 }
 
+/* ⚠ WHO MAY CALL (audit, 13 Oct 2026). verify_jwt is off so pg_cron can call
+   in, so the function checks instead: the scheduler's x-cron-key (vault
+   `cron_secret`, secret CRON_SECRET), the service-role key, or, where `users`
+   is set, a signed-in user of the app or website. Anyone else gets a 401. */
+async function callerOk(req: Request, users: boolean): Promise<boolean> {
+  const cron = Deno.env.get('CRON_SECRET');
+  if (cron && req.headers.get('x-cron-key') === cron) return true;
+  const auth = req.headers.get('authorization') ?? '';
+  if (auth && auth === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) return true;
+  if (!users || !auth.startsWith('Bearer ')) return false;
+  const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/auth/v1/user`,
+    { headers: { apikey: Deno.env.get('SUPABASE_ANON_KEY') ?? '', Authorization: auth } });
+  await r.body?.cancel();
+  return r.ok;
+}
+const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allowed' }),
+  { status: 401, headers: { 'Content-Type': 'application/json' } });
+
 Deno.serve(async (req) => {
+  if (req.method !== 'OPTIONS' && !(await callerOk(req, false))) return refused();
   const url = Deno.env.get('SUPABASE_URL')!;
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const h = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' };

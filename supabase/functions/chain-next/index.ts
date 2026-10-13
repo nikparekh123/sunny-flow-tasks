@@ -200,6 +200,24 @@ const nyToday = () =>
   new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
     .toLocaleDateString('en-CA');
 
+/* ⚠ WHO MAY CALL (audit, 13 Oct 2026). verify_jwt is off so pg_cron can call
+   in, so the function checks instead: the scheduler's x-cron-key (vault
+   `cron_secret`, secret CRON_SECRET), the service-role key, or, where `users`
+   is set, a signed-in user of the app or website. Anyone else gets a 401. */
+async function callerOk(req: Request, users: boolean): Promise<boolean> {
+  const cron = Deno.env.get('CRON_SECRET');
+  if (cron && req.headers.get('x-cron-key') === cron) return true;
+  const auth = req.headers.get('authorization') ?? '';
+  if (auth && auth === `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`) return true;
+  if (!users || !auth.startsWith('Bearer ')) return false;
+  const r = await fetch(`${Deno.env.get('SUPABASE_URL')}/auth/v1/user`,
+    { headers: { apikey: Deno.env.get('SUPABASE_ANON_KEY') ?? '', Authorization: auth } });
+  await r.body?.cancel();
+  return r.ok;
+}
+const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allowed' }),
+  { status: 401, headers: { 'Content-Type': 'application/json' } });
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   const t0 = Date.now();
@@ -212,6 +230,10 @@ Deno.serve(async (req) => {
 
     let body: Record<string, unknown> = {};
     try { body = await req.json(); } catch { /* cron sends none */ }
+    /* A one-name live read is public prices and the iOS roll sheet asks for it
+       with the publishable key, so it stays open; the full run, which rewrites
+       option_chain_next, is the scheduler's or the service role's. */
+    if (typeof body.ticker !== 'string' && !(await callerOk(req, false))) return refused();
     const dryRun = body.dry_run === true;
     const today0 = nyToday();
     const useTheta = String(body.source ?? Deno.env.get('MARKS_SOURCE') ?? 'polygon').toLowerCase() === 'theta'
