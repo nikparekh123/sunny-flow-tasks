@@ -122,6 +122,7 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     Sold vs Bought, Allocation) take the Theta and Delta glass; Positions ticker cards,
     Performance, Portfolio and Watchlist stay on the design's paper. One switch,
     `S.glassCards`, puts them all back on paper; per card, `sCardSurface(glass: false)`.
+    Tried and turned off the same day (Nik: "go back to how it was"): `S.glassCards` is false.
 
 ## Still open
 

@@ -157,7 +157,7 @@ enum S {
     /// Trial, Nik 13 Oct 2026: the glance cards (Inventory, Yield, Payback, Sold vs
     /// Bought, Allocation) in the Theta and Delta glass. Set to false to put them
     /// back on the design's solid paper cards (nothing else changes).
-    static let glassCards = true
+    static let glassCards = false   // trial ended 13 Oct 2026: Nik went back to paper
     static let rDeck: CGFloat = 24
     static let rChip: CGFloat = 16
     static let rPanel: CGFloat = 18
