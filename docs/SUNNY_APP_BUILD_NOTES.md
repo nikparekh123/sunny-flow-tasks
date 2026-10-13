@@ -85,6 +85,13 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     the rule writes about 41% and 30% to 40% tested best; a high reading means the LEAPs lost
     delta, and the fix is rolling them deeper, not selling fewer calls.
 
+20. **Account value vs IBKR: left as is.** Nik, 13 Oct 2026. Sunny runs about $300 to $400
+    off IBKR's app during the day: about $110 in the starting close (IBKR statement close vs
+    the app's prior close, probably accrued interest), and option prices (we use the bid/ask
+    middle; IBKR its own mark, worst on wide LEAP spreads), plus up to a minute of lag.
+    Unrealized differs by design: the glossary counts open shorts at full value and keeps
+    their open premium apart (about $7.3K), where IBKR nets shorts against their sale price.
+
 ## Still open
 
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old
