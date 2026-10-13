@@ -163,7 +163,7 @@ enum DeckBuilder {
         let wd = n.weekday
         if c.kind == "closed" {
             // Not on a closed day itself: the status line says so.
-            let t = MarketClock.ny(Date())
+            let t = MarketClock.ny(SClock.now())
             guard MarketClock.isTradingDay(today, weekday: t.weekday, h.calendar) else { return nil }
             let expiry = wd == 6 ? "weeklies expire Thursday" : "weeklies expire Friday as usual"
             return DeckCard(id: "hol-\(n.iso)", kicker: "Holiday · \(weekdays[wd]) \(dayNum(n.iso))",

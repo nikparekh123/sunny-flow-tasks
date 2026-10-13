@@ -20,10 +20,14 @@ import SwiftUI
 @Observable
 final class PeriodState {
     enum View: String, CaseIterable { case week = "Week", month = "Month" }
-    var view: View = .week
+    var view: View = DebugPreset.string("period.view") == "month" ? .month : .week
     /// Months (Week) or years (Month) back from now; 0 = now, never ahead.
-    var back = 0
-    var picked: [String: Int] = [:]     // card key -> picked column
+    var back = DebugPreset.int("period.back") ?? 0
+    var picked: [String: Int] = {      // card key -> picked column
+        var p: [String: Int] = [:]
+        for k in ["inv", "yield", "svb"] { if let v = DebugPreset.int("\(k).pick") { p[k] = v } }
+        return p
+    }()
 
     func step(_ d: Int) {
         withAnimation(S.standard()) { back = max(0, back - d); picked = [:] }

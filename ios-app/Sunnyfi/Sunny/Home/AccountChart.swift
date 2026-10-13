@@ -174,12 +174,12 @@ extension Array {
 struct AccountChart: View {
     let home: HomePayload
     @AppStorage("sunny.hideNumbers") private var hidden = false
-    @State private var range: ChartRange = .m1
-    @State private var compare = false
-    @State private var single: ChartGroup?
-    @State private var half: ChartHalf = .both
+    @State private var range: ChartRange = DebugPreset.string("chart.range").flatMap(ChartRange.init(rawValue:)) ?? .m1
+    @State private var compare = DebugPreset.bool("chart.compare")
+    @State private var single: ChartGroup? = DebugPreset.string("chart.single").flatMap(ChartGroup.init(rawValue:))
+    @State private var half: ChartHalf = DebugPreset.string("chart.half").flatMap(ChartHalf.init(rawValue:)) ?? .both
     /// The finger, 0...1 across the line (continuous; numbers snap to a day).
-    @State private var finger: CGFloat?
+    @State private var finger: CGFloat? = DebugPreset.double("chart.scrub").map { CGFloat($0) }
     @State private var drawn: CGFloat = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
 
@@ -199,7 +199,10 @@ struct AccountChart: View {
             rangesRow
             panel
         }
-        .onAppear { if let m = model, !m.available(range) { range = .all } }
+        .onAppear {
+            if let m = model, !m.available(range) { range = .all }
+            if DebugPreset.gallery != nil || !DebugPreset.values.isEmpty { hidden = DebugPreset.bool("eye") }
+        }
     }
 
     // MARK: Where we are

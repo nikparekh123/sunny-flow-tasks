@@ -86,12 +86,22 @@ final class HomeStore {
                 if !moved.isEmpty { showToast("Positions updated · \(moved.count) changed") }
             }
             home = payload
-            if reason != .tick || words == nil || !MarketClock.isRegular(Date(), calendar: payload.calendar) {
+            if reason != .tick || words == nil || !MarketClock.isRegular(SClock.now(), calendar: payload.calendar) {
                 words = payload
             }
-            lastGood = Date()
+            lastGood = SClock.now()
             tick += 1
-            if MarketClock.inSession(Date(), calendar: payload.calendar) { livePulse += 1 }
+            if MarketClock.inSession(SClock.now(), calendar: payload.calendar) { livePulse += 1 }
+            #if DEBUG && targetEnvironment(simulator)
+            if let ago = DebugPreset.double("store.ago") { lastGood = SClock.now().addingTimeInterval(-ago) }
+            switch DebugPreset.string("store.health") {
+            case "notUpdating": health = .notUpdating
+            case "offline": health = .offline
+            case "cantReach": health = .cantReach
+            default: break
+            }
+            if let t = DebugPreset.string("store.toast") { showToast(t.replacingOccurrences(of: "_", with: " ")) }
+            #endif
             health = .fresh
             loadError = nil
             lastAttemptFailedOffline = false
@@ -139,7 +149,7 @@ final class HomeStore {
     /// Runs while the app is active. Ticks only inside a session; the caller
     /// cancels it when the scene leaves the foreground.
     func live() async {
-        if let g = lastGood, Date().timeIntervalSince(g) < 30, home != nil {
+        if let g = lastGood, SClock.now().timeIntervalSince(g) < 30, home != nil {
             // Fresh enough: the clock starts from the last good update.
         } else {
             await refresh(.open)
@@ -147,10 +157,10 @@ final class HomeStore {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(30))
             if Task.isCancelled { break }
-            if MarketClock.inSession(Date(), calendar: home?.calendar ?? []) {
+            if MarketClock.inSession(SClock.now(), calendar: home?.calendar ?? []) {
                 await refresh(.tick)
                 updateHealth()
-            } else if let h = home, MarketClock.ny(Date()).date != h.today {
+            } else if let h = home, MarketClock.ny(SClock.now()).date != h.today {
                 // Midnight New York: the deck and the day's words move on.
                 await refresh(.open)
             }
@@ -160,6 +170,6 @@ final class HomeStore {
     /// Open and nothing good for 90 s: the pill turns red (block 01).
     private func updateHealth() {
         guard let g = lastGood else { return }
-        if Date().timeIntervalSince(g) > 90, health == .fresh { health = .notUpdating }
+        if SClock.now().timeIntervalSince(g) > 90, health == .fresh { health = .notUpdating }
     }
 }

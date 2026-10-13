@@ -7,9 +7,11 @@
 //
 //  ⚠ INTER SHIPS AS ONE VARIABLE FONT. A weight is the `wght` axis, set on the
 //  font descriptor; SwiftUI's `.weight()` cannot reach it on a custom font.
-//  ⚠ CSS LINE HEIGHT IS THE WHOLE LINE BOX; SwiftUI's `lineSpacing` is extra
-//  space ON TOP of the font's natural line, and a fixed frame truncates a
-//  wrapped title. iOS 26's `.lineHeight(.exact(points:))` is the CSS box.
+//  ⚠ CSS LINE HEIGHT IS THE WHOLE LINE BOX, with the glyphs centred in it.
+//  SwiftUI's `lineSpacing` is extra space between lines only, a fixed frame
+//  truncates a wrapped title, and `.lineHeight(.exact)` sat the glyphs low
+//  in tight boxes (button labels off centre). So: natural line + leading
+//  between lines + the difference split evenly above and below.
 //
 
 import SwiftUI
@@ -87,11 +89,17 @@ private struct STypeModifier: ViewModifier {
     let t: SType
     let tabular: Bool
     func body(content: Content) -> some View {
-        // iOS 26's exact line height is CSS's line box, multi-line included.
+        // CSS centres the glyphs in the line box: half the difference above,
+        // half below, even when the box is tighter than the font. So the
+        // font keeps its natural line, extra lines get the leading, and the
+        // box is trimmed or grown evenly top and bottom (negative padding
+        // for a tight box, which never clips a wrapped line).
+        let natural = t.uiFont().lineHeight
         content
             .font(t.font(tabular: tabular))
             .tracking(t.tracking * t.size)
-            .lineHeight(.exact(points: t.line))
+            .lineSpacing(max(0, t.line - natural))
+            .padding(.vertical, (t.line - natural) / 2)
     }
 }
 
@@ -117,8 +125,10 @@ extension View {
     func sMono(_ size: CGFloat, _ weight: CGFloat = 400, line: CGFloat? = nil, tracking: CGFloat = 0) -> some View {
         let m = SMono(size: size, weight: weight, line: line, tracking: tracking)
         let f = m.uiFont()
+        let lh = line ?? f.lineHeight
         return self.font(Font(f))
             .tracking(tracking * size)
-            .lineHeight(line.map { .exact(points: $0) })
+            .lineSpacing(max(0, lh - f.lineHeight))
+            .padding(.vertical, (lh - f.lineHeight) / 2)
     }
 }

@@ -15,7 +15,7 @@ struct SunnyInventory: View {
     let home: HomePayload
     let words: HomePayload
     @Environment(HomeRouter.self) private var router
-    @State private var hidden: Set<String> = []
+    @State private var hidden: Set<String> = DebugPreset.set("inv.hide")
 
     private var inv: Inventory { home.inventory }
     private var P: PeriodState { router.period }

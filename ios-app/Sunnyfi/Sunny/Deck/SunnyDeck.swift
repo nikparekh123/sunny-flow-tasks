@@ -19,7 +19,7 @@ struct SunnyDeck: View {
 
     /// The cards as they were when a drag began; changes wait for the lift.
     @State private var held: [DeckCard]?
-    @State private var index = 0
+    @State private var index = DebugPreset.int("deck.index") ?? 0
     @State private var lastSwipe = Date.distantPast
     @State private var dismissed: Set<String> = []
 

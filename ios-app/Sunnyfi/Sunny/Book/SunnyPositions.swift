@@ -16,6 +16,7 @@ import UIKit
 
 enum PMode { case pct, usd, tv
     var next: PMode { switch self { case .pct: .usd; case .usd: .tv; case .tv: .pct } }
+    static func preset(_ s: String?) -> PMode { s == "usd" ? .usd : s == "tv" ? .tv : .pct }
 }
 
 /// The priced book, built once per payload.
@@ -57,9 +58,9 @@ enum PBook {
 
 struct SunnyPositions: View {
     let home: HomePayload
-    @State private var pick = "ALL"
-    @State private var mode: PMode = .pct
-    @State private var page: String?
+    @State private var pick = DebugPreset.string("pos.pick") ?? "ALL"
+    @State private var mode: PMode = PMode.preset(DebugPreset.string("pos.mode"))
+    @State private var page: String? = DebugPreset.string("pos.page")
     @State private var legSel: [String: String] = [:]
     @State private var tallest: CGFloat = 0
     @Environment(HomeRouter.self) private var router
@@ -315,7 +316,9 @@ struct PSideCard: View {
     @State private var si: Int?
     @Environment(\.changedLegs) private var changed
 
-    private var leg: PLeg { L.first { $0.id == sel } ?? L[0] }
+    private var leg: PLeg {
+        L.first { $0.id == sel } ?? DebugPreset.int("pos.leg").flatMap { L[safe: $0] } ?? L[0]
+    }
     private var sold: Bool { L[0].sold }
     private var call: Bool { L[0].call }
     private var CW: CGFloat { width - 40 }
@@ -324,7 +327,7 @@ struct PSideCard: View {
     var body: some View {
         let l = leg, px = l.px
         let slots = TimeStrip.slots(until: l.expiry, long: !sold, calendar: home.calendar)
-        let idx = min(si ?? slots.count - 1, slots.count - 1)
+        let idx = min(si ?? PTime.presetSlot(slots), slots.count - 1)
         let el = min(slots[idx].el, l.days)
         let (lo, hi) = Self.span(l)
         let stops = (0...5).map { Double($0) / 5 * l.days }
@@ -408,7 +411,7 @@ struct PCombinedCard: View {
         let hasShort = !shorts.isEmpty
         let until = (hasShort ? shorts : L).map(\.expiry).max()!
         let slots = TimeStrip.slots(until: until, long: !hasShort, calendar: home.calendar)
-        let idx = min(si ?? slots.count - 1, slots.count - 1)
+        let idx = min(si ?? PTime.presetSlot(slots), slots.count - 1)
         let endDays = (hasShort ? shorts : L).map(\.days).max() ?? 0
         let el = min(slots[idx].el, endDays)
         let px = L[0].px, ks = L.map(\.k)
@@ -466,6 +469,18 @@ enum PDist {
 }
 
 enum PTime {
+    /// The strip's starting stop: Exp, or a preset ("now", a weekday 2-6 at
+    /// noon, or "d<N>" days out).
+    static func presetSlot(_ s: [TimeSlot]) -> Int {
+        let last = s.count - 1
+        guard let p = DebugPreset.string("pos.slot") else { return last }
+        if p == "now" { return 0 }
+        if p.hasPrefix("d"), let n = Int(p.dropFirst()) { return min(last, n) }
+        if let wd = Int(p) {
+            return s.firstIndex { $0.minutes == 12 * 60 && DeckBuilder.weekday($0.date) == wd } ?? last
+        }
+        return last
+    }
     static let mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
     static func dayLabel(_ s: [TimeSlot], _ i: Int, long: Bool) -> String {
         if i == 0 { return "Now" }
@@ -739,7 +754,7 @@ struct PTimeStripView: View {
 
     private var px: CGFloat { long ? 2 : 5.5 }
     private var last: Int { slots.count - 1 }
-    private var cur: Int { min(si ?? last, last) }
+    private var cur: Int { min(si ?? PTime.presetSlot(slots), last) }
 
     var body: some View {
         VStack(spacing: 6) {

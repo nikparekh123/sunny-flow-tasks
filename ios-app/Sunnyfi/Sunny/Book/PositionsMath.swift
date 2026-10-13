@@ -99,7 +99,7 @@ enum PMath {
     }
 
     /// Build priced legs from the payload. Spot: the ticker's live price.
-    static func legs(_ home: HomePayload, now: Date = Date()) -> [PLeg] {
+    static func legs(_ home: HomePayload, now: Date = SClock.now()) -> [PLeg] {
         let spot = Dictionary(home.portfolio.compactMap { p in p.spot.map { (p.ticker, $0) } }, uniquingKeysWith: { a, _ in a })
         return home.legs.compactMap { l in
             guard let px = spot[l.ticker] ?? l.underlying, px > 0 else { return nil }
@@ -162,7 +162,7 @@ struct TimeSlot: Hashable {
 enum TimeStrip {
     /// Sold: now, then every 15 minutes 9:30 to 4:00 on each trading day to
     /// the expiry close. Bought: now, then one a day to the expiry.
-    static func slots(until expiry: String, long: Bool, calendar: [CalendarDay], now: Date = Date()) -> [TimeSlot] {
+    static func slots(until expiry: String, long: Bool, calendar: [CalendarDay], now: Date = SClock.now()) -> [TimeSlot] {
         let t = MarketClock.ny(now)
         var out = [TimeSlot(el: 0, date: t.date, minutes: nil, open: false, noon: false)]
         let end = PMath.expiryClose(expiry)

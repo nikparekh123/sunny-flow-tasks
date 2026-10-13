@@ -17,8 +17,8 @@ struct SunnyYield: View {
     let home: HomePayload
     let words: HomePayload
     @Environment(HomeRouter.self) private var router
-    @State private var mode: PMode = .pct
-    @State private var hidden: Set<String> = []
+    @State private var mode: PMode = PMode.preset(DebugPreset.string("yield.mode"))
+    @State private var hidden: Set<String> = DebugPreset.set("yield.hide")
 
     private var P: PeriodState { router.period }
 
@@ -132,8 +132,8 @@ struct SunnyYield: View {
 struct SunnyPayback: View {
     let home: HomePayload
     let words: HomePayload
-    @State private var mode: PMode = .pct
-    @State private var hidden: Set<String> = []
+    @State private var mode: PMode = PMode.preset(DebugPreset.string("pb.mode"))
+    @State private var hidden: Set<String> = DebugPreset.set("pb.hide")
 
     private var pb: Payback { home.payback }
 

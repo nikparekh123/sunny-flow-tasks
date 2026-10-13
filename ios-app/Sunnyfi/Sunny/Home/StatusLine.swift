@@ -127,7 +127,8 @@ struct StatusLine: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 20)) { ctx in
             let home = store.home
-            let st = MarketStatus.at(ctx.date, calendar: home?.calendar ?? [], held415: home?.tradeTo415 ?? [])
+            let now = SClock.override ?? ctx.date
+            let st = MarketStatus.at(now, calendar: home?.calendar ?? [], held415: home?.tradeTo415 ?? [])
             HStack(spacing: 8) {
                 Circle().fill(dot(st.tone)).frame(width: 8, height: 8)
                 Text(st.text)
@@ -135,7 +136,7 @@ struct StatusLine: View {
                     .foregroundStyle(textColor(st.tone))
                     .lineLimit(1)
                 Spacer(minLength: 8)
-                UpdatedPill(store: store, now: ctx.date, open: st.tone != .grey)
+                UpdatedPill(store: store, now: now, open: st.tone != .grey)
             }
             .frame(height: 28)
             .accessibilityElement(children: .combine)

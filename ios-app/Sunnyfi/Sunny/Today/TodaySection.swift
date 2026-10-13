@@ -66,12 +66,12 @@ struct SArrow: View {
 
 struct SunnyToday: View {
     let home: HomePayload
-    @State private var dollars = false
+    @State private var dollars = DebugPreset.bool("today.usd")
 
     private enum Mode { case cards, preMarket, lastWeek }
 
     private var mode: Mode {
-        let t = MarketClock.ny(Date()), m = t.minutes
+        let t = MarketClock.ny(SClock.now()), m = t.minutes
         let holiday = MarketClock.closure(t.date, home.calendar)?.kind == "closed" && t.weekday != 1 && t.weekday != 7
         if holiday { return .cards }
         let weekend = (t.weekday == 6 && m >= 16 * 60) || t.weekday == 7 || t.weekday == 1 || (t.weekday == 2 && m < 4 * 60)
@@ -97,6 +97,7 @@ struct SunnyToday: View {
     }
 
     private var cards: some View {
+        ScrollViewReader { proxy in
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(home.indices) { t in
@@ -104,14 +105,17 @@ struct SunnyToday: View {
                         withAnimation(S.standard(S.tap)) { dollars.toggle() }
                     }
                     .containerRelativeFrame(.horizontal, count: 3, spacing: 8)
+                    .id(t.symbol)
                 }
             }
             .scrollTargetLayout()
         }
+        .onAppear { if DebugPreset.bool("today.vix") { proxy.scrollTo("^VIX", anchor: .trailing) } }
         .contentMargins(.horizontal, S.margin, for: .scrollContent)
         .scrollTargetBehavior(.viewAligned)
         .scrollIndicators(.hidden)
         .scrollClipDisabled()
+        }
     }
 }
 

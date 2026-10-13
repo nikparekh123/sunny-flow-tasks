@@ -40,7 +40,8 @@ struct SunnyMountain: View {
     let kind: Kind
     let home: HomePayload
     let onHot: (String) -> Void
-    @State private var scrub: Int?
+    @State private var scrub: Int? = nil
+    @State private var preset = true
     @Environment(\.colorScheme) private var scheme
 
     private static let LW: CGFloat = 262, TOP: CGFloat = 16, BOT: CGFloat = 172
@@ -52,7 +53,8 @@ struct SunnyMountain: View {
 
     var body: some View {
         let n = V.count
-        let idx = min(scrub ?? n - 1, max(0, n - 1))
+        let pre = preset ? DebugPreset.int(kind == .theta ? "theta.scrub" : "delta.scrub") : nil
+        let idx = min(scrub ?? pre ?? n - 1, max(0, n - 1))
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(kind == .theta ? "Theta" : "Delta").sType(.sectionTitle, tabular: false)
@@ -65,7 +67,7 @@ struct SunnyMountain: View {
                     Text(h.text).sType(.largeNumber).foregroundStyle(h.color)
                         .contentTransition(.numericText(value: V[idx]))
                         .padding(.top, 6)
-                    (Text("\(scrub == nil ? "Now" : F.day(home.history.days[safe: idx] ?? "")) · \(h.sub) ")
+                    (Text("\(scrub == nil && pre == nil ? "Now" : F.day(home.history.days[safe: idx] ?? "")) · \(h.sub) ")
                      + Text("· \(h.trend)").foregroundStyle(h.trendColor))
                         .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
                         .foregroundStyle(S.muted)
@@ -73,7 +75,7 @@ struct SunnyMountain: View {
                         .frame(height: 20)
                 }
             }
-            if !noLongs && n > 1 { chart(idx) }
+            if !noLongs && n > 1 { chart(idx, dragging: scrub != nil || pre != nil) }
             tiles
         }
         .foregroundStyle(S.ink)
@@ -103,7 +105,7 @@ struct SunnyMountain: View {
 
     // MARK: The mountain
 
-    @ViewBuilder private func chart(_ idx: Int) -> some View {
+    @ViewBuilder private func chart(_ idx: Int, dragging: Bool) -> some View {
         let n = V.count, F = floorV, LW = Self.LW
         let vmin = min(V.min()!, F), vmax = max(V.max()!, F, kind == .delta ? cap : F)
         let pad = (vmax - vmin) * 0.08
@@ -142,12 +144,12 @@ struct SunnyMountain: View {
                 var b = Path(); b.move(to: CGPoint(x: 0, y: BL)); b.addLine(to: CGPoint(x: LW, y: BL))
                 ctx.stroke(b, with: .color(S.ink.opacity(0.22)), lineWidth: 1)
                 ctx.stroke(line { $0 }, with: .color(S.ink.opacity(0.92)), style: StrokeStyle(lineWidth: 1, lineJoin: .round))
-                if scrub != nil {
+                if dragging {
                     ctx.fill(Path(CGRect(x: X(idx) - 0.5, y: 8, width: 1, height: 196 - 30)), with: .color(S.pGrid.opacity(3)))
                 }
             }
             .frame(width: 301, height: 196)
-            Circle().fill(scrub != nil ? S.ink : (V[n - 1] < F ? brick : upC)).frame(width: 6, height: 6)
+            Circle().fill(dragging ? S.ink : (V[n - 1] < F ? brick : upC)).frame(width: 6, height: 6)
                 .overlay(Circle().stroke(S.paper, lineWidth: 2))
                 .position(x: X(idx), y: Y(V[idx]))
             if showPk {
@@ -173,7 +175,7 @@ struct SunnyMountain: View {
         .gesture(ScrubGesture(onChange: { x in
             let j = max(0, min(n - 1, Int((x / LW * CGFloat(n - 1)).rounded())))
             if j != scrub { UISelectionFeedbackGenerator().selectionChanged(); scrub = j }
-        }, onEnd: { withAnimation(S.standard(0.3)) { scrub = nil } }))
+        }, onEnd: { withAnimation(S.standard(0.3)) { scrub = nil; preset = false } }))
         .accessibilityElement()
         .accessibilityLabel("\(kind == .theta ? "Theta" : "Delta") over time, now \(fmt(V[n - 1]))")
         .accessibilityAdjustableAction { dir in

@@ -26,9 +26,20 @@ struct HomeView: View {
         ZStack {
             SBackground()
             if let home = store.home {
+                #if DEBUG
+                if let g = DebugPreset.gallery {
+                    GalleryHost(block: g, store: store, home: home)
+                        .environment(\.livePulse, store.livePulse)
+                } else {
+                    page(home)
+                        .opacity(shown ? 1 : 0)
+                        .onAppear { withAnimation(.easeOut(duration: 0.5)) { shown = true } }
+                }
+                #else
                 page(home)
                     .opacity(shown ? 1 : 0)
                     .onAppear { withAnimation(.easeOut(duration: 0.5)) { shown = true } }
+                #endif
             } else if store.loadError != nil {
                 HomeUnavailable(store: store)
             } else {

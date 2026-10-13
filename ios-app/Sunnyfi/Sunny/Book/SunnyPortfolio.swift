@@ -19,9 +19,9 @@ enum TileMode { case pct, usd, price
 struct SunnyPortfolio: View {
     let home: HomePayload
     let words: HomePayload
-    @State private var range = 0
-    @State private var mode: TileMode = .pct
-    @State private var otherOpen = false
+    @State private var range = DebugPreset.int("pf.range") ?? 0
+    @State private var mode: TileMode = DebugPreset.string("pf.mode") == "usd" ? .usd : DebugPreset.string("pf.mode") == "price" ? .price : .pct
+    @State private var otherOpen = DebugPreset.bool("pf.other")
     @Environment(\.colorScheme) private var scheme
 
     private static let ranges = ["Today", "1 week", "2 weeks", "3 weeks", "4 weeks"]

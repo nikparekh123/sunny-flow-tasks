@@ -181,11 +181,11 @@ struct SunnySoldBought: View {
 
 struct SunnyPerformance: View {
     let words: HomePayload
-    @State private var realized = true
-    @State private var unrealized = false
+    @State private var realized = DebugPreset.string("perf.r") != "0"
+    @State private var unrealized = DebugPreset.bool("perf.u")
     @State private var period: Int?          // nil = YTD, else a month index
-    @State private var types: Set<String> = []
-    @State private var focus: String?
+    @State private var types: Set<String> = DebugPreset.set("perf.types")
+    @State private var focus: String? = DebugPreset.string("perf.focus")
     @State private var started = false
 
     private struct T { let key: String; let name: String; let color: Color }
@@ -307,7 +307,12 @@ struct SunnyPerformance: View {
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .sCardSurface(glow: unrealized)
-        .onAppear { if !started { started = true; period = months.count - 1 } }
+        .onAppear {
+            guard !started else { return }
+            started = true
+            let p = DebugPreset.string("perf.period")
+            period = p == "ytd" ? nil : p.flatMap(Int.init) ?? months.count - 1
+        }
     }
 
     // Filters: Realized · Unrealized, position types, then the period.
@@ -515,9 +520,9 @@ struct SunnyPerformance: View {
 struct SunnyAllocation: View {
     let home: HomePayload
     let words: HomePayload
-    @State private var dollars = false
-    @State private var picked: String?
-    @State private var more = false
+    @State private var dollars = DebugPreset.bool("alloc.usd")
+    @State private var picked: String? = DebugPreset.string("alloc.pick")
+    @State private var more = DebugPreset.bool("alloc.more")
 
     private static let palette: [Color] = [0x3B873D, 0x65C466, 0x366DEB, 0x73B6F9, 0xF7CE46, 0x996C23, 0x6E6E73].map { Color(hex: $0) }
 
