@@ -1146,7 +1146,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   // ════════════════════════════════════════════════════════════════════════
   // THETA CHECK (block 07), mode 'theta_check', after every close. Asleep
   // until a LEAP drags: its theta a day up 50% or more on a month ago, or it
-  // alone pulls the book's 2-week ratio under 2× (Nik took both proposals).
+  // alone pulls the book's 2-week ratio under 3× (Nik took both proposals; the
+  // line moved from 2× to 3× on 13 Oct 2026 after the risk-bands backtest).
   // A finding carries its fix: the roll to the next January a year further
   // out at 70 to 75 delta (Nik, 12 Oct 2026: "around 70 to 75 delta, not
   // 90"; 0.9 put NKE into a $47,550 debit, new capital, not a roll).
@@ -1161,6 +1162,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     && !(ranToday && ny(new Date(String(ranToday))).date === today);
   if (mode === 'theta_check' && !checkDue) checkSummary = [{ skipped: 'not after the close, or already ran today' }];
   if (checkDue) {
+    const THETA_LINE = 3;   // the Theta card's warning line (block 15), same number in the app
     const ratioNow = history.theta.now;
     const thS = livePoint?.thS ?? all.at(-1)?.thS ?? 0, thL = livePoint?.thL ?? all.at(-1)?.thL ?? 0;
     const monthAgo = days.length > 21 ? days[days.length - 21] : days[0];
@@ -1180,7 +1182,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const growth = thenTh && thenTh > 0 ? nowTh / thenTh - 1 : null;
       const without = thL - nowTh > 0 ? thS / (thL - nowTh) : null;
       const trigger = growth != null && growth >= 0.5 ? 'growth'
-        : (ratioNow != null && ratioNow < 2 && without != null && without >= 2) ? 'ratio' : null;
+        : (ratioNow != null && ratioNow < THETA_LINE && without != null && without >= THETA_LINE) ? 'ratio' : null;
       found.push({ l, nowTh, thenTh, thenDay, growth, without, trigger });
     }
     const existing = openChecks;

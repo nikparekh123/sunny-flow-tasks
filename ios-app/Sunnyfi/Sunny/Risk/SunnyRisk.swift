@@ -3,7 +3,7 @@
 //  Sunny
 //
 //  Blocks 15 and 16 · Theta and Delta, the glass pair, on SunnyMountain.
-//  Theta: short theta ÷ long theta, 2-week average, off the 2× line (green
+//  Theta: short theta ÷ long theta, 2-week average, off the 3× line (green
 //  above, brick below), a peak tag over the summit. Delta: sold Δ ÷ long Δ
 //  with the healthy band 20% to 50% (yellow above 50%). Both over the
 //  window since the book began, one point a trading day, today live. Drag
@@ -47,7 +47,12 @@ struct SunnyMountain: View {
     private static let LW: CGFloat = 262, TOP: CGFloat = 16, BOT: CGFloat = 172
 
     private var V: [Double] { kind == .theta ? home.history.theta.avg2w : home.history.delta.avg2w }
-    private var floorV: Double { kind == .theta ? 2 : 20 }
+    /// The Theta warning line. 3×, not the design's 2× (Nik, 13 Oct 2026: the
+    /// backtest had 2× firing on under 1% of weeks; below 3× most months lost).
+    static let thetaLine: Double = 3
+    /// "3×", for the line's tag (inside the chart `F` is the floor value, not the formatter).
+    static let thetaLineTag = F.trim(thetaLine) + "×"
+    private var floorV: Double { kind == .theta ? Self.thetaLine : 20 }
     private let cap: Double = 50
     private var noLongs: Bool { kind == .theta ? home.risk.theta.long <= 0 : home.risk.delta.long <= 0 }
 
@@ -91,7 +96,8 @@ struct SunnyMountain: View {
         let v = V[i], v0 = V[max(0, i - 5)]
         if kind == .theta {
             let tr = v < v0 * 0.95 ? "downslope" : v > v0 * 1.05 ? "climbing" : "steady"
-            return (String(format: "%.2f×", v), v < 2 ? S.red : S.ink, v < 2 ? "below 2×" : "above 2×", tr, tr == "downslope" ? S.red : S.muted)
+            let L = Self.thetaLine
+            return (String(format: "%.2f×", v), v < L ? S.red : S.ink, v < L ? "below \(F.trim(L))×" : "above \(F.trim(L))×", tr, tr == "downslope" ? S.red : S.muted)
         }
         let L = home.risk.delta.long, out = v < 20 || v > 50
         let tr = v < 20 ? "underselling" : v > 50 ? "capping upside" : "healthy"
@@ -159,7 +165,7 @@ struct SunnyMountain: View {
             tag(fmt(V[n - 1]), color: V[n - 1] < F ? S.red : S.ink, weight: 700)
                 .alignmentGuide(.leading) { _ in -(LW + 7) }.alignmentGuide(.top) { d in -(ey - d.height / 2) }
             let by = abs(BL - ey) < 11 ? BL + (BL > ey ? 11 : -11) : BL
-            tag(kind == .theta ? "2×" : "20%", color: faint, weight: 600)
+            tag(kind == .theta ? Self.thetaLineTag : "20%", color: faint, weight: 600)
                 .alignmentGuide(.leading) { _ in -(LW + 7) }.alignmentGuide(.top) { d in -(by - d.height / 2) }
             if kind == .delta && abs(capY - ey) >= 11 {
                 tag("50%", color: faint, weight: 600)

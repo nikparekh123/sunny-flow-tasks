@@ -77,6 +77,14 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 18. **Story line (block 22).** Not built. Nik, 13 Oct: the account value replaced it, so the
     rotating line under the header is not wanted.
 
+19. **Theta line 3×, not 2×.** Nik, 13 Oct 2026, after the risk-bands backtest
+    (research/risk-bands, untracked): under the roll sheet 2× fired on under 1% of weeks;
+    below 3× on the app's gauge most following months lost money. The line, the "below/above"
+    words, the red number and the theta check's ratio trigger all use 3×
+    (`SunnyMountain.thetaLine`, `THETA_LINE` in sunny-home). The Delta band stays 20% to 50%:
+    the rule writes about 41% and 30% to 40% tested best; a high reading means the LEAPs lost
+    delta, and the fix is rolling them deeper, not selling fewer calls.
+
 ## Still open
 
 - **Push.** apns-deliver sends to `com.sunnyfi.app` devices only, so alerts keep going to the old
