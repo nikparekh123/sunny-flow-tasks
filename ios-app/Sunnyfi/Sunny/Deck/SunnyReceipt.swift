@@ -256,7 +256,8 @@ enum R {
 struct ReportPaper: View {
     let report: Deck.Report
     let today: String
-    @State private var open: Set<String> = []
+    @State private var open: Set<String> = DebugPreset.string("rcpt.open") == "all"
+        ? ["realized", "commission", "interest", "unrealized", "best", "up"] : []
     @State private var clipped: Set<Int> = []
 
     private var monthly: Bool { report.kind == "monthly" }
@@ -478,7 +479,7 @@ struct ThetaPaper: View {
     let calendar: [CalendarDay]
     @State private var why = true
     @State private var roll = true
-    @State private var details = false
+    @State private var details = DebugPreset.string("rcpt.open") == "all"
 
     var body: some View {
         let leg = R.leg(check.leg)
@@ -490,10 +491,13 @@ struct ThetaPaper: View {
                     Text("\(leg.ticker) · \(leg.month) $\(leg.strike) \(leg.call ? "CALLS" : "PUTS")")
                         .sMono(12, 700, line: 14, tracking: 0.16)
                 }
-                (Text("It’s time to roll the ") + Text("\(check.ticker) long calls.").font(Font(SMono(size: 28, weight: 700).uiFont())))
+                // Balanced like the design's headline: thin, then bold from the name.
+                let thin = "It’s time to roll the ", whole = thin + "\(check.ticker) long calls."
+                let set = Array(SWrap.lines(whole, font: SMono(size: 28).uiFont(), kern: -0.28, width: 300, .balance))
+                (Text(String(set.prefix(thin.count))) + Text(String(set.dropFirst(thin.count))).font(Font(SMono(size: 28, weight: 700).uiFont())))
                     .sMono(28, 400, line: 34, tracking: -0.01)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
+                    .fixedSize()
                 if let now = check.ratioNow {
                     HStack(spacing: 0) {
                         Text("THETA ")

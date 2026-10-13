@@ -117,7 +117,11 @@ enum SWrap {
     enum Mode { case balance, pretty }
 
     static func lines(_ s: String, _ t: SType, width: CGFloat, _ mode: Mode) -> String {
-        let attrs: [NSAttributedString.Key: Any] = [.font: t.uiFont(), .kern: t.tracking * t.size]
+        lines(s, font: t.uiFont(), kern: t.tracking * t.size, width: width, mode)
+    }
+
+    static func lines(_ s: String, font: UIFont, kern: CGFloat, width: CGFloat, _ mode: Mode) -> String {
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .kern: kern]
         let measure = { (x: String) -> CGFloat in ceil(NSAttributedString(string: x, attributes: attrs).size().width) }
         let words = s.split(separator: " ").map(String.init)
         guard words.count > 1, measure(s) > width else { return s }
