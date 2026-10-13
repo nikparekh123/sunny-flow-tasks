@@ -61,8 +61,11 @@ struct SType {
             return .systemFont(ofSize: size, weight: UIFont.Weight(rawValue: (weight - 400) / 500))
         }
         var attrs: [UIFontDescriptor.AttributeName: Any] = [
+            // opsz stays at 14, the text cut, at every size: the design's
+            // web Inter has no optical-size axis, so its big titles and
+            // numbers are the text cut too (the display cut set ~4% narrower).
             UIFontDescriptor.AttributeName(rawValue: "NSCTFontVariationAttribute"):
-                [0x77676874: weight, 0x6F70737A: min(max(size, 14), 32)],
+                [0x77676874: weight, 0x6F70737A: 14],
         ]
         if tabular {
             attrs[.featureSettings] = [[UIFontDescriptor.FeatureKey.type: kNumberSpacingType,
@@ -100,6 +103,49 @@ private struct STypeModifier: ViewModifier {
             .tracking(t.tracking * t.size)
             .lineSpacing(max(0, t.line - natural))
             .padding(.vertical, (t.line - natural) / 2)
+    }
+}
+
+// MARK: - CSS text-wrap
+
+/// CSS `text-wrap: balance` and `pretty`, which SwiftUI does not have. The
+/// breaks are worked out here and set as line breaks, so the text renders
+/// exactly as wrapped. Balance: the narrowest width that keeps the same
+/// number of lines (the deck titles). Pretty: never one word alone on the
+/// last line.
+enum SWrap {
+    enum Mode { case balance, pretty }
+
+    static func lines(_ s: String, _ t: SType, width: CGFloat, _ mode: Mode) -> String {
+        let attrs: [NSAttributedString.Key: Any] = [.font: t.uiFont(), .kern: t.tracking * t.size]
+        let measure = { (x: String) -> CGFloat in ceil(NSAttributedString(string: x, attributes: attrs).size().width) }
+        let words = s.split(separator: " ").map(String.init)
+        guard words.count > 1, measure(s) > width else { return s }
+        func greedy(_ w: CGFloat) -> [[String]] {
+            var out: [[String]] = [], line: [String] = []
+            for word in words {
+                if line.isEmpty || measure((line + [word]).joined(separator: " ")) <= w { line.append(word) }
+                else { out.append(line); line = [word] }
+            }
+            if !line.isEmpty { out.append(line) }
+            return out
+        }
+        var best = greedy(width)
+        switch mode {
+        case .balance:
+            var lo: CGFloat = 0, hi = width
+            while hi - lo > 1 {
+                let mid = (lo + hi) / 2
+                if greedy(mid).count <= best.count { hi = mid } else { lo = mid }
+            }
+            best = greedy(hi)
+        case .pretty:
+            if best.count > 1, best[best.count - 1].count == 1, best[best.count - 2].count >= 2 {
+                let moved = best[best.count - 2].removeLast()
+                best[best.count - 1].insert(moved, at: 0)
+            }
+        }
+        return best.map { $0.joined(separator: " ") }.joined(separator: "\n")
     }
 }
 

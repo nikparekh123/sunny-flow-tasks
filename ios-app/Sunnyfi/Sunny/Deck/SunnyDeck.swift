@@ -109,6 +109,11 @@ struct SunnyDeckCard: View {
     let onDismiss: () -> Void
     @Environment(\.colorScheme) private var scheme
 
+    static let title = SType(size: 30, weight: 700, line: 34, tracking: -0.02)
+    static let sub = SType(size: 13, weight: 500, line: 18, tracking: 0)
+    /// The card's width (353 on a 393 phone), for the sub line's wrap.
+    @State private var width: CGFloat = 353
+
     private var fg: Color {
         switch card.tone { case .yellow: S.deckInk; case .ink, .green: .white; case .frosted: S.ink }
     }
@@ -138,17 +143,18 @@ struct SunnyDeckCard: View {
                     Text(card.kicker.uppercased())
                         .sType(SType(size: 13, weight: 700, line: 16, tracking: 0.06), tabular: false)
                     Spacer(minLength: 0)
-                    HStack(alignment: .bottom, spacing: 16) {
+                    // CSS space-between with a 16 gap: one gap, not one each
+                    // side of the spacer. Title balanced, sub never one word alone.
+                    HStack(alignment: .bottom, spacing: 0) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(card.title)
-                                .sType(SType(size: 30, weight: 700, line: 34, tracking: -0.02), tabular: false)
-                                .frame(maxWidth: card.action == nil ? 280 : 230, alignment: .leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(card.sub)
-                                .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
-                                .fixedSize(horizontal: false, vertical: true)
+                            Text(SWrap.lines(card.title, Self.title, width: card.action == nil ? 280 : 230, .balance))
+                                .sType(Self.title, tabular: false)
+                                .fixedSize()
+                            Text(SWrap.lines(card.sub, Self.sub, width: width - 44 - (card.action == nil ? 0 : 64), .pretty))
+                                .sType(Self.sub, tabular: false)
+                                .fixedSize()
                         }
-                        Spacer(minLength: 0)
+                        Spacer(minLength: 16)
                         if card.action != nil { arrow }
                     }
                 }
@@ -174,6 +180,7 @@ struct SunnyDeckCard: View {
             }
         }
         .frame(height: 184)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .clipShape(shape)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(card.kicker). \(card.title). \(card.sub)")

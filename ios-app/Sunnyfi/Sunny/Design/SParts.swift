@@ -43,19 +43,32 @@ struct SGlassCard<Content: View>: View {
 
 /// Frosted solid (tokens.md, deck cards): the glass sheen, lit rim and
 /// shadow on an opaque fill, because other deck cards stack behind it.
+/// The design's glassSh, light | dark: a 1 px white ring (.7 | .16), the
+/// top-left edge lit (1 | .28), the bottom-right faint (.55 | .08), a soft
+/// glow inside the top (.9 | .12), a hairline outside (light only) and the
+/// drop shadow (.04/.1 | .2/.4).
 struct SFrostedSurface: View {
     var radius: CGFloat = S.rDeck
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
+        let dark = scheme == .dark
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         shape.fill(LinearGradient(stops: [
                 .init(color: S.frost[0], location: 0),
                 .init(color: S.frost[1], location: 0.55),
                 .init(color: S.frost[2], location: 1),
             ], startPoint: UnitPoint(x: 0.1, y: 0), endPoint: UnitPoint(x: 0.9, y: 1)))
-            .overlay(shape.strokeBorder(LinearGradient(colors: [.white.opacity(0.9), .white.opacity(0.15)],
-                                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
-            .shadow(color: .black.opacity(0.04), radius: 1.5, y: 1)
-            .shadow(color: .black.opacity(0.10), radius: 12, y: 10)
+            .overlay(shape.fill(LinearGradient(colors: [.white.opacity(dark ? 0.12 : 0.9), .white.opacity(0)],
+                                               startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.14))))
+            .overlay(shape.strokeBorder(.white.opacity(dark ? 0.16 : 0.7), lineWidth: 1))
+            .overlay(shape.strokeBorder(LinearGradient(stops: [
+                    .init(color: .white.opacity(dark ? 0.28 : 1), location: 0),
+                    .init(color: .white.opacity(0), location: 0.5),
+                    .init(color: .white.opacity(dark ? 0.08 : 0.55), location: 1),
+                ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1))
+            .overlay(shape.stroke(Color(red: 29 / 255, green: 29 / 255, blue: 31 / 255).opacity(dark ? 0 : 0.06), lineWidth: 1))
+            .shadow(color: .black.opacity(dark ? 0.2 : 0.04), radius: 1.5, y: 1)
+            .shadow(color: .black.opacity(dark ? 0.32 : 0.08), radius: 12, y: 10)
     }
 }
 

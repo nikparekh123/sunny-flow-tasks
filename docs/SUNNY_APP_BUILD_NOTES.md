@@ -51,6 +51,18 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     13 Oct: sort by premium size, the open credit on the sold legs, biggest first; names with
     only longs go last. The dot still shows the room; the All chip's dot is the worst name.
 
+11. **Inter's cut.** The design loads Inter from Google Fonts with weights only, so every
+    size renders in the text cut (opsz 14). The app set the optical size to the point size,
+    which drew big titles and numbers about 4% narrower. Built at opsz 14 everywhere, which
+    measures within half a point of the design.
+12. **Deck arrow.** The web Inter has no → glyph, so the browser falls back, and the PNG
+    screens and the live file draw it differently. Built in Inter, per "Inter only".
+13. **Theta check name.** The design says "the Nike longs"; the payload has tickers only and
+    every other card uses them ("NFLX reports after close"). Built as "the NKE longs".
+14. **Deck title wrap.** The design balances deck titles ("Time to roll / the NKE longs")
+    and keeps subs from ending on one word. SwiftUI has neither, so the breaks are worked out
+    in code (SWrap).
+
 ## Still open
 
 - **App icon.** The new target has no icon yet.
