@@ -92,6 +92,10 @@ final class HomeStore {
             lastGood = SClock.now()
             tick += 1
             if MarketClock.inSession(SClock.now(), calendar: payload.calendar) { livePulse += 1 }
+
+            health = .fresh
+            loadError = nil
+            lastAttemptFailedOffline = false
             #if DEBUG && targetEnvironment(simulator)
             if let ago = DebugPreset.double("store.ago") { lastGood = SClock.now().addingTimeInterval(-ago) }
             switch DebugPreset.string("store.health") {
@@ -102,9 +106,6 @@ final class HomeStore {
             }
             if let t = DebugPreset.string("store.toast") { showToast(t.replacingOccurrences(of: "_", with: " ")) }
             #endif
-            health = .fresh
-            loadError = nil
-            lastAttemptFailedOffline = false
         } catch {
             loadError = String(describing: error)
             lastAttemptFailedOffline = (error as? URLError)?.code == .notConnectedToInternet

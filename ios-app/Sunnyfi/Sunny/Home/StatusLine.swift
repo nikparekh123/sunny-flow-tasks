@@ -74,9 +74,16 @@ enum MarketClock {
 // MARK: - Status
 
 struct MarketStatus: Equatable {
-    enum Tone { case grey, amber, red, green }
+    enum Tone { case grey, amber, red, green, ink }
     let text: String
-    let tone: Tone
+    /// The dot's colour and the words' colour (they differ in pre-market:
+    /// a yellow dot over grey words, as the gallery draws it).
+    let dot: Tone
+    let ink: Tone
+    /// Prices are moving: the pill may say "Live" or turn red when stuck.
+    let live: Bool
+
+    static func grey(_ t: String) -> MarketStatus { .init(text: t, dot: .grey, ink: .grey, live: false) }
 
     /// Block 01's states, in the order the gallery lists them.
     static func at(_ now: Date, calendar cal: [CalendarDay], held415: [String]) -> MarketStatus {
@@ -89,33 +96,33 @@ struct MarketStatus: Equatable {
         if !trading {
             if let c = MarketClock.closure(t.date, cal), c.kind == "closed" {
                 let named = c.name == "Market closed" ? "Closed today" : c.name
-                return .init(text: "\(named) · opens \(MarketClock.dayName[next.weekday]) 9:30", tone: .grey)
+                return .grey("\(named) · opens \(MarketClock.dayName[next.weekday]) 9:30")
             }
-            return .init(text: "Weekend · opens \(MarketClock.dayName[next.weekday]) 9:30", tone: .grey)
+            return .grey("Weekend · opens \(MarketClock.dayName[next.weekday]) 9:30")
         }
         let close = MarketClock.closeMinutes(t.date, cal), open = 9 * 60 + 30
-        if m < 4 * 60 { return .init(text: "Closed · opens 9:30", tone: .grey) }
-        if m < open - 30 { return .init(text: "Pre-market · opens 9:30", tone: .amber) }
-        if m < open { return .init(text: "Opens in \(open - m)m", tone: .amber) }
+        if m < 4 * 60 { return .grey("Closed · opens 9:30") }
+        if m < open - 30 { return .init(text: "Pre-market · opens 9:30", dot: .amber, ink: .grey, live: false) }
+        if m < open { return .init(text: "Opens in \(open - m)m", dot: .amber, ink: .amber, live: false) }
         if m < close - 30 {
-            return close < 16 * 60
-                ? .init(text: "Market open · closes \(MarketClock.clock(close))", tone: .green)
-                : .init(text: "Market open", tone: .green)
+            let txt = close < 16 * 60 ? "Market open · closes \(MarketClock.clock(close))" : "Market open"
+            return .init(text: txt, dot: .green, ink: .ink, live: true)
         }
-        if m < close - 10 { return .init(text: "Closes in \(close - m)m", tone: .amber) }
-        if m < close { return .init(text: "Closes in \(close - m)m", tone: .red) }
+        if m < close - 10 { return .init(text: "Closes in \(close - m)m", dot: .amber, ink: .amber, live: true) }
+        if m < close { return .init(text: "Closes in \(close - m)m", dot: .red, ink: .red, live: true) }
         // After the bell: the 4:15 tail for names in the book that trade it.
         if m < close + 15, !held415.isEmpty {
-            return .init(text: "After hours · \(held415.joined(separator: ", ")) until \(MarketClock.clock(close + 15))", tone: .amber)
+            return .init(text: "After hours · \(held415.joined(separator: ", ")) until \(MarketClock.clock(close + 15))",
+                         dot: .amber, ink: .amber, live: true)
         }
         // The evening before a closure says so.
         if let c = MarketClock.closure(MarketClock.addDays(t.date, 1).iso, cal), c.kind == "closed" {
-            return .init(text: "Closed tomorrow · \(c.name)", tone: .grey)
+            return .grey("Closed tomorrow · \(c.name)")
         }
         if t.weekday == 6 || next.iso != MarketClock.addDays(t.date, 1).iso {
-            return .init(text: "After hours · opens \(nextWhen)", tone: .grey)
+            return .grey("After hours · opens \(nextWhen)")
         }
-        return .init(text: m < 20 * 60 ? "After hours · opens 9:30" : "Closed · opens 9:30", tone: .grey)
+        return .grey(m < 20 * 60 ? "After hours · opens 9:30" : "Closed · opens 9:30")
     }
 }
 
@@ -129,56 +136,68 @@ struct StatusLine: View {
             let home = store.home
             let now = SClock.override ?? ctx.date
             let st = MarketStatus.at(now, calendar: home?.calendar ?? [], held415: home?.tradeTo415 ?? [])
-            HStack(spacing: 8) {
-                Circle().fill(dot(st.tone)).frame(width: 8, height: 8)
-                Text(st.text)
-                    .sType(.kicker.sized(13, line: 13).weighted(600), tabular: false)
-                    .foregroundStyle(textColor(st.tone))
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                UpdatedPill(store: store, now: now, open: st.tone != .grey)
+            // space-between with a 12 gap (one gap, not one each side of a spacer)
+            HStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Circle().fill(color(st.dot, dot: true)).frame(width: 8, height: 8)
+                    Text(st.text)
+                        .sType(.kicker.sized(13, line: 13).weighted(600), tabular: false)
+                        .foregroundStyle(color(st.ink, dot: false))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 12)
+                UpdatedPill(store: store, now: now, live: st.live)
             }
             .frame(height: 28)
             .accessibilityElement(children: .combine)
         }
     }
 
-    private func dot(_ t: MarketStatus.Tone) -> Color {
-        switch t { case .grey: S.muted; case .amber: S.yellow; case .red: S.red; case .green: S.green }
-    }
-    private func textColor(_ t: MarketStatus.Tone) -> Color {
-        switch t { case .grey: S.muted; case .amber: S.yellowDeep; case .red: S.red; case .green: S.ink }
+    private func color(_ t: MarketStatus.Tone, dot: Bool) -> Color {
+        switch t {
+        case .grey: S.muted
+        case .amber: dot ? S.yellow : S.yellowDeep
+        case .red: S.red
+        case .green: S.green
+        case .ink: S.ink
+        }
     }
 }
 
-/// "Updated 16:04" · green "Live · just now" for 2 s after an update · red
-/// with the reason when the market is open and updates stop. Tap = refresh.
+/// "Updated 16:04" · green "Live · just now" for 2.5 s after an update · red
+/// with the reason when prices should be moving and updates stop. Closed,
+/// it shows when prices last moved: "Updated 16:15", "Updated Fri 16:15", or
+/// the day alone on a market holiday. Tap = refresh.
 struct UpdatedPill: View {
     let store: HomeStore
     let now: Date
-    let open: Bool
+    let live: Bool
 
     var body: some View {
         let (text, color) = label
         Button { Task { await store.refresh(.pull) } } label: {
             HStack(spacing: 6) {
-                Circle().fill(color == S.muted ? S.muted : color).frame(width: 5, height: 5)
+                Circle().fill(color).frame(width: 6, height: 6)
                 Text(text).sType(.label, tabular: true).foregroundStyle(color)
             }
             .padding(.horizontal, 10)
             .frame(height: 28)
             .glassEffect(.regular, in: .capsule)
+            .contentShape(Capsule().inset(by: -8))
         }
         .buttonStyle(SPressStyle())
         .accessibilityLabel(text)
         .accessibilityHint("Refreshes now")
     }
 
+    private func fmt(_ d: Date, _ f: String) -> String {
+        let x = DateFormatter(); x.timeZone = MarketClock.ny; x.dateFormat = f; return x.string(from: d)
+    }
+
     private var label: (String, Color) {
         guard let g = store.lastGood else { return ("Updating", S.muted) }
-        let f = DateFormatter(); f.timeZone = MarketClock.ny; f.dateFormat = "H:mm"
-        let at = f.string(from: g)
-        if open {
+        if live {
+            let at = fmt(g, "H:mm")
             switch store.health {
             case .notUpdating: return ("Not updating · \(at)", S.red)
             case .offline: return ("No connection · \(at)", S.red)
@@ -186,12 +205,22 @@ struct UpdatedPill: View {
             case .fresh: break
             }
             if now.timeIntervalSince(g) < 2.5 { return ("Live · just now", S.green) }
+            return ("Updated \(at)", S.muted)
         }
-        let sameDay = MarketClock.ny(g).date == MarketClock.ny(now).date
-        if !sameDay {
-            let d = DateFormatter(); d.timeZone = MarketClock.ny; d.dateFormat = "EEE H:mm"
-            return ("Updated \(d.string(from: g))", S.muted)
-        }
-        return ("Updated \(at)", S.muted)
+        // Closed or not yet open: the last time prices moved.
+        let t = MarketClock.ny(now)
+        let pre = t.minutes >= 4 * 60 && t.minutes < 9 * 60 + 30
+            && MarketClock.isTradingDay(t.date, weekday: t.weekday, store.home?.calendar ?? [])
+        let last = pre ? g : (store.home?.fresh.marks.flatMap(Self.iso) ?? g)
+        if MarketClock.ny(last).date == t.date { return ("Updated \(fmt(last, "H:mm"))", S.muted) }
+        let holiday = MarketClock.closure(t.date, store.home?.calendar ?? [])?.kind == "closed"
+        return (holiday ? "Updated \(fmt(last, "EEE"))" : "Updated \(fmt(last, "EEE H:mm"))", S.muted)
+    }
+
+    static func iso(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
     }
 }
