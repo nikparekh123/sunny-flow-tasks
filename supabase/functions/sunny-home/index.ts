@@ -705,18 +705,26 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
 
   // ── Yield (block 17): every short credit, filed under the week it covers ──
   const weekStartOf = (iso: string) => { const d = new Date(iso + 'T12:00:00Z'); const wd = (d.getUTCDay() + 6) % 7; return addDays(iso, -wd); };
-  const yieldWeeks = new Map<string, { cs: number; cb: number; ps: number; pb: number; month: string }>();
+  /* Time value at a trade (Yield's third mode, block 17): the premium less
+     what was intrinsic at that day's close. */
+  const tvOf = (t: Row, call: boolean) => {
+    const px = closeOn(String(t.ticker), String(t.trade_date)), k = Number(t.strike), prem = Number(t.premium);
+    const intr = px == null ? 0 : call ? Math.max(0, px - k) : Math.max(0, k - px);
+    return Math.max(0, prem - intr) * Number(t.contracts) * 100;
+  };
+  const yieldWeeks = new Map<string, { cs: number; cb: number; ps: number; pb: number; cst: number; cbt: number;
+    pst: number; pbt: number; month: string }>();
   for (const [, rows] of groups) {
     const f = rows[0];
     if (f.direction !== 'short') continue;
     const firstOpen = rows.filter((r) => r.action === 'open').map((r) => String(r.trade_date)).sort()[0];
     if (!firstOpen || firstOpen < BOOK_START) continue;
     const exp = String(f.expiry), w = weekStartOf(exp);
-    const e = yieldWeeks.get(w) ?? { cs: 0, cb: 0, ps: 0, pb: 0, month: exp.slice(0, 7) };
+    const e = yieldWeeks.get(w) ?? { cs: 0, cb: 0, ps: 0, pb: 0, cst: 0, cbt: 0, pst: 0, pbt: 0, month: exp.slice(0, 7) };
     for (const t of rows) {
-      const c = Number(t.contracts) * Number(t.premium) * 100;
-      if (f.option_type === 'call') { if (t.action === 'open') e.cs += c; else e.cb += c; }
-      else { if (t.action === 'open') e.ps += c; else e.pb += c; }
+      const c = Number(t.contracts) * Number(t.premium) * 100, call = f.option_type === 'call', tv = tvOf(t, call);
+      if (call) { if (t.action === 'open') { e.cs += c; e.cst += tv; } else { e.cb += c; e.cbt += tv; } }
+      else { if (t.action === 'open') { e.ps += c; e.pst += tv; } else { e.pb += c; e.pbt += tv; } }
     }
     yieldWeeks.set(w, e);
   }
@@ -736,7 +744,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
   const yieldOut = [...yieldWeeks].sort((a, b) => a[0].localeCompare(b[0])).map(([w, e]) => {
     const inv = investedAsOf(addDays(w, 6)) || investedNow;
     return { week: w, fri: addDays(w, 4), month: e.month, calls_sold: Math.round(e.cs), calls_back: Math.round(e.cb),
-             puts_sold: Math.round(e.ps), puts_back: Math.round(e.pb), invested: Math.round(inv) };
+             puts_sold: Math.round(e.ps), puts_back: Math.round(e.pb), invested: Math.round(inv),
+             calls_sold_tv: Math.round(e.cst), calls_back_tv: Math.round(e.cbt),
+             puts_sold_tv: Math.round(e.pst), puts_back_tv: Math.round(e.pbt) };
   });
 
   // ── Inventory (block 14): the shelf, now and per week covered ──

@@ -20,6 +20,12 @@ enum S {
         Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
     }
 
+    /// One token with alpha, two appearances.
+    static func dynA(_ light: UInt32, _ la: Double, _ dark: UInt32, _ da: Double) -> Color {
+        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark).withAlphaComponent(da)
+                                                       : UIColor(hex: light).withAlphaComponent(la) })
+    }
+
     static let ink        = dyn(0x1D1D1F, 0xF5F5F7)   // text, selected chip fill
     static let muted      = dyn(0x6E6E73, 0x98989D)   // labels, secondary text
     static let paper      = dyn(0xFFFFFF, 0x1C1C1E)   // solid cards
@@ -84,6 +90,24 @@ enum S {
     // light steps into ink). Measured equal to the gallery swatches.
     static let heatUp   = [dyn(0xD0DFD0, 0x314131), dyn(0xA9C7A8, 0x365535), dyn(0x38793A, 0x3A703A), dyn(0x336334, 0x3B873D)]
     static let heatDown = [dyn(0xF4D2CF, 0x553330), dyn(0xF0ACA6, 0x793733), dyn(0xBE3435, 0xAC3836), dyn(0x983230, 0xD63437)]
+
+    // Positions (SunnyPositions.dc.html palette): the time strip's ticks, the
+    // flat payoff chart's lines and fills, a picked row.
+    static let tickMajor = dyn(0xA3A6AB, 0x6E6E73)
+    static let tickMinor = dyn(0xD2D4D8, 0x3A3A3C)
+    static let pZero     = dynA(0x1D1D1F, 0.28, 0xFFFFFF, 0.30)
+    static let pNowLine  = dynA(0x1D1D1F, 0.22, 0xFFFFFF, 0.22)
+    static let pGrid     = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.07)
+    static let pRowSel   = dynA(0x1D1D1F, 0.05, 0xFFFFFF, 0.06)
+    static let pGainFill = dynA(0x65C466, 0.28, 0x65C466, 0.26)
+    static let pLossFill = dynA(0xEB4B46, 0.20, 0xEB4B46, 0.28)
+    static let pBeRing   = dynA(0x1D1D1F, 0.14, 0x000000, 0.45)
+    static let pBeDot    = Color(hex: 0xF7CE46)
+    /// The soft panel under a Positions hero: a faint top-to-bottom fill.
+    static let pSoftTop  = dynA(0x1D1D1F, 0.022, 0xFFFFFF, 0.065)
+    static let pSoftBot  = dynA(0x1D1D1F, 0.045, 0xFFFFFF, 0.04)
+    static let pSoftLip  = dynA(0xFFFFFF, 0.95, 0xFFFFFF, 0.09)
+    static let pSoftRim  = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.05)
 
     /// A figure on the chart and its stats: red when below zero, else ink.
     static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }

@@ -24,6 +24,12 @@ struct HomePayload: Decodable {
     let chart: Chart?
     let deck: Deck
     let lastWeek: LastWeek?
+    let portfolio: [Holding]
+    let watchlist: [Watch]
+    let legs: [Leg]
+    let inventory: Inventory
+    let writes: Writes
+    let yield: [YieldWeek]
     /// Every open theta check (block 15's breathing tile), not only today's card.
     let thetaChecks: [Deck.ThetaCheck]?
 }
@@ -85,6 +91,91 @@ struct LastWeek: Decodable {
     let vix: Vix?
     struct Row: Decodable, Identifiable { var id: String { symbol }; let symbol: String; let changePct: Double?; let pricedMovePct: Double?; let close: Double? }
     struct Vix: Decodable { let close: Double; let changePct: Double? }
+}
+
+// MARK: - Portfolio and Watchlist (blocks 10, 11)
+
+/// % moves per range: today, 1 to 4 weeks.
+struct Moves: Decodable {
+    let d: Double?, w1: Double?, w2: Double?, w3: Double?, w4: Double?
+    func at(_ r: Int) -> Double? { [d, w1, w2, w3, w4][max(0, min(4, r))] }
+}
+struct Holding: Decodable, Identifiable {
+    var id: String { ticker }
+    let ticker: String
+    let spot: Double?
+    let exposure: Double
+    let shareValue: Double?
+    let optionValue: Double?
+    let ranges: Moves
+}
+struct Watch: Decodable, Identifiable {
+    var id: String { ticker }
+    let ticker: String
+    let price: Double?
+    let ranges: Moves
+}
+
+// MARK: - Inventory and the Writes sheet (block 14)
+
+struct Inventory: Decodable {
+    let by: [By]
+    let weeks: [Week]
+    let callsMax: Int
+    let putsMax: Int
+    let callsSold: Int
+    let putsSold: Int
+    let creditOpen: Double
+    struct By: Decodable, Identifiable {
+        var id: String { ticker }
+        let ticker: String
+        let callsMax: Int, callsSold: Int, putsMax: Int, putsSold: Int
+        let creditOpen: Double
+    }
+    struct Week: Decodable { let week: String; let fri: String; let calls: Int; let puts: Int }
+}
+
+struct Writes: Decodable {
+    let expiry: String?
+    let names: [Name]
+    struct Name: Decodable, Identifiable {
+        var id: String { ticker }
+        let ticker: String
+        let expiry: String
+        let spot: Double?
+        let sd: Double?
+        let plan: [Plan]
+        let expected: Double
+        let already: [Already]
+        let collected: Double
+        let calls: Count
+        let puts: PutCount
+        let written: Bool
+        let delta: Delta
+        let bar: Bar
+        let earnings: Earn?
+        struct Plan: Decodable { let type: String; let n: Int; let strike: Double; let mid: Double?; let delta: Double?; let note: String; let credit: Double }
+        struct Already: Decodable { let type: String; let n: Int; let strike: Double; let credit: Double }
+        struct Count: Decodable { let sold: Int; let of: Int }
+        struct PutCount: Decodable { let sold: Int; let of: Int; let bought: Int }
+        struct Delta: Decodable { let now: Double; let after: Double }
+        struct Bar: Decodable {
+            let put: Double?, spot: Double?, call: Double?, sd1: Double?, breakeven: Double?
+            let toPutPct: Double?, toSd1Pct: Double?
+        }
+        struct Earn: Decodable { let date: String; let time: String? }
+    }
+}
+
+// MARK: - Yield (block 17)
+
+struct YieldWeek: Decodable {
+    let week: String
+    let fri: String
+    let month: String
+    let invested: Double
+    let callsSold: Double, callsBack: Double, putsSold: Double, putsBack: Double
+    let callsSoldTv: Double?, callsBackTv: Double?, putsSoldTv: Double?, putsBackTv: Double?
 }
 
 // MARK: - Account chart (block 02b)

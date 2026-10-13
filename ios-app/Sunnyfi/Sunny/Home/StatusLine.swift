@@ -45,6 +45,13 @@ enum MarketClock {
         return isTradingDay(t.date, weekday: t.weekday, calendar) && t.minutes >= 4 * 60 && t.minutes < 20 * 60
     }
 
+    /// 9:30 to the close on a trading day.
+    static func isRegular(_ d: Date, calendar: [CalendarDay]) -> Bool {
+        let t = ny(d)
+        return isTradingDay(t.date, weekday: t.weekday, calendar) && t.minutes >= 9 * 60 + 30
+            && t.minutes < closeMinutes(t.date, calendar)
+    }
+
     static func addDays(_ iso: String, _ n: Int) -> (iso: String, weekday: Int) {
         var cal = Calendar(identifier: .gregorian); cal.timeZone = ny
         let f = DateFormatter(); f.calendar = cal; f.timeZone = ny; f.dateFormat = "yyyy-MM-dd"
@@ -152,7 +159,7 @@ struct UpdatedPill: View {
 
     var body: some View {
         let (text, color) = label
-        Button { Task { await store.refresh() } } label: {
+        Button { Task { await store.refresh(.tick) } } label: {
             HStack(spacing: 6) {
                 Circle().fill(color == S.muted ? S.muted : color).frame(width: 5, height: 5)
                 Text(text).sType(.label, tabular: true).foregroundStyle(color)

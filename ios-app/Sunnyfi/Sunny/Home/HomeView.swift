@@ -25,6 +25,11 @@ struct HomeView: View {
             } else {
                 SunriseLoading()
             }
+            if let home = store.home, router.writes != nil {
+                SunnyWritesSheet(home: home, ticker: Bindable(router).writes)
+                    .transition(.move(edge: .trailing))
+                    .zIndex(9)
+            }
             if let home = store.home, let r = router.receipt {
                 receipt(r, home)
                     .transition(.move(edge: .bottom))
@@ -40,22 +45,48 @@ struct HomeView: View {
     }
 
     private func page(_ home: HomePayload) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 10) {
-                    StatusLine(store: store).padding(.horizontal, S.margin)
-                    AccountChart(home: home)
+        let words = store.words ?? home
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        StatusLine(store: store).padding(.horizontal, S.margin)
+                        AccountChart(home: home)
+                    }
+                    .sEnter(0)
+                    SunnyDeck(cards: DeckBuilder.cards(home), today: home.today) { act(action: $0) }
+                        .padding(.horizontal, S.margin)
+                        .sEnter(1)
+                    SunnyQuickNav { s in
+                        withAnimation(S.standard(0.6)) { proxy.scrollTo(s, anchor: .top) }
+                    }
+                    .sEnter(2)
+                    SunnySectionTitle(title: "Today").id("today")
+                    SunnyToday(home: home).sEnter(3)
+
+                    SunnySectionTitle(title: "Book").id(HomeRouter.Section.book)
+                    SunnyPortfolio(home: home, words: words)
+                        .padding(.horizontal, S.margin)
+                        .id("portfolio")
+                        .sEnter(4)
+                    SunnyPositions(home: home)
+                        .id("positions")
+                        .sEnter(5)
+                    SunnyInventory(home: home, words: words)
+                        .padding(.horizontal, S.margin)
+                        .id("inventory")
+                        .sEnter(6)
                 }
-                .sEnter(0)
-                SunnyDeck(cards: DeckBuilder.cards(home), today: home.today) { act(action: $0) }
-                    .padding(.horizontal, S.margin)
-                    .sEnter(1)
+                .padding(.top, 14)
+                .padding(.bottom, 40)
             }
-            .padding(.top, 14)
-            .padding(.bottom, 40)
+            .scrollIndicators(.hidden)
+            .refreshable { await store.refresh(.pull) }
+            .onChange(of: router.scrollID) { _, id in
+                if let id { proxy.scrollTo(id, anchor: .top) }
+            }
         }
-        .scrollIndicators(.hidden)
-        .refreshable { await store.refresh() }
+        .environment(\.livePulse, store.livePulse)
     }
 
     /// DEBUG simulator runs only: `-open report|theta|writes:TICKER` opens a
@@ -70,13 +101,15 @@ struct HomeView: View {
             if v == "report" { router.open(.report(0)) }
             else if v == "theta", let c = (store.home?.thetaChecks ?? []).first { router.open(.theta(c.leg)) }
             else if v.hasPrefix("writes:") { router.writes = String(v.dropFirst(7)) }
+            else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
+            else if v.hasPrefix("pick:") { router.debugPick = String(v.dropFirst(5)); router.scrollID = "positions" }
         }
         #endif
     }
 
     private func act(action: DeckCard.Action) {
         switch action {
-        case .writes(let t): router.writes = t
+        case .writes(let t): withAnimation(S.standard(0.45)) { router.writes = t }
         case .report(let i): router.open(.report(i))
         case .theta(let leg): router.open(.theta(leg))
         }

@@ -23,10 +23,17 @@ final class HomeStore {
     enum Health: Equatable { case fresh, notUpdating, offline, cantReach }
 
     private(set) var home: HomePayload?
+    /// The payload insight words are written from (blocks 10, 22, 23). It
+    /// moves only on open, on pull to refresh and after the close, never on
+    /// the 30 s tick, so a sentence does not change under the reader.
+    private(set) var words: HomePayload?
     /// When the last good update landed (the Updated pill's time).
     private(set) var lastGood: Date?
     /// Bumped on every good update: the live glow pulses and numbers roll on it.
     private(set) var tick = 0
+    /// Bumped on a good update while a session runs: the live glow pulses
+    /// (block 24). Closed, it stays still and the glow fades out.
+    private(set) var livePulse = 0
     private(set) var health: Health = .fresh
     private(set) var loadError: String?
 
@@ -36,21 +43,27 @@ final class HomeStore {
     // MARK: Loading
 
     /// One fetch; a second caller waits for the one already running.
-    func refresh() async {
-        if let t = inFlight { await t.value; return }
-        let t = Task { await self.fetch() }
+    enum Reason { case open, pull, tick }
+
+    func refresh(_ reason: Reason = .pull) async {
+        if let t = inFlight { await t.value; if reason != .tick, let h = home { words = h }; return }
+        let t = Task { await self.fetch(reason) }
         inFlight = t
         await t.value
         inFlight = nil
     }
 
-    private func fetch() async {
+    private func fetch(_ reason: Reason) async {
         do {
             let data = try await Self.source()
             let payload = try Self.decoder.decode(Row.self, from: data).payload
             home = payload
+            if reason != .tick || words == nil || !MarketClock.isRegular(Date(), calendar: payload.calendar) {
+                words = payload
+            }
             lastGood = Date()
             tick += 1
+            if MarketClock.inSession(Date(), calendar: payload.calendar) { livePulse += 1 }
             health = .fresh
             loadError = nil
             lastAttemptFailedOffline = false
@@ -90,14 +103,17 @@ final class HomeStore {
         if let g = lastGood, Date().timeIntervalSince(g) < 30, home != nil {
             // Fresh enough: the clock starts from the last good update.
         } else {
-            await refresh()
+            await refresh(.open)
         }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(30))
             if Task.isCancelled { break }
             if MarketClock.inSession(Date(), calendar: home?.calendar ?? []) {
-                await refresh()
+                await refresh(.tick)
                 updateHealth()
+            } else if let h = home, MarketClock.ny(Date()).date != h.today {
+                // Midnight New York: the deck and the day's words move on.
+                await refresh(.open)
             }
         }
     }
