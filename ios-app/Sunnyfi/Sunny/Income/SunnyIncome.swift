@@ -167,7 +167,7 @@ struct SunnyPayback: View {
                              + heroPart(intr))
                                 .sType(.largeNumber).lineLimit(1).minimumScaleFactor(0.6)
                         }
-                        Text(noLeaps ? "no LEAPs held" : heroSub(first))
+                        Text(noLeaps ? "nothing to pay back" : heroSub(first))
                             .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
                             .foregroundStyle(S.muted).lineLimit(1)
                     }
@@ -176,11 +176,16 @@ struct SunnyPayback: View {
                 }
                 .buttonStyle(SPressStyle())
             }
-            if !noLeaps {
+            if noLeaps {
+                SStatLine(items: [("-", "no LEAPs held", S.ink)])
+            } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    SStatLine(items: [(F.moneyK(tv.pace), "/ wk", tv.pace < 0 ? S.red : S.green),
-                                      (F.moneyK(intr.pace), "/ wk", intr.pace < 0 ? S.red : S.blue)]
-                              + (first.map { [(short(dateIn($0.weeks!)), "· \($0.name.lowercased()) first", S.ink)] } ?? []))
+                    // "$4.7K tv / wk · $3.1K intr / wk · 18 Nov 26 time value first"; once one
+                    // side is paid back, the other is "next".
+                    let next = s.contains { $0.done } ? "next" : "first"
+                    SStatLine(items: [(F.moneyK(tv.pace), "tv / wk", tv.pace < 0 ? S.red : S.green),
+                                      (F.moneyK(intr.pace), "intr / wk", intr.pace < 0 ? S.red : S.blue)]
+                              + (first.map { [(short(dateIn($0.weeks!)), "\($0.name.lowercased()) \(next)", S.ink)] } ?? []))
                     SInlineInsight(lead: insight.lead, rest: insight.rest)
                 }
                 chart
@@ -196,10 +201,23 @@ struct SunnyPayback: View {
     private func heroPart(_ x: Side) -> Text {
         let c: Color = x.paid < 0 ? S.red : x.color
         switch mode {
-        case .pct: return Text(PF.pct(x.pct)).foregroundStyle(c)
+        case .pct: return Text(Self.pct(x.pct)).foregroundStyle(c)
         case .usd: return Text(PF.usd(x.paid)).foregroundStyle(c)
         case .tv: return Text(x.done ? "done" : x.weeks.map { "\($0) wk" } ?? "-").foregroundStyle(c)
         }
+    }
+    /// "42%", "18.6%", "100%": one place, no trailing .0, no minus sign.
+    static func pct(_ v: Double) -> String {
+        let r = (abs(v) * 10).rounded() / 10
+        return (r == r.rounded() ? String(Int(r)) : String(format: "%.1f", r)) + "%"
+    }
+    /// The first day the side reached its target, from the daily series.
+    private func paidOn(_ x: Side) -> String? {
+        let (t, p) = x.key == "tv" ? (1, 2) : (3, 4)
+        return pb.series.first { r in
+            guard let tv = r[safe: t]?.number, let pv = r[safe: p]?.number else { return false }
+            return tv > 0 && pv >= tv
+        }?.first?.string
     }
     private func heroSub(_ first: Side?) -> String {
         switch mode {
@@ -213,7 +231,7 @@ struct SunnyPayback: View {
     }
 
     private func row(_ x: Side) -> some View {
-        let note: String = x.done ? "Paid back" : x.weeks.map { "\(F.moneyK(x.pace)) / wk · \(short(dateIn($0)))" } ?? "no date at this pace"
+        let note: String = x.done ? paidOn(x).map { "Paid back · \(short($0))" } ?? "Paid back" : x.weeks.map { "\(F.moneyK(x.pace)) / wk · \(short(dateIn($0)))" } ?? "no date at this pace"
         return Button {
             withAnimation(.easeOut(duration: 0.15)) { if hidden.contains(x.key) { hidden.remove(x.key) } else { hidden.insert(x.key) } }
         } label: {
@@ -222,7 +240,7 @@ struct SunnyPayback: View {
                     Circle().fill(x.color).frame(width: 8, height: 8)
                     Text(x.name).sType(SType(size: 15, weight: 600, line: 15, tracking: 0), tabular: false)
                     Spacer()
-                    Text(PF.pct(x.pct)).sType(SType(size: 15, weight: 700, line: 15, tracking: 0))
+                    Text(Self.pct(x.pct)).sType(SType(size: 15, weight: 700, line: 15, tracking: 0))
                         .foregroundStyle(x.paid < 0 ? S.red : x.done ? S.green : S.ink)
                 }
                 HStack {
