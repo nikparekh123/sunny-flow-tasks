@@ -20,7 +20,7 @@ struct SignInScreen: View {
 
     var body: some View {
         ZStack {
-            S.screen.ignoresSafeArea()
+            SBackground()
             VStack(alignment: .leading, spacing: 0) {
                 Spacer()
                 Text("Sunny").sType(.largeTitle, tabular: false).foregroundStyle(S.ink)
@@ -73,7 +73,7 @@ struct FirstRunScreen: View {
 
     var body: some View {
         ZStack {
-            S.screen.ignoresSafeArea()
+            SBackground()
             VStack(alignment: .leading, spacing: S.gapInside) {
                 Spacer()
                 Text("Before you start").sType(.largeTitle, tabular: false).foregroundStyle(S.ink)
@@ -133,7 +133,7 @@ struct LockScreen: View {
     let lock: AppLock
     var body: some View {
         ZStack {
-            S.screen.ignoresSafeArea()
+            SBackground()
             VStack(spacing: 16) {
                 Text("Sunny").sType(.largeTitle, tabular: false).foregroundStyle(S.ink)
                 Button {
@@ -161,7 +161,7 @@ struct SunriseLoading: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
         ZStack {
-            S.screen.ignoresSafeArea()
+            SBackground()
             VStack(spacing: 14) {
                 ZStack(alignment: .bottom) {
                     Circle().fill(LinearGradient(colors: [S.sunLight, S.orange, S.sunDeep], startPoint: .top, endPoint: .bottom))

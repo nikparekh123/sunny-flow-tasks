@@ -79,6 +79,12 @@ enum S {
     static let receiptRed = Color(hex: 0xD63437)
     static let receiptMuted = Color(hex: 0x6E6E73)
 
+    // Portfolio and Watchlist heat (block 10): four steps of strength, mixed
+    // in oklch as the design does (green/red into the surface, the strong
+    // light steps into ink). Measured equal to the gallery swatches.
+    static let heatUp   = [dyn(0xD0DFD0, 0x314131), dyn(0xA9C7A8, 0x365535), dyn(0x38793A, 0x3A703A), dyn(0x336334, 0x3B873D)]
+    static let heatDown = [dyn(0xF4D2CF, 0x553330), dyn(0xF0ACA6, 0x793733), dyn(0xBE3435, 0xAC3836), dyn(0x983230, 0xD63437)]
+
     /// A figure on the chart and its stats: red when below zero, else ink.
     static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }
 
@@ -98,6 +104,13 @@ enum S {
             .init(color: dyn(0xF3F1EE, 0x0C0A08), location: 1),
         ], startPoint: .top, endPoint: .bottom)
     }
+    /// The phone design's default screen, "aurora": three soft glows fixed
+    /// behind the page (Sunny Phone Standalone, screenBg = aurora). Green
+    /// top left, blue right, yellow at the bottom; light / dark strength.
+    static let auroraGreen  = (color: Color(red: 101/255, green: 196/255, blue: 102/255), light: 0.42, dark: 0.34)
+    static let auroraBlue   = (color: Color(red: 115/255, green: 182/255, blue: 249/255), light: 0.38, dark: 0.30)
+    static let auroraYellow = (color: Color(red: 247/255, green: 206/255, blue: 70/255), light: 0.32, dark: 0.22)
+
     /// Live glow (block 24): sun in light, moon in dark.
     static let glowSun  = Color(red: 247/255, green: 206/255, blue: 70/255).opacity(0.45)
     static let glowMoon = Color(red: 196/255, green: 216/255, blue: 250/255).opacity(0.26)

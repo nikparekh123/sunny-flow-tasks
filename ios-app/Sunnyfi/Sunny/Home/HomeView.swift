@@ -17,7 +17,7 @@ struct HomeView: View {
 
     var body: some View {
         ZStack {
-            S.screen.ignoresSafeArea()
+            SBackground()
             if let home = store.home {
                 page(home)
             } else if store.loadError != nil {
