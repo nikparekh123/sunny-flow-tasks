@@ -221,7 +221,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
   const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
 
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
-         openChecks, divs, posAll, lmd, chainRows, savedHistory] = await Promise.all([
+         openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast] = await Promise.all([
     page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
     /* One row per leg ever marked: grows with every trade, so paged. */
@@ -254,6 +254,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
       + '&order=ticker.asc,expiry.asc,side.asc,strike.asc'),
     page('account_history?order=day.asc&select=day,nav,cash,margin,interest_cum,commission_cum,dividends_cum,'
       + 'realized_cum,unrealized,time_value,capital_long,shares_value,groups'),
+    get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date&order=pay_date.asc,ticker.asc`),
   ]);
 
   step('reads');
@@ -1388,6 +1389,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
     .map((d) => [String(d.report_date), r2(Number(d.dividends))]);
   const yearPaid = acctDays.filter((d) => String(d.report_date) > addDays(today, -365)).reduce((s, d) => s + Number(d.dividends ?? 0), 0);
   const shNow = Number(livePt?.shares_value ?? lastRow?.shares_value ?? 0);
+  /* Who paid (02b "Payers"): IBKR's daily cash has no ticker, so a payment
+     counts for a name that held shares at the close before its ex-date. */
+  const stkDays = [...new Set(posAll.filter((p) => p.asset_category === 'STK').map((p) => String(p.report_date)))].sort();
+  const posDays = [...new Set(posAll.map((p) => String(p.report_date)))].sort();
+  const payers = divPast.filter((d) => {
+    const before = posDays.filter((x) => x < String(d.ex_date)).at(-1);
+    return !!before && stkDays.length > 0 && posAll.some((p) => String(p.report_date) === before && p.asset_category === 'STK'
+      && String(p.symbol).toUpperCase() === String(d.ticker) && Number(p.position) > 0);
+  }).map((d) => [String(d.pay_date), String(d.ticker)]);
   const nextDiv = divs.filter((d) => sharesNow.has(String(d.ticker))).sort((a, b) => String(a.pay_date ?? a.ex_date).localeCompare(String(b.pay_date ?? b.ex_date)))[0];
   const col = (f: string) => pts.map((p) => (p[f] == null ? null : Number(p[f])));
   const gcol = (g: GK, f: string) => pts.map((p) => Number((p.groups as Record<string, Record<string, number>>)[g]?.[f] ?? 0));
@@ -1401,7 +1411,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' = 'tick'): Promise
       unreal: gcol(g, 'unreal'), tv: gcol(g, 'tv') }])),
     shares_tickers: pts.map((p) => Number((p.groups as Record<string, Record<string, number>>).sh?.tickers ?? 0)),
     closed: closedPos,
-    dividends: { paid: paidDays, yield_pct: shNow > 0 ? r2(yearPaid / shNow * 100) : null,
+    dividends: { paid: paidDays, payers, yield_pct: shNow > 0 ? r2(yearPaid / shNow * 100) : null,
       next: nextDiv ? { ticker: nextDiv.ticker, ex_date: nextDiv.ex_date, pay_date: nextDiv.pay_date ?? null,
                         amount: num(nextDiv.cash_amount) } : null },
   } : null;

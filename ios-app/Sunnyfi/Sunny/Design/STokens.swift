@@ -1,0 +1,134 @@
+//
+//  STokens.swift
+//  Sunny
+//
+//  The S namespace (handoff 18/19 `tokens.md`, `Sunny UI Kit.dc.html` §01-02).
+//  Every colour, size, radius, shadow and curve in the app comes from here;
+//  no view carries a hex. Where tokens.md and the UI Kit disagree the UI Kit
+//  wins (README, Precedence) and the difference is listed for Niket.
+//
+
+import SwiftUI
+import UIKit
+
+enum S {
+
+    // MARK: Colour roles, light / dark
+
+    /// One token, two appearances.
+    static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
+        Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })
+    }
+
+    static let ink        = dyn(0x1D1D1F, 0xF5F5F7)   // text, selected chip fill
+    static let muted      = dyn(0x6E6E73, 0x98989D)   // labels, secondary text
+    static let paper      = dyn(0xFFFFFF, 0x1C1C1E)   // solid cards
+    static let surface    = dyn(0xF1F2F4, 0x2C2C2E)   // fills inside cards, soft panels
+    static let line       = dyn(0xE3E5E8, 0x3A3A3C)   // card outline, hairlines
+    static let green      = dyn(0x3B873D, 0x65C466)   // gains, up
+    static let red        = dyn(0xD63437, 0xEB4B46)   // losses, down; never a minus sign
+    static let yellowDeep = dyn(0x996C23, 0xF7CE46)   // breakeven text, near-breakeven dot
+    static let yellow     = dyn(0xF7CE46, 0xF7CE46)   // earnings card, breakeven dot, live glow
+    static let blue       = dyn(0x366DEB, 0x3A86F7)   // put strike, links
+    /// White text and marks on a filled card (Report green, Theta check ink).
+    static let onFill     = Color.white
+
+    // Accents (UI Kit §01)
+    static let orange       = dyn(0xF2A93B, 0xF2A93B)  // shares, refresh sun
+    static let sunDeep      = Color(hex: 0xE8862E)
+    static let sunLight     = Color(hex: 0xFFE98F)
+    static let yellowTint   = Color(hex: 0xFDF3D1)     // summary box, hot tile
+    static let yellowInk    = Color(hex: 0x6B5B2E)     // text on the tint
+    static let receiptRule  = Color(hex: 0xCFCCC5)
+    static let receiptSlot  = Color(hex: 0x111111)
+
+    // Rank ramp, Performance (UI Kit §01)
+    static let rank: [Color] = [0x1F5F21, 0x2E7A30, 0x3B873D, 0x4FA051, 0x65C466].map { Color(hex: $0) }
+    static let unrealizedTint = Color(hex: 0xA9E1AA)
+    static let loss1 = Color(hex: 0xB22A2D)
+    static let loss2 = Color(hex: 0xD63437)
+    static let other = Color(hex: 0xB8BCC2)
+
+    // Account chart compare lines (block 02b), as SunnyHomeChart.dc.html
+    // draws them: Sold is ink, Bought is blue, Shares orange, Dividends the
+    // yellow-deep token (#996C23 / #F7CE46). No new colours.
+    static let lineSold      = ink
+    static let lineBought    = blue
+    static let lineShares    = orange
+    static let lineDividends = yellowDeep
+
+    // Account chart furniture, as SunnyHomeChart.dc.html sets it: the dotted
+    // zero line, the ring round the scrub dot, and a selected chip.
+    static let chartBase = dyn(0xC7C7CC, 0x636366)
+    static let chartRing = dyn(0xFFFFFF, 0x000000)
+    static let chipOn    = Color(UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor(hex: 0xF5F5F7) : UIColor(hex: 0x1D1D1F).withAlphaComponent(0.9) })
+    static let chipOnInk = dyn(0xFFFFFF, 0x1C1C1E)
+
+    /// A figure on the chart and its stats: red when below zero, else ink.
+    static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }
+
+    /// Green up, red down, ink when exactly flat (02b: "$0 is ink").
+    static func signed(_ v: Double) -> Color { v > 0 ? green : v < 0 ? red : ink }
+
+    /// Frosted solid deck cards (tokens.md, Glass): the opaque fill under the sheen.
+    static let frost: [Color] = [dyn(0xFFFFFF, 0x323234), dyn(0xF6F7F8, 0x1F1F21), dyn(0xFAFAFB, 0x28282A)]
+
+    // MARK: Screen and glow
+
+    /// Page background: a soft tinted gradient so glass has something to refract.
+    static var screen: LinearGradient {
+        LinearGradient(stops: [
+            .init(color: dyn(0xEEF2F0, 0x0A0F0C), location: 0),
+            .init(color: dyn(0xF1F2F4, 0x000000), location: 0.38),
+            .init(color: dyn(0xF3F1EE, 0x0C0A08), location: 1),
+        ], startPoint: .top, endPoint: .bottom)
+    }
+    /// Live glow (block 24): sun in light, moon in dark.
+    static let glowSun  = Color(red: 247/255, green: 206/255, blue: 70/255).opacity(0.45)
+    static let glowMoon = Color(red: 196/255, green: 216/255, blue: 250/255).opacity(0.26)
+
+    // MARK: Shape and space
+
+    static let cardWidth: CGFloat = 353       // a card on its own (393 phone)
+    static let rowCardWidth: CGFloat = 341    // cards in a snap row, next one peeks
+    static let margin: CGFloat = 20
+    static let rCard: CGFloat = 20
+    static let rDeck: CGFloat = 24
+    static let rChip: CGFloat = 16
+    static let rPanel: CGFloat = 18
+    static let rTile: CGFloat = 14
+    static let rPill: CGFloat = 12
+    static let padCard: CGFloat = 20
+    static let padDeck: CGFloat = 22
+    static let gapRow: CGFloat = 8
+    static let gapInside: CGFloat = 12
+    static let gapGroup: CGFloat = 20
+    static let hit: CGFloat = 44
+
+    // MARK: Motion (subtle, Apple-like)
+
+    /// cubic-bezier(.22,1,.36,1): moves, slides, swipes, glass pills.
+    static func standard(_ d: Double = 0.42) -> Animation { .timingCurve(0.22, 1, 0.36, 1, duration: d) }
+    /// cubic-bezier(.32,.72,0,1): Now and Exp tags, sheets.
+    static func sheet(_ d: Double = 0.45) -> Animation { .timingCurve(0.32, 0.72, 0, 1, duration: d) }
+    static let tap: Double = 0.18
+    static let move: Double = 0.42
+    static let count: Double = 0.85
+    static let roll: Double = 0.4
+    static let stagger: Double = 0.07
+    /// Ranges and filters morph the account line (02b): 0.56 s ease in out.
+    static let morph: Animation = .easeInOut(duration: 0.56)
+}
+
+// MARK: - Hex helpers (tokens only; views never take a hex)
+
+extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                  blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+}
+extension Color {
+    init(hex: UInt32) { self.init(uiColor: UIColor(hex: hex)) }
+}

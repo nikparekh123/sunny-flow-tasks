@@ -7,14 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		074D042884C48D43B8FF0695 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = B66712D4BF7F2E1313445BEB /* Supabase */; };
 		D8CE241A2FCC98BD005FE434 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = D8CE24192FCC98BD005FE434 /* Supabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		32D2D8196F39247746E45B9C /* Sunny.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sunny.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D8CE23FE2FCC96F2005FE434 /* Sunnyfi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sunnyfi.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		74CCF9C37AACA0431568940E /* Sunny */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Sunny;
+			sourceTree = "<group>";
+		};
 		D8CE24002FCC96F2005FE434 /* Sunnyfi */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Sunnyfi;
@@ -31,6 +38,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FD62A4CC12532A2AB250DBB0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				074D042884C48D43B8FF0695 /* Supabase in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -38,6 +53,7 @@
 			isa = PBXGroup;
 			children = (
 				D8CE24002FCC96F2005FE434 /* Sunnyfi */,
+				74CCF9C37AACA0431568940E /* Sunny */,
 				D8CE23FF2FCC96F2005FE434 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,6 +62,7 @@
 			isa = PBXGroup;
 			children = (
 				D8CE23FE2FCC96F2005FE434 /* Sunnyfi.app */,
+				32D2D8196F39247746E45B9C /* Sunny.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -53,6 +70,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		059BAB05AC98329CBEA39DB5 /* Sunny */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A58780248F70A5AD1CFCB217 /* Build configuration list for PBXNativeTarget "Sunny" */;
+			buildPhases = (
+				127318980BE26A2940C2E424 /* Sources */,
+				FD62A4CC12532A2AB250DBB0 /* Frameworks */,
+				4F3E24A3F8DDF345C147D65F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				74CCF9C37AACA0431568940E /* Sunny */,
+			);
+			name = Sunny;
+			packageProductDependencies = (
+				B66712D4BF7F2E1313445BEB /* Supabase */,
+			);
+			productName = Sunny;
+			productReference = 32D2D8196F39247746E45B9C /* Sunny.app */;
+			productType = "com.apple.product-type.application";
+		};
 		D8CE23FD2FCC96F2005FE434 /* Sunnyfi */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D8CE24092FCC96F3005FE434 /* Build configuration list for PBXNativeTarget "Sunnyfi" */;
@@ -87,6 +127,9 @@
 				LastSwiftUpdateCheck = 2650;
 				LastUpgradeCheck = 2700;
 				TargetAttributes = {
+					059BAB05AC98329CBEA39DB5 = {
+						CreatedOnToolsVersion = 26.5;
+					};
 					D8CE23FD2FCC96F2005FE434 = {
 						CreatedOnToolsVersion = 26.5;
 					};
@@ -111,11 +154,19 @@
 			projectRoot = "";
 			targets = (
 				D8CE23FD2FCC96F2005FE434 /* Sunnyfi */,
+				059BAB05AC98329CBEA39DB5 /* Sunny */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		4F3E24A3F8DDF345C147D65F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D8CE23FC2FCC96F2005FE434 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -144,6 +195,13 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		127318980BE26A2940C2E424 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D8CE23FA2FCC96F2005FE434 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -154,6 +212,87 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		2E7ECFC2B1A56CAA7FA644FA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sunny.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = AR5LF7RNCP;
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Sunny-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Sunny;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock Sunny so your positions stay private if your phone is unattended.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sunnyfi.app.next;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		66C7FA9689E6D75E0A200FD7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Sunny.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = AR5LF7RNCP;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Sunny-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = Sunny;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock Sunny so your positions stay private if your phone is unattended.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sunnyfi.app.next;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		D8CE24072FCC96F3005FE434 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -365,6 +504,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A58780248F70A5AD1CFCB217 /* Build configuration list for PBXNativeTarget "Sunny" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2E7ECFC2B1A56CAA7FA644FA /* Debug */,
+				66C7FA9689E6D75E0A200FD7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		D8CE23F92FCC96F2005FE434 /* Build configuration list for PBXProject "Sunnyfi" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -405,6 +553,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		B66712D4BF7F2E1313445BEB /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D8CE24182FCC98BC005FE434 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
 		D8CE24192FCC98BD005FE434 /* Supabase */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = D8CE24182FCC98BC005FE434 /* XCRemoteSwiftPackageReference "supabase-swift" */;
