@@ -34,6 +34,11 @@ final class HomeStore {
     /// Bumped on a good update while a session runs: the live glow pulses
     /// (block 24). Closed, it stays still and the glow fades out.
     private(set) var livePulse = 0
+    /// Legs whose mark moved on the last update (rows wash, block 25), and
+    /// the toast's count: "Positions updated · 3 changed".
+    private(set) var changedLegs: Set<String> = []
+    private(set) var toast: String?
+    private var toastTask: Task<Void, Never>?
     private(set) var health: Health = .fresh
     private(set) var loadError: String?
 
@@ -57,6 +62,15 @@ final class HomeStore {
         do {
             let data = try await Self.source()
             let payload = try Self.decoder.decode(Row.self, from: data).payload
+            if let old = home, reason == .tick || reason == .pull {
+                let before = Dictionary(old.legs.map { ($0.id, $0.mark ?? 0) }, uniquingKeysWith: { a, _ in a })
+                let moved = Set(payload.legs.filter { leg in
+                    guard let prev = before[leg.id] else { return true }
+                    return abs(prev - (leg.mark ?? 0)) > 0.004
+                }.map(\.id))
+                changedLegs = moved
+                if !moved.isEmpty { showToast("Positions updated · \(moved.count) changed") }
+            }
             home = payload
             if reason != .tick || words == nil || !MarketClock.isRegular(Date(), calendar: payload.calendar) {
                 words = payload
@@ -94,6 +108,17 @@ final class HomeStore {
         d.keyDecodingStrategy = .convertFromSnakeCase
         return d
     }()
+
+    private func showToast(_ t: String) {
+        toastTask?.cancel()
+        toast = t
+        toastTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self.toast = nil
+            self.changedLegs = []
+        }
+    }
 
     // MARK: The 30 s clock
 

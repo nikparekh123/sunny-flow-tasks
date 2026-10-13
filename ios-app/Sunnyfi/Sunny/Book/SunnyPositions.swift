@@ -313,6 +313,7 @@ struct PSideCard: View {
     @Binding var mode: PMode
     @Binding var sel: String?
     @State private var si: Int?
+    @Environment(\.changedLegs) private var changed
 
     private var leg: PLeg { L.first { $0.id == sel } ?? L[0] }
     private var sold: Bool { L[0].sold }
@@ -366,7 +367,8 @@ struct PSideCard: View {
                     let v = mode == .pct ? PF.pct(x.pct) : mode == .usd ? PF.usd(x.g) : PF.usd(x.tv)
                     PRow(name: PF.strike(x.k), qty: "×\(x.q)", dist: "\(d.v) \(d.m)", distColor: d.c, value: v,
                          valueColor: mode == .tv ? S.ink : x.g >= 0 ? S.green : S.red, nameW: 96,
-                         selected: x.id == l.id) { withAnimation(S.standard(0.3)) { sel = x.id } }
+                         selected: x.id == l.id, tap: { withAnimation(S.standard(0.3)) { sel = x.id } },
+                         wash: changed.contains(x.id))
                 }
             }
         }
@@ -397,6 +399,7 @@ struct PCombinedCard: View {
     let L: [PLeg]
     let width: CGFloat
     @State private var si: Int?
+    @Environment(\.changedLegs) private var changed
 
     var body: some View {
         let CW = width - 40, W = CW - 44
@@ -441,7 +444,8 @@ struct PCombinedCard: View {
                     let d = PDist.of(x)
                     PRow(name: "\(PF.strike(x.k))\(x.call ? "C" : "P")", qty: "\(x.sold ? "sold" : "bought") ×\(x.q)",
                          dist: "\(d.v) \(d.m)", distColor: d.c, value: PF.usd(x.g),
-                         valueColor: x.g >= 0 ? S.green : S.red, nameW: 128, selected: false, tap: nil)
+                         valueColor: x.g >= 0 ? S.green : S.red, nameW: 128, selected: false, tap: nil,
+                         wash: changed.contains(x.id))
                 }
             }
         }
@@ -579,6 +583,7 @@ struct PRow: View {
     let nameW: CGFloat
     let selected: Bool
     let tap: (() -> Void)?
+    var wash = false
     var body: some View {
         let row = HStack(spacing: 10) {
             (Text(name).font(SType(size: 15, weight: 600, line: 18, tracking: 0).font())
@@ -593,6 +598,7 @@ struct PRow: View {
         }
         .frame(height: 44)
         .padding(.horizontal, 8)
+        .modifier(Wash(on: wash))
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(selected ? S.pRowSel : .clear))
         .padding(.horizontal, -8)
         .contentShape(Rectangle())

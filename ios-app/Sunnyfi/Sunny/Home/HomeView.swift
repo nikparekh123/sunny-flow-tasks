@@ -14,16 +14,32 @@ struct HomeView: View {
     let store: HomeStore
     @State private var router = HomeRouter()
     @Environment(\.scenePhase) private var scenePhase
+    // Pull to refresh (block 25): how far the page is pulled past the top,
+    // the phase, and the space held open while it fetches.
+    @State private var pull: CGFloat = 0
+    @State private var phase: PullPhase = .idle
+    @State private var hold: CGFloat = 0
+    @State private var shown = false
+    @State private var touching = false
 
     var body: some View {
         ZStack {
             SBackground()
             if let home = store.home {
                 page(home)
+                    .opacity(shown ? 1 : 0)
+                    .onAppear { withAnimation(.easeOut(duration: 0.5)) { shown = true } }
             } else if store.loadError != nil {
                 HomeUnavailable(store: store)
             } else {
-                SunriseLoading()
+                SunriseLoading().transition(.opacity.combined(with: .scale(scale: 1.04)))
+            }
+            if let t = store.toast {
+                SunnyToast(text: t)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 4)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(8)
             }
             if let home = store.home, router.writes != nil {
                 SunnyWritesSheet(home: home, ticker: Bindable(router).writes)
@@ -48,6 +64,7 @@ struct HomeView: View {
         let words = store.words ?? home
         return ScrollViewReader { proxy in
             ScrollView {
+                Color.clear.frame(height: hold)
                 VStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 10) {
                         StatusLine(store: store).padding(.horizontal, S.margin)
@@ -93,12 +110,48 @@ struct HomeView: View {
                 .padding(.bottom, 40)
             }
             .scrollIndicators(.hidden)
-            .refreshable { await store.refresh(.pull) }
+            .onScrollGeometryChange(for: CGFloat.self) { -($0.contentOffset.y + $0.contentInsets.top) } action: { _, v in
+                pull = max(0, v)
+                guard phase == .idle || phase == .pulling || phase == .armed else { return }
+                if phase == .armed && !touching { Task { await pullRefresh() }; return }
+                // Only a finger arms it; the bounce back never does.
+                if touching { phase = pull >= 110 ? .armed : pull > 0 ? .pulling : .idle }
+                else if pull <= 0 { phase = .idle }
+            }
+            .onScrollPhaseChange { _, new in
+                touching = new == .interacting || new == .tracking
+                if !touching, phase == .armed { Task { await pullRefresh() } }
+            }
+            .overlay(alignment: .top) {
+                if pull + hold > 0 {
+                    PullSunrise(pull: max(pull, hold), phase: phase)
+                        .frame(height: pull + hold, alignment: .bottom)
+                        .clipped()
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.easeOut(duration: 0.3), value: store.toast)
             .onChange(of: router.scrollID) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .top) }
             }
         }
         .environment(\.livePulse, store.livePulse)
+        .environment(\.changedLegs, store.changedLegs)
+    }
+
+    /// Let go past 110: hold the sun open, fetch, say "Updated · just now",
+    /// then set.
+    private func pullRefresh() async {
+        guard phase == .armed else { return }
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+        phase = .refreshing
+        withAnimation(S.standard(0.5)) { hold = 136 }
+        await store.refresh(.pull)
+        phase = .done
+        try? await Task.sleep(for: .seconds(1))
+        withAnimation(S.standard(0.5)) { hold = 0 }
+        try? await Task.sleep(for: .milliseconds(500))
+        phase = .idle
     }
 
     /// DEBUG simulator runs only: `-open report|theta|writes:TICKER` opens a

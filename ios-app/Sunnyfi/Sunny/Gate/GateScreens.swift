@@ -151,31 +151,3 @@ struct LockScreen: View {
         .task { _ = await lock.authenticate() }
     }
 }
-
-// MARK: - Sunrise loading (block 25)
-
-/// Until the first good update: a sun rising out of the horizon line, then
-/// Home fades in. No half-empty cards.
-struct SunriseLoading: View {
-    @State private var rise = false
-    @Environment(\.accessibilityReduceMotion) private var reduce
-    var body: some View {
-        ZStack {
-            SBackground()
-            VStack(spacing: 14) {
-                ZStack(alignment: .bottom) {
-                    Circle().fill(LinearGradient(colors: [S.sunLight, S.orange, S.sunDeep], startPoint: .top, endPoint: .bottom))
-                        .frame(width: 44, height: 44)
-                        .offset(y: rise ? -6 : 30)
-                    Rectangle().fill(S.line).frame(width: 120, height: 1)
-                }
-                .frame(width: 120, height: 60)
-                .clipped()
-                Text("FETCHING YOUR BOOK").sType(.micro, tabular: false).foregroundStyle(S.muted)
-            }
-        }
-        .onAppear {
-            withAnimation(reduce ? nil : .easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { rise = true }
-        }
-    }
-}

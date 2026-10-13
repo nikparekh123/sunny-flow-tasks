@@ -159,7 +159,7 @@ struct UpdatedPill: View {
 
     var body: some View {
         let (text, color) = label
-        Button { Task { await store.refresh(.tick) } } label: {
+        Button { Task { await store.refresh(.pull) } } label: {
             HStack(spacing: 6) {
                 Circle().fill(color == S.muted ? S.muted : color).frame(width: 5, height: 5)
                 Text(text).sType(.label, tabular: true).foregroundStyle(color)
