@@ -184,17 +184,19 @@ struct SunnyPortfolio: View {
             return x != y ? x > y : a.0 < b.0
         }.prefix(3))
     }
+    /// The stocks themselves, not the options on them (Nik, 13 Oct 2026): the
+    /// biggest gainer, the biggest loser, then the next biggest move, by % for
+    /// the range. "NKE up 1.8%. BABA down 0.5%, NFLX up 0.5%."
     private var pfWords: (lead: String, rest: String) {
         let r = range
-        let xs: [(String, Double)] = words.portfolio.map { p in
-            let pct: Double = p.ranges.at(r) ?? 0
-            return (p.ticker, abs(p.exposure) * pct / 100)
-        }
-        let parts: [String] = Self.top3(xs).map { m in
-            let dir = m.1 < 0 ? "down" : "up"
-            return "\(m.0) \(dir) \(F.moneyK(m.1))"
-        }
-        return Self.sentence(parts)
+        let xs: [(String, Double)] = words.portfolio.map { ($0.ticker, $0.ranges.at(r) ?? 0) }
+        let up = xs.filter { $0.1 > 0 }.max { $0.1 < $1.1 }
+        let down = xs.filter { $0.1 < 0 }.min { $0.1 < $1.1 }
+        var picks = [up, down].compactMap { $0 }
+        let next = Self.top3(xs.filter { x in x.1 != 0 && !picks.contains { $0.0 == x.0 } }).first
+        if let next { picks.append(next) }
+        let parts: [String] = picks.map { m in "\(m.0) \(m.1 < 0 ? "down" : "up") \(F.pct(m.1, places: 1))" }
+        return parts.isEmpty ? ("Nothing moved.", "") : Self.sentence(parts)
     }
     private var wlWords: (lead: String, rest: String) {
         let r = range
