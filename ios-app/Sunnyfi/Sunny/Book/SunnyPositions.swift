@@ -314,6 +314,8 @@ struct PTickerCards: View {
                             .padding(.vertical, 8)
                             .contentShape(Rectangle())
                             .onTapGesture { withAnimation(S.standard()) { page = k.rawValue } }
+                            .accessibilityLabel("Card \((kinds.firstIndex(of: k) ?? 0) + 1) of \(kinds.count)")
+                            .accessibilityAddTraits(k.rawValue == cur ? [.isButton, .isSelected] : .isButton)
                     }
                 }
                 .animation(S.standard(0.25), value: cur)
@@ -372,6 +374,7 @@ struct PSideCard: View {
                           text: { mode == .pct ? PF.pct($0) : PF.usd($0) },
                           tone: mode == .tv ? S.ink : gain >= 0 ? S.green : S.red, word: w)
                 }
+                .accessibilityHint("Switches percent, dollars and time value")
                 .buttonStyle(SPressStyle())
                 PSoftPanel(
                     heads: L.count > 1 ? ["\(PF.strike(l.k)) ×\(l.q) · \(dayLbl)", "Total today"] : ["\(PF.strike(l.k)) ×\(l.q) · \(dayLbl)"],

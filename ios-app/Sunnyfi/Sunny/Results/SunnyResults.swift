@@ -585,6 +585,7 @@ struct SunnyAllocation: View {
                 }
             }
             .frame(height: 40)
+            .accessibilityHidden(true)   // the rows below carry the same picks for VoiceOver
             VStack(spacing: 0) {
                 ForEach(shown, id: \.name) { it in
                     Button { withAnimation(S.standard(0.3)) { picked = picked == it.name ? nil : it.name } } label: {

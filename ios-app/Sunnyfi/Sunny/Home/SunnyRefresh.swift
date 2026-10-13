@@ -22,6 +22,7 @@ struct SunnySun: View {
     var spinning: Bool
     var size: CGFloat = 72           // the ray box; the disc is half
     @State private var spin = false
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
         let bright = lit ? 1 : progress
@@ -44,7 +45,8 @@ struct SunnySun: View {
         }
         .frame(width: size, height: size)
         .onChange(of: spinning, initial: true) { _, on in
-            if on { withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { spin = true } }
+            // Reduce Motion: the rays hold still while fetching.
+            if on && !reduce { withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { spin = true } }
             else { spin = false }
         }
     }

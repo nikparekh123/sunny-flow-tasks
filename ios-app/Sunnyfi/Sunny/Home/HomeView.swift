@@ -14,6 +14,7 @@ struct HomeView: View {
     let store: HomeStore
     @State private var router = HomeRouter()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduce
     // Pull to refresh (block 25): how far the page is pulled past the top,
     // the phase, and the space held open while it fetches.
     @State private var pull: CGFloat = 0
@@ -49,17 +50,17 @@ struct HomeView: View {
                 SunnyToast(text: t)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .padding(.top, 4)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(reduce ? .opacity : .move(edge: .top).combined(with: .opacity))
                     .zIndex(8)
             }
             if let home = store.home, router.writes != nil {
                 SunnyWritesSheet(home: home, ticker: Bindable(router).writes)
-                    .transition(.move(edge: .trailing))
+                    .transition(reduce ? .opacity : .move(edge: .trailing))   // Reduce Motion: fades, no slides
                     .zIndex(9)
             }
             if let home = store.home, let r = router.receipt {
                 receipt(r, home)
-                    .transition(.move(edge: .bottom))
+                    .transition(reduce ? .opacity : .move(edge: .bottom))
                     .zIndex(10)
             }
         }
