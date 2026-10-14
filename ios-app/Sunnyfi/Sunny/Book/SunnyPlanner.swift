@@ -234,6 +234,9 @@ struct SunnyPlanner: View {
         .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
         .scrollPosition(id: $page)
         .scrollIndicators(.hidden)
+        // The card's shadow runs past the row; clipped, it ended in a hard
+        // band under the card (Nik, 14 Oct 2026).
+        .scrollClipDisabled()
         .frame(height: h > 0 ? h + 32 : nil, alignment: .top)
         .padding(.horizontal, -S.margin).padding(.top, -8).padding(.bottom, -24)
         .animation(reduce ? nil : S.standard(0.4), value: h)
