@@ -266,6 +266,11 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 58. **Call / Put readable** (Nik, 14 Oct 2026: "hardly readable"): the side a strike is on is
     filled in its colour (green call, blue put, as its dot and chart tag) with paper text, 13
     semibold; the other word is ink. Replaces the design's white pill on glass.
+59. **Week | Month without the flash** (Nik, 14 Oct 2026). The bar row was centred on this
+    week; switching scrolled the same row, so the shorter row clamped it to its start for a
+    frame before it scrolled back to now. Each view (and each ‹ › step) now gets its own row,
+    already centred on now (or its last column), and the two crossfade on the toggle's spring.
+    One fix in `SBarChart`, so Inventory, Yield and Sold vs Bought all move together again.
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home

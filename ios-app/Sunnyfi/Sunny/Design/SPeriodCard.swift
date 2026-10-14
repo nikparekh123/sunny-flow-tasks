@@ -273,13 +273,13 @@ struct SBarChart: View {
             .padding(.horizontal, -20)
             .padding(.vertical, -12)
             .onAppear {
-                if let now = columns.first(where: \.isNow)?.id { proxy.scrollTo(now, anchor: .center) }
+                if let now = columns.first(where: \.isNow)?.id ?? columns.last?.id { proxy.scrollTo(now, anchor: .center) }
             }
-            // Week to Month (or back): land on this month or week, never on the start.
-            .onChange(of: columns.map(\.label)) { _, _ in
-                guard let now = columns.first(where: \.isNow)?.id ?? columns.last?.id else { return }
-                Task { @MainActor in proxy.scrollTo(now, anchor: .center) }
-            }
+            // Week to Month (or a step ‹ ›): a new row, already on this week or
+            // month, crossfades in. Scrolling the old row instead jumped it to
+            // its start for a frame (the "flash", Nik 14 Oct 2026), because the
+            // shorter row clamped the offset before it scrolled back to now.
+            .id(columns.map(\.label).joined(separator: "|"))
         }
     }
 
