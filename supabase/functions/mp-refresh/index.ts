@@ -316,7 +316,7 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
-  let body: { source?: string; compare?: boolean; passes?: number } = {};
+  let body: { source?: string; compare?: boolean; passes?: number; shadow?: boolean } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* no body is fine */ }
   const t0 = Date.now();
   const fromCron = req.headers.get('user-agent')?.includes('pg_net') ?? false;
@@ -359,7 +359,7 @@ Deno.serve(async (req) => {
   return last!;
 });
 
-async function refresh(req: Request, body: { source?: string; compare?: boolean },
+async function refresh(req: Request, body: { source?: string; compare?: boolean; shadow?: boolean },
                        opts: { history: boolean } = { history: true }): Promise<Response> {
   const now = new Date().toISOString();
   const source = (body.source ?? Deno.env.get('MARKS_SOURCE') ?? 'polygon').toLowerCase();
@@ -494,6 +494,7 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
                 bid: number | null; ask: number | null };
     const thetaBy = new Map<string, TV>();
     let thetaErr: string | null = null;
+    let shadowNote: unknown = null;
     if (useTheta) {
       const groups = [...new Set(openLegs.map((l) => `${l.ticker.toUpperCase()}|${l.expiry}`))];
       try {
@@ -604,6 +605,114 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
               oi: fin(oiBy.get(k)) ?? null, underlying: Sx,
             });
           }
+        }
+        /* ── LEAP MODEL PRICES, SHADOW ONLY (Nik, 14 Oct 2026) ──────────
+           IBKR values the LEAPs with its own model inside wide quotes (NKE
+           Jan 2028 30C closed 8.70 x 10.15: our mid 9.43, IBKR 8.99), so the
+           account read $3.6K above IBKR. Three model prices are logged beside
+           the midpoint at the close and compared each night with IBKR's own
+           statement mark (view leap_model_vs_ibkr). Nothing reads them yet;
+           the app keeps the midpoint until one wins. Same model as the marks:
+           r 4%, spot less the dividends due before the expiry. */
+        const nyP = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
+          hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+        const nyM = Number(nyP.hour) * 60 + Number(nyP.minute);
+        if (body.shadow === true || (nyM >= 15 * 60 + 58 && nyM <= 16 * 60 + 45)) {
+          try {
+            type Lp = { t: string; e: string; k: number; call: boolean; n: number; ids: string[] };
+            const leaps = new Map<string, Lp>();
+            for (const l of openLegs) {
+              if (l.direction !== 'long' || yrs(l.expiry) < 0.5) continue;
+              const key = `${l.ticker.toUpperCase()}|${l.expiry}|${l.option_type}|${Number(l.strike)}`;
+              const cur = leaps.get(key) ?? { t: l.ticker.toUpperCase(), e: l.expiry, k: Number(l.strike),
+                                               call: l.option_type === 'call', n: 0, ids: [] };
+              cur.n += remaining.get(l.id) ?? 0; cur.ids.push(l.id); leaps.set(key, cur);
+            }
+            const L = [...leaps.values()].filter((x) => x.n > 0);
+            const since = new Date(Date.now() - 12 * 864e5).toISOString().slice(0, 10);
+            const [lmd, apd] = await Promise.all([
+              admin.from('leg_marks_daily').select('option_trade_id, day, iv')
+                .in('option_trade_id', L.flatMap((x) => x.ids)).gte('day', since).lt('day', estToday),
+              admin.from('account_positions_daily').select('report_date, underlying, put_call, strike, expiry, mark_price')
+                .eq('asset_category', 'OPT').gte('report_date', since).lt('report_date', estToday)
+                .in('underlying', [...new Set(L.map((x) => x.t))]),
+            ]);
+            const ivDays = (lmd.data ?? []) as Array<{ option_trade_id: string; day: string; iv: number | null }>;
+            const ib = (apd.data ?? []) as Array<{ report_date: string; underlying: string; put_call: string;
+                                                   strike: number; expiry: string; mark_price: number }>;
+            const ibDays = [...new Set(ib.map((r) => r.report_date))];
+            const cl = ibDays.length ? ((await admin.from('daily_closes').select('ticker, date, close_price')
+              .in('ticker', [...new Set(L.map((x) => x.t))]).in('date', ibDays)).data ?? []) as
+              Array<{ ticker: string; date: string; close_price: number }> : [];
+            const median = (v: number[]) => { const a = [...v].sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : null; };
+            const rowsOut: Array<Record<string, unknown>> = [];
+            for (const x of L) {
+              const T = yrs(x.e), Sx = spotOf.get(x.t); if (Sx == null) continue;
+              const pv = pvDivs(x.t, x.e), Sd = Math.max(0.01, Sx - pv);
+              const tv = thetaBy.get(`${x.t}|${x.e}|${legKey(x.call ? 'call' : 'put', x.k)}`);
+              const mid = tv?.mark ?? null;
+              const price = (v: number | null) => (v != null && v > 0.01 && v < 4 ? bsPrice(x.call, Sd, x.k, T, v) : null);
+              // 1. Smoothed: the median of this contract's daily IVs, last five sessions.
+              const byDay = new Map<string, number>();
+              for (const r of ivDays) if (x.ids.includes(r.option_trade_id) && r.iv != null) byDay.set(r.day, Number(r.iv));
+              const ivSmooth = median([...byDay.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 5).map((e) => e[1]));
+              // 2. IBKR-anchored: the IV IBKR's last statement mark implies, repriced now.
+              const last = ib.filter((r) => r.underlying === x.t && r.put_call === (x.call ? 'C' : 'P')
+                && Number(r.strike) === x.k && String(r.expiry) === x.e).sort((a, b) => b.report_date.localeCompare(a.report_date))[0];
+              let ivIb: number | null = null;
+              if (last) {
+                const S0 = cl.find((c) => c.ticker === x.t && c.date === last.report_date)?.close_price;
+                const T0 = Math.max(1 / 365, (Date.parse(`${x.e}T20:00:00Z`) - Date.parse(`${last.report_date}T20:00:00Z`)) / (365 * 864e5));
+                if (S0) ivIb = greeksFrom(x.call, Number(last.mark_price), Math.max(0.01, Number(S0) - pv), x.k, T0)?.iv ?? null;
+              }
+              // 3. Smile: IVs of the same expiry's tight out-of-the-money strikes, fitted at this strike.
+              const chain = res.find((r) => r.t === x.t && r.e === x.e)?.gr ?? [];
+              const pts: Array<{ x: number; iv: number; w: number }> = [];
+              for (const r of chain) {
+                const d = r.data?.[0]; if (!d) continue;
+                const b = Number(d.bid), a = Number(d.ask); if (!(b > 0 && a > 0)) continue;
+                const m = (a + b) / 2, sp = (a - b) / m; if (sp > 0.12) continue;
+                const K = Number(r.contract.strike), isCall = r.contract.right.toLowerCase() === 'call';
+                if (isCall ? K < Sx : K >= Sx) continue;
+                const lx = Math.log(K / Sd); if (Math.abs(lx) > 0.6) continue;
+                const v = greeksFrom(isCall, m, Sd, K, T)?.iv; if (v == null) continue;
+                pts.push({ x: lx, iv: v, w: 1 / Math.max(sp, 0.01) });
+              }
+              let ivSmile: number | null = null;
+              if (pts.length >= 3) {
+                const quad = pts.length >= 6;
+                // Weighted least squares on [1, x, x^2] (or [1, x]).
+                const n = quad ? 3 : 2, A = Array.from({ length: n }, () => Array(n).fill(0)), B = Array(n).fill(0);
+                for (const p of pts) {
+                  const f = quad ? [1, p.x, p.x * p.x] : [1, p.x];
+                  for (let i = 0; i < n; i++) { B[i] += p.w * f[i] * p.iv; for (let j = 0; j < n; j++) A[i][j] += p.w * f[i] * f[j]; }
+                }
+                for (let i = 0; i < n; i++) {          // Gauss-Jordan
+                  let piv = i; for (let r2 = i + 1; r2 < n; r2++) if (Math.abs(A[r2][i]) > Math.abs(A[piv][i])) piv = r2;
+                  [A[i], A[piv]] = [A[piv], A[i]]; [B[i], B[piv]] = [B[piv], B[i]];
+                  const dv = A[i][i]; if (Math.abs(dv) < 1e-12) { ivSmile = null; break; }
+                  for (let j = 0; j < n; j++) A[i][j] /= dv; B[i] /= dv;
+                  for (let r2 = 0; r2 < n; r2++) if (r2 !== i) { const f = A[r2][i]; for (let j = 0; j < n; j++) A[r2][j] -= f * A[i][j]; B[r2] -= f * B[i]; }
+                  ivSmile = 0;
+                }
+                if (ivSmile != null) {
+                  const x0 = Math.log(x.k / Sd), xs = Math.max(Math.min(...pts.map((p) => p.x)), Math.min(Math.max(...pts.map((p) => p.x)), x0));
+                  ivSmile = B[0] + B[1] * xs + (quad ? B[2] * xs * xs : 0);
+                }
+              }
+              const r3 = (v: number | null) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10000) / 10000);
+              rowsOut.push({ day: estToday, ticker: x.t, put_call: x.call ? 'C' : 'P', strike: x.k, expiry: x.e, position: x.n,
+                spot: r3(Sx), bid: tv?.bid ?? null, ask: tv?.ask ?? null, mid, iv_mid: r3(tv?.iv ?? null),
+                iv_smooth: r3(ivSmooth), m_smooth: r3(price(ivSmooth)),
+                iv_ibkr: r3(ivIb), m_ibkr: r3(price(ivIb)), ibkr_from: last?.report_date ?? null,
+                iv_smile: r3(ivSmile), m_smile: r3(price(ivSmile)), smile_points: pts.length,
+                captured_at: new Date().toISOString() });
+            }
+            if (rowsOut.length) {
+              const { error } = await admin.from('leap_model_shadow').upsert(rowsOut, { onConflict: 'day,ticker,put_call,strike,expiry' });
+              shadowNote = error ? { error: error.message } : { rows: rowsOut.length, sample: rowsOut.slice(0, 8) };
+            } else shadowNote = { rows: 0 };
+          } catch (e) { shadowNote = { error: (e as Error).message }; }
         }
       } catch (err) { thetaErr = (err as Error).message; }
     }
@@ -774,7 +883,7 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
 
     const summary = {
       ok: true,
-      source: useTheta ? 'theta' : 'polygon', theta_used: thetaUsed, theta_error: thetaErr,
+      source: useTheta ? 'theta' : 'polygon', theta_used: thetaUsed, theta_error: thetaErr, shadow: shadowNote,
       legs: { total: openLegs.length, updated: legResults.length, failed: legFailures.length, failures: legFailures.slice(0, 10) },
       tickers: { total: allTickers.length, updated: stockResults.filter((r) => r.spot != null).length },
       timestamp: now,
