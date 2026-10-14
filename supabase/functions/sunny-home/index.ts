@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-13.13';
+const BUILD = '2026-10-13.14';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -298,6 +298,32 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   }
   legs.sort((a, b) => a.ticker.localeCompare(b.ticker) || a.expiry.localeCompare(b.expiry) || a.strike - b.strike);
   const book = [...new Set(legs.map((l) => l.ticker))].sort();
+
+  /* ── Hourly closes for the Positions Chart cards (handoff 22, block 13) ──
+     The last five sessions that have opened (today once it is past 9:30),
+     10:00 to 16:00 New York, from our own 30 s quotes (`hourly_closes`).
+     `ahead` lists the sessions still to come in the next week, so a sold
+     card can run its empty hours into the expiry. Started here, awaited at
+     the payload: it runs beside the rest of the build. */
+  const sessions: string[] = [];
+  for (let d = isTrading(today) && now.mins >= 9 * 60 + 30 ? today : prevTrading(today); sessions.length < 5; d = prevTrading(d)) sessions.unshift(d);
+  const ahead: string[] = [];
+  for (let d = addDays(sessions[4], 1); d <= addDays(today, 7); d = addDays(d, 1)) if (isTrading(d)) ahead.push(d);
+  const hoursP: Promise<Row> = book.length
+    ? fetch(`${URL_}/rest/v1/rpc/hourly_closes`, { method: 'POST', headers: H,
+        body: JSON.stringify({ p_tickers: book, p_days: sessions }) })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`hourly_closes ${r.status} ${(await r.text()).slice(0, 160)}`);
+        const px: Record<string, (number | null)[]> = Object.fromEntries(book.map((t) => [t, Array(35).fill(null)]));
+        for (const x of await r.json() as Row[]) {
+          const j = sessions.indexOf(String(x.day));
+          if (px[x.ticker] && j >= 0) px[x.ticker][j * 7 + Number(x.hr) - 10] = Math.round(Number(x.spot) * 1000) / 1000;
+        }
+        return { days: sessions, ahead, px };
+      })
+      /* A failed read must not stop Home: the cards fall back to the price. */
+      .catch((e) => ({ days: sessions, ahead, px: {}, error: String(e).slice(0, 160) }))
+    : Promise.resolve({ days: sessions, ahead, px: {} });
 
   /* ── REALIZED, per docs/PNL_GLOSSARY.md (Nik chose the glossary for the
      header, 12 Oct 2026). Only what closed: sold options bought back or
@@ -1452,12 +1478,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   } : null;
 
   step('theta_check');
+  const hours = await hoursP;
+  step('hours');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
     calendar: cal.filter((c) => String(c.date) >= today)
       .map((c) => ({ date: c.date, kind: c.kind, closes: c.closes, name: c.name })),
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
-    fresh, account, indices, overnight, watchlist, portfolio, legs, risk,
+    fresh, account, indices, overnight, watchlist, portfolio, legs, hours, risk,
     chart, history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
     writes: { expiry: targetExp, names: writes },

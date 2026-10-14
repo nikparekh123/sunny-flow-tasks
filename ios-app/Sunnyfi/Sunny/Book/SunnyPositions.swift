@@ -2,156 +2,128 @@
 //  SunnyPositions.swift
 //  Sunny
 //
-//  Blocks 12 and 13 · SunnyPositions. Glass chips pick All or a ticker
-//  (least room to the short breakeven first). All: one Liquid Glass card
-//  with the four book-wide totals. A ticker: one card per type it holds
-//  (Calls sold · Puts sold · Calls bought · Puts bought), then Combined,
-//  341 wide with the next one peeking; each with its hero (tap cycles % →
-//  $ → time value, shared everywhere), the soft panel, the flat payoff of
-//  the picked strike, the time strip and the strike rows.
+//  Blocks 12 and 13 (handoff 22, 13 Oct 2026) · SunnyPositions. Five pages
+//  that swipe: All, Sold (Bar), Sold (Chart), Bought (Bar), Bought (Chart); a
+//  side with no legs drops both. Glass chips on top follow the page, and
+//  Positions is as tall as the page you are on. All is one glass card with
+//  the four totals (tap one to open its side). A side opens with its total
+//  for the book (tap cycles time value → % → $, shared by every page), then
+//  one glass card per ticker, safest first: Bar, a price axis with every
+//  strike, or Chart, the hourly price with the strikes as lines. Both styles
+//  are built so Nik can use them side by side and pick one.
 //
 
 import SwiftUI
-import UIKit
-
-enum PMode { case pct, usd, tv
-    var next: PMode { switch self { case .pct: .usd; case .usd: .tv; case .tv: .pct } }
-    static func preset(_ s: String?) -> PMode { s == "usd" ? .usd : s == "tv" ? .tv : .pct }
-}
-
-/// The priced book, built once per payload.
-@MainActor
-enum PCache {
-    private static var key = ""
-    private static var value: [PLeg] = []
-    static func legs(_ home: HomePayload) -> [PLeg] {
-        if key == home.builtAt { return value }
-        key = home.builtAt; value = PMath.legs(home); return value
-    }
-}
-
-struct PTicker: Identifiable {
-    var id: String { t }
-    let t: String
-    let room: Double              // % to the nearest sold breakeven, ∞ without shorts
-    let credit: Double            // premium on the sold legs still open
-    let paid: Double              // premium paid for the long legs
-    var status: Status { room <= 0 ? .past : room < 2 ? .near : .safe }
-    enum Status { case past, near, safe }
-    var dot: Color { switch status { case .past: S.red; case .near: S.yellowDeep; case .safe: S.green } }
-}
-
-enum PBook {
-    static func tickers(_ L: [PLeg]) -> [PTicker] {
-        var seen: [String] = []
-        for l in L where !seen.contains(l.t) { seen.append(l.t) }
-        return seen.map { t in
-            let sc = L.filter { $0.t == t && $0.sold && $0.call }, sp = L.filter { $0.t == t && $0.sold && !$0.call }
-            let px = L.first { $0.t == t }!.px
-            let rc = sc.isEmpty ? Double.infinity : (PMath.beShortCalls(sc) - px) / px * 100
-            let rp = sp.isEmpty ? Double.infinity : (px - PMath.beShortPuts(sp)) / px * 100
-            let mine = L.filter { $0.t == t }
-            return PTicker(t: t, room: min(rc, rp),
-                           credit: mine.filter(\.sold).reduce(0) { $0 + $1.base },
-                           paid: mine.filter { !$0.sold }.reduce(0) { $0 + $1.base })
-        }
-        // Biggest open credit first (Nik, 13 Oct 2026: "sort positions by
-        // premium size", open credit); names with only longs go last, by
-        // what was paid.
-        .sorted {
-            if $0.credit != $1.credit { return $0.credit > $1.credit }
-            if $0.paid != $1.paid { return $0.paid > $1.paid }
-            return $0.t < $1.t
-        }
-    }
-    /// The worst name in the book: least room to its short breakeven.
-    static func worst(_ tks: [PTicker]) -> PTicker? { tks.min { $0.room < $1.room } }
-}
-
-// MARK: - The block
 
 struct SunnyPositions: View {
     let home: HomePayload
-    @State private var pick = DebugPreset.string("pos.pick") ?? "ALL"
-    @State private var mode: PMode = PMode.preset(DebugPreset.string("pos.mode"))
-    @State private var page: String?
-    @State private var legSel: [String: String] = [:]
-    @State private var tallest: CGFloat = 0
+    @State private var mode: PMode = PMode.preset(DebugPreset.string("pos.mode"), default: .tv)
+    @State private var page: Int? = 0
+    @State private var heights: [Int: CGFloat] = [:]
+    @State private var seen: Set<Int> = []
+    @State private var visible = false
+    @State private var fullW: CGFloat = 393
     @Environment(HomeRouter.self) private var router
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        let L = PCache.legs(home)
-        let tks = PBook.tickers(L)
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 12) {
+        let pages = PCache.pages(home)
+        let cur = min(max(page ?? 0, 0), max(pages.count - 1, 0))
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 14) {
                 Text("Positions").sType(.sectionTitle, tabular: false).foregroundStyle(S.ink)
-                if !tks.isEmpty { chips(tks) }
+                    .accessibilityAddTraits(.isHeader)
+                if !pages.isEmpty { chips(pages, cur) }
             }
             .padding(.horizontal, S.margin)
-            if tks.isEmpty {
+            if pages.isEmpty {
                 empty.padding(.horizontal, S.margin)
-            } else if pick == "ALL" || !tks.contains(where: { $0.t == pick }) {
-                // Its own height (Nik, 13 Oct 2026): no longer stretched to the ticker
-                // cards, a small gap under the title and some room at the bottom.
-                PAllCard(L: L, tks: tks, mode: $mode, minHeight: 0)
-                    .padding(.horizontal, S.margin)
             } else {
-                PTickerCards(home: home, L: L, ticker: pick, mode: $mode, legSel: $legSel, page: $page, measuring: false)
-                    .task {
-                        // Audit preset: a scroll position set before layout is ignored, so set it after.
-                        guard let p = DebugPreset.string("pos.page") else { return }
-                        try? await Task.sleep(for: .milliseconds(300))
-                        page = p
+                pager(pages, cur)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { fullW = $0 }
+        // First view of each page animates once (block 12, Motion): a page
+        // counts as seen once Positions is on screen with that page picked.
+        .onScrollVisibilityChange(threshold: 0.15) { v in visible = v; if v { seen.insert(cur) } }
+        .onChange(of: cur) { _, i in if visible { seen.insert(i) } }
+        .onChange(of: router.debugPick) { _, v in if let v, let i = Int(v) { page = i } }
+        .task {
+            // Audit preset: a scroll position set before layout is ignored, so set it after.
+            guard let p = DebugPreset.int("pos.page") else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            page = p
+        }
+    }
+
+    private func go(_ i: Int) { withAnimation(S.standard(0.45)) { page = i } }
+
+    // MARK: Chips
+
+    private func chips(_ pages: [PPage], _ cur: Int) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(pages) { pg in
+                        PChip(page: pg, on: pg.id == cur) { go(pg.id) }.id(pg.id)
                     }
-                    .id(pick)
-                    .transition(.opacity)
+                }
+                .padding(.top, 8).padding(.bottom, 10)
             }
+            .contentMargins(.horizontal, S.margin, for: .scrollContent)
+            .scrollIndicators(.hidden)
+            // The glass chips' shadows must not be cut by the row: clipped,
+            // they left a gray band with hard edges behind the chips.
+            .scrollClipDisabled()
+            .padding(.horizontal, -S.margin)
+            .padding(.top, -8).padding(.bottom, -10)
+            // Swiping moves the picked chip and keeps it in view.
+            .onChange(of: cur) { _, i in withAnimation(S.standard(0.4)) { proxy.scrollTo(i, anchor: .leading) } }
         }
-        .onChange(of: router.debugPick) { _, v in if let v { pick = v } }
     }
 
-    private func chips(_ tks: [PTicker]) -> some View {
-        ScrollView(.horizontal) {
-            HStack(spacing: 6) {
-                chip("All", dot: (PBook.worst(tks) ?? tks[0]).dot, room: nil, on: pick == "ALL") { pick = "ALL" }
-                ForEach(tks) { x in
-                    chip(x.t, dot: x.dot, room: x.room.isFinite && x.room > 0 ? String(format: "%.1f%%", x.room) : nil,
-                         on: pick == x.t) { pick = x.t; page = nil }
+    // MARK: Pages
+
+    private func pager(_ pages: [PPage], _ cur: Int) -> some View {
+        let pw = max(0, fullW - 2 * S.margin)
+        let h = heights[cur] ?? 0
+        let hours = home.hours
+        let live = PChartGeom.liveSlot(sessions: hours?.days ?? [], today: home.today, now: SClock.now(), calendar: home.calendar)
+        return ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 20) {
+                ForEach(pages) { pg in
+                    PPageView(page: pg, width: pw, hours: hours, live: live, today: home.today, mode: $mode,
+                              go: seen.contains(pg.id) || reduce,
+                              jump: { sold in
+                                  if let i = pages.first(where: { $0.kind == (sold ? .sold : .bought) })?.id { go(i) }
+                              })
+                        .frame(width: pw, alignment: .topLeading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[pg.id] = $0 }
+                        .id(pg.id)
                 }
             }
-            .padding(.top, 8).padding(.bottom, 10)
+            .scrollTargetLayout()
+            // Room for the glass shadows: the pager clips, the shadows must not.
+            .padding(.top, 8).padding(.bottom, 24)
         }
-        .contentMargins(.horizontal, 20, for: .scrollContent)
+        .contentMargins(.horizontal, S.margin, for: .scrollContent)
+        .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
+        .scrollPosition(id: $page)
         .scrollIndicators(.hidden)
-        .padding(.horizontal, -20)
-        .padding(.top, -8).padding(.bottom, -10)
-    }
-
-    private func chip(_ t: String, dot: Color, room: String?, on: Bool, tap: @escaping () -> Void) -> some View {
-        Button { withAnimation(S.standard(0.35)) { tap() } } label: {
-            HStack(spacing: 6) {
-                Circle().fill(dot).frame(width: 8, height: 8)
-                Text(t).sType(SType(size: 13, weight: 600, line: 13, tracking: 0), tabular: false)
-                    .foregroundStyle(on ? S.paper : S.ink)
-                if let room {
-                    Text(room).sType(SType(size: 13, weight: 500, line: 13, tracking: 0))
-                        .foregroundStyle(on ? S.paper.opacity(0.72) : S.muted)
-                }
-            }
-            .padding(.horizontal, 12).frame(height: 32)
-            .background { if on { Capsule().fill(S.ink).shadow(color: .black.opacity(0.14), radius: 6, y: 4) } }
-            .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
-            .contentShape(Capsule().inset(by: -6))
-        }
-        .buttonStyle(SPressStyle())
-        .accessibilityLabel(room.map { "\(t), \($0) to breakeven" } ?? t)
-        .accessibilityAddTraits(on ? .isSelected : [])
+        // As tall as the page you are on: a short page leaves no gap, and the
+        // cards below move up smoothly (0.4 s).
+        .frame(height: h > 0 ? h + 32 : nil, alignment: .top)
+        .padding(.top, -8).padding(.bottom, -24)
+        .animation(reduce ? nil : S.standard(0.4), value: h)
     }
 
     private var empty: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("No open positions").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-            Text("Calls you sell or buy show up here.").sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
+            Text("Calls and puts you sell or buy show up here.")
+                .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
                 .foregroundStyle(S.muted)
         }
         .foregroundStyle(S.ink)
@@ -161,740 +133,635 @@ struct SunnyPositions: View {
     }
 }
 
+// MARK: - Chip
+
+private struct PChip: View {
+    let page: PPage
+    let on: Bool
+    let tap: () -> Void
+
+    var body: some View {
+        Button(action: tap) {
+            HStack(spacing: 6) {
+                Circle().fill(page.status.dot).frame(width: 8, height: 8)
+                Text(page.chip).sType(SType(size: 13, weight: 600, line: 13, tracking: 0), tabular: false)
+                    .foregroundStyle(on ? S.paper : S.ink)
+                Text("\(page.legs.count)").sType(SType(size: 13, weight: 500, line: 13, tracking: 0))
+                    .foregroundStyle(on ? S.paper.opacity(0.72) : S.muted)
+            }
+            .padding(.horizontal, 12).frame(height: 32)
+            .background {
+                if on {
+                    Capsule().fill(S.ink)
+                        .shadow(color: .black.opacity(0.10), radius: 1, y: 1)
+                        .shadow(color: .black.opacity(0.14), radius: 6, y: 4)
+                }
+            }
+            .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
+            .contentShape(Capsule().inset(by: -6))
+            .animation(.easeOut(duration: 0.2), value: on)
+        }
+        .buttonStyle(PPress(scale: 0.96))
+        .accessibilityLabel("\(page.chip), \(PF.count(page.legs.count, "leg"))")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+// MARK: - One page
+
+private struct PPageView: View {
+    let page: PPage
+    let width: CGFloat
+    let hours: Hours?
+    let live: Double
+    let today: String
+    @Binding var mode: PMode
+    let go: Bool
+    let jump: (Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if page.kind == .all {
+                PAllCard(legs: page.legs, mode: mode, go: go, jump: jump)
+            } else {
+                PSideTop(page: page, mode: $mode, go: go).pEnter(go, 0)
+                ForEach(Array(page.cards.enumerated()), id: \.element.id) { j, c in
+                    PTickerCard(card: c, viz: page.viz ?? .bar, width: width - 40, go: go,
+                                delay: Double(min(j + 1, 6)) * S.stagger,
+                                hist: hours?.px[c.t] ?? [], live: live, sessions: hours?.days ?? [],
+                                ahead: c.weekExpiry.map { e in (hours?.ahead ?? []).filter { $0 <= e } } ?? [],
+                                today: today)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - All (one glass card, four totals)
 
-struct PAllCard: View {
-    let L: [PLeg]
-    let tks: [PTicker]
-    @Binding var mode: PMode
-    let minHeight: CGFloat
-    @State private var shown = false
-    @Environment(\.accessibilityReduceMotion) private var reduce
+private struct PAllCard: View {
+    let legs: [PLeg]
+    let mode: PMode
+    let go: Bool
+    let jump: (Bool) -> Void
 
-    private struct Total: Identifiable { let id: String; let sold: Bool; let L: [PLeg] }
+    private var rows: [(t: String, sold: Bool, L: [PLeg])] {
+        [("Calls sold", true, true), ("Puts sold", true, false), ("Calls bought", false, true), ("Puts bought", false, false)]
+            .map { r in (r.0, r.1, legs.filter { $0.sold == r.1 && $0.call == r.2 }) }
+            .filter { !$0.2.isEmpty }
+    }
 
     var body: some View {
-        let groups = [Total(id: "Calls sold", sold: true, L: L.filter { $0.sold && $0.call }),
-                      Total(id: "Calls bought", sold: false, L: L.filter { !$0.sold && $0.call }),
-                      Total(id: "Puts sold", sold: true, L: L.filter { $0.sold && !$0.call }),
-                      Total(id: "Puts bought", sold: false, L: L.filter { !$0.sold && !$0.call })].filter { !$0.L.isEmpty }
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("All positions").sType(.sectionTitle, tabular: false)
-                Spacer()
-                Text("\(Set(L.map(\.t)).count) tickers · \(L.count) legs")
+                Spacer(minLength: 0)
+                Text(PF.count(Set(legs.map(\.t)).count, "ticker") + " · " + PF.count(legs.count, "leg"))
                     .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
             }
-            VStack(alignment: .leading, spacing: 28) {
-                ForEach(Array(groups.enumerated()), id: \.element.id) { i, g in
-                    total(g).opacity(shown ? 1 : 0).offset(y: shown || reduce ? 0 : 14)
-                        .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.7).delay(Double(i) * 0.07), value: shown)
+            VStack(alignment: .leading, spacing: 20) {
+                ForEach(Array(rows.enumerated()), id: \.element.t) { j, r in
+                    let A = PTotals(r.L)
+                    Button { jump(r.sold) } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(r.t) · \(PWords.word(mode, sold: r.sold))")
+                                .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+                                .foregroundStyle(S.muted)
+                            PNum(value: PWords.big(A, mode), format: PWords.format(mode), go: go,
+                                 delay: 0.12 + Double(j) * S.stagger)
+                                .sType(.display)
+                                .foregroundStyle(PWords.tone(A, mode))
+                                .lineLimit(1)
+                            PWords.line(A, mode, sold: r.sold).padding(.top, 4)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PPress(scale: 0.98))
+                    .pEnter(go, Double(min(j, 6)) * S.stagger)
+                    .accessibilityLabel("\(r.t), \(PWords.word(mode, sold: r.sold)) \(PWords.format(mode)(PWords.big(A, mode)))")
+                    .accessibilityHint("Opens \(r.sold ? "Sold" : "Bought")")
                 }
             }
-            .padding(.top, 4).padding(.bottom, 12)
         }
         .foregroundStyle(S.ink)
-        .padding(20)
-        .frame(maxWidth: .infinity, minHeight: max(minHeight, 0), alignment: .topLeading)
+        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 28)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
         .sunnyGlow()
-        .onAppear { shown = true }
-        .onDisappear { shown = false }
-    }
-
-    private func total(_ g: Total) -> some View {
-        let base = g.L.reduce(0) { $0 + $1.base }, gain = g.L.reduce(0) { $0 + $1.g }
-        let tv = g.L.reduce(0) { $0 + $1.tv }, now = g.L.reduce(0) { $0 + $1.now }
-        let pct = base > 0 ? gain / base * 100 : 0
-        let tone: Color = gain >= 0 ? S.green : S.red
-        let word = g.sold ? ["captured", "kept", "time value"] : ["return", "gain", "time value"]
-        let w = mode == .pct ? word[0] : mode == .usd ? word[1] : word[2]
-        let big = mode == .pct ? abs(pct) : mode == .usd ? abs(gain) : tv
-        var bits: [(String, String, Color)] = [(PF.usd(now), " now", S.ink)]
-        if mode != .pct { bits.append((PF.pct(pct), g.sold ? " captured" : " return", tone)) }
-        if mode != .tv { bits.append((PF.usd(tv), " time value", S.ink)) }
-        if mode != .usd { bits.append((PF.usd(gain), g.sold ? " kept" : " gain", tone)) }
-        return Button { withAnimation(.smooth(duration: S.roll)) { mode = mode.next } } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(g.id) · \(w)").sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                    .foregroundStyle(S.muted)
-                SNumber(value: big, format: { mode == .pct ? PF.pct($0) : PF.usd($0) })
-                    .sType(.display)
-                    .foregroundStyle(mode == .tv ? S.ink : tone)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                bits.enumerated().reduce(Text("")) { acc, e in
-                    let (j, b) = e
-                    return acc + Text(b.0).font(SType(size: 14, weight: 700, line: 18, tracking: 0).font(tabular: true)).foregroundStyle(b.2)
-                        + Text(b.1 + (j < bits.count - 1 ? " · " : "")).foregroundStyle(S.muted)
-                }
-                .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-                .padding(.top, 4)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SPressStyle())
-        .accessibilityHint("Switches percent, dollars and time value")
     }
 }
 
-// MARK: - A ticker's cards
+// MARK: - Page top (a side's total for the book)
 
-struct PTickerCards: View {
-    let home: HomePayload
-    let L: [PLeg]
-    let ticker: String
+private struct PSideTop: View {
+    let page: PPage
     @Binding var mode: PMode
-    @Binding var legSel: [String: String]
-    @Binding var page: String?
-    let measuring: Bool
-
-    private enum Kind: String { case s, p, l, q, n }
-
-    /// Calls sold · Puts sold · Calls bought · Puts bought, the ones held,
-    /// each by strike.
-    private static func groups(_ mine: [PLeg]) -> [(Kind, [PLeg])] {
-        var out: [(Kind, [PLeg])] = []
-        let add = { (k: Kind, sold: Bool, call: Bool) in
-            let xs: [PLeg] = mine.filter { $0.sold == sold && $0.call == call }.sorted { $0.k < $1.k }
-            if !xs.isEmpty { out.append((k, xs)) }
-        }
-        add(.s, true, true); add(.p, true, false); add(.l, false, true); add(.q, false, false)
-        return out
-    }
+    let go: Bool
 
     var body: some View {
-        let mine = L.filter { $0.t == ticker }
-        let g = Self.groups(mine)
-        let one = g.count == 1
-        let kinds: [Kind] = g.map(\.0) + (g.count > 1 ? [.n] : [])
-        let cw: CGFloat = one ? 353 : 341
-        VStack(spacing: 14) {
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 8) {
-                    ForEach(kinds, id: \.rawValue) { k in
-                        Group {
-                            if k == .n {
-                                PCombinedCard(home: home, L: mine, width: cw)
-                            } else {
-                                let legs = g.first { $0.0 == k }!.1
-                                PSideCard(home: home, key: k.rawValue, L: legs, width: cw, mode: $mode,
-                                          sel: Binding(get: { legSel[k.rawValue] }, set: { legSel[k.rawValue] = $0 }))
-                            }
-                        }
-                        .frame(width: cw)
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .sCardSurface(glass: false)   // strike table and payoff labels stay on paper
-                        .id(k.rawValue)
-                    }
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .scrollTargetLayout()
-            }
-            .contentMargins(.horizontal, 20, for: .scrollContent)
-            .scrollTargetBehavior(.viewAligned)
-            .scrollPosition(id: $page)
-            .scrollIndicators(.hidden)
-            .scrollClipDisabled()
-            .scrollDisabled(one || measuring)
-            if kinds.count > 1 {
-                let cur = page ?? kinds[0].rawValue
-                HStack(spacing: 6) {
-                    ForEach(kinds, id: \.rawValue) { k in
-                        Capsule().fill(k.rawValue == cur ? S.ink : S.tickMinor)
-                            .frame(width: k.rawValue == cur ? 16 : 6, height: 6)
-                            .padding(.vertical, 8)
-                            .contentShape(Rectangle())
-                            .onTapGesture { withAnimation(S.standard()) { page = k.rawValue } }
-                            .accessibilityLabel("Card \((kinds.firstIndex(of: k) ?? 0) + 1) of \(kinds.count)")
-                            .accessibilityAddTraits(k.rawValue == cur ? [.isButton, .isSelected] : .isButton)
-                    }
-                }
-                .animation(S.standard(0.25), value: cur)
-                .frame(maxWidth: .infinity)
-                .padding(.top, -8)
-            }
-        }
-    }
-}
-
-// MARK: - One side (calls or puts, sold or bought)
-
-struct PSideCard: View {
-    let home: HomePayload
-    let key: String
-    let L: [PLeg]
-    let width: CGFloat
-    @Binding var mode: PMode
-    @Binding var sel: String?
-    @State private var si: Int?
-    @Environment(\.changedLegs) private var changed
-
-    private var leg: PLeg {
-        L.first { $0.id == sel } ?? DebugPreset.int("pos.leg").flatMap { L[safe: $0] } ?? L[0]
-    }
-    private var sold: Bool { L[0].sold }
-    private var call: Bool { L[0].call }
-    private var CW: CGFloat { width - 40 }
-    private var W: CGFloat { CW - 44 }
-
-    var body: some View {
-        let l = leg, px = l.px
-        let slots = TimeStrip.slots(until: l.expiry, long: !sold, calendar: home.calendar)
-        let idx = min(si ?? PTime.presetSlot(slots), slots.count - 1)
-        let el = min(slots[idx].el, l.days)
-        let (lo, hi) = Self.span(l)
-        let stops = (0...5).map { Double($0) / 5 * l.days }
-        let yr = PayoffGeom.range([l], stops: stops, lo: lo, hi: hi)
-        let C = PayoffGeom.build([l], el: el, lo: lo, hi: hi, yr: yr, W: W, unbounded: sold, label: { PF.strike($0.k) })
-        let base = L.reduce(0) { $0 + $1.base }, gain = L.reduce(0) { $0 + $1.g }
-        let tvAll = L.reduce(0) { $0 + $1.tv }, nowAll = L.reduce(0) { $0 + $1.now }
-        let pctAll = base > 0 ? gain / base * 100 : 0
-        let V = PMath.pv(l, px, el)
-        let tvLeg = max(0, V - (call ? max(0, px - l.k) : max(0, l.k - px))) * 100 * Double(l.q)
-        let pLeg = (sold ? l.a - V : V - l.a) / l.a * 100
-        let words = sold ? ["captured", "kept", "time value"] : ["return", "gain", "time value"]
-        let w = mode == .pct ? words[0] : mode == .usd ? words[1] : words[2]
-        let dayLbl = PTime.dayLabel(slots, idx, long: !sold)
-
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 14) {
-                PCardHead(title: "\(l.t) \(call ? "Calls" : "Puts") \(sold ? "sold" : "bought")",
-                          count: "\(L.count) \(L.count == 1 ? "leg" : "legs")")
-                Button { withAnimation(.smooth(duration: S.roll)) { mode = mode.next } } label: {
-                    PHero(value: mode == .pct ? abs(pctAll) : mode == .usd ? abs(gain) : tvAll,
-                          text: { mode == .pct ? PF.pct($0) : PF.usd($0) },
-                          tone: mode == .tv ? S.ink : gain >= 0 ? S.green : S.red, word: w)
-                }
-                .accessibilityHint("Switches percent, dollars and time value")
-                .buttonStyle(SPressStyle())
-                PSoftPanel(
-                    heads: L.count > 1 ? ["\(PF.strike(l.k)) ×\(l.q) · \(dayLbl)", "Total today"] : ["\(PF.strike(l.k)) ×\(l.q) · \(dayLbl)"],
-                    rows: [
-                        (sold ? "credit" : "paid", [(PF.usd(l.base), S.ink), (PF.usd(base), S.ink)]),
-                        ("worth now", [(PF.usd(V * 100 * Double(l.q)), S.ink), (PF.usd(nowAll), S.ink)]),
-                        ("TV", [(PF.usd(tvLeg), S.ink), (PF.usd(tvAll), S.ink)]),
-                        (sold ? "captured" : "return", [(PF.pct(pLeg), pLeg >= 0 ? S.green : S.red), (PF.pct(pctAll), gain >= 0 ? S.green : S.red)]),
-                    ].map { ($0.0, L.count > 1 ? $0.1 : [$0.1[0]]) })
-            }
-            PFlatChart(C: C, W: W, CW: CW, now: px, selected: l.id, dist: PDist.of(l))
-            PTimeStripView(slots: slots, si: $si, long: !sold, width: width)
-                .id(l.id)   // a new strike opens on Now, never the last strike's time
-            VStack(spacing: 2) {
-                ForEach(L) { x in
-                    let d = PDist.of(x)
-                    let v = mode == .pct ? PF.pct(x.pct) : mode == .usd ? PF.usd(x.g) : PF.usd(x.tv)
-                    PRow(name: PF.strike(x.k), qty: "×\(x.q)", dist: "\(d.v) \(d.m)", distColor: d.c, value: v,
-                         valueColor: mode == .tv ? S.ink : x.g >= 0 ? S.green : S.red, nameW: 96,
-                         selected: x.id == l.id, tap: { withAnimation(S.standard(0.3)) { sel = x.id; si = nil } },
-                         wash: changed.contains(x.id))
-                }
-            }
-        }
-        .foregroundStyle(S.ink)
-        .padding(20)
-    }
-
-    /// The chart's price span, as the design fits each side.
-    static func span(_ l: PLeg) -> (Double, Double) {
-        let px = l.px, k = l.k, a = l.a
-        if l.call && l.sold {
-            let hi = max(k + 2 * a, k * 1.004, px * 1.01), span = max(hi - min(px, k), px * 0.04)
-            return (min(px, k) - span * 0.3, hi)
-        } else if l.call {
-            return (min(px, k) * 0.78, max(px, k + a) + 1.4 * a)
-        } else if l.sold {
-            let lo = max(0.01, min(k - 2 * a, k * 0.996, px * 0.99)), span = max(max(px, k) - lo, px * 0.04)
-            return (lo, max(px, k) + span * 0.3)
-        }
-        return (max(0.01, min(px, k - a) - 1.4 * a), max(px, k) * 1.22)
-    }
-}
-
-// MARK: - Combined (block 13)
-
-struct PCombinedCard: View {
-    let home: HomePayload
-    let L: [PLeg]
-    let width: CGFloat
-    @State private var si: Int?
-    @Environment(\.changedLegs) private var changed
-
-    var body: some View {
-        let CW = width - 40, W = CW - 44
-        let shorts = L.filter(\.sold), longs = L.filter { !$0.sold }
-        let lC = longs.filter(\.call), sC = shorts.filter(\.call)
-        let hasShort = !shorts.isEmpty
-        let until = (hasShort ? shorts : L).map(\.expiry).max()!
-        let slots = TimeStrip.slots(until: until, long: !hasShort, calendar: home.calendar)
-        let idx = min(si ?? PTime.presetSlot(slots), slots.count - 1)
-        let endDays = (hasShort ? shorts : L).map(\.days).max() ?? 0
-        let el = min(slots[idx].el, endDays)
-        let px = L[0].px, ks = L.map(\.k)
-        let lo = min(px, ks.min()!) * 0.9, hi = max(px * 1.08, (ks.max() ?? px) * 1.06)
-        let sQ = sC.reduce(0) { $0 + $1.q }, lQ = lC.reduce(0) { $0 + $1.q }
-        let stops = (0...5).map { Double($0) / 5 * endDays }
-        let yr = PayoffGeom.range(L, stops: stops, lo: lo, hi: hi)
-        let C = PayoffGeom.build(L, el: el, lo: lo, hi: hi, yr: yr, W: W, unbounded: sQ > lQ,
-                                 label: { "\(PF.strike($0.k))\($0.call ? "C" : "P")·\($0.sold ? "S" : "B")" })
-        let near = (hasShort ? shorts : L).min { abs($0.k - px) < abs($1.k - px) }!
-        let net = L.reduce(0) { $0 + $1.g }
-        let delta = L.reduce(0) { $0 + PMath.delta($1, px, el) }
-        let longVal = PMath.value(longs, px, el)
-        let income = shorts.reduce(0) { $0 + $1.base }
-        let anyPuts = L.contains { !$0.call }
-        let dayLbl = PTime.dayLabel(slots, idx, long: !hasShort)
-        let order = longs.filter(\.call) + longs.filter { !$0.call } + shorts.filter(\.call) + shorts.filter { !$0.call }
-
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 14) {
-                PCardHead(title: "\(L[0].t) Combined", count: "\(L.count) legs")
-                PHero(value: abs(net), text: { PF.usd($0) }, tone: net >= 0 ? S.green : S.red, word: "net P/L")
-                PSoftPanel(heads: ["Total \(dayLbl)"], rows: [
-                    ("delta", [(PF.count(delta), delta < -0.5 ? S.red : S.ink)]),
-                    (anyPuts ? "long value" : "long calls", [(PF.usd(longVal), S.ink)]),
-                    (anyPuts ? "short income" : "short calls income", [(PF.usd(income), S.ink)]),
-                ])
-            }
-            PFlatChart(C: C, W: W, CW: CW, now: px, selected: near.id, dist: PDist.of(near))
-            PTimeStripView(slots: slots, si: $si, long: !hasShort, width: width)
-            VStack(spacing: 2) {
-                ForEach(order) { x in
-                    let d = PDist.of(x)
-                    PRow(name: "\(PF.strike(x.k))\(x.call ? "C" : "P")", qty: "\(x.sold ? "sold" : "bought") ×\(x.q)",
-                         dist: "\(d.v) \(d.m)", distColor: d.c, value: PF.usd(x.g),
-                         valueColor: x.g >= 0 ? S.green : S.red, nameW: 128, selected: false, tap: nil,
-                         wash: changed.contains(x.id))
-                }
-            }
-        }
-        .foregroundStyle(S.ink)
-        .padding(20)
-    }
-}
-
-// MARK: - Parts
-
-enum PDist {
-    /// "0.8%" "OTM", green on your side (sold OTM, bought ITM), red past it.
-    static func of(_ l: PLeg) -> (v: String, m: String, c: Color) {
-        let d = (l.call ? l.k - l.px : l.px - l.k) / l.px * 100
-        let ok = l.sold ? d > 0 : d < 0
-        return (String(format: "%.1f%%", abs(d)), d > 0 ? "OTM" : d < 0 ? "ITM" : "ATM", ok ? S.green : S.red)
-    }
-}
-
-enum PTime {
-    /// The strip's starting stop: Now (Nik, 13 Oct 2026: a strike always opens
-    /// on today's view, not Exp), or an audit preset ("exp", a weekday 2-6 at
-    /// noon, or "d<N>" days out).
-    static func presetSlot(_ s: [TimeSlot]) -> Int {
-        let last = s.count - 1
-        guard let p = DebugPreset.string("pos.slot") else { return 0 }
-        if p == "now" { return 0 }
-        if p == "exp" { return last }
-        if p.hasPrefix("d"), let n = Int(p.dropFirst()) { return min(last, n) }
-        if let wd = Int(p) {
-            return s.firstIndex { $0.minutes == 12 * 60 && DeckBuilder.weekday($0.date) == wd } ?? last
-        }
-        return last
-    }
-    static let mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    static func dayLabel(_ s: [TimeSlot], _ i: Int, long: Bool) -> String {
-        if i == 0 { return "Now" }
-        if i == s.count - 1 { return "Exp" }
-        let x = s[i]
-        if long { return F.day(x.date) }
-        return "\(DeckBuilder.weekdays[DeckBuilder.weekday(x.date)]) \(clock(x.minutes ?? 0))"
-    }
-    static func clock(_ m: Int) -> String {
-        let h = m / 60, mm = m % 60, h12 = h % 12 == 0 ? 12 : h % 12
-        return String(format: "%d:%02d %@", h12, mm, h >= 12 ? "PM" : "AM")
-    }
-    /// "Now (5 DTE)" · "Oct 14, 2:15 PM (2 DTE)" · "Oct 14, 2026 (100 DTE)"
-    static func chip(_ s: [TimeSlot], _ i: Int, long: Bool) -> String {
-        let end = s[s.count - 1].date
-        let dte = { (d: String) -> Int in
-            let a = PMath.nyDate(d, minutes: 0), b = PMath.nyDate(end, minutes: 0)
-            return max(0, Int((b.timeIntervalSince(a) / 86400).rounded()))
-        }
-        if i == 0 { return "Now (\(dte(s[0].date)) DTE)" }
-        let x = s[i]
-        let when = long ? "\(F.day(x.date)), \(x.date.prefix(4))" : "\(F.day(x.date)), \(clock(x.minutes ?? 0))"
-        return "\(when) (\(dte(x.date)) DTE)"
-    }
-}
-
-struct PCardHead: View {
-    let title: String
-    let count: String
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(title).sType(.sectionTitle, tabular: false).lineLimit(1)
-            Spacer(minLength: 0)
-            Text(count).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                .foregroundStyle(S.muted).lineLimit(1)
-        }
-    }
-}
-
-struct PHero: View {
-    let value: Double
-    let text: (Double) -> String
-    let tone: Color
-    let word: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SNumber(value: value, format: text)
-                .sType(.largeNumber)
-                .foregroundStyle(tone)
-            Text(word).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false).foregroundStyle(S.muted)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-    }
-}
-
-/// The soft panel: labels left, the picked strike's column, then Total in
-/// quieter 13 pt grey, coloured only for gains and losses.
-struct PSoftPanel: View {
-    let heads: [String]
-    let rows: [(String, [(String, Color)])]
-    /// 96 as designed; a little less with two columns so labels never cut.
-    private var col: CGFloat { heads.count > 1 ? 84 : 96 }
-    var body: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 8) {
+        let A = PTotals(page.legs)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(page.sold ? "Sold" : "Bought").sType(.sectionTitle, tabular: false).foregroundStyle(S.ink)
                 Spacer(minLength: 0)
-                ForEach(Array(heads.enumerated()), id: \.offset) { j, h in
-                    Text(h).sType(SType(size: 12, weight: j == 0 ? 700 : 600, line: 14, tracking: 0))
-                        .foregroundStyle(j == 0 ? S.ink : S.muted)
-                        .lineLimit(1).fixedSize()
-                        .frame(minWidth: col, alignment: .trailing)
-                }
+                Text(PF.count(page.tickers, "ticker") + " · " + PF.count(page.legs.count, "leg"))
+                    .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
             }
-            .frame(height: 30)
-            ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(r.0).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                        .foregroundStyle(S.muted).lineLimit(1).fixedSize()
-                    Spacer(minLength: 0)
-                    ForEach(Array(r.1.enumerated()), id: \.offset) { j, cell in
-                        Text(cell.0)
-                            .sType(SType(size: j == 0 ? 15 : 13, weight: j == 0 ? 700 : 600, line: 18, tracking: 0))
-                            .foregroundStyle(j == 0 || cell.1 != S.ink ? cell.1 : S.muted)
-                            .contentTransition(.numericText())
-                            .lineLimit(1).fixedSize()
-                            .frame(minWidth: col, alignment: .trailing)
-                    }
+            Button { withAnimation(.smooth(duration: S.roll)) { mode = mode.nextPositions } } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    PNum(value: PWords.big(A, mode), format: PWords.format(mode), go: go, delay: 0.12)
+                        .sType(.largeNumber)
+                        .foregroundStyle(PWords.tone(A, mode))
+                    Text(PWords.word(mode, sold: page.sold))
+                        .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                        .foregroundStyle(S.muted)
                 }
-                .frame(height: 34)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(POpacityPress())
+            .accessibilityLabel("\(page.sold ? "Sold" : "Bought"), \(PWords.word(mode, sold: page.sold)) \(PWords.format(mode)(PWords.big(A, mode)))")
+            .accessibilityHint("Switches time value, percent and dollars")
+            PWords.line(A, mode, sold: page.sold)
         }
-        .padding(.horizontal, 16).padding(.vertical, 6)
-        .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(LinearGradient(colors: [S.pSoftTop, S.pSoftBot], startPoint: .top, endPoint: .bottom))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(S.pSoftRim, lineWidth: 0.5))
-                .overlay(alignment: .top) {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .trim(from: 0.0, to: 1.0).stroke(S.pSoftLip, lineWidth: 1)
-                        .mask(alignment: .top) { Rectangle().frame(height: 2) }
-                }
-                .shadow(color: S.ink.opacity(0.03), radius: 1, y: 1)
-        }
+        .padding(.top, 4).padding(.bottom, 8)
     }
 }
 
-struct PRow: View {
-    let name: String
-    let qty: String
-    let dist: String
-    let distColor: Color
-    let value: String
-    let valueColor: Color
-    let nameW: CGFloat
-    let selected: Bool
-    let tap: (() -> Void)?
-    var wash = false
+/// The words and numbers the All rows and page tops share (block 12, Numbers).
+enum PWords {
+    static func word(_ m: PMode, sold: Bool) -> String {
+        switch m { case .tv: "time value"; case .pct: sold ? "captured" : "return"; case .usd: sold ? "kept" : "gain" }
+    }
+    static func big(_ A: PTotals, _ m: PMode) -> Double {
+        switch m { case .tv: A.tv; case .pct: abs(A.pct); case .usd: abs(A.g) }
+    }
+    static func format(_ m: PMode) -> (Double) -> String {
+        if m == .pct { return { PF.pct($0) } }
+        return { PF.usd($0) }
+    }
+    /// Time value in ink; % and $ green when up, red when down, never a sign.
+    static func tone(_ A: PTotals, _ m: PMode) -> Color { m == .tv ? S.ink : A.up ? S.green : S.red }
+
+    /// $ now first, then the two values the big number is not showing.
+    static func line(_ A: PTotals, _ m: PMode, sold: Bool) -> some View {
+        let tn = A.up ? S.green : S.red
+        var bits: [(String, String, Color)] = [(PF.usd(A.now), " now", S.ink)]
+        if m != .pct { bits.append((PF.pct(A.pct), sold ? " captured" : " return", tn)) }
+        if m != .tv { bits.append((PF.usd(A.tv), " time value", S.ink)) }
+        if m != .usd { bits.append((PF.usd(A.g), sold ? " kept" : " gain", tn)) }
+        let bold = SType(size: 14, weight: 700, line: 18, tracking: 0).font(tabular: true)
+        return bits.enumerated().reduce(Text("")) { acc, e in
+            acc + Text(e.element.0).font(bold).foregroundStyle(e.element.2)
+                + Text(e.element.1 + (e.offset < bits.count - 1 ? " · " : "")).foregroundStyle(S.muted)
+        }
+        .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// MARK: - Ticker card (block 13)
+
+private struct PTickerCard: View {
+    let card: PCard
+    let viz: PViz
+    let width: CGFloat              // content width: 313 on a 393 phone
+    let go: Bool
+    let delay: Double
+    let hist: [Double?]
+    let live: Double
+    let sessions: [String]
+    let ahead: [String]
+    let today: String
+
     var body: some View {
-        let row = HStack(spacing: 10) {
-            (Text(name).font(SType(size: 15, weight: 600, line: 18, tracking: 0).font())
-             + Text(" " + qty).font(SType(size: 15, weight: 500, line: 18, tracking: 0).font()).foregroundStyle(S.muted))
+        let c = card
+        VStack(alignment: .leading, spacing: 18) {
+            head
+            if viz == .bar {
+                PBarView(c: c, g: PBarGeom(c, width: width), go: go, d: delay)
+            } else {
+                PChartView(c: c, g: PChartGeom(c, width: width, hist: hist, live: live, sessions: sessions,
+                                               ahead: ahead, today: today),
+                           width: width, go: go, d: delay)
+            }
+            footer
+        }
+        .foregroundStyle(S.ink)
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background { PCornerGlow(status: c.status) }
+        .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
+        .sunnyGlow()
+        .pEnter(go, delay)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11y)
+    }
+
+    private var head: some View {
+        let c = card
+        return VStack(alignment: .leading, spacing: 12) {
+            (Text(c.t).font(SType(size: 20, weight: 700, line: 24, tracking: 0).font())
+             + Text(" " + PF.price(c.px)).font(SType(size: 20, weight: 500, line: 24, tracking: 0).font(tabular: true))
+                .foregroundStyle(S.muted))
+                .sType(SType(size: 20, weight: 700, line: 24, tracking: 0))
                 .lineLimit(1)
-                .frame(width: nameW, alignment: .leading)
-            Text(dist).sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(distColor)
-                .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1)
-            Text(value).sType(SType(size: 15, weight: 700, line: 18, tracking: 0)).foregroundStyle(valueColor)
-                .contentTransition(.numericText())
-                .frame(width: 64, alignment: .trailing).lineLimit(1).minimumScaleFactor(0.8)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(c.by).foregroundStyle(S.muted)
+                Spacer(minLength: 0)
+                c.heads.enumerated().reduce(Text("")) { acc, e in
+                    let h = e.element
+                    return acc + Text(PF.dist(h.dist) + (h.dist >= 0 ? " to " : " past ") + h.word)
+                        .foregroundStyle(Self.distColor(h.dist, sold: c.sold))
+                        + Text(e.offset < c.heads.count - 1 ? " · " : "").foregroundStyle(S.muted)
+                }
+            }
+            .sType(SType(size: 13, weight: 500, line: 16, tracking: 0))
+            .lineLimit(1)
         }
-        .frame(height: 44)
-        .padding(.horizontal, 8)
-        .modifier(Wash(on: wash))
-        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(selected ? S.pRowSel : .clear))
-        .padding(.horizontal, -8)
-        .contentShape(Rectangle())
-        if let tap {
-            Button(action: tap) { row }.buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-        } else {
-            row.accessibilityElement(children: .combine)
+    }
+
+    /// Gold inside 2% on a sold strike, red once a sold strike is crossed,
+    /// green past a bought one; otherwise muted.
+    static func distColor(_ d: Double, sold: Bool) -> Color {
+        d < 0 ? (sold ? S.red : S.green) : sold && d < 2 ? S.yellowDeep : S.muted
+    }
+
+    private var footer: some View {
+        let A = card.totals, tn = A.up ? S.green : S.red
+        let usd: (Double) -> String = { PF.usd($0) }, pct: (Double) -> String = { PF.pct($0) }
+        let stats: [(Double, (Double) -> String, String, Color)] = [
+            (A.tv, usd, "time value", S.ink),
+            (abs(A.pct), pct, card.sold ? "captured" : "return", tn),
+            (abs(A.g), usd, card.sold ? "kept" : "gain", tn),
+        ]
+        return HStack(alignment: .top, spacing: 8) {
+            ForEach(stats, id: \.2) { s in
+                VStack(alignment: .leading, spacing: 2) {
+                    SNumber(value: s.0, format: s.1, countUp: false)
+                        .sType(SType(size: 17, weight: 700, line: 20, tracking: 0))
+                        .foregroundStyle(s.3)
+                        .lineLimit(1)
+                    Text(s.2).sType(SType(size: 12, weight: 500, line: 14, tracking: 0), tabular: false)
+                        .foregroundStyle(S.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
+        .padding(.top, 17)
+        .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
+    }
+
+    private var a11y: String {
+        let c = card
+        let d = c.heads.map { "\(F.trim((abs($0.dist) * 10).rounded() / 10)) percent \($0.dist >= 0 ? "to" : "past") \($0.word) \(PF.strike($0.k))" }
+        let g = Int(abs(c.totals.g).rounded()).formatted()
+        let kept = c.sold ? (c.totals.up ? "kept \(g) dollars" : "down \(g) dollars")
+                          : (c.totals.up ? "gain \(g) dollars" : "down \(g) dollars")
+        return ([c.t, PF.price(c.px)] + d + [kept]).joined(separator: ", ")
     }
 }
 
-// MARK: - The flat payoff chart
+/// The soft corner glow from the top left, tinted by the nearest strike:
+/// radial 130% × 90%, the tint at 28% (dark 22%) fading out by 60%.
+private struct PCornerGlow: View {
+    let status: PStatus
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let t = status == .safe ? S.pGlowSafe : status == .near ? S.pGlowNear : S.pGlowPast
+        let c = Color(red: t.r / 255, green: t.g / 255, blue: t.b / 255)
+        let a = scheme == .dark ? 0.22 : 0.28
+        GeometryReader { geo in
+            let rx = 1.3 * geo.size.width, ry = max(0.9 * geo.size.height, 1)
+            Rectangle()
+                .fill(RadialGradient(colors: [c.opacity(a), c.opacity(0)], center: .topLeading,
+                                     startRadius: 0, endRadius: 0.6 * rx))
+                .frame(width: geo.size.width, height: geo.size.height * rx / ry)
+                .scaleEffect(x: 1, y: ry / rx, anchor: .topLeading)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: S.rCard, style: .continuous))
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 0.3), value: status)
+    }
+}
 
-struct PFlatChart: View {
-    let C: PayoffChart
-    let W: CGFloat
-    let CW: CGFloat
-    let now: Double
-    let selected: String
-    let dist: (v: String, m: String, c: Color)
+// MARK: - Bar
+
+private struct PBarView: View {
+    let c: PCard
+    let g: PBarGeom
+    let go: Bool
+    let d: Double
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
+        let on = go || reduce
+        let fill = c.totals.up ? S.pFillUp : S.pFillDown
+        let n = g.labels.count
         ZStack(alignment: .topLeading) {
-            Canvas { ctx, _ in
-                // Faint vertical grid at the price ticks.
-                for t in C.xTicks {
-                    ctx.fill(Path(CGRect(x: t.x - 0.5, y: 22, width: 1, height: 130)), with: .color(S.pGrid))
-                }
-                let area = { (pts: [CGPoint]) -> Path in var p = Path(); p.addLines(pts); p.closeSubpath(); return p }
-                ctx.fill(area(C.posArea), with: .color(S.pGainFill))
-                ctx.fill(area(C.negArea), with: .color(S.pLossFill))
-                var nowL = Path(); nowL.move(to: CGPoint(x: C.nx, y: 22)); nowL.addLine(to: CGPoint(x: C.nx, y: 152))
-                ctx.stroke(nowL, with: .color(S.pNowLine), lineWidth: 1.5)
-                var zero = Path(); zero.move(to: CGPoint(x: 0, y: C.zy)); zero.addLine(to: CGPoint(x: W, y: C.zy))
-                ctx.stroke(zero, with: .color(S.pZero), lineWidth: 1)
-                for s in C.segs {
-                    var p = Path(); p.addLines(s.pts)
-                    ctx.stroke(p, with: .color(s.loss ? S.red : S.green),
-                               style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                }
-                for x in C.markers {
-                    var t = Path()
-                    t.move(to: CGPoint(x: x - 4, y: PayoffGeom.B - 7)); t.addLine(to: CGPoint(x: x + 4, y: PayoffGeom.B - 7))
-                    t.addLine(to: CGPoint(x: x, y: PayoffGeom.B)); t.closeSubpath()
-                    ctx.fill(t, with: .color(S.red))
-                }
-                // Strike ticks under the plot.
-                for k in C.strikes {
-                    ctx.fill(Path(CGRect(x: k.x - 0.5, y: 152, width: 1, height: 5)), with: .color(S.ink))
+            // The track; only the stretch where the premium holds fills in.
+            ZStack(alignment: .topLeading) {
+                Capsule().fill(S.pTrack)
+                ForEach(Array(g.zones.enumerated()), id: \.offset) { _, z in
+                    Capsule().fill(fill)
+                        .animation(reduce ? nil : S.standard(0.7).delay(d + 0.2)) {
+                            $0.scaleEffect(x: on ? 1 : 0.001, anchor: .leading)
+                        }
+                        .animation(S.standard(0.6)) { $0.frame(width: max(0, z.1 - z.0), height: 14).offset(x: z.0) }
                 }
             }
-            .frame(width: W, height: PayoffGeom.H)
-
-            // The price over the now line.
-            Text("$" + F.level(now))
-                .sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
-                .foregroundStyle(S.muted).fixedSize()
-                .alignmentGuide(.leading) { d in
-                    C.nx < 34 ? -(C.nx - 4) : C.nx > W - 34 ? -(C.nx + 4 - d.width) : -(C.nx - d.width / 2)
+            .frame(width: g.W, height: 14, alignment: .topLeading)
+            .clipShape(Capsule())
+            .offset(y: 36)
+            // Ticks, then labels: each drops 4 pt and fades in, 30 ms apart.
+            ForEach(Array(g.labels.enumerated()), id: \.element.id) { k, l in
+                RoundedRectangle(cornerRadius: 1).fill(S.ink)
+                    .frame(width: 2, height: 6 + CGFloat(l.row) * 36)
+                    .offset(x: l.x - 1, y: 54)
+                    .pDrop(on, d + 0.35 + Double(min(k, 8)) * 0.03)
+            }
+            ForEach(Array(g.labels.enumerated()), id: \.element.id) { k, l in
+                VStack(alignment: l.align.h, spacing: 0) {
+                    Text(l.num).sType(PBarGeom.numType).foregroundStyle(S.ink)
+                    Text(l.sub).sType(PBarGeom.subType).foregroundStyle(subColor(l.strike))
                 }
-            if let d = C.dot {
-                Circle().fill(d.gain ? S.green : S.red).frame(width: 8, height: 8)
-                    .overlay(Circle().stroke(S.paper, lineWidth: 2))
-                    .position(x: d.x, y: d.y)
+                .frame(width: l.w, alignment: l.align.frame)
+                .fixedSize()
+                .offset(x: l.left, y: 62 + CGFloat(l.row) * 36)
+                .pDrop(on, d + 0.35 + Double(min(n + k, 8)) * 0.03)
             }
-            ForEach(Array(C.be.enumerated()), id: \.offset) { _, b in
-                Circle().fill(S.pBeDot).frame(width: 10, height: 10)
-                    .overlay(Circle().stroke(S.paper, lineWidth: 2))
-                    .background(Circle().stroke(S.pBeRing, lineWidth: 1).padding(-2.5))
-                    .position(x: b.x, y: C.zy)
-                let right = b.falling ? b.x < W - 64 : b.x < 64
-                Text("$" + F.level(b.price))
-                    .sType(SType(size: 11, weight: 700, line: 14, tracking: 0))
-                    .foregroundStyle(S.yellowDeep)
-                    .padding(.horizontal, 3)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(S.paper))
-                    .fixedSize()
-                    .alignmentGuide(.leading) { d in right ? -(b.x + 8) : -(b.x - 8 - d.width) }
-                    .alignmentGuide(.top) { _ in -(C.zy - 21) }
-            }
-            // Price ticks, kept clear of the strike labels.
-            let labels = strikeLabels
-            ForEach(Array(C.xTicks.enumerated()), id: \.offset) { _, t in
-                let lbl = "$" + (abs(t.v - t.v.rounded()) < 1e-6 ? String(Int(t.v.rounded())) : String(format: t.step < 0.1 ? "%.2f" : "%.1f", t.v))
-                let clash = labels.contains { abs($0.x - t.x) < $0.w / 2 + CGFloat(lbl.count) * 3.2 + 8 }
-                if !clash {
-                    Text(lbl).sType(SType(size: 11, weight: 500, line: 13, tracking: 0)).foregroundStyle(S.muted).fixedSize()
-                        .position(x: t.x, y: 160 + 6.5)
-                }
-            }
-            ForEach(Array(labels.enumerated()), id: \.offset) { _, k in
-                (Text(k.text).foregroundStyle(S.ink) + Text(k.dist).foregroundStyle(dist.c))
-                    .sType(SType(size: 11, weight: 700, line: 13, tracking: 0))
-                    .fixedSize()
-                    .position(x: k.x, y: 160 + 6.5)
-            }
-            // P/L ticks on the right.
-            ForEach(Array(C.yTicks.enumerated()), id: \.offset) { _, y in
-                Text(PF.usd(y.v)).sType(SType(size: 11, weight: 600, line: 13, tracking: 0))
-                    .foregroundStyle(y.v < 0 ? S.red : S.muted).fixedSize()
-                    .frame(width: CW, alignment: .trailing)
-                    .position(x: CW / 2, y: y.y)
-            }
+            // The price: ink pill, caret, and the ringed thumb on the bar;
+            // they slide in from the card's left edge, and glide on the tick.
+            Text(g.pillText).sType(PBarGeom.pillType).foregroundStyle(S.paper)
+                .frame(width: g.pillW, height: 24)
+                .background(Capsule().fill(S.ink))
+                .pSlide(on, from: g.pillLeft, d + 0.15)
+                .animation(S.standard(0.6)) { $0.offset(x: g.pillLeft) }
+            PCaret().fill(S.ink).frame(width: 10, height: 6)
+                .offset(y: 23)
+                .pSlide(on, from: g.caretLeft, d + 0.15)
+                .animation(S.standard(0.6)) { $0.offset(x: g.caretLeft) }
+            Circle().fill(S.paper)
+                .overlay(Circle().strokeBorder(S.ink, lineWidth: 2.5))
+                .frame(width: 24, height: 24)
+                .shadow(color: .black.opacity(0.20), radius: 1, y: 1)
+                .shadow(color: .black.opacity(0.18), radius: 4, y: 3)
+                .offset(y: 31)
+                .pSlide(on, from: g.xp - 12, d + 0.15)
+                .animation(S.standard(0.6)) { $0.offset(x: g.xp - 12) }
         }
-        .frame(width: CW, height: PayoffGeom.H, alignment: .topLeading)
-        .accessibilityElement()
-        .accessibilityLabel("Payoff chart. Price \(F.money(now, cents: true))."
-                            + (C.be.isEmpty ? "" : " Breakeven \(C.be.map { F.money($0.price, cents: true) }.joined(separator: " and ")).")
-                            + " Profit or loss now \(PF.usd(C.plNow)) \(C.plNow >= 0 ? "gain" : "loss").")
+        .frame(width: g.W, height: g.height, alignment: .topLeading)
     }
 
-    /// Strike labels; the picked strike carries its distance, "34 (0.8% OTM)".
-    private var strikeLabels: [(x: CGFloat, w: CGFloat, text: String, dist: String)] {
-        C.strikes.filter { !$0.label.isEmpty }.map { k in
-            let withDist = k.id == selected && !k.label.contains("–")
-            let d = withDist ? " (\(dist.v) \(dist.m))" : ""
-            let w = CGFloat((k.label + d).count) * 6.4 + 6
-            let x = withDist ? max(w / 2, min(W - w / 2, k.x)) : k.center
-            return (x, w, k.label, d)
-        }
+    private func subColor(_ s: PStrike) -> Color {
+        s.sold && s.dist < 0 ? S.red : s.sold && s.dist < 2 ? S.yellowDeep : S.muted
     }
 }
 
-// MARK: - The time strip
+private extension PBarGeom.Label.Align {
+    var h: HorizontalAlignment { switch self { case .leading: .leading; case .center: .center; case .trailing: .trailing } }
+    var frame: Alignment { switch self { case .leading: .leading; case .center: .center; case .trailing: .trailing } }
+}
 
-/// Scrolls under a fixed centre line: 15-minute steps to the Friday close
-/// when sold, a day a step when bought. Native scroll, snapping to steps, a
-/// selection haptic per step; ‹ Now and Exp › slide in once that end has
-/// scrolled out of view.
-struct PTimeStripView: View {
-    let slots: [TimeSlot]
-    @Binding var si: Int?
-    let long: Bool
+private struct PCaret: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+        p.addLine(to: CGPoint(x: r.midX, y: r.maxY)); p.closeSubpath()
+        return p
+    }
+}
+
+// MARK: - Chart
+
+private struct PChartView: View {
+    let c: PCard
+    let g: PChartGeom
     let width: CGFloat
-    @State private var pos = ScrollPosition(x: 0)
-    @State private var ready = false
-
-    private var px: CGFloat { long ? 2 : 5.5 }
-    private var last: Int { slots.count - 1 }
-    private var cur: Int { min(si ?? PTime.presetSlot(slots), last) }
+    let go: Bool
+    let d: Double
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        VStack(spacing: 6) {
-            Text(PTime.chip(slots, cur, long: long))
-                .sType(SType(size: 13, weight: 700, line: 13, tracking: 0))
-                .foregroundStyle(S.ink)
-                .padding(.horizontal, 12).frame(height: 28)
-                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(S.surface))
-                .contentTransition(.numericText())
-            ZStack {
-                ScrollView(.horizontal) {
-                    strip.frame(width: CGFloat(last) * px + width, height: 52)
+        let on = go || reduce
+        let lineC = c.totals.up ? S.green : S.red
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                // Strikes as plain gray lines: dashed sold, dotted bought. They
+                // grow out of their tags.
+                ForEach(Array(g.lines.enumerated()), id: \.element.id) { k, l in
+                    PHLine()
+                        .stroke(S.pStrike, style: l.sold ? StrokeStyle(lineWidth: 1.5, dash: [4.5, 3])
+                                                          : StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [0, 3]))
+                        .frame(width: g.plot, height: 1.5)
+                        .animation(reduce ? nil : S.standard(0.6).delay(d + 0.15 + Double(k) * 0.05)) {
+                            $0.scaleEffect(x: on ? 1 : 0.001, anchor: .trailing)
+                        }
+                        .offset(y: l.y)
                 }
-                .scrollPosition($pos)
-                .scrollTargetBehavior(StepSnap(step: px))
-                .scrollIndicators(.hidden)
-                .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, x in
-                    guard ready else { return }
-                    let n = max(0, min(last, Int((x / px).rounded())))
-                    if n != cur { UISelectionFeedbackGenerator().selectionChanged(); si = n }
+                // The hourly line: the only color on the card. Draws left to right.
+                PLineShape(segments: g.segments)
+                    .trim(from: 0, to: on ? 1 : 0)
+                    .stroke(lineC, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    .animation(reduce ? nil : .timingCurve(0.22, 1, 0.36, 1, duration: 0.9).delay(d + 0.1), value: on)
+                    .frame(width: g.plot, height: PChartGeom.H)
+                    .clipped()
+                PConnectors(plot: g.plot, items: g.connectors)
+                    .stroke(S.muted, style: StrokeStyle(lineWidth: 1, lineCap: .round))
+                    .frame(width: width, height: PChartGeom.H)
+                    .pDrop(on, d + 0.35)
+                Circle().fill(S.paper)
+                    .overlay(Circle().strokeBorder(lineC, lineWidth: 2.5))
+                    .frame(width: 12, height: 12)
+                    .shadow(color: .black.opacity(0.20), radius: 1, y: 1)
+                    .shadow(color: .black.opacity(0.18), radius: 4, y: 3)
+                    .animation(reduce ? nil : S.standard(0.4).delay(d + 0.85)) {
+                        $0.scaleEffect(on ? 1 : 0.4).opacity(on ? 1 : 0)
+                    }
+                    .offset(x: g.dot.x - 6, y: g.dot.y - 6)
+                ForEach(Array(g.tags.enumerated()), id: \.element.id) { k, t in
+                    tag(t)
+                        .offset(x: g.plot + 8, y: t.top)
+                        .pDrop(on, d + 0.35 + Double(min(k + 1, 8)) * 0.03)
                 }
-                Rectangle().fill(S.tickMajor).frame(width: 1, height: 54).offset(y: -2)
-                    .allowsHitTesting(false)
-                HStack {
-                    tag(now: true).offset(x: cur > 0 && CGFloat(cur) * px > width / 2 - 34 ? 0 : -width * 0.3)
-                        .opacity(cur > 0 && CGFloat(cur) * px > width / 2 - 34 ? 1 : 0)
-                    Spacer()
-                    tag(now: false).offset(x: CGFloat(last - cur) * px > width / 2 - 34 ? 0 : width * 0.3)
-                        .opacity(CGFloat(last - cur) * px > width / 2 - 34 ? 1 : 0)
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-                .animation(S.sheet(0.45), value: cur)
             }
-            .frame(width: width, height: 52)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, -20)
-        .onAppear {
-            pos.scrollTo(x: CGFloat(cur) * px)
-            Task { try? await Task.sleep(for: .milliseconds(80)); ready = true }
-        }
-        .accessibilityElement()
-        .accessibilityLabel("Day and time, \(PTime.chip(slots, cur, long: long))")
-        .accessibilityAdjustableAction { dir in
-            let n = max(0, min(last, cur + (dir == .increment ? 1 : -1)))
-            si = n; pos.scrollTo(x: CGFloat(n) * px)
+            .frame(width: width, height: PChartGeom.H, alignment: .topLeading)
+            // A day label at each session start; today in ink.
+            ZStack(alignment: .topLeading) {
+                ForEach(g.days) { x in
+                    Text(x.text).sType(SType(size: 11, weight: 500, line: 14, tracking: 0), tabular: false)
+                        .foregroundStyle(x.today ? S.ink : S.muted)
+                        .fixedSize()
+                        .offset(x: x.x)
+                }
+            }
+            .frame(width: g.plot, height: 14, alignment: .topLeading)
         }
     }
 
-    private var strip: some View {
-        let lead = width / 2
-        return Canvas { ctx, size in
-            for i in 0...last {
-                let s = slots[i]
-                let tick = i == 0 || i == last || (long ? i % 7 == 0 : (s.minutes ?? 0) % 30 == 0)
-                guard tick else { continue }
-                let major = i == 0 || i == last || (long ? [91, 182, 273, 365, 730].contains(i) : (s.open || s.noon))
-                let h: CGFloat = major ? 18 : 10, x = lead + CGFloat(i) * px
-                ctx.fill(Path(CGRect(x: x - 0.5, y: size.height - 4 - h, width: 1, height: h)),
-                         with: .color(major ? S.tickMajor : S.tickMinor))
+    /// Price: ink pill. Strike: number, then its %; puts in a soft pill.
+    @ViewBuilder private func tag(_ t: PChartGeom.Tag) -> some View {
+        if t.isPrice {
+            Text(t.num).sType(SType(size: 13, weight: 700, line: 13, tracking: 0)).foregroundStyle(S.paper)
+                .padding(.horizontal, 7).frame(height: 18)
+                .background(Capsule().fill(S.ink))
+                .fixedSize()
+        } else {
+            HStack(spacing: 4) {
+                Text(t.num).sType(SType(size: 13, weight: 700, line: 13, tracking: 0)).foregroundStyle(S.ink)
+                Text(t.sub).sType(SType(size: 11, weight: 600, line: 11, tracking: 0)).foregroundStyle(S.muted)
             }
-            for l in labels {
-                let t = ctx.resolve(Text(l.t).font(SType(size: 13, weight: 500, line: 16, tracking: 0).font(tabular: true))
-                    .foregroundStyle(S.tickMajor))
-                ctx.draw(t, at: CGPoint(x: lead + CGFloat(l.i) * px, y: 6 + 8), anchor: .center)
-            }
+            .padding(.horizontal, t.isPut ? 6 : 0).frame(height: 18)
+            .background { if t.isPut { Capsule().fill(S.pTrack) } }
+            .fixedSize()
         }
-    }
-
-    private var labels: [(i: Int, t: String)] {
-        var o: [(i: Int, t: String)] = []
-        for (i, s) in slots.enumerated() where i > 0 && i < last {
-            if long {
-                if s.date.hasSuffix("-01") {
-                    let m = Int(s.date.dropFirst(5).prefix(2)) ?? 1
-                    o.append((i, m == 1 ? "Jan '\(s.date.dropFirst(2).prefix(2))" : PTime.mon[m - 1]))
-                }
-            } else if s.open {
-                let p = s.date.split(separator: "-").compactMap { Int($0) }
-                o.append((i, "\(p[1])/\(p[2])"))
-            } else if s.noon { o.append((i, "12 PM")) }
-        }
-        let w = { (t: String) -> CGFloat in CGFloat(t.count) * 7 + 4 }
-        let fits = { (a: (i: Int, t: String), b: (i: Int, t: String)) -> Bool in
-            CGFloat(abs(b.i - a.i)) * px > (w(a.t) + w(b.t)) / 2 + 10
-        }
-        var kept: [(i: Int, t: String)] = [(0, "Now")]
-        let ex = (i: last, t: "Exp")
-        for q in o where fits(kept[kept.count - 1], q) && fits(q, ex) { kept.append(q) }
-        kept.append(ex)
-        return kept
-    }
-
-    private func tag(now: Bool) -> some View {
-        Button {
-            let n = now ? 0 : last
-            withAnimation(S.standard(0.6)) { pos.scrollTo(x: CGFloat(n) * px) }
-        } label: {
-            HStack(spacing: 5) {
-                if now { Image(systemName: "chevron.left").font(.system(size: 9, weight: .heavy)) }
-                Text(now ? "Now" : "Exp").sType(SType(size: 13, weight: 700, line: 13, tracking: 0), tabular: false)
-                if !now { Image(systemName: "chevron.right").font(.system(size: 9, weight: .heavy)) }
-            }
-            .foregroundStyle(S.ink)
-            .padding(.leading, now ? 9 : 11).padding(.trailing, now ? 11 : 9)
-            .frame(height: 28)
-            .background(UnevenRoundedRectangle(topLeadingRadius: now ? 0 : 14, bottomLeadingRadius: now ? 0 : 14,
-                                               bottomTrailingRadius: now ? 14 : 0, topTrailingRadius: now ? 14 : 0)
-                .fill(S.paper))
-            .overlay(UnevenRoundedRectangle(topLeadingRadius: now ? 0 : 14, bottomLeadingRadius: now ? 0 : 14,
-                                            bottomTrailingRadius: now ? 14 : 0, topTrailingRadius: now ? 14 : 0)
-                .stroke(S.line, lineWidth: 1))
-        }
-        .buttonStyle(SPressStyle())
-        .accessibilityLabel(now ? "Back to now" : "Jump to expiry")
     }
 }
 
-/// Lands a scroll on a whole step.
-struct StepSnap: ScrollTargetBehavior {
-    let step: CGFloat
-    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
-        target.rect.origin.x = (target.rect.origin.x / step).rounded() * step
+private struct PLineShape: Shape {
+    let segments: [[CGPoint]]
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        for s in segments {
+            guard let f = s.first else { continue }
+            p.move(to: f)
+            for q in s.dropFirst() { p.addLine(to: q) }
+        }
+        return p
+    }
+}
+
+private struct PHLine: Shape {
+    func path(in r: CGRect) -> Path {
+        var p = Path(); p.move(to: CGPoint(x: r.minX, y: r.midY)); p.addLine(to: CGPoint(x: r.maxX, y: r.midY)); return p
+    }
+}
+
+/// A 1 pt connector from the plot's edge (x 240) to a tag moved off its line (x 246).
+private struct PConnectors: Shape {
+    let plot: CGFloat
+    let items: [(y: CGFloat, cy: CGFloat)]
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        for i in items { p.move(to: CGPoint(x: plot, y: i.y)); p.addLine(to: CGPoint(x: plot + 6, y: i.cy)) }
+        return p
+    }
+}
+
+// MARK: - Motion and parts
+
+extension PStatus {
+    /// Green on your side, gray inside 1%, red on the wrong side.
+    var dot: Color { switch self { case .safe: S.green; case .near: S.pNeutral; case .past: S.red } }
+}
+
+private extension View {
+    /// Cards and totals rise 14 pt and fade in, 0.6 s, the first time their page shows.
+    func pEnter(_ go: Bool, _ delay: Double) -> some View { modifier(PEnter(on: go, delay: delay)) }
+    /// Ticks, labels and tags drop 4 pt and fade in, 0.4 s.
+    func pDrop(_ on: Bool, _ delay: Double) -> some View { modifier(PDrop(on: on, delay: delay)) }
+    /// Thumb, pill and caret slide in from the card's left edge, 0.8 s.
+    func pSlide(_ on: Bool, from x: CGFloat, _ delay: Double) -> some View { modifier(PSlide(on: on, x: x, delay: delay)) }
+}
+
+private struct PEnter: ViewModifier {
+    let on: Bool
+    let delay: Double
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    func body(content: Content) -> some View {
+        let shown = on || reduce
+        content.animation(reduce ? nil : S.standard(0.6).delay(delay)) {
+            $0.opacity(shown ? 1 : 0).offset(y: shown ? 0 : 14)
+        }
+    }
+}
+
+private struct PDrop: ViewModifier {
+    let on: Bool
+    let delay: Double
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    func body(content: Content) -> some View {
+        content.animation(reduce ? nil : S.standard(0.4).delay(delay)) {
+            $0.opacity(on ? 1 : 0).offset(y: on ? 0 : -4)
+        }
+    }
+}
+
+private struct PSlide: ViewModifier {
+    let on: Bool
+    let x: CGFloat
+    let delay: Double
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    func body(content: Content) -> some View {
+        content
+            .animation(reduce ? nil : S.standard(0.8).delay(delay)) { $0.offset(x: on ? 0 : -x) }
+            .animation(reduce ? nil : .linear(duration: 0.2).delay(delay)) { $0.opacity(on ? 1 : 0) }
+    }
+}
+
+/// A big number that counts up from 0 the first time its page shows (0.9 s
+/// ease-out, from `delay`), then rolls its digits on every change.
+private struct PNum: View {
+    let value: Double
+    let format: (Double) -> String
+    let go: Bool
+    let delay: Double
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var shown: Double = 0
+    @State private var started = false
+    @State private var counting = false
+
+    var body: some View {
+        Group {
+            if counting {
+                PCounting(value: shown, format: format)
+            } else {
+                Text(format(started ? shown : reduce ? value : 0)).contentTransition(.numericText(value: shown))
+            }
+        }
+        .onAppear { if go { start() } }
+        .onChange(of: go) { _, g in if g { start() } }
+        .onChange(of: value) { _, v in
+            guard started else { return }
+            if counting || reduce { shown = v } else { withAnimation(.smooth(duration: S.roll)) { shown = v } }
+        }
+    }
+
+    private func start() {
+        guard !started else { return }
+        started = true
+        if reduce { shown = value; return }
+        counting = true
+        shown = 0
+        withAnimation(.timingCurve(0.33, 1, 0.68, 1, duration: 0.9).delay(delay)) { shown = value } completion: { counting = false }
+    }
+}
+
+private struct PCounting: View, Animatable {
+    var value: Double
+    let format: (Double) -> String
+    var animatableData: Double {
+        get { value }
+        set { value = newValue }
+    }
+    var body: some View { Text(format(value)) }
+}
+
+private struct PPress: ButtonStyle {
+    let scale: CGFloat
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? scale : 1)
+            .animation(.easeOut(duration: S.tap), value: configuration.isPressed)
+    }
+}
+
+/// The page-top number dims while pressed (the design's active opacity .6).
+private struct POpacityPress: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .animation(.easeOut(duration: S.tap), value: configuration.isPressed)
     }
 }

@@ -2,17 +2,28 @@
 //  PositionsMath.swift
 //  Sunny
 //
-//  The arithmetic behind SunnyPositions (blocks 12 and 13), as the design
-//  file works it: Black-Scholes at rate 0 with puts by parity, each contract
-//  at the volatility backed out of its own mark (so Today equals live P/L),
-//  payoff on any day up to expiry, breakevens where the payoff crosses
-//  zero, and the flat chart's geometry (fixed scale across days).
+//  The arithmetic behind SunnyPositions (blocks 12 and 13, handoff 22), as
+//  SunnyPositions.dc.html works it: legs at their marks, side and ticker
+//  totals, the distance to a strike and its status, the five pages, and the
+//  Bar and Chart geometry (axis, fill zones, label rows, the hourly line's
+//  scale and the tag stacks).
 //
 
 import Foundation
 import CoreGraphics
+import UIKit
 
-/// One position leg, ready to price.
+/// The big number's mode. Yield and Payback cycle % → $ → time value
+/// (`next`); Positions cycles time value → % → $ (`nextPositions`, block 12).
+enum PMode { case pct, usd, tv
+    var next: PMode { switch self { case .pct: .usd; case .usd: .tv; case .tv: .pct } }
+    var nextPositions: PMode { switch self { case .tv: .pct; case .pct: .usd; case .usd: .tv } }
+    static func preset(_ s: String?, default d: PMode = .pct) -> PMode {
+        s == "usd" ? .usd : s == "tv" ? .tv : s == "pct" ? .pct : d
+    }
+}
+
+/// One open leg at its mark.
 struct PLeg: Identifiable, Hashable {
     let id: String
     let t: String            // ticker
@@ -20,100 +31,160 @@ struct PLeg: Identifiable, Hashable {
     let q: Int               // contracts
     let a: Double            // premium opened (sold) or paid (bought), per share
     let b: Double            // mark now, per share
-    let days: Double         // calendar days from now to the 4:00 PM expiry close
     let expiry: String
     let sold: Bool
     let call: Bool
     let px: Double           // the ticker's price now
-    let sg: Double           // volatility backed out of the mark
 
     var base: Double { a * 100 * Double(q) }
     var now: Double { b * 100 * Double(q) }
-    /// $ captured when sold, $ gain when bought.
+    /// $ kept when sold, $ gain when bought.
     var g: Double { (sold ? a - b : b - a) * 100 * Double(q) }
-    var pct: Double { base > 0 ? g / base * 100 : 0 }
     var intrinsic: Double { call ? max(0, px - k) : max(0, k - px) }
     var tv: Double { max(0, b - intrinsic) * 100 * Double(q) }
+    /// % from the price to the strike, positive while out of the money.
+    var dist: Double { (call ? k - px : px - k) / px * 100 }
+}
+
+/// Sums over legs (block 12, Logic).
+struct PTotals {
+    var base = 0.0, g = 0.0, now = 0.0, tv = 0.0
+    init(_ L: [PLeg]) { for l in L { base += l.base; g += l.g; now += l.now; tv += l.tv } }
+    /// % captured (sold) or % return (bought).
+    var pct: Double { base > 0 ? g / base * 100 : 0 }
+    var up: Bool { g >= 0 }
+}
+
+/// A strike's status: on your side (out of the money sold, in the money
+/// bought) by more than 1%, inside 1%, or on the wrong side.
+enum PStatus: Int, Comparable {
+    case safe, near, past
+    static func of(dist: Double, sold: Bool) -> PStatus { abs(dist) < 1 ? .near : (dist > 0) == sold ? .safe : .past }
+    static func worst(_ xs: [PStatus]) -> PStatus { xs.max() ?? .safe }
+    static func < (a: PStatus, b: PStatus) -> Bool { a.rawValue < b.rawValue }
+}
+
+/// Legs at the same strike, type and side, merged; sizes add.
+struct PStrike: Hashable {
+    let k: Double
+    let call: Bool
+    let sold: Bool
+    var q: Int
+    let dist: Double
+    var key: String { (sold ? "s" : "b") + (call ? "c" : "p") + PF.strike(k) }
+    var status: PStatus { .of(dist: dist, sold: sold) }
+}
+
+/// One ticker card on a side's page (block 13).
+struct PCard: Identifiable {
+    let id: String
+    let t: String
+    let px: Double
+    let sold: Bool                   // the page's side
+    let legs: [PLeg]
+    let strikes: [PStrike]
+    let totals: PTotals
+    let status: PStatus              // the glow: worst strike on the card
+    let near: Double                 // the order key, safe first sorts high to low
+    let by: String                   // "By Fri", "By Mar 19"
+    let weekExpiry: String?          // the expiry when it falls this week
+    /// The put and the call closest to the price (block 13, Header strikes).
+    let heads: [(word: String, dist: Double, k: Double)]
+}
+
+enum PViz { case bar, chart }
+
+/// A page: All, or a side in one of the two styles.
+struct PPage: Identifiable {
+    enum Kind { case all, sold, bought }
+    let id: Int
+    let kind: Kind
+    let viz: PViz?
+    let chip: String
+    let legs: [PLeg]
+    let cards: [PCard]
+    let status: PStatus              // the chip's dot (All: the sold legs)
+    var sold: Bool { kind == .sold }
+    var tickers: Int { Set(legs.map(\.t)).count }
+}
+
+enum PBook {
+    /// The five pages; a side with no legs drops both of its pages.
+    static func pages(_ L: [PLeg], today: String) -> [PPage] {
+        let S0 = L.filter(\.sold), B0 = L.filter { !$0.sold }
+        let kinds: [(PPage.Kind, String, [PLeg], PViz?)] = [
+            (.all, "All", L, nil), (.sold, "Sold (Bar)", S0, .bar), (.sold, "Sold (Chart)", S0, .chart),
+            (.bought, "Bought (Bar)", B0, .bar), (.bought, "Bought (Chart)", B0, .chart),
+        ].filter { !$0.2.isEmpty }
+        let soldCards = cards(S0, sold: true, today: today), boughtCards = cards(B0, sold: false, today: today)
+        return kinds.enumerated().map { i, k in
+            let dots = (k.0 == .all ? S0 : k.2).map { PStatus.of(dist: $0.dist, sold: $0.sold) }
+            return PPage(id: i, kind: k.0, viz: k.3, chip: k.1, legs: k.2,
+                         cards: k.0 == .all ? [] : k.0 == .sold ? soldCards : boughtCards,
+                         status: .worst(dots))
+        }
+    }
+
+    /// One card per ticker, safest first.
+    static func cards(_ L: [PLeg], sold: Bool, today: String) -> [PCard] {
+        var order: [String] = []
+        for l in L where !order.contains(l.t) { order.append(l.t) }
+        let week = fridayOnOrAfter(today)
+        return order.map { t in
+            let Lt = L.filter { $0.t == t }
+            var S: [PStrike] = []
+            for l in Lt {
+                if let i = S.firstIndex(where: { $0.k == l.k && $0.call == l.call && $0.sold == l.sold }) { S[i].q += l.q }
+                else { S.append(PStrike(k: l.k, call: l.call, sold: l.sold, q: l.q, dist: l.dist)) }
+            }
+            var heads: [(word: String, dist: Double, k: Double)] = []
+            for (w, xs) in [("put", S.filter { !$0.call }), ("call", S.filter(\.call))] where !xs.isEmpty {
+                let s = xs.min { abs($0.dist) < abs($1.dist) }!
+                heads.append((w, s.dist, s.k))
+            }
+            let exp = Lt.map(\.expiry).min()!
+            let thisWeek = exp <= week
+            let near = sold ? S.map(\.dist).min()! : S.map { -$0.dist }.min()!
+            return PCard(id: t, t: t, px: Lt[0].px, sold: sold, legs: Lt, strikes: S, totals: PTotals(Lt),
+                         status: .worst(S.map(\.status)), near: near,
+                         by: "By " + (thisWeek ? weekday(exp) : PF.monthDay(exp)),
+                         weekExpiry: thisWeek ? exp : nil, heads: heads)
+        }
+        .sorted { $0.near != $1.near ? $0.near > $1.near : $0.t < $1.t }
+    }
+
+    /// This week's Friday (on a weekend, the coming one).
+    static func fridayOnOrAfter(_ iso: String) -> String {
+        var d = MarketClock.addDays(iso, 0)
+        while d.weekday != 6 { d = MarketClock.addDays(d.iso, 1) }
+        return d.iso
+    }
+    static func weekday(_ iso: String) -> String { MarketClock.dayName[MarketClock.addDays(iso, 0).weekday] }
+}
+
+/// The priced book and its pages, built once per payload.
+@MainActor
+enum PCache {
+    private static var key = ""
+    private static var value: [PPage] = []
+    static func pages(_ home: HomePayload) -> [PPage] {
+        if key == home.builtAt { return value }
+        key = home.builtAt; value = PBook.pages(PMath.legs(home), today: home.today); return value
+    }
 }
 
 enum PMath {
-    /// Abramowitz-Stegun normal CDF, as the design file.
-    static func nd(_ x: Double) -> Double {
-        let t = 1 / (1 + 0.2316419 * abs(x)), d = 0.3989423 * exp(-x * x / 2)
-        let p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))))
-        return x > 0 ? 1 - p : p
-    }
-    /// Call value, rate 0.
-    static func bs(_ S: Double, _ K: Double, _ tau: Double, _ sg: Double) -> Double {
-        if tau <= 0 { return max(0, S - K) }
-        let v = sg * sqrt(tau), d1 = (log(S / K) + v * v / 2) / v
-        return S * nd(d1) - K * nd(d1 - v)
-    }
-    /// Volatility that prices the call at `b` (bisection, 5% floor).
-    static func iv(_ px: Double, _ k: Double, _ tau: Double, _ b: Double) -> Double {
-        if b <= max(0, px - k) + 1e-4 || tau <= 0 { return 0.05 }
-        var lo = 0.01, hi = 5.0
-        for _ in 0..<60 { let md = (lo + hi) / 2; if bs(px, k, tau, md) > b { hi = md } else { lo = md } }
-        return (lo + hi) / 2
-    }
-    /// A leg's value per share at price S, `el` days from now.
-    static func pv(_ l: PLeg, _ S: Double, _ el: Double) -> Double {
-        let tau = max(0, l.days - el) / 365
-        let cv = bs(S, l.k, tau, l.sg)
-        return l.call ? cv : max(0, cv - S + l.k)
-    }
-    /// P/L of legs at price S, `el` days from now.
-    static func pl(_ L: [PLeg], _ S: Double, _ el: Double) -> Double {
-        L.reduce(0) { x, l in let V = pv(l, S, el); return x + (l.sold ? l.a - V : V - l.a) * 100 * Double(l.q) }
-    }
-    /// Signed value (sold legs negative).
-    static func value(_ L: [PLeg], _ S: Double, _ el: Double) -> Double {
-        L.reduce(0) { $0 + pv($1, S, el) * 100 * Double($1.q) * ($1.sold ? -1 : 1) }
-    }
-    /// Delta in shares, negative when sold.
-    static func delta(_ l: PLeg, _ S: Double, _ el: Double) -> Double {
-        let tau = max(0, l.days - el) / 365
-        var d: Double
-        if tau <= 0 { d = S > l.k ? 1 : 0 } else {
-            let v = l.sg * sqrt(tau); d = nd((log(S / l.k) + v * v / 2) / v)
-        }
-        if !l.call { d -= 1 }
-        return d * 100 * Double(l.q) * (l.sold ? -1 : 1)
-    }
-    /// Breakeven at expiry for sold calls (above) and sold puts (below).
-    static func beShortCalls(_ L: [PLeg]) -> Double {
-        let minK = L.map(\.k).min()!, maxK = L.map(\.k).max()!
-        let cr = L.reduce(0) { $0 + $1.base }, q = Double(L.reduce(0) { $0 + $1.q })
-        var lo = minK, hi = maxK + cr / (100 * q) + 1
-        let at = L.map(\.days).max() ?? 0
-        for _ in 0..<50 { let md = (lo + hi) / 2; if pl(L, md, at) > 0 { lo = md } else { hi = md } }
-        return (lo + hi) / 2
-    }
-    static func beShortPuts(_ L: [PLeg]) -> Double {
-        let minK = L.map(\.k).min()!, maxK = L.map(\.k).max()!
-        let cr = L.reduce(0) { $0 + $1.base }, q = Double(L.reduce(0) { $0 + $1.q })
-        var lo = max(0.01, minK - cr / (100 * q) - 1), hi = maxK
-        let at = L.map(\.days).max() ?? 0
-        for _ in 0..<50 { let md = (lo + hi) / 2; if pl(L, md, at) > 0 { hi = md } else { lo = md } }
-        return (lo + hi) / 2
-    }
-
-    /// Build priced legs from the payload. Spot: the ticker's live price.
-    static func legs(_ home: HomePayload, now: Date = SClock.now()) -> [PLeg] {
+    /// Legs from the payload at the ticker's live price.
+    static func legs(_ home: HomePayload) -> [PLeg] {
         let spot = Dictionary(home.portfolio.compactMap { p in p.spot.map { (p.ticker, $0) } }, uniquingKeysWith: { a, _ in a })
         return home.legs.compactMap { l in
             guard let px = spot[l.ticker] ?? l.underlying, px > 0 else { return nil }
-            let days = max(0, expiryClose(l.expiry).timeIntervalSince(now) / 86400)
-            let b = l.mark ?? l.avg, call = l.type == "call"
-            // Back the volatility out of the mark; a put through parity.
-            let sg = iv(px, l.strike, days / 365, call ? b : b + px - l.strike)
-            return PLeg(id: l.id, t: l.ticker, k: l.strike, q: l.n, a: l.avg, b: b, days: days, expiry: l.expiry,
-                        sold: l.side == "sold", call: call, px: px, sg: sg)
+            return PLeg(id: l.id, t: l.ticker, k: l.strike, q: l.n, a: l.avg, b: l.mark ?? l.avg, expiry: l.expiry,
+                        sold: l.side == "sold", call: l.type == "call", px: px)
         }
     }
 
-    /// 4:00 PM New York on an expiry date.
-    static func expiryClose(_ iso: String) -> Date { nyDate(iso, minutes: 16 * 60) }
+    /// A New York wall-clock time on a date.
     static func nyDate(_ iso: String, minutes: Int) -> Date {
         var c = DateComponents(); let p = iso.split(separator: "-").compactMap { Int($0) }
         guard p.count == 3 else { return Date() }
@@ -145,178 +216,200 @@ enum PF {
         let x = abs(v)
         return x >= 99.95 ? "\(Int(x.rounded()))%" : String(format: "%.1f%%", x)
     }
-    static func strike(_ k: Double) -> String { F.trim(k) == String(Int(k)) ? String(Int(k)) : String(k) }
-}
-
-// MARK: - The time strip
-
-/// One stop on the time strip: `el` days from now.
-struct TimeSlot: Hashable {
-    let el: Double
-    let date: String          // yyyy-MM-dd, New York
-    let minutes: Int?         // minutes after midnight (sold strip), nil = now / a day
-    let open: Bool
-    let noon: Bool
-}
-
-enum TimeStrip {
-    /// Sold: now, then every 15 minutes 9:30 to 4:00 on each trading day to
-    /// the expiry close. Bought: now, then one a day to the expiry.
-    static func slots(until expiry: String, long: Bool, calendar: [CalendarDay], now: Date = SClock.now()) -> [TimeSlot] {
-        let t = MarketClock.ny(now)
-        var out = [TimeSlot(el: 0, date: t.date, minutes: nil, open: false, noon: false)]
-        let end = PMath.expiryClose(expiry)
-        if long {
-            // One stop a day, then the expiry itself as the last stop. Counting
-            // days with ceil ran a partial day one past it (Jan 22 for a Jan 21 expiry).
-            let full = max(0, end.timeIntervalSince(now) / 86400)
-            var i = 1
-            while true {
-                let d = MarketClock.addDays(t.date, i).iso
-                if d >= expiry {
-                    out.append(TimeSlot(el: full, date: expiry, minutes: nil, open: false, noon: false))
-                    return out
-                }
-                out.append(TimeSlot(el: Double(i), date: d, minutes: nil, open: false, noon: false))
-                i += 1
-            }
-        }
-        var day = t.date, wd = t.weekday
-        while day <= expiry {
-            if MarketClock.isTradingDay(day, weekday: wd, calendar) {
-                let close = MarketClock.closeMinutes(day, calendar)
-                var m = 9 * 60 + 30
-                while m <= close {
-                    let at = PMath.nyDate(day, minutes: m)
-                    if at > now { out.append(TimeSlot(el: at.timeIntervalSince(now) / 86400, date: day, minutes: m,
-                                                      open: m == 9 * 60 + 30, noon: m == 12 * 60)) }
-                    m += 15
-                }
-            }
-            let nx = MarketClock.addDays(day, 1); day = nx.iso; wd = nx.weekday
-        }
-        return out
+    /// Distance to a strike: one decimal under 10%, whole above.
+    static func dist(_ v: Double) -> String {
+        let x = abs(v)
+        return x >= 10 ? "\(Int(x.rounded()))%" : String(format: "%.1f%%", x)
+    }
+    static func strike(_ k: Double) -> String { k == k.rounded() ? String(Int(k)) : String(k) }
+    static func price(_ v: Double) -> String { String(format: "%.2f", v) }
+    /// "5 calls", "1 put".
+    static func count(_ n: Int, _ w: String) -> String { "\(n) \(w)\(n == 1 ? "" : "s")" }
+    /// "Mar 19"
+    static func monthDay(_ iso: String) -> String {
+        let p = iso.split(separator: "-").compactMap { Int($0) }
+        guard p.count == 3 else { return iso }
+        let m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][p[1] - 1]
+        return "\(m) \(p[2])"
+    }
+    /// Width of a string in a type style (tabular figures), for the label rows.
+    static func width(_ s: String, _ t: SType) -> CGFloat {
+        (s as NSString).size(withAttributes: [.font: t.uiFont(tabular: true), .kern: t.tracking * t.size]).width
     }
 }
 
-// MARK: - Flat chart geometry
+// MARK: - Bar geometry (block 13, Bar)
 
-struct PayoffChart {
-    struct Seg { var pts: [CGPoint]; var loss: Bool }
-    var posArea = [CGPoint](), negArea = [CGPoint]()
-    var segs = [Seg]()
-    var markers = [CGFloat]()             // x where the loss leaves the floor
-    var zy: CGFloat = 0, nx: CGFloat = 0
-    var be = [(x: CGFloat, price: Double, falling: Bool)]()
-    var yTicks = [(y: CGFloat, v: Double)]()
-    var xTicks = [(x: CGFloat, v: Double, step: Double)]()
-    var strikes = [(x: CGFloat, label: String, center: CGFloat, id: String)]()
-    var dot: (x: CGFloat, y: CGFloat, gain: Bool)?
-    var plNow: Double = 0
-}
-
-enum PayoffGeom {
-    static let T: CGFloat = 30, B: CGFloat = 152, H: CGFloat = 176
-
-    /// The fixed y range across every stop, so moving the day never rescales.
-    static func range(_ L: [PLeg], stops: [Double], lo: Double, hi: Double) -> (Double, Double) {
-        var yMax = -Double.infinity, yMin = Double.infinity
-        for e in stops { for i in 0...40 {
-            let S = lo + (hi - lo) * Double(i) / 40, v = PMath.pl(L, S, e)
-            yMax = max(yMax, v); yMin = min(yMin, v)
-        } }
-        return (yMax, yMin)
+struct PBarGeom {
+    struct Label: Identifiable {
+        let id: String
+        let x: CGFloat            // the tick
+        let left: CGFloat         // the label box, pinned inside the card
+        let w: CGFloat
+        let align: Align
+        let num: String
+        let sub: String
+        let strike: PStrike
+        var row = 0
+        enum Align { case leading, center, trailing }
     }
 
-    static func build(_ L: [PLeg], el: Double, lo: Double, hi: Double, yr: (Double, Double), W: CGFloat,
-                      unbounded: Bool, label: (PLeg) -> String) -> PayoffChart {
-        var c = PayoffChart()
-        let (yMax, yMin) = yr
-        var yHi: Double, yLo: Double
-        if unbounded {
-            let credit = L.filter(\.sold).reduce(0) { $0 + $1.base }
-            let ref = max(abs(yMax), abs(PMath.pl(L, L[0].px, el)), credit, 1)
-            yHi = max(yMax, 0.15 * ref) * 1.18
-            yLo = max(yMin * 1.12, (yMax > 0 ? -1.05 : -2.2) * ref)
+    static let numType = SType(size: 15, weight: 700, line: 18, tracking: 0)
+    static let subType = SType(size: 12, weight: 500, line: 14, tracking: 0)
+    static let pillType = SType(size: 13, weight: 700, line: 24, tracking: 0)
+
+    let W: CGFloat
+    let lo: Double, hi: Double
+    let zones: [(CGFloat, CGFloat)]   // x from, x to
+    let labels: [Label]
+    let rows: Int
+    let xp: CGFloat
+    let pillText: String
+    let pillW: CGFloat
+
+    init(_ c: PCard, width W: CGFloat) {
+        self.W = W
+        let ks = c.strikes.map(\.k)
+        var lo = min(c.px * 0.97, ks.min() ?? c.px), hi = max(c.px * 1.03, ks.max() ?? c.px)
+        let pd = (hi - lo) * 0.1; lo -= pd; hi += pd
+        self.lo = lo; self.hi = hi
+        let X = { (v: Double) in CGFloat((v - lo) / (hi - lo)) * W }
+        // The stretch where the premium holds (Logic, Fill zone).
+        var z: [(Double, Double)] = []
+        if c.sold {
+            let sp = c.strikes.filter { !$0.call }.map(\.k), sc = c.strikes.filter(\.call).map(\.k)
+            z.append((sp.max() ?? lo, sc.min() ?? hi))
         } else {
-            yHi = max(yMax, 0.15 * abs(min(yMin, 0)), 1) * 1.18
-            yLo = min(yMin, -0.15 * yHi) * 1.12
+            let bc = c.strikes.filter(\.call).map(\.k), bp = c.strikes.filter { !$0.call }.map(\.k)
+            if let m = bc.min() { z.append((m, hi)) }
+            if let m = bp.max() { z.append((lo, m)) }
         }
-        let X = { (S: Double) -> CGFloat in CGFloat((S - lo) / (hi - lo)) * W }
-        let Yr = { (v: Double) -> CGFloat in max(T - 2, T + CGFloat((yHi - v) / (yHi - yLo)) * (B - T)) }
-        c.zy = Yr(0)
-        let N = 110
-        var out: [(CGPoint, Double)] = []
-        var prev: Double?
-        for i in 0...N {
-            let S = lo + (hi - lo) * Double(i) / Double(N), v = PMath.pl(L, S, el)
-            if let pv = prev, (pv > 0) != (v > 0), pv != v {
-                let S0 = lo + (hi - lo) * Double(i - 1) / Double(N)
-                let s = S0 + (S - S0) * (pv / (pv - v))
-                out.append((CGPoint(x: X(s), y: c.zy), 0))
-                c.be.append((X(s), s, pv > 0))
+        zones = z.filter { $0.1 > $0.0 }.map { (X($0.0), X($0.1)) }
+        xp = X(c.px)
+        pillText = PF.price(c.px)
+        pillW = ceil(PF.width(pillText, Self.pillType)) + 18
+        // Strikes hang under the bar on alternating rows; a label drops one
+        // more row only if it would still come within 6 of another label or
+        // 3 of another tick.
+        var its: [Label] = c.strikes.map { s in
+            let num = PF.strike(s.k), sub = PF.dist(s.dist) + " · " + PF.count(s.q, s.call ? "call" : "put")
+            let w = ceil(max(PF.width(num, Self.numType), PF.width(sub, Self.subType))) + 2
+            let x = X(s.k), l = min(max(x - w / 2, 0), W - w)
+            let a: Label.Align = x - w / 2 < 0 ? .leading : x + w / 2 > W ? .trailing : .center
+            return Label(id: s.key, x: x, left: l, w: w, align: a, num: num, sub: sub, strike: s)
+        }.sorted { $0.x < $1.x }
+        var placed: [Label] = []
+        for i in its.indices {
+            var it = its[i], r = i % 2
+            while r < 6 {
+                let ok = placed.allSatisfy { p in
+                    if p.row == r { return it.left >= p.left + p.w + 6 || it.left + it.w <= p.left - 6 }
+                    if p.row > r { return p.x < it.left - 3 || p.x > it.left + it.w + 3 }
+                    return it.x < p.left - 3 || it.x > p.left + p.w + 3
+                }
+                if ok { break }
+                r += 1
             }
-            out.append((CGPoint(x: X(S), y: Yr(v)), v)); prev = v
+            it.row = r; placed.append(it); its[i] = it
         }
-        // Lines: green above zero, red below, cut at the floor with a marker.
-        var cur: PayoffChart.Seg?
-        for i in 1..<out.count {
-            var p = out[i - 1].0, q = out[i].0
-            if p.y > B && q.y > B { if let s = cur { c.segs.append(s); cur = nil }; continue }
-            let loss = (out[i - 1].1 + out[i].1) / 2 < 0
-            if p.y > B { let t = (B - p.y) / (q.y - p.y); p = CGPoint(x: p.x + (q.x - p.x) * t, y: B); c.markers.append(p.x) }
-            if q.y > B { let t = (B - p.y) / (q.y - p.y); q = CGPoint(x: p.x + (q.x - p.x) * t, y: B); c.markers.append(q.x) }
-            if var s = cur, s.loss == loss, let last = s.pts.last, abs(last.x - p.x) < 0.01, abs(last.y - p.y) < 0.01 {
-                s.pts.append(q); cur = s
-            } else {
-                if let s = cur { c.segs.append(s) }
-                cur = PayoffChart.Seg(pts: [p, q], loss: loss)
+        labels = placed
+        rows = placed.reduce(0) { max($0, $1.row + 1) }
+    }
+
+    /// 36 to the bar's bottom (50), then the rows.
+    var height: CGFloat { 50 + (rows > 0 ? 8 + CGFloat(rows) * 36 : 4) }
+    var pillLeft: CGFloat { min(max(xp - pillW / 2, 0), W - pillW) }
+    var caretLeft: CGFloat { min(max(xp - 5, 6), W - 16) }
+}
+
+// MARK: - Chart geometry (block 13, Chart)
+
+struct PChartGeom {
+    struct Tag: Identifiable {
+        let id: String
+        let y: CGFloat            // its line
+        var top: CGFloat = 0      // the 18 pt row it sits in
+        let num: String
+        let sub: String
+        let isPrice: Bool
+        let isPut: Bool
+        var cy: CGFloat { top + 9 }
+    }
+    struct Day: Identifiable { let id: String; let x: CGFloat; let text: String; let today: Bool }
+
+    static let H: CGFloat = 150
+    let plot: CGFloat                 // 240 on a 393 phone
+    let segments: [[CGPoint]]         // the hourly line, joined across hours with no quote
+    let dot: CGPoint
+    let lines: [(id: String, y: CGFloat, sold: Bool)]
+    let tags: [Tag]
+    let days: [Day]
+
+    /// `hist`: 35 hourly closes over five sessions (nil where missing).
+    /// `live`: the slot the live price sits at (fractional in the session).
+    /// `ahead`: future sessions shown to the expiry (sold cards this week).
+    init(_ c: PCard, width W: CGFloat, hist: [Double?], live: Double, sessions: [String], ahead: [String], today: String) {
+        let H = Self.H, PR = W - 73
+        plot = PR
+        let F = Double(ahead.count * 7)
+        // Hourly closes before the live slot, then the live price.
+        var pts: [(Double, Double?)] = hist.prefix(35).enumerated().map { (Double($0.offset), $0.element) }.filter { $0.0 < live }
+        pts.append((live, c.px))
+        let vals = pts.compactMap(\.1)
+        // Y fits the strikes and the price first, then stretches up to half
+        // that span for the history; anything beyond clips.
+        let ks = c.strikes.map(\.k)
+        var ylo = min(c.px, ks.min() ?? c.px), yhi = max(c.px, ks.max() ?? c.px)
+        let sp0 = max(yhi - ylo, c.px * 0.06), mid0 = (ylo + yhi) / 2
+        ylo = mid0 - sp0 * 0.62; yhi = mid0 + sp0 * 0.62
+        ylo = max(min(ylo, vals.min() ?? ylo), ylo - sp0 * 0.5)
+        yhi = min(max(yhi, vals.max() ?? yhi), yhi + sp0 * 0.5)
+        let (l0, h0) = (ylo, yhi)
+        let Y = { (v: Double) in H - CGFloat((v - l0) / (h0 - l0)) * H }
+        let Xi = { (i: Double) in CGFloat(i / (34 + F)) * PR }
+        // One line, joined across any hour with no quote (Nik, 13 Oct 2026: a
+        // break "looks odd"; our feed missed the morning of 12 Oct).
+        let joined = pts.compactMap { p in p.1.map { CGPoint(x: Xi(p.0), y: Y($0)) } }
+        segments = joined.isEmpty ? [] : [joined]
+        dot = CGPoint(x: Xi(live), y: Y(c.px))
+        lines = c.strikes.map { ($0.key, Y($0.k), $0.sold) }
+        // Tags spread around their lines in 18 pt rows; a stack holding the
+        // price stays pinned to it; all kept inside the plot's height.
+        var tg: [Tag] = [Tag(id: "px", y: Y(c.px), num: PF.price(c.px), sub: "", isPrice: true, isPut: false)]
+            + c.strikes.map { Tag(id: $0.key, y: Y($0.k), num: PF.strike($0.k), sub: PF.dist($0.dist), isPrice: false, isPut: !$0.call) }
+        tg.sort { $0.y < $1.y }
+        let PT: CGFloat = 18
+        func place(_ cl: [Tag]) -> CGFloat {
+            let top: CGFloat
+            if let j = cl.firstIndex(where: \.isPrice) { top = cl[j].y - PT / 2 - CGFloat(j) * PT }
+            else { top = cl.enumerated().reduce(0) { $0 + $1.element.y - CGFloat($1.offset) * PT } / CGFloat(cl.count) - PT / 2 }
+            return max(0, min(H - PT * CGFloat(cl.count), top))
+        }
+        var cls: [(tags: [Tag], top: CGFloat)] = tg.map { ([$0], place([$0])) }
+        var merged = true, it = 0
+        while merged && it < 20 {
+            merged = false; it += 1
+            for i in 0..<max(0, cls.count - 1) where cls[i].top + CGFloat(cls[i].tags.count) * PT > cls[i + 1].top {
+                let c2 = cls[i].tags + cls[i + 1].tags
+                cls.replaceSubrange(i...(i + 1), with: [(c2, place(c2))])
+                merged = true
+                break
             }
         }
-        if let s = cur { c.segs.append(s) }
-        c.posArea = [CGPoint(x: out[0].0.x, y: c.zy)] + out.map { CGPoint(x: $0.0.x, y: min($0.0.y, c.zy)) } + [CGPoint(x: out.last!.0.x, y: c.zy)]
-        c.negArea = [CGPoint(x: out[0].0.x, y: c.zy)] + out.map { CGPoint(x: $0.0.x, y: min(B, max($0.0.y, c.zy))) } + [CGPoint(x: out.last!.0.x, y: c.zy)]
-        c.be = c.be.filter { $0.price > lo && $0.price < hi }
-        c.nx = X(L[0].px)
-        c.plNow = PMath.pl(L, L[0].px, el)
-        // P/L ticks on the right; price ticks under.
-        let nice = { (v: Double) -> Double in
-            let p = pow(10, floor(log10(max(v, 1e-9)))), f = v / p
-            return (f < 1.5 ? 1 : f < 3 ? 2 : f < 4 ? 2.5 : f < 7.5 ? 5 : 10) * p
-        }
-        let ys = nice(max(yHi, -yLo) * 0.5)
-        c.yTicks = [ys, 0, -ys].filter { $0 == 0 || (Yr($0) > T + 4 && Yr($0) < B - 4) }.map { (Yr($0), $0) }
-        let xs = nice((hi - lo) / 3.4)
-        var v = ceil(lo / xs) * xs
-        while v <= hi + 1e-9 { let x = X(v); if x > 14 && x < W - 14 { c.xTicks.append((x, v, xs)) }; v += xs }
-        // Strike labels; ones that would touch merge into a range.
-        var u: [(l: PLeg, x: CGFloat, lbl: String)] = []
-        for l in L where !u.contains(where: { $0.l.k == l.k && $0.l.sold == l.sold }) { u.append((l, X(l.k), label(l))) }
-        u.sort { $0.x < $1.x }
-        let est = { (s: String) -> CGFloat in CGFloat(s.count) * 6.4 + 6 }
-        let suf = { (s: String) -> String in String(s.drop { $0.isNumber || $0 == "." }) }
-        var cl = u.map { [$0] }
-        let lab = { (m: [(l: PLeg, x: CGFloat, lbl: String)]) -> String in
-            if m.count == 1 { return m[0].lbl }
-            let a = m[0], z = m[m.count - 1], sf = suf(a.lbl)
-            return m.allSatisfy { suf($0.lbl) == sf } ? "\(PF.strike(a.l.k))–\(PF.strike(z.l.k))\(sf)" : "\(a.lbl)–\(z.lbl)"
-        }
-        let cx = { (m: [(l: PLeg, x: CGFloat, lbl: String)]) -> CGFloat in (m[0].x + m[m.count - 1].x) / 2 }
-        var moved = true
-        while moved && cl.count > 1 {
-            moved = false
-            for i in 1..<cl.count where cx(cl[i]) - cx(cl[i - 1]) < (est(lab(cl[i])) + est(lab(cl[i - 1]))) / 2 + 4 {
-                cl[i - 1] += cl[i]; cl.remove(at: i); moved = true; break
-            }
-        }
-        for m in cl {
-            let t = lab(m), w = est(t), ctr = max(w / 2, min(W - w / 2, cx(m)))
-            for (j, q) in m.enumerated() { c.strikes.append((q.x, j == 0 ? t : "", ctr, q.l.id)) }
-        }
-        if L.count == 1, let l = L.first, l.k > lo, l.k < hi {
-            let pv = PMath.pl(L, l.k, el), y = Yr(pv)
-            if y <= B { c.dot = (X(l.k), y, pv >= 0) }
-        }
-        return c
+        tags = cls.flatMap { cl in cl.tags.enumerated().map { j, t in var t = t; t.top = cl.top + CGFloat(j) * PT; return t } }
+        // A label at each session start; on a sold card this week, the days ahead.
+        days = sessions.enumerated().map { j, d in Day(id: "p" + d, x: Xi(Double(j * 7)), text: PBook.weekday(d), today: d == today) }
+            + ahead.enumerated().map { j, d in Day(id: "f" + d, x: Xi(Double(35 + j * 7)), text: PBook.weekday(d), today: false) }
+    }
+
+    /// Strike tags more than 3 off their line get a connector.
+    var connectors: [(y: CGFloat, cy: CGFloat)] { tags.filter { !$0.isPrice && abs($0.cy - $0.y) > 3 }.map { ($0.y, $0.cy) } }
+
+    /// Where the live price sits: in the session while it trades, otherwise
+    /// on the last close (the 16:00 slot of the last session).
+    static func liveSlot(sessions: [String], today: String, now: Date, calendar: [CalendarDay]) -> Double {
+        guard sessions.last == today else { return 34 }
+        let m = MarketClock.ny(now).minutes, close = MarketClock.closeMinutes(today, calendar)
+        return max(27.5, min(34, 28 + Double(min(m, close) - 600) / 60))
     }
 }

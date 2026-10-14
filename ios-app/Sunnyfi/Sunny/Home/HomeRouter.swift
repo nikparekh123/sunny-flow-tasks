@@ -28,7 +28,7 @@ final class HomeRouter {
     var scrollTarget: Section?
     /// DEBUG: scroll to a block by id ("today", "portfolio", ...).
     var scrollID: String?
-    /// DEBUG: pick a Positions chip at launch.
+    /// DEBUG: open a Positions page (its index) at launch.
     var debugPick: String?
 
     func open(_ r: Receipt) { withAnimation(S.standard(0.55)) { receipt = r } }

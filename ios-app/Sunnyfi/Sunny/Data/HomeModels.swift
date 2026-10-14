@@ -27,6 +27,8 @@ struct HomePayload: Decodable {
     let portfolio: [Holding]
     let watchlist: [Watch]
     let legs: [Leg]
+    /// Hourly closes for the Positions Chart cards (blocks 12 and 13).
+    let hours: Hours?
     let inventory: Inventory
     let writes: Writes
     let yield: [YieldWeek]
@@ -38,6 +40,15 @@ struct HomePayload: Decodable {
     let allocation: Allocation
     /// Every open theta check (block 15's breathing tile), not only today's card.
     let thetaChecks: [Deck.ThetaCheck]?
+}
+
+/// The last five sessions that have opened, 10:00 to 16:00 New York, seven
+/// closes a session per ticker (nil where no quote), and the sessions still to
+/// come in the next week (a sold card runs its empty hours into the expiry).
+struct Hours: Decodable {
+    let days: [String]
+    let ahead: [String]
+    let px: [String: [Double?]]
 }
 
 struct CalendarDay: Decodable, Hashable {
