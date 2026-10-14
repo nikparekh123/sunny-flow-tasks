@@ -96,7 +96,8 @@ struct SunnyPositions: View {
         return ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 20) {
                 ForEach(pages) { pg in
-                    PPageView(page: pg, width: pw, hours: hours, live: live, today: home.today, mode: $mode,
+                    PPageView(page: pg, width: pw, hours: hours, live: live, today: home.today,
+                              open: MarketClock.isRegular(SClock.now(), calendar: home.calendar), mode: $mode,
                               go: seen.contains(pg.id) || reduce)
                         .frame(width: pw, alignment: .topLeading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -175,6 +176,7 @@ private struct PPageView: View {
     let hours: Hours?
     let live: Double
     let today: String
+    let open: Bool                  // regular session: the chart dots pulse
     @Binding var mode: PMode
     let go: Bool
 
@@ -189,7 +191,7 @@ private struct PPageView: View {
                                 delay: Double(min(j + 1, 6)) * S.stagger,
                                 hist: hours?.px[c.t] ?? [], live: live, sessions: hours?.days ?? [],
                                 ahead: c.weekExpiry.map { e in (hours?.ahead ?? []).filter { $0 <= e } } ?? [],
-                                today: today)
+                                today: today, open: open)
                 }
             }
         }
@@ -338,6 +340,7 @@ private struct PTickerCard: View {
     let sessions: [String]
     let ahead: [String]
     let today: String
+    let open: Bool
 
     var body: some View {
         let c = card
@@ -348,7 +351,7 @@ private struct PTickerCard: View {
             } else {
                 PChartView(c: c, g: PChartGeom(c, width: width, hist: hist, live: live, sessions: sessions,
                                                ahead: ahead, today: today),
-                           width: width, go: go, d: delay)
+                           width: width, go: go, d: delay, open: open)
             }
             footer
         }
@@ -545,6 +548,7 @@ private struct PChartView: View {
     let width: CGFloat
     let go: Bool
     let d: Double
+    let open: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
@@ -580,6 +584,8 @@ private struct PChartView: View {
                     .frame(width: 12, height: 12)
                     .shadow(color: .black.opacity(0.20), radius: 1, y: 1)
                     .shadow(color: .black.opacity(0.18), radius: 4, y: 3)
+                    // Market open: a soft ring ripples out of the dot (Nik, 14 Oct 2026).
+                    .background { if open && on && !reduce { PLivePulse(color: lineC) } }
                     .animation(reduce ? nil : S.standard(0.4).delay(d + 0.85)) {
                         $0.scaleEffect(on ? 1 : 0.4).opacity(on ? 1 : 0)
                     }
@@ -621,6 +627,31 @@ private struct PChartView: View {
             .fixedSize()
         }
     }
+}
+
+/// The live ring: grows from the dot to 2.8x and fades in 1.6 s, rests
+/// 0.4 s, repeats while the market is open.
+private struct PLivePulse: View {
+    let color: Color
+    var body: some View {
+        Circle().fill(color.opacity(0.45))
+            .frame(width: 12, height: 12)
+            .keyframeAnimator(initialValue: Ring(), repeating: true) { content, v in
+                content.scaleEffect(v.scale).opacity(v.opacity)
+            } keyframes: { _ in
+                KeyframeTrack(\.scale) {
+                    CubicKeyframe(2.8, duration: 1.6)
+                    LinearKeyframe(2.8, duration: 0.4)
+                }
+                KeyframeTrack(\.opacity) {
+                    CubicKeyframe(0, duration: 1.6)
+                    LinearKeyframe(0, duration: 0.4)
+                }
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+    struct Ring { var scale: CGFloat = 1; var opacity: Double = 1 }
 }
 
 private struct PLineShape: Shape {

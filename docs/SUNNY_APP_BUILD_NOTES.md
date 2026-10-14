@@ -183,6 +183,10 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     as the card on screen; the chips follow and stay in view (Nik, 13 Oct 2026). Back by swipe
     now starts at the left edge only, so swiping right on a card goes to the previous ticker.
 
+43. **Live pulse on the Chart dot.** While the market is open (9:30 to the close, New York), a
+    soft ring in the line's colour grows from the dot to 2.8x and fades in 1.6 s, rests 0.4 s and
+    repeats; off outside the session and with Reduce Motion (Nik, 14 Oct 2026; not in the design).
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on
