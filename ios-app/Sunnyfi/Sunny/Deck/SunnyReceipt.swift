@@ -502,7 +502,8 @@ struct ThetaPaper: View {
                     HStack(spacing: 0) {
                         Text("THETA ")
                         Text("\(F.level(now))×").foregroundStyle(S.receiptRed)
-                        if let after = r?.bookRatio?.after { Text(" · BACK TO \(F.level(after))× AFTER") }
+                        // "Back to" only when the roll lifts the book (KR's would have lowered it).
+                        if let after = r?.bookRatio?.after { Text(" · \(after > now ? "BACK TO " : "")\(F.level(after))× AFTER") }
                     }
                     .sMono(11, line: 14, tracking: 0.04).foregroundStyle(S.receiptMuted)
                 }

@@ -97,10 +97,7 @@ struct SunnyPositions: View {
             HStack(alignment: .top, spacing: 20) {
                 ForEach(pages) { pg in
                     PPageView(page: pg, width: pw, hours: hours, live: live, today: home.today, mode: $mode,
-                              go: seen.contains(pg.id) || reduce,
-                              jump: { sold in
-                                  if let i = pages.first(where: { $0.kind == (sold ? .sold : .bought) })?.id { go(i) }
-                              })
+                              go: seen.contains(pg.id) || reduce)
                         .frame(width: pw, alignment: .topLeading)
                         .fixedSize(horizontal: false, vertical: true)
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[pg.id] = $0 }
@@ -180,12 +177,11 @@ private struct PPageView: View {
     let today: String
     @Binding var mode: PMode
     let go: Bool
-    let jump: (Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if page.kind == .all {
-                PAllCard(legs: page.legs, mode: mode, go: go, jump: jump)
+                PAllCard(legs: page.legs, mode: $mode, go: go)
             } else {
                 PSideTop(page: page, mode: $mode, go: go).pEnter(go, 0)
                 ForEach(Array(page.cards.enumerated()), id: \.element.id) { j, c in
@@ -204,9 +200,8 @@ private struct PPageView: View {
 
 private struct PAllCard: View {
     let legs: [PLeg]
-    let mode: PMode
+    @Binding var mode: PMode
     let go: Bool
-    let jump: (Bool) -> Void
 
     private var rows: [(t: String, sold: Bool, L: [PLeg])] {
         [("Calls sold", true, true), ("Puts sold", true, false), ("Calls bought", false, true), ("Puts bought", false, false)]
@@ -226,9 +221,11 @@ private struct PAllCard: View {
             VStack(alignment: .leading, spacing: 28) {
                 ForEach(Array(rows.enumerated()), id: \.element.t) { j, r in
                     let A = PTotals(r.L)
-                    Button { jump(r.sold) } label: {
+                    // A tap switches time value → % → $ on every page, as before the
+                    // redesign (Nik, 13 Oct 2026); the design's jump to that side went.
+                    Button { withAnimation(.smooth(duration: S.roll)) { mode = mode.nextPositions } } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(r.t) · \(PWords.word(mode, sold: r.sold))")
+                            Text("\(r.t) · \(PWords.word(mode, sold: r.sold, up: A.up))")
                                 .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
                                 .foregroundStyle(S.muted)
                             PNum(value: PWords.big(A, mode), format: PWords.format(mode), go: go,
@@ -243,8 +240,8 @@ private struct PAllCard: View {
                     }
                     .buttonStyle(PPress(scale: 0.98))
                     .pEnter(go, Double(min(j, 6)) * S.stagger)
-                    .accessibilityLabel("\(r.t), \(PWords.word(mode, sold: r.sold)) \(PWords.format(mode)(PWords.big(A, mode)))")
-                    .accessibilityHint("Opens \(r.sold ? "Sold" : "Bought")")
+                    .accessibilityLabel("\(r.t), \(PWords.word(mode, sold: r.sold, up: A.up)) \(PWords.format(mode)(PWords.big(A, mode)))")
+                    .accessibilityHint("Switches time value, percent and dollars")
                 }
             }
         }
@@ -277,7 +274,7 @@ private struct PSideTop: View {
                     PNum(value: PWords.big(A, mode), format: PWords.format(mode), go: go, delay: 0.12)
                         .sType(.largeNumber)
                         .foregroundStyle(PWords.tone(A, mode))
-                    Text(PWords.word(mode, sold: page.sold))
+                    Text(PWords.word(mode, sold: page.sold, up: A.up))
                         .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
                         .foregroundStyle(S.muted)
                 }
@@ -285,7 +282,7 @@ private struct PSideTop: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(POpacityPress())
-            .accessibilityLabel("\(page.sold ? "Sold" : "Bought"), \(PWords.word(mode, sold: page.sold)) \(PWords.format(mode)(PWords.big(A, mode)))")
+            .accessibilityLabel("\(page.sold ? "Sold" : "Bought"), \(PWords.word(mode, sold: page.sold, up: A.up)) \(PWords.format(mode)(PWords.big(A, mode)))")
             .accessibilityHint("Switches time value, percent and dollars")
             PWords.line(A, mode, sold: page.sold)
         }
@@ -295,8 +292,10 @@ private struct PSideTop: View {
 
 /// The words and numbers the All rows and page tops share (block 12, Numbers).
 enum PWords {
-    static func word(_ m: PMode, sold: Bool) -> String {
-        switch m { case .tv: "time value"; case .pct: sold ? "captured" : "return"; case .usd: sold ? "kept" : "gain" }
+    /// A bought side down says loss, not gain (Nik, 13 Oct 2026: "when it's red
+    /// don't call it gain").
+    static func word(_ m: PMode, sold: Bool, up: Bool) -> String {
+        switch m { case .tv: "time value"; case .pct: sold ? "captured" : "return"; case .usd: sold ? "kept" : up ? "gain" : "loss" }
     }
     static func big(_ A: PTotals, _ m: PMode) -> Double {
         switch m { case .tv: A.tv; case .pct: abs(A.pct); case .usd: abs(A.g) }
@@ -314,7 +313,7 @@ enum PWords {
         var bits: [(String, String, Color)] = [(PF.usd(A.now), " now", S.ink)]
         if m != .pct { bits.append((PF.pct(A.pct), sold ? " captured" : " return", tn)) }
         if m != .tv { bits.append((PF.usd(A.tv), " time value", S.ink)) }
-        if m != .usd { bits.append((PF.usd(A.g), sold ? " kept" : " gain", tn)) }
+        if m != .usd { bits.append((PF.usd(A.g), sold ? " kept" : A.up ? " gain" : " loss", tn)) }
         let bold = SType(size: 14, weight: 700, line: 18, tracking: 0).font(tabular: true)
         return bits.enumerated().reduce(Text("")) { acc, e in
             acc + Text(e.element.0).font(bold).foregroundStyle(e.element.2)
@@ -398,7 +397,7 @@ private struct PTickerCard: View {
         let stats: [(Double, (Double) -> String, String, Color)] = [
             (A.tv, usd, "time value", S.ink),
             (abs(A.pct), pct, card.sold ? "captured" : "return", tn),
-            (abs(A.g), usd, card.sold ? "kept" : "gain", tn),
+            (abs(A.g), usd, card.sold ? "kept" : A.up ? "gain" : "loss", tn),
         ]
         return HStack(alignment: .top, spacing: 8) {
             ForEach(stats, id: \.2) { s in
@@ -422,7 +421,7 @@ private struct PTickerCard: View {
         let d = c.heads.map { "\(F.trim((abs($0.dist) * 10).rounded() / 10)) percent \($0.dist >= 0 ? "to" : "past") \($0.word) \(PF.strike($0.k))" }
         let g = Int(abs(c.totals.g).rounded()).formatted()
         let kept = c.sold ? (c.totals.up ? "kept \(g) dollars" : "down \(g) dollars")
-                          : (c.totals.up ? "gain \(g) dollars" : "down \(g) dollars")
+                          : (c.totals.up ? "gain \(g) dollars" : "loss \(g) dollars")
         return ([c.t, PF.price(c.px)] + d + [kept]).joined(separator: ", ")
     }
 }

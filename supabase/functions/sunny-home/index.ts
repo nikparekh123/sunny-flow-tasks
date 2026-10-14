@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-13.15';
+const BUILD = '2026-10-13.16';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -154,7 +154,11 @@ type LegLite = { ticker: string; strike: number; expiry: string; n: number; mark
 /** The roll for a dragging LEAP: next January a year further out, at the
  *  strike nearest 0.725 delta (Nik: "around 70 to 75 delta"). */
 const ROLL_DELTA = 0.725;
-async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, commPer: number, spotNow: number | null): Promise<Row> {
+/* `ratioNow` and `ratioAfter` are the book's 2-week ratio (the Theta card's
+   number, the one the 3x line is drawn on), now and with this LEAP's theta
+   swapped for the new one's; never today's single-day ratio. */
+async function rollFor(l: LegLite, oldTh: number, ratioNow: number | null, ratioAfter: (newTh: number) => number | null,
+                       commPer: number, spotNow: number | null): Promise<Row> {
   const exps = (await thetaJson(`/v3/option/list/expirations?symbol=${l.ticker}`))
     .map((r) => String(r.expiration ?? r.date ?? '')).filter(Boolean)
     .map((e) => e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`).sort();
@@ -196,12 +200,16 @@ async function rollFor(l: LegLite, oldTh: number, thS: number, thL: number, comm
     iv: { old: l.iv, new: r2(Number(pick.iv)) },
     delta: { old: l.delta, new: r2(Number(pick.delta)) },
     open_interest: { old: oiOf(oiOld, l.strike), new: oiOf(oi, Number(pick.k)) },
-    book_ratio: { now: thL > 0 ? r2(thS / thL) : null, after: thL - oldTh + newTh > 0 ? r2(thS / (thL - oldTh + newTh)) : null },
+    book_ratio: { now: ratioNow, after: (() => { const a = ratioAfter(newTh); return a == null ? null : r2(a); })() },
     spot: r2(S),
   };
 }
 
-async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 'tick'): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
+/* opts.dry (admin, mode 'theta_check'): run the check now and write nothing to
+   theta_checks or the heartbeat; opts.price prices the roll for that ticker's
+   LEAPs (or '*' for all) whether or not they flag. For checking the check. */
+async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 'tick',
+                     opts: { dry?: boolean; price?: string } = {}): Promise<{ payload: Row; ms: number; steps: Record<string, number> }> {
   let checkSummary: Row[] | null = null;
   /* Where the build's time goes, returned with the timings (no data). */
   const steps: Record<string, number> = {};
@@ -1199,13 +1207,29 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
      runs, and only once (the heartbeat says whether today already ran). */
   const ranToday = mode === 'theta_check'
     ? (await get("sync_heartbeat?feed=eq.theta-check&select=ran_at"))[0]?.ran_at : null;
-  const checkDue = mode === 'theta_check' && isTrading(today) && now.mins >= 16 * 60 + 15
-    && !(ranToday && ny(new Date(String(ranToday))).date === today);
+  const dry = mode === 'theta_check' && !!opts.dry;
+  const checkDue = dry || (mode === 'theta_check' && isTrading(today) && now.mins >= 16 * 60 + 15
+    && !(ranToday && ny(new Date(String(ranToday))).date === today));
   if (mode === 'theta_check' && !checkDue) checkSummary = [{ skipped: 'not after the close, or already ran today' }];
   if (checkDue) {
     const THETA_LINE = 3;   // the Theta card's warning line (block 15), same number in the app
     const ratioNow = history.theta.now;
-    const thS = livePoint?.thS ?? all.at(-1)?.thS ?? 0, thL = livePoint?.thL ?? all.at(-1)?.thL ?? 0;
+    const thL = livePoint?.thL ?? all.at(-1)?.thL ?? 0;
+    /* ⚠ ONE BASIS (audit, 13 Oct 2026). The ratio trigger compared the 2-week
+       ratio against a single-day "without": the daily ratio swings through the
+       week as the weeklies near Friday, so under 3x a strong day would have
+       flagged every LEAP and a weak one none, and the receipt said KR "alone"
+       moved theta 8.05x to 7.76x when its share was 0.03x. Without-this-LEAP
+       and after-the-roll are now the 2-week ratio too: the last ten points with
+       the leg's theta removed or swapped (today's swap held across the ten). */
+    const last10 = all.slice(-10);
+    const ratio2w = (key: string, swap: (old: number) => number) => {
+      const xs = last10.map((p) => {
+        const L = p.thL - (p.thLongBy[key] ?? 0) + swap(p.thLongBy[key] ?? 0);
+        return L > 0 ? p.thS / L : null;
+      }).filter((x): x is number => x != null && isFinite(x));
+      return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+    };
     const monthAgo = days.length > 21 ? days[days.length - 21] : days[0];
     const commPerContract = (() => {
       const c = trades.filter((t) => t.commission != null);
@@ -1239,10 +1263,11 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const thenDay = thenTh != null ? monthAgo : null;
       const growth = thenTh && thenTh > 0 ? nowTh / thenTh - 1 : null;
       const share = thL > 0 ? nowTh / thL : 0;
-      const without = thL - liveTh > 0 ? thS / (thL - liveTh) : null;
+      const key = `${l.ticker}|call|${l.strike}|${l.expiry}`;
+      const without = ratio2w(key, () => 0);
       const trigger = growth != null && growth >= 0.5 && share >= GROWTH_MIN_SHARE ? 'growth'
         : (ratioNow != null && ratioNow < THETA_LINE && without != null && without >= THETA_LINE) ? 'ratio' : null;
-      found.push({ l, nowTh, liveTh, thenTh, thenDay, growth, share, without, trigger });
+      found.push({ l, key, nowTh, liveTh, thenTh, thenDay, growth, share, without, trigger });
     }
     const existing = openChecks;
     for (const c of existing) {
@@ -1253,12 +1278,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         : { last_checked: today, theta_now: r2(f!.nowTh), ratio_now: ratioNow, ratio_without: f!.without && r2(f!.without),
             ...(ratioNow != null && c.ratio_at_card != null && ratioNow <= Number(c.ratio_at_card) - 0.25
               ? { card_on: today, ratio_at_card: ratioNow } : {}) };
-      await fetch(`${URL_}/rest/v1/theta_checks?id=eq.${c.id}`, { method: 'PATCH', headers: H, body: JSON.stringify(body) });
+      if (!dry) await fetch(`${URL_}/rest/v1/theta_checks?id=eq.${c.id}`, { method: 'PATCH', headers: H, body: JSON.stringify(body) });
     }
-    for (const f of found.filter((x) => x.trigger)) {
+    const priced: Row[] = [];
+    for (const f of found.filter((x) => x.trigger || (dry && (opts.price === '*' || opts.price === x.l.ticker)))) {
       const l = f.l as Leg;
-      if (existing.some((c) => c.ticker === l.ticker && Number(c.strike) === l.strike && String(c.expiry) === l.expiry)) continue;
-      const roll = await rollFor(l, f.liveTh, thS, thL, commPerContract, spotOf.get(l.ticker) ?? null).catch((e) => ({ error: String(e).slice(0, 120) }));
+      if (!dry && existing.some((c) => c.ticker === l.ticker && Number(c.strike) === l.strike && String(c.expiry) === l.expiry)) continue;
+      const roll = await rollFor(l, f.liveTh, ratioNow, (newTh) => ratio2w(f.key, () => newTh), commPerContract,
+        spotOf.get(l.ticker) ?? null).catch((e) => ({ error: String(e).slice(0, 120) }));
+      if (dry) { priced.push({ leg: `${l.ticker} ${l.strike}C ${l.expiry}`, roll }); continue; }
       await fetch(`${URL_}/rest/v1/theta_checks`, {
         method: 'POST', headers: { ...H, Prefer: 'return=minimal' },
         body: JSON.stringify([{ ticker: l.ticker, option_type: 'call', strike: l.strike, expiry: l.expiry, contracts: l.n,
@@ -1267,7 +1295,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
           ratio_now: ratioNow, ratio_without: f.without && r2(f.without), ratio_at_card: ratioNow, roll, last_checked: today }]),
       });
     }
-    await fetch(`${URL_}/rest/v1/sync_heartbeat?on_conflict=feed`, {
+    if (!dry) await fetch(`${URL_}/rest/v1/sync_heartbeat?on_conflict=feed`, {
       method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
       body: JSON.stringify([{ feed: 'theta-check', ran_at: new Date().toISOString(),
         rows_written: found.filter((x) => x.trigger).length,
@@ -1276,6 +1304,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     checkSummary = found.map((f) => ({ leg: `${f.l.ticker} ${f.l.strike}C ${f.l.expiry}`, theta: r2(f.nowTh),
       then: f.thenTh && r2(f.thenTh), growth_pct: f.growth == null ? null : Math.round(f.growth * 100),
       share_pct: Math.round(f.share * 1000) / 10, without: f.without && r2(f.without), trigger: f.trigger }));
+    if (dry) checkSummary = [{ dry: true, ratio_now: ratioNow, priced }, ...checkSummary];
   }
 
   // ── Theta check (block 07): what the after-close run found ──
@@ -1533,7 +1562,7 @@ const refused = () => new Response(JSON.stringify({ ok: false, error: 'not allow
 
 Deno.serve(async (req) => {
   if (req.method !== 'OPTIONS' && !(await callerOk(req, false))) return refused();
-  let body: { passes?: number; mode?: 'theta_check' | 'history' | 'last_week' } = {};
+  let body: { passes?: number; mode?: 'theta_check' | 'history' | 'last_week'; dry?: boolean; price?: string } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* cron sends {} */ }
   try {
     const n = ny();
@@ -1546,7 +1575,7 @@ Deno.serve(async (req) => {
         const wait = ((i === 0 ? 6_000 : 36_000) - (Date.now() % 60_000) + 60_000) % 60_000;
         if (wait < 40_000) await new Promise((r) => setTimeout(r, wait));
       }
-      const { payload, ms, steps } = await build(body.mode ?? 'tick');
+      const { payload, ms, steps } = await build(body.mode ?? 'tick', { dry: body.dry, price: body.price });
       const w = await fetch(`${URL_}/rest/v1/home_snapshot?on_conflict=id`, {
         method: 'POST', headers: { ...H, Prefer: 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify([{ id: 1, payload, built_at: payload.built_at, build: BUILD, ms }]),

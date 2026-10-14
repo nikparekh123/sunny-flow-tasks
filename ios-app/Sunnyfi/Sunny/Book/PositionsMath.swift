@@ -356,14 +356,18 @@ struct PChartGeom {
         var pts: [(Double, Double?)] = hist.prefix(35).enumerated().map { (Double($0.offset), $0.element) }.filter { $0.0 < live }
         pts.append((live, c.px))
         let vals = pts.compactMap(\.1)
-        // Y fits the strikes and the price first, then stretches up to half
-        // that span for the history; anything beyond clips.
+        // Y fits the strikes and the price, zoomed in so the strikes sit well
+        // apart (Nik, 13 Oct 2026: "increase the gap between strikes"; the
+        // design's 6% minimum span and half-span history stretch left them
+        // squeezed at the top). The scale widens only as far as the price has
+        // to go; the week's line may stretch it by a quarter at most, and
+        // beyond that it clips.
         let ks = c.strikes.map(\.k)
         var ylo = min(c.px, ks.min() ?? c.px), yhi = max(c.px, ks.max() ?? c.px)
-        let sp0 = max(yhi - ylo, c.px * 0.06), mid0 = (ylo + yhi) / 2
+        let sp0 = max(yhi - ylo, c.px * 0.02), mid0 = (ylo + yhi) / 2
         ylo = mid0 - sp0 * 0.62; yhi = mid0 + sp0 * 0.62
-        ylo = max(min(ylo, vals.min() ?? ylo), ylo - sp0 * 0.5)
-        yhi = min(max(yhi, vals.max() ?? yhi), yhi + sp0 * 0.5)
+        ylo = max(min(ylo, vals.min() ?? ylo), ylo - sp0 * 0.25)
+        yhi = min(max(yhi, vals.max() ?? yhi), yhi + sp0 * 0.25)
         let (l0, h0) = (ylo, yhi)
         let Y = { (v: Double) in H - CGFloat((v - l0) / (h0 - l0)) * H }
         let Xi = { (i: Double) in CGFloat(i / (34 + F)) * PR }

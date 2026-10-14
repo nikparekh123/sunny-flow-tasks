@@ -153,6 +153,20 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     on 13 Oct: nothing flags (NKE's single-day jump of 47% is 18% smoothed). KR's card was
     resolved as a false alarm.
 
+35. **Theta check on one basis.** The ratio trigger, "without this LEAP" and the roll's
+    before/after are all the 2-week ratio (the Theta card's number, the 3x line's basis); they
+    had mixed in the single-day ratio, which swings through the week. The receipt says "back
+    to" only when the roll lifts the book. Admin test mode: `{"mode":"theta_check","dry":true,
+    "price":"*"}` runs the check now, writes nothing, and prices every LEAP's roll (13 Oct).
+36. **All card taps cycle the number.** Tap a total: time value, %, $, shared with every page,
+    as before the redesign (Nik, 13 Oct 2026); the design's jump to that side is gone, the chips
+    navigate.
+37. **Loss, not gain.** A bought side or card that is down says "loss" (Nik, 13 Oct 2026:
+    "when it's red don't call it gain"). Only Positions used the word.
+38. **Chart scale zoomed on the strikes.** Fit to the strikes and the price with a 2% minimum
+    span (design 6%), and the week's line may widen it by a quarter at most (design half);
+    beyond that it clips. The strikes sit well apart; a big move widens the scale (Nik, 13 Oct).
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on
