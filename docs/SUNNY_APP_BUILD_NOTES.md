@@ -249,14 +249,23 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
       (Nik, 14 Oct 2026); day labels need 30 pt, today, the report day and Friday keep theirs.
     - **"By Oct 23"**, not "By Fri", in the header, insight and fully-sold line: "By Fri" means
       this Friday on Positions (Nik, 14 Oct 2026).
-    - **Zoomed scale** (Nik, 14 Oct 2026: "breathing room between strikes"): the Positions rule,
-      fitted to the price and every sold and planned strike, the week stretching it by a
-      quarter at most; replaces the design's fixed 1.5 SD. Rescales glide with the plan. With
-      no strike at all the whole week shows.
+    - **Zoomed scale** (Nik, 14 Oct 2026: "breathing room between strikes"): fitted to the
+      price and every sold and planned strike (the Positions rule) and always the whole week,
+      as the design did; replaces the design's fixed 1.5 SD. Positions' quarter-stretch cut
+      most of PEP's week off. Rescales glide with the plan.
     - **Pulse** on the price dot during the regular session, as Positions (Nik, 14 Oct 2026).
     - **System slider**: iOS 26 `Slider` with `step`, a `tick` per stop and `neutralValue`
       (puts fill from the right). Its ticks sit under the track, not on it as drawn; its thumb
       is the system capsule and glass lens. A tap on the track jumps to the nearest stop.
+56. **Planner swipes between names** (Nik, 14 Oct 2026: "like before"): the chart cards sit
+    side by side and snap one at a time, the chips follow; the strikes below are the name on
+    screen's and rise in again. The cards slide, so they no longer also rise (a change from
+    the block's entrance); each card's week still draws in as it appears.
+57. **Reset** (Nik, 14 Oct 2026): a glass "Reset" capsule beside Add, shown only once a name's
+    plan was changed; it goes back to the engine's pick, live.
+58. **Call / Put readable** (Nik, 14 Oct 2026: "hardly readable"): the side a strike is on is
+    filled in its colour (green call, blue put, as its dot and chart tag) with paper text, 13
+    semibold; the other word is ink. Replaces the design's white pill on glass.
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home

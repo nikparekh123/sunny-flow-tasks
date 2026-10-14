@@ -69,6 +69,10 @@ struct SunnyPlanner: View {
     @State private var held: PlannerChain?
     @State private var holding = false
     @State private var cardW: CGFloat = 353
+    /// The card on screen; swiping moves it and the chips follow (as the old
+    /// writes page did, Nik 14 Oct 2026).
+    @State private var page: String?
+    @State private var heights: [String: CGFloat] = [:]
     @FocusState private var focus: PlannerField?
     @State private var drafts: [PlannerField: String] = [:]
 
@@ -82,7 +86,7 @@ struct SunnyPlanner: View {
                     VStack(alignment: .leading, spacing: 12) {
                         header
                         chips(names, cur)
-                        if let cur { content(cur) }
+                        if let cur { content(names, cur) }
                         else {
                             Text("Nothing to plan this week.").sType(.body, tabular: false).foregroundStyle(S.muted)
                         }
@@ -199,7 +203,54 @@ struct SunnyPlanner: View {
         withAnimation(reduce ? nil : S.standard(0.25)) { router.plans["\(b.t)|\(b.expiry)"] = L }
     }
 
-    @ViewBuilder private func content(_ n: Writes.Name) -> some View {
+    @ViewBuilder private func content(_ names: [Writes.Name], _ n: Writes.Name) -> some View {
+        let b = book(n), L = legs(b)
+        pager(names, n)
+        // The strikes are the name on screen's; they rise in again on every
+        // name (block 14b, Motion).
+        PlannerAppear(delay: 0.08) { strikes(b, L) }
+            .id("strikes-" + b.t)
+    }
+
+    /// One chart card per name, side by side; snaps one at a time and is as
+    /// tall as the card on screen. The cards slide, so they do not also rise;
+    /// each card's week draws in as it appears.
+    private func pager(_ names: [Writes.Name], _ cur: Writes.Name) -> some View {
+        let h = heights[cur.ticker] ?? 0
+        return ScrollView(.horizontal) {
+            LazyHStack(alignment: .top, spacing: 20) {
+                ForEach(names) { n in
+                    card(n)
+                        .frame(width: cardW, alignment: .topLeading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[n.ticker] = $0 }
+                        .id(n.ticker)
+                }
+            }
+            .scrollTargetLayout()
+            .padding(.top, 8).padding(.bottom, 24)
+        }
+        .contentMargins(.horizontal, S.margin, for: .scrollContent)
+        .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
+        .scrollPosition(id: $page)
+        .scrollIndicators(.hidden)
+        .frame(height: h > 0 ? h + 32 : nil, alignment: .top)
+        .padding(.horizontal, -S.margin).padding(.top, -8).padding(.bottom, -24)
+        .animation(reduce ? nil : S.standard(0.4), value: h)
+        .onChange(of: page) { _, p in
+            if let p, p != ticker { focus = nil; router.writes = p }
+        }
+        .onChange(of: ticker) { _, t in
+            if let t, t != page { withAnimation(reduce ? nil : S.standard(0.45)) { page = t } }
+        }
+        .task {
+            // A scroll position set before the first layout is ignored, so set it after.
+            try? await Task.sleep(for: .milliseconds(60))
+            page = cur.ticker
+        }
+    }
+
+    private func card(_ n: Writes.Name) -> some View {
         let b = book(n), L = legs(b)
         let hours = home.hours
         let sessions = hours?.days ?? []
@@ -209,13 +260,15 @@ struct SunnyPlanner: View {
         let inner = cardW - 32
         let g = PlannerGeom(b, legs: L, width: inner, hist: hist, live: live, sessions: sessions, ahead: ahead,
                             today: home.today, per: PlannerAxis.per(ahead.count))
-        // The entrance replays on every name (block 14b, Motion): each name's
-        // card and strikes are new views that rise in once as they appear.
-        PlannerCard(b: b, legs: L, g: g, width: inner, insight: insight(n, b),
-                    open: MarketClock.isRegular(SClock.now(), calendar: home.calendar))
-            .id(b.t)
-        PlannerAppear(delay: 0.08) { strikes(b, L) }
-            .id("strikes-" + b.t)
+        return PlannerCard(b: b, legs: L, g: g, width: inner, insight: insight(n, b),
+                           open: MarketClock.isRegular(SClock.now(), calendar: home.calendar))
+    }
+
+    /// Back to the engine's pick for this name (Nik, 14 Oct 2026).
+    private func reset(_ b: PlannerBook) {
+        focus = nil
+        drafts.removeAll()
+        withAnimation(reduce ? nil : S.standard(0.25)) { router.plans["\(b.t)|\(b.expiry)"] = nil }
     }
 
     /// "NFLX is up 6.0% over 5 days." then the 1 SD move by the expiry, from
@@ -235,7 +288,7 @@ struct SunnyPlanner: View {
 
     private func strikes(_ b: PlannerBook, _ L: [PlanLeg]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("Strikes").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
                         .foregroundStyle(S.muted)
@@ -243,6 +296,21 @@ struct SunnyPlanner: View {
                         .foregroundStyle(S.pNeutral)
                 }
                 Spacer(minLength: 0)
+                if router.plans["\(b.t)|\(b.expiry)"] != nil {
+                    Button { reset(b) } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.counterclockwise").font(.system(size: 11, weight: .bold))
+                            Text("Reset").sType(SType(size: 13, weight: 600, line: 13, tracking: 0), tabular: false)
+                        }
+                        .foregroundStyle(S.ink)
+                        .padding(.leading, 12).padding(.trailing, 14).frame(height: 32)
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                        .contentShape(Capsule().inset(by: -6))
+                    }
+                    .buttonStyle(SPressStyle())
+                    .accessibilityLabel("Reset to the suggested plan")
+                    .transition(.opacity)
+                }
                 if !b.fullySold && b.canAdd(L) {
                     Button { if let N = b.add(L) { save(b, N) } } label: {
                         HStack(spacing: 6) {
@@ -366,7 +434,6 @@ private struct PlannerCard: View {
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
         .shadow(color: .black.opacity(0.04), radius: 1.5, y: 1)
         .shadow(color: .black.opacity(0.10), radius: 12, y: 10)
-        .modifier(PlannerEnter(go: go, delay: 0))
         .task { go = true }
         .accessibilityElement(children: .combine)
     }
@@ -641,24 +708,26 @@ private struct PlannerSegment: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            button("Call", on: call, enabled: canCall) { pick(.c) }
-            button("Put", on: !call, enabled: canPut) { pick(.p) }
+            button("Call", on: call, enabled: canCall, fill: S.green) { pick(.c) }
+            button("Put", on: !call, enabled: canPut, fill: S.blue) { pick(.p) }
         }
         .padding(2)
         .glassEffect(.regular, in: .capsule)
         .animation(S.standard(0.3), value: call)
     }
 
-    private func button(_ t: String, on: Bool, enabled: Bool, _ act: @escaping () -> Void) -> some View {
+    /// Readable at a glance (Nik, 14 Oct 2026: "hardly readable"): the side
+    /// it is on is filled in its own colour, green call, blue put, as its dot
+    /// and chart tag; the other side's word is ink.
+    private func button(_ t: String, on: Bool, enabled: Bool, fill: Color, _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
-            Text(t).sType(SType(size: 12, weight: 600, line: 12, tracking: 0), tabular: false)
-                .foregroundStyle(on ? S.ink : S.muted)
-                .frame(width: 38, height: 24)
+            Text(t).sType(SType(size: 13, weight: 600, line: 13, tracking: 0), tabular: false)
+                .foregroundStyle(on ? S.paper : S.ink)
+                .frame(width: 42, height: 24)
                 .background {
                     if on {
-                        Capsule().fill(Color.white.opacity(scheme == .dark ? 0.22 : 0.85))
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(scheme == .dark ? 0.3 : 1), lineWidth: 0.5))
-                            .shadow(color: .black.opacity(scheme == .dark ? 0.4 : 0.12), radius: 3, y: 2)
+                        Capsule().fill(fill)
+                            .shadow(color: .black.opacity(scheme == .dark ? 0.4 : 0.15), radius: 2, y: 1)
                             .matchedGeometryEffect(id: "seg", in: ns)
                     }
                 }

@@ -283,16 +283,18 @@ struct PlannerGeom {
         // Zoomed to the price and the strikes, sold and planned, so they sit
         // well apart (Nik, 14 Oct 2026: "breathing room between strikes", the
         // Positions zoom; the design's fixed 1.5 SD scale bunched them). The
-        // week may stretch it by a quarter at most, beyond that it clips. As
-        // a strike slides out the scale glides with it.
+        // whole week always shows, as in the design: Positions lets the week
+        // stretch the scale by a quarter only, which cut most of PEP's week
+        // off when its strikes sat above a lower week. As a strike slides out
+        // the scale glides with it.
         let ks = b.sold.map(\.k) + legs.map(\.k)
         var ylo = min(b.px, ks.min() ?? b.px), yhi = max(b.px, ks.max() ?? b.px)
         let sp0 = max(yhi - ylo, b.px * 0.02), mid0 = (ylo + yhi) / 2
         ylo = mid0 - sp0 * 0.62; yhi = mid0 + sp0 * 0.62
-        // With no strike to fit (none planned, none sold) the whole week shows.
-        let stretch = ks.isEmpty ? Double.infinity : sp0 * 0.25
-        ylo = max(min(ylo, vals.min() ?? ylo), ylo - stretch)
-        yhi = min(max(yhi, vals.max() ?? yhi), yhi + stretch)
+        if let vlo = vals.min(), let vhi = vals.max() {
+            let pad = (max(yhi, vhi) - min(ylo, vlo)) * 0.04
+            ylo = min(ylo, vlo - pad); yhi = max(yhi, vhi + pad)
+        }
         let (lo, hi) = (ylo, yhi)
         self.lo = lo; self.hi = hi
         let Y = { (v: Double) in H - CGFloat((v - lo) / max(hi - lo, 0.0001)) * H }
