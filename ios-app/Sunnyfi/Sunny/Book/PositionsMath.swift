@@ -35,6 +35,7 @@ struct PLeg: Identifiable, Hashable {
     let sold: Bool
     let call: Bool
     let px: Double           // the ticker's price now
+    let w: Double            // mark at the start of the Chart cards' week
 
     var base: Double { a * 100 * Double(q) }
     var now: Double { b * 100 * Double(q) }
@@ -44,15 +45,20 @@ struct PLeg: Identifiable, Hashable {
     var tv: Double { max(0, b - intrinsic) * 100 * Double(q) }
     /// % from the price to the strike, positive while out of the money.
     var dist: Double { (call ? k - px : px - k) / px * 100 }
+    /// $ made or lost over the week the Chart card shows.
+    var week: Double { (sold ? w - b : b - w) * 100 * Double(q) }
 }
 
 /// Sums over legs (block 12, Logic).
 struct PTotals {
-    var base = 0.0, g = 0.0, now = 0.0, tv = 0.0
-    init(_ L: [PLeg]) { for l in L { base += l.base; g += l.g; now += l.now; tv += l.tv } }
+    var base = 0.0, g = 0.0, now = 0.0, tv = 0.0, week = 0.0
+    init(_ L: [PLeg]) { for l in L { base += l.base; g += l.g; now += l.now; tv += l.tv; week += l.week } }
     /// % captured (sold) or % return (bought).
     var pct: Double { base > 0 ? g / base * 100 : 0 }
     var up: Bool { g >= 0 }
+    /// The Chart line's colour: the week shown, not since opened (Nik, 14 Oct
+    /// 2026: a LEAP rising all week drew red because it is down since bought).
+    var weekUp: Bool { week >= 0 }
 }
 
 /// A strike's status: on your side (out of the money sold, in the money
@@ -180,7 +186,7 @@ enum PMath {
         return home.legs.compactMap { l in
             guard let px = spot[l.ticker] ?? l.underlying, px > 0 else { return nil }
             return PLeg(id: l.id, t: l.ticker, k: l.strike, q: l.n, a: l.avg, b: l.mark ?? l.avg, expiry: l.expiry,
-                        sold: l.side == "sold", call: l.type == "call", px: px)
+                        sold: l.side == "sold", call: l.type == "call", px: px, w: l.markWk ?? l.avg)
         }
     }
 

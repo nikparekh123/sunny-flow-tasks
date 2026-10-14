@@ -174,6 +174,11 @@ struct SunnyInventory: View {
 struct SunnyWritesSheet: View {
     let home: HomePayload
     @Binding var ticker: String?
+    /// The card on screen; swiping moves it and the chips follow (Nik, 13 Oct
+    /// 2026: "can we slide to the next ticker").
+    @State private var page: String?
+    @State private var heights: [String: CGFloat] = [:]
+    @State private var cardW: CGFloat = 353
 
     var body: some View {
         let names = home.writes.names
@@ -196,46 +201,92 @@ struct SunnyWritesSheet: View {
                             Text("Inventory").sType(.largeTitle, tabular: false)
                         }
                         .frame(height: 40)
-                        ScrollView(.horizontal) {
-                            HStack(spacing: 8) {
-                                ForEach(names) { n in
-                                    let on = n.ticker == cur?.ticker
-                                    Button { withAnimation(S.standard(0.35)) { ticker = n.ticker } } label: {
-                                        HStack(spacing: 8) {
-                                            Text(n.ticker).sType(SType(size: 15, weight: 500, line: 15, tracking: 0), tabular: false)
-                                            Text("\(n.calls.sold) of \(n.calls.of)")
-                                                .sType(SType(size: 12, weight: 600, line: 12, tracking: 0))
-                                                .foregroundStyle(on ? S.chipOnInk.opacity(0.7) : S.muted)
+                        ScrollViewReader { proxy in
+                            ScrollView(.horizontal) {
+                                HStack(spacing: 8) {
+                                    ForEach(names) { n in
+                                        let on = n.ticker == cur?.ticker
+                                        Button { withAnimation(S.standard(0.35)) { ticker = n.ticker } } label: {
+                                            HStack(spacing: 8) {
+                                                Text(n.ticker).sType(SType(size: 15, weight: 500, line: 15, tracking: 0), tabular: false)
+                                                Text("\(n.calls.sold) of \(n.calls.of)")
+                                                    .sType(SType(size: 12, weight: 600, line: 12, tracking: 0))
+                                                    .foregroundStyle(on ? S.chipOnInk.opacity(0.7) : S.muted)
+                                            }
+                                            .foregroundStyle(on ? S.chipOnInk : S.ink)
+                                            .padding(.horizontal, 16).frame(height: 40)
+                                            .background { if on { Capsule().fill(S.ink) } }
+                                            .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
                                         }
-                                        .foregroundStyle(on ? S.chipOnInk : S.ink)
-                                        .padding(.horizontal, 16).frame(height: 40)
-                                        .background { if on { Capsule().fill(S.ink) } }
-                                        .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
+                                        .buttonStyle(SPressStyle())
+                                        .accessibilityAddTraits(on ? .isSelected : [])
+                                        .id(n.ticker)
                                     }
-                                    .buttonStyle(SPressStyle())
-                                    .accessibilityAddTraits(on ? .isSelected : [])
                                 }
+                                .padding(.vertical, 8)
                             }
-                            .padding(.vertical, 8)
+                            .contentMargins(.horizontal, 20, for: .scrollContent)
+                            .scrollIndicators(.hidden)
+                            .scrollClipDisabled()
+                            .padding(.horizontal, -20).padding(.vertical, -8)
+                            .onAppear { if let t = cur?.ticker { proxy.scrollTo(t, anchor: .center) } }
+                            .onChange(of: cur?.ticker) { _, t in
+                                if let t { withAnimation(S.standard(0.4)) { proxy.scrollTo(t, anchor: .center) } }
+                            }
                         }
-                        .contentMargins(.horizontal, 20, for: .scrollContent)
-                        .scrollIndicators(.hidden)
-                        .padding(.horizontal, -20).padding(.vertical, -8)
                     }
-                    if let cur { WriteCard(n: cur, calendar: home.calendar).id(cur.ticker).transition(.opacity) }
+                    if let cur { pager(names, cur) }
                     else {
                         Text("Nothing to write this week.").sType(.body, tabular: false).foregroundStyle(S.muted)
                     }
                 }
                 .foregroundStyle(S.ink)
                 .padding(.horizontal, S.margin)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width - 2 * S.margin } action: { cardW = $0 }
                 .padding(.top, 14).padding(.bottom, 60)
             }
             .scrollIndicators(.hidden)
         }
+        // Back from the left edge only, as iOS does, so swiping the cards
+        // right goes to the previous ticker instead of closing the screen.
         .gesture(DragGesture(minimumDistance: 30).onEnded { v in
-            if v.translation.width > 80, abs(v.translation.height) < 60 { withAnimation(S.standard(0.45)) { ticker = nil } }
+            if v.startLocation.x < 30, v.translation.width > 80, abs(v.translation.height) < 60 {
+                withAnimation(S.standard(0.45)) { ticker = nil }
+            }
         })
+    }
+
+    /// One card per name, side by side; snaps one at a time and is as tall as
+    /// the card on screen.
+    private func pager(_ names: [Writes.Name], _ cur: Writes.Name) -> some View {
+        let h = heights[cur.ticker] ?? 0
+        return ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 20) {
+                ForEach(names) { n in
+                    WriteCard(n: n, calendar: home.calendar)
+                        .frame(width: cardW, alignment: .topLeading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[n.ticker] = $0 }
+                        .id(n.ticker)
+                }
+            }
+            .scrollTargetLayout()
+            .padding(.top, 8).padding(.bottom, 24)
+        }
+        .contentMargins(.horizontal, S.margin, for: .scrollContent)
+        .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
+        .scrollPosition(id: $page)
+        .scrollIndicators(.hidden)
+        .frame(height: h > 0 ? h + 32 : nil, alignment: .top)
+        .padding(.horizontal, -S.margin).padding(.top, -8).padding(.bottom, -24)
+        .animation(S.standard(0.4), value: h)
+        .onChange(of: page) { _, p in if let p, p != ticker { ticker = p } }
+        .onChange(of: ticker) { _, t in if let t, t != page { withAnimation(S.standard(0.45)) { page = t } } }
+        .task {
+            // A scroll position set before the first layout is ignored, so set it after.
+            try? await Task.sleep(for: .milliseconds(60))
+            page = cur.ticker
+        }
     }
 }
 

@@ -23,4 +23,6 @@ struct Leg: Decodable, Identifiable, Hashable {
     let theta: Double?
     let underlying: Double?
     let opened: String?
+    /// The mark at the close before the Chart cards' first session (the week shown).
+    let markWk: Double?
 }

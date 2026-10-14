@@ -549,7 +549,7 @@ private struct PChartView: View {
 
     var body: some View {
         let on = go || reduce
-        let lineC = c.totals.up ? S.green : S.red
+        let lineC = c.totals.weekUp ? S.green : S.red   // the week shown (Nik, 14 Oct 2026)
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topLeading) {
                 // Strikes as plain gray lines: dashed sold, dotted bought. They

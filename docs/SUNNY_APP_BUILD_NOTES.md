@@ -174,6 +174,15 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 40. **Roll strike stays on delta alone.** Asked whether to require open interest of 100+ for the
     suggested roll's strike (KR 57.5 had OI 1); Nik: keep delta only (14 Oct 2026).
 
+41. **Chart line colour = the week shown.** Green when the card's legs made money over the five
+    sessions on the chart, red when they lost (Nik, 14 Oct 2026: a LEAP rising all week drew red
+    because it is still down since bought). The footer and the Bar fill keep since-opened. Each
+    leg carries `mark_wk`, its mark at the close before the first session (sunny-home); a leg
+    opened inside the week starts from its opening price.
+42. **Inventory sheet swipes.** One card per ticker side by side, snapping one at a time, as tall
+    as the card on screen; the chips follow and stay in view (Nik, 13 Oct 2026). Back by swipe
+    now starts at the left edge only, so swiping right on a card goes to the previous ticker.
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on

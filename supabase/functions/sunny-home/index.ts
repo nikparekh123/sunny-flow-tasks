@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-13.16';
+const BUILD = '2026-10-14.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -282,7 +282,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   const gBy = new Map(greeks.map((g) => [String(g.option_trade_id), g]));
   type Leg = { ticker: string; type: 'call' | 'put'; side: 'sold' | 'bought'; strike: number; expiry: string;
     n: number; avg: number; opened: string; mark: number | null; iv: number | null; delta: number | null;
-    theta: number | null; gamma: number | null; vega: number | null; underlying: number | null; marked_at: string | null };
+    theta: number | null; gamma: number | null; vega: number | null; underlying: number | null; marked_at: string | null;
+    mark_wk?: number | null };
   const legs: Leg[] = [];
   for (const rows of groups.values()) {
     const opens = rows.filter((r) => r.action === 'open').sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -1526,6 +1527,19 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
 
   step('theta_check');
   const hours = await hoursP;
+  /* Each leg's mark at the close before the Chart cards' first session, so a
+     card's line colours by the week it shows (Nik, 14 Oct 2026: a LEAP whose
+     price rose all week drew red because it is still down since bought). A leg
+     opened inside the week starts from what it was opened at. */
+  {
+    const before = prevTrading(sessions[0]);
+    for (const l of legs) {
+      const ids = (groups.get(`${l.ticker}|${l.type}|${l.side === 'sold' ? 'short' : 'long'}|${l.strike}|${l.expiry}`) ?? [])
+        .filter((t) => t.action === 'open').map((t) => String(t.id));
+      const g = l.opened > before ? null : greekOn(ids, before);
+      l.mark_wk = g?.last_mark != null ? r2(Number(g.last_mark) * 100) / 100 : g?.mark != null ? r2(Number(g.mark) * 100) / 100 : l.avg;
+    }
+  }
   step('hours');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
