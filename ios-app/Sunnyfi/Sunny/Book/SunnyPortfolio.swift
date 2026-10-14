@@ -5,7 +5,7 @@
 //  Blocks 10 and 11 · Portfolio and Watchlist, one card (UI Kit 06).
 //  Portfolio: every name in the book as a block sized by exposure and
 //  coloured by its move for the range; names under 4% fold into Other.
-//  Watchlist: the fixed list as equal blocks, five across. One range filter
+//  Watchlist: the fixed list as equal blocks, five across (more: even rows). One range filter
 //  and one tap cycle (% → $ → price) drive both. Sizes never change with the
 //  range, only colour.
 //
@@ -166,7 +166,9 @@ struct SunnyPortfolio: View {
     // MARK: Watchlist
 
     private var watchlist: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 5), spacing: 3) {
+        // Five across up to five names; more fill even rows (8 = 4 + 4).
+        let n = home.watchlist.count, cols = n <= 5 ? max(1, n) : Int(ceil(Double(n) / 2))
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: cols), spacing: 3) {
             ForEach(home.watchlist) { q in
                 let pct = q.ranges.at(range) ?? 0
                 tile(Item(t: q.ticker, pct: pct, exp: 0, imp: 0, price: q.price, other: false), w: 60, h: 56,

@@ -17,6 +17,10 @@ import SwiftUI
 
 struct SunnyPositions: View {
     let home: HomePayload
+    /// Cards keep the order this payload gives them: the insight words' copy,
+    /// so they re-sort on open, pull to refresh and after the close, never on
+    /// the 15 s tick (Nik, 14 Oct 2026: cards moving "all the time").
+    var orderFrom: HomePayload? = nil
     @State private var mode: PMode = PMode.preset(DebugPreset.string("pos.mode"), default: .tv)
     @State private var page: Int? = 0
     @State private var heights: [Int: CGFloat] = [:]
@@ -30,7 +34,7 @@ struct SunnyPositions: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        let pages = PCache.pages(home)
+        let pages = PCache.pages(home, orderFrom: orderFrom)
         let cur = min(max(page ?? 0, 0), max(pages.count - 1, 0))
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 14) {

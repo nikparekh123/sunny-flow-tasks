@@ -20,9 +20,19 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-14.2';
+const BUILD = '2026-10-14.3';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
-const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
+const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
+/* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
+   A name here does not take the roll sheet: its calls are `cover` of its LEAPs,
+   all at the first strike `otmPct`% or more above spot, every week; Inventory
+   counts it full at that share. Dormant until the name is held. */
+const WRITE_RULES: Record<string, { cover: number; otmPct: number }> = {
+  TSLA: { cover: 0.7, otmPct: 3 },   // sideways view: B, 3% out on 70%
+  SPCX: { cover: 0.5, otmPct: 5 },   // very bullish: deep LEAP, 5% out on 50%
+};
+const coverOf = (t: string, leaps: number) =>
+  WRITE_RULES[t] ? Math.floor(leaps * WRITE_RULES[t].cover + 0.5) : leaps;
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
 const TRADE_TO_415 = ['SPY', 'QQQ', 'IWM', 'DIA'];
 /* The weekly put write as a share of the puts bought (Nik, 13 Oct 2026). */
@@ -808,7 +818,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     if (l.side === 'sold') e.credit += l.avg * l.n * 100;
     invNow.set(l.ticker, e);
   }
-  const invRows = [...invNow].map(([t, e]) => ({ ticker: t, calls_max: e.cH, calls_sold: e.cS, puts_max: e.pH,
+  /* A name with a research rule is full at its share of the LEAPs (WRITE_RULES). */
+  const invRows = [...invNow].map(([t, e]) => ({ ticker: t, calls_max: coverOf(t, e.cH), calls_sold: e.cS, puts_max: e.pH,
     puts_sold: e.pS, credit_open: Math.round(e.credit) }));
   /* Per week covered, the most contracts that were ON at once: a roll closes
      one strike and opens another, so counting every sale would put a fully
@@ -1087,9 +1098,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const move21 = mo.length > back && spot > 0 ? (spot / mo[back].c - 1) * 100 : null;
     const earnRow = upcomingEarn.get(t);
     const earnIn = !!earnRow && String(earnRow.report_date) >= today && String(earnRow.report_date) <= targetExp;
-    const share = earnIn ? 0.2 : 1 / 3, out = move21 != null && move21 >= 15 ? 1.0 : 0.6;
+    const rule = WRITE_RULES[t];
+    const share = rule ? 0 : earnIn ? 0.2 : 1 / 3, out = move21 != null && move21 >= 15 ? 1.0 : 0.6;
+    const callTarget = coverOf(t, leapN);
     const atmN = Math.floor(leapN * share + 0.5);
-    const atm = calls.filter((x) => x.k >= spot && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
+    /* A research name: one strike, the first at least otmPct% above spot. */
+    const ruleK = rule ? calls.filter((x) => x.k >= spot * (1 + rule.otmPct / 100) && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null : null;
+    const atm = rule ? ruleK : calls.filter((x) => x.k >= spot && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
     let otm = sd ? nearestK(calls.filter((x) => x.k > spot && x.mid > 0), spot + out * sd) : null;
     if (atm && otm && otm.k <= atm.k) otm = calls.filter((x) => x.k > atm.k && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
     const sd1 = sd ? nearestK(calls.filter((x) => x.k > spot), spot + sd) : null;
@@ -1101,13 +1116,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (!otm || !atm || Math.abs(l.strike - atm.k) <= Math.abs(l.strike - otm.k)) doneAtm += l.n; else doneOtm += l.n;
     }
     const donePuts = sold.filter((x) => x.type === 'put').reduce((s, l) => s + l.n, 0);
-    const left = Math.max(0, leapN - doneAtm - doneOtm);
-    const leftAtm = Math.min(left, Math.max(0, atmN - doneAtm)), leftOtm = left - leftAtm;
+    const left = Math.max(0, callTarget - doneAtm - doneOtm);
+    const leftAtm = rule ? left : Math.min(left, Math.max(0, atmN - doneAtm)), leftOtm = left - leftAtm;
     /* Puts: about 30% of the puts bought, rounded half up (NKE 20 -> 6). */
     const putTarget = Math.floor(putsN * PUT_SHARE + 0.5);
     const leftPuts = Math.max(0, putTarget - donePuts);
     const plan = [
-      atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta, note: 'at the money' } : null,
+      atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta,
+        note: rule ? `${rule.otmPct}% out of the money` : 'at the money' } : null,
       otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta, note: out === 1 ? 'at 1 SD' : 'at 0.6 SD' } : null,
       put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta, note: 'at the money' } : null,
     ].filter(Boolean) as { type: string; n: number; strike: number; mid: number; delta: number | null; note: string }[];
@@ -1117,7 +1133,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     writes.push({
       ticker: t, expiry: targetExp, spot: r2(spot), sd: sd == null ? null : r2(sd),
       move_21d_pct: move21 == null ? null : r2(move21),
-      split: { atm_share: r2(share), out_sd: out, why: earnIn ? 'earnings' : out === 1 ? 'up a lot' : 'flat' },
+      split: { atm_share: r2(share), out_sd: out, why: rule ? 'research' : earnIn ? 'earnings' : out === 1 ? 'up a lot' : 'flat' },
       earnings: earnIn ? { date: earnRow!.report_date, time: earnRow!.report_time ?? null } : null,
       ex_dividend: (() => { const d = divs.find((x) => x.ticker === t && String(x.ex_date) <= targetExp);
         return d ? { date: d.ex_date, amount: num(d.cash_amount) } : null; })(),
@@ -1125,7 +1141,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       expected: Math.round(plan.reduce((s, p) => s + p.mid * p.n * 100, 0)),
       already: sold.map((l) => ({ type: l.type, n: l.n, strike: l.strike, credit: Math.round(l.avg * l.n * 100) })),
       collected: Math.round(sold.reduce((s, l) => s + l.avg * l.n * 100, 0)),
-      calls: { sold: doneAtm + doneOtm, of: leapN }, puts: { sold: donePuts, of: putTarget, bought: putsN },
+      calls: { sold: doneAtm + doneOtm, of: callTarget }, puts: { sold: donePuts, of: putTarget, bought: putsN },
       written: left === 0 && leftPuts === 0,
       delta: { now: Math.round(deltaNow), after: Math.round(deltaAfter) },
       /* The By Fri bar: put strike, price, the call strike, the 1 SD call. */

@@ -116,13 +116,14 @@ struct PPage: Identifiable {
 
 enum PBook {
     /// The five pages; a side with no legs drops both of its pages.
-    static func pages(_ L: [PLeg], today: String) -> [PPage] {
+    static func pages(_ L: [PLeg], today: String, order: [Bool: [String]]? = nil) -> [PPage] {
         let S0 = L.filter(\.sold), B0 = L.filter { !$0.sold }
         let kinds: [(PPage.Kind, String, [PLeg], PViz?)] = [
             (.all, "All", L, nil), (.sold, "Sold (Bar)", S0, .bar), (.sold, "Sold (Chart)", S0, .chart),
             (.bought, "Bought (Bar)", B0, .bar), (.bought, "Bought (Chart)", B0, .chart),
         ].filter { !$0.2.isEmpty }
-        let soldCards = cards(S0, sold: true, today: today), boughtCards = cards(B0, sold: false, today: today)
+        let soldCards = cards(S0, sold: true, today: today, order: order?[true])
+        let boughtCards = cards(B0, sold: false, today: today, order: order?[false])
         return kinds.enumerated().map { i, k in
             let dots = (k.0 == .all ? S0 : k.2).map { PStatus.of(dist: $0.dist, sold: $0.sold) }
             return PPage(id: i, kind: k.0, viz: k.3, chip: k.1, legs: k.2,
@@ -131,8 +132,29 @@ enum PBook {
         }
     }
 
-    /// One card per ticker, safest first.
-    static func cards(_ L: [PLeg], sold: Bool, today: String) -> [PCard] {
+    /// The card order a payload gives: each side's tickers, safest first.
+    static func order(_ L: [PLeg], today: String) -> [Bool: [String]] {
+        [true: cards(L.filter(\.sold), sold: true, today: today).map(\.t),
+         false: cards(L.filter { !$0.sold }, sold: false, today: today).map(\.t)]
+    }
+
+    /// One card per ticker, safest first; with `order`, in that frozen order
+    /// (names it does not know go last, safest first).
+    static func cards(_ L: [PLeg], sold: Bool, today: String, order: [String]? = nil) -> [PCard] {
+        let live = safestFirst(L, sold: sold, today: today)
+        guard let order else { return live }
+        let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        return live.enumerated().sorted { a, b in
+            switch (rank[a.element.t], rank[b.element.t]) {
+            case let (x?, y?): return x < y
+            case (.some, nil): return true
+            case (nil, .some): return false
+            default: return a.offset < b.offset
+            }
+        }.map(\.element)
+    }
+
+    private static func safestFirst(_ L: [PLeg], sold: Bool, today: String) -> [PCard] {
         var order: [String] = []
         for l in L where !order.contains(l.t) { order.append(l.t) }
         let week = fridayOnOrAfter(today)
@@ -173,9 +195,13 @@ enum PBook {
 enum PCache {
     private static var key = ""
     private static var value: [PPage] = []
-    static func pages(_ home: HomePayload) -> [PPage] {
-        if key == home.builtAt { return value }
-        key = home.builtAt; value = PBook.pages(PMath.legs(home), today: home.today); return value
+    /// `orderFrom`: the payload the card order is read from (the insight
+    /// words' copy, which only moves on open, pull and after the close).
+    static func pages(_ home: HomePayload, orderFrom: HomePayload? = nil) -> [PPage] {
+        let k = home.builtAt + "|" + (orderFrom?.builtAt ?? "")
+        if key == k { return value }
+        let order = orderFrom.map { PBook.order(PMath.legs($0), today: $0.today) }
+        key = k; value = PBook.pages(PMath.legs(home), today: home.today, order: order); return value
     }
 }
 

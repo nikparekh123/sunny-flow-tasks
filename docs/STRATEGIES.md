@@ -69,6 +69,19 @@ And one that is not a preference: **moneyness inverts on a put.** A call is in t
 money above its strike, a put below it. That flag drives every row colour and the
 ROLLING count.
 
+### Planned: TSLA and SpaceX (SPCX), from 2026-10-14
+
+Not traded yet. Researched for Nik (`docs/TSLA_SPCX_RESEARCH.md`); the app's
+write suggestions already carry these rules and switch on when a name is held.
+
+| | TSLA (sideways view) | SPCX (very bullish) |
+|---|---|---|
+| the long leg | Jan 2028, about 0.80 delta | Jan 2028, deep (0.85 to 0.88 delta) |
+| the short leg | 3% out of the money on 70% of the LEAPs, weekly | 5% out of the money on 50%, weekly |
+
+**Not the roll sheet, and not three times a week.** These two names do not take the
+book's third-at-the-money rule; weekly beat Mon/Wed/Fri selling in the test.
+
 ---
 
 ## Wound down

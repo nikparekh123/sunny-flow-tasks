@@ -201,6 +201,15 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     as before. The glow keeps its 30 s rhythm. Checked live: passes 1.3-1.7 s, builds 0.2-0.4 s,
     marks equal to IBKR's bid/ask middle on four legs.
 
+46. **Watchlist: SPCX, TSLA, APP added.** Eight names (Nik, 14 Oct 2026): the Yahoo feed
+    (market-tape) and sunny-home's list; more than five tiles fill even rows (4 + 4).
+47. **Write rules from research.** TSLA: 3% out of the money on 70% of the LEAPs; SPCX: 5% out
+    on 50%; Inventory counts each full at that share (`WRITE_RULES`, docs/TSLA_SPCX_RESEARCH.md).
+    Dormant until the names are held; every other name keeps the roll sheet.
+48. **Positions cards keep their order.** Still safest first, but read from the insight words'
+    copy, so they re-sort on open, pull to refresh and after the close, never on the 15 s
+    tick (Nik, 14 Oct 2026: moving "all the time"). Numbers stay live.
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on

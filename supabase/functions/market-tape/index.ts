@@ -5,7 +5,7 @@
  *   SPY QQQ IWM            the Today row, through pre-market and after hours
  *   ^VIX                   a level, not a price
  *   ^N225 ^GDAXI ^NSEI 000001.SS   the Overnight card (pre-market only)
- *   INTU ADBE PYPL VZ TMUS the Watchlist (Nik, 12 Oct 2026; fixed for now)
+ *   INTU ADBE PYPL VZ TMUS SPCX TSLA APP  the Watchlist (Nik, 12 and 14 Oct 2026)
  *
  * ⚠ YAHOO FOR NOW, THETA LATER. Our Theta plan is options only, and options
  * do not trade before 9:30 or after 4:00, so the option-implied spot cannot
@@ -14,7 +14,7 @@
  * unofficial: it wants a cookie and a "crumb", and it refuses my Mac outright
  * (429), so this only ever runs from Supabase.
  *
- * ONE REQUEST for all 13 symbols (v7 quote). Two passes per cron call, 30 s
+ * ONE REQUEST for all 16 symbols (v7 quote). Two passes per cron call, 30 s
  * apart, like mp-refresh. Writes `market_live` (one row per symbol) and,
  * once the regular session has closed, that day's close into `daily_closes`
  * for the symbols nothing else captures, so the range filters can look back.
@@ -48,6 +48,9 @@ const SYMBOLS: { s: string; label: string; kind: 'index' | 'vix' | 'global' | 'w
   { s: 'PYPL', label: 'PYPL', kind: 'watch' },
   { s: 'VZ', label: 'VZ', kind: 'watch' },
   { s: 'TMUS', label: 'TMUS', kind: 'watch' },
+  { s: 'SPCX', label: 'SPCX', kind: 'watch' },
+  { s: 'TSLA', label: 'TSLA', kind: 'watch' },
+  { s: 'APP', label: 'APP', kind: 'watch' },
 ];
 /* SPY, QQQ and IWM closes already come from mp-refresh's tapes. */
 const CLOSES_HERE = SYMBOLS.filter((x) => x.kind === 'vix' || x.kind === 'watch').map((x) => x.s);

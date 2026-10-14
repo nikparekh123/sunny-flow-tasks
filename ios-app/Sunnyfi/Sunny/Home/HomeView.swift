@@ -104,7 +104,7 @@ struct HomeView: View {
                         .padding(.horizontal, S.margin)
                         .id("portfolio")
                         .sEnter(4)
-                    SunnyPositions(home: home)
+                    SunnyPositions(home: home, orderFrom: words)
                         .id("positions")
                         .sEnter(5)
                     SunnyInventory(home: home, words: words)
