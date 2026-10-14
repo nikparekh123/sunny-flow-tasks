@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-14.1';
+const BUILD = '2026-10-14.2';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -1581,13 +1581,18 @@ Deno.serve(async (req) => {
   try {
     const n = ny();
     const live = !['Sat', 'Sun'].includes(n.wd) && n.mins >= 4 * 60 && n.mins < 20 * 60;
-    const passes = body.mode ? 1 : body.passes ?? (live ? 2 : (n.mins % 10 === 0 ? 1 : 0));
+    /* ⚠ EVERY 15 S IN THE REGULAR SESSION (Nik, 14 Oct 2026): mp-refresh
+       prices at :00 :15 :30 :45 from 9:30 to 16:00 New York, so four builds,
+       each just after a price pass; every 30 s otherwise. */
+    const regular = live && n.mins >= 9 * 60 + 30 && n.mins < 16 * 60;
+    const passes = body.mode ? 1 : body.passes ?? (regular ? 4 : live ? 2 : (n.mins % 10 === 0 ? 1 : 0));
     const out: Row[] = [];
     for (let i = 0; i < passes; i++) {
-      /* mp-refresh writes at :00 and :30 and takes 2-4 s; build just after. */
+      /* mp-refresh writes on its pass and takes 2-4 s; build just after. */
       if (live && !body.passes && !body.mode) {
-        const wait = ((i === 0 ? 6_000 : 36_000) - (Date.now() % 60_000) + 60_000) % 60_000;
-        if (wait < 40_000) await new Promise((r) => setTimeout(r, wait));
+        const at = 6_000 + i * (passes === 4 ? 15_000 : 30_000);
+        const wait = (at - (Date.now() % 60_000) + 60_000) % 60_000;
+        if (wait < (passes === 4 ? 16_000 : 40_000)) await new Promise((r) => setTimeout(r, wait));
       }
       const { payload, ms, steps } = await build(body.mode ?? 'tick', { dry: body.dry, price: body.price });
       const w = await fetch(`${URL_}/rest/v1/home_snapshot?on_conflict=id`, {

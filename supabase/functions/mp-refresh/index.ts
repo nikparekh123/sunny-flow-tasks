@@ -43,6 +43,12 @@
  * ⚠ EVERY 30 SECONDS (Nik, 9 Oct 2026). The cron still fires each minute in
  * market hours; a cron call refreshes twice, the second pass 30s after the
  * first. A manual call refreshes once.
+ *
+ * ⚠ EVERY 15 SECONDS IN THE REGULAR SESSION (Nik, 14 Oct 2026). From 9:30 to
+ * 16:00 New York a cron call refreshes four times, 15 s apart. Storage stays
+ * as it was: only the passes on :00 and :30 append to option_greeks and
+ * ticker_quotes (their triggers feed the live tables); the passes between
+ * write the live tables only.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -336,15 +342,25 @@ Deno.serve(async (req) => {
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
   }
-  const passes = Math.max(1, Math.min(2, body.passes ?? (fromCron ? 2 : 1)));
-  const first = await refresh(req, body);
-  if (passes < 2 || body.compare) return first;
-  /* The second pass lands 30s after the first one STARTED. */
-  await new Promise((r) => setTimeout(r, 30_000 - Math.min(29_000, Date.now() - t0)));
-  return await refresh(req, body);
+  const nyNow = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York',
+    weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date()).map((x) => [x.type, x.value]));
+  const nyMins = Number(nyNow.hour) * 60 + Number(nyNow.minute);
+  const regular = !['Sat', 'Sun'].includes(nyNow.weekday) && nyMins >= 9 * 60 + 30 && nyMins < 16 * 60;
+  const passes = Math.max(1, Math.min(4, body.passes ?? (fromCron ? (regular ? 4 : 2) : 1)));
+  const step = passes === 4 ? 15_000 : 30_000;
+  let last: Response | null = null;
+  for (let i = 0; i < passes; i++) {
+    /* Each pass lands `step` after the previous one STARTED. */
+    if (i > 0) await new Promise((r) => setTimeout(r, Math.max(0, t0 + i * step - Date.now())));
+    last = await refresh(req, body, { history: passes !== 4 || i % 2 === 0 });
+    if (body.compare) break;
+  }
+  return last!;
 });
 
-async function refresh(req: Request, body: { source?: string; compare?: boolean }): Promise<Response> {
+async function refresh(req: Request, body: { source?: string; compare?: boolean },
+                       opts: { history: boolean } = { history: true }): Promise<Response> {
   const now = new Date().toISOString();
   const source = (body.source ?? Deno.env.get('MARKS_SOURCE') ?? 'polygon').toLowerCase();
   const useTheta = (source === 'theta' || body.compare) && !!THETA_URL && !!THETA_KEY;
@@ -730,9 +746,11 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
       // Append-only: each cron run inserts a new row. The
       // `option_greeks_latest` view exposes the most recent capture
       // per trade for read paths. 90-day retention prune runs daily.
-      const { error: gErr } = await admin
-        .from('option_greeks')
-        .insert(rows);
+      /* A 15 s pass between :00 and :30 writes the live table only. */
+      const { error: gErr } = opts.history
+        ? await admin.from('option_greeks').insert(rows)
+        : await admin.from('option_greeks_live')
+            .upsert(rows.map((r) => ({ ...r, id: crypto.randomUUID() })), { onConflict: 'option_trade_id' });
       if (gErr) throw new Error(`option_greeks insert failed: ${gErr.message}`);
     }
     if (stockResults.length > 0) {
@@ -746,9 +764,10 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean 
         }));
       if (rows.length > 0) {
         // Append-only — see `ticker_quotes_latest` view. 30-day prune.
-        const { error: qErr } = await admin
-          .from('ticker_quotes')
-          .insert(rows);
+        const { error: qErr } = opts.history
+          ? await admin.from('ticker_quotes').insert(rows)
+          : await admin.from('ticker_quotes_live')
+              .upsert(rows.map((r) => ({ ...r, id: crypto.randomUUID() })), { onConflict: 'ticker' });
         if (qErr) throw new Error(`ticker_quotes insert failed: ${qErr.message}`);
       }
     }

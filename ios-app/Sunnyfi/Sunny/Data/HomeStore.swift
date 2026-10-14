@@ -3,8 +3,10 @@
 //  Sunny
 //
 //  Reads the one Home row and keeps it live (block 25, Refresh):
-//  · every 30 s while a session runs (4:00 to 20:00 New York, trading days);
-//    closed, nothing ticks and the numbers are the close;
+//  · every 30 s while a session runs (4:00 to 20:00 New York, trading days),
+//    every 15 s from 9:30 to 16:00 (Nik, 14 Oct 2026), each fetch timed just
+//    after the server's rebuild; closed, nothing ticks and the numbers are the
+//    close;
 //  · one request for the whole page, never two at once (a pull during a tick
 //    joins it), the 30 s clock restarting after each good update;
 //  · a failure keeps the last good numbers; open and no good update for 90 s
@@ -35,6 +37,7 @@ final class HomeStore {
     /// Bumped on a good update while a session runs: the live glow pulses
     /// (block 24). Closed, it stays still and the glow fades out.
     private(set) var livePulse = 0
+    private var lastPulse: Date?
     /// Legs bought, sold, closed or resized since the last update, and the
     /// toast's count: "Positions updated · 3 changed". Price moves are not a
     /// change (Nik, 14 Oct 2026: on every tick they were "just noise").
@@ -91,7 +94,12 @@ final class HomeStore {
             }
             lastGood = SClock.now()
             tick += 1
-            if MarketClock.inSession(SClock.now(), calendar: payload.calendar) { livePulse += 1 }
+            // The glow keeps its 30 s rhythm when updates come every 15 s (Nik).
+            if MarketClock.inSession(SClock.now(), calendar: payload.calendar),
+               lastPulse.map({ SClock.now().timeIntervalSince($0) >= 28 }) ?? true {
+                livePulse += 1
+                lastPulse = SClock.now()
+            }
 
             health = .fresh
             loadError = nil
@@ -156,7 +164,7 @@ final class HomeStore {
             await refresh(.open)
         }
         while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(30))
+            try? await Task.sleep(for: .seconds(Self.untilNextBuild(calendar: home?.calendar ?? [])))
             if Task.isCancelled { break }
             if MarketClock.inSession(SClock.now(), calendar: home?.calendar ?? []) {
                 await refresh(.tick)
@@ -166,6 +174,17 @@ final class HomeStore {
                 await refresh(.open)
             }
         }
+    }
+
+    /// Seconds to the next server rebuild plus a beat: sunny-home builds at
+    /// :06 :21 :36 :51 in the regular session and :06 :36 otherwise, so the
+    /// app asks at :08 :23 :38 :53 (or :08 :38).
+    static func untilNextBuild(calendar: [CalendarDay]) -> Double {
+        let step = MarketClock.isRegular(SClock.now(), calendar: calendar) ? 15.0 : 30.0
+        let now = SClock.now().timeIntervalSince1970, offset = 8.0
+        var next = offset + (((now - offset) / step).rounded(.down) + 1) * step
+        if next - now < 1 { next += step }
+        return next - now
     }
 
     /// Open and nothing good for 90 s: the pill turns red (block 01).

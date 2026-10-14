@@ -192,6 +192,15 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     changes size (Nik, 14 Oct 2026: "just noise"). Its slide animates the toast alone: on the
     page it also animated every card change from the same update, and the cards jumped.
 
+45. **15 s updates in the regular session.** Nik, 14 Oct 2026 (the 10 s idea, parked the day
+    before, came back as 15 s). 9:30 to 16:00 New York: mp-refresh prices four times a minute
+    (:00 :15 :30 :45 from its start), sunny-home rebuilds just after each (:06 :21 :36 :51), the
+    app fetches at :08 :23 :38 :53. Stock and option prices move together (same pass), so time
+    value stays right. Storage unchanged: only the :00 and :30 passes append to option_greeks
+    and ticker_quotes; the passes between write the live tables. Outside the session: every 30 s
+    as before. The glow keeps its 30 s rhythm. Checked live: passes 1.3-1.7 s, builds 0.2-0.4 s,
+    marks equal to IBKR's bid/ask middle on four legs.
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on
@@ -213,8 +222,8 @@ labels 3.9-4.4; dark: red 3.9-4.5).
   the existing Xcode-managed profile "iOS Team Provisioning Profile: com.sunnyfi.app" (push,
   development, until Jun 2027). The old Sunnyfi target moved to `com.sunnyfi.legacy`, its code
   kept for now. The app re-registers for push on every launch when alerts are allowed.
-- **10 s option prices (parked).** Scoped 13 Oct 2026; Nik parked it: revisit in November with
-  the Theta stock prices, so stock and option prices speed up together.
+- **Faster updates.** 15 s in the regular session since 14 Oct 2026 (decision 45). Watch the
+  Theta server on Fly.io (shared-cpu-1x, 1 GB) and the database load over the first days.
 - **Live checks.** The 30 s tick, the glow and the toast need a look during market hours.
 - **Last week (block 09).** `index_weekly` was empty because sunny-home went live after the
   last weekend. Admin mode `last_week` filled Oct 5 - 9; next Friday after the close is the
