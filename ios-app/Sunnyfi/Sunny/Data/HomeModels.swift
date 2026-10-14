@@ -155,6 +155,8 @@ struct Inventory: Decodable {
 struct Writes: Decodable {
     let expiry: String?
     let names: [Name]
+    /// Names with no chain cached for that Friday (left out of `names`).
+    let missing: [String]?
     struct Name: Decodable, Identifiable {
         var id: String { ticker }
         let ticker: String
@@ -171,6 +173,10 @@ struct Writes: Decodable {
         let delta: Delta
         let bar: Bar
         let earnings: Earn?
+        /// The Planner (block 14b): LEAPs held, and the next report even when
+        /// it falls after the expiry.
+        let leaps: Int?
+        let nextEarnings: Earn?
         struct Plan: Decodable { let type: String; let n: Int; let strike: Double; let mid: Double?; let delta: Double?; let note: String; let credit: Double }
         struct Already: Decodable { let type: String; let n: Int; let strike: Double; let credit: Double }
         struct Count: Decodable { let sold: Int; let of: Int }

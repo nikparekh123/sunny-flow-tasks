@@ -545,28 +545,69 @@ private struct PChartView: View {
 }
 
 /// The live ring: grows from the dot to 2.8x and fades in 1.6 s, rests
-/// 0.4 s, repeats while the market is open.
-private struct PLivePulse: View {
+/// 0.4 s, repeats while the market is open. Core Animation runs it, so the
+/// page is not redrawn every frame: as a SwiftUI keyframe animation inside a
+/// glass card it held the app at about 80% CPU (Planner audit, 14 Oct 2026).
+struct PLivePulse: View {
     let color: Color
+    @Environment(\.colorScheme) private var scheme
     var body: some View {
-        Circle().fill(color.opacity(0.45))
+        PulseRing(color: color, dark: scheme == .dark)
             .frame(width: 12, height: 12)
-            .keyframeAnimator(initialValue: Ring(), repeating: true) { content, v in
-                content.scaleEffect(v.scale).opacity(v.opacity)
-            } keyframes: { _ in
-                KeyframeTrack(\.scale) {
-                    CubicKeyframe(2.8, duration: 1.6)
-                    LinearKeyframe(2.8, duration: 0.4)
-                }
-                KeyframeTrack(\.opacity) {
-                    CubicKeyframe(0, duration: 1.6)
-                    LinearKeyframe(0, duration: 0.4)
-                }
-            }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
-    struct Ring { var scale: CGFloat = 1; var opacity: Double = 1 }
+}
+
+private struct PulseRing: UIViewRepresentable {
+    let color: Color
+    let dark: Bool
+
+    func makeUIView(context: Context) -> RingView { RingView() }
+    func updateUIView(_ v: RingView, context: Context) {
+        let ui = UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))
+        v.ring.fillColor = ui.withAlphaComponent(0.45).cgColor
+    }
+
+    final class RingView: UIView {
+        let ring = CAShapeLayer()
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+            layer.addSublayer(ring)
+            NotificationCenter.default.addObserver(self, selector: #selector(restart),
+                                                   name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
+        @objc private func restart() { ring.removeAnimation(forKey: "pulse"); setNeedsLayout() }
+        required init?(coder: NSCoder) { fatalError() }
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            ring.frame = bounds
+            ring.path = UIBezierPath(ovalIn: bounds).cgPath
+            guard ring.animation(forKey: "pulse") == nil, bounds.width > 0 else { return }
+            let scale = CAKeyframeAnimation(keyPath: "transform.scale")
+            scale.values = [1, 2.8, 2.8]
+            scale.keyTimes = [0, 0.8, 1]
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.values = [1, 0, 0]
+            fade.keyTimes = [0, 0.8, 1]
+            let ease = CAMediaTimingFunction(controlPoints: 0.25, 0.1, 0.25, 1)
+            scale.timingFunctions = [ease, CAMediaTimingFunction(name: .linear)]
+            fade.timingFunctions = [ease, CAMediaTimingFunction(name: .linear)]
+            let g = CAAnimationGroup()
+            g.animations = [scale, fade]
+            g.duration = 2.0
+            g.repeatCount = .infinity
+            g.isRemovedOnCompletion = false
+            ring.add(g, forKey: "pulse")
+        }
+        // Back on screen or from the background: start it again.
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            restart()
+        }
+    }
 }
 
 private struct PLineShape: Shape {

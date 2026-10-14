@@ -53,11 +53,15 @@ enum MarketClock {
     }
 
     static func addDays(_ iso: String, _ n: Int) -> (iso: String, weekday: Int) {
-        var cal = Calendar(identifier: .gregorian); cal.timeZone = ny
-        let f = DateFormatter(); f.calendar = cal; f.timeZone = ny; f.dateFormat = "yyyy-MM-dd"
-        let d = cal.date(byAdding: .day, value: n, to: f.date(from: iso)!)!
-        return (f.string(from: d), cal.component(.weekday, from: d))
+        let d = nyCal.date(byAdding: .day, value: n, to: isoDay.date(from: iso)!)!
+        return (isoDay.string(from: d), nyCal.component(.weekday, from: d))
     }
+    /// Made once: a DateFormatter per call was a top cost on every redraw.
+    private static let nyCal: Calendar = { var c = Calendar(identifier: .gregorian); c.timeZone = ny; return c }()
+    nonisolated(unsafe) private static let isoDay: DateFormatter = {
+        let f = DateFormatter(); f.calendar = nyCal; f.timeZone = ny; f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"; return f
+    }()
     /// The next trading day after `iso`.
     static func nextTrading(after iso: String, _ cal: [CalendarDay]) -> (iso: String, weekday: Int) {
         var x = addDays(iso, 1)

@@ -3,7 +3,7 @@
 //  Sunny
 //
 //  What Home has open: a receipt over the page (blocks 06 and 07), the
-//  Writes sheet on a ticker (block 14), and where quick nav scrolls (08).
+//  Planner on a ticker (block 14b), and where quick nav scrolls (08).
 //
 
 import SwiftUI
@@ -24,7 +24,11 @@ final class HomeRouter {
     var receipt: Receipt?
     /// Week | Month and ‹ ›, shared by Inventory, Yield and Sold vs Bought.
     let period = PeriodState()
+    /// The ticker the Planner (block 14b) is open on.
     var writes: String?
+    /// Each name's plan, kept until the app closes ("ticker|expiry"; a name
+    /// with no entry shows the engine's pick, live).
+    var plans: [String: [PlanLeg]] = [:]
     var scrollTarget: Section?
     /// DEBUG: scroll to a block by id ("today", "portfolio", ...).
     var scrollID: String?

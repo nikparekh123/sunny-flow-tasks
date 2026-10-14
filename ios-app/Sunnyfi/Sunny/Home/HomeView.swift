@@ -60,7 +60,7 @@ struct HomeView: View {
             .animation(.easeOut(duration: 0.3), value: store.toast)
             .zIndex(8)
             if let home = store.home, router.writes != nil {
-                SunnyWritesSheet(home: home, ticker: Bindable(router).writes)
+                SunnyPlanner(home: home, words: store.words ?? home)
                     .transition(reduce ? .opacity : .move(edge: .trailing))   // Reduce Motion: fades, no slides
                     .zIndex(9)
             }

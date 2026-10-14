@@ -41,7 +41,7 @@ const json = (status: number, body: unknown) =>
     status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-const BUILD = '2026-10-09.1';
+const BUILD = '2026-10-14.1';
 
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
@@ -86,11 +86,11 @@ function deltaOf(call: boolean, S: number, K: number, T: number, v: number): num
 }
 
 /** One expiry's chain from Theta, in Polygon's snapshot shape. */
-async function thetaChain(ticker: string, expiry: string): Promise<Snap[]> {
+async function thetaChain(ticker: string, expiry: string, withOi = true): Promise<Snap[]> {
   const ex = expiry.replaceAll('-', '');
   const [gr, oi] = await Promise.all([
     thetaGet(`/v3/option/snapshot/quote?symbol=${ticker}&expiration=${ex}`),
-    thetaGet(`/v3/option/snapshot/open_interest?symbol=${ticker}&expiration=${ex}`),
+    withOi ? thetaGet(`/v3/option/snapshot/open_interest?symbol=${ticker}&expiration=${ex}`) : Promise.resolve([] as TRow[]),
   ]);
   const key = (r: TRow) => `${r.contract.right.toLowerCase()}|${Number(r.contract.strike)}`;
   const oiBy = new Map(oi.map((r) => [key(r), Number(r.data?.[0]?.open_interest)]));
@@ -242,11 +242,11 @@ Deno.serve(async (req) => {
     src = useTheta ? 'theta' : 'polygon';
     /** One expiry's chain: Theta when on (falling back to Polygon if it has
         nothing), otherwise Polygon. `null` means the call itself failed. */
-    const chain = async (ticker: string, expiry: string): Promise<Snap[] | null> => {
+    const chain = async (ticker: string, expiry: string, withOi = true): Promise<Snap[] | null> => {
       if (useTheta) {
         /* No two-sided call and put to find the spot from: fall back. */
         try {
-          const t = await thetaChain(ticker, expiry);
+          const t = await thetaChain(ticker, expiry, withOi);
           if (t.some((c) => c.underlying_asset?.price)) return t;
         } catch { /* fall back */ }
       }
@@ -258,6 +258,45 @@ Deno.serve(async (req) => {
       if (!r.ok) return null;
       return ((await r.json()) as { results?: Snap[] }).results ?? [];
     };
+
+    /* ⚠ THE PLANNER, ONE NAME, ONE FRIDAY (block 14b, 14 Oct 2026). The
+       Planner asks every 15 s while it is open: every listed strike on both
+       sides out to about 2 SD (it plans from the money to 1.4 SD), each with
+       the live mid and its delta, plus the IV at the money and the 1 SD move to
+       the expiry. Nothing is written and open interest is not asked for, so a
+       read is one Theta call. */
+    if (typeof body.ticker === 'string' && typeof body.expiry === 'string') {
+      const ticker = body.ticker.toUpperCase(), expiry = body.expiry;
+      if (!/^[A-Z.]{1,6}$/.test(ticker) || !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return json(400, { ok: false, error: 'bad ticker or expiry' });
+      const items = await chain(ticker, expiry, false);
+      if (!items) return json(502, { ok: false, build: BUILD, error: 'no chain' });
+      const spot = items.find((c) => c.underlying_asset?.price)?.underlying_asset?.price ?? null;
+      if (!spot) return json(200, { ok: false, build: BUILD, source: src, ticker, expiry, error: 'no spot' });
+      /* The IV at the strike nearest spot: the call there, else the put. */
+      const atm = items.filter((c) => c.implied_volatility && typeof c.details?.strike_price === 'number')
+        .sort((a, b) => Math.abs(a.details!.strike_price! - spot) - Math.abs(b.details!.strike_price! - spot)
+          || (a.details?.contract_type === 'call' ? -1 : 1))[0];
+      const iv = atm?.implied_volatility ?? null;
+      const days = Math.max(1, yearsTo(expiry) * 365);
+      const sd = iv ? spot * iv * Math.sqrt(days / 365) : null;
+      const band = Math.max(spot * BAND_PCT / 100, 2.2 * (sd ?? 0));
+      type P = { k: number; mid: number; bid: number | null; ask: number | null; dl: number | null; iv: number | null };
+      const calls: P[] = [], puts: P[] = [];
+      for (const c of items) {
+        const k = c.details?.strike_price, side = c.details?.contract_type;
+        if (typeof k !== 'number' || (side !== 'call' && side !== 'put') || Math.abs(k - spot) > band) continue;
+        const mid = midOf(c, spot);
+        if (mid == null) continue;
+        (side === 'call' ? calls : puts).push({ k, mid: Math.round(mid * 100) / 100,
+          bid: c.last_quote?.bid ?? null, ask: c.last_quote?.ask ?? null,
+          dl: c.greeks?.delta == null ? null : Math.round(c.greeks.delta * 10000) / 10000,
+          iv: c.implied_volatility == null ? null : Math.round(c.implied_volatility * 10000) / 10000 });
+      }
+      calls.sort((a, b) => a.k - b.k); puts.sort((a, b) => a.k - b.k);
+      return json(200, { ok: true, build: BUILD, source: src, ticker, expiry, asOf: new Date().toISOString(),
+                         spot: Math.round(spot * 1000) / 1000, iv: iv == null ? null : Math.round(iv * 10000) / 10000,
+                         days: Math.round(days * 100) / 100, sd: sd == null ? null : Math.round(sd * 1000) / 1000, calls, puts });
+    }
 
     /* ⚠ LIVE, ONE NAME (24 Sep 2026). The roll sheet asks for this every time
        it opens: Nik saw BABA at 110 and a write at 112, because the app had

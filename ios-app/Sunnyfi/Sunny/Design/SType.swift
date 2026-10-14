@@ -56,7 +56,21 @@ struct SType {
     // MARK: fonts
 
     /// Inter at this size and weight; `tabular` turns on tnum for numbers.
+    /// Built once per size, weight and tnum, then reused: a variable-font
+    /// descriptor per Text on every redraw was the app's biggest cost
+    /// (Planner audit, 14 Oct 2026).
     func uiFont(tabular: Bool = false) -> UIFont {
+        let key = "\(size)|\(weight)|\(tabular)"
+        Self.lock.lock(); defer { Self.lock.unlock() }
+        if let f = Self.cache[key] { return f }
+        let f = make(tabular: tabular)
+        Self.cache[key] = f
+        return f
+    }
+    nonisolated(unsafe) private static var cache: [String: UIFont] = [:]
+    private static let lock = NSLock()
+
+    private func make(tabular: Bool) -> UIFont {
         guard let base = UIFont(name: "Inter", size: size) else {
             return .systemFont(ofSize: size, weight: UIFont.Weight(rawValue: (weight - 400) / 500))
         }

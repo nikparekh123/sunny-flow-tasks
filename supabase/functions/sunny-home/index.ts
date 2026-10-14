@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-14.3';
+const BUILD = '2026-10-14.4';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -327,7 +327,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   const sessions: string[] = [];
   for (let d = isTrading(today) && now.mins >= 9 * 60 + 30 ? today : prevTrading(today); sessions.length < 5; d = prevTrading(d)) sessions.unshift(d);
   const ahead: string[] = [];
-  for (let d = addDays(sessions[4], 1); d <= addDays(today, 7); d = addDays(d, 1)) if (isTrading(d)) ahead.push(d);
+  /* To next Friday (eleven days from a Monday): the Planner (block 14b)
+     runs its empty hours to the Friday it plans for. Positions keeps only
+     the days up to each card's own expiry. */
+  for (let d = addDays(sessions[4], 1); d <= addDays(today, 11); d = addDays(d, 1)) if (isTrading(d)) ahead.push(d);
   const hoursP: Promise<Row> = book.length
     ? fetch(`${URL_}/rest/v1/rpc/hourly_closes`, { method: 'POST', headers: H,
         body: JSON.stringify({ p_tickers: book, p_days: sessions }) })
@@ -1132,6 +1135,11 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const putK = put?.k ?? sold.find((x) => x.type === 'put')?.strike ?? null;
     writes.push({
       ticker: t, expiry: targetExp, spot: r2(spot), sd: sd == null ? null : r2(sd),
+      /* The Planner (block 14b) caps calls at the LEAPs held and puts at the
+         puts bought, less what is already sold for that Friday, and names the
+         next report even when it falls after the expiry. */
+      leaps: leapN,
+      next_earnings: earnRow ? { date: earnRow.report_date, time: earnRow.report_time ?? null } : null,
       move_21d_pct: move21 == null ? null : r2(move21),
       split: { atm_share: r2(share), out_sd: out, why: rule ? 'research' : earnIn ? 'earnings' : out === 1 ? 'up a lot' : 'flat' },
       earnings: earnIn ? { date: earnRow!.report_date, time: earnRow!.report_time ?? null } : null,
@@ -1565,7 +1573,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     fresh, account, indices, overnight, watchlist, portfolio, legs, hours, risk,
     chart, history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
-    writes: { expiry: targetExp, names: writes },
+    /* A name with no chain cached for that Friday is listed apart, so one
+       missing chain can never break the payload's shape. */
+    writes: { expiry: targetExp, names: writes.filter((w: Row) => !w.error),
+              missing: writes.filter((w: Row) => w.error).map((w: Row) => w.ticker) },
     theta_checks: thetaChecks, last_week: lastWeek, ...(checkSummary ? { theta_check_run: checkSummary } : {}),
   };
   return { payload, ms: Date.now() - t0, steps };

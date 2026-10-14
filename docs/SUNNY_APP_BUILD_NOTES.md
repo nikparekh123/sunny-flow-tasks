@@ -228,6 +228,64 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 53. **Footer: collected (or paid) first.** Four figures: collected · time value · captured ·
     kept on Sold, paid · time value · return · gain on Bought; collected = kept + time value
     still in the option (Nik, 14 Oct 2026).
+54. **Planner (block 14b, handoff 23) replaces the writes page.** `SunnyPlanner` +
+    `PlannerMath` (Book/). Every Inventory chip and the deck's earnings card open it.
+    - **Starting plan = the engine's pick** (the roll sheet: a third ATM, rest 0.6 SD, 1 SD
+      after a 15% month, 20% ATM with earnings; TSLA 3% out on 70%, SPCX 5% out on 50%; puts
+      30% of the puts bought, nearest at or below spot), not the prototype's 0.6/1 SD split.
+      An untouched name follows the engine live; once edited, the plan is kept per name and
+      Friday until the app closes (`HomeRouter.plans`).
+    - **Next Friday**, the writes rule. Caps: calls = LEAPs held less calls sold for that
+      Friday; puts = all puts bought less puts sold (Nik, 14 Oct 2026).
+    - **Live chain**: `chain-next` with `{ticker, expiry}` returns every listed strike to about
+      2.2 SD with live mid and Black-Scholes delta; polled every 15 s in the regular session (60 s
+      otherwise) only while the Planner is open; held still while a slider is held. The chain
+      IV already carries a report, so no extra 1.5x for earnings.
+    - **Stops**: the first listed strike at or past the money, then the listed strike nearest
+      each 0.2 SD step to 1.4 SD, kept strictly apart. Where strikes are a dollar apart on a
+      low-vol name (KR) "strictly apart" walks past 1.4 SD (KR's stop 7 is about 2.1 SD; the
+      label shows the true SD).
+    - **Axis squeezed**: the days to next Friday share the design's three sessions of width
+      (Nik, 14 Oct 2026); day labels need 30 pt, today, the report day and Friday keep theirs.
+    - **"By Oct 23"**, not "By Fri", in the header, insight and fully-sold line: "By Fri" means
+      this Friday on Positions (Nik, 14 Oct 2026).
+    - **Zoomed scale** (Nik, 14 Oct 2026: "breathing room between strikes"): the Positions rule,
+      fitted to the price and every sold and planned strike, the week stretching it by a
+      quarter at most; replaces the design's fixed 1.5 SD. Rescales glide with the plan. With
+      no strike at all the whole week shows.
+    - **Pulse** on the price dot during the regular session, as Positions (Nik, 14 Oct 2026).
+    - **System slider**: iOS 26 `Slider` with `step`, a `tick` per stop and `neutralValue`
+      (puts fill from the right). Its ticks sit under the track, not on it as drawn; its thumb
+      is the system capsule and glass lens. A tap on the track jumps to the nearest stop.
+55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
+    variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
+    keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home
+    redraw no longer redraws it. The live pulse runs on Core Animation: as a SwiftUI keyframe
+    animation inside glass it held the app near 80% CPU.
+
+## Planner audit (14 Oct 2026)
+
+Against `blocks/14b-planner.md` and `reference/SunnyPlanner.dc.html`, 430 and 393, light and
+dark, live chains saved for repeatable numbers (`-preset planner.chains=<dir>`).
+- **Numbers by hand**: NFLX 71×3 + 75×14 = $858 + $2,044 = $2,902, delta 685 → 111; BABA
+  112×5 call + 110×1 put = $1,120 + $212 = $1,332, delta 404 → 221. App equal to the dollar.
+- **Rules** (35 checks, compiled against the app's own code): caps, over-typing gives way
+  biggest first to 1, quantity 0 → 1, strike snaps to listed and clamps ATM..1.4 SD, side
+  switch keeps the stop and takes what is free, a full side does nothing, Add takes a free
+  side calls first then splits the biggest one stop past the farthest, four is the most, fully
+  sold adds nothing, earnings in/out of the week. All pass.
+- **Motion** (recorded, fitted): card fade 0.525 s (spec 0.5), rise 0.6 s on the standard curve,
+  strikes +92 ms (spec 80), line from +0.1 s over 0.9 s, dot from 0.85 s over 0.3 s. Reduce
+  Motion: the name changes in one frame.
+- **Fixed in the audit**: Call/Put halves overlapped their tap areas (a tap on Put after the
+  switch landed on Call and switched back); the selected half greyed out; the Done button
+  covered the field being typed in (the row now rises to the middle); a value-keyed animation
+  on the chart scale looped the render and blanked the screen; the fade's animation also drove
+  the rise (stacked value-keyed animations: the inner wins; the fade is now scoped); the
+  entrance waited up to seconds behind slow redraws (fonts, above).
+- **Differs from the design, by choice**: system slider ticks below the track; ATM line at the
+  price (the prototype draws it at its snapped ATM strike); next Friday axis and date label;
+  zoomed scale; pulse.
 
 ## Positions audit (13 Oct 2026)
 
