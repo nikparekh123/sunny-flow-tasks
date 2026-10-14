@@ -166,6 +166,8 @@ labels 3.9-4.4; dark: red 3.9-4.5).
   the existing Xcode-managed profile "iOS Team Provisioning Profile: com.sunnyfi.app" (push,
   development, until Jun 2027). The old Sunnyfi target moved to `com.sunnyfi.legacy`, its code
   kept for now. The app re-registers for push on every launch when alerts are allowed.
+- **10 s option prices (parked).** Scoped 13 Oct 2026; Nik parked it: revisit in November with
+  the Theta stock prices, so stock and option prices speed up together.
 - **Live checks.** The 30 s tick, the glow and the toast need a look during market hours.
 - **Last week (block 09).** `index_weekly` was empty because sunny-home went live after the
   last weekend. Admin mode `last_week` filled Oct 5 - 9; next Friday after the close is the
