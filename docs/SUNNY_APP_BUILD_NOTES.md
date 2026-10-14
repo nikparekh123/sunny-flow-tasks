@@ -210,6 +210,10 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     copy, so they re-sort on open, pull to refresh and after the close, never on the 15 s
     tick (Nik, 14 Oct 2026: moving "all the time"). Numbers stay live.
 
+49. **Yield legend in dollars.** Calls sold, Calls closing cost, Puts sold and Puts closing cost
+    always show dollars (Nik, 14 Oct 2026: the hero already gives the %): plain dollars when the
+    hero is %, the mode's own dollars (time value) otherwise.
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on

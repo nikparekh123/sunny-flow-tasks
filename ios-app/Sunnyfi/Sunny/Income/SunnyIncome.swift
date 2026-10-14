@@ -30,8 +30,8 @@ struct SunnyYield: View {
         var any: Bool { weeks > 0 }
     }
 
-    private func value(_ w: YieldWeek) -> (Double, Double, Double, Double) {
-        switch mode {
+    private func value(_ w: YieldWeek, _ m: PMode? = nil) -> (Double, Double, Double, Double) {
+        switch m ?? mode {
         case .pct:
             let k = w.invested > 0 ? 100 / w.invested : 0
             return (w.callsSold * k, w.callsBack * k, w.putsSold * k, w.putsBack * k)
@@ -39,9 +39,9 @@ struct SunnyYield: View {
         case .tv: return (w.callsSoldTv ?? 0, w.callsBackTv ?? 0, w.putsSoldTv ?? 0, w.putsBackTv ?? 0)
         }
     }
-    private func sums(_ rows: [YieldWeek]) -> Sums {
+    private func sums(_ rows: [YieldWeek], _ m: PMode? = nil) -> Sums {
         rows.reduce(into: Sums()) { s, w in
-            let v = value(w); s.cs += v.0; s.cb += v.1; s.ps += v.2; s.pb += v.3; s.weeks += 1
+            let v = value(w, m); s.cs += v.0; s.cb += v.1; s.ps += v.2; s.pb += v.3; s.weeks += 1
         }
     }
     private func fmt(_ v: Double) -> String { mode == .pct ? F.pct(v) : F.moneyK(v) }
@@ -103,8 +103,11 @@ struct SunnyYield: View {
                                   bars: [bar(s.cs, s.cb, S.green, S.callsBack, "cs"), bar(s.ps, s.pb, S.blue, S.putsBack, "ps")],
                                   isNow: c.now)
             }, picked: pick) { P.picked["yield"] = $0 }
-            SLegend(rows: [("cs", "Calls sold", fmt(tot.cs), S.green), ("csb", "Calls · Closing Cost", fmt(tot.cb), S.callsBack),
-                           ("ps", "Puts sold", fmt(tot.ps), S.blue), ("psb", "Puts · Closing Cost", fmt(tot.pb), S.putsBack)],
+            // Always dollars (Nik, 14 Oct 2026: the hero already gives the %):
+            // plain dollars in % mode, the mode's own dollars otherwise.
+            let money = mode == .pct ? sums(shown.flatMap(\.rows), .usd) : tot
+            SLegend(rows: [("cs", "Calls sold", F.moneyK(money.cs), S.green), ("csb", "Calls · Closing Cost", F.moneyK(money.cb), S.callsBack),
+                           ("ps", "Puts sold", F.moneyK(money.ps), S.blue), ("psb", "Puts · Closing Cost", F.moneyK(money.pb), S.putsBack)],
                     hidden: $hidden)
         }
         .foregroundStyle(S.ink)
