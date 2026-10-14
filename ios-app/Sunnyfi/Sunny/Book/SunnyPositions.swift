@@ -2,15 +2,14 @@
 //  SunnyPositions.swift
 //  Sunny
 //
-//  Blocks 12 and 13 (handoff 22, 13 Oct 2026) · SunnyPositions. Five pages
-//  that swipe: All, Sold (Bar), Sold (Chart), Bought (Bar), Bought (Chart); a
-//  side with no legs drops both. Glass chips on top follow the page, and
+//  Blocks 12 and 13 (handoff 22, 13 Oct 2026) · SunnyPositions. Three pages
+//  that swipe: All, Sold, Bought (the Chart style; Nik dropped the Bar on
+//  14 Oct 2026); a side with no legs drops its page. Glass chips follow, and
 //  Positions is as tall as the page you are on. All is one glass card with
-//  the four totals (tap one to open its side). A side opens with its total
+//  the four totals (tap one to switch time value, % and $). A side opens with its total
 //  for the book (tap cycles time value → % → $, shared by every page), then
-//  one glass card per ticker, safest first: Bar, a price axis with every
-//  strike, or Chart, the hourly price with the strikes as lines. Both styles
-//  are built so Nik can use them side by side and pick one.
+//  one glass card per ticker, safest first: the hourly price with the strikes
+//  as lines.
 //
 
 import SwiftUI
@@ -191,7 +190,7 @@ private struct PPageView: View {
             } else {
                 PSideTop(page: page, mode: $mode, go: go).pEnter(go, 0)
                 ForEach(Array(page.cards.enumerated()), id: \.element.id) { j, c in
-                    PTickerCard(card: c, viz: page.viz ?? .bar, width: width - 40, go: go,
+                    PTickerCard(card: c, width: width - 40, go: go,
                                 delay: Double(min(j + 1, 6)) * S.stagger,
                                 hist: hours?.px[c.t] ?? [], live: live, sessions: hours?.days ?? [],
                                 ahead: c.weekExpiry.map { e in (hours?.ahead ?? []).filter { $0 <= e } } ?? [],
@@ -335,7 +334,6 @@ enum PWords {
 
 private struct PTickerCard: View {
     let card: PCard
-    let viz: PViz
     let width: CGFloat              // content width: 313 on a 393 phone
     let go: Bool
     let delay: Double
@@ -350,13 +348,9 @@ private struct PTickerCard: View {
         let c = card
         VStack(alignment: .leading, spacing: 18) {
             head
-            if viz == .bar {
-                PBarView(c: c, g: PBarGeom(c, width: width), go: go, d: delay)
-            } else {
-                PChartView(c: c, g: PChartGeom(c, width: width, hist: hist, live: live, sessions: sessions,
-                                               ahead: ahead, today: today),
-                           width: width, go: go, d: delay, open: open)
-            }
+            PChartView(c: c, g: PChartGeom(c, width: width, hist: hist, live: live, sessions: sessions,
+                                           ahead: ahead, today: today),
+                       width: width, go: go, d: delay, open: open)
             footer
         }
         .foregroundStyle(S.ink)
@@ -453,94 +447,6 @@ private struct PCornerGlow: View {
         .clipShape(RoundedRectangle(cornerRadius: S.rCard, style: .continuous))
         .allowsHitTesting(false)
         .animation(.easeInOut(duration: 0.3), value: status)
-    }
-}
-
-// MARK: - Bar
-
-private struct PBarView: View {
-    let c: PCard
-    let g: PBarGeom
-    let go: Bool
-    let d: Double
-    @Environment(\.accessibilityReduceMotion) private var reduce
-
-    var body: some View {
-        let on = go || reduce
-        let fill = c.totals.up ? S.pFillUp : S.pFillDown
-        let n = g.labels.count
-        ZStack(alignment: .topLeading) {
-            // The track; only the stretch where the premium holds fills in.
-            ZStack(alignment: .topLeading) {
-                Capsule().fill(S.pTrack)
-                ForEach(Array(g.zones.enumerated()), id: \.offset) { _, z in
-                    Capsule().fill(fill)
-                        .animation(reduce ? nil : S.standard(0.7).delay(d + 0.2)) {
-                            $0.scaleEffect(x: on ? 1 : 0.001, anchor: .leading)
-                        }
-                        .frame(width: max(0, z.1 - z.0), height: 14).offset(x: z.0)
-                        .animation(S.standard(0.6), value: z.1 - z.0 + z.0 * 1000)
-                }
-            }
-            .frame(width: g.W, height: 14, alignment: .topLeading)
-            .clipShape(Capsule())
-            .offset(y: 36)
-            // Ticks, then labels: each drops 4 pt and fades in, 30 ms apart.
-            ForEach(Array(g.labels.enumerated()), id: \.element.id) { k, l in
-                RoundedRectangle(cornerRadius: 1).fill(S.ink)
-                    .frame(width: 2, height: 6 + CGFloat(l.row) * 36)
-                    .offset(x: l.x - 1, y: 54)
-                    .pDrop(on, d + 0.35 + Double(min(k, 8)) * 0.03)
-            }
-            ForEach(Array(g.labels.enumerated()), id: \.element.id) { k, l in
-                VStack(alignment: l.align.h, spacing: 0) {
-                    Text(l.num).sType(PBarGeom.numType).foregroundStyle(S.ink)
-                    Text(l.sub).sType(PBarGeom.subType).foregroundStyle(subColor(l.strike))
-                }
-                .frame(width: l.w, alignment: l.align.frame)
-                .fixedSize()
-                .offset(x: l.left, y: 62 + CGFloat(l.row) * 36)
-                .pDrop(on, d + 0.35 + Double(min(n + k, 8)) * 0.03)
-            }
-            // The price: ink pill, caret, and the ringed thumb on the bar;
-            // they slide in from the card's left edge, and glide on the tick.
-            Text(g.pillText).sType(PBarGeom.pillType).foregroundStyle(S.paper)
-                .frame(width: g.pillW, height: 24)
-                .background(Capsule().fill(S.ink))
-                .pSlide(on, from: g.pillLeft, d + 0.15)
-                .offset(x: g.pillLeft).animation(S.standard(0.6), value: g.pillLeft)
-            PCaret().fill(S.ink).frame(width: 10, height: 6)
-                .offset(y: 23)
-                .pSlide(on, from: g.caretLeft, d + 0.15)
-                .offset(x: g.caretLeft).animation(S.standard(0.6), value: g.caretLeft)
-            Circle().fill(S.paper)
-                .overlay(Circle().strokeBorder(S.ink, lineWidth: 2.5))
-                .frame(width: 24, height: 24)
-                .shadow(color: .black.opacity(0.20), radius: 1, y: 1)
-                .shadow(color: .black.opacity(0.18), radius: 4, y: 3)
-                .offset(y: 31)
-                .pSlide(on, from: g.xp - 12, d + 0.15)
-                .offset(x: g.xp - 12).animation(S.standard(0.6), value: g.xp)
-        }
-        .frame(width: g.W, height: g.height, alignment: .topLeading)
-    }
-
-    private func subColor(_ s: PStrike) -> Color {
-        s.sold && s.dist < 0 ? S.red : s.sold && s.dist < 2 ? S.yellowDeep : S.muted
-    }
-}
-
-private extension PBarGeom.Label.Align {
-    var h: HorizontalAlignment { switch self { case .leading: .leading; case .center: .center; case .trailing: .trailing } }
-    var frame: Alignment { switch self { case .leading: .leading; case .center: .center; case .trailing: .trailing } }
-}
-
-private struct PCaret: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY)); p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.midX, y: r.maxY)); p.closeSubpath()
-        return p
     }
 }
 
@@ -700,8 +606,6 @@ private extension View {
     func pEnter(_ go: Bool, _ delay: Double) -> some View { modifier(PEnter(on: go, delay: delay)) }
     /// Ticks, labels and tags drop 4 pt and fade in, 0.4 s.
     func pDrop(_ on: Bool, _ delay: Double) -> some View { modifier(PDrop(on: on, delay: delay)) }
-    /// Thumb, pill and caret slide in from the card's left edge, 0.8 s.
-    func pSlide(_ on: Bool, from x: CGFloat, _ delay: Double) -> some View { modifier(PSlide(on: on, x: x, delay: delay)) }
 }
 
 private struct PEnter: ViewModifier {
@@ -726,21 +630,6 @@ private struct PDrop: ViewModifier {
         content
             .opacity(on ? 1 : 0).offset(y: on ? 0 : -4)
             .animation(reduce ? nil : S.standard(0.4).delay(delay), value: on)
-    }
-}
-
-private struct PSlide: ViewModifier {
-    let on: Bool
-    let x: CGFloat
-    let delay: Double
-    @Environment(\.accessibilityReduceMotion) private var reduce
-    func body(content: Content) -> some View {
-        // The opacity's own (faster) animation sits inside the slide's.
-        content
-            .opacity(on ? 1 : 0)
-            .animation(reduce ? nil : .linear(duration: 0.2).delay(delay), value: on)
-            .offset(x: on ? 0 : -x)
-            .animation(reduce ? nil : S.standard(0.8).delay(delay), value: on)
     }
 }
 

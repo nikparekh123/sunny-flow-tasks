@@ -214,6 +214,11 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     always show dollars (Nik, 14 Oct 2026: the hero already gives the %): plain dollars when the
     hero is %, the mode's own dollars (time value) otherwise.
 
+50. **Chart picked, Bar removed.** Nik, 14 Oct 2026, after a day with both: Positions is three
+    pages, All · Sold · Bought, every ticker card in the Chart style. The Bar pages, their
+    geometry and motion are deleted (decisions 39 and the Bar half of the audit no longer
+    apply). Debug preset `pos.page`: 0 All, 1 Sold, 2 Bought.
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on

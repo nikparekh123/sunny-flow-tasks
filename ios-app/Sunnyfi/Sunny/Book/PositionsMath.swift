@@ -4,9 +4,9 @@
 //
 //  The arithmetic behind SunnyPositions (blocks 12 and 13, handoff 22), as
 //  SunnyPositions.dc.html works it: legs at their marks, side and ticker
-//  totals, the distance to a strike and its status, the five pages, and the
-//  Bar and Chart geometry (axis, fill zones, label rows, the hourly line's
-//  scale and the tag stacks).
+//  totals, the distance to a strike and its status, the three pages, and the
+//  Chart geometry (the hourly line's scale and the tag stacks). The Bar style
+//  was removed on 14 Oct 2026 when Nik picked the Chart.
 //
 
 import Foundation
@@ -98,14 +98,11 @@ struct PCard: Identifiable {
     let heads: [(word: String, dist: Double, k: Double)]
 }
 
-enum PViz { case bar, chart }
-
 /// A page: All, or a side in one of the two styles.
 struct PPage: Identifiable {
     enum Kind { case all, sold, bought }
     let id: Int
     let kind: Kind
-    let viz: PViz?
     let chip: String
     let legs: [PLeg]
     let cards: [PCard]
@@ -118,15 +115,15 @@ enum PBook {
     /// The five pages; a side with no legs drops both of its pages.
     static func pages(_ L: [PLeg], today: String, order: [Bool: [String]]? = nil) -> [PPage] {
         let S0 = L.filter(\.sold), B0 = L.filter { !$0.sold }
-        let kinds: [(PPage.Kind, String, [PLeg], PViz?)] = [
-            (.all, "All", L, nil), (.sold, "Sold (Bar)", S0, .bar), (.sold, "Sold (Chart)", S0, .chart),
-            (.bought, "Bought (Bar)", B0, .bar), (.bought, "Bought (Chart)", B0, .chart),
+        /* Three pages: the Chart style won (Nik, 14 Oct 2026); the Bar pages went. */
+        let kinds: [(PPage.Kind, String, [PLeg])] = [
+            (.all, "All", L), (.sold, "Sold", S0), (.bought, "Bought", B0),
         ].filter { !$0.2.isEmpty }
         let soldCards = cards(S0, sold: true, today: today, order: order?[true])
         let boughtCards = cards(B0, sold: false, today: today, order: order?[false])
         return kinds.enumerated().map { i, k in
             let dots = (k.0 == .all ? S0 : k.2).map { PStatus.of(dist: $0.dist, sold: $0.sold) }
-            return PPage(id: i, kind: k.0, viz: k.3, chip: k.1, legs: k.2,
+            return PPage(id: i, kind: k.0, chip: k.1, legs: k.2,
                          cards: k.0 == .all ? [] : k.0 == .sold ? soldCards : boughtCards,
                          status: .worst(dots))
         }
@@ -264,97 +261,6 @@ enum PF {
         let m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][p[1] - 1]
         return "\(m) \(p[2])"
     }
-    /// Width of a string in a type style (tabular figures), for the label rows.
-    static func width(_ s: String, _ t: SType) -> CGFloat {
-        (s as NSString).size(withAttributes: [.font: t.uiFont(tabular: true), .kern: t.tracking * t.size]).width
-    }
-}
-
-// MARK: - Bar geometry (block 13, Bar)
-
-struct PBarGeom {
-    struct Label: Identifiable {
-        let id: String
-        let x: CGFloat            // the tick
-        let left: CGFloat         // the label box, pinned inside the card
-        let w: CGFloat
-        let align: Align
-        let num: String
-        let sub: String
-        let strike: PStrike
-        var row = 0
-        enum Align { case leading, center, trailing }
-    }
-
-    static let numType = SType(size: 15, weight: 700, line: 18, tracking: 0)
-    static let subType = SType(size: 12, weight: 500, line: 14, tracking: 0)
-    static let pillType = SType(size: 13, weight: 700, line: 24, tracking: 0)
-
-    let W: CGFloat
-    let lo: Double, hi: Double
-    let zones: [(CGFloat, CGFloat)]   // x from, x to
-    let labels: [Label]
-    let rows: Int
-    let xp: CGFloat
-    let pillText: String
-    let pillW: CGFloat
-
-    init(_ c: PCard, width W: CGFloat) {
-        self.W = W
-        let ks = c.strikes.map(\.k)
-        // Zoomed on the strikes (Nik, 13 Oct 2026): at least 1% either side of
-        // the price, not the design's 3%, so close strikes sit apart; the axis
-        // still widens to every strike and the price.
-        var lo = min(c.px * 0.99, ks.min() ?? c.px), hi = max(c.px * 1.01, ks.max() ?? c.px)
-        let pd = (hi - lo) * 0.1; lo -= pd; hi += pd
-        self.lo = lo; self.hi = hi
-        let X = { (v: Double) in CGFloat((v - lo) / (hi - lo)) * W }
-        // The stretch where the premium holds (Logic, Fill zone).
-        var z: [(Double, Double)] = []
-        if c.sold {
-            let sp = c.strikes.filter { !$0.call }.map(\.k), sc = c.strikes.filter(\.call).map(\.k)
-            z.append((sp.max() ?? lo, sc.min() ?? hi))
-        } else {
-            let bc = c.strikes.filter(\.call).map(\.k), bp = c.strikes.filter { !$0.call }.map(\.k)
-            if let m = bc.min() { z.append((m, hi)) }
-            if let m = bp.max() { z.append((lo, m)) }
-        }
-        zones = z.filter { $0.1 > $0.0 }.map { (X($0.0), X($0.1)) }
-        xp = X(c.px)
-        pillText = PF.price(c.px)
-        pillW = ceil(PF.width(pillText, Self.pillType)) + 18
-        // Strikes hang under the bar on alternating rows; a label drops one
-        // more row only if it would still come within 6 of another label or
-        // 3 of another tick.
-        var its: [Label] = c.strikes.map { s in
-            let num = PF.strike(s.k), sub = PF.dist(s.dist) + " · " + PF.count(s.q, s.call ? "call" : "put")
-            let w = ceil(max(PF.width(num, Self.numType), PF.width(sub, Self.subType))) + 2
-            let x = X(s.k), l = min(max(x - w / 2, 0), W - w)
-            let a: Label.Align = x - w / 2 < 0 ? .leading : x + w / 2 > W ? .trailing : .center
-            return Label(id: s.key, x: x, left: l, w: w, align: a, num: num, sub: sub, strike: s)
-        }.sorted { $0.x < $1.x }
-        var placed: [Label] = []
-        for i in its.indices {
-            var it = its[i], r = i % 2
-            while r < 6 {
-                let ok = placed.allSatisfy { p in
-                    if p.row == r { return it.left >= p.left + p.w + 6 || it.left + it.w <= p.left - 6 }
-                    if p.row > r { return p.x < it.left - 3 || p.x > it.left + it.w + 3 }
-                    return it.x < p.left - 3 || it.x > p.left + p.w + 3
-                }
-                if ok { break }
-                r += 1
-            }
-            it.row = r; placed.append(it); its[i] = it
-        }
-        labels = placed
-        rows = placed.reduce(0) { max($0, $1.row + 1) }
-    }
-
-    /// 36 to the bar's bottom (50), then the rows.
-    var height: CGFloat { 50 + (rows > 0 ? 8 + CGFloat(rows) * 36 : 4) }
-    var pillLeft: CGFloat { min(max(xp - pillW / 2, 0), W - pillW) }
-    var caretLeft: CGFloat { min(max(xp - 5, 6), W - 16) }
 }
 
 // MARK: - Chart geometry (block 13, Chart)
