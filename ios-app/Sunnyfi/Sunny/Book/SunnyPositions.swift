@@ -22,7 +22,10 @@ struct SunnyPositions: View {
     @State private var heights: [Int: CGFloat] = [:]
     @State private var seen: Set<Int> = []
     @State private var visible = false
-    @State private var fullW: CGFloat = 393
+    /// The screen's width from the start (then measured), so a page picked
+    /// before the first layout lands on its edge on a 430 phone too.
+    @State private var fullW: CGFloat =
+        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width ?? 393
     @Environment(HomeRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduce
 
@@ -212,14 +215,15 @@ private struct PAllCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
+        // More room than the design's 24 / 20 / 28 (Nik, 13 Oct 2026: "feels too cramped").
+        VStack(alignment: .leading, spacing: 32) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("All positions").sType(.sectionTitle, tabular: false)
                 Spacer(minLength: 0)
                 Text(PF.count(Set(legs.map(\.t)).count, "ticker") + " · " + PF.count(legs.count, "leg"))
                     .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
             }
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 28) {
                 ForEach(Array(rows.enumerated()), id: \.element.t) { j, r in
                     let A = PTotals(r.L)
                     Button { jump(r.sold) } label: {
@@ -245,7 +249,7 @@ private struct PAllCard: View {
             }
         }
         .foregroundStyle(S.ink)
-        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 28)
+        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 36)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
         .sunnyGlow()
@@ -468,7 +472,8 @@ private struct PBarView: View {
                         .animation(reduce ? nil : S.standard(0.7).delay(d + 0.2)) {
                             $0.scaleEffect(x: on ? 1 : 0.001, anchor: .leading)
                         }
-                        .animation(S.standard(0.6)) { $0.frame(width: max(0, z.1 - z.0), height: 14).offset(x: z.0) }
+                        .frame(width: max(0, z.1 - z.0), height: 14).offset(x: z.0)
+                        .animation(S.standard(0.6), value: z.1 - z.0 + z.0 * 1000)
                 }
             }
             .frame(width: g.W, height: 14, alignment: .topLeading)
@@ -497,11 +502,11 @@ private struct PBarView: View {
                 .frame(width: g.pillW, height: 24)
                 .background(Capsule().fill(S.ink))
                 .pSlide(on, from: g.pillLeft, d + 0.15)
-                .animation(S.standard(0.6)) { $0.offset(x: g.pillLeft) }
+                .offset(x: g.pillLeft).animation(S.standard(0.6), value: g.pillLeft)
             PCaret().fill(S.ink).frame(width: 10, height: 6)
                 .offset(y: 23)
                 .pSlide(on, from: g.caretLeft, d + 0.15)
-                .animation(S.standard(0.6)) { $0.offset(x: g.caretLeft) }
+                .offset(x: g.caretLeft).animation(S.standard(0.6), value: g.caretLeft)
             Circle().fill(S.paper)
                 .overlay(Circle().strokeBorder(S.ink, lineWidth: 2.5))
                 .frame(width: 24, height: 24)
@@ -509,7 +514,7 @@ private struct PBarView: View {
                 .shadow(color: .black.opacity(0.18), radius: 4, y: 3)
                 .offset(y: 31)
                 .pSlide(on, from: g.xp - 12, d + 0.15)
-                .animation(S.standard(0.6)) { $0.offset(x: g.xp - 12) }
+                .offset(x: g.xp - 12).animation(S.standard(0.6), value: g.xp)
         }
         .frame(width: g.W, height: g.height, alignment: .topLeading)
     }
@@ -670,10 +675,12 @@ private struct PEnter: ViewModifier {
     let delay: Double
     @Environment(\.accessibilityReduceMotion) private var reduce
     func body(content: Content) -> some View {
+        // Value-keyed, not `animation(_:body:)`: offsets inside a body-scoped
+        // animation jumped (audit, 13 Oct 2026: no rise, no slide).
         let shown = on || reduce
-        content.animation(reduce ? nil : S.standard(0.6).delay(delay)) {
-            $0.opacity(shown ? 1 : 0).offset(y: shown ? 0 : 14)
-        }
+        content
+            .opacity(shown ? 1 : 0).offset(y: shown ? 0 : 14)
+            .animation(reduce ? nil : S.standard(0.6).delay(delay), value: shown)
     }
 }
 
@@ -682,9 +689,9 @@ private struct PDrop: ViewModifier {
     let delay: Double
     @Environment(\.accessibilityReduceMotion) private var reduce
     func body(content: Content) -> some View {
-        content.animation(reduce ? nil : S.standard(0.4).delay(delay)) {
-            $0.opacity(on ? 1 : 0).offset(y: on ? 0 : -4)
-        }
+        content
+            .opacity(on ? 1 : 0).offset(y: on ? 0 : -4)
+            .animation(reduce ? nil : S.standard(0.4).delay(delay), value: on)
     }
 }
 
@@ -694,9 +701,12 @@ private struct PSlide: ViewModifier {
     let delay: Double
     @Environment(\.accessibilityReduceMotion) private var reduce
     func body(content: Content) -> some View {
+        // The opacity's own (faster) animation sits inside the slide's.
         content
-            .animation(reduce ? nil : S.standard(0.8).delay(delay)) { $0.offset(x: on ? 0 : -x) }
-            .animation(reduce ? nil : .linear(duration: 0.2).delay(delay)) { $0.opacity(on ? 1 : 0) }
+            .opacity(on ? 1 : 0)
+            .animation(reduce ? nil : .linear(duration: 0.2).delay(delay), value: on)
+            .offset(x: on ? 0 : -x)
+            .animation(reduce ? nil : S.standard(0.8).delay(delay), value: on)
     }
 }
 

@@ -12,7 +12,7 @@ the old Sunnyfi app. It reads one row, `home_snapshot`, rebuilt every 30 s by `s
 | 03-07 Deck, report and theta check receipts | `Sunny/Deck/` |
 | 08-09 Quick nav, Today | `Sunny/Today/TodaySection.swift` |
 | 10-11 Portfolio, Watchlist | `Sunny/Book/SunnyPortfolio.swift` |
-| 12-13 Positions | `Sunny/Book/SunnyPositions.swift`, `PositionsMath.swift` |
+| 12-13 Positions (handoff 22) | `Sunny/Book/SunnyPositions.swift`, `PositionsMath.swift` |
 | 14 Inventory, Writes sheet | `Sunny/Book/SunnyInventory.swift` |
 | 15-16 Theta, Delta | `Sunny/Risk/SunnyRisk.swift` |
 | 17-18 Yield, Payback | `Sunny/Income/SunnyIncome.swift` |
@@ -126,6 +126,38 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 
 28. **Deck swipe.** A UIKit pan that only takes sideways drags (`DeckSwipe`), not a SwiftUI
     DragGesture: a drag starting on the deck held the page's vertical scroll (Nik, 13 Oct 2026).
+
+29. **Positions redesign (handoff 22), both styles.** Five pages: All, Sold (Bar), Sold (Chart),
+    Bought (Bar), Bought (Chart); Nik uses both and picks one later (13 Oct 2026). The old
+    per-ticker chips, payoff chart, time strip, page dots and Combined card are deleted (Nik:
+    delete), and with them decisions 10 and 26.
+30. **"to" and "past".** Block 13's text says "to" when the strike is on your side; the
+    component and the pictures say "to" until the price reaches the strike and "past" once it
+    crosses (red on sold, green on bought). Nik: match the pictures.
+31. **Chart data.** Hourly closes 10:00 to 16:00 New York from our own 30 s quotes
+    (`hourly_closes()`, the last quote at or before each full hour), not a new feed; Nik chose
+    hourly over 15-minute points. Until 9 Oct the quotes ran 15 minutes late, so those days read
+    15 minutes after the hour (checked against Yahoo's 15-minute bars: mean gap 0.03-0.07%).
+    The line joins across any hour with no quote (Nik: a break "looks odd"; our feed missed the
+    morning of 12 Oct). Holidays never show: only trading days count.
+32. **All card spacing.** 32 under the header, 28 between totals, 36 at the bottom, not the
+    design's 24 / 20 / 28 (Nik: "feels too cramped").
+33. **Glow tint.** Block 13 says the glow follows the nearest strike; the component takes the
+    worst strike on the card. Built as the component, so a crossed strike always shows red.
+
+## Positions audit (13 Oct 2026)
+
+Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on
+the last page at 430 wide landed between pages (the pager started at 393 wide); cards did not
+rise and the thumb, pill and caret did not slide (offsets in a body-scoped animation jump; now
+value-keyed); chart points on the delayed-feed days. Matched by overlay at 393: chips, All card,
+page top, Bar and Chart cards to about 1 px at 2x. Totals checked against the legs by hand.
+
+Open, for Nik: (1) close strikes on the Bar: the design's label rule runs out of rows (NFLX 71,
+72, 72.5 drops the 72.5 label seven rows and its tick crosses the 72 label; five strikes a point
+apart overlap); the Chart handles both. (2) Contrast: some small coloured text on the glass is
+under 4.5:1 with the design's own colours (light: muted on a tinted corner 3.9, gold/red/green
+labels 3.9-4.4; dark: red 3.9-4.5).
 
 ## Still open
 
