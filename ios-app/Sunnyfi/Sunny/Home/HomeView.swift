@@ -46,13 +46,19 @@ struct HomeView: View {
             } else {
                 SunriseLoading().transition(.opacity.combined(with: .scale(scale: 1.04)))
             }
-            if let t = store.toast {
-                SunnyToast(text: t)
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .padding(.top, 4)
-                    .transition(reduce ? .opacity : .move(edge: .top).combined(with: .opacity))
-                    .zIndex(8)
+            // The toast's slide animates the toast alone: on the page it also
+            // animated every card change from the same update, and the cards
+            // jumped (Nik, 14 Oct 2026).
+            ZStack(alignment: .top) {
+                if let t = store.toast {
+                    SunnyToast(text: t)
+                        .padding(.top, 4)
+                        .transition(reduce ? .opacity : .move(edge: .top).combined(with: .opacity))
+                }
             }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .animation(.easeOut(duration: 0.3), value: store.toast)
+            .zIndex(8)
             if let home = store.home, router.writes != nil {
                 SunnyWritesSheet(home: home, ticker: Bindable(router).writes)
                     .transition(reduce ? .opacity : .move(edge: .trailing))   // Reduce Motion: fades, no slides
@@ -142,7 +148,6 @@ struct HomeView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .animation(.easeOut(duration: 0.3), value: store.toast)
             .onChange(of: router.scrollID) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .top) }
             }

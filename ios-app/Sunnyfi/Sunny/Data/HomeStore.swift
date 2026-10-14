@@ -35,8 +35,9 @@ final class HomeStore {
     /// Bumped on a good update while a session runs: the live glow pulses
     /// (block 24). Closed, it stays still and the glow fades out.
     private(set) var livePulse = 0
-    /// Legs whose mark moved on the last update (rows wash, block 25), and
-    /// the toast's count: "Positions updated · 3 changed".
+    /// Legs bought, sold, closed or resized since the last update, and the
+    /// toast's count: "Positions updated · 3 changed". Price moves are not a
+    /// change (Nik, 14 Oct 2026: on every tick they were "just noise").
     private(set) var changedLegs: Set<String> = []
     private(set) var toast: String?
     private var toastTask: Task<Void, Never>?
@@ -77,13 +78,12 @@ final class HomeStore {
             let data = try await Self.source()
             let payload = try Self.decoder.decode(Row.self, from: data).payload
             if let old = home, reason == .tick || reason == .pull {
-                let before = Dictionary(old.legs.map { ($0.id, $0.mark ?? 0) }, uniquingKeysWith: { a, _ in a })
-                let moved = Set(payload.legs.filter { leg in
-                    guard let prev = before[leg.id] else { return true }
-                    return abs(prev - (leg.mark ?? 0)) > 0.004
-                }.map(\.id))
-                changedLegs = moved
-                if !moved.isEmpty { showToast("Positions updated · \(moved.count) changed") }
+                let before = Dictionary(old.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
+                let after = Dictionary(payload.legs.map { ($0.id, $0.n) }, uniquingKeysWith: +)
+                let changed = Set(after.keys.filter { before[$0] != after[$0] })
+                    .union(before.keys.filter { after[$0] == nil })
+                changedLegs = changed
+                if !changed.isEmpty { showToast("Positions updated · \(changed.count) changed") }
             }
             home = payload
             if reason != .tick || words == nil || !MarketClock.isRegular(SClock.now(), calendar: payload.calendar) {

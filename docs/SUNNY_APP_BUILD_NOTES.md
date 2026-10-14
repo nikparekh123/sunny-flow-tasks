@@ -187,6 +187,11 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     soft ring in the line's colour grows from the dot to 2.8x and fades in 1.6 s, rests 0.4 s and
     repeats; off outside the session and with Reduce Motion (Nik, 14 Oct 2026; not in the design).
 
+44. **"Positions updated" only on trades.** The toast fired whenever any leg's mark moved half a
+    cent, so every tick in market hours; now only when a leg is bought, sold, closed, expires or
+    changes size (Nik, 14 Oct 2026: "just noise"). Its slide animates the toast alone: on the
+    page it also animated every card change from the same update, and the cards jumped.
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on
