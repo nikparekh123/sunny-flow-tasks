@@ -50,7 +50,8 @@ struct SunnySoldBought: View {
     private func q(_ v: Double) -> Double { abs(v) >= 1000 ? (v / 100).rounded() * 100 : v.rounded() }
 
     var body: some View {
-        let cs = cols, pick = P.picked["svb"]
+        // Nothing tapped: the numbers follow the grey box (this week or month).
+        let cs = cols, pick = P.picked["svb"] ?? cs.first(where: \.now)?.id
         let shown = pick.map { i in cs.filter { $0.id == i } } ?? cs
         let X = shown.compactMap(\.agg).reduce(nil as Agg?) { acc, a in var x = acc ?? Agg(); x.chg += a.chg; x.real += a.real; x.n += a.n; return x }
         let net = X.map { q($0.chg) + q($0.real) } ?? 0

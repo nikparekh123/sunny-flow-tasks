@@ -396,7 +396,10 @@ private struct PTickerCard: View {
     private var footer: some View {
         let A = card.totals, tn = A.up ? S.green : S.red
         let usd: (Double) -> String = { PF.usd($0) }, pct: (Double) -> String = { PF.pct($0) }
+        // Collected (sold) or paid (bought) first, so the rest adds up: collected
+        // = kept + time value still in the option (Nik, 14 Oct 2026).
         let stats: [(Double, (Double) -> String, String, Color)] = [
+            (A.base, usd, card.sold ? "collected" : "paid", S.ink),
             (A.tv, usd, "time value", S.ink),
             (abs(A.pct), pct, card.sold ? "captured" : "return", tn),
             (abs(A.g), usd, PWords.dollars(sold: card.sold, up: A.up), tn),
@@ -520,7 +523,7 @@ private struct PChartView: View {
         }
     }
 
-    /// Price: ink pill. Strike: number, then its %; puts in a soft pill.
+    /// Price: ink pill. Strike: number, contracts, then its %; puts in a soft pill.
     @ViewBuilder private func tag(_ t: PChartGeom.Tag) -> some View {
         if t.isPrice {
             Text(t.num).sType(SType(size: 13, weight: 700, line: 13, tracking: 0)).foregroundStyle(S.paper)
@@ -530,6 +533,8 @@ private struct PChartView: View {
         } else {
             HStack(spacing: 4) {
                 Text(t.num).sType(SType(size: 13, weight: 700, line: 13, tracking: 0)).foregroundStyle(S.ink)
+                // Contracts at the strike (Nik, 14 Oct 2026), then the distance.
+                Text(t.qty).sType(SType(size: 11, weight: 600, line: 11, tracking: 0)).foregroundStyle(S.ink)
                 Text(t.sub).sType(SType(size: 11, weight: 600, line: 11, tracking: 0)).foregroundStyle(S.muted)
             }
             .padding(.horizontal, t.isPut ? 6 : 0).frame(height: 18)

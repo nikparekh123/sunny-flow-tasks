@@ -219,6 +219,16 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     geometry and motion are deleted (decisions 39 and the Bar half of the audit no longer
     apply). Debug preset `pos.page`: 0 All, 1 Sold, 2 Bought.
 
+51. **Period cards open on now.** Yield and Sold vs Bought: with nothing tapped, the numbers
+    follow the grey box, this week in Week view and this month in Month view (Nik, 14 Oct 2026:
+    Week showed October's total until W3 was tapped). Inventory unchanged: its untapped number
+    is already now.
+52. **Chart tags carry the contracts.** `72 ×6 2.1%`: strike, contracts at it, distance (Nik,
+    14 Oct 2026); the tag column is 77 wide (design 65), the plot 12 narrower.
+53. **Footer: collected (or paid) first.** Four figures: collected · time value · captured ·
+    kept on Sold, paid · time value · return · gain on Bought; collected = kept + time value
+    still in the option (Nik, 14 Oct 2026).
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on

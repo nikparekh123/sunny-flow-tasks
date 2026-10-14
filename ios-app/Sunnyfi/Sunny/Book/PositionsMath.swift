@@ -272,6 +272,7 @@ struct PChartGeom {
         var top: CGFloat = 0      // the 18 pt row it sits in
         let num: String
         let sub: String
+        var qty: String = ""         // "×6": the contracts at that strike
         let isPrice: Bool
         let isPut: Bool
         var cy: CGFloat { top + 9 }
@@ -290,7 +291,8 @@ struct PChartGeom {
     /// `live`: the slot the live price sits at (fractional in the session).
     /// `ahead`: future sessions shown to the expiry (sold cards this week).
     init(_ c: PCard, width W: CGFloat, hist: [Double?], live: Double, sessions: [String], ahead: [String], today: String) {
-        let H = Self.H, PR = W - 73
+        // The tag column is 77 wide (design 65) so it can carry the contract count.
+        let H = Self.H, PR = W - 85
         plot = PR
         let F = Double(ahead.count * 7)
         // Hourly closes before the live slot, then the live price.
@@ -321,7 +323,7 @@ struct PChartGeom {
         // Tags spread around their lines in 18 pt rows; a stack holding the
         // price stays pinned to it; all kept inside the plot's height.
         var tg: [Tag] = [Tag(id: "px", y: Y(c.px), num: PF.price(c.px), sub: "", isPrice: true, isPut: false)]
-            + c.strikes.map { Tag(id: $0.key, y: Y($0.k), num: PF.strike($0.k), sub: PF.dist($0.dist), isPrice: false, isPut: !$0.call) }
+            + c.strikes.map { Tag(id: $0.key, y: Y($0.k), num: PF.strike($0.k), sub: PF.dist($0.dist), qty: "×\($0.q)", isPrice: false, isPut: !$0.call) }
         tg.sort { $0.y < $1.y }
         let PT: CGFloat = 18
         func place(_ cl: [Tag]) -> CGFloat {

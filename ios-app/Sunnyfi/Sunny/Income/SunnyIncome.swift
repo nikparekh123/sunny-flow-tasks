@@ -63,7 +63,9 @@ struct SunnyYield: View {
     }
 
     var body: some View {
-        let cs = cols, pick = P.picked["yield"]
+        // Nothing tapped: the numbers follow the grey box, this week or this month
+        // (Nik, 14 Oct 2026: Week showed October's total until W3 was tapped).
+        let cs = cols, pick = P.picked["yield"] ?? cs.first(where: \.now)?.id
         let shown = pick.map { i in cs.filter { $0.id == i } } ?? cs
         let tot = sums(shown.flatMap(\.rows))
         // Each figure is rounded first, then added, so the hero matches the stat line.
