@@ -145,6 +145,14 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 33. **Glow tint.** Block 13 says the glow follows the nearest strike; the component takes the
     worst strike on the card. Built as the component, so a crossed strike always shows red.
 
+34. **Theta check growth rule: smoothed and sized.** Nik, 13 Oct 2026, after KR's one LEAP
+    was told to roll on noise ($0.27 a day on 14 Sep against $0.72 now, +167%, while its theta
+    bounced between $0.18 and $0.78 day to day on a thin deep-ITM quote; 0.4% of the book's long
+    decay; book ratio 7.8x). Growth now compares 5-session averages, and only a LEAP carrying 10%
+    or more of the book's long decay can flag on growth. The ratio trigger is unchanged. Replayed
+    on 13 Oct: nothing flags (NKE's single-day jump of 47% is 18% smoothed). KR's card was
+    resolved as a false alarm.
+
 ## Positions audit (13 Oct 2026)
 
 Fixed: the chip row cut the glass shadows (a gray band, also in the old Positions); opening on

@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-13.14';
+const BUILD = '2026-10-13.15';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS'];
 /* Options on these trade to 4:15 ET (block 01). One config; extend here. */
@@ -1212,19 +1212,37 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const n = c.reduce((s, t) => s + Number(t.contracts), 0);
       return n ? Math.abs(c.reduce((s, t) => s + Number(t.commission), 0)) / n : 0.7;
     })();
+    /* ⚠ SMOOTHED AND SIZED (Nik, 13 Oct 2026). KR's one LEAP flagged on
+       noise: $0.27 a day on 14 Sep against $0.72 now (+167%), while its theta
+       bounced between $0.18 and $0.78 day to day on a thin deep-ITM quote, and
+       it was 0.4% of the book's long decay. Growth now compares 5-session
+       averages, not two single days, and only a LEAP carrying 10% or more of
+       the book's long decay can flag on growth. The ratio trigger is as before. */
+    const GROWTH_MIN_SHARE = 0.10;
+    const monthIdx = days.indexOf(monthAgo);
+    const avgTh = (vals: (number | null)[]) => {
+      const xs = vals.filter((v): v is number => v != null);
+      return xs.length >= 3 ? xs.reduce((s, v) => s + v, 0) / xs.length : null;
+    };
     const found: Row[] = [];
     for (const l of legs.filter((x) => x.side === 'bought' && x.type === 'call')) {
       const ids = (groups.get(`${l.ticker}|call|long|${l.strike}|${l.expiry}`) ?? [])
         .filter((t) => t.action === 'open').map((t) => String(t.id));
-      const nowTh = Math.abs(l.theta ?? 0) * l.n * 100;
-      const then = greekOn(ids, monthAgo);
-      const thenDay = then ? monthAgo : null;
-      const thenTh = then ? Math.abs(Number(then.theta ?? 0)) * l.n * 100 : null;
+      const thOn = (d: string | undefined) => {
+        const g = d ? greekOn(ids, d) : null;
+        return g && g.theta != null ? Math.abs(Number(g.theta)) * l.n * 100 : null;
+      };
+      const liveTh = Math.abs(l.theta ?? 0) * l.n * 100;
+      // Today live plus the four sessions before it; then the five ending a month ago.
+      const nowTh = avgTh([liveTh, ...days.slice(-4).map(thOn)]) ?? liveTh;
+      const thenTh = monthIdx >= 0 ? avgTh(days.slice(Math.max(0, monthIdx - 4), monthIdx + 1).map(thOn)) : null;
+      const thenDay = thenTh != null ? monthAgo : null;
       const growth = thenTh && thenTh > 0 ? nowTh / thenTh - 1 : null;
-      const without = thL - nowTh > 0 ? thS / (thL - nowTh) : null;
-      const trigger = growth != null && growth >= 0.5 ? 'growth'
+      const share = thL > 0 ? nowTh / thL : 0;
+      const without = thL - liveTh > 0 ? thS / (thL - liveTh) : null;
+      const trigger = growth != null && growth >= 0.5 && share >= GROWTH_MIN_SHARE ? 'growth'
         : (ratioNow != null && ratioNow < THETA_LINE && without != null && without >= THETA_LINE) ? 'ratio' : null;
-      found.push({ l, nowTh, thenTh, thenDay, growth, without, trigger });
+      found.push({ l, nowTh, liveTh, thenTh, thenDay, growth, share, without, trigger });
     }
     const existing = openChecks;
     for (const c of existing) {
@@ -1240,7 +1258,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     for (const f of found.filter((x) => x.trigger)) {
       const l = f.l as Leg;
       if (existing.some((c) => c.ticker === l.ticker && Number(c.strike) === l.strike && String(c.expiry) === l.expiry)) continue;
-      const roll = await rollFor(l, f.nowTh, thS, thL, commPerContract, spotOf.get(l.ticker) ?? null).catch((e) => ({ error: String(e).slice(0, 120) }));
+      const roll = await rollFor(l, f.liveTh, thS, thL, commPerContract, spotOf.get(l.ticker) ?? null).catch((e) => ({ error: String(e).slice(0, 120) }));
       await fetch(`${URL_}/rest/v1/theta_checks`, {
         method: 'POST', headers: { ...H, Prefer: 'return=minimal' },
         body: JSON.stringify([{ ticker: l.ticker, option_type: 'call', strike: l.strike, expiry: l.expiry, contracts: l.n,
@@ -1257,7 +1275,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     });
     checkSummary = found.map((f) => ({ leg: `${f.l.ticker} ${f.l.strike}C ${f.l.expiry}`, theta: r2(f.nowTh),
       then: f.thenTh && r2(f.thenTh), growth_pct: f.growth == null ? null : Math.round(f.growth * 100),
-      without: f.without && r2(f.without), trigger: f.trigger }));
+      share_pct: Math.round(f.share * 1000) / 10, without: f.without && r2(f.without), trigger: f.trigger }));
   }
 
   // ── Theta check (block 07): what the after-close run found ──
