@@ -270,7 +270,10 @@ struct PBarGeom {
     init(_ c: PCard, width W: CGFloat) {
         self.W = W
         let ks = c.strikes.map(\.k)
-        var lo = min(c.px * 0.97, ks.min() ?? c.px), hi = max(c.px * 1.03, ks.max() ?? c.px)
+        // Zoomed on the strikes (Nik, 13 Oct 2026): at least 1% either side of
+        // the price, not the design's 3%, so close strikes sit apart; the axis
+        // still widens to every strike and the price.
+        var lo = min(c.px * 0.99, ks.min() ?? c.px), hi = max(c.px * 1.01, ks.max() ?? c.px)
         let pd = (hi - lo) * 0.1; lo -= pd; hi += pd
         self.lo = lo; self.hi = hi
         let X = { (v: Double) in CGFloat((v - lo) / (hi - lo)) * W }

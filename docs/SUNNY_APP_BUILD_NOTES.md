@@ -161,11 +161,18 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 36. **All card taps cycle the number.** Tap a total: time value, %, $, shared with every page,
     as before the redesign (Nik, 13 Oct 2026); the design's jump to that side is gone, the chips
     navigate.
-37. **Loss, not gain.** A bought side or card that is down says "loss" (Nik, 13 Oct 2026:
-    "when it's red don't call it gain"). Only Positions used the word.
+37. **Loss, not gain; lost, not kept.** Red says so in words: a bought side or card that is
+    down says "loss", a sold one "lost" (Nik, 13 Oct 2026: "when it's red don't call it gain").
+    "captured" and "return" stay. Only Positions used these words.
 38. **Chart scale zoomed on the strikes.** Fit to the strikes and the price with a 2% minimum
     span (design 6%), and the week's line may widen it by a quarter at most (design half);
     beyond that it clips. The strikes sit well apart; a big move widens the scale (Nik, 13 Oct).
+
+39. **Bar axis zoomed on the strikes.** At least 1% either side of the price, not the design's
+    3%, so close strikes sit apart and their labels stop colliding (NFLX 71 / 72 / 72.5 now three
+    tidy rows). The axis still widens to every strike and the price (Nik, 14 Oct 2026).
+40. **Roll strike stays on delta alone.** Asked whether to require open interest of 100+ for the
+    suggested roll's strike (KR 57.5 had OI 1); Nik: keep delta only (14 Oct 2026).
 
 ## Positions audit (13 Oct 2026)
 
@@ -175,9 +182,9 @@ rise and the thumb, pill and caret did not slide (offsets in a body-scoped anima
 value-keyed); chart points on the delayed-feed days. Matched by overlay at 393: chips, All card,
 page top, Bar and Chart cards to about 1 px at 2x. Totals checked against the legs by hand.
 
-Open, for Nik: (1) close strikes on the Bar: the design's label rule runs out of rows (NFLX 71,
-72, 72.5 drops the 72.5 label seven rows and its tick crosses the 72 label; five strikes a point
-apart overlap); the Chart handles both. (2) Contrast: some small coloured text on the glass is
+Open, for Nik: (1) close strikes on the Bar: the design's label rule could run out of rows (NFLX
+71, 72, 72.5 dropped the 72.5 label seven rows); decision 39's zoom fixes NFLX, but five strikes
+a point apart can still crowd; the Chart handles it. (2) Contrast: some small coloured text on the glass is
 under 4.5:1 with the design's own colours (light: muted on a tinted corner 3.9, gold/red/green
 labels 3.9-4.4; dark: red 3.9-4.5).
 

@@ -292,11 +292,12 @@ private struct PSideTop: View {
 
 /// The words and numbers the All rows and page tops share (block 12, Numbers).
 enum PWords {
-    /// A bought side down says loss, not gain (Nik, 13 Oct 2026: "when it's red
-    /// don't call it gain").
+    /// Red says so in words: a bought side down is a loss, not a gain, and a
+    /// sold side down is lost, not kept (Nik, 13 Oct 2026).
     static func word(_ m: PMode, sold: Bool, up: Bool) -> String {
-        switch m { case .tv: "time value"; case .pct: sold ? "captured" : "return"; case .usd: sold ? "kept" : up ? "gain" : "loss" }
+        switch m { case .tv: "time value"; case .pct: sold ? "captured" : "return"; case .usd: dollars(sold: sold, up: up) }
     }
+    static func dollars(sold: Bool, up: Bool) -> String { sold ? (up ? "kept" : "lost") : (up ? "gain" : "loss") }
     static func big(_ A: PTotals, _ m: PMode) -> Double {
         switch m { case .tv: A.tv; case .pct: abs(A.pct); case .usd: abs(A.g) }
     }
@@ -313,7 +314,7 @@ enum PWords {
         var bits: [(String, String, Color)] = [(PF.usd(A.now), " now", S.ink)]
         if m != .pct { bits.append((PF.pct(A.pct), sold ? " captured" : " return", tn)) }
         if m != .tv { bits.append((PF.usd(A.tv), " time value", S.ink)) }
-        if m != .usd { bits.append((PF.usd(A.g), sold ? " kept" : A.up ? " gain" : " loss", tn)) }
+        if m != .usd { bits.append((PF.usd(A.g), " " + dollars(sold: sold, up: A.up), tn)) }
         let bold = SType(size: 14, weight: 700, line: 18, tracking: 0).font(tabular: true)
         return bits.enumerated().reduce(Text("")) { acc, e in
             acc + Text(e.element.0).font(bold).foregroundStyle(e.element.2)
@@ -397,7 +398,7 @@ private struct PTickerCard: View {
         let stats: [(Double, (Double) -> String, String, Color)] = [
             (A.tv, usd, "time value", S.ink),
             (abs(A.pct), pct, card.sold ? "captured" : "return", tn),
-            (abs(A.g), usd, card.sold ? "kept" : A.up ? "gain" : "loss", tn),
+            (abs(A.g), usd, PWords.dollars(sold: card.sold, up: A.up), tn),
         ]
         return HStack(alignment: .top, spacing: 8) {
             ForEach(stats, id: \.2) { s in
@@ -420,8 +421,7 @@ private struct PTickerCard: View {
         let c = card
         let d = c.heads.map { "\(F.trim((abs($0.dist) * 10).rounded() / 10)) percent \($0.dist >= 0 ? "to" : "past") \($0.word) \(PF.strike($0.k))" }
         let g = Int(abs(c.totals.g).rounded()).formatted()
-        let kept = c.sold ? (c.totals.up ? "kept \(g) dollars" : "down \(g) dollars")
-                          : (c.totals.up ? "gain \(g) dollars" : "loss \(g) dollars")
+        let kept = "\(PWords.dollars(sold: c.sold, up: c.totals.up)) \(g) dollars"
         return ([c.t, PF.price(c.px)] + d + [kept]).joined(separator: ", ")
     }
 }
