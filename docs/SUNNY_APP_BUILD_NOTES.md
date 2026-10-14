@@ -266,11 +266,18 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 58. **Call / Put readable** (Nik, 14 Oct 2026: "hardly readable"): the side a strike is on is
     filled in its colour (green call, blue put, as its dot and chart tag) with paper text, 13
     semibold; the other word is ink. Replaces the design's white pill on glass.
-59. **Week | Month without the flash** (Nik, 14 Oct 2026). The bar row was centred on this
-    week; switching scrolled the same row, so the shorter row clamped it to its start for a
-    frame before it scrolled back to now. Each view (and each ‹ › step) now gets its own row,
-    already centred on now (or its last column), and the two crossfade on the toggle's spring.
-    One fix in `SBarChart`, so Inventory, Yield and Sold vs Bought all move together again.
+59. **Week ↔ Month animation** (update 14 Oct, `week.md`). One shared sequence in
+    `PeriodState.flip`: the thumb slides at once (`S.thumb`, overshoot); Out: bars shrink
+    (0.7 s standard), the hero fades and drops 6 pt and the value labels fade (0.15 s); at
+    240 ms the data, labels and scroll swap with no animation (a new row, already on now:
+    now 32 pt in from the right, a past period at the start), bars at 0; 32 ms on, In: bars
+    grow 0.7 s, hero back after 0.2 s (0.5 s), labels after 0.5 s (0.4 s). The last tap wins;
+    Reduce Motion swaps at once; ‹ › morphs heights 0.7 s with no Out. In Inventory and Yield
+    (`SBarChart`) and Sold vs Bought (its own chart, now with label room on both sides so its
+    height holds). Payback, Performance and Allocation have no Week | Month here.
+    Measured (430 sim): bars 89% down at 240 ms, swap clean, grow 0.7 s, hero +0.23 s, labels
+    +0.5 s; the In starts about 45 ms late in the simulator (the swap's redraw). A bar label's
+    fade is scoped to opacity: value-keyed, its delay also held the label behind its bar.
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home

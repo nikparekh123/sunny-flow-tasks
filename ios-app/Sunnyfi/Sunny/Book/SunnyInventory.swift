@@ -36,7 +36,8 @@ struct SunnyInventory: View {
             // No LEAPs held: header and stat line only, no chart (block 14 tile).
             if inv.callsMax > 0 {
                 SViewToggle(period: P)
-                SBarChart(columns: cols.map(\.col), caps: caps, picked: pick) { P.picked["inv"] = $0 }
+                SBarChart(columns: cols.map(\.col), caps: caps, picked: pick, onPick: { P.picked["inv"] = $0 },
+                          grown: P.grown, rowKey: P.view.rawValue)
                 SLegend(rows: legend, hidden: $hidden)
             }
             if inv.by.contains(where: { $0.callsMax > 0 }) { chips }

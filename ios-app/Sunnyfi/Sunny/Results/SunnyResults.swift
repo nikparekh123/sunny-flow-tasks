@@ -18,6 +18,7 @@ struct SunnySoldBought: View {
     let home: HomePayload
     @Environment(HomeRouter.self) private var router
     private var P: PeriodState { router.period }
+    @State private var chartW: CGFloat = 0
 
     private struct Agg { var chg = 0.0, real = 0.0, n = 0 }
     private struct Col { let id: Int; let label: String; let agg: Agg?; let now: Bool }
@@ -101,7 +102,10 @@ struct SunnySoldBought: View {
         let vals = cs.compactMap(\.agg).flatMap { [$0.chg, $0.real] }
         let pos = max(0, vals.max() ?? 0), neg = max(0, -(vals.min() ?? 0))
         let K = 130 / max(1, pos + neg)
-        let upH = (pos * K).rounded() + (pos > 0 ? 16 : 0), dnH = (neg * K).rounded() + (neg > 0 ? 16 : 0)
+        // Room for a label on both sides always, so the card keeps its height
+        // when Week | Month swaps to a period with (or without) losses.
+        let upH = (pos * K).rounded() + 16, dnH = (neg * K).rounded() + 16
+        let up = P.grown
         let bar = { (v: Double) -> CGFloat in v == 0 ? 0 : max(3, CGFloat((abs(v) * K).rounded())) }
         return ScrollViewReader { proxy in
             ScrollView(.horizontal) {
@@ -114,10 +118,11 @@ struct SunnySoldBought: View {
                                     ForEach(0..<2, id: \.self) { j in
                                         let v = j == 0 ? (c.agg?.chg ?? 0) : (c.agg?.real ?? 0)
                                         VStack(spacing: 4) {
-                                            if v > 0 { Text(F.moneyK(v)).sType(SType(size: 11, weight: 600, line: 12, tracking: 0)).fixedSize() }
+                                            if v > 0 { label(F.moneyK(v), S.ink, up) }
                                             UnevenRoundedRectangle(topLeadingRadius: 5, bottomLeadingRadius: 1, bottomTrailingRadius: 1, topTrailingRadius: 5)
-                                                .fill(j == 0 ? S.ink : S.deckYellow).frame(height: v > 0 ? bar(v) : 0)
+                                                .fill(j == 0 ? S.ink : S.deckYellow).frame(height: v > 0 && up ? bar(v) : 0)
                                         }
+                                        .animation(S.standard(S.grow), value: up)
                                         .frame(maxWidth: .infinity)
                                     }
                                 }
@@ -128,9 +133,10 @@ struct SunnySoldBought: View {
                                         let v = j == 0 ? (c.agg?.chg ?? 0) : (c.agg?.real ?? 0)
                                         VStack(spacing: 4) {
                                             UnevenRoundedRectangle(topLeadingRadius: 1, bottomLeadingRadius: 5, bottomTrailingRadius: 5, topTrailingRadius: 1)
-                                                .fill(j == 0 ? S.ink : S.deckYellow).frame(height: v < 0 ? bar(v) : 0)
-                                            if v < 0 { Text(F.moneyK(v)).sType(SType(size: 11, weight: 600, line: 12, tracking: 0)).foregroundStyle(S.red).fixedSize() }
+                                                .fill(j == 0 ? S.ink : S.deckYellow).frame(height: v < 0 && up ? bar(v) : 0)
+                                            if v < 0 { label(F.moneyK(v), S.red, up) }
                                         }
+                                        .animation(S.standard(S.grow), value: up)
                                         .frame(maxWidth: .infinity)
                                     }
                                 }
@@ -153,12 +159,27 @@ struct SunnySoldBought: View {
             .contentMargins(.horizontal, 20, for: .scrollContent)
             .scrollIndicators(.hidden)
             .padding(.horizontal, -20)
-            .onAppear { if let n = cs.first(where: \.now)?.id { proxy.scrollTo(n, anchor: .center) } }
-            .onChange(of: cs.map(\.label)) { _, _ in
-                guard let n = cs.first(where: \.now)?.id ?? cs.last?.id else { return }
-                Task { @MainActor in proxy.scrollTo(n, anchor: .center) }
-            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { chartW = $0 }
+            .onAppear { land(proxy, cs) }
+            // ‹ › inside a view: the same row, scrolled along with the morph.
+            .onChange(of: cs.map(\.label)) { _, _ in withAnimation(S.standard(S.grow)) { land(proxy, cs) } }
+            // Week ↔ Month: a new row, swapped in while the bars are down (SBarChart).
+            .id(P.view.rawValue)
         }
+    }
+
+    /// Now 32 pt in from the right edge; a past period opens at the start.
+    private func land(_ proxy: ScrollViewProxy, _ cs: [Col]) {
+        if let n = cs.first(where: \.now)?.id {
+            let w = chartW > 112 ? chartW : 353
+            proxy.scrollTo(n, anchor: UnitPoint(x: (w - 112) / (w - 80), y: 0.5))
+        } else if let f = cs.first?.id { proxy.scrollTo(f, anchor: .leading) }
+    }
+
+    /// A bar's value: out 0.15 s, back 0.4 s once the bars are mostly up.
+    private func label(_ t: String, _ c: Color, _ up: Bool) -> some View {
+        Text(t).sType(SType(size: 11, weight: 600, line: 12, tracking: 0)).foregroundStyle(c).fixedSize()
+            .animation(up ? .easeOut(duration: 0.4).delay(0.5) : .easeOut(duration: 0.15)) { $0.opacity(up ? 1 : 0) }
     }
 
     /// The sentence, picked by the two signs (block 19).

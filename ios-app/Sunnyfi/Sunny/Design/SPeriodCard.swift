@@ -20,7 +20,13 @@ import SwiftUI
 @Observable
 final class PeriodState {
     enum View: String, CaseIterable { case week = "Week", month = "Month" }
+    /// What the cards show. It changes 240 ms after a flip, with no animation.
     var view: View = DebugPreset.string("period.view") == "month" ? .month : .week
+    /// What the Week | Month switch shows: it moves at once.
+    var selected: View = DebugPreset.string("period.view") == "month" ? .month : .week
+    /// Bars up, hero and value labels shown. False through a flip's Out phase.
+    var grown = true
+    private var swap: Task<Void, Never>?
     /// Months (Week) or years (Month) back from now; 0 = now, never ahead.
     var back = DebugPreset.int("period.back") ?? 0
     var picked: [String: Int] = {      // card key -> picked column
@@ -29,8 +35,36 @@ final class PeriodState {
         return p
     }()
 
+    /// ‹ ›: no Out phase; the bars morph from old to new height.
     func step(_ d: Int) {
-        withAnimation(S.standard()) { back = max(0, back - d); picked = [:] }
+        withAnimation(S.standard(S.grow)) { back = max(0, back - d); picked = [:] }
+    }
+
+    /// Week ↔ Month (update 14 Oct): the thumb slides; Out (bars shrink, the
+    /// hero and value labels fade) runs 240 ms; then the data, labels and
+    /// scroll swap with no animation and the bars render at 0; two frames on,
+    /// In: bars grow 0.7 s, the hero rises in after 0.2 s, labels after 0.5 s.
+    /// Each part carries its own timing, keyed on `grown`. The last tap wins;
+    /// Reduce Motion swaps at once.
+    func flip(to v: View, reduce: Bool) {
+        guard v != selected else { return }
+        withAnimation(reduce ? .easeOut(duration: 0.2) : S.thumb()) { selected = v }
+        swap?.cancel()
+        if reduce {
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) { view = v; back = 0; picked = [:]; grown = true }
+            return
+        }
+        grown = false
+        swap = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(240))
+            guard !Task.isCancelled else { return }
+            var t = Transaction(); t.disablesAnimations = true
+            withTransaction(t) { view = v; back = 0; picked = [:] }
+            try? await Task.sleep(for: .milliseconds(32))
+            guard !Task.isCancelled else { return }
+            grown = true
+        }
     }
 }
 
@@ -128,6 +162,10 @@ struct SPeriodHeader: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
+                // Week ↔ Month: out 0.15 s with a 6 pt drop, back in 0.5 s after 0.2 s.
+                .opacity(period.grown ? 1 : 0)
+                .offset(y: period.grown ? 0 : 6)
+                .animation(period.grown ? S.standard(0.5).delay(0.2) : .easeOut(duration: 0.15), value: period.grown)
             }
             .buttonStyle(SPressStyle())
             .accessibilityHint("Switches what the number shows")
@@ -178,24 +216,24 @@ struct SStatLine: View {
 struct SViewToggle: View {
     @Bindable var period: PeriodState
     @Namespace private var ns
+    @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
         HStack(spacing: 0) {
             ForEach(PeriodState.View.allCases, id: \.self) { v in
                 Button {
-                    withAnimation(.timingCurve(0.34, 1.4, 0.4, 1, duration: 0.45)) {
-                        period.view = v; period.back = 0; period.picked = [:]
-                    }
+                    period.flip(to: v, reduce: reduce)
                 } label: {
                     Text(v.rawValue).sType(.label, tabular: false)
-                        .foregroundStyle(period.view == v ? S.chipOnInk : S.ink)
+                        .foregroundStyle(period.selected == v ? S.chipOnInk : S.ink)
+                        .animation(.easeOut(duration: 0.3), value: period.selected)
                         .frame(width: 68, height: 28)
                         .background {
-                            if period.view == v { Capsule().fill(S.ink).matchedGeometryEffect(id: "thumb", in: ns) }
+                            if period.selected == v { Capsule().fill(S.ink).matchedGeometryEffect(id: "thumb", in: ns) }
                         }
                         .contentShape(Capsule())
                 }
                 .buttonStyle(SPressStyle())
-                .accessibilityAddTraits(period.view == v ? .isSelected : [])
+                .accessibilityAddTraits(period.selected == v ? .isSelected : [])
             }
         }
         .padding(3)
@@ -226,6 +264,11 @@ struct SBarChart: View {
     var caps: [(h: CGFloat, label: String, color: Color)] = []
     let picked: Int?
     let onPick: (Int?) -> Void
+    /// Week ↔ Month: false while the bars are down (PeriodState.grown).
+    var grown: Bool = true
+    /// The row's identity: a new row (already on now) for each Week | Month view.
+    var rowKey: String = ""
+    @State private var viewW: CGFloat = 0
 
     private static let H: CGFloat = 172
     private static let colW: CGFloat = 80, gap: CGFloat = 40
@@ -272,14 +315,26 @@ struct SBarChart: View {
             .scrollIndicators(.hidden)
             .padding(.horizontal, -20)
             .padding(.vertical, -12)
-            .onAppear {
-                if let now = columns.first(where: \.isNow)?.id ?? columns.last?.id { proxy.scrollTo(now, anchor: .center) }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { viewW = $0 }
+            .onAppear { land(proxy) }
+            // ‹ › inside a view: the same row, scrolled along with the morph.
+            .onChange(of: columns.map(\.label)) { _, _ in
+                withAnimation(S.standard(S.grow)) { land(proxy) }
             }
-            // Week to Month (or a step ‹ ›): a new row, already on this week or
-            // month, crossfades in. Scrolling the old row instead jumped it to
-            // its start for a frame (the "flash", Nik 14 Oct 2026), because the
-            // shorter row clamped the offset before it scrolled back to now.
-            .id(columns.map(\.label).joined(separator: "|"))
+            // Week ↔ Month: a new row, swapped in with no animation while the
+            // bars are down and already on now. (Scrolling one row across the
+            // swap clamped it to its start for a frame, the "flash".)
+            .id(rowKey)
+        }
+    }
+
+    /// Now sits 32 pt in from the right edge; a past period opens at the start.
+    private func land(_ proxy: ScrollViewProxy) {
+        if let now = columns.first(where: \.isNow)?.id {
+            let w = viewW > Self.colW + 32 ? viewW : 353
+            proxy.scrollTo(now, anchor: UnitPoint(x: (w - 32 - Self.colW) / (w - Self.colW), y: 0.5))
+        } else if let first = columns.first?.id {
+            proxy.scrollTo(first, anchor: .leading)
         }
     }
 
@@ -303,13 +358,22 @@ struct SBarChart: View {
                                 }
                             }
                             .fixedSize()
+                            // Week ↔ Month: out 0.15 s, back 0.4 s once the bars are mostly up.
+                            // Scoped to the opacity: value-keyed, the delay also held the
+                            // label at the baseline behind its growing bar.
+                            .animation(grown ? .easeOut(duration: 0.4).delay(0.5) : .easeOut(duration: 0.15)) {
+                                $0.opacity(grown ? 1 : 0)
+                            }
+                            // Stacked segments shrink and grow as one bar.
                             VStack(spacing: 0) {
                                 ForEach(Array(b.segs.reversed().enumerated()), id: \.offset) { _, g in
-                                    Rectangle().fill(g.color).frame(height: max(0, g.value)).opacity(g.hidden ? 0.25 : 1)
+                                    Rectangle().fill(g.color).frame(height: grown ? max(0, g.value) : 0).opacity(g.hidden ? 0.25 : 1)
                                 }
                             }
                             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
                         }
+                        // Bar heights, and the label riding on top, 0.7 s.
+                        .animation(S.standard(S.grow), value: grown)
                         .frame(maxWidth: .infinity)
                     }
                 }

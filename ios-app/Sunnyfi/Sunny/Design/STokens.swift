@@ -178,6 +178,11 @@ enum S {
     static let stagger: Double = 0.07
     /// Ranges and filters morph the account line (02b): 0.56 s ease in out.
     static let morph: Animation = .easeInOut(duration: 0.56)
+    /// cubic-bezier(.34,1.4,.4,1): the Week | Month thumb, a slight overshoot
+    /// (update 14 Oct, Week ↔ Month animation).
+    static func thumb(_ d: Double = 0.45) -> Animation { .timingCurve(0.34, 1.4, 0.4, 1, duration: d) }
+    /// Bar heights shrinking and growing (Week | Month) and morphing (‹ ›).
+    static let grow: Double = 0.7
 }
 
 // MARK: - Hex helpers (tokens only; views never take a hex)

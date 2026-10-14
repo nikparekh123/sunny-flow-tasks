@@ -104,7 +104,7 @@ struct SunnyYield: View {
                 return SBarColumn(id: c.id, label: c.label,
                                   bars: [bar(s.cs, s.cb, S.green, S.callsBack, "cs"), bar(s.ps, s.pb, S.blue, S.putsBack, "ps")],
                                   isNow: c.now)
-            }, picked: pick) { P.picked["yield"] = $0 }
+            }, picked: pick, onPick: { P.picked["yield"] = $0 }, grown: P.grown, rowKey: P.view.rawValue)
             // Always dollars (Nik, 14 Oct 2026: the hero already gives the %):
             // plain dollars in % mode, the mode's own dollars otherwise.
             let money = mode == .pct ? sums(shown.flatMap(\.rows), .usd) : tot
