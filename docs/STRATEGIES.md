@@ -69,6 +69,23 @@ And one that is not a preference: **moneyness inverts on a put.** A call is in t
 money above its strike, a put below it. That flag drives every row colour and the
 ROLLING count.
 
+### The in-the-money put overlay, from 2026-10-15
+
+Replaces the 1:1 six-month programme above for **NKE, LULU, BABA and NFLX**. Nik sold
+every put by 15 Oct and asked for a forward test (not a backtest: these names fell 20 to
+30% in two years). Research: `research/itm-puts/` and the page "LEAP Put Overlay Test".
+
+| | |
+|---|---|
+| the long put | March 2027 (about 5 months), the strike nearest 8% above the price, on **half** the LEAPs; roll before expiry into the next ~5-month put |
+| the weekly put | **half the long puts**, the first strike at least 2% below the price, never above a long put's strike (always covered) |
+| the calls | unchanged: every LEAP, a third at the money, the rest at 0.6 SD |
+| extra upside | optional: buy out-of-the-money calls (1-year ~30% out or quarterly ~15% out), never sell fewer calls |
+
+Across the ten names tested: about free in a flat year, +$219K in a 30% crash, -$151K in a
+sudden 30% jump. The account is on portfolio margin, so the puts cut the margin requirement
+by about a third. The book goes delta negative after big falls while the puts are working.
+
 ### Planned: TSLA and SpaceX (SPCX), from 2026-10-14
 
 Not traded yet. Researched for Nik (`docs/TSLA_SPCX_RESEARCH.md`); the app's

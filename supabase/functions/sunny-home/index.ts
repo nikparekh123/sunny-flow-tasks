@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-14.4';
+const BUILD = '2026-10-15.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -37,6 +37,14 @@ const coverOf = (t: string, leaps: number) =>
 const TRADE_TO_415 = ['SPY', 'QQQ', 'IWM', 'DIA'];
 /* The weekly put write as a share of the puts bought (Nik, 13 Oct 2026). */
 const PUT_SHARE = 0.3;
+/* The in-the-money put overlay (Nik, 15 Oct 2026; forward test in research/itm-puts):
+   long puts on half the LEAPs, weekly puts sold on half of those, at the first strike
+   at least otmPct% below spot and never above a long put's strike, so each one stays
+   covered. Held names only for now. */
+const PUT_RULES: Record<string, { share: number; otmPct: number }> = {
+  NKE: { share: 0.5, otmPct: 2 }, LULU: { share: 0.5, otmPct: 2 },
+  BABA: { share: 0.5, otmPct: 2 }, NFLX: { share: 0.5, otmPct: 2 },
+};
 
 const URL_ = Deno.env.get('SUPABASE_URL')!;
 const KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -1064,7 +1072,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   // roll-sheet rule, not the design's (Nik, 12 Oct 2026: "stays as we have it
   // today"). Calls: a third at the money, the rest at 0.6 SD, the rest at 1 SD
   // after a 15%+ month, 20% at the money when a report falls on or before the
-  // expiry. Puts: the nearest strike at or below spot. Sized on every LEAP
+  // expiry. Puts: the nearest strike at or below spot (overlay names: 2% below,
+  // capped at the long put strike, half the puts bought; PUT_RULES). Sized on every LEAP
   // (calls); puts at about 30% of the puts bought (Nik, 13 Oct 2026: "around
   // 30%", the put programme's smaller weekly quantity); what is already sold for that
   // Friday counts toward the strike it sits nearer, and only the rest is
@@ -1111,7 +1120,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     let otm = sd ? nearestK(calls.filter((x) => x.k > spot && x.mid > 0), spot + out * sd) : null;
     if (atm && otm && otm.k <= atm.k) otm = calls.filter((x) => x.k > atm.k && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
     const sd1 = sd ? nearestK(calls.filter((x) => x.k > spot), spot + sd) : null;
-    const put = puts.filter((x) => x.k <= spot && x.mid > 0).sort((a, b) => b.k - a.k)[0] ?? null;
+    /* Overlay names: the highest strike at least otmPct% below spot, capped at the lowest
+       long put still open on that Friday; no covering long put, no suggestion. */
+    const pRule = PUT_RULES[t];
+    const coverKs = ls.filter((l) => l.side === 'bought' && l.type === 'put' && l.expiry >= targetExp).map((l) => l.strike);
+    const coverK = coverKs.length ? Math.min(...coverKs) : null;
+    const put = pRule
+      ? (coverK == null ? null : puts.filter((x) => x.k <= spot * (1 - pRule.otmPct / 100) && x.k <= coverK && x.mid > 0)
+          .sort((a, b) => b.k - a.k)[0] ?? null)
+      : puts.filter((x) => x.k <= spot && x.mid > 0).sort((a, b) => b.k - a.k)[0] ?? null;
     /* Already sold for that Friday: each counts toward the nearer strike. */
     const sold = ls.filter((l) => l.side === 'sold' && l.expiry === targetExp);
     let doneAtm = 0, doneOtm = 0;
@@ -1121,14 +1138,16 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const donePuts = sold.filter((x) => x.type === 'put').reduce((s, l) => s + l.n, 0);
     const left = Math.max(0, callTarget - doneAtm - doneOtm);
     const leftAtm = rule ? left : Math.min(left, Math.max(0, atmN - doneAtm)), leftOtm = left - leftAtm;
-    /* Puts: about 30% of the puts bought, rounded half up (NKE 20 -> 6). */
-    const putTarget = Math.floor(putsN * PUT_SHARE + 0.5);
+    /* Puts: about 30% of the puts bought, rounded half up (NKE 20 -> 6); overlay
+       names half (NKE 30 -> 15, BABA 7 -> 4). */
+    const putTarget = Math.floor(putsN * (pRule?.share ?? PUT_SHARE) + 0.5);
     const leftPuts = Math.max(0, putTarget - donePuts);
     const plan = [
       atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta,
         note: rule ? `${rule.otmPct}% out of the money` : 'at the money' } : null,
       otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta, note: out === 1 ? 'at 1 SD' : 'at 0.6 SD' } : null,
-      put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta, note: 'at the money' } : null,
+      put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta,
+        note: pRule ? `${pRule.otmPct}% out of the money` : 'at the money' } : null,
     ].filter(Boolean) as { type: string; n: number; strike: number; mid: number; delta: number | null; note: string }[];
     const deltaNow = ls.reduce((s, l) => s + (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100, 0);
     const deltaAfter = deltaNow - plan.reduce((s, p) => s + (p.delta ?? 0) * p.n * 100, 0);
