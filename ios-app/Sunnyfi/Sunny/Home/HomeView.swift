@@ -59,7 +59,7 @@ struct HomeView: View {
             .frame(maxHeight: .infinity, alignment: .top)
             .animation(.easeOut(duration: 0.3), value: store.toast)
             .zIndex(8)
-            if let home = store.home, router.writes != nil {
+            if let home = store.home, router.plannerOpen {
                 SunnyPlanner(home: home, words: store.words ?? home)
                     .transition(reduce ? .opacity : .move(edge: .trailing))   // Reduce Motion: fades, no slides
                     .zIndex(9)
@@ -92,8 +92,10 @@ struct HomeView: View {
                     SunnyDeck(cards: DeckBuilder.cards(home), today: home.today) { act(action: $0) }
                         .padding(.horizontal, S.margin)
                         .sEnter(1)
+                    // An even glide in and out over a second; the 0.6 s ease-out
+                    // started at full speed and felt like a jump (Nik, 15 Oct 2026).
                     SunnyQuickNav { s in
-                        withAnimation(S.standard(0.6)) { proxy.scrollTo(s, anchor: .top) }
+                        withAnimation(reduce ? nil : .timingCurve(0.45, 0, 0.25, 1, duration: 1.0)) { proxy.scrollTo(s, anchor: .top) }
                     }
                     .sEnter(2)
                     SunnySectionTitle(title: "Today").id("today")
@@ -182,7 +184,7 @@ struct HomeView: View {
             try? await Task.sleep(for: .seconds(1.2))
             if v == "report" { router.open(.report(0)) }
             else if v == "theta", let c = (store.home?.thetaChecks ?? []).first { router.open(.theta(c.leg)) }
-            else if v.hasPrefix("writes:") { router.writes = String(v.dropFirst(7)) }
+            else if v.hasPrefix("writes:") { router.openPlanner(String(v.dropFirst(7)), animated: false) }
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
             else if v.hasPrefix("pick:") { router.debugPick = String(v.dropFirst(5)); router.scrollID = "positions" }
         }
@@ -191,7 +193,7 @@ struct HomeView: View {
 
     private func act(action: DeckCard.Action) {
         switch action {
-        case .writes(let t): withAnimation(S.standard(0.45)) { router.writes = t }
+        case .writes(let t): router.openPlanner(t)
         case .report(let i): router.open(.report(i))
         case .theta(let leg): router.open(.theta(leg))
         }

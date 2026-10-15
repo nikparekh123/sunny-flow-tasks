@@ -287,6 +287,23 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     covering long put, no put suggestion. Other names keep 30% at the money. Calls unchanged:
     the roll-sheet split is what the test used. Server only (sunny-home build 2026-10-15.1);
     the Planner already starts from the engine's pick.
+61. **Current week / Next week** (Nik, 15 Oct 2026: "easier to read and know"). On Inventory,
+    Yield and Sold vs Bought the week columns for this Friday and next Friday read "Current
+    week" and "Next week" (`Periods.weekLabel`); the rest stay W1..W5, months unchanged. The
+    header names the same column ("October · Current week"). The label may run a little
+    wider than its 80 pt column, inside the grey box.
+62. **Positions fits the whole week** (Nik, 15 Oct 2026, NKE after a 5% jump). The y-scale
+    always includes the week's line, as the Planner's does; it no longer clips past a
+    quarter of the strike span. Strike lines sit closer after a jump; their tags still spread.
+63. **Planner fixes** (Nik, 15 Oct 2026: "buggy and slow"). A typed strike or quantity lands
+    on the name it was typed on (it went to the new name's same-numbered row after a swipe);
+    a box empties on focus with its value as a grey prompt, so typing replaces it; every
+    name's chain is fetched on open so a swiped-to card is live at once; all cards share the
+    tallest card's height; the name changes when a swipe settles; the week draws in and the
+    strikes rise only for the name it opened on (a swipe shows them at once); Home reads
+    `router.plannerOpen`, not the ticker, so a swipe no longer redraws Home.
+64. **Quick nav glide** (Nik, 15 Oct 2026: "too fast"): Book · Risk · Income · Results scroll
+    over 1 s on an ease-in-out curve (was 0.6 s ease-out).
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home

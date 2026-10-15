@@ -39,7 +39,7 @@ struct SunnySoldBought: View {
             let fri = Periods.thisFriday(today)
             return Periods.fridays(a).enumerated().map { i, f in
                 let mon = MarketClock.addDays(f, -4).iso
-                return Col(id: i, label: "W\(i + 1)", agg: agg(r.filter { $0.d >= mon && $0.d <= f }), now: f == fri)
+                return Col(id: i, label: Periods.weekLabel(i, fri: f, today: today), agg: agg(r.filter { $0.d >= mon && $0.d <= f }), now: f == fri)
             }
         }
         return Periods.months(a, start: Periods.bookStart(home)).map { m in
@@ -142,7 +142,7 @@ struct SunnySoldBought: View {
                                 }
                                 .frame(height: CGFloat(dnH), alignment: .top)
                                 Text(c.label).sType(SType(size: 12, weight: lit ? 700 : 600, line: 12, tracking: 0), tabular: false)
-                                    .foregroundStyle(lit ? S.ink : S.muted).frame(height: 14).padding(.top, 12)
+                                    .foregroundStyle(lit ? S.ink : S.muted).lineLimit(1).fixedSize().frame(height: 14).padding(.top, 12)
                             }
                             .frame(width: 80)
                             .background {

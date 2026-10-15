@@ -109,14 +109,22 @@ enum Periods {
         while d.weekday != 6 { d = MarketClock.addDays(d.iso, d.weekday == 7 ? 6 : 1) }
         return d.iso
     }
-    /// "October" · "October · W2" · "2026" · "2026 · Sep"
+    /// A week column's name: "Current week" and "Next week" by name, the rest
+    /// by number (Nik, 15 Oct 2026: "easier to read and know").
+    static func weekLabel(_ i: Int, fri: String, today: String) -> String {
+        let now = thisFriday(today)
+        if fri == now { return "Current week" }
+        if fri == MarketClock.addDays(now, 7).iso { return "Next week" }
+        return "W\(i + 1)"
+    }
+    /// "October" · "October · W2" · "October · Current week" · "2026" · "2026 · Sep"
     static func label(_ s: PeriodState, today: String, picked: Int?) -> String {
         let a = anchor(s, today: today)
         if s.view == .month {
             return picked.map { "\(longMonths[$0]) \(a)" } ?? a
         }
-        let m = longMonths[(Int(a.suffix(2)) ?? 1) - 1]
-        return picked.map { "\(m) · W\($0 + 1)" } ?? m
+        let m = longMonths[(Int(a.suffix(2)) ?? 1) - 1], fr = fridays(a)
+        return picked.map { "\(m) · \($0 < fr.count ? weekLabel($0, fri: fr[$0], today: today) : "W\($0 + 1)")" } ?? m
     }
 }
 
@@ -377,9 +385,12 @@ struct SBarChart: View {
                         .frame(maxWidth: .infinity)
                     }
                 }
+                // "Current week" runs a little wider than the column; it stays on one
+                // line, centred, inside the grey box (the 40 pt gap keeps neighbours clear).
                 Text(col.label)
                     .sType(SType(size: 12, weight: lit ? 700 : 600, line: 12, tracking: 0), tabular: false)
                     .foregroundStyle(lit ? S.ink : S.muted)
+                    .lineLimit(1).fixedSize()
                     .frame(height: 14)
             }
             .frame(width: Self.colW)

@@ -53,7 +53,7 @@ struct SunnyYield: View {
         if P.view == .week {
             let fri = Periods.thisFriday(today)
             return Periods.fridays(a).enumerated().map { i, f in
-                Col(id: i, label: "W\(i + 1)", rows: home.yield.filter { $0.fri == f }, now: f == fri)
+                Col(id: i, label: Periods.weekLabel(i, fri: f, today: today), rows: home.yield.filter { $0.fri == f }, now: f == fri)
             }
         }
         return Periods.months(a, start: Periods.bookStart(home)).map { m in

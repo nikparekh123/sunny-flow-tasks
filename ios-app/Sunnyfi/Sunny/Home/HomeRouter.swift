@@ -26,6 +26,17 @@ final class HomeRouter {
     let period = PeriodState()
     /// The ticker the Planner (block 14b) is open on.
     var writes: String?
+    /// Whether the Planner is up. Home reads this, not `writes`, so swiping
+    /// between names in the Planner no longer redraws the whole Home page.
+    var plannerOpen = false
+    func openPlanner(_ t: String, animated: Bool = true) {
+        writes = t
+        withAnimation(animated ? S.standard(0.45) : nil) { plannerOpen = true }
+    }
+    func closePlanner() {
+        withAnimation(S.standard(0.45)) { plannerOpen = false }
+        writes = nil
+    }
     /// Each name's plan, kept until the app closes ("ticker|expiry"; a name
     /// with no entry shows the engine's pick, live).
     var plans: [String: [PlanLeg]] = [:]

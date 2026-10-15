@@ -302,15 +302,18 @@ struct PChartGeom {
         // Y fits the strikes and the price, zoomed in so the strikes sit well
         // apart (Nik, 13 Oct 2026: "increase the gap between strikes"; the
         // design's 6% minimum span and half-span history stretch left them
-        // squeezed at the top). The scale widens only as far as the price has
-        // to go; the week's line may stretch it by a quarter at most, and
-        // beyond that it clips.
+        // squeezed at the top). The week's line always fits as well, as on the
+        // Planner (Nik, 15 Oct 2026: after NKE's 5% jump the week was cut off
+        // below the chart and the line seemed to start on Thursday); the
+        // tags still spread apart when a jump brings the strike lines closer.
         let ks = c.strikes.map(\.k)
         var ylo = min(c.px, ks.min() ?? c.px), yhi = max(c.px, ks.max() ?? c.px)
         let sp0 = max(yhi - ylo, c.px * 0.02), mid0 = (ylo + yhi) / 2
         ylo = mid0 - sp0 * 0.62; yhi = mid0 + sp0 * 0.62
-        ylo = max(min(ylo, vals.min() ?? ylo), ylo - sp0 * 0.25)
-        yhi = min(max(yhi, vals.max() ?? yhi), yhi + sp0 * 0.25)
+        if let vlo = vals.min(), let vhi = vals.max() {
+            let pad = (max(yhi, vhi) - min(ylo, vlo)) * 0.04
+            ylo = min(ylo, vlo - pad); yhi = max(yhi, vhi + pad)
+        }
         let (l0, h0) = (ylo, yhi)
         let Y = { (v: Double) in H - CGFloat((v - l0) / (h0 - l0)) * H }
         let Xi = { (i: Double) in CGFloat(i / (34 + F)) * PR }

@@ -104,7 +104,7 @@ struct SunnyInventory: View {
             let fri = Periods.thisFriday(today)
             return Periods.fridays(a).enumerated().map { i, f in
                 let w = inv.weeks.first { $0.fri == f }
-                return make(i, "W\(i + 1)", w?.calls, w?.puts, f == fri)
+                return make(i, Periods.weekLabel(i, fri: f, today: today), w?.calls, w?.puts, f == fri)
             }
         }
         return Periods.months(a, start: Periods.bookStart(home)).map { m in
@@ -141,7 +141,7 @@ struct SunnyInventory: View {
         return ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(order) { c in
-                    Button { withAnimation(S.standard(0.45)) { router.writes = c.ticker } } label: {
+                    Button { router.openPlanner(c.ticker) } label: {
                         HStack(spacing: 6) {
                             Text(c.ticker).sType(SType(size: 13, weight: 700, line: 13, tracking: 0), tabular: false)
                             Text("\(c.callsSold) of \(c.callsMax)").sType(SType(size: 13, weight: 600, line: 13, tracking: 0))

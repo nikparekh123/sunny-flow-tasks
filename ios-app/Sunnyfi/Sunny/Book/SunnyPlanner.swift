@@ -21,6 +21,14 @@ final class PlannerFeed {
     private(set) var chains: [String: PlannerChain] = [:]      // "ticker|expiry"
     private struct Req: Encodable { let ticker: String; let expiry: String }
 
+    /// Every name's chain at once when the Planner opens, so a swipe lands on
+    /// a card that is already live (sliders and boxes wait for a chain).
+    func prefetch(_ names: [(String, String)]) async {
+        await withTaskGroup(of: Void.self) { g in
+            for (t, e) in names where chains["\(t)|\(e)"] == nil { g.addTask { await self.fetch(t, e) } }
+        }
+    }
+
     func run(_ t: String, _ expiry: String, calendar: [CalendarDay]) async {
         while !Task.isCancelled {
             await fetch(t, expiry)
@@ -48,8 +56,14 @@ final class PlannerFeed {
     }
 }
 
-/// A text field being typed in: a leg's strike or its quantity.
-enum PlannerField: Hashable { case k(Int), q(Int) }
+/// A text field being typed in: a leg's strike or its quantity, on one name.
+/// The ticker rides along so a value typed before a swipe lands on its own
+/// name (it used to land on the new name's row with the same number).
+enum PlannerField: Hashable {
+    case k(String, Int), q(String, Int)
+    var ticker: String { switch self { case .k(let t, _), .q(let t, _): return t } }
+    var leg: Int { switch self { case .k(_, let i), .q(_, let i): return i } }
+}
 
 // MARK: - Page
 
@@ -75,6 +89,10 @@ struct SunnyPlanner: View {
     @State private var heights: [String: CGFloat] = [:]
     @FocusState private var focus: PlannerField?
     @State private var drafts: [PlannerField: String] = [:]
+    /// The name the Planner opened on draws its week in; every card after
+    /// that (a swipe, a chip) is simply there (Nik, 15 Oct 2026).
+    @State private var opener: String?
+    @State private var drawn = false
 
     var body: some View {
         let names = home.writes.names
@@ -102,7 +120,7 @@ struct SunnyPlanner: View {
                 // keyboard leaves, clear of the keyboard's Done button.
                 .onChange(of: focus) { _, f in
                     guard let f else { return }
-                    let id: Int = { switch f { case .k(let i), .q(let i): return i } }()
+                    let id = f.leg
                     Task {
                         try? await Task.sleep(for: .milliseconds(350))
                         withAnimation(S.standard(0.35)) { proxy.scrollTo("row-\(id)", anchor: .center) }
@@ -118,7 +136,16 @@ struct SunnyPlanner: View {
             guard let cur else { return }
             await feed.run(cur.ticker, cur.expiry, calendar: home.calendar)
         }
-        .onChange(of: focus) { old, _ in if let old, let cur { commit(old, cur) } }
+        .task {
+            if opener == nil { opener = ticker }
+            await feed.prefetch(names.map { ($0.ticker, $0.expiry) })
+        }
+        .task {
+            // After the opening card has drawn its week, later cards are just there.
+            try? await Task.sleep(for: .milliseconds(1200))
+            drawn = true
+        }
+        .onChange(of: focus) { old, _ in if let old { commit(old) } }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -129,7 +156,7 @@ struct SunnyPlanner: View {
 
     private func close() {
         focus = nil
-        withAnimation(S.standard(0.45)) { router.writes = nil }
+        router.closePlanner()
     }
 
     // MARK: Header and chips
@@ -206,9 +233,9 @@ struct SunnyPlanner: View {
     @ViewBuilder private func content(_ names: [Writes.Name], _ n: Writes.Name) -> some View {
         let b = book(n), L = legs(b)
         pager(names, n)
-        // The strikes are the name on screen's; they rise in again on every
-        // name (block 14b, Motion).
-        PlannerAppear(delay: 0.08) { strikes(b, L) }
+        // The strikes are the name on screen's; they rise in on open, and on a
+        // swipe they are simply there, like the card (Nik, 15 Oct 2026).
+        PlannerAppear(delay: 0.08, instant: drawn || b.t != (opener ?? ticker)) { strikes(b, L) }
             .id("strikes-" + b.t)
     }
 
@@ -216,14 +243,15 @@ struct SunnyPlanner: View {
     /// tall as the card on screen. The cards slide, so they do not also rise;
     /// each card's week draws in as it appears.
     private func pager(_ names: [Writes.Name], _ cur: Writes.Name) -> some View {
-        let h = heights[cur.ticker] ?? 0
+        // Every card as tall as the tallest, so a swipe never resizes the page
+        // under it (the strikes jumped when a card had a two-line note).
+        let h = heights.values.max() ?? 0
         return ScrollView(.horizontal) {
             LazyHStack(alignment: .top, spacing: 20) {
                 ForEach(names) { n in
-                    card(n)
+                    card(n, minH: h)
                         .frame(width: cardW, alignment: .topLeading)
                         .fixedSize(horizontal: false, vertical: true)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[n.ticker] = $0 }
                         .id(n.ticker)
                 }
             }
@@ -240,8 +268,10 @@ struct SunnyPlanner: View {
         .frame(height: h > 0 ? h + 32 : nil, alignment: .top)
         .padding(.horizontal, -S.margin).padding(.top, -8).padding(.bottom, -24)
         .animation(reduce ? nil : S.standard(0.4), value: h)
-        .onChange(of: page) { _, p in
-            if let p, p != ticker { focus = nil; router.writes = p }
+        // The name changes once the swipe has settled, not as it passes the
+        // middle: switching mid-swipe redrew the page under the finger.
+        .onScrollPhaseChange { _, phase in
+            if phase == .idle, let p = page, p != ticker { focus = nil; router.writes = p }
         }
         .onChange(of: ticker) { _, t in
             if let t, t != page { withAnimation(reduce ? nil : S.standard(0.45)) { page = t } }
@@ -253,7 +283,7 @@ struct SunnyPlanner: View {
         }
     }
 
-    private func card(_ n: Writes.Name) -> some View {
+    private func card(_ n: Writes.Name, minH: CGFloat) -> some View {
         let b = book(n), L = legs(b)
         let hours = home.hours
         let sessions = hours?.days ?? []
@@ -264,7 +294,9 @@ struct SunnyPlanner: View {
         let g = PlannerGeom(b, legs: L, width: inner, hist: hist, live: live, sessions: sessions, ahead: ahead,
                             today: home.today, per: PlannerAxis.per(ahead.count))
         return PlannerCard(b: b, legs: L, g: g, width: inner, insight: insight(n, b),
-                           open: MarketClock.isRegular(SClock.now(), calendar: home.calendar))
+                           open: MarketClock.isRegular(SClock.now(), calendar: home.calendar),
+                           instant: drawn || n.ticker != (opener ?? ticker), minH: minH,
+                           onHeight: { h in if heights[n.ticker] != h { heights[n.ticker] = h } })
     }
 
     /// Back to the engine's pick for this name (Nik, 14 Oct 2026).
@@ -355,15 +387,18 @@ struct SunnyPlanner: View {
         .padding(.horizontal, 4).padding(.top, 4)
     }
 
-    /// A typed value lands on blur or Done: snapped and clamped.
-    private func commit(_ f: PlannerField, _ n: Writes.Name) {
+    /// A typed value lands on blur or Done, on the name it was typed on:
+    /// snapped and clamped. Left empty, nothing changes.
+    private func commit(_ f: PlannerField) {
         guard let s = drafts[f] else { return }
         drafts[f] = nil
+        guard let n = home.writes.names.first(where: { $0.ticker == f.ticker }) else { return }
         let b = book(n), L = legs(b)
         let v = Double(s.filter { "0123456789.".contains($0) }) ?? .nan
+        guard v.isFinite else { return }
         switch f {
-        case .k(let id): save(b, b.typeStrike(L, id, v))
-        case .q(let id): save(b, b.typeQty(L, id, v))
+        case .k(_, let id): save(b, b.typeStrike(L, id, v))
+        case .q(_, let id): save(b, b.typeQty(L, id, v))
         }
     }
 }
@@ -390,8 +425,20 @@ private struct PlannerCard: View {
     let width: CGFloat
     let insight: (lead: String, rest: String)
     let open: Bool                  // regular session: the price dot pulses
-    @State private var go = false
+    /// Already drawn: a card reached by a swipe shows its week at once.
+    let instant: Bool
+    /// The tallest card's height; this card's own is reported up.
+    let minH: CGFloat
+    let onHeight: (CGFloat) -> Void
+    @State private var go: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
+
+    init(b: PlannerBook, legs: [PlanLeg], g: PlannerGeom, width: CGFloat, insight: (lead: String, rest: String),
+         open: Bool, instant: Bool, minH: CGFloat, onHeight: @escaping (CGFloat) -> Void) {
+        self.b = b; self.legs = legs; self.g = g; self.width = width; self.insight = insight
+        self.open = open; self.instant = instant; self.minH = minH; self.onHeight = onHeight
+        _go = State(initialValue: instant)
+    }
 
     // Shown from a task, after the hidden first frame is drawn, so the change
     // gets its own animated update.
@@ -432,7 +479,8 @@ private struct PlannerCard: View {
         }
         .foregroundStyle(S.ink)
         .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { onHeight($0) }
+        .frame(maxWidth: .infinity, minHeight: minH, alignment: .topLeading)
         .background { PlannerGlow(green: !legs.isEmpty) }
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
         .shadow(color: .black.opacity(0.04), radius: 1.5, y: 1)
@@ -607,7 +655,7 @@ private struct PlannerRow: View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Circle().fill(c).frame(width: 6, height: 6)
-                field(.k(l.id), PF.strike(l.k), keyboard: .decimalPad, label: "Strike")
+                field(.k(b.t, l.id), PF.strike(l.k), keyboard: .decimalPad, label: "Strike")
                     .sType(SType(size: 15, weight: 600, line: 30, tracking: 0))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 6)
@@ -637,7 +685,7 @@ private struct PlannerRow: View {
                 HStack(spacing: 0) {
                     Text("×").sType(SType(size: 13, weight: 500, line: 28, tracking: 0), tabular: false)
                         .foregroundStyle(S.pNeutral)
-                    field(.q(l.id), String(l.q), keyboard: .numberPad, label: "Quantity")
+                    field(.q(b.t, l.id), String(l.q), keyboard: .numberPad, label: "Quantity")
                         .sType(SType(size: 14, weight: 600, line: 28, tracking: 0))
                         .padding(.leading, 2).padding(.trailing, 6)
                         .frame(width: 38, height: 28)
@@ -656,17 +704,16 @@ private struct PlannerRow: View {
                         : Color(red: 120 / 255, green: 120 / 255, blue: 128 / 255).opacity(0.12)
     }
 
-    /// A draft while the box has focus; it lands on blur or Done.
+    /// A draft while the box has focus; it lands on blur or Done. On focus the
+    /// box empties and shows the current value in grey, so typing always
+    /// replaces it ("1" then "3" read 13 when the select-all came too late).
     private func field(_ f: PlannerField, _ shown: String, keyboard: UIKeyboardType, label: String) -> some View {
-        TextField(label, text: Binding(get: { drafts[f] ?? shown }, set: { drafts[f] = $0 }))
+        TextField(label, text: Binding(get: { drafts[f] ?? shown }, set: { drafts[f] = $0 }), prompt: Text(shown))
             .keyboardType(keyboard)
             .focused(focus, equals: f)
             .foregroundStyle(S.ink)
             .disabled(!b.live)
-            .onChange(of: focus.wrappedValue == f) { _, on in
-                // Select what is there, so typing replaces it.
-                if on { DispatchQueue.main.async { UIApplication.shared.sendAction(#selector(UIResponder.selectAll(_:)), to: nil, from: nil, for: nil) } }
-            }
+            .onChange(of: focus.wrappedValue == f) { _, on in if on { drafts[f] = "" } }
             .accessibilityLabel(label)
     }
 
@@ -879,8 +926,12 @@ private struct PlannerAmbient: View {
 /// Rises in once when it appears (the strikes, 80 ms after the card).
 private struct PlannerAppear<Content: View>: View {
     let delay: Double
-    @ViewBuilder var content: Content
-    @State private var go = false
+    let content: Content
+    @State private var go: Bool
+    init(delay: Double, instant: Bool = false, @ViewBuilder content: () -> Content) {
+        self.delay = delay; self.content = content()
+        _go = State(initialValue: instant)
+    }
     var body: some View {
         content.modifier(PlannerEnter(go: go, delay: delay)).task { go = true }
     }
