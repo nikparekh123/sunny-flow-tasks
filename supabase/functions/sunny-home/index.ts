@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-15.1';
+const BUILD = '2026-10-15.2';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1149,7 +1149,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta,
         note: pRule ? `${pRule.otmPct}% out of the money` : 'at the money' } : null,
     ].filter(Boolean) as { type: string; n: number; strike: number; mid: number; delta: number | null; note: string }[];
-    const deltaNow = ls.reduce((s, l) => s + (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100, 0);
+    /* Only what is still open on that Friday: this week's calls expire first,
+       and counting them made a plan look delta negative (Nik, 15 Oct 2026). */
+    const deltaNow = ls.filter((l) => l.expiry >= targetExp)
+      .reduce((s, l) => s + (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100, 0);
     const deltaAfter = deltaNow - plan.reduce((s, p) => s + (p.delta ?? 0) * p.n * 100, 0);
     const putK = put?.k ?? sold.find((x) => x.type === 'put')?.strike ?? null;
     writes.push({
