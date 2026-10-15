@@ -252,11 +252,15 @@ struct SViewToggle: View {
 // MARK: - SunnyBarChart
 
 struct SBar {
-    struct Seg { let value: CGFloat; let color: Color; var hidden = false }
+    /// `hatch`: drawn in S.hatch (rolled contracts, block 14) rather than solid.
+    struct Seg { let value: CGFloat; let color: Color; var hidden = false; var hatch = false }
     let segs: [Seg]               // bottom up, heights in points
     var label: String = ""
     var labelColor: Color = S.ink
     var sub: String? = nil
+    /// Rolled count under the label, after a hatched swatch in `rolledHue`.
+    var rolled: Int? = nil
+    var rolledHue: Color = S.green
 }
 
 struct SBarColumn: Identifiable {
@@ -364,6 +368,13 @@ struct SBarChart: View {
                                 if let s = b.sub {
                                     Text(s).sType(SType(size: 11, weight: 600, line: 12, tracking: 0)).foregroundStyle(S.muted)
                                 }
+                                if let r = b.rolled {
+                                    HStack(spacing: 3) {
+                                        S.hatchSwatch(b.rolledHue, size: 7)
+                                        Text("\(r)").sType(SType(size: 11, weight: 600, line: 12, tracking: 0)).foregroundStyle(S.muted)
+                                    }
+                                    .accessibilityLabel("\(r) rolled")
+                                }
                             }
                             .fixedSize()
                             // Week ↔ Month: out 0.15 s, back 0.4 s once the bars are mostly up.
@@ -375,7 +386,10 @@ struct SBarChart: View {
                             // Stacked segments shrink and grow as one bar.
                             VStack(spacing: 0) {
                                 ForEach(Array(b.segs.reversed().enumerated()), id: \.offset) { _, g in
-                                    Rectangle().fill(g.color).frame(height: grown ? max(0, g.value) : 0).opacity(g.hidden ? 0.25 : 1)
+                                    Group {
+                                        if g.hatch { SHatch(color: g.color) } else { Rectangle().fill(g.color) }
+                                    }
+                                    .frame(height: grown ? max(0, g.value) : 0).opacity(g.hidden ? 0.25 : 1)
                                 }
                             }
                             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))

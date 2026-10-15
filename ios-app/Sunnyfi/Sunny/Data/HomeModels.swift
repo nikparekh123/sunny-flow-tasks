@@ -148,8 +148,16 @@ struct Inventory: Decodable {
         let ticker: String
         let callsMax: Int, callsSold: Int, putsMax: Int, putsSold: Int
         let creditOpen: Double
+        /// Contracts rolled out of this week's Friday (block 14, handoff 24).
+        let rolled: Int?
     }
-    struct Week: Decodable { let week: String; let fri: String; let calls: Int; let puts: Int }
+    /// A week's bar: the most contracts on at once, of which `*Rolled` were
+    /// closed early and reopened later (they stay here, hatched).
+    struct Week: Decodable {
+        let week: String; let fri: String; let calls: Int; let puts: Int
+        let callsRolled: Int?; let putsRolled: Int?
+        let rolledTo: String?; let rolledNames: [String]?
+    }
 }
 
 struct Writes: Decodable {

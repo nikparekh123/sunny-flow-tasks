@@ -196,3 +196,33 @@ extension UIColor {
 extension Color {
     init(hex: UInt32) { self.init(uiColor: UIColor(hex: hex)) }
 }
+
+
+// MARK: - Hatch (handoff 24, block 14: rolled contracts)
+
+/// S.hatch: the side's hue in 2 pt stripes at -45°, 3 pt gaps of the same hue
+/// at 20%. Fills the frame it is given; the same recipe light and dark.
+struct SHatch: View {
+    let color: Color
+    var body: some View {
+        Canvas { ctx, size in
+            ctx.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color.opacity(0.2)))
+            let step: CGFloat = 5 * 2.squareRoot()          // 2 pt stripe + 3 pt gap, across the stripe
+            var p = Path(), x = -size.height
+            while x < size.width + size.height {
+                p.move(to: CGPoint(x: x, y: size.height)); p.addLine(to: CGPoint(x: x + size.height, y: 0))
+                x += step
+            }
+            ctx.stroke(p, with: .color(color), lineWidth: 2)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+extension S {
+    static func hatch(_ c: Color) -> SHatch { SHatch(color: c) }
+    /// The small hatched square beside a rolled count (7 pt on a bar label, 8 pt in a key).
+    static func hatchSwatch(_ c: Color, size: CGFloat) -> some View {
+        SHatch(color: c).frame(width: size, height: size).clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
+    }
+}

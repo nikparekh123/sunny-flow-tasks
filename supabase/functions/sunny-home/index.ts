@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-15.4';
+const BUILD = '2026-10-15.5';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -836,6 +836,40 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   /* A name with a research rule is full at its share of the LEAPs (WRITE_RULES). */
   const invRows = [...invNow].map(([t, e]) => ({ ticker: t, calls_max: coverOf(t, e.cH), calls_sold: e.cS, puts_max: e.pH,
     puts_sold: e.pS, credit_open: Math.round(e.credit) }));
+  /* ROLLS (handoff 24, block 14): a short closed and a short opened on the same
+     day, same ticker and type, the new expiry later. Rolled = the smaller side,
+     per day; it stays in the week it left (a hatched top on that bar) and the
+     new contracts count again in their own week. */
+  type Roll = { t: string; type: string; from: string; to: string; n: number };
+  const rolls: Roll[] = [];
+  {
+    const day = new Map<string, { closes: Map<string, number>; opens: Map<string, number> }>();
+    for (const r of trades) {
+      if (r.direction !== 'short') continue;
+      const k = `${String(r.ticker).toUpperCase()}|${r.option_type}|${r.trade_date}`;
+      const e = day.get(k) ?? { closes: new Map(), opens: new Map() };
+      const side = r.action === 'close' ? e.closes : r.action === 'open' ? e.opens : null;
+      if (side) side.set(String(r.expiry), (side.get(String(r.expiry)) ?? 0) + Number(r.contracts));
+      day.set(k, e);
+    }
+    for (const [k, e] of day) {
+      const [t, type] = k.split('|');
+      const opens = [...e.opens].sort((a, b) => a[0].localeCompare(b[0])).map(([x, n]) => ({ x, n }));
+      for (const [from, n0] of [...e.closes].sort((a, b) => a[0].localeCompare(b[0]))) {
+        let left = n0;
+        for (const o of opens) {
+          if (left <= 0) break;
+          if (o.x <= from || o.n <= 0) continue;
+          const n = Math.min(left, o.n);
+          rolls.push({ t, type, from, to: o.x, n }); left -= n; o.n -= n;
+        }
+      }
+    }
+  }
+  const rolledOut = (w: string, type: string) => rolls.filter((r) => r.type === type && weekStartOf(r.from) === w);
+  /* The week the shelf is on now: this Friday's, or the coming one at the weekend. */
+  const shelfWeek = (() => { const d = new Date(today + 'T12:00:00Z'), wd = d.getUTCDay();
+    return weekStartOf(addDays(today, wd === 6 ? 2 : wd === 0 ? 1 : 0)); })();
   /* Per week covered, the most contracts that were ON at once: a roll closes
      one strike and opens another, so counting every sale would put a fully
      covered week over its own max. Fills replay in order, closes first on a
@@ -854,13 +888,19 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       for (const t of fills) { on += (t.action === 'open' ? 1 : -1) * Number(t.contracts); max = Math.max(max, on); }
       return max;
     };
-    return { week: w, fri: addDays(w, 4), calls: peak('call'), puts: peak('put') };
+    const rc = rolledOut(w, 'call'), rp = rolledOut(w, 'put');
+    const out = [...rc, ...rp];
+    return { week: w, fri: addDays(w, 4), calls: peak('call'), puts: peak('put'),
+             calls_rolled: rc.reduce((s, r) => s + r.n, 0), puts_rolled: rp.reduce((s, r) => s + r.n, 0),
+             rolled_to: out.length ? out.map((r) => r.to).sort().slice(-1)[0] : null,
+             rolled_names: [...new Set(out.map((r) => r.t))].sort() };
   });
   const inventory = {
     calls_max: invRows.reduce((s, r) => s + r.calls_max, 0), calls_sold: invRows.reduce((s, r) => s + r.calls_sold, 0),
     puts_max: invRows.reduce((s, r) => s + r.puts_max, 0), puts_sold: invRows.reduce((s, r) => s + r.puts_sold, 0),
     credit_open: invRows.reduce((s, r) => s + r.credit_open, 0),
     by: invRows.filter((r) => r.calls_max + r.puts_max > 0)
+      .map((r) => ({ ...r, rolled: rolls.filter((x) => x.t === r.ticker && weekStartOf(x.from) === shelfWeek).reduce((s, x) => s + x.n, 0) }))
       .sort((a, b) => (a.calls_max ? a.calls_sold / a.calls_max : 1) - (b.calls_max ? b.calls_sold / b.calls_max : 1)),
     weeks: invWeeks,
   };

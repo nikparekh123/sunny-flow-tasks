@@ -304,6 +304,15 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     `router.plannerOpen`, not the ticker, so a swipe no longer redraws Home.
 64. **Quick nav glide** (Nik, 15 Oct 2026: "too fast"): Book · Risk · Income · Results scroll
     over 1 s on an ease-in-out curve (was 0.6 s ease-out).
+65. **Inventory rolls** (handoff 24, block 14). sunny-home pairs a short closed and a short
+    opened the same day, same ticker and type, later expiry (rolled = the smaller side, per
+    day) and adds per week `calls_rolled`, `puts_rolled`, `rolled_to`, `rolled_names`, and per
+    name `rolled` for this week. The bar keeps its height: solid for what stayed, S.hatch on
+    top for what was rolled; the label adds a 7 pt swatch and the count; "Rolled to Oct 23 ·
+    NKE, LULU" sits under the legend; a rolled name's chip reads "NKE ⁄ 60 rolled". Now is this
+    week's bar, so the hero, stat line and Calls on count rolled contracts as sold:
+    "116 of 124 calls · 94% covered · 67 rolled · 8 left". Nik rolls most Fridays, so past
+    weeks are mostly hatched. Positions keeps its All page for now (Nik, 15 Oct, over §4).
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home

@@ -24,13 +24,16 @@ struct SunnyInventory: View {
         let cols = columns
         let pick = P.picked["inv"]
         let pickedCol = pick.flatMap { i in cols.first { $0.col.id == i } }
+        // Now is this week's bar: rolled contracts count in it (handoff 24, block 14).
+        let nowCol = cols.first { $0.col.isNow }
+        let shown = pickedCol ?? nowCol
         VStack(alignment: .leading, spacing: 20) {
-            SPeriodHeader(label: "Inventory", hero: hero(pickedCol), heroValue: Double(pickedCol?.calls ?? inv.callsSold),
+            SPeriodHeader(label: "Inventory", hero: hero(shown), heroValue: Double(shown?.calls ?? inv.callsSold),
                           heroColor: inv.callsMax > 0 && inv.callsSold > inv.callsMax && pickedCol == nil ? S.red : S.ink,
-                          sub: sub(pickedCol), onTap: {}, period: P,
+                          sub: sub(shown, picked: pickedCol != nil), onTap: {}, period: P,
                           canGoBack: Periods.canGoBack(P, today: home.today, start: Periods.bookStart(home)))
             VStack(alignment: .leading, spacing: 0) {
-                SStatLine(items: stats)
+                SStatLine(items: stats(nowCol))
                 SInlineInsight(lead: insight.lead, rest: insight.rest)
             }
             // No LEAPs held: header and stat line only, no chart (block 14 tile).
@@ -38,7 +41,10 @@ struct SunnyInventory: View {
                 SViewToggle(period: P)
                 SBarChart(columns: cols.map(\.col), caps: caps, picked: pick, onPick: { P.picked["inv"] = $0 },
                           grown: P.grown, rowKey: P.view.rawValue)
-                SLegend(rows: legend, hidden: $hidden)
+                VStack(alignment: .leading, spacing: 10) {
+                    SLegend(rows: legend(nowCol), hidden: $hidden)
+                    if let c = shown, c.rolledCalls + c.rolledPuts > 0, let to = c.rolledTo { rolledKey(c, to) }
+                }
             }
             if inv.by.contains(where: { $0.callsMax > 0 }) { chips }
         }
@@ -54,20 +60,35 @@ struct SunnyInventory: View {
         if inv.callsMax == 0 { return "No calls to sell" }
         return "\(c?.calls ?? inv.callsSold) of \(inv.callsMax) calls"
     }
-    private func sub(_ c: Col?) -> String {
+    /// "93% covered · 16 rolled · 8 left" (rolled count as sold, not as left);
+    /// a picked period: "69% covered · 9 of 20 puts".
+    private func sub(_ c: Col?, picked: Bool) -> String {
         if inv.callsMax == 0 { return "\(inv.putsSold) of \(inv.putsMax) puts" }
-        if let c {
-            return "\(Int((Double(c.calls) / Double(inv.callsMax) * 100).rounded()))% covered · \(c.puts) of \(inv.putsMax) puts"
-        }
-        if inv.callsSold > inv.callsMax { return "\(inv.callsSold - inv.callsMax) calls not covered" }
-        let pct = Int((Double(inv.callsSold) / Double(inv.callsMax) * 100).rounded())
-        return "\(pct)% covered · \(inv.callsMax - inv.callsSold) left to sell"
+        if !picked, inv.callsSold > inv.callsMax { return "\(inv.callsSold - inv.callsMax) calls not covered" }
+        let calls = c?.calls ?? inv.callsSold, rolled = c?.rolledCalls ?? 0
+        let pct = Int((Double(calls) / Double(inv.callsMax) * 100).rounded())
+        let r = rolled > 0 ? " · \(rolled) rolled" : ""
+        if picked, let c { return "\(pct)% covered\(r) · \(c.puts) of \(inv.putsMax) puts" }
+        let left = max(0, inv.callsMax - calls)
+        return rolled > 0 ? "\(pct)% covered\(r) · \(left) left" : "\(pct)% covered · \(left) left to sell"
     }
-    private var stats: [(value: String, label: String, color: Color)] {
+    private func stats(_ now: Col?) -> [(value: String, label: String, color: Color)] {
+        let calls = now?.calls ?? inv.callsSold, puts = now?.puts ?? inv.putsSold
         var s: [(value: String, label: String, color: Color)] = [(F.moneyK(inv.creditOpen), "credit", S.ink)]
-        if inv.callsMax > 0 { s.append(("\(inv.callsSold)", "calls sold", inv.callsSold > inv.callsMax ? S.red : S.green)) }
-        if inv.putsMax > 0 || inv.putsSold > 0 { s.append(("\(inv.putsSold)", "puts sold", S.blue)) }
+        if inv.callsMax > 0 { s.append(("\(calls)", "calls sold", inv.callsSold > inv.callsMax ? S.red : S.green)) }
+        if inv.putsMax > 0 || puts > 0 { s.append(("\(puts)", "puts sold", S.blue)) }
         return s
+    }
+    /// "Rolled to Oct 23 · NKE", under the legend (12/16 Medium, muted).
+    private func rolledKey(_ c: Col, _ to: String) -> some View {
+        HStack(spacing: 6) {
+            S.hatchSwatch(c.rolledCalls > 0 ? S.green : S.blue, size: 8)
+            Text("Rolled to \(F.day(to))" + (c.rolledNames.isEmpty ? "" : " · " + c.rolledNames.joined(separator: ", ")))
+                .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false)
+                .foregroundStyle(S.muted)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
     }
     private var insight: (lead: String, rest: String) {
         let w = words.inventory
@@ -82,35 +103,43 @@ struct SunnyInventory: View {
 
     // MARK: Periods
 
-    private struct Col { let col: SBarColumn; let calls: Int; let puts: Int }
+    private struct Col {
+        let col: SBarColumn; let calls: Int; let puts: Int
+        var rolledCalls = 0, rolledPuts = 0
+        var rolledTo: String? = nil, rolledNames: [String] = []
+    }
 
     private var columns: [Col] {
         let today = home.today, a = Periods.anchor(P, today: today)
         let iMax = CGFloat(max(1, inv.callsMax, inv.putsMax))
         let h = { (v: Int) -> CGFloat in CGFloat(v) / iMax * (148 - 32) }
-        let make = { (i: Int, label: String, calls: Int?, puts: Int?, now: Bool) -> Col in
+        /* A side's bar: what stayed on (solid) under what was rolled out (hatched),
+           so a rolled week keeps its height (handoff 24, block 14). */
+        let bar = { (n: Int?, rolled: Int, color: Color, key: String) -> SBar in
+            let r = min(rolled, n ?? 0)
+            return SBar(segs: [.init(value: h((n ?? 0) - r), color: color, hidden: hidden.contains(key)),
+                               .init(value: h(r), color: color, hidden: hidden.contains(key), hatch: true)],
+                        label: n.map { $0 > 0 ? "\($0)" : "0" } ?? "", rolled: r > 0 ? r : nil, rolledHue: color)
+        }
+        let make = { (i: Int, label: String, w: Inventory.Week?, now: Bool) -> Col in
+            let rc = w?.callsRolled ?? 0, rp = w?.putsRolled ?? 0
             var bars: [SBar] = []
-            if inv.callsMax > 0 {
-                bars.append(SBar(segs: [.init(value: h(calls ?? 0), color: S.green, hidden: hidden.contains("calls"))],
-                                 label: calls.map { $0 > 0 ? "\($0)" : "0" } ?? ""))
-            }
-            if inv.putsMax > 0 {
-                bars.append(SBar(segs: [.init(value: h(puts ?? 0), color: S.blue, hidden: hidden.contains("puts"))],
-                                 label: puts.map { $0 > 0 ? "\($0)" : "0" } ?? ""))
-            }
-            return Col(col: SBarColumn(id: i, label: label, bars: bars, isNow: now), calls: calls ?? 0, puts: puts ?? 0)
+            if inv.callsMax > 0 { bars.append(bar(w?.calls, rc, S.green, "calls")) }
+            if inv.putsMax > 0 { bars.append(bar(w?.puts, rp, S.blue, "puts")) }
+            return Col(col: SBarColumn(id: i, label: label, bars: bars, isNow: now), calls: w?.calls ?? 0, puts: w?.puts ?? 0,
+                       rolledCalls: rc, rolledPuts: rp, rolledTo: w?.rolledTo, rolledNames: w?.rolledNames ?? [])
         }
         if P.view == .week {
             let fri = Periods.thisFriday(today)
             return Periods.fridays(a).enumerated().map { i, f in
                 let w = inv.weeks.first { $0.fri == f }
-                return make(i, Periods.weekLabel(i, fri: f, today: today), w?.calls, w?.puts, f == fri)
+                return make(i, Periods.weekLabel(i, fri: f, today: today), w, f == fri)
             }
         }
         return Periods.months(a, start: Periods.bookStart(home)).map { m in
             let ym = String(format: "%@-%02d", a, m + 1)
             let w = inv.weeks.filter { $0.fri.hasPrefix(ym) }.sorted { $0.fri < $1.fri }.last
-            return make(m, Periods.monthNames[m], w?.calls, w?.puts, today.hasPrefix(ym))
+            return make(m, Periods.monthNames[m], w, today.hasPrefix(ym))
         }
     }
 
@@ -122,10 +151,10 @@ struct SunnyInventory: View {
         return c
     }
 
-    private var legend: [(key: String, name: String, value: String, color: Color)] {
+    private func legend(_ now: Col?) -> [(key: String, name: String, value: String, color: Color)] {
         var r: [(key: String, name: String, value: String, color: Color)] = []
-        if inv.callsMax > 0 { r.append(("calls", "Calls on", "\(inv.callsSold) of \(inv.callsMax)", S.green)) }
-        if inv.putsMax > 0 { r.append(("puts", "Puts on", "\(inv.putsSold) of \(inv.putsMax)", S.blue)) }
+        if inv.callsMax > 0 { r.append(("calls", "Calls on", "\(now?.calls ?? inv.callsSold) of \(inv.callsMax)", S.green)) }
+        if inv.putsMax > 0 { r.append(("puts", "Puts on", "\(now?.puts ?? inv.putsSold) of \(inv.putsMax)", S.blue)) }
         return r
     }
 
@@ -144,8 +173,16 @@ struct SunnyInventory: View {
                     Button { router.openPlanner(c.ticker) } label: {
                         HStack(spacing: 6) {
                             Text(c.ticker).sType(SType(size: 13, weight: 700, line: 13, tracking: 0), tabular: false)
-                            Text("\(c.callsSold) of \(c.callsMax)").sType(SType(size: 13, weight: 600, line: 13, tracking: 0))
-                                .foregroundStyle(c.callsSold > c.callsMax ? S.red : S.ink)
+                            // A name that rolled this week: "NKE ⁄ 16 rolled" (handoff 24).
+                            if let r = c.rolled, r > 0 {
+                                HStack(spacing: 4) {
+                                    S.hatchSwatch(S.green, size: 8)
+                                    Text("\(r) rolled").sType(SType(size: 13, weight: 600, line: 13, tracking: 0))
+                                }
+                            } else {
+                                Text("\(c.callsSold) of \(c.callsMax)").sType(SType(size: 13, weight: 600, line: 13, tracking: 0))
+                                    .foregroundStyle(c.callsSold > c.callsMax ? S.red : S.ink)
+                            }
                         }
                         .foregroundStyle(S.ink)
                         .padding(.horizontal, 12).frame(height: 32)
