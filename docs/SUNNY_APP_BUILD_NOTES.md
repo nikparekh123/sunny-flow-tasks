@@ -281,7 +281,7 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
 60. **Put overlay in the Planner** (Nik, 15 Oct 2026, after the ITM-put forward test,
     `research/itm-puts`, page "LEAP Put Overlay Test"). He buys the long puts himself (March
     2027, strike nearest 8% above the price, on half the LEAPs). For NKE, LULU, BABA and NFLX
-    (`PUT_RULES` in sunny-home) next Friday's put write is now half the puts bought, rounded
+    (`PUT_RULES` in sunny-home; UBER added the same day) next Friday's put write is now half the puts bought, rounded
     half up (NKE 30 -> 15, BABA 7 -> 4), at the highest strike at least 2% below spot, never
     above the lowest long put still open that Friday, so every short put is covered. No
     covering long put, no put suggestion. Other names keep 30% at the money. Calls unchanged:

@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-15.3';
+const BUILD = '2026-10-15.4';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -47,6 +47,7 @@ const CUSHION = 0.2;
 const PUT_RULES: Record<string, { share: number; otmPct: number }> = {
   NKE: { share: 0.5, otmPct: 2 }, LULU: { share: 0.5, otmPct: 2 },
   BABA: { share: 0.5, otmPct: 2 }, NFLX: { share: 0.5, otmPct: 2 },
+  UBER: { share: 0.5, otmPct: 2 },          // added 15 Oct 2026 once UBER had long puts (Nik)
 };
 
 const URL_ = Deno.env.get('SUPABASE_URL')!;
