@@ -313,6 +313,14 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     week's bar, so the hero, stat line and Calls on count rolled contracts as sold:
     "116 of 124 calls · 94% covered · 67 rolled · 8 left". Nik rolls most Fridays, so past
     weeks are mostly hatched. Positions keeps its All page for now (Nik, 15 Oct, over §4).
+66. **Account chart · four legs** (handoff 24, block 02b). Realized and Unrealized left the
+    stats row: Calls sold · Puts sold · Calls bought · Puts bought, one tap cycles % change →
+    $ change → Time value. Change = the leg's running P&L (`groups.cs|ps|cb|pb.line`) from the
+    range start to the day you are on; % = that over the money in long options at the range
+    start (`capital_long`, Nik's 12 Oct rule for Sold and Bought). Time value is that day's
+    (`groups.*.tv`): account_history already stores it from IBKR's 4 PM marks every day, so
+    scrubbing shows the real past value ("Time value · Oct 3"), never "today only". Label row
+    13/16 Semibold muted with three 5 pt dots (current 14 wide, ink). Stats area 112 tall.
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home
