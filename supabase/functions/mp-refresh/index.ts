@@ -192,13 +192,21 @@ function impliedSpot(rows: ThetaRow[], T: number): number | null {
     const k = Number(r.contract.strike), e = by.get(k) ?? {};
     e[r.contract.right.toLowerCase() === 'call' ? 'c' : 'p'] = (bid + ask) / 2; by.set(k, e);
   }
-  let best: number | null = null, gap = Infinity;
+  /* ⚠ THE MIDDLE OF THE THREE NEAREST STRIKES, NOT ONE (15 Oct 2026). One
+     thin pair on FIS's expiring weekly read 34.09 against a real 36.47 and
+     sent the Planner's "at the money" calls in the money. */
+  const pairs: Array<{ gap: number; s: number }> = [];
   for (const [k, e] of by) {
     if (e.c == null || e.p == null) continue;
-    if (Math.abs(e.c - e.p) < gap) { gap = Math.abs(e.c - e.p); best = e.c - e.p + k * Math.exp(-0.04 * T); }
+    pairs.push({ gap: Math.abs(e.c - e.p), s: e.c - e.p + k * Math.exp(-0.04 * T) });
   }
-  return best;
+  if (!pairs.length) return null;
+  const near = pairs.sort((a, b) => a.gap - b.gap).slice(0, 3).map((x) => x.s).sort((a, b) => a - b);
+  return near[Math.floor(near.length / 2)];
 }
+/** An expiry this close (today or tomorrow) is too thin to read a price from. */
+const MIN_SPOT_DAYS = 2;
+const farEnough = (e: string) => (Date.parse(`${e}T20:00:00Z`) - Date.now()) / 864e5 >= MIN_SPOT_DAYS;
 
 // ─── Helpers ────────────────────────────────────────────────────
 const positive = (n: number | undefined | null): number | null =>
@@ -513,31 +521,42 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean;
         const yrs = (e: string) => Math.max(1 / 365, (Date.parse(`${e}T20:00:00Z`) - Date.now()) / (365 * 864e5));
         const spotOf = new Map<string, number>();
         for (const { t, e, gr } of [...res].sort((a, b) => a.e.localeCompare(b.e))) {
-          if (spotOf.has(t)) continue;
+          if (spotOf.has(t) || !farEnough(e)) continue;
           const sx = impliedSpot(gr, yrs(e));
           if (sx != null) spotOf.set(t, sx);
         }
+        /* A name whose only near leg expires today or tomorrow (FIS on 15 Oct)
+           asks for the next listed weekly below, like a LEAP-only name. */
+        const tooNear = [...new Set(res.map((r) => r.t))].filter((t) => !spotOf.has(t));
         /* ⚠ A NAME HOLDING ONLY LONG-DATED LEGS ASKS FOR ITS NEAREST LISTED
            EXPIRY (audit, 13 Oct 2026). KR's only leg is the Jan 2028 LEAP, and
            parity two years out is dragged down by the dividends paid before
            then: 61.74 against IBKR's 62.56 close. Anything whose nearest held
            expiry is over 45 days away now prices off the nearest weekly. */
         const farOnly = [...spotOf.keys()].filter((t) => {
-          const e = res.filter((r) => r.t === t).map((r) => r.e).sort()[0];
+          const e = res.filter((r) => r.t === t).map((r) => r.e).filter(farEnough).sort()[0];
           return (Date.parse(`${e}T20:00:00Z`) - Date.now()) / 864e5 > 45;
-        });
+        }).concat(tooNear);
         await pool(farOnly.map((t) => async () => {
           try {
             const ex = (await fetch(`${THETA_URL}/v3/option/list/expirations?symbol=${t}&format=json`,
               { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(15_000) })
               .then((r) => r.ok ? r.json() : { response: [] })).response as Array<{ expiration: string }>;
-            const next = ex.map((x) => x.expiration).filter((e) => e > estToday).sort()[0];
+            const next = ex.map((x) => x.expiration).filter((e) => e > estToday && farEnough(e)).sort()[0];
             if (!next) return;
             const rows = await theta(`/v3/option/snapshot/quote?symbol=${t}&expiration=${next.replaceAll('-', '')}`);
             const sx = impliedSpot(rows, yrs(next));
             if (sx != null) spotOf.set(t, sx);
           } catch { /* keep the long-dated estimate */ }
         }), 2);
+        /* Last resort for a too-near name the weekly read could not price: its
+           nearest expiry after all, as before (better than no spot at all). */
+        for (const t of tooNear) {
+          if (spotOf.has(t)) continue;
+          const r = res.filter((x) => x.t === t).sort((a, b) => a.e.localeCompare(b.e))[0];
+          const sx = r ? impliedSpot(r.gr, yrs(r.e)) : null;
+          if (sx != null) spotOf.set(t, sx);
+        }
         /* Expected dividends per name: every declared ex-date still ahead, then
            the last regular dividend repeated at its own cadence (frequency, or
            the gap between the last two). Regular cash dividends only. */
@@ -799,7 +818,7 @@ async function refresh(req: Request, body: { source?: string; compare?: boolean;
             const ex = (await fetch(`${THETA_URL}/v3/option/list/expirations?symbol=${t}&format=json`,
               { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(15_000) })
               .then((r) => r.ok ? r.json() : { response: [] })).response as Array<{ expiration: string }>;
-            const next = ex.map((x) => x.expiration).filter((e) => e > estToday).sort()[0];
+            const next = ex.map((x) => x.expiration).filter((e) => e > estToday && farEnough(e)).sort()[0];
             if (!next) return;
             const rows = await theta(`/v3/option/snapshot/quote?symbol=${t}&expiration=${next.replaceAll('-', '')}`);
             const T = Math.max(1 / 365, (Date.parse(`${next}T20:00:00Z`) - Date.now()) / (365 * 864e5));
