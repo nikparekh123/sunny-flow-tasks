@@ -321,6 +321,19 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     (`groups.*.tv`): account_history already stores it from IBKR's 4 PM marks every day, so
     scrubbing shows the real past value ("Time value · Oct 3"), never "today only". Label row
     13/16 Semibold muted with three 5 pt dots (current 14 wide, ink). Stats area 112 tall.
+67. **Futures morning and the bell** (handoff 24, block 09). market-tape adds ES=F, NQ=F,
+    RTY=F from Yahoo (~10 min behind, Nik's choice) and stores each one's 16:00 price (the
+    15:59 one-minute bar, read from 16:12) in daily_closes; market_live.kind now allows
+    'future' (migration 20261015211800). sunny-home sends `futures` (price, quote time, last
+    16:00 base before today) and each tape's `regular` close. 7:00-9:30 on trading days the
+    cards show close × (future / 16:00 base) with the yellow ES · NQ · RTY pill and "Implied
+    by futures · since the 16:00 close"; a future older than 20 min (Nik; design said 10) or
+    with no base, and VIX (no VX on Yahoo), keeps the card at its close, no pill. Overnight
+    now shows 4:00-7:00 only. At 9:30:00 the bell rolls each card (19 pt, 0.4 s, 70 ms
+    stagger), the pills shrink out, the caption fades and its 26 pt closes from 0.5 s; more
+    than 60 s late (backgrounded) or Reduce Motion: a plain swap. Before the open a card's
+    move runs from the last regular close (Yahoo's previous close is then the day before);
+    this also fixes the 4:00-9:30 change. `-preset today.bell=N` rings N s after launch.
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home

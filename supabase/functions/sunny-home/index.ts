@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-15.5';
+const BUILD = '2026-10-15.6';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -552,10 +552,23 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     symbol: m.symbol, label: m.label, state: m.market_state, price: num(m.price), prev_close: num(m.prev_close),
     change_pct: num(m.regular_change_pct), change: num(m.regular_change),
     pre: num(m.pre_price), pre_pct: num(m.pre_change_pct), post: num(m.post_price), post_pct: num(m.post_change_pct),
+    /* The last regular close: before the open it is the 16:00 close the
+       morning's moves run from (prev_close is then the day before). */
+    regular: num(m.regular_price), regular_at: m.regular_time ?? null,
     at: m.captured_at,
   });
   const indices = ['SPY', 'QQQ', 'IWM', '^VIX'].map((s) => tape(mk(s))).filter(Boolean);
   const overnight = ['^N225', '^GDAXI', '^NSEI', '000001.SS'].map((s) => tape(mk(s))).filter(Boolean);
+  /* Futures for the 7:00-9:30 cards (handoff 24, block 09): each card's 16:00
+     close times (future now / its 16:00 price). The base is the future's last
+     stored 16:00 before today; the app judges staleness from `at` (Yahoo runs
+     ~10 min behind; Nik allows 20). VIX has no future here (no VX on Yahoo). */
+  const futures = [['SPY', 'ES=F', 'ES'], ['QQQ', 'NQ=F', 'NQ'], ['IWM', 'RTY=F', 'RTY']].map(([card, sym, pill]) => {
+    const m = mk(sym);
+    const b = closes.filter((c) => c.ticker === sym && String(c.date) < today).sort((x, y) => String(y.date).localeCompare(String(x.date)))[0];
+    return { card, symbol: sym, pill, price: num(m?.price), at: m?.regular_time ?? null,
+             base: b ? Number(b.close_price) : null, base_date: b ? String(b.date) : null };
+  });
   const watchlist = WATCH.map((s) => {
     const m = mk(s); if (!m) return null;
     return { ticker: s, price: num(m.regular_price), ranges: ranges(s, num(m.regular_price), num(m.regular_change_pct)) };
@@ -1644,7 +1657,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     calendar: cal.filter((c) => String(c.date) >= today)
       .map((c) => ({ date: c.date, kind: c.kind, closes: c.closes, name: c.name })),
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
-    fresh, account, indices, overnight, watchlist, portfolio, legs, hours, risk,
+    fresh, account, indices, overnight, futures, watchlist, portfolio, legs, hours, risk,
     chart, history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
     /* A name with no chain cached for that Friday is listed apart, so one

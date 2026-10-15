@@ -21,6 +21,8 @@ struct HomePayload: Decodable {
     let account: Account
     let indices: [Tape]
     let overnight: [Tape]
+    /// ES, NQ, RTY for the 7:00-9:30 cards (handoff 24, block 09).
+    let futures: [Future]?
     let chart: Chart?
     let deck: Deck
     let lastWeek: LastWeek?
@@ -97,7 +99,22 @@ struct Tape: Decodable, Identifiable {
     let prePct: Double?
     let post: Double?
     let postPct: Double?
+    /// The last regular close (before the open: the 16:00 close moves run from).
+    let regular: Double?
+    let regularAt: String?
     let at: String?
+}
+
+/// A front-month future for an index card: its price now (`at`, Yahoo ~10 min
+/// behind) and its 16:00 price on `baseDate`, the base the card divides by.
+struct Future: Decodable {
+    let card: String
+    let symbol: String
+    let pill: String
+    let price: Double?
+    let at: String?
+    let base: Double?
+    let baseDate: String?
 }
 
 struct LastWeek: Decodable {

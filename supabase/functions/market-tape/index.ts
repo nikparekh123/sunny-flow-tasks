@@ -6,6 +6,10 @@
  *   ^VIX                   a level, not a price
  *   ^N225 ^GDAXI ^NSEI 000001.SS   the Overnight card (pre-market only)
  *   INTU ADBE PYPL VZ TMUS SPCX TSLA APP  the Watchlist (Nik, 12 and 14 Oct 2026)
+ *   ES=F NQ=F RTY=F        front-month futures for the 7:00-9:30 cards (handoff 24,
+ *                          block 09). Yahoo's are ~10 min delayed (measured 600 s);
+ *                          Nik took that on 15 Oct. VX is not on Yahoo, so VIX has none.
+ *                          Each one's 16:00 price is kept in daily_closes as the base.
  *
  * ⚠ YAHOO FOR NOW, THETA LATER. Our Theta plan is options only, and options
  * do not trade before 9:30 or after 4:00, so the option-implied spot cannot
@@ -27,14 +31,14 @@
  * not a JWT, so a verify_jwt function answers 401 to every scheduled call
  * (12 Oct 2026: the first deploys did exactly that).
  */
-const BUILD = '2026-10-12.1';
+const BUILD = '2026-10-15.1';
 const UA = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 '
     + '(KHTML, like Gecko) Version/17.0 Safari/605.1.15',
   Accept: 'application/json, text/plain, */*',
   'Accept-Language': 'en-US,en;q=0.9',
 };
-const SYMBOLS: { s: string; label: string; kind: 'index' | 'vix' | 'global' | 'watch' }[] = [
+const SYMBOLS: { s: string; label: string; kind: 'index' | 'vix' | 'global' | 'watch' | 'future' }[] = [
   { s: 'SPY', label: 'SPY', kind: 'index' },
   { s: 'QQQ', label: 'QQQ', kind: 'index' },
   { s: 'IWM', label: 'IWM', kind: 'index' },
@@ -51,7 +55,11 @@ const SYMBOLS: { s: string; label: string; kind: 'index' | 'vix' | 'global' | 'w
   { s: 'SPCX', label: 'SPCX', kind: 'watch' },
   { s: 'TSLA', label: 'TSLA', kind: 'watch' },
   { s: 'APP', label: 'APP', kind: 'watch' },
+  { s: 'ES=F', label: 'ES', kind: 'future' },
+  { s: 'NQ=F', label: 'NQ', kind: 'future' },
+  { s: 'RTY=F', label: 'RTY', kind: 'future' },
 ];
+const FUTURES = SYMBOLS.filter((x) => x.kind === 'future').map((x) => x.s);
 /* SPY, QQQ and IWM closes already come from mp-refresh's tapes. */
 const CLOSES_HERE = SYMBOLS.filter((x) => x.kind === 'vix' || x.kind === 'watch').map((x) => x.s);
 
@@ -195,9 +203,36 @@ Deno.serve(async (req) => {
       passes.push({ pass, symbols: rows.length, ms: Date.now() - t0 });
     }
 
+    /* Each future's 16:00 price, the base the morning cards divide by: the
+       close of the 15:59 one-minute bar. Yahoo runs ~10 min behind, so it is
+       read from 16:12, once a day (skipped when today's rows are in). */
+    let bases = 0;
+    if (ny.mins >= 16 * 60 + 12) {
+      const have = await fetch(`${url}/rest/v1/daily_closes?date=eq.${ny.date}&ticker=in.(${FUTURES.map((x) => `"${x}"`).join(',')})&select=ticker`,
+        { headers: h }).then((r) => r.ok ? r.json() : []) as Array<{ ticker: string }>;
+      const need = FUTURES.filter((f) => !have.some((x) => x.ticker === f));
+      const rows: Array<{ ticker: string; date: string; close_price: number }> = [];
+      for (const f of need) {
+        const r = await fetch(`https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(f)}?range=1d&interval=1m`,
+          { headers: UA, signal: AbortSignal.timeout(10_000) });
+        if (!r.ok) { await r.body?.cancel(); continue; }
+        const res = (await r.json())?.chart?.result?.[0];
+        const t: number[] = res?.timestamp ?? [];
+        const c: (number | null)[] = res?.indicators?.quote?.[0]?.close ?? [];
+        let best: number | null = null;
+        for (let i = 0; i < t.length; i++) {
+          const p = nyParts(new Date(t[i] * 1000));
+          if (p.date === ny.date && p.mins < 16 * 60 && c[i] != null) best = c[i];   // last bar starting before 16:00
+        }
+        if (best != null) rows.push({ ticker: f, date: ny.date, close_price: best });
+      }
+      await upsert('daily_closes', 'ticker,date', rows);
+      bases = rows.length;
+    }
+
     await upsert('sync_heartbeat', 'feed', [{
       feed: 'market-tape', ran_at: new Date().toISOString(), rows_written: Number(passes.at(-1)?.symbols ?? 0),
-      detail: `yahoo · ${passes.map((p) => p.symbols).join('/')} symbols`,
+      detail: `yahoo · ${passes.map((p) => p.symbols).join('/')} symbols${bases ? ` · ${bases} futures bases` : ''}`,
     }]);
     return new Response(JSON.stringify({ ok: true, build: BUILD, passes }),
       { headers: { 'Content-Type': 'application/json' } });

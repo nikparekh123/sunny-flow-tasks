@@ -5,7 +5,8 @@
 //  Block 08 · quick nav (Book · Risk · Income · Results) and the section
 //  titles it scrolls to. Block 09 · Today: SPY · QQQ · IWM · VIX cards
 //  (three in view, swipe for VIX, tap switches % and $), Overnight under
-//  them in pre-market, Last week in their place from Friday's close to
+//  them 4:00 to 7:00, futures-implied prices 7:00 to 9:30 with the bell at
+//  9:30 (handoff 24), Last week in their place from Friday's close to
 //  Monday 4:00. New York time throughout.
 //
 
@@ -67,8 +68,13 @@ struct SArrow: View {
 struct SunnyToday: View {
     let home: HomePayload
     @State private var dollars = DebugPreset.bool("today.usd")
+    /// The 9:30 bell: cards rolled to their first prints, left to right.
+    @State private var rolled: Set<String> = []
+    @State private var captionGone = false         // faded out
+    @State private var captionClosed = false       // its 26 pt closed
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
-    private enum Mode { case cards, preMarket, lastWeek }
+    private enum Mode { case cards, preMarket, futures, lastWeek }
 
     private var mode: Mode {
         let t = MarketClock.ny(SClock.now()), m = t.minutes
@@ -76,8 +82,37 @@ struct SunnyToday: View {
         if holiday { return .cards }
         let weekend = (t.weekday == 6 && m >= 16 * 60) || t.weekday == 7 || t.weekday == 1 || (t.weekday == 2 && m < 4 * 60)
         if weekend, home.lastWeek != nil { return .lastWeek }
-        if MarketClock.isTradingDay(t.date, weekday: t.weekday, home.calendar), m >= 4 * 60, m < 9 * 60 + 30 { return .preMarket }
+        let trading = MarketClock.isTradingDay(t.date, weekday: t.weekday, home.calendar)
+        if trading, m >= 4 * 60, m < 7 * 60 { return .preMarket }
+        // 7:00 to 9:30: the cards show where futures point (handoff 24).
+        if trading, m >= 7 * 60, m < 9 * 60 + 30 { return .futures }
         return .cards
+    }
+
+    /// What a card shows. Futures: the 16:00 close times (future now / its 16:00
+    /// price), change against that close. A future that is stale (Yahoo is ~10
+    /// min behind; past 20 min, Nik) or has no base, and VIX (no VX on Yahoo),
+    /// keep the card at its close with no pill. Before the open, moves run from
+    /// the last regular close (Yahoo's previous close is then the day before).
+    struct Quote { let price: Double; let prev: Double; let pill: String? }
+
+    private func quote(_ t: Tape, futures: Bool) -> Quote {
+        let close = t.regular ?? t.prevClose ?? t.price ?? 0
+        if futures && !rolled.contains(t.symbol) {
+            if let f = home.futures?.first(where: { $0.card == t.symbol }), let now = f.price, let base = f.base, base > 0,
+               let at = f.at.flatMap(Self.iso), SClock.now().timeIntervalSince(at) <= 20 * 60 {
+                return Quote(price: close * now / base, prev: close, pill: f.pill)
+            }
+            return Quote(price: close, prev: t.prevClose ?? close, pill: nil)
+        }
+        let price = t.price ?? close
+        let preOpen = t.state == "PRE" || futures
+        return Quote(price: price, prev: preOpen ? close : (t.prevClose ?? price), pill: nil)
+    }
+    private static func iso(_ s: String) -> Date? {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]; return f.date(from: s)
     }
 
     var body: some View {
@@ -87,21 +122,74 @@ struct SunnyToday: View {
                 if md == .lastWeek, let lw = home.lastWeek {
                     LastWeekCard(lw: lw).padding(.horizontal, S.margin)
                 } else {
-                    cards
+                    VStack(alignment: .leading, spacing: 0) {
+                        cards(futures: md == .futures)
+                        let implied = md == .futures && home.indices.contains { quote($0, futures: true).pill != nil }
+                        if implied || (md == .futures && !captionClosed && !rolled.isEmpty) {
+                            Text("Implied by futures · since the 16:00 close")
+                                .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+                                .foregroundStyle(S.muted)
+                                .opacity(captionGone ? 0 : 1)
+                                .padding(.top, 10)
+                                .frame(height: captionClosed ? 0 : 26, alignment: .top)
+                                .clipped()
+                                .padding(.horizontal, S.margin)
+                        }
+                    }
                     if md == .preMarket, !home.overnight.isEmpty {
                         OvernightCard(tapes: home.overnight).padding(.horizontal, S.margin)
                     }
                 }
             }
+            .task(id: md == .futures) { if md == .futures { await bell() } }
         }
     }
 
-    private var cards: some View {
+    // MARK: The 9:30 bell
+
+    /// Waits for 9:30:00 New York, then rolls each card to its first regular
+    /// print, left to right 70 ms apart; the pills go; the caption fades, then
+    /// its space closes so the row below moves up once. Back from the
+    /// background more than 60 s late, or Reduce Motion: a plain swap.
+    private func bell() async {
+        rolled = []; captionGone = false; captionClosed = false
+        var wait = Self.secondsToBell(SClock.now())
+        #if DEBUG && targetEnvironment(simulator)
+        if let d = DebugPreset.double("today.bell") { wait = d }       // audits: the clock is pinned
+        #endif
+        if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+        guard !Task.isCancelled else { return }
+        let late = -Self.secondsToBell(SClock.now())
+        let symbols = home.indices.map(\.symbol)
+        if reduce || (late > 60 && DebugPreset.double("today.bell") == nil) {
+            withAnimation(reduce ? .easeOut(duration: 0.2) : nil) { rolled = Set(symbols) }
+            captionGone = true; captionClosed = true
+            return
+        }
+        for (i, s) in symbols.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * S.stagger) {
+                withAnimation(S.standard(0.4)) { _ = rolled.insert(s) }
+            }
+        }
+        withAnimation(.easeOut(duration: 0.2)) { captionGone = true }
+        withAnimation(S.standard(0.35).delay(0.5)) { captionClosed = true }
+    }
+
+    private static func secondsToBell(_ now: Date) -> Double {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "America/New_York") ?? .current
+        let c = cal.dateComponents([.hour, .minute, .second, .nanosecond], from: now)
+        let s = Double((c.hour ?? 0) * 3600 + (c.minute ?? 0) * 60 + (c.second ?? 0)) + Double(c.nanosecond ?? 0) / 1e9
+        return 9.5 * 3600 - s
+    }
+
+    private func cards(futures: Bool) -> some View {
         ScrollViewReader { proxy in
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(home.indices) { t in
-                    IndexCard(tape: t, dollars: dollars) {
+                    IndexCard(tape: t, q: quote(t, futures: futures), phase: futures && !rolled.contains(t.symbol),
+                              dollars: dollars) {
                         withAnimation(S.standard(S.tap)) { dollars.toggle() }
                     }
                     .containerRelativeFrame(.horizontal, count: 3, spacing: 8)
@@ -121,29 +209,47 @@ struct SunnyToday: View {
 
 struct IndexCard: View {
     let tape: Tape
+    let q: SunnyToday.Quote
+    /// True while the card shows the futures morning; flipping it at the bell
+    /// rolls the old number out and the first print in.
+    let phase: Bool
     let dollars: Bool
     let onTap: () -> Void
 
     private var level: Bool { tape.symbol.hasPrefix("^") }
 
     var body: some View {
-        let price = tape.price ?? 0, prev = tape.prevClose ?? price
+        let price = q.price, prev = q.prev
         let diff = price - prev, pct = prev != 0 ? diff / prev * 100 : 0
         let up = diff >= 0, tone = up ? S.green : S.red
         let shown = dollars ? (level ? F.level(diff) : "$" + F.level(diff)) : F.pct(pct)
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(tape.label).sType(.ticker, tabular: false)
-                Spacer(minLength: 0)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text((level ? "" : "$") + F.level(price))
-                        .sType(.price)
-                        .contentTransition(.numericText(value: price))
-                    HStack(spacing: 4) {
-                        SArrow(up: up).foregroundStyle(tone)
-                        Text(shown).sType(.change).foregroundStyle(tone)
-                            .contentTransition(.numericText(value: dollars ? diff : pct))
+                HStack(spacing: 8) {
+                    Text(tape.label).sType(.ticker, tabular: false)
+                    if let p = q.pill {
+                        // ES · NQ · RTY: 18 tall, radius 9, 0 6, S.yellow, ink, 11/11 Bold.
+                        Text(p).sType(SType(size: 11, weight: 700, line: 11, tracking: 0), tabular: false)
+                            .foregroundStyle(S.ink)
+                            .padding(.horizontal, 6).frame(height: 18)
+                            .background(Capsule().fill(S.yellow))
+                            .transition(.scale(scale: 0.6).combined(with: .opacity).animation(.easeOut(duration: 0.2)))
                     }
+                }
+                Spacer(minLength: 0)
+                ZStack(alignment: .bottomLeading) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text((level ? "" : "$") + F.level(price))
+                            .sType(.price)
+                            .contentTransition(.numericText(value: price))
+                        HStack(spacing: 4) {
+                            SArrow(up: up).foregroundStyle(tone)
+                            Text(shown).sType(.change).foregroundStyle(tone)
+                                .contentTransition(.numericText(value: dollars ? diff : pct))
+                        }
+                    }
+                    .id(phase)
+                    .transition(.bellRoll)
                 }
             }
             .lineLimit(1).minimumScaleFactor(0.8)
@@ -157,8 +263,25 @@ struct IndexCard: View {
         }
         .buttonStyle(SPressStyle())
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(tape.label) \((level ? "" : "$") + F.level(price)), \(up ? "up" : "down") \(shown)")
+        .accessibilityLabel("\(tape.label) \((level ? "" : "$") + F.level(price)), \(up ? "up" : "down") \(shown)"
+                            + (q.pill.map { ", implied by \($0) futures" } ?? ""))
         .accessibilityHint(dollars ? "Shows percent" : "Shows dollars")
+    }
+}
+
+/// The bell's roll: the old number rises 19 pt and fades, the new one comes up
+/// from 19 pt below (0.4 s S.ease.standard, opacity 0.3 s).
+private struct BellShift: ViewModifier {
+    let y: CGFloat
+    func body(content: Content) -> some View { content.offset(y: y) }
+}
+extension AnyTransition {
+    static var bellRoll: AnyTransition {
+        .asymmetric(
+            insertion: AnyTransition.modifier(active: BellShift(y: 19), identity: BellShift(y: 0)).animation(S.standard(0.4))
+                .combined(with: AnyTransition.opacity.animation(.easeOut(duration: 0.3))),
+            removal: AnyTransition.modifier(active: BellShift(y: -19), identity: BellShift(y: 0)).animation(S.standard(0.4))
+                .combined(with: AnyTransition.opacity.animation(.easeOut(duration: 0.3))))
     }
 }
 
