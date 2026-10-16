@@ -228,6 +228,10 @@ struct History: Decodable {
         let trend: String?
         /// Delta only: the hedge puts' delta each day (16 Oct 2026).
         let hedge: [Double?]?
+        /// Delta only: net delta left each day, % of LEAP shares, and its parts.
+        let netPct: [Double?]?
+        let net: [Double?]?
+        let shares: [Double?]?
     }
 }
 
@@ -242,12 +246,20 @@ struct Risk: Decodable {
     }
     /// Short = everything sold, calls and puts, as sizes; long = every call
     /// bought (LEAPs and upside calls); hedge = the puts bought (Nik, 16 Oct 2026).
+    /// Net delta left = calls bought - calls sold + puts sold - hedge puts, as
+    /// a % of the shares the LEAPs control (`pct`, `pctNow`).
     struct Delta: Decodable {
         let long: Double
         let sold: Double
         let hedge: Double?
+        let net: Double?
+        let shares: Double?
+        let pctNow: Double?
         let by: [By]
-        struct By: Decodable { let ticker: String; let pct: Double; let long: Double; let sold: Double; let hedge: Double? }
+        struct By: Decodable {
+            let ticker: String; let pct: Double; let long: Double; let sold: Double; let hedge: Double?
+            let net: Double?; let shares: Double?
+        }
     }
 }
 

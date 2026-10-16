@@ -340,6 +340,14 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     the eye still toggles it by hand. Nik sets Leave home / Arrive home automations in
     Shortcuts; Sunny never sees a location. Account block only; blurring every figure would
     need a design first.
+70. **Delta card: net delta left** (Nik, 16 Oct 2026, supersedes the ratio in 69). The number is
+    calls bought - calls sold + puts sold - hedge puts, as a % of the shares the LEAPs control,
+    per name and in total, each day as it was (no 2-week average). One band for every name:
+    under 15% red ("too thin", "net short" below 0), 15-20% amber ("getting thin"), 20-30% on
+    target (green word), over 30% "room to sell" (grey; the chart greys above the 30% line).
+    Tiles run thinnest first. Same 20% base as the Planner's cushion. Upside calls (8%+ out of
+    the money at purchase, or out of the money with 13 months or less) count in long delta but
+    are not LEAPs: off the Inventory shelf, the Planner's LEAP count, Payback and the base.
 69. **Delta card: short, long, hedge** (Nik, 16 Oct 2026; was calls only since 12 Oct). Short Δ =
     every leg sold, calls and puts, as sizes added; long Δ = every call bought (LEAPs plus the
     3- and 12-month upside calls, 10% of LEAP value a year); the hedge puts bought are a third

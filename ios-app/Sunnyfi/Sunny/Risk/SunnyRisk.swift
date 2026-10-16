@@ -4,10 +4,11 @@
 //
 //  Blocks 15 and 16 · Theta and Delta, the glass pair, on SunnyMountain.
 //  Theta: short theta ÷ long theta, 2-week average, off the 3× line (green
-//  above, brick below), a peak tag over the summit. Delta: sold Δ ÷ long Δ
-//  with the healthy band 20% to 50% (yellow above 50%); sold is calls and puts
-//  sold, long is every call bought, and the hedge puts are a third line
-//  (Nik, 16 Oct 2026). Both over the
+//  above, brick below), a peak tag over the summit. Delta: net delta left
+//  (calls bought - calls sold + puts sold - hedge puts) as a % of the shares
+//  the LEAPs control, one band for every name: under 15% red, 15-20% amber,
+//  20-30% on target, over 30% room to sell (Nik, 16 Oct 2026; the Planner's
+//  cushion is the same 20%). The hedge puts are a third line. Both over the
 //  window since the book began, one point a trading day, today live. Drag
 //  to read any day. Tiles per ticker under each; the one a theta check
 //  found drags and breathes, and opens its receipt.
@@ -51,14 +52,17 @@ struct SunnyMountain: View {
 
     private static let LW: CGFloat = 262, TOP: CGFloat = 16, BOT: CGFloat = 172
 
-    private var V: [Double] { kind == .theta ? home.history.theta.avg2w : home.history.delta.avg2w }
+    private var V: [Double] {
+        kind == .theta ? home.history.theta.avg2w
+                       : (home.history.delta.netPct?.map { $0 ?? 0 } ?? home.history.delta.avg2w)
+    }
     /// The Theta warning line. 3×, not the design's 2× (Nik, 13 Oct 2026: the
     /// backtest had 2× firing on under 1% of weeks; below 3× most months lost).
     static let thetaLine: Double = 3
     /// "3×", for the line's tag (inside the chart `F` is the floor value, not the formatter).
     static let thetaLineTag = F.trim(thetaLine) + "×"
     private var floorV: Double { kind == .theta ? Self.thetaLine : 20 }
-    private let cap: Double = 50
+    private let cap: Double = 30      // Delta: above this, room to sell
     private var noLongs: Bool { kind == .theta ? home.risk.theta.long <= 0 : home.risk.delta.long <= 0 }
 
     var body: some View {
@@ -117,9 +121,19 @@ struct SunnyMountain: View {
             let L = Self.thetaLine
             return (String(format: "%.2f×", v), v < L ? S.red : S.ink, v < L ? "below \(F.trim(L))×" : "above \(F.trim(L))×", tr, tr == "downslope" ? S.red : S.muted)
         }
-        let L = home.risk.delta.long, out = v < 20 || v > 50
-        let tr = v < 20 ? "underselling" : v > 50 ? "capping upside" : "healthy"
-        return ("\(Int(v.rounded()))%", out ? S.yellowDeep : S.ink, "\(nK(L * v / 100)) of \(nK(L)) Δ sold", tr, out ? S.yellowDeep : S.green)
+        let live = i == V.count - 1 && scrub == nil
+        let net = live ? (home.risk.delta.net ?? 0) : (home.history.delta.net?[safe: i] ?? nil) ?? 0
+        let shares = live ? (home.risk.delta.shares ?? 0) : (home.history.delta.shares?[safe: i] ?? nil) ?? 0
+        let b = Self.band(v)
+        return ("\(Int(v.rounded()))%", v < 20 ? b.color : S.ink, "\(net < 0 ? "-" : "")\(nK(net)) Δ left of \(nK(shares))", b.word, b.color)
+    }
+    /// One band for every name (Nik, 16 Oct 2026).
+    static func band(_ v: Double) -> (word: String, color: Color) {
+        if v < 0 { return ("net short", S.red) }
+        if v < 15 { return ("too thin", S.red) }
+        if v < 20 { return ("getting thin", S.yellowDeep) }
+        if v <= 30 { return ("on target", S.green) }
+        return ("room to sell", S.muted)
     }
     /// 1.7K · 860: whole hundreds above 1,000.
     private func nK(_ v: Double) -> String {
@@ -161,7 +175,7 @@ struct SunnyMountain: View {
                          with: .linearGradient(Gradient(colors: [Color(hex: 0xEB4B46).opacity(0.08), Color(hex: 0xEB4B46).opacity(0.55)]),
                                                startPoint: CGPoint(x: 0, y: BL), endPoint: CGPoint(x: 0, y: Self.BOT)))
                 if kind == .delta {
-                    ctx.fill(area({ max(50, $0) }, capY), with: .color(Color(hex: 0xF7CE46).opacity(0.38)))
+                    ctx.fill(area({ max(30, $0) }, capY), with: .color(S.muted.opacity(0.22)))
                     var c = Path(); c.move(to: CGPoint(x: 0, y: capY)); c.addLine(to: CGPoint(x: LW, y: capY))
                     ctx.stroke(c, with: .color(S.ink.opacity(0.22)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                 }
@@ -186,7 +200,7 @@ struct SunnyMountain: View {
             tag(kind == .theta ? Self.thetaLineTag : "20%", color: faint, weight: 600)
                 .alignmentGuide(.leading) { _ in -(LW + 7) }.alignmentGuide(.top) { d in -(by - d.height / 2) }
             if kind == .delta && abs(capY - ey) >= 11 {
-                tag("50%", color: faint, weight: 600)
+                tag("30%", color: faint, weight: 600)
                     .alignmentGuide(.leading) { _ in -(LW + 7) }.alignmentGuide(.top) { d in -(capY - d.height / 2) }
             }
             ForEach(months(days), id: \.m) { o in
@@ -253,9 +267,11 @@ struct SunnyMountain: View {
             t.sort { ($0.hot != nil ? 0 : 1) < ($1.hot != nil ? 0 : 1) }
             return t
         }
-        return home.risk.delta.by.filter { $0.long > 0 }.sorted { $0.pct > $1.pct }.map {
-            Tile(name: $0.ticker, value: "\(Int($0.pct.rounded()))%", tone: $0.pct < 20 || $0.pct > 50 ? S.yellowDeep : S.green,
-                 sub: "\(nK($0.sold)) of \(nK($0.long)) Δ", hot: nil)
+        // Thinnest cushion first.
+        return home.risk.delta.by.filter { ($0.shares ?? 0) > 0 }.sorted { $0.pct < $1.pct }.map {
+            let n = $0.net ?? 0
+            return Tile(name: $0.ticker, value: "\(Int($0.pct.rounded()))%", tone: Self.band($0.pct).color,
+                        sub: "\(n < 0 ? "-" : "")\(nK(n)) Δ left", hot: nil)
         }
     }
 
