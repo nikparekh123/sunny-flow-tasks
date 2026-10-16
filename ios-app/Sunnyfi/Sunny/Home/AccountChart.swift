@@ -173,6 +173,9 @@ extension Array {
 
 struct AccountChart: View {
     let home: HomePayload
+    /// Home opened or was pulled: Time value shows its read for a few seconds.
+    var readTick = 0
+    @State private var readOn = false
     @AppStorage(SunnyPrivacy.key) private var hidden = false   // also set by the Hide / Show Sunny numbers actions
     @State private var range: ChartRange = DebugPreset.string("chart.range").flatMap(ChartRange.init(rawValue:)) ?? .m1
     @State private var compare = DebugPreset.bool("chart.compare")
@@ -203,6 +206,33 @@ struct AccountChart: View {
             if let m = model, !m.available(range) { range = .all }
             if DebugPreset.gallery != nil || !DebugPreset.values.isEmpty { hidden = DebugPreset.bool("eye") }
         }
+        .task(id: readTick) {
+            guard readTick > 0, Self.timeValueRead(home) != nil else { return }
+            try? await Task.sleep(for: .milliseconds(1200))    // after the loading screen has gone
+            guard !Task.isCancelled else { return }
+            withAnimation(reduce ? nil : S.standard(0.4)) { readOn = true }
+            try? await Task.sleep(for: .seconds(3))
+            withAnimation(reduce ? nil : S.standard(0.4)) { readOn = false }
+        }
+    }
+
+    /// The one-word read that stands in for "Time value" for a few seconds
+    /// (Nik, 16 Oct 2026). From the sold legs alone: what they are in the money
+    /// at today's prices against the time value still in them. Under 10% is
+    /// calm and shows nothing (Nik dropped "Decaying": the label staying put
+    /// already says calm); otherwise the side with more in the money says which
+    /// way prices are pushing: calls Stocks up, puts Stocks down.
+    static func timeValueRead(_ home: HomePayload) -> (word: String, color: Color)? {
+        let tv = home.account.timeValueSold ?? 0
+        guard tv > 0 else { return nil }
+        var calls = 0.0, puts = 0.0
+        for l in home.legs where l.side == "sold" && l.expiry >= home.today {
+            guard let s = home.portfolio.first(where: { $0.ticker == l.ticker })?.spot ?? l.underlying else { continue }
+            let x = (l.type == "call" ? max(0, s - l.strike) : max(0, l.strike - s)) * Double(l.n) * 100
+            if l.type == "call" { calls += x } else { puts += x }
+        }
+        if calls + puts < 0.1 * tv { return nil }
+        return calls >= puts ? ("Stocks up", S.orangeDeep) : ("Stocks down", S.red)
     }
 
     // MARK: Where we are
@@ -562,6 +592,8 @@ struct AccountChart: View {
         var value: Double = 0
         var text: String? = nil
         var color: Color = S.ink
+        /// Time value only, live (not while dragging): the word and its colour.
+        var read: (word: String, color: Color)? = nil
     }
 
     private var stats: [Stat] {
@@ -577,7 +609,8 @@ struct AccountChart: View {
             let tv = lastLive ? (home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
             return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
                     Stat(label: "Unrealized", value: u, color: S.lossInk(u)),
-                    Stat(label: "Time value", value: tv, color: S.lossInk(tv))]
+                    Stat(label: "Time value", value: tv, color: S.lossInk(tv),
+                         read: scrubbing ? nil : Self.timeValueRead(home))]
         case .shares?:
             let r = m.realized(.shares, .both, i) - m.realized(.shares, .both, s)
             let u = m.unreal(.shares, .both, i)
@@ -616,13 +649,23 @@ struct AccountChart: View {
             .foregroundStyle(st.color)
             .lineLimit(1)
             .blur(radius: hidden ? 9 : 0)
-            Text(st.label)
-                .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                .foregroundStyle(S.muted)
-                .lineLimit(1)
+            // The read rolls in over "Time value" for a few seconds, then back.
+            let word = readOn ? st.read : nil
+            ZStack(alignment: .leading) {
+                Text(word?.word ?? st.label)
+                    .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+                    .foregroundStyle(word?.color ?? S.muted)
+                    .lineLimit(1)
+                    .id(word?.word ?? st.label)
+                    .transition(reduce ? .identity : .asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)))
+            }
+            .frame(height: 16, alignment: .leading)
+            .clipped()
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(st.label) \(hidden ? "hidden" : st.text ?? F.money(st.value))")
+        .accessibilityLabel("\(st.read?.word ?? st.label) \(hidden ? "hidden" : st.text ?? F.money(st.value))")
     }
 
     private struct Minor { let label: String; let text: String; var color: Color = S.ink }

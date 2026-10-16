@@ -37,6 +37,9 @@ final class HomeStore {
     /// Bumped on a good update while a session runs: the live glow pulses
     /// (block 24). Closed, it stays still and the glow fades out.
     private(set) var livePulse = 0
+    /// Bumped when Home opens and on pull to refresh: the account block's
+    /// Time value label shows its one-word read for a few seconds (Nik, 16 Oct 2026).
+    private(set) var readTick = 0
     private var lastPulse: Date?
     /// Legs bought, sold, closed or resized since the last update, and the
     /// toast's count: "Positions updated · 3 changed". Price moves are not a
@@ -69,11 +72,17 @@ final class HomeStore {
     enum Reason { case open, pull, tick }
 
     func refresh(_ reason: Reason = .pull) async {
-        if let t = inFlight { await t.value; if reason != .tick, let h = home { words = h }; return }
+        if let t = inFlight {
+            await t.value
+            if reason != .tick, let h = home { words = h }
+            if reason == .pull { readTick += 1 }
+            return
+        }
         let t = Task { await self.fetch(reason) }
         inFlight = t
         await t.value
         inFlight = nil
+        if reason == .pull { readTick += 1 }
     }
 
     private func fetch(_ reason: Reason) async {
@@ -163,6 +172,7 @@ final class HomeStore {
         } else {
             await refresh(.open)
         }
+        readTick += 1
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(Self.untilNextBuild(calendar: home?.calendar ?? [])))
             if Task.isCancelled { break }

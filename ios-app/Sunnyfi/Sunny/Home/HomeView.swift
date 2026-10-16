@@ -91,7 +91,7 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 10) {
                         StatusLine(store: store).padding(.horizontal, S.margin)
-                        AccountChart(home: home)
+                        AccountChart(home: home, readTick: store.readTick)
                     }
                     .sEnter(0)
                     SunnyDeck(cards: DeckBuilder.cards(home), today: home.today) { act(action: $0) }
