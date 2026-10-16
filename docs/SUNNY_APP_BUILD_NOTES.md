@@ -340,6 +340,12 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     the eye still toggles it by hand. Nik sets Leave home / Arrive home automations in
     Shortcuts; Sunny never sees a location. Account block only; blurring every figure would
     need a design first.
+72. **One rule: full quantity** (Nik, 16 Oct 2026). The Planner sells calls on every LEAP; the
+    15 Oct 20% cushion trim is removed (sunny-home 2026-10-16.6). Extra delta comes from BUYING
+    the 3-month (15% out) and 12-month (30% out) upside calls, sized at 10% of LEAP value a year,
+    never from selling fewer. Delta and the Planner should become one design (Nik will get it
+    designed); next idea: a "calls to buy" line in the Planner, and "add upside calls" when a
+    name's net delta gets thin.
 71. **Delta tags** (Nik, 16 Oct 2026). Each Delta tile names the problem: Room to sell (over 30%),
     On target (20-30%), Getting thin (15-20%), Too thin (under 15%), Net short (below 0); first
     built as Sell / Fine / Watch / Buy back and renamed the same day. Tags are judged on NEXT WEEK: a leg

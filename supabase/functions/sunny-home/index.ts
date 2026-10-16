@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-16.5';
+const BUILD = '2026-10-16.6';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -41,11 +41,10 @@ const PUT_SHARE = 0.3;
    long puts on half the LEAPs, weekly puts sold on half of those, at the first strike
    at least otmPct% below spot and never above a long put's strike, so each one stays
    covered. Held names only for now. */
-/* The delta cushion (Nik, 15 Oct 2026): after next Friday's suggested sale a
-   name keeps at least this share of its LEAP shares long (20 per LEAP). */
-const CUSHION = 0.2;
-/* The week a name reports it keeps 10 more points of delta, on the Delta card's
-   band and in the Planner's cushion alike (Nik, 16 Oct 2026). */
+/* ONE RULE (Nik, 16 Oct 2026): the Planner sells calls on every LEAP, the full
+   quantity; delta is kept by BUYING the quarterly and yearly upside calls, never
+   by selling fewer. The 20% cushion trim (15 Oct) is gone. The Delta card's band
+   still runs 10 points higher the week a name reports. */
 const DELTA_EARN_BUMP = 10;
 const PUT_RULES: Record<string, { share: number; otmPct: number }> = {
   NKE: { share: 0.5, otmPct: 2 }, LULU: { share: 0.5, otmPct: 2 },
@@ -1258,7 +1257,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        names half (NKE 30 -> 15, BABA 7 -> 4). */
     const putTarget = Math.floor(putsN * (pRule?.share ?? PUT_SHARE) + 0.5);
     const leftPuts = Math.max(0, putTarget - donePuts);
-    let plan = [
+    const plan = [
       atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta,
         note: rule ? `${rule.otmPct}% out of the money` : 'at the money' } : null,
       otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta, note: out === 1 ? 'at 1 SD' : 'at 0.6 SD' } : null,
@@ -1269,14 +1268,6 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        and counting them made a plan look delta negative (Nik, 15 Oct 2026). */
     const deltaNow = ls.filter((l) => l.expiry >= targetExp)
       .reduce((s, l) => s + (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100, 0);
-    /* Trim calls until the cushion holds: the at-the-money strike first (the
-       most delta a contract), then the one further out. Puts add delta. */
-    const floorD = (CUSHION + (earnIn ? DELTA_EARN_BUMP / 100 : 0)) * leapN * 100;
-    let afterD = deltaNow - plan.reduce((s, p) => s + (p.delta ?? 0) * p.n * 100, 0), trimmed = 0;
-    for (const p of plan.filter((x) => x.type === 'call')) {
-      while (p.n > 0 && afterD < floorD && (p.delta ?? 0) > 0) { p.n -= 1; afterD += (p.delta ?? 0) * 100; trimmed += 1; }
-    }
-    plan = plan.filter((p) => p.n > 0);
     const deltaAfter = deltaNow - plan.reduce((s, p) => s + (p.delta ?? 0) * p.n * 100, 0);
     const putK = put?.k ?? sold.find((x) => x.type === 'put')?.strike ?? null;
     writes.push({
@@ -1297,7 +1288,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       collected: Math.round(sold.reduce((s, l) => s + l.avg * l.n * 100, 0)),
       calls: { sold: doneAtm + doneOtm, of: callTarget }, puts: { sold: donePuts, of: putTarget, bought: putsN },
       written: left === 0 && leftPuts === 0,
-      delta: { now: Math.round(deltaNow), after: Math.round(deltaAfter), floor: Math.round(floorD), trimmed },
+      delta: { now: Math.round(deltaNow), after: Math.round(deltaAfter) },
       /* The By Fri bar: put strike, price, the call strike, the 1 SD call. */
       bar: { put: putK, spot: r2(spot), call: atm?.k ?? sold.find((x) => x.type === 'call')?.strike ?? null,
              sd1: sd1?.k ?? null, breakeven: atm ? r2(atm.k + atm.mid) : null,

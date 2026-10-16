@@ -80,7 +80,7 @@ every put by 15 Oct and asked for a forward test (not a backtest: these names fe
 | the long put | March 2027 (about 5 months), the strike nearest 8% above the price, on **half** the LEAPs; roll before expiry into the next ~5-month put |
 | the weekly put | **half the long puts**, the first strike at least 2% below the price, never above a long put's strike (always covered) |
 | the calls | unchanged: every LEAP, a third at the money, the rest at 0.6 SD |
-| extra upside | optional: buy out-of-the-money calls (1-year ~30% out or quarterly ~15% out), never sell fewer calls |
+| extra upside | buy out-of-the-money calls: 12-month ~30% out (held) and 3-month ~15% out (each quarter), 10% of each name's LEAP value a year, split by payoff per $ (NKE leans 12-month, LULU 3-month). **One rule (16 Oct): calls are sold on every LEAP; delta is kept by these buys, never by selling fewer calls.** |
 
 Across the ten names tested: about free in a flat year, +$219K in a 30% crash, -$151K in a
 sudden 30% jump. The account is on portfolio margin, so the puts cut the margin requirement
