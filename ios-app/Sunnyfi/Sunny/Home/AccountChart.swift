@@ -173,7 +173,7 @@ extension Array {
 
 struct AccountChart: View {
     let home: HomePayload
-    @AppStorage("sunny.hideNumbers") private var hidden = false
+    @AppStorage(SunnyPrivacy.key) private var hidden = false   // also set by the Hide / Show Sunny numbers actions
     @State private var range: ChartRange = DebugPreset.string("chart.range").flatMap(ChartRange.init(rawValue:)) ?? .m1
     @State private var compare = DebugPreset.bool("chart.compare")
     @State private var single: ChartGroup? = DebugPreset.string("chart.single").flatMap(ChartGroup.init(rawValue:))

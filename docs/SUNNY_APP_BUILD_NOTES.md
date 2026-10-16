@@ -334,6 +334,12 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     than 60 s late (backgrounded) or Reduce Motion: a plain swap. Before the open a card's
     move runs from the last regular close (Yahoo's previous close is then the day before);
     this also fixes the 4:00-9:30 change. `-preset today.bell=N` rings N s after launch.
+68. **Travel privacy via Shortcuts** (Nik, 16 Oct 2026). `App/SunnyIntents.swift`: "Hide Sunny
+    numbers" and "Show Sunny numbers" App Intents (and Siri phrases "Hide numbers in Sunny")
+    set `sunny.hideNumbers`, the eye's own switch, so the account block opens blurred or clear;
+    the eye still toggles it by hand. Nik sets Leave home / Arrive home automations in
+    Shortcuts; Sunny never sees a location. Account block only; blurring every figure would
+    need a design first.
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home
