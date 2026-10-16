@@ -41,13 +41,6 @@ enum ChartGroup: String, CaseIterable, Identifiable {
     var splits: Bool { self == .sold || self == .bought }
 }
 
-/// The four legs' shared mode (handoff 24, block 02b): one tap steps
-/// % change → $ change → Time value → back, Positions' order.
-enum LegMode: CaseIterable {
-    case pct, usd, tv
-    var next: LegMode { self == .pct ? .usd : self == .usd ? .tv : .pct }
-}
-
 enum ChartHalf: String, CaseIterable, Identifiable {
     case both = "Both", calls = "Calls", puts = "Puts"
     var id: String { rawValue }
@@ -188,7 +181,6 @@ struct AccountChart: View {
     /// The finger, 0...1 across the line (continuous; numbers snap to a day).
     @State private var finger: CGFloat? = DebugPreset.double("chart.scrub").map { CGFloat($0) }
     @State private var drawn: CGFloat = 0
-    @State private var legMode: LegMode = .pct
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     private var model: ChartModel? {
@@ -543,24 +535,10 @@ struct AccountChart: View {
                 legend.transition(.opacity)
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        modeLabel
-                        // Nothing singled out: the four legs, one tap cycles them all
-                        // (handoff 24). A strategy singled out keeps its three stats.
-                        let legs = single == nil && !fresh
-                        Button {
-                            withAnimation(reduce ? nil : .smooth(duration: S.roll)) { legMode = legMode.next }
-                        } label: {
-                            HStack(alignment: .top, spacing: 12) {
-                                ForEach(Array(stats.enumerated()), id: \.offset) { _, st in
-                                    statCell(st).frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                            .contentShape(Rectangle())
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(Array(stats.enumerated()), id: \.offset) { _, st in
+                            statCell(st).frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(!legs)
-                        .accessibilityHint(legs ? "Switches percent change, dollar change and time value" : "")
                     }
                     HStack(spacing: 12) {
                         HStack(spacing: 16) {
@@ -576,41 +554,7 @@ struct AccountChart: View {
                 .transition(.opacity)
             }
         }
-        // 112 in every state, so the deck below never moves (handoff 24).
-        .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
-    }
-
-    /// "% change · 1M", "$ change · to Oct 3", "Time value · now", then three
-    /// dots for the mode; a strategy singled out reads "Sold · 1M", no dots.
-    private var modeLabel: some View {
-        let (_, e) = bounds, i = at
-        let past = finger != nil && i < e
-        let day = model.map { F.day($0.c.days[i]) } ?? ""
-        let when = past ? "to \(day)" : range.rawValue
-        let text: String = {
-            if let g = single { return "\(g.rawValue) · \(when)" }
-            switch legMode {
-            case .pct: return "% change · \(when)"
-            case .usd: return "$ change · \(when)"
-            case .tv: return past ? "Time value · \(day)" : "Time value · now"
-            }
-        }()
-        return HStack(spacing: 8) {
-            Text(text).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
-                .foregroundStyle(S.muted)
-                .contentTransition(.opacity)
-            if single == nil && !fresh {
-                HStack(spacing: 4) {
-                    ForEach(LegMode.allCases, id: \.self) { m in
-                        Capsule().fill(m == legMode ? S.ink : S.muted.opacity(0.4))
-                            .frame(width: m == legMode ? 14 : 5, height: 5)
-                    }
-                }
-                .animation(reduce ? nil : S.standard(0.3), value: legMode)
-                .accessibilityHidden(true)
-            }
-        }
-        .frame(height: 16)
+        .frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
     }
 
     private struct Stat {
@@ -618,39 +562,22 @@ struct AccountChart: View {
         var value: Double = 0
         var text: String? = nil
         var color: Color = S.ink
-        /// The legs: one format for the column (%, $12.4K, time value).
-        var format: ((Double) -> String)? = nil
-    }
-
-    /// Calls sold · Puts sold · Calls bought · Puts bought. Change runs from the
-    /// range start to the day you are on; % is that over the money in long
-    /// options at the range start (Nik, 12 Oct); time value is that day's.
-    private func legs(_ m: ChartModel, s: Int, i: Int) -> [Stat] {
-        let cap = m.capital(.sold, s)
-        return [("cs", "Calls sold"), ("ps", "Puts sold"), ("cb", "Calls bought"), ("pb", "Puts bought")].map { k, name in
-            let g = m.c.groups[k]
-            let d = (g?.line[safe: i] ?? 0) - (g?.line[safe: s] ?? 0)
-            let tone = d.rounded() == 0 ? S.ink : d > 0 ? S.green : S.red
-            switch legMode {
-            case .pct:
-                let p = cap > 0 ? d / cap * 100 : 0
-                return Stat(label: name, value: p, color: abs(p) < 0.05 ? S.ink : tone, format: { F.pct($0, places: 1) })
-            case .usd:
-                return Stat(label: name, value: d, color: tone, format: { F.moneyK($0) })
-            case .tv:
-                return Stat(label: name, value: g?.tv[safe: i] ?? 0, format: { F.moneyK($0) })
-            }
-        }
     }
 
     private var stats: [Stat] {
         guard let m = model, !fresh else {
-            return ["Calls sold", "Puts sold", "Calls bought", "Puts bought"].map { Stat(label: $0, format: { F.moneyK($0) }) }
+            return ["Realized", "Unrealized", "Time value"].map { Stat(label: $0) }
         }
-        let (s, _) = bounds, i = at
+        let (s, e) = bounds, i = at
+        let lastLive = i == e && m.c.liveLast
         switch single {
         case .none:
-            return legs(m, s: s, i: i)
+            let r = (m.c.realizedCum[i] ?? 0) - (m.c.realizedCum[s] ?? 0)
+            let u = lastLive ? (home.account.unrealized ?? m.c.unrealized[i] ?? 0) : (m.c.unrealized[i] ?? 0)
+            let tv = lastLive ? (home.account.timeValueSold ?? m.c.timeValue[i] ?? 0) : (m.c.timeValue[i] ?? 0)
+            return [Stat(label: "Realized", value: r, color: S.lossInk(r)),
+                    Stat(label: "Unrealized", value: u, color: S.lossInk(u)),
+                    Stat(label: "Time value", value: tv, color: S.lossInk(tv))]
         case .shares?:
             let r = m.realized(.shares, .both, i) - m.realized(.shares, .both, s)
             let u = m.unreal(.shares, .both, i)
@@ -677,8 +604,6 @@ struct AccountChart: View {
             Group {
                 if let t = st.text {
                     Text(t)
-                } else if let f = st.format {
-                    SNumber(value: st.value, format: f, countUp: false)
                 } else {
                     // Full dollars; $K above $100,000 only when the column would wrap.
                     ViewThatFits(in: .horizontal) {

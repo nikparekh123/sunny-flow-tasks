@@ -313,7 +313,7 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     week's bar, so the hero, stat line and Calls on count rolled contracts as sold:
     "116 of 124 calls · 94% covered · 67 rolled · 8 left". Nik rolls most Fridays, so past
     weeks are mostly hatched. Positions keeps its All page for now (Nik, 15 Oct, over §4).
-66. **Account chart · four legs** (handoff 24, block 02b). Realized and Unrealized left the
+66. **Account chart · four legs: REVERTED** (Nik, 15 Oct 2026: "I don't like this change"). The stats row stays Realized · Unrealized · Time value; handoff 24 §2 is not built. What was tried (handoff 24, block 02b): Realized and Unrealized left the
     stats row: Calls sold · Puts sold · Calls bought · Puts bought, one tap cycles % change →
     $ change → Time value. Change = the leg's running P&L (`groups.cs|ps|cb|pb.line`) from the
     range start to the day you are on; % = that over the money in long options at the range
