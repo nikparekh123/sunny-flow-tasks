@@ -28,6 +28,9 @@ struct SunnyPlanner: View {
     @State private var risen = [false, false, false]
     @State private var lineDrawn = false
     @State private var dotIn = false
+    /// The name on screen, kept while the page slides away (Back clears the
+    /// router's name first, and the page flipped to the first name mid-slide).
+    @State private var lastT: String?
 
     enum Mode { case lanes, week }
 
@@ -40,7 +43,7 @@ struct SunnyPlanner: View {
 
     var body: some View {
         let all = pkgs
-        let cur = all.first { $0.t == router.writes } ?? all.first
+        let cur = all.first { $0.t == (router.writes ?? lastT) } ?? all.first
         ZStack(alignment: .top) {
             PlannerAmbient()
             // The page width is read, never written back into state: a
@@ -62,16 +65,31 @@ struct SunnyPlanner: View {
                 .scrollIndicators(.hidden)
             }
         }
-        // Back from the left edge only, as iOS does.
+        // Back from the left edge, as iOS does; anywhere else a sideways swipe
+        // moves to the next or previous name, as the Oct 14 Planner did (Nik,
+        // 16 Oct 2026: "swipe doesnt work").
         .gesture(DragGesture(minimumDistance: 30).onEnded { v in
-            if v.startLocation.x < 30, v.translation.width > 80, abs(v.translation.height) < 60 { router.closePlanner() }
+            let dx = v.translation.width, dy = v.translation.height
+            if v.startLocation.x < 30, dx > 80, abs(dy) < 60 { router.closePlanner(); return }
+            guard abs(dx) > 60, abs(dx) > 2 * abs(dy), let cur else { return }
+            step(all, from: cur.t, by: dx < 0 ? 1 : -1)
         })
-        .task(id: cur?.t) { await entrance() }
+        .task(id: cur?.t) {
+            lastT = cur?.t
+            await entrance()
+        }
         .onAppear {
             #if DEBUG && targetEnvironment(simulator)
             if DebugPreset.string("planner.view") == "week" { mode = .week }
             #endif
         }
+    }
+
+    /// The next or previous name, in chip order; nothing past either end.
+    private func step(_ all: [PlanPkg], from t: String, by d: Int) {
+        guard let i = all.firstIndex(where: { $0.t == t }), all.indices.contains(i + d) else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        router.writes = all[i + d].t
     }
 
     /// Replays on every name change; Reduce Motion shows everything at once.
