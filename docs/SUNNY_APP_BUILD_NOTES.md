@@ -346,6 +346,24 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     never from selling fewer. Delta and the Planner should become one design (Nik will get it
     designed); next idea: a "calls to buy" line in the Planner, and "add upside calls" when a
     name's net delta gets thin.
+73. **Handoff 25: Planner and Delta replaced** (Nik, 16 Oct 2026). One package per name,
+    built in sunny-home (`writes.names[].pkg`) and read by both cards, so a Delta tile and the
+    Planner's "now" are one number. Nik's answers: NOW is the next-week basis (legs past
+    today, as the Delta card already was), not the design's "everything on today"; SELLS are
+    our rule (a third at the money, the rest at 0.6 SD, 20% ATM in an earnings week; puts by
+    PUT_RULES), not the design's 30% / round-down; BUYS follow the design (12-month ~30% out
+    held the year, 3-month ~15% out rolled at expiry, 10% of LEAP value a year split by live
+    delta per dollar, each at least 1); ORANGE under 20% (30% the week it reports), RED net
+    short. The fix (pick one, 3-month default) lands on 25% (35%) when after-the-plan is still
+    under 20% (30%) with every suggestion on. Upside quotes: chain-next writes
+    `option_chain_upside` (monthly nearest 91 / 365 days, calls 5-50% out) every 15 min.
+    "Rolls" on a held upside call is its expiry (the research rolled 3-month at expiry and
+    held 12-month the year). Adjust strikes pushes the Oct 14 page (`SunnyStrikes`), unchanged.
+    Breathing runs on Core Animation (`Risk/DeltaAlert.swift`). Gaps filled without a design:
+    "Everything for <Fri> is sold." when the sells are all done; chip order is alphabetical;
+    lane height holds when a filter clears a lane. Hit a layout loop on first build: a width
+    measured with onGeometryChange and fed back into the same layout; now read from a
+    GeometryReader only.
 71. **Delta tags** (Nik, 16 Oct 2026). Each Delta tile names the problem: Room to sell (over 30%),
     On target (20-30%), Getting thin (15-20%), Too thin (under 15%), Net short (below 0); first
     built as Sell / Fine / Watch / Buy back and renamed the same day. Tags are judged on NEXT WEEK: a leg

@@ -249,7 +249,7 @@ struct SunnyPlanner: View {
             Text(t).sType(SType(size: 12, weight: 600, line: 12, tracking: 0), tabular: false)
                 .foregroundStyle(mode == m ? S.paper : S.ink)
                 .frame(width: 72, height: 28)
-                .contentShape(Rectangle())
+                .contentShape(Rectangle().inset(by: -8))   // 44 pt to the touch, 28 to the eye
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(mode == m ? .isSelected : [])
