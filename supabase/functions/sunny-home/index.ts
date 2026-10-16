@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-15.6';
+const BUILD = '2026-10-16.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -598,16 +598,20 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
 
   step('market+portfolio');
   // ── Risk: Theta and Delta now (history comes from the daily roll-up) ──
-  const tick = new Map<string, { collect: number; lose: number; longD: number; soldD: number }>();
-  let thShort = 0, thLong = 0, dLong = 0, dSold = 0;
+  const tick = new Map<string, { collect: number; lose: number; longD: number; soldD: number; hedgeD: number }>();
+  let thShort = 0, thLong = 0, dLong = 0, dSold = 0, dHedge = 0;
   for (const l of legs) {
-    const e = tick.get(l.ticker) ?? { collect: 0, lose: 0, longD: 0, soldD: 0 };
+    const e = tick.get(l.ticker) ?? { collect: 0, lose: 0, longD: 0, soldD: 0, hedgeD: 0 };
     const th = Math.abs(l.theta ?? 0) * l.n * 100;
     if (l.side === 'sold') { thShort += th; e.collect += th; } else { thLong += th; e.lose += th; }
-    /* Delta is calls only (block 16, Nik accepted 12 Oct 2026). */
-    if (l.type === 'call' && l.delta != null) {
+    /* Delta (Nik, 16 Oct 2026): short = everything sold, calls and puts, as
+       sizes added; long = every call bought (LEAPs and the upside calls); the
+       hedge puts bought are their own number. (Was calls only, 12 Oct.) */
+    if (l.delta != null) {
       const d = Math.abs(l.delta) * l.n * 100;
-      if (l.side === 'sold') { dSold += d; e.soldD += d; } else { dLong += d; e.longD += d; }
+      if (l.side === 'sold') { dSold += d; e.soldD += d; }
+      else if (l.type === 'call') { dLong += d; e.longD += d; }
+      else { dHedge += d; e.hedgeD += d; }
     }
     tick.set(l.ticker, e);
   }
@@ -615,9 +619,11 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     theta: { short: r2(thShort), long: r2(thLong), ratio_now: thLong > 0 ? r2(thShort / thLong) : null,
       by: [...tick].map(([t, e]) => ({ ticker: t, collect: r2(e.collect), lose: r2(e.lose), net: r2(e.collect - e.lose) }))
         .sort((a, b) => Math.abs(b.net) - Math.abs(a.net)) },
-    delta: { sold: Math.round(dSold), long: Math.round(dLong), ratio_now: dLong > 0 ? r2(dSold / dLong * 100) : null,
+    delta: { sold: Math.round(dSold), long: Math.round(dLong), hedge: Math.round(dHedge),
+      ratio_now: dLong > 0 ? r2(dSold / dLong * 100) : null,
       by: [...tick].filter(([, e]) => e.longD > 0)
-        .map(([t, e]) => ({ ticker: t, sold: Math.round(e.soldD), long: Math.round(e.longD), pct: r2(e.soldD / e.longD * 100) }))
+        .map(([t, e]) => ({ ticker: t, sold: Math.round(e.soldD), long: Math.round(e.longD), hedge: Math.round(e.hedgeD),
+                            pct: r2(e.soldD / e.longD * 100) }))
         .sort((a, b) => b.pct - a.pct) },
   };
 
@@ -662,10 +668,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     }
     return null;
   };
-  type Point = { d: string; thS: number; thL: number; dS: number; dL: number; longMV: number; shortMV: number;
+  type Point = { d: string; thS: number; thL: number; dS: number; dL: number; dH: number; longMV: number; shortMV: number;
                  thLongBy: Record<string, number> };
   const pointOf = (d: string, live: boolean): Point => {
-    const p: Point = { d, thS: 0, thL: 0, dS: 0, dL: 0, longMV: 0, shortMV: 0, thLongBy: {} };
+    const p: Point = { d, thS: 0, thL: 0, dS: 0, dL: 0, dH: 0, longMV: 0, shortMV: 0, thLongBy: {} };
     const ls = live
       ? legs.map((l) => ({ ticker: l.ticker, type: l.type, short: l.side === 'sold', n: l.n,
           g: { theta: l.theta, delta: l.delta, mark: l.mark } as Row, key: `${l.ticker}|${l.type}|${l.strike}|${l.expiry}` }))
@@ -677,9 +683,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (l.short) { p.thS += th; p.shortMV += mv; } else {
         p.thL += th; p.longMV += mv; p.thLongBy[l.key] = (p.thLongBy[l.key] ?? 0) + th;
       }
-      if (l.type === 'call' && l.g.delta != null) {
+      if (l.g.delta != null) {                     // same split as the live card above
         const dl = Math.abs(Number(l.g.delta)) * l.n * 100;
-        if (l.short) p.dS += dl; else p.dL += dl;
+        if (l.short) p.dS += dl; else if (l.type === 'call') p.dL += dl; else p.dH += dl;
       }
     }
     return p;
@@ -727,7 +733,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       short: all.map((p) => Math.round(p.thS)), long: all.map((p) => Math.round(p.thL)) },
     delta: { daily: deltaDaily.map((x) => (x == null ? null : Math.round(x))), avg2w: delta2w.map((x) => (x == null ? null : Math.round(x))),
       now: delta2w.at(-1) == null ? null : Math.round(delta2w.at(-1)!), trend: trendOf(delta2w),
-      sold: all.map((p) => Math.round(p.dS)), long: all.map((p) => Math.round(p.dL)) },
+      sold: all.map((p) => Math.round(p.dS)), long: all.map((p) => Math.round(p.dL)), hedge: all.map((p) => Math.round(p.dH)) },
   };
 
   step('history');

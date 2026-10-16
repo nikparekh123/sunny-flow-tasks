@@ -226,6 +226,8 @@ struct History: Decodable {
         let avg2w: [Double]
         let now: Double?
         let trend: String?
+        /// Delta only: the hedge puts' delta each day (16 Oct 2026).
+        let hedge: [Double?]?
     }
 }
 
@@ -238,11 +240,14 @@ struct Risk: Decodable {
         let by: [By]
         struct By: Decodable { let ticker: String; let net: Double; let collect: Double; let lose: Double }
     }
+    /// Short = everything sold, calls and puts, as sizes; long = every call
+    /// bought (LEAPs and upside calls); hedge = the puts bought (Nik, 16 Oct 2026).
     struct Delta: Decodable {
         let long: Double
         let sold: Double
+        let hedge: Double?
         let by: [By]
-        struct By: Decodable { let ticker: String; let pct: Double; let long: Double; let sold: Double }
+        struct By: Decodable { let ticker: String; let pct: Double; let long: Double; let sold: Double; let hedge: Double? }
     }
 }
 

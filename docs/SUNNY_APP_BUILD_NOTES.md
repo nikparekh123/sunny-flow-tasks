@@ -340,6 +340,13 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     the eye still toggles it by hand. Nik sets Leave home / Arrive home automations in
     Shortcuts; Sunny never sees a location. Account block only; blurring every figure would
     need a design first.
+69. **Delta card: short, long, hedge** (Nik, 16 Oct 2026; was calls only since 12 Oct). Short Δ =
+    every leg sold, calls and puts, as sizes added; long Δ = every call bought (LEAPs plus the
+    3- and 12-month upside calls, 10% of LEAP value a year); the hedge puts bought are a third
+    line under the hero ("Hedge puts · 2.9K Δ"), now or on the day scrubbed. Ratio, tiles and
+    history all use the new split (sunny-home 2026-10-16.1, `risk.delta.hedge`,
+    `history.delta.hedge`). Theta and Delta share one height. With puts sold counted the ratio
+    reads higher (69% on 16 Oct, was ~49%), so the 20-50% band may need a new look.
 55. **Speed (Planner audit).** `SType.uiFont` now caches each Inter size/weight/tnum (a
     variable-font descriptor per Text per redraw was the app's top cost); `MarketClock.addDays`
     keeps one formatter. The Planner reads its name from the router, not a Binding, so a Home

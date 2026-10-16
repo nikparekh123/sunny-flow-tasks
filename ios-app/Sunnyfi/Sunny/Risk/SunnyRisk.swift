@@ -5,7 +5,9 @@
 //  Blocks 15 and 16 · Theta and Delta, the glass pair, on SunnyMountain.
 //  Theta: short theta ÷ long theta, 2-week average, off the 3× line (green
 //  above, brick below), a peak tag over the summit. Delta: sold Δ ÷ long Δ
-//  with the healthy band 20% to 50% (yellow above 50%). Both over the
+//  with the healthy band 20% to 50% (yellow above 50%); sold is calls and puts
+//  sold, long is every call bought, and the hedge puts are a third line
+//  (Nik, 16 Oct 2026). Both over the
 //  window since the book began, one point a trading day, today live. Drag
 //  to read any day. Tiles per ticker under each; the one a theta check
 //  found drags and breathes, and opens its receipt.
@@ -19,12 +21,15 @@ struct SunnyRisk: View {
 
     var body: some View {
         ScrollView(.horizontal) {
+            // One height for the pair: the Delta card's hedge line must not
+            // leave the Theta card short.
             HStack(alignment: .top, spacing: 12) {
                 SunnyMountain(kind: .theta, home: home) { leg in router.open(.theta(leg)) }
                     .frame(width: 341)
                 SunnyMountain(kind: .delta, home: home) { _ in }
                     .frame(width: 341)
             }
+            .fixedSize(horizontal: false, vertical: true)
             .scrollTargetLayout()
             .padding(.vertical, 4)
         }
@@ -78,6 +83,13 @@ struct SunnyMountain: View {
                         .foregroundStyle(S.muted)
                         .lineLimit(1).minimumScaleFactor(0.85)
                         .frame(height: 20)
+                    if kind == .delta, let hg = hedgeAt(idx, live: scrub == nil && pre == nil), hg > 0 {
+                        Text("Hedge puts · \(nK(hg)) Δ")
+                            .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                            .foregroundStyle(S.muted)
+                            .contentTransition(.numericText(value: hg))
+                            .frame(height: 20)
+                    }
                 }
             }
             if !noLongs && n > 1 { chart(idx, dragging: scrub != nil || pre != nil) }
@@ -85,9 +97,15 @@ struct SunnyMountain: View {
         }
         .foregroundStyle(S.ink)
         .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
         .sunnyGlow()
+    }
+
+    /// The hedge puts' delta: now, or the day under the finger.
+    private func hedgeAt(_ i: Int, live: Bool) -> Double? {
+        if live { return home.risk.delta.hedge }
+        return home.history.delta.hedge?[safe: i] ?? nil
     }
 
     // MARK: Words
