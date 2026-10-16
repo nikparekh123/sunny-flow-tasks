@@ -41,7 +41,7 @@ const json = (status: number, body: unknown) =>
     status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-const BUILD = '2026-10-14.1';
+const BUILD = '2026-10-16.1';
 
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
@@ -416,6 +416,67 @@ Deno.serve(async (req) => {
       }
     }
 
+    /* ⚠ THE UPSIDE CALLS (handoff 25, 16 Oct 2026). The Planner sizes the
+       12-month call (~30% out, held the year) and the 3-month (~15% out,
+       rolled at expiry) from their live mid and delta. The monthly expiry
+       nearest 91 and 365 days, from Theta's own list; calls 5% to 50% out of
+       the money. Their own table (option_chain_upside), so the weekly readers
+       never see these expiries. Theta only: Polygon has no expiry list here. */
+    const upRows: Record<string, unknown>[] = [];
+    if (useTheta) {
+      const monthly = (e: string) => { const d = new Date(e + 'T12:00:00Z'), wd = d.getUTCDay(), dd = d.getUTCDate();
+        return (wd === 5 && dd >= 15 && dd <= 21) || (wd === 4 && dd >= 14 && dd <= 20); };
+      const dayN = (e: string) => (Date.parse(e + 'T12:00:00Z') - Date.parse(today + 'T12:00:00Z')) / 86_400_000;
+      for (const ticker of [...names].sort()) {
+        const r = await fetch(`${THETA_URL}/v3/option/list/expirations?symbol=${ticker}&format=json`,
+          { headers: { 'x-proxy-key': THETA_KEY }, signal: AbortSignal.timeout(15_000) }).catch(() => null);
+        const list = r && r.ok ? (((await r.json())?.response ?? []) as Record<string, unknown>[]) : [];
+        const exps = list.map((x) => String(x.expiration ?? x.date ?? '')).filter(Boolean)
+          .map((e) => (e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`)).filter(monthly);
+        for (const [tenor, days, lo, hi] of [['3m', 91, 1.05, 1.35], ['12m', 365, 1.1, 1.5]] as const) {
+          const exp = exps.filter((e) => Math.abs(dayN(e) - days) <= (tenor === '3m' ? 35 : 75))
+            .sort((a, b) => Math.abs(dayN(a) - days) - Math.abs(dayN(b) - days))[0];
+          if (!exp) { notes.push(`${ticker} ${tenor}: no monthly near ${days} days`); continue; }
+          const items = await thetaChain(ticker, exp, false).catch(() => [] as Snap[]);
+          const spot = items.find((c) => c.underlying_asset?.price)?.underlying_asset?.price ?? null;
+          if (!spot) { notes.push(`${ticker} ${tenor} ${exp}: no spot`); continue; }
+          let kept = 0;
+          for (const c of items) {
+            const k = c.details?.strike_price;
+            if (c.details?.contract_type !== 'call' || typeof k !== 'number' || k < spot * lo || k > spot * hi) continue;
+            const mid = midOf(c, spot);
+            if (mid == null || c.greeks?.delta == null) continue;
+            kept++;
+            upRows.push({ ticker, tenor, expiry: exp, strike: k, mid: Math.round(mid * 100) / 100,
+              delta: Math.round(c.greeks.delta * 10000) / 10000,
+              iv: c.implied_volatility == null ? null : Math.round(c.implied_volatility * 10000) / 10000,
+              spot: Math.round(spot * 1000) / 1000, snapshot_at: runAt });
+          }
+          notes.push(`${ticker} ${tenor} ${exp}: ${kept}`);
+        }
+      }
+    }
+    if (!dryRun && upRows.length) {
+      const r = await fetch(`${SB_URL}/rest/v1/option_chain_upside?on_conflict=ticker,tenor,strike`, {
+        method: 'POST',
+        headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`,
+          'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates' },
+        body: JSON.stringify(upRows),
+      });
+      if (!r.ok) notes.push(`upside upsert: HTTP ${r.status} ${(await r.text()).slice(0, 200)}`);
+      else {
+        /* A name-tenor this run rewrote drops what it did not touch (strikes
+           that left the band, last month's expiry). */
+        for (const k of new Set(upRows.map((x) => `${x.ticker}|${x.tenor}`))) {
+          const [tk, tn] = k.split('|');
+          const d = await fetch(`${SB_URL}/rest/v1/option_chain_upside?ticker=eq.${tk}&tenor=eq.${tn}`
+            + `&snapshot_at=lt.${encodeURIComponent(runAt)}`,
+            { method: 'DELETE', headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` } });
+          if (!d.ok) notes.push(`upside delete ${k}: HTTP ${d.status}`);
+        }
+      }
+    }
+
     if (!dryRun && rows.length) {
       /* One upsert a chunk; the primary key is (ticker, expiry, side, strike),
          so a run rewrites the band in place. Strikes that left the band are
@@ -454,7 +515,7 @@ Deno.serve(async (req) => {
 
     return json(200, {
       ok: true, build: BUILD, source: src, dryRun, names: [...names].sort(), weeks,
-      rows: rows.length, ms: Date.now() - t0, notes,
+      rows: rows.length, upside: upRows.length, ms: Date.now() - t0, notes,
     });
   } catch (e) {
     return json(500, { ok: false, build: BUILD, error: (e as Error).message });

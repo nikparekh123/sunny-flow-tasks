@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-16.6';
+const BUILD = '2026-10-16.7';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -253,7 +253,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   const marksFrom = [addDays(today, -45), addDays(winStart, -10), addDays(BOOK_START, -5)].sort()[0];
 
   const [trades, greeks, quotes, market, acctDays, cal, earn, seasons, closes, runs, sells, lots, savedReports, macro,
-         openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast] = await Promise.all([
+         openChecks, divs, posAll, lmd, chainRows, savedHistory, divPast, upQuotes] = await Promise.all([
     page('option_trades?voided_at=is.null&order=id.asc&select=id,ticker,trade_date,action,option_type,'
       + 'direction,contracts,strike,premium,expiry,executed_at,commission,net_cash,realized_pl,realized_pl_source,note'),
     /* One row per leg ever marked: grows with every trade, so paged. */
@@ -287,6 +287,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     page('account_history?order=day.asc&select=day,nav,cash,margin,interest_cum,commission_cum,dividends_cum,'
       + 'realized_cum,unrealized,time_value,capital_long,shares_value,groups'),
     get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date&order=pay_date.asc,ticker.asc`),
+    /* The 3- and 12-month upside calls the Planner sizes (chain-next, 15 min). */
+    get('option_chain_upside?select=ticker,tenor,expiry,strike,mid,delta,spot&order=ticker.asc,tenor.asc,strike.asc'),
   ]);
 
   step('reads');
@@ -665,9 +667,12 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
             && String(x.report_date) >= today && String(x.report_date) <= addDays(today, 7));
           const up = earnWeek ? DELTA_EARN_BUMP : 0;
           const tag = pct < 15 + up ? 'buy_back' : pct < 20 + up ? 'watch' : pct <= 30 + up ? 'fine' : 'sell';
+          /* The alert (handoff 25, block 16): red when net short, orange under
+             20% (30% the week it reports); nothing else is coloured. */
+          const alert = pct < 0 ? 'red' : pct < 20 + up ? 'orange' : null;
           return { ticker: t, sold: Math.round(e.soldD), long: Math.round(e.longD), hedge: Math.round(e.hedgeD),
                    sold_calls: Math.round(e.scD), sold_puts: Math.round(e.spD), net: Math.round(net), shares: e.shares,
-                   pct: r2(pct), tag, earnings_week: earnWeek };
+                   pct: r2(pct), tag, alert, earnings_week: earnWeek };
         })
         .sort((a, b) => b.pct - a.pct) },
   };
@@ -1270,6 +1275,66 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       .reduce((s, l) => s + (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100, 0);
     const deltaAfter = deltaNow - plan.reduce((s, p) => s + (p.delta ?? 0) * p.n * 100, 0);
     const putK = put?.k ?? sold.find((x) => x.type === 'put')?.strike ?? null;
+    /* ── THE PACKAGE (handoff 25, blocks 14b and 16): one model for the
+       Planner and the Delta tile. Delta in share-equivalents, contracts × 100
+       × delta: long adds, short takes away, and a put's delta is negative, so
+       hedge puts take away and short puts add. NOW is the Delta tile's number
+       to the share (legs past today, the next-week basis; Nik, 16 Oct 2026).
+       AFTER is everything still on at the target Friday plus the suggestions
+       left on; the app redoes it as chips switch off. Sells are OUR rule
+       above (Nik: "keep ours"); the buys and the fix are the design's: a
+       12-month call ~30% out held the year and a 3-month ~15% out rolled at
+       expiry, 10% of LEAP value a year split by delta per dollar (the 3-month
+       premium counted four times), each at least 1. Still under 20% (30% in
+       the earnings week) with every suggestion on: N more 3-month or M
+       12-month calls to land on 25% (35%). */
+    const pkg = (() => {
+      const base = leapN * 100;
+      if (!base) return null;
+      const tk = tick.get(t);
+      const nowD = tk ? tk.longD - tk.scD + tk.spD - tk.hedgeD : 0;
+      const e = earn.some((x) => String(x.ticker).toUpperCase() === t
+        && String(x.report_date) >= today && String(x.report_date) <= addDays(today, 7)) ? DELTA_EARN_BUMP : 0;
+      const dOf = (l: Leg) => (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100;
+      const tenorOf = (l: Leg) => ((Date.parse(l.expiry) - Date.parse(l.opened)) / (30.44 * 864e5) > 6 ? '12m' : '3m');
+      const held = ls.filter((l) => l.expiry > today).map((l) => {
+        const up = upside.has(l);
+        const ty = l.type === 'call' ? (l.side === 'sold' ? 'sc' : up ? 'oc' : 'lc') : (l.side === 'sold' ? 'sp' : 'lp');
+        return { ty, n: l.n, k: l.strike, exp: l.expiry, d: Math.round(dOf(l)), stays: l.expiry >= targetExp,
+                 ...(up ? { tenor: tenorOf(l), roll: l.expiry } : {}) };
+      });
+      const heldTenor = new Set(held.filter((h) => h.ty === 'oc').map((h) => (h as { tenor?: string }).tenor));
+      const sug: Row[] = plan.map((p, i) => ({ id: `s${i}`, ty: p.type === 'call' ? 'sc' : 'sp', act: 'Sell',
+        n: p.n, k: p.strike, exp: targetExp, mid: r2(p.mid), d: Math.round(-(p.delta ?? 0) * p.n * 100) }));
+      /* The upside quotes: the listed strike nearest 15% / 30% over today's price. */
+      const q = (tenor: string, out: number) => {
+        const xs = upQuotes.filter((r) => r.ticker === t && r.tenor === tenor && Number(r.mid) > 0 && r.delta != null);
+        if (!xs.length || !(spot > 0)) return null;
+        const r = xs.reduce((a, b) => (Math.abs(Number(b.strike) - spot * out) < Math.abs(Number(a.strike) - spot * out) ? b : a));
+        return { k: Number(r.strike), exp: String(r.expiry), mid: Number(r.mid), dl: Number(r.delta) };
+      };
+      const q12 = q('12m', 1.3), q3 = q('3m', 1.15);
+      const leapValue = ls.filter(isLeap).reduce((s2, l) => s2 + (l.mark ?? 0) * l.n * 100, 0);
+      const budget = 0.1 * leapValue;
+      const e12 = q12 ? q12.dl / q12.mid : 0, e3 = q3 ? q3.dl / (4 * q3.mid) : 0;
+      const w = e12 + e3 > 0 ? e12 / (e12 + e3) : 0;
+      const n12 = q12 ? Math.max(1, Math.round(budget * w / (100 * q12.mid))) : 0;
+      const n3 = q3 ? Math.max(1, Math.round(budget * (1 - w) / 4 / (100 * q3.mid))) : 0;
+      const buy = (id: string, tenor: string, x: { k: number; exp: string; mid: number; dl: number }, n: number) =>
+        ({ id, ty: 'oc', act: 'Buy', tenor, n, k: x.k, exp: x.exp, mid: r2(x.mid), d: Math.round(x.dl * n * 100) });
+      if (q12 && !heldTenor.has('12m')) sug.push(buy('b12', '12m', q12, n12));
+      if (q3 && !heldTenor.has('3m')) sug.push(buy('b3', '3m', q3, n3));
+      const after0 = held.filter((h) => h.stays).reduce((s2, h) => s2 + h.d, 0) + sug.reduce((s2, x) => s2 + Number(x.d), 0);
+      const after0P = after0 / base * 100;
+      const gap = (25 + e - after0P) / 100 * base;
+      const fix = after0P < 20 + e ? [
+        q3 ? buy('f3', '3m', q3, Math.ceil(gap / (100 * q3.dl))) : null,
+        q12 ? buy('f12', '12m', q12, Math.ceil(gap / (100 * q12.dl))) : null,
+      ].filter(Boolean) : [];
+      return { base, e, now: Math.round(nowD), now_pct: r2(nowD / base * 100), held, sug, fix,
+               after0: Math.round(after0), after0_pct: r2(after0P),
+               leap_value: Math.round(leapValue), budget: Math.round(budget), w: r2(w) };
+    })();
     writes.push({
       ticker: t, expiry: targetExp, spot: r2(spot), sd: sd == null ? null : r2(sd),
       /* The Planner (block 14b) caps calls at the LEAPs held and puts at the
@@ -1289,6 +1354,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       calls: { sold: doneAtm + doneOtm, of: callTarget }, puts: { sold: donePuts, of: putTarget, bought: putsN },
       written: left === 0 && leftPuts === 0,
       delta: { now: Math.round(deltaNow), after: Math.round(deltaAfter) },
+      pkg,
       /* The By Fri bar: put strike, price, the call strike, the 1 SD call. */
       bar: { put: putK, spot: r2(spot), call: atm?.k ?? sold.find((x) => x.type === 'call')?.strike ?? null,
              sd1: sd1?.k ?? null, breakeven: atm ? r2(atm.k + atm.mid) : null,
