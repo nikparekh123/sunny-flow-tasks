@@ -97,13 +97,6 @@ struct SunnyMountain: View {
                             .contentTransition(.numericText(value: hg))
                             .frame(height: 20)
                     }
-                    if kind == .delta, !summary.isEmpty {
-                        Text(summary)
-                            .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                            .foregroundStyle(S.ink)
-                            .lineLimit(1).minimumScaleFactor(0.85)
-                            .frame(height: 20)
-                    }
                 }
             }
             if !noLongs && n > 1 { chart(idx, dragging: scrub != nil || pre != nil) }
@@ -119,13 +112,6 @@ struct SunnyMountain: View {
         }
     }
 
-    /// "5 to sell · 1 to buy back · 1 fine": the tags, for the book (next week).
-    private var summary: String {
-        let by = home.risk.delta.by.filter { ($0.shares ?? 0) > 0 }
-        let c = { (t: String) in by.filter { $0.tag == t }.count }
-        return [(c("sell"), "to sell"), (c("buy_back"), "to buy back"), (c("watch"), "to watch"), (c("fine"), "fine")]
-            .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
-    }
     static func tagWord(_ t: String?) -> String? {
         switch t { case "sell": "Sell"; case "fine": "Fine"; case "watch": "Watch"; case "buy_back": "Buy back"; default: nil }
     }

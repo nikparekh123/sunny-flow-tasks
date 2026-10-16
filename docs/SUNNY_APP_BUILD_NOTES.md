@@ -347,8 +347,8 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     name reports (report within 7 days) the band runs 10 points higher, on the card and in the
     Planner's cushion alike (`DELTA_EARN_BUMP`). Sell, Fine, Watch open the Planner on that name;
     Buy back opens a sheet of its sold calls, deepest in the money first, with how many to buy
-    back to reach 25% (35% that week). A line under the hero sums the book: "5 to sell · 1 to
-    buy back · 1 fine". sunny-home 2026-10-16.4.
+    back to reach 25% (35% that week). The summary line under the hero ("5 to sell · 1 to
+    buy back · 1 fine") was removed the same day (Nik). sunny-home 2026-10-16.4.
 70. **Delta card: net delta left** (Nik, 16 Oct 2026, supersedes the ratio in 69). The number is
     calls bought - calls sold + puts sold - hedge puts, as a % of the shares the LEAPs control,
     per name and in total, each day as it was (no 2-week average). One band for every name:
