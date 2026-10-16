@@ -202,6 +202,37 @@ struct Writes: Decodable {
         /// it falls after the expiry.
         let leaps: Int?
         let nextEarnings: Earn?
+        /// The package (handoff 25): what is held, next week's plan and the fix,
+        /// in share-equivalent delta. `now` is the Delta tile's number.
+        let pkg: Pkg?
+        struct Pkg: Decodable {
+            /// LEAP shares (contracts × 100): the denominator of every %.
+            let base: Double
+            /// 10 the week the name reports (every band edge moves up), else 0.
+            let e: Double
+            let now: Double
+            let nowPct: Double
+            let held: [Held]
+            let sug: [Sug]
+            let fix: [Sug]
+            let after0: Double
+            let after0Pct: Double
+            let leapValue: Double?
+            let budget: Double?
+            let w: Double?
+            /// The chain's IV at the money (the Week view's range).
+            let iv: Double?
+            /// ty: lc LEAP · sc call sold · lp hedge put · sp put sold · oc upside call.
+            /// `stays`: still on at the plan's Friday. `d`: signed delta, shares.
+            struct Held: Decodable, Hashable {
+                let ty: String; let n: Int; let k: Double; let exp: String; let d: Double; let stays: Bool
+                let tenor: String?; let roll: String?
+            }
+            struct Sug: Decodable, Identifiable, Hashable {
+                let id: String; let ty: String; let act: String; let tenor: String?
+                let n: Int; let k: Double; let exp: String; let mid: Double; let d: Double
+            }
+        }
         struct Plan: Decodable { let type: String; let n: Int; let strike: Double; let mid: Double?; let delta: Double?; let note: String; let credit: Double }
         struct Already: Decodable { let type: String; let n: Int; let strike: Double; let credit: Double }
         struct Count: Decodable { let sold: Int; let of: Int }
@@ -262,6 +293,8 @@ struct Risk: Decodable {
             let net: Double?; let shares: Double?
             /// sell · fine · watch · buy_back, judged on next week (16 Oct 2026).
             let tag: String?
+            /// red (net short) · orange (under 20%, 30% the week it reports) · nil.
+            let alert: String?
             let earningsWeek: Bool?
         }
     }

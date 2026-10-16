@@ -97,9 +97,10 @@ struct SPill: View {
 
 /// Press feedback: a 0.97 scale, 0.18 s (tokens.md S.dur.tap).
 struct SPressStyle: ButtonStyle {
+    var scale: CGFloat = 0.97
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .scaleEffect(configuration.isPressed ? scale : 1)
             .animation(.easeOut(duration: S.tap), value: configuration.isPressed)
     }
 }

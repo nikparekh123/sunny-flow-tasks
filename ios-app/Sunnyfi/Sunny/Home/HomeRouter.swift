@@ -34,9 +34,18 @@ final class HomeRouter {
         withAnimation(animated ? S.standard(0.45) : nil) { plannerOpen = true }
     }
     func closePlanner() {
-        withAnimation(S.standard(0.45)) { plannerOpen = false }
+        withAnimation(S.standard(0.45)) { plannerOpen = false; strikesOpen = false }
         writes = nil
     }
+    /// Adjust strikes: the Oct 14 strike controls, pushed over the Planner on
+    /// the same name (handoff 25). Back pops to the Planner.
+    var strikesOpen = false
+    func openStrikes() { withAnimation(S.standard(0.45)) { strikesOpen = true } }
+    func closeStrikes() { withAnimation(S.standard(0.45)) { strikesOpen = false } }
+    /// The Planner's choices per name, kept until the app closes: the
+    /// suggestions switched off, and the fix picked ("none" once dropped).
+    var pkgOff: [String: Set<String>] = [:]
+    var pkgFix: [String: String] = [:]
     /// Each name's plan, kept until the app closes ("ticker|expiry"; a name
     /// with no entry shows the engine's pick, live).
     var plans: [String: [PlanLeg]] = [:]

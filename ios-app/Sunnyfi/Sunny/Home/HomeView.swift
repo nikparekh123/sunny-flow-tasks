@@ -60,9 +60,14 @@ struct HomeView: View {
             .animation(.easeOut(duration: 0.3), value: store.toast)
             .zIndex(8)
             if let home = store.home, router.plannerOpen {
-                SunnyPlanner(home: home, words: store.words ?? home)
+                SunnyPlanner(home: home)
                     .transition(reduce ? .opacity : .move(edge: .trailing))   // Reduce Motion: fades, no slides
                     .zIndex(9)
+            }
+            if let home = store.home, router.plannerOpen, router.strikesOpen {
+                SunnyStrikes(home: home, words: store.words ?? home)
+                    .transition(reduce ? .opacity : .move(edge: .trailing))
+                    .zIndex(9.5)
             }
             if let home = store.home, let r = router.receipt {
                 receipt(r, home)

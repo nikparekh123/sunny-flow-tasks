@@ -40,7 +40,14 @@ enum S {
     static let onFill     = Color.white
 
     // Accents (UI Kit §01)
-    static let orange       = dyn(0xF2A93B, 0xF2A93B)  // shares, refresh sun
+    static let orange       = dyn(0xF2A93B, 0xF2A93B)  // shares, refresh sun; the alert on a thin name (Oct 16)
+    /// Text on or about a thin name: a thin Delta tile's % and sub line, the
+    /// Planner's band word and number (handoff 25, Added Oct 16). 5.1:1 on white.
+    static let orangeDeep   = dyn(0xB35200, 0xF2A93B)
+    /// The breathing tint, ring and glow use the bright pair in both modes
+    /// (SunnyDelta keyframes: 242,169,59 and 235,75,70).
+    static let breatheOrange = Color(hex: 0xF2A93B)
+    static let breatheRed    = Color(hex: 0xEB4B46)
     static let sunDeep      = Color(hex: 0xE8862E)
     static let sunLight     = Color(hex: 0xFFE98F)
     static let yellowTint   = Color(hex: 0xFDF3D1)     // summary box, hot tile

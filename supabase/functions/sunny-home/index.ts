@@ -1333,7 +1333,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       ].filter(Boolean) : [];
       return { base, e, now: Math.round(nowD), now_pct: r2(nowD / base * 100), held, sug, fix,
                after0: Math.round(after0), after0_pct: r2(after0P),
-               leap_value: Math.round(leapValue), budget: Math.round(budget), w: r2(w) };
+               leap_value: Math.round(leapValue), budget: Math.round(budget), w: r2(w),
+               iv: ivRow?.iv ?? null };
     })();
     writes.push({
       ticker: t, expiry: targetExp, spot: r2(spot), sd: sd == null ? null : r2(sd),
