@@ -263,10 +263,7 @@ struct Risk: Decodable {
             /// sell · fine · watch · buy_back, judged on next week (16 Oct 2026).
             let tag: String?
             let earningsWeek: Bool?
-            let buyBack: [BuyBack]?
         }
-        /// A sold call to buy back, deepest in the money first; `buy` of `n`.
-        struct BuyBack: Decodable, Hashable { let strike: Double; let expiry: String; let n: Int; let delta: Double; let buy: Int }
     }
 }
 

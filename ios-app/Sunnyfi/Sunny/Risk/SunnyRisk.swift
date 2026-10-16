@@ -47,8 +47,6 @@ struct SunnyMountain: View {
     let home: HomePayload
     let onHot: (String) -> Void
     @State private var scrub: Int? = nil
-    /// The name whose Buy back tag was tapped: its strikes, deepest first.
-    @State private var buyBack: Risk.Delta.By? = nil
     @Environment(HomeRouter.self) private var router
     @State private var preset = true
     @Environment(\.colorScheme) private var scheme
@@ -107,9 +105,6 @@ struct SunnyMountain: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
         .sunnyGlow()
-        .sheet(item: $buyBack) { b in
-            BuyBackSheet(by: b).presentationDetents([.medium]).presentationDragIndicator(.visible)
-        }
     }
 
     static func tagWord(_ t: String?) -> String? {
@@ -297,8 +292,8 @@ struct SunnyMountain: View {
         Button {
             if let leg = t.hot { onHot(leg) }
             else if let b = t.by {
-                // Buy back: which strikes first. Anything else: the Planner on that name.
-                if b.tag == "buy_back", !(b.buyBack ?? []).isEmpty { buyBack = b } else { router.openPlanner(b.ticker) }
+                // The tag shows the problem, not what to do (Nik, 16 Oct 2026): a tap opens the Planner.
+                router.openPlanner(b.ticker)
             }
         } label: {
             VStack(alignment: .leading, spacing: 6) {
@@ -359,47 +354,3 @@ struct Breathe: ViewModifier {
 }
 
 
-/// Buy back, deepest in the money first (each one takes the most delta off),
-/// until the name is back to 25% net delta (35% the week it reports).
-struct BuyBackSheet: View {
-    let by: Risk.Delta.By
-    var body: some View {
-        let rows = (by.buyBack ?? []).filter { $0.buy > 0 }
-        let total = rows.reduce(0) { $0 + $1.buy }
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Buy back first · \(by.ticker)").sType(.sectionTitle, tabular: false)
-                Text("About \(total) call\(total == 1 ? "" : "s") back to \(by.earningsWeek == true ? 35 : 25)% net delta"
-                     + " · now \(Int(by.pct.rounded()))%")
-                    .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
-                    .foregroundStyle(S.muted)
-            }
-            VStack(spacing: 0) {
-                ForEach(rows, id: \.self) { r in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(F.day(r.expiry)) \(PF.strike(r.strike)) call")
-                                .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                            Text("Δ \(String(format: "%.2f", r.delta)) each · \(r.n) sold")
-                                .sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.muted)
-                        }
-                        Spacer(minLength: 8)
-                        Text("Buy back \(r.buy)").sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
-                            .foregroundStyle(S.red)
-                    }
-                    .padding(.vertical, 12)
-                    .overlay(alignment: .bottom) { Rectangle().fill(S.line).frame(height: 1) }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-            Text("Deepest in the money first: each one takes the most delta off.")
-                .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
-                .foregroundStyle(S.muted)
-            Spacer(minLength: 0)
-        }
-        .foregroundStyle(S.ink)
-        .padding(20)
-        .padding(.top, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}

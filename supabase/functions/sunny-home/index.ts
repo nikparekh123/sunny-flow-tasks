@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-16.4';
+const BUILD = '2026-10-16.5';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -622,10 +622,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   step('market+portfolio');
   // ── Risk: Theta and Delta now (history comes from the daily roll-up) ──
   const tick = new Map<string, { collect: number; lose: number; longD: number; soldD: number; hedgeD: number;
-    scD: number; spD: number; shares: number; calls: { strike: number; expiry: string; n: number; delta: number }[] }>();
+    scD: number; spD: number; shares: number }>();
   let thShort = 0, thLong = 0, dLong = 0, dSold = 0, dHedge = 0, dSC = 0, dSP = 0, shLong = 0;
   for (const l of legs) {
-    const e = tick.get(l.ticker) ?? { collect: 0, lose: 0, longD: 0, soldD: 0, hedgeD: 0, scD: 0, spD: 0, shares: 0, calls: [] };
+    const e = tick.get(l.ticker) ?? { collect: 0, lose: 0, longD: 0, soldD: 0, hedgeD: 0, scD: 0, spD: 0, shares: 0 };
     const th = Math.abs(l.theta ?? 0) * l.n * 100;
     if (l.side === 'sold') { thShort += th; e.collect += th; } else { thLong += th; e.lose += th; }
     /* Delta (Nik, 16 Oct 2026): short = everything sold, calls and puts, as
@@ -638,10 +638,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const d = Math.abs(l.delta) * l.n * 100;
       if (l.side === 'sold') {
         dSold += d; e.soldD += d;
-        if (l.type === 'call') {
-          dSC += d; e.scD += d;
-          e.calls.push({ strike: l.strike, expiry: l.expiry, n: l.n, delta: r2(Math.abs(l.delta)) });
-        } else { dSP += d; e.spD += d; }
+        if (l.type === 'call') { dSC += d; e.scD += d; } else { dSP += d; e.spD += d; }
       }
       else if (l.type === 'call') { dLong += d; e.longD += d; }
       else { dHedge += d; e.hedgeD += d; }
@@ -669,17 +666,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
             && String(x.report_date) >= today && String(x.report_date) <= addDays(today, 7));
           const up = earnWeek ? DELTA_EARN_BUMP : 0;
           const tag = pct < 15 + up ? 'buy_back' : pct < 20 + up ? 'watch' : pct <= 30 + up ? 'fine' : 'sell';
-          /* Buy back: the deepest in the money first (most delta a contract),
-             until the name is back to the band's middle (25%, +10 that week). */
-          let need = Math.max(0, (25 + up) / 100 * e.shares - net);
-          const buy_back = [...e.calls].sort((a, b) => b.delta - a.delta || a.expiry.localeCompare(b.expiry)).map((c) => {
-            const k = need > 0 && c.delta > 0 ? Math.min(c.n, Math.ceil(need / (c.delta * 100))) : 0;
-            need -= k * c.delta * 100;
-            return { ...c, buy: k };
-          });
           return { ticker: t, sold: Math.round(e.soldD), long: Math.round(e.longD), hedge: Math.round(e.hedgeD),
                    sold_calls: Math.round(e.scD), sold_puts: Math.round(e.spD), net: Math.round(net), shares: e.shares,
-                   pct: r2(pct), tag, earnings_week: earnWeek, buy_back: tag === 'buy_back' ? buy_back : [] };
+                   pct: r2(pct), tag, earnings_week: earnWeek };
         })
         .sort((a, b) => b.pct - a.pct) },
   };
