@@ -340,8 +340,9 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     the eye still toggles it by hand. Nik sets Leave home / Arrive home automations in
     Shortcuts; Sunny never sees a location. Account block only; blurring every figure would
     need a design first.
-71. **Delta tags** (Nik, 16 Oct 2026). Each Delta tile carries a word: Sell (over 30%), Fine
-    (20-30%), Watch (15-20%), Buy back (under 15% or net short), judged on NEXT WEEK: a leg
+71. **Delta tags** (Nik, 16 Oct 2026). Each Delta tile names the problem: Room to sell (over 30%),
+    On target (20-30%), Getting thin (15-20%), Too thin (under 15%), Net short (below 0); first
+    built as Sell / Fine / Watch / Buy back and renamed the same day. Tags are judged on NEXT WEEK: a leg
     expiring today is left out of the card's numbers, tiles and history (each past day leaves
     out what expired that day), so a Friday's expiring calls never read as Buy back. The week a
     name reports (report within 7 days) the band runs 10 points higher, on the card and in the

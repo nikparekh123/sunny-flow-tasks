@@ -107,8 +107,13 @@ struct SunnyMountain: View {
         .sunnyGlow()
     }
 
-    static func tagWord(_ t: String?) -> String? {
-        switch t { case "sell": "Sell"; case "fine": "Fine"; case "watch": "Watch"; case "buy_back": "Buy back"; default: nil }
+    /// The tag names the problem, not an action (Nik, 16 Oct 2026).
+    static func tagWord(_ t: String?, pct: Double = 0) -> String? {
+        switch t {
+        case "sell": "Room to sell"; case "fine": "On target"; case "watch": "Getting thin"
+        case "buy_back": pct < 0 ? "Net short" : "Too thin"
+        default: nil
+        }
     }
     static func tagColor(_ t: String?) -> Color {
         switch t { case "fine": S.green; case "watch": S.yellowDeep; case "buy_back": S.red; default: S.muted }
@@ -304,7 +309,7 @@ struct SunnyMountain: View {
                 }
                 HStack(alignment: .center, spacing: 6) {
                     Text(t.value).sType(SType(size: 20, weight: 800, line: 20, tracking: -0.02)).foregroundStyle(t.tone)
-                    if let w = Self.tagWord(t.tag) {
+                    if let w = Self.tagWord(t.tag, pct: t.by?.pct ?? 0) {
                         Text(w).sType(SType(size: 11, weight: 700, line: 11, tracking: 0), tabular: false)
                             .foregroundStyle(Self.tagColor(t.tag))
                             .padding(.horizontal, 6).frame(height: 18)
@@ -334,7 +339,7 @@ struct SunnyMountain: View {
         }
         .buttonStyle(SPressStyle())
         .disabled(t.hot == nil && t.by == nil)
-        .accessibilityLabel("\(t.name) \(t.value)\(Self.tagWord(t.tag).map { ", \($0)" } ?? ""), \(t.hot != nil ? "losing faster, opens the theta check" : t.sub)")
+        .accessibilityLabel("\(t.name) \(t.value)\(Self.tagWord(t.tag, pct: t.by?.pct ?? 0).map { ", \($0)" } ?? ""), \(t.hot != nil ? "losing faster, opens the theta check" : t.sub)")
     }
 }
 
