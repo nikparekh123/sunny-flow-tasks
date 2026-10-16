@@ -47,6 +47,9 @@ struct SunnyMountain: View {
     let home: HomePayload
     let onHot: (String) -> Void
     @State private var scrub: Int? = nil
+    /// The name whose Buy back tag was tapped: its strikes, deepest first.
+    @State private var buyBack: Risk.Delta.By? = nil
+    @Environment(HomeRouter.self) private var router
     @State private var preset = true
     @Environment(\.colorScheme) private var scheme
 
@@ -94,6 +97,13 @@ struct SunnyMountain: View {
                             .contentTransition(.numericText(value: hg))
                             .frame(height: 20)
                     }
+                    if kind == .delta, !summary.isEmpty {
+                        Text(summary)
+                            .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                            .foregroundStyle(S.ink)
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                            .frame(height: 20)
+                    }
                 }
             }
             if !noLongs && n > 1 { chart(idx, dragging: scrub != nil || pre != nil) }
@@ -104,6 +114,23 @@ struct SunnyMountain: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
         .sunnyGlow()
+        .sheet(item: $buyBack) { b in
+            BuyBackSheet(by: b).presentationDetents([.medium]).presentationDragIndicator(.visible)
+        }
+    }
+
+    /// "5 to sell · 1 to buy back · 1 fine": the tags, for the book (next week).
+    private var summary: String {
+        let by = home.risk.delta.by.filter { ($0.shares ?? 0) > 0 }
+        let c = { (t: String) in by.filter { $0.tag == t }.count }
+        return [(c("sell"), "to sell"), (c("buy_back"), "to buy back"), (c("watch"), "to watch"), (c("fine"), "fine")]
+            .filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+    }
+    static func tagWord(_ t: String?) -> String? {
+        switch t { case "sell": "Sell"; case "fine": "Fine"; case "watch": "Watch"; case "buy_back": "Buy back"; default: nil }
+    }
+    static func tagColor(_ t: String?) -> Color {
+        switch t { case "fine": S.green; case "watch": S.yellowDeep; case "buy_back": S.red; default: S.muted }
     }
 
     /// The hedge puts' delta: now, or the day under the finger.
@@ -240,7 +267,7 @@ struct SunnyMountain: View {
 
     private var tiles: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(kind == .theta ? "By position · net θ per day" : "By position · short Δ of long Δ")
+            Text(kind == .theta ? "By position · net θ per day" : "By position · net Δ left · next week")
                 .sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
@@ -254,7 +281,11 @@ struct SunnyMountain: View {
         }
     }
 
-    private struct Tile { let name: String; let value: String; let tone: Color; let sub: String; let hot: String? }
+    private struct Tile {
+        let name: String; let value: String; let tone: Color; let sub: String; let hot: String?
+        var tag: String? = nil
+        var by: Risk.Delta.By? = nil
+    }
 
     private var tileData: [Tile] {
         if kind == .theta {
@@ -270,20 +301,36 @@ struct SunnyMountain: View {
         // Thinnest cushion first.
         return home.risk.delta.by.filter { ($0.shares ?? 0) > 0 }.sorted { $0.pct < $1.pct }.map {
             let n = $0.net ?? 0
-            return Tile(name: $0.ticker, value: "\(Int($0.pct.rounded()))%", tone: Self.band($0.pct).color,
-                        sub: "\(n < 0 ? "-" : "")\(nK(n)) Δ left", hot: nil)
+            return Tile(name: $0.ticker, value: "\(Int($0.pct.rounded()))%", tone: Self.tagColor($0.tag),
+                        sub: "\(n < 0 ? "-" : "")\(nK(n)) Δ left" + ($0.earningsWeek == true ? " · earnings" : ""),
+                        hot: nil, tag: $0.tag, by: $0)
         }
     }
 
     private func tile(_ t: Tile) -> some View {
-        Button { if let leg = t.hot { onHot(leg) } } label: {
+        Button {
+            if let leg = t.hot { onHot(leg) }
+            else if let b = t.by {
+                // Buy back: which strikes first. Anything else: the Planner on that name.
+                if b.tag == "buy_back", !(b.buyBack ?? []).isEmpty { buyBack = b } else { router.openPlanner(b.ticker) }
+            }
+        } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(t.name).sType(SType(size: 13, weight: 600, line: 13, tracking: 0), tabular: false)
                     Spacer(minLength: 8)
                     Circle().fill(t.hot != nil ? S.yellow : .clear).frame(width: 6, height: 6)
                 }
-                Text(t.value).sType(SType(size: 20, weight: 800, line: 20, tracking: -0.02)).foregroundStyle(t.tone)
+                HStack(alignment: .center, spacing: 6) {
+                    Text(t.value).sType(SType(size: 20, weight: 800, line: 20, tracking: -0.02)).foregroundStyle(t.tone)
+                    if let w = Self.tagWord(t.tag) {
+                        Text(w).sType(SType(size: 11, weight: 700, line: 11, tracking: 0), tabular: false)
+                            .foregroundStyle(Self.tagColor(t.tag))
+                            .padding(.horizontal, 6).frame(height: 18)
+                            .background(Capsule().fill(Self.tagColor(t.tag).opacity(0.14)))
+                            .fixedSize()
+                    }
+                }
                 Text(t.hot != nil ? "losing faster · tap" : t.sub)
                     .sType(SType(size: 12, weight: 500, line: 14, tracking: 0))
                     .foregroundStyle(t.hot != nil ? (scheme == .dark ? S.yellow : S.yellowDeep) : (scheme == .dark ? Color.white.opacity(0.86) : S.ink))
@@ -305,8 +352,8 @@ struct SunnyMountain: View {
             }
         }
         .buttonStyle(SPressStyle())
-        .disabled(t.hot == nil)
-        .accessibilityLabel("\(t.name) \(t.value), \(t.hot != nil ? "losing faster, opens the theta check" : t.sub)")
+        .disabled(t.hot == nil && t.by == nil)
+        .accessibilityLabel("\(t.name) \(t.value)\(Self.tagWord(t.tag).map { ", \($0)" } ?? ""), \(t.hot != nil ? "losing faster, opens the theta check" : t.sub)")
     }
 }
 
@@ -322,5 +369,51 @@ struct Breathe: ViewModifier {
                 guard !reduce else { return }
                 withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) { on = true }
             }
+    }
+}
+
+
+/// Buy back, deepest in the money first (each one takes the most delta off),
+/// until the name is back to 25% net delta (35% the week it reports).
+struct BuyBackSheet: View {
+    let by: Risk.Delta.By
+    var body: some View {
+        let rows = (by.buyBack ?? []).filter { $0.buy > 0 }
+        let total = rows.reduce(0) { $0 + $1.buy }
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Buy back first · \(by.ticker)").sType(.sectionTitle, tabular: false)
+                Text("About \(total) call\(total == 1 ? "" : "s") back to \(by.earningsWeek == true ? 35 : 25)% net delta"
+                     + " · now \(Int(by.pct.rounded()))%")
+                    .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                    .foregroundStyle(S.muted)
+            }
+            VStack(spacing: 0) {
+                ForEach(rows, id: \.self) { r in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(F.day(r.expiry)) \(PF.strike(r.strike)) call")
+                                .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                            Text("Δ \(String(format: "%.2f", r.delta)) each · \(r.n) sold")
+                                .sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.muted)
+                        }
+                        Spacer(minLength: 8)
+                        Text("Buy back \(r.buy)").sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
+                            .foregroundStyle(S.red)
+                    }
+                    .padding(.vertical, 12)
+                    .overlay(alignment: .bottom) { Rectangle().fill(S.line).frame(height: 1) }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            Text("Deepest in the money first: each one takes the most delta off.")
+                .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
+                .foregroundStyle(S.muted)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(S.ink)
+        .padding(20)
+        .padding(.top, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -340,6 +340,15 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     the eye still toggles it by hand. Nik sets Leave home / Arrive home automations in
     Shortcuts; Sunny never sees a location. Account block only; blurring every figure would
     need a design first.
+71. **Delta tags** (Nik, 16 Oct 2026). Each Delta tile carries a word: Sell (over 30%), Fine
+    (20-30%), Watch (15-20%), Buy back (under 15% or net short), judged on NEXT WEEK: a leg
+    expiring today is left out of the card's numbers, tiles and history (each past day leaves
+    out what expired that day), so a Friday's expiring calls never read as Buy back. The week a
+    name reports (report within 7 days) the band runs 10 points higher, on the card and in the
+    Planner's cushion alike (`DELTA_EARN_BUMP`). Sell, Fine, Watch open the Planner on that name;
+    Buy back opens a sheet of its sold calls, deepest in the money first, with how many to buy
+    back to reach 25% (35% that week). A line under the hero sums the book: "5 to sell · 1 to
+    buy back · 1 fine". sunny-home 2026-10-16.4.
 70. **Delta card: net delta left** (Nik, 16 Oct 2026, supersedes the ratio in 69). The number is
     calls bought - calls sold + puts sold - hedge puts, as a % of the shares the LEAPs control,
     per name and in total, each day as it was (no 2-week average). One band for every name:
