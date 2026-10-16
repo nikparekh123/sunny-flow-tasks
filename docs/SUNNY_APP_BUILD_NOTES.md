@@ -364,6 +364,17 @@ The UI Kit / phone design wins visuals, Build Blocks wins behaviour (README, Pre
     lane height holds when a filter clears a lane. Hit a layout loop on first build: a width
     measured with onGeometryChange and fed back into the same layout; now read from a
     GeometryReader only.
+74. **Books: S and N, and the lock-down** (Nik, 16 Oct 2026). A second book for Nik's cousin
+    (own IBKR, portfolio margin, same rules). One book on screen at a time; Nik gets an S | N
+    switch (to be designed), the cousin sees only N. Migration `20261016200000_books_and_lockdown`:
+    `books` (S = U13741475 + U21749479), `book_members` (owner / viewer), `book_id` on every
+    personal table (default S, so every writer is unchanged), reads limited to your own books,
+    edits to a book's owner (the sunnyfi.co positions page still edits for Nik), feed health and
+    sync logs to Nik only, data-changing database functions closed to the public key. Phones
+    belong to the login that registered them; apns-deliver sends each alert only to its book's
+    phones. options-cards and payoff-book answered anyone holding the publishable key (the old
+    Sunnyfi app called them that way); they now need a signed-in member of book S. Next: the
+    cousin's Flex token and queries, per-book sync, one home_snapshot per book, the switch.
 71. **Delta tags** (Nik, 16 Oct 2026). Each Delta tile names the problem: Room to sell (over 30%),
     On target (20-30%), Getting thin (15-20%), Too thin (under 15%), Net short (below 0); first
     built as Sell / Fine / Watch / Buy back and renamed the same day. Tags are judged on NEXT WEEK: a leg

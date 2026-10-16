@@ -86,8 +86,32 @@ async function page(url: string, key: string, path: string): Promise<Record<stri
   return out;
 }
 
+/* ⚠ WHO MAY CALL (16 Oct 2026, books). This builds Nik's book (S), so it answers
+   the scheduler, the service role, or a signed-in member of book S. Until today
+   it answered anyone holding the app's publishable key, which ships inside the
+   app. The cousin's login (book N) gets a 401 here. */
+async function bookSCaller(req: Request): Promise<boolean> {
+  const url = Deno.env.get('SUPABASE_URL')!, sr = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const cron = Deno.env.get('CRON_SECRET');
+  if (cron && (req.headers.get('x-cron-key') === cron || req.headers.get('x-admin-key') === cron)) return true;
+  const auth = req.headers.get('authorization') ?? '';
+  if (auth === `Bearer ${sr}`) return true;
+  if (!auth.startsWith('Bearer ')) return false;
+  const u = await fetch(`${url}/auth/v1/user`, { headers: { apikey: Deno.env.get('SUPABASE_ANON_KEY') ?? '', Authorization: auth } });
+  if (!u.ok) { await u.body?.cancel(); return false; }
+  const id = String((await u.json())?.id ?? '');
+  if (!/^[0-9a-f-]{36}$/.test(id)) return false;
+  const m = await fetch(`${url}/rest/v1/book_members?user_id=eq.${id}&book_id=eq.S&select=user_id`,
+    { headers: { apikey: sr, Authorization: `Bearer ${sr}` } });
+  return m.ok && ((await m.json()) as unknown[]).length > 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  if (!(await bookSCaller(req))) {
+    return new Response(JSON.stringify({ ok: false, error: 'not allowed' }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
   try {
     const SB_URL = Deno.env.get('SUPABASE_URL')!;
     const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;

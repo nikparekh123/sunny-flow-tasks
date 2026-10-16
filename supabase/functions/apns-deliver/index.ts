@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
   // 1) Pull pending alerts (cap per run so we don't time out).
   const { data: alerts, error: alertsErr } = await supabase
     .from('alert_dispatch')
-    .select('id, category, ticker, title, body, deep_link, meta')
+    .select('id, category, ticker, title, body, deep_link, meta, book_id')
     .is('delivered_at', null)
     .order('created_at', { ascending: true })
     .limit(50);
@@ -103,7 +103,7 @@ Deno.serve(async (req) => {
   // 2) Pull every registered device for this bundle.
   const { data: devices, error: devErr } = await supabase
     .from('push_devices')
-    .select('token, environment, bundle_id')
+    .select('token, environment, bundle_id, user_id')
     .eq('bundle_id', bundleId);
   if (devErr) {
     return new Response(
@@ -123,7 +123,15 @@ Deno.serve(async (req) => {
   // 3) Mint a JWT (or reuse cached).
   const jwt = await getAPNsJWT({ teamId, keyId, authKey });
 
-  // 4) Send each alert to each device.
+  /* ⚠ EACH BOOK'S ALERTS GO TO ITS OWN PHONES (16 Oct 2026, books). A phone
+     belongs to the login that registered it (push_devices.user_id); an alert
+     belongs to a book (alert_dispatch.book_id, S unless a feed says otherwise);
+     it goes to the phones of that book's members only, so the cousin (book N)
+     never gets Nik's alerts and the other way round. */
+  const { data: members } = await supabase.from('book_members').select('user_id, book_id');
+  const inBook = (book: string) => new Set((members ?? []).filter((m) => m.book_id === book).map((m) => m.user_id));
+
+  // 4) Send each alert to its book's devices.
   let totalSent = 0;
   let totalFailed = 0;
   const failures: { token_prefix: string; status: number; reason?: string }[] = [];
@@ -131,7 +139,12 @@ Deno.serve(async (req) => {
 
   for (const alert of alerts) {
     let anyOK = false;
-    for (const dev of devices) {
+    const who = inBook(alert.book_id ?? 'S');
+    const targets = devices.filter((d) => d.user_id && who.has(d.user_id));
+    // No phone for this book yet: settle it, or it would hold the oldest-50
+    // window and block every other book's alerts.
+    if (!targets.length) { deliveredAlertIDs.push(alert.id); continue; }
+    for (const dev of targets) {
       const host = APNS_HOSTS[dev.environment as 'production' | 'sandbox'];
       if (!host) continue;
       const payload = {
