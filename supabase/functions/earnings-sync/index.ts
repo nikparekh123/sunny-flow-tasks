@@ -40,9 +40,14 @@
 import { corsHeaders, json, db, ymd, parseISO, addDays, nyToday } from
   'https://raw.githubusercontent.com/nikparekh123/sunny-flow-tasks/dd3c85a56102451ae439016d6a90460c4d41dab0/supabase/functions/_shared/planner.ts';
 
-const BUILD = '2026-10-12.1';
+const BUILD = '2026-10-16.1';
 /* Not in the book, but always synced: JPM's report date starts earnings season. */
 const ANCHORS = ['JPM'];
+/* ⚠ THE WATCHLIST TOO (Nik, 16 Oct 2026). Its names were never synced, so
+   VZ, TMUS and T sat on stale Benzinga dates from 4 Sep (VZ read 20 and 28
+   Oct, the company says 26 Oct). Keep this list in step with WATCH in
+   sunny-home/index.ts; stored as scope 'other', like JPM. */
+const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];
 const AHEAD = 400;
 const BEHIND = 30;
 const SAME_QUARTER = 45;
@@ -112,7 +117,7 @@ Deno.serve(async (req) => {
     ]);
     const book = new Set([...legs, ...pos]
       .map((r) => String(r.ticker ?? '').toUpperCase()).filter(Boolean));
-    const names = body.tickers ?? [...new Set([...book, ...ANCHORS])].sort();
+    const names = body.tickers ?? [...new Set([...book, ...ANCHORS, ...WATCH])].sort();
 
     const found: Row[] = [];
     const none: string[] = [];

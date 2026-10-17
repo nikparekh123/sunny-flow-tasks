@@ -22,7 +22,7 @@
  */
 const BUILD = '2026-10-16.7';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
-const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026)
+const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
    A name here does not take the roll sheet: its calls are `cover` of its LEAPs,
    all at the first strike `otmPct`% or more above spot, every week; Inventory
