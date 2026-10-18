@@ -86,6 +86,36 @@ Across the ten names tested: about free in a flat year, +$219K in a 30% crash, -
 sudden 30% jump. The account is on portfolio margin, so the puts cut the margin requirement
 by about a third. The book goes delta negative after big falls while the puts are working.
 
+### NKE weekly rule (trial), from 2026-10-17
+
+**NKE only for now.** The other names keep the rule above. Chosen by Nik after the
+17 Oct tests (`research/target-study/`). Each week the seven factors give simple reads,
+and the reads pick the strike.
+
+| | |
+|---|---|
+| how many calls | **54 of 60** (keep 10% free). NKE's one exception to "calls on every LEAP" |
+| skip the week | IV rank under 25, or IV below realised volatility measured **without earnings days** |
+| earnings before expiry | calls at 1 SD, no puts |
+| ex-dividend, calls within 2% of the price | fewer calls |
+| the strike | start at 0.6 SD, or 0.8 SD if momentum is bullish. One step wider if stretched up, or if momentum and technicals are both bullish. One step closer (20% at the money, the rest 0.6 SD) if stretched down or fundamentals are bearish. Never past 1 SD |
+| breakout week (up 5% or more in 5 days) | the next strike above the week's high, never inside the range |
+| puts | half the long puts (13 today) at 0.6 SD, 0.8 SD if momentum is bearish. None if stretched down or across earnings. Never above a long put's strike |
+| extra upside | unchanged: the 3-month and 12-month buys above, **bought always**. A buy-on-trigger version was tested and dropped: it fired in nearly every year and bought late |
+
+The reads:
+
+- **Momentum:** bullish above a rising 200-day line, bearish below a falling one, else mixed.
+- **Technicals:** bullish above the 20- and 50-day lines with RSI 50 to 70, bearish below both with RSI under 50, else mixed.
+- **Stretched up / down:** in the top or bottom 10% of the month's range after a 5%+ week.
+- **Fundamentals bearish:** the price is more than 10% above value (the middle of the analyst target and the models).
+
+Tested, rolled every Friday: NKE's real year made $40.5K with 6 losing weeks (worst
+-$5.9K), against today's rule $45.6K with 13 (worst -$11.5K). In the forward test it
+makes about $2.4K a year less on average and loses $10K more in a crash, but makes $14K
+to $38K more in a violent rally. Nik's view: these names are beaten down, so a violent
+rally is the case worth paying for.
+
 ### Planned: TSLA and SpaceX (SPCX), from 2026-10-14
 
 Not traded yet. Researched for Nik (`docs/TSLA_SPCX_RESEARCH.md`); the app's
