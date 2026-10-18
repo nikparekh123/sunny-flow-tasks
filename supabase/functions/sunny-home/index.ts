@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-16.7';
+const BUILD = '2026-10-17.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -46,6 +46,23 @@ const PUT_SHARE = 0.3;
    by selling fewer. The 20% cushion trim (15 Oct) is gone. The Delta card's band
    still runs 10 points higher the week a name reports. */
 const DELTA_EARN_BUMP = 10;
+/* ⚠ THE READ RULE (NKE weekly rule, trial; Nik 17 Oct 2026; docs/STRATEGIES.md).
+   NKE ONLY for now. The week's write comes from the daily reads
+   (ticker_technicals.reads, written by ticker-technicals), as tested in
+   research/target-study/playbook_replay.py ('candidate, 10% free'):
+     IV skip -> nothing that week; earnings before expiry -> every call at 1 SD, no puts;
+     else the menu: start 0.6 SD (0.8 if momentum bullish), one step wider if stretched up
+     or momentum + technicals both bullish, one step closer (20% at the money + 0.6 SD)
+     if stretched down or fundamentals bearish, never past 1 SD; breakout week -> the
+     next strike above the 5-day high; ex-dividend before expiry with calls within 2%
+     -> two thirds of the calls; puts on half the long puts at 0.6 SD (0.8 if momentum
+     bearish), none if stretched down, never above a long put's strike.
+   `cover` is the share of the LEAPs sold (54 of 60: 10% kept free). NKE's one exception
+   to ONE RULE below. Inventory still counts every LEAP (its max is coverage). Reads
+   older than READS_STALE_DAYS fall back to the roll-sheet rule. */
+const READ_RULES: Record<string, { cover: number }> = { NKE: { cover: 0.9 } };
+const READ_MENU: [number, number][] = [[0.2, 0.6], [0, 0.6], [0, 0.8], [0, 1.0]];   // [at-the-money share, SD of the rest]
+const READS_STALE_DAYS = 5;
 const PUT_RULES: Record<string, { share: number; otmPct: number }> = {
   NKE: { share: 0.5, otmPct: 2 }, LULU: { share: 0.5, otmPct: 2 },
   BABA: { share: 0.5, otmPct: 2 }, NFLX: { share: 0.5, otmPct: 2 },
@@ -1209,6 +1226,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   type CS = { k: number; mid: number; delta: number | null; iv: number | null; oi: number | null };
   const nearestK = (xs: CS[], target: number) => xs.length
     ? xs.reduce((a, b) => (Math.abs(b.k - target) < Math.abs(a.k - target) ? b : a)) : null;
+  /* The latest reads per read-rule name (ticker-technicals, every 15 min in the session). */
+  const readsOf = new Map<string, Row>();
+  if (Object.keys(READ_RULES).length) {
+    for (const r of await get(`ticker_technicals?ticker=in.(${Object.keys(READ_RULES).join(',')})&reads=not.is.null`
+      + `&day=gte.${addDays(today, -READS_STALE_DAYS)}&select=ticker,day,reads&order=ticker.asc,day.desc`)) {
+      if (!readsOf.has(String(r.ticker))) readsOf.set(String(r.ticker), r);
+    }
+  }
   const writes = [];
   for (const t of book) {
     const ls = legs.filter((l) => l.ticker === t);
@@ -1231,21 +1256,69 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const earnRow = upcomingEarn.get(t);
     const earnIn = !!earnRow && String(earnRow.report_date) >= today && String(earnRow.report_date) <= targetExp;
     const rule = WRITE_RULES[t];
-    const share = rule ? 0 : earnIn ? 0.2 : 1 / 3, out = move21 != null && move21 >= 15 ? 1.0 : 0.6;
-    const callTarget = coverOf(t, leapN);
-    const atmN = Math.floor(leapN * share + 0.5);
+    const coverKs = ls.filter((l) => l.side === 'bought' && l.type === 'put' && l.expiry >= targetExp).map((l) => l.strike);
+    const coverK = coverKs.length ? Math.min(...coverKs) : null;
+    /* ── THE READ RULE (READ_RULES; NKE only): the week's pick from the reads ── */
+    const rr = READ_RULES[t] ? readsOf.get(t) : undefined;
+    type Pick = { label: string; why: string; share: number; z: number | null; calls: number; puts: number; pz: number | null;
+                  atm: CS | null; out: CS | null; put: CS | null; outNote: string };
+    let pick: Pick | null = null;
+    if (rr && sd && spot > 0) {
+      const R = rr.reads as Record<string, Row & { read: string; fact: string }>;
+      const inp = (R.inputs ?? {}) as Row;
+      const live = calls.filter((x) => x.mid > 0).sort((a, b) => a.k - b.k);
+      const cAt = (x: number) => live.find((c) => c.k >= x) ?? live.at(-1) ?? null;      // first strike at or above
+      const pAt = (x: number) => coverK == null ? null                                    // highest at or below, covered
+        : puts.filter((p) => p.mid > 0 && p.k <= x && p.k <= coverK).sort((a, b) => b.k - a.k)[0] ?? null;
+      const full = Math.floor(leapN * READ_RULES[t].cover + 0.5);
+      const halfPuts = Math.floor(putsN * 0.5 + 0.5);
+      /* An after-the-close report on the expiry day lands after it. */
+      const earnWk = earnIn && !(String(earnRow!.report_date) === targetExp && earnRow!.report_time === 'amc');
+      const exd = inp.ex_div ? String(inp.ex_div) : null, exIn = !!exd && exd > today && exd <= targetExp;
+      const none = { atm: null, out: null, put: null, pz: null };
+      if (R.iv?.read === 'skip') {
+        pick = { label: 'Skip the week', why: `IV: ${R.iv.fact}`, share: 0, z: null, calls: 0, puts: 0, outNote: '', ...none };
+      } else if (earnWk) {
+        pick = { label: 'Earnings week: every call at 1 SD, no puts', why: `Earnings ${earnRow!.report_date} before the expiry`,
+                 share: 0, z: 1, calls: full, puts: 0, ...none, out: cAt(spot + sd), outNote: 'at 1 SD' };
+      } else {
+        let idx = R.momentum?.read === 'bullish' ? 2 : 1;
+        const why: string[] = [`momentum ${R.momentum?.read}`];
+        if (R.fundamentals?.read === 'bearish') { idx--; why.push('fundamentals bearish: closer'); }
+        if (R.history?.read === 'stretched up') { idx++; why.push('stretched up: wider'); }
+        if (R.history?.read === 'stretched down') { idx--; why.push('stretched down: closer'); }
+        if (R.momentum?.read === 'bullish' && R.technicals?.read === 'bullish') { idx++; why.push('momentum and technicals bullish: wider'); }
+        idx = Math.max(0, Math.min(3, idx));
+        const [share, z] = READ_MENU[idx];
+        let out = cAt(spot + z * sd), outNote = `at ${z} SD`;
+        const hi5 = Number(inp.high5 ?? 0);
+        if (R.breakout?.read === 'yes' && out && hi5 > 0 && out.k <= hi5) {
+          out = cAt(hi5 + 0.01); outNote = 'above the 5-day high'; why.push(`breakout week: above $${hi5.toFixed(2)}`);
+        }
+        const atm = share ? cAt(spot) : null;
+        const near = Math.min(atm?.k ?? Infinity, out?.k ?? Infinity) <= spot * 1.02;
+        const n = exIn && near ? Math.round(full * 2 / 3) : full;
+        if (exIn && near) why.push(`ex-dividend ${exd} with calls within 2%: two thirds`);
+        const pz = R.momentum?.read === 'bearish' ? 0.8 : 0.6;
+        const stretchedDn = R.history?.read === 'stretched down';
+        pick = { label: (share ? `${Math.round(share * 100)}% at the money + ${z} SD` : `${z} SD`) + (outNote === 'above the 5-day high' ? ', above the 5-day high' : ''),
+                 why: why.join('; '), share, z, calls: n, puts: stretchedDn ? 0 : halfPuts, pz,
+                 atm, out, put: stretchedDn ? null : pAt(spot - pz * sd), outNote };
+      }
+    }
+    const share = pick ? pick.share : rule ? 0 : earnIn ? 0.2 : 1 / 3, out = pick ? (pick.z ?? 0.6) : move21 != null && move21 >= 15 ? 1.0 : 0.6;
+    const callTarget = pick ? pick.calls : coverOf(t, leapN);
+    const atmN = pick ? Math.round(pick.calls * pick.share) : Math.floor(leapN * share + 0.5);
     /* A research name: one strike, the first at least otmPct% above spot. */
     const ruleK = rule ? calls.filter((x) => x.k >= spot * (1 + rule.otmPct / 100) && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null : null;
-    const atm = rule ? ruleK : calls.filter((x) => x.k >= spot && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
-    let otm = sd ? nearestK(calls.filter((x) => x.k > spot && x.mid > 0), spot + out * sd) : null;
+    const atm = pick ? pick.atm : rule ? ruleK : calls.filter((x) => x.k >= spot && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
+    let otm = pick ? pick.out : sd ? nearestK(calls.filter((x) => x.k > spot && x.mid > 0), spot + out * sd) : null;
     if (atm && otm && otm.k <= atm.k) otm = calls.filter((x) => x.k > atm.k && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
     const sd1 = sd ? nearestK(calls.filter((x) => x.k > spot), spot + sd) : null;
     /* Overlay names: the highest strike at least otmPct% below spot, capped at the lowest
        long put still open on that Friday; no covering long put, no suggestion. */
     const pRule = PUT_RULES[t];
-    const coverKs = ls.filter((l) => l.side === 'bought' && l.type === 'put' && l.expiry >= targetExp).map((l) => l.strike);
-    const coverK = coverKs.length ? Math.min(...coverKs) : null;
-    const put = pRule
+    const put = pick ? pick.put : pRule
       ? (coverK == null ? null : puts.filter((x) => x.k <= spot * (1 - pRule.otmPct / 100) && x.k <= coverK && x.mid > 0)
           .sort((a, b) => b.k - a.k)[0] ?? null)
       : puts.filter((x) => x.k <= spot && x.mid > 0).sort((a, b) => b.k - a.k)[0] ?? null;
@@ -1260,14 +1333,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const leftAtm = rule ? left : Math.min(left, Math.max(0, atmN - doneAtm)), leftOtm = left - leftAtm;
     /* Puts: about 30% of the puts bought, rounded half up (NKE 20 -> 6); overlay
        names half (NKE 30 -> 15, BABA 7 -> 4). */
-    const putTarget = Math.floor(putsN * (pRule?.share ?? PUT_SHARE) + 0.5);
+    const putTarget = pick ? pick.puts : Math.floor(putsN * (pRule?.share ?? PUT_SHARE) + 0.5);
     const leftPuts = Math.max(0, putTarget - donePuts);
     const plan = [
       atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta,
         note: rule ? `${rule.otmPct}% out of the money` : 'at the money' } : null,
-      otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta, note: out === 1 ? 'at 1 SD' : 'at 0.6 SD' } : null,
+      otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta,
+        note: pick ? pick.outNote : out === 1 ? 'at 1 SD' : 'at 0.6 SD' } : null,
       put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta,
-        note: pRule ? `${pRule.otmPct}% out of the money` : 'at the money' } : null,
+        note: pick ? `at ${pick.pz} SD` : pRule ? `${pRule.otmPct}% out of the money` : 'at the money' } : null,
     ].filter(Boolean) as { type: string; n: number; strike: number; mid: number; delta: number | null; note: string }[];
     /* Only what is still open on that Friday: this week's calls expire first,
        and counting them made a plan look delta negative (Nik, 15 Oct 2026). */
@@ -1344,7 +1418,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       leaps: leapN,
       next_earnings: earnRow ? { date: earnRow.report_date, time: earnRow.report_time ?? null } : null,
       move_21d_pct: move21 == null ? null : r2(move21),
-      split: { atm_share: r2(share), out_sd: out, why: rule ? 'research' : earnIn ? 'earnings' : out === 1 ? 'up a lot' : 'flat' },
+      split: { atm_share: r2(share), out_sd: out, why: pick ? 'reads' : rule ? 'research' : earnIn ? 'earnings' : out === 1 ? 'up a lot' : 'flat' },
+      /* The read rule's pick and the reads behind it (READ_RULES; null for other names). */
+      read_rule: !READ_RULES[t] ? null : !pick
+        ? { name: 'NKE weekly rule (trial)', error: rr ? 'no chain IV for this Friday' : `no reads in the last ${READS_STALE_DAYS} days: the roll-sheet rule is used` }
+        : { name: 'NKE weekly rule (trial)', pick: pick.label, why: pick.why, calls: pick.calls, of: leapN, puts: pick.puts,
+            reads_day: rr!.day, reads: Object.fromEntries(['fundamentals', 'technicals', 'iv', 'history', 'momentum', 'events', 'breakout']
+              .map((k) => [k, (rr!.reads as Row)[k] ?? null])) },
       earnings: earnIn ? { date: earnRow!.report_date, time: earnRow!.report_time ?? null } : null,
       ex_dividend: (() => { const d = divs.find((x) => x.ticker === t && String(x.ex_date) <= targetExp);
         return d ? { date: d.ex_date, amount: num(d.cash_amount) } : null; })(),
@@ -1357,8 +1437,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       delta: { now: Math.round(deltaNow), after: Math.round(deltaAfter) },
       pkg,
       /* The By Fri bar: put strike, price, the call strike, the 1 SD call. */
-      bar: { put: putK, spot: r2(spot), call: atm?.k ?? sold.find((x) => x.type === 'call')?.strike ?? null,
-             sd1: sd1?.k ?? null, breakeven: atm ? r2(atm.k + atm.mid) : null,
+      bar: { put: putK, spot: r2(spot), call: (atm ?? otm)?.k ?? sold.find((x) => x.type === 'call')?.strike ?? null,
+             sd1: sd1?.k ?? null, breakeven: (atm ?? otm) ? r2((atm ?? otm)!.k + (atm ?? otm)!.mid) : null,
              to_put_pct: putK ? r2((spot - putK) / spot * 100) : null,
              to_sd1_pct: sd1 ? r2((sd1.k - spot) / spot * 100) : null },
     });
