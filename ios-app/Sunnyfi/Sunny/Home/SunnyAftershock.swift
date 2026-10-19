@@ -132,9 +132,14 @@ struct AftershockScan {
         case .wait: return AftershockFrame(mode: .wait)
         case .soon: return AftershockFrame(mode: .soon, rem: rem)
         case .scan:
-            // Waiting for the session's bars: the wave keeps reading.
-            let sl = sinceScan.truncatingRemainder(dividingBy: 9.5), p = min(1, sl / 7)
-            return AftershockFrame(mode: .scan, p: p, hold: min(1, max(0, sl - 7)), count: Int((p * n).rounded()))
+            // One pass at 4:15, then rest: the wave never loops while the closing prices are on their way
+            // (Nik, 19 Oct 2026: "the animations keep repeating").
+            if sinceScan < 8 {
+                let p = min(1, sinceScan / 7)
+                return AftershockFrame(mode: .scan, p: p, hold: min(1, max(0, sinceScan - 7)), count: Int((p * n).rounded()))
+            }
+            var f = AftershockFrame(mode: .wait); f.waiting = true; f.count = universe
+            return f
         case .done, .none:
             let lt: Double? = pending ? 0 : reveal.map { now.timeIntervalSince($0) }
             if let lt, lt < 8, !reduce {
@@ -156,6 +161,8 @@ struct AftershockFrame {
     /// Crashes found so far, names read so far.
     var found = 0
     var count = 0
+    /// Read every name, the closes not in yet: the orbit rests (the wait pulse), the words say so.
+    var waiting = false
 
     /// The countdown's and the scan's progress, for the ring and the bar.
     var progress: Double { mode == .soon ? 1 - rem / 900 : mode == .scan ? p : 0 }
@@ -530,6 +537,7 @@ struct SunnyAftershockPage: View {
     /// Label, big line and sub line for each state (block 26, Scenarios).
     static func words(_ m: AftershockScan, _ fr: AftershockFrame) -> (String, String, String) {
         let u = m.universe
+        if fr.waiting { return ("Scanning", "\(u) of \(u)", "Waiting for today's closing prices") }
         switch fr.mode {
         case .wait: return ("Next scan", m.nextScan, "Checks \(u) names after the close")
         case .soon: return ("Scan in", fr.clock, "at 4:15 PM")
@@ -750,6 +758,7 @@ struct SunnyAftershockCard: View {
     /// Title and line for each state (block 03b, Title and line).
     static func words(_ m: AftershockScan, _ fr: AftershockFrame) -> (String, String) {
         let u = m.universe
+        if fr.waiting { return ("\(u) of \(u)", "Waiting for today's closing prices") }
         switch fr.mode {
         case .wait:
             return ("Scan at 4:15", "Day 2 · " + m.top.map(\.e.ticker).joined(separator: ", ") + " today")
