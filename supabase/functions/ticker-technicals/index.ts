@@ -30,10 +30,13 @@
  *                        weekly model number carried until he gives a new one.
  */
 
-const BUILD = '2026-10-17.2';
-/* ⚠ ONE NAME FOR NOW (Nik, 16 Oct 2026: "do this only for one ticker for now
-   to test it"). Widen to the book and the watchlist once he has seen NKE. */
-const TICKERS = ['NKE'];
+const BUILD = '2026-10-19.5';
+/* ⚠ EVERY NAME HELD (Nik, 19 Oct 2026: "extend the reads to all names"): any
+   ticker with an open option leg in any book. Was NKE only (16 Oct). A name is
+   read only once a position exists (Nik: "No TSLA for now, only after position is
+   established"); EXTRA stays empty unless he names one. Only NKE's PICK uses the
+   reads (sunny-home READ_RULES); the other names just show them. */
+const EXTRA: string[] = [];
 const KEEP_DAYS = 260;          // rows written each run (a year of trading days)
 const PIVOT = 5;                // a turning point beats 5 sessions either side
 const SWING_LOOKBACK = 126;     // about 6 months of sessions
@@ -175,12 +178,47 @@ Deno.serve(async (req) => {
   if (!poly) return new Response(JSON.stringify({ ok: false, error: 'POLYGON_API_KEY is not set' }), { status: 500 });
   const today = nyDate();
   const out: Row[] = [];
-  for (const t of TICKERS) {
+  /* Held = a leg whose opens exceed its closes (an opened-and-closed name like META
+     is not held). Paged: PostgREST returns 1,000 rows at most. */
+  const legs = new Map<string, number>();
+  for (let from = 0; ; from += 1000) {
+    const r = await fetch(`${URL_}/rest/v1/option_trades?voided_at=is.null&expiry=gte.${today}&select=ticker,option_type,direction,strike,expiry,action,contracts&order=id.asc`,
+      { headers: { ...H, Range: `${from}-${from + 999}` } });
+    if (!r.ok) throw new Error(`option_trades: ${r.status}`);
+    const rows = await r.json() as Row[];
+    for (const x of rows) {
+      const k = [String(x.ticker).toUpperCase(), x.option_type, x.direction, Number(x.strike), x.expiry].join('|');
+      legs.set(k, (legs.get(k) ?? 0) + (x.action === 'open' ? 1 : -1) * Number(x.contracts));
+    }
+    if (rows.length < 1000) break;
+  }
+  const TICKERS = [...new Set([...[...legs].filter(([, n]) => n > 0).map(([k]) => k.split('|')[0]), ...EXTRA])].sort();
+  let polyBlocked = false;
+  const one = async (t: string) => {
     try {
-      const from = nyDate(new Date(Date.now() - 2 * 365 * 864e5));
-      const r = await fetch(`https://api.polygon.io/v2/aggs/ticker/${t}/range/1/day/${from}/${today}?adjusted=true&sort=asc&limit=50000&apiKey=${poly}`);
-      if (!r.ok) throw new Error(`polygon ${r.status}`);
-      const bars = ((await r.json()).results ?? []) as { t: number; o: number; h: number; l: number; c: number; v: number }[];
+      /* Two years of daily bars, fetched from Polygon once a day per name and kept in
+         ticker_bars (19 Oct 2026: every name every 15 minutes hit Polygon's per-minute
+         limit). After the close the day's own bar is fetched once more. If Polygon
+         refuses, yesterday's copy is used and the live price stands in for today. */
+      type Bar = { t: number; o: number; h: number; l: number; c: number; v: number };
+      const cached = (await get(`ticker_bars?ticker=eq.${t}&select=asof,bars,fetched_at`))[0];
+      const afterClose = Number(new Date().toLocaleTimeString('en-GB', { timeZone: 'America/New_York', hour12: false }).slice(0, 2)) >= 17;
+      const fresh = cached && String(cached.asof) === today
+        && (!afterClose || nyDate(new Date(String(cached.fetched_at))) === today && Number(new Date(String(cached.fetched_at)).toLocaleTimeString('en-GB', { timeZone: 'America/New_York', hour12: false }).slice(0, 2)) >= 17);
+      let bars: Bar[] = cached ? (cached.bars as number[][]).map(([t_, o, h, l, c, v]) => ({ t: t_, o, h, l, c, v })) : [];
+      if (!fresh && !polyBlocked) {
+        const from = nyDate(new Date(Date.now() - 2 * 365 * 864e5));
+        const r = await fetch(`https://api.polygon.io/v2/aggs/ticker/${t}/range/1/day/${from}/${today}?adjusted=true&sort=asc&limit=50000&apiKey=${poly}`);
+        if (r.ok) {
+          const got = ((await r.json()).results ?? []) as Bar[];
+          if (got.length >= 210) {
+            bars = got;
+            await send('POST', 'ticker_bars?on_conflict=ticker', [{ ticker: t, asof: today, fetched_at: new Date().toISOString(),
+              bars: got.map((b) => [b.t, b.o, b.h, b.l, b.c, b.v]) }], 'resolution=merge-duplicates,return=minimal');
+          }
+        } else if (r.status === 429) polyBlocked = true;     // the rest of this run uses yesterday's copies
+      }
+      if (!bars.length) throw new Error(polyBlocked ? 'Polygon limit hit before this name was fetched; next run' : 'no bars')
       if (bars.length < 210) throw new Error(`only ${bars.length} bars`);
       const days = bars.map((b) => nyDate(new Date(b.t)));
       const close = bars.map((b) => b.c), high = bars.map((b) => b.h), low = bars.map((b) => b.l);
@@ -247,7 +285,7 @@ Deno.serve(async (req) => {
         const fund = value == null ? { read: 'neutral', fact: 'no analyst target yet' } : {
           read: value > S * 1.1 ? 'bullish' : value < S * 0.9 ? 'bearish' : 'neutral',
           fact: `${at != null && mv != null ? `value ${usd(value)} (analysts ${usd(at)}, model ${usd(mv)})` : mv != null ? `model ${usd(mv)}` : `analysts ${usd(value)}`}, ${pc(value / S - 1)} ${value >= S ? 'above' : 'below'} the price`,
-          value: r4(value) };
+          value: r4(value), analyst: at == null ? null : r4(at), model: mv == null ? null : r4(mv) };
 
         const up20 = S > e20[n]!, dn20 = S < e20[n]!, up50 = S > s50[n]!, dn50 = S < s50[n]!, r = rs[n]!;
         const tech = { read: up20 && up50 && r >= 50 && r <= 70 ? 'bullish' : dn20 && dn50 && r < 50 ? 'bearish' : 'mixed',
@@ -299,6 +337,13 @@ Deno.serve(async (req) => {
 
         reads = { day: days[n], expiry: exp, price: r4(S), fundamentals: fund, technicals: tech, iv: ivR,
           history: hist, momentum: mom, events, breakout,
+          /* Facts for Our thesis (handoff 26, block 14c): the 10, 50, 100 and 200-day lines, the 5-day move
+             and the month's range with prices, the 12-month move, and the usual IV (the year's median). */
+          thesis: {
+            sma10: r4(sma(close, 10)[n]), sma50: r4(s50[n]), sma100: r4(sma(close, 100)[n]), sma200: r4(s200[n]),
+            close5: r4(close[n - 5]), m_lo: r4(lo), m_hi: r4(hi), chg252: n >= 252 ? r4((S / close[n - 252] - 1) * 100) : null,
+            sma200_21: r4(s200[n - 21]), iv_usual: yr.length ? r4([...yr].sort((a, b) => a - b)[Math.floor(yr.length / 2)]) : null,
+          },
           inputs: { iv: r4(ivNow), iv_rank: r4(rank), hv20_ex: r4(hx[n]), rich: r4(rich), w5: r4(w5), high5: r4(hi5),
                     next_earnings: earnNext ? String(earnNext.report_date) : null, ex_div: exd, ex_div_estimated: est },
           build: BUILD };
@@ -342,6 +387,9 @@ Deno.serve(async (req) => {
     } catch (e) {
       out.push({ ticker: t, error: (e as Error).message });
     }
-  }
+  };
+  /* Four names at a time: each reads two years of bars, the IV history and its walls. */
+  for (let i = 0; i < TICKERS.length; i += 4) await Promise.all(TICKERS.slice(i, i + 4).map(one));
+  out.sort((a, b) => String(a.ticker).localeCompare(String(b.ticker)));
   return new Response(JSON.stringify({ ok: true, build: BUILD, today, out }), { headers: { 'Content-Type': 'application/json' } });
 });
