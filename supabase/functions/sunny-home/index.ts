@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-19.2';
+const BUILD = '2026-10-19.4';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1225,10 +1225,12 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   type CS = { k: number; mid: number; delta: number | null; iv: number | null; oi: number | null };
   const nearestK = (xs: CS[], target: number) => xs.length
     ? xs.reduce((a, b) => (Math.abs(b.k - target) < Math.abs(a.k - target) ? b : a)) : null;
-  /* The latest reads per read-rule name (ticker-technicals, every 15 min in the session). */
+  /* The latest reads per name (ticker-technicals, every 15 min in the session): the read-rule names pick their
+     strike from them; every name's Thesis page shows them (handoff 27). */
   const readsOf = new Map<string, Row>();
-  if (Object.keys(READ_RULES).length) {
-    for (const r of await get(`ticker_technicals?ticker=in.(${Object.keys(READ_RULES).join(',')})&reads=not.is.null`
+  const readNames = [...new Set([...Object.keys(READ_RULES), ...book])];
+  if (readNames.length) {
+    for (const r of await get(`ticker_technicals?ticker=in.(${readNames.join(',')})&reads=not.is.null`
       + `&day=gte.${addDays(today, -READS_STALE_DAYS)}&select=ticker,day,reads&order=ticker.asc,day.desc`)) {
       if (!readsOf.has(String(r.ticker))) readsOf.set(String(r.ticker), r);
     }
@@ -1438,6 +1440,20 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
             strike: pick.out?.k ?? null, strike_pct: pick.out ? r2((pick.out.k / spot - 1) * 100) : null,
             reads_day: rr!.day, reads: Object.fromEntries(['fundamentals', 'technicals', 'iv', 'history', 'momentum', 'events', 'breakout', 'thesis', 'inputs']
               .map((k) => [k, (rr!.reads as Row)[k] ?? null])) },
+      /* The Thesis page (handoff 27, 14c; Nik 19 Oct 2026: "thesis for each page, the 0.6 planner for now"): NKE's read
+         rule stays in read_rule; every other name (and NKE when its reads are missing) gets the Planner's own rule here,
+         0.6 SD (1 SD after a 15% month), with its reads and facts and the Planner's out-of-the-money strike. */
+      thesis: (() => {
+        if (READ_RULES[t] && pick) return null;
+        const r0 = readsOf.get(t);
+        if (!r0 || !sd || !(spot > 0) || !otm) return null;
+        const R0 = r0.reads as Row;
+        return { name: '0.6 SD planner', pick: `${out} SD`, calls: callTarget, of: leapN, atm_share: callTarget ? r2(atmN / callTarget) : 0,
+          baseline: 0.6, steps: out === 1 ? [{ read: 'history', label: `History · up ${Math.round(move21 ?? 0)}% in a month`, step: '1 SD' }] : [],
+          pick_sd: out, spot: r2(spot), sd: r2(sd), strike: otm.k, strike_pct: r2((otm.k / spot - 1) * 100), reads_day: r0.day,
+          reads: Object.fromEntries(['fundamentals', 'technicals', 'iv', 'history', 'momentum', 'events', 'breakout', 'thesis', 'inputs']
+            .map((k) => [k, R0[k] ?? null])) };
+      })(),
       earnings: earnIn ? { date: earnRow!.report_date, time: earnRow!.report_time ?? null } : null,
       ex_dividend: (() => { const d = divs.find((x) => x.ticker === t && String(x.ex_date) <= targetExp);
         return d ? { date: d.ex_date, amount: num(d.cash_amount) } : null; })(),
