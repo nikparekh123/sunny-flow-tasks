@@ -192,11 +192,13 @@ struct HomeView: View {
         phase = .idle
     }
 
-    /// DEBUG simulator runs only: `-open report|theta|writes:TICKER` opens a
-    /// state straight away, so every state can be screenshotted.
+    /// DEBUG simulator runs only: `-open report|theta|writes:TICKER|aftershock`
+    /// opens a state straight away, so every state can be screenshotted.
     private func debugOpen() {
         #if DEBUG && targetEnvironment(simulator)
         let a = ProcessInfo.processInfo.arguments
+        // `-pushlink <url>`: as if a push carrying that deep link was tapped.
+        if let i = a.firstIndex(of: "-pushlink"), i + 1 < a.count { PushInbox.shared.link = a[i + 1] }
         guard let i = a.firstIndex(of: "-open"), i + 1 < a.count else { return }
         let v = a[i + 1]
         Task {

@@ -366,11 +366,11 @@ private struct PTickerCard: View {
         .background { PCornerGlow(status: c.status) }
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
         // Block 13b: laid over the card, so the ticker line keeps its place.
-        // The 44 hit area overhangs the 24 line by 10 above and below and
-        // the 22 circle's right edge sits on the 20 padding.
+        // The 44 tall hit area is centred on the 24 line; the word's right
+        // edge sits on the 20 padding.
         .overlay(alignment: .topTrailing) {
             if let m = StrategyMark.Kind(strategy) {
-                StrategyMark(kind: m, ticker: c.t).padding(.top, 10).padding(.trailing, 9)
+                StrategyMark(kind: m, ticker: c.t).padding(.top, 10).padding(.trailing, 20)
             }
         }
         .sunnyGlow()
@@ -760,9 +760,10 @@ private struct POpacityPress: ButtonStyle {
 
 // MARK: - Strategy mark (block 13b)
 
-/// A quiet 22 circle at the end of a Positions ticker line naming the
-/// position's strategy; tap opens the Planner on that name, as an Inventory
-/// chip does. S.track fill and an S.muted glyph, never a gain or loss colour.
+/// The position's strategy as a small grey word at the end of the Positions
+/// ticker line: Aftershock, Rebound or Ladder (Nik, 19 Oct 2026: the word in
+/// place of the design's glyph). Tap opens the Planner on that name, as an
+/// Inventory chip does.
 struct StrategyMark: View {
     enum Kind: String {
         case aftershock, rebound, ladder
@@ -775,37 +776,13 @@ struct StrategyMark: View {
 
     var body: some View {
         Button { router.openPlanner(ticker) } label: {
-            Self.glyph(kind)
-                .stroke(S.muted, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
-                .frame(width: 24, height: 24)
-                .scaleEffect(13.0 / 24.0)
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(S.track))
-                .frame(width: S.hit, height: S.hit)
-                .contentShape(Circle())
+            Text(kind.name).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+                .foregroundStyle(S.muted)
+                .padding(.leading, 12)
+                .frame(height: S.hit)
+                .contentShape(Rectangle())
         }
-        .buttonStyle(SPressStyle(scale: 0.9))
+        .buttonStyle(SPressStyle(scale: 0.95))
         .accessibilityLabel("\(kind.name), open the Planner for \(ticker)")
-    }
-
-    /// The design's paths on a 24 grid (SunnyPositions.dc.html, SGi).
-    static func glyph(_ k: Kind) -> Path {
-        var p = Path()
-        switch k {
-        case .aftershock:       // M2 8h5l3 10 3-9 2 5 1.5-2H22
-            p.move(to: CGPoint(x: 2, y: 8)); p.addLine(to: CGPoint(x: 7, y: 8)); p.addLine(to: CGPoint(x: 10, y: 18))
-            p.addLine(to: CGPoint(x: 13, y: 9)); p.addLine(to: CGPoint(x: 15, y: 14)); p.addLine(to: CGPoint(x: 16.5, y: 12))
-            p.addLine(to: CGPoint(x: 22, y: 12))
-        case .rebound:          // M3 5c1.6 8 4.4 13 8 13 3.2 0 5.4-3.6 7-10M14.6 8.4l3.6-.8 1 3.6
-            p.move(to: CGPoint(x: 3, y: 5))
-            p.addCurve(to: CGPoint(x: 11, y: 18), control1: CGPoint(x: 4.6, y: 13), control2: CGPoint(x: 7.4, y: 18))
-            p.addCurve(to: CGPoint(x: 18, y: 8), control1: CGPoint(x: 14.2, y: 18), control2: CGPoint(x: 16.4, y: 14.4))
-            p.move(to: CGPoint(x: 14.6, y: 8.4)); p.addLine(to: CGPoint(x: 18.2, y: 7.6)); p.addLine(to: CGPoint(x: 19.2, y: 11.2))
-        case .ladder:           // M7 3v18M17 3v18M7 8h10M7 13h10M7 18h10
-            p.move(to: CGPoint(x: 7, y: 3)); p.addLine(to: CGPoint(x: 7, y: 21))
-            p.move(to: CGPoint(x: 17, y: 3)); p.addLine(to: CGPoint(x: 17, y: 21))
-            for y in [8.0, 13, 18] { p.move(to: CGPoint(x: 7, y: y)); p.addLine(to: CGPoint(x: 17, y: y)) }
-        }
-        return p
     }
 }

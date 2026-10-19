@@ -15,6 +15,7 @@
 //
 
 import SwiftUI
+import QuartzCore
 
 // MARK: - The scanner at a moment
 
@@ -228,6 +229,18 @@ final class OrbitMotion {
     var T = 0.0
     var last: Double?
     var falls: [String: (x: Double, y: Double, t: Double)] = [:]
+    #if DEBUG
+    /// `-preset as.perf=1`: logs the orbit's draw time every 240 frames.
+    private var cost: [Double] = []
+    func perf(_ s: Double) {
+        guard DebugPreset.bool("as.perf") else { return }
+        cost.append(s * 1000)
+        guard cost.count == 240 else { return }
+        let sorted = cost.sorted()
+        print(String(format: "[orbit] draw ms mean %.2f p95 %.2f max %.2f", cost.reduce(0, +) / 240, sorted[227], sorted[239]))
+        cost = []
+    }
+    #endif
 }
 
 // MARK: - The orbit, one Canvas pass
@@ -436,9 +449,15 @@ struct SunnyAftershockPage: View {
             let fr = m.frame(now, reveal: reveal, pending: pending(m), reduce: reduce)
             let dark = scheme == .dark
             Canvas { g, _ in
+                #if DEBUG
+                let t0 = CACurrentMediaTime()
+                #endif
                 AftershockOrbit.draw(g, fr: fr, crashes: m.top.map(\.e.ticker), universe: m.universe,
                                      motion: motion, clock: ctx.date.timeIntervalSinceReferenceDate, reduce: reduce,
                                      ink: S.ink, red: S.red, k: dark ? 1 : 0.9, labels: true)
+                #if DEBUG
+                motion.perf(CACurrentMediaTime() - t0)
+                #endif
             }
         }
         .frame(width: 353, height: 340)
@@ -534,6 +553,10 @@ struct AftershockRow: View {
 
     var body: some View {
         let e = row.e, settled = settledShown && row.settled
+        // The 1 pt rule sits above the row's 14 pt padding, as the design's
+        // border-top does (a row is 73 pt: 1 + 14 + 24 + 4 + 16 + 14).
+        VStack(alignment: .leading, spacing: 0) {
+        Rectangle().fill(S.pRule).frame(height: 1)
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -557,7 +580,7 @@ struct AftershockRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: open ? nil : 0, alignment: .top)
         .clipped()
-        .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
+        }
         .opacity(open ? 1 : 0)
         .animation(reduce ? nil : S.standard(0.6), value: open)
         .accessibilityElement(children: .combine)
@@ -616,13 +639,15 @@ struct SunnyAftershockCard: View {
     @State private var reveal: Date?
     @State private var seen: AftershockScan.Mode?
     @State private var width: CGFloat = 353
+    /// The orbit and words stop when the card is scrolled off the page.
+    @State private var onScreen = true
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: S.rDeck, style: .continuous)
         ZStack(alignment: .topLeading) {
             S.night
             orbit
-            TimelineView(.animation(minimumInterval: 0.1)) { _ in
+            TimelineView(.animation(minimumInterval: 0.1, paused: !onScreen)) { _ in
                 let now = SClock.now()
                 let m = AftershockScan.at(now, data, calendar: calendar)
                 let fr = m.frame(now, reveal: reveal, pending: pending(m), reduce: reduce)
@@ -675,6 +700,7 @@ struct SunnyAftershockCard: View {
         }
         .frame(height: 184)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onScrollVisibilityChange(threshold: 0.01) { onScreen = $0 }
         .clipShape(shape)
         .overlay { if scheme == .dark { shape.strokeBorder(Color.white.opacity(0.08), lineWidth: 1) } }
         .shadow(color: .black.opacity(scheme == .dark ? 0 : 0.08), radius: 1.5, y: 1)
@@ -694,7 +720,7 @@ struct SunnyAftershockCard: View {
     /// The page orbit at 0.52, centered 77 in from the right and 84 down,
     /// white on the night fill, no ticker labels; 30 frames a second.
     private var orbit: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !onScreen)) { ctx in
             let now = SClock.now()
             let m = AftershockScan.at(now, data, calendar: calendar)
             let fr = m.frame(now, reveal: reveal, pending: pending(m), reduce: reduce)
