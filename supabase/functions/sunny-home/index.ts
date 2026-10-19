@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-19.5';
+const BUILD = '2026-10-19.6';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -406,8 +406,12 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
      cost (28 Sep ruling), and IBKR's own realized_pl wherever the Daily Flex
      delivered it (it carries commissions and handles assignments: an assigned
      option books 0, its premium lives in the share sale). Booked on the close
-     date, or the expiry date for a leg left to expire. A leg is in or out by
-     when it was OPENED: nothing opened before 31 Aug 2026 counts. */
+     date, or the expiry date for a leg left to expire. Every close after
+     31 Aug 2026 counts, whenever the leg was opened, so a month matches
+     IBKR's statement (Nik, 19 Oct 2026: the FIS March put bought 26 Aug and
+     sold 1 Oct was +$2,546 IBKR had and Sunny didn't). A leg opened before
+     31 Aug books nothing on or before it, and stays out of the premium in
+     hand and the held cost. */
   /* `leg` names the line on the report ("NKE 36C"), `how` says how it closed,
      `basis` is the credit (sold) or cost (bought) behind it, for "kept 92%". */
   type Ev = { d: string; ticker: string; kind: 'calls sold' | 'puts sold' | 'calls bought' | 'puts bought' | 'shares';
@@ -423,7 +427,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       || String(a.executed_at ?? '').localeCompare(String(b.executed_at ?? ''))
       || (a.action === 'open' ? -1 : 1));
     const firstOpen = fills.find((f) => f.action === 'open');
-    if (!firstOpen || String(firstOpen.trade_date) < BOOK_START) continue;
+    if (!firstOpen) continue;
+    const pre = String(firstOpen.trade_date) < BOOK_START;
     const f0 = fills[0];
     const short = f0.direction === 'short';
     const kind = `${f0.option_type === 'call' ? 'calls' : 'puts'} ${short ? 'sold' : 'bought'}` as Ev['kind'];
@@ -432,31 +437,36 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     let qty = 0, cost = 0;
     for (const t of fills) {
       const n = Number(t.contracts), px = Number(t.premium) * 100;
-      if (t.action === 'open') { qty += n; cost += n * px; if (short) heldFlows.push({ d: String(t.trade_date), amt: n * px }); continue; }
+      if (t.action === 'open') { qty += n; cost += n * px; if (short && !pre) heldFlows.push({ d: String(t.trade_date), amt: n * px }); continue; }
       const avg = qty > 0 ? cost / qty : 0;
-      if (short) heldFlows.push({ d: String(t.trade_date), amt: -n * avg });
+      if (short && !pre) heldFlows.push({ d: String(t.trade_date), amt: -n * avg });
       const ib = t.realized_pl != null && t.realized_pl_source === 'ibkr' ? Number(t.realized_pl) : null;
       const amt = ib ?? (short ? n * (avg - px) : n * (px - avg));
       const code = String(t.note ?? '').match(/IBKR (A|Ex|Ep) lifecycle/)?.[1];
       const how = code === 'Ep' ? 'expired' : code === 'A' ? 'assigned' : code === 'Ex' ? 'exercised' : 'closed';
-      realized.push({ d: String(t.trade_date), ticker: String(f0.ticker).toUpperCase(), kind, amt, leg, how,
-        basis: n * avg, exp });
+      if (!pre || String(t.trade_date) > BOOK_START) {
+        realized.push({ d: String(t.trade_date), ticker: String(f0.ticker).toUpperCase(), kind, amt, leg, how,
+          basis: n * avg, exp });
+      }
       cost -= n * avg; qty -= n;
     }
     if (qty > 0.0001 && String(f0.expiry) < today) {
-      realized.push({ d: exp, ticker: String(f0.ticker).toUpperCase(), kind, amt: short ? cost : -cost, leg,
-        how: 'expired', basis: cost, exp });
-      if (short) heldFlows.push({ d: exp, amt: -cost });
-    } else if (qty > 0.0001) {
+      if (!pre || exp > BOOK_START) {
+        realized.push({ d: exp, ticker: String(f0.ticker).toUpperCase(), kind, amt: short ? cost : -cost, leg,
+          how: 'expired', basis: cost, exp });
+      }
+      if (short && !pre) heldFlows.push({ d: exp, amt: -cost });
+    } else if (qty > 0.0001 && !pre) {
       heldCost.set(k, { n: qty, cost });
     }
   }
-  /* Shares sold count only when the lot was bought inside the book: the
-     31 Aug / 1 Sep unwind of the old share blocks is history, the September
-     put assignments sold on the 21st are not. */
+  /* Every share sale after 31 Aug counts, as IBKR's statement does (the 1 Sep
+     sale of the old TLT, FIS and AIG blocks too: Nik, 19 Oct 2026). On
+     31 Aug itself only a lot bought that day counts; the rest of that day's
+     unwind is August. */
   for (const s of sells) {
     const t = String(s.ticker).toUpperCase(), d = String(s.trade_date);
-    if (!lots.some((l) => String(l.ticker).toUpperCase() === t && String(l.acquired_date) <= d)) continue;
+    if (d <= BOOK_START && !lots.some((l) => String(l.ticker).toUpperCase() === t && String(l.acquired_date) <= d)) continue;
     realized.push({ d, ticker: t, kind: 'shares', amt: Number(s.realized_pl ?? 0), leg: `${t} shares`, how: 'sold',
       basis: 0 });
   }
@@ -1824,13 +1834,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
   for (const [, rows] of groups) {
     const f = rows[0], short = f.direction === 'short';
     const firstOpen = rows.filter((r) => r.action === 'open').map((r) => String(r.trade_date)).sort()[0];
-    if (!firstOpen || firstOpen < BOOK_START) continue;
+    if (!firstOpen) continue;
     const net = rows.reduce((s, r) => s + (r.action === 'open' ? 1 : -1) * Number(r.contracts), 0);
     const closes = rows.filter((r) => r.action === 'close');
     let when: string | null = null;
     if (net <= 0 && closes.length) when = closes.map((r) => String(r.trade_date)).sort().at(-1)!;
     else if (net > 0 && String(f.expiry) < today) when = String(f.expiry);
-    if (!when) continue;
+    /* Opened before 31 Aug: in only when it went flat after it, as realized is. */
+    if (!when || (firstOpen < BOOK_START && when <= BOOK_START)) continue;
     const leg = `${String(f.ticker).toUpperCase()} ${r2(Number(f.strike))}${f.option_type === 'call' ? 'C' : 'P'}`;
     const amt = realized.filter((e) => e.leg === leg && e.exp === String(f.expiry) && e.kind === `${f.option_type === 'call' ? 'calls' : 'puts'} ${short ? 'sold' : 'bought'}`)
       .reduce((s, e) => s + e.amt, 0);
