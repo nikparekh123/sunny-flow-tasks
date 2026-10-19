@@ -2,11 +2,14 @@
 //  SunnyPlanner.swift
 //  Sunny
 //
-//  Block 14b · Planner, replaced 16 Oct 2026 (handoff 25): one name, the
-//  whole package. The glass position card (Strikes lanes or Week zones,
-//  filters, Position now in pairs), Suggestions, Delta, then Adjust strikes,
-//  which pushes the Oct 14 strike controls (SunnyStrikes). Opens from an
-//  Inventory chip or any Delta tile; the name chips switch in place.
+//  Blocks 14b + 14c (handoff 27) · the Thesis and Planner screen: one pushed
+//  screen, a horizontal pager of two pages. The Thesis (0) says why next
+//  week's call strike sits where it does; the Planner (1) is the whole
+//  package for one name: the glass position card (Strikes lanes or Week
+//  zones, Position now in pairs), Suggestions and Delta. The header (Back,
+//  the two sliding titles, the job line) and the name chips are shared.
+//  This week's thesis on a Positions card opens it on the Thesis; an
+//  Inventory chip or a Delta tile, on the Planner.
 //
 //  The numbers are the server's package (PlannerPackage.swift): sells by
 //  OUR rule (Nik: "keep ours"), the design's upside buys and fix, NOW on the
@@ -21,8 +24,16 @@ struct SunnyPlanner: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Environment(\.colorScheme) private var scheme
     @State private var mode: Mode = .lanes
-    /// Types switched off the chart (both views); the scale holds still.
-    @State private var offTypes: Set<PlanPkg.Ty> = []
+    /// The pager: where it scrolls to, the swipe progress (0 Thesis, 1 Planner;
+    /// only the header reads it, so a swipe never redraws the cards), the page
+    /// it settled on, and each page's height.
+    @State private var pos = ScrollPosition()
+    /// The page it opened on. Set as the pager's first offset by its edge, so
+    /// the page underneath never scrolls with it (an id scroll moved both).
+    private let start: Int
+    @State private var pager: PagerProgress
+    @State private var settled: Int
+    @State private var heights: [Int: CGFloat] = [:]
     /// Entrance: the three cards fade (0.5 s) and rise 14 pt (0.6 s), 70 ms apart.
     @State private var shown = [false, false, false]
     @State private var risen = [false, false, false]
@@ -31,10 +42,19 @@ struct SunnyPlanner: View {
     /// The name on screen, kept while the page slides away (Back clears the
     /// router's name first, and the page flipped to the first name mid-slide).
     @State private var lastT: String?
-    /// Our thesis (block 14c) is open over this name's cards.
-    @State private var thesis = false
 
     enum Mode { case lanes, week }
+
+    init(home: HomePayload, page: Int = 1) {
+        self.home = home
+        var start = page
+        #if DEBUG && targetEnvironment(simulator)
+        if DebugPreset.bool("planner.thesis") { start = 0 }
+        #endif
+        self.start = start
+        _pager = State(initialValue: PagerProgress(p: Double(start)))
+        _settled = State(initialValue: start)
+    }
 
     private var dark: Bool { scheme == .dark }
     private var pkgs: [PlanPkg] {
@@ -51,45 +71,28 @@ struct SunnyPlanner: View {
             // The page width is read, never written back into state: a
             // measured width fed into the layout it measures can loop.
             GeometryReader { g in
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            header.id("top")
-                            if thesis, let p = cur, let th = thesisFor(p) {
-                                PlannerThesisView(th: th)
-                            } else {
-                                chips(all, cur)
-                                if let p = cur { cards(p, W: max(260, g.size.width - 2 * S.margin - 40)) }
-                                else {
-                                    Text("Nothing to plan this week.").sType(.body, tabular: false).foregroundStyle(S.muted)
-                                }
-                            }
-                        }
-                        .foregroundStyle(S.ink)
-                        .padding(.horizontal, S.margin)
-                        .padding(.top, 14).padding(.bottom, 32)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        backRow
+                        PairHeader(pager: pager, go: go(to:))
+                        chips(all, cur)
+                        pages(cur, W: max(260, g.size.width - 2 * S.margin - 40))
                     }
-                    .scrollIndicators(.hidden)
-                    // Opening Our thesis scrolls to the top (14c, Motion).
-                    .onChange(of: thesis) { _, _ in proxy.scrollTo("top", anchor: .top) }
+                    .foregroundStyle(S.ink)
+                    .padding(.horizontal, S.margin)
+                    .padding(.top, 14).padding(.bottom, 32)
                 }
+                .scrollIndicators(.hidden)
             }
         }
-        // Back from the left edge, as iOS does; anywhere else a sideways swipe
-        // moves to the next or previous name, as the Oct 14 Planner did (Nik,
-        // 16 Oct 2026: "swipe doesnt work").
-        .gesture(DragGesture(minimumDistance: 30).onEnded { v in
+        // Back from the left edge, as iOS does, from the Thesis; on the
+        // Planner the same swipe pages back to the Thesis.
+        .simultaneousGesture(DragGesture(minimumDistance: 30).onEnded { v in
             let dx = v.translation.width, dy = v.translation.height
-            if v.startLocation.x < 30, dx > 80, abs(dy) < 60 { back(); return }
-            guard !thesis, abs(dx) > 60, abs(dx) > 2 * abs(dy), let cur else { return }
-            step(all, from: cur.t, by: dx < 0 ? 1 : -1)
+            if settled == 0, v.startLocation.x < 30, dx > 80, abs(dy) < 60 { back() }
         })
         .task(id: cur?.t) {
             lastT = cur?.t
-            thesis = false
-            #if DEBUG && targetEnvironment(simulator)
-            if DebugPreset.bool("planner.thesis") { thesis = true }
-            #endif
             await entrance()
         }
         .onAppear {
@@ -99,11 +102,72 @@ struct SunnyPlanner: View {
         }
     }
 
-    /// The next or previous name, in chip order; nothing past either end.
-    private func step(_ all: [PlanPkg], from t: String, by d: Int) {
-        guard let i = all.firstIndex(where: { $0.t == t }), all.indices.contains(i + d) else { return }
+    // MARK: The pager
+
+    /// Thesis (0) and Planner (1), one page at a time. As tall as the page
+    /// you are on; the height eases 0.4 s when a page settles. 24 under each
+    /// page is room for the card shadow, taken back from the layout.
+    private func pages(_ cur: PlanPkg?, W: CGFloat) -> some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 0) {
+                page(0) { thesisPage(cur) }
+                page(1) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let p = cur { cards(p, W: W) }
+                        else {
+                            Text("Nothing to plan this week.").sType(.body, tabular: false).foregroundStyle(S.muted)
+                        }
+                    }
+                }
+            }
+            .scrollTargetLayout()
+            // Top down: the shorter page would sit centred on the taller one.
+            .frame(height: heights[settled], alignment: .top)
+        }
+        .scrollTargetBehavior(.paging)
+        .scrollPosition($pos)
+        .defaultScrollAnchor(start == 1 ? .trailing : .leading, for: .initialOffset)
+        .scrollIndicators(.hidden)
+        .onScrollGeometryChange(for: Double.self) { g in
+            Double(g.contentOffset.x / max(1, g.containerSize.width))
+        } action: { _, v in
+            pager.p = min(1, max(0, v))
+        }
+        .onScrollPhaseChange { _, ph in
+            if ph == .idle { settle() }
+        }
+        .frame(height: heights[settled])
+        .animation(reduce ? nil : S.standard(0.4), value: heights[settled])
+        .padding(.horizontal, -S.margin)
+        .padding(.bottom, -24)
+    }
+
+    private func page<C: View>(_ i: Int, @ViewBuilder _ c: () -> C) -> some View {
+        c()
+            .padding(.horizontal, S.margin)
+            .padding(.bottom, 24)
+            .containerRelativeFrame(.horizontal)
+            .fixedSize(horizontal: false, vertical: true)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[i] = $0 }
+    }
+
+    @ViewBuilder private func thesisPage(_ cur: PlanPkg?) -> some View {
+        if let p = cur {
+            PlannerThesisView(ticker: p.t, strategy: home.strategies?[p.t], th: thesisFor(p))
+        }
+    }
+
+    private func settle() {
+        let s = Int(pager.p.rounded())
+        if s != settled { settled = s }
+    }
+
+    /// A tap on the gray title runs the same scroll, about 0.6 s.
+    private func go(to i: Int) {
+        guard i != settled else { return }
         UISelectionFeedbackGenerator().selectionChanged()
-        router.writes = all[i + d].t
+        let edge: Edge = i == 0 ? .leading : .trailing
+        if reduce { pos.scrollTo(edge: edge) } else { withAnimation(.smooth(duration: 0.6)) { pos.scrollTo(edge: edge) } }
     }
 
     /// Replays on every name change; Reduce Motion shows everything at once.
@@ -126,34 +190,31 @@ struct SunnyPlanner: View {
 
     // MARK: Header and name chips
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Button { back() } label: {
-                Path { p in p.move(to: CGPoint(x: 8, y: 2)); p.addLine(to: CGPoint(x: 2, y: 8)); p.addLine(to: CGPoint(x: 8, y: 14)) }
-                    .stroke(S.ink, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
-                    .frame(width: 10, height: 16)
-                    .frame(width: 44, height: 44)
-                    .glassEffect(.regular.interactive(), in: .circle)
-                    .contentShape(Circle())
-            }
-            .buttonStyle(SPressStyle(scale: 0.95))
-            .padding(-2)
-            .accessibilityLabel("Back")
-            Text(thesis ? "Our thesis" : "Planner").sType(.largeTitle, tabular: false)
+    private var backRow: some View {
+        Button { back() } label: {
+            Path { p in p.move(to: CGPoint(x: 8, y: 2)); p.addLine(to: CGPoint(x: 2, y: 8)); p.addLine(to: CGPoint(x: 8, y: 14)) }
+                .stroke(S.ink, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                .frame(width: 10, height: 16)
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.interactive(), in: .circle)
+                .contentShape(Circle())
         }
+        .buttonStyle(SPressStyle(scale: 0.95))
+        .padding(-2)
         .frame(height: 40)
+        .accessibilityLabel("Back")
     }
 
-    /// Back from Our thesis returns to the Planner; from the Planner, to Home.
-    private func back() {
-        if thesis { thesis = false } else { router.closePlanner() }
-    }
+    /// Back returns to wherever the screen was opened from.
+    private func back() { router.closePlanner() }
 
-    /// Our thesis for a name with a read rule (NKE for now; others show no row).
+    /// The thesis for a name: NKE's read rule while it picks, else the 0.6 SD
+    /// Planner rule with the name's reads; nil shows "No thesis for X yet".
     private func thesisFor(_ p: PlanPkg) -> Thesis? {
-        guard let r = home.writes.names.first(where: { $0.ticker == p.t })?.readRule?.value else { return nil }
+        guard let n = home.writes.names.first(where: { $0.ticker == p.t }),
+              let r = n.readRule?.value ?? n.thesis?.value else { return nil }
         let off = router.pkgOff[p.t] ?? [], pick = router.pkgFix[p.t]
-        return Thesis(r, p, afterP: p.pct(p.after(p.live(off: off, pick: pick))))
+        return Thesis(r, p, afterP: p.pct(p.after(p.live(off: off, pick: pick))), strategy: home.strategies?[p.t])
     }
 
     private func chips(_ all: [PlanPkg], _ cur: PlanPkg?) -> some View {
@@ -203,31 +264,15 @@ struct SunnyPlanner: View {
         let live = p.live(off: off, pick: pick)
         let afterP = p.pct(p.after(live))
         positionCard(p, live: live, afterP: afterP, W: W).modifier(Rise(on: shown[0], up: risen[0]))
-        suggestionsCard(p, off: off, pick: pick, live: live, thesis: thesisFor(p)?.entry).modifier(Rise(on: shown[1], up: risen[1]))
+        suggestionsCard(p, off: off, pick: pick, live: live).modifier(Rise(on: shown[1], up: risen[1]))
         deltaCard(p, afterP: afterP, W: W).modifier(Rise(on: shown[2], up: risen[2]))
-        Button { router.openStrikes() } label: {
-            HStack {
-                Text("Adjust strikes").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                    .foregroundStyle(S.muted)
-                Spacer()
-                Path { q in q.move(to: CGPoint(x: 1, y: 1)); q.addLine(to: CGPoint(x: 6, y: 6)); q.addLine(to: CGPoint(x: 1, y: 11)) }
-                    .stroke(S.pNeutral, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                    .frame(width: 7, height: 12)
-                    .padding(.trailing, 4)
-            }
-            .padding(.horizontal, 4)
-            .frame(height: 52)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(SPressStyle())
-        .accessibilityLabel("Adjust strikes for \(p.t)")
     }
 
     // MARK: Position card (glass)
 
     private func positionCard(_ p: PlanPkg, live: [PlanPkg.Leg], afterP: Double, W: CGFloat) -> some View {
         let every = p.held + live
-        let shownLegs = every.filter { !offTypes.contains($0.ty) }
+        let shownLegs = every
         return VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -252,7 +297,6 @@ struct SunnyPlanner: View {
             Group {
                 if mode == .lanes { lanes(p, every: every, shown: shownLegs, W: W) } else { week(p, shown: shownLegs, W: W) }
             }
-            filters(p)
             positionNow(p)
         }
         .padding(20)
@@ -529,39 +573,6 @@ struct SunnyPlanner: View {
         }
     }
 
-    // MARK: Filters
-
-    private func filters(_ p: PlanPkg) -> some View {
-        let present = Set((p.held + p.sug + p.fix).map(\.ty))
-        let defs: [(PlanPkg.Ty, String, Color, Bool)] = [(.lc, "Long calls", S.green, false), (.sc, "Short calls", S.green, true),
-                                                         (.lp, "Long puts", S.blue, false), (.sp, "Short puts", S.blue, true),
-                                                         (.oc, "OTM calls", S.green, false)]
-        return FlowRows(spacing: 8) {
-            ForEach(defs.filter { present.contains($0.0) }, id: \.0) { ty, t, col, short in
-                let on = !offTypes.contains(ty)
-                Button {
-                    withAnimation(reduce ? nil : S.standard(0.3)) {
-                        if on { offTypes.insert(ty) } else { offTypes.remove(ty) }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Circle().fill(on && short ? col : .clear)
-                            .overlay(Circle().strokeBorder(on ? col : (dark ? Color.white.opacity(0.3) : S.ink.opacity(0.25)), lineWidth: 1.5))
-                            .frame(width: 8, height: 8)
-                        Text(t).sType(SType(size: 12, weight: 600, line: 12, tracking: 0), tabular: false)
-                            .foregroundStyle(on ? S.ink : S.muted)
-                    }
-                    .padding(.leading, 10).padding(.trailing, 12).frame(height: 32)
-                    .overlay { if !on { Capsule().strokeBorder(dark ? Color.white.opacity(0.16) : S.ink.opacity(0.14), lineWidth: 1) } }
-                    .glassEffect(on ? .regular.interactive() : .identity, in: .capsule)
-                    .contentShape(Capsule().inset(by: -6))
-                }
-                .buttonStyle(SPressStyle(scale: 0.95))
-                .accessibilityLabel("\(t), \(on ? "shown" : "hidden")")
-            }
-        }
-    }
-
     // MARK: Position now, in pairs
 
     private struct PRow: Identifiable {
@@ -665,7 +676,7 @@ struct SunnyPlanner: View {
 
     // MARK: Suggestions
 
-    private func suggestionsCard(_ p: PlanPkg, off: Set<String>, pick: String?, live: [PlanPkg.Leg], thesis line: String?) -> some View {
+    private func suggestionsCard(_ p: PlanPkg, off: Set<String>, pick: String?, live: [PlanPkg.Leg]) -> some View {
         let credit = live.filter(\.short).reduce(0) { $0 + Double($1.n) * 100 * ($1.mid ?? 0) }
         let cost = live.filter { !$0.short }.reduce(0) { $0 + Double($1.n) * 100 * ($1.mid ?? 0) }
         let f = pick ?? "f3"
@@ -712,7 +723,6 @@ struct SunnyPlanner: View {
             Text("\(PP.usd(credit)) in · \(PP.usd(cost)) out")
                 .sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
                 .contentTransition(.numericText(value: credit - cost))
-            if let line { ThesisEntry(line: line) { thesis = true } }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -855,6 +865,62 @@ struct SunnyPlanner: View {
 private struct Rise: ViewModifier {
     let on: Bool, up: Bool
     func body(content: Content) -> some View { content.opacity(on ? 1 : 0).offset(y: up ? 0 : 14) }
+}
+
+/// The swipe progress, 0 on the Thesis, 1 on the Planner. A class, so only
+/// the header that reads it redraws while the finger moves.
+@Observable final class PagerProgress {
+    var p: Double
+    init(p: Double) { self.p = p }
+}
+
+/// The two large titles on one line (34 heavy) and the job line under them
+/// (14c, Header). The strip slides 140 per page (Thesis is 120 wide, 20 gap);
+/// colors and the job line cross-fade on the same progress, 1:1 with the finger.
+private struct PairHeader: View {
+    let pager: PagerProgress
+    let go: (Int) -> Void
+
+    var body: some View {
+        let p = pager.p
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 20) {
+                title("Thesis", i: 0, mix: p).frame(width: 120, alignment: .leading)
+                title("Planner", i: 1, mix: 1 - p)
+            }
+            .offset(x: -p * 140)
+            .padding(.horizontal, S.margin)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 40, alignment: .leading)
+            .clipped()
+            .padding(.horizontal, -S.margin)
+            ZStack(alignment: .leading) {
+                Text("Why these strikes").opacity(1 - p)
+                Text("What to sell for next week").opacity(p)
+            }
+            .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+            .foregroundStyle(S.muted)
+            .lineLimit(1)
+            .frame(height: 20)
+            .accessibilityHidden(true)
+        }
+        .padding(.top, -4)
+    }
+
+    /// `mix`: 0 is the current page (S.ink), 1 the other (S.muted2).
+    private func title(_ t: String, i: Int, mix: Double) -> some View {
+        Button { go(i) } label: {
+            Text(t).sType(.largeTitle, tabular: false)
+                .foregroundStyle(S.ink.mix(with: S.pNeutral, by: min(1, max(0, mix))))
+                .lineLimit(1)
+                .fixedSize()
+                .frame(height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(mix < 0.5 ? [.isHeader, .isSelected] : [])
+        .accessibilityHint(mix < 0.5 ? "" : "Shows the \(t) page")
+    }
 }
 
 /// Filters wrap onto a second row (block 14b: 8 apart both ways).

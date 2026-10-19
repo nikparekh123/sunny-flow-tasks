@@ -2,15 +2,17 @@
 //  PlannerThesis.swift
 //  Sunny
 //
-//  Block 14c (handoff 26) · Our thesis: why the Planner picked its call
-//  strike. The answer first in one glass card (the baseline, each step, the
-//  pick and the strike), then the facts in five numbered sections. Opens
-//  from a row at the bottom of Suggestions; Back returns to the Planner.
+//  Block 14c (handoff 27) · the Thesis page: why next week's call strike
+//  sits where it does. One glass card: the strategy's premise, five
+//  numbered sections in the order that strategy cares about, then the
+//  receipt and the strike in a lighter pane at the end. Page 0 of the
+//  Thesis and Planner screen; the Planner is one swipe left.
 //
-//  The steps are the TESTED NKE rule's (docs/STRATEGIES.md, NKE weekly rule):
-//  0.6 SD, +0.2 SD a step wider, "closer" a step in (Nik, 19 Oct 2026), not
-//  the design's +0.1 a read. The strike is sunny-home's read_rule strike, the
-//  same one on the Suggestions chip and in Position after the plan.
+//  NKE's steps are the TESTED NKE rule's (docs/STRATEGIES.md): 0.6 SD,
+//  +0.2 a step wider, "closer" a step in. Every other name follows the
+//  Planner's own 0.6 SD rule (Nik, 19 Oct 2026: "Thesis for each page the
+//  .6 planner for now"). Either way the strike is the one on the
+//  Suggestions chip and in Position after the plan.
 //
 
 import SwiftUI
@@ -18,7 +20,7 @@ import SwiftUI
 // MARK: - The words
 
 struct Thesis {
-    struct Line { let label: String; let value: String; let bold: Bool }
+    struct Line { let label: String; let value: String; let bold: Bool; var color: Color = S.ink }
     struct Fact { var t: String; var hl: String = ""; var hc: Color = S.muted; var t2: String = "" }
     struct Row: Identifiable {
         let id: String
@@ -27,26 +29,23 @@ struct Thesis {
         let readColor: Color
         let nameColor: Color
         let step: String
+        let stepColor: Color
         let facts: [Fact]
     }
-    struct Group: Identifiable { let id: String; let n: Int; let title: String; let rows: [Row] }
+    struct Group: Identifiable { let id: String; let title: String; let rows: [Row] }
 
-    let ticker: String
-    let price: String
     let lines: [Line]
     let strike: String
     let detail: String
+    /// In the strategy's order (Strategy.order), Portfolio delta last; numbered on screen.
     let groups: [Group]
-    let entry: String
 
-    init(_ r: ReadRule, _ p: PlanPkg, afterP: Double) {
+    init(_ r: ReadRule, _ p: PlanPkg, afterP: Double, strategy: String?) {
         let spot = r.spot, px = Self.usd(spot)
-        ticker = p.t
-        price = String(format: "%.2f", spot)
 
         // The receipt: baseline, steps, pick; then the strike.
         var ls = [Line(label: "Baseline", value: "\(F.trim(r.baseline ?? 0.6)) SD", bold: false)]
-        ls += r.steps.map { Line(label: $0.label, value: $0.step, bold: false) }
+        ls += r.steps.map { let (v, c) = Self.step($0.step); return Line(label: $0.label, value: v, bold: false, color: c) }
         ls.append(Line(label: "Pick", value: r.pick ?? r.pickSd.map { "\(F.trim($0)) SD" } ?? "", bold: true))
         lines = ls
         strike = r.strike.map(Self.usd) ?? "None"
@@ -54,19 +53,6 @@ struct Thesis {
         detail = r.strike.map { k in
             "\(String(format: "%.1f", abs((k / spot - 1) * 100)))% \(k >= spot ? "above" : "below") \(px) · \(out) of \(r.of) calls"
         } ?? "No calls this week"
-
-        // The row line under Suggestions.
-        let plus = r.steps.filter { $0.step.hasPrefix("+") }
-        let sum = plus.compactMap { Double($0.step.dropFirst()) }.reduce(0, +)
-        var why = r.strike.map { "Why \(Self.usd($0)) · " } ?? "Why no calls · "
-        if r.steps.isEmpty { why += "the \(F.trim(r.baseline ?? 0.6)) SD baseline" }
-        else {
-            why += "\(F.trim(r.baseline ?? 0.6)) SD"
-            if !plus.isEmpty { why += " plus \(F.trim(sum)) from " + Self.and(plus.map(\.read)) }
-            let other = r.steps.filter { !$0.step.hasPrefix("+") }
-            if !other.isEmpty { why += (plus.isEmpty ? ", " : " · ") + other.map { "\($0.step) on \($0.read)" }.joined(separator: ", ") }
-        }
-        entry = why
 
         // The five sections.
         let R = r.reads, T = R.thesis, I = R.inputs
@@ -79,9 +65,11 @@ struct Thesis {
                 let x = read?.read ?? ""
                 return x == "bullish" ? S.green : x == "bearish" ? S.red : S.orangeDeep
             }()
+            let shown = steps.map { Self.step($0.step) }
             return Row(id: key, name: solo ? "" : name, read: w, readColor: tone,
                        nameColor: steps.isEmpty ? S.muted : S.ink,
-                       step: steps.map(\.step).joined(separator: " "), facts: facts)
+                       step: shown.map(\.0).joined(separator: " "),
+                       stepColor: shown.contains { $0.1 == S.red } ? S.red : S.ink, facts: facts)
         }
 
         // 1 · Fundamentals
@@ -146,17 +134,26 @@ struct Thesis {
         let dl = [Fact(t: "\(Int(abs(p.nowPct).rounded()))% left now, \(Int(abs(afterP).rounded()))% after the plan"),
                   Fact(t: "Target \(Int(20 + p.e)) to \(Int(30 + p.e))% of \(Int(p.base).formatted()) LEAP shares")]
 
-        groups = [
-            Group(id: "f", n: 1, title: "Fundamentals", rows: [row("fundamentals", "Fundamentals", R.fundamentals, solo: true, fund)]),
-            Group(id: "p", n: 2, title: "Price", rows: [
+        let all = [
+            Group(id: "f", title: "Fundamentals", rows: [row("fundamentals", "Fundamentals", R.fundamentals, solo: true, fund)]),
+            Group(id: "p", title: "Price", rows: [
                 row("technicals", "Technicals", R.technicals, tech),
                 row("history", "History", R.history, hist),
                 row("momentum", "Momentum", R.momentum, mom),
             ]),
-            Group(id: "i", n: 3, title: "IV", rows: [row("iv", "IV", R.iv, word: ivWord, solo: true, iv)]),
-            Group(id: "e", n: 4, title: "Events", rows: [row("events", "Events", R.events, word: clear ? "None found" : nil, solo: true, ev)]),
-            Group(id: "d", n: 5, title: "Portfolio delta", rows: [row("delta", "Portfolio delta", nil, word: band.rawValue, solo: true, dl)]),
+            Group(id: "i", title: "IV", rows: [row("iv", "IV", R.iv, word: ivWord, solo: true, iv)]),
+            Group(id: "e", title: "Events", rows: [row("events", "Events", R.events, word: clear ? "None found" : nil, solo: true, ev)]),
+            Group(id: "d", title: "Portfolio delta", rows: [row("delta", "Portfolio delta", nil, word: band.rawValue, solo: true, dl)]),
         ]
+        groups = Strategy.order(strategy).compactMap { id in all.first { $0.id == id } }
+    }
+
+    /// A step on the right and in the receipt: "+0.2" as it is; a step in
+    /// ("closer", or a negative) in S.red with no minus sign (14c, Steps).
+    static func step(_ s: String) -> (String, Color) {
+        if s == "closer" { return ("Closer", S.red) }
+        if s.hasPrefix("-") || s.hasPrefix("\u{2212}") { return (String(s.dropFirst()), S.red) }
+        return (s, S.ink)
     }
 
     /// $38.50 · $37 · $1,204.50
@@ -172,101 +169,48 @@ struct Thesis {
     }
 }
 
-// MARK: - The entry row (bottom of Suggestions)
-
-struct ThesisEntry: View {
-    let line: String
-    let open: () -> Void
-    var body: some View {
-        Button(action: open) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Our thesis").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                        .foregroundStyle(S.ink)
-                    Text(line).sType(SType(size: 13, weight: 500, line: 16, tracking: 0))
-                        .foregroundStyle(S.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-                Path { q in q.move(to: CGPoint(x: 1.5, y: 1.5)); q.addLine(to: CGPoint(x: 6.5, y: 7)); q.addLine(to: CGPoint(x: 1.5, y: 12.5)) }
-                    .stroke(S.muted, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    .frame(width: 8, height: 14)
-            }
-            .padding(.top, 8)
-            .frame(minHeight: 56)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(ThesisPress())
-        .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
-        .padding(.bottom, -8)
-        .accessibilityLabel("Our thesis. \(line)")
-    }
-}
-
-/// Press dims to 60% (block 14c, Entry).
-private struct ThesisPress: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
-            .animation(.easeOut(duration: 0.2), value: configuration.isPressed)
-    }
-}
-
-// MARK: - The thesis view
+// MARK: - The Thesis page
 
 struct PlannerThesisView: View {
-    let th: Thesis
-    @Environment(\.accessibilityReduceMotion) private var reduce
-    @State private var shown = false
+    let ticker: String
+    let strategy: String?
+    /// nil: no thesis for this name yet (no reads, or no chain).
+    let th: Thesis?
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                (Text(th.ticker).font(SType(size: 20, weight: 700, line: 24, tracking: 0).font())
-                 + Text(" " + th.price).font(SType(size: 20, weight: 500, line: 24, tracking: 0).font(tabular: true)).foregroundStyle(S.muted))
-                    .sType(SType(size: 20, weight: 700, line: 24, tracking: 0))
-                    .lineLimit(1)
-                Text("Calls to sell for next week · by Fri").sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
+            if let name = Strategy.name(strategy), let premise = Strategy.premise(strategy) {
+                (Text(name).font(SType(size: 15, weight: 700, line: 20, tracking: 0).font()).foregroundStyle(S.ink)
+                 + Text(" · " + premise))
+                    .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
                     .foregroundStyle(S.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .modifier(ThesisRise(on: shown, i: 0))
-            receipt.modifier(ThesisRise(on: shown, i: 0))
-            Text("OUR THESIS").sType(SType(size: 13, weight: 700, line: 16, tracking: 0.04), tabular: false)
-                .foregroundStyle(S.muted)
-                .padding(.top, 8)
-                .modifier(ThesisRise(on: shown, i: 1))
-                .accessibilityAddTraits(.isHeader)
-            VStack(alignment: .leading, spacing: 0) {
-                let idx = Self.indexes(th.groups)
-                ForEach(Array(th.groups.enumerated()), id: \.element.id) { gi, g in
-                    group(g, at: idx[gi])
+            if let th {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(th.groups.enumerated()), id: \.element.id) { i, g in group(g, n: i + 1) }
                 }
+                receipt(th)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No thesis for \(ticker) yet").sType(SType(size: 17, weight: 600, line: 22, tracking: 0), tabular: false)
+                    Text("The call strike stays on the 0.6 SD baseline until a read moves it.")
+                        .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                        .foregroundStyle(S.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 8)
             }
-            .padding(.top, -8)
         }
         .foregroundStyle(S.ink)
-        .task { await enter() }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 
-    /// The design's stagger: name line and receipt 0, label 1, then each
-    /// section takes the index of its first row and every row the next.
-    static func indexes(_ gs: [Thesis.Group]) -> [(group: Int, rows: [Int])] {
-        var i = 2
-        return gs.map { g in
-            let gIndex = i
-            let rows = g.rows.map { _ -> Int in defer { i += 1 }; return i }
-            return (gIndex, rows)
-        }
-    }
-
-    private func enter() async {
-        var t = Transaction(); t.disablesAnimations = true
-        if reduce { withTransaction(t) { shown = true }; return }
-        withTransaction(t) { shown = false }
-        try? await Task.sleep(for: .milliseconds(32))
-        shown = true
-    }
-
-    private var receipt: some View {
+    /// The lighter pane at the end: white 55%, dark white 6%, 20 radius.
+    private func receipt(_ th: Thesis) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(th.lines.enumerated()), id: \.offset) { _, l in
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -274,46 +218,45 @@ struct PlannerThesisView: View {
                         .foregroundStyle(l.bold ? S.ink : S.muted)
                     Spacer(minLength: 0)
                     Text(l.value).sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
+                        .foregroundStyle(l.color)
                 }
                 .padding(.vertical, 10)
                 .overlay(alignment: .bottom) { Rectangle().fill(S.pRule).frame(height: 1) }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("Strike").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false)
-                Spacer(minLength: 0)
-                Text(th.strike).sType(.largeNumber)
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Strike").sType(SType(size: 17, weight: 700, line: 22, tracking: 0), tabular: false)
+                    Spacer(minLength: 0)
+                    Text(th.strike).sType(.largeNumber)
+                }
+                Text(th.detail).sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                    .foregroundStyle(S.muted)
+                    .multilineTextAlignment(.trailing)
             }
             .padding(.top, 14)
-            Text(th.detail).sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-                .foregroundStyle(S.muted)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .multilineTextAlignment(.trailing)
-                .padding(.top, 6)
         }
         .padding(.top, 6).padding(.horizontal, 20).padding(.bottom, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .background(RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .fill(Color.white.opacity(scheme == .dark ? 0.06 : 0.55)))
         .accessibilityElement(children: .combine)
     }
 
-    private func group(_ g: Thesis.Group, at ix: (group: Int, rows: [Int])) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("\(g.n)").sType(SType(size: 15, weight: 600, line: 22, tracking: 0))
-                .foregroundStyle(S.muted)
-                .frame(width: 24, alignment: .leading)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(g.title.uppercased()).sType(SType(size: 13, weight: 700, line: 22, tracking: 0.04), tabular: false)
-                    .foregroundStyle(S.muted)
-                    .accessibilityAddTraits(.isHeader)
-                ForEach(Array(g.rows.enumerated()), id: \.element.id) { j, r in
-                    row(r).modifier(ThesisRise(on: shown, i: ix.rows[j]))
-                }
+    /// "1 EVENTS", then one read a line with its facts; padding 16 0 4 under a rule.
+    private func group(_ g: Thesis.Group, n: Int) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(n)").sType(SType(size: 13, weight: 700, line: 16, tracking: 0))
+                Text(g.title.uppercased()).sType(SType(size: 13, weight: 700, line: 16, tracking: 0.04), tabular: false)
             }
+            .foregroundStyle(S.muted)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+            ForEach(g.rows) { r in row(r) }
         }
-        .padding(.top, 14).padding(.bottom, 4)
+        .padding(.top, 16).padding(.bottom, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
-        .modifier(ThesisRise(on: shown, i: ix.group))
     }
 
     private func row(_ r: Thesis.Row) -> some View {
@@ -335,25 +278,10 @@ struct PlannerThesisView: View {
             Spacer(minLength: 0)
             if !r.step.isEmpty {
                 Text(r.step).sType(SType(size: 17, weight: 700, line: 22, tracking: 0))
+                    .foregroundStyle(r.stepColor)
             }
         }
-        .padding(.top, 4).padding(.bottom, 10)
+        .padding(.top, 8).padding(.bottom, 10)
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// Rise 10 pt and fade in, 70 ms apart: opacity 0.4 s, move 0.5 s
-/// (S.ease.standard). Reduce Motion: everything at once.
-private struct ThesisRise: ViewModifier {
-    let on: Bool
-    let i: Int
-    @Environment(\.accessibilityReduceMotion) private var reduce
-    func body(content: Content) -> some View {
-        let d = Double(i) * S.stagger
-        content
-            .opacity(on ? 1 : 0)
-            .animation(reduce || !on ? nil : .easeOut(duration: 0.4).delay(d), value: on)
-            .offset(y: on || reduce ? 0 : 10)
-            .animation(reduce || !on ? nil : S.standard(0.5).delay(d), value: on)
     }
 }

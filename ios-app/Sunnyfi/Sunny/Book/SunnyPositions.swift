@@ -336,6 +336,7 @@ enum PWords {
 // MARK: - Ticker card (block 13)
 
 private struct PTickerCard: View {
+    @Environment(HomeRouter.self) private var router
     let card: PCard
     /// aftershock, rebound or ladder (block 13b); nil shows no mark.
     let strategy: String?
@@ -352,27 +353,32 @@ private struct PTickerCard: View {
     var body: some View {
         let c = card
         VStack(alignment: .leading, spacing: 18) {
-            head
-            PChartView(c: c, g: PChartGeom(c, width: width, hist: hist, live: live, sessions: sessions,
-                                           ahead: ahead, today: today),
-                       width: width, go: go, d: delay, open: open)
-            footer
+            VStack(alignment: .leading, spacing: 18) {
+                head
+                PChartView(c: c, g: PChartGeom(c, width: width, hist: hist, live: live, sessions: sessions,
+                                               ahead: ahead, today: today),
+                           width: width, go: go, d: delay, open: open)
+                footer
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(a11y)
+            // Block 13b (handoff 27): the last row, 18 under the stats; opens the Thesis on this name.
+            Button { router.openPlanner(c.t, page: 0) } label: {
+                Text("This week's thesis").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                    .foregroundStyle(S.ink)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(Capsule().fill(S.track))
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(SPressStyle(scale: 0.97))
+            .accessibilityLabel("Open this week's thesis for \(c.t)")
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(a11y)
         .foregroundStyle(S.ink)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { PCornerGlow(status: c.status) }
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
-        // Block 13b: laid over the card, so the ticker line keeps its place.
-        // The 44 tall hit area is centred on the 24 line; the word's right
-        // edge sits on the 20 padding.
-        .overlay(alignment: .topTrailing) {
-            if let m = StrategyMark.Kind(strategy) {
-                StrategyMark(kind: m, ticker: c.t).padding(.top, 10).padding(.trailing, 20)
-            }
-        }
         .sunnyGlow()
         .pEnter(go, delay)
     }
@@ -380,11 +386,20 @@ private struct PTickerCard: View {
     private var head: some View {
         let c = card
         return VStack(alignment: .leading, spacing: 12) {
-            (Text(c.t).font(SType(size: 20, weight: 700, line: 24, tracking: 0).font())
-             + Text(" " + PF.price(c.px)).font(SType(size: 20, weight: 500, line: 24, tracking: 0).font(tabular: true))
-                .foregroundStyle(S.muted))
-                .sType(SType(size: 20, weight: 700, line: 24, tracking: 0))
-                .lineLimit(1)
+            // The strategy, plain text at the end of the ticker line (13b, handoff 27): 15 Medium, S.muted.
+            HStack(alignment: .center, spacing: 12) {
+                (Text(c.t).font(SType(size: 20, weight: 700, line: 24, tracking: 0).font())
+                 + Text(" " + PF.price(c.px)).font(SType(size: 20, weight: 500, line: 24, tracking: 0).font(tabular: true))
+                    .foregroundStyle(S.muted))
+                    .sType(SType(size: 20, weight: 700, line: 24, tracking: 0))
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let name = Strategy.name(strategy) {
+                    Text(name).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                        .foregroundStyle(S.muted)
+                        .lineLimit(1)
+                }
+            }
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(c.by).foregroundStyle(S.muted)
                 Spacer(minLength: 0)
@@ -439,7 +454,7 @@ private struct PTickerCard: View {
         let d = c.heads.map { "\(F.trim((abs($0.dist) * 10).rounded() / 10)) percent \($0.dist >= 0 ? "to" : "past") \($0.word) \(PF.strike($0.k))" }
         let g = Int(abs(c.totals.g).rounded()).formatted()
         let kept = "\(PWords.dollars(sold: c.sold, up: c.totals.up)) \(g) dollars"
-        return ([c.t, PF.price(c.px)] + d + [kept]).joined(separator: ", ")
+        return ([c.t, PF.price(c.px)] + (Strategy.name(strategy).map { [$0] } ?? []) + d + [kept]).joined(separator: ", ")
     }
 }
 
@@ -758,31 +773,28 @@ private struct POpacityPress: ButtonStyle {
     }
 }
 
-// MARK: - Strategy mark (block 13b)
+// MARK: - Strategy (block 13b)
 
-/// The position's strategy as a small grey word at the end of the Positions
-/// ticker line: Aftershock, Rebound or Ladder (Nik, 19 Oct 2026: the word in
-/// place of the design's glyph). Tap opens the Planner on that name, as an
-/// Inventory chip does.
-struct StrategyMark: View {
-    enum Kind: String {
-        case aftershock, rebound, ladder
-        init?(_ s: String?) { guard let s, let k = Kind(rawValue: s) else { return nil }; self = k }
-        var name: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+/// The three strategy tags (Nik, 19 Oct 2026: the names are placeholders for now).
+enum Strategy {
+    static func name(_ s: String?) -> String? {
+        switch s { case "aftershock": "Aftershock"; case "rebound": "Rebound"; case "ladder": "Ladder"; default: nil }
     }
-    let kind: Kind
-    let ticker: String
-    @Environment(HomeRouter.self) private var router
-
-    var body: some View {
-        Button { router.openPlanner(ticker) } label: {
-            Text(kind.name).sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                .foregroundStyle(S.muted)
-                .padding(.leading, 12)
-                .frame(height: S.hit)
-                .contentShape(Rectangle())
+    /// The Thesis page's opening line per strategy (14c), and its section order.
+    static func premise(_ s: String?) -> String? {
+        switch s {
+        case "ladder": "sell calls on the LEAP shares every week, one rung above the price."
+        case "aftershock": "after a 15% one-day drop that holds on Day 2, sell calls closer while the crash premium lasts."
+        case "rebound": "off the low and turning up, so calls go further out to leave room for the climb."
+        default: nil
         }
-        .buttonStyle(SPressStyle(scale: 0.95))
-        .accessibilityLabel("\(kind.name), open the Planner for \(ticker)")
+    }
+    /// Section ids f(undamentals) p(rice) i(v) e(vents) d(elta); Portfolio delta always last.
+    static func order(_ s: String?) -> [String] {
+        switch s {
+        case "aftershock": ["e", "p", "i", "f", "d"]
+        case "rebound": ["p", "f", "i", "e", "d"]
+        default: ["f", "p", "i", "e", "d"]
+        }
     }
 }

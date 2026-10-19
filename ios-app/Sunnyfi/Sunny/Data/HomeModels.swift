@@ -235,6 +235,8 @@ struct Writes: Decodable {
         /// The weekly read rule and Our thesis (block 14c): NKE only for now.
         /// Lenient, so a change in its shape never costs the whole payload.
         let readRule: Lenient<ReadRule>?
+        /// Every other name's Thesis page (handoff 27): the 0.6 SD Planner rule with the name's reads.
+        let thesis: Lenient<ReadRule>?
         struct Pkg: Decodable {
             /// LEAP shares (contracts × 100): the denominator of every %.
             let base: Double

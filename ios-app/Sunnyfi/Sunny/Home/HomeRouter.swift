@@ -30,8 +30,12 @@ final class HomeRouter {
     /// Whether the Planner is up. Home reads this, not `writes`, so swiping
     /// between names in the Planner no longer redraws the whole Home page.
     var plannerOpen = false
-    func openPlanner(_ t: String, animated: Bool = true) {
+    /// The page the Thesis and Planner screen opens on (handoff 27): 0 the Thesis (This week's thesis on a
+    /// Positions card), 1 the Planner (an Inventory chip, a Delta tile, a deck card).
+    var plannerPage = 1
+    func openPlanner(_ t: String, page: Int = 1, animated: Bool = true) {
         writes = t
+        plannerPage = page
         withAnimation(animated ? S.standard(0.45) : nil) { plannerOpen = true }
     }
     func closePlanner() {

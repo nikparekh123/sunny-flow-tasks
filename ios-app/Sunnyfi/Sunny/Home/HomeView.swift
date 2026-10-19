@@ -60,7 +60,7 @@ struct HomeView: View {
             .animation(.easeOut(duration: 0.3), value: store.toast)
             .zIndex(8)
             if let home = store.home, router.plannerOpen {
-                SunnyPlanner(home: home)
+                SunnyPlanner(home: home, page: router.plannerPage)
                     .transition(reduce ? .opacity : .move(edge: .trailing))   // Reduce Motion: fades, no slides
                     .zIndex(9)
             }
@@ -206,6 +206,7 @@ struct HomeView: View {
             if v == "report" { router.open(.report(0)) }
             else if v == "theta", let c = (store.home?.thetaChecks ?? []).first { router.open(.theta(c.leg)) }
             else if v.hasPrefix("writes:") { router.openPlanner(String(v.dropFirst(7)), animated: false) }
+            else if v.hasPrefix("thesis:") { router.openPlanner(String(v.dropFirst(7)), page: 0, animated: false) }
             else if v == "aftershock" { router.openAftershock(animated: false) }
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
             else if v.hasPrefix("pick:") { router.debugPick = String(v.dropFirst(5)); router.scrollID = "positions" }
