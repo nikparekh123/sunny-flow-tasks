@@ -218,8 +218,8 @@ struct AccountChart: View {
 
     /// The one-word read that stands in for "Time value" for a few seconds
     /// (Nik, 16 Oct 2026). From the sold legs alone: what they are in the money
-    /// at today's prices against the time value still in them. Under 10% is
-    /// calm and shows nothing (Nik dropped "Decaying": the label staying put
+    /// at today's prices against the time value still in them. Under 5% (Nik,
+    /// 19 Oct 2026; was 10%) is calm and shows nothing (Nik dropped "Decaying": the label staying put
     /// already says calm); otherwise the side with more in the money says which
     /// way prices are pushing: calls Stocks up, puts Stocks down.
     static func timeValueRead(_ home: HomePayload) -> (word: String, color: Color)? {
@@ -231,7 +231,7 @@ struct AccountChart: View {
             let x = (l.type == "call" ? max(0, s - l.strike) : max(0, l.strike - s)) * Double(l.n) * 100
             if l.type == "call" { calls += x } else { puts += x }
         }
-        if calls + puts < 0.1 * tv { return nil }
+        if calls + puts < 0.05 * tv { return nil }
         return calls >= puts ? ("Stocks up", S.orangeDeep) : ("Stocks down", S.red)
     }
 
