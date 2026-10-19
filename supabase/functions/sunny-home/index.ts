@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-17.1';
+const BUILD = '2026-10-19.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1261,7 +1261,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     /* ── THE READ RULE (READ_RULES; NKE only): the week's pick from the reads ── */
     const rr = READ_RULES[t] ? readsOf.get(t) : undefined;
     type Pick = { label: string; why: string; share: number; z: number | null; calls: number; puts: number; pz: number | null;
-                  atm: CS | null; out: CS | null; put: CS | null; outNote: string };
+                  atm: CS | null; out: CS | null; put: CS | null; outNote: string;
+                  steps: { read: string; label: string; step: string }[] };
     let pick: Pick | null = null;
     if (rr && sd && spot > 0) {
       const R = rr.reads as Record<string, Row & { read: string; fact: string }>;
@@ -1277,33 +1278,40 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const exd = inp.ex_div ? String(inp.ex_div) : null, exIn = !!exd && exd > today && exd <= targetExp;
       const none = { atm: null, out: null, put: null, pz: null };
       if (R.iv?.read === 'skip') {
-        pick = { label: 'Skip the week', why: `IV: ${R.iv.fact}`, share: 0, z: null, calls: 0, puts: 0, outNote: '', ...none };
+        pick = { label: 'Skip the week', why: `IV: ${R.iv.fact}`, share: 0, z: null, calls: 0, puts: 0, outNote: '', ...none,
+                 steps: [{ read: 'iv', label: `IV · ${R.iv.fact}`, step: 'skip' }] };
       } else if (earnWk) {
         pick = { label: 'Earnings week: every call at 1 SD, no puts', why: `Earnings ${earnRow!.report_date} before the expiry`,
-                 share: 0, z: 1, calls: full, puts: 0, ...none, out: cAt(spot + sd), outNote: 'at 1 SD' };
+                 share: 0, z: 1, calls: full, puts: 0, ...none, out: cAt(spot + sd), outNote: 'at 1 SD',
+                 steps: [{ read: 'events', label: `Events · earnings ${earnRow!.report_date} before expiry`, step: '1 SD' }] };
       } else {
         let idx = R.momentum?.read === 'bullish' ? 2 : 1;
         const why: string[] = [`momentum ${R.momentum?.read}`];
-        if (R.fundamentals?.read === 'bearish') { idx--; why.push('fundamentals bearish: closer'); }
-        if (R.history?.read === 'stretched up') { idx++; why.push('stretched up: wider'); }
-        if (R.history?.read === 'stretched down') { idx--; why.push('stretched down: closer'); }
-        if (R.momentum?.read === 'bullish' && R.technicals?.read === 'bullish') { idx++; why.push('momentum and technicals bullish: wider'); }
+        /* Our thesis (handoff 26, 14c), on the TESTED rule (Nik, 19 Oct 2026): each menu step is 0.2 SD
+           (0.6 -> 0.8 -> 1.0); a step closer from 0.6 is 20% at the money + 0.6. Bearish momentum is not a step. */
+        const steps: { read: string; label: string; step: string }[] = [];
+        if (R.momentum?.read === 'bullish') steps.push({ read: 'momentum', label: 'Momentum · bullish', step: '+0.2' });
+        if (R.fundamentals?.read === 'bearish') { idx--; why.push('fundamentals bearish: closer'); steps.push({ read: 'fundamentals', label: 'Fundamentals · bearish', step: 'closer' }); }
+        if (R.history?.read === 'stretched up') { idx++; why.push('stretched up: wider'); steps.push({ read: 'history', label: 'History · stretched up', step: '+0.2' }); }
+        if (R.history?.read === 'stretched down') { idx--; why.push('stretched down: closer'); steps.push({ read: 'history', label: 'History · stretched down', step: 'closer' }); }
+        if (R.momentum?.read === 'bullish' && R.technicals?.read === 'bullish') { idx++; why.push('momentum and technicals bullish: wider'); steps.push({ read: 'technicals', label: 'Technicals · bullish with momentum', step: '+0.2' }); }
         idx = Math.max(0, Math.min(3, idx));
         const [share, z] = READ_MENU[idx];
         let out = cAt(spot + z * sd), outNote = `at ${z} SD`;
         const hi5 = Number(inp.high5 ?? 0);
         if (R.breakout?.read === 'yes' && out && hi5 > 0 && out.k <= hi5) {
           out = cAt(hi5 + 0.01); outNote = 'above the 5-day high'; why.push(`breakout week: above $${hi5.toFixed(2)}`);
+          steps.push({ read: 'breakout', label: `Breakout week · above the 5-day high $${hi5.toFixed(2)}`, step: 'strike' });
         }
         const atm = share ? cAt(spot) : null;
         const near = Math.min(atm?.k ?? Infinity, out?.k ?? Infinity) <= spot * 1.02;
         const n = exIn && near ? Math.round(full * 2 / 3) : full;
-        if (exIn && near) why.push(`ex-dividend ${exd} with calls within 2%: two thirds`);
+        if (exIn && near) { why.push(`ex-dividend ${exd} with calls within 2%: two thirds`); steps.push({ read: 'events', label: `Events · ex-dividend ${exd}`, step: 'two thirds' }); }
         const pz = R.momentum?.read === 'bearish' ? 0.8 : 0.6;
         const stretchedDn = R.history?.read === 'stretched down';
         pick = { label: (share ? `${Math.round(share * 100)}% at the money + ${z} SD` : `${z} SD`) + (outNote === 'above the 5-day high' ? ', above the 5-day high' : ''),
                  why: why.join('; '), share, z, calls: n, puts: stretchedDn ? 0 : halfPuts, pz,
-                 atm, out, put: stretchedDn ? null : pAt(spot - pz * sd), outNote };
+                 atm, out, put: stretchedDn ? null : pAt(spot - pz * sd), outNote, steps };
       }
     }
     const share = pick ? pick.share : rule ? 0 : earnIn ? 0.2 : 1 / 3, out = pick ? (pick.z ?? 0.6) : move21 != null && move21 >= 15 ? 1.0 : 0.6;
@@ -1423,7 +1431,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       read_rule: !READ_RULES[t] ? null : !pick
         ? { name: 'NKE weekly rule (trial)', error: rr ? 'no chain IV for this Friday' : `no reads in the last ${READS_STALE_DAYS} days: the roll-sheet rule is used` }
         : { name: 'NKE weekly rule (trial)', pick: pick.label, why: pick.why, calls: pick.calls, of: leapN, puts: pick.puts,
-            reads_day: rr!.day, reads: Object.fromEntries(['fundamentals', 'technicals', 'iv', 'history', 'momentum', 'events', 'breakout']
+            /* Our thesis (14c): baseline 0.6 SD, the steps, the pick and the one strike every card uses. */
+            baseline: 0.6, steps: pick.steps, pick_sd: pick.z, atm_share: pick.share, spot: r2(spot), sd: sd == null ? null : r2(sd),
+            strike: pick.out?.k ?? null, strike_pct: pick.out ? r2((pick.out.k / spot - 1) * 100) : null,
+            reads_day: rr!.day, reads: Object.fromEntries(['fundamentals', 'technicals', 'iv', 'history', 'momentum', 'events', 'breakout', 'thesis', 'inputs']
               .map((k) => [k, (rr!.reads as Row)[k] ?? null])) },
       earnings: earnIn ? { date: earnRow!.report_date, time: earnRow!.report_time ?? null } : null,
       ex_dividend: (() => { const d = divs.find((x) => x.ticker === t && String(x.ex_date) <= targetExp);
@@ -1849,6 +1860,38 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     }
   }
   step('hours');
+  // ── AFTERSHOCK (handoff 26, blocks 26 and 03b) and each name's strategy (13b) ──
+  /* The page and the deck card read the last scans and the crashes of the last two weeks; the app
+     works out the state (waiting, countdown, scanning, results, Day 2) from the New York clock.
+     Day 2 moves come with the next scan (Nik, 19 Oct 2026: option 1; our Polygon plan has no live
+     prices for names not held). */
+  const [aUni, aScans, aEvents, aTaken] = await Promise.all([
+    get('crash_universe?select=ticker'),
+    get('crash_scans?order=day.desc&limit=3&select=day,scanned_at,universe,crashes'),
+    get(`crash_events?day=gte.${addDays(today, -14)}&order=day.desc,drop_pct.asc&select=ticker,day,prev_close,close,drop_pct,entry_day,day2_close,day2_pct`),
+    get('crash_events?taken=eq.true&select=ticker,entry_day&order=entry_day.desc'),
+  ]);
+  const aftershock = {
+    universe: aUni.length,
+    scans: aScans.map((x) => ({ day: x.day, crashes: Number(x.crashes), scanned_at: x.scanned_at })),
+    events: aEvents.map((e) => ({ ticker: e.ticker, day: e.day, prev_close: num(e.prev_close), close: num(e.close),
+      drop_pct: num(e.drop_pct), day2: e.entry_day, day2_close: num(e.day2_close), day2_pct: num(e.day2_pct) })),
+    /* Today until today's scan is in, then the next trading day. */
+    next_scan_day: isTrading(today) && String(aScans[0]?.day ?? '') !== today ? today : nextTrading(today),
+  };
+  /* By name (Nik, 19 Oct 2026): TSLA is Ladder; a name whose crash trade was taken (puts sold on its
+     Day 2, seen by crash-scan) is Aftershock; every other held name is Rebound. */
+  const LADDER = ['TSLA'];
+  const takenOn = new Map<string, string>();
+  for (const e of aTaken) if (!takenOn.has(String(e.ticker))) takenOn.set(String(e.ticker), String(e.entry_day));
+  const strategies: Record<string, string> = {};
+  for (const l of legs) {
+    if (strategies[l.ticker]) continue;
+    const tk = takenOn.get(l.ticker);
+    strategies[l.ticker] = LADDER.includes(l.ticker) ? 'ladder'
+      : tk && legs.some((x) => x.ticker === l.ticker && x.opened >= tk) ? 'aftershock' : 'rebound';
+  }
+  step('aftershock');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
     calendar: cal.filter((c) => String(c.date) >= today)
@@ -1862,6 +1905,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     writes: { expiry: targetExp, names: writes.filter((w: Row) => !w.error),
               missing: writes.filter((w: Row) => w.error).map((w: Row) => w.ticker) },
     theta_checks: thetaChecks, last_week: lastWeek, ...(checkSummary ? { theta_check_run: checkSummary } : {}),
+    aftershock, strategies,
   };
   return { payload, ms: Date.now() - t0, steps };
 }
