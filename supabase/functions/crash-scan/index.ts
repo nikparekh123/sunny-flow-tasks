@@ -3,7 +3,7 @@
  * research in research/crash-scan/).
  *
  *   scan   from 4:15 PM New York, every 5 minutes until done. Today's closes come from Theta (Nik, 19 Oct 2026:
- *          "use Theta data"): its 15-minute-delayed stock snapshot shows the 16:00 close from 4:15 PM; until the
+ *          "use Theta data"): its 15-minute-delayed minute bars show the last regular trade from 4:15 PM; until the
  *          Theta stock plan is live on the proxy, Theta's end-of-day bar (published about 5:15 PM); Polygon's
  *          grouped bars last (our Polygon plan releases them only some time after the close: 403 until then).
  *          The prior close is Polygon's grouped bar for the previous session (split-adjusted). Any
@@ -18,7 +18,7 @@
  *         source?: 'theta-delayed' | 'theta-eod' | 'grouped' (force one source, for tests) }.
  * The cron sends nothing: 'auto' picks by New York time.
  */
-const BUILD = '2026-10-19.5';
+const BUILD = '2026-10-19.6';
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
 const DROP = -0.15;
@@ -89,11 +89,15 @@ async function thetaEach(uni: string[], path: (t: string) => string, pick: (rows
 }
 const flat = (x: Row) => (x?.data?.[0] ?? x) as Row;
 const stamp = (x: Row) => String(x.created ?? x.timestamp ?? x.date ?? '');
-/** Today's 16:00 close from Theta's 15-minute-delayed snapshot (stock plan): only a print stamped today at or after 16:00. */
+/** The session's last regular trade from Theta's 15-minute-delayed minute bars (stock plan, venue utp_cta): the
+    close of the last bar with trades from 15:55 to 16:00, readable from about 4:15 PM. The snapshot's "close" is the
+    latest trade, after hours included, so it is not used. */
 async function thetaSnapshot(uni: string[], date: string) {
-  return thetaEach(uni, (t) => `/v3/stock/snapshot/ohlc?symbol=${encodeURIComponent(t)}`, (rows) => {
-    const x = flat(rows[0] ?? {}); const st = stamp(x);
-    return st.slice(0, 10) === date && st.slice(11, 16) >= '16:00' ? Number(x.close) : null;
+  const d = date.replaceAll('-', '');
+  return thetaEach(uni, (t) => `/v3/stock/history/ohlc?symbol=${encodeURIComponent(t)}&date=${d}&interval=1m&start_time=15:55:00&end_time=16:00:00&venue=utp_cta`, (rows) => {
+    const bars = rows.map(flat).filter((x) => stamp(x).slice(0, 10) === date && Number(x.count) > 0 && Number(x.close) > 0
+      && stamp(x).slice(11, 16) <= '15:59');
+    return bars.length ? Number(bars[bars.length - 1].close) : null;
   });
 }
 /** The session's end-of-day bar from Theta (published about 5:15 PM New York; free on our plan). */
