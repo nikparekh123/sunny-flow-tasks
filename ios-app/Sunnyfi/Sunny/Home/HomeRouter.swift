@@ -3,7 +3,8 @@
 //  Sunny
 //
 //  What Home has open: a receipt over the page (blocks 06 and 07), the
-//  Planner on a ticker (block 14b), and where quick nav scrolls (08).
+//  Planner on a ticker (block 14b), the Aftershock page (26), and where
+//  quick nav scrolls (08).
 //
 
 import SwiftUI
@@ -49,6 +50,13 @@ final class HomeRouter {
     /// Each name's plan, kept until the app closes ("ticker|expiry"; a name
     /// with no entry shows the engine's pick, live).
     var plans: [String: [PlanLeg]] = [:]
+    /// The Aftershock page (block 26), pushed from its deck card (03b) and
+    /// from the 4:16 PM push. Back returns where it was opened from.
+    var aftershockOpen = false
+    func openAftershock(animated: Bool = true) {
+        withAnimation(animated ? S.standard(0.45) : nil) { aftershockOpen = true }
+    }
+    func closeAftershock() { withAnimation(S.standard(0.45)) { aftershockOpen = false } }
     var scrollTarget: Section?
     /// DEBUG: scroll to a block by id ("today", "portfolio", ...).
     var scrollID: String?

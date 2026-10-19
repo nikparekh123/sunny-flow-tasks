@@ -31,6 +31,8 @@ struct SunnyPlanner: View {
     /// The name on screen, kept while the page slides away (Back clears the
     /// router's name first, and the page flipped to the first name mid-slide).
     @State private var lastT: String?
+    /// Our thesis (block 14c) is open over this name's cards.
+    @State private var thesis = false
 
     enum Mode { case lanes, week }
 
@@ -49,20 +51,28 @@ struct SunnyPlanner: View {
             // The page width is read, never written back into state: a
             // measured width fed into the layout it measures can loop.
             GeometryReader { g in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        header
-                        chips(all, cur)
-                        if let p = cur { cards(p, W: max(260, g.size.width - 2 * S.margin - 40)) }
-                        else {
-                            Text("Nothing to plan this week.").sType(.body, tabular: false).foregroundStyle(S.muted)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            header.id("top")
+                            if thesis, let p = cur, let th = thesisFor(p) {
+                                PlannerThesisView(th: th)
+                            } else {
+                                chips(all, cur)
+                                if let p = cur { cards(p, W: max(260, g.size.width - 2 * S.margin - 40)) }
+                                else {
+                                    Text("Nothing to plan this week.").sType(.body, tabular: false).foregroundStyle(S.muted)
+                                }
+                            }
                         }
+                        .foregroundStyle(S.ink)
+                        .padding(.horizontal, S.margin)
+                        .padding(.top, 14).padding(.bottom, 32)
                     }
-                    .foregroundStyle(S.ink)
-                    .padding(.horizontal, S.margin)
-                    .padding(.top, 14).padding(.bottom, 32)
+                    .scrollIndicators(.hidden)
+                    // Opening Our thesis scrolls to the top (14c, Motion).
+                    .onChange(of: thesis) { _, _ in proxy.scrollTo("top", anchor: .top) }
                 }
-                .scrollIndicators(.hidden)
             }
         }
         // Back from the left edge, as iOS does; anywhere else a sideways swipe
@@ -70,12 +80,16 @@ struct SunnyPlanner: View {
         // 16 Oct 2026: "swipe doesnt work").
         .gesture(DragGesture(minimumDistance: 30).onEnded { v in
             let dx = v.translation.width, dy = v.translation.height
-            if v.startLocation.x < 30, dx > 80, abs(dy) < 60 { router.closePlanner(); return }
-            guard abs(dx) > 60, abs(dx) > 2 * abs(dy), let cur else { return }
+            if v.startLocation.x < 30, dx > 80, abs(dy) < 60 { back(); return }
+            guard !thesis, abs(dx) > 60, abs(dx) > 2 * abs(dy), let cur else { return }
             step(all, from: cur.t, by: dx < 0 ? 1 : -1)
         })
         .task(id: cur?.t) {
             lastT = cur?.t
+            thesis = false
+            #if DEBUG && targetEnvironment(simulator)
+            if DebugPreset.bool("planner.thesis") { thesis = true }
+            #endif
             await entrance()
         }
         .onAppear {
@@ -114,7 +128,7 @@ struct SunnyPlanner: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Button { router.closePlanner() } label: {
+            Button { back() } label: {
                 Path { p in p.move(to: CGPoint(x: 8, y: 2)); p.addLine(to: CGPoint(x: 2, y: 8)); p.addLine(to: CGPoint(x: 8, y: 14)) }
                     .stroke(S.ink, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
                     .frame(width: 10, height: 16)
@@ -125,9 +139,21 @@ struct SunnyPlanner: View {
             .buttonStyle(SPressStyle(scale: 0.95))
             .padding(-2)
             .accessibilityLabel("Back")
-            Text("Planner").sType(.largeTitle, tabular: false)
+            Text(thesis ? "Our thesis" : "Planner").sType(.largeTitle, tabular: false)
         }
         .frame(height: 40)
+    }
+
+    /// Back from Our thesis returns to the Planner; from the Planner, to Home.
+    private func back() {
+        if thesis { thesis = false } else { router.closePlanner() }
+    }
+
+    /// Our thesis for a name with a read rule (NKE for now; others show no row).
+    private func thesisFor(_ p: PlanPkg) -> Thesis? {
+        guard let r = home.writes.names.first(where: { $0.ticker == p.t })?.readRule?.value else { return nil }
+        let off = router.pkgOff[p.t] ?? [], pick = router.pkgFix[p.t]
+        return Thesis(r, p, afterP: p.pct(p.after(p.live(off: off, pick: pick))))
     }
 
     private func chips(_ all: [PlanPkg], _ cur: PlanPkg?) -> some View {
@@ -177,7 +203,7 @@ struct SunnyPlanner: View {
         let live = p.live(off: off, pick: pick)
         let afterP = p.pct(p.after(live))
         positionCard(p, live: live, afterP: afterP, W: W).modifier(Rise(on: shown[0], up: risen[0]))
-        suggestionsCard(p, off: off, pick: pick, live: live).modifier(Rise(on: shown[1], up: risen[1]))
+        suggestionsCard(p, off: off, pick: pick, live: live, thesis: thesisFor(p)?.entry).modifier(Rise(on: shown[1], up: risen[1]))
         deltaCard(p, afterP: afterP, W: W).modifier(Rise(on: shown[2], up: risen[2]))
         Button { router.openStrikes() } label: {
             HStack {
@@ -639,7 +665,7 @@ struct SunnyPlanner: View {
 
     // MARK: Suggestions
 
-    private func suggestionsCard(_ p: PlanPkg, off: Set<String>, pick: String?, live: [PlanPkg.Leg]) -> some View {
+    private func suggestionsCard(_ p: PlanPkg, off: Set<String>, pick: String?, live: [PlanPkg.Leg], thesis line: String?) -> some View {
         let credit = live.filter(\.short).reduce(0) { $0 + Double($1.n) * 100 * ($1.mid ?? 0) }
         let cost = live.filter { !$0.short }.reduce(0) { $0 + Double($1.n) * 100 * ($1.mid ?? 0) }
         let f = pick ?? "f3"
@@ -686,6 +712,7 @@ struct SunnyPlanner: View {
             Text("\(PP.usd(credit)) in · \(PP.usd(cost)) out")
                 .sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
                 .contentTransition(.numericText(value: credit - cost))
+            if let line { ThesisEntry(line: line) { thesis = true } }
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)

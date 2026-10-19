@@ -48,6 +48,10 @@ struct GalleryHost: View {
             AccountChart(home: home)
         case "deck":
             SunnyDeck(cards: DeckBuilder.cards(home), today: home.today) { _ in }.padding(.horizontal, S.margin)
+        case "aftershock-card":
+            if let a = home.aftershock {
+                SunnyAftershockCard(data: a, calendar: home.calendar, onTap: {}, onDismiss: {}).padding(.horizontal, S.margin)
+            }
         case "today":
             SunnyToday(home: home)
         case "portfolio":

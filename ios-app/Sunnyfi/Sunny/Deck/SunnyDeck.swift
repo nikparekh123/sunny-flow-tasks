@@ -32,9 +32,16 @@ struct SunnyDeck: View {
                 ZStack(alignment: .top) {
                     ForEach(Array(deck.enumerated()), id: \.element.id) { i, c in
                         let r = (i - di + n) % n, b = min(r, 2)
-                        SunnyDeckCard(card: c,
-                                      onTap: { tap(c) },
-                                      onDismiss: { dismiss(c) })
+                        Group {
+                            if let s = c.scan {
+                                SunnyAftershockCard(data: s.data, calendar: s.calendar,
+                                                    onTap: { tap(c) }, onDismiss: { dismiss(c) })
+                            } else {
+                                SunnyDeckCard(card: c,
+                                              onTap: { tap(c) },
+                                              onDismiss: { dismiss(c) })
+                            }
+                        }
                             .scaleEffect(1 - 0.06 * CGFloat(b))
                             .offset(y: (n > 1 ? 16 : 0) - 12 * CGFloat(b))
                             .opacity(r > 2 ? 0 : 1)
@@ -114,12 +121,12 @@ struct SunnyDeckCard: View {
     @State private var width: CGFloat = 353
 
     private var fg: Color {
-        switch card.tone { case .yellow: S.deckInk; case .ink, .green: .white; case .frosted: S.ink }
+        switch card.tone { case .yellow: S.deckInk; case .ink, .green, .night: .white; case .frosted: S.ink }
     }
     private var markColor: Color {
         switch card.tone {
         case .yellow: S.deckInk.opacity(0.08)
-        case .ink: Color.white.opacity(0.08)
+        case .ink, .night: Color.white.opacity(0.08)
         case .green: Color.white.opacity(0.10)
         case .frosted: scheme == .dark ? Color.white.opacity(0.06) : S.deckInk.opacity(0.06)
         }
@@ -190,6 +197,7 @@ struct SunnyDeckCard: View {
         switch card.tone {
         case .yellow: S.deckYellow
         case .ink: S.deckInk
+        case .night: S.night
         case .green: S.deckGreen
         case .frosted: SFrostedSurface(radius: S.rDeck)
         }
@@ -199,7 +207,7 @@ struct SunnyDeckCard: View {
         let (fill, rim): (Color, Color) = {
             switch card.tone {
             case .yellow: (Color.white.opacity(0.42), Color.white.opacity(0.75))
-            case .ink: (Color.white.opacity(0.14), Color.white.opacity(0.25))
+            case .ink, .night: (Color.white.opacity(0.14), Color.white.opacity(0.25))
             case .green: (Color.white.opacity(0.18), Color.white.opacity(0.35))
             case .frosted: scheme == .dark ? (Color.white.opacity(0.12), Color.white.opacity(0.18))
                                            : (Color.white.opacity(0.6), Color.white.opacity(0.9))

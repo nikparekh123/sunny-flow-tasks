@@ -100,6 +100,7 @@ struct SunnyPositions: View {
             HStack(alignment: .top, spacing: 20) {
                 ForEach(pages) { pg in
                     PPageView(page: pg, width: pw, hours: hours, live: live, today: home.today,
+                              strategies: home.strategies ?? [:],
                               open: MarketClock.isRegular(SClock.now(), calendar: home.calendar), mode: $mode,
                               go: seen.contains(pg.id) || reduce)
                         .frame(width: pw, alignment: .topLeading)
@@ -179,6 +180,8 @@ private struct PPageView: View {
     let hours: Hours?
     let live: Double
     let today: String
+    /// Each name's strategy (block 13b).
+    let strategies: [String: String]
     let open: Bool                  // regular session: the chart dots pulse
     @Binding var mode: PMode
     let go: Bool
@@ -190,7 +193,7 @@ private struct PPageView: View {
             } else {
                 PSideTop(page: page, mode: $mode, go: go).pEnter(go, 0)
                 ForEach(Array(page.cards.enumerated()), id: \.element.id) { j, c in
-                    PTickerCard(card: c, width: width - 40, go: go,
+                    PTickerCard(card: c, strategy: strategies[c.t], width: width - 40, go: go,
                                 delay: Double(min(j + 1, 6)) * S.stagger,
                                 hist: hours?.px[c.t] ?? [], live: live, sessions: hours?.days ?? [],
                                 ahead: c.weekExpiry.map { e in (hours?.ahead ?? []).filter { $0 <= e } } ?? [],
@@ -334,6 +337,8 @@ enum PWords {
 
 private struct PTickerCard: View {
     let card: PCard
+    /// aftershock, rebound or ladder (block 13b); nil shows no mark.
+    let strategy: String?
     let width: CGFloat              // content width: 313 on a 393 phone
     let go: Bool
     let delay: Double
@@ -353,15 +358,23 @@ private struct PTickerCard: View {
                        width: width, go: go, d: delay, open: open)
             footer
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11y)
         .foregroundStyle(S.ink)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { PCornerGlow(status: c.status) }
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
+        // Block 13b: laid over the card, so the ticker line keeps its place.
+        // The 44 hit area overhangs the 24 line by 10 above and below and
+        // the 22 circle's right edge sits on the 20 padding.
+        .overlay(alignment: .topTrailing) {
+            if let m = StrategyMark.Kind(strategy) {
+                StrategyMark(kind: m, ticker: c.t).padding(.top, 10).padding(.trailing, 9)
+            }
+        }
         .sunnyGlow()
         .pEnter(go, delay)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(a11y)
     }
 
     private var head: some View {
@@ -742,5 +755,57 @@ private struct POpacityPress: ButtonStyle {
         configuration.label
             .opacity(configuration.isPressed ? 0.6 : 1)
             .animation(.easeOut(duration: S.tap), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Strategy mark (block 13b)
+
+/// A quiet 22 circle at the end of a Positions ticker line naming the
+/// position's strategy; tap opens the Planner on that name, as an Inventory
+/// chip does. S.track fill and an S.muted glyph, never a gain or loss colour.
+struct StrategyMark: View {
+    enum Kind: String {
+        case aftershock, rebound, ladder
+        init?(_ s: String?) { guard let s, let k = Kind(rawValue: s) else { return nil }; self = k }
+        var name: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+    }
+    let kind: Kind
+    let ticker: String
+    @Environment(HomeRouter.self) private var router
+
+    var body: some View {
+        Button { router.openPlanner(ticker) } label: {
+            Self.glyph(kind)
+                .stroke(S.muted, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                .frame(width: 24, height: 24)
+                .scaleEffect(13.0 / 24.0)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(S.track))
+                .frame(width: S.hit, height: S.hit)
+                .contentShape(Circle())
+        }
+        .buttonStyle(SPressStyle(scale: 0.9))
+        .accessibilityLabel("\(kind.name), open the Planner for \(ticker)")
+    }
+
+    /// The design's paths on a 24 grid (SunnyPositions.dc.html, SGi).
+    static func glyph(_ k: Kind) -> Path {
+        var p = Path()
+        switch k {
+        case .aftershock:       // M2 8h5l3 10 3-9 2 5 1.5-2H22
+            p.move(to: CGPoint(x: 2, y: 8)); p.addLine(to: CGPoint(x: 7, y: 8)); p.addLine(to: CGPoint(x: 10, y: 18))
+            p.addLine(to: CGPoint(x: 13, y: 9)); p.addLine(to: CGPoint(x: 15, y: 14)); p.addLine(to: CGPoint(x: 16.5, y: 12))
+            p.addLine(to: CGPoint(x: 22, y: 12))
+        case .rebound:          // M3 5c1.6 8 4.4 13 8 13 3.2 0 5.4-3.6 7-10M14.6 8.4l3.6-.8 1 3.6
+            p.move(to: CGPoint(x: 3, y: 5))
+            p.addCurve(to: CGPoint(x: 11, y: 18), control1: CGPoint(x: 4.6, y: 13), control2: CGPoint(x: 7.4, y: 18))
+            p.addCurve(to: CGPoint(x: 18, y: 8), control1: CGPoint(x: 14.2, y: 18), control2: CGPoint(x: 16.4, y: 14.4))
+            p.move(to: CGPoint(x: 14.6, y: 8.4)); p.addLine(to: CGPoint(x: 18.2, y: 7.6)); p.addLine(to: CGPoint(x: 19.2, y: 11.2))
+        case .ladder:           // M7 3v18M17 3v18M7 8h10M7 13h10M7 18h10
+            p.move(to: CGPoint(x: 7, y: 3)); p.addLine(to: CGPoint(x: 7, y: 21))
+            p.move(to: CGPoint(x: 17, y: 3)); p.addLine(to: CGPoint(x: 17, y: 21))
+            for y in [8.0, 13, 18] { p.move(to: CGPoint(x: 7, y: y)); p.addLine(to: CGPoint(x: 17, y: y)) }
+        }
+        return p
     }
 }

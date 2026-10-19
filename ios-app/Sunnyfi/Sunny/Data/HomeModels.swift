@@ -42,6 +42,33 @@ struct HomePayload: Decodable {
     let allocation: Allocation
     /// Every open theta check (block 15's breathing tile), not only today's card.
     let thetaChecks: [Deck.ThetaCheck]?
+    /// The crash scanner (handoff 26, blocks 03b and 26).
+    let aftershock: Aftershock?
+    /// Each open name's strategy: rebound, ladder or aftershock (block 13b).
+    let strategies: [String: String]?
+}
+
+/// Aftershock: the universe, the last scans and the last two weeks of crashes,
+/// biggest drop first within a day (crash-scan, read by sunny-home).
+struct Aftershock: Decodable, Equatable {
+    let universe: Int
+    let scans: [Scan]
+    let events: [Event]
+    let nextScanDay: String?
+
+    struct Scan: Decodable, Equatable { let day: String; let crashes: Int; let scannedAt: String? }
+    struct Event: Decodable, Equatable, Identifiable {
+        var id: String { ticker + day }
+        let ticker: String
+        let day: String
+        let prevClose: Double
+        let close: Double
+        let dropPct: Double
+        /// The trading day after the crash, and its close once it is in.
+        let day2: String?
+        let day2Close: Double?
+        let day2Pct: Double?
+    }
 }
 
 /// The last five sessions that have opened, 10:00 to 16:00 New York, seven
@@ -205,6 +232,9 @@ struct Writes: Decodable {
         /// The package (handoff 25): what is held, next week's plan and the fix,
         /// in share-equivalent delta. `now` is the Delta tile's number.
         let pkg: Pkg?
+        /// The weekly read rule and Our thesis (block 14c): NKE only for now.
+        /// Lenient, so a change in its shape never costs the whole payload.
+        let readRule: Lenient<ReadRule>?
         struct Pkg: Decodable {
             /// LEAP shares (contracts × 100): the denominator of every %.
             let base: Double
@@ -496,4 +526,78 @@ enum Scalar: Decodable {
     }
     var string: String? { if case .s(let v) = self { return v }; return nil }
     var number: Double? { if case .n(let v) = self { return v }; return nil }
+}
+
+/// Decodes to nil instead of failing the payload.
+struct Lenient<T: Decodable>: Decodable {
+    let value: T?
+    init(from d: Decoder) throws { value = try? T(from: d) }
+}
+
+/// A name's weekly read rule (sunny-home `read_rule`; docs/STRATEGIES.md, NKE
+/// weekly rule): the seven reads, the steps off the 0.6 SD baseline, the
+/// pick and the one call strike every card uses.
+struct ReadRule: Decodable {
+    let of: Int
+    let calls: Int
+    let spot: Double
+    let sd: Double?
+    let baseline: Double?
+    let pickSd: Double?
+    /// "0.6 SD", "1 SD", or the skip.
+    let pick: String?
+    let strike: Double?
+    let strikePct: Double?
+    /// The share sold at the money when a read steps closer (0 otherwise).
+    let atmShare: Double?
+    let steps: [Step]
+    let reads: Reads
+
+    struct Step: Decodable { let read: String; let label: String; let step: String }
+    struct Read: Decodable {
+        let read: String
+        let fact: String
+        let value: Double?
+        let analyst: Double?
+        let model: Double?
+    }
+    struct Reads: Decodable {
+        let fundamentals: Read?
+        let technicals: Read?
+        let iv: Read?
+        let history: Read?
+        let momentum: Read?
+        let events: Read?
+        let breakout: Read?
+        let inputs: Inputs?
+        let thesis: Facts?
+    }
+    struct Inputs: Decodable {
+        let iv: Double?
+        let rich: Double?
+        let hv20Ex: Double?
+        let ivRank: Double?
+        let exDiv: String?
+        let exDivEstimated: Bool?
+        let nextEarnings: String?
+    }
+    /// The prices behind the reads: moving averages, the 5-day-ago close, the
+    /// month's range, the 12-month move, the usual IV.
+    struct Facts: Decodable {
+        let sma10: Double?
+        let sma50: Double?
+        let sma100: Double?
+        let sma200: Double?
+        let sma200Ago: Double?
+        let close5: Double?
+        let mLo: Double?
+        let mHi: Double?
+        let chg252: Double?
+        let ivUsual: Double?
+        // .convertFromSnakeCase turns sma200_21 into sma20021.
+        enum CodingKeys: String, CodingKey {
+            case sma10, sma50, sma100, sma200, close5, mLo, mHi, chg252, ivUsual
+            case sma200Ago = "sma20021"
+        }
+    }
 }

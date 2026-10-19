@@ -74,9 +74,18 @@ struct HomeView: View {
                     .transition(reduce ? .opacity : .move(edge: .bottom))
                     .zIndex(10)
             }
+            // Over everything, so the 4:16 PM push lands on it from anywhere.
+            if let home = store.home, router.aftershockOpen, home.aftershock != nil {
+                SunnyAftershockPage(home: home, onBack: router.closeAftershock)
+                    .transition(reduce ? .opacity : .move(edge: .trailing))
+                    .zIndex(10.5)
+            }
         }
         .environment(router)
         .onAppear(perform: debugOpen)
+        // A tapped push: Aftershock opens its page once Home has its data.
+        .onChange(of: PushInbox.shared.link, initial: true) { _, _ in openPushed() }
+        .onChange(of: store.home == nil) { _, _ in openPushed() }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
             await store.live()
@@ -94,9 +103,14 @@ struct HomeView: View {
                         AccountChart(home: home, readTick: store.readTick)
                     }
                     .sEnter(0)
-                    SunnyDeck(cards: DeckBuilder.cards(home), today: home.today) { act(action: $0) }
-                        .padding(.horizontal, S.margin)
-                        .sEnter(1)
+                    // Rebuilt every 15 s as well as on each update, so the
+                    // Aftershock card comes in at 4:00 PM and leaves at 8:00 PM
+                    // with nothing else changing.
+                    TimelineView(.periodic(from: .now, by: 15)) { _ in
+                        SunnyDeck(cards: DeckBuilder.cards(home), today: home.today) { act(action: $0) }
+                    }
+                    .padding(.horizontal, S.margin)
+                    .sEnter(1)
                     // An even glide in and out over a second; the 0.6 s ease-out
                     // started at full speed and felt like a jump (Nik, 15 Oct 2026).
                     SunnyQuickNav { s in
@@ -190,6 +204,7 @@ struct HomeView: View {
             if v == "report" { router.open(.report(0)) }
             else if v == "theta", let c = (store.home?.thetaChecks ?? []).first { router.open(.theta(c.leg)) }
             else if v.hasPrefix("writes:") { router.openPlanner(String(v.dropFirst(7)), animated: false) }
+            else if v == "aftershock" { router.openAftershock(animated: false) }
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
             else if v.hasPrefix("pick:") { router.debugPick = String(v.dropFirst(5)); router.scrollID = "positions" }
         }
@@ -201,7 +216,14 @@ struct HomeView: View {
         case .writes(let t): router.openPlanner(t)
         case .report(let i): router.open(.report(i))
         case .theta(let leg): router.open(.theta(leg))
+        case .aftershock: router.openAftershock()
         }
+    }
+
+    private func openPushed() {
+        guard let link = PushInbox.shared.link, store.home != nil else { return }
+        PushInbox.shared.link = nil
+        if link == "sunny://aftershock" { router.openAftershock(animated: false) }
     }
 
     @ViewBuilder private func receipt(_ r: HomeRouter.Receipt, _ home: HomePayload) -> some View {

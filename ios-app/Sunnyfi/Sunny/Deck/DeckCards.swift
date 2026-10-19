@@ -3,7 +3,8 @@
 //  Sunny
 //
 //  Which cards are in the Home deck today (blocks 03 to 07), in the deck's
-//  order: Earnings · Earnings season · Theta check · Report · Holiday. Each
+//  order: Aftershock (03b, first while it is live) · Earnings · Earnings
+//  season · Theta check · Report · Holiday. Each
 //  kind keeps its own rule for when it comes and goes; this works them out
 //  from the Home payload and the saved calendar, in New York time, on open,
 //  on every refresh and at midnight.
@@ -12,8 +13,8 @@
 import SwiftUI
 
 struct DeckCard: Identifiable, Equatable {
-    enum Tone: Equatable { case yellow, ink, green, frosted }
-    enum Action: Equatable { case writes(String), report(Int), theta(String) }
+    enum Tone: Equatable { case yellow, ink, green, frosted, night }
+    enum Action: Equatable { case writes(String), report(Int), theta(String), aftershock }
 
     let id: String
     let kicker: String
@@ -24,6 +25,8 @@ struct DeckCard: Identifiable, Equatable {
     let action: Action?
     /// Key a ✕ files the card under, and until when (yyyy-MM-dd, inclusive).
     let dismiss: (key: String, until: String)?
+    /// The Aftershock card draws itself live from the scanner (03b).
+    var scan: (data: Aftershock, calendar: [CalendarDay])? = nil
 
     static func == (a: DeckCard, b: DeckCard) -> Bool {
         a.id == b.id && a.kicker == b.kicker && a.title == b.title && a.sub == b.sub && a.mark == b.mark
@@ -54,12 +57,30 @@ enum DeckBuilder {
     static func cards(_ h: HomePayload) -> [DeckCard] {
         let today = h.today
         var out: [DeckCard] = []
+        if let a = aftershock(h) { out.append(a) }
         out += earnings(h, today)
         if let s = season(h, today) { out.append(s) }
         out += (h.deck.thetaChecks ?? []).filter(\.cardToday).map(theta)
         out += reports(h)
         if let x = holiday(h, today) { out.append(x) }
         return out.filter { c in c.dismiss.map { !DeckDismissals.hidden($0.key, today: today) } ?? true }
+    }
+
+    // MARK: 03b · Aftershock, first from 4:00 PM on trading days
+
+    /// In at 4:00 PM; with crashes it stays through Day 2 and rolls into the
+    /// next countdown; All clear leaves at 8:00 PM. A ✕ hides it until the
+    /// next 4:00 PM (each cycle has its own key).
+    private static func aftershock(_ h: HomePayload) -> DeckCard? {
+        guard let a = h.aftershock else { return nil }
+        let m = AftershockScan.at(SClock.now(), a, calendar: h.calendar)
+        guard m.card else { return nil }
+        let w = SunnyAftershockCard.words(m, m.frame(SClock.now(), reveal: nil, pending: false, reduce: true))
+        let key = "aftershock-\(m.cycle)"
+        var c = DeckCard(id: key, kicker: "Aftershock", title: w.0, sub: w.1, mark: "", tone: .night,
+                         action: .aftershock, dismiss: (key, MarketClock.addDays(m.cycle, 7).iso))
+        c.scan = (a, h.calendar)
+        return c
     }
 
     // MARK: 04 · Earnings, one trading day ahead

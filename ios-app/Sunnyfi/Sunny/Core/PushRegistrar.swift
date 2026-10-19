@@ -157,15 +157,22 @@ extension PushAppDelegate: UNUserNotificationCenterDelegate {
         return [.banner, .sound, .badge]
     }
 
-    /// User tapped a notification. The Ink rebuild is a single NVDA
-    /// surface, so a tap just brings the app to the foreground on the
-    /// portfolio — there's no multi-ticker tab to route to. (Deep-link
-    /// routing into a specific section can be re-added here once the
-    /// Ink nav model needs it.)
+    /// User tapped a notification. A push that carries a deep link (the
+    /// 4:16 PM Aftershock push: sunny://aftershock) opens that page once
+    /// Home is up; any other push just opens the app.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
-        // no-op: opening the app is the whole action for now
+        let link = response.notification.request.content.userInfo["deep_link"] as? String
+        await MainActor.run { PushInbox.shared.link = link }
     }
+}
+
+/// The deep link of the last tapped push, until Home has opened it.
+@MainActor
+@Observable
+final class PushInbox {
+    static let shared = PushInbox()
+    var link: String?
 }
 
 // MARK: - Public entry point

@@ -120,6 +120,11 @@ enum S {
     /// Grid lines and soft fills (Yield, Payback, Sold vs Bought, Risk).
     static let pGrid     = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.07)
 
+    // Added Oct 19 (handoff 26): the strategy mark fill (13b) and the
+    // Aftershock countdown bar track (26); the Aftershock deck card (03b).
+    static let track = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.10)
+    static let night = Color(hex: 0x05070A)
+
     /// A figure on the chart and its stats: red when below zero, else ink.
     static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }
 

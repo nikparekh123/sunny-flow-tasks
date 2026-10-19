@@ -8,6 +8,7 @@
 //  release build compiles all of it away and reads the real clock.
 //
 //    -now 2026-11-25T17:30        New York time for the clock
+//    -run                         with -now, the clock runs on from there
 //    -preset key=value,key=value  a component's starting state
 //    -gallery <block>             one block alone, as a gallery tile
 //
@@ -16,7 +17,18 @@ import Foundation
 
 enum SClock {
     /// The time the app believes it is.
-    static func now() -> Date { override ?? Date() }
+    static func now() -> Date {
+        guard let o = override else { return Date() }
+        return running ? o.addingTimeInterval(Date().timeIntervalSince(launch)) : o
+    }
+    private static let launch = Date()
+    private static let running: Bool = {
+        #if DEBUG && targetEnvironment(simulator)
+        return ProcessInfo.processInfo.arguments.contains("-run")
+        #else
+        return false
+        #endif
+    }()
 
     static let override: Date? = {
         #if DEBUG && targetEnvironment(simulator)
