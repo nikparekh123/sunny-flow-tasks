@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-19.4';
+const BUILD = '2026-10-19.5';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -285,7 +285,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     page(`daily_closes?date=gte.${[addDays(today, -45), addDays(BOOK_START, -7)].sort()[0]}&order=date.asc,ticker.asc&select=ticker,date,close_price`),
     get('ibkr_sync_runs?status=eq.success&order=finished_at.desc&limit=1&select=finished_at'),
     get(`share_sells?voided_at=is.null&trade_date=gte.${BOOK_START}&select=ticker,trade_date,quantity,price,realized_pl`),
-    get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share`),
+    get(`share_lots?voided_at=is.null&acquired_date=gte.${BOOK_START}&select=ticker,acquired_date,qty_original,cost_per_share,realized_pl`),
     get(`reports?shown_on=gte.${addDays(today, -1)}&select=kind,period_start,payload`),
     get(`macro_events?event_date=gte.${today}&event_date=lte.${addDays(today, 21)}&importance=gte.3`
       + '&category=in.(inflation,jobs,rates)&order=event_date.asc&select=event_date,event_time,name'),
@@ -459,6 +459,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     if (!lots.some((l) => String(l.ticker).toUpperCase() === t && String(l.acquired_date) <= d)) continue;
     realized.push({ d, ticker: t, kind: 'shares', amt: Number(s.realized_pl ?? 0), leg: `${t} shares`, how: 'sold',
       basis: 0 });
+  }
+  /* A buy that closed a short: an assigned call left him short the shares and
+     he bought them back. IBKR books the result, the call's premium in it, on
+     the buy (KR, 21 Sep 2026: +$42.81). */
+  for (const l of lots) {
+    const amt = Number(l.realized_pl ?? 0);
+    if (!amt) continue;
+    const t = String(l.ticker).toUpperCase();
+    realized.push({ d: String(l.acquired_date), ticker: t, kind: 'shares', amt, leg: `${t} shares`, how: 'closed', basis: 0 });
   }
   /* Average cost of what is still held, IBKR's method, for every open leg. */
   for (const l of legs) {

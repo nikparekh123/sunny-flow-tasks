@@ -26,7 +26,8 @@
  *                  Code A = assignment   (deferred to reconcile)
  *                  Code Ex = exercise    (deferred to reconcile)
  *                  Code Ep = expired     (deferred to reconcile)
- *   STK            BUY                   share_lots
+ *   STK            BUY                   share_lots (realized_pl = IBKR's
+ *                                         fifoPnlRealized when it closes a short)
  *                  SELL                  share_sells (realized_pl=0,
  *                                          FIFO consumed by a
  *                                          separate reconcile job)
@@ -1319,6 +1320,14 @@ async function upsertStock(
   const isBuy = t.buySell === 'BUY';
 
   if (isBuy) {
+    /* A buy that closes a short (an assigned call left him short, he buys the
+       shares back) carries IBKR's realized P&L, the call's premium included.
+       Kept on the lot (KR, 21 Sep 2026: +$42.81 was dropped). Absent on the
+       intraday TCF, so a re-sync from it never clears what the Daily Flex wrote. */
+    const buyPnlRaw = t.fifoPnlRealized ?? '';
+    const buyPnl = buyPnlRaw !== '' ? Number(buyPnlRaw) : NaN;
+    const hasBuyPnl = Number.isFinite(buyPnl);
+
     // Compute next fifo_order for this ticker
     const { data: maxRow } = await supabase
       .from('share_lots')
@@ -1342,6 +1351,7 @@ async function upsertStock(
       executed_at: parseExecUtc(t.dateTime),
       last_synced_at: new Date().toISOString(),
       voided_at: null,
+      ...(hasBuyPnl ? { realized_pl: buyPnl, realized_pl_source: 'ibkr' } : {}),
     };
 
     const { data: existing } = await supabase
