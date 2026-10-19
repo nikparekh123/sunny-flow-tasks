@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-19.1';
+const BUILD = '2026-10-19.2';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1222,7 +1222,6 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     d.setUTCDate(d.getUTCDate() + (5 - wd + 7) % 7 + (wd === 6 || wd === 0 ? 0 : 7));
     return d.toISOString().slice(0, 10); })();
   const targetExp = lastTradingOnOrBefore(nextFri);
-  const dte = Math.max(1, Math.round((Date.parse(targetExp) - Date.parse(today)) / 864e5));
   type CS = { k: number; mid: number; delta: number | null; iv: number | null; oi: number | null };
   const nearestK = (xs: CS[], target: number) => xs.length
     ? xs.reduce((a, b) => (Math.abs(b.k - target) < Math.abs(a.k - target) ? b : a)) : null;
@@ -1246,9 +1245,12 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       mid: Number(r.mid ?? 0), delta: num(r.delta), iv: num(r.iv), oi: num(r.oi) }));
     const calls = cs('call'), puts = cs('put');
     const spot = spotOf.get(t) ?? Number(rows.find((r) => r.spot)?.spot ?? 0);
-    /* One SD from the chain's own IV at the strike nearest spot. */
+    /* One SD from the chain's own IV at the strike nearest spot, over a Friday-to-Friday
+       week (5 trading days) whatever day it is: the NKE rule was tested selling Friday for
+       the next Friday, and measuring to the expiry made it wider midweek (Nik, 19 Oct 2026:
+       Monday's 0.6 SD was 3.8% instead of about 3%). */
     const ivRow = [...calls, ...puts].filter((x) => x.iv).sort((a, b) => Math.abs(a.k - spot) - Math.abs(b.k - spot))[0];
-    const sd = ivRow?.iv ? spot * ivRow.iv * Math.sqrt(dte / 365) : null;
+    const sd = ivRow?.iv ? spot * ivRow.iv * Math.sqrt(5 / 252) : null;
     /* The month: today against 20 sessions back (21 once today's close is in). */
     const mo = closeSeries(t).reverse();
     const back = mo.length && mo[0].d === today ? 21 : 20;
