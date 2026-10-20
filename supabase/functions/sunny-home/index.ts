@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-20.2';
+const BUILD = '2026-10-20.4';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1262,6 +1262,18 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     }
   }
   const writes = [];
+  /* This week (handoff 28, block 12b): what to roll, buy and sell by Friday, one row per task,
+     from the CALL RULE (Nik, 20 Oct 2026: "our live rule, ignore the design rule"; "include
+     everything", so next Friday's sale and puts are rows too). */
+  const thisWeek: Row[] = [];
+  /* Short company names for Insights ("Nike This week"): the first word of the listed name. */
+  const shortName = new Map<string, string>();
+  if (book.length) {
+    for (const r of await get(`ticker_names?ticker=in.(${book.join(',')})&select=ticker,name`)) {
+      const w = String(r.name ?? '').replace(/^the\s+/i, '').split(/[\s,]+/)[0] ?? '';
+      shortName.set(String(r.ticker), r.ticker === 'FIS' || !w ? String(r.ticker) : w.charAt(0).toUpperCase() + w.slice(1));
+    }
+  }
   for (const t of book) {
     const ls = legs.filter((l) => l.ticker === t);
     const leapN = ls.filter(isLeap).reduce((s, l) => s + l.n, 0);
@@ -1488,8 +1500,156 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
                q: qq ? { k: qq.k, exp: qq.exp, mid: r2(qq.mid), sd: Q_SD, target: qq.target } : null,
                iv: ivRow?.iv ?? null };
     })();
+    /* ── DELTA AND GAMMA (handoff 28, blocks 13 and 16): every open leg at its own IV, an instant
+       jump of m% from today's price with each leg's time left unchanged. Delta in shares (sign ×
+       contracts × 100 × delta), dollars at the jumped price. The cost: what the jump gives back
+       against holding today's delta (the gamma area). A week of premium: the calls and puts sold
+       priced again at today's strikes for 7 days. Thin = under half of today's delta, short =
+       below 0, both found in 0.1% steps to 10%. A normal week's move: one weekly SD, to 0.5%. */
+    const dg = (() => {
+      const open = ls.filter((l) => l.expiry >= today && l.n > 0);
+      if (!open.some((l) => l.side === 'bought') || !(spot > 0)) return null;
+      const yr = (e: string) => Math.max(0.5 / 365, (Date.parse(e) - Date.parse(today)) / 864e5 / 365);
+      const ivA = ivRow?.iv ?? null;
+      const lg = open.map((l) => ({ sg: l.side === 'sold' ? -1 : 1, call: l.type === 'call', K: l.strike, q: l.n, T: yr(l.expiry),
+        v: l.iv && l.iv > 0 ? l.iv : (ivA ?? 0.4) }));
+      const opt = (S: number, x: typeof lg[number], T = x.T) => { const c = bsCall(S, x.K, T, x.v);
+        return x.call ? { p: c.price, d: c.delta } : { p: c.price - S + x.K * Math.exp(-RATE * T), d: c.delta - 1 }; };
+      const o0 = lg.map((x) => opt(spot, x));
+      const at = (m: number) => { const S = spot * (1 + m / 100); let b = 0, s2 = 0, gb = 0;
+        lg.forEach((x, i) => { const o1 = opt(S, x), dd = x.sg * x.q * 100 * o1.d; if (x.sg < 0) s2 += dd; else b += dd;
+          gb += x.sg * x.q * 100 * (o0[i].d * (S - spot) - (o1.p - o0[i].p)); });
+        return { S, b, s: s2, d: b + s2, gb: Math.max(0, gb) }; };
+      const d0 = at(0).d;
+      const wk = lg.filter((x) => x.sg < 0).reduce((a, x) => a + x.q * 100 * opt(spot, x, 7 / 365).p, 0);
+      let thin: number | null = null, sh: number | null = null;
+      for (let i = 0; i <= 100; i++) { const a = at(i / 10); if (thin == null && a.d < d0 / 2) thin = i / 10; if (sh == null && a.d < 0) sh = i / 10; }
+      const sdPct = ivA ? ivA * Math.sqrt(5 / 252) * 100 : null, m1 = sdPct ? Math.round(sdPct * 2) / 2 : null;
+      return { px: r2(spot), sd: sdPct == null ? null : r2(sdPct), d0: Math.round(d0), d0_usd: Math.round(d0 * spot), wk: Math.round(wk),
+        thin, sh, m1, needs: m1 != null && at(m1).d < d0 / 2,
+        /* [move %, bought $, sold $, net $, cost $] every 0.5% from 0 to 10%. */
+        ser: Array.from({ length: 21 }, (_, i) => { const a = at(i / 2);
+          return [i / 2, Math.round(a.b * a.S), Math.round(a.s * a.S), Math.round(a.d * a.S), Math.round(a.gb)]; }) };
+    })();
+    /* ── THIS WEEK's rows for this name (the CALL RULE): this Friday's in-the-money calls rolled
+       to next Friday's strike, the quarterly buy (or sell fewer), next Friday's calls and puts.
+       Delta added in dollars (shares × price); a sale takes delta away. */
+    const usdK = (k: number) => '$' + (Math.abs(k - Math.round(k)) < 0.005 ? String(Math.round(k)) : String(+k.toFixed(2)));
+    const mdy = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const mon = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+    if (!rule) {
+      const itm = ls.filter((l) => l.side === 'sold' && l.type === 'call' && l.expiry === saleDay && l.strike < spot);
+      const nItm = itm.reduce((a, l) => a + l.n, 0);
+      const rolledTo = atm ? Math.min(nItm, leftAtm) : 0;
+      if (nItm > 0) {
+        const low = Math.min(...itm.map((l) => l.strike));
+        const back = itm.reduce((a, l) => a + (l.mark ?? 0) * l.n * 100, 0), credit = rolledTo * (atm?.mid ?? 0) * 100;
+        const dOld = itm.reduce((a, l) => a + (l.delta ?? 1) * l.n * 100, 0), dNew = rolledTo * (atm?.delta ?? 0) * 100;
+        thisWeek.push({ id: `${t}|roll|${saleDay}`, t, kind: 'roll', face: 'sold',
+          action: rolledTo > 0 ? `Roll ${nItm} ${usdK(low)} calls to ${usdK(atm!.k)}` : `Buy back ${nItm} ${usdK(low)} calls`,
+          cost: Math.round(Math.abs(back - credit)), credit: back - credit < 0, delta: Math.round((dOld - dNew) * spot), sh: dg?.sh ?? null });
+      }
+      const fq = pkg?.fix.find((x) => x.id === 'fq'), ff = pkg?.fix.find((x) => x.id === 'ff');
+      if (fq) thisWeek.push({ id: `${t}|buy|${fq.exp}`, t, kind: 'buy', face: 'dg',
+        action: `Buy ${fq.n} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`, alt: ff ? `or sell ${ff.n} fewer` : null,
+        cost: Math.round(Number(fq.n) * Number(fq.mid) * 100), credit: false, delta: Math.round(Number(fq.d) * spot), sh: dg?.sh ?? null });
+      /* Next Friday's sales wait for Friday (Nik, 20 Oct 2026: "should come on Friday or when one of
+         them is closed, this is too early"). Before Friday only LEAPs with no call this week (one closed
+         early, or never sold) get a row, for just that many; from Friday, everything left to sell. */
+      const saleTime = today >= saleDay;
+      const openWk = ls.filter((l) => l.side === 'sold' && l.type === 'call' && l.expiry === saleDay).reduce((a, l) => a + l.n, 0);
+      const sellN = saleTime ? Math.max(0, leftAtm - rolledTo) : Math.max(0, Math.min(leftAtm, callTarget - openWk - doneAtm));
+      if (atm && sellN > 0) thisWeek.push({ id: `${t}|sell|${targetExp}`, t, kind: 'sell', face: 'sold',
+        action: `Sell ${sellN} ${usdK(atm.k)} calls · ${mdy(targetExp)}${earnWk ? ' · 1 SD, earnings' : ''}`,
+        cost: Math.round(sellN * atm.mid * 100), credit: true, delta: Math.round(-(atm.delta ?? 0) * sellN * 100 * spot), sh: dg?.sh ?? null });
+      /* Puts the same way: from Friday everything left; before it only what has no put this week. */
+      const openWkP = ls.filter((l) => l.side === 'sold' && l.type === 'put' && l.expiry === saleDay).reduce((a, l) => a + l.n, 0);
+      const putN = saleTime ? leftPuts : Math.max(0, Math.min(leftPuts, putTarget - openWkP - donePuts));
+      if (put && putN > 0) thisWeek.push({ id: `${t}|put|${targetExp}`, t, kind: 'put', face: 'sold',
+        action: `Sell ${putN} ${usdK(put.k)} puts · ${mdy(targetExp)}`,
+        cost: Math.round(putN * put.mid * 100), credit: true, delta: Math.round(-(put.delta ?? 0) * putN * 100 * spot), sh: dg?.sh ?? null });
+    }
+    /* ── INSIGHTS (handoff 28, 14c): six plain points from the reads, written by fixed sentence
+       rules (Nik, 20 Oct 2026), in the order the strategy cares about, the last always delta, read
+       from the same book as the card (`dg`). _Underscores_ mark the few words the app underlines. */
+    const insights = (() => {
+      const r0 = readsOf.get(t);
+      if (!r0 || !(spot > 0)) return null;
+      const R = r0.reads as Row, T = (R.thesis ?? {}) as Row, I = (R.inputs ?? {}) as Row;
+      const nm = shortName.get(t) ?? t, usd = (v: number) => '$' + (v >= 100 ? Math.round(v).toString() : v.toFixed(2));
+      const usd0 = (v: number) => '$' + Math.round(v).toString(), pc = (v: number) => `${Math.round(Math.abs(v))}%`;
+      const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+      const and = (xs: string[]) => xs.length < 2 ? (xs[0] ?? '') : xs.slice(0, -1).join(', ') + ' and ' + xs.at(-1);
+      const weeksTo = (iso: string) => Math.round((Date.parse(iso) - Date.parse(today)) / (7 * 864e5));
+      const F0 = R.fundamentals as Row | undefined;
+      const fund = (): [string, string] => {
+        if (!F0) return ['Fundamentals are not in yet.', 'There is no analyst target or model value for this name.'];
+        const lead = F0.read === 'bullish' ? 'Fundamentals are bullish.' : F0.read === 'bearish' ? 'Fundamentals are bearish.' : 'Fundamentals are neutral.';
+        const a = num(F0.analyst), m = num(F0.model), v = num(F0.value);
+        let b = a != null && m != null ? `Analysts see about _${usd0(a)}_ and our model about _${usd0(m)}_.` : a != null ? `Analysts see about _${usd0(a)}_.` : m != null ? `Our model sees about _${usd0(m)}_.` : '';
+        if (v != null) { const d = (v / spot - 1) * 100; b += `${b ? ' ' : ''}Fair value sits at ${usd(v)}, _${pc(d)} ${d >= 0 ? 'above' : 'below'}_ today's price.`; }
+        return [lead, b];
+      };
+      const tech = (): [string, string] => {
+        const rd = (R.technicals as Row | undefined)?.read;
+        const lead = rd === 'bullish' ? 'Technicals are bullish.' : rd === 'bearish' ? 'Technicals are bearish.' : 'Technicals are mixed.';
+        const xs = [[10, num(T.sma10)], [50, num(T.sma50)], [100, num(T.sma100)], [200, num(T.sma200)]].filter((x) => x[1] != null) as [number, number][];
+        const up = xs.filter((x) => spot > x[1]).map((x) => String(x[0])), dn = xs.filter((x) => spot <= x[1]).map((x) => String(x[0]));
+        const b = !xs.length ? '' : !dn.length ? `${nm} trades above all its ${and(up)}-day averages.`
+          : !up.length ? `${nm} trades _below_ its ${and(dn)}-day averages.`
+          : `${nm} trades above its ${and(up)}-day average${up.length > 1 ? 's' : ''} but still _below the ${and(dn)}-day_.`;
+        return [lead, b];
+      };
+      const trend = (): [string, string] => {
+        const rd = (R.momentum as Row | undefined)?.read;
+        const lead = rd === 'bearish' ? 'The trend is still down.' : rd === 'bullish' ? 'The trend is up.' : 'The trend is mixed.';
+        const w5 = num(I.w5), y = num(T.chg252), s200 = num(T.sma200), s200a = num(T.sma200_21);
+        const wk = w5 != null ? `It is ${w5 >= 0 ? 'up' : 'down'} ${pc(w5 * 100)} this week` : '';
+        const yr = y != null ? `_${y >= 0 ? 'up' : 'down'} ${pc(y)} over the year_` : '';
+        const line = s200 != null && s200a != null ? ` ${spot < s200 ? 'under' : 'over'} a ${s200 < s200a ? 'falling' : 'rising'} 200-day line` : '';
+        const joint = wk && yr ? (Math.sign(w5!) !== Math.sign(y!) ? ', but ' : ', and ') : '';
+        return [lead, wk || yr ? cap(`${wk}${joint}${yr}${line}.`) : ''];
+      };
+      const hist = (): [string, string] => {
+        const rd = String((R.history as Row | undefined)?.read ?? '');
+        const lead = rd === 'stretched up' ? 'It is stretched up.' : rd === 'stretched down' ? 'It is stretched down.'
+          : rd === 'flat' ? 'It is moving sideways.' : rd ? cap(`It is ${rd}.`) : 'History is not in yet.';
+        const c5 = num(T.close5), lo = num(T.m_lo), hi = num(T.m_hi);
+        let b = c5 != null ? `${usd(c5)} to ${usd(spot)} in 5 days.` : '';
+        if (lo != null && hi != null && hi > lo) { const f = (spot - lo) / (hi - lo);
+          b += `${b ? ' ' : ''}It sits at the _${f >= 2 / 3 ? 'top' : f <= 1 / 3 ? 'bottom' : 'middle'} of the month's range_, ${usd(lo)} to ${usd(hi)}.`; }
+        return [lead, b];
+      };
+      const opts = (): [string, string] => {
+        const iv = num(I.iv), rich = num(I.rich), u = num(T.iv_usual), skip = (R.iv as Row | undefined)?.read === 'skip';
+        const lead = skip || (rich != null && rich < 0.9) ? 'Options pay little.' : rich != null && rich >= 1.2 ? 'Options pay well.' : 'Options pay fairly.';
+        if (iv == null) return [lead, ''];
+        const how = rich == null ? '' : rich >= 1.2 ? ', so premium is _rich_ for how much it really moves' : rich < 0.9 ? ', so premium is _thin_ for how much it moves' : ', about fair for how much it moves';
+        return [lead, `Implied volatility is ${pc(iv * 100)}${u != null ? ` against a usual ${pc(u * 100)}` : ''}${how}.`];
+      };
+      const events = (): [string, string] => {
+        const ne = I.next_earnings ? String(I.next_earnings) : null, ex = I.ex_div ? String(I.ex_div) : null;
+        if (earnWk && earnRow) return ['Earnings land before the expiry.', `${nm} reports on _${mdy(String(earnRow.report_date))}_, before the ${mdy(targetExp)} expiry.`];
+        if (ex && ex > today && ex <= targetExp) return ['It goes ex-dividend before the expiry.', `The ex-dividend date is _${mdy(ex)}_${I.ex_div_estimated ? ' (estimated)' : ''}.`];
+        const next = [ne ? { d: ne, t: 'earnings' } : null, ex && ex > today ? { d: ex, t: 'ex-dividend' } : null].filter(Boolean).sort((a, b) => a!.d.localeCompare(b!.d))[0];
+        return ['No events this week.', `Nothing lands before Friday.${next ? ` The next one is ${next.t} on _${mdy(next.d)}_, about ${weeksTo(next.d)} week${weeksTo(next.d) === 1 ? '' : 's'} away.` : ''}`];
+      };
+      const delta = (): [string, string] => {
+        if (!dg) return ['Delta is not in yet.', ''];
+        const f1 = (v: number) => (v % 1 ? v.toFixed(1) : String(v));
+        if (dg.needs) return [dg.sh != null ? 'Delta is too thin.' : 'Delta is getting thin.',
+          `A normal week's move, about +${f1(dg.m1!)}%, leaves _less than half_ of today's delta${dg.sh != null ? `, and it goes _short after +${f1(dg.sh)}%_.` : '. It never goes short inside 10%.'}`];
+        if (dg.sh != null) return ['Delta holds this week.', `It stays long through a normal week's move of about +${f1(dg.m1 ?? 0)}% and goes _short after +${f1(dg.sh)}%_.`];
+        if (dg.thin != null) return ['Delta holds this week.', `It stays long through a normal week's move of about +${f1(dg.m1 ?? 0)}%, gets _thin after +${f1(dg.thin)}%_ and never goes short.`];
+        return ['Delta is on target.', 'It stays _long all the way to a 10% jump_.'];
+      };
+      /* Every point written; the strategy's order picks six once the tags are known (below). */
+      const pt = (f: () => [string, string]) => { const [lead, body] = f(); return { lead, body }; };
+      return { name: nm, day: r0.day, all: { fund: pt(fund), tech: pt(tech), trend: pt(trend), hist: pt(hist), opts: pt(opts),
+        events: pt(events), delta: pt(delta) } as Record<string, { lead: string; body: string }> };
+    })();
     writes.push({
-      ticker: t, expiry: targetExp, spot: r2(spot), sd: sd == null ? null : r2(sd),
+      ticker: t, expiry: targetExp, spot: r2(spot), sd: sd == null ? null : r2(sd), dg, insights,
       /* The Planner (block 14b) caps calls at the LEAPs held and puts at the
          puts bought, less what is already sold for that Friday, and names the
          next report even when it falls after the expiry. */
@@ -1981,6 +2141,19 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     strategies[l.ticker] = LADDER.includes(l.ticker) ? 'ladder'
       : tk && legs.some((x) => x.ticker === l.ticker && x.opened >= tk) ? 'aftershock' : 'rebound';
   }
+  /* Insights (14c): six points in the order the strategy cares about, the last always delta.
+     Ladder starts with Fundamentals, Aftershock with Events, Rebound with Price. */
+  const INSIGHT_ORDER: Record<string, string[]> = {
+    ladder: ['fund', 'tech', 'trend', 'opts', 'events', 'delta'],
+    aftershock: ['events', 'tech', 'hist', 'opts', 'fund', 'delta'],
+    rebound: ['tech', 'hist', 'fund', 'opts', 'events', 'delta'],
+  };
+  for (const w of writes as Row[]) {
+    if (!w.insights) continue;
+    const st = strategies[w.ticker] ?? null, all = w.insights.all as Record<string, Row>;
+    w.insights = { name: w.insights.name, day: w.insights.day, strategy: st,
+      points: (INSIGHT_ORDER[st ?? 'rebound'] ?? INSIGHT_ORDER.rebound).map((k) => all[k]) };
+  }
   step('aftershock');
   const payload = {
     build: BUILD, built_at: new Date().toISOString(), today, trading_today: isTrading(today),
@@ -1996,6 +2169,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
               missing: writes.filter((w: Row) => w.error).map((w: Row) => w.ticker) },
     theta_checks: thetaChecks, last_week: lastWeek, ...(checkSummary ? { theta_check_run: checkSummary } : {}),
     aftershock, strategies,
+    /* This week (block 12b): rolls first, then buys, then next Friday's sales; within each, the
+       name that goes short soonest first. */
+    this_week: [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind))
+      || ((a.sh ?? 99) - (b.sh ?? 99)) || String(a.t).localeCompare(String(b.t))),
   };
   return { payload, ms: Date.now() - t0, steps };
 }

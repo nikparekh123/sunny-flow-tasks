@@ -22,24 +22,14 @@ struct SunnyRisk: View {
     let home: HomePayload
     @Environment(HomeRouter.self) private var router
 
+    /// Handoff 28 (20 Oct 2026): Theta stands alone at full width, the Delta and
+    /// Gamma map under it; the Delta card is retired.
     var body: some View {
-        ScrollView(.horizontal) {
-            // One height for the pair: the Delta card's hedge line must not
-            // leave the Theta card short.
-            HStack(alignment: .top, spacing: 12) {
-                SunnyMountain(kind: .theta, home: home) { leg in router.open(.theta(leg)) }
-                    .frame(width: 341)
-                SunnyMountain(kind: .delta, home: home) { _ in }
-                    .frame(width: 341)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .scrollTargetLayout()
-            .padding(.vertical, 4)
+        VStack(alignment: .leading, spacing: 20) {
+            SunnyMountain(kind: .theta, home: home) { leg in router.open(.theta(leg)) }
+            SunnyDeltaGamma(home: home)
         }
-        .contentMargins(.horizontal, 20, for: .scrollContent)
-        .scrollTargetBehavior(.viewAligned)
-        .scrollIndicators(.hidden)
-        .scrollClipDisabled()
+        .padding(.horizontal, S.margin)
     }
 }
 
@@ -290,7 +280,7 @@ struct SunnyMountain: View {
     /// SunnyDelta's tile: a calm solid pill on glass, or breathing orange / red.
     /// Any tile opens the Planner on that name; the fix lives there.
     private func deltaTile(_ t: Tile) -> some View {
-        Button { router.openPlanner(t.name) } label: {
+        Button { router.openCard(t.name, face: "dg") } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(t.name).sType(SType(size: 13, weight: 600, line: 13, tracking: 0), tabular: false).foregroundStyle(S.ink)

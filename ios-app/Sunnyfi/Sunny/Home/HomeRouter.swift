@@ -3,8 +3,9 @@
 //  Sunny
 //
 //  What Home has open: a receipt over the page (blocks 06 and 07), the
-//  Planner on a ticker (block 14b), the Aftershock page (26), and where
-//  quick nav scrolls (08).
+//  Aftershock page (26), a Position card opened on a face and the Insights
+//  sheet (handoff 28; the Planner and Thesis are retired), and where quick
+//  nav scrolls (08).
 //
 
 import SwiftUI
@@ -23,37 +24,54 @@ final class HomeRouter {
     }
 
     var receipt: Receipt?
+
+    // MARK: The Book (handoff 28)
+
+    /// The Delta and Gamma jump, %: one value for every card and the Home map (3 to 10).
+    var jump = 7
+    /// A card opened from a tap: the face it opens on ("sold", "bought", "dg"), and the ring.
+    var cardFace: [String: String] = [:]
+    var cardTick = 0
+    var ring: String?
+    /// The Home page scrolls here, smoothly ("pos-NKE", "thisweek").
+    var scrollTo: String?
+    /// This week's rows highlighted from a card's rebalance row (1.8 s).
+    var nxRing: String?
+    /// The Insights sheet's name.
+    var insights: String?
+    /// This week: rows ticked today, id -> day, kept on the phone.
+    var checked: [String: String] = {
+        let d = UserDefaults.standard.dictionary(forKey: "thisWeek.checked") as? [String: String] ?? [:]
+        let cut = String(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 86_400)).prefix(10))
+        return d.filter { $0.value >= cut }
+    }()
+    func check(_ id: String, day: String) {
+        checked[id] = day
+        UserDefaults.standard.set(checked, forKey: "thisWeek.checked")
+    }
+
+    /// Opens a name's Position card on a face: scroll to it, swipe to the face, ring it 1.8 s.
+    func openCard(_ t: String, face: String) {
+        cardFace[t] = face
+        cardTick += 1
+        scrollTo = "pos-\(t)"
+        ring = t
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.8))
+            if self.ring == t { withAnimation(.easeOut(duration: 0.4)) { self.ring = nil } }
+        }
+    }
+    /// From a card's rebalance row: up to This week, that name's text lit for 1.8 s.
+    func focusThisWeek(_ t: String) {
+        scrollTo = "thisweek"
+        withAnimation(.easeInOut(duration: 0.4)) { nxRing = t }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.8))
+            if self.nxRing == t { withAnimation(.easeInOut(duration: 0.4)) { self.nxRing = nil } }
+        }
+    }
     /// Week | Month and ‹ ›, shared by Inventory, Yield and Sold vs Bought.
     let period = PeriodState()
-    /// The ticker the Planner (block 14b) is open on.
-    var writes: String?
-    /// Whether the Planner is up. Home reads this, not `writes`, so swiping
-    /// between names in the Planner no longer redraws the whole Home page.
-    var plannerOpen = false
-    /// The page the Thesis and Planner screen opens on (handoff 27): 0 the Thesis (This week's thesis on a
-    /// Positions card), 1 the Planner (an Inventory chip, a Delta tile, a deck card).
-    var plannerPage = 1
-    func openPlanner(_ t: String, page: Int = 1, animated: Bool = true) {
-        writes = t
-        plannerPage = page
-        withAnimation(animated ? S.standard(0.45) : nil) { plannerOpen = true }
-    }
-    func closePlanner() {
-        withAnimation(S.standard(0.45)) { plannerOpen = false; strikesOpen = false }
-        writes = nil
-    }
-    /// Adjust strikes: the Oct 14 strike controls, pushed over the Planner on
-    /// the same name (handoff 25). Back pops to the Planner.
-    var strikesOpen = false
-    func openStrikes() { withAnimation(S.standard(0.45)) { strikesOpen = true } }
-    func closeStrikes() { withAnimation(S.standard(0.45)) { strikesOpen = false } }
-    /// The Planner's choices per name, kept until the app closes: the
-    /// suggestions switched off, and the fix picked ("none" once dropped).
-    var pkgOff: [String: Set<String>] = [:]
-    var pkgFix: [String: String] = [:]
-    /// Each name's plan, kept until the app closes ("ticker|expiry"; a name
-    /// with no entry shows the engine's pick, live).
-    var plans: [String: [PlanLeg]] = [:]
     /// The Aftershock page (block 26), pushed from its deck card (03b) and
     /// from the 4:16 PM push. Back returns where it was opened from.
     var aftershockOpen = false

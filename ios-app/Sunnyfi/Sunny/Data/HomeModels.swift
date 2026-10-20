@@ -46,6 +46,71 @@ struct HomePayload: Decodable {
     let aftershock: Aftershock?
     /// Each open name's strategy: rebound, ladder or aftershock (block 13b).
     let strategies: [String: String]?
+    /// This week (handoff 28, block 12b): what to roll, buy and sell by Friday, one row per task.
+    let thisWeek: Lenient<[WeekTask]>?
+}
+
+/// One This week row (block 12b): the CALL RULE's roll, buy and sales for a name.
+struct WeekTask: Decodable, Identifiable, Hashable {
+    let id: String
+    let t: String
+    /// roll · buy · sell · put
+    let kind: String
+    /// The Position card face the work is on: "sold" or "dg".
+    let face: String
+    let action: String
+    /// The other fix for a buy: "or sell 12 fewer".
+    let alt: String?
+    let cost: Double
+    let credit: Bool
+    /// Dollar delta the task adds (a sale takes some away: negative).
+    let delta: Double
+    /// Where the name goes short (%), for the order.
+    let sh: Double?
+}
+
+/// Delta and Gamma for one name (blocks 13 and 16): an instant jump from today's price.
+struct DGBook: Decodable, Hashable {
+    let px: Double
+    /// One weekly SD in %.
+    let sd: Double?
+    /// Today's delta, shares and dollars.
+    let d0: Double
+    let d0Usd: Double
+    /// A week of premium, dollars.
+    let wk: Double
+    /// Where it gets thin (under half of today's delta) and goes short, % (nil past 10%).
+    let thin: Double?
+    let sh: Double?
+    /// A normal week's move, %, and whether it leaves less than half of today's delta.
+    let m1: Double?
+    let needs: Bool
+    /// [move %, bought $, sold $, net $, cost $] every 0.5% from 0 to 10%.
+    let ser: [[Double]]
+
+    struct Point { let m: Double; let b: Double; let s: Double; let n: Double; let gb: Double }
+    func at(_ m: Double) -> Point {
+        let r = ser[safe: max(0, min(ser.count - 1, Int((m * 2).rounded())))] ?? []
+        return Point(m: m, b: r[safe: 1] ?? 0, s: r[safe: 2] ?? 0, n: r[safe: 3] ?? 0, gb: r[safe: 4] ?? 0)
+    }
+    /// Stays long · thin · short at move m.
+    enum State { case long, thin, short }
+    func state(_ m: Double) -> State {
+        let n = at(m).n
+        return n < 0 ? .short : n < d0Usd / 2 * (1 + m / 100) ? .thin : .long
+    }
+    /// The jump's cost in weeks of premium.
+    func weeks(_ m: Double) -> Double { wk > 0 ? at(m).gb / wk : 0 }
+    func sdOf(_ m: Double) -> Double? { sd.map { $0 > 0 ? m / $0 : 0 } }
+}
+
+/// Six plain points about one name this week (14c), written on the server.
+struct NameInsights: Decodable, Hashable {
+    let name: String
+    let day: String?
+    let strategy: String?
+    let points: [Point]
+    struct Point: Decodable, Hashable { let lead: String; let body: String }
 }
 
 /// Aftershock: the universe, the last scans and the last two weeks of crashes,
@@ -235,6 +300,10 @@ struct Writes: Decodable {
         /// The weekly read rule and Our thesis (block 14c): NKE only for now.
         /// Lenient, so a change in its shape never costs the whole payload.
         let readRule: Lenient<ReadRule>?
+        /// Delta and Gamma (handoff 28): the face, the Home map and the Insights delta point.
+        let dg: Lenient<DGBook>?
+        /// This week's insights (14c).
+        let insights: Lenient<NameInsights>?
         /// Every other name's Thesis page (handoff 27): the 0.6 SD Planner rule with the name's reads.
         let thesis: Lenient<ReadRule>?
         struct Pkg: Decodable {

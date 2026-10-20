@@ -59,16 +59,6 @@ struct HomeView: View {
             .frame(maxHeight: .infinity, alignment: .top)
             .animation(.easeOut(duration: 0.3), value: store.toast)
             .zIndex(8)
-            if let home = store.home, router.plannerOpen {
-                SunnyPlanner(home: home, page: router.plannerPage)
-                    .transition(reduce ? .opacity : .move(edge: .trailing))   // Reduce Motion: fades, no slides
-                    .zIndex(9)
-            }
-            if let home = store.home, router.plannerOpen, router.strikesOpen {
-                SunnyStrikes(home: home, words: store.words ?? home)
-                    .transition(reduce ? .opacity : .move(edge: .trailing))
-                    .zIndex(9.5)
-            }
             if let home = store.home, let r = router.receipt {
                 receipt(r, home)
                     .transition(reduce ? .opacity : .move(edge: .bottom))
@@ -79,6 +69,18 @@ struct HomeView: View {
                 SunnyAftershockPage(home: home, onBack: router.closeAftershock)
                     .transition(reduce ? .opacity : .move(edge: .trailing))
                     .zIndex(10.5)
+            }
+        }
+        // This week's insights (14c): a sheet from every Position card.
+        .sheet(isPresented: Binding(get: { router.insights != nil }, set: { if !$0 { router.insights = nil } })) {
+            if let t = router.insights {
+                SunnyInsightsSheet(t: t, insights: store.home?.writes.names.first { $0.ticker == t }?.insights?.value) {
+                    router.insights = nil
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(34)
+                .environment(router)
             }
         }
         .environment(router)
@@ -121,6 +123,11 @@ struct HomeView: View {
                     SunnyToday(home: home).sEnter(3)
 
                     SunnySectionTitle(title: "Book").id(HomeRouter.Section.book)
+                    // This week leads the Book (handoff 28, 12b): the only place the app says to act.
+                    SunnyThisWeek(home: home)
+                        .padding(.horizontal, S.margin)
+                        .id("thisweek")
+                        .sEnter(4)
                     SunnyPortfolio(home: home, words: words)
                         .padding(.horizontal, S.margin)
                         .id("portfolio")
@@ -172,6 +179,12 @@ struct HomeView: View {
             .onChange(of: router.scrollID) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .top) }
             }
+            // A card opened from a tap, or This week from a card's row: a smooth scroll.
+            .onChange(of: router.scrollTo) { _, id in
+                guard let id else { return }
+                withAnimation(reduce ? nil : .smooth(duration: 0.6)) { proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: 0.02)) }
+                router.scrollTo = nil
+            }
         }
         .environment(\.livePulse, store.livePulse)
         .environment(\.changedLegs, store.changedLegs)
@@ -205,8 +218,11 @@ struct HomeView: View {
             try? await Task.sleep(for: .seconds(1.2))
             if v == "report" { router.open(.report(0)) }
             else if v == "theta", let c = (store.home?.thetaChecks ?? []).first { router.open(.theta(c.leg)) }
-            else if v.hasPrefix("writes:") { router.openPlanner(String(v.dropFirst(7)), animated: false) }
-            else if v.hasPrefix("thesis:") { router.openPlanner(String(v.dropFirst(7)), page: 0, animated: false) }
+            else if v.hasPrefix("card:") {
+                let p = v.dropFirst(5).split(separator: ":").map(String.init)
+                router.openCard(p[0], face: p.count > 1 ? p[1] : "sold")
+            }
+            else if v.hasPrefix("insights:") { router.insights = String(v.dropFirst(9)) }
             else if v == "aftershock" { router.openAftershock(animated: false) }
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
             else if v.hasPrefix("pick:") { router.debugPick = String(v.dropFirst(5)); router.scrollID = "positions" }
@@ -216,7 +232,7 @@ struct HomeView: View {
 
     private func act(action: DeckCard.Action) {
         switch action {
-        case .writes(let t): router.openPlanner(t)
+        case .writes(let t): router.openCard(t, face: "sold")
         case .report(let i): router.open(.report(i))
         case .theta(let leg): router.open(.theta(leg))
         case .aftershock: router.openAftershock()

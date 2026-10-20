@@ -170,7 +170,7 @@ struct SunnyInventory: View {
         return ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(order) { c in
-                    Button { router.openPlanner(c.ticker) } label: {
+                    Button { router.openCard(c.ticker, face: "sold") } label: {
                         HStack(spacing: 6) {
                             Text(c.ticker).sType(SType(size: 13, weight: 700, line: 13, tracking: 0), tabular: false)
                             // A name that rolled this week: "NKE ⁄ 16 rolled" (handoff 24).

@@ -2,14 +2,13 @@
 //  SunnyPositions.swift
 //  Sunny
 //
-//  Blocks 12 and 13 (handoff 22, 13 Oct 2026) · SunnyPositions. Three pages
-//  that swipe: All, Sold, Bought (the Chart style; Nik dropped the Bar on
-//  14 Oct 2026); a side with no legs drops its page. Glass chips follow, and
-//  Positions is as tall as the page you are on. All is one glass card with
-//  the four totals (tap one to switch time value, % and $). A side opens with its total
-//  for the book (tap cycles time value → % → $, shared by every page), then
-//  one glass card per ticker, safest first: the hourly price with the strikes
-//  as lines.
+//  Blocks 12 and 13 (handoff 28, 20 Oct 2026) · Positions: one glass card per
+//  name, safest first. The body swipes Sold · Bought · Delta and Gamma (Sold
+//  first) under a Liquid Glass segmented control whose capsule rides the swipe;
+//  every face is the same height, so a swipe moves nothing else on the page. A
+//  name with a task open in This week gets orange dots and a row that links up
+//  to it; every card ends with This week's insights (a sheet). Nothing bought:
+//  Sold only, no tabs. The Sold and Bought pages and their chips are gone.
 //
 
 import SwiftUI
@@ -20,108 +19,65 @@ struct SunnyPositions: View {
     /// so they re-sort on open, pull to refresh and after the close, never on
     /// the 15 s tick (Nik, 14 Oct 2026: cards moving "all the time").
     var orderFrom: HomePayload? = nil
-    @State private var mode: PMode = PMode.preset(DebugPreset.string("pos.mode"), default: .tv)
-    @State private var page: Int? = 0
-    @State private var heights: [Int: CGFloat] = [:]
-    @State private var seen: Set<Int> = []
-    @State private var visible = false
-    /// The screen's width from the start (then measured), so a page picked
-    /// before the first layout lands on its edge on a 430 phone too.
-    @State private var fullW: CGFloat =
-        (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width ?? 393
+    @State private var seen = false
     @Environment(HomeRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
         let pages = PCache.pages(home, orderFrom: orderFrom)
-        let cur = min(max(page ?? 0, 0), max(pages.count - 1, 0))
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Positions").sType(.sectionTitle, tabular: false).foregroundStyle(S.ink)
-                    .accessibilityAddTraits(.isHeader)
-                if !pages.isEmpty { chips(pages, cur) }
-            }
-            .padding(.horizontal, S.margin)
-            if pages.isEmpty {
-                empty.padding(.horizontal, S.margin)
-            } else {
-                pager(pages, cur)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { fullW = $0 }
-        // First view of each page animates once (block 12, Motion): a page
-        // counts as seen once Positions is on screen with that page picked.
-        .onScrollVisibilityChange(threshold: 0.15) { v in visible = v; if v { seen.insert(cur) } }
-        .onChange(of: cur) { _, i in if visible { seen.insert(i) } }
-        .onChange(of: router.debugPick) { _, v in if let v, let i = Int(v) { page = i } }
-        .task {
-            // Audit preset: a scroll position set before layout is ignored, so set it after.
-            guard let p = DebugPreset.int("pos.page") else { return }
-            try? await Task.sleep(for: .milliseconds(300))
-            page = p
-        }
-    }
-
-    private func go(_ i: Int) { withAnimation(S.standard(0.45)) { page = i } }
-
-    // MARK: Chips
-
-    private func chips(_ pages: [PPage], _ cur: Int) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    ForEach(pages) { pg in
-                        PChip(page: pg, on: pg.id == cur) { go(pg.id) }.id(pg.id)
-                    }
-                }
-                .padding(.top, 8).padding(.bottom, 10)
-            }
-            .contentMargins(.horizontal, S.margin, for: .scrollContent)
-            .scrollIndicators(.hidden)
-            // The glass chips' shadows must not be cut by the row: clipped,
-            // they left a gray band with hard edges behind the chips.
-            .scrollClipDisabled()
-            .padding(.horizontal, -S.margin)
-            .padding(.top, -8).padding(.bottom, -10)
-            // Swiping moves the picked chip and keeps it in view.
-            .onChange(of: cur) { _, i in withAnimation(S.standard(0.4)) { proxy.scrollTo(i, anchor: .leading) } }
-        }
-    }
-
-    // MARK: Pages
-
-    private func pager(_ pages: [PPage], _ cur: Int) -> some View {
-        let pw = max(0, fullW - 2 * S.margin)
-        let h = heights[cur] ?? 0
+        let sold = pages.first { $0.kind == .sold }, bought = pages.first { $0.kind == .bought }
+        let names = (sold?.cards.map(\.t) ?? []) + (bought?.cards.map(\.t) ?? []).filter { t in !(sold?.cards.contains { $0.t == t } ?? false) }
+        let fullW = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.screen.bounds.width ?? 393
+        let width = fullW - 2 * S.margin - 40
         let hours = home.hours
         let live = PChartGeom.liveSlot(sessions: hours?.days ?? [], today: home.today, now: SClock.now(), calendar: home.calendar)
-        return ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 20) {
-                ForEach(pages) { pg in
-                    PPageView(page: pg, width: pw, hours: hours, live: live, today: home.today,
-                              strategies: home.strategies ?? [:],
-                              open: MarketClock.isRegular(SClock.now(), calendar: home.calendar), mode: $mode,
-                              go: seen.contains(pg.id) || reduce)
-                        .frame(width: pw, alignment: .topLeading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[pg.id] = $0 }
-                        .id(pg.id)
+        let open = MarketClock.isRegular(SClock.now(), calendar: home.calendar)
+        let tasks = SunnyThisWeek.open(home, checked: router.checked)
+        let all = home.thisWeek?.value ?? []
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Positions").sType(.sectionTitle, tabular: false).foregroundStyle(S.ink)
+                    .accessibilityAddTraits(.isHeader)
+                if !names.isEmpty { totals(sold: sold?.legs ?? [], bought: bought?.legs ?? [], tickers: names.count) }
+            }
+            if names.isEmpty {
+                empty
+            } else {
+                ForEach(Array(names.enumerated()), id: \.element) { j, t in
+                    let sc = sold?.cards.first { $0.t == t }, bc = bought?.cards.first { $0.t == t }
+                    let w = home.writes.names.first { $0.ticker == t }
+                    PNameCard(t: t, px: (sc ?? bc)?.px ?? 0, sold: sc, bought: bc, dg: w?.dg?.value,
+                              strategy: home.strategies?[t], tasks: tasks.filter { $0.t == t },
+                              hadTasks: all.contains { $0.t == t }, ringed: router.ring == t, width: width,
+                              go: seen || reduce, delay: Double(min(j, 6)) * S.stagger,
+                              hours: hours, live: live, today: home.today, open: open)
+                        .id("pos-\(t)")
                 }
             }
-            .scrollTargetLayout()
-            // Room for the glass shadows: the pager clips, the shadows must not.
-            .padding(.top, 8).padding(.bottom, 24)
         }
-        .contentMargins(.horizontal, S.margin, for: .scrollContent)
-        .scrollTargetBehavior(.viewAligned(limitBehavior: .alwaysByOne))
-        .scrollPosition(id: $page)
-        .scrollIndicators(.hidden)
-        // As tall as the page you are on: a short page leaves no gap, and the
-        // cards below move up smoothly (0.4 s).
-        .frame(height: h > 0 ? h + 32 : nil, alignment: .top)
-        .padding(.top, -8).padding(.bottom, -24)
-        .animation(reduce ? nil : S.standard(0.4), value: h)
+        .padding(.horizontal, S.margin)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // First view animates once (block 12, Motion). The list is many screens tall, so any
+        // sliver on screen counts: at 10% the cards stayed hidden under the Positions title.
+        .onScrollVisibilityChange(threshold: 0.001) { v in if v { seen = true } }
+    }
+
+    /// "7 tickers · $3.7K time value · $3.8K kept · $48K bought gain".
+    private func totals(sold: [PLeg], bought: [PLeg], tickers: Int) -> some View {
+        let S0 = PTotals(sold), B = PTotals(bought)
+        let bold = SType(size: 14, weight: 700, line: 18, tracking: 0).font(tabular: true)
+        var t = Text("\(tickers)").font(bold).foregroundStyle(S.ink) + Text(tickers == 1 ? " ticker" : " tickers")
+        if !sold.isEmpty {
+            t = t + Text(" · ") + Text(PF.usd(S0.tv)).font(bold).foregroundStyle(S.ink) + Text(" time value · ")
+                + Text(PF.usd(abs(S0.g))).font(bold).foregroundStyle(S0.up ? S.green : S.red) + Text(S0.up ? " kept" : " lost")
+        }
+        if !bought.isEmpty {
+            t = t + Text(" · ") + Text(PF.usd(abs(B.g))).font(bold).foregroundStyle(B.up ? S.green : S.red)
+                + Text(B.up ? " bought gain" : " bought loss")
+        }
+        return t.sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+            .foregroundStyle(S.muted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var empty: some View {
@@ -138,268 +94,174 @@ struct SunnyPositions: View {
     }
 }
 
-// MARK: - Chip
-
-private struct PChip: View {
-    let page: PPage
-    let on: Bool
-    let tap: () -> Void
-
-    var body: some View {
-        Button(action: tap) {
-            HStack(spacing: 6) {
-                Circle().fill(page.status.dot).frame(width: 8, height: 8)
-                Text(page.chip).sType(SType(size: 13, weight: 600, line: 13, tracking: 0), tabular: false)
-                    .foregroundStyle(on ? S.paper : S.ink)
-                Text("\(page.legs.count)").sType(SType(size: 13, weight: 500, line: 13, tracking: 0))
-                    .foregroundStyle(on ? S.paper.opacity(0.72) : S.muted)
-            }
-            .padding(.horizontal, 12).frame(height: 32)
-            .background {
-                if on {
-                    Capsule().fill(S.ink)
-                        .shadow(color: .black.opacity(0.10), radius: 1, y: 1)
-                        .shadow(color: .black.opacity(0.14), radius: 6, y: 4)
-                }
-            }
-            .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
-            .contentShape(Capsule().inset(by: -6))
-            .animation(.easeOut(duration: 0.2), value: on)
-        }
-        .buttonStyle(PPress(scale: 0.96))
-        .accessibilityLabel("\(page.chip), \(PF.count(page.legs.count, "leg"))")
-        .accessibilityAddTraits(on ? .isSelected : [])
-    }
-}
-
-// MARK: - One page
-
-private struct PPageView: View {
-    let page: PPage
-    let width: CGFloat
-    let hours: Hours?
-    let live: Double
-    let today: String
-    /// Each name's strategy (block 13b).
-    let strategies: [String: String]
-    let open: Bool                  // regular session: the chart dots pulse
-    @Binding var mode: PMode
-    let go: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if page.kind == .all {
-                PAllCard(legs: page.legs, mode: $mode, go: go)
-            } else {
-                PSideTop(page: page, mode: $mode, go: go).pEnter(go, 0)
-                ForEach(Array(page.cards.enumerated()), id: \.element.id) { j, c in
-                    PTickerCard(card: c, strategy: strategies[c.t], width: width - 40, go: go,
-                                delay: Double(min(j + 1, 6)) * S.stagger,
-                                hist: hours?.px[c.t] ?? [], live: live, sessions: hours?.days ?? [],
-                                ahead: c.weekExpiry.map { e in (hours?.ahead ?? []).filter { $0 <= e } } ?? [],
-                                today: today, open: open)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - All (one glass card, four totals)
-
-private struct PAllCard: View {
-    let legs: [PLeg]
-    @Binding var mode: PMode
-    let go: Bool
-
-    private var rows: [(t: String, sold: Bool, L: [PLeg])] {
-        [("Calls sold", true, true), ("Puts sold", true, false), ("Calls bought", false, true), ("Puts bought", false, false)]
-            .map { r in (r.0, r.1, legs.filter { $0.sold == r.1 && $0.call == r.2 }) }
-            .filter { !$0.2.isEmpty }
-    }
-
-    var body: some View {
-        // More room than the design's 24 / 20 / 28 (Nik, 13 Oct 2026: "feels too cramped").
-        VStack(alignment: .leading, spacing: 32) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("All positions").sType(.sectionTitle, tabular: false)
-                Spacer(minLength: 0)
-                Text(PF.count(Set(legs.map(\.t)).count, "ticker") + " · " + PF.count(legs.count, "leg"))
-                    .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
-            }
-            VStack(alignment: .leading, spacing: 28) {
-                ForEach(Array(rows.enumerated()), id: \.element.t) { j, r in
-                    let A = PTotals(r.L)
-                    // A tap switches time value → % → $ on every page, as before the
-                    // redesign (Nik, 13 Oct 2026); the design's jump to that side went.
-                    Button { withAnimation(.smooth(duration: S.roll)) { mode = mode.nextPositions } } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(r.t) · \(PWords.word(mode, sold: r.sold, up: A.up))")
-                                .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false)
-                                .foregroundStyle(S.muted)
-                            PNum(value: PWords.big(A, mode), format: PWords.format(mode), go: go,
-                                 delay: 0.12 + Double(j) * S.stagger)
-                                .sType(.display)
-                                .foregroundStyle(PWords.tone(A, mode))
-                                .lineLimit(1)
-                            PWords.line(A, mode, sold: r.sold).padding(.top, 4)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PPress(scale: 0.98))
-                    .pEnter(go, Double(min(j, 6)) * S.stagger)
-                    .accessibilityLabel("\(r.t), \(PWords.word(mode, sold: r.sold, up: A.up)) \(PWords.format(mode)(PWords.big(A, mode)))")
-                    .accessibilityHint("Switches time value, percent and dollars")
-                }
-            }
-        }
-        .foregroundStyle(S.ink)
-        .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 36)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
-        .sunnyGlow()
-    }
-}
-
-// MARK: - Page top (a side's total for the book)
-
-private struct PSideTop: View {
-    let page: PPage
-    @Binding var mode: PMode
-    let go: Bool
-
-    var body: some View {
-        let A = PTotals(page.legs)
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(page.sold ? "Sold" : "Bought").sType(.sectionTitle, tabular: false).foregroundStyle(S.ink)
-                Spacer(minLength: 0)
-                Text(PF.count(page.tickers, "ticker") + " · " + PF.count(page.legs.count, "leg"))
-                    .sType(SType(size: 13, weight: 500, line: 16, tracking: 0), tabular: false).foregroundStyle(S.muted)
-            }
-            Button { withAnimation(.smooth(duration: S.roll)) { mode = mode.nextPositions } } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    PNum(value: PWords.big(A, mode), format: PWords.format(mode), go: go, delay: 0.12)
-                        .sType(.largeNumber)
-                        .foregroundStyle(PWords.tone(A, mode))
-                    Text(PWords.word(mode, sold: page.sold, up: A.up))
-                        .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
-                        .foregroundStyle(S.muted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(POpacityPress())
-            .accessibilityLabel("\(page.sold ? "Sold" : "Bought"), \(PWords.word(mode, sold: page.sold, up: A.up)) \(PWords.format(mode)(PWords.big(A, mode)))")
-            .accessibilityHint("Switches time value, percent and dollars")
-            PWords.line(A, mode, sold: page.sold)
-        }
-        .padding(.top, 4).padding(.bottom, 8)
-    }
-}
-
-/// The words and numbers the All rows and page tops share (block 12, Numbers).
+/// The words and numbers the cards share (block 12, Numbers).
 enum PWords {
     /// Red says so in words: a bought side down is a loss, not a gain, and a
     /// sold side down is lost, not kept (Nik, 13 Oct 2026).
-    static func word(_ m: PMode, sold: Bool, up: Bool) -> String {
-        switch m { case .tv: "time value"; case .pct: sold ? "captured" : "return"; case .usd: dollars(sold: sold, up: up) }
-    }
     static func dollars(sold: Bool, up: Bool) -> String { sold ? (up ? "kept" : "lost") : (up ? "gain" : "loss") }
-    static func big(_ A: PTotals, _ m: PMode) -> Double {
-        switch m { case .tv: A.tv; case .pct: abs(A.pct); case .usd: abs(A.g) }
-    }
-    static func format(_ m: PMode) -> (Double) -> String {
-        if m == .pct { return { PF.pct($0) } }
-        return { PF.usd($0) }
-    }
-    /// Time value in ink; % and $ green when up, red when down, never a sign.
-    static func tone(_ A: PTotals, _ m: PMode) -> Color { m == .tv ? S.ink : A.up ? S.green : S.red }
-
-    /// $ now first, then the two values the big number is not showing.
-    static func line(_ A: PTotals, _ m: PMode, sold: Bool) -> some View {
-        let tn = A.up ? S.green : S.red
-        var bits: [(String, String, Color)] = [(PF.usd(A.now), " now", S.ink)]
-        if m != .pct { bits.append((PF.pct(A.pct), sold ? " captured" : " return", tn)) }
-        if m != .tv { bits.append((PF.usd(A.tv), " time value", S.ink)) }
-        if m != .usd { bits.append((PF.usd(A.g), " " + dollars(sold: sold, up: A.up), tn)) }
-        let bold = SType(size: 14, weight: 700, line: 18, tracking: 0).font(tabular: true)
-        return bits.enumerated().reduce(Text("")) { acc, e in
-            acc + Text(e.element.0).font(bold).foregroundStyle(e.element.2)
-                + Text(e.element.1 + (e.offset < bits.count - 1 ? " · " : "")).foregroundStyle(S.muted)
-        }
-        .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-        .fixedSize(horizontal: false, vertical: true)
-    }
 }
 
-// MARK: - Ticker card (block 13)
+/// The swipe progress across a card's faces (0, 1, 2). A class, so only the
+/// tabs that read it redraw while the finger moves.
+@Observable final class PFaceProgress {
+    var p: Double = 0
+    var moving = false
+}
 
-private struct PTickerCard: View {
+// MARK: - One name's card (block 13)
+
+private struct PNameCard: View {
+    enum Face: String, CaseIterable, Identifiable {
+        case sold, bought, dg
+        var id: String { rawValue }
+        var label: String { switch self { case .sold: "Sold"; case .bought: "Bought"; case .dg: "Delta and Gamma" } }
+    }
     @Environment(HomeRouter.self) private var router
-    let card: PCard
-    /// aftershock, rebound or ladder (block 13b); nil shows no mark.
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    let t: String
+    let px: Double
+    let sold: PCard?
+    let bought: PCard?
+    let dg: DGBook?
     let strategy: String?
-    let width: CGFloat              // content width: 313 on a 393 phone
+    /// Open today, not yet checked.
+    let tasks: [WeekTask]
+    /// Any task today: all checked reads "Done for this week".
+    let hadTasks: Bool
+    /// Opened from a tap: a 2 pt ink outline for 1.8 s.
+    let ringed: Bool
+    let width: CGFloat
     let go: Bool
     let delay: Double
-    let hist: [Double?]
+    let hours: Hours?
     let live: Double
-    let sessions: [String]
-    let ahead: [String]
     let today: String
     let open: Bool
 
+    @State private var pos = ScrollPosition()
+    @State private var prog = PFaceProgress()
+    @State private var heights: [Face: CGFloat] = [:]
+
+    private var pageW: CGFloat { width + 40 }
+    private var faces: [Face] {
+        [sold != nil ? .sold : nil, bought != nil ? .bought : nil, bought != nil && dg != nil ? .dg : nil].compactMap { $0 }
+    }
+    /// The faces the work is on: Sold for a roll or a sale, Delta and Gamma for a buy.
+    private var workOn: Set<Face> { Set(tasks.map { $0.face == "dg" ? Face.dg : Face.sold }) }
+
     var body: some View {
-        let c = card
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 18) {
-                head
-                PChartView(c: c, g: PChartGeom(c, width: width, hist: hist, live: live, sessions: sessions,
-                                               ahead: ahead, today: today),
-                           width: width, go: go, d: delay, open: open)
-                footer
+        let F = faces, h = F.compactMap { heights[$0] }.max() ?? 0
+        VStack(alignment: .leading, spacing: 14) {
+            head
+            if F.count > 1 {
+                PFaceTabs(faces: F.map(\.label), dots: F.map { workOn.contains($0) }, prog: prog) { i in scroll(to: i) }
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(a11y)
-            // Block 13b (handoff 27): the last row, 18 under the stats; opens the Thesis on this name.
-            Button { router.openPlanner(c.t, page: 0) } label: {
-                Text("This week's thesis").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+            // Each face carries the card's 20 pt side padding inside the pager, so a strike tag that
+            // runs past the plot stays on its own face instead of showing on the next one.
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(F) { f in
+                        face(f)
+                            .frame(width: width, alignment: .topLeading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[f] = $0 }
+                            .frame(height: h > 0 ? h : nil, alignment: .top)
+                            .padding(.horizontal, 20)
+                            .frame(width: pageW)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition($pos)
+            .scrollIndicators(.hidden)
+            .scrollDisabled(F.count < 2)
+            .onScrollGeometryChange(for: Double.self) { g in Double(g.contentOffset.x / max(1, g.containerSize.width)) } action: { _, v in
+                prog.p = v
+            }
+            .onScrollPhaseChange { _, ph in prog.moving = ph != .idle }
+            .frame(width: pageW, height: h > 0 ? h : nil)
+            .padding(.horizontal, -20)
+            if !tasks.isEmpty || hadTasks { rebalance }
+            Button { router.insights = t } label: {
+                Text("This week's insights").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
                     .foregroundStyle(S.ink)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
+                    .frame(maxWidth: .infinity).frame(height: 44)
                     .background(Capsule().fill(S.track))
                     .contentShape(Capsule())
             }
             .buttonStyle(SPressStyle(scale: 0.97))
-            .accessibilityLabel("Open this week's thesis for \(c.t)")
+            .padding(.top, 4)
+            .accessibilityLabel("Open this week's insights for \(t)")
         }
         .foregroundStyle(S.ink)
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { PCornerGlow(status: c.status) }
+        .background { PCornerGlow(status: (sold ?? bought)?.status ?? .safe) }
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
+        .overlay {
+            RoundedRectangle(cornerRadius: S.rCard, style: .continuous)
+                .strokeBorder(S.ink, lineWidth: 2)
+                .opacity(ringed ? 1 : 0)
+                .animation(.easeOut(duration: 0.4), value: ringed)
+                .allowsHitTesting(false)
+        }
         .sunnyGlow()
         .pEnter(go, delay)
+        // Opened from a tap (This week, the map, a chip): swipe to its face.
+        .onChange(of: router.cardTick) { _, _ in
+            guard let f = router.cardFace[t].flatMap(Face.init(rawValue:)), let i = F.firstIndex(of: f) else { return }
+            scroll(to: i)
+        }
+        .onAppear {
+            if let f = router.cardFace[t].flatMap(Face.init(rawValue:)), let i = F.firstIndex(of: f), i > 0 {
+                var tr = Transaction(); tr.disablesAnimations = true
+                withTransaction(tr) { pos.scrollTo(x: CGFloat(i) * pageW) }
+            }
+        }
     }
 
+    /// By the face's x offset, never its id: an id scroll moves the page underneath too.
+    private func scroll(to i: Int) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        if reduce { pos.scrollTo(x: CGFloat(i) * pageW) } else { withAnimation(S.standard(0.35)) { pos.scrollTo(x: CGFloat(i) * pageW) } }
+    }
+
+    // MARK: Header
+
     private var head: some View {
-        let c = card
-        return VStack(alignment: .leading, spacing: 12) {
-            // The strategy, plain text at the end of the ticker line (13b, handoff 27): 15 Medium, S.muted.
-            HStack(alignment: .center, spacing: 12) {
-                (Text(c.t).font(SType(size: 20, weight: 700, line: 24, tracking: 0).font())
-                 + Text(" " + PF.price(c.px)).font(SType(size: 20, weight: 500, line: 24, tracking: 0).font(tabular: true))
-                    .foregroundStyle(S.muted))
-                    .sType(SType(size: 20, weight: 700, line: 24, tracking: 0))
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                if let name = Strategy.name(strategy) {
-                    Text(name).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
-                        .foregroundStyle(S.muted)
-                        .lineLimit(1)
-                }
+        HStack(alignment: .center, spacing: 8) {
+            if !tasks.isEmpty {
+                Circle().fill(S.orange).frame(width: 10, height: 10)
+                    .accessibilityLabel("Needs a rebalance")
             }
+            (Text(t).font(SType(size: 20, weight: 700, line: 24, tracking: 0).font())
+             + Text(" " + PF.price(px)).font(SType(size: 20, weight: 500, line: 24, tracking: 0).font(tabular: true))
+                .foregroundStyle(S.muted))
+                .sType(SType(size: 20, weight: 700, line: 24, tracking: 0))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            if let name = Strategy.name(strategy) {
+                Text(name).sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                    .foregroundStyle(S.muted).lineLimit(1)
+            }
+        }
+        .frame(height: 24)
+    }
+
+    // MARK: Faces
+
+    @ViewBuilder private func face(_ f: Face) -> some View {
+        switch f {
+        case .sold: if let c = sold { side(c) }
+        case .bought: if let c = bought { side(c) }
+        case .dg: if let d = dg { PDGFace(t: t, dg: d, width: width) }
+        }
+    }
+
+    /// Sold or Bought: By Fri and the nearest strikes, the hourly line with the strikes, four numbers.
+    private func side(_ c: PCard) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(c.by).foregroundStyle(S.muted)
                 Spacer(minLength: 0)
@@ -412,7 +274,14 @@ private struct PTickerCard: View {
             }
             .sType(SType(size: 13, weight: 500, line: 16, tracking: 0))
             .lineLimit(1)
+            PChartView(c: c, g: PChartGeom(c, width: width, hist: hours?.px[c.t] ?? [], live: live, sessions: hours?.days ?? [],
+                                           ahead: c.weekExpiry.map { e in (hours?.ahead ?? []).filter { $0 <= e } } ?? [],
+                                           today: today),
+                       width: width, go: go, d: delay, open: open)
+            footer(c)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11y(c))
     }
 
     /// Gold inside 2% on a sold strike, red once a sold strike is crossed,
@@ -421,16 +290,16 @@ private struct PTickerCard: View {
         d < 0 ? (sold ? S.red : S.green) : sold && d < 2 ? S.yellowDeep : S.muted
     }
 
-    private var footer: some View {
-        let A = card.totals, tn = A.up ? S.green : S.red
+    private func footer(_ c: PCard) -> some View {
+        let A = c.totals, tn = A.up ? S.green : S.red
         let usd: (Double) -> String = { PF.usd($0) }, pct: (Double) -> String = { PF.pct($0) }
         // Collected (sold) or paid (bought) first, so the rest adds up: collected
         // = kept + time value still in the option (Nik, 14 Oct 2026).
         let stats: [(Double, (Double) -> String, String, Color)] = [
-            (A.base, usd, card.sold ? "collected" : "paid", S.ink),
+            (A.base, usd, c.sold ? "collected" : "paid", S.ink),
             (A.tv, usd, "time value", S.ink),
-            (abs(A.pct), pct, card.sold ? "captured" : "return", tn),
-            (abs(A.g), usd, PWords.dollars(sold: card.sold, up: A.up), tn),
+            (abs(A.pct), pct, c.sold ? "captured" : "return", tn),
+            (abs(A.g), usd, PWords.dollars(sold: c.sold, up: A.up), tn),
         ]
         return HStack(alignment: .top, spacing: 8) {
             ForEach(stats, id: \.2) { s in
@@ -449,12 +318,112 @@ private struct PTickerCard: View {
         .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
     }
 
-    private var a11y: String {
-        let c = card
+    private func a11y(_ c: PCard) -> String {
         let d = c.heads.map { "\(F.trim((abs($0.dist) * 10).rounded() / 10)) percent \($0.dist >= 0 ? "to" : "past") \($0.word) \(PF.strike($0.k))" }
         let g = Int(abs(c.totals.g).rounded()).formatted()
-        let kept = "\(PWords.dollars(sold: c.sold, up: c.totals.up)) \(g) dollars"
-        return ([c.t, PF.price(c.px)] + (Strategy.name(strategy).map { [$0] } ?? []) + d + [kept]).joined(separator: ", ")
+        return ([t, c.sold ? "Sold" : "Bought", PF.price(c.px)] + d + ["\(PWords.dollars(sold: c.sold, up: c.totals.up)) \(g) dollars"])
+            .joined(separator: ", ")
+    }
+
+    // MARK: Rebalance row (13): up to This week, or Done for this week
+
+    private var rebalance: some View {
+        let done = tasks.isEmpty
+        return Button { if !done { router.focusThisWeek(t) } } label: {
+            HStack(alignment: .center, spacing: 12) {
+                ZStack {
+                    if done {
+                        Circle().fill(S.ink)
+                        Path { q in q.move(to: CGPoint(x: 6.5, y: 11.5)); q.addLine(to: CGPoint(x: 9.8, y: 14.6)); q.addLine(to: CGPoint(x: 15.6, y: 7.8)) }
+                            .stroke(S.paper, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                    } else {
+                        Circle().fill(S.orange).frame(width: 10, height: 10)
+                    }
+                }
+                .frame(width: 22, height: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(done ? "Done for this week" : "\(tasks.count) to do this week")
+                        .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                    Text(done ? "Delta back on target" : tasks.map(\.action).joined(separator: " · "))
+                        .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                        .foregroundStyle(done ? S.green : S.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if !done {
+                    Path { q in q.move(to: CGPoint(x: 1, y: 7)); q.addLine(to: CGPoint(x: 6.5, y: 1.5)); q.addLine(to: CGPoint(x: 12, y: 7)) }
+                        .stroke(S.muted, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                        .frame(width: 13, height: 8)
+                }
+            }
+            .padding(.top, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(done)
+        .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
+        .accessibilityLabel(done ? "Done for this week, delta back on target"
+                                 : "\(tasks.count) to do this week: \(tasks.map(\.action).joined(separator: ", ")), go to This week")
+    }
+}
+
+// MARK: - The tabs: a Liquid Glass segmented control whose capsule rides the swipe
+
+private struct PFaceTabs: View {
+    let faces: [String]
+    let dots: [Bool]
+    let prog: PFaceProgress
+    let tap: (Int) -> Void
+    @Environment(\.colorScheme) private var scheme
+
+    /// Each tab as wide as its label (and dot), the spare width shared out evenly.
+    private func widths(_ W: CGFloat) -> [CGFloat] {
+        let f = SType(size: 13, weight: 600, line: 16, tracking: 0).uiFont()
+        let nat = faces.enumerated().map { i, t in
+            ceil((t as NSString).size(withAttributes: [.font: f]).width) + (dots[safe: i] == true ? 12 : 0) + 24
+        }
+        let spare = max(0, W - nat.reduce(0, +)) / CGFloat(max(1, faces.count))
+        let w = nat.map { $0 + spare }, sum = w.reduce(0, +)
+        return sum > W ? w.map { $0 * W / sum } : w
+    }
+
+    var body: some View {
+        GeometryReader { g in
+            let ws = widths(g.size.width - 6), xs = ws.indices.map { i in ws[..<i].reduce(0, +) }
+            let p = min(max(prog.p, 0), Double(faces.count - 1)), lo = Int(p.rounded(.down)), hi = min(lo + 1, faces.count - 1), f = CGFloat(p - Double(lo))
+            let x = xs[lo] + (xs[hi] - xs[lo]) * f, w = ws[lo] + (ws[hi] - ws[lo]) * f
+            ZStack(alignment: .leading) {
+                Capsule().fill(S.track)
+                // On glass, small parts are solid (tokens, Glass): white with a hairline and a soft shadow.
+                Capsule().fill(scheme == .dark ? Color.white.opacity(0.14) : Color.white)
+                    .overlay(Capsule().strokeBorder(scheme == .dark ? Color.white.opacity(0.14) : S.ink.opacity(0.06), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.10), radius: 4, y: 2)
+                    .frame(width: w, height: 30)
+                    .scaleEffect(x: prog.moving ? 1.06 : 1, y: prog.moving ? 1.14 : 1)
+                    .offset(x: 3 + x)
+                    .animation(.easeOut(duration: 0.2), value: prog.moving)
+                HStack(spacing: 0) {
+                    ForEach(Array(faces.enumerated()), id: \.offset) { i, t in
+                        Button { tap(i) } label: {
+                            HStack(spacing: 6) {
+                                Text(t).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
+                                    .foregroundStyle(S.ink).lineLimit(1)
+                                if dots[safe: i] == true { Circle().fill(S.orange).frame(width: 6, height: 6) }
+                            }
+                            .frame(width: ws[safe: i] ?? 0, height: 36)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(abs(Double(i) - prog.p) < 0.5 ? [.isSelected, .isButton] : .isButton)
+                        .accessibilityLabel(t + (dots[safe: i] == true ? ", needs a rebalance" : ""))
+                    }
+                }
+                .padding(.horizontal, 3)
+            }
+        }
+        .frame(height: 36)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Faces")
     }
 }
 
