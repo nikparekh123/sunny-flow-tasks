@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-20.4';
+const BUILD = '2026-10-20.5';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1465,8 +1465,14 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const ivA = num(xs.reduce((a, b) => (Math.abs(Number(b.strike) - spot) < Math.abs(Number(a.strike) - spot) ? b : a)).iv) ?? ivRow?.iv ?? null;
         if (!ivA) return null;
         const target = spot * (1 + Q_SD * ivA * Math.sqrt(Tq));
-        const r = xs.find((x) => Number(x.strike) >= target) ?? xs.at(-1)!;
-        return { k: Number(r.strike), exp, mid: Number(r.mid), dl: Number(r.delta), iv: num(r.iv) ?? ivA, target: r2(target) };
+        /* Calls already held for this quarter set the strike: more are added at the strike held
+           (the most contracts), never a new 1.5 SD strike that moved with the price (Nik, 20 Oct
+           2026: NKE holds Jan $47.50 and was told to buy Jan $50). A new quarter picks fresh. */
+        const heldQ = ls.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry === exp)
+          .sort((a, b) => b.n - a.n)[0];
+        const atHeld = heldQ ? xs.find((x) => Math.abs(Number(x.strike) - heldQ.strike) < 0.001) : undefined;
+        const r = atHeld ?? xs.find((x) => Number(x.strike) >= target) ?? xs.at(-1)!;
+        return { k: Number(r.strike), exp, mid: Number(r.mid), dl: Number(r.delta), iv: num(r.iv) ?? ivA, target: r2(target), more: !!atHeld };
       })();
       const leapValue = ls.filter(isLeap).reduce((s2, l) => s2 + (l.mark ?? 0) * l.n * 100, 0);
       const after0 = held.filter((h) => h.stays).reduce((s2, h) => s2 + h.d, 0) + sug.reduce((s2, x) => s2 + Number(x.d), 0);
@@ -1497,7 +1503,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
                after0: Math.round(after0), after0_pct: r2(after0P), leap_value: Math.round(leapValue),
                safe: S15 == null || d15 == null ? null
                  : { sd: SAFE_SD, px: r2(S15), by: evalDay, d15: Math.round(d15), pct: r2(d15 / base * 100) },
-               q: qq ? { k: qq.k, exp: qq.exp, mid: r2(qq.mid), sd: Q_SD, target: qq.target } : null,
+               q: qq ? { k: qq.k, exp: qq.exp, mid: r2(qq.mid), sd: Q_SD, target: qq.target, more: qq.more } : null,
                iv: ivRow?.iv ?? null };
     })();
     /* ── DELTA AND GAMMA (handoff 28, blocks 13 and 16): every open leg at its own IV, an instant
@@ -1551,7 +1557,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       }
       const fq = pkg?.fix.find((x) => x.id === 'fq'), ff = pkg?.fix.find((x) => x.id === 'ff');
       if (fq) thisWeek.push({ id: `${t}|buy|${fq.exp}`, t, kind: 'buy', face: 'dg',
-        action: `Buy ${fq.n} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`, alt: ff ? `or sell ${ff.n} fewer` : null,
+        action: `Buy ${fq.n}${pkg?.q?.more ? ' more' : ''} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`, alt: ff ? `or sell ${ff.n} fewer` : null,
         cost: Math.round(Number(fq.n) * Number(fq.mid) * 100), credit: false, delta: Math.round(Number(fq.d) * spot), sh: dg?.sh ?? null });
       /* Next Friday's sales wait for Friday (Nik, 20 Oct 2026: "should come on Friday or when one of
          them is closed, this is too early"). Before Friday only LEAPs with no call this week (one closed
