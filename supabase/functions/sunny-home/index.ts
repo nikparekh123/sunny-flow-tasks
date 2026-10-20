@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-20.5';
+const BUILD = '2026-10-20.8';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1482,7 +1482,6 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const gap = Math.max(0, (25 + e - after0P) / 100 * base), thin = after0P < 20 + e;
       const short15 = d15 != null && d15 < 0;
       const fix: Row[] = [];
-      const atmSug = sug.find((x) => x.ty === 'sc');
       if (thin || short15) {
         if (qq) {
           const dq15 = S15 ? dAt(S15, qq.k, qq.exp, qq.iv, true) : 0;
@@ -1490,14 +1489,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
           if (n > 0) fix.push({ id: 'fq', ty: 'oc', act: 'Buy', tenor: 'q', n, k: qq.k, exp: qq.exp, mid: r2(qq.mid),
             d: Math.round(qq.dl * n * 100), d15: Math.round(dq15 * n * 100) });
         }
-        if (atmSug) {
-          const ivA = plan.find((p) => p.type === 'call' && p.strike === atmSug.k)?.iv ?? null;
-          const da15 = S15 ? dAt(S15, atmSug.k, targetExp, ivA, true) : 0, daNow = Math.abs(Number(atmSug.d)) / (atmSug.n * 100);
-          const m = Math.min(atmSug.n, Math.max(short15 && da15 > 0 ? Math.ceil(-d15! / (100 * da15)) : 0,
-            thin && daNow > 0 ? Math.ceil(gap / (100 * daNow)) : 0));
-          if (m > 0) fix.push({ id: 'ff', ty: 'sc', act: 'Sell fewer', n: m, k: atmSug.k, exp: targetExp, mid: atmSug.mid,
-            d: Math.round(daNow * m * 100), d15: Math.round(da15 * m * 100) });
-        }
+        /* Selling fewer calls is no longer offered (Nik, 20 Oct 2026: "we agreed that is not a good
+           solution"; it gave up about 3x what the quarterly calls cost). */
       }
       return { base, e, now: Math.round(nowD), now_pct: r2(nowD / base * 100), held, sug, fix,
                after0: Math.round(after0), after0_pct: r2(after0P), leap_value: Math.round(leapValue),
@@ -1555,9 +1548,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
           action: rolledTo > 0 ? `Roll ${nItm} ${usdK(low)} calls to ${usdK(atm!.k)}` : `Buy back ${nItm} ${usdK(low)} calls`,
           cost: Math.round(Math.abs(back - credit)), credit: back - credit < 0, delta: Math.round((dOld - dNew) * spot), sh: dg?.sh ?? null });
       }
-      const fq = pkg?.fix.find((x) => x.id === 'fq'), ff = pkg?.fix.find((x) => x.id === 'ff');
+      const fq = pkg?.fix.find((x) => x.id === 'fq');
       if (fq) thisWeek.push({ id: `${t}|buy|${fq.exp}`, t, kind: 'buy', face: 'dg',
-        action: `Buy ${fq.n}${pkg?.q?.more ? ' more' : ''} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`, alt: ff ? `or sell ${ff.n} fewer` : null,
+        action: `Buy ${fq.n}${pkg?.q?.more ? ' more' : ''} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`, alt: null,
         cost: Math.round(Number(fq.n) * Number(fq.mid) * 100), credit: false, delta: Math.round(Number(fq.d) * spot), sh: dg?.sh ?? null });
       /* Next Friday's sales wait for Friday (Nik, 20 Oct 2026: "should come on Friday or when one of
          them is closed, this is too early"). Before Friday only LEAPs with no call this week (one closed
@@ -1593,7 +1586,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const lead = F0.read === 'bullish' ? 'Fundamentals are bullish.' : F0.read === 'bearish' ? 'Fundamentals are bearish.' : 'Fundamentals are neutral.';
         const a = num(F0.analyst), m = num(F0.model), v = num(F0.value);
         let b = a != null && m != null ? `Analysts see about _${usd0(a)}_ and our model about _${usd0(m)}_.` : a != null ? `Analysts see about _${usd0(a)}_.` : m != null ? `Our model sees about _${usd0(m)}_.` : '';
-        if (v != null) { const d = (v / spot - 1) * 100; b += `${b ? ' ' : ''}Fair value sits at ${usd(v)}, _${pc(d)} ${d >= 0 ? 'above' : 'below'}_ today's price.`; }
+        if (v != null) { const d = (v / spot - 1) * 100;
+          b += `${b ? ' ' : ''}Fair value sits at ${usd(v)}, ${Math.abs(d) < 1 ? 'about today\'s price' : `_${pc(d)} ${d >= 0 ? 'above' : 'below'}_ today's price`}.`; }
         return [lead, b];
       };
       const tech = (): [string, string] => {
@@ -1619,17 +1613,23 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const hist = (): [string, string] => {
         const rd = String((R.history as Row | undefined)?.read ?? '');
         const lead = rd === 'stretched up' ? 'It is stretched up.' : rd === 'stretched down' ? 'It is stretched down.'
-          : rd === 'flat' ? 'It is moving sideways.' : rd ? cap(`It is ${rd}.`) : 'History is not in yet.';
+          : rd === 'flat' ? 'It is moving sideways.' : rd === 'down' ? 'It is drifting lower.' : rd === 'up' ? 'It is drifting higher.'
+          : rd ? cap(`It is ${rd}.`) : 'History is not in yet.';
         const c5 = num(T.close5), lo = num(T.m_lo), hi = num(T.m_hi);
-        let b = c5 != null ? `${usd(c5)} to ${usd(spot)} in 5 days.` : '';
+        /* The lead and its first sentence say the same thing: a stretched read is about the last 5
+           days, any other about the month (LULU read "moving sideways" over "+6% in 5 days"). */
+        const fact = String((R.history as Row | undefined)?.fact ?? '');
+        let b = rd.startsWith('stretched') ? (c5 != null ? `${usd(c5)} to ${usd(spot)} in 5 days.` : '') : fact ? cap(fact.replace(/\.$/, '')) + '.' : '';
         if (lo != null && hi != null && hi > lo) { const f = (spot - lo) / (hi - lo);
           b += `${b ? ' ' : ''}It sits at the _${f >= 2 / 3 ? 'top' : f <= 1 / 3 ? 'bottom' : 'middle'} of the month's range_, ${usd(lo)} to ${usd(hi)}.`; }
         return [lead, b];
       };
       const opts = (): [string, string] => {
-        const iv = num(I.iv), rich = num(I.rich), u = num(T.iv_usual), skip = (R.iv as Row | undefined)?.read === 'skip';
+        const iv = num(I.iv), rich = num(I.rich), u = num(T.iv_usual), skip = (R.iv as Row | undefined)?.read === 'skip', rank = num(I.iv_rank);
         const lead = skip || (rich != null && rich < 0.9) ? 'Options pay little.' : rich != null && rich >= 1.2 ? 'Options pay well.' : 'Options pay fairly.';
         if (iv == null) return [lead, ''];
+        /* Low for the name over the year: say so, never "rich" under "pay little". */
+        if (skip) return [lead, `Implied volatility is ${pc(iv * 100)}${u != null ? ` against a usual ${pc(u * 100)}` : ''}, _near the low end of its year_${rank != null ? ` (rank ${Math.round(rank)})` : ''}.`];
         const how = rich == null ? '' : rich >= 1.2 ? ', so premium is _rich_ for how much it really moves' : rich < 0.9 ? ', so premium is _thin_ for how much it moves' : ', about fair for how much it moves';
         return [lead, `Implied volatility is ${pc(iv * 100)}${u != null ? ` against a usual ${pc(u * 100)}` : ''}${how}.`];
       };

@@ -35,11 +35,12 @@ struct SunnyPositions: View {
         let tasks = SunnyThisWeek.open(home, checked: router.checked)
         let all = home.thisWeek?.value ?? []
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Positions").sType(.sectionTitle, tabular: false).foregroundStyle(S.ink)
                     .accessibilityAddTraits(.isHeader)
                 if !names.isEmpty { totals(sold: sold?.legs ?? [], bought: bought?.legs ?? [], tickers: names.count) }
             }
+            .padding(.bottom, 8)
             if names.isEmpty {
                 empty
             } else {
@@ -140,8 +141,11 @@ private struct PNameCard: View {
 
     @State private var pos = ScrollPosition()
     @State private var prog = PFaceProgress()
-    @State private var heights: [Face: CGFloat] = [:]
+    /// The faces' shared height (the tallest face).
+    @State private var h: CGFloat = 0
 
+    /// One face is the card's full width; it carries the 20 pt side padding itself, so a strike
+    /// tag that runs past the plot stays on its own face.
     private var pageW: CGFloat { width + 40 }
     private var faces: [Face] {
         [sold != nil ? .sold : nil, bought != nil ? .bought : nil, bought != nil && dg != nil ? .dg : nil].compactMap { $0 }
@@ -150,27 +154,22 @@ private struct PNameCard: View {
     private var workOn: Set<Face> { Set(tasks.map { $0.face == "dg" ? Face.dg : Face.sold }) }
 
     var body: some View {
-        let F = faces, h = F.compactMap { heights[$0] }.max() ?? 0
-        VStack(alignment: .leading, spacing: 14) {
-            head
-            if F.count > 1 {
-                PFaceTabs(faces: F.map(\.label), dots: F.map { workOn.contains($0) }, prog: prog) { i in scroll(to: i) }
+        let F = faces
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 14) {
+                head
+                if F.count > 1 {
+                    PFaceTabs(faces: F.map(\.label), dots: F.map { workOn.contains($0) }, prog: prog) { i in scroll(to: i) }
+                }
             }
-            // Each face carries the card's 20 pt side padding inside the pager, so a strike tag that
-            // runs past the plot stays on its own face instead of showing on the next one.
+            .padding(.horizontal, 20)
+            // Every face is the same height (the tallest), its numbers on the bottom, so a swipe moves nothing.
             ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(F) { f in
-                        face(f)
-                            .frame(width: width, alignment: .topLeading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { heights[f] = $0 }
-                            .frame(height: h > 0 ? h : nil, alignment: .top)
-                            .padding(.horizontal, 20)
-                            .frame(width: pageW)
-                    }
+                PEqualFaces(w: pageW) {
+                    ForEach(F) { f in face(f).padding(.horizontal, 20) }
                 }
                 .scrollTargetLayout()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h = $0 }
             }
             .scrollTargetBehavior(.paging)
             .scrollPosition($pos)
@@ -181,8 +180,7 @@ private struct PNameCard: View {
             }
             .onScrollPhaseChange { _, ph in prog.moving = ph != .idle }
             .frame(width: pageW, height: h > 0 ? h : nil)
-            .padding(.horizontal, -20)
-            if !tasks.isEmpty || hadTasks { rebalance }
+            if !tasks.isEmpty || hadTasks { rebalance.padding(.horizontal, 20) }
             Button { router.insights = t } label: {
                 Text("This week's insights").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
                     .foregroundStyle(S.ink)
@@ -191,17 +189,19 @@ private struct PNameCard: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(SPressStyle(scale: 0.97))
-            .padding(.top, 4)
+            .padding(.horizontal, 20)
             .accessibilityLabel("Open this week's insights for \(t)")
         }
         .foregroundStyle(S.ink)
-        .padding(20)
+        .padding(.vertical, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background { PCornerGlow(status: (sold ?? bought)?.status ?? .safe) }
         .glassEffect(.regular, in: .rect(cornerRadius: S.rCard))
+        // Opened from a tap: a 2 pt ink outline 2 pt outside the card for 1.8 s (block 12).
         .overlay {
-            RoundedRectangle(cornerRadius: S.rCard, style: .continuous)
+            RoundedRectangle(cornerRadius: S.rCard + 4, style: .continuous)
                 .strokeBorder(S.ink, lineWidth: 2)
+                .padding(-4)
                 .opacity(ringed ? 1 : 0)
                 .animation(.easeOut(duration: 0.4), value: ringed)
                 .allowsHitTesting(false)
@@ -261,7 +261,7 @@ private struct PNameCard: View {
 
     /// Sold or Bought: By Fri and the nearest strikes, the hourly line with the strikes, four numbers.
     private func side(_ c: PCard) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(c.by).foregroundStyle(S.muted)
                 Spacer(minLength: 0)
@@ -278,8 +278,10 @@ private struct PNameCard: View {
                                            ahead: c.weekExpiry.map { e in (hours?.ahead ?? []).filter { $0 <= e } } ?? [],
                                            today: today),
                        width: width, go: go, d: delay, open: open)
+            Spacer(minLength: 0)
             footer(c)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(a11y(c))
     }
@@ -314,7 +316,7 @@ private struct PNameCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.top, 17)
+        .padding(.top, 16)
         .overlay(alignment: .top) { Rectangle().fill(S.pRule).frame(height: 1) }
     }
 
@@ -367,6 +369,24 @@ private struct PNameCard: View {
     }
 }
 
+/// The faces side by side, each `w` wide and as tall as the tallest, so a face with less in it
+/// keeps its numbers on the bottom and a swipe never changes the card's height.
+private struct PEqualFaces: Layout {
+    let w: CGFloat
+    private func tallest(_ subviews: Subviews) -> CGFloat {
+        subviews.map { $0.sizeThatFits(ProposedViewSize(width: w, height: nil)).height }.max() ?? 0
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        CGSize(width: w * CGFloat(subviews.count), height: tallest(subviews))
+    }
+    func placeSubviews(in b: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let h = tallest(subviews)
+        for (i, v) in subviews.enumerated() {
+            v.place(at: CGPoint(x: b.minX + CGFloat(i) * w, y: b.minY), proposal: ProposedViewSize(width: w, height: h))
+        }
+    }
+}
+
 // MARK: - The tabs: a Liquid Glass segmented control whose capsule rides the swipe
 
 private struct PFaceTabs: View {
@@ -375,6 +395,7 @@ private struct PFaceTabs: View {
     let prog: PFaceProgress
     let tap: (Int) -> Void
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     /// Each tab as wide as its label (and dot), the spare width shared out evenly.
     private func widths(_ W: CGFloat) -> [CGFloat] {
@@ -389,25 +410,26 @@ private struct PFaceTabs: View {
 
     var body: some View {
         GeometryReader { g in
-            let ws = widths(g.size.width - 6), xs = ws.indices.map { i in ws[..<i].reduce(0, +) }
+            let ws = widths(g.size.width - 4), xs = ws.indices.map { i in ws[..<i].reduce(0, +) }
             let p = min(max(prog.p, 0), Double(faces.count - 1)), lo = Int(p.rounded(.down)), hi = min(lo + 1, faces.count - 1), f = CGFloat(p - Double(lo))
             let x = xs[lo] + (xs[hi] - xs[lo]) * f, w = ws[lo] + (ws[hi] - ws[lo]) * f
             ZStack(alignment: .leading) {
-                Capsule().fill(S.track)
-                // On glass, small parts are solid (tokens, Glass): white with a hairline and a soft shadow.
-                Capsule().fill(scheme == .dark ? Color.white.opacity(0.14) : Color.white)
-                    .overlay(Capsule().strokeBorder(scheme == .dark ? Color.white.opacity(0.14) : S.ink.opacity(0.06), lineWidth: 0.5))
-                    .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.10), radius: 4, y: 2)
-                    .frame(width: w, height: 30)
-                    .scaleEffect(x: prog.moving ? 1.06 : 1, y: prog.moving ? 1.14 : 1)
-                    .offset(x: 3 + x)
-                    .animation(.easeOut(duration: 0.2), value: prog.moving)
+                // The design's segmented track (gray 12%, dark 24%) and its capsule (white 88%, dark 20%).
+                Capsule().fill(Color(red: 118 / 255, green: 118 / 255, blue: 128 / 255).opacity(scheme == .dark ? 0.24 : 0.12))
+                    .overlay(Capsule().strokeBorder(scheme == .dark ? Color.white.opacity(0.06) : Color.black.opacity(0.04), lineWidth: 0.5))
+                Capsule().fill(Color.white.opacity(scheme == .dark ? 0.2 : 0.88))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(scheme == .dark ? 0.22 : 0.9), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.08), radius: scheme == .dark ? 4 : 1.5, y: scheme == .dark ? 2 : 1)
+                    .frame(width: w, height: 32)
+                    .scaleEffect(x: prog.moving && !reduce ? 1.06 : 1, y: prog.moving && !reduce ? 1.14 : 1)
+                    .offset(x: 2 + x)
+                    .animation(reduce ? nil : .easeOut(duration: 0.2), value: prog.moving)
                 HStack(spacing: 0) {
                     ForEach(Array(faces.enumerated()), id: \.offset) { i, t in
                         Button { tap(i) } label: {
                             HStack(spacing: 6) {
                                 Text(t).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
-                                    .foregroundStyle(S.ink).lineLimit(1)
+                                    .foregroundStyle(abs(Double(i) - prog.p) < 0.5 ? S.ink : S.muted).lineLimit(1)
                                 if dots[safe: i] == true { Circle().fill(S.orange).frame(width: 6, height: 6) }
                             }
                             .frame(width: ws[safe: i] ?? 0, height: 36)
@@ -418,7 +440,7 @@ private struct PFaceTabs: View {
                         .accessibilityLabel(t + (dots[safe: i] == true ? ", needs a rebalance" : ""))
                     }
                 }
-                .padding(.horizontal, 3)
+                .padding(.horizontal, 2)
             }
         }
         .frame(height: 36)

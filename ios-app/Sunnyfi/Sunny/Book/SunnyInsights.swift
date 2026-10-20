@@ -43,7 +43,7 @@ struct SunnyInsightsSheet: View {
                     .padding(.top, 10)
                 if let ins = insights, !ins.points.isEmpty {
                     Text("\(ins.points.count) things to know").sType(.sectionTitle, tabular: false)
-                        .padding(.top, 20).padding(.bottom, 16)
+                        .padding(.top, 20).padding(.bottom, 12)
                     ForEach(Array(ins.points.enumerated()), id: \.offset) { i, p in
                         point(i + 1, p)
                             .opacity(shown || reduce ? 1 : 0)
@@ -74,7 +74,7 @@ struct SunnyInsightsSheet: View {
             Text("\(n).").sType(SType(size: 17, weight: 600, line: 25, tracking: 0)).frame(width: 30, alignment: .leading)
             (lead + body).sType(f, tabular: false).fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.vertical, 16)
+        .padding(.top, 14).padding(.bottom, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
         .accessibilityElement(children: .combine)

@@ -29,33 +29,38 @@ struct SunnyDeltaGamma: View {
         let D0 = N.reduce(0) { $0 + $1.dg.d0Usd }, Dm = N.reduce(0) { $0 + $1.dg.at(m).n }
         let GB = N.reduce(0) { $0 + $1.dg.at(m).gb }, WP = N.reduce(0) { $0 + $1.dg.wk }
         let sds = N.compactMap(\.dg.sd), sdAvg = sds.isEmpty ? nil : sds.reduce(0, +) / Double(sds.count)
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 20) {
             Text("Delta and Gamma").sType(.sectionTitle, tabular: false)
-            HStack {
-                Text("If stocks jump")
-                Spacer(minLength: 0)
-                Text(sdAvg.map { String(format: "%.1f SD", m / $0) } ?? "")
-                    .contentTransition(.numericText(value: m))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("If stocks jump")
+                    Spacer(minLength: 0)
+                    Text(sdAvg.map { String(format: "%.1f SD", m / $0) } ?? "")
+                        .contentTransition(.numericText(value: m))
+                }
+                .sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
+                .foregroundStyle(S.muted)
+                .padding(.horizontal, 2)
+                JumpSlider(value: $r.jump, stops: true)
             }
-            .sType(SType(size: 17, weight: 500, line: 22, tracking: 0))
-            .foregroundStyle(S.muted)
-            JumpSlider(value: $r.jump, stops: true)
             HStack(alignment: .top, spacing: 16) {
                 hero(Dm < 0 ? "Short at +\(router.jump)%" : "Still long at +\(router.jump)%", PF.usd(Dm), Dm < 0 ? S.red : S.ink,
                      "down from \(PF.usd(D0))")
                 hero("The jump costs", PF.usd(GB), S.red, WP > 0 ? String(format: "%.1f weeks of premium", GB / WP) : "")
             }
+            .padding(.top, -4)
             Text("Right is less long, past the dashed line it's short. Higher costs more. Tap a name to open it in Positions.")
-                .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
+                .sType(SType(size: 13, weight: 400, line: 18, tracking: 0), tabular: false)
                 .foregroundStyle(S.muted)
+                .frame(minHeight: 36, alignment: .topLeading)
                 .fixedSize(horizontal: false, vertical: true)
             DGMap(names: N, m: m)
             HStack {
                 Text("← still long"); Spacer(); Text("short →")
             }
-            .sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false)
-            .foregroundStyle(S.muted)
-            .padding(.top, -6)
+            .sType(SType(size: 11, weight: 600, line: 14, tracking: 0), tabular: false)
+            .foregroundStyle(S.pNeutral)
+            .padding(.top, -10)
         }
         .foregroundStyle(S.ink)
         .padding(20)
@@ -69,7 +74,7 @@ struct SunnyDeltaGamma: View {
             Text(l).sType(SType(size: 15, weight: 600, line: 20, tracking: 0)).foregroundStyle(S.muted)
             Text(v).sType(SType(size: 28, weight: 800, line: 30, tracking: -0.02)).foregroundStyle(c)
                 .contentTransition(.numericText())
-            Text(sub).sType(SType(size: 13, weight: 500, line: 16, tracking: 0)).foregroundStyle(S.muted)
+            Text(sub).sType(SType(size: 13, weight: 400, line: 18, tracking: 0)).foregroundStyle(S.muted)
         }
         .lineLimit(1).minimumScaleFactor(0.8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -110,12 +115,12 @@ private struct DGMap: View {
                 label("Still long", x: (XS[0] + XS[1]) / 2, y: 14, c: S.muted)
                 label("Thin", x: (XS[1] + XS[2]) / 2, y: 14, c: S.muted)
                 label("Short", x: (XS[2] + XS[3]) / 2, y: 14, c: S.red)
-                Text("Act first").sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(S.red).fixedSize()
-                    .position(x: W - 40, y: 32)
-                Text("2 weeks").sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(S.muted).fixedSize()
-                    .position(x: W - 36, y: Yw(2) - 12)
-                Text("1 week").sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(S.muted).fixedSize()
-                    .position(x: W - 32, y: Yw(1) - 12)
+                Text("Act first").sType(SType(size: 11, weight: 600, line: 13, tracking: 0)).foregroundStyle(S.red).fixedSize()
+                    .position(x: W - 30, y: 30)
+                Text("2 weeks").sType(SType(size: 11, weight: 600, line: 13, tracking: 0)).foregroundStyle(S.muted).fixedSize()
+                    .position(x: W - 26, y: Yw(2) - 7)
+                Text("1 week").sType(SType(size: 11, weight: 600, line: 13, tracking: 0)).foregroundStyle(S.muted).fixedSize()
+                    .position(x: W - 23, y: Yw(1) - 7)
                 // Trails from today to the move.
                 ForEach(names, id: \.t) { n in
                     Path { p in
@@ -129,8 +134,8 @@ private struct DGMap: View {
                 }
                 Circle().fill(S.ink).overlay(Circle().strokeBorder(S.paper, lineWidth: 2)).frame(width: 14, height: 14)
                     .position(x: Xv(1), y: Yw(0))
-                Text("today").sType(SType(size: 13, weight: 600, line: 16, tracking: 0)).foregroundStyle(S.muted).fixedSize()
-                    .position(x: Xv(1) + 30, y: Yw(0) - 16)
+                Text("today").sType(SType(size: 11, weight: 600, line: 13, tracking: 0)).foregroundStyle(S.pNeutral).fixedSize()
+                    .position(x: Xv(1) + 22, y: Yw(0) - 14)
                 ForEach(pts, id: \.t) { b in bubble(b) }
             }
             .frame(width: W, height: H, alignment: .topLeading)
@@ -141,7 +146,7 @@ private struct DGMap: View {
     }
 
     private func label(_ s: String, x: CGFloat, y: CGFloat, c: Color) -> some View {
-        Text(s).sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(c).fixedSize()
+        Text(s).sType(SType(size: 11, weight: 600, line: 13, tracking: 0), tabular: false).foregroundStyle(c).fixedSize()
             .position(x: x, y: y)
     }
 
@@ -152,8 +157,8 @@ private struct DGMap: View {
         let mx = max(1, names.map { abs($0.dg.d0Usd) }.max() ?? 1)
         var P = names.map { n -> (t: String, x: CGFloat, y: CGFloat, sz: CGFloat, st: DGBook.State, wk: Double) in
             let a = n.dg.at(m), v = n.dg.d0Usd != 0 ? a.n / (n.dg.d0Usd * (1 + m / 100)) : 0
-            let sz = CGFloat(40 + 18 * (abs(n.dg.d0Usd) / mx).squareRoot())
-            return (n.t, Xv(v), min(H - sz / 2 - 30, Yw(n.dg.weeks(m))), sz, n.dg.state(m), n.dg.weeks(m))
+            let sz = CGFloat((24 + 16 * (abs(n.dg.d0Usd) / mx).squareRoot()).rounded())
+            return (n.t, Xv(v), min(H - sz / 2 - 46, Yw(n.dg.weeks(m))), sz, n.dg.state(m), n.dg.weeks(m))
         }
         for _ in 0..<12 {
             for p in P.indices {
@@ -180,14 +185,14 @@ private struct DGMap: View {
         let text: Color = b.st == .short ? .white : S.ink
         let held = b.t != "TSLA"
         return Button { if held { router.openCard(b.t, face: "dg") } } label: {
-            VStack(spacing: 4) {
-                Text(b.t).sType(SType(size: 13, weight: 700, line: 16, tracking: 0), tabular: false)
+            VStack(spacing: 3) {
+                Text(b.t).sType(SType(size: 11, weight: 700, line: 11, tracking: 0), tabular: false)
                     .foregroundStyle(text)
                     .frame(width: b.sz, height: b.sz)
                     .background(Circle().fill(fill))
                     .overlay(Circle().strokeBorder(S.line, lineWidth: b.st == .short ? 0 : 1))
                     .shadow(color: .black.opacity(0.12), radius: 3, y: 2)
-                Text(String(format: "%.1f wk", b.wk)).sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
+                Text(String(format: "%.1f wk", b.wk)).sType(SType(size: 11, weight: 600, line: 13, tracking: 0))
                     .foregroundStyle(b.st == .short ? S.red : S.muted)
                     .fixedSize()
             }

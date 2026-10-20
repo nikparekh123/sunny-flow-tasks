@@ -37,6 +37,10 @@ final class HomeRouter {
     var scrollTo: String?
     /// This week's rows highlighted from a card's rebalance row (1.8 s).
     var nxRing: String?
+    /// This week's side, "s" Short or "l" Long (handoff 29): opens on Short, holds while the app is open.
+    var weekSide = "s"
+    /// This week shows its five most urgent per side until Show more.
+    var weekMore = false
     /// The Insights sheet's name.
     var insights: String?
     /// This week: rows ticked today, id -> day, kept on the phone.
