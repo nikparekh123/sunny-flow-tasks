@@ -79,17 +79,41 @@ every put by 15 Oct and asked for a forward test (not a backtest: these names fe
 |---|---|
 | the long put | March 2027 (about 5 months), the strike nearest 8% above the price, on **half** the LEAPs; roll before expiry into the next ~5-month put |
 | the weekly put | **half the long puts**, the first strike at least 2% below the price, never above a long put's strike (always covered) |
-| the calls | unchanged: every LEAP, a third at the money, the rest at 0.6 SD |
-| extra upside | buy out-of-the-money calls: 12-month ~30% out (held) and 3-month ~15% out (each quarter), 10% of each name's LEAP value a year, split by payoff per $ (NKE leans 12-month, LULU 3-month). **One rule (16 Oct): calls are sold on every LEAP; delta is kept by these buys, never by selling fewer calls.** |
+| the calls | **from 2026-10-20: the call rule below** (every LEAP at the money) |
+| extra upside | **from 2026-10-20: the quarterly 1.5 SD calls below.** Before that: 12-month ~30% out and 3-month ~15% out, 10% of LEAP value a year (held ones stay on the books) |
 
 Across the ten names tested: about free in a flat year, +$219K in a 30% crash, -$151K in a
 sudden 30% jump. The account is on portfolio margin, so the puts cut the margin requirement
 by about a third. The book goes delta negative after big falls while the puts are working.
 
-### NKE weekly rule (trial), from 2026-10-17
+### The call rule, from 2026-10-20: at the money + quarterly 1.5 SD
 
-**NKE only for now.** The other names keep the rule above. Chosen by Nik after the
-17 Oct tests (`research/target-study/`). Each week the seven factors give simple reads,
+**Every name.** Replaces "a third at the money, the rest at 0.6 SD" and the NKE read
+rule's strike. Nik, 20 Oct 2026: "1.5 SD means selling ATM as we agreed and buying
+quarterly 1.5 SD calls, add based on delta and SD." Tested 19 Oct as "Q 1.5 SD"
+(`research/target-study/diagq_fwd.py`, `six_fwd.py`): the best all-rounder found, ahead of
+the 0.6 SD rule's forward average on all seven names.
+
+| | |
+|---|---|
+| the weekly calls | **every LEAP**, each Friday for the next Friday, at the money: the first strike at or above the price |
+| earnings week | a report after the Friday sale and before the expiry: every call at **1 SD**, no puts |
+| the quarterly calls | the next Jan/Apr/Jul/Oct expiry at least 3 weeks out, the first strike at or above the price + **1.5 SD to that expiry** (spot x IV x sqrt(time)) |
+| how many quarterly calls | enough that the plan **holds net delta at 0 or above if the stock is 1.5 weekly SD higher by the Thursday before the expiry**, and at 20% or above today (landing on 25%) |
+| the other fix | sell fewer weekly calls instead, sized the same way. The Planner offers both as a pick-one pair; buying is the default (about 3x cheaper as a standing rule, 20 Oct check) |
+| puts | unchanged (the overlay above; NKE's puts still from its reads) |
+
+Why 1.5 SD: in the Planner's own SD, 1.5 SD up covered 19 weeks in 20 for every held name
+but BABA over the last year (earnings weeks aside). A 1 SD check costs about the same:
+the weekly calls are all in the money by about 1 SD, so they cannot get any shorter after
+that. The Delta card shows the +1.5 SD figure; the Thesis receipt shows the rule.
+
+### NKE weekly rule (trial), from 2026-10-17 to 2026-10-20 (calls retired)
+
+**Its call strike, count (54 of 60) and skip are retired by the call rule above.** Its puts
+still run. Kept for the record.
+
+Chosen by Nik after the 17 Oct tests (`research/target-study/`). Each week the seven factors give simple reads,
 and the reads pick the strike.
 
 | | |

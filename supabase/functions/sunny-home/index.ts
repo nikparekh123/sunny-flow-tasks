@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-19.6';
+const BUILD = '2026-10-20.2';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -41,10 +41,17 @@ const PUT_SHARE = 0.3;
    long puts on half the LEAPs, weekly puts sold on half of those, at the first strike
    at least otmPct% below spot and never above a long put's strike, so each one stays
    covered. Held names only for now. */
-/* ONE RULE (Nik, 16 Oct 2026): the Planner sells calls on every LEAP, the full
-   quantity; delta is kept by BUYING the quarterly and yearly upside calls, never
-   by selling fewer. The 20% cushion trim (15 Oct) is gone. The Delta card's band
-   still runs 10 points higher the week a name reports. */
+/* ⚠ THE CALL RULE (Nik, 20 Oct 2026: "1.5 SD means selling ATM as we agreed and buying
+   quarterly 1.5 SD calls, add based on delta and SD"). Replaces 0.6 SD and NKE's read-rule
+   strike. Tested 19 Oct as "Q 1.5 SD" (research/target-study/diagq_fwd.py, six_fwd.py):
+   every LEAP sold each week at the money, the first strike at or above the price; the
+   week a report lands before the expiry, every call at 1 SD and no puts. Delta is kept by
+   calls on the next Jan/Apr/Jul/Oct expiry at Q_SD to that expiry, sized so the plan holds
+   net delta at or above 0 through a SAFE_SD weekly move by the Thursday before the expiry,
+   and at or above the 20% floor today. The other way he fixes it: sell fewer calls. The
+   Delta card's band still runs 10 points higher the week a name reports. */
+const SAFE_SD = 1.5;
+const Q_SD = 1.5;
 const DELTA_EARN_BUMP = 10;
 /* ⚠ THE READ RULE (NKE weekly rule, trial; Nik 17 Oct 2026; docs/STRATEGIES.md).
    NKE ONLY for now. The week's write comes from the daily reads
@@ -305,7 +312,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       + 'realized_cum,unrealized,time_value,capital_long,shares_value,groups'),
     get(`dividends?pay_date=gt.${BOOK_START}&pay_date=lte.${today}&select=ticker,ex_date,pay_date&order=pay_date.asc,ticker.asc`),
     /* The 3- and 12-month upside calls the Planner sizes (chain-next, 15 min). */
-    get('option_chain_upside?select=ticker,tenor,expiry,strike,mid,delta,spot&order=ticker.asc,tenor.asc,strike.asc'),
+    get('option_chain_upside?select=ticker,tenor,expiry,strike,mid,delta,iv,spot&order=ticker.asc,tenor.asc,strike.asc'),
   ]);
 
   step('reads');
@@ -1278,6 +1285,15 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const move21 = mo.length > back && spot > 0 ? (spot / mo[back].c - 1) * 100 : null;
     const earnRow = upcomingEarn.get(t);
     const earnIn = !!earnRow && String(earnRow.report_date) >= today && String(earnRow.report_date) <= targetExp;
+    /* An earnings week for next week's sale: the report lands after the calls are sold (this
+       Friday's close; an after-the-close report that day counts) and before they expire (an
+       after-the-close report on the expiry day lands after it). NFLX reporting on a Monday is
+       not next week's earnings week (20 Oct 2026). */
+    const saleDay = lastTradingOnOrBefore(addDays(nextFri, -7));
+    const earnWk = !!earnRow && (() => {
+      const d = String(earnRow.report_date), amc = earnRow.report_time === 'amc';
+      return (d > saleDay || (d === saleDay && amc)) && (d < targetExp || (d === targetExp && !amc));
+    })();
     const rule = WRITE_RULES[t];
     const coverKs = ls.filter((l) => l.side === 'bought' && l.type === 'put' && l.expiry >= targetExp).map((l) => l.strike);
     const coverK = coverKs.length ? Math.min(...coverKs) : null;
@@ -1296,8 +1312,6 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         : puts.filter((p) => p.mid > 0 && p.k <= x && p.k <= coverK).sort((a, b) => b.k - a.k)[0] ?? null;
       const full = Math.floor(leapN * READ_RULES[t].cover + 0.5);
       const halfPuts = Math.floor(putsN * 0.5 + 0.5);
-      /* An after-the-close report on the expiry day lands after it. */
-      const earnWk = earnIn && !(String(earnRow!.report_date) === targetExp && earnRow!.report_time === 'amc');
       const exd = inp.ex_div ? String(inp.ex_div) : null, exIn = !!exd && exd > today && exd <= targetExp;
       const none = { atm: null, out: null, put: null, pz: null };
       if (R.iv?.read === 'skip') {
@@ -1337,14 +1351,18 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
                  atm, out, put: stretchedDn ? null : pAt(spot - pz * sd), outNote, steps };
       }
     }
-    const share = pick ? pick.share : rule ? 0 : earnIn ? 0.2 : 1 / 3, out = pick ? (pick.z ?? 0.6) : move21 != null && move21 >= 15 ? 1.0 : 0.6;
-    const callTarget = pick ? pick.calls : coverOf(t, leapN);
-    const atmN = pick ? Math.round(pick.calls * pick.share) : Math.floor(leapN * share + 0.5);
+    /* ── THE CALL RULE (CALL RULE above, 20 Oct 2026): every LEAP at the money, the first
+       strike at or above the price; the week a report lands before the expiry (an
+       after-the-close report on the expiry day lands after it), every call at 1 SD.
+       NKE's read rule now sets its puts only. A research name keeps its own strike. */
+    const share = 1, out = earnWk ? 1 : 0;
+    const callTarget = coverOf(t, leapN);
+    const atmN = callTarget;
     /* A research name: one strike, the first at least otmPct% above spot. */
     const ruleK = rule ? calls.filter((x) => x.k >= spot * (1 + rule.otmPct / 100) && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null : null;
-    const atm = pick ? pick.atm : rule ? ruleK : calls.filter((x) => x.k >= spot && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
-    let otm = pick ? pick.out : sd ? nearestK(calls.filter((x) => x.k > spot && x.mid > 0), spot + out * sd) : null;
-    if (atm && otm && otm.k <= atm.k) otm = calls.filter((x) => x.k > atm.k && x.mid > 0).sort((a, b) => a.k - b.k)[0] ?? null;
+    const liveC = calls.filter((x) => x.mid > 0).sort((a, b) => a.k - b.k);
+    const atm = rule ? ruleK : earnWk ? (sd ? liveC.find((x) => x.k >= spot + sd) ?? null : null) : liveC.find((x) => x.k >= spot) ?? null;
+    const otm = null as CS | null;
     const sd1 = sd ? nearestK(calls.filter((x) => x.k > spot), spot + sd) : null;
     /* Overlay names: the highest strike at least otmPct% below spot, capped at the lowest
        long put still open on that Friday; no covering long put, no suggestion. */
@@ -1364,35 +1382,43 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const leftAtm = rule ? left : Math.min(left, Math.max(0, atmN - doneAtm)), leftOtm = left - leftAtm;
     /* Puts: about 30% of the puts bought, rounded half up (NKE 20 -> 6); overlay
        names half (NKE 30 -> 15, BABA 7 -> 4). */
-    const putTarget = pick ? pick.puts : Math.floor(putsN * (pRule?.share ?? PUT_SHARE) + 0.5);
+    const putTarget = earnWk ? 0 : pick ? pick.puts : Math.floor(putsN * (pRule?.share ?? PUT_SHARE) + 0.5);
     const leftPuts = Math.max(0, putTarget - donePuts);
     const plan = [
-      atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta,
-        note: rule ? `${rule.otmPct}% out of the money` : 'at the money' } : null,
-      otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta,
-        note: pick ? pick.outNote : out === 1 ? 'at 1 SD' : 'at 0.6 SD' } : null,
-      put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta,
+      atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta, iv: atm.iv,
+        note: rule ? `${rule.otmPct}% out of the money` : earnWk ? 'at 1 SD, earnings week' : 'at the money' } : null,
+      otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta, iv: otm.iv,
+        note: 'out of the money' } : null,
+      put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta, iv: put.iv,
         note: pick ? `at ${pick.pz} SD` : pRule ? `${pRule.otmPct}% out of the money` : 'at the money' } : null,
-    ].filter(Boolean) as { type: string; n: number; strike: number; mid: number; delta: number | null; note: string }[];
+    ].filter(Boolean) as { type: string; n: number; strike: number; mid: number; delta: number | null; iv: number | null; note: string }[];
     /* Only what is still open on that Friday: this week's calls expire first,
        and counting them made a plan look delta negative (Nik, 15 Oct 2026). */
     const deltaNow = ls.filter((l) => l.expiry >= targetExp)
       .reduce((s, l) => s + (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100, 0);
     const deltaAfter = deltaNow - plan.reduce((s, p) => s + (p.delta ?? 0) * p.n * 100, 0);
     const putK = put?.k ?? sold.find((x) => x.type === 'put')?.strike ?? null;
-    /* ── THE PACKAGE (handoff 25, blocks 14b and 16): one model for the
-       Planner and the Delta tile. Delta in share-equivalents, contracts × 100
-       × delta: long adds, short takes away, and a put's delta is negative, so
-       hedge puts take away and short puts add. NOW is the Delta tile's number
-       to the share (legs past today, the next-week basis; Nik, 16 Oct 2026).
-       AFTER is everything still on at the target Friday plus the suggestions
-       left on; the app redoes it as chips switch off. Sells are OUR rule
-       above (Nik: "keep ours"); the buys and the fix are the design's: a
-       12-month call ~30% out held the year and a 3-month ~15% out rolled at
-       expiry, 10% of LEAP value a year split by delta per dollar (the 3-month
-       premium counted four times), each at least 1. Still under 20% (30% in
-       the earnings week) with every suggestion on: N more 3-month or M
-       12-month calls to land on 25% (35%). */
+    /* ── THE SAFETY CHECK (Nik, 20 Oct 2026): everything still on at the plan's Friday plus the
+       plan, repriced at the price SAFE_SD weekly SD higher on the Thursday before the expiry
+       (the last full day: calls sold in the money are near 1 delta by then). Black-Scholes at
+       each leg's own IV (the chain's for the plan). `d15` is its share delta there. */
+    const evalDay = prevTrading(targetExp);
+    const S15 = sd && spot > 0 ? spot + SAFE_SD * sd : null;
+    const yrsTo = (exp: string) => Math.max(1 / 365, (Date.parse(exp) - Date.parse(evalDay)) / 864e5 / 365);
+    const dAt = (S: number, K: number, exp: string, iv: number | null, call: boolean) => {
+      const v = iv && iv > 0 ? iv : (ivRow?.iv ?? 0.4), dc = bsCall(S, K, yrsTo(exp), v).delta;
+      return call ? dc : dc - 1;
+    };
+    /* ── THE PACKAGE (handoff 25, blocks 14b and 16; the buys replaced 20 Oct 2026): one model
+       for the Planner and the Delta tile. Delta in share-equivalents, contracts × 100 × delta:
+       long adds, short takes away, and a put's delta is negative, so hedge puts take away and
+       short puts add. NOW is the Delta tile's number to the share (legs past today, the
+       next-week basis; Nik, 16 Oct 2026). AFTER is everything still on at the target Friday
+       plus the suggestions left on; the app redoes it as chips switch off. The sells are the
+       CALL RULE. The fix is a pick-one pair whenever the plan falls short at +SAFE_SD SD or
+       under the 20% floor (30% the week it reports): N quarterly calls at Q_SD to their
+       expiry (default) or M fewer calls sold, each sized to hold delta at or above 0 at
+       +SAFE_SD SD and to land on 25% (35%) today. */
     const pkg = (() => {
       const base = leapN * 100;
       if (!base) return null;
@@ -1400,45 +1426,66 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const nowD = tk ? tk.longD - tk.scD + tk.spD - tk.hedgeD : 0;
       const e = earn.some((x) => String(x.ticker).toUpperCase() === t
         && String(x.report_date) >= today && String(x.report_date) <= addDays(today, 7)) ? DELTA_EARN_BUMP : 0;
-      const dOf = (l: Leg) => (l.side === 'bought' ? 1 : -1) * (l.delta ?? 0) * l.n * 100;
+      const sgn = (l: Leg) => (l.side === 'bought' ? 1 : -1);
+      const dOf = (l: Leg) => sgn(l) * (l.delta ?? 0) * l.n * 100;
       const tenorOf = (l: Leg) => ((Date.parse(l.expiry) - Date.parse(l.opened)) / (30.44 * 864e5) > 6 ? '12m' : '3m');
       const held = ls.filter((l) => l.expiry > today).map((l) => {
-        const up = upside.has(l);
+        const up = upside.has(l), stays = l.expiry >= targetExp;
         const ty = l.type === 'call' ? (l.side === 'sold' ? 'sc' : up ? 'oc' : 'lc') : (l.side === 'sold' ? 'sp' : 'lp');
-        return { ty, n: l.n, k: l.strike, exp: l.expiry, d: Math.round(dOf(l)), stays: l.expiry >= targetExp,
+        return { ty, n: l.n, k: l.strike, exp: l.expiry, d: Math.round(dOf(l)), stays,
+                 d15: stays && S15 ? Math.round(sgn(l) * dAt(S15, l.strike, l.expiry, l.iv, l.type === 'call') * l.n * 100) : 0,
                  ...(up ? { tenor: tenorOf(l), roll: l.expiry } : {}) };
       });
-      const heldTenor = new Set(held.filter((h) => h.ty === 'oc').map((h) => (h as { tenor?: string }).tenor));
       const sug: Row[] = plan.map((p, i) => ({ id: `s${i}`, ty: p.type === 'call' ? 'sc' : 'sp', act: 'Sell',
-        n: p.n, k: p.strike, exp: targetExp, mid: r2(p.mid), d: Math.round(-(p.delta ?? 0) * p.n * 100) }));
-      /* The upside quotes: the listed strike nearest 15% / 30% over today's price. */
-      const q = (tenor: string, out: number) => {
-        const xs = upQuotes.filter((r) => r.ticker === t && r.tenor === tenor && Number(r.mid) > 0 && r.delta != null);
+        n: p.n, k: p.strike, exp: targetExp, mid: r2(p.mid), d: Math.round(-(p.delta ?? 0) * p.n * 100),
+        d15: S15 ? Math.round(-dAt(S15, p.strike, targetExp, p.iv, p.type === 'call') * p.n * 100) : 0 }));
+      /* The quarterly: chain-next's 'q' chain, or its 3-month one when that is a quarterly month.
+         The strike: the first listed at or above the price plus Q_SD SD to its expiry, at the
+         IV of the strike nearest the price. */
+      const qq = (() => {
+        const ok = (r: Row) => r.ticker === t && Number(r.mid) > 0 && r.delta != null;
+        let xs = upQuotes.filter((r) => ok(r) && r.tenor === 'q');
+        if (!xs.length) xs = upQuotes.filter((r) => ok(r) && r.tenor === '3m' && [1, 4, 7, 10].includes(Number(String(r.expiry).slice(5, 7))));
         if (!xs.length || !(spot > 0)) return null;
-        const r = xs.reduce((a, b) => (Math.abs(Number(b.strike) - spot * out) < Math.abs(Number(a.strike) - spot * out) ? b : a));
-        return { k: Number(r.strike), exp: String(r.expiry), mid: Number(r.mid), dl: Number(r.delta) };
-      };
-      const q12 = q('12m', 1.3), q3 = q('3m', 1.15);
+        xs = [...xs].sort((a, b) => Number(a.strike) - Number(b.strike));
+        const exp = String(xs[0].expiry);
+        const Tq = Math.max(1 / 365, (Date.parse(exp) - Date.parse(today)) / 864e5 / 365);
+        const ivA = num(xs.reduce((a, b) => (Math.abs(Number(b.strike) - spot) < Math.abs(Number(a.strike) - spot) ? b : a)).iv) ?? ivRow?.iv ?? null;
+        if (!ivA) return null;
+        const target = spot * (1 + Q_SD * ivA * Math.sqrt(Tq));
+        const r = xs.find((x) => Number(x.strike) >= target) ?? xs.at(-1)!;
+        return { k: Number(r.strike), exp, mid: Number(r.mid), dl: Number(r.delta), iv: num(r.iv) ?? ivA, target: r2(target) };
+      })();
       const leapValue = ls.filter(isLeap).reduce((s2, l) => s2 + (l.mark ?? 0) * l.n * 100, 0);
-      const budget = 0.1 * leapValue;
-      const e12 = q12 ? q12.dl / q12.mid : 0, e3 = q3 ? q3.dl / (4 * q3.mid) : 0;
-      const w = e12 + e3 > 0 ? e12 / (e12 + e3) : 0;
-      const n12 = q12 ? Math.max(1, Math.round(budget * w / (100 * q12.mid))) : 0;
-      const n3 = q3 ? Math.max(1, Math.round(budget * (1 - w) / 4 / (100 * q3.mid))) : 0;
-      const buy = (id: string, tenor: string, x: { k: number; exp: string; mid: number; dl: number }, n: number) =>
-        ({ id, ty: 'oc', act: 'Buy', tenor, n, k: x.k, exp: x.exp, mid: r2(x.mid), d: Math.round(x.dl * n * 100) });
-      if (q12 && !heldTenor.has('12m')) sug.push(buy('b12', '12m', q12, n12));
-      if (q3 && !heldTenor.has('3m')) sug.push(buy('b3', '3m', q3, n3));
       const after0 = held.filter((h) => h.stays).reduce((s2, h) => s2 + h.d, 0) + sug.reduce((s2, x) => s2 + Number(x.d), 0);
       const after0P = after0 / base * 100;
-      const gap = (25 + e - after0P) / 100 * base;
-      const fix = after0P < 20 + e ? [
-        q3 ? buy('f3', '3m', q3, Math.ceil(gap / (100 * q3.dl))) : null,
-        q12 ? buy('f12', '12m', q12, Math.ceil(gap / (100 * q12.dl))) : null,
-      ].filter(Boolean) : [];
+      const d15 = S15 == null ? null
+        : held.filter((h) => h.stays).reduce((s2, h) => s2 + h.d15, 0) + sug.reduce((s2, x) => s2 + Number(x.d15), 0);
+      const gap = Math.max(0, (25 + e - after0P) / 100 * base), thin = after0P < 20 + e;
+      const short15 = d15 != null && d15 < 0;
+      const fix: Row[] = [];
+      const atmSug = sug.find((x) => x.ty === 'sc');
+      if (thin || short15) {
+        if (qq) {
+          const dq15 = S15 ? dAt(S15, qq.k, qq.exp, qq.iv, true) : 0;
+          const n = Math.max(short15 && dq15 > 0 ? Math.ceil(-d15! / (100 * dq15)) : 0, thin && qq.dl > 0 ? Math.ceil(gap / (100 * qq.dl)) : 0);
+          if (n > 0) fix.push({ id: 'fq', ty: 'oc', act: 'Buy', tenor: 'q', n, k: qq.k, exp: qq.exp, mid: r2(qq.mid),
+            d: Math.round(qq.dl * n * 100), d15: Math.round(dq15 * n * 100) });
+        }
+        if (atmSug) {
+          const ivA = plan.find((p) => p.type === 'call' && p.strike === atmSug.k)?.iv ?? null;
+          const da15 = S15 ? dAt(S15, atmSug.k, targetExp, ivA, true) : 0, daNow = Math.abs(Number(atmSug.d)) / (atmSug.n * 100);
+          const m = Math.min(atmSug.n, Math.max(short15 && da15 > 0 ? Math.ceil(-d15! / (100 * da15)) : 0,
+            thin && daNow > 0 ? Math.ceil(gap / (100 * daNow)) : 0));
+          if (m > 0) fix.push({ id: 'ff', ty: 'sc', act: 'Sell fewer', n: m, k: atmSug.k, exp: targetExp, mid: atmSug.mid,
+            d: Math.round(daNow * m * 100), d15: Math.round(da15 * m * 100) });
+        }
+      }
       return { base, e, now: Math.round(nowD), now_pct: r2(nowD / base * 100), held, sug, fix,
-               after0: Math.round(after0), after0_pct: r2(after0P),
-               leap_value: Math.round(leapValue), budget: Math.round(budget), w: r2(w),
+               after0: Math.round(after0), after0_pct: r2(after0P), leap_value: Math.round(leapValue),
+               safe: S15 == null || d15 == null ? null
+                 : { sd: SAFE_SD, px: r2(S15), by: evalDay, d15: Math.round(d15), pct: r2(d15 / base * 100) },
+               q: qq ? { k: qq.k, exp: qq.exp, mid: r2(qq.mid), sd: Q_SD, target: qq.target } : null,
                iv: ivRow?.iv ?? null };
     })();
     writes.push({
@@ -1449,27 +1496,32 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       leaps: leapN,
       next_earnings: earnRow ? { date: earnRow.report_date, time: earnRow.report_time ?? null } : null,
       move_21d_pct: move21 == null ? null : r2(move21),
-      split: { atm_share: r2(share), out_sd: out, why: pick ? 'reads' : rule ? 'research' : earnIn ? 'earnings' : out === 1 ? 'up a lot' : 'flat' },
-      /* The read rule's pick and the reads behind it (READ_RULES; null for other names). */
-      read_rule: !READ_RULES[t] ? null : !pick
-        ? { name: 'NKE weekly rule (trial)', error: rr ? 'no chain IV for this Friday' : `no reads in the last ${READS_STALE_DAYS} days: the roll-sheet rule is used` }
-        : { name: 'NKE weekly rule (trial)', pick: pick.label, why: pick.why, calls: pick.calls, of: leapN, puts: pick.puts,
-            /* Our thesis (14c): baseline 0.6 SD, the steps, the pick and the one strike every card uses. */
-            baseline: 0.6, steps: pick.steps, pick_sd: pick.z, atm_share: pick.share, spot: r2(spot), sd: sd == null ? null : r2(sd),
-            strike: pick.out?.k ?? null, strike_pct: pick.out ? r2((pick.out.k / spot - 1) * 100) : null,
-            reads_day: rr!.day, reads: Object.fromEntries(['fundamentals', 'technicals', 'iv', 'history', 'momentum', 'events', 'breakout', 'thesis', 'inputs']
-              .map((k) => [k, (rr!.reads as Row)[k] ?? null])) },
-      /* The Thesis page (handoff 27, 14c; Nik 19 Oct 2026: "thesis for each page, the 0.6 planner for now"): NKE's read
-         rule stays in read_rule; every other name (and NKE when its reads are missing) gets the Planner's own rule here,
-         0.6 SD (1 SD after a 15% month), with its reads and facts and the Planner's out-of-the-money strike. */
+      split: { atm_share: r2(share), out_sd: out, why: rule ? 'research' : earnWk ? 'earnings' : 'atm' },
+      /* Retired 20 Oct 2026 (the CALL RULE): NKE's reads no longer pick its call strike. */
+      read_rule: null,
+      /* The Thesis page (14c), every name: the CALL RULE in receipt lines, with the name's reads
+         and facts. Nothing in the reads moves the strike now; an earnings week does (1 SD). */
       thesis: (() => {
-        if (READ_RULES[t] && pick) return null;
         const r0 = readsOf.get(t);
-        if (!r0 || !sd || !(spot > 0) || !otm) return null;
+        if (!r0 || !sd || !(spot > 0) || !atm) return null;
         const R0 = r0.reads as Row;
-        return { name: '0.6 SD planner', pick: `${out} SD`, calls: callTarget, of: leapN, atm_share: callTarget ? r2(atmN / callTarget) : 0,
-          baseline: 0.6, steps: out === 1 ? [{ read: 'history', label: `History · up ${Math.round(move21 ?? 0)}% in a month`, step: '1 SD' }] : [],
-          pick_sd: out, spot: r2(spot), sd: r2(sd), strike: otm.k, strike_pct: r2((otm.k / spot - 1) * 100), reads_day: r0.day,
+        const md = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+        const wd = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { weekday: 'short', timeZone: 'UTC' });
+        const usd = (v: number) => '$' + (Math.abs(v - Math.round(v)) < 0.005 ? String(Math.round(v)) : v.toFixed(2));
+        const sf = pkg?.safe, fq = pkg?.fix.find((x) => x.id === 'fq');
+        const lines = [
+          { label: earnWk ? 'Weekly calls · earnings week' : 'Weekly calls', value: earnWk ? '1 SD' : 'At the money' },
+          ...(pkg?.q ? [{ label: `Quarterly calls · ${Q_SD} SD to ${md(pkg.q.exp)}`, value: usd(pkg.q.k) }] : []),
+          ...(sf ? [{ label: `Delta at +${SAFE_SD} SD · ${usd(sf.px)} by ${wd(sf.by)}`, value: `${Math.abs(Math.round(sf.pct))}%`,
+                      tone: sf.pct < 0 ? 'red' : 'ink' }] : []),
+          ...(sf && fq ? [{ label: `With ${fq.n} quarterly call${fq.n === 1 ? '' : 's'}`,
+                            value: `${Math.abs(Math.round((sf.d15 + Number(fq.d15)) / pkg!.base * 100))}%`,
+                            tone: sf.d15 + Number(fq.d15) < 0 ? 'red' : 'ink' }] : []),
+        ];
+        return { name: 'At the money + quarterly 1.5 SD', pick: earnWk ? '1 SD' : 'At the money', calls: callTarget, of: leapN,
+          atm_share: 1, baseline: null, pick_sd: earnWk ? 1 : 0, spot: r2(spot), sd: r2(sd),
+          steps: earnWk ? [{ read: 'events', label: `Events · earnings ${earnRow!.report_date} before expiry`, step: '1 SD' }] : [],
+          strike: atm.k, strike_pct: r2((atm.k / spot - 1) * 100), reads_day: r0.day, lines,
           reads: Object.fromEntries(['fundamentals', 'technicals', 'iv', 'history', 'momentum', 'events', 'breakout', 'thesis', 'inputs']
             .map((k) => [k, R0[k] ?? null])) };
       })(),

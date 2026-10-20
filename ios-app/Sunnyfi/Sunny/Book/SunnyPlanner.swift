@@ -265,7 +265,7 @@ struct SunnyPlanner: View {
         let afterP = p.pct(p.after(live))
         positionCard(p, live: live, afterP: afterP, W: W).modifier(Rise(on: shown[0], up: risen[0]))
         suggestionsCard(p, off: off, pick: pick, live: live).modifier(Rise(on: shown[1], up: risen[1]))
-        deltaCard(p, afterP: afterP, W: W).modifier(Rise(on: shown[2], up: risen[2]))
+        deltaCard(p, afterP: afterP, safeP: p.safe == nil ? nil : p.safePct(live), W: W).modifier(Rise(on: shown[2], up: risen[2]))
     }
 
     // MARK: Position card (glass)
@@ -679,7 +679,9 @@ struct SunnyPlanner: View {
     private func suggestionsCard(_ p: PlanPkg, off: Set<String>, pick: String?, live: [PlanPkg.Leg]) -> some View {
         let credit = live.filter(\.short).reduce(0) { $0 + Double($1.n) * 100 * ($1.mid ?? 0) }
         let cost = live.filter { !$0.short }.reduce(0) { $0 + Double($1.n) * 100 * ($1.mid ?? 0) }
-        let f = pick ?? "f3"
+        let f = pick ?? "fq"
+        /* The +1.5 SD check with the plan as it stands, before the fix (20 Oct 2026). */
+        let short15 = p.safe.map { _ in p.safePct(p.live(off: off, pick: "none")) }.flatMap { $0 < 0 ? $0 : nil }
         let cols = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
         return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
@@ -703,8 +705,11 @@ struct SunnyPlanner: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(alignment: .top, spacing: 10) {
                         Circle().fill(S.breatheOrange).frame(width: 6, height: 6).padding(.top, 6)
-                        (Text("To stay on target. ").font(SType(size: 13, weight: 600, line: 18, tracking: 0).font()).foregroundStyle(S.ink)
-                         + Text("Still under \(Int(20 + p.e))% with the plan on. Pick one to land on \(Int(25 + p.e))%."))
+                        (short15 != nil && p.safe != nil
+                         ? Text("To stay safe. ").font(SType(size: 13, weight: 600, line: 18, tracking: 0).font()).foregroundStyle(S.ink)
+                            + Text("At +\(F.trim(p.safe!.sd)) SD, \(PP.money(p.safe!.px)) by \(PP.weekday(p.safe!.by)), delta would be \(Int(abs(short15!).rounded()))% net short. Pick one to hold it at zero or above.")
+                         : Text("To stay on target. ").font(SType(size: 13, weight: 600, line: 18, tracking: 0).font()).foregroundStyle(S.ink)
+                            + Text("Still under \(Int(20 + p.e))% with the plan on. Pick one to land on \(Int(25 + p.e))%."))
                             .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
                             .foregroundStyle(S.muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -764,7 +769,7 @@ struct SunnyPlanner: View {
                     Text("\(l.n) × \(PP.k(l.k)) \(l.call ? "C" : "P")").sType(SType(size: 15, weight: 600, line: 20, tracking: 0))
                     Text("\(PP.dist(l.k, p.px)) · \(PP.date(l.exp, today: home.today))")
                         .sType(SType(size: 12, weight: 600, line: 16, tracking: 0))
-                    (Text("\(PP.usd(money)) \(l.short ? "in" : "out") · ")
+                    (Text("\(PP.usd(money)) \(l.fewer ? "less in" : l.short ? "in" : "out") · ")
                      + Text("\(PP.d(l.d)) Δ").foregroundStyle(l.d < 0 ? S.red : S.muted))
                         .sType(SType(size: 12, weight: 500, line: 16, tracking: 0))
                         .foregroundStyle(S.muted)
@@ -785,7 +790,7 @@ struct SunnyPlanner: View {
 
     // MARK: Delta · now against after the plan
 
-    private func deltaCard(_ p: PlanPkg, afterP: Double, W: CGFloat) -> some View {
+    private func deltaCard(_ p: PlanPkg, afterP: Double, safeP: Double?, W: CGFloat) -> some View {
         let nowP = p.nowPct, e = p.e
         let bN = p.band(nowP), bA = p.band(afterP)
         let MW = W, m0 = -10.0, m1 = 50 + e
@@ -848,10 +853,22 @@ struct SunnyPlanner: View {
             }
             .frame(width: MW, height: 36, alignment: .topLeading)
             .animation(reduce ? nil : S.standard(0.4), value: afterP)
-            Text("Net delta as a share of \(Int(p.base).formatted()) LEAP shares · " + (earn ?? "on target is 20-30%"))
-                .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false)
-                .foregroundStyle(S.muted)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Net delta as a share of \(Int(p.base).formatted()) LEAP shares · " + (earn ?? "on target is 20-30%"))
+                    .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false)
+                    .fixedSize(horizontal: false, vertical: true)
+                /* The +1.5 SD check (Nik, 20 Oct 2026): safe while it stays at zero or above. */
+                if let s = p.safe, let v = safeP {
+                    (Text("At +\(F.trim(s.sd)) SD, \(PP.money(s.px)) by \(PP.weekday(s.by)): ")
+                     + Text(v < 0 ? "\(Int(abs(v).rounded()))% net short" : "\(Int(v.rounded()))%")
+                        .font(SType(size: 12, weight: 700, line: 16, tracking: 0).font(tabular: true))
+                        .foregroundStyle(v < 0 ? S.red : S.ink))
+                        .sType(SType(size: 12, weight: 500, line: 16, tracking: 0), tabular: false)
+                        .contentTransition(.numericText(value: v))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .foregroundStyle(S.muted)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)

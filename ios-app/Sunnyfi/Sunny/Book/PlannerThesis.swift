@@ -43,13 +43,18 @@ struct Thesis {
     init(_ r: ReadRule, _ p: PlanPkg, afterP: Double, strategy: String?) {
         let spot = r.spot, px = Self.usd(spot)
 
-        // The receipt: baseline, steps, pick; then the strike.
-        var ls = [Line(label: "Baseline", value: "\(F.trim(r.baseline ?? 0.6)) SD", bold: false)]
-        ls += r.steps.map { let (v, c) = Self.step($0.step); return Line(label: $0.label, value: v, bold: false, color: c) }
-        ls.append(Line(label: "Pick", value: r.pick ?? r.pickSd.map { "\(F.trim($0)) SD" } ?? "", bold: true))
-        lines = ls
+        // The receipt: the server's lines when it writes them (the CALL RULE, 20 Oct 2026: weekly
+        // calls at the money, the quarterly 1.5 SD call, delta at +1.5 SD); else baseline, steps, pick.
+        if let rl = r.lines {
+            lines = rl.map { Line(label: $0.label, value: $0.value, bold: false, color: $0.tone == "red" ? S.red : S.ink) }
+        } else {
+            var ls = [Line(label: "Baseline", value: "\(F.trim(r.baseline ?? 0.6)) SD", bold: false)]
+            ls += r.steps.map { let (v, c) = Self.step($0.step); return Line(label: $0.label, value: v, bold: false, color: c) }
+            ls.append(Line(label: "Pick", value: r.pick ?? r.pickSd.map { "\(F.trim($0)) SD" } ?? "", bold: true))
+            lines = ls
+        }
         strike = r.strike.map(Self.usd) ?? "None"
-        let out = Int((Double(r.calls) * (1 - (r.atmShare ?? 0))).rounded())
+        let out = r.lines != nil ? r.calls : Int((Double(r.calls) * (1 - (r.atmShare ?? 0))).rounded())
         detail = r.strike.map { k in
             "\(String(format: "%.1f", abs((k / spot - 1) * 100)))% \(k >= spot ? "above" : "below") \(px) · \(out) of \(r.of) calls"
         } ?? "No calls this week"
@@ -195,7 +200,7 @@ struct PlannerThesisView: View {
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("No thesis for \(ticker) yet").sType(SType(size: 17, weight: 600, line: 22, tracking: 0), tabular: false)
-                    Text("The call strike stays on the 0.6 SD baseline until a read moves it.")
+                    Text("The weekly calls sell at the money. The reads for this page are not in yet.")
                         .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
                         .foregroundStyle(S.muted)
                         .fixedSize(horizontal: false, vertical: true)

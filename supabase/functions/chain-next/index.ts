@@ -41,7 +41,7 @@ const json = (status: number, body: unknown) =>
     status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
-const BUILD = '2026-10-16.1';
+const BUILD = '2026-10-20.2';
 
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
@@ -393,12 +393,17 @@ Deno.serve(async (req) => {
         if (!items) { notes.push(`${ticker} ${expiry}: no chain`); continue; }
         const spot = items.find((c) => c.underlying_asset?.price)?.underlying_asset?.price ?? null;
         if (!spot) { notes.push(`${ticker} ${expiry}: no spot`); continue; }
+        /* An earnings week sells its calls at 1 SD (sunny-home's CALL RULE, 20 Oct 2026), and a
+           rich week's 1 SD can sit past 12%: keep 1.6 SD to the expiry too, from the IV nearest spot. */
+        const ivNear = items.filter((c) => c.implied_volatility && typeof c.details?.strike_price === 'number')
+          .sort((a, b) => Math.abs(a.details!.strike_price! - spot) - Math.abs(b.details!.strike_price! - spot))[0]?.implied_volatility ?? 0;
+        const band = Math.max(spot * BAND_PCT / 100, 1.6 * spot * ivNear * Math.sqrt(Math.max(1, yearsTo(expiry) * 365) / 365));
         let kept = 0;
         for (const c of items) {
           const strike = c.details?.strike_price;
           const side = c.details?.contract_type;
           if (typeof strike !== 'number' || (side !== 'call' && side !== 'put')) continue;
-          if (Math.abs(strike - spot) > spot * BAND_PCT / 100) continue;
+          if (Math.abs(strike - spot) > band) continue;
           const mid = midOf(c, spot);
           if (mid == null) continue;
           kept++;
@@ -433,11 +438,16 @@ Deno.serve(async (req) => {
         const list = r && r.ok ? (((await r.json())?.response ?? []) as Record<string, unknown>[]) : [];
         const exps = list.map((x) => String(x.expiration ?? x.date ?? '')).filter(Boolean)
           .map((e) => (e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`)).filter(monthly);
-        for (const [tenor, days, lo, hi] of [['3m', 91, 1.05, 1.35], ['12m', 365, 1.1, 1.5]] as const) {
-          const exp = exps.filter((e) => Math.abs(dayN(e) - days) <= (tenor === '3m' ? 35 : 75))
+        /* The quarterly (Nik, 20 Oct 2026): the next Jan/Apr/Jul/Oct monthly at least 21 days out,
+           1x to 1.8x the price, so the Planner can find the strike 1.5 SD to its expiry. */
+        const quarterly = exps.filter((e) => [1, 4, 7, 10].includes(Number(e.slice(5, 7))) && dayN(e) >= 21).sort()[0];
+        const got = new Map<string, Snap[]>();
+        for (const [tenor, days, lo, hi] of [['3m', 91, 1.05, 1.35], ['12m', 365, 1.1, 1.5], ['q', 0, 1.0, 1.8]] as const) {
+          const exp = tenor === 'q' ? quarterly : exps.filter((e) => Math.abs(dayN(e) - days) <= (tenor === '3m' ? 35 : 75))
             .sort((a, b) => Math.abs(dayN(a) - days) - Math.abs(dayN(b) - days))[0];
-          if (!exp) { notes.push(`${ticker} ${tenor}: no monthly near ${days} days`); continue; }
-          const items = await thetaChain(ticker, exp, false).catch(() => [] as Snap[]);
+          if (!exp) { notes.push(`${ticker} ${tenor}: no ${tenor === 'q' ? 'quarterly' : `monthly near ${days} days`}`); continue; }
+          if (!got.has(exp)) got.set(exp, await thetaChain(ticker, exp, false).catch(() => [] as Snap[]));
+          const items = got.get(exp)!;
           const spot = items.find((c) => c.underlying_asset?.price)?.underlying_asset?.price ?? null;
           if (!spot) { notes.push(`${ticker} ${tenor} ${exp}: no spot`); continue; }
           let kept = 0;

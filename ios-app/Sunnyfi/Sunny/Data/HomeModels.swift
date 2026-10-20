@@ -254,15 +254,25 @@ struct Writes: Decodable {
             let w: Double?
             /// The chain's IV at the money (the Week view's range).
             let iv: Double?
+            /// The plan repriced 1.5 SD up on the Thursday before the expiry (Nik, 20 Oct 2026):
+            /// the price, the day, and net delta there before any fix.
+            let safe: Safe?
+            /// The quarterly call: 1.5 SD to its expiry.
+            let q: Quarterly?
+            struct Safe: Decodable, Hashable { let sd: Double; let px: Double; let by: String; let d15: Double; let pct: Double }
+            struct Quarterly: Decodable, Hashable { let k: Double; let exp: String; let mid: Double; let sd: Double }
             /// ty: lc LEAP · sc call sold · lp hedge put · sp put sold · oc upside call.
             /// `stays`: still on at the plan's Friday. `d`: signed delta, shares.
             struct Held: Decodable, Hashable {
                 let ty: String; let n: Int; let k: Double; let exp: String; let d: Double; let stays: Bool
                 let tenor: String?; let roll: String?
+                /// Signed delta at +1.5 SD on the Thursday before the expiry, shares.
+                let d15: Double?
             }
             struct Sug: Decodable, Identifiable, Hashable {
                 let id: String; let ty: String; let act: String; let tenor: String?
                 let n: Int; let k: Double; let exp: String; let mid: Double; let d: Double
+                let d15: Double?
             }
         }
         struct Plan: Decodable { let type: String; let n: Int; let strike: Double; let mid: Double?; let delta: Double?; let note: String; let credit: Double }
@@ -554,8 +564,11 @@ struct ReadRule: Decodable {
     let atmShare: Double?
     let steps: [Step]
     let reads: Reads
+    /// The receipt, when the server writes it (the CALL RULE, 20 Oct 2026): label, value, tone ("red"/"ink").
+    let lines: [Line]?
 
     struct Step: Decodable { let read: String; let label: String; let step: String }
+    struct Line: Decodable { let label: String; let value: String; let tone: String? }
     struct Read: Decodable {
         let read: String
         let fact: String
