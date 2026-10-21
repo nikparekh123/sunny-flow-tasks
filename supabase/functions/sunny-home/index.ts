@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-20.8';
+const BUILD = '2026-10-21.2';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1533,6 +1533,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     /* ── THIS WEEK's rows for this name (the CALL RULE): this Friday's in-the-money calls rolled
        to next Friday's strike, the quarterly buy (or sell fewer), next Friday's calls and puts.
        Delta added in dollars (shares × price); a sale takes delta away. */
+    /* Each row carries `held`: what is already on for it (calls held at that quarter, calls or puts sold
+       for next Friday, in-the-money calls still open). The app hides a ticked row for the day only while
+       `held` is unchanged, so a fill that leaves more to do ("Buy 15 more") shows straight away, and a
+       price move that only nudges the size does not bring a ticked row back (Nik, 21 Oct 2026). */
     const usdK = (k: number) => '$' + (Math.abs(k - Math.round(k)) < 0.005 ? String(Math.round(k)) : String(+k.toFixed(2)));
     const mdy = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
     const mon = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
@@ -1544,12 +1548,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const low = Math.min(...itm.map((l) => l.strike));
         const back = itm.reduce((a, l) => a + (l.mark ?? 0) * l.n * 100, 0), credit = rolledTo * (atm?.mid ?? 0) * 100;
         const dOld = itm.reduce((a, l) => a + (l.delta ?? 1) * l.n * 100, 0), dNew = rolledTo * (atm?.delta ?? 0) * 100;
-        thisWeek.push({ id: `${t}|roll|${saleDay}`, t, kind: 'roll', face: 'sold',
+        thisWeek.push({ id: `${t}|roll|${saleDay}`, t, kind: 'roll', face: 'sold', held: nItm,
           action: rolledTo > 0 ? `Roll ${nItm} ${usdK(low)} calls to ${usdK(atm!.k)}` : `Buy back ${nItm} ${usdK(low)} calls`,
           cost: Math.round(Math.abs(back - credit)), credit: back - credit < 0, delta: Math.round((dOld - dNew) * spot), sh: dg?.sh ?? null });
       }
       const fq = pkg?.fix.find((x) => x.id === 'fq');
       if (fq) thisWeek.push({ id: `${t}|buy|${fq.exp}`, t, kind: 'buy', face: 'dg',
+        held: ls.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry === String(fq.exp)).reduce((a, l) => a + l.n, 0),
         action: `Buy ${fq.n}${pkg?.q?.more ? ' more' : ''} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`, alt: null,
         cost: Math.round(Number(fq.n) * Number(fq.mid) * 100), credit: false, delta: Math.round(Number(fq.d) * spot), sh: dg?.sh ?? null });
       /* Next Friday's sales wait for Friday (Nik, 20 Oct 2026: "should come on Friday or when one of
@@ -1558,13 +1563,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const saleTime = today >= saleDay;
       const openWk = ls.filter((l) => l.side === 'sold' && l.type === 'call' && l.expiry === saleDay).reduce((a, l) => a + l.n, 0);
       const sellN = saleTime ? Math.max(0, leftAtm - rolledTo) : Math.max(0, Math.min(leftAtm, callTarget - openWk - doneAtm));
-      if (atm && sellN > 0) thisWeek.push({ id: `${t}|sell|${targetExp}`, t, kind: 'sell', face: 'sold',
+      if (atm && sellN > 0) thisWeek.push({ id: `${t}|sell|${targetExp}`, t, kind: 'sell', face: 'sold', held: doneAtm + doneOtm,
         action: `Sell ${sellN} ${usdK(atm.k)} calls · ${mdy(targetExp)}${earnWk ? ' · 1 SD, earnings' : ''}`,
         cost: Math.round(sellN * atm.mid * 100), credit: true, delta: Math.round(-(atm.delta ?? 0) * sellN * 100 * spot), sh: dg?.sh ?? null });
       /* Puts the same way: from Friday everything left; before it only what has no put this week. */
       const openWkP = ls.filter((l) => l.side === 'sold' && l.type === 'put' && l.expiry === saleDay).reduce((a, l) => a + l.n, 0);
       const putN = saleTime ? leftPuts : Math.max(0, Math.min(leftPuts, putTarget - openWkP - donePuts));
-      if (put && putN > 0) thisWeek.push({ id: `${t}|put|${targetExp}`, t, kind: 'put', face: 'sold',
+      if (put && putN > 0) thisWeek.push({ id: `${t}|put|${targetExp}`, t, kind: 'put', face: 'sold', held: donePuts,
         action: `Sell ${putN} ${usdK(put.k)} puts · ${mdy(targetExp)}`,
         cost: Math.round(putN * put.mid * 100), credit: true, delta: Math.round(-(put.delta ?? 0) * putN * 100 * spot), sh: dg?.sh ?? null });
     }

@@ -67,6 +67,23 @@ struct WeekTask: Decodable, Identifiable, Hashable {
     let delta: Double
     /// Where the name goes short (%), for the order.
     let sh: Double?
+    /// What is already on for this row (calls held at that quarter, sold for next Friday, ITM still open).
+    let held: Int?
+}
+
+/// A To do row ticked today, as it read when ticked (Done today, Nik 21 Oct 2026).
+struct DoneTask: Codable, Hashable {
+    let id: String
+    let day: String
+    let held: Int
+    let t: String
+    let kind: String
+    let face: String
+    let action: String
+    let cost: Double
+    let credit: Bool
+    let delta: Double
+    var key: String { "\(id)@\(held)" }
 }
 
 /// Delta and Gamma for one name (blocks 13 and 16): an instant jump from today's price.

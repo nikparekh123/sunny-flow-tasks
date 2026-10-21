@@ -43,15 +43,23 @@ final class HomeRouter {
     var weekMore = false
     /// The Insights sheet's name.
     var insights: String?
-    /// This week: rows ticked today, id -> day, kept on the phone.
-    var checked: [String: String] = {
-        let d = UserDefaults.standard.dictionary(forKey: "thisWeek.checked") as? [String: String] ?? [:]
+    /// To do: rows ticked, kept on the phone as they read when ticked, keyed "id@held" so a ticked row
+    /// and its follow-up after a partial fill both stay in Done today (Nik, 21 Oct 2026). Last 7 days.
+    var checked: [String: DoneTask] = {
+        guard let d = UserDefaults.standard.data(forKey: "toDo.done"),
+              let v = try? JSONDecoder().decode([String: DoneTask].self, from: d) else { return [:] }
         let cut = String(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 86_400)).prefix(10))
-        return d.filter { $0.value >= cut }
+        return v.filter { $0.value.day >= cut }
     }()
-    func check(_ id: String, day: String) {
-        checked[id] = day
-        UserDefaults.standard.set(checked, forKey: "thisWeek.checked")
+    func check(_ r: WeekTask, day: String) {
+        let h = r.held ?? 0
+        checked["\(r.id)@\(h)"] = DoneTask(id: r.id, day: day, held: h, t: r.t, kind: r.kind, face: r.face,
+                                             action: r.action, cost: r.cost, credit: r.credit, delta: r.delta)
+        save()
+    }
+    func uncheck(_ key: String) { checked[key] = nil; save() }
+    private func save() {
+        if let d = try? JSONEncoder().encode(checked) { UserDefaults.standard.set(d, forKey: "toDo.done") }
     }
 
     /// Opens a name's Position card on a face: scroll to it, swipe to the face, ring it 1.8 s.

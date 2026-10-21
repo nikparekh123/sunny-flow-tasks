@@ -8,8 +8,9 @@
 //  Short | Long splits the list (what you sold, what you buy), five most urgent
 //  on each side, the rest behind Show more.
 //  Checking a row is you saying it is done; the app places no orders. Checked,
-//  it strikes through, waits 1.2 s (tap again to undo), then folds away and does
-//  not come back that day. The last one folds the whole card.
+//  it strikes through, waits 1.2 s (tap again to undo), then moves to Done today
+//  at the bottom of its side, struck through, until the day ends (Nik, 21 Oct
+//  2026). A fill that leaves more to do brings the follow-up row back up top.
 //
 
 import SwiftUI
@@ -22,12 +23,18 @@ struct SunnyThisWeek: View {
     /// Rows ticked in the last 1.2 s: still on screen, struck through.
     @State private var pending: Set<String> = []
 
-    /// Today's rows: every task not checked today.
-    static func open(_ home: HomePayload, checked: [String: String]) -> [WeekTask] {
-        (home.thisWeek?.value ?? []).filter { checked[$0.id] != home.today }
+    /// Today's open rows: every task not ticked today at what is held now. A fill changes what is held,
+    /// so a partial fill's "Buy 15 more" shows straight away (Nik, 21 Oct 2026).
+    static func open(_ home: HomePayload, checked: [String: DoneTask]) -> [WeekTask] {
+        (home.thisWeek?.value ?? []).filter { r in checked["\(r.id)@\(r.held ?? 0)"]?.day != home.today }
     }
+    /// Ticked today, newest first.
+    static func done(_ home: HomePayload, checked: [String: DoneTask]) -> [DoneTask] {
+        checked.values.filter { $0.day == home.today }.sorted { $0.key < $1.key }
+    }
+    static func side(_ kind: String) -> String { kind == "buy" ? "l" : "s" }
     /// To sell: rolls (net a sale) and calls and puts to sell; To buy: calls to buy (Nik, 21 Oct 2026, was Short | Long).
-    static func side(_ r: WeekTask) -> String { r.kind == "buy" ? "l" : "s" }
+    static func side(_ r: WeekTask) -> String { side(r.kind) }
 
     var body: some View {
         let rows = Self.open(home, checked: router.checked)
@@ -35,8 +42,9 @@ struct SunnyThisWeek: View {
         let mine = rows.filter { Self.side($0) == router.weekSide }
         let shown = router.weekMore ? mine : Array(mine.prefix(5))
         let counts = ["s", "l"].map { s in rows.filter { Self.side($0) == s && !pending.contains($0.id) }.count }
+        let doneAll = Self.done(home, checked: router.checked), doneMine = doneAll.filter { Self.side($0.kind) == router.weekSide }
         Group {
-            if !rows.isEmpty {
+            if !rows.isEmpty || !doneAll.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("To do").sType(.sectionTitle, tabular: false)
@@ -69,6 +77,7 @@ struct SunnyThisWeek: View {
                     if mine.count > 5 { more(mine.count - 5) }
                     let open = mine.filter { !pending.contains($0.id) }
                     if !open.isEmpty { total(open) }
+                    if !doneMine.isEmpty { doneGroup(doneMine) }
                 }
                 .foregroundStyle(S.ink)
                 .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 8)
@@ -79,6 +88,7 @@ struct SunnyThisWeek: View {
             }
         }
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35), value: shown.map(\.id))
+        .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35), value: doneAll.map(\.key))
         // From a card's rebalance row: that name's side, Show more if its task is past the fifth.
         .onChange(of: router.nxRing) { _, t in
             guard let t, let r = rows.first(where: { $0.t == t }) else { return }
@@ -121,6 +131,62 @@ struct SunnyThisWeek: View {
         .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Total, \(rows.count) to \(word), \(PF.usd(cash))\(cash > 0 ? " credit" : ""), \(Self.deltaWords(delta))")
+    }
+
+    /// Done today: the rows ticked today on this side, struck through, at the bottom. Tap the filled
+    /// circle to undo; tap the row to open the card.
+    private func doneGroup(_ items: [DoneTask]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Done today · \(items.count)")
+                .sType(SType(size: 13, weight: 600, line: 16, tracking: 0))
+                .foregroundStyle(S.muted)
+                .padding(.top, 14).padding(.bottom, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
+                .accessibilityAddTraits(.isHeader)
+            ForEach(items, id: \.key) { d in
+                HStack(alignment: .center, spacing: 12) {
+                    Button {
+                        withAnimation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35)) { router.uncheck(d.key) }
+                    } label: {
+                        ZStack {
+                            Circle().fill(S.ink)
+                            Path { q in q.move(to: CGPoint(x: 1.5, y: 5.2)); q.addLine(to: CGPoint(x: 4.5, y: 8)); q.addLine(to: CGPoint(x: 10.5, y: 1.8)) }
+                                .stroke(S.paper, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                                .frame(width: 12, height: 10)
+                        }
+                        .frame(width: 22, height: 22)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, -11)
+                    .accessibilityLabel("Done: \(d.t), \(d.action). Tap to undo")
+                    Button { router.openCard(d.t, face: d.face) } label: {
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(d.t).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false)
+                                Text(d.action).sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                                    .strikethrough()
+                                    .lineLimit(1).minimumScaleFactor(0.8)
+                            }
+                            Spacer(minLength: 8)
+                            (Text(PF.usd(d.cost)) + Text(d.credit ? " credit" : "").font(SType(size: 13, weight: 500, line: 20, tracking: 0).font()))
+                                .sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
+                                .strikethrough()
+                                .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens \(d.t) in Positions")
+                }
+                .foregroundStyle(S.ink)
+                .opacity(0.45)
+                .frame(minHeight: 52)
+                .transition(.opacity)
+            }
+        }
     }
 
     /// "Show 11 more" or "Show less": 48 tall, centred, the chevron turns.
@@ -217,7 +283,7 @@ struct SunnyThisWeek: View {
         v >= 0 ? "+\(PF.usd(v)) delta" : "\(PF.usd(v)) delta"
     }
 
-    /// Tick, wait 1.2 s, then leave for the day; a second tap inside the beat undoes it.
+    /// Tick, wait 1.2 s, then move to Done today; a second tap inside the beat undoes it.
     private func toggle(_ r: WeekTask) {
         if pending.contains(r.id) { pending.remove(r.id); return }
         UISelectionFeedbackGenerator().selectionChanged()
@@ -226,7 +292,7 @@ struct SunnyThisWeek: View {
             try? await Task.sleep(for: .seconds(1.2))
             guard pending.contains(r.id) else { return }
             withAnimation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35)) {
-                router.check(r.id, day: home.today)
+                router.check(r, day: home.today)
                 pending.remove(r.id)
             }
         }
