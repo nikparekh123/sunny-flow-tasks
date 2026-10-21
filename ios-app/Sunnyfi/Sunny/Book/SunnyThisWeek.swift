@@ -5,8 +5,8 @@
 //  Block 12b (handoffs 28 and 29, 20 Oct 2026) · This week: what to roll, buy and
 //  sell by Friday, one row per task, from the CALL RULE (Nik: "our live rule, ignore
 //  the design rule"; "include everything", so next Friday's sales are rows too).
-//  Short | Long splits the list (what you sold, what you buy), five most urgent
-//  on each side, the rest behind Show more.
+//  Tickers across the top (Nik, 21 Oct 2026, replacing To sell | To buy): pick one
+//  to see its actions, each row the action only, and that name's total.
 //  Checking a row is you saying it is done; the app places no orders. Checked,
 //  it strikes through, waits 1.2 s (tap again to undo), then moves to Done today
 //  at the bottom of its side, struck through, until the day ends (Nik, 21 Oct
@@ -35,16 +35,24 @@ struct SunnyThisWeek: View {
     static func side(_ kind: String) -> String { kind == "buy" ? "l" : "s" }
     /// To sell: rolls (net a sale) and calls and puts to sell; To buy: calls to buy (Nik, 21 Oct 2026, was Short | Long).
     static func side(_ r: WeekTask) -> String { side(r.kind) }
+    /// Tickers in the order the rows come (most urgent first), then any with only Done today rows.
+    static func tickers(_ rows: [WeekTask], _ done: [DoneTask]) -> [String] {
+        var names: [String] = []
+        for r in rows where !names.contains(r.t) { names.append(r.t) }
+        for d in done where !names.contains(d.t) { names.append(d.t) }
+        return names
+    }
 
     var body: some View {
         let rows = Self.open(home, checked: router.checked)
         let left = rows.filter { !pending.contains($0.id) }.count
-        let mine = rows.filter { Self.side($0) == router.weekSide }
-        let shown = router.weekMore ? mine : Array(mine.prefix(5))
-        let counts = ["s", "l"].map { s in rows.filter { Self.side($0) == s && !pending.contains($0.id) }.count }
-        let doneAll = Self.done(home, checked: router.checked), doneMine = doneAll.filter { Self.side($0.kind) == router.weekSide }
+        let doneAll = Self.done(home, checked: router.checked)
+        let names = Self.tickers(rows, doneAll)
+        let cur = names.contains(router.weekTicker ?? "") ? router.weekTicker! : (names.first ?? "")
+        let mine = rows.filter { $0.t == cur }
+        let doneMine = doneAll.filter { $0.t == cur }
         Group {
-            if !rows.isEmpty || !doneAll.isEmpty {
+            if !names.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("To do").sType(.sectionTitle, tabular: false)
@@ -56,25 +64,20 @@ struct SunnyThisWeek: View {
                             .contentTransition(.numericText(value: Double(left)))
                     }
                     .padding(.bottom, 12)
-                    WeekSideSwitch(side: router.weekSide, counts: counts) { s in
-                        guard s != router.weekSide else { return }
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        withAnimation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35)) { router.weekSide = s }
-                    }
-                    .padding(.bottom, 14)
-                    ForEach(shown) { r in
+                    chips(names, cur: cur, rows: rows)
+                        .padding(.bottom, 12)
+                    ForEach(mine) { r in
                         row(r)
                             .transition(.opacity.combined(with: .scale(scale: 1, anchor: .top)))
                     }
                     if mine.isEmpty {
-                        Text("Nothing to \(router.weekSide == "s" ? "sell" : "buy") this week")
+                        Text("Nothing left for \(cur) this week")
                             .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
                             .foregroundStyle(S.muted)
                             .padding(.top, 14).padding(.bottom, 12)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
                     }
-                    if mine.count > 5 { more(mine.count - 5) }
                     let open = mine.filter { !pending.contains($0.id) }
                     if !open.isEmpty { total(open) }
                     if !doneMine.isEmpty { doneGroup(doneMine) }
@@ -87,29 +90,66 @@ struct SunnyThisWeek: View {
                 .transition(.opacity)
             }
         }
-        .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35), value: shown.map(\.id))
+        .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35), value: mine.map(\.id))
         .animation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35), value: doneAll.map(\.key))
-        // From a card's rebalance row: that name's side, Show more if its task is past the fifth.
+        // From a card's rebalance row: that name's chip.
         .onChange(of: router.nxRing) { _, t in
-            guard let t, let r = rows.first(where: { $0.t == t }) else { return }
-            let s = Self.side(r), i = rows.filter { Self.side($0) == s }.firstIndex { $0.t == t } ?? 0
-            withAnimation(reduce ? nil : S.standard(0.35)) {
-                router.weekSide = s
-                if i >= 5 { router.weekMore = true }
-            }
+            guard let t, names.contains(t) else { return }
+            withAnimation(reduce ? nil : S.standard(0.35)) { router.weekTicker = t }
         }
     }
 
-    /// The side's total, always the last line (Nik, 21 Oct 2026): every open row on that side,
-    /// shown or not, ticked rows out. Cash nets (a credit less what rolls cost); delta nets too.
+    /// The tickers across the top, scrolling sideways: the picked one in ink, each with what is left.
+    private func chips(_ names: [String], cur: String, rows: [WeekTask]) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(names, id: \.self) { t in
+                        let on = t == cur, n = rows.filter { $0.t == t && !pending.contains($0.id) }.count
+                        Button {
+                            guard !on else { return }
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            withAnimation(reduce ? .easeOut(duration: 0.2) : S.standard(0.35)) { router.weekTicker = t }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(t).sType(SType(size: 13, weight: 700, line: 13, tracking: 0), tabular: false)
+                                Text(n > 0 ? "\(n)" : "done")
+                                    .sType(SType(size: 13, weight: 500, line: 13, tracking: 0))
+                                    .foregroundStyle(on ? S.chipOnInk.opacity(0.72) : S.muted)
+                                    .contentTransition(.numericText(value: Double(n)))
+                            }
+                            .foregroundStyle(on ? S.chipOnInk : S.ink)
+                            .padding(.horizontal, 12).frame(height: 32)
+                            .background { if on { Capsule().fill(S.chipOn) } }
+                            .glassEffect(on ? .identity : .regular.interactive(), in: .capsule)
+                            .contentShape(Capsule().inset(by: -6))
+                            .animation(.easeOut(duration: 0.2), value: on)
+                        }
+                        .buttonStyle(SPressStyle(scale: 0.96))
+                        .accessibilityLabel("\(t), \(n > 0 ? "\(n) to do" : "done")")
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                        .id(t)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            // Inside the card's 20 pt padding, clipped at it: the chips never run past the card
+            // (Nik, 21 Oct 2026). The 8 pt above and below keeps the chip shadows inside the clip.
+            .scrollIndicators(.hidden)
+            .padding(.vertical, -8)
+            .onChange(of: cur) { _, t in withAnimation(reduce ? nil : S.standard(0.35)) { proxy.scrollTo(t, anchor: .center) } }
+        }
+    }
+
+    /// The ticker's total, always the last line (Nik, 21 Oct 2026): every open row for that name,
+    /// ticked rows out. Cash nets (a credit less what rolls cost); delta nets too.
     private func total(_ rows: [WeekTask]) -> some View {
         let cash = rows.reduce(0.0) { $0 + ($1.credit ? $1.cost : -$1.cost) }   // > 0: a credit
         let delta = rows.reduce(0.0) { $0 + $1.delta }
-        let word = router.weekSide == "s" ? "sell" : "buy"
         return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Total").sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false)
-                Text("\(rows.count) to \(word)").sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                Text("\(rows.count) to do").sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
                     .foregroundStyle(S.muted)
             }
             Spacer(minLength: 8)
@@ -130,7 +170,7 @@ struct SunnyThisWeek: View {
         .frame(minHeight: 60)
         .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Total, \(rows.count) to \(word), \(PF.usd(cash))\(cash > 0 ? " credit" : ""), \(Self.deltaWords(delta))")
+        .accessibilityLabel("Total, \(rows.count) to do, \(PF.usd(cash))\(cash > 0 ? " credit" : ""), \(Self.deltaWords(delta))")
     }
 
     /// Done today: the rows ticked today on this side, struck through, at the bottom. Tap the filled
@@ -164,12 +204,9 @@ struct SunnyThisWeek: View {
                     .accessibilityLabel("Done: \(d.t), \(d.action). Tap to undo")
                     Button { router.openCard(d.t, face: d.face) } label: {
                         HStack(alignment: .center, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(d.t).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false)
-                                Text(d.action).sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-                                    .strikethrough()
-                                    .lineLimit(1).minimumScaleFactor(0.8)
-                            }
+                            Text(d.action).sType(SType(size: 15, weight: 500, line: 20, tracking: 0))
+                                .strikethrough()
+                                .lineLimit(1).minimumScaleFactor(0.75)
                             Spacer(minLength: 8)
                             (Text(PF.usd(d.cost)) + Text(d.credit ? " credit" : "").font(SType(size: 13, weight: 500, line: 20, tracking: 0).font()))
                                 .sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
@@ -187,29 +224,6 @@ struct SunnyThisWeek: View {
                 .transition(.opacity)
             }
         }
-    }
-
-    /// "Show 11 more" or "Show less": 48 tall, centred, the chevron turns.
-    private func more(_ n: Int) -> some View {
-        Button {
-            withAnimation(reduce ? nil : S.standard(0.35)) { router.weekMore.toggle() }
-        } label: {
-            HStack(spacing: 8) {
-                Text(router.weekMore ? "Show less" : "Show \(n) more")
-                    .sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                    .contentTransition(.numericText(value: Double(n)))
-                Path { q in q.move(to: CGPoint(x: 1.5, y: 1.5)); q.addLine(to: CGPoint(x: 6, y: 6)); q.addLine(to: CGPoint(x: 10.5, y: 1.5)) }
-                    .stroke(S.muted, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                    .frame(width: 12, height: 8)
-                    .rotationEffect(.degrees(router.weekMore ? 180 : 0))
-                    .animation(reduce ? nil : S.standard(0.3), value: router.weekMore)
-            }
-            .foregroundStyle(S.ink)
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(POpacity())
-        .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
     }
 
     // MARK: A row
@@ -241,16 +255,13 @@ struct SunnyThisWeek: View {
 
             Button { router.openCard(r.t, face: r.face) } label: {
                 HStack(alignment: .center, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(r.t).sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false)
-                            .foregroundStyle(lit ? S.orangeDeep : S.ink)
-                        // Two lines at most (Nik, 20 Oct 2026): the ticker, then the action on one line.
-                        Text(r.action).foregroundStyle(lit ? S.orangeDeep : S.ink)
-                            .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
-                            .strikethrough(done)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
+                    // The action only; the chip above names the ticker (Nik, 21 Oct 2026).
+                    Text(r.action).foregroundStyle(lit ? S.orangeDeep : S.ink)
+                        .sType(SType(size: 15, weight: 500, line: 20, tracking: 0))
+                        .strikethrough(done)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .layoutPriority(1)
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 2) {
                         (Text(PF.usd(r.cost)).foregroundStyle(r.credit ? S.green : S.ink)
@@ -262,6 +273,7 @@ struct SunnyThisWeek: View {
                             .foregroundStyle(r.delta < 0 ? S.red : S.muted)
                     }
                     .lineLimit(1)
+                    .fixedSize()
                 }
                 .contentShape(Rectangle())
             }
@@ -296,23 +308,6 @@ struct SunnyThisWeek: View {
                 pending.remove(r.id)
             }
         }
-    }
-}
-
-/// Short | Long (handoff 29): the system segmented control, so it is iOS 26 Liquid Glass natively
-/// (Nik, 20 Oct 2026), each side with its count.
-private struct WeekSideSwitch: View {
-    let side: String
-    let counts: [Int]
-    let pick: (String) -> Void
-
-    var body: some View {
-        Picker("To sell or to buy", selection: Binding(get: { side }, set: { pick($0) })) {
-            Text("To sell  \(counts[safe: 0] ?? 0)").tag("s")
-            Text("To buy  \(counts[safe: 1] ?? 0)").tag("l")
-        }
-        .pickerStyle(.segmented)
-        .controlSize(.large)
     }
 }
 
