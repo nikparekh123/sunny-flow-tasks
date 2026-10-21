@@ -365,7 +365,7 @@ private struct PNameCard: View {
         .disabled(done)
         .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
         .accessibilityLabel(done ? "Done for this week, delta back on target"
-                                 : "\(tasks.count) to do this week: \(tasks.map(\.action).joined(separator: ", ")), go to This week")
+                                 : "\(tasks.count) to do this week: \(tasks.map(\.action).joined(separator: ", ")), go to To do")
     }
 }
 

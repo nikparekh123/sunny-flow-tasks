@@ -39,10 +39,10 @@ struct SunnyThisWeek: View {
             if !rows.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text("This week").sType(.sectionTitle, tabular: false)
+                        Text("To do").sType(.sectionTitle, tabular: false)
                             .accessibilityAddTraits(.isHeader)
                         Spacer(minLength: 0)
-                        Text("\(left) to do · by Fri")
+                        Text("\(left) left · by Fri")
                             .sType(SType(size: 13, weight: 500, line: 16, tracking: 0))
                             .foregroundStyle(S.muted)
                             .contentTransition(.numericText(value: Double(left)))
