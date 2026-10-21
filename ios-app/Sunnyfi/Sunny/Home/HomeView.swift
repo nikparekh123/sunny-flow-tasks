@@ -123,14 +123,14 @@ struct HomeView: View {
                     SunnyToday(home: home).sEnter(3)
 
                     SunnySectionTitle(title: "Book").id(HomeRouter.Section.book)
-                    // This week leads the Book (handoff 28, 12b): the only place the app says to act.
-                    SunnyThisWeek(home: home)
-                        .padding(.horizontal, S.margin)
-                        .id("thisweek")
-                        .sEnter(4)
                     SunnyPortfolio(home: home, words: words)
                         .padding(.horizontal, S.margin)
                         .id("portfolio")
+                        .sEnter(4)
+                    // This week (12b), after Portfolio (Nik, 20 Oct 2026): the only place the app says to act.
+                    SunnyThisWeek(home: home)
+                        .padding(.horizontal, S.margin)
+                        .id("thisweek")
                         .sEnter(4)
                     SunnyPositions(home: home, orderFrom: words)
                         .id("positions")
