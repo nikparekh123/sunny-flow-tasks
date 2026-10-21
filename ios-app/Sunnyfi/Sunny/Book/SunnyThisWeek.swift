@@ -26,7 +26,7 @@ struct SunnyThisWeek: View {
     static func open(_ home: HomePayload, checked: [String: String]) -> [WeekTask] {
         (home.thisWeek?.value ?? []).filter { checked[$0.id] != home.today }
     }
-    /// Short is what you sold (rolls, calls and puts to sell); Long is what you buy.
+    /// To sell: rolls (net a sale) and calls and puts to sell; To buy: calls to buy (Nik, 21 Oct 2026, was Short | Long).
     static func side(_ r: WeekTask) -> String { r.kind == "buy" ? "l" : "s" }
 
     var body: some View {
@@ -59,7 +59,7 @@ struct SunnyThisWeek: View {
                             .transition(.opacity.combined(with: .scale(scale: 1, anchor: .top)))
                     }
                     if mine.isEmpty {
-                        Text("Nothing \(router.weekSide == "s" ? "short" : "long") to do this week")
+                        Text("Nothing to \(router.weekSide == "s" ? "sell" : "buy") this week")
                             .sType(SType(size: 13, weight: 500, line: 18, tracking: 0), tabular: false)
                             .foregroundStyle(S.muted)
                             .padding(.top, 14).padding(.bottom, 12)
@@ -67,6 +67,8 @@ struct SunnyThisWeek: View {
                             .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
                     }
                     if mine.count > 5 { more(mine.count - 5) }
+                    let open = mine.filter { !pending.contains($0.id) }
+                    if !open.isEmpty { total(open) }
                 }
                 .foregroundStyle(S.ink)
                 .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 8)
@@ -86,6 +88,39 @@ struct SunnyThisWeek: View {
                 if i >= 5 { router.weekMore = true }
             }
         }
+    }
+
+    /// The side's total, always the last line (Nik, 21 Oct 2026): every open row on that side,
+    /// shown or not, ticked rows out. Cash nets (a credit less what rolls cost); delta nets too.
+    private func total(_ rows: [WeekTask]) -> some View {
+        let cash = rows.reduce(0.0) { $0 + ($1.credit ? $1.cost : -$1.cost) }   // > 0: a credit
+        let delta = rows.reduce(0.0) { $0 + $1.delta }
+        let word = router.weekSide == "s" ? "sell" : "buy"
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Total").sType(SType(size: 15, weight: 700, line: 20, tracking: 0), tabular: false)
+                Text("\(rows.count) to \(word)").sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                    .foregroundStyle(S.muted)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 2) {
+                (Text(PF.usd(cash)).foregroundStyle(cash > 0 ? S.green : S.ink)
+                 + Text(cash > 0 ? " credit" : "").font(SType(size: 13, weight: 500, line: 20, tracking: 0).font())
+                    .foregroundStyle(S.green))
+                    .sType(SType(size: 15, weight: 700, line: 20, tracking: 0))
+                    .contentTransition(.numericText(value: cash))
+                Text(Self.deltaWords(delta))
+                    .sType(SType(size: 13, weight: 500, line: 18, tracking: 0))
+                    .foregroundStyle(delta < 0 ? S.red : S.muted)
+                    .contentTransition(.numericText(value: delta))
+            }
+            .lineLimit(1)
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 60)
+        .overlay(alignment: .top) { Rectangle().fill(S.line).frame(height: 1) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Total, \(rows.count) to \(word), \(PF.usd(cash))\(cash > 0 ? " credit" : ""), \(Self.deltaWords(delta))")
     }
 
     /// "Show 11 more" or "Show less": 48 tall, centred, the chevron turns.
@@ -206,9 +241,9 @@ private struct WeekSideSwitch: View {
     let pick: (String) -> Void
 
     var body: some View {
-        Picker("Short or long", selection: Binding(get: { side }, set: { pick($0) })) {
-            Text("Short  \(counts[safe: 0] ?? 0)").tag("s")
-            Text("Long  \(counts[safe: 1] ?? 0)").tag("l")
+        Picker("To sell or to buy", selection: Binding(get: { side }, set: { pick($0) })) {
+            Text("To sell  \(counts[safe: 0] ?? 0)").tag("s")
+            Text("To buy  \(counts[safe: 1] ?? 0)").tag("l")
         }
         .pickerStyle(.segmented)
         .controlSize(.large)
