@@ -2,10 +2,10 @@
 //  HomeRouter.swift
 //  Sunny
 //
-//  What Home has open: a receipt over the page (blocks 06 and 07), the
-//  Aftershock page (26), a Position card opened on a face and the Insights
-//  sheet (handoff 28; the Planner and Thesis are retired), and where quick
-//  nav scrolls (08).
+//  What the app has open: the tab (Home or Positions, handoff 30), a receipt
+//  over the page (blocks 06 and 07), the Aftershock page (26), a Position card
+//  opened on a face, the Positions filter and the Insights sheet, and where
+//  quick nav scrolls (08).
 //
 
 import SwiftUI
@@ -22,63 +22,43 @@ final class HomeRouter {
         case book = "Book", risk = "Risk", income = "Income", results = "Results"
         var id: String { rawValue }
     }
+    /// The two tabs (block 12a). Opens on Home.
+    enum Tab: Hashable { case home, positions }
 
+    var tab: Tab = .home
+    /// Tapping the open tab scrolls it to the top (block 12a): each tab watches its own count.
+    var topTick: [Tab: Int] = [:]
     var receipt: Receipt?
 
-    // MARK: The Book (handoff 28)
+    // MARK: Positions (handoffs 28 and 30)
 
     /// The Delta and Gamma jump, %: one value for every card and the Home map (3 to 10).
     var jump = 7
-    /// A card opened from a tap: the face it opens on ("sold", "bought", "dg"), and the ring.
+    /// A card opened from a tap: the face it opens on ("todo", "sold", "bought", "dg"), and the ring.
     var cardFace: [String: String] = [:]
     var cardTick = 0
     var ring: String?
-    /// The Home page scrolls here, smoothly ("pos-NKE", "thisweek").
+    /// The Positions screen scrolls here, smoothly ("pos-NKE").
     var scrollTo: String?
-    /// This week's rows highlighted from a card's rebalance row (1.8 s).
-    var nxRing: String?
-    /// To do's picked ticker (Nik, 21 Oct 2026: tickers across the top instead of To sell | To buy);
-    /// nil is the most urgent name. Holds while the app is open.
-    var weekTicker: String?
+    /// The Positions filter (block 12): one at a time.
+    var filter: PFilter = .all
     /// The Insights sheet's name.
     var insights: String?
-    /// To do: rows ticked, kept on the phone as they read when ticked, keyed "id@held" so a ticked row
-    /// and its follow-up after a partial fill both stay in Done today (Nik, 21 Oct 2026). Last 7 days.
-    var checked: [String: DoneTask] = {
-        guard let d = UserDefaults.standard.data(forKey: "toDo.done"),
-              let v = try? JSONDecoder().decode([String: DoneTask].self, from: d) else { return [:] }
-        let cut = String(ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7 * 86_400)).prefix(10))
-        return v.filter { $0.value.day >= cut }
-    }()
-    func check(_ r: WeekTask, day: String) {
-        let h = r.held ?? 0
-        checked["\(r.id)@\(h)"] = DoneTask(id: r.id, day: day, held: h, t: r.t, kind: r.kind, face: r.face,
-                                             action: r.action, cost: r.cost, credit: r.credit, delta: r.delta)
-        save()
-    }
-    func uncheck(_ key: String) { checked[key] = nil; save() }
-    private func save() {
-        if let d = try? JSONEncoder().encode(checked) { UserDefaults.standard.set(d, forKey: "toDo.done") }
-    }
 
-    /// Opens a name's Position card on a face: scroll to it, swipe to the face, ring it 1.8 s.
+    /// Opens a name's Position card on a face from anywhere: the Positions tab, then the card
+    /// scrolled under the nav bar on that face, ringed 2 pt for 1.8 s (block 12a).
     func openCard(_ t: String, face: String) {
+        let switching = tab != .positions
+        tab = .positions
         cardFace[t] = face
-        cardTick += 1
-        scrollTo = "pos-\(t)"
-        ring = t
         Task { @MainActor in
+            // The tab's screen is built first, so its scroll and the card's pager are there to move.
+            if switching { try? await Task.sleep(for: .milliseconds(350)) }
+            self.cardTick += 1
+            self.scrollTo = "pos-\(t)"
+            self.ring = t
             try? await Task.sleep(for: .seconds(1.8))
             if self.ring == t { withAnimation(.easeOut(duration: 0.4)) { self.ring = nil } }
-        }
-    }
-    /// From a card's rebalance row: up to This week, that name's text lit for 1.8 s.
-    func focusThisWeek(_ t: String) {
-        scrollTo = "thisweek"
-        withAnimation(.easeInOut(duration: 0.4)) { nxRing = t }
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.8))
-            if self.nxRing == t { withAnimation(.easeInOut(duration: 0.4)) { self.nxRing = nil } }
         }
     }
     /// Week | Month and ‹ ›, shared by Inventory, Yield and Sold vs Bought.
@@ -93,9 +73,32 @@ final class HomeRouter {
     var scrollTarget: Section?
     /// DEBUG: scroll to a block by id ("today", "portfolio", ...).
     var scrollID: String?
-    /// DEBUG: open a Positions page (its index) at launch.
-    var debugPick: String?
 
     func open(_ r: Receipt) { withAnimation(S.standard(0.55)) { receipt = r } }
     func closeReceipt() { withAnimation(S.standard(0.55)) { receipt = nil } }
+}
+
+/// The Positions filter (block 12): All names, To do, the stock today, or calls that kept at least
+/// a share of their premium. One at a time.
+enum PFilter: Hashable {
+    case all, todo, up, down, kept(Int)
+    var title: String {
+        switch self {
+        case .all: "All names"
+        case .todo: "To do"
+        case .up: "Stock up"
+        case .down: "Stock down"
+        case .kept(let p): "Captured \(p)%"
+        }
+    }
+    /// What the screen says when nothing matches.
+    var none: String {
+        switch self {
+        case .all: "No names here."
+        case .todo: "Nothing to do this week. Every name is full and on target."
+        case .up: "No stocks are up today."
+        case .down: "No stocks are down today."
+        case .kept(let p): "No calls have kept \(p)% of their premium yet."
+        }
+    }
 }

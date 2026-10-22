@@ -46,6 +46,8 @@ enum S {
     static let orangeDeep   = dyn(0xB35200, 0xF2A93B)
     /// The breathing tint, ring and glow use the bright pair in both modes
     /// (SunnyDelta keyframes: 242,169,59 and 235,75,70).
+    /// The To do count badge's text: dark ink (S.ink's light value) on S.orange in both modes (handoff 30).
+    static let badgeInk = Color(hex: 0x1D1D1F)
     static let breatheOrange = Color(hex: 0xF2A93B)
     static let breatheRed    = Color(hex: 0xEB4B46)
     static let sunDeep      = Color(hex: 0xE8862E)

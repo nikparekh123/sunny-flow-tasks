@@ -2,10 +2,12 @@
 //  HomeView.swift
 //  Sunny
 //
-//  The one Home page, in Home order: status and the account (01, 02, 02b),
-//  the deck (03-07), quick nav (08), Today (09), then Book · Risk · Income ·
-//  Results. 20 pt margins, 20 between blocks, the screen gradient under
-//  everything, live every 30 s while a session runs.
+//  The app's two tabs (handoff 30, block 12a): Home and Positions, in the
+//  native tab bar, each with its own scroll. Home in Home order: status and
+//  the account (01, 02, 02b), the deck (03-07), quick nav (08), Today (09),
+//  then Book · Risk · Income · Results. Positions is its own screen (12).
+//  20 pt margins, 20 between blocks, the screen gradient under everything,
+//  live every 30 s while a session runs.
 //
 
 import SwiftUI
@@ -22,6 +24,7 @@ struct HomeView: View {
     @State private var hold: CGFloat = 0
     @State private var shown = false
     @State private var touching = false
+    @State private var homePos = ScrollPosition()
 
     var body: some View {
         ZStack {
@@ -32,12 +35,12 @@ struct HomeView: View {
                     GalleryHost(block: g, store: store, home: home)
                         .environment(\.livePulse, store.livePulse)
                 } else {
-                    page(home)
+                    tabs(home)
                         .opacity(shown ? 1 : 0)
                         .onAppear { withAnimation(.easeOut(duration: 0.5)) { shown = true } }
                 }
                 #else
-                page(home)
+                tabs(home)
                     .opacity(shown ? 1 : 0)
                     .onAppear { withAnimation(.easeOut(duration: 0.5)) { shown = true } }
                 #endif
@@ -94,6 +97,28 @@ struct HomeView: View {
         }
     }
 
+    /// The native tab bar (block 12a): iOS draws the floating glass bar, its lens and labels. Opens on Home.
+    private func tabs(_ home: HomePayload) -> some View {
+        // A tap on the open tab comes through as the same value: that tab scrolls to the top.
+        let pick = Binding(get: { router.tab }, set: { t in
+            if t == router.tab { router.topTick[t, default: 0] += 1 } else { router.tab = t }
+        })
+        return TabView(selection: pick) {
+            Tab("Home", systemImage: "house.fill", value: HomeRouter.Tab.home) {
+                NavigationStack {
+                    ZStack {
+                        SBackground()
+                        page(home)
+                    }
+                    .toolbar(.hidden, for: .navigationBar)
+                }
+            }
+            Tab("Positions", systemImage: "rectangle.stack.fill", value: HomeRouter.Tab.positions) {
+                NavigationStack { SunnyPositionsTab(store: store) }
+            }
+        }
+    }
+
     private func page(_ home: HomePayload) -> some View {
         let words = store.words ?? home
         return ScrollViewReader { proxy in
@@ -122,23 +147,13 @@ struct HomeView: View {
                     SunnySectionTitle(title: "Today").id("today")
                     SunnyToday(home: home).sEnter(3)
 
+                    // Book keeps Portfolio and the watchlist; the cards, To do and Inventory moved to the
+                    // Positions tab (handoff 30).
                     SunnySectionTitle(title: "Book").id(HomeRouter.Section.book)
                     SunnyPortfolio(home: home, words: words)
                         .padding(.horizontal, S.margin)
                         .id("portfolio")
                         .sEnter(4)
-                    // This week (12b), after Portfolio (Nik, 20 Oct 2026): the only place the app says to act.
-                    SunnyThisWeek(home: home)
-                        .padding(.horizontal, S.margin)
-                        .id("thisweek")
-                        .sEnter(4)
-                    SunnyPositions(home: home, orderFrom: words)
-                        .id("positions")
-                        .sEnter(5)
-                    SunnyInventory(home: home, words: words)
-                        .padding(.horizontal, S.margin)
-                        .id("inventory")
-                        .sEnter(6)
 
                     SunnySectionTitle(title: "Risk").id(HomeRouter.Section.risk)
                     SunnyRisk(home: home).id("risk")
@@ -156,6 +171,8 @@ struct HomeView: View {
                 .padding(.bottom, 40)
             }
             .scrollIndicators(.hidden)
+            .scrollPosition($homePos)
+            .onChange(of: router.topTick[.home]) { _, _ in withAnimation(reduce ? nil : S.standard(0.45)) { homePos.scrollTo(edge: .top) } }
             .onScrollGeometryChange(for: CGFloat.self) { -($0.contentOffset.y + $0.contentInsets.top) } action: { _, v in
                 pull = max(0, v)
                 guard phase == .idle || phase == .pulling || phase == .armed else { return }
@@ -178,12 +195,6 @@ struct HomeView: View {
             }
             .onChange(of: router.scrollID) { _, id in
                 if let id { proxy.scrollTo(id, anchor: .top) }
-            }
-            // A card opened from a tap, or This week from a card's row: a smooth scroll.
-            .onChange(of: router.scrollTo) { _, id in
-                guard let id else { return }
-                withAnimation(reduce ? nil : .smooth(duration: 0.6)) { proxy.scrollTo(id, anchor: UnitPoint(x: 0.5, y: 0.02)) }
-                router.scrollTo = nil
             }
         }
         .environment(\.livePulse, store.livePulse)
@@ -225,7 +236,12 @@ struct HomeView: View {
             else if v.hasPrefix("insights:") { router.insights = String(v.dropFirst(9)) }
             else if v == "aftershock" { router.openAftershock(animated: false) }
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
-            else if v.hasPrefix("pick:") { router.debugPick = String(v.dropFirst(5)); router.scrollID = "positions" }
+            else if v.hasPrefix("tab:") { router.tab = v.dropFirst(4) == "positions" ? .positions : .home }
+            else if v.hasPrefix("filter:") {
+                let f = String(v.dropFirst(7))
+                router.tab = .positions
+                router.filter = f == "todo" ? .todo : f == "up" ? .up : f == "down" ? .down : Int(f).map { .kept($0) } ?? .all
+            }
         }
         #endif
     }

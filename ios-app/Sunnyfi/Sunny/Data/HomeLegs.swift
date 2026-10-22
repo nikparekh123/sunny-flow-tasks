@@ -25,4 +25,6 @@ struct Leg: Decodable, Identifiable, Hashable {
     let opened: String?
     /// The mark at the close before the Chart cards' first session (the week shown).
     let markWk: Double?
+    /// A hedge call: the quarterly calls bought under the call rule, apart from the LEAPs (handoff 30).
+    let up: Bool?
 }

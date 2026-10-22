@@ -36,6 +36,7 @@ struct PLeg: Identifiable, Hashable {
     let call: Bool
     let px: Double           // the ticker's price now
     let w: Double            // mark at the start of the Chart cards' week
+    var up = false           // a hedge call, not a LEAP (the Positions totals)
 
     var base: Double { a * 100 * Double(q) }
     var now: Double { b * 100 * Double(q) }
@@ -209,7 +210,7 @@ enum PMath {
         return home.legs.compactMap { l in
             guard let px = spot[l.ticker] ?? l.underlying, px > 0 else { return nil }
             return PLeg(id: l.id, t: l.ticker, k: l.strike, q: l.n, a: l.avg, b: l.mark ?? l.avg, expiry: l.expiry,
-                        sold: l.side == "sold", call: l.type == "call", px: px, w: l.markWk ?? l.avg)
+                        sold: l.side == "sold", call: l.type == "call", px: px, w: l.markWk ?? l.avg, up: l.up ?? false)
         }
     }
 

@@ -46,11 +46,14 @@ struct HomePayload: Decodable {
     let aftershock: Aftershock?
     /// Each open name's strategy: rebound, ladder or aftershock (block 13b).
     let strategies: [String: String]?
-    /// This week (handoff 28, block 12b): what to roll, buy and sell by Friday, one row per task.
+    /// To do (handoff 28, block 12b; on each card since handoff 30): what to roll, buy and sell by
+    /// Friday, one row per task. A row leaves once IBKR shows the trade; nothing is ticked.
     let thisWeek: Lenient<[WeekTask]>?
+    /// The To do face's two bars per name: calls and puts sold against room (handoff 30, block 13).
+    let todo: Lenient<[String: TodoBars]>?
 }
 
-/// One This week row (block 12b): the CALL RULE's roll, buy and sales for a name.
+/// One To do row (block 12b rules, block 13 face): the CALL RULE's roll, buy and sales for a name.
 struct WeekTask: Decodable, Identifiable, Hashable {
     let id: String
     let t: String
@@ -58,32 +61,24 @@ struct WeekTask: Decodable, Identifiable, Hashable {
     let kind: String
     /// The Position card face the work is on: "sold" or "dg".
     let face: String
+    /// The one-line text builds before handoff 30 show, the date in it.
     let action: String
-    /// The other fix for a buy: "or sell 12 fewer".
-    let alt: String?
+    /// The face's two lines: "Sell 13 $36.5 puts", then "Oct 30 · fills puts to 13".
+    let act: String?
+    let why: String?
     let cost: Double
     let credit: Bool
     /// Dollar delta the task adds (a sale takes some away: negative).
     let delta: Double
     /// Where the name goes short (%), for the order.
     let sh: Double?
-    /// What is already on for this row (calls held at that quarter, sold for next Friday, ITM still open).
-    let held: Int?
+    /// This Week (rolls and sales) or Buy inventory (calls to buy).
+    var buy: Bool { kind == "buy" }
 }
 
-/// A To do row ticked today, as it read when ticked (Done today, Nik 21 Oct 2026).
-struct DoneTask: Codable, Hashable {
-    let id: String
-    let day: String
-    let held: Int
-    let t: String
-    let kind: String
-    let face: String
-    let action: String
-    let cost: Double
-    let credit: Bool
-    let delta: Double
-    var key: String { "\(id)@\(held)" }
+/// Calls sold against room (one per LEAP) and puts sold against the put cap, for the week being worked.
+struct TodoBars: Decodable, Hashable {
+    let cc: Int, cs: Int, pc: Int, ps: Int
 }
 
 /// Delta and Gamma for one name (blocks 13 and 16): an instant jump from today's price.

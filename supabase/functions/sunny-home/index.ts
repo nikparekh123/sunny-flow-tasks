@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-21.2';
+const BUILD = '2026-10-22.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1266,6 +1266,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
      from the CALL RULE (Nik, 20 Oct 2026: "our live rule, ignore the design rule"; "include
      everything", so next Friday's sale and puts are rows too). */
   const thisWeek: Row[] = [];
+  /* The To do face's two bars per name (handoff 30, block 13): calls sold against room (one per
+     LEAP, 1:1) and puts sold against the put cap (`putTarget`), for the week being worked: this
+     Friday's until it comes, then next Friday's. */
+  const todo: Record<string, Row> = {};
   /* Short company names for Insights ("Nike This week"): the first word of the listed name. */
   const shortName = new Map<string, string>();
   if (book.length) {
@@ -1396,6 +1400,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        names half (NKE 30 -> 15, BABA 7 -> 4). */
     const putTarget = earnWk ? 0 : pick ? pick.puts : Math.floor(putsN * (pRule?.share ?? PUT_SHARE) + 0.5);
     const leftPuts = Math.max(0, putTarget - donePuts);
+    const shelfExp = today >= saleDay ? targetExp : saleDay;
+    const soldOn = (ty: string) => ls.filter((l) => l.side === 'sold' && l.type === ty && l.expiry >= shelfExp).reduce((a, l) => a + l.n, 0);
+    todo[t] = { cc: leapN, cs: soldOn('call'), pc: putTarget, ps: soldOn('put') };
     const plan = [
       atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta, iv: atm.iv,
         note: rule ? `${rule.otmPct}% out of the money` : earnWk ? 'at 1 SD, earnings week' : 'at the money' } : null,
@@ -1487,7 +1494,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
           const dq15 = S15 ? dAt(S15, qq.k, qq.exp, qq.iv, true) : 0;
           const n = Math.max(short15 && dq15 > 0 ? Math.ceil(-d15! / (100 * dq15)) : 0, thin && qq.dl > 0 ? Math.ceil(gap / (100 * qq.dl)) : 0);
           if (n > 0) fix.push({ id: 'fq', ty: 'oc', act: 'Buy', tenor: 'q', n, k: qq.k, exp: qq.exp, mid: r2(qq.mid),
-            d: Math.round(qq.dl * n * 100), d15: Math.round(dq15 * n * 100) });
+            d: Math.round(qq.dl * n * 100), d15: Math.round(dq15 * n * 100),
+            short: short15, at: S15 ? Math.round((S15 / spot - 1) * 1000) / 10 : null });
         }
         /* Selling fewer calls is no longer offered (Nik, 20 Oct 2026: "we agreed that is not a good
            solution"; it gave up about 3x what the quarterly calls cost). */
@@ -1548,15 +1556,21 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const low = Math.min(...itm.map((l) => l.strike));
         const back = itm.reduce((a, l) => a + (l.mark ?? 0) * l.n * 100, 0), credit = rolledTo * (atm?.mid ?? 0) * 100;
         const dOld = itm.reduce((a, l) => a + (l.delta ?? 1) * l.n * 100, 0), dNew = rolledTo * (atm?.delta ?? 0) * 100;
-        thisWeek.push({ id: `${t}|roll|${saleDay}`, t, kind: 'roll', face: 'sold', held: nItm,
-          action: rolledTo > 0 ? `Roll ${nItm} ${usdK(low)} calls to ${usdK(atm!.k)}` : `Buy back ${nItm} ${usdK(low)} calls`,
+        const act = rolledTo > 0 ? `Roll ${nItm} ${usdK(low)} calls to ${usdK(atm!.k)}` : `Buy back ${nItm} ${usdK(low)} calls`;
+        thisWeek.push({ id: `${t}|roll|${saleDay}`, t, kind: 'roll', face: 'sold', held: nItm, action: act, act,
+          why: rolledTo > 0 ? `In the money · to ${mdy(targetExp)}` : 'In the money',
           cost: Math.round(Math.abs(back - credit)), credit: back - credit < 0, delta: Math.round((dOld - dNew) * spot), sh: dg?.sh ?? null });
       }
+      /* `act` and `why` are the To do face's two lines (handoff 30); `action` stays for builds
+         before it, which show one line with the date in it. */
       const fq = pkg?.fix.find((x) => x.id === 'fq');
-      if (fq) thisWeek.push({ id: `${t}|buy|${fq.exp}`, t, kind: 'buy', face: 'dg',
-        held: ls.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry === String(fq.exp)).reduce((a, l) => a + l.n, 0),
-        action: `Buy ${fq.n}${pkg?.q?.more ? ' more' : ''} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`, alt: null,
-        cost: Math.round(Number(fq.n) * Number(fq.mid) * 100), credit: false, delta: Math.round(Number(fq.d) * spot), sh: dg?.sh ?? null });
+      if (fq) {
+        const heldQ = ls.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry === String(fq.exp)).reduce((a, l) => a + l.n, 0);
+        const act = `Buy ${fq.n}${pkg?.q?.more ? ' more' : ''} ${mon(String(fq.exp))} ${usdK(Number(fq.k))} calls`;
+        thisWeek.push({ id: `${t}|buy|${fq.exp}`, t, kind: 'buy', face: 'dg', held: heldQ, action: act, act, alt: null,
+          why: `${fq.short && fq.at != null ? `Short at +${fq.at}%` : 'Thin after Friday'} · ${mon(String(fq.exp))} calls ${heldQ} → ${heldQ + Number(fq.n)}`,
+          cost: Math.round(Number(fq.n) * Number(fq.mid) * 100), credit: false, delta: Math.round(Number(fq.d) * spot), sh: dg?.sh ?? null });
+      }
       /* Next Friday's sales wait for Friday (Nik, 20 Oct 2026: "should come on Friday or when one of
          them is closed, this is too early"). Before Friday only LEAPs with no call this week (one closed
          early, or never sold) get a row, for just that many; from Friday, everything left to sell. */
@@ -1565,12 +1579,16 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const sellN = saleTime ? Math.max(0, leftAtm - rolledTo) : Math.max(0, Math.min(leftAtm, callTarget - openWk - doneAtm));
       if (atm && sellN > 0) thisWeek.push({ id: `${t}|sell|${targetExp}`, t, kind: 'sell', face: 'sold', held: doneAtm + doneOtm,
         action: `Sell ${sellN} ${usdK(atm.k)} calls · ${mdy(targetExp)}${earnWk ? ' · 1 SD, earnings' : ''}`,
+        act: `Sell ${sellN} ${usdK(atm.k)} ${sellN === 1 ? 'call' : 'calls'}`,
+        why: `${mdy(targetExp)}${earnWk ? ' · 1 SD, earnings' : ''} · fills calls to ${todo[t].cs + sellN}`,
         cost: Math.round(sellN * atm.mid * 100), credit: true, delta: Math.round(-(atm.delta ?? 0) * sellN * 100 * spot), sh: dg?.sh ?? null });
       /* Puts the same way: from Friday everything left; before it only what has no put this week. */
       const openWkP = ls.filter((l) => l.side === 'sold' && l.type === 'put' && l.expiry === saleDay).reduce((a, l) => a + l.n, 0);
       const putN = saleTime ? leftPuts : Math.max(0, Math.min(leftPuts, putTarget - openWkP - donePuts));
       if (put && putN > 0) thisWeek.push({ id: `${t}|put|${targetExp}`, t, kind: 'put', face: 'sold', held: donePuts,
         action: `Sell ${putN} ${usdK(put.k)} puts · ${mdy(targetExp)}`,
+        act: `Sell ${putN} ${usdK(put.k)} ${putN === 1 ? 'put' : 'puts'}`,
+        why: `${mdy(targetExp)} · fills puts to ${todo[t].ps + putN}`,
         cost: Math.round(putN * put.mid * 100), credit: true, delta: Math.round(-(put.delta ?? 0) * putN * 100 * spot), sh: dg?.sh ?? null });
     }
     /* ── INSIGHTS (handoff 28, 14c): six plain points from the reads, written by fixed sentence
@@ -2171,7 +2189,10 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     calendar: cal.filter((c) => String(c.date) >= today)
       .map((c) => ({ date: c.date, kind: c.kind, closes: c.closes, name: c.name })),
     trade_to_415: TRADE_TO_415.filter((t) => book.includes(t)),
-    fresh, account, indices, overnight, futures, watchlist, portfolio, legs, hours, risk,
+    /* `up`: a hedge call (the quarterly calls under the call rule), apart from the LEAPs in the
+       Positions totals (handoff 30). */
+    fresh, account, indices, overnight, futures, watchlist, portfolio, hours, risk,
+    legs: legs.map((l) => (upside.has(l) ? { ...l, up: true } : l)),
     chart, history, payback, yield: yieldOut, inventory, sold_vs_bought: soldVsBought, performance, allocation,
     deck: { earnings, season: seasonOut, reports: reportsOut, theta_checks: thetaChecks.filter((c) => c.card_today) },
     /* A name with no chain cached for that Friday is listed apart, so one
@@ -2184,6 +2205,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        name that goes short soonest first. */
     this_week: [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind))
       || ((a.sh ?? 99) - (b.sh ?? 99)) || String(a.t).localeCompare(String(b.t))),
+    todo,
   };
   return { payload, ms: Date.now() - t0, steps };
 }
