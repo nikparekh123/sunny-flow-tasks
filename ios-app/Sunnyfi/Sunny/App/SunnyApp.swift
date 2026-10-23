@@ -56,10 +56,20 @@ struct RootView: View {
             case .signedIn:
                 if !lock.onboardingDone {
                     FirstRunScreen(lock: lock) { lock.onboardingDone = true }
-                } else if lock.biometricEnabled && lock.isLocked {
-                    LockScreen(lock: lock)
                 } else {
-                    HomeView(store: store)
+                    // The lock covers Home instead of replacing it, so unlocking lands exactly where the app
+                    // was left: the tab, the card and its face, the scroll (Nik, 23 Oct 2026). Swapping the
+                    // views threw Home away and rebuilt it on the Home tab every time.
+                    let locked = lock.biometricEnabled && lock.isLocked
+                    ZStack {
+                        HomeView(store: store)
+                            .accessibilityHidden(locked)
+                        if locked {
+                            LockScreen(lock: lock)
+                                .transition(.opacity)
+                        }
+                    }
+                    .animation(.easeOut(duration: 0.2), value: locked)
                 }
             }
         }

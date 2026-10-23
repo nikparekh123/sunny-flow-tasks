@@ -17,6 +17,10 @@ struct SunnyPositionsTab: View {
     /// The totals' view: one tap turns every number together (time value, % change, $ change).
     @State private var mode = 0
     @State private var top = ScrollPosition()
+    /// The cards' order, set when the tab opens and on a pull: the 15 s updates move numbers, never a
+    /// card under the finger (Nik, 23 Oct 2026: "the cards are changing sequence as I am looking at it").
+    /// A name it does not know goes last.
+    @State private var order: [String] = []
 
     var body: some View {
         @Bindable var router = router
@@ -34,7 +38,7 @@ struct SunnyPositionsTab: View {
 
     private func screen(_ home: HomePayload) -> some View {
         let words = store.words ?? home
-        let all = PNames.build(home, orderFrom: words)
+        let all = PNames.keep(PNames.build(home, orderFrom: words), order)
         let shown = all.filter { $0.matches(router.filter) }
         return ScrollViewReader { proxy in
             ScrollView {
@@ -66,7 +70,9 @@ struct SunnyPositionsTab: View {
             .scrollPosition($top)
             .onChange(of: router.topTick[.positions]) { _, _ in withAnimation(reduce ? nil : S.standard(0.45)) { top.scrollTo(edge: .top) } }
             .scrollEdgeEffectStyle(.soft, for: .top)
-            .refreshable { await store.refresh(.pull) }
+            .refreshable { await store.refresh(.pull); reorder() }
+            .onAppear { if order.isEmpty { reorder() } }
+            .onChange(of: router.tab) { _, t in if t == .positions { reorder() } }
             // A card opened from a tap: a smooth scroll, the card 16 pt under the nav bar.
             .onChange(of: router.scrollTo) { _, id in
                 guard let id else { return }
@@ -82,6 +88,12 @@ struct SunnyPositionsTab: View {
                     .sharedBackgroundVisibility(router.filter != .all ? .hidden : .automatic)
             }
         }
+    }
+
+    /// The order as the data reads now: names with To do first, then the cards' own order.
+    private func reorder() {
+        guard let h = store.home else { return }
+        order = PNames.build(h, orderFrom: store.words ?? h).map(\.t)
     }
 
     /// The Walls screen: opens on next Friday's expiry; the To do chains are tagged (13d).

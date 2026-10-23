@@ -57,6 +57,16 @@ final class AppLock {
             }
             UserDefaults.standard.set(true, forKey: migratedKey)
         }
+        // Sunny has no Settings screen to pick a timeout, and an unset or "immediately" value asked for
+        // Face ID after every app switch (Nik, 23 Oct 2026). One hour, as the migration above meant.
+        let v3 = "lockTimeoutMigratedV3"
+        if !UserDefaults.standard.bool(forKey: v3) {
+            let raw = UserDefaults.standard.object(forKey: "lockTimeoutMin") as? Int
+            if raw == nil || raw == LockTimeout.immediate.rawValue {
+                UserDefaults.standard.set(LockTimeout.oneHour.rawValue, forKey: "lockTimeoutMin")
+            }
+            UserDefaults.standard.set(true, forKey: v3)
+        }
     }
 
     /// Currently locked? When true the root view shows the BiometricGate
@@ -78,8 +88,8 @@ final class AppLock {
 
     var lockTimeout: LockTimeout {
         get {
-            let raw = UserDefaults.standard.object(forKey: "lockTimeoutMin") as? Int ?? LockTimeout.immediate.rawValue
-            return LockTimeout(rawValue: raw) ?? .immediate
+            let raw = UserDefaults.standard.object(forKey: "lockTimeoutMin") as? Int ?? LockTimeout.oneHour.rawValue
+            return LockTimeout(rawValue: raw) ?? .oneHour
         }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "lockTimeoutMin") }
     }

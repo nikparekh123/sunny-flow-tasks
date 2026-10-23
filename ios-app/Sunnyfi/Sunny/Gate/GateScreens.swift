@@ -148,6 +148,9 @@ struct LockScreen: View {
                 .buttonStyle(SPressStyle())
             }
         }
+        // Over Home now: nothing underneath can be touched or read while it shows.
+        .contentShape(Rectangle())
+        .accessibilityAddTraits(.isModal)
         .task { _ = await lock.authenticate() }
     }
 }

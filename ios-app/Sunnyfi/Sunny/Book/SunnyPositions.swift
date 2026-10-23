@@ -70,6 +70,20 @@ enum PNames {
         }
         return all.filter(\.hasTodo) + all.filter { !$0.hasTodo }
     }
+
+    /// `names` in a frozen order (the Positions tab's); names it does not know keep their own order, last.
+    static func keep(_ names: [PName], _ order: [String]) -> [PName] {
+        guard !order.isEmpty else { return names }
+        let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+        return names.enumerated().sorted { a, b in
+            switch (rank[a.element.t], rank[b.element.t]) {
+            case let (x?, y?): x < y
+            case (.some, nil): true
+            case (nil, .some): false
+            case (nil, nil): a.offset < b.offset
+            }
+        }.map(\.element)
+    }
 }
 
 /// The cards, in order, each entering once (block 12, Motion).
