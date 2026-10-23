@@ -94,7 +94,7 @@ struct NameWays: Decodable, Hashable {
         let inn: Double
         let left: Double
         let basis: String
-        let pick: String
+        let pick: String?
         let tiles: [Tile]
     }
     /// The quarterly's put walls, priced; no count, no pick (Nik, 23 Oct 2026: "I can decide").

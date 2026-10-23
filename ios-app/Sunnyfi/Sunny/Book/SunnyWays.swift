@@ -23,9 +23,11 @@ struct PWay: Identifiable, Hashable {
     var label: String { labels.joined(separator: " · ") }
 }
 
-/// One trade on the face: sell calls, sell puts, buy calls, or the put walls to buy at.
+/// One trade on the face: sell calls, sell puts, buy calls, or the put walls to buy at. With nothing to
+/// trade on a side its walls still show (cw, pw, bw: Nik, 23 Oct 2026, "we can say nothing to trade in
+/// the grey box but still need to show for all").
 struct PTrade: Identifiable {
-    enum Kind: String { case sc, sp, bc, bp }
+    enum Kind: String { case sc, sp, bc, bp, cw, pw, bw }
     let kind: Kind
     var id: String { kind.rawValue }
     let head: String
@@ -35,6 +37,10 @@ struct PTrade: Identifiable {
     let pick: String?
     var sell: Bool { kind == .sc || kind == .sp }
     var call: Bool { kind == .sc || kind == .bc }
+    /// Walls only: nothing to trade on this side.
+    var walls: Bool { kind == .cw || kind == .pw || kind == .bw }
+    /// A trade to do (the badge counts these).
+    var todo: Bool { kind == .sc || kind == .sp || kind == .bc }
 }
 
 enum PWays {
@@ -50,11 +56,20 @@ enum PWays {
                 out.append(PTrade(kind: .sc, head: "Sell \(n) \(md) \(n == 1 ? "call" : "calls")",
                                   sub: "One per LEAP · \(c.rule ?? "ATM") · " + soldWords(c.sold),
                                   ways: merge(ts, rule: c.rule ?? "ATM"), pick: c.pick))
+            } else if let c = w.sell.calls, let ts = c.tiles, !ts.isEmpty {
+                out.append(PTrade(kind: .cw, head: "\(md) calls",
+                                  sub: ((c.sold ?? 0) > 0 ? "\(c.sold!) sold · nothing left to sell" : "Nothing to sell") + " · the walls",
+                                  ways: merge(ts, rule: "ATM"), pick: nil))
             }
             if let p = w.sell.puts, !p.isPaused, let n = p.n, n > 0, let ts = p.tiles {
                 out.append(PTrade(kind: .sp, head: "Sell \(n) \(md) \(n == 1 ? "put" : "puts")",
                                   sub: "From the put cap · " + (p.rule == "1st wall" ? "the put wall" : "the rule's strike") + " · " + soldWords(p.sold),
                                   ways: merge(ts, rule: "Rule"), pick: p.pick))
+            } else if let p = w.sell.puts, let ts = p.tiles, !ts.isEmpty {
+                let why = p.isPaused ? "Paused · below the 50-day" + (p.s50.map { " \(PF.price($0))" } ?? "")
+                    : (p.sold ?? 0) > 0 ? "\(p.sold!) sold · nothing left to sell" : "Nothing to sell"
+                out.append(PTrade(kind: .pw, head: "\(md) puts", sub: why + " · the walls",
+                                  ways: merge(ts, rule: "Rule"), pick: nil))
             }
             return out
         case .buy:
@@ -63,6 +78,9 @@ enum PWays {
                 out.append(PTrade(kind: .bc, head: "Need \(us(c.need)) Δ",
                                   sub: (c.inn > 0 ? "\(us(c.inn)) in · " : "None in yet · ") + "\(us(c.left)) left · \(month(c.exp)) calls, follow the wall",
                                   ways: merge(c.tiles, rule: "Rule"), pick: c.pick))
+            } else if let c = w.buy.calls, !c.tiles.isEmpty {
+                out.append(PTrade(kind: .bw, head: "\(month(c.exp)) calls", sub: "Delta covered · nothing to buy · the walls",
+                                  ways: merge(c.tiles, rule: "Rule"), pick: nil))
             }
             if let p = w.buy.puts, !p.tiles.isEmpty {
                 out.append(PTrade(kind: .bp, head: "\(month(p.exp)) puts",
@@ -155,7 +173,7 @@ struct PWaysFace: View {
         let cur = current(trades)
         VStack(alignment: .leading, spacing: 18) {
             chips
-            let paused = block == .sell ? w.sell.puts.flatMap { $0.isPaused ? $0 : nil } : nil
+            let paused = block == .sell ? w.sell.puts.flatMap { $0.isPaused && ($0.tiles ?? []).isEmpty ? $0 : nil } : nil
             if trades.isEmpty && paused == nil {
                 Text(block == .sell ? "Nothing to sell this week." : "Nothing to buy this week.")
                     .sType(SType(size: 15, weight: 500, line: 20, tracking: 0), tabular: false)
@@ -163,7 +181,7 @@ struct PWaysFace: View {
             }
             ForEach(trades) { tr in trade(tr, on: cur?.0.id == tr.id ? cur?.1.id : nil) }
             if let p = paused { pausedLine(p) }
-            if let c = cur { panel(c.0, c.1) }
+            if let c = cur { panel(c.0, c.1, nothing: !trades.contains(where: \.todo)) }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -174,7 +192,7 @@ struct PWaysFace: View {
             let p = s.split(separator: ".").map(String.init)
             if p.count == 2, let tr = trades.first(where: { $0.id == p[0] }), let wy = tr.ways.first(where: { $0.ids.contains(p[1]) }) { return (tr, wy) }
         }
-        guard let tr = trades.first else { return nil }
+        guard let tr = trades.first(where: \.todo) ?? trades.first else { return nil }
         let wy = tr.ways.first { w in tr.pick.map { w.ids.contains($0) } ?? false } ?? tr.ways.first
         return wy.map { (tr, $0) }
     }
@@ -292,7 +310,7 @@ struct PWaysFace: View {
             let n = x.n ?? 0, cost = x.cost ?? 0
             a += ", \(PF.count(n, "call")), \(us(cost)) dollars" + ga
             return Values(k: PF.strike(x.k), dist: dist, v3: PF.count(n, "call"), v3c: S.ink, v4: usd(cost), v4c: S.ink, gx: gx, a: a)
-        case .bp:
+        case .bp, .cw, .pw, .bw:
             let each = (x.mid ?? 0) * 100, d = abs(x.d ?? 0)
             a += ", \(us(each)) dollars each, delta \(String(format: "%.2f", d)) each" + ga
             return Values(k: PF.strike(x.k), dist: dist, v3: usd(each) + " each", v3c: S.ink, v4: String(format: "%.2f Δ each", d), v4c: S.ink, gx: gx, a: a)
@@ -315,7 +333,7 @@ struct PWaysFace: View {
 
     // MARK: The panel: the tapped way as the trade
 
-    private func panel(_ tr: PTrade, _ wy: PWay) -> some View {
+    private func panel(_ tr: PTrade, _ wy: PWay, nothing: Bool) -> some View {
         let x = wy.tile, us = PWays.us, usd = PWays.usd, k = PF.strike(x.k), pxT = "$" + PF.price(px)
         var head = "", tail = "", tailC = S.ink, l1 = ""
         var parts: [(String, Color)] = []
@@ -343,6 +361,11 @@ struct PWaysFace: View {
                 parts = [("Fills the ", S.ink), ("\(us(c?.left ?? 0)) Δ left", S.ink),
                          (" · " + String(format: "%.2f", x.de ?? x.d ?? 0) + " Δ each" + (c?.basis == "thu" ? " by \(PWays.weekday(w.sell.by))" : ""), S.ink)]
             }
+        case .cw, .pw, .bw:
+            // Nothing to trade on this side: say so, then the tapped wall as data.
+            head = nothing ? "Nothing to trade" : tr.kind == .cw ? "No calls to sell" : tr.kind == .pw ? "No puts to sell" : "No calls to buy"
+            l1 = "\(k) · \(wy.label) · " + near
+            parts = [(usd((x.mid ?? 0) * 100) + " each · " + String(format: "%.2f", abs(x.d ?? 0)) + " Δ each", S.ink)]
         case .bp:
             let p = w.buy.puts
             head = "Buy \(PWays.month(p?.exp ?? "")) puts at \(k) · \(wy.label) · "; tail = usd((x.mid ?? 0) * 100) + " each"; l1 = near

@@ -174,7 +174,8 @@ private struct PNameCard: View {
     /// tag that runs past the plot stays on its own face.
     private var pageW: CGFloat { width + 40 }
     private var faces: [Face] {
-        [n.hasTodo ? .todo : nil, n.sold != nil ? .sold : nil, n.bought != nil ? .bought : nil,
+        // With ways the To do face stays on every card, the walls showing even with nothing to trade (23 Oct).
+        [n.hasTodo || n.ways != nil ? .todo : nil, n.sold != nil ? .sold : nil, n.bought != nil ? .bought : nil,
          n.bought != nil && n.dg != nil ? .dg : nil].compactMap { $0 }
     }
     /// The Δ Γ dot, only while a buy is open: red when it goes short inside a normal week's move,
@@ -187,7 +188,7 @@ private struct PNameCard: View {
     }
     private func mark(_ f: Face) -> PMark {
         // With ways the badge says it all: no dots on the other tabs (13c).
-        if n.ways != nil { return f == .todo ? .badge(n.todoN) : .none }
+        if n.ways != nil { return f == .todo && n.todoN > 0 ? .badge(n.todoN) : .none }
         return switch f {
         case .todo: .badge(n.tasks.count)
         case .sold: n.tasks.contains { $0.face == "sold" } ? .dot(S.orange) : .none

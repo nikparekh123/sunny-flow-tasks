@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-23.2';
+const BUILD = '2026-10-23.3';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1661,17 +1661,21 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const tile = (id: string, c: CS | null, call: boolean, S: number | null, gx: number | null, was: number | null) => !c ? null : {
           id, k: c.k, mid: r2(c.mid), d: r4(c.delta), d15: S ? r4(dAt(S, c.k, targetExp, c.iv, call)) : null, g: gx, was };
         const wkNow = wk.now, wkAgo = wk.ago;
-        const nCalls = sellN + (saleTime ? rolledTo : 0);
-        const sellCalls = atm && nCalls > 0 ? { n: nCalls, sold: doneAtm + doneOtm, rule: earnWk ? '1 SD' : 'ATM', pick: 'at',
-          tiles: [tile('at', atm, true, S15, null, null),
-                  tile('w', quoted(calls, wkNow?.cw), true, S15, gm(wkNow?.cwg), wkAgo?.cw ?? null),
-                  tile('w2', quoted(calls, wkNow?.cw2), true, S15, gm(wkNow?.cw2g), wkAgo?.cw2 ?? null)].filter(Boolean) } : null;
-        const sellPuts = putsPaused && putTarget > 0 ? { paused: true, s50: r2(m50!.sma50) }
+        /* Every name shows next Friday's walls, trade or not (Nik, 23 Oct 2026: "we can say nothing to
+           trade in the grey box but still need to show for all"): a side with nothing left to sell sends
+           n 0 and its walls, no pick (`pick` '' keeps builds 6 and 7 decoding). */
+        const nCalls = atm ? sellN + (saleTime ? rolledTo : 0) : 0;
+        const callWalls = [tile('w', quoted(calls, wkNow?.cw), true, S15, gm(wkNow?.cwg), wkAgo?.cw ?? null),
+                           tile('w2', quoted(calls, wkNow?.cw2), true, S15, gm(wkNow?.cw2g), wkAgo?.cw2 ?? null)].filter(Boolean);
+        const putWalls = [tile('w', quoted(puts, wkNow?.pw), false, S15dn, gm(wkNow?.pwg), wkAgo?.pw ?? null),
+                          tile('w2', quoted(puts, wkNow?.pw2), false, S15dn, gm(wkNow?.pw2g), wkAgo?.pw2 ?? null)].filter(Boolean);
+        const sellCalls = nCalls > 0 ? { n: nCalls, sold: doneAtm + doneOtm, rule: earnWk ? '1 SD' : 'ATM', pick: 'at',
+            tiles: [tile('at', atm, true, S15, null, null), ...callWalls] }
+          : callWalls.length ? { n: 0, sold: doneAtm + doneOtm, rule: earnWk ? '1 SD' : 'ATM', pick: '', tiles: callWalls } : null;
+        const sellPuts = putsPaused && putTarget > 0 ? { paused: true, s50: r2(m50!.sma50), n: 0, sold: donePuts, pick: '', tiles: putWalls }
           : put && putN > 0 ? { n: putN, sold: donePuts, rule: wallPut ? '1st wall' : 'rule', pick: wallPut ? 'w' : 'at',
-              tiles: [wallPut ? null : tile('at', put, false, S15dn, null, null),
-                      tile('w', quoted(puts, wkNow?.pw), false, S15dn, gm(wkNow?.pwg), wkAgo?.pw ?? null),
-                      tile('w2', quoted(puts, wkNow?.pw2), false, S15dn, gm(wkNow?.pw2g), wkAgo?.pw2 ?? null)].filter(Boolean) }
-          : null;
+              tiles: [wallPut ? null : tile('at', put, false, S15dn, null, null), ...putWalls].filter(Boolean) }
+          : putWalls.length ? { n: 0, sold: donePuts, pick: '', tiles: putWalls } : null;
         /* Buy calls: the need is the delta short at +1.5 SD by Thursday, or what lifts today's delta back to
            the floor, whichever is bigger (the fix's own sizing, so the wall tile equals the fix row). */
         const P = pkgIn, qq = P?.qq;
@@ -1693,6 +1697,18 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
           const tiles = [bt('w', rowAt(qw.now?.cw), gm(qw.now?.cwg), qw.ago?.cw ?? null), bt('w2', rowAt(qw.now?.cw2), gm(qw.now?.cw2g), qw.ago?.cw2 ?? null),
             bt('sd', rowAt(qq.sdK), null, null), { id: 'sh', k: 0, n: left, cost: Math.round(left * spot) }].filter(Boolean) as Row[];
           if (left > 0) buyCalls = { exp: qq.exp, need: inn + left, inn, left, basis, pick: tiles.some((x) => x.id === 'w') ? 'w' : 'sd', tiles };
+        }
+        /* Nothing to buy: the quarterly's call walls anyway, as data (left 0, no pick). */
+        if (!buyCalls) {
+          const qRows = upQuotes.filter((r) => r.ticker === t && r.tenor === 'q' && Number(r.mid) > 0);
+          const qExp = qRows.length ? String(qRows[0].expiry) : null;
+          const qw = qExp ? wallsAt(t, qExp) : null;
+          const ct = (id: string, k: number | null | undefined, gx: number | null, was: number | null) => {
+            const r = k == null ? null : qRows.find((x) => Math.abs(Number(x.strike) - k) < 1e-6);
+            return r ? { id, k: Number(r.strike), mid: r2(Number(r.mid)), d: r4(num(r.delta)), g: gx, was } : null;
+          };
+          const tiles = qw ? [ct('w', qw.now?.cw, gm(qw.now?.cwg), qw.ago?.cw ?? null), ct('w2', qw.now?.cw2, gm(qw.now?.cw2g), qw.ago?.cw2 ?? null)].filter(Boolean) : [];
+          if (tiles.length) buyCalls = { exp: qExp, need: 0, inn: 0, left: 0, basis: 'now', pick: '', tiles };
         }
         /* Buy puts: that expiry's put walls under the price, priced (chain-next 'qp'). No count, no pick. */
         const pExp = qq ? String(qq.exp) : null;
