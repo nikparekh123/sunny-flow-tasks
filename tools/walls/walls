@@ -1,0 +1,26 @@
+#!/bin/bash
+# walls TICKER [--days 45] [--expiries 2026-10-30,2026-11-06] [--target PCT] [--nosave]
+# Gamma walls for one stock from the gex-walls Supabase function (Theta Data through fly.io).
+# Each run is logged to the gex_walls table unless --nosave.
+set -euo pipefail
+[ $# -ge 1 ] || { sed -n '2,4p' "$0"; exit 1; }
+T=$(echo "$1" | tr a-z A-Z); shift
+DAYS=45; EXP=""; TGT=""; SAVE=true
+while [ $# -gt 0 ]; do case "$1" in
+  --days) DAYS=$2; shift 2;; --expiries) EXP=$2; shift 2;; --target) TGT=$2; shift 2;; --nosave) SAVE=false; shift;;
+  *) echo "unknown option $1"; exit 1;; esac; done
+REF=ziwoutsnuywjnsyfbzsp
+PAT=$(security find-generic-password -a sunnyfi -s supabase_pat -w)
+KEY=$(curl -s -m 60 -X POST "https://api.supabase.com/v1/projects/$REF/database/query" -H "Authorization: Bearer $PAT" \
+  -H 'Content-Type: application/json' -d '{"query":"select decrypted_secret k from vault.decrypted_secrets where name = '"'"'cron_secret'"'"'"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["k"])')
+BODY=$(python3 -c 'import json,sys; t,d,e,g,s=sys.argv[1:]
+b={"ticker":t,"days":int(d),"save":s=="true"}
+if e: b["expiries"]=e.split(",")
+if g: b["target"]=float(g)
+print(json.dumps(b))' "$T" "$DAYS" "$EXP" "$TGT" "$SAVE")
+curl -s -m 180 -X POST "https://$REF.supabase.co/functions/v1/gex-walls" -H "x-cron-key: $KEY" -H 'Content-Type: application/json' -d "$BODY" \
+  | python3 -c 'import json,sys
+d=json.load(sys.stdin)
+if d.get("ok"): print(d["text"])
+else: print("FAILED:", d.get("error")); [print("  -", p) for p in d.get("problems", [])]; sys.exit(2)'
