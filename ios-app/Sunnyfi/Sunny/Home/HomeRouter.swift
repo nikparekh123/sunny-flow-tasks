@@ -44,6 +44,8 @@ final class HomeRouter {
     var filter: PFilter = .all
     /// The Insights sheet's name.
     var insights: String?
+    /// The Walls screen's name (13d), pushed in the Positions stack from All walls on a card.
+    var walls: String?
 
     /// Opens a name's Position card on a face from anywhere: the Positions tab, then the card
     /// scrolled under the nav bar on that face, ringed 2 pt for 1.8 s (block 12a).

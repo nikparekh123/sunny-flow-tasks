@@ -40,6 +40,18 @@ puts only while its last close is above its 50-day average; below it, put sales 
 **-$44** from 31 Aug to 23 Oct (3 winning weeks, 3 losing), so they were adding drop
 risk for nothing. The long protective puts are unchanged.
 
+**From 2026-10-23 (handoff 31): strikes from the gamma walls.** Nik:
+- **Weekly short puts** (when above the 50-day) go at next Friday's **1st put wall** below
+  the price (its 2nd wall once the price has fallen through the 1st). The count is
+  unchanged: the put cap. Replaces "nearest strike at or below" and the 2% overlay rule.
+- **Hedge calls** are bought at the quarterly's **1st call wall** (2nd wall, 1.5 SD and
+  shares shown as other ways), sized to the delta still needed: short at +1.5 SD by
+  Thursday, or under the floor today. Shares and puts count in that delta.
+- **Protective puts:** January's 1st and 2nd put walls are shown with price and delta;
+  no size is suggested, Nik decides.
+- Hedge expiry: January until it is under 8 weeks out (to 20 Nov 2026), then March, June,
+  September and December, each moving on at 8 weeks the same way.
+
 Selling about **a quarter of the notional** each week fully funds a 1:1 six-month
 put. It works because weekly puts trade rich to six-month puts: the square root
 of time says a 6-month should cost about 5.1x a weekly, and NKE measures 6.13x,

@@ -85,14 +85,18 @@ export function impliedSpot(pairs: { k: number; c: number; p: number }[], T: num
   return best ? best.c - best.p + best.k * Math.exp(-r * T) : null;
 }
 
-/** Years from `nowMs` to 4:00 PM New York on the expiry day (calendar time), at least an hour. */
-export function yearsTo(exp: string, nowMs: number): number {
-  const [y, m, d] = exp.split('-').map(Number);
+/** 4:00 PM New York on a day, in ms. */
+export function closeMs(day: string): number {
+  const [y, m, d] = day.split('-').map(Number);
   // New York's offset that day: 4 PM EDT is 20:00 UTC, 4 PM EST is 21:00 UTC.
   const noonUtc = new Date(Date.UTC(y, m - 1, d, 12));
   const nyHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hourCycle: 'h23' }).format(noonUtc));
-  const closeMs = Date.UTC(y, m - 1, d, 16 + (12 - nyHour));
-  return Math.max(1 / (365 * 24), (closeMs - nowMs) / (365 * 864e5));
+  return Date.UTC(y, m - 1, d, 16 + (12 - nyHour));
+}
+
+/** Years from `nowMs` to 4:00 PM New York on the expiry day (calendar time), at least an hour. */
+export function yearsTo(exp: string, nowMs: number): number {
+  return Math.max(1 / (365 * 24), (closeMs(exp) - nowMs) / (365 * 864e5));
 }
 
 /** Dollars of delta per 1% move for one contract line: calls plus, puts minus. */
@@ -182,6 +186,22 @@ export function zeroGamma(legs: Leg[], spot: number, opts: { r?: number; q?: num
     pS = S; pV = v;
   }
   return xs.length ? xs.sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot))[0] : null;
+}
+
+/** The strike holding the most contracts on each side (calls above spot, puts below), when it is not that
+    side's gamma wall: open interest far from the price carries little gamma, so it "sleeps" until the
+    stock moves toward it (handoff 31, 13d: "Most contracts: 47.5 (42,765), wakes if NKE rallies"). */
+export function sleeping(legs: Leg[], spot: number, w: Walls): { call: { k: number; oi: number } | null; put: { k: number; oi: number } | null } {
+  const by = new Map<number, { c: number; p: number }>();
+  for (const l of legs) { const x = by.get(l.k) ?? { c: 0, p: 0 }; x.c += l.coi; x.p += l.poi; by.set(l.k, x); }
+  const xs = [...by.entries()].map(([k, x]) => ({ k, ...x }));
+  const top = (side: 'c' | 'p') => xs.filter((x) => (side === 'c' ? x.k > spot : x.k < spot) && x[side] > 0)
+    .sort((a, b) => b[side] - a[side] || Math.abs(a.k - spot) - Math.abs(b.k - spot))[0];
+  const c = top('c'), p = top('p');
+  return {
+    call: c && c.k !== w.call[0]?.k ? { k: c.k, oi: c.c } : null,
+    put: p && p.k !== w.put[0]?.k ? { k: p.k, oi: p.p } : null,
+  };
 }
 
 /** Today's volume above half the open interest: new positions went on today. */

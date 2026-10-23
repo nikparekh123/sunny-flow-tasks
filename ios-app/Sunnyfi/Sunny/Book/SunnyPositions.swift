@@ -6,9 +6,10 @@
 //  Positions tab: one glass card per name. The body swipes To do · Sold ·
 //  Bought · Δ Γ under a Liquid Glass control whose capsule rides the swipe;
 //  To do comes first while the name has work and goes once IBKR shows the
-//  trades (nothing is ticked). Every face is the same height, so a swipe moves
-//  nothing else on the page. The count badge and the tab dots say where the
-//  work is; every card ends with This week's insights (a sheet). Nothing
+//  trades (nothing is ticked). The card is as tall as the face it is on and
+//  blends between two faces mid-swipe (handoff 31). With ways (13c) the To do
+//  face is SunnyWays and the count badge is its number of trades; every card
+//  ends with This week's insights (a sheet) and All walls (13d). Nothing
 //  bought: no Δ Γ face.
 //
 
@@ -28,13 +29,19 @@ struct PName: Identifiable {
     /// To do rows: this week's rolls and sales, then the calls to buy.
     let tasks: [WeekTask]
     let bars: TodoBars?
+    /// The To do face as Sell and Buy with their ways (handoff 31, 13c); replaces the bars and rows.
+    let ways: NameWays?
     /// The most any call sold has kept of its premium, % (Calls that kept at least).
     let kept: Double
+
+    /// The badge: the trades left with ways on, else the To do rows.
+    var todoN: Int { ways?.trades ?? tasks.count }
+    var hasTodo: Bool { todoN > 0 }
 
     func matches(_ f: PFilter) -> Bool {
         switch f {
         case .all: true
-        case .todo: !tasks.isEmpty
+        case .todo: hasTodo
         case .up: (move ?? 0) > 0
         case .down: (move ?? 0) < 0
         case .kept(let p): kept >= Double(p)
@@ -51,17 +58,17 @@ enum PNames {
         let names = ((sold?.cards.map(\.t) ?? []) + (bought?.cards.map(\.t) ?? [])).reduce(into: [String]()) { a, t in
             if !a.contains(t) && t != "TSLA" { a.append(t) }
         }
-        let rows = home.thisWeek?.value ?? [], bars = home.todo?.value ?? [:]
+        let rows = home.thisWeek?.value ?? [], bars = home.todo?.value ?? [:], ways = home.ways?.value ?? [:]
         let moves = Dictionary(home.portfolio.map { ($0.ticker, $0.ranges.d) }, uniquingKeysWith: { a, _ in a })
         let all: [PName] = names.map { t in
             let sc = sold?.cards.first { $0.t == t }, bc = bought?.cards.first { $0.t == t }
             let calls = (sc?.legs ?? []).filter { $0.call && $0.base > 0 }
             return PName(t: t, px: (sc ?? bc)?.px ?? 0, move: moves[t] ?? nil, sold: sc, bought: bc,
                          dg: home.writes.names.first { $0.ticker == t }?.dg?.value, strategy: home.strategies?[t],
-                         tasks: rows.filter { $0.t == t }.sorted { !$0.buy && $1.buy }, bars: bars[t],
+                         tasks: rows.filter { $0.t == t }.sorted { !$0.buy && $1.buy }, bars: bars[t], ways: ways[t],
                          kept: calls.map { $0.g / $0.base * 100 }.max() ?? 0)
         }
-        return all.filter { !$0.tasks.isEmpty } + all.filter(\.tasks.isEmpty)
+        return all.filter(\.hasTodo) + all.filter { !$0.hasTodo }
     }
 }
 
@@ -142,15 +149,18 @@ private struct PNameCard: View {
 
     @State private var pos = ScrollPosition()
     @State private var prog = PFaceProgress()
-    /// The faces' shared height (the tallest face).
-    @State private var h: CGFloat = 0
+    /// Each face's own height: the card takes the one it is on, blended mid-swipe (handoff 31).
+    @State private var hs: [Face: CGFloat] = [:]
+    /// The To do face's chip and tapped ways, kept for the session (13c).
+    @State private var block: PWays.Block = .sell
+    @State private var sel: [PWays.Block: String] = [:]
 
     private var t: String { n.t }
     /// One face is the card's full width; it carries the 20 pt side padding itself, so a strike
     /// tag that runs past the plot stays on its own face.
     private var pageW: CGFloat { width + 40 }
     private var faces: [Face] {
-        [n.tasks.isEmpty ? nil : .todo, n.sold != nil ? .sold : nil, n.bought != nil ? .bought : nil,
+        [n.hasTodo ? .todo : nil, n.sold != nil ? .sold : nil, n.bought != nil ? .bought : nil,
          n.bought != nil && n.dg != nil ? .dg : nil].compactMap { $0 }
     }
     /// The Δ Γ dot, only while a buy is open: red when it goes short inside a normal week's move,
@@ -162,7 +172,9 @@ private struct PNameCard: View {
         return nil
     }
     private func mark(_ f: Face) -> PMark {
-        switch f {
+        // With ways the badge says it all: no dots on the other tabs (13c).
+        if n.ways != nil { return f == .todo ? .badge(n.todoN) : .none }
+        return switch f {
         case .todo: .badge(n.tasks.count)
         case .sold: n.tasks.contains { $0.face == "sold" } ? .dot(S.orange) : .none
         case .bought: .none
@@ -182,33 +194,54 @@ private struct PNameCard: View {
                 }
             }
             .padding(.horizontal, 20)
-            // Every face is the same height (the tallest), its numbers on the bottom, so a swipe moves nothing.
-            ScrollView(.horizontal) {
-                PEqualFaces(w: pageW) {
-                    ForEach(F) { f in face(f).padding(.horizontal, 20) }
+            // Each face at its own height, top aligned: the card takes the one on screen and blends
+            // between two mid-swipe (handoff 31, 13).
+            PFaceHeight(prog: prog, heights: F.map { hs[$0] }) {
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(F) { f in
+                            face(f).padding(.horizontal, 20)
+                                .frame(width: pageW, alignment: .topLeading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { v in setHeight(f, v) }
+                        }
+                    }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h = $0 }
+                .scrollTargetBehavior(.paging)
+                .scrollPosition($pos)
+                .scrollIndicators(.hidden)
+                .scrollDisabled(F.count < 2)
+                .onScrollGeometryChange(for: Double.self) { g in Double(g.contentOffset.x / max(1, g.containerSize.width)) } action: { _, v in
+                    prog.p = v
+                }
+                .onScrollPhaseChange { _, ph in prog.moving = ph != .idle }
             }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition($pos)
-            .scrollIndicators(.hidden)
-            .scrollDisabled(F.count < 2)
-            .onScrollGeometryChange(for: Double.self) { g in Double(g.contentOffset.x / max(1, g.containerSize.width)) } action: { _, v in
-                prog.p = v
+            .frame(width: pageW)
+            HStack(spacing: 8) {
+                Button { router.insights = t } label: {
+                    Text("This week's insights").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                        .foregroundStyle(S.ink)
+                        .lineLimit(1).minimumScaleFactor(0.85)
+                        .frame(maxWidth: .infinity).frame(height: 44)
+                        .background(Capsule().fill(S.track))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(SPressStyle(scale: 0.97))
+                .accessibilityLabel("Open this week's insights for \(t)")
+                // The Walls screen for this name (13d), pushed in the Positions stack.
+                Button { router.walls = t } label: {
+                    Text("All walls").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
+                        .foregroundStyle(S.ink)
+                        .lineLimit(1)
+                        .padding(.horizontal, 20).frame(height: 44)
+                        .background(Capsule().fill(S.track))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(SPressStyle(scale: 0.97))
+                .accessibilityLabel("All walls for \(t)")
             }
-            .onScrollPhaseChange { _, ph in prog.moving = ph != .idle }
-            .frame(width: pageW, height: h > 0 ? h : nil)
-            Button { router.insights = t } label: {
-                Text("This week's insights").sType(SType(size: 15, weight: 600, line: 20, tracking: 0), tabular: false)
-                    .foregroundStyle(S.ink)
-                    .frame(maxWidth: .infinity).frame(height: 44)
-                    .background(Capsule().fill(S.track))
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(SPressStyle(scale: 0.97))
             .padding(.horizontal, 20)
-            .accessibilityLabel("Open this week's insights for \(t)")
         }
         .foregroundStyle(S.ink)
         .padding(.vertical, 20)
@@ -240,12 +273,25 @@ private struct PNameCard: View {
             withTransaction(tr) { pos.scrollTo(x: CGFloat(i) * pageW) }
         }
         .onAppear {
+            #if DEBUG && targetEnvironment(simulator)
+            // `-ways buy` opens every To do face on Buy; `-waysSel bc.w2` taps that way (screenshots).
+            let a = ProcessInfo.processInfo.arguments
+            if a.contains("buy"), a.contains("-ways") { block = .buy }
+            if let i = a.firstIndex(of: "-waysSel"), i + 1 < a.count { sel[block] = a[i + 1] }
+            #endif
             let f = router.cardFace[t].flatMap(Face.init(rawValue:)) ?? (keptOn ? .sold : nil)
             if let f, let i = F.firstIndex(of: f), i > 0 {
                 var tr = Transaction(); tr.disablesAnimations = true
                 withTransaction(tr) { pos.scrollTo(x: CGFloat(i) * pageW) }
             }
         }
+    }
+
+    /// A face's height as measured: a change while the card is still (a chip, a fill) eases 0.3 s;
+    /// mid-swipe it follows at once (Reduce Motion: always at once).
+    private func setHeight(_ f: Face, _ v: CGFloat) {
+        guard abs((hs[f] ?? 0) - v) > 0.5 else { return }
+        if hs[f] == nil || prog.moving || reduce { hs[f] = v } else { withAnimation(S.standard(0.3)) { hs[f] = v } }
     }
 
     /// By the face's x offset, never its id: an id scroll moves the page underneath too.
@@ -260,7 +306,7 @@ private struct PNameCard: View {
     /// The ticker, its price and today's move; the strategy on the right; an orange dot while there is work.
     private var head: some View {
         HStack(alignment: .center, spacing: 8) {
-            if !n.tasks.isEmpty {
+            if n.hasTodo {
                 Circle().fill(S.orange).frame(width: 10, height: 10)
                     .accessibilityLabel("Has To do")
             }
@@ -287,7 +333,8 @@ private struct PNameCard: View {
 
     @ViewBuilder private func face(_ f: Face) -> some View {
         switch f {
-        case .todo: todoFace
+        case .todo:
+            if let w = n.ways { PWaysFace(t: t, px: n.px, w: w, block: $block, sel: $sel) } else { todoFace }
         case .sold: if let c = n.sold { side(c) }
         case .bought: if let c = n.bought { side(c) }
         case .dg: if let d = n.dg { PDGFace(t: t, dg: d, width: width) }
@@ -314,7 +361,7 @@ private struct PNameCard: View {
                                            today: today),
                        width: width, go: go, d: delay, open: open)
             Spacer(minLength: 0)
-            if c.sold { unsold }
+            if c.sold && n.ways == nil { unsold }
             footer(c)
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -517,21 +564,18 @@ private struct PNameCard: View {
     }
 }
 
-/// The faces side by side, each `w` wide and as tall as the tallest, so a face with less in it
-/// keeps its numbers on the bottom and a swipe never changes the card's height.
-private struct PEqualFaces: Layout {
-    let w: CGFloat
-    private func tallest(_ subviews: Subviews) -> CGFloat {
-        subviews.map { $0.sizeThatFits(ProposedViewSize(width: w, height: nil)).height }.max() ?? 0
-    }
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        CGSize(width: w * CGFloat(subviews.count), height: tallest(subviews))
-    }
-    func placeSubviews(in b: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let h = tallest(subviews)
-        for (i, v) in subviews.enumerated() {
-            v.place(at: CGPoint(x: b.minX + CGFloat(i) * w, y: b.minY), proposal: ProposedViewSize(width: w, height: h))
-        }
+/// The pager's height: the face on screen, blended between two by the swipe (handoff 31, 13). Its own
+/// view, so only it redraws while the finger moves; the faces inside are not rebuilt.
+private struct PFaceHeight<Content: View>: View {
+    let prog: PFaceProgress
+    let heights: [CGFloat?]
+    @ViewBuilder let content: Content
+    var body: some View {
+        let p = min(max(prog.p, 0), Double(max(0, heights.count - 1)))
+        let lo = Int(p.rounded(.down)), hi = min(lo + 1, heights.count - 1), f = CGFloat(p - Double(lo))
+        let a = heights[safe: lo] ?? nil, b = heights[safe: hi] ?? nil
+        let h: CGFloat? = a.map { a in a + ((b ?? a) - a) * f }
+        content.frame(height: h, alignment: .top).clipped()
     }
 }
 
@@ -935,7 +979,7 @@ private struct PPress: ButtonStyle {
 }
 
 /// The page-top number dims while pressed (the design's active opacity .6).
-private struct POpacityPress: ButtonStyle {
+struct POpacityPress: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.6 : 1)

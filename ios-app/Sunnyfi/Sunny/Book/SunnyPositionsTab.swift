@@ -19,12 +19,15 @@ struct SunnyPositionsTab: View {
     @State private var top = ScrollPosition()
 
     var body: some View {
+        @Bindable var router = router
         ZStack {
             SBackground()
             if let home = store.home { screen(home) }
         }
         .navigationTitle("Positions")
         .navigationBarTitleDisplayMode(.large)
+        // All walls on a card (13d): the Walls screen for that name, the system's push and back.
+        .navigationDestination(item: $router.walls) { t in walls(t) }
         .environment(\.livePulse, store.livePulse)
         .environment(\.changedLegs, store.changedLegs)
     }
@@ -81,9 +84,23 @@ struct SunnyPositionsTab: View {
         }
     }
 
+    /// The Walls screen: opens on next Friday's expiry; the To do chains are tagged (13d).
+    @ViewBuilder private func walls(_ t: String) -> some View {
+        if let home = store.home {
+            let w = home.ways?.value?[t]
+            let held = Set((home.writes.names.first { $0.ticker == t }?.pkg?.held ?? []).filter { $0.ty == "oc" }.map(\.exp))
+            let buys = Set([w?.buy.calls?.exp, w?.buy.puts?.exp].compactMap { $0 }).subtracting(held)
+            let tags = Dictionary(grouping: [(w?.sell.exp, "Your sells")].compactMap { e, s in e.map { ($0, s) } }
+                + held.map { ($0, "Your hedge · calls held") } + buys.map { ($0, "Your hedge · new buys") }, by: \.0)
+                .mapValues { $0.map(\.1) }
+            let px = PNames.build(home, orderFrom: store.words ?? home).first { $0.t == t }?.px ?? 0
+            SunnyWalls(t: t, px: px, today: home.today, sells: w?.sell.exp, tags: tags)
+        }
+    }
+
     /// "7 names · 5 with To do", or while a filter is on "Stock up · 4 of 7 names".
     private func subtitle(_ all: [PName], shown: Int) -> String {
-        let names = PWords.n(all.count, "name"), todo = all.filter { !$0.tasks.isEmpty }.count
+        let names = PWords.n(all.count, "name"), todo = all.filter(\.hasTodo).count
         if router.filter != .all { return "\(router.filter.title) · \(shown) of \(names)" }
         return names + (todo > 0 ? " · \(todo) with To do" : "")
     }

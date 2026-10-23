@@ -127,6 +127,12 @@ enum S {
     static let track = dynA(0x1D1D1F, 0.06, 0xFFFFFF, 0.10)
     static let night = Color(hex: 0x05070A)
 
+    // Added Oct 23 (handoff 31): the way tiles on the To do face, the Walls screen's cards and chips
+    // (with a 0.5 pt S.line hairline), and the rule's pick (with a 1.5 pt S.green ring).
+    static let tile      = dynA(0xFFFFFF, 0.55, 0xFFFFFF, 0.06)
+    static let tileWalls = dynA(0xFFFFFF, 0.72, 0xFFFFFF, 0.06)
+    static let greenTint = dynA(0x65C466, 0.16, 0x65C466, 0.18)
+
     /// A figure on the chart and its stats: red when below zero, else ink.
     static func lossInk(_ v: Double) -> Color { v < 0 ? red : ink }
 

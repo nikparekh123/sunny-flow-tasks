@@ -1,7 +1,7 @@
 // The gamma-wall maths on a small fixed chain, checked by hand, with no Theta and no network.
 // Run: deno test supabase/functions/gex-walls/walls_test.ts
 import { bsGamma, buildStrikes, Chain, Contract, contractGex, findWalls, IncompleteChain, isFresh,
-  nearest, summaryLine, target, yearsTo, zeroGamma } from './walls.ts';
+  nearest, sleeping, summaryLine, target, yearsTo, zeroGamma } from './walls.ts';
 
 function eq(a: unknown, b: unknown, msg = '') {
   if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${msg} expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
@@ -152,4 +152,11 @@ Deno.test('the flip: where the re-priced chain nets to zero', () => {
   // Interpolated between 0.25% price steps, so within a cent, not exact.
   near(zeroGamma(legs, 97, { gammaFn: (S, K) => tent(S, K) })!, 95, 0.01);
   eq(zeroGamma([legs[0]], 97, { gammaFn: (S, K) => tent(S, K) }), null, 'all calls: never crosses');
+});
+
+Deno.test('the sleeping wall: most contracts on a side, off its gamma wall', () => {
+  const b = buildStrikes(one, { nowMs: NOW, gammaFn });
+  // Calls: 105 holds the most (2,500) and is the wall, so nothing sleeps. Puts: the wall is 95
+  // (1,500 x 0.04) but 90 holds more contracts (2,000 x 0.02 gamma).
+  eq(sleeping(b.legs, 100, findWalls(b.rows, 100)), { call: null, put: { k: 90, oi: 2000 } });
 });

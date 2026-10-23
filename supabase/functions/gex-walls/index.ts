@@ -14,11 +14,15 @@
  * POST { ticker, days?: 45, expiries?: ['2026-10-30', ...], target?: 5, save?: true }
  *   -> { ok, ..., text }   text is the printable table and summary
  * POST { mode: 'daily', tickers? }  every name with a cached chain (the book), after the close each
- *   trading day; each run appends one row to gex_walls (the per-ticker log).
+ *   trading day; each run appends one row to gex_walls (the per-ticker log). For the book (no `tickers`)
+ *   it also saves one row per expiry (handoff 31, the Walls screen): the next three weeklies, the
+ *   monthlies to about six months and the next January, each on its own (`expiry` set).
+ * POST { mode: 'backfill', days: ['2026-10-19', ...], tickers? }  the same per-expiry rows for past
+ *   sessions, from Theta's history (end-of-day quotes, that day's open interest), priced at 4 PM.
  * An incomplete chain fails loudly: HTTP 422 with every problem named, and nothing is logged.
  */
-import { buildStrikes, Chain, Contract, findWalls, IncompleteChain, impliedSpot, isFresh, nearest,
-  renderTable, solveIv, summaryLine, target, yearsTo, zeroGamma } from './walls.ts';
+import { buildStrikes, Chain, closeMs, Contract, findWalls, IncompleteChain, impliedSpot, isFresh, nearest,
+  renderTable, sleeping, solveIv, summaryLine, target, yearsTo, zeroGamma } from './walls.ts';
 
 const THETA_URL = Deno.env.get('THETA_URL') ?? '';
 const THETA_KEY = Deno.env.get('THETA_PROXY_KEY') ?? '';
@@ -49,38 +53,68 @@ function nyNow(): { day: string; afterClose: boolean } {
 const dte = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 864e5);
 const key = (c: Row) => `${c.expiration}|${Number(c.strike)}|${c.right}`;
 
-/** Pull the chain for the window (or the listed expiries) and turn it into walls.ts's shape. */
-async function loadChain(ticker: string, days: number, expiries?: string[]): Promise<{ chain: Chain; warnings: string[] }> {
-  const { day, afterClose } = nyNow();
-  const listed = (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration));
-  if (!listed.length) throw new IncompleteChain([`Theta lists no expirations for ${ticker}`]);
+/** Is this a standard monthly: the third Friday, or the Thursday before when that Friday is a holiday. */
+const isMonthly = (e: string) => { const d = new Date(e + 'T12:00:00Z'), wd = d.getUTCDay(), dd = d.getUTCDate();
+  return (wd === 5 && dd >= 15 && dd <= 21) || (wd === 4 && dd >= 14 && dd <= 20); };
+
+/** The expiries the Walls screen keeps (handoff 31, 13d): the next four weeklies (the screen shows three, and
+    its week table reaches back to Monday, when the third was the fourth), the monthlies to about six months,
+    and the next January (where the hedge calls sit) when it is further out. */
+function logged(listed: string[], day: string): string[] {
+  const fut = listed.filter((e) => e > day).sort();
+  const weeklies = fut.filter((e) => !isMonthly(e) && dte(day, e) <= 28).slice(0, 4);
+  const monthlies = fut.filter((e) => isMonthly(e) && dte(day, e) <= 186);
+  const jan = fut.find((e) => isMonthly(e) && e.slice(5, 7) === '01');
+  return [...new Set([...weeklies, ...monthlies, ...(jan ? [jan] : [])])].sort();
+}
+
+/** Pull the chain for the expiries `pick` wants (or the listed ones) and turn it into walls.ts's shape.
+    `asOf` a past session: Theta's end-of-day quotes and that day's open interest, priced at its 4 PM close. */
+async function loadChain(ticker: string, o: { days?: number; expiries?: string[]; pick?: (listed: string[], day: string) => string[];
+  asOf?: string }): Promise<{ chain: Chain; warnings: string[]; nowMs: number; day: string }> {
+  const live = nyNow(), day = o.asOf ?? live.day, afterClose = o.asOf ? true : live.afterClose;
+  const nowMs = o.asOf ? closeMs(o.asOf) : Date.now();
+  const D = day.replaceAll('-', '');
+  // A past session: the whole end-of-day chain at once, and its expiries are the listed ones.
+  const hist = o.asOf ? await theta(`/v3/option/history/eod?symbol=${ticker}&expiration=*&start_date=${D}&end_date=${D}`) : [];
+  const listed = o.asOf ? [...new Set(hist.map((r) => String(r.contract.expiration)))].sort()
+    : (await theta(`/v3/option/list/expirations?symbol=${ticker}`)).map((x) => String(x.expiration));
+  if (!listed.length) throw new IncompleteChain([`Theta lists no expirations for ${ticker}${o.asOf ? ` on ${o.asOf}` : ''}`]);
   let want: string[];
-  if (expiries?.length) {
-    const missing = expiries.filter((e) => !listed.includes(e));
+  if (o.expiries?.length) {
+    const missing = o.expiries.filter((e) => !listed.includes(e));
     if (missing.length) throw new IncompleteChain(missing.map((e) => `${e} is not a listed ${ticker} expiry`));
-    want = [...expiries].sort();
+    want = [...o.expiries].sort();
+  } else if (o.pick) {
+    want = o.pick(listed, day);
   } else {
-    want = listed.filter((e) => e >= day && dte(day, e) <= days);
+    want = listed.filter((e) => e >= day && dte(day, e) <= (o.days ?? 45));
   }
   // An expiry that closed today has no gamma left.
   want = want.filter((e) => !(e === day && afterClose));
-  if (!want.length) throw new IncompleteChain([`no ${ticker} expiries in the next ${days} days`]);
+  if (!want.length) throw new IncompleteChain([`no ${ticker} expiries to read`]);
+  const span = Math.max(...want.map((e) => dte(day, e)));
   const q = (ep: string, e: string) => `/v3/option/snapshot/${ep}?symbol=${ticker}&expiration=${e}`;
-  const all = (ep: string, extra = '') => expiries?.length
+  // A handful of named expiries one by one; a window (or a long list) in one call, cut to the ones wanted.
+  const all = (ep: string, extra = '') => (o.expiries?.length && want.length <= 3) || span > 400
     ? Promise.all(want.map((e) => theta(q(ep, e.replaceAll('-', '')) + extra))).then((xs) => xs.flat())
-    : theta(q(ep, '*') + `&max_dte=${days}` + extra);
+    : theta(q(ep, '*') + `&max_dte=${span}` + extra).then((xs) => xs.filter((r) => want.includes(String(r.contract.expiration))));
   // The stock price is read from the two nearest expiries, whichever ones were asked for: a far
   // expiry's call - put carries the dividends paid before it (NKE January read 37.09 against 37.40,
   // 23 Oct 2026). Their quotes are fetched for the price only when they are not in the run.
   const nearest2 = listed.filter((e) => e >= day && !(e === day && afterClose)).slice(0, 2);
   const extra = nearest2.filter((e) => !want.includes(e));
-  const [ivs, ois, ohlc, extraIvs] = await Promise.all([all('greeks/implied_volatility'), all('open_interest'), all('ohlc', '&current_day_only=true'),
-    Promise.all(extra.map((e) => theta(q('greeks/implied_volatility', e.replaceAll('-', ''))))).then((xs) => xs.flat())]);
+  const [ivs, ois, ohlc, extraIvs] = o.asOf
+    ? [hist.filter((r) => want.includes(String(r.contract.expiration))),
+       (await theta(`/v3/option/history/open_interest?symbol=${ticker}&expiration=*&date=${D}`)).filter((r) => want.includes(String(r.contract.expiration))),
+       hist, hist.filter((r) => extra.includes(String(r.contract.expiration)))]
+    : await Promise.all([all('greeks/implied_volatility'), all('open_interest'), all('ohlc', '&current_day_only=true'),
+      Promise.all(extra.map((e) => theta(q('greeks/implied_volatility', e.replaceAll('-', ''))))).then((xs) => xs.flat())]);
   const oi = new Map(ois.map((r) => [key(r.contract), Number((r.data ?? []).at(-1)?.open_interest ?? 0)]));
   const vol = new Map(ohlc.map((r) => [key(r.contract), Number((r.data ?? []).at(-1)?.volume ?? 0)]));
   // Mids (two-sided quotes only), then the stock price they imply: the median of each nearest expiry's
   // at-the-money call - put + K e^(-rT). Each IV is then solved from its own mid.
-  const now = Date.now();
+  const now = nowMs;
   let thetaSpot = 0;
   type Quote = { exp: string; k: number; right: 'C' | 'P'; mid: number | null; c: Row };
   const parse = (r: Row): Quote => {
@@ -116,13 +150,12 @@ async function loadChain(ticker: string, days: number, expiries?: string[]): Pro
   if (thetaSpot > 0 && Math.abs(thetaSpot / spot - 1) > 0.005) {
     warnings.push(`Theta's stock price ${thetaSpot.toFixed(2)} differs from the ${spot.toFixed(2)} the option quotes imply; the quotes are used`);
   }
-  return { chain: { ticker, spot, expiries: want, contracts }, warnings };
+  return { chain: { ticker, spot, expiries: want, contracts }, warnings, nowMs, day };
 }
 
 async function run(ticker: string, days: number, expiries?: string[], pct?: number, save = true) {
-  const { day } = nyNow();
-  const { chain, warnings: w0 } = await loadChain(ticker, days, expiries);
-  const b = buildStrikes(chain, { nowMs: Date.now() });
+  const { chain, warnings: w0, nowMs, day } = await loadChain(ticker, { days, expiries });
+  const b = buildStrikes(chain, { nowMs });
   // The flip is the zero-gamma level (Nik, 22 Oct 2026: the spec's cumulative crossing is dropped).
   const walls = findWalls(b.rows, chain.spot), flip = zeroGamma(b.legs, chain.spot);
   const net = b.rows.reduce((s, r) => s + r.netGex, 0);
@@ -158,6 +191,41 @@ async function run(ticker: string, days: number, expiries?: string[], pct?: numb
   return out;
 }
 
+/** One row per expiry (handoff 31, 13d): each expiry's own walls, flip, sleeping walls and strikes, saved
+    for the day in place of any earlier run's. A failed expiry (too little quoted) is named, the rest saved. */
+async function runExpiries(ticker: string, asOf?: string, save = true) {
+  const { chain, warnings, nowMs, day } = await loadChain(ticker, { pick: logged, asOf });
+  const rows: Row[] = [], errors: string[] = [];
+  const m = (v: number | undefined) => v == null ? null : Math.round(v);
+  for (const e of chain.expiries) {
+    try {
+      const b = buildStrikes({ ...chain, expiries: [e], contracts: chain.contracts.filter((c) => c.exp === e) }, { nowMs });
+      const w = findWalls(b.rows, chain.spot), flip = zeroGamma(b.legs, chain.spot), sl = sleeping(b.legs, chain.spot, w);
+      const oi = new Map<number, { c: number; p: number }>();
+      for (const l of b.legs) { const x = oi.get(l.k) ?? { c: 0, p: 0 }; x.c += l.coi; x.p += l.poi; oi.set(l.k, x); }
+      // The strikes nearest the price, plus every wall and sleeping strike wherever it sits.
+      const keep = new Set<number>([...nearest(b.rows, chain.spot, 16).map((r) => r.k), ...w.call.map((r) => r.k), ...w.put.map((r) => r.k),
+        ...(sl.call ? [sl.call.k] : []), ...(sl.put ? [sl.put.k] : [])]);
+      const net = b.rows.reduce((s, r) => s + r.netGex, 0);
+      rows.push({ day, ticker, expiry: e, days: null, expiries: [e], spot: chain.spot, net_gex: Math.round(net), flip,
+        call_wall: w.call[0]?.k ?? null, call_wall_gex: m(w.call[0]?.callGex), call_wall2: w.call[1]?.k ?? null, call_wall2_gex: m(w.call[1]?.callGex),
+        put_wall: w.put[0]?.k ?? null, put_wall_gex: m(w.put[0]?.putGex), put_wall2: w.put[1]?.k ?? null, put_wall2_gex: m(w.put[1]?.putGex),
+        sleep: sl, fresh: b.rows.filter(isFresh).map((r) => r.k),
+        filled_oi_pct: b.totalOi ? +(b.filledOi / b.totalOi * 100).toFixed(2) : 0,
+        summary: summaryLine(day, ticker, chain.spot, net, flip, w).replace(` ${ticker} `, ` ${ticker} ${e} `),
+        strikes: b.rows.filter((r) => keep.has(r.k)).map((r) => ({ k: r.k, call: Math.round(r.callGex), put: Math.round(r.putGex),
+          net: Math.round(r.netGex), coi: oi.get(r.k)?.c ?? 0, poi: oi.get(r.k)?.p ?? 0, oi: r.oi, vol: r.vol, fresh: isFresh(r) })) });
+    } catch (err) {
+      errors.push(`${e}: ${err instanceof IncompleteChain ? err.problems.join('; ') : String((err as Error).message)}`);
+    }
+  }
+  if (save && rows.length) {
+    await db(`gex_walls?ticker=eq.${ticker}&day=eq.${day}&expiry=not.is.null`, { method: 'DELETE' });
+    await db('gex_walls', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(rows) });
+  }
+  return { ticker, day, spot: chain.spot, saved: rows.map((r) => `${r.expiry} c ${r.call_wall}/${r.call_wall2} p ${r.put_wall}/${r.put_wall2}`), errors, warnings };
+}
+
 /* Who may call: the scheduler's x-cron-key, the service-role key, or a signed-in user of the app. */
 async function callerOk(req: Request): Promise<boolean> {
   const cron = Deno.env.get('CRON_SECRET');
@@ -174,22 +242,40 @@ const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { sta
 Deno.serve(async (req) => {
   if (!(await callerOk(req))) return json({ ok: false, error: 'not allowed' }, 401);
   if (!THETA_URL || !THETA_KEY) return json({ ok: false, error: 'THETA_URL / THETA_PROXY_KEY not set' }, 500);
-  let body: { ticker?: string; tickers?: string[]; days?: number; expiries?: string[]; target?: number; save?: boolean; mode?: string } = {};
+  let body: { ticker?: string; tickers?: string[]; days?: number | string[]; expiries?: string[]; target?: number; save?: boolean;
+    mode?: string; per_expiry?: boolean; as_of?: string } = {};
   try { if (req.method === 'POST') body = await req.json(); } catch { /* empty body */ }
-  const days = Math.max(1, Math.min(400, Number(body.days ?? 45)));
+  const days = Math.max(1, Math.min(400, Number(Array.isArray(body.days) ? 45 : body.days ?? 45)));
+  const book = async () => Object.keys((await db('home_snapshot?id=eq.1&select=s:payload->strategies'))[0]?.s ?? {}).sort();
   try {
+    if (body.mode === 'backfill') {
+      const sessions = Array.isArray(body.days) ? body.days : [];
+      const names = body.tickers?.length ? body.tickers : await book();
+      const results = [];
+      for (const d of sessions) for (const t of names) {
+        try { results.push(await runExpiries(t.toUpperCase(), d, body.save ?? true)); }
+        catch (e) { results.push({ ticker: t, day: d, error: e instanceof IncompleteChain ? e.problems : String((e as Error).message) }); }
+      }
+      return json({ ok: results.every((r) => !('error' in r) && !(r as Row).errors?.length), results });
+    }
+    if (body.ticker && body.per_expiry) return json({ ok: true, ...(await runExpiries(body.ticker.toUpperCase(), body.as_of, body.save ?? true)) });
     if (body.mode === 'daily' || !body.ticker) {
       const { day } = nyNow();
       const closed = await db(`market_calendar?date=eq.${day}&kind=eq.closed&select=date`);
       if (closed.length) return json({ ok: true, day, skipped: 'market closed' });
       // The open names: Home's strategy map has one key per name with a leg (the chain table can
       // hold a closed name, and a read of it caps at 1,000 rows).
-      const names = body.tickers?.length ? body.tickers
-        : Object.keys((await db('home_snapshot?id=eq.1&select=s:payload->strategies'))[0]?.s ?? {}).sort();
-      const results = [];
+      const names = body.tickers?.length ? body.tickers : await book();
+      // Each expiry on its own for the book only (the market names keep the combined row).
+      const perExpiry = body.per_expiry ?? !body.tickers?.length;
+      const results: Row[] = [];
       for (const t of names) {
         try { const r = await run(t.toUpperCase(), days, undefined, undefined, body.save ?? true); results.push({ ticker: t, summary: r.summary }); }
         catch (e) { results.push({ ticker: t, error: e instanceof IncompleteChain ? e.problems : String((e as Error).message) }); }
+        if (perExpiry) {
+          try { const r = await runExpiries(t.toUpperCase(), undefined, body.save ?? true); results.push({ ticker: t, expiries: r.saved, ...(r.errors.length ? { error: r.errors } : {}) }); }
+          catch (e) { results.push({ ticker: t, error: e instanceof IncompleteChain ? e.problems : String((e as Error).message) }); }
+        }
       }
       return json({ ok: results.every((r) => !('error' in r)), day, results });
     }

@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-23.1';
+const BUILD = '2026-10-23.2';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1271,6 +1271,34 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (!above50.has(String(r.ticker))) above50.set(String(r.ticker), { close: Number(r.close), sma50: Number(r.sma50) });
     }
   }
+  /* WALLS (handoff 31, 13c): each expiry's walls at its last log (gex-walls, one row per expiry after every
+     close), for the To do face's ways: next Friday's on the sells, the quarterly's on the buys. `ago` is the
+     same expiry's walls a week earlier, for the panel's "was 33 last week". */
+  type WallRow = { day: string; cw: number | null; cwg: number | null; cw2: number | null; cw2g: number | null;
+                   pw: number | null; pwg: number | null; pw2: number | null; pw2g: number | null };
+  const wallLog = new Map<string, WallRow[]>();
+  if (book.length) {
+    for (const r of await page(`gex_walls?ticker=in.(${book.join(',')})&expiry=not.is.null&day=gte.${addDays(today, -12)}`
+      + '&select=ticker,day,expiry,call_wall,call_wall_gex,call_wall2,call_wall2_gex,put_wall,put_wall_gex,put_wall2,put_wall2_gex'
+      + '&order=ticker.asc,expiry.asc,day.desc,id.asc')) {
+      const k = `${r.ticker}|${r.expiry}`;
+      (wallLog.get(k) ?? wallLog.set(k, []).get(k)!).push({ day: String(r.day),
+        cw: num(r.call_wall), cwg: num(r.call_wall_gex), cw2: num(r.call_wall2), cw2g: num(r.call_wall2_gex),
+        pw: num(r.put_wall), pwg: num(r.put_wall_gex), pw2: num(r.put_wall2), pw2g: num(r.put_wall2_gex) });
+    }
+  }
+  const wallsAt = (t: string, exp: string) => { const xs = wallLog.get(`${t}|${exp}`) ?? [];
+    return { now: xs[0] ?? null, ago: xs.find((x) => x.day <= addDays(today, -7)) ?? null }; };
+  /* SHARES (handoff 31: "held shares count at one delta each"): IBKR's last daily positions, plus the share
+     buys and sales booked after that report. */
+  const lastPosDay = posAll.reduce((m: string, r: Row) => (String(r.report_date) > m ? String(r.report_date) : m), '');
+  const sharesHeld = new Map<string, number>();
+  const addSh = (t: string, n: number) => sharesHeld.set(t, (sharesHeld.get(t) ?? 0) + n);
+  for (const r of posAll) if (String(r.report_date) === lastPosDay && r.asset_category === 'STK') addSh(String(r.symbol).toUpperCase(), Number(r.position ?? 0));
+  for (const l of lots) if (String(l.acquired_date) > lastPosDay) addSh(String(l.ticker).toUpperCase(), Number(l.qty_original ?? 0));
+  for (const x of sells) if (String(x.trade_date) > lastPosDay) addSh(String(x.ticker).toUpperCase(), -Math.abs(Number(x.quantity ?? 0)));
+  /* The To do face's ways per name (handoff 31, 13c). */
+  const ways: Record<string, Row> = {};
   const writes = [];
   /* This week (handoff 28, block 12b): what to roll, buy and sell by Friday, one row per task,
      from the CALL RULE (Nik, 20 Oct 2026: "our live rule, ignore the design rule"; "include
@@ -1393,7 +1421,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     /* Overlay names: the highest strike at least otmPct% below spot, capped at the lowest
        long put still open on that Friday; no covering long put, no suggestion. */
     const pRule = PUT_RULES[t];
-    const put = pick ? pick.put : pRule
+    /* PUTS AT THE PUT WALL (Nik, 23 Oct 2026: "when we sell we will use the put wall rule"): next Friday's
+       put wall below the price (the 1st, else the 2nd once the price has fallen through the 1st), quoted.
+       The older rules below are the fallback only, for a Friday with no walls logged. */
+    const wk = wallsAt(t, targetExp);
+    const wallPut = [wk.now?.pw, wk.now?.pw2].map((k) => k != null && k < spot ? puts.find((x) => Math.abs(x.k - k) < 1e-6 && x.mid > 0) : undefined)
+      .find(Boolean) ?? null;
+    const put = wallPut ? wallPut : pick ? pick.put : pRule
       ? (coverK == null ? null : puts.filter((x) => x.k <= spot * (1 - pRule.otmPct / 100) && x.k <= coverK && x.mid > 0)
           .sort((a, b) => b.k - a.k)[0] ?? null)
       : puts.filter((x) => x.k <= spot && x.mid > 0).sort((a, b) => b.k - a.k)[0] ?? null;
@@ -1421,7 +1455,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       otm && leftOtm > 0 ? { type: 'call', n: leftOtm, strike: otm.k, mid: otm.mid, delta: otm.delta, iv: otm.iv,
         note: 'out of the money' } : null,
       put && leftPuts > 0 ? { type: 'put', n: leftPuts, strike: put.k, mid: put.mid, delta: put.delta, iv: put.iv,
-        note: pick ? `at ${pick.pz} SD` : pRule ? `${pRule.otmPct}% out of the money` : 'at the money' } : null,
+        note: wallPut ? 'at the put wall' : pick ? `at ${pick.pz} SD` : pRule ? `${pRule.otmPct}% out of the money` : 'at the money' } : null,
     ].filter(Boolean) as { type: string; n: number; strike: number; mid: number; delta: number | null; iv: number | null; note: string }[];
     /* Only what is still open on that Friday: this week's calls expire first,
        and counting them made a plan look delta negative (Nik, 15 Oct 2026). */
@@ -1450,11 +1484,13 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        under the 20% floor (30% the week it reports): N quarterly calls at Q_SD to their
        expiry (default) or M fewer calls sold, each sized to hold delta at or above 0 at
        +SAFE_SD SD and to land on 25% (35%) today. */
+    /* The package's inner numbers the To do ways size from (not sent). */
+    let pkgIn: { qq: Row | null; d15: number | null; gap: number; thin: boolean; short15: boolean; sh: number } | null = null;
     const pkg = (() => {
       const base = leapN * 100;
       if (!base) return null;
-      const tk = tick.get(t);
-      const nowD = tk ? tk.longD - tk.scD + tk.spD - tk.hedgeD : 0;
+      const tk = tick.get(t), sh = sharesHeld.get(t) ?? 0;
+      const nowD = (tk ? tk.longD - tk.scD + tk.spD - tk.hedgeD : 0) + sh;
       const e = earn.some((x) => String(x.ticker).toUpperCase() === t
         && String(x.report_date) >= today && String(x.report_date) <= addDays(today, 7)) ? DELTA_EARN_BUMP : 0;
       const sgn = (l: Leg) => (l.side === 'bought' ? 1 : -1);
@@ -1467,6 +1503,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
                  d15: stays && S15 ? Math.round(sgn(l) * dAt(S15, l.strike, l.expiry, l.iv, l.type === 'call') * l.n * 100) : 0,
                  ...(up ? { tenor: tenorOf(l), roll: l.expiry } : {}) };
       });
+      /* Shares held count at one delta each, today and at +1.5 SD (handoff 31). */
+      if (sh) held.push({ ty: 'sh', n: sh, k: 0, exp: '', d: sh, stays: true, d15: sh });
       const sug: Row[] = plan.map((p, i) => ({ id: `s${i}`, ty: p.type === 'call' ? 'sc' : 'sp', act: 'Sell',
         n: p.n, k: p.strike, exp: targetExp, mid: r2(p.mid), d: Math.round(-(p.delta ?? 0) * p.n * 100),
         d15: S15 ? Math.round(-dAt(S15, p.strike, targetExp, p.iv, p.type === 'call') * p.n * 100) : 0 }));
@@ -1476,7 +1514,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const qq = (() => {
         const ok = (r: Row) => r.ticker === t && Number(r.mid) > 0 && r.delta != null;
         let xs = upQuotes.filter((r) => ok(r) && r.tenor === 'q');
-        if (!xs.length) xs = upQuotes.filter((r) => ok(r) && r.tenor === '3m' && [1, 4, 7, 10].includes(Number(String(r.expiry).slice(5, 7))));
+        if (!xs.length) xs = upQuotes.filter((r) => ok(r) && r.tenor === '3m' && [1, 3, 6, 9, 12].includes(Number(String(r.expiry).slice(5, 7))));
         if (!xs.length || !(spot > 0)) return null;
         xs = [...xs].sort((a, b) => Number(a.strike) - Number(b.strike));
         const exp = String(xs[0].expiry);
@@ -1484,14 +1522,17 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         const ivA = num(xs.reduce((a, b) => (Math.abs(Number(b.strike) - spot) < Math.abs(Number(a.strike) - spot) ? b : a)).iv) ?? ivRow?.iv ?? null;
         if (!ivA) return null;
         const target = spot * (1 + Q_SD * ivA * Math.sqrt(Tq));
-        /* Calls already held for this quarter set the strike: more are added at the strike held
-           (the most contracts), never a new 1.5 SD strike that moved with the price (Nik, 20 Oct
-           2026: NKE holds Jan $47.50 and was told to buy Jan $50). A new quarter picks fresh. */
-        const heldQ = ls.filter((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry === exp)
-          .sort((a, b) => b.n - a.n)[0];
-        const atHeld = heldQ ? xs.find((x) => Math.abs(Number(x.strike) - heldQ.strike) < 0.001) : undefined;
-        const r = atHeld ?? xs.find((x) => Number(x.strike) >= target) ?? xs.at(-1)!;
-        return { k: Number(r.strike), exp, mid: Number(r.mid), dl: Number(r.delta), iv: num(r.iv) ?? ivA, target: r2(target), more: !!atHeld };
+        /* THE WALL IS THE DEFAULT (Nik, 22 Oct 2026; handoff 31): new buys go to today's call wall on that
+           expiry (its 1st, else its 2nd, above the price and quoted), whatever is already held; the 1.5 SD
+           strike only when there is no wall. Replaces "add at the strike held" (20 Oct). */
+        const wq = wallsAt(t, exp).now;
+        const atWall = [wq?.cw, wq?.cw2].map((k) => k != null && k > spot ? xs.find((x) => Math.abs(Number(x.strike) - k) < 1e-6) : undefined)
+          .find(Boolean);
+        const sdRow = xs.find((x) => Number(x.strike) >= target) ?? xs.at(-1)!;
+        const r = atWall ?? sdRow;
+        const heldQ = ls.some((l) => l.side === 'bought' && l.type === 'call' && upside.has(l) && l.expiry === exp);
+        return { k: Number(r.strike), exp, mid: Number(r.mid), dl: Number(r.delta), iv: num(r.iv) ?? ivA, target: r2(target), more: heldQ,
+                 wall: !!atWall, xs, sdK: Number(sdRow.strike) };
       })();
       const leapValue = ls.filter(isLeap).reduce((s2, l) => s2 + (l.mark ?? 0) * l.n * 100, 0);
       const after0 = held.filter((h) => h.stays).reduce((s2, h) => s2 + h.d, 0) + sug.reduce((s2, x) => s2 + Number(x.d), 0);
@@ -1512,6 +1553,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         /* Selling fewer calls is no longer offered (Nik, 20 Oct 2026: "we agreed that is not a good
            solution"; it gave up about 3x what the quarterly calls cost). */
       }
+      pkgIn = { qq, d15, gap, thin, short15, sh };
       return { base, e, now: Math.round(nowD), now_pct: r2(nowD / base * 100), held, sug, fix,
                after0: Math.round(after0), after0_pct: r2(after0P), leap_value: Math.round(leapValue),
                safe: S15 == null || d15 == null ? null
@@ -1527,7 +1569,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
        below 0, both found in 0.1% steps to 10%. A normal week's move: one weekly SD, to 0.5%. */
     const dg = (() => {
       const open = ls.filter((l) => l.expiry >= today && l.n > 0);
-      if (!open.some((l) => l.side === 'bought') || !(spot > 0)) return null;
+      if ((!open.some((l) => l.side === 'bought') && !(sharesHeld.get(t) ?? 0)) || !(spot > 0)) return null;
       const yr = (e: string) => Math.max(0.5 / 365, (Date.parse(e) - Date.parse(today)) / 864e5 / 365);
       const ivA = ivRow?.iv ?? null;
       const lg = open.map((l) => ({ sg: l.side === 'sold' ? -1 : 1, call: l.type === 'call', K: l.strike, q: l.n, T: yr(l.expiry),
@@ -1535,7 +1577,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       const opt = (S: number, x: typeof lg[number], T = x.T) => { const c = bsCall(S, x.K, T, x.v);
         return x.call ? { p: c.price, d: c.delta } : { p: c.price - S + x.K * Math.exp(-RATE * T), d: c.delta - 1 }; };
       const o0 = lg.map((x) => opt(spot, x));
-      const at = (m: number) => { const S = spot * (1 + m / 100); let b = 0, s2 = 0, gb = 0;
+      /* Shares held: one delta each on the bought side, no gamma (handoff 31). */
+      const shN = sharesHeld.get(t) ?? 0;
+      const at = (m: number) => { const S = spot * (1 + m / 100); let b = shN, s2 = 0, gb = 0;
         lg.forEach((x, i) => { const o1 = opt(S, x), dd = x.sg * x.q * 100 * o1.d; if (x.sg < 0) s2 += dd; else b += dd;
           gb += x.sg * x.q * 100 * (o0[i].d * (S - spot) - (o1.p - o0[i].p)); });
         return { S, b, s: s2, d: b + s2, gb: Math.max(0, gb) }; };
@@ -1602,6 +1646,68 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
         act: `Sell ${putN} ${usdK(put.k)} ${putN === 1 ? 'put' : 'puts'}`,
         why: `${mdy(targetExp)} · fills puts to ${todo[t].ps + putN}`,
         cost: Math.round(putN * put.mid * 100), credit: true, delta: Math.round(-(put.delta ?? 0) * putN * 100 * spot), sh: dg?.sh ?? null });
+      /* ── THE WAYS (handoff 31, 13c): the To do face as two blocks. Sell: next Friday's calls at the money
+         (one per LEAP; on Friday that includes this week's in-the-money calls being rolled) and its puts at
+         the put wall, each with that Friday's 1st and 2nd walls beside it. Buy: the delta still needed, at
+         the quarterly's call wall by default, with its 2nd wall, the 1.5 SD strike and shares as other ways,
+         each covering all of it; and that expiry's put walls, data only (Nik, 23 Oct 2026: "just show the
+         data I can decide"). Delta is the whole book's, puts and shares in it. Each tile carries its own
+         numbers: `d` the option's own delta (puts negative), `d15` it at the move price by Thursday. */
+      ways[t] = (() => {
+        const r4 = (v: number | null | undefined) => v == null ? null : Math.round(v * 1e4) / 1e4;
+        const S15dn = sd && spot > 0 ? spot - SAFE_SD * sd : null;
+        const quoted = (xs: CS[], k: number | null | undefined) => k == null ? null : xs.find((x) => Math.abs(x.k - k) < 1e-6 && x.mid > 0) ?? null;
+        const gm = (v: number | null | undefined) => v == null ? null : Math.round(Math.abs(v));
+        const tile = (id: string, c: CS | null, call: boolean, S: number | null, gx: number | null, was: number | null) => !c ? null : {
+          id, k: c.k, mid: r2(c.mid), d: r4(c.delta), d15: S ? r4(dAt(S, c.k, targetExp, c.iv, call)) : null, g: gx, was };
+        const wkNow = wk.now, wkAgo = wk.ago;
+        const nCalls = sellN + (saleTime ? rolledTo : 0);
+        const sellCalls = atm && nCalls > 0 ? { n: nCalls, sold: doneAtm + doneOtm, rule: earnWk ? '1 SD' : 'ATM', pick: 'at',
+          tiles: [tile('at', atm, true, S15, null, null),
+                  tile('w', quoted(calls, wkNow?.cw), true, S15, gm(wkNow?.cwg), wkAgo?.cw ?? null),
+                  tile('w2', quoted(calls, wkNow?.cw2), true, S15, gm(wkNow?.cw2g), wkAgo?.cw2 ?? null)].filter(Boolean) } : null;
+        const sellPuts = putsPaused && putTarget > 0 ? { paused: true, s50: r2(m50!.sma50) }
+          : put && putN > 0 ? { n: putN, sold: donePuts, rule: wallPut ? '1st wall' : 'rule', pick: wallPut ? 'w' : 'at',
+              tiles: [wallPut ? null : tile('at', put, false, S15dn, null, null),
+                      tile('w', quoted(puts, wkNow?.pw), false, S15dn, gm(wkNow?.pwg), wkAgo?.pw ?? null),
+                      tile('w2', quoted(puts, wkNow?.pw2), false, S15dn, gm(wkNow?.pw2g), wkAgo?.pw2 ?? null)].filter(Boolean) }
+          : null;
+        /* Buy calls: the need is the delta short at +1.5 SD by Thursday, or what lifts today's delta back to
+           the floor, whichever is bigger (the fix's own sizing, so the wall tile equals the fix row). */
+        const P = pkgIn, qq = P?.qq;
+        let buyCalls: Row | null = null;
+        if (P && qq && (P.short15 || P.thin)) {
+          const thuNeed = P.short15 && P.d15 != null ? -P.d15 : 0, nowNeed = P.thin ? P.gap : 0;
+          const basis = thuNeed >= nowNeed ? 'thu' : 'now', left = Math.ceil(Math.max(thuNeed, nowNeed));
+          const hedges = pkg?.held.filter((h) => h.ty === 'oc' && h.stays) ?? [];
+          const inn = Math.round(hedges.reduce((a, h) => a + (basis === 'thu' ? h.d15 : h.d), 0) + P.sh);
+          const qw = wallsAt(t, String(qq.exp)), xs = qq.xs as Row[];
+          const rowAt = (k: number | null | undefined) => k == null ? null : xs.find((x) => Math.abs(Number(x.strike) - k) < 1e-6) ?? null;
+          const bt = (id: string, r: Row | null, gx: number | null, was: number | null) => {
+            if (!r) return null;
+            const k = Number(r.strike), mid = Number(r.mid), dl = Number(r.delta), iv = num(r.iv) ?? qq.iv;
+            const dq15 = S15 ? dAt(S15, k, String(qq.exp), iv, true) : 0;
+            const n = Math.max(thuNeed > 0 && dq15 > 0 ? Math.ceil(thuNeed / (100 * dq15)) : 0, nowNeed > 0 && dl > 0 ? Math.ceil(nowNeed / (100 * dl)) : 0);
+            return n > 0 ? { id, k, mid: r2(mid), d: r4(dl), d15: r4(dq15), de: r4(basis === 'thu' ? dq15 : dl), n, cost: Math.round(n * mid * 100), g: gx, was } : null;
+          };
+          const tiles = [bt('w', rowAt(qw.now?.cw), gm(qw.now?.cwg), qw.ago?.cw ?? null), bt('w2', rowAt(qw.now?.cw2), gm(qw.now?.cw2g), qw.ago?.cw2 ?? null),
+            bt('sd', rowAt(qq.sdK), null, null), { id: 'sh', k: 0, n: left, cost: Math.round(left * spot) }].filter(Boolean) as Row[];
+          if (left > 0) buyCalls = { exp: qq.exp, need: inn + left, inn, left, basis, pick: tiles.some((x) => x.id === 'w') ? 'w' : 'sd', tiles };
+        }
+        /* Buy puts: that expiry's put walls under the price, priced (chain-next 'qp'). No count, no pick. */
+        const pExp = qq ? String(qq.exp) : null;
+        const pRows = pExp ? upQuotes.filter((r) => r.ticker === t && r.tenor === 'qp' && String(r.expiry) === pExp && Number(r.mid) > 0) : [];
+        const pw = pExp ? wallsAt(t, pExp) : null;
+        const pt = (id: string, k: number | null | undefined, gx: number | null, was: number | null) => {
+          const r = k == null || k >= spot ? null : pRows.find((x) => Math.abs(Number(x.strike) - k) < 1e-6);
+          return r ? { id, k: Number(r.strike), mid: r2(Number(r.mid)), d: r4(num(r.delta)), g: gx, was } : null;
+        };
+        const ptiles = pw ? [pt('w', pw.now?.pw, gm(pw.now?.pwg), pw.ago?.pw ?? null), pt('w2', pw.now?.pw2, gm(pw.now?.pw2g), pw.ago?.pw2 ?? null)].filter(Boolean) : [];
+        const buyPuts = ptiles.length ? { exp: pExp, held: ls.filter((l) => l.side === 'bought' && l.type === 'put').reduce((a, l) => a + l.n, 0), tiles: ptiles } : null;
+        return { sell: { exp: targetExp, by: evalDay, mv: S15 == null ? null : r2(S15), mv_dn: S15dn == null ? null : r2(S15dn),
+                         calls: sellCalls, puts: sellPuts },
+                 buy: { calls: buyCalls, puts: buyPuts } };
+      })();
     }
     /* ── INSIGHTS (handoff 28, 14c): six plain points from the reads, written by fixed sentence
        rules (Nik, 20 Oct 2026), in the order the strategy cares about, the last always delta, read
@@ -2218,6 +2324,8 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     this_week: [...thisWeek].sort((a, b) => (['roll', 'buy', 'sell', 'put'].indexOf(a.kind) - ['roll', 'buy', 'sell', 'put'].indexOf(b.kind))
       || ((a.sh ?? 99) - (b.sh ?? 99)) || String(a.t).localeCompare(String(b.t))),
     todo,
+    /* The To do face's ways (handoff 31, 13c). */
+    ways,
   };
   return { payload, ms: Date.now() - t0, steps };
 }

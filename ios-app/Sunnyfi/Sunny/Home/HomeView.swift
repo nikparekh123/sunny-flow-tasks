@@ -237,6 +237,11 @@ struct HomeView: View {
             else if v == "aftershock" { router.openAftershock(animated: false) }
             else if v.hasPrefix("at:") { router.scrollID = String(v.dropFirst(3)) }
             else if v.hasPrefix("tab:") { router.tab = v.dropFirst(4) == "positions" ? .positions : .home }
+            else if v.hasPrefix("walls:") {
+                router.tab = .positions
+                try? await Task.sleep(for: .milliseconds(500))
+                router.walls = String(v.dropFirst(6))
+            }
             else if v.hasPrefix("filter:") {
                 let f = String(v.dropFirst(7))
                 router.tab = .positions

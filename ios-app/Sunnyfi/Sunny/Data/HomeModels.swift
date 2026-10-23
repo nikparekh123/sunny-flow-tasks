@@ -51,6 +51,79 @@ struct HomePayload: Decodable {
     let thisWeek: Lenient<[WeekTask]>?
     /// The To do face's two bars per name: calls and puts sold against room (handoff 30, block 13).
     let todo: Lenient<[String: TodoBars]>?
+    /// The To do face's ways per name (handoff 31, block 13c). When a name has them, they replace the
+    /// bars and the rows.
+    let ways: Lenient<[String: NameWays]>?
+}
+
+/// One name's To do as two blocks (block 13c): Sell (next Friday's calls and puts) and Buy (the delta
+/// still needed; the quarterly's put walls as data). Every count is the server's, net of what IBKR shows.
+struct NameWays: Decodable, Hashable {
+    let sell: Sell
+    let buy: Buy
+    struct Sell: Decodable, Hashable {
+        let exp: String
+        /// The Thursday before the expiry, and the prices 1.5 weekly SD up and down by then.
+        let by: String
+        let mv: Double?
+        let mvDn: Double?
+        let calls: Trade?
+        let puts: Trade?
+    }
+    struct Buy: Decodable, Hashable {
+        let calls: Need?
+        let puts: PutWalls?
+    }
+    /// A sale: `n` left to sell, `sold` already sold for that Friday. Puts below the 50-day carry
+    /// `paused` and the average instead.
+    struct Trade: Decodable, Hashable {
+        let n: Int?
+        let sold: Int?
+        let rule: String?
+        let pick: String?
+        let tiles: [Tile]?
+        let paused: Bool?
+        let s50: Double?
+        var isPaused: Bool { paused ?? false }
+    }
+    /// The delta still needed (shares of delta): `need` = `inn` (hedge calls and shares held) + `left`.
+    /// `basis` thu: measured at +1.5 SD by Thursday; now: today's delta under the floor.
+    struct Need: Decodable, Hashable {
+        let exp: String
+        let need: Double
+        let inn: Double
+        let left: Double
+        let basis: String
+        let pick: String
+        let tiles: [Tile]
+    }
+    /// The quarterly's put walls, priced; no count, no pick (Nik, 23 Oct 2026: "I can decide").
+    struct PutWalls: Decodable, Hashable {
+        let exp: String
+        let held: Int
+        let tiles: [Tile]
+    }
+    /// One way. `id`: at (the rule's strike), w (1st wall), w2 (2nd wall), sd (1.5 SD), sh (shares).
+    /// `d` the option's own delta (puts below 0), `d15` it at the move price by Thursday, `de` the delta
+    /// a buy is sized on; `n` and `cost` on buys; `g` the gamma at the wall, dollars; `was` the same wall a
+    /// week ago.
+    struct Tile: Decodable, Hashable {
+        let id: String
+        let k: Double
+        let mid: Double?
+        let d: Double?
+        let d15: Double?
+        let de: Double?
+        let n: Int?
+        let cost: Double?
+        let g: Double?
+        let was: Double?
+    }
+    /// The trades on the badge: calls and puts to sell, calls to buy. The put walls are data only.
+    var trades: Int {
+        ((sell.calls?.n ?? 0) > 0 ? 1 : 0) + (!(sell.puts?.isPaused ?? false) && (sell.puts?.n ?? 0) > 0 ? 1 : 0)
+            + ((buy.calls?.left ?? 0) > 0 ? 1 : 0)
+    }
 }
 
 /// One To do row (block 12b rules, block 13 face): the CALL RULE's roll, buy and sales for a name.

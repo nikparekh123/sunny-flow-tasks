@@ -131,6 +131,9 @@ async function thetaChain(ticker: string, expiry: string, withOi = true): Promis
   }
   return out;
 }
+/** The hedge quarterly's cycle starts at January 2027 and moves on once it is under 8 weeks out. */
+const HEDGE_FROM = '2027-01-01';
+const HEDGE_MIN_DAYS = 56;
 /** Strikes within this much of spot, each side. Five tiles need far less; the
     band is wide enough that a big day does not empty it before the next run. */
 const BAND_PCT = 12;
@@ -438,14 +441,20 @@ Deno.serve(async (req) => {
         const list = r && r.ok ? (((await r.json())?.response ?? []) as Record<string, unknown>[]) : [];
         const exps = list.map((x) => String(x.expiration ?? x.date ?? '')).filter(Boolean)
           .map((e) => (e.includes('-') ? e : `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6, 8)}`)).filter(monthly);
-        /* The quarterly (Nik, 20 Oct 2026): the next Jan/Apr/Jul/Oct monthly at least 21 days out,
-           1x to 1.8x the price, so the Planner can find the strike 1.5 SD to its expiry. */
-        const quarterly = exps.filter((e) => [1, 4, 7, 10].includes(Number(e.slice(5, 7))) && dayN(e) >= 21).sort()[0];
+        /* The hedge quarterly, where new hedge calls are bought and the put walls priced: January 2027
+           (where the hedge already sat), then March, June, September and December (Nik, 22 Oct 2026),
+           each until it is under 8 weeks out, then the next (Nik, 23 Oct 2026: "8 weeks out is fine";
+           January hands over to March after 20 Nov 2026). Was Jan/Apr/Jul/Oct at 21 days (20 Oct).
+           1x to 1.8x the price for the calls, so the 1.5 SD strike to its expiry is there too. */
+        const quarterly = exps.filter((e) => e >= HEDGE_FROM && (e.startsWith(HEDGE_FROM.slice(0, 7)) || [3, 6, 9, 12].includes(Number(e.slice(5, 7))))
+          && dayN(e) >= HEDGE_MIN_DAYS).sort()[0];
         const got = new Map<string, Snap[]>();
-        for (const [tenor, days, lo, hi] of [['3m', 91, 1.05, 1.35], ['12m', 365, 1.1, 1.5], ['q', 0, 1.0, 1.8]] as const) {
-          const exp = tenor === 'q' ? quarterly : exps.filter((e) => Math.abs(dayN(e) - days) <= (tenor === '3m' ? 35 : 75))
+        /* 'qp': that quarterly's puts, 0.6x to 1x the price (handoff 31: the To do face shows the January
+           put walls to buy at; Nik, 23 Oct 2026: "just show the data, I can decide"). */
+        for (const [tenor, days, lo, hi] of [['3m', 91, 1.05, 1.35], ['12m', 365, 1.1, 1.5], ['q', 0, 1.0, 1.8], ['qp', 0, 0.6, 1.0]] as const) {
+          const exp = tenor === 'q' || tenor === 'qp' ? quarterly : exps.filter((e) => Math.abs(dayN(e) - days) <= (tenor === '3m' ? 35 : 75))
             .sort((a, b) => Math.abs(dayN(a) - days) - Math.abs(dayN(b) - days))[0];
-          if (!exp) { notes.push(`${ticker} ${tenor}: no ${tenor === 'q' ? 'quarterly' : `monthly near ${days} days`}`); continue; }
+          if (!exp) { notes.push(`${ticker} ${tenor}: no ${tenor === 'q' || tenor === 'qp' ? 'quarterly' : `monthly near ${days} days`}`); continue; }
           if (!got.has(exp)) got.set(exp, await thetaChain(ticker, exp, false).catch(() => [] as Snap[]));
           const items = got.get(exp)!;
           const spot = items.find((c) => c.underlying_asset?.price)?.underlying_asset?.price ?? null;
@@ -453,7 +462,7 @@ Deno.serve(async (req) => {
           let kept = 0;
           for (const c of items) {
             const k = c.details?.strike_price;
-            if (c.details?.contract_type !== 'call' || typeof k !== 'number' || k < spot * lo || k > spot * hi) continue;
+            if (c.details?.contract_type !== (tenor === 'qp' ? 'put' : 'call') || typeof k !== 'number' || k < spot * lo || k > spot * hi) continue;
             const mid = midOf(c, spot);
             if (mid == null || c.greeks?.delta == null) continue;
             kept++;
