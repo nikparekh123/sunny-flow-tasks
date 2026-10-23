@@ -34,6 +34,12 @@ Added on top, not instead. **Buy six-month puts roughly 1:1 against the LEAPs,
 twice a year. Sell a smaller weekly quantity of puts to fund them.** The aim is
 protection that pays for itself, never income.
 
+**From 2026-10-23: weekly puts only above the 50-day.** Nik: a name sells its weekly
+puts only while its last close is above its 50-day average; below it, put sales pause
+(To do shows "Puts paused · Below the 50-day"). The weekly short puts netted about
+**-$44** from 31 Aug to 23 Oct (3 winning weeks, 3 losing), so they were adding drop
+risk for nothing. The long protective puts are unchanged.
+
 Selling about **a quarter of the notional** each week fully funds a 1:1 six-month
 put. It works because weekly puts trade rich to six-month puts: the square root
 of time says a 6-month should cost about 5.1x a weekly, and NKE measures 6.13x,

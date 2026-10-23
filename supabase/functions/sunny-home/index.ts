@@ -20,7 +20,7 @@
  * Body: { passes?: 1|2 } (cron sends nothing: two passes in market hours,
  * 30 s apart, a quiet pass every 10 minutes otherwise).
  */
-const BUILD = '2026-10-22.1';
+const BUILD = '2026-10-23.1';
 const BOOK_START = '2026-08-31';          // PNL_GLOSSARY: the stock-replacement shift
 const WATCH = ['INTU', 'ADBE', 'PYPL', 'VZ', 'TMUS', 'SPCX', 'TSLA', 'APP'];   // + SPCX TSLA APP (Nik, 14 Oct 2026); keep earnings-sync's WATCH in step
 /* ⚠ WRITE RULES FROM RESEARCH (Nik, 14 Oct 2026, docs/TSLA_SPCX_RESEARCH.md).
@@ -1261,6 +1261,16 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       if (!readsOf.has(String(r.ticker))) readsOf.set(String(r.ticker), r);
     }
   }
+  /* PUTS ONLY ABOVE THE 50-DAY (Nik, 23 Oct 2026): the weekly short puts netted about -$44 from 31 Aug
+     to 23 Oct, so a name sells puts only while its last close is above its 50-day average. The last
+     completed session's close (a row before today), from ticker-technicals. */
+  const above50 = new Map<string, { close: number; sma50: number }>();
+  if (book.length) {
+    for (const r of await get(`ticker_technicals?ticker=in.(${book.join(',')})&day=lt.${today}&day=gte.${addDays(today, -10)}`
+      + `&sma50=not.is.null&select=ticker,day,close,sma50&order=ticker.asc,day.desc`)) {
+      if (!above50.has(String(r.ticker))) above50.set(String(r.ticker), { close: Number(r.close), sma50: Number(r.sma50) });
+    }
+  }
   const writes = [];
   /* This week (handoff 28, block 12b): what to roll, buy and sell by Friday, one row per task,
      from the CALL RULE (Nik, 20 Oct 2026: "our live rule, ignore the design rule"; "include
@@ -1402,7 +1412,9 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
     const leftPuts = Math.max(0, putTarget - donePuts);
     const shelfExp = today >= saleDay ? targetExp : saleDay;
     const soldOn = (ty: string) => ls.filter((l) => l.side === 'sold' && l.type === ty && l.expiry >= shelfExp).reduce((a, l) => a + l.n, 0);
-    todo[t] = { cc: leapN, cs: soldOn('call'), pc: putTarget, ps: soldOn('put') };
+    const m50 = above50.get(t), putsPaused = !!m50 && m50.close < m50.sma50;
+    todo[t] = { cc: leapN, cs: soldOn('call'), pc: putTarget, ps: soldOn('put'),
+      ...(putsPaused ? { pp: true, s50: r2(m50!.sma50) } : {}) };
     const plan = [
       atm && leftAtm > 0 ? { type: 'call', n: leftAtm, strike: atm.k, mid: atm.mid, delta: atm.delta, iv: atm.iv,
         note: rule ? `${rule.otmPct}% out of the money` : earnWk ? 'at 1 SD, earnings week' : 'at the money' } : null,
@@ -1585,7 +1597,7 @@ async function build(mode: 'tick' | 'theta_check' | 'history' | 'last_week' = 't
       /* Puts the same way: from Friday everything left; before it only what has no put this week. */
       const openWkP = ls.filter((l) => l.side === 'sold' && l.type === 'put' && l.expiry === saleDay).reduce((a, l) => a + l.n, 0);
       const putN = saleTime ? leftPuts : Math.max(0, Math.min(leftPuts, putTarget - openWkP - donePuts));
-      if (put && putN > 0) thisWeek.push({ id: `${t}|put|${targetExp}`, t, kind: 'put', face: 'sold', held: donePuts,
+      if (put && putN > 0 && !putsPaused) thisWeek.push({ id: `${t}|put|${targetExp}`, t, kind: 'put', face: 'sold', held: donePuts,
         action: `Sell ${putN} ${usdK(put.k)} puts · ${mdy(targetExp)}`,
         act: `Sell ${putN} ${usdK(put.k)} ${putN === 1 ? 'put' : 'puts'}`,
         why: `${mdy(targetExp)} · fills puts to ${todo[t].ps + putN}`,

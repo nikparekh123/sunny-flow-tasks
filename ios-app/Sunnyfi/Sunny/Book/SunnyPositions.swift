@@ -371,7 +371,7 @@ private struct PNameCard: View {
     // MARK: Unsold (block 13, Sold): room left while a sale is open, a tap goes to To do
 
     @ViewBuilder private var unsold: some View {
-        let b = n.bars, uc = max(0, (b?.cc ?? 0) - (b?.cs ?? 0)), up = max(0, (b?.pc ?? 0) - (b?.ps ?? 0))
+        let b = n.bars, uc = max(0, (b?.cc ?? 0) - (b?.cs ?? 0)), up = b?.putsPaused == true ? 0 : max(0, (b?.pc ?? 0) - (b?.ps ?? 0))
         if (uc > 0 || up > 0) && n.tasks.contains(where: { $0.kind == "sell" || $0.kind == "put" }) {
             let words = (uc > 0 ? PWords.n(uc, "call") : "") + (uc > 0 && up > 0 ? " and " : "") + (up > 0 ? PWords.n(up, "put") : "") + " unsold"
             Button { scroll(to: .todo) } label: {
@@ -407,7 +407,8 @@ private struct PNameCard: View {
             if let b = n.bars {
                 HStack(alignment: .top, spacing: 16) {
                     bar("Calls", b.cs, b.cc)
-                    if b.pc > 0 || b.ps > 0 { bar("Puts", b.ps, b.pc) } else { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
+                    if b.putsPaused { pausedPuts(b) }
+                    else if b.pc > 0 || b.ps > 0 { bar("Puts", b.ps, b.pc) } else { Color.clear.frame(maxWidth: .infinity, maxHeight: 1) }
                 }
             }
             VStack(alignment: .leading, spacing: 14) {
@@ -450,6 +451,21 @@ private struct PNameCard: View {
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(l), \(a) of \(room) sold" + (over ? ", \(a - room) over" : ""))
+    }
+
+    /// Put sales paused: the stock's last close is under its 50-day average (Nik, 23 Oct 2026). In the
+    /// puts bar's place, so the card says why there is no put to sell.
+    private func pausedPuts(_ b: TodoBars) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Puts paused").sType(SType(size: 13, weight: 600, line: 16, tracking: 0), tabular: false).foregroundStyle(S.ink)
+            Text(b.s50.map { "Below the 50-day \(PF.price($0))" } ?? "Below the 50-day")
+                .sType(SType(size: 13, weight: 500, line: 16, tracking: 0))
+                .foregroundStyle(S.muted)
+                .lineLimit(1).minimumScaleFactor(0.85)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Puts paused, below the 50-day average" + (b.s50.map { " of \(PF.price($0))" } ?? ""))
     }
 
     private func group(_ h: String, _ rows: [WeekTask]) -> some View {

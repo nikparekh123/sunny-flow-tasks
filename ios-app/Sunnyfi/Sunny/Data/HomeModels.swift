@@ -77,8 +77,12 @@ struct WeekTask: Decodable, Identifiable, Hashable {
 }
 
 /// Calls sold against room (one per LEAP) and puts sold against the put cap, for the week being worked.
+/// `pp`: put sales paused, the last close under the 50-day average `s50` (Nik, 23 Oct 2026).
 struct TodoBars: Decodable, Hashable {
     let cc: Int, cs: Int, pc: Int, ps: Int
+    let pp: Bool?
+    let s50: Double?
+    var putsPaused: Bool { pp ?? false }
 }
 
 /// Delta and Gamma for one name (blocks 13 and 16): an instant jump from today's price.
