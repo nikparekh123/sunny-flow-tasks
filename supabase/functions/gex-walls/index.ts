@@ -69,34 +69,41 @@ async function loadChain(ticker: string, days: number, expiries?: string[]): Pro
   const all = (ep: string, extra = '') => expiries?.length
     ? Promise.all(want.map((e) => theta(q(ep, e.replaceAll('-', '')) + extra))).then((xs) => xs.flat())
     : theta(q(ep, '*') + `&max_dte=${days}` + extra);
-  const [ivs, ois, ohlc] = await Promise.all([all('greeks/implied_volatility'), all('open_interest'), all('ohlc', '&current_day_only=true')]);
+  // The stock price is read from the two nearest expiries, whichever ones were asked for: a far
+  // expiry's call - put carries the dividends paid before it (NKE January read 37.09 against 37.40,
+  // 23 Oct 2026). Their quotes are fetched for the price only when they are not in the run.
+  const nearest2 = listed.filter((e) => e >= day && !(e === day && afterClose)).slice(0, 2);
+  const extra = nearest2.filter((e) => !want.includes(e));
+  const [ivs, ois, ohlc, extraIvs] = await Promise.all([all('greeks/implied_volatility'), all('open_interest'), all('ohlc', '&current_day_only=true'),
+    Promise.all(extra.map((e) => theta(q('greeks/implied_volatility', e.replaceAll('-', ''))))).then((xs) => xs.flat())]);
   const oi = new Map(ois.map((r) => [key(r.contract), Number((r.data ?? []).at(-1)?.open_interest ?? 0)]));
   const vol = new Map(ohlc.map((r) => [key(r.contract), Number((r.data ?? []).at(-1)?.volume ?? 0)]));
-  // Mids (two-sided quotes only), then the stock price they imply: the median over the expiries within
-  // two weeks of each one's at-the-money call - put + K e^(-rT). Each IV is then solved from its own mid.
+  // Mids (two-sided quotes only), then the stock price they imply: the median of each nearest expiry's
+  // at-the-money call - put + K e^(-rT). Each IV is then solved from its own mid.
   const now = Date.now();
   let thetaSpot = 0;
-  const quotes: { exp: string; k: number; right: 'C' | 'P'; mid: number | null; c: Row }[] = [];
-  for (const r of ivs) {
-    const c = r.contract, d = (r.data ?? []).at(-1) ?? {};
-    if (!want.includes(String(c.expiration))) continue;
+  type Quote = { exp: string; k: number; right: 'C' | 'P'; mid: number | null; c: Row };
+  const parse = (r: Row): Quote => {
+    const c = r.contract, d = (r.data ?? []).at(-1) ?? {}, b = Number(d.bid), a = Number(d.ask);
     thetaSpot = Number(d.underlying_price) || thetaSpot;
-    const b = Number(d.bid), a = Number(d.ask);
-    quotes.push({ exp: String(c.expiration), k: Number(c.strike), right: c.right === 'CALL' ? 'C' : 'P', mid: b > 0 && a >= b ? (a + b) / 2 : null, c });
-  }
-  const spots: { e: string; s: number }[] = [];
-  for (const e of want) {
+    return { exp: String(c.expiration), k: Number(c.strike), right: c.right === 'CALL' ? 'C' : 'P', mid: b > 0 && a >= b ? (a + b) / 2 : null, c };
+  };
+  const quotes = ivs.filter((r) => want.includes(String(r.contract.expiration))).map(parse);
+  const forPrice = [...ivs.filter((r) => nearest2.includes(String(r.contract.expiration))), ...extraIvs].map(parse);
+  const spotOf = (qs: Quote[], exps: string[]) => exps.map((e) => {
     const pairs = new Map<number, { k: number; c: number; p: number }>();
-    for (const x of quotes.filter((x) => x.exp === e && x.mid)) {
+    for (const x of qs.filter((x) => x.exp === e && x.mid)) {
       const p = pairs.get(x.k) ?? { k: x.k, c: 0, p: 0 };
       if (x.right === 'C') p.c = x.mid!; else p.p = x.mid!;
       pairs.set(x.k, p);
     }
-    const s = impliedSpot([...pairs.values()], yearsTo(e, now));
-    if (s) spots.push({ e, s });
-  }
-  const near2w = spots.filter((x) => dte(day, x.e) <= 14);
-  const pool = (near2w.length ? near2w : spots).map((x) => x.s).sort((a, b) => a - b);
+    return impliedSpot([...pairs.values()], yearsTo(e, now));
+  }).filter((s): s is number => !!s);
+  // Fallback: the run's own expiries within two weeks, then any of them.
+  let pool = spotOf(forPrice, nearest2);
+  if (!pool.length) pool = spotOf(quotes, want.filter((e) => dte(day, e) <= 14));
+  if (!pool.length) pool = spotOf(quotes, want);
+  pool.sort((a, b) => a - b);
   const spot = pool.length ? pool[Math.floor(pool.length / 2)] : 0;
   if (!(spot > 0)) throw new IncompleteChain([`no at-the-money call and put quotes to read ${ticker}'s price from`]);
   const contracts: Contract[] = quotes.map((x) => ({ exp: x.exp, k: x.k, right: x.right,
